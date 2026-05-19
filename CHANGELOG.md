@@ -8,6 +8,15 @@ policy.
 
 ## [Unreleased]
 
+## [0.2.0b17] - 2026-05-19
+
+This release reshapes the Oracle Database 26ai surface so the Locus
+agent runtime — not the wrapped primitives — is the protagonist. The
+seven Oracle 26ai notebooks (06–12) and the workbench's Oracle 26ai
+pattern set were rebuilt to put `Agent` in the driver's seat, with
+the database as the durable substrate it reaches for. Closes the
+"showcase Locus, not the bindings" feedback. PR #230.
+
 ### Changed — Oracle 26ai notebooks 06–12 rewritten as agent demos
 
 Notebooks 06–12 used to walk the bare `OracleVectorStore` /
