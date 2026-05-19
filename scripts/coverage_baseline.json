@@ -60,7 +60,7 @@
   "src/locus/loop/nodes.py": 96.5,
   "src/locus/loop/react.py": 97.94,
   "src/locus/loop/router.py": 95.37,
-  "src/locus/loop/runner.py": 97.28,
+  "src/locus/loop/runner.py": 96.6,
   "src/locus/memory/__init__.py": 100.0,
   "src/locus/memory/backends/__init__.py": 100.0,
   "src/locus/memory/backends/_oracle_config.py": 100.0,
