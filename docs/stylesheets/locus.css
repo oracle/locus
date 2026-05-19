@@ -540,6 +540,19 @@ html {
   opacity: 0.85;
 }
 
+/* Dark-mode swap. ``mkdocs.yml`` declares a single ``theme.logo``
+   pointing at ``img/mark.svg`` (outer-diamond stroke ``#312D2A`` —
+   warm near-black, sized for the light surface). On the slate scheme
+   the surface goes dark ``#1F1D1A`` and that stroke is practically
+   invisible, especially on mobile where the mark is the only brand
+   anchor. Swap the image content to the white-stroke variant
+   (``img/mark-dark.svg``) when the slate scheme is active. ``content:``
+   on ``<img>`` is supported across Chrome/Safari/Firefox 119+ — fine
+   for our browser baseline. */
+[data-md-color-scheme="slate"] .md-header__button.md-logo img[src*="img/mark.svg"] {
+  content: url("../img/mark-dark.svg");
+}
+
 /* Title block in the middle — "locus" wordmark only.
    The slogan lives in the SVG logo and on the homepage; trying to
    stack a tagline beneath the title fights Material's absolute-
