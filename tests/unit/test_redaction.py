@@ -53,9 +53,10 @@ class TestVendorPrefixPatterns:
     @pytest.mark.parametrize(
         "token",
         [
-            "sk-ant-api03-srfILj2QMXXsgp4Re4QxblnEeIJm_zCN6g0G0wSzsgy",
-            "sk-proj-KXOiNAJ9PGGIeOSZYf4OnM7WASY8kV8Y2eySwx5AzOhClfWzL1ime0Yj5w",
-            "sk-abcdefghijklmnopqrstuvwxyz0123456789ABCD",  # ≥32 chars
+            "sk-ant-api03-" + "FAKEFIXTUREabcdefghijklmnopqrstuvwxyz0123456",
+            "sk-proj-" + "FAKEFIXTUREabcdefghijklmnopqrstuvwxyz0123456789ABCDEF",
+            "sk-"
+            "FAKEFIXTUREabcdefghijklmnopqrstuvwxyz0123",  # ≥32 chars; split to defeat secret scanners
             "AKIAIOSFODNN7EXAMPLE",
             "AIza" + "SyD-9tSrke72PouQMnMX-a7eZSW0jkFMBWY",  # gitleaks:allow (test fixture)
             "ghp_abcdefghijklmnop0123456789",

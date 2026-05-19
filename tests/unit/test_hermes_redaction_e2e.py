@@ -80,7 +80,7 @@ class TestExecutorRedactsVendorKeys:
         @tool
         def leak_openai() -> str:
             fake = (
-                "sk-proj-" + "KXOiNAJ9PGGIeOSZYf4OnM7WASY8kV8Y2eySwx5"
+                "sk-proj-" + "FAKEFIXTUREabcdefghijklmnopqrstuvwxyz01"
             )  # gitleaks:allow (test fixture)
             raise RuntimeError(f"401 from API: {fake}")
 
@@ -88,7 +88,7 @@ class TestExecutorRedactsVendorKeys:
         result = await _run_one(executor, registry, factory, "leak_openai")
 
         assert not result.success
-        assert "KXOiNAJ9PGGIeOSZYf4OnM7WASY8kV8Y2eySwx5" not in (result.error or "")
+        assert "FAKEFIXTUREabcdefghijklmnopqrstuvwxyz01" not in (result.error or "")
 
 
 # ---------------------------------------------------------------------------
