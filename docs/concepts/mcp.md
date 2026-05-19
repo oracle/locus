@@ -199,7 +199,7 @@ implementation detail.
 ## Source and notebook
 
 - [`locus.integrations.fastmcp`](https://github.com/oracle-samples/locus/blob/main/src/locus/integrations/fastmcp.py) — built on FastMCP.
-- [`notebook_46_mcp_integration.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_46_mcp_integration.py) — consumer + producer end-to-end.
+- [`notebook_47_mcp_integration.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_47_mcp_integration.py) — consumer + producer end-to-end.
 
 ## See also
 

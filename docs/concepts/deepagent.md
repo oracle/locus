@@ -349,7 +349,7 @@ workflow = create_research_workflow(
 
 ## See also
 
-- [Notebook 41](../notebooks/notebook_34_deepagent.md) — four-part
+- [Notebook 42](../notebooks/notebook_35_deepagent.md) — four-part
   walkthrough: basic factory, filesystem + todos, subagents, observability.
 - [API reference — DeepAgent](../api/deepagent.md) — full class and
   function signatures including `create_research_workflow`.

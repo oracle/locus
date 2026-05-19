@@ -88,13 +88,22 @@ postgresql = ["asyncpg>=0.29"]
 opensearch = ["opensearch-py>=2.4"]
 oracledb = ["oracledb>=2.2.0"]
 
-# All checkpoint backends.
+# Oracle's official agent-memory client. Used by the
+# `OracleAgentMemoryManager` adapter in src/locus/memory/managers/.
+# Alpha-grade upstream (Dev Status 3 as of 26.4.0) — pinned to the
+# 26.x line so a breaking 27.0 doesn't auto-upgrade through pip.
+agentmemory = ["oracleagentmemory>=26.4.0,<27"]
+
+# All checkpoint backends + Oracle's agent-memory client. `pip install
+# locus-sdk[checkpoints]` is the Oracle-flavoured one-shot install for
+# both durable thread state and the recommended agent-memory path.
 checkpoints = [
     "redis>=5.0",
     "asyncpg>=0.29",
     "opensearch-py>=2.4",
     "oracledb>=2.2.0",
     "oci>=2.173.0",
+    "oracleagentmemory>=26.4.0,<27",
 ]
 
 # RAG vector stores — one extra per store under src/locus/rag/stores/
@@ -560,6 +569,7 @@ module = [
     "opensearchpy.*",
     "redis.*",
     "asyncpg.*",
+    "oracleagentmemory.*",
     "fastapi.*",
     "uvicorn.*",
     "whisper.*",

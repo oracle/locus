@@ -164,7 +164,7 @@ of them call.
 
 ## Source and notebook
 
-- [`notebook_49_skills.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_49_skills.py) — programmatic and filesystem-loaded skills end-to-end.
+- [`notebook_50_skills.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_50_skills.py) — programmatic and filesystem-loaded skills end-to-end.
 - [`locus.skills`](https://github.com/oracle-samples/locus/tree/main/src/locus/skills) — `Skill`, `SkillsPlugin`.
 - [AgentSkills.io specification](https://agentskills.io) — the format locus implements.
 

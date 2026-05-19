@@ -335,13 +335,35 @@ PATTERNS: list[dict[str, Any]] = [
         ),
     },
     {
+        # The recommended Oracle-backed memory path — sits above the
+        # OracleStore-flavoured variant so the workbench surfaces it
+        # first.
+        "id": "oracle_agent_memory",
+        "title": "Oracle agent memory (recommended)",
+        "notebook": 13,
+        "summary": (
+            "Agent with OracleAgentMemoryManager — wraps Oracle's official "
+            "`oracleagentmemory` package (LongMemEval-tuned extraction + "
+            "scoped context cards). Thread A teaches a fact; a brand-new "
+            "Agent in thread B recalls it via the LLM-extracted memory. "
+            "Requires ORACLE_* on the backend + OPENAI_API_KEY (or OCI "
+            "kwargs) for the embedder/LLM. `pip install "
+            "locus-sdk[agentmemory]`."
+        ),
+        "recommended": True,
+    },
+    {
         "id": "oracle_26ai_cross_thread_memory",
-        "title": "Cross-thread memory agent (OracleStore)",
+        "title": "Cross-thread memory agent — portable BaseStore path",
         "notebook": 11,
         "summary": (
-            "Agent with LLMMemoryManager(store=OracleStore). Thread A teaches "
-            "a fact; a brand-new Agent in thread B recalls it without seeing "
-            "thread A's messages. Requires ORACLE_* on the backend."
+            "The portable, backend-agnostic path: LLMMemoryManager + any "
+            "BaseStore (InMemory / Redis / Postgres / OpenSearch / Oracle "
+            "OracleStore). Thread A teaches a fact; a brand-new Agent in "
+            "thread B recalls it. Use this when you need a non-Oracle "
+            "backend, an LLM-free regex extractor, or a deterministic "
+            "test-friendly path. For Oracle workloads prefer the "
+            "`oracle_agent_memory` pattern above."
         ),
     },
     {
@@ -358,7 +380,7 @@ PATTERNS: list[dict[str, Any]] = [
     {
         "id": "cohere_reranker",
         "title": "Retrieve-then-rerank (Cohere V4)",
-        "notebook": 60,
+        "notebook": 61,
         "summary": (
             "Same query, two orderings: embedding-only vs Cohere V4 "
             "cross-encoder. The reranker promotes the canonical answer to "
@@ -381,31 +403,31 @@ PATTERNS: list[dict[str, Any]] = [
     {
         "id": "composition",
         "title": "Composition (Sequential)",
-        "notebook": 25,
+        "notebook": 26,
         "summary": "Two agents chained: researcher → summariser.",
     },
     {
         "id": "orchestrator",
         "title": "Orchestrator + specialists",
-        "notebook": 17,
+        "notebook": 18,
         "summary": "One coordinator, two specialists, parallel dispatch.",
     },
     {
         "id": "stategraph_loop",
         "title": "StateGraph (critic loop)",
-        "notebook": 43,
+        "notebook": 44,
         "summary": "Writer → Critic loop until critic approves; allow_cycles.",
     },
     {
         "id": "map_reduce",
         "title": "Map-reduce code review",
-        "notebook": 42,
+        "notebook": 43,
         "summary": "Send fan-out across N reviewers, reduce findings.",
     },
     {
         "id": "structured_output",
         "title": "Structured output (Verdict)",
-        "notebook": 13,
+        "notebook": 14,
         "summary": "Pydantic output_schema — typed Verdict, not free text.",
     },
     {
@@ -420,7 +442,7 @@ PATTERNS: list[dict[str, Any]] = [
     {
         "id": "cognitive_routing",
         "title": "Cognitive routing (rule-based vs LLM)",
-        "notebook": 59,
+        "notebook": 60,
         "summary": (
             "Dispatch a prompt through the cognitive router. Toggle the "
             "LLM picker checkbox to compare rule-based protocol selection "
@@ -1822,6 +1844,180 @@ async def _run_oracle_26ai_cross_thread_memory(req: RunRequest) -> RunResponse:
         await store.close()
 
 
+async def _run_oracle_agent_memory(req: RunRequest) -> RunResponse:
+    """Workbench demo for notebook 69 — Oracle agent memory (recommended).
+
+    Same two-session shape as `_run_oracle_26ai_cross_thread_memory`,
+    but powered by Oracle's official ``oracleagentmemory`` client via
+    Locus's :class:`OracleAgentMemoryManager` adapter. The LLM
+    extractor stores facts about Alice in thread A; thread B's
+    brand-new agent recalls them via cross-thread search injected
+    into the system prompt.
+
+    Requires:
+
+    - ``ORACLE_*`` env (or the per-tab Database panel) for the ADB
+      connection.
+    - ``OPENAI_API_KEY`` for the embedder + extraction LLM. (For OCI
+      Generative AI, override ``OAM_EMBEDDER`` / ``OAM_LLM`` and
+      provide the OCI auth fields as default kwargs on Embedder/Llm
+      via a future patch.)
+    - ``pip install 'locus-sdk[agentmemory]'`` so ``oracleagentmemory``
+      is importable on the backend.
+    """
+    import oracledb
+
+    from locus.agent import Agent, AgentConfig
+    from locus.memory.managers import OracleAgentMemoryManager
+
+    db = _require_db(req)
+    table_prefix = "locus_workbench_69_oam_"
+    user_id = "workbench-user"
+    thread_a = "workbench-69-thread-a"
+    thread_b = "workbench-69-thread-b"
+
+    embedder_model = os.environ.get("OAM_EMBEDDER", "openai/text-embedding-3-small")
+    llm_model = os.environ.get("OAM_LLM", "openai/gpt-4o-mini")
+
+    # OracleAgentMemory wants a sync oracledb connection — wire it up
+    # with the same wallet block the other Oracle patterns use.
+    db_kwargs = _db_kwargs(db)
+    conn = oracledb.connect(
+        user=db_kwargs["user"],
+        password=db_kwargs["password"],
+        dsn=db_kwargs["dsn"],
+        config_dir=db_kwargs["wallet_location"],
+        wallet_location=db_kwargs["wallet_location"],
+        wallet_password=db_kwargs.get("wallet_password", ""),
+    )
+
+    try:
+        manager = OracleAgentMemoryManager(
+            connection=conn,
+            embedder=embedder_model,
+            llm=llm_model,
+            extract_memories=True,
+            table_name_prefix=table_prefix,
+            schema_policy="create_if_necessary",
+            thread_defaults={
+                # Force extraction on every add_messages so thread B
+                # sees thread A's facts immediately — the demo's whole
+                # point.
+                "memory_extraction_frequency": 1,
+                "memory_extraction_window": 0,
+            },
+        )
+
+        def _build_agent():
+            return Agent(
+                config=AgentConfig(
+                    model=build_model(req.provider),
+                    system_prompt=(
+                        "You are a helpful OCI infrastructure assistant. Be "
+                        "concise. Use any persistent facts you've been given "
+                        "about the user."
+                    ),
+                    memory_manager=manager,
+                    max_iterations=2,
+                )
+            )
+
+        teach_prompt = (
+            req.prompt
+            or "Hi — I'm Alice. I work on OCI GenAI infrastructure and I prefer "
+            "us-chicago-1 for inference. Note that for next time."
+        ).strip()
+        recall_prompt = "Remind me which OCI region I prefer for inference, and what I work on."
+
+        # Thread A teaches.
+        agent_a = _build_agent()
+        reply_a, events_a = await _drive_agent_with_thread_md(
+            agent_a, teach_prompt, thread_a, user_id=user_id
+        )
+
+        # Inspect the underlying client between sessions — show what
+        # the LLM extractor stored.
+        admin_lines: list[str] = []
+        try:
+            results = await manager._client.search_async(  # noqa: SLF001
+                query="user profile preferences and role",
+                user_id=user_id,
+                max_results=8,
+            )
+            for r in results:
+                snippet = (getattr(r, "content", str(r)) or "")[:160]
+                admin_lines.append(f"- {snippet}")
+        except Exception as exc:  # noqa: BLE001
+            admin_lines.append(f"(inspect failed: {type(exc).__name__}: {exc})")
+
+        # Thread B recalls — brand-new Agent, no shared messages.
+        agent_b = _build_agent()
+        reply_b, events_b = await _drive_agent_with_thread_md(
+            agent_b, recall_prompt, thread_b, user_id=user_id
+        )
+
+        events: list[RunEvent] = [
+            RunEvent(
+                kind="info",
+                text=(
+                    f"backend: OracleAgentMemoryManager dsn={db.dsn} "
+                    f"table_prefix={table_prefix!r}  embedder={embedder_model!r}  "
+                    f"llm={llm_model!r}"
+                ),
+            ),
+            RunEvent(kind="session", text=f"thread-a (alice) user: {teach_prompt}"),
+            *events_a,
+            RunEvent(kind="session", text=f"thread-a (alice) agent: {reply_a[:240]}"),
+            RunEvent(
+                kind="store",
+                text=(
+                    "oracleagentmemory.search_async(user_id='alice'):\n  "
+                    + ("\n  ".join(admin_lines) if admin_lines else "(no memories yet)")
+                ),
+            ),
+            RunEvent(kind="session", text=f"thread-b (alice) user: {recall_prompt}"),
+            *events_b,
+            RunEvent(kind="session", text=f"thread-b (alice) agent: {reply_b[:240]}"),
+        ]
+        reply = (
+            f"Thread A — Alice teaches her preference ({len(events_a)} events):\n{reply_a}\n\n"
+            f"Thread B — brand-new Agent, same user_id ({len(events_b)} events):\n{reply_b}"
+        )
+        return RunResponse(reply=reply, events=events)
+    finally:
+        conn.close()
+
+
+async def _drive_agent_with_thread_md(
+    agent: Any, prompt: str, thread_id: str, *, user_id: str
+) -> tuple[str, list[RunEvent]]:
+    """Mirror of :func:`_drive_agent_with_thread` that also forwards
+    ``user_id`` as agent metadata so the memory manager's scope
+    resolvers see it.
+    """
+    events: list[RunEvent] = []
+    final = ""
+    async for ev in agent.run(
+        prompt,
+        thread_id=thread_id,
+        metadata={"thread_id": thread_id, "user_id": user_id},
+    ):
+        kind = type(ev).__name__
+        text = (
+            getattr(ev, "tool_name", None)
+            or getattr(ev, "final_message", None)
+            or getattr(ev, "content", None)
+            or getattr(ev, "reasoning", None)
+            or ""
+        )
+        if not isinstance(text, str):
+            text = str(text)
+        events.append(RunEvent(kind=kind, text=text))
+        if kind == "TerminateEvent":
+            final = getattr(ev, "final_message", "") or ""
+    return final, events
+
+
 async def _run_oracle_26ai_versioned_saver(req: RunRequest) -> RunResponse:
     """Workbench demo for notebook 12 — versioned agent history.
 
@@ -2071,6 +2267,7 @@ PATTERN_RUNNERS: dict[str, Any] = {
     "oracle_26ai_adb_loader": _run_oracle_26ai_adb_loader,
     "oracle_26ai_indb_chunker": _run_oracle_26ai_indb_chunker,
     "oracle_26ai_indb_embeddings": _run_oracle_26ai_indb_embeddings,
+    "oracle_agent_memory": _run_oracle_agent_memory,
     "oracle_26ai_cross_thread_memory": _run_oracle_26ai_cross_thread_memory,
     "oracle_26ai_versioned_saver": _run_oracle_26ai_versioned_saver,
     "cohere_reranker": _run_cohere_reranker,

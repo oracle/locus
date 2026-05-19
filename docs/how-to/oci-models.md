@@ -174,7 +174,7 @@ export LOCUS_OCI_TRANSPORT=v1     # or "sdk"
 
 Notebooks that use `from examples.config import get_model` inherit
 this routing. Notebooks that instantiate a class directly
-(e.g. `notebook_55_model_providers.py`) show both transports
+(e.g. `notebook_56_model_providers.py`) show both transports
 side-by-side.
 
 ## What's not supported today

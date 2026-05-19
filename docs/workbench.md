@@ -179,7 +179,7 @@ make web                                          # pane 3 — :5173
 end-to-end test suite in `workbench/e2e/`. The `make backend` target
 is the workbench runner — distinct from `make backend-research` and
 `make backend-finance`, which spin up the A2A mesh demo peers for
-[notebook 28](notebooks/notebook_33_a2a_protocol.md), not the
+[notebook 28](notebooks/notebook_34_a2a_protocol.md), not the
 workbench.
 
 ### Verify it's up
@@ -308,7 +308,7 @@ same behaviour as running the notebook from a terminal, just inside
 the workbench so you can watch streamed events instead of tailing
 stdout.
 
-Notebook 29 (DeepAgent) ships a `part5_datastores` section that
+Notebook 30 (DeepAgent) ships a `part5_datastores` section that
 exercises `create_deepagent(datastores={"medical": …})` against an
 in-memory `RAGRetriever`. The same auto-wiring backs the
 [deep-research project examples][dr] — seven runnable demos that
@@ -391,7 +391,7 @@ correlate findings.
 → specialist_fanout
 ```
 
-See [notebook 34](notebooks/notebook_39_emergent_routing.md) for the
+See [notebook 34](notebooks/notebook_40_emergent_routing.md) for the
 full code path and [concepts/router.md](concepts/router.md#emergent-picker-opt-in-second-mode)
 for the architectural details.
 

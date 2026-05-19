@@ -192,7 +192,7 @@ approval-gated agent — chosen by protocol selection, not by the model.
 | `a2a_delegate` | Cross-process A2A call (opt-in) | distributed meshes |
 
 → [Cognitive router concept](https://oracle-samples.github.io/locus/concepts/router/) ·
-[`examples/notebook_57_cognitive_router.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_57_cognitive_router.py)
+[`examples/notebook_58_cognitive_router.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_58_cognitive_router.py)
 
 ---
 
@@ -239,6 +239,7 @@ print(result.text)
 | **[🧠 Reasoning](https://oracle-samples.github.io/locus/concepts/reasoning/)** | `reflexion=True` · `grounding=True` · `CausalChain` · **GSAR** typed grounding layer (`arXiv:2604.23366`). |
 | **[🛡 Idempotent tools](https://oracle-samples.github.io/locus/concepts/idempotency/)** | `@tool(idempotent=True)` — dedupes on `(name, args)`. The model can't double-charge, double-book, or double-page. |
 | **[💾 Durable memory](https://oracle-samples.github.io/locus/concepts/checkpointers/)** | 8 checkpoint backends — Oracle 26ai · OCI Object Storage · PostgreSQL · Redis · OpenSearch · in-memory · file · HTTP. |
+| **[🧠 Long-term memory](https://oracle-samples.github.io/locus/concepts/memory-manager/)** | Recommended Oracle path: `OracleAgentMemoryManager` over Oracle's [`oracleagentmemory`](https://pypi.org/project/oracleagentmemory/) — LongMemEval-tuned recall, context cards, scoped retrieval. Portable path: `LLMMemoryManager` over any `BaseStore` (InMemory / Redis / Postgres / OpenSearch / Oracle). |
 | **[🔎 RAG](https://oracle-samples.github.io/locus/concepts/rag/)** | 4 vector stores — Oracle 26ai · OpenSearch · pgvector · in-memory. OCI Cohere + OpenAI embeddings · multimodal (PDF, image OCR, audio). |
 | **[📡 Streaming + Server](https://oracle-samples.github.io/locus/concepts/server/)** | Typed events · SSE · `AgentServer` (FastAPI, per-principal thread isolation). |
 | **[🪝 Hooks](https://oracle-samples.github.io/locus/concepts/hooks/)** | Logging · OpenTelemetry · ModelRetry · Guardrails · Steering (LLM-as-judge). |
@@ -333,9 +334,9 @@ cd locus && pip install -e .
 python examples/notebook_01_oci_transports.py        # start here — three OCI transports
 python examples/notebook_06_oracle_26ai_rag.py       # native VECTOR RAG on Oracle 26ai
 python examples/notebook_07_oracle_26ai_checkpointer.py  # durable agent threads in ADB
-python examples/notebook_13_basic_agent.py           # your first agent
-python examples/notebook_34_deepagent.py             # deep-research factory
-python examples/notebook_68_research_workflow.py     # full research pipeline
+python examples/notebook_14_basic_agent.py           # your first agent
+python examples/notebook_35_deepagent.py             # deep-research factory
+python examples/notebook_69_research_workflow.py     # full research pipeline
 ```
 
 | Track | Range | What you learn |

@@ -4,7 +4,7 @@ A runnable example of three Locus agents talking to each other across
 process boundaries via the Agent-to-Agent (A2A) protocol — HTTP + SSE
 with capability-based discovery via `AgentCard`.
 
-The starting point was [`notebook_34_a2a_protocol.py`][t34]; this is
+The starting point was [`notebook_35_a2a_protocol.py`][t34]; this is
 the project version with proper service boundaries, a Makefile, an
 orchestrator that does real capability-tagged discovery, and an
 integration test.
@@ -124,6 +124,6 @@ Vite proxies `/api/research/*` and `/api/finance/*` to the two
 services, so it works against the same `make research` /
 `make finance` pair from above.
 
-[t34]: https://github.com/oracle-samples/locus/blob/main/examples/notebook_34_a2a_protocol.py
+[t34]: https://github.com/oracle-samples/locus/blob/main/examples/notebook_35_a2a_protocol.py
 [a2a]: https://github.com/oracle-samples/locus/blob/main/src/locus/a2a/protocol.py
 [orch]: https://oracle-samples.github.io/locus/concepts/multi-agent/orchestrator/

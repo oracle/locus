@@ -80,7 +80,7 @@ than ~5 lines of plumbing for the standard case.
    papers over this with an `oci_transport: "auto"` rule that mirrors
    `examples/config.py:_pick_oci_transport`. Would be nicer if the SDK
    had a single `OCIGenAIModel(model_id=...)` that auto-routed.
-2. **`output_schema=` is buried.** Notebook 13 demonstrates it but it's
+2. **`output_schema=` is buried.** Notebook 14 demonstrates it but it's
    in a later section; first-time users tend to miss it and hand-parse
    JSON instead. Worth surfacing in `Agent`'s docstring.
 3. **Inconsistent kwargs.** `max_tokens` (some providers) vs

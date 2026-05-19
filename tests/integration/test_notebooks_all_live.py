@@ -56,9 +56,9 @@ _NOTEBOOKS_DIR = _REPO / "examples"
 # the default and override per-notebook below.
 _DEFAULT_TIMEOUT = 360
 _NOTEBOOK_TIMEOUT_OVERRIDES: dict[str, int] = {
-    # notebook_39_emergent_routing: 5 dispatches × 2-3 LLM calls each
+    # notebook_40_emergent_routing: 5 dispatches × 2-3 LLM calls each
     # through a reasoning model — empirical wall time ~7-9 min.
-    "notebook_39_emergent_routing.py": 900,
+    "notebook_40_emergent_routing.py": 900,
 }
 
 

@@ -302,9 +302,9 @@ re-ranking before they reach the agent.
 
 ## Source and notebooks
 
-- [`notebook_43_rag_basics.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_43_rag_basics.py) — minimal end-to-end RAG.
-- [`notebook_44_rag_providers.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_44_rag_providers.py) — picking an embedder + store.
-- [`notebook_45_rag_agents.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_45_rag_agents.py) — `create_rag_tool` plugged into an agent.
+- [`notebook_44_rag_basics.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_44_rag_basics.py) — minimal end-to-end RAG.
+- [`notebook_45_rag_providers.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_45_rag_providers.py) — picking an embedder + store.
+- [`notebook_46_rag_agents.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_46_rag_agents.py) — `create_rag_tool` plugged into an agent.
 - [`locus.rag`](https://github.com/oracle-samples/locus/tree/main/src/locus/rag) — `RAGRetriever`, all embedders, all stores, `create_rag_tool`, `RAGToolkit`.
 
 ## See also

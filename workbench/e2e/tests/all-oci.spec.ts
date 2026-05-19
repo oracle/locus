@@ -36,20 +36,20 @@ const BFF = process.env.BFF_URL ?? "http://127.0.0.1:3101";
 // fine here in principle but they expect an OCI session, not API key —
 // keep them out of the sweep so a single auth shape covers everything.
 const SKIP = new Set<string>([
-  "notebook_49_audio_response",
-  "notebook_50_audio_chat",
+  "notebook_50_audio_response",
+  "notebook_51_audio_chat",
   // DeepAgent runs 4 parts with subagents — takes >10 min on any real model.
   // Covered by CLI tests; skipped here to keep the workbench sweep bounded.
-  "notebook_41_deepagent",
+  "notebook_42_deepagent",
   // Requires structured-output support; Cohere R-series returns 400 on
   // json_schema response_format. The guard exits 0 with a helpful message
   // only when LOCUS_MODEL_PROVIDER=oci+cohere — skip in the OCI sweep too.
-  "notebook_14_reasoning_patterns",
+  "notebook_15_reasoning_patterns",
   // RAG notebooks call OCIEmbeddings which defaults to api_key auth —
   // incompatible with session-token profiles (e.g. BOAT-OC1). The embed
   // client needs a separate API-key profile or LOCUS_OCI_AUTH_TYPE=security_token.
-  "notebook_22_rag_basics",
-  "notebook_24_rag_agents",
+  "notebook_23_rag_basics",
+  "notebook_25_rag_agents",
 ]);
 
 test.use({ video: "off", trace: "off", screenshot: "off" });
@@ -100,9 +100,9 @@ async function runOne(page: Page, id: string): Promise<{ code: number; tail: str
 }
 
 const SLOW_NOTEBOOKS = new Set<string>([
-  "notebook_41_deepagent",
-  "notebook_51_cognitive_router",
-  "notebook_56_research_workflow",
+  "notebook_42_deepagent",
+  "notebook_52_cognitive_router",
+  "notebook_57_research_workflow",
 ]);
 const SLOW_MULTIPLIER = 3;
 

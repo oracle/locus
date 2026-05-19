@@ -24,9 +24,9 @@ const PER_NOTEBOOK_MS = Number(process.env.PER_NOTEBOOK_MS ?? 360_000);
 // Notebooks that hardcode an OCI dependency (oci.config.from_file) or
 // use OCI-only models like gpt-audio. Can't run against OpenAI.
 const OCI_ONLY = new Set<string>([
-  "notebook_41_deepagent",        // >10 min with subagents; covered by CLI tests
-  "notebook_49_audio_response",
-  "notebook_50_audio_chat",
+  "notebook_42_deepagent",        // >10 min with subagents; covered by CLI tests
+  "notebook_50_audio_response",
+  "notebook_51_audio_chat",
 ]);
 
 // Stagger gap so N workers don't all hit OpenAI at the same instant.
@@ -77,9 +77,9 @@ async function runOne(page: Page, id: string): Promise<{ code: number; tail: str
 }
 
 const SLOW_NOTEBOOKS = new Set<string>([
-  "notebook_41_deepagent",
-  "notebook_51_cognitive_router",
-  "notebook_56_research_workflow",
+  "notebook_42_deepagent",
+  "notebook_52_cognitive_router",
+  "notebook_57_research_workflow",
 ]);
 const SLOW_MULTIPLIER = 3;
 

@@ -41,7 +41,7 @@ in `PATTERN_RUNNERS`.
 | 42 | Map-reduce code review | `Send` fan-out to N reviewers, reduce |
 | 43 | StateGraph (critic loop) | Writer → Critic with `allow_cycles` |
 
-Notebook 41 (DeepAgent) now also includes a `part5_datastores` section
+Notebook 42 (DeepAgent) now also includes a `part5_datastores` section
 that exercises `create_deepagent(datastores=...)` against an in-memory
 RAGRetriever — the same auto-wiring is the foundation for the
 [`examples/projects/deep-research/`][dr] gist ports, which run the

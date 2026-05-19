@@ -41,12 +41,12 @@ def has_model_available() -> bool:
 
 
 # =============================================================================
-# Notebook 13: Structured Output Tests
+# Notebook 14: Structured Output Tests
 # =============================================================================
 
 
 class TestNotebook13StructuredOutput:
-    """Tests for Notebook 13: Structured Output."""
+    """Tests for Notebook 14: Structured Output."""
 
     def test_json_extraction_plain_text(self):
         """Test extracting JSON from plain text."""
@@ -123,12 +123,12 @@ class TestNotebook13StructuredOutput:
 
 
 # =============================================================================
-# Notebook 14: Reasoning Patterns Tests
+# Notebook 15: Reasoning Patterns Tests
 # =============================================================================
 
 
 class TestNotebook14ReasoningPatterns:
-    """Tests for Notebook 14: Reasoning Patterns."""
+    """Tests for Notebook 15: Reasoning Patterns."""
 
     def test_reflector_assessment(self):
         """Test Reflector evaluation."""
@@ -254,12 +254,12 @@ class TestNotebook14ReasoningPatterns:
 
 
 # =============================================================================
-# Notebook 15: Playbooks Tests
+# Notebook 16: Playbooks Tests
 # =============================================================================
 
 
 class TestNotebook15Playbooks:
-    """Tests for Notebook 15: Playbooks."""
+    """Tests for Notebook 16: Playbooks."""
 
     def test_playbook_step_creation(self):
         """Test creating playbook steps."""
@@ -341,12 +341,12 @@ class TestNotebook15Playbooks:
 
 
 # =============================================================================
-# Notebook 16: Agent Handoff Tests
+# Notebook 17: Agent Handoff Tests
 # =============================================================================
 
 
 class TestNotebook16AgentHandoff:
-    """Tests for Notebook 16: Agent Handoff."""
+    """Tests for Notebook 17: Agent Handoff."""
 
     def test_handoff_agent_creation(self):
         """Test creating handoff agents."""
@@ -403,12 +403,12 @@ class TestNotebook16AgentHandoff:
 
 
 # =============================================================================
-# Notebook 17: Orchestrator Pattern Tests
+# Notebook 18: Orchestrator Pattern Tests
 # =============================================================================
 
 
 class TestNotebook17OrchestratorPattern:
-    """Tests for Notebook 17: Orchestrator Pattern."""
+    """Tests for Notebook 18: Orchestrator Pattern."""
 
     def test_specialist_creation(self):
         """Test creating specialists."""
@@ -458,12 +458,12 @@ class TestNotebook17OrchestratorPattern:
 
 
 # =============================================================================
-# Notebook 18: Specialist Agents Tests
+# Notebook 19: Specialist Agents Tests
 # =============================================================================
 
 
 class TestNotebook18SpecialistAgents:
-    """Tests for Notebook 18: Specialist Agents."""
+    """Tests for Notebook 19: Specialist Agents."""
 
     def test_specialist_playbook(self):
         """Test specialist playbooks."""
@@ -529,12 +529,12 @@ class TestNotebook18SpecialistAgents:
 
 
 # =============================================================================
-# Notebook 19: Guardrails & Security Tests
+# Notebook 20: Guardrails & Security Tests
 # =============================================================================
 
 
 class TestNotebook19GuardrailsSecurity:
-    """Tests for Notebook 19: Guardrails & Security."""
+    """Tests for Notebook 20: Guardrails & Security."""
 
     def test_guardrail_config(self):
         """Test guardrail configuration."""
@@ -602,12 +602,12 @@ class TestNotebook19GuardrailsSecurity:
 
 
 # =============================================================================
-# Notebook 20: Checkpoint Backends Tests
+# Notebook 21: Checkpoint Backends Tests
 # =============================================================================
 
 
 class TestNotebook20CheckpointBackends:
-    """Tests for Notebook 20: Checkpoint Backends."""
+    """Tests for Notebook 21: Checkpoint Backends."""
 
     @pytest.mark.asyncio
     async def test_memory_checkpointer(self):
@@ -670,12 +670,12 @@ class TestNotebook20CheckpointBackends:
 
 
 # =============================================================================
-# Notebook 21: SSE Streaming Tests
+# Notebook 22: SSE Streaming Tests
 # =============================================================================
 
 
 class TestNotebook21SSEStreaming:
-    """Tests for Notebook 21: SSE Streaming."""
+    """Tests for Notebook 22: SSE Streaming."""
 
     def test_sse_message_format(self):
         """Test SSE message formatting."""
@@ -787,28 +787,13 @@ class TestNotebookExecution:
     """Tests that run actual notebooks (with mock model)."""
 
     @pytest.mark.asyncio
-    async def test_notebook_35_runs(self):
+    async def test_notebook_36_runs(self):
         """Test that notebook 35 runs without error."""
         import subprocess
         import sys
 
         result = subprocess.run(
-            [sys.executable, "examples/notebook_40_structured_output.py"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-            check=False,
-        )
-        assert result.returncode == 0, f"Notebook 35 failed: {result.stderr}"
-
-    @pytest.mark.asyncio
-    async def test_notebook_36_runs(self):
-        """Test that notebook 36 runs without error."""
-        import subprocess
-        import sys
-
-        result = subprocess.run(
-            [sys.executable, "examples/notebook_41_reasoning_patterns.py"],
+            [sys.executable, "examples/notebook_41_structured_output.py"],
             capture_output=True,
             text=True,
             timeout=60,
@@ -817,46 +802,61 @@ class TestNotebookExecution:
         assert result.returncode == 0, f"Notebook 36 failed: {result.stderr}"
 
     @pytest.mark.asyncio
-    async def test_notebook_42_runs(self):
+    async def test_notebook_37_runs(self):
+        """Test that notebook 36 runs without error."""
+        import subprocess
+        import sys
+
+        result = subprocess.run(
+            [sys.executable, "examples/notebook_42_reasoning_patterns.py"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        assert result.returncode == 0, f"Notebook 37 failed: {result.stderr}"
+
+    @pytest.mark.asyncio
+    async def test_notebook_43_runs(self):
         """Test that notebook 42 runs without error."""
         import subprocess
         import sys
 
         result = subprocess.run(
-            [sys.executable, "examples/notebook_47_playbooks.py"],
+            [sys.executable, "examples/notebook_48_playbooks.py"],
             capture_output=True,
             text=True,
             timeout=60,
             check=False,
         )
-        assert result.returncode == 0, f"Notebook 42 failed: {result.stderr}"
+        assert result.returncode == 0, f"Notebook 43 failed: {result.stderr}"
 
     @pytest.mark.asyncio
-    async def test_notebook_48_runs(self):
+    async def test_notebook_49_runs(self):
         """Test that notebook 48 runs without error."""
         import subprocess
         import sys
 
         result = subprocess.run(
-            [sys.executable, "examples/notebook_53_checkpoint_backends.py"],
+            [sys.executable, "examples/notebook_54_checkpoint_backends.py"],
             capture_output=True,
             text=True,
             timeout=60,
             check=False,
         )
-        assert result.returncode == 0, f"Notebook 48 failed: {result.stderr}"
+        assert result.returncode == 0, f"Notebook 49 failed: {result.stderr}"
 
     @pytest.mark.asyncio
-    async def test_notebook_13_runs(self):
+    async def test_notebook_14_runs(self):
         """Test that notebook 13 runs without error."""
         import subprocess
         import sys
 
         result = subprocess.run(
-            [sys.executable, "examples/notebook_18_sse_streaming.py"],
+            [sys.executable, "examples/notebook_19_sse_streaming.py"],
             capture_output=True,
             text=True,
             timeout=60,
             check=False,
         )
-        assert result.returncode == 0, f"Notebook 13 failed: {result.stderr}"
+        assert result.returncode == 0, f"Notebook 14 failed: {result.stderr}"

@@ -47,7 +47,7 @@ def main() -> None:
             continue
         if not title:
             continue
-        slug = py.stem  # e.g. notebook_13_basic_agent
+        slug = py.stem  # e.g. notebook_14_basic_agent
         page = OUT / f"{slug}.md"
         page.write_text(
             f"# Notebook {num:02d}: {title}\n\n"

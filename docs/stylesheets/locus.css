@@ -1297,3 +1297,34 @@ html {
   .md-header__source.md-header__oci { margin-left: 0.15rem; padding: 0.15rem 0.25rem; }
   .md-header__source.md-header__github { margin-left: 0.2rem; }
 }
+
+/* ---------------------------------------------------------------------------
+ * Code-block copy button
+ *
+ * mkdocs-material's default ``.md-clipboard`` uses
+ * ``--md-default-fg-color--lightest`` (#c5c8c8 in our light scheme,
+ * #4a4844 in slate). On our pale-cream code-block background the
+ * light-scheme variant is practically invisible until you hover.
+ * Promote the resting state to ``--lighter`` (darker neutral) for
+ * baseline contrast, and switch to Oracle red on hover so the affordance
+ * is obvious.
+ * --------------------------------------------------------------------- */
+.md-clipboard {
+  color: var(--md-default-fg-color--lighter);
+  opacity: 0.85;
+  transition: color 120ms ease-in-out, opacity 120ms ease-in-out;
+}
+.md-clipboard:focus,
+.md-clipboard:hover {
+  color: var(--or-red);
+  opacity: 1;
+}
+[data-md-color-scheme="slate"] .md-clipboard {
+  color: var(--md-default-fg-color--light);
+  opacity: 0.9;
+}
+[data-md-color-scheme="slate"] .md-clipboard:focus,
+[data-md-color-scheme="slate"] .md-clipboard:hover {
+  color: var(--or-red-light);
+  opacity: 1;
+}

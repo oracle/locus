@@ -58,20 +58,20 @@ Environment Variables:
 
 Examples:
     # Run with mock (default - no credentials needed):
-    python examples/notebook_13_basic_agent.py
+    python examples/notebook_14_basic_agent.py
 
     # Run with OCI GenAI (V1 transport, OpenAI-compatible endpoint):
     export LOCUS_MODEL_PROVIDER=oci
     export LOCUS_MODEL_ID=openai.gpt-5.5-2026-04-23
     export LOCUS_OCI_PROFILE=MY_PROFILE
-    python examples/notebook_13_basic_agent.py
+    python examples/notebook_14_basic_agent.py
 
     # Run with OCI GenAI (SDK transport, required for Cohere R-series):
     export LOCUS_MODEL_PROVIDER=oci
     export LOCUS_MODEL_ID=cohere.command-r-plus-08-2024
     export LOCUS_OCI_PROFILE=MY_PROFILE
     export LOCUS_OCI_ENDPOINT=https://inference.generativeai.us-chicago-1.oci.oraclecloud.com
-    python examples/notebook_13_basic_agent.py
+    python examples/notebook_14_basic_agent.py
 
     # Run with OCI on an OCI VM / OKE node (workload identity):
     export LOCUS_MODEL_PROVIDER=oci
@@ -82,7 +82,7 @@ Examples:
     # Run with OpenAI:
     export LOCUS_MODEL_PROVIDER=openai
     export OPENAI_API_KEY=sk-...
-    python examples/notebook_13_basic_agent.py
+    python examples/notebook_14_basic_agent.py
 
 See `docs/how-to/oci-models.md` for the full transport story.
 """

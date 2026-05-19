@@ -158,7 +158,7 @@ A future locus release may bundle a typed judge directly into
 
 ## Source and notebook
 
-- [`notebook_54_evaluation.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_54_evaluation.py) — runnable end-to-end suite.
+- [`notebook_55_evaluation.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_55_evaluation.py) — runnable end-to-end suite.
 - [`locus.evaluation.framework`](https://github.com/oracle-samples/locus/blob/main/src/locus/evaluation/framework.py) — `EvalCase`, `EvalRunner`, `EvalReport`.
 
 ## See also

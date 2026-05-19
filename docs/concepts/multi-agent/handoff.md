@@ -104,9 +104,9 @@ customer's last message.
 
 ## Notebooks
 
-- [`notebook_30_agent_handoff.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_30_agent_handoff.py)
+- [`notebook_31_agent_handoff.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_31_agent_handoff.py)
   — full triage + billing + shipping + returns escalation flow.
-- [`notebook_38_multiagent_human_in_loop.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_38_multiagent_human_in_loop.py)
+- [`notebook_39_multiagent_human_in_loop.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_39_multiagent_human_in_loop.py)
   — handoff to a human via `interrupt()` (one of three HITL patterns
   in the same file).
 

@@ -169,7 +169,7 @@ or whatever your platform expects.
 
 ## Source and notebook
 
-- [`notebook_67_agent_server.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_67_agent_server.py) — runnable wrapper plus a curl client.
+- [`notebook_68_agent_server.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_68_agent_server.py) — runnable wrapper plus a curl client.
 - [`locus.server`](https://github.com/oracle-samples/locus/tree/main/src/locus/server) — `AgentServer`, `InvokeRequest`, `InvokeResponse`.
 
 ## See also

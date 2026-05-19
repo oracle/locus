@@ -123,7 +123,7 @@ export LOCUS_MODEL_PROVIDER=oci
 export LOCUS_MODEL_ID="ocid1.generativeaiendpoint.oc1.<region>....<id>"
 export LOCUS_OCI_PROFILE=MY_PROFILE
 export LOCUS_OCI_COMPARTMENT="ocid1.compartment.oc1..."
-python examples/notebook_13_basic_agent.py
+python examples/notebook_14_basic_agent.py
 ```
 
 `LOCUS_OCI_TRANSPORT=sdk` forces the SDK transport explicitly if you

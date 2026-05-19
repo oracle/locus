@@ -128,7 +128,7 @@ observable as their own event types.
 
 ## Source and notebook
 
-- [`notebook_41_reasoning_patterns.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_41_reasoning_patterns.py) — all three add-ons end-to-end.
+- [`notebook_42_reasoning_patterns.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_42_reasoning_patterns.py) — all three add-ons end-to-end.
 - [`locus.reasoning.reflexion`](https://github.com/oracle-samples/locus/blob/main/src/locus/reasoning/reflexion.py)
 - [`locus.reasoning.grounding`](https://github.com/oracle-samples/locus/blob/main/src/locus/reasoning/grounding.py)
 - [`locus.reasoning.causal`](https://github.com/oracle-samples/locus/blob/main/src/locus/reasoning/causal.py)

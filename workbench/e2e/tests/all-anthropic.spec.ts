@@ -27,12 +27,12 @@ const PER_NOTEBOOK_MS = Number(process.env.PER_NOTEBOOK_MS ?? 360_000);
 // or use OCI-only models like gpt-audio. They can't run against
 // Anthropic and are skipped from this sweep.
 const OCI_ONLY = new Set<string>([
-  "notebook_41_deepagent",        // >10 min with subagents; covered by CLI tests
-  "notebook_49_audio_response",
-  "notebook_50_audio_chat",
+  "notebook_42_deepagent",        // >10 min with subagents; covered by CLI tests
+  "notebook_50_audio_response",
+  "notebook_51_audio_chat",
   // RAG notebooks call OCIEmbeddings internally — no OCI credentials in Anthropic sweep.
-  "notebook_22_rag_basics",
-  "notebook_24_rag_agents",
+  "notebook_23_rag_basics",
+  "notebook_25_rag_agents",
 ]);
 // Stagger gap between notebooks inside a worker. Anthropic tier 1 caps
 // at 50 RPM for sonnet — with N workers each firing back-to-back we can
@@ -97,9 +97,9 @@ async function runOne(page: Page, id: string): Promise<{ code: number; tail: str
 }
 
 const SLOW_NOTEBOOKS = new Set<string>([
-  "notebook_41_deepagent",
-  "notebook_51_cognitive_router",
-  "notebook_56_research_workflow",
+  "notebook_42_deepagent",
+  "notebook_52_cognitive_router",
+  "notebook_57_research_workflow",
 ]);
 const SLOW_MULTIPLIER = 3;
 

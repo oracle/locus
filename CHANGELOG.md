@@ -8,6 +8,73 @@ policy.
 
 ## [Unreleased]
 
+### Added — `OracleAgentMemoryManager` (recommended Oracle-backed memory path)
+
+New `BaseMemoryManager` adapter at `src/locus/memory/managers/oracle_agent_memory.py`
+that bridges Locus's standard `memory_manager=` slot to Oracle's
+official [`oracleagentmemory`](https://pypi.org/project/oracleagentmemory/)
+client. Same Agent runtime, no contract changes; the adapter routes
+`on_session_start` / `on_session_end` into oracleagentmemory's
+`Thread.add_messages_async` (which fires the LLM extractor) and
+`client.search_async` (scoped to the resolved `user_id` /
+`agent_id`), so a brand-new Agent in thread B can recall facts that
+the LLM extractor learned about Alice in thread A.
+
+Wins vs. the BaseStore-flavoured `LLMMemoryManager + OracleStore`
+path: LongMemEval-tuned recall (94.4 % on GPT-5.5 xhigh), prompt-
+ready context cards, scoped retrieval by user/agent/thread, temporal
+reasoning. Cost: Oracle-only, alpha upstream (`oracleagentmemory`
+26.4.0, Dev Status 3).
+
+- New optional dep `[agentmemory]` in `pyproject.toml`
+  (`oracleagentmemory>=26.4.0,<27`). Also rolled into `[checkpoints]`
+  so `pip install locus-sdk[checkpoints]` covers everything Oracle.
+- New live notebook `examples/notebook_13_oracle_agent_memory.py` +
+  matching docs page `docs/notebooks/notebook_13_oracle_agent_memory.md`,
+  promoted to the top of the Oracle 26ai notebook block.
+- New workbench pattern `oracle_agent_memory` (PATTERNS + PATTERN_RUNNERS
+  in `workbench/backend/runner.py`), placed above
+  `oracle_26ai_cross_thread_memory` with a `recommended: true` flag.
+
+### Changed — notebook renumber: Oracle agent memory in the 06–13 block
+
+The new notebook was authored at slot 69, then renumbered to slot 13
+so it joins the contiguous Oracle Database 26ai block (06–13).
+Everything previously at slot 13–68 shifted by +1 (Foundations
+13→14 … Real-world workflows 67→68 → 68→69). Cross-references in
+`mkdocs.yml`, `docs/notebooks/*.md`, `docs/concepts/*.md`,
+`docs/how-to/*.md`, the integration test discoverers
+(`test_notebooks_subset.py`, `test_notebooks_all_live.py`), and the
+workbench `PATTERNS` notebook fields were updated in lockstep.
+Embedded audio assets (`notebook_67_question.wav` etc.) followed the
+same shift.
+
+### Fixed — code-block copy-button contrast
+
+`.md-clipboard` was using mkdocs-material's default
+`--md-default-fg-color--lightest` (`#c5c8c8` light / `#4a4844` slate)
+— practically invisible against our pale-cream code-block background
+in light mode. Promoted the resting state to `--lighter`, hover state
+to Oracle red, slate scheme to its own contrast-tuned values.
+`docs/stylesheets/locus.css` only.
+
+### Changed — `docs/concepts/memory-manager.md` reframes the memory spectrum
+
+The "Persistent backends" section now leads with
+`OracleAgentMemoryManager` as the recommended Oracle-backed memory
+path; `LLMMemoryManager + BaseStore` (InMemory / Redis / Postgres /
+OpenSearch / OracleStore) is reframed as the portable / multi-backend
+/ test-friendly path. Same content for both — no deprecation. The
+README gets a new "Long-term memory" feature row mirroring the framing.
+
+### Explicitly not changed
+
+`LLMMemoryManager` and `OracleStore` are unchanged and remain
+first-class. The portability spectrum (Redis / Postgres / OpenSearch /
+InMemory / Oracle) is the entire reason they exist; oracleagentmemory
+is an upgrade for users who can pay the Oracle-only + alpha-upstream
+cost, not a replacement.
+
 ## [0.2.0b17] - 2026-05-19
 
 This release reshapes the Oracle Database 26ai surface so the Locus
@@ -109,8 +176,8 @@ and the integration test file (renamed from `test_notebooks_13_21.py` to
 
 Embedded references migrated to match the new numbers: database table
 names (`locus_notebook_NN_*`), thread IDs, audio asset filenames
-(`notebook_65_response.mp3`, `notebook_66_question.wav`,
-`notebook_66_answer.wav`), and `Notebook NN` headers inside each file.
+(`notebook_66_response.mp3`, `notebook_67_question.wav`,
+`notebook_67_answer.wav`), and `Notebook NN` headers inside each file.
 
 ### Changed — `config.py` now defaults to OCI Generative AI
 
@@ -226,7 +293,7 @@ from the user's shell-default OCI config. New docs page:
   DDL; `False` for production with pre-created table + DML-only privs).
   CREATE USER / GRANT script + ready-to-paste CREATE TABLE + CREATE
   VECTOR INDEX in both the docstring and `docs/concepts/rag.md`.
-- Notebook 22 (`using_vector_stores`) now lists `OracleVectorStore`
+- Notebook 23 (`using_vector_stores`) now lists `OracleVectorStore`
   alongside the InMemory / Qdrant / OpenSearch / pgvector / Chroma
   options.
 - Three deep-research demos and the project README now default
@@ -255,7 +322,7 @@ from the user's shell-default OCI config. New docs page:
   `openai.gpt-4.1` — frontier OpenAI, different rate-limit pool, same
   OpenAI-compat tool_calls codepath.
 - `test_notebooks_all_live._NOTEBOOK_TIMEOUT_OVERRIDES` adds a
-  per-notebook budget. `notebook_34_emergent_routing` lifted from 360s
+  per-notebook budget. `notebook_35_emergent_routing` lifted from 360s
   → 900s (legitimately takes ~10 min under the reasoning model with 5
   dispatches × ≥3 LLM calls each).
 
@@ -528,12 +595,12 @@ and verified output stats from a real ADB run.
 - `docs/concepts/deepagent.md` — new "Datastore auto-wiring" section
   with an Oracle Autonomous DB example and the provider-quirk +
   async-loop notes.
-- `docs/notebooks/notebook_29_deepagent.md` — topic 6 cross-references
+- `docs/notebooks/notebook_30_deepagent.md` — topic 6 cross-references
   the deep-research project for the multi-backend variants.
 - `docs/workbench.md` and `workbench/README.md` — cross-references
   under "What you can run" so workbench users discover the project
   examples.
-- `examples/notebook_29_deepagent.py` — new `part5_datastores()` that
+- `examples/notebook_30_deepagent.py` — new `part5_datastores()` that
   exercises `create_deepagent(datastores=...)` against an in-memory
   `RAGRetriever`, so the workbench picks the notebook up and demos
   the auto-wiring without external dependencies.

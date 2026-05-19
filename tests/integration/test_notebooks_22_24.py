@@ -81,13 +81,13 @@ def get_model():
 
 
 # =============================================================================
-# Notebook 22: RAG Basics Tests
+# Notebook 23: RAG Basics Tests
 # =============================================================================
 
 
 @pytest.mark.skipif(not has_embedder_available(), reason="No embedder available")
 class TestNotebook22RAGBasics:
-    """Tests for Notebook 22: RAG Basics."""
+    """Tests for Notebook 23: RAG Basics."""
 
     @pytest.mark.asyncio
     async def test_embedding_single_text(self):
@@ -248,13 +248,13 @@ class TestNotebook22RAGBasics:
 
 
 # =============================================================================
-# Notebook 23: RAG Providers Tests
+# Notebook 24: RAG Providers Tests
 # =============================================================================
 
 
 @pytest.mark.skipif(not has_embedder_available(), reason="No embedder available")
 class TestNotebook23RAGProviders:
-    """Tests for Notebook 23: RAG Providers."""
+    """Tests for Notebook 24: RAG Providers."""
 
     @pytest.mark.asyncio
     @pytest.mark.skipif(not os.environ.get("OPENAI_API_KEY"), reason="OpenAI not configured")
@@ -310,13 +310,13 @@ class TestNotebook23RAGProviders:
 
 
 # =============================================================================
-# Notebook 24: RAG Agents Tests
+# Notebook 25: RAG Agents Tests
 # =============================================================================
 
 
 @pytest.mark.skipif(not has_embedder_available(), reason="No embedder available")
 class TestNotebook24RAGAgents:
-    """Tests for Notebook 24: RAG Agents."""
+    """Tests for Notebook 25: RAG Agents."""
 
     @pytest.mark.asyncio
     async def test_rag_as_tool(self):

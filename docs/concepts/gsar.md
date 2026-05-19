@@ -153,6 +153,6 @@ production you'd map your tool taxonomy onto these.
   — outer loop, abstain handling, budget exhaustion.
 - [`tests/integration/test_gsar_live.py`](https://github.com/oracle-samples/locus/blob/main/tests/integration/test_gsar_live.py)
   — live LLM judge driving the full loop.
-- [`examples/notebook_42_gsar_typed_grounding.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_42_gsar_typed_grounding.py)
+- [`examples/notebook_43_gsar_typed_grounding.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_43_gsar_typed_grounding.py)
   — a runnable walkthrough of the four parts.
 - Paper: [arXiv:2604.23366](https://arxiv.org/abs/2604.23366).

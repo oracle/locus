@@ -136,10 +136,71 @@ Each combination gets its own set of memories — no cross-contamination.
 
 ## Persistent backends
 
-Replace `InMemoryStore` with any `BaseStore` backend:
+Locus exposes memory along a spectrum, from "works everywhere" to
+"opinionated Oracle-specific":
+
+| Path | Manager class | When to pick it |
+|---|---|---|
+| Portable / multi-backend | `LLMMemoryManager` + any `BaseStore` (InMemory / Redis / Postgres / OpenSearch / Oracle `OracleStore`) | You need backend portability, an LLM-free extractor, or a test-friendly path |
+| **Recommended Oracle path** | **`OracleAgentMemoryManager`** (Oracle's official [`oracleagentmemory`](https://pypi.org/project/oracleagentmemory/) client) | You're on Oracle AI Database and want LongMemEval-tuned recall, context cards, and scoped retrieval by `user_id` / `agent_id` / `thread_id` without writing your own extractor |
+
+### Oracle agent memory (recommended for Oracle deployments)
+
+`OracleAgentMemoryManager` is a thin adapter that implements the
+`BaseMemoryManager` contract on top of `oracleagentmemory.core.OracleAgentMemory`.
+You get LLM-backed extraction (94.4 % on LongMemEval / GPT-5.5 xhigh),
+prompt-ready context cards, scoped retrieval, and temporal reasoning —
+without changing how your `Agent` consumes memory.
 
 ```python
-from locus.memory.backends import RedisBackend, PostgreSQLBackend, OracleBackend
+import oracledb
+from locus.memory.managers import OracleAgentMemoryManager
+
+conn = oracledb.connect(
+    user="locus_app",
+    password=os.environ["ORACLE_PW"],
+    dsn="mydb_low",
+    config_dir="~/.oci/wallets/mydb",
+    wallet_location="~/.oci/wallets/mydb",
+    wallet_password=os.environ.get("ORACLE_WALLET_PW", ""),
+)
+manager = OracleAgentMemoryManager(
+    connection=conn,
+    embedder="openai/text-embedding-3-small",  # or any litellm-style model spec
+    llm="openai/gpt-4o-mini",                  # or "oci/openai.gpt-4.1" with OCI kwargs
+    table_name_prefix="locus_oam_",
+)
+agent = Agent(model="oci:openai.gpt-4.1", memory_manager=manager)
+
+# Pass user_id (and optional thread_id) via metadata to scope retrieval:
+agent.run_sync(
+    "Hi, I'm Alice — I prefer us-chicago-1 for inference.",
+    metadata={"user_id": "alice", "thread_id": "t-a"},
+)
+```
+
+Install the optional extras:
+
+```bash
+pip install 'locus-sdk[agentmemory]'      # just the agent-memory client
+pip install 'locus-sdk[checkpoints]'      # everything Oracle: checkpointers + agent memory
+```
+
+The upstream is currently alpha (`oracleagentmemory` 26.4.0, Dev
+Status 3). When you need a portable backend or a fully-deterministic
+LLM-free extractor, fall back to the portable path below.
+
+See [notebook 13](../notebooks/notebook_13_oracle_agent_memory.md) for
+a runnable end-to-end demo with two sessions on the same `user_id`.
+
+### Portable path (any BaseStore backend)
+
+`LLMMemoryManager` works against any `BaseStore` implementation. Use
+this for InMemory tests, Redis/Postgres/OpenSearch deployments, or
+when you need a deterministic regex-based extractor:
+
+```python
+from locus.memory.backends import RedisBackend, PostgreSQLBackend
 from locus.memory.store_backends import OracleStore   # Oracle 26ai native
 
 # Redis — distributed, fast (OCI Cache with Redis)
@@ -149,7 +210,10 @@ manager = LLMMemoryManager(store=RedisBackend("redis://localhost:6379"))
 manager = LLMMemoryManager(store=PostgreSQLBackend(host="...", database="..."))
 
 # [Oracle 26ai][oracle-db] (`OracleStore`) — namespaced key/value with optional [VECTOR][ai-vector-search]
-# search inside a namespace. Native locus, no langchain dep.
+# search inside a namespace. Native locus, no langchain dep. For
+# Oracle workloads, prefer `OracleAgentMemoryManager` above unless
+# you specifically want the BaseStore protocol or the LLM-free
+# regex extractor.
 manager = LLMMemoryManager(
     store=OracleStore(
         dsn="mydb_low",

@@ -112,11 +112,11 @@ Specialist(
 
 ## Notebooks
 
-- [`notebook_31_orchestrator_pattern.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_31_orchestrator_pattern.py)
+- [`notebook_32_orchestrator_pattern.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_32_orchestrator_pattern.py)
   — router + three parallel specialists, results merged.
-- [`notebook_32_specialist_agents.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_32_specialist_agents.py)
+- [`notebook_33_specialist_agents.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_33_specialist_agents.py)
   — confidence floors and per-specialist playbooks.
-- [`notebook_63_procurement_approval.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_63_procurement_approval.py)
+- [`notebook_64_procurement_approval.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_64_procurement_approval.py)
   — orchestrator-shaped procurement with tiered approval gates and a
   typed `PurchaseOrder` artifact.
 

@@ -102,9 +102,9 @@ async def end_to_end(catalogue: list[dict]) -> dict:
 
 ## Notebooks
 
-- [`notebook_28_functional_api.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_28_functional_api.py)
+- [`notebook_29_functional_api.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_29_functional_api.py)
   — `@task` and `@entrypoint` end-to-end.
-- [`notebook_35_map_reduce_code_review.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_35_map_reduce_code_review.py)
+- [`notebook_36_map_reduce_code_review.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_36_map_reduce_code_review.py)
   — same map/reduce shape, written as a graph with `Send` instead.
   Useful as the "graph version" comparison when you're choosing
   between functional and StateGraph for a fan-out workload.

@@ -129,8 +129,8 @@ anything leaves, see [Safety](safety.md).
 
 ## Source and notebooks
 
-- [`notebook_17_agent_hooks.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_17_agent_hooks.py) — first hook, including logging.
-- [`notebook_19_hooks_advanced.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_19_hooks_advanced.py) — telemetry pipelines.
+- [`notebook_18_agent_hooks.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_18_agent_hooks.py) — first hook, including logging.
+- [`notebook_20_hooks_advanced.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_20_hooks_advanced.py) — telemetry pipelines.
 - [`locus.hooks.builtin.logging`](https://github.com/oracle-samples/locus/blob/main/src/locus/hooks/builtin/logging.py) — `LoggingHook`, `StructuredLoggingHook`.
 - [`locus.hooks.builtin.telemetry`](https://github.com/oracle-samples/locus/blob/main/src/locus/hooks/builtin/telemetry.py) — `TelemetryHook`, `NoOpTelemetryHook`.
 
