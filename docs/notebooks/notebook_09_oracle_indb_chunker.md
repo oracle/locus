@@ -1,22 +1,38 @@
-# Oracle In-DB Chunker
+# Oracle In-DB Chunker — `DBMS_VECTOR_CHAIN.UTL_TO_CHUNKS`
 
-Oracle 23ai / 26ai ships a server-side chunking primitive,
-`DBMS_VECTOR_CHAIN.UTL_TO_CHUNKS`. It tokenises and segments text
-without ever shipping the content back to Python — the perfect first
-stage of an ingest pipeline that already has the source CLOBs in the
-database. Locus wraps it as `OracleInDBChunker`.
+Oracle Database 26ai ships **server-side chunking** as a first-class
+PL/SQL primitive. `DBMS_VECTOR_CHAIN.UTL_TO_CHUNKS` tokenises and
+segments text inside the database — the source CLOBs never travel
+back to Python, only the resulting chunk records. For corpora that
+already live in the database this collapses the first stage of any
+RAG pipeline into a single SQL call.
+
+`OracleInDBChunker` is the Locus wrapper. Two shapes:
+
+- **`chunk_text(passage)`** — chunks a single string the application
+  passed in. Good for ad-hoc material the user supplied.
+- **`chunk_column(table, column, ...)`** — streams chunks out of
+  every row of a CLOB column. Good for ingesting an entire table
+  without round-tripping the documents through the application.
+
+To exercise both shapes the notebook drives the chunker from a Locus
+`Agent`. Each chunker call is wrapped as a `@tool`; the agent picks
+which one to invoke from the prompt, and the SQL fires inside a
+`ToolStartEvent` / `ToolCompleteEvent` pair so you can see exactly
+when the database does the work. The agent is the harness; the
+PL/SQL chunker is the subject.
 
 ## What this covers
 
-- `OracleInDBChunker(dsn=..., max_tokens=20, overlap=0, by="words")` —
-  same connection envelope as the loader (notebook 08) and the vector
-  store (notebook 06).
-- `await chunker.chunk_text(long_paragraph)` — single Python string in,
-  list of `{chunk_id, offset, length, text}` rows out.
-- `async for chunk in chunker.chunk_column(table_name=..., text_column=...)`
-  — streams chunks of *every row* in a table, with no Python
-  round-trip for the source text. Each chunk carries the `source_id`
-  of the row it came from.
+- `OracleInDBChunker(...).chunk_text(passage)` returning chunk records
+  for a single string.
+- `OracleInDBChunker(...).chunk_column(table, column)` streaming
+  chunks out of an entire CLOB column without round-tripping the
+  source documents.
+- `@tool chunk_paragraph(text)` / `@tool chunk_table_rows(limit)` —
+  exposing each shape as an agent tool.
+- One connection envelope (DSN, user, wallet) shared with the loader
+  (notebook 08) and the vector store (notebook 06).
 
 ## Prerequisites
 
@@ -51,6 +67,8 @@ python examples/notebook_09_oracle_indb_chunker.py
 - [Notebook 08 — Oracle ADB document loader](notebook_08_oracle_adb_loader.md)
 - [Notebook 10 — Oracle in-DB embeddings](notebook_10_oracle_indb_embeddings.md)
 - [Oracle AI Database 26ai — AI Vector Search User's Guide](https://docs.oracle.com/en/database/oracle/oracle-database/23/vecse/index.html)
+- [`DBMS_VECTOR_CHAIN` PL/SQL package reference](https://docs.oracle.com/en/database/oracle/oracle-database/23/arpls/dbms_vector_chain1.html)
+- [python-oracledb driver](https://python-oracledb.readthedocs.io/en/latest/index.html)
 
 ## Source
 

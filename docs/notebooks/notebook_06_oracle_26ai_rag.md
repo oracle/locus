@@ -1,11 +1,12 @@
-# Oracle 26ai RAG
+# Oracle 26ai RAG agent
 
-The Oracle-native RAG target on Oracle Cloud Infrastructure (OCI).
+A Locus `Agent` that retrieves over Oracle Database 26ai. The agent
+runtime is the protagonist; Oracle 26ai is the durable substrate.
 Embeddings live in a real `VECTOR(N, FLOAT32)` column, similarity is
 the `VECTOR_DISTANCE` SQL function, and the index is `CREATE VECTOR
-INDEX ... ORGANIZATION NEIGHBOR PARTITIONS WITH DISTANCE COSINE` — all
-native to Oracle Database 26ai. The retriever pipeline is the same one
-the in-memory RAG notebooks use; only the store import changes.
+INDEX ... ORGANIZATION NEIGHBOR PARTITIONS WITH DISTANCE COSINE` — but
+what this notebook shows is the *agent* deciding when to search,
+firing a real tool call, and grounding its reply in what came back.
 
 ## What this covers
 
@@ -14,8 +15,12 @@ the in-memory RAG notebooks use; only the store import changes.
   Database wallet, auto-creating the table with a native
   `VECTOR(1024, FLOAT32)` column on first use, and serving cosine
   similarity queries via `VECTOR_DISTANCE`.
-- `RAGRetriever` driving the search — swap to OpenSearch, pgvector,
-  or in-memory by changing the store import only.
+- `create_rag_tool(retriever, ...)` turning the `RAGRetriever` into a
+  Locus `@tool` and handing it to an `Agent`. Each retrieval surfaces
+  as `ToolStartEvent` / `ToolCompleteEvent` so the agent's
+  decision-making is visible.
+- The same agent, the same tool — swap the store import to OpenSearch,
+  pgvector, or in-memory and nothing else changes.
 
 ## Prerequisites
 
@@ -57,7 +62,11 @@ for the `CREATE USER locus_app` / `CREATE VECTOR INDEX` DDL.
 
 - [Concepts — RAG (Oracle 26ai walkthrough)](../concepts/rag.md)
 - [Notebook 05 — Cohere Reranker V4 over Oracle 26ai](notebook_05_cohere_reranker.md)
+- [Oracle Database 26ai — documentation](https://docs.oracle.com/en/database/oracle/oracle-database/23/index.html)
 - [Oracle AI Database 26ai — AI Vector Search User's Guide](https://docs.oracle.com/en/database/oracle/oracle-database/23/vecse/index.html)
+- [Oracle Autonomous Database — documentation](https://docs.oracle.com/en/cloud/paas/autonomous-database/index.html)
+- [python-oracledb driver](https://python-oracledb.readthedocs.io/en/latest/index.html)
+- [OCI Generative AI — documentation hub](https://docs.oracle.com/en-us/iaas/Content/generative-ai/home.htm)
 
 ## Source
 

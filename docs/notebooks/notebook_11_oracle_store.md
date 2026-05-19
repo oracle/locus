@@ -1,28 +1,27 @@
-# Oracle 26ai Store (long-term memory)
+# Oracle 26ai cross-thread memory agent
 
-Where the [Oracle 26ai checkpointer](notebook_07_oracle_26ai_checkpointer.md)
-persists *per-thread* agent state, `OracleStore` persists *cross-thread*
-facts: the namespaced key/value store the long-term-memory layer
-reaches for when something needs to outlive any single conversation.
-It is the locus-native equivalent of `langgraph-oracledb.OracleStore`
-/ `AsyncOracleStore` — same schema shape, same surface area — but with
-**zero** langchain / langgraph imports.
+A Locus `Agent` with cross-thread long-term memory backed by
+`OracleStore`. Where the [Oracle 26ai checkpointer](notebook_07_oracle_26ai_checkpointer.md)
+persists *per-thread* state, `OracleStore` persists *cross-thread*
+facts. The Locus agent reaches into it through
+`LLMMemoryManager`, which extracts memories at the end of a session
+and injects them into the system prompt at the start of the next one.
+The agent in this notebook learns a fact in thread A and a brand-new
+agent in thread B answers a question that depends on that fact —
+without ever seeing thread A's messages.
 
 ## What this covers
 
-- Plain K/V mode: `put(namespace, key, value)` / `get(namespace, key)`
-  against a CLOB JSON column, keyed on `(namespace, key)`.
-- `list_namespaces(prefix=...)` enumerating every namespace beneath a
-  parent — namespaces are `tuple[str, ...]` and flatten to `/`-joined
-  strings inside the table.
-- Vector mode: pass `dimension=N` and the store provisions a
-  `VECTOR(N, FLOAT32)` column; `put_with_embedding` /
-  `search_by_embedding` use the same `VECTOR_DISTANCE` SQL function
-  the RAG store uses, but scoped to a namespace.
-
-The notebook uses a tiny 4-dim fake embedding so the vector demo can
-run without an embedding model. Real workloads hand in 1024-dim Cohere
-V3 or 1536-dim Cohere V4 vectors.
+- `OracleStore` implementing the `BaseStore` contract on top of
+  Oracle 26ai. Plain K/V here; pass `dimension=N` for vector mode.
+- `LLMMemoryManager(store=oracle_store, namespace_prefix=("users",
+  user_id), extract_fn=...)` as the agent-facing surface. Hand it to
+  `Agent(memory_manager=...)`.
+- The agent loop calling `manager.extract(messages)` at session end
+  and `manager.retrieve()` at session start — visible by inspecting
+  the store between the two threads.
+- A deterministic regex-based extractor for the demo; production
+  deployments wire an LLM-backed extractor here.
 
 ## Prerequisites
 
@@ -62,7 +61,9 @@ only.
 
 - [Notebook 07 — Oracle 26ai checkpointer](notebook_07_oracle_26ai_checkpointer.md)
 - [Notebook 12 — Oracle 26ai versioned checkpoint saver](notebook_12_oracle_versioned_saver.md)
+- [Oracle Database 26ai — documentation](https://docs.oracle.com/en/database/oracle/oracle-database/23/index.html)
 - [Oracle AI Database 26ai — AI Vector Search User's Guide](https://docs.oracle.com/en/database/oracle/oracle-database/23/vecse/index.html)
+- [python-oracledb driver](https://python-oracledb.readthedocs.io/en/latest/index.html)
 
 ## Source
 

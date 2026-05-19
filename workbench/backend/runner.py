@@ -279,14 +279,80 @@ async def _drive_pipeline(runnable: Any, prompt: str) -> tuple[str, list[RunEven
 PATTERNS: list[dict[str, Any]] = [
     {
         "id": "oracle_26ai_rag",
-        "title": "Oracle 26ai RAG (native VECTOR)",
-        "notebook": 61,
+        "title": "Oracle 26ai RAG agent",
+        "notebook": 6,
         "summary": (
-            "OracleVectorStore against an Autonomous Database wallet — native "
-            "VECTOR(1024, FLOAT32) + VECTOR_DISTANCE COSINE, same RAGRetriever "
-            "as the in-memory notebooks. Requires ORACLE_DSN / ORACLE_USER / "
-            "ORACLE_PASSWORD / ORACLE_WALLET on the backend plus an OCI "
-            "provider for embeddings."
+            "A Locus Agent that retrieves over Oracle 26ai. create_rag_tool "
+            "wraps RAGRetriever + OracleVectorStore (native VECTOR(1024, "
+            "FLOAT32) + VECTOR_DISTANCE COSINE) as a @tool; the agent "
+            "decides when to search and grounds its reply in the returned "
+            "passages. Requires ORACLE_* on the backend + an OCI provider "
+            "for embeddings."
+        ),
+    },
+    {
+        "id": "oracle_26ai_checkpointer",
+        "title": "Oracle 26ai durable agent thread",
+        "notebook": 7,
+        "summary": (
+            "An Agent with oracle_checkpointer wired in: the agent loop "
+            "persists state on every iteration. A brand-new Agent loads the "
+            "same thread_id from Oracle 26ai and recalls turn 1 — no manual "
+            "save/load. Requires ORACLE_* on the backend."
+        ),
+    },
+    {
+        "id": "oracle_26ai_adb_loader",
+        "title": "Agent driving OracleADBLoader",
+        "notebook": 8,
+        "summary": (
+            "Agent exposes fetch_articles_by_topic(topic) — a @tool that "
+            "wraps OracleADBLoader with bind_params. The agent picks the "
+            "topic, runs the parameter-bound SELECT, and grounds the answer "
+            "in the rows. Requires ORACLE_* on the backend."
+        ),
+    },
+    {
+        "id": "oracle_26ai_indb_chunker",
+        "title": "Agent + Oracle in-DB chunker",
+        "notebook": 9,
+        "summary": (
+            "Agent with @tool chunk_paragraph(text) — DBMS_VECTOR_CHAIN."
+            "UTL_TO_CHUNKS runs entirely server-side. Requires ORACLE_* on "
+            "the backend + DBMS_VECTOR_CHAIN grant."
+        ),
+    },
+    {
+        "id": "oracle_26ai_indb_embeddings",
+        "title": "Data-residency RAG agent",
+        "notebook": 10,
+        "summary": (
+            "Agent doing RAG with OracleInDBEmbeddings + OracleVectorStore: "
+            "embedding generation and VECTOR_DISTANCE both run inside Oracle "
+            "26ai. The LLM still sees the question + retrieved passages. "
+            "Requires the ONNX model loaded via DBMS_VECTOR.LOAD_ONNX_MODEL "
+            "and ORACLE_* on the backend."
+        ),
+    },
+    {
+        "id": "oracle_26ai_cross_thread_memory",
+        "title": "Cross-thread memory agent (OracleStore)",
+        "notebook": 11,
+        "summary": (
+            "Agent with LLMMemoryManager(store=OracleStore). Thread A teaches "
+            "a fact; a brand-new Agent in thread B recalls it without seeing "
+            "thread A's messages. Requires ORACLE_* on the backend."
+        ),
+    },
+    {
+        "id": "oracle_26ai_versioned_saver",
+        "title": "Versioned agent history (OracleCheckpointSaver)",
+        "notebook": 12,
+        "summary": (
+            "Agent runs three turns; after each one, AgentState.to_checkpoint "
+            "is written to OracleCheckpointSaver with a monotonic "
+            "checkpoint_id and parent link. list_checkpoints shows the full "
+            "lineage. Requires ORACLE_* on the backend."
         ),
     },
     {
@@ -1133,30 +1199,15 @@ def _resolve_db(cfg: DatabaseConfig | None) -> DatabaseConfig:
     )
 
 
-async def _run_oracle_26ai_rag(req: RunRequest) -> RunResponse:
-    """Workbench demo for notebook 06 — Oracle 26ai native VECTOR RAG.
-
-    Embeds a tiny Oracle-themed corpus with ``OCIEmbeddings``
-    (Cohere V3, 1024-dim) and stores it in an ``OracleVectorStore``
-    backed by an Autonomous Database wallet. The store auto-creates a
-    ``VECTOR(1024, FLOAT32)`` table on first use and serves cosine
-    similarity via ``VECTOR_DISTANCE``.
-
-    Requires the database side via env vars (set them where the
-    workbench backend runs): ``ORACLE_DSN``, ``ORACLE_USER``,
-    ``ORACLE_PASSWORD``, ``ORACLE_WALLET``, and (if the wallet is
-    encrypted) ``ORACLE_WALLET_PASSWORD``. The OCI side comes from
-    the provider panel in the UI.
-    """
-    from locus.rag import OCIEmbeddings, OracleVectorStore, RAGRetriever
-
+def _require_oci_provider(req: RunRequest, *, reason: str) -> None:
     if req.provider.provider not in {"oci-session", "oci-apikey"}:
         raise HTTPException(
             400,
-            "Oracle 26ai RAG requires OCI embeddings (Cohere V3 on us-chicago-1). "
-            "Switch the provider to OCI session or OCI api_key in the UI.",
+            f"{reason} Switch the provider to OCI session or OCI api_key in the UI.",
         )
 
+
+def _require_db(req: RunRequest) -> DatabaseConfig:
     db = _resolve_db(req.database)
     if not db.is_set():
         raise HTTPException(
@@ -1167,6 +1218,45 @@ async def _run_oracle_26ai_rag(req: RunRequest) -> RunResponse:
             "path must be readable by the backend process — when running "
             "in Docker, mount it into the container.",
         )
+    return db
+
+
+def _oci_endpoint(cfg: ProviderConfig) -> tuple[str, str, str]:
+    """Resolve (region, auth_type, service_endpoint) from a provider cfg."""
+    region = cfg.region or "us-chicago-1"
+    auth_type = "security_token" if cfg.provider == "oci-session" else "api_key"
+    endpoint = f"https://inference.generativeai.{region}.oci.oraclecloud.com"
+    return region, auth_type, endpoint
+
+
+def _db_kwargs(db: DatabaseConfig) -> dict[str, str]:
+    """Standard wallet/credentials envelope shared by every Oracle primitive."""
+    return {
+        "dsn": db.dsn,
+        "user": db.user,
+        "password": db.password,
+        "wallet_location": os.path.expanduser(db.wallet_location),
+        "wallet_password": db.wallet_password,
+    }
+
+
+async def _run_oracle_26ai_rag(req: RunRequest) -> RunResponse:
+    """Workbench demo for notebook 06 — Oracle 26ai RAG agent.
+
+    The Locus ``Agent`` is the protagonist: ``create_rag_tool`` wraps
+    a ``RAGRetriever`` over ``OracleVectorStore`` (native VECTOR(1024,
+    FLOAT32) + VECTOR_DISTANCE COSINE) as a ``@tool``, and the agent
+    decides when to search. Every retrieval surfaces as a
+    ``ToolStartEvent`` / ``ToolCompleteEvent`` pair in the event log.
+    """
+    from locus.agent import Agent, AgentConfig
+    from locus.rag import OCIEmbeddings, OracleVectorStore, RAGRetriever, create_rag_tool
+
+    _require_oci_provider(
+        req,
+        reason=("Oracle 26ai RAG requires OCI embeddings (Cohere V3 on us-chicago-1)."),
+    )
+    db = _require_db(req)
 
     corpus = [
         "Oracle 26ai introduces a native VECTOR(N, FLOAT32) column type "
@@ -1184,9 +1274,7 @@ async def _run_oracle_26ai_rag(req: RunRequest) -> RunResponse:
     query = (req.prompt or "How does Oracle 26ai store and search embeddings?").strip()
 
     cfg = req.provider
-    region = cfg.region or "us-chicago-1"
-    auth_type = "security_token" if cfg.provider == "oci-session" else "api_key"
-    endpoint = f"https://inference.generativeai.{region}.oci.oraclecloud.com"
+    _, auth_type, endpoint = _oci_endpoint(cfg)
 
     embedder = OCIEmbeddings(
         model_id="cohere.embed-english-v3.0",
@@ -1197,48 +1285,794 @@ async def _run_oracle_26ai_rag(req: RunRequest) -> RunResponse:
     )
 
     store = OracleVectorStore(
-        dsn=db.dsn,
-        user=db.user,
-        password=db.password,
-        wallet_location=os.path.expanduser(db.wallet_location),
-        wallet_password=db.wallet_password,
-        table_name="locus_workbench_61",
+        **_db_kwargs(db),
+        table_name="locus_workbench_06",
         dimension=1024,
         distance_metric="COSINE",
     )
 
     retriever = RAGRetriever(embedder=embedder, store=store)
     await retriever.add_documents(corpus)
-    hits = await retriever.retrieve(query, limit=3)
 
-    events: list[RunEvent] = [
-        RunEvent(kind="info", text=f"query: {query}"),
-        RunEvent(
-            kind="info",
-            text=f"backend: OracleVectorStore dsn={os.environ['ORACLE_DSN']} "
-            f"dim=1024 metric=COSINE",
+    knowledge_tool = create_rag_tool(
+        retriever,
+        name="search_oracle_26ai_corpus",
+        description=(
+            "Search the Oracle 26ai vector knowledge base. Returns "
+            "passages with cosine-similarity scores against a 1024-dim "
+            "Cohere V3 query embedding. Call this whenever the answer "
+            "might depend on Oracle 26ai vector storage, index types, or "
+            "wallet details — do not guess."
         ),
-    ]
-    for i, h in enumerate(hits.documents, start=1):
-        events.append(
+        limit=3,
+        threshold=0.0,
+    )
+
+    agent = Agent(
+        config=AgentConfig(
+            model=build_model(req.provider),
+            tools=[knowledge_tool],
+            system_prompt=(
+                "You are an Oracle 26ai field engineer. When the question "
+                "touches Oracle 26ai vector storage, index types, or "
+                "Autonomous Database wallets, call search_oracle_26ai_corpus "
+                "first and ground your answer in the returned passages. "
+                "Cite a passage for each claim. Do not invent SQL syntax."
+            ),
+            max_iterations=4,
+        )
+    )
+
+    try:
+        reply, events = await _drive_agent(agent, query)
+        events.insert(
+            0,
             RunEvent(
-                kind="hit",
-                text=f"#{i}  score={h.score:.4f}  {h.document.content[:90]}",
-                extra={"rank": i, "score": h.score, "doc_id": h.document.id},
+                kind="info",
+                text=(
+                    f"backend: OracleVectorStore dsn={db.dsn} "
+                    f"dim=1024 metric=COSINE table=locus_workbench_06"
+                ),
+            ),
+        )
+        return RunResponse(reply=reply, events=events)
+    finally:
+        await store.close()
+
+
+async def _run_oracle_26ai_checkpointer(req: RunRequest) -> RunResponse:
+    """Workbench demo for notebook 07 — durable agent thread on Oracle 26ai.
+
+    Two ``Agent`` instances built fresh on the same ``thread_id`` against
+    an ``oracle_checkpointer``. The first runs the user's prompt; the
+    second — a brand-new Python object — resumes the thread by loading
+    the state from Oracle, then answers a follow-up. Same ``thread_id``,
+    different process semantics.
+    """
+    from locus.agent import Agent, AgentConfig
+    from locus.memory.backends import oracle_checkpointer
+
+    db = _require_db(req)
+    table_name = "locus_workbench_07"
+    thread_id = "workbench-07-thread"
+
+    def _cp():
+        return oracle_checkpointer(**_db_kwargs(db), table_name=table_name)
+
+    def _build_agent():
+        return Agent(
+            config=AgentConfig(
+                model=build_model(req.provider),
+                system_prompt=(
+                    "You are a concise on-call SRE assistant. Remember "
+                    "everything the user has told you earlier in this thread."
+                ),
+                checkpointer=_cp(),
+                checkpoint_every_n_iterations=1,
+                max_iterations=3,
             )
         )
 
-    top = hits.documents[0].document.content if hits.documents else ""
+    user_prompt = (
+        req.prompt or "checkout-api p99 spiked at 14:02 right after the 13:58 deploy."
+    ).strip()
+
+    # ---- Session 1 ----------------------------------------------------------
+    agent1 = _build_agent()
+    reply1, events1 = await _drive_agent_with_thread(agent1, user_prompt, thread_id)
+
+    # ---- Session 2 — fresh Agent, same thread_id ---------------------------
+    agent2 = _build_agent()
+    follow_up = "Has anything similar happened in the last fortnight?"
+    reply2, events2 = await _drive_agent_with_thread(agent2, follow_up, thread_id)
+
+    events: list[RunEvent] = [
+        RunEvent(
+            kind="info",
+            text=(
+                f"backend: oracle_checkpointer dsn={db.dsn} "
+                f"table={table_name} thread_id={thread_id!r}"
+            ),
+        ),
+        RunEvent(kind="session", text=f"session-1 user: {user_prompt}"),
+        *events1,
+        RunEvent(kind="session", text=f"session-1 agent: {reply1[:240]}"),
+        RunEvent(kind="session", text=f"session-2 user: {follow_up}"),
+        *events2,
+        RunEvent(kind="session", text=f"session-2 agent: {reply2[:240]}"),
+    ]
     reply = (
-        f"Top match (VECTOR_DISTANCE / COSINE):\n{top}"
-        if top
-        else "No documents returned — the table is empty or the query embedding failed."
+        f"Session 1 ({len(events1)} events):\n{reply1}\n\n"
+        f"Session 2 — brand-new Agent, same thread_id ({len(events2)} events):\n{reply2}"
     )
     return RunResponse(reply=reply, events=events)
 
 
+async def _run_oracle_26ai_adb_loader(req: RunRequest) -> RunResponse:
+    """Workbench demo for notebook 08 — Agent driving OracleADBLoader.
+
+    Sets up a disposable demo table, hands the agent a ``@tool`` that
+    runs parameter-bound ``SELECT``s against it via ``OracleADBLoader``,
+    and drops the table on the way out.
+    """
+    from locus.agent import Agent, AgentConfig
+    from locus.rag.loaders import OracleADBLoader
+    from locus.tools import tool
+
+    db = _require_db(req)
+    table = "locus_workbench_08_articles"
+    rows = [
+        (
+            1,
+            "oracle-26ai-vectors",
+            "Oracle 26ai introduces a native VECTOR(N, FLOAT32) column type "
+            "with HNSW and IVF organisations.",
+            "AI Vector Search",
+        ),
+        (
+            2,
+            "oracle-26ai-similarity",
+            "VECTOR_DISTANCE(col, :query, COSINE) returns the cosine distance "
+            "between a stored vector and a query vector.",
+            "AI Vector Search",
+        ),
+        (
+            3,
+            "adb-wallets",
+            "Autonomous Database wallets bundle a tnsnames.ora alias per "
+            "consumer group — _low, _medium, _high, _tp, _tpurgent.",
+            "Autonomous Database",
+        ),
+    ]
+
+    await _setup_demo_articles(db, table, rows)
+
+    @tool
+    async def fetch_articles_by_topic(topic: str) -> list[dict]:
+        """Fetch every article tagged with the given topic from the content
+        store.
+
+        Args:
+            topic: Exact topic label. Known values include 'AI Vector
+                Search' and 'Autonomous Database'.
+        """
+        loader = OracleADBLoader(
+            **_db_kwargs(db),
+            sql=(f"SELECT id, slug, body, topic FROM {table} WHERE topic = :topic ORDER BY id"),
+            bind_params={"topic": topic},
+            content_column="body",
+            id_column="slug",
+            metadata_columns=["topic"],
+        )
+        try:
+            docs = await loader.load()
+            return [
+                {
+                    "id": d.id,
+                    "body": d.content,
+                    "topic": d.metadata.get("topic"),
+                }
+                for d in docs
+            ]
+        finally:
+            await loader.close()
+
+    agent = Agent(
+        config=AgentConfig(
+            model=build_model(req.provider),
+            tools=[fetch_articles_by_topic],
+            system_prompt=(
+                "You are a docs analyst. The content store lives in Oracle "
+                "Autonomous Database — use fetch_articles_by_topic with the "
+                "exact topic label before you answer. Cite the article slug."
+            ),
+            max_iterations=4,
+        )
+    )
+
+    query = (
+        req.prompt or "Summarise what we know about AI Vector Search from the content store."
+    ).strip()
+
+    try:
+        reply, events = await _drive_agent(agent, query)
+        events.insert(
+            0,
+            RunEvent(
+                kind="info",
+                text=f"backend: OracleADBLoader dsn={db.dsn} table={table}",
+            ),
+        )
+        return RunResponse(reply=reply, events=events)
+    finally:
+        await _drop_demo_table(db, table)
+
+
+async def _run_oracle_26ai_indb_chunker(req: RunRequest) -> RunResponse:
+    """Workbench demo for notebook 09 — Agent + Oracle in-DB chunker."""
+    from locus.agent import Agent, AgentConfig
+    from locus.rag.chunkers import OracleInDBChunker
+    from locus.tools import tool
+
+    db = _require_db(req)
+    chunker = OracleInDBChunker(
+        **_db_kwargs(db),
+        max_tokens=20,
+        overlap=0,
+        by="words",
+    )
+
+    @tool
+    async def chunk_paragraph(text: str) -> dict:
+        """Chunk a single passage server-side via DBMS_VECTOR_CHAIN.
+
+        Args:
+            text: The passage to chunk. Pass the user's full string.
+        """
+        chunks = await chunker.chunk_text(text)
+        first = (chunks[0]["text"] if chunks else "") or ""
+        return {
+            "count": len(chunks),
+            "total_chars": len(text),
+            "first": first[:160],
+        }
+
+    agent = Agent(
+        config=AgentConfig(
+            model=build_model(req.provider),
+            tools=[chunk_paragraph],
+            system_prompt=(
+                "You are an ingest planning agent. When the user hands you a "
+                "passage, call chunk_paragraph to size it. Report the chunk "
+                "count and the first chunk's preview verbatim."
+            ),
+            max_iterations=3,
+        )
+    )
+
+    query = (
+        req.prompt
+        or "Chunk this passage for me and report stats: Oracle Database 26ai "
+        "introduces native vector search through the VECTOR column type and "
+        "the VECTOR_DISTANCE SQL function. Vectors live in a real column "
+        "with a configurable dimension and storage format such as FLOAT32 "
+        "or INT8."
+    ).strip()
+
+    try:
+        reply, events = await _drive_agent(agent, query)
+        events.insert(
+            0,
+            RunEvent(
+                kind="info",
+                text=(
+                    f"backend: OracleInDBChunker dsn={db.dsn} "
+                    "max_tokens=20 by=words (UTL_TO_CHUNKS server-side)"
+                ),
+            ),
+        )
+        return RunResponse(reply=reply, events=events)
+    finally:
+        await chunker.close()
+
+
+async def _run_oracle_26ai_indb_embeddings(req: RunRequest) -> RunResponse:
+    """Workbench demo for notebook 10 — Data-residency RAG agent.
+
+    Uses ``OracleInDBEmbeddings`` (DB-side ONNX) + ``OracleVectorStore``;
+    every retrieval round-trips through 26ai with no external embedding
+    call. The ONNX model must be loaded into the target DB once via
+    ``DBMS_VECTOR.LOAD_ONNX_MODEL`` — if not, surfaces a friendly error.
+    """
+    from locus.agent import Agent, AgentConfig
+    from locus.rag import OracleVectorStore, RAGRetriever, create_rag_tool
+    from locus.rag.embeddings.oracle_indb import OracleInDBEmbeddings
+
+    db = _require_db(req)
+    model_name = os.environ.get("OCI_INDB_MODEL", "ALL_MINILM_L12_V2")
+    dimension = 384
+
+    embedder = OracleInDBEmbeddings(
+        model_name=model_name,
+        dimension=dimension,
+        **_db_kwargs(db),
+    )
+
+    # Smoke test the in-DB model before spinning up an Agent — surfaces
+    # ORA-40284 (model not loaded) with a 400 instead of an opaque crash.
+    try:
+        await embedder.embed("smoke test")
+    except Exception as exc:  # noqa: BLE001 - detect ORA-* and report cleanly.
+        await embedder.close()
+        text = str(exc)
+        if any(m in text for m in ("ORA-40284", "ORA-29024", "ORA-04063", "ORA-20100")):
+            raise HTTPException(
+                400,
+                f"In-DB ONNX model {model_name!r} is not loaded. Run "
+                "DBMS_VECTOR.LOAD_ONNX_MODEL once, grant 'MINING MODEL "
+                "SELECT' to the runtime user, then retry. Or set "
+                "OCI_INDB_MODEL to a model that exists in your DB.",
+            ) from exc
+        raise
+
+    store = OracleVectorStore(
+        **_db_kwargs(db),
+        table_name="locus_workbench_10",
+        dimension=dimension,
+        distance_metric="COSINE",
+    )
+
+    corpus = [
+        "Oracle Database 26ai exposes server-side embedding via "
+        "DBMS_VECTOR_CHAIN.UTL_TO_EMBEDDING and UTL_TO_EMBEDDINGS.",
+        "DBMS_VECTOR.LOAD_ONNX_MODEL imports an ONNX model into the database "
+        "as a mining model. The text never leaves the DB at embedding time.",
+        "The ALL_MINILM_L12_V2 ONNX model emits 384-dim sentence embeddings "
+        "and is the default model in 26ai data-residency demos.",
+        "Pair OracleInDBEmbeddings with OracleVectorStore(dimension=384) and "
+        "the whole embedding + similarity-search half stays inside Oracle 26ai.",
+        "VECTOR_DISTANCE(col, :query, COSINE) scores stored vectors against "
+        "the in-DB-generated query vector.",
+    ]
+    retriever = RAGRetriever(embedder=embedder, store=store)
+    await retriever.add_documents(corpus)
+
+    knowledge_tool = create_rag_tool(
+        retriever,
+        name="search_indb_corpus",
+        description=(
+            "Search the data-residency knowledge base. Embedding generation "
+            "runs inside Oracle 26ai via DBMS_VECTOR_CHAIN.UTL_TO_EMBEDDING, "
+            "and similarity search runs as VECTOR_DISTANCE / COSINE in the "
+            "same database — no text leaves the DB at retrieval time."
+        ),
+        limit=3,
+        threshold=0.0,
+    )
+
+    agent = Agent(
+        config=AgentConfig(
+            model=build_model(req.provider),
+            tools=[knowledge_tool],
+            system_prompt=(
+                "You are a data-residency architect. When a question touches "
+                "in-database embedding, call search_indb_corpus first and "
+                "ground your answer in the returned passages. Note that the "
+                "embedding/search round-trip stayed inside Oracle 26ai."
+            ),
+            max_iterations=4,
+        )
+    )
+
+    query = (req.prompt or "How does Oracle 26ai keep embedding text inside the database?").strip()
+
+    try:
+        reply, events = await _drive_agent(agent, query)
+        events.insert(
+            0,
+            RunEvent(
+                kind="info",
+                text=(
+                    f"backend: OracleInDBEmbeddings model={model_name} "
+                    f"dim={dimension}  +  OracleVectorStore "
+                    f"table=locus_workbench_10 metric=COSINE"
+                ),
+            ),
+        )
+        return RunResponse(reply=reply, events=events)
+    finally:
+        await store.close()
+        await embedder.close()
+
+
+async def _run_oracle_26ai_cross_thread_memory(req: RunRequest) -> RunResponse:
+    """Workbench demo for notebook 11 — cross-thread memory on OracleStore.
+
+    Thread A's agent learns a fact (LLMMemoryManager.on_session_end
+    persists it to OracleStore). Thread B's brand-new agent retrieves it
+    via on_session_start without ever seeing thread A's messages.
+    """
+    import re
+    import uuid
+
+    from locus.agent import Agent, AgentConfig
+    from locus.core.messages import Message, Role
+    from locus.memory.manager import LLMMemoryManager, Memory, MemoryType
+    from locus.memory.store_backends import OracleStore
+
+    db = _require_db(req)
+    table_name = "locus_workbench_11_store"
+    user_id = "workbench-user"
+
+    store = OracleStore(
+        **_db_kwargs(db),
+        table_name=table_name,
+        dimension=None,
+    )
+
+    _FAVORITE_RX = re.compile(
+        r"(?:i\s+(?:prefer|like|use|work\s+with|run\s+on)|my\s+(?:favourite|favorite)\s+\w+\s+is)\s+([^\.\n]+)",
+        re.IGNORECASE,
+    )
+    _ROLE_RX = re.compile(
+        r"i\s+(?:work\s+on|build|maintain|own)\s+([^\.\n]+)",
+        re.IGNORECASE,
+    )
+
+    async def extract_fn(messages: list[Message]) -> list[Memory]:
+        memories: list[Memory] = []
+        for msg in messages:
+            if msg.role != Role.USER or not msg.content:
+                continue
+            text = msg.content.strip()
+            if m := _FAVORITE_RX.search(text):
+                memories.append(
+                    Memory(
+                        type=MemoryType.USER,
+                        key=f"preference_{uuid.uuid4().hex[:8]}",
+                        content=f"User stated a preference: {m.group(1).strip().rstrip('.')}.",
+                        metadata={"source": "workbench"},
+                    )
+                )
+            if m := _ROLE_RX.search(text):
+                memories.append(
+                    Memory(
+                        type=MemoryType.USER,
+                        key=f"role_{uuid.uuid4().hex[:8]}",
+                        content=f"User's role / focus: {m.group(1).strip().rstrip('.')}.",
+                        metadata={"source": "workbench"},
+                    )
+                )
+        return memories
+
+    manager = LLMMemoryManager(
+        store=store,
+        namespace_prefix=("users", user_id),
+        extract_fn=extract_fn,
+    )
+
+    def _build_agent():
+        return Agent(
+            config=AgentConfig(
+                model=build_model(req.provider),
+                system_prompt=(
+                    "You are a helpful OCI infrastructure assistant. Be "
+                    "concise. Use any persistent facts you've been given "
+                    "about the user."
+                ),
+                memory_manager=manager,
+                max_iterations=2,
+            )
+        )
+
+    teach_prompt = (
+        req.prompt
+        or "Hi — I work on OCI GenAI infrastructure and I prefer us-chicago-1 for inference."
+    ).strip()
+    recall_prompt = "Remind me which OCI region I prefer for inference, and what I work on."
+
+    try:
+        # Thread A teaches.
+        agent_a = _build_agent()
+        reply_a, events_a = await _drive_agent_with_thread(agent_a, teach_prompt, "thread-a")
+
+        # Inspect store between sessions.
+        admin_lines: list[str] = []
+        for memory_type in MemoryType:
+            ns = ("users", user_id, memory_type.value)
+            items = await store.search(ns, query=None, limit=10)
+            for item in items:
+                value = item.value
+                content = value.get("content") if isinstance(value, dict) else value
+                admin_lines.append(f"[{memory_type.value}] {item.key} -> {content}")
+
+        # Thread B recalls — brand-new Agent, no shared messages.
+        agent_b = _build_agent()
+        reply_b, events_b = await _drive_agent_with_thread(agent_b, recall_prompt, "thread-b")
+
+        events: list[RunEvent] = [
+            RunEvent(
+                kind="info",
+                text=(
+                    f"backend: OracleStore dsn={db.dsn} table={table_name} "
+                    f"namespace=('users','{user_id}', ...)"
+                ),
+            ),
+            RunEvent(kind="session", text=f"thread-a user: {teach_prompt}"),
+            *events_a,
+            RunEvent(kind="session", text=f"thread-a agent: {reply_a[:240]}"),
+            RunEvent(
+                kind="store",
+                text=(
+                    "OracleStore now contains:\n  "
+                    + ("\n  ".join(admin_lines) if admin_lines else "(no memories)")
+                ),
+            ),
+            RunEvent(kind="session", text=f"thread-b user: {recall_prompt}"),
+            *events_b,
+            RunEvent(kind="session", text=f"thread-b agent: {reply_b[:240]}"),
+        ]
+        reply = (
+            f"Thread A ({len(events_a)} events):\n{reply_a}\n\n"
+            f"Thread B — brand-new Agent, no shared messages "
+            f"({len(events_b)} events):\n{reply_b}"
+        )
+        return RunResponse(reply=reply, events=events)
+    finally:
+        await store.close()
+
+
+async def _run_oracle_26ai_versioned_saver(req: RunRequest) -> RunResponse:
+    """Workbench demo for notebook 12 — versioned agent history.
+
+    Agent runs three turns under a live ``oracle_checkpointer``; after
+    each turn, the post-turn ``AgentState`` snapshot is written to
+    ``OracleCheckpointSaver`` with a monotonic ``checkpoint_id`` and
+    parent link. ``list_checkpoints`` shows the lineage afterwards.
+    """
+    from locus.agent import Agent, AgentConfig
+    from locus.core.events import TerminateEvent
+    from locus.memory.backends import OracleCheckpointSaver, oracle_checkpointer
+
+    db = _require_db(req)
+    table_prefix = "locus_workbench_12"
+    thread_id = "workbench-12-thread"
+
+    saver = OracleCheckpointSaver(**_db_kwargs(db), table_name=table_prefix)
+    live_cp = oracle_checkpointer(
+        **_db_kwargs(db),
+        table_name=f"{table_prefix}_live",
+    )
+
+    base_prompt = (
+        req.prompt or "Open the incident: checkout-api p99 is up 4× over the last 15 minutes."
+    ).strip()
+    turns = [
+        base_prompt,
+        "What service did we deploy at 13:58 and is anything correlated?",
+        "Draft a one-sentence customer-facing status update.",
+    ]
+
+    agent = Agent(
+        config=AgentConfig(
+            model=build_model(req.provider),
+            system_prompt=(
+                "You are the on-call incident commander. Advance the "
+                "incident each turn; one short paragraph."
+            ),
+            checkpointer=live_cp,
+            checkpoint_every_n_iterations=1,
+            max_iterations=3,
+        )
+    )
+
+    events: list[RunEvent] = [
+        RunEvent(
+            kind="info",
+            text=(
+                f"backend: OracleCheckpointSaver dsn={db.dsn} "
+                f"tables={table_prefix}_checkpoints + {table_prefix}_writes; "
+                f"live thread on {table_prefix}_live"
+            ),
+        ),
+    ]
+    parent: str | None = None
+    final_msg = ""
+    try:
+        for i, prompt in enumerate(turns, start=1):
+            inner_events: list[RunEvent] = []
+            final = ""
+            stop_reason = "complete"
+            async for ev in agent.run(prompt, thread_id=thread_id):
+                if isinstance(ev, TerminateEvent):
+                    final = ev.final_message or ""
+                    stop_reason = ev.reason or "complete"
+                kind = type(ev).__name__
+                text = (
+                    getattr(ev, "tool_name", None)
+                    or getattr(ev, "final_message", None)
+                    or getattr(ev, "content", None)
+                    or getattr(ev, "reasoning", None)
+                    or ""
+                )
+                if not isinstance(text, str):
+                    text = str(text)
+                inner_events.append(RunEvent(kind=kind, text=text))
+
+            state = agent._last_run_state  # type: ignore[attr-defined]
+            if state is None:
+                raise HTTPException(500, "agent.run() did not populate state")
+
+            cid = f"v{i}"
+            snapshot = state.to_checkpoint()
+            await saver.put(
+                thread_id=thread_id,
+                checkpoint_id=cid,
+                parent_checkpoint_id=parent,
+                checkpoint_data=snapshot,
+                metadata={
+                    "turn": i,
+                    "messages": len(snapshot.get("messages", [])),
+                    "stop_reason": str(stop_reason),
+                },
+            )
+            events.append(
+                RunEvent(
+                    kind="session",
+                    text=f"turn {i} user: {prompt}",
+                )
+            )
+            events.extend(inner_events)
+            events.append(
+                RunEvent(
+                    kind="checkpoint",
+                    text=(
+                        f"saver.put -> id={cid!r} parent={parent!r} "
+                        f"messages={len(snapshot.get('messages', []))} "
+                        f"stop_reason={stop_reason!r}"
+                    ),
+                    extra={
+                        "checkpoint_id": cid,
+                        "parent": parent,
+                        "messages": len(snapshot.get("messages", [])),
+                    },
+                )
+            )
+            parent = cid
+            final_msg = final
+
+        history = await saver.list_checkpoints(thread_id=thread_id)
+        for row in history:
+            events.append(
+                RunEvent(
+                    kind="lineage",
+                    text=(
+                        f"id={row['checkpoint_id']!r} "
+                        f"parent={row['parent_checkpoint_id']!r} "
+                        f"metadata={row.get('metadata')!r}"
+                    ),
+                )
+            )
+
+        reply = (
+            f"Three-turn agent thread persisted as a v1→v2→v3 lineage in "
+            f"OracleCheckpointSaver. Final turn:\n{final_msg}"
+        )
+        return RunResponse(reply=reply, events=events)
+    finally:
+        # Best-effort cleanup so the workbench is re-runnable.
+        try:
+            await saver.delete_thread(thread_id)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            await live_cp.delete(thread_id)
+        except Exception:  # noqa: BLE001
+            pass
+        await saver.close()
+
+
+# -------------------------------------------------------------------------
+# Shared helpers used by the Oracle 26ai workbench patterns.
+# -------------------------------------------------------------------------
+
+
+async def _drive_agent_with_thread(
+    agent: Any, prompt: str, thread_id: str
+) -> tuple[str, list[RunEvent]]:
+    """Variant of :func:`_drive_agent` that propagates ``thread_id`` so the
+    agent's checkpointer/memory hooks fire.
+    """
+    events: list[RunEvent] = []
+    final = ""
+    async for ev in agent.run(prompt, thread_id=thread_id):
+        kind = type(ev).__name__
+        text = (
+            getattr(ev, "tool_name", None)
+            or getattr(ev, "final_message", None)
+            or getattr(ev, "content", None)
+            or getattr(ev, "reasoning", None)
+            or ""
+        )
+        if not isinstance(text, str):
+            text = str(text)
+        events.append(RunEvent(kind=kind, text=text))
+        if kind == "TerminateEvent":
+            final = getattr(ev, "final_message", "") or ""
+    return final, events
+
+
+async def _setup_demo_articles(db: DatabaseConfig, table: str, rows: list[tuple]) -> None:
+    """Create + populate a small disposable table for the loader demo."""
+    import oracledb
+
+    kw = _db_kwargs(db)
+    params: dict[str, str] = {}
+    if kw["wallet_location"]:
+        params["config_dir"] = kw["wallet_location"]
+        params["wallet_location"] = kw["wallet_location"]
+        if kw["wallet_password"]:
+            params["wallet_password"] = kw["wallet_password"]
+    conn = await oracledb.connect_async(
+        user=kw["user"], password=kw["password"], dsn=kw["dsn"], **params
+    )
+    try:
+        cursor = conn.cursor()
+        try:
+            await cursor.execute(f"DROP TABLE {table}")
+        except Exception:  # noqa: BLE001 - may not exist; fine.
+            pass
+        await cursor.execute(
+            f"""
+            CREATE TABLE {table} (
+                id      NUMBER PRIMARY KEY,
+                slug    VARCHAR2(64) NOT NULL,
+                body    CLOB NOT NULL,
+                topic   VARCHAR2(64) NOT NULL
+            )
+            """
+        )
+        await cursor.executemany(
+            f"INSERT INTO {table} (id, slug, body, topic) VALUES (:1, :2, :3, :4)",
+            rows,
+        )
+        await conn.commit()
+    finally:
+        await conn.close()
+
+
+async def _drop_demo_table(db: DatabaseConfig, table: str) -> None:
+    import oracledb
+
+    kw = _db_kwargs(db)
+    params: dict[str, str] = {}
+    if kw["wallet_location"]:
+        params["config_dir"] = kw["wallet_location"]
+        params["wallet_location"] = kw["wallet_location"]
+        if kw["wallet_password"]:
+            params["wallet_password"] = kw["wallet_password"]
+    conn = await oracledb.connect_async(
+        user=kw["user"], password=kw["password"], dsn=kw["dsn"], **params
+    )
+    try:
+        cursor = conn.cursor()
+        try:
+            await cursor.execute(f"DROP TABLE {table}")
+        except Exception:  # noqa: BLE001 - already gone; fine.
+            pass
+        await conn.commit()
+    finally:
+        await conn.close()
+
+
 PATTERN_RUNNERS: dict[str, Any] = {
     "oracle_26ai_rag": _run_oracle_26ai_rag,
+    "oracle_26ai_checkpointer": _run_oracle_26ai_checkpointer,
+    "oracle_26ai_adb_loader": _run_oracle_26ai_adb_loader,
+    "oracle_26ai_indb_chunker": _run_oracle_26ai_indb_chunker,
+    "oracle_26ai_indb_embeddings": _run_oracle_26ai_indb_embeddings,
+    "oracle_26ai_cross_thread_memory": _run_oracle_26ai_cross_thread_memory,
+    "oracle_26ai_versioned_saver": _run_oracle_26ai_versioned_saver,
     "cohere_reranker": _run_cohere_reranker,
     "agent": _run_agent,
     "agent_with_tools": _run_agent_with_tools,

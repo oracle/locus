@@ -54,7 +54,7 @@ agent quotes them in the answer.
 
 | Class | Provider | Notes |
 |---|---|---|
-| `OCIEmbeddings` | OCI GenAI (Cohere) | Default for OCI deployments. Models: `cohere.embed-english-v3.0`, `-multilingual-v3.0`, `cohere.embed-v4.0`. |
+| `OCIEmbeddings` | [OCI Generative AI][oci-genai] (Cohere) | Default for OCI deployments. Models: `cohere.embed-english-v3.0`, `-multilingual-v3.0`, `cohere.embed-v4.0`. |
 | `OpenAIEmbeddings` | OpenAI directly | `text-embedding-3-small` / `-large`. |
 
 ```python
@@ -70,7 +70,7 @@ embedder = OCIEmbeddings(
 
 | Store | Class | Best for |
 |---|---|---|
-| **Oracle 26ai** | `OracleVectorStore` | Native `VECTOR(N, FLOAT32)` + `VECTOR_DISTANCE` — day-1 target on OCI. |
+| **[Oracle 26ai][oracle-db]** | `OracleVectorStore` | Native [`VECTOR(N, FLOAT32)` + `VECTOR_DISTANCE`][ai-vector-search] — day-1 target on OCI. |
 | OpenSearch | `OpenSearchVectorStore` | k-NN plugin; pairs well with existing search infra. |
 | pgvector | `PgVectorStore` | Postgres shops. |
 | In-memory | `InMemoryVectorStore` | Tests. |
@@ -91,7 +91,7 @@ store = OracleVectorStore(
 
 #### Production setup — least-privileged schema
 
-Running Locus against an Autonomous Database as `ADMIN` is an Oracle
+Running Locus against an [Autonomous Database][adb] as `ADMIN` is an Oracle
 security anti-pattern: every connection has full DBA privileges, so a
 compromised credential or a malformed query has unbounded blast radius.
 Provision a dedicated app user instead — run this once as `ADMIN`:
@@ -323,3 +323,8 @@ re-ranking before they reach the agent.
 - [OCI Generative AI — documentation hub](https://docs.oracle.com/iaas/Content/generative-ai/home.htm)
   — embeddings models (`cohere.embed-*`, `cohere.rerank-*`) consumed by
   the OCI embedder + reranker.
+
+[oracle-db]: https://docs.oracle.com/en/database/oracle/oracle-database/23/index.html
+[ai-vector-search]: https://docs.oracle.com/en/database/oracle/oracle-database/23/vecse/overview-ai-vector-search.html
+[oci-genai]: https://docs.oracle.com/en-us/iaas/Content/generative-ai/home.htm
+[adb]: https://docs.oracle.com/en/cloud/paas/autonomous-database/index.html

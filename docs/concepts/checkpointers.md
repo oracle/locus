@@ -41,8 +41,8 @@ agent.run_sync("What were we discussing?", thread_id="user-c42")
 | Postgres shop, want SQL queries on metadata | `postgresql_checkpointer` |
 | Need full-text search across past runs | `opensearch_checkpointer` |
 | Oracle Database shop, want JSON queries | `oracle_checkpointer` |
-| **Oracle 26ai with versioned history + pending writes** | `OracleCheckpointSaver` — LangGraph-shape, native |
-| **OCI-native, serverless, lifecycle policies** | `oci_bucket_checkpointer` — the day-1 OCI path |
+| **[Oracle 26ai][oracle-db] with versioned history + pending writes** | `OracleCheckpointSaver` — LangGraph-shape, native |
+| **[OCI Object Storage][oci-objectstorage], serverless, lifecycle policies** | `oci_bucket_checkpointer` — the day-1 OCI path |
 | Already have a checkpoint service over HTTP | `HTTPCheckpointer` |
 
 Default recommendation on OCI: `oci_bucket_checkpointer`. No DB to run,
@@ -124,7 +124,7 @@ Fastest reads, optional TTL for ephemeral conversations.
 
 ### Oracle 26ai: `oracle_checkpointer` + `OracleCheckpointSaver`
 
-If your stack is already on **Oracle Autonomous Database 26ai**, locus
+If your stack is already on **[Oracle Autonomous Database 26ai][adb]**, locus
 ships two native checkpointers — one to colocate agent state with the
 rest of your app data, the other to give LangGraph-style versioned
 history in the same database.
@@ -336,3 +336,7 @@ schema, both checkpoint state and long-term memory live in Oracle.
   — buckets, namespaces, IAM policies. Backs the `oci_bucket_checkpointer()` factory.
 - [Oracle AI Database 26ai — AI Vector Search User's Guide](https://docs.oracle.com/en/database/oracle/oracle-database/23/vecse/index.html)
   — referenced by the Oracle 26ai checkpointer + vector store.
+
+[oracle-db]: https://docs.oracle.com/en/database/oracle/oracle-database/23/index.html
+[adb]: https://docs.oracle.com/en/cloud/paas/autonomous-database/index.html
+[oci-objectstorage]: https://docs.oracle.com/en-us/iaas/Content/Object/Concepts/objectstorageoverview.htm

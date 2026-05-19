@@ -209,21 +209,26 @@ notebooks 06 and 07 walk both end-to-end.
 
 [Oracle 26ai concept page →](concepts/rag.md)
 
-## Source
+## Walk the notebooks
 
-locus is small enough to read end-to-end. No magic, no hidden registries, no import-time side-effects. A few entry points:
+The fastest way to read locus is to run the notebooks. Each one is a
+single self-contained file under [`examples/`][gh-examples] with a
+matching docs page — start at the topic you want, click through to
+the source from there.
 
-| What | Where |
+| What | Notebooks (click any one) |
 |---|---|
-| Agent + ReAct loop | [`loop/nodes.py`](https://github.com/oracle-samples/locus/blob/main/src/locus/loop/nodes.py) — `ThinkNode:59`, `ExecuteNode:136`, `ReflectNode:260` |
-| Cognitive router | [`router/runtime.py:42`](https://github.com/oracle-samples/locus/blob/main/src/locus/router/runtime.py#L42) → `protocol.py` → `policy.py` → `compiler.py` |
-| Multi-agent shapes | [`multiagent/`](https://github.com/oracle-samples/locus/tree/main/src/locus/multiagent) — `orchestrator.py`, `swarm.py`, `handoff.py`, `graph.py`, `functional.py` |
-| Observability | [`observability/event_bus.py`](https://github.com/oracle-samples/locus/blob/main/src/locus/observability/event_bus.py) · [`agent/runtime_loop.py:61`](https://github.com/oracle-samples/locus/blob/main/src/locus/agent/runtime_loop.py#L61) |
-| Idempotent tools | [`tools/decorator.py:113`](https://github.com/oracle-samples/locus/blob/main/src/locus/tools/decorator.py#L113) · `core/termination.py:39` |
-| OCI model transport | [`models/providers/oci/openai_compat.py:163`](https://github.com/oracle-samples/locus/blob/main/src/locus/models/providers/oci/openai_compat.py#L163) |
-| Oracle 26ai primitives | [`rag/stores/oracle.py`](https://github.com/oracle-samples/locus/blob/main/src/locus/rag/stores/oracle.py) · [`memory/backends/oracle_versioned.py`](https://github.com/oracle-samples/locus/blob/main/src/locus/memory/backends/oracle_versioned.py) · [`memory/store_backends/oracle.py`](https://github.com/oracle-samples/locus/blob/main/src/locus/memory/store_backends/oracle.py) |
+| Agent + ReAct loop | [13 — Basic agent](notebooks/notebook_13_basic_agent.md) · [14 — Agent with tools](notebooks/notebook_14_agent_with_tools.md) · [17 — Lifecycle hooks](notebooks/notebook_17_agent_hooks.md) |
+| Cognitive router (PRISM) | [57 — Cognitive router](notebooks/notebook_57_cognitive_router.md) · [39 — Emergent routing](notebooks/notebook_39_emergent_routing.md) |
+| Multi-agent shapes | [21 — Basic graph](notebooks/notebook_21_basic_graph.md) · [26 — Composition](notebooks/notebook_26_composition.md) · [29 — Swarm](notebooks/notebook_29_swarm_multiagent.md) · [30 — Handoff](notebooks/notebook_30_agent_handoff.md) · [31 — Orchestrator](notebooks/notebook_31_orchestrator_pattern.md) · [33 — A2A](notebooks/notebook_33_a2a_protocol.md) |
+| Observability | [16 — Streaming events](notebooks/notebook_16_agent_streaming.md) · [58 — Observability basics](notebooks/notebook_58_observability_basics.md) · [61 — Event catalogue](notebooks/notebook_61_event_catalogue.md) |
+| Idempotent tools · termination | [14 — Agent with tools](notebooks/notebook_14_agent_with_tools.md) · [20 — Termination](notebooks/notebook_20_termination.md) |
+| OCI model transport | [01 — OCI transports](notebooks/notebook_01_oci_transports.md) · [02 — OCI v1](notebooks/notebook_02_oci_openai_chat.md) · [03 — OCI Responses](notebooks/notebook_03_oci_responses.md) · [04 — Dedicated AI Cluster](notebooks/notebook_04_oci_dac.md) |
+| Oracle 26ai primitives | [06 — RAG](notebooks/notebook_06_oracle_26ai_rag.md) · [07 — Checkpointer](notebooks/notebook_07_oracle_26ai_checkpointer.md) · [08 — ADB loader](notebooks/notebook_08_oracle_adb_loader.md) · [09 — In-DB chunker](notebooks/notebook_09_oracle_indb_chunker.md) · [10 — In-DB embeddings](notebooks/notebook_10_oracle_indb_embeddings.md) · [11 — Cross-thread store](notebooks/notebook_11_oracle_store.md) · [12 — Versioned saver](notebooks/notebook_12_oracle_versioned_saver.md) |
 
-Full source map → [Capabilities](capabilities.md) · [API reference](api/agent.md)
+Full catalog → [Notebooks index](notebooks/index.md) · [Capabilities matrix](capabilities.md) · [API reference](api/agent.md)
+
+[gh-examples]: https://github.com/oracle-samples/locus/tree/main/examples
 
 ---
 

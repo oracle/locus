@@ -374,6 +374,9 @@ ignore = [
 "workbench/backend/runner.py" = [
     "ASYNC240", # os.path in async — wallet-path resolution, fast/local
     "PTH111",   # os.path.expanduser — OCI / wallet config paths
+    "S608",     # SQL built from hardcoded demo-table identifiers
+    "SLF001",   # _last_run_state read after agent.run() exhausts —
+                # mirrors what agent.run_sync does internally
 ]
 "tests/**/*.py" = [
     "ARG",     # unused arguments in fixtures

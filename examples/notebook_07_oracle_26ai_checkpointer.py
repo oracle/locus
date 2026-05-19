@@ -7,26 +7,34 @@
 
 In-memory and on-disk checkpointers are fine for local development —
 when the process restarts, the conversation is gone. This notebook
-wires Locus's ``oracle_checkpointer`` adapter against an Oracle Cloud
-Infrastructure (OCI) Autonomous Database 26ai so agent threads survive
-process restarts, scale out across replicas, and can be picked up from
-another machine.
+wires Locus's ``oracle_checkpointer`` into an ``Agent`` so the agent
+loop itself writes ``AgentState`` (messages, metrics, all of it) to
+Oracle 26ai after every iteration. A second ``Agent`` instance — built
+fresh, simulating a different process — loads the same ``thread_id``
+and the conversation continues uninterrupted.
+
+The point: it isn't a state-blob primitive demo. The *Locus agent
+runtime* is the protagonist; Oracle 26ai is the durable substrate it
+checkpoints into. The user never calls ``cp.save`` — the agent does
+that for them.
 
 Key concepts:
 
 - ``oracle_checkpointer(...)`` returns a ``StorageBackendAdapter``
-  wrapped around ``OracleBackend``. It writes the ``AgentState`` JSON
-  to a CLOB column keyed by ``thread_id``.
-- ``cp.save(state, thread_id=...)`` persists; ``cp.load(thread_id)``
-  rehydrates the same ``AgentState`` (messages, metrics, all of it).
+  wrapped around ``OracleBackend``. Pass it to ``Agent(checkpointer=...)``
+  and the agent loop persists state on every iteration.
+- ``agent.run_sync(prompt, thread_id="...")`` loads state for that
+  thread before the first model call and saves after each iteration.
+- ``checkpoint_every_n_iterations=1`` means a mid-loop crash recovers
+  to the last completed iteration, not the start of the turn.
 - ``cp.list_threads()`` enumerates every persisted conversation — the
   primitive admin dashboards use to enumerate sessions.
-- The vector store from notebook 06 and this checkpointer can share a
-  single Autonomous Database wallet.
 
-The demo simulates two sessions: session 1 writes a few turns, session
-2 (a "different process") loads the same thread id and appends more.
-The state survives between them.
+The demo simulates two sessions. Session 1 starts a conversation and
+the agent persists the state to Oracle automatically. Session 2 spins
+up a brand-new ``Agent`` instance — different Python object, same
+``thread_id``, same Oracle pool — and the agent recalls turn 1 without
+being told what was said.
 
 Run it::
 
@@ -51,8 +59,9 @@ import asyncio
 import os
 import sys
 
-from locus.core.messages import Message
-from locus.core.state import AgentState
+from config import get_model, print_config
+
+from locus.agent import Agent
 from locus.memory.backends import oracle_checkpointer
 
 
@@ -65,6 +74,7 @@ _REQUIRED_ENV = (
 
 
 THREAD_ID = "notebook_07_thread"
+TABLE_NAME = "locus_notebook_07"
 
 
 def _missing_env() -> list[str]:
@@ -72,7 +82,7 @@ def _missing_env() -> list[str]:
 
 
 def _print_skip_banner(missing: list[str]) -> None:
-    print("\n--- Notebook 07: Oracle 26ai checkpointer ---")
+    print("\n--- Notebook 07: Oracle 26ai durable agent thread ---")
     print(
         "Required environment variables not set; skipping the live demo so "
         "this file still runs cleanly in CI.\n"
@@ -87,6 +97,7 @@ def _print_skip_banner(missing: list[str]) -> None:
     print("\nMinimal wiring (what the live path below builds):")
     print(
         """
+    from locus.agent import Agent
     from locus.memory.backends import oracle_checkpointer
 
     cp = oracle_checkpointer(
@@ -97,8 +108,9 @@ def _print_skip_banner(missing: list[str]) -> None:
         wallet_password=os.environ.get("ORACLE_WALLET_PASSWORD", ""),
         table_name="locus_checkpoints",
     )
-    await cp.save(state, thread_id="my_thread")
-    resumed = await cp.load("my_thread")
+    agent = Agent(model=model, checkpointer=cp, checkpoint_every_n_iterations=1)
+    agent.run_sync("My name is Alice.", thread_id="t1")
+    agent.run_sync("What's my name?", thread_id="t1")  # recalls turn 1
         """.rstrip()
     )
 
@@ -110,56 +122,77 @@ def _build_checkpointer():
         password=os.environ["ORACLE_PASSWORD"],
         wallet_location=os.path.expanduser(os.environ["ORACLE_WALLET"]),
         wallet_password=os.environ.get("ORACLE_WALLET_PASSWORD", ""),
-        table_name="locus_notebook_07",
+        table_name=TABLE_NAME,
     )
 
 
-async def first_run() -> None:
-    """Session 1 — user starts a conversation; we persist it to 26ai."""
-    print("\n--- Session 1: write the first turns to Oracle 26ai ---")
+def _build_agent():
+    """Fresh ``Agent`` instance, fresh checkpointer pool — same Oracle table.
+
+    Returning a new ``Agent`` per call is the whole point: it proves the
+    durability lives in 26ai, not in the Python object. The two agents
+    below share nothing in memory; the conversation survives because
+    the Locus agent loop loaded state from Oracle before its first
+    model call.
+    """
+    return Agent(
+        model=get_model(max_tokens=120),
+        system_prompt=(
+            "You are an on-call SRE assistant. Be concise — one or two "
+            "sentences per turn. Remember everything the user has told "
+            "you earlier in this thread."
+        ),
+        checkpointer=_build_checkpointer(),
+        # Persist after every iteration, not just at session end. A
+        # mid-loop crash on a tool call recovers to the last completed
+        # iteration instead of the start of the turn.
+        checkpoint_every_n_iterations=1,
+    )
+
+
+async def first_session() -> None:
+    """Session 1 — operator starts a conversation; agent persists turn 1."""
+    print("\n--- Session 1: agent persists turn 1 to Oracle 26ai ---")
+    agent = _build_agent()
+
+    result = agent.run_sync(
+        "p99 on checkout-api spiked at 14:02. The deploy at 13:58 looks suspicious.",
+        thread_id=THREAD_ID,
+    )
+    print(f"User : p99 on checkout-api spiked at 14:02 (after the 13:58 deploy).")
+    print(f"Agent: {result.message.strip()}")
+    print(f"  state size after this turn: {len(result.state.messages)} messages")
+
+    # The state hit Oracle, not just memory. Confirm via the
+    # checkpointer's admin surface — the same one a dashboard would use.
     cp = _build_checkpointer()
+    threads = await cp.list_threads()
+    print(f"  threads currently in {TABLE_NAME}: {threads}")
 
-    state = AgentState(agent_id="notebook_06")
-    state = state.with_message(Message.system("You are a concise SRE assistant."))
-    state = state.with_message(Message.user("p99 on checkout-api spiked at 14:02."))
-    state = state.with_message(
-        Message.assistant(
-            "Pulling the checkout-api dashboard. Will compare against the "
-            "previous 24h baseline and flag anything > 2σ."
-        )
+
+async def second_session() -> None:
+    """Session 2 — different ``Agent`` object, same ``thread_id``.
+
+    The new agent loads state from Oracle on the first ``run_sync``
+    call. The model never sees turn 1 in the prompt — Locus reads
+    ``thread_id`` from the checkpointer and injects the recovered
+    messages into the agent loop.
+    """
+    print("\n--- Session 2: a brand-new Agent resumes the thread ---")
+    agent = _build_agent()
+
+    result = agent.run_sync(
+        "Has anything like that happened in the last fortnight?",
+        thread_id=THREAD_ID,
     )
+    print("User : Has anything like that happened in the last fortnight?")
+    print(f"Agent: {result.message.strip()}")
+    print(f"  state size after this turn: {len(result.state.messages)} messages")
 
-    await cp.save(state, thread_id=THREAD_ID)
-    print(f"Saved thread {THREAD_ID!r} with {len(state.messages)} messages.")
-    print("Listing every persisted thread:")
-    for tid in await cp.list_threads():
-        print(f"  - {tid}")
-
-
-async def second_run() -> None:
-    """Session 2 — different process, same thread id; resume and append."""
-    print("\n--- Session 2: load from Oracle 26ai and continue ---")
-    cp = _build_checkpointer()
-
-    resumed = await cp.load(THREAD_ID)
-    print(f"Loaded {len(resumed.messages)} messages from {THREAD_ID!r}.")
-    for m in resumed.messages:
-        role = getattr(m, "role", "?")
-        text = (getattr(m, "content", "") or "")[:80]
-        print(f"  [{role}] {text}")
-
-    resumed = resumed.with_message(Message.user("Anything similar in the last week?"))
-    resumed = resumed.with_message(
-        Message.assistant(
-            "Two prior spikes in the past 14 days, both correlated with "
-            "deploy windows. Sharing the trace links and the deploy IDs."
-        )
-    )
-
-    await cp.save(resumed, thread_id=THREAD_ID)
     print(
-        f"\nThread now persisted with {len(resumed.messages)} messages — "
-        "durable across restarts, replicas, and operator handoffs."
+        "\nThe second Agent loaded prior turns from Oracle 26ai before "
+        "the first model call — no AgentState was hand-built, no save/load "
+        "was called manually. The Locus agent loop did it on every iteration."
     )
 
 
@@ -169,8 +202,9 @@ async def main() -> None:
         _print_skip_banner(missing)
         return
 
-    await first_run()
-    await second_run()
+    print_config()
+    await first_session()
+    await second_session()
 
 
 if __name__ == "__main__":

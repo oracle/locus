@@ -1,22 +1,24 @@
-# Oracle 26ai Checkpointer
+# Oracle 26ai Checkpointer agent
 
 In-memory and on-disk checkpointers are fine for local development —
 when the process restarts, the conversation is gone. This notebook
-wires Locus's `oracle_checkpointer` adapter against an Oracle Cloud
-Infrastructure (OCI) Autonomous Database 26ai so agent threads survive
-process restarts, scale out across replicas, and can be picked up from
-another machine.
+wires Locus's `oracle_checkpointer` into an `Agent` so the agent loop
+itself writes `AgentState` to Oracle 26ai on every iteration. A second
+`Agent` instance — built fresh, simulating a different process — loads
+the same `thread_id` and the conversation continues uninterrupted.
+The user never calls `cp.save` — the agent does that for them.
 
 ## What this covers
 
-- `oracle_checkpointer(...)` building a `StorageBackendAdapter` wrapped
-  around `OracleBackend` — JSON `AgentState` persisted to a CLOB column
-  keyed by `thread_id`.
-- Two saves under the same thread id, across two function calls
-  standing in for separate processes. The second run loads the saved
-  `AgentState` and continues from there.
-- `list_threads()` enumerating every persisted conversation — the
-  primitive admin dashboards use.
+- `oracle_checkpointer(...)` plugged into `Agent(checkpointer=...)`.
+  The agent loop persists `AgentState` after every iteration.
+- `agent.run_sync(prompt, thread_id="...")` loading state for the
+  thread before the first model call and saving after each iteration.
+- `checkpoint_every_n_iterations=1` — a mid-loop crash recovers to
+  the last completed iteration, not the start of the turn.
+- A brand-new `Agent` object resuming the same `thread_id` and
+  recalling turn 1 without being told what was said.
+- `cp.list_threads()` as the admin view dashboards reach for.
 
 ## Prerequisites
 
@@ -54,7 +56,9 @@ and the rotation guidance.
 
 - [Concepts — Checkpointers & Store](../concepts/checkpointers.md)
 - [Notebook 05 — Oracle 26ai RAG (shares the same wallet)](notebook_06_oracle_26ai_rag.md)
-- [Oracle AI Database 26ai — AI Vector Search User's Guide](https://docs.oracle.com/en/database/oracle/oracle-database/23/vecse/index.html)
+- [Oracle Database 26ai — documentation](https://docs.oracle.com/en/database/oracle/oracle-database/23/index.html)
+- [Oracle Autonomous Database — documentation](https://docs.oracle.com/en/cloud/paas/autonomous-database/index.html)
+- [python-oracledb driver](https://python-oracledb.readthedocs.io/en/latest/index.html)
 
 ## Source
 

@@ -3,28 +3,29 @@
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
 
-"""Notebook 06: production RAG against Oracle Database 26ai with native vectors.
+"""Notebook 06: a Locus agent that retrieves over Oracle Database 26ai.
 
-This is the Oracle-native RAG target on Oracle Cloud Infrastructure
-(OCI). The retriever pipeline you'll see is the same one the in-memory
-RAG notebooks use — only the store import changes — but here it is
-backed by Oracle Database 26ai's native vector column and indexed for
-production cosine similarity search.
+The Locus agent runtime is the protagonist here. Oracle 26ai is the
+durable substrate — embeddings live in a native ``VECTOR(N, FLOAT32)``
+column, similarity is the ``VECTOR_DISTANCE`` SQL function — but what
+this notebook shows is the *agent* deciding when to search the corpus,
+firing a real tool call, and grounding its reply in what came back.
 
 Key concepts:
 
-- ``VECTOR(N, FLOAT32)`` is 26ai's native vector column type. Embeddings
-  live in a real column, not a JSON blob or a side index.
-- ``VECTOR_DISTANCE(col, :query, COSINE)`` is the SQL function for
-  similarity search. ``OracleVectorStore`` issues this under the hood.
-- ``CREATE VECTOR INDEX ... ORGANIZATION NEIGHBOR PARTITIONS`` is 26ai's
-  native HNSW/IVF index, built asynchronously after the first insert.
+- ``OracleVectorStore`` opens an async pool against an Autonomous
+  Database wallet, auto-creates a ``VECTOR(1024, FLOAT32)`` table on
+  first use, and serves cosine similarity via ``VECTOR_DISTANCE``.
 - ``OCIEmbeddings`` produces 1024-dim Cohere V3 vectors on OCI GenAI;
-  ``OracleVectorStore`` opens an async pool against the Autonomous
-  Database wallet and auto-creates the table on first use.
-- ``RAGRetriever`` is the same class every other Locus RAG notebook
-  uses — swap to in-memory, pgvector, or OpenSearch by changing only
-  the store import.
+  ``RAGRetriever`` glues the two together.
+- ``create_rag_tool(retriever, ...)`` returns a ``@tool``-decorated
+  callable. Hand it to an ``Agent`` and the model picks when to call
+  it — Locus surfaces every retrieval as ``ToolStartEvent`` /
+  ``ToolCompleteEvent`` in the event stream, so you can see the agent
+  driving the database.
+- The same retriever, the same tool, the same agent loop. Swap the
+  store import to OpenSearch, pgvector, or in-memory and nothing else
+  changes.
 
 Run it::
 
@@ -35,7 +36,7 @@ Run it::
     export ORACLE_WALLET=~/.oci/wallets/mydb    # directory with tnsnames.ora
     export ORACLE_WALLET_PASSWORD='<wallet-pw>' # if the wallet is encrypted
 
-    # Embedding side — OCI GenAI in us-chicago-1.
+    # Embedding + model side — OCI GenAI in us-chicago-1.
     export OCI_PROFILE=DEFAULT
     export OCI_REGION=us-chicago-1
     export OCI_COMPARTMENT=ocid1.compartment.oc1..xxx
@@ -59,10 +60,14 @@ Difficulty: Intermediate. Self-contained — no prior notebook required.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 
-from locus.rag import OCIEmbeddings, OracleVectorStore, RAGRetriever
+from config import get_model, print_config
+
+from locus.agent import Agent
+from locus.rag import OCIEmbeddings, OracleVectorStore, RAGRetriever, create_rag_tool
 
 
 _REQUIRED_ENV = (
@@ -89,7 +94,11 @@ CORPUS = [
 ]
 
 
-QUERY = "How does Oracle 26ai store and search embeddings?"
+QUERIES = [
+    "How does Oracle 26ai store embeddings under the hood?",
+    "What index organisations are supported for the VECTOR column?",
+    "Why might the very first similarity query feel slower than later ones?",
+]
 
 
 def _missing_env() -> list[str]:
@@ -97,7 +106,7 @@ def _missing_env() -> list[str]:
 
 
 def _print_skip_banner(missing: list[str]) -> None:
-    print("\n--- Notebook 06: Oracle 26ai RAG ---")
+    print("\n--- Notebook 06: Oracle 26ai RAG agent ---")
     print(
         "Required environment variables not set; skipping the live demo so "
         "this file still runs cleanly in CI.\n"
@@ -112,39 +121,66 @@ def _print_skip_banner(missing: list[str]) -> None:
     print("\nMinimal wiring (what the live path below builds):")
     print(
         """
-    from locus.rag import OCIEmbeddings, OracleVectorStore, RAGRetriever
-
-    embedder = OCIEmbeddings(
-        model_id="cohere.embed-english-v3.0",
-        profile_name=os.environ["OCI_PROFILE"],
-        compartment_id=os.environ["OCI_COMPARTMENT"],
-        service_endpoint=(
-            f"https://inference.generativeai."
-            f"{os.environ['OCI_REGION']}.oci.oraclecloud.com"
-        ),
+    from locus.agent import Agent
+    from locus.rag import (
+        OCIEmbeddings, OracleVectorStore, RAGRetriever, create_rag_tool,
     )
 
-    store = OracleVectorStore(
-        dsn=os.environ["ORACLE_DSN"],
-        user=os.environ["ORACLE_USER"],
-        password=os.environ["ORACLE_PASSWORD"],
-        wallet_location=os.environ["ORACLE_WALLET"],
-        wallet_password=os.environ.get("ORACLE_WALLET_PASSWORD", ""),
-        dimension=1024,
+    retriever = RAGRetriever(
+        embedder=OCIEmbeddings(model_id="cohere.embed-english-v3.0", ...),
+        store=OracleVectorStore(dsn=..., user=..., dimension=1024, ...),
     )
-
-    retriever = RAGRetriever(embedder=embedder, store=store)
     await retriever.add_documents(corpus)
-    hits = await retriever.retrieve("…", limit=3)
+
+    knowledge = create_rag_tool(retriever, name="search_oracle_26ai_corpus")
+    agent = Agent(model=model, tools=[knowledge], system_prompt="...")
+
+    async for ev in agent.run("How does Oracle 26ai store embeddings?"):
+        print(ev.event_type)
         """.rstrip()
     )
 
 
-def _print_hits(title: str, hits) -> None:
-    print(f"\n--- {title} ---")
-    for i, hit in enumerate(hits.documents, start=1):
-        snippet = hit.document.content.replace("\n", " ")[:110]
-        print(f"  #{i}  score={hit.score:.4f}  {snippet}")
+async def _seed_corpus(retriever: RAGRetriever) -> None:
+    print(f"\nSeeding {len(CORPUS)} passages into the VECTOR(1024) table…")
+    await retriever.add_documents(CORPUS)
+
+
+async def _drive_agent(agent: Agent, prompt: str) -> None:
+    """Run the agent and print every relevant lifecycle event.
+
+    The point of this loop is to make the *agent's* decision-making
+    visible: when it plans a tool call, the ``ToolStartEvent`` /
+    ``ToolCompleteEvent`` pair show the Oracle 26ai retrieval happening
+    in real time. The retriever itself is just the substrate the agent
+    chose to reach for.
+    """
+    print(f"\n--- User: {prompt} ---")
+    final = ""
+    async for event in agent.run(prompt):
+        et = event.event_type
+        if et == "tool_start":
+            args = getattr(event, "arguments", None) or {}
+            query = args.get("query") if isinstance(args, dict) else None
+            print(f"  [agent → Oracle 26ai] tool_start: {event.tool_name}(query={query!r})")
+        elif et == "tool_complete":
+            # ToolCompleteEvent.result is always a string (JSON-encoded for
+            # dict/list return values). Decode it back so we can show the
+            # agent's view of the retrieval.
+            raw = getattr(event, "result", "") or ""
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                payload = {}
+            hits = payload.get("results", []) if isinstance(payload, dict) else []
+            print(f"  [agent ← Oracle 26ai] tool_complete: {len(hits)} hit(s)")
+            for i, hit in enumerate(hits, start=1):
+                snippet = (hit.get("content") or "").replace("\n", " ")[:80]
+                print(f"      #{i}  score={hit.get('score')!r}  {snippet}")
+        elif et == "terminate":
+            final = getattr(event, "final_message", "") or ""
+    if final:
+        print(f"\nAgent: {final.strip()}")
 
 
 async def main() -> None:
@@ -152,6 +188,8 @@ async def main() -> None:
     if missing:
         _print_skip_banner(missing)
         return
+
+    print_config()
 
     profile = os.environ.get("LOCUS_OCI_PROFILE") or os.environ.get("OCI_PROFILE", "DEFAULT")
     region = os.environ.get("LOCUS_OCI_REGION") or os.environ.get("OCI_REGION", "us-chicago-1")
@@ -182,19 +220,49 @@ async def main() -> None:
     )
 
     retriever = RAGRetriever(embedder=embedder, store=store)
+    await _seed_corpus(retriever)
 
-    print(f"Embedding and inserting {len(CORPUS)} passages…")
-    await retriever.add_documents(CORPUS)
+    # The agent only ever sees the tool surface — never the retriever
+    # directly. ``create_rag_tool`` returns a Locus ``@tool`` that wraps
+    # ``retriever.retrieve(...)`` and tags the result with metadata,
+    # scores, and a security note (retrieved content is untrusted data).
+    knowledge_tool = create_rag_tool(
+        retriever,
+        name="search_oracle_26ai_corpus",
+        description=(
+            "Search the Oracle 26ai vector knowledge base. Returns up to N "
+            "passages with cosine-similarity scores against a 1024-dim "
+            "Cohere V3 query embedding. Call this whenever the answer might "
+            "depend on Oracle 26ai's vector storage, index types, or wallet "
+            "details — do not guess."
+        ),
+        limit=3,
+        threshold=0.0,
+    )
 
-    print(f"Query: {QUERY!r}")
-    hits = await retriever.retrieve(QUERY, limit=3)
-    _print_hits("Top-3 (VECTOR_DISTANCE, COSINE)", hits)
+    agent = Agent(
+        model=get_model(max_tokens=300),
+        tools=[knowledge_tool],
+        system_prompt=(
+            "You are an Oracle 26ai field engineer. When a question touches "
+            "Oracle 26ai vector storage, index types, or Autonomous Database "
+            "wallets, call search_oracle_26ai_corpus first and ground your "
+            "answer in the returned passages. Cite the passage you used. "
+            "Never invent SQL syntax — quote what the retrieval returned."
+        ),
+        max_iterations=4,
+    )
+
+    for query in QUERIES:
+        await _drive_agent(agent, query)
 
     print(
-        "\nThe same RAGRetriever drove an Oracle 26ai vector search. "
-        "Swap to OpenSearch, pgvector, or in-memory by changing the "
-        "store import only."
+        "\nOne agent. One Oracle 26ai pool. Every reply above was the "
+        "agent deciding to issue VECTOR_DISTANCE / COSINE on its own — "
+        "the retriever, the tool, and the model are all Locus primitives."
     )
+
+    await store.close()
 
 
 if __name__ == "__main__":

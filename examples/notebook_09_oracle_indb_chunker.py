@@ -3,30 +3,28 @@
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
 
-"""Notebook 09: chunk text **inside the database** with ``OracleInDBChunker``.
+"""Notebook 09: a Locus agent driving an in-database chunker.
 
 Oracle 23ai / 26ai ships a server-side chunking primitive,
 ``DBMS_VECTOR_CHAIN.UTL_TO_CHUNKS``. It tokenises and segments text
-without ever shipping the content back to Python — the perfect first
-stage of an ingest pipeline that already has the source CLOBs in the
-database. Locus wraps it as
-:class:`locus.rag.chunkers.OracleInDBChunker`.
+without ever shipping the content back to Python — perfect for the
+first stage of an ingest pipeline where the source CLOBs already live
+in the database. Locus wraps it as
+:class:`locus.rag.chunkers.OracleInDBChunker`, but the protagonist of
+this notebook is the *Locus agent* that decides when and how to use it.
 
-Key concepts:
+The agent gets two tools:
 
-- ``OracleInDBChunker(dsn=..., max_tokens=20, overlap=0, by="words")``
-  builds the chunker bound to an Autonomous Database wallet. Same
-  connection envelope as the loader (notebook 08) and the vector store
-  (notebook 06).
-- ``await chunker.chunk_text(long_paragraph)`` returns
-  ``[{chunk_id, offset, length, text}, …]`` for a single Python string
-  — useful when you've already pulled the raw text out (loader output,
-  uploaded blob, etc.).
-- ``async for chunk in chunker.chunk_column(table_name=..., text_column=...)``
-  streams chunks of *every row* in a table, with no Python round-trip
-  for the source text. Each chunk carries the ``source_id`` of the row
-  it came from so you can write the chunks into a vector store keyed
-  back to the document.
+- ``chunk_paragraph(text)`` — wraps ``chunker.chunk_text``. Returns the
+  chunk list for one Python string (e.g. a passage the user pasted).
+- ``chunk_table_rows(limit)`` — wraps the streaming
+  ``chunker.chunk_column`` over a demo table; returns per-row chunk
+  counts. This is how an ingest agent inspects a corpus that already
+  lives in ADB without pulling every CLOB back over the wire.
+
+The agent picks which tool to call from the user's prompt, sees the
+``ToolStartEvent`` / ``ToolCompleteEvent`` pair, and grounds its
+summary in the chunk stats the database returned.
 
 Prerequisite (one-time, out-of-band)::
 
@@ -52,10 +50,16 @@ Difficulty: Intermediate. Self-contained — no prior notebook required.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
+from collections import Counter
 
+from config import get_model, print_config
+
+from locus.agent import Agent
 from locus.rag.chunkers import OracleInDBChunker
+from locus.tools import tool
 
 
 _REQUIRED_ENV = (
@@ -82,12 +86,18 @@ _LONG_PARAGRAPH = (
 )
 
 
+_QUERIES = (
+    f"I have this passage to ingest — chunk it for me and report stats:\n{_LONG_PARAGRAPH}",
+    f"How many chunks would I get if I ingested every row in the {_TABLE} table right now?",
+)
+
+
 def _missing_env() -> list[str]:
     return [name for name in _REQUIRED_ENV if not os.environ.get(name)]
 
 
 def _print_skip_banner(missing: list[str]) -> None:
-    print("\n--- Notebook 09: OracleInDBChunker ---")
+    print("\n--- Notebook 09: OracleInDBChunker agent ---")
     print(
         "Required environment variables not set; skipping the live demo so "
         "this file still runs cleanly in CI.\n"
@@ -104,24 +114,19 @@ def _print_skip_banner(missing: list[str]) -> None:
     print("\nMinimal wiring (what the live path below builds):")
     print(
         """
+    from locus.agent import Agent
     from locus.rag.chunkers import OracleInDBChunker
+    from locus.tools import tool
 
-    chunker = OracleInDBChunker(
-        dsn=os.environ["ORACLE_DSN"],
-        user=os.environ["ORACLE_USER"],
-        password=os.environ["ORACLE_PASSWORD"],
-        wallet_location=os.environ["ORACLE_WALLET"],
-        wallet_password=os.environ.get("ORACLE_WALLET_PASSWORD", ""),
-        max_tokens=20,
-        overlap=0,
-        by="words",
-    )
-    chunks = await chunker.chunk_text(long_paragraph)
-    async for chunk in chunker.chunk_column(
-        table_name="locus_notebook_09_docs",
-        text_column="body",
-    ):
-        ...
+    chunker = OracleInDBChunker(..., max_tokens=20)
+
+    @tool
+    async def chunk_paragraph(text: str) -> dict:
+        chunks = await chunker.chunk_text(text)
+        return {"count": len(chunks), "preview": chunks[:3]}
+
+    agent = Agent(model=model, tools=[chunk_paragraph], ...)
+    agent.run_sync("Chunk this passage for me: ...")
         """.rstrip()
     )
 
@@ -137,11 +142,6 @@ def _conn_kwargs() -> dict[str, str]:
 
 
 async def _setup_demo_table() -> None:
-    """Create + populate a tiny ``locus_notebook_09_docs`` table.
-
-    Only used by the ``chunk_column`` leg of the demo. The single-string
-    leg (:meth:`chunk_text`) needs no table at all.
-    """
     import oracledb
 
     kw = _conn_kwargs()
@@ -203,11 +203,52 @@ async def _drop_demo_table() -> None:
         await conn.close()
 
 
+async def _drive_agent(agent: Agent, prompt: str) -> None:
+    one_line = prompt.replace("\n", " ")
+    head = one_line if len(one_line) < 120 else one_line[:117] + "..."
+    print(f"\n--- User: {head} ---")
+    final = ""
+    async for event in agent.run(prompt):
+        et = event.event_type
+        if et == "tool_start":
+            args = getattr(event, "arguments", None) or {}
+            arg_preview = {
+                k: (v if not isinstance(v, str) or len(v) < 40 else v[:37] + "...")
+                for k, v in (args.items() if isinstance(args, dict) else [])
+            }
+            print(f"  [agent → 26ai] tool_start: {event.tool_name}({arg_preview})")
+        elif et == "tool_complete":
+            raw = getattr(event, "result", "") or ""
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                payload = None
+            if isinstance(payload, dict):
+                summary = {
+                    k: (
+                        v
+                        if not isinstance(v, (list, dict))
+                        else f"<{type(v).__name__} len={len(v)}>"
+                    )
+                    for k, v in payload.items()
+                }
+                print(f"  [agent ← 26ai] tool_complete: {summary}")
+            else:
+                snippet = raw if len(raw) < 200 else raw[:197] + "..."
+                print(f"  [agent ← 26ai] tool_complete: {snippet!r}")
+        elif et == "terminate":
+            final = getattr(event, "final_message", "") or ""
+    if final:
+        print(f"\nAgent: {final.strip()}")
+
+
 async def main() -> None:
     missing = _missing_env()
     if missing:
         _print_skip_banner(missing)
         return
+
+    print_config()
 
     chunker = OracleInDBChunker(
         **_conn_kwargs(),
@@ -215,48 +256,92 @@ async def main() -> None:
         overlap=0,
         by="words",
     )
+    await _setup_demo_table()
+
+    @tool
+    async def chunk_paragraph(text: str) -> dict:
+        """Tokenise and segment a single passage inside the database.
+
+        Wraps DBMS_VECTOR_CHAIN.UTL_TO_CHUNKS. The text is bound to a
+        PL/SQL local and chunked server-side at the chunker's configured
+        max_tokens / overlap. Returns the chunk count, the total char
+        length, and a preview of the first chunk.
+
+        Args:
+            text: The passage to chunk. Pass the user's full string.
+
+        Returns:
+            {"count": int, "total_chars": int, "first": str}
+        """
+        chunks = await chunker.chunk_text(text)
+        first = (chunks[0]["text"] if chunks else "") or ""
+        return {
+            "count": len(chunks),
+            "total_chars": len(text),
+            "first": first[:160],
+        }
+
+    @tool
+    async def chunk_table_rows(limit: int = 100) -> dict:
+        """Stream chunks from every row in the demo CLOB table.
+
+        Wraps OracleInDBChunker.chunk_column over the
+        ``locus_notebook_09_docs`` table. The source CLOBs never leave
+        the database — only the chunk records come back. Useful for
+        an ingest agent that wants to know "how big is this corpus, in
+        chunks" before committing to write to a vector store.
+
+        Args:
+            limit: Cap on rows to inspect (default 100). Set higher for
+                bigger demos.
+
+        Returns:
+            {"rows": int, "chunks": int, "per_row": {source_id: count}}
+        """
+        per_row: Counter[str] = Counter()
+        seen = 0
+        async for chunk in chunker.chunk_column(
+            table_name=_TABLE,
+            text_column="body",
+            id_column="id",
+        ):
+            seen += 1
+            per_row[str(chunk["source_id"])] += 1
+            if seen >= limit * 50:  # safety stop
+                break
+        return {
+            "rows": len(per_row),
+            "chunks": seen,
+            "per_row": dict(per_row),
+        }
+
+    agent = Agent(
+        model=get_model(max_tokens=400),
+        tools=[chunk_paragraph, chunk_table_rows],
+        system_prompt=(
+            "You are an ingest planning agent. When the user hands you a "
+            "passage, call chunk_paragraph to size it. When they ask about "
+            "a table corpus, call chunk_table_rows. Always report the "
+            "chunk count and the first chunk's preview so they know what "
+            "the database produced. Do not invent numbers."
+        ),
+        max_iterations=4,
+    )
 
     try:
-        print("\n--- chunk_text(): one Python string → list of chunks ---")
-        chunks = await chunker.chunk_text(_LONG_PARAGRAPH)
-        print(f"Got {len(chunks)} chunks from a {len(_LONG_PARAGRAPH)}-char paragraph:")
-        for c in chunks:
-            preview = (c["text"] or "").replace("\n", " ")[:70]
-            print(
-                f"  chunk_id={c['chunk_id']:<3} "
-                f"offset={c['offset']:<5} "
-                f"length={c['length']:<5} "
-                f"text={preview!r}"
-            )
+        for query in _QUERIES:
+            await _drive_agent(agent, query)
 
-        print(f"\n--- chunk_column(): streaming chunks from table {_TABLE!r} ---")
-        await _setup_demo_table()
-        try:
-            seen = 0
-            async for chunk in chunker.chunk_column(
-                table_name=_TABLE,
-                text_column="body",
-                id_column="id",
-            ):
-                if seen < 5:
-                    preview = (chunk["text"] or "").replace("\n", " ")[:60]
-                    print(
-                        f"  source_id={chunk['source_id']} "
-                        f"chunk_id={chunk['chunk_id']:<3} "
-                        f"offset={chunk['offset']:<5} "
-                        f"{preview!r}"
-                    )
-                seen += 1
-            print(f"  … {seen} chunks total streamed from {_TABLE}.")
-        finally:
-            await _drop_demo_table()
+        print(
+            "\nThe agent picked the right primitive for each request — "
+            "single-string vs. column-streaming — and every chunk was "
+            "produced by UTL_TO_CHUNKS inside Oracle 26ai. Pair with "
+            "OracleInDBEmbeddings (notebook 10) for a fully in-database "
+            "ingest pipeline."
+        )
     finally:
         await chunker.close()
-
-    print(
-        "\nUTL_TO_CHUNKS ran entirely DB-side. Pair with OracleInDBEmbeddings "
-        "(notebook 10) for a fully in-database ingest pipeline."
-    )
+        await _drop_demo_table()
 
 
 if __name__ == "__main__":

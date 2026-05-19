@@ -3,33 +3,41 @@
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
 
-"""Notebook 10: in-database embeddings with ``OracleInDBEmbeddings``.
+"""Notebook 10: a Locus agent doing data-residency-aware RAG in-database.
 
 Oracle 23ai / 26ai can host ONNX embedding models *inside* the
-database (via ``DBMS_VECTOR.LOAD_ONNX_MODEL``). When the model lives
-in the DB the embedding generation happens DB-side: the application
-ships text over the wire, the database produces the vector locally,
-and the caller gets back a serialized ``VECTOR`` ready to write into
-a ``VECTOR`` column. This is the canonical pattern when data residency
-rules forbid sending text out to OCI GenAI / OpenAI / a third-party
-endpoint, or when the latency budget can't absorb a remote round-trip.
+database via ``DBMS_VECTOR.LOAD_ONNX_MODEL``. When the embedding model
+lives in the DB, the application ships text into the server, the
+database produces the vector locally, and the caller never sees the
+text leave Oracle's process. Pair that with ``OracleVectorStore`` and
+the entire embedding + similarity-search half of the RAG pipeline runs
+inside the database — the canonical pattern when data residency rules
+forbid sending corpus text to OCI GenAI / OpenAI / a third-party
+endpoint.
 
-Locus wraps the in-DB primitives — ``DBMS_VECTOR_CHAIN.UTL_TO_EMBEDDING``
-and ``UTL_TO_EMBEDDINGS`` — as
-:class:`locus.rag.embeddings.oracle_indb.OracleInDBEmbeddings`.
+This notebook puts a Locus ``Agent`` on top of that stack so the
+agent's retrieval calls land on Oracle 26ai. The agent picks the
+query, fires a tool, and the database does the embedding + the
+cosine search. The retrieved passages then ground the agent's answer.
+
+(Caveat: the *LLM* the agent uses for reasoning still sees the
+question + the retrieved passages, so this is residency for embeddings
+and search, not for the chat prompt. Pair with an in-house OCI model
+in the same compartment if you need end-to-end residency.)
 
 Key concepts:
 
-- ``OracleInDBEmbeddings(model_name="ALL_MINILM_L12_V2", dimension=384,
-  dsn=..., user=..., password=..., wallet_location=...)`` binds the
-  embedder to an in-DB ONNX model. The connection envelope mirrors the
-  loader, chunker, and vector store.
-- ``await emb.embed(text)`` returns a single
-  :class:`EmbeddingResult` (``.embedding`` is ``list[float]`` of length
-  ``dimension``).
-- ``await emb.embed_batch([t1, t2, …])`` batches via
-  ``UTL_TO_EMBEDDINGS`` when available, with a per-text fallback for
-  older patch levels.
+- ``OracleInDBEmbeddings(model_name=..., dimension=...)`` binds the
+  embedder to an in-DB ONNX model. ``embed(text)`` calls
+  ``DBMS_VECTOR_CHAIN.UTL_TO_EMBEDDING`` server-side.
+- ``OracleVectorStore(dimension=...)`` is the persistence side of the
+  pair. Same wallet, same pool kwargs.
+- ``RAGRetriever(embedder=indb_embedder, store=store)`` glues them
+  together. ``create_rag_tool(retriever)`` exposes the pair as a
+  single Locus ``@tool``.
+- ``Agent(tools=[tool], ...)`` lets the model decide when to search.
+  Every search round-trips through the database — no external
+  embedding endpoint.
 
 Prerequisites
 -------------
@@ -52,8 +60,8 @@ And the schema running this notebook needs the grants::
 
 The notebook accepts ``OCI_INDB_MODEL`` as an env override for the
 model name (default ``ALL_MINILM_L12_V2``). If the model isn't loaded
-in the target DB, the live path will catch ``ORA-29024`` / ``ORA-20100``
-/ similar and skip-banner cleanly instead of stack-tracing.
+in the target DB, the live path catches the resulting ``ORA-…``,
+prints a skip banner, and exits cleanly.
 
 Run it::
 
@@ -66,19 +74,20 @@ Run it::
 
     python examples/notebook_10_oracle_indb_embeddings.py
 
-If ``ORACLE_DSN`` / ``ORACLE_PASSWORD`` / ``ORACLE_WALLET`` aren't set
-the notebook prints the wiring snippet and exits cleanly — no
-traceback, no half-initialised state.
-
 Difficulty: Intermediate. Self-contained — no prior notebook required.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 
+from config import get_model, print_config
+
+from locus.agent import Agent
+from locus.rag import OracleVectorStore, RAGRetriever, create_rag_tool
 from locus.rag.embeddings.oracle_indb import OracleInDBEmbeddings
 
 
@@ -90,10 +99,30 @@ _REQUIRED_ENV = (
 )
 
 
-# Default to the most common ONNX model loaded into 23ai / 26ai demos.
-# Override via ``OCI_INDB_MODEL`` if your database has a different one.
 _DEFAULT_MODEL = "ALL_MINILM_L12_V2"
 _DEFAULT_DIM = 384
+
+
+CORPUS = [
+    "Oracle Database 26ai exposes server-side embedding via "
+    "DBMS_VECTOR_CHAIN.UTL_TO_EMBEDDING and UTL_TO_EMBEDDINGS.",
+    "DBMS_VECTOR.LOAD_ONNX_MODEL imports an ONNX model into the database "
+    "as a mining model. The text never leaves the DB at embedding time.",
+    "The ALL_MINILM_L12_V2 ONNX model emits 384-dim sentence embeddings "
+    "and is the default model in 26ai data-residency demos.",
+    "Pair OracleInDBEmbeddings with OracleVectorStore(dimension=384) and "
+    "the whole embedding + similarity-search half of the pipeline stays "
+    "inside Oracle 26ai.",
+    "VECTOR_DISTANCE(col, :query, COSINE) is the SQL function that scores "
+    "stored vectors against the in-DB-generated query vector.",
+]
+
+
+QUERIES = (
+    "How does Oracle 26ai keep embedding text inside the database?",
+    "Which ONNX model does the 26ai data-residency demo default to, and what "
+    "dimension does it emit?",
+)
 
 
 def _missing_env() -> list[str]:
@@ -101,7 +130,7 @@ def _missing_env() -> list[str]:
 
 
 def _print_skip_banner(missing: list[str]) -> None:
-    print("\n--- Notebook 10: OracleInDBEmbeddings ---")
+    print("\n--- Notebook 10: OracleInDBEmbeddings agent ---")
     print(
         "Required environment variables not set; skipping the live demo so "
         "this file still runs cleanly in CI.\n"
@@ -122,26 +151,24 @@ def _print_skip_banner(missing: list[str]) -> None:
     print("\nMinimal wiring (what the live path below builds):")
     print(
         """
+    from locus.agent import Agent
+    from locus.rag import OracleVectorStore, RAGRetriever, create_rag_tool
     from locus.rag.embeddings.oracle_indb import OracleInDBEmbeddings
 
-    emb = OracleInDBEmbeddings(
-        model_name=os.environ.get("OCI_INDB_MODEL", "ALL_MINILM_L12_V2"),
-        dimension=384,
-        dsn=os.environ["ORACLE_DSN"],
-        user=os.environ["ORACLE_USER"],
-        password=os.environ["ORACLE_PASSWORD"],
-        wallet_location=os.environ["ORACLE_WALLET"],
-        wallet_password=os.environ.get("ORACLE_WALLET_PASSWORD", ""),
-    )
-    vec = await emb.embed("hello world")
-    vecs = await emb.embed_batch(["foo", "bar", "baz"])
-    await emb.close()
+    embedder = OracleInDBEmbeddings(model_name="ALL_MINILM_L12_V2",
+                                    dimension=384, dsn=..., ...)
+    store = OracleVectorStore(dimension=384, ...)
+    retriever = RAGRetriever(embedder=embedder, store=store)
+    await retriever.add_documents(corpus)
+    tool = create_rag_tool(retriever, name="search_indb_corpus")
+    agent = Agent(model=model, tools=[tool], ...)
+    agent.run_sync("...")
         """.rstrip()
     )
 
 
 def _print_model_skip_banner(model: str, exc: Exception) -> None:
-    print("\n--- Notebook 10: OracleInDBEmbeddings ---")
+    print("\n--- Notebook 10: OracleInDBEmbeddings agent ---")
     print(
         f"The ONNX model {model!r} isn't loaded (or accessible) in the "
         "target database, so the live path can't run.\n"
@@ -164,15 +191,45 @@ def _is_missing_model_error(exc: BaseException) -> bool:
     )
 
 
+async def _drive_agent(agent: Agent, prompt: str) -> None:
+    print(f"\n--- User: {prompt} ---")
+    final = ""
+    async for event in agent.run(prompt):
+        et = event.event_type
+        if et == "tool_start":
+            args = getattr(event, "arguments", None) or {}
+            query = args.get("query") if isinstance(args, dict) else None
+            print(
+                f"  [agent → 26ai] tool_start: {event.tool_name}"
+                f"(query={query!r})  ← embedding + search both run in-DB"
+            )
+        elif et == "tool_complete":
+            raw = getattr(event, "result", "") or ""
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                payload = {}
+            hits = payload.get("results", []) if isinstance(payload, dict) else []
+            print(f"  [agent ← 26ai] tool_complete: {len(hits)} hit(s)")
+            for i, hit in enumerate(hits, start=1):
+                snippet = (hit.get("content") or "").replace("\n", " ")[:80]
+                print(f"      #{i}  score={hit.get('score')!r}  {snippet}")
+        elif et == "terminate":
+            final = getattr(event, "final_message", "") or ""
+    if final:
+        print(f"\nAgent: {final.strip()}")
+
+
 async def main() -> None:
     missing = _missing_env()
     if missing:
         _print_skip_banner(missing)
         return
 
+    print_config()
     model_name = os.environ.get("OCI_INDB_MODEL", _DEFAULT_MODEL)
 
-    emb = OracleInDBEmbeddings(
+    embedder = OracleInDBEmbeddings(
         model_name=model_name,
         dimension=_DEFAULT_DIM,
         dsn=os.environ["ORACLE_DSN"],
@@ -182,34 +239,76 @@ async def main() -> None:
         wallet_password=os.environ.get("ORACLE_WALLET_PASSWORD", ""),
     )
 
+    # Quick smoke test of the in-DB embedder before we start spinning up
+    # an Agent — surfaces ORA-* on the missing-model path with a clean
+    # banner instead of failing inside the agent loop.
     try:
-        print(f"\n--- embed(): single text → list[float] (model={model_name}) ---")
-        try:
-            result = await emb.embed("hello world")
-        except Exception as exc:  # noqa: BLE001 - we want to detect ORA-* and skip.
-            if _is_missing_model_error(exc):
-                _print_model_skip_banner(model_name, exc)
-                return
-            raise
+        smoke = await embedder.embed("smoke test")
+    except Exception as exc:  # noqa: BLE001 - detect ORA-* and skip cleanly.
+        if _is_missing_model_error(exc):
+            _print_model_skip_banner(model_name, exc)
+            await embedder.close()
+            return
+        await embedder.close()
+        raise
+    print(f"\nIn-DB embedder ready (model={model_name}, dim={len(smoke.embedding)}).")
 
-        vec = result.embedding
-        head = ", ".join(f"{x:+.4f}" for x in vec[:5])
-        print(f"  text     : {result.text!r}")
-        print(f"  dimension: {len(vec)}")
-        print(f"  first 5  : [{head}, …]")
-
-        print("\n--- embed_batch(): three texts → three vectors ---")
-        batch = await emb.embed_batch(["foo", "bar", "baz"])
-        for r in batch:
-            print(f"  text={r.text!r:<8}  dim={len(r.embedding)}  model={r.model}")
-    finally:
-        await emb.close()
-
-    print(
-        "\nThe vectors were generated entirely DB-side via "
-        "DBMS_VECTOR_CHAIN.UTL_TO_EMBEDDING — no text ever left the database. "
-        "Pair with OracleVectorStore (notebook 06) to keep the full pipeline in-DB."
+    store = OracleVectorStore(
+        dsn=os.environ["ORACLE_DSN"],
+        user=os.environ["ORACLE_USER"],
+        password=os.environ["ORACLE_PASSWORD"],
+        wallet_location=os.path.expanduser(os.environ["ORACLE_WALLET"]),
+        wallet_password=os.environ.get("ORACLE_WALLET_PASSWORD", ""),
+        table_name="locus_notebook_10",
+        dimension=_DEFAULT_DIM,
+        distance_metric="COSINE",
     )
+
+    retriever = RAGRetriever(embedder=embedder, store=store)
+
+    print(f"Seeding {len(CORPUS)} passages — every embedding runs in-DB…")
+    await retriever.add_documents(CORPUS)
+
+    knowledge_tool = create_rag_tool(
+        retriever,
+        name="search_indb_corpus",
+        description=(
+            "Search the data-residency knowledge base. Embedding generation "
+            "runs inside Oracle 26ai via DBMS_VECTOR_CHAIN.UTL_TO_EMBEDDING, "
+            "and similarity search runs as VECTOR_DISTANCE / COSINE in the "
+            "same database — no text leaves the DB at retrieval time. Use "
+            "this whenever the question depends on 26ai's in-database "
+            "embedding capabilities."
+        ),
+        limit=3,
+        threshold=0.0,
+    )
+
+    agent = Agent(
+        model=get_model(max_tokens=300),
+        tools=[knowledge_tool],
+        system_prompt=(
+            "You are a data-residency architect. When a question touches "
+            "in-database embedding or the in-DB ONNX model, call "
+            "search_indb_corpus first and ground your answer in the "
+            "returned passages. Always note that the embedding/search "
+            "round-trip stayed inside Oracle 26ai. Do not invent figures."
+        ),
+        max_iterations=4,
+    )
+
+    try:
+        for query in QUERIES:
+            await _drive_agent(agent, query)
+
+        print(
+            "\nEvery retrieval above embedded the query and ran "
+            "VECTOR_DISTANCE inside Oracle 26ai. The agent only sees the "
+            "tool's result — no external embedding endpoint was called."
+        )
+    finally:
+        await store.close()
+        await embedder.close()
 
 
 if __name__ == "__main__":

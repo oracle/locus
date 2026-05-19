@@ -269,14 +269,23 @@ nav:
   - Agent: api/agent.md
   - Multi-agent: api/multiagent.md
   - Cognitive Router: api/router.md
+  - DeepAgent: api/deepagent.md
+  - ReAct loop: api/loop.md
   - Tools: api/tools.md
-  - Termination: api/termination.md
   - Hooks: api/hooks.md
-  - Checkpointers: api/checkpointers.md
+  - Termination: api/termination.md
   - Reasoning: api/reasoning.md
   - RAG: api/rag.md
+  - Memory: api/memory.md
+  - Checkpointers: api/checkpointers.md
   - Models: api/models.md
+  - Multi-modal providers: api/providers.md
+  - Streaming: api/streaming.md
+  - Events: api/events.md
+  - Observability: api/observability.md
   - Agent Server: api/server.md
   - Evaluation: api/evaluation.md
-  - Events: api/events.md
-  - DeepAgent: api/deepagent.md
+  - Playbooks: api/playbooks.md
+  - Skills: api/skills.md
+  - Integrations: api/integrations.md
+  - Core primitives: api/core.md

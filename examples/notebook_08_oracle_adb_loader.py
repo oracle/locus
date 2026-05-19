@@ -3,33 +3,37 @@
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
 
-"""Notebook 08: stream rows from an Autonomous Database with ``OracleADBLoader``.
+"""Notebook 08: a Locus agent that pulls rows from Autonomous Database.
 
-The first link of any Oracle-native RAG pipeline is "get the source
-rows out of the database as ``Document`` objects". Locus ships
-:class:`locus.rag.loaders.OracleADBLoader` for exactly this: it opens
-an async ``oracledb`` pool against an Autonomous Database wallet, runs
-a single ``SELECT``, and yields one
-:class:`locus.rag.stores.base.Document` per row — content column to
-``Document.content``, optional ``id_column`` to ``Document.id``, every
-other projected column into ``Document.metadata``.
+The first link of any Oracle-native data flow is "get the source rows
+out of the database". Locus ships
+:class:`locus.rag.loaders.OracleADBLoader` for exactly this — an
+async-pooled loader that turns an ADB ``SELECT`` into a stream of
+:class:`locus.rag.stores.base.Document` objects. This notebook puts a
+Locus ``Agent`` in the driver's seat: the loader is wrapped as a
+``@tool``, the agent chooses which topic to pull, the ADB query
+happens inside ``ToolStartEvent`` / ``ToolCompleteEvent``, and the
+final answer is grounded in what came back.
 
 Key concepts:
 
-- ``OracleADBLoader(dsn=..., user=..., password=..., wallet_location=...,
-  sql=..., content_column=..., id_column=..., metadata_columns=[...])``
-  is the canonical constructor. The connection envelope mirrors
-  :class:`OracleVectorStore` and :class:`OracleBackend` so a single
-  wallet block configures all three.
-- ``async for doc in loader.lazy_load():`` streams rows as the cursor
-  produces them — memory stays flat on large pulls.
-- ``await loader.load()`` is the eager variant, returning a
-  ``list[Document]``.
-- ``await loader.close()`` releases the pool.
+- The agent never sees ``OracleADBLoader`` directly. It sees
+  ``fetch_articles_by_topic(topic)`` — a Locus ``@tool`` that wraps
+  the loader and returns a deterministic list of rows.
+- Each invocation is a fresh, parameter-bound ADB query —
+  ``bind_params={"topic": ...}`` keeps user-controlled input out of
+  the SQL text.
+- ``await loader.load()`` is used here because the agent wants the
+  whole result set in one turn. Switch to ``async for doc in
+  loader.lazy_load()`` if you're streaming into a UI.
+- The same connection envelope (DSN, user, wallet) feeds the loader,
+  the vector store (notebook 06), the in-DB chunker (notebook 09),
+  the in-DB embedder (notebook 10), and the checkpointer (07).
 
 This notebook is self-contained: it creates a disposable demo table
-``locus_notebook_08_articles``, populates three rows, walks the loader
-through both the streaming and eager paths, then drops the table.
+``locus_notebook_08_articles``, populates a few rows, hands the loader
+to an Agent as a tool, asks the agent two domain questions, and drops
+the table on the way out.
 
 Run it::
 
@@ -51,12 +55,15 @@ Difficulty: Intermediate. Self-contained — no prior notebook required.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 
-# Both imports work; the package-level alias is shorter and matches the
-# rest of the locus RAG surface (``from locus.rag import OCIEmbeddings``).
+from config import get_model, print_config
+
+from locus.agent import Agent
 from locus.rag.loaders import OracleADBLoader
+from locus.tools import tool
 
 
 _REQUIRED_ENV = (
@@ -91,7 +98,21 @@ _DEMO_ROWS = [
         "consumer group — _low, _medium, _high, _tp, _tpurgent.",
         "Autonomous Database",
     ),
+    (
+        4,
+        "adb-consumer-groups",
+        "_tp and _tpurgent are transaction-processing consumer groups; "
+        "_low / _medium / _high target reporting workloads with different "
+        "parallel-server limits.",
+        "Autonomous Database",
+    ),
 ]
+
+
+_QUERIES = (
+    "Summarise what we know about AI Vector Search from the content store.",
+    "What does the content store say about Autonomous Database consumer groups?",
+)
 
 
 def _missing_env() -> list[str]:
@@ -99,7 +120,7 @@ def _missing_env() -> list[str]:
 
 
 def _print_skip_banner(missing: list[str]) -> None:
-    print("\n--- Notebook 08: OracleADBLoader ---")
+    print("\n--- Notebook 08: OracleADBLoader agent ---")
     print(
         "Required environment variables not set; skipping the live demo so "
         "this file still runs cleanly in CI.\n"
@@ -114,23 +135,23 @@ def _print_skip_banner(missing: list[str]) -> None:
     print("\nMinimal wiring (what the live path below builds):")
     print(
         """
+    from locus.agent import Agent
     from locus.rag.loaders import OracleADBLoader
+    from locus.tools import tool
 
-    loader = OracleADBLoader(
-        dsn=os.environ["ORACLE_DSN"],
-        user=os.environ["ORACLE_USER"],
-        password=os.environ["ORACLE_PASSWORD"],
-        wallet_location=os.environ["ORACLE_WALLET"],
-        wallet_password=os.environ.get("ORACLE_WALLET_PASSWORD", ""),
-        sql="SELECT id, slug, body, topic FROM articles WHERE topic = :topic",
-        bind_params={"topic": "AI Vector Search"},
-        content_column="body",
-        id_column="slug",
-        metadata_columns=["topic"],
-    )
-    async for doc in loader.lazy_load():
-        print(doc.id, doc.content[:80])
-    await loader.close()
+    @tool
+    async def fetch_articles_by_topic(topic: str) -> list[dict]:
+        loader = OracleADBLoader(..., bind_params={"topic": topic}, ...)
+        try:
+            return [
+                {"id": d.id, "body": d.content, "topic": d.metadata["topic"]}
+                for d in await loader.load()
+            ]
+        finally:
+            await loader.close()
+
+    agent = Agent(model=model, tools=[fetch_articles_by_topic], ...)
+    agent.run_sync("Summarise what we know about AI Vector Search.")
         """.rstrip()
     )
 
@@ -147,12 +168,6 @@ def _conn_kwargs() -> dict[str, str]:
 
 
 async def _setup_demo_table() -> None:
-    """Create + populate ``locus_notebook_08_articles`` via plain ``oracledb``.
-
-    Kept off the loader on purpose — the loader is a read-only primitive.
-    For a one-shot notebook we issue the DDL/DML ourselves so the source
-    rows exist before ``lazy_load()`` is called.
-    """
     import oracledb
 
     kw = _conn_kwargs()
@@ -171,7 +186,6 @@ async def _setup_demo_table() -> None:
     )
     try:
         cursor = conn.cursor()
-        # Best-effort drop in case a previous run left it behind.
         try:
             await cursor.execute(f"DROP TABLE {_TABLE}")
         except Exception:  # noqa: BLE001 - table may not exist; fine.
@@ -223,45 +237,106 @@ async def _drop_demo_table() -> None:
         await conn.close()
 
 
+async def _drive_agent(agent: Agent, prompt: str) -> None:
+    print(f"\n--- User: {prompt} ---")
+    final = ""
+    async for event in agent.run(prompt):
+        et = event.event_type
+        if et == "tool_start":
+            args = getattr(event, "arguments", None) or {}
+            topic = args.get("topic") if isinstance(args, dict) else None
+            print(f"  [agent → ADB] tool_start: {event.tool_name}(topic={topic!r})")
+        elif et == "tool_complete":
+            raw = getattr(event, "result", "") or ""
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                payload = []
+            rows = payload if isinstance(payload, list) else []
+            print(f"  [agent ← ADB] tool_complete: {len(rows)} row(s)")
+            for r in rows:
+                rid = r.get("id") if isinstance(r, dict) else None
+                body = (r.get("body") if isinstance(r, dict) else "") or ""
+                print(f"      id={rid!r}  {body[:80]}")
+        elif et == "terminate":
+            final = getattr(event, "final_message", "") or ""
+    if final:
+        print(f"\nAgent: {final.strip()}")
+
+
 async def main() -> None:
     missing = _missing_env()
     if missing:
         _print_skip_banner(missing)
         return
 
-    print(f"Creating disposable demo table {_TABLE}…")
+    print_config()
+
+    print(f"\nCreating disposable demo table {_TABLE}…")
     await _setup_demo_table()
 
-    loader = OracleADBLoader(
-        **_conn_kwargs(),
-        sql=(f"SELECT id, slug, body, topic FROM {_TABLE} WHERE topic = :topic ORDER BY id"),
-        bind_params={"topic": "AI Vector Search"},
-        content_column="body",
-        id_column="slug",
-        metadata_columns=["topic"],
+    @tool
+    async def fetch_articles_by_topic(topic: str) -> list[dict]:
+        """Fetch every article tagged with the given topic from the
+        content store.
+
+        Args:
+            topic: Exact topic label. Known values include 'AI Vector
+                Search' and 'Autonomous Database'.
+
+        Returns:
+            A list of articles, each with id (slug), body (text), and
+            topic. Empty list if no rows match.
+        """
+        # Fresh loader per call so the SELECT is parameter-bound — the
+        # ``topic`` arg goes through ``bind_params``, not string
+        # interpolation, even though the agent picked it.
+        loader = OracleADBLoader(
+            **_conn_kwargs(),
+            sql=(f"SELECT id, slug, body, topic FROM {_TABLE} WHERE topic = :topic ORDER BY id"),
+            bind_params={"topic": topic},
+            content_column="body",
+            id_column="slug",
+            metadata_columns=["topic"],
+        )
+        try:
+            docs = await loader.load()
+            return [
+                {
+                    "id": d.id,
+                    "body": d.content,
+                    "topic": d.metadata.get("topic"),
+                }
+                for d in docs
+            ]
+        finally:
+            await loader.close()
+
+    agent = Agent(
+        model=get_model(max_tokens=300),
+        tools=[fetch_articles_by_topic],
+        system_prompt=(
+            "You are a docs analyst. The content store lives in Oracle "
+            "Autonomous Database — use fetch_articles_by_topic with the "
+            "exact topic label to retrieve rows before you answer. Cite "
+            "the article slug for each claim. Do not invent rows."
+        ),
+        max_iterations=4,
     )
 
     try:
-        print("\n--- lazy_load(): streaming rows as the cursor produces them ---")
-        async for doc in loader.lazy_load():
-            snippet = doc.content.replace("\n", " ")[:80]
-            print(f"  id={doc.id!r}  topic={doc.metadata.get('topic')!r}  {snippet}")
+        for query in _QUERIES:
+            await _drive_agent(agent, query)
 
-        print("\n--- load(): eager variant returning list[Document] ---")
-        docs = await loader.load()
-        print(f"  retrieved {len(docs)} documents")
-        for doc in docs:
-            print(f"    - {doc.id}: {len(doc.content)} chars, metadata={doc.metadata}")
+        print(
+            "\nThe agent drove every ADB round-trip itself — picking the "
+            "topic, running the parameter-bound SELECT, grounding the "
+            "answer in the returned rows. Locus + Oracle 26ai, no "
+            "langchain glue."
+        )
     finally:
-        await loader.close()
         print(f"\nDropping demo table {_TABLE}…")
         await _drop_demo_table()
-
-    print(
-        "\nThe loader yielded Document objects directly from the ADB SELECT — "
-        "feed them into RAGRetriever.add_documents() or an OracleInDBChunker "
-        "(notebook 09) without any langchain glue."
-    )
 
 
 if __name__ == "__main__":

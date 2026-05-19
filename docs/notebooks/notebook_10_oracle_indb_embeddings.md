@@ -1,28 +1,45 @@
-# Oracle In-DB Embeddings
+# Oracle In-DB Embeddings — `DBMS_VECTOR_CHAIN.UTL_TO_EMBEDDING`
 
-Oracle 23ai / 26ai can host ONNX embedding models *inside* the
-database via `DBMS_VECTOR.LOAD_ONNX_MODEL`. When the model lives in
-the DB the embedding generation happens DB-side: the application ships
-text over the wire, the database produces the vector locally, and the
-caller gets back a serialized `VECTOR` ready to write into a `VECTOR`
-column. The canonical pattern when data residency rules forbid sending
-text to a remote inference service, or when the latency budget can't
-absorb a remote round-trip.
+Oracle Database 26ai can run the **entire** embed + search step
+without leaving the database. An ONNX model loaded once via
+`DBMS_VECTOR.LOAD_ONNX_MODEL` produces vectors server-side through
+`DBMS_VECTOR_CHAIN.UTL_TO_EMBEDDING`, and `VECTOR_DISTANCE` does the
+cosine search in the same SQL round-trip. Text-in-flight never leaves
+the database at embedding time — the data-residency story is "the
+data never crossed the boundary," not "we encrypted it on the way
+out."
 
-Locus wraps `DBMS_VECTOR_CHAIN.UTL_TO_EMBEDDING` /
-`UTL_TO_EMBEDDINGS` as `OracleInDBEmbeddings`.
+`OracleInDBEmbeddings` is the Locus adapter. Pair it with
+`OracleVectorStore` (sharing one wallet, one pool kwargs envelope)
+and you have a complete in-DB retrieval pipeline:
+
+```text
+text  ──▶  UTL_TO_EMBEDDING (server-side ONNX)  ──▶  VECTOR(384, FLOAT32)
+                                                            │
+                                                            ▼
+                                                VECTOR_DISTANCE COSINE
+```
+
+To drive the pipeline the notebook hands a `RAGRetriever(embedder=
+OracleInDBEmbeddings, store=OracleVectorStore)` to a Locus `Agent` via
+`create_rag_tool(retriever)`. Each retrieval is one SQL round-trip —
+no external embedding endpoint, no Python embedding library. The
+agent is the harness; the in-DB embedder + `VECTOR_DISTANCE` are the
+subject.
 
 ## What this covers
 
 - `OracleInDBEmbeddings(model_name="ALL_MINILM_L12_V2", dimension=384,
-  dsn=..., user=..., password=..., wallet_location=...)` — binds the
-  embedder to an in-DB ONNX model. Same connection envelope as the
-  loader (notebook 08), chunker (notebook 09), and vector store
-  (notebook 06).
-- `await emb.embed(text)` — single text → `EmbeddingResult`
-  (`.embedding` is `list[float]` of length `dimension`).
-- `await emb.embed_batch([t1, t2, …])` — uses `UTL_TO_EMBEDDINGS` when
-  available, with a per-text fallback for older patch levels.
+  ...)` calling `DBMS_VECTOR_CHAIN.UTL_TO_EMBEDDING` server-side.
+- `OracleVectorStore(dimension=384, ...)` as the persistence side of
+  the pair, with a native `VECTOR(384, FLOAT32)` column and cosine
+  `VECTOR_DISTANCE` search.
+- `DBMS_VECTOR.LOAD_ONNX_MODEL` as the one-time bootstrap to register
+  the ONNX model inside the database.
+- `RAGRetriever(embedder=indb, store=store)` glued together, then
+  exposed to an `Agent` via `create_rag_tool(retriever)` — each
+  agent retrieval = one SQL round-trip that embeds + searches inside
+  26ai.
 
 ## Prerequisites
 
@@ -69,6 +86,8 @@ python examples/notebook_10_oracle_indb_embeddings.py
 - [Notebook 08 — Oracle ADB document loader](notebook_08_oracle_adb_loader.md)
 - [Notebook 09 — Oracle in-DB chunker](notebook_09_oracle_indb_chunker.md)
 - [Oracle AI Database 26ai — AI Vector Search User's Guide](https://docs.oracle.com/en/database/oracle/oracle-database/23/vecse/index.html)
+- [`DBMS_VECTOR_CHAIN` PL/SQL package reference](https://docs.oracle.com/en/database/oracle/oracle-database/23/arpls/dbms_vector_chain1.html)
+- [python-oracledb driver](https://python-oracledb.readthedocs.io/en/latest/index.html)
 
 ## Source
 

@@ -8,6 +8,68 @@ policy.
 
 ## [Unreleased]
 
+### Changed — Oracle 26ai notebooks 06–12 rewritten as agent demos
+
+Notebooks 06–12 used to walk the bare `OracleVectorStore` /
+`oracle_checkpointer` / `OracleADBLoader` / `OracleInDBChunker` /
+`OracleInDBEmbeddings` / `OracleStore` / `OracleCheckpointSaver`
+primitives — useful as reference cards, but they showed Locus
+wrapping someone else's bindings rather than Locus driving them.
+
+Every one of those seven notebooks now puts a Locus `Agent` in the
+driver's seat with Oracle 26ai as the durable substrate:
+
+- **06 — `notebook_06_oracle_26ai_rag.py`**: `create_rag_tool` over
+  `OracleVectorStore`; the agent decides when to call `VECTOR_DISTANCE`
+  and grounds its answer in the returned passages.
+- **07 — `notebook_07_oracle_26ai_checkpointer.py`**: `Agent(checkpointer=
+  oracle_checkpointer(...))`; a brand-new Agent instance resumes the
+  same `thread_id` and recalls turn 1 — no manual save/load.
+- **08 — `notebook_08_oracle_adb_loader.py`**: `@tool fetch_articles_by_topic`
+  wrapping `OracleADBLoader` with `bind_params`; the agent picks the
+  topic and runs the parameter-bound SELECT.
+- **09 — `notebook_09_oracle_indb_chunker.py`**: agent with
+  `chunk_paragraph` + `chunk_table_rows` tools over `OracleInDBChunker`;
+  picks the right primitive per prompt.
+- **10 — `notebook_10_oracle_indb_embeddings.py`**: data-residency RAG
+  agent on `OracleInDBEmbeddings` + `OracleVectorStore` — embedding +
+  similarity search both stay inside 26ai.
+- **11 — `notebook_11_oracle_store.py`**: `Agent(memory_manager=
+  LLMMemoryManager(store=OracleStore))`; thread A teaches a fact,
+  brand-new Agent in thread B recalls it without seeing thread A's
+  messages.
+- **12 — `notebook_12_oracle_versioned_saver.py`**: three-turn agent
+  with both `oracle_checkpointer` (live thread) and
+  `OracleCheckpointSaver` (versioned lineage); shows
+  `list_checkpoints`, `get(checkpoint_id=...)`, and `put_writes`.
+
+Every notebook still prints a friendly skip banner when ORACLE_* env
+vars are absent so the file remains CI-safe.
+
+### Changed — workbench: six new agent-driven Oracle 26ai patterns + rewritten RAG pattern
+
+`workbench/backend/runner.py` previously exposed a single primitive-only
+`oracle_26ai_rag` pattern that called `RAGRetriever.retrieve` directly.
+Replaced with seven agent-driven patterns that mirror the rewritten
+notebooks:
+
+- `oracle_26ai_rag` (rewritten) — `Agent(tools=[create_rag_tool(...)])`
+- `oracle_26ai_checkpointer` — two-session resume on Oracle 26ai
+- `oracle_26ai_adb_loader` — agent + `OracleADBLoader` tool
+- `oracle_26ai_indb_chunker` — agent + `OracleInDBChunker` tool
+- `oracle_26ai_indb_embeddings` — data-residency RAG agent
+- `oracle_26ai_cross_thread_memory` — `LLMMemoryManager(store=OracleStore)`
+- `oracle_26ai_versioned_saver` — versioned agent lineage
+
+Added shared helpers `_require_oci_provider`, `_require_db`,
+`_oci_endpoint`, `_db_kwargs`, `_drive_agent_with_thread`,
+`_setup_demo_articles`, `_drop_demo_table` so each runner stays
+focused on the Locus + Oracle wiring rather than wallet boilerplate.
+
+The HTTP `POST /api/run/{pattern_id}` surface is unchanged; the seven
+new pattern IDs slot into the existing `PATTERNS` and `PATTERN_RUNNERS`
+tables.
+
 ### Changed — notebook renumber + Oracle-first reordering
 
 Renumbered every `examples/notebook_NN_*.py` and its matching

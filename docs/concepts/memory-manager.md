@@ -145,10 +145,10 @@ from locus.memory.store_backends import OracleStore   # Oracle 26ai native
 # Redis — distributed, fast (OCI Cache with Redis)
 manager = LLMMemoryManager(store=RedisBackend("redis://localhost:6379"))
 
-# PostgreSQL — relational, JSONB metadata (OCI Database with PostgreSQL)
+# PostgreSQL — relational, JSONB metadata ([OCI Database with PostgreSQL][oci-postgres])
 manager = LLMMemoryManager(store=PostgreSQLBackend(host="...", database="..."))
 
-# Oracle 26ai (`OracleStore`) — namespaced key/value with optional VECTOR
+# [Oracle 26ai][oracle-db] (`OracleStore`) — namespaced key/value with optional [VECTOR][ai-vector-search]
 # search inside a namespace. Native locus, no langchain dep.
 manager = LLMMemoryManager(
     store=OracleStore(
