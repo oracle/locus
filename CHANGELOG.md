@@ -8,6 +8,17 @@ policy.
 
 ## [Unreleased]
 
+## [0.2.0b18] - 2026-05-19
+
+Promotes Oracle's official [`oracleagentmemory`](https://pypi.org/project/oracleagentmemory/)
+client to the recommended Oracle-backed memory path. New
+`OracleAgentMemoryManager` adapter implements Locus's standard
+`BaseMemoryManager` contract on top of oracleagentmemory's threads +
+context cards + LLM extractor, with `LLMMemoryManager + OracleStore`
+reframed as the portable / multi-backend fallback. Includes a notebook
+renumber that brings the new demo into the contiguous Oracle 26ai
+block (06–13). PR #235.
+
 ### Added — `OracleAgentMemoryManager` (recommended Oracle-backed memory path)
 
 New `BaseMemoryManager` adapter at `src/locus/memory/managers/oracle_agent_memory.py`
