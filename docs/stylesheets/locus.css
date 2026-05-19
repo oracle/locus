@@ -792,10 +792,18 @@ html {
   background-color: #2A2826 !important;
 }
 
-/* Push theme toggle away from the "multi-agent SDK" tagline on mobile. */
+/* Mobile: float the palette toggle into the right rail. At cramped
+   widths the toggle was rendering on top of the "s" in "locus" because
+   the flex flow placed it immediately after the wordmark, where the
+   title block doesn't end cleanly. ``margin-left: auto`` shoves it to
+   the right edge of the header__inner row, joining the search +
+   source-link cluster — no more overlap, and the toggle stays
+   discoverable next to the other header actions. */
 @media (max-width: 56em) {
   form.md-header__option {
-    margin-left: 0.5rem;
+    margin-left: auto;
+    margin-right: 0.25rem;
+    flex: 0 0 auto;
   }
 }
 /* Icons in the dark drawer source strip — white for contrast. */
