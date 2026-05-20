@@ -8,6 +8,12 @@ policy.
 
 ## [Unreleased]
 
+## [0.2.0b19] - 2026-05-20
+
+Bundles the OCI V1 transport rename (`OCIOpenAIModel` → `OCIChatCompletionsModel`,
+PR #237) with three workbench / notebook drift fixes that the rename
+verification surfaced (PR #238).
+
 ### Changed (breaking) — rename `OCIOpenAIModel` → `OCIChatCompletionsModel`
 
 The OCI V1 transport class has been renamed to better describe what it
@@ -35,6 +41,57 @@ load-bearing, replaced with neutral descriptors ("default", "V1 transport",
 "Oracle-native path"). Substantive uses ("the paper recommends",
 "AAP recommends iron-fortified cereals", agent prompts that include
 the word "recommend") were left alone.
+
+### Fixed — workbench pattern drift (PR #238)
+
+Three workbench patterns silently regressed because the workbench code
+wasn't kept in sync with upstream API changes. Surfaced during the
+verification sweep that ran every pattern live against a real OCI
+backend.
+
+- **`orchestrator`**: constructed `Specialist(name=, agent=, description=)`
+  with the old API. Current `Specialist` class requires
+  `specialist_type` + `system_prompt` as Pydantic fields and takes
+  `model=` directly. `Orchestrator` similarly switched from
+  `coordinator_model= + specialists=` to `model=` + a separate
+  `register_specialists([...])` call. Rewritten to match notebook 32.
+- **`memory_manager`**: `LLMMemoryManager(extract_fn=lambda _: [])`
+  raised `TypeError: 'list' object can't be awaited` because
+  `extract_fn` is now awaited. Wrapped the noop in a real
+  `async def _noop_extract`.
+- **`stategraph_loop`**: mapped its conditional-edge end branch to
+  `"__end__"` (lowercase) but locus's `StateGraph` recognizes only
+  `END = "__END__"` (uppercase). Imported `END` from
+  `locus.multiagent.graph` and used the constant directly.
+
+### Fixed — notebook `table_name` strings out of sync with notebook numbers (PR #238)
+
+The slot-13 renumber in b18 (and earlier renumbers) bumped notebook
+filenames and docs nav but missed hardcoded `table_name=` strings
+inside seven notebook bodies. Read-only flows kept working silently;
+INSERT-heavy notebooks hit ORA-00001 unique-constraint violations on
+the second batch run because the stale table from the prior run still
+held the same primary keys.
+
+Updated 7 files to match their current notebook number:
+
+- `notebook_16_agent_memory.py` (was `locus_notebook_10_*`)
+- `notebook_35_deepagent.py` (was `locus_notebook_30_medical`)
+- `notebook_44_rag_basics.py` (was `locus_notebook_39_*`)
+- `notebook_45_rag_providers.py` (was `locus_notebook_40_*`)
+- `notebook_46_rag_agents.py` (was `locus_notebook_41_*`)
+- `notebook_54_checkpoint_backends.py` (was `locus_notebook_48`)
+- `notebook_68_agent_server.py` (was `locus_notebook_62`)
+
+A pre-commit / lint check to prevent future drift is tracked in #241.
+
+### Docs — `oracle_26ai_indb_embeddings` env override
+
+Workbench Troubleshooting now documents that `oracle_26ai_indb_embeddings`
+needs `OCI_INDB_MODEL=<your-model-name>` set on the backend when the
+target ADB has the ONNX model loaded under a non-canonical name. The
+escape hatch was always there and surfaced in the error message — now
+also in the workbench docs. Auto-detection tracked in #242.
 
 ## [0.2.0b18] - 2026-05-19
 
