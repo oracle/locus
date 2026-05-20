@@ -546,7 +546,7 @@ async def _run_orchestrator(req: RunRequest) -> RunResponse:
 async def _run_stategraph_loop(req: RunRequest) -> RunResponse:
     """Writer → Critic loop with allow_cycles."""
     from locus.agent import Agent, AgentConfig
-    from locus.multiagent.graph import GraphConfig, StateGraph
+    from locus.multiagent.graph import END, GraphConfig, StateGraph
 
     model = build_model(req.provider)
     writer = Agent(
@@ -591,7 +591,7 @@ async def _run_stategraph_loop(req: RunRequest) -> RunResponse:
     graph.add_node("critic", critic_node)
     graph.set_entry_point("writer")
     graph.add_edge("writer", "critic")
-    graph.add_conditional_edges("critic", route, {"writer": "writer", "end": "__end__"})
+    graph.add_conditional_edges("critic", route, {"writer": "writer", "end": END})
     result = await graph.execute({"prompt": req.prompt})
     final_state = getattr(result, "final_state", result)
     return RunResponse(
