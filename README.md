@@ -116,7 +116,7 @@ credentials change.
 
 | Provider | Transport | What it covers |
 |---|---|---|
-| **OCI Generative AI** | **V1** (`OCIOpenAIModel`) — default | OpenAI commercial · Meta Llama · xAI Grok · Mistral · Google Gemini · Anthropic Claude on OCI |
+| **OCI Generative AI** | **V1** (`OCIChatCompletionsModel`) — default | OpenAI commercial · Meta Llama · xAI Grok · Mistral · Google Gemini · Anthropic Claude on OCI |
 | **OCI Generative AI** | **SDK** (`OCIModel`) — auto for `cohere.command-r*` | Cohere R-series native API |
 | **OCI Generative AI** | **Responses** (`OCIResponsesModel`) — opt-in | Server-stateful endpoint for OpenAI / xAI / Gemini Responses-only models |
 | **OpenAI** | `OpenAIModel` | Chat completions, reasoning models (o-series), `base_url` override for Azure · Portkey · LiteLLM · vLLM · together.ai · fireworks · groq |
@@ -239,7 +239,7 @@ print(result.text)
 | **[🧠 Reasoning](https://oracle-samples.github.io/locus/concepts/reasoning/)** | `reflexion=True` · `grounding=True` · `CausalChain` · **GSAR** typed grounding layer (`arXiv:2604.23366`). |
 | **[🛡 Idempotent tools](https://oracle-samples.github.io/locus/concepts/idempotency/)** | `@tool(idempotent=True)` — dedupes on `(name, args)`. The model can't double-charge, double-book, or double-page. |
 | **[💾 Durable memory](https://oracle-samples.github.io/locus/concepts/checkpointers/)** | 8 checkpoint backends — Oracle 26ai · OCI Object Storage · PostgreSQL · Redis · OpenSearch · in-memory · file · HTTP. |
-| **[🧠 Long-term memory](https://oracle-samples.github.io/locus/concepts/memory-manager/)** | Recommended Oracle path: `OracleAgentMemoryManager` over Oracle's [`oracleagentmemory`](https://pypi.org/project/oracleagentmemory/) — LongMemEval-tuned recall, context cards, scoped retrieval. Portable path: `LLMMemoryManager` over any `BaseStore` (InMemory / Redis / Postgres / OpenSearch / Oracle). |
+| **[🧠 Long-term memory](https://oracle-samples.github.io/locus/concepts/memory-manager/)** | Oracle-native path: `OracleAgentMemoryManager` over Oracle's [`oracleagentmemory`](https://pypi.org/project/oracleagentmemory/) — LongMemEval-tuned recall, context cards, scoped retrieval. Portable path: `LLMMemoryManager` over any `BaseStore` (InMemory / Redis / Postgres / OpenSearch / Oracle). |
 | **[🔎 RAG](https://oracle-samples.github.io/locus/concepts/rag/)** | 4 vector stores — Oracle 26ai · OpenSearch · pgvector · in-memory. OCI Cohere + OpenAI embeddings · multimodal (PDF, image OCR, audio). |
 | **[📡 Streaming + Server](https://oracle-samples.github.io/locus/concepts/server/)** | Typed events · SSE · `AgentServer` (FastAPI, per-principal thread isolation). |
 | **[🪝 Hooks](https://oracle-samples.github.io/locus/concepts/hooks/)** | Logging · OpenTelemetry · ModelRetry · Guardrails · Steering (LLM-as-judge). |
@@ -341,7 +341,7 @@ python examples/notebook_69_research_workflow.py     # full research pipeline
 
 | Track | Range | What you learn |
 |---|---|---|
-| **OCI Generative AI** | 01–05 | OCI transports, OCIOpenAIModel, Responses, Dedicated AI Cluster, Cohere Reranker V4 |
+| **OCI Generative AI** | 01–05 | OCI transports, OCIChatCompletionsModel, Responses, Dedicated AI Cluster, Cohere Reranker V4 |
 | **Oracle Database 26ai** | 06–12 | Vector RAG, checkpointer, ADB loader, in-DB chunker, in-DB embeddings, cross-thread store, versioned saver |
 | **Agent Foundations** | 13–20 | Agent, tools, memory, streaming, hooks, termination |
 | **Graphs & composition** | 21–28 | StateGraph, conditional routing, reducers, HITL, composition, functional API |
@@ -491,12 +491,15 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Every PR runs format, lint, mypy, unit t
 
 ## Citing GSAR
 
+Paper: [GSAR: Typed Grounding for Hallucination Detection and Recovery in Multi-Agent LLMs](https://arxiv.org/abs/2604.23366) ([PDF](https://arxiv.org/pdf/2604.23366)) — Federico A. Kamelhar, 2026.
+
 ```bibtex
 @article{kamelhar2026gsar,
   title   = {GSAR: Typed Grounding for Hallucination Detection and Recovery in Multi-Agent LLMs},
   author  = {Kamelhar, Federico A.},
   journal = {arXiv preprint arXiv:2604.23366},
   year    = {2026},
+  url     = {https://arxiv.org/abs/2604.23366},
 }
 ```
 

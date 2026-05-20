@@ -16,7 +16,7 @@ reflexion, GSAR, grounding, tool hooks, idempotency, checkpointing,
 streaming, structured output, termination conditions — works
 identically to the chat/completions path.
 
-Auth mirrors :class:`OCIOpenAIModel`: API key via ``profile=``, or
+Auth mirrors :class:`OCIChatCompletionsModel`: API key via ``profile=``, or
 ``auth_type="instance_principal"|"resource_principal"`` for workload
 identity. Reuses the existing httpx signer (``OCIRequestSigner``).
 """
@@ -207,7 +207,7 @@ class OCIResponsesModel(BaseModel):
             msg = "compartment_id is required when auth_type= is set"
             raise ValueError(msg)
 
-        # Resolve compartment_id with same precedence as OCIOpenAIModel.
+        # Resolve compartment_id with same precedence as OCIChatCompletionsModel.
         if compartment_id is None:
             import os
 

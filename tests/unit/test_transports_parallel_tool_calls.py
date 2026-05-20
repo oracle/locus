@@ -15,7 +15,7 @@ of model whims.
 
 Covers:
 
-* ``OpenAIModel._parse_response`` (also covers ``OCIOpenAIModel`` via
+* ``OpenAIModel._parse_response`` (also covers ``OCIChatCompletionsModel`` via
   inheritance — the OpenAI-compat wire is shared)
 * ``GenericProvider.parse_response`` (OCI native SDK for
   OpenAI/Meta/xAI/Mistral/Google)
@@ -34,7 +34,7 @@ import pytest
 
 
 # =============================================================================
-# OpenAIModel / OCIOpenAIModel — OpenAI-compat wire
+# OpenAIModel / OCIChatCompletionsModel — OpenAI-compat wire
 # =============================================================================
 
 

@@ -6,7 +6,7 @@
 
 The audit caught the orchestrator running specialists serially (a
 deliberate trade for OCI GenAI stability before timeouts were
-properly pinned). With ``OCIOpenAIModel`` now sharing the OpenAI
+properly pinned). With ``OCIChatCompletionsModel`` now sharing the OpenAI
 provider's ``request_timeout`` / ``max_retries`` defaults, the
 orchestrator fans out to specialists in parallel — bounded by
 ``max_parallel_specialists``, with per-specialist exception

@@ -6,7 +6,7 @@
 ``locus.models.providers.oci.openai_compat``.
 
 The existing ``test_oci_openai_compat.py`` exercises the public API
-(``OCIOpenAIModel.__init__``, ``client``) but stubs the helper functions
+(``OCIChatCompletionsModel.__init__``, ``client``) but stubs the helper functions
 out, so the helper bodies are never executed. This file invokes each
 helper directly and patches the real ``oci`` SDK calls they depend on.
 """

@@ -142,9 +142,9 @@ Locus exposes memory along a spectrum, from "works everywhere" to
 | Path | Manager class | When to pick it |
 |---|---|---|
 | Portable / multi-backend | `LLMMemoryManager` + any `BaseStore` (InMemory / Redis / Postgres / OpenSearch / Oracle `OracleStore`) | You need backend portability, an LLM-free extractor, or a test-friendly path |
-| **Recommended Oracle path** | **`OracleAgentMemoryManager`** (Oracle's official [`oracleagentmemory`](https://pypi.org/project/oracleagentmemory/) client) | You're on Oracle AI Database and want LongMemEval-tuned recall, context cards, and scoped retrieval by `user_id` / `agent_id` / `thread_id` without writing your own extractor |
+| Oracle-native | `OracleAgentMemoryManager` (Oracle's official [`oracleagentmemory`](https://pypi.org/project/oracleagentmemory/) client) | You're on Oracle AI Database and want LongMemEval-tuned recall, context cards, and scoped retrieval by `user_id` / `agent_id` / `thread_id` without writing your own extractor |
 
-### Oracle agent memory (recommended for Oracle deployments)
+### Oracle agent memory
 
 `OracleAgentMemoryManager` is a thin adapter that implements the
 `BaseMemoryManager` contract on top of `oracleagentmemory.core.OracleAgentMemory`.

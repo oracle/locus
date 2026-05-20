@@ -24,7 +24,7 @@ Event mapping::
 - Tool-call telemetry with `span_id` pairing —
   `agent.tool.started` and `agent.tool.completed` share an id so
   consumers can compute durations without subtracting timestamps.
-- Token usage from `result.metrics` — the recommended source for cost
+- Token usage from `result.metrics` — the canonical source for cost
   meters and budget enforcers.
 
 Run it (OCI Generative AI is the default; auto-detected from `~/.oci/config`):

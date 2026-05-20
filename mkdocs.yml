@@ -189,10 +189,6 @@ nav:
     - 4 · OCI Dedicated AI Cluster: notebooks/notebook_04_oci_dac.md
     - 5 · Cohere Reranker V4 on OCI: notebooks/notebook_05_cohere_reranker.md
   - Oracle Database 26ai:
-    # Oracle agent memory (the recommended Oracle-backed memory
-    # manager) sits at the top so docs visitors hit it before the
-    # portable BaseStore variant in notebook 11.
-    - Oracle agent memory (recommended): notebooks/notebook_13_oracle_agent_memory.md
     - 6 · Oracle 26ai RAG: notebooks/notebook_06_oracle_26ai_rag.md
     - 7 · Oracle 26ai checkpointer: notebooks/notebook_07_oracle_26ai_checkpointer.md
     - 8 · Oracle ADB document loader: notebooks/notebook_08_oracle_adb_loader.md
@@ -200,6 +196,7 @@ nav:
     - 10 · Oracle in-DB embeddings: notebooks/notebook_10_oracle_indb_embeddings.md
     - 11 · Oracle store (portable BaseStore path): notebooks/notebook_11_oracle_store.md
     - 12 · Oracle versioned checkpoint saver: notebooks/notebook_12_oracle_versioned_saver.md
+    - 13 · Oracle agent memory: notebooks/notebook_13_oracle_agent_memory.md
   - Agent Foundations:
     - 14 · Basic agent: notebooks/notebook_14_basic_agent.md
     - 15 · Agent with tools: notebooks/notebook_15_agent_with_tools.md

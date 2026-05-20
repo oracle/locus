@@ -178,7 +178,7 @@ Oracle account on Oracle infrastructure? Switch the prefix:
 agent = Agent(model="oci:anthropic.claude-sonnet")
 ```
 
-That routes through `OCIOpenAIModel` against the OCI Generative AI
+That routes through `OCIChatCompletionsModel` against the OCI Generative AI
 endpoint (uses `OCI_PROFILE` for auth, no `ANTHROPIC_API_KEY` needed).
 Same model behind it; different billing surface.
 

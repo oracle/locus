@@ -10,8 +10,8 @@ Models are organized into two categories:
    - OpenAI (GPT) - Oracle partnership
 
 2. Hosted providers (OCI GenAI):
-   - ``OCIOpenAIModel`` — OpenAI-compatible ``/openai/v1`` transport.
-     Recommended for OpenAI / Meta / xAI / Mistral / Gemini families.
+   - ``OCIChatCompletionsModel`` — OpenAI-compatible ``/openai/v1`` transport.
+     For OpenAI / Meta / xAI / Mistral / Gemini families.
      Real SSE streaming and day-0 model support.
    - ``OCIModel`` — OCI SDK transport against ``/20231130/actions/v1``.
      Required for Cohere R-series (``cohere.command-r-*``).
@@ -21,9 +21,9 @@ Usage:
     from locus.models import OpenAIModel
     model = OpenAIModel(model="gpt-4o")
 
-    # OCI GenAI — V1 transport (recommended)
-    from locus.models import OCIOpenAIModel
-    model = OCIOpenAIModel(model="openai.gpt-5", profile="DEFAULT")
+    # OCI GenAI — V1 transport
+    from locus.models import OCIChatCompletionsModel
+    model = OCIChatCompletionsModel(model="openai.gpt-5", profile="DEFAULT")
 
     # OCI GenAI — Cohere R-series
     from locus.models import OCIModel
@@ -67,8 +67,8 @@ __all__ = [
     "OCIModel",
     "OCIConfig",
     "OCIAuthType",
-    "OCIOpenAIModel",
-    "OCIOpenAIConfig",
+    "OCIChatCompletionsModel",
+    "OCIChatCompletionsConfig",
 ]
 
 
@@ -90,10 +90,14 @@ def __getattr__(name: str) -> object:
             return OCIConfig
         return OCIAuthType
 
-    if name in ("OCIOpenAIModel", "OCIOpenAIConfig"):
-        from locus.models.providers.oci import OCIOpenAIConfig, OCIOpenAIModel
+    if name in ("OCIChatCompletionsModel", "OCIChatCompletionsConfig"):
+        from locus.models.providers.oci import OCIChatCompletionsConfig, OCIChatCompletionsModel
 
-        return OCIOpenAIModel if name == "OCIOpenAIModel" else OCIOpenAIConfig
+        return (
+            OCIChatCompletionsModel
+            if name == "OCIChatCompletionsModel"
+            else OCIChatCompletionsConfig
+        )
 
     msg = f"module {__name__!r} has no attribute {name!r}"
     raise AttributeError(msg)

@@ -8,18 +8,46 @@ policy.
 
 ## [Unreleased]
 
+### Changed (breaking) — rename `OCIOpenAIModel` → `OCIChatCompletionsModel`
+
+The OCI V1 transport class has been renamed to better describe what it
+targets (OCI's `/openai/v1/chat/completions` endpoint) and to
+disambiguate from `OCIResponsesModel`. The old name implied the
+transport was only for OpenAI-family models, when in fact V1 also
+serves Meta / xAI / Mistral / Gemini / non-R Cohere on OCI.
+
+Hard rename — no deprecation alias (pre-1.0). Anyone constructing the
+class by name must update imports:
+
+```diff
+- from locus.models import OCIOpenAIModel, OCIOpenAIConfig
++ from locus.models import OCIChatCompletionsModel, OCIChatCompletionsConfig
+```
+
+The string factory (`get_model("oci:...")`) is unchanged.
+
+### Changed — remove "(recommended)" editorial labels from product surfaces
+
+Stripped "(recommended)" / "recommended path" framing from product
+labels across docs, examples, README, and module docstrings (checkpointers,
+memory, RAG, OCI transports, agent-memory). Where the framing was
+load-bearing, replaced with neutral descriptors ("default", "V1 transport",
+"Oracle-native path"). Substantive uses ("the paper recommends",
+"AAP recommends iron-fortified cereals", agent prompts that include
+the word "recommend") were left alone.
+
 ## [0.2.0b18] - 2026-05-19
 
-Promotes Oracle's official [`oracleagentmemory`](https://pypi.org/project/oracleagentmemory/)
-client to the recommended Oracle-backed memory path. New
-`OracleAgentMemoryManager` adapter implements Locus's standard
-`BaseMemoryManager` contract on top of oracleagentmemory's threads +
-context cards + LLM extractor, with `LLMMemoryManager + OracleStore`
-reframed as the portable / multi-backend fallback. Includes a notebook
+Adds an Oracle-native memory adapter on top of Oracle's official
+[`oracleagentmemory`](https://pypi.org/project/oracleagentmemory/)
+client. New `OracleAgentMemoryManager` implements Locus's standard
+`BaseMemoryManager` contract over oracleagentmemory's threads +
+context cards + LLM extractor; `LLMMemoryManager + OracleStore`
+remains the portable / multi-backend path. Includes a notebook
 renumber that brings the new demo into the contiguous Oracle 26ai
 block (06–13). PR #235.
 
-### Added — `OracleAgentMemoryManager` (recommended Oracle-backed memory path)
+### Added — `OracleAgentMemoryManager` (Oracle-native memory path)
 
 New `BaseMemoryManager` adapter at `src/locus/memory/managers/oracle_agent_memory.py`
 that bridges Locus's standard `memory_manager=` slot to Oracle's
@@ -42,10 +70,10 @@ reasoning. Cost: Oracle-only, alpha upstream (`oracleagentmemory`
   so `pip install locus-sdk[checkpoints]` covers everything Oracle.
 - New live notebook `examples/notebook_13_oracle_agent_memory.py` +
   matching docs page `docs/notebooks/notebook_13_oracle_agent_memory.md`,
-  promoted to the top of the Oracle 26ai notebook block.
+  filed in sequential order in the Oracle 26ai notebook block (slot 13).
 - New workbench pattern `oracle_agent_memory` (PATTERNS + PATTERN_RUNNERS
-  in `workbench/backend/runner.py`), placed above
-  `oracle_26ai_cross_thread_memory` with a `recommended: true` flag.
+  in `workbench/backend/runner.py`), filed in sequential order after
+  `oracle_26ai_cross_thread_memory`.
 
 ### Changed — notebook renumber: Oracle agent memory in the 06–13 block
 
@@ -71,11 +99,11 @@ to Oracle red, slate scheme to its own contrast-tuned values.
 
 ### Changed — `docs/concepts/memory-manager.md` reframes the memory spectrum
 
-The "Persistent backends" section now leads with
-`OracleAgentMemoryManager` as the recommended Oracle-backed memory
-path; `LLMMemoryManager + BaseStore` (InMemory / Redis / Postgres /
-OpenSearch / OracleStore) is reframed as the portable / multi-backend
-/ test-friendly path. Same content for both — no deprecation. The
+The "Persistent backends" section now documents
+`OracleAgentMemoryManager` as the Oracle-native memory path alongside
+`LLMMemoryManager + BaseStore` (InMemory / Redis / Postgres /
+OpenSearch / OracleStore) as the portable / multi-backend /
+test-friendly path. Same content for both — no deprecation. The
 README gets a new "Long-term memory" feature row mirroring the framing.
 
 ### Explicitly not changed
@@ -164,7 +192,7 @@ Renumbered every `examples/notebook_NN_*.py` and its matching
 reading order, not historical order of authorship.
 
 - **Notebooks 01–05 are now the OCI Generative AI section** (inference
-  platform): OCI transports, OCIOpenAIModel, OCIResponsesModel, DAC,
+  platform): OCI transports, OCIChatCompletionsModel, OCIResponsesModel, DAC,
   Cohere Reranker V4.
 - **Notebooks 06–07 are now the Oracle Database 26ai section** (data
   layer): native `VECTOR(N, FLOAT32)` RAG and durable agent-thread
@@ -319,7 +347,7 @@ from the user's shell-default OCI config. New docs page:
   `from locus.tools import tool`, etc.). The shorthand worked via
   `locus/__init__.py`'s lazy `__getattr__` mapping but Pyright /
   VS Code can't follow it; canonical paths resolve statically.
-- `examples/config.py` corrected: `OCIOpenAIModel` is imported from
+- `examples/config.py` corrected: `OCIChatCompletionsModel` is imported from
   `locus.models.providers.oci`, not `locus.models`.
 - README's "The cognitive router" section now demonstrates an actual
   `Router` (`GoalFrame` extractor + `ProtocolRegistry` +
@@ -438,7 +466,7 @@ against the `oci-genai-auth` reference (oracle-samples/oci-genai-auth-python).
   takes optional `profile` / `config_file` kwargs and, for
   `SecurityTokenSigner` signers, returns a closure that re-reads the
   `security_token_file` from disk and yields a fresh
-  `SecurityTokenSigner`. `OCIOpenAIModel.client` plumbs the kwargs.
+  `SecurityTokenSigner`. `OCIChatCompletionsModel.client` plumbs the kwargs.
 - `src/locus/models/providers/oci/responses.py` — same plumbing on the
   Responses transport so both paths get session-token disk reload.
 - `tests/unit/test_oci_signer_refresh_observability.py` — 9 cases
@@ -451,7 +479,7 @@ against the `oci-genai-auth` reference (oracle-samples/oci-genai-auth-python).
 
 ### Fixed — OCI instance-principal token now auto-refreshes on both openai-style HTTP transports
 
-`OCIOpenAIModel` (behind every `oci:openai.<model>` / `oci:google.<model>` id)
+`OCIChatCompletionsModel` (behind every `oci:openai.<model>` / `oci:google.<model>` id)
 **and** `OCIResponsesModel` (the `/v1/responses` transport) were both
 constructing their `OCIRequestSigner` without passing a `refresh_signer`
 callback. `OCIRequestSigner.auth_flow` has a refresh-on-401 branch *and*
@@ -487,7 +515,7 @@ by this bug:
 
 | Transport | File | Status |
 |---|---|---|
-| `OCIOpenAIModel` (Chat Completions) | `src/locus/models/providers/oci/openai_compat.py` | Fixed |
+| `OCIChatCompletionsModel` (Chat Completions) | `src/locus/models/providers/oci/openai_compat.py` | Fixed |
 | `OCIResponsesModel` (`/v1/responses`) | `src/locus/models/providers/oci/responses.py` | Fixed |
 | `OCIModel` (native OCI SDK) | `src/locus/models/providers/oci/client.py` | Unaffected (OCI SDK refresh) |
 | `OracleGenAIEmbeddings` (RAG) | `src/locus/rag/embeddings/oci.py` | Unaffected (OCI SDK refresh) |
@@ -495,7 +523,7 @@ by this bug:
 No public-API change; the wiring is internal.
 
 - `src/locus/models/providers/oci/openai_compat.py` — new
-  `_refresh_callable_for(signer)` helper; `OCIOpenAIModel.client` now
+  `_refresh_callable_for(signer)` helper; `OCIChatCompletionsModel.client` now
   passes `refresh_signer=_refresh_callable_for(signer)` and
   `refresh_interval=600.0` when constructing `OCIRequestSigner`.
 - `src/locus/models/providers/oci/responses.py` — `OCIResponsesModel._http_client`
@@ -643,7 +671,7 @@ stays green (4564 passed, 3 skipped). Closes
 [#191](https://github.com/oracle-samples/locus/issues/191).
 
 - **`[oci]` extra now pulls `openai>=1.50`.** The OCI provider
-  lazy-imports `openai` at request time (`OCIOpenAIModel.client`
+  lazy-imports `openai` at request time (`OCIChatCompletionsModel.client`
   property); without it in the extra, a fresh
   `pip install "locus-sdk[oci]"` boots cleanly but the first
   `.complete()` raises `ModuleNotFoundError: No module named 'openai'`.
@@ -676,7 +704,7 @@ stays green (4564 passed, 3 skipped). Closes
   unit-tested. Callers can branch on the boolean without parsing the
   reason string.
 
-- **`OCIOpenAIModel` auth-mode error is self-fixing.** The constructor
+- **`OCIChatCompletionsModel` auth-mode error is self-fixing.** The constructor
   `ValueError` for zero or two auth modes now names both valid call
   shapes (`profile='<section_from_~/.oci/config>'` for the API-key path
   vs. `auth_type='instance_principal'|'resource_principal'|
@@ -761,7 +789,7 @@ stays green (4564 passed, 3 skipped). Closes
 ### Docs — OCI Responses surfaced across existing pages + voice pass
 
 - **`concepts/providers/oci.md`** now lists three transports
-  (`OCIOpenAIModel`, `OCIResponsesModel`, `OCIModel`) and includes
+  (`OCIChatCompletionsModel`, `OCIResponsesModel`, `OCIModel`) and includes
   the Responses architecture diagram + a "when to pick which" section
   cross-linked to [`concepts/oci-responses.md`](docs/concepts/oci-responses.md).
 - **`how-to/oci-models.md`** transport table gains a Responses row
@@ -770,7 +798,7 @@ stays green (4564 passed, 3 skipped). Closes
   (ZDR-safe) modes.
 - Both pages cross-link [notebook 00](docs/notebooks/notebook_01_oci_transports.md)
   (transports side-by-side), [notebook 57](docs/notebooks/notebook_02_oci_openai_chat.md)
-  (OCIOpenAIModel deep dive) and
+  (OCIChatCompletionsModel deep dive) and
   [notebook 58](docs/notebooks/notebook_03_oci_responses.md)
   (OCIResponsesModel deep dive).
 - **Voice pass** — locus is an *agentic* framework. Removed every
@@ -841,7 +869,7 @@ Individual MR numbers in parentheses anchor each item to its source change.
   and Locus references it via `previous_response_id`. Use it for
   Responses-only OCI models (e.g. `openai.gpt-5.5-pro`) and for runs
   where re-sending the full history each turn is wasteful. Auth surface
-  identical to `OCIOpenAIModel` (`profile=` for API key / session,
+  identical to `OCIChatCompletionsModel` (`profile=` for API key / session,
   `auth_type="instance_principal" | "resource_principal"` for workload
   identity). **Project OCID stays optional** — only required when a
   specific Responses feature demands it, in which case
@@ -875,7 +903,7 @@ Individual MR numbers in parentheses anchor each item to its source change.
   without changes; new fields are keyword-only with defaults of `""`
   and `{}`.
 
-- `OCIOpenAIModel` — second OCI transport against the OpenAI-compatible
+- `OCIChatCompletionsModel` — second OCI transport against the OpenAI-compatible
   `/openai/v1/chat/completions` endpoint. Wraps the standard `openai` SDK,
   inherits `OpenAIModel` for parsing/streaming/tool conversion, signs
   requests with an inline `httpx.Auth` wrapper around the existing OCI
@@ -912,7 +940,7 @@ Individual MR numbers in parentheses anchor each item to its source change.
 - `examples/config.py` and the `oci:` string-factory entry in
   `locus.models.registry` now route OCI model ids by family —
   `cohere.command-r-*` flows through `OCIModel`, everything else
-  through `OCIOpenAIModel`. Existing notebooks inherit the new
+  through `OCIChatCompletionsModel`. Existing notebooks inherit the new
   transport without edits. Override with
   `LOCUS_OCI_TRANSPORT=v1|sdk`. (MR !70)
 - `OpenAIModel` reasoning-family detection now tolerates OCI-style

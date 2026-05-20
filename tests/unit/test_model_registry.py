@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 import pytest
 
-from locus.models.providers.oci.openai_compat import OCIOpenAIModel
+from locus.models.providers.oci.openai_compat import OCIChatCompletionsModel
 from locus.models.registry import get_model
 
 
@@ -35,7 +35,7 @@ class TestOCIRegistryEnvFallback:
     def test_env_profile_used_when_no_kwargs(self, monkeypatch, mock_profile_load):
         monkeypatch.setenv("OCI_PROFILE", "FROM_ENV")
         model = get_model("oci:openai.gpt-5.5")
-        assert isinstance(model, OCIOpenAIModel)
+        assert isinstance(model, OCIChatCompletionsModel)
         assert model.config.profile == "FROM_ENV"
 
     def test_explicit_profile_overrides_env(self, monkeypatch, mock_profile_load):
@@ -82,15 +82,15 @@ class TestOCIRegistryFamilyRouting:
     def test_openai_family_routes_to_v1(self, monkeypatch, mock_profile_load):
         monkeypatch.setenv("OCI_PROFILE", "FROM_ENV")
         model = get_model("oci:openai.gpt-5.5")
-        assert isinstance(model, OCIOpenAIModel)
+        assert isinstance(model, OCIChatCompletionsModel)
 
     def test_meta_family_routes_to_v1(self, monkeypatch, mock_profile_load):
         monkeypatch.setenv("OCI_PROFILE", "FROM_ENV")
         model = get_model("oci:meta.llama-3.3-70b-instruct")
-        assert isinstance(model, OCIOpenAIModel)
+        assert isinstance(model, OCIChatCompletionsModel)
 
     def test_non_r_cohere_routes_to_v1(self, monkeypatch, mock_profile_load):
         # cohere.command-a-* is not an R-series model — V1 transport.
         monkeypatch.setenv("OCI_PROFILE", "FROM_ENV")
         model = get_model("oci:cohere.command-a-03-2025")
-        assert isinstance(model, OCIOpenAIModel)
+        assert isinstance(model, OCIChatCompletionsModel)

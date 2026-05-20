@@ -25,7 +25,7 @@ locus.models
 │
 ├── oci:                                   ── Oracle Generative AI · day-0
 │   │
-│   ├── V1 transport · OCIOpenAIModel
+│   ├── V1 transport · OCIChatCompletionsModel
 │   │   ├─ openai.*          — OpenAI commercial chat + reasoning
 │   │   ├─ meta.*            — Meta Llama family
 │   │   ├─ xai.*             — xAI Grok family
@@ -127,6 +127,6 @@ exercises all four providers with the same agent.
 | `OpenAIModel` | [`models/native/openai.py`](https://github.com/oracle-samples/locus/blob/main/src/locus/models/native/openai.py) |
 | `AnthropicModel` | [`models/native/anthropic.py`](https://github.com/oracle-samples/locus/blob/main/src/locus/models/native/anthropic.py) |
 | `OllamaModel` | [`models/native/ollama.py`](https://github.com/oracle-samples/locus/blob/main/src/locus/models/native/ollama.py) |
-| `OCIOpenAIModel` (V1) | [`models/providers/oci/openai_compat.py:163`](https://github.com/oracle-samples/locus/blob/main/src/locus/models/providers/oci/openai_compat.py#L163) |
+| `OCIChatCompletionsModel` (V1) | [`models/providers/oci/openai_compat.py:163`](https://github.com/oracle-samples/locus/blob/main/src/locus/models/providers/oci/openai_compat.py#L163) |
 | `OCIModel` (SDK) | [`models/providers/oci/__init__.py`](https://github.com/oracle-samples/locus/blob/main/src/locus/models/providers/oci/__init__.py) |
 | `PooledModel` | [`models/pooled.py`](https://github.com/oracle-samples/locus/blob/main/src/locus/models/pooled.py) |

@@ -133,7 +133,7 @@ async def test_dac_stream_yields_chunks(dac_model: object) -> None:
 @pytest.mark.asyncio
 async def test_dac_via_get_model_routes_to_oci_model(dac_model: object) -> None:
     """``get_model("oci:<DAC OCID>")`` returns an ``OCIModel`` instance
-    rather than ``OCIOpenAIModel`` (V1 transport can't speak DAC)."""
+    rather than ``OCIChatCompletionsModel`` (V1 transport can't speak DAC)."""
     from locus.models import get_model
     from locus.models.providers.oci import OCIModel
 

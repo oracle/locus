@@ -62,7 +62,7 @@ def example_routing() -> None:
     print()
     print("  1. ocid1.generativeaiendpoint.<region>....   -> OCIModel (OCI SDK)")
     print("  2. cohere.command-r-*                         -> OCIModel (OCI SDK)")
-    print("  3. everything else                            -> OCIOpenAIModel")
+    print("  3. everything else                            -> OCIChatCompletionsModel")
     print()
     print("Both of these end up on OCIModel:")
     print()

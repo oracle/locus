@@ -7,7 +7,7 @@
 Covers:
 
 - ``get_model("oci:ocid1.generativeaiendpoint.<region>....")`` routes
-  to ``OCIModel`` (SDK transport), not ``OCIOpenAIModel`` (V1).
+  to ``OCIModel`` (SDK transport), not ``OCIChatCompletionsModel`` (V1).
 - ``OCIClient.get_serving_mode()`` returns ``DedicatedServingMode`` for
   endpoint OCIDs and ``OnDemandServingMode`` for plain model ids.
 - ``GenericProvider.parse_stream_chunk()`` correctly extracts text +
@@ -78,10 +78,10 @@ class TestModelRegistryRoutesDACToSDK:
         # gpt-style on-demand models continue to use the V1 transport.
         pytest.importorskip("oci")
         from locus.models import get_model
-        from locus.models.providers.oci import OCIOpenAIModel
+        from locus.models.providers.oci import OCIChatCompletionsModel
 
         model = get_model("oci:openai.gpt-5.5", profile="DEFAULT")
-        assert isinstance(model, OCIOpenAIModel)
+        assert isinstance(model, OCIChatCompletionsModel)
 
 
 # ---------------------------------------------------------------------------

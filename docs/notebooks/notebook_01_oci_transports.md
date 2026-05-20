@@ -13,7 +13,7 @@ Read top-to-bottom. The first match wins.
 |---|---|
 | A Responses-only model (e.g. `openai.gpt-5.5-pro`), or OCI to hold the thread | `OCIResponsesModel` |
 | A Cohere R-series model (`cohere.command-r*`) | `OCIModel` |
-| Everything else (OpenAI, Meta, Mistral, xAI, Gemini, non-R Cohere) | `OCIOpenAIModel` (default) |
+| Everything else (OpenAI, Meta, Mistral, xAI, Gemini, non-R Cohere) | `OCIChatCompletionsModel` (default) |
 
 The runtime reads `model.server_stateful`. When it is `True`, Locus
 sends only the latest turn and threads OCI's continuation id through

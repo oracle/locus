@@ -7,10 +7,10 @@
 This module provides components for building RAG pipelines:
 
 Embeddings (convert text to vectors):
-- OCIEmbeddings: OCI GenAI with Cohere models (recommended for Oracle)
+- OCIEmbeddings: OCI GenAI with Cohere models
 
 Vector Stores (persist and search vectors):
-- OracleVectorStore: Oracle 26ai with native VECTOR type (recommended)
+- OracleVectorStore: Oracle 26ai with native VECTOR type
 - OpenSearchVectorStore: OpenSearch with k-NN plugin
 - InMemoryVectorStore: In-memory store (testing)
 

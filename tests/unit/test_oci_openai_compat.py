@@ -25,8 +25,8 @@ import pytest
 from locus.core.messages import Message
 from locus.models.providers.oci.openai_compat import (
     DEFAULT_OCI_GENAI_REGION,
-    OCIOpenAIConfig,
-    OCIOpenAIModel,
+    OCIChatCompletionsConfig,
+    OCIChatCompletionsModel,
     build_oci_openai_base_url,
 )
 
@@ -34,7 +34,7 @@ from locus.models.providers.oci.openai_compat import (
 COMPARTMENT_OCID = "ocid1.compartment.oc1..aaaaaaaaexample"
 
 
-class TestBuildOCIOpenAIBaseURL:
+class TestBuildOCIChatCompletionsBaseURL:
     def test_default_region(self):
         assert build_oci_openai_base_url(DEFAULT_OCI_GENAI_REGION) == (
             "https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/openai/v1"
@@ -49,11 +49,11 @@ class TestBuildOCIOpenAIBaseURL:
 class TestAuthModeValidation:
     def test_no_auth_mode_raises(self):
         with pytest.raises(ValueError, match="specify exactly one"):
-            OCIOpenAIModel(model="openai.gpt-5.5")
+            OCIChatCompletionsModel(model="openai.gpt-5.5")
 
     def test_both_auth_modes_raises(self):
         with pytest.raises(ValueError, match="specify exactly one"):
-            OCIOpenAIModel(
+            OCIChatCompletionsModel(
                 model="openai.gpt-5.5",
                 profile="MY_PROFILE",
                 auth_type="instance_principal",
@@ -62,7 +62,7 @@ class TestAuthModeValidation:
 
     def test_unknown_auth_type_raises(self):
         with pytest.raises(ValueError, match="auth_type must be one of"):
-            OCIOpenAIModel(
+            OCIChatCompletionsModel(
                 model="openai.gpt-5.5",
                 auth_type="federated_user",
                 compartment_id=COMPARTMENT_OCID,
@@ -70,7 +70,7 @@ class TestAuthModeValidation:
 
     def test_auth_type_without_compartment_raises(self):
         with pytest.raises(ValueError, match="compartment_id is required"):
-            OCIOpenAIModel(
+            OCIChatCompletionsModel(
                 model="openai.gpt-5.5",
                 auth_type="instance_principal",
             )
@@ -85,7 +85,7 @@ class TestAuthModeValidation:
         compartment_id requirement so the error is self-fixing.
         """
         with pytest.raises(ValueError) as excinfo:
-            OCIOpenAIModel(model="openai.gpt-5.5")
+            OCIChatCompletionsModel(model="openai.gpt-5.5")
         msg = str(excinfo.value)
         # Self-fix breadcrumbs the user can act on.
         assert "~/.oci/config" in msg
@@ -100,7 +100,7 @@ class TestProfileMode:
             "locus.models.providers.oci.openai_compat._load_profile_config",
             return_value={"tenancy": COMPARTMENT_OCID},
         ):
-            model = OCIOpenAIModel(model="openai.gpt-5.5", profile="MY_PROFILE")
+            model = OCIChatCompletionsModel(model="openai.gpt-5.5", profile="MY_PROFILE")
         assert model.config.profile == "MY_PROFILE"
         assert model.config.auth_type is None
         assert model.config.compartment_id == COMPARTMENT_OCID
@@ -111,7 +111,7 @@ class TestProfileMode:
             "locus.models.providers.oci.openai_compat._load_profile_config",
             return_value={"tenancy": "ocid1.tenancy.oc1..fromprofile"},
         ):
-            model = OCIOpenAIModel(model="openai.gpt-5.5", profile="MY_PROFILE")
+            model = OCIChatCompletionsModel(model="openai.gpt-5.5", profile="MY_PROFILE")
         assert model.config.compartment_id == "ocid1.tenancy.oc1..fromprofile"
 
     def test_explicit_compartment_overrides_auto_derive(self):
@@ -119,7 +119,7 @@ class TestProfileMode:
             "locus.models.providers.oci.openai_compat._load_profile_config",
             return_value={"tenancy": "ocid1.tenancy.oc1..fromprofile"},
         ) as mock_load:
-            model = OCIOpenAIModel(
+            model = OCIChatCompletionsModel(
                 model="openai.gpt-5.5",
                 profile="MY_PROFILE",
                 compartment_id="ocid1.compartment.oc1..explicit",
@@ -134,7 +134,7 @@ class TestProfileMode:
             side_effect=FileNotFoundError("no config file"),
         ):
             # init should still succeed (compartment ends up None).
-            model = OCIOpenAIModel(model="openai.gpt-5.5", profile="MISSING")
+            model = OCIChatCompletionsModel(model="openai.gpt-5.5", profile="MISSING")
         assert model.config.compartment_id is None
 
     def test_env_var_overrides_profile_tenancy(self, monkeypatch):
@@ -151,7 +151,7 @@ class TestProfileMode:
             "locus.models.providers.oci.openai_compat._load_profile_config",
             return_value={"tenancy": "ocid1.tenancy.oc1..from-profile"},
         ) as mock_load:
-            model = OCIOpenAIModel(model="openai.gpt-4o-mini", profile="ANY")
+            model = OCIChatCompletionsModel(model="openai.gpt-4o-mini", profile="ANY")
         # Env var takes precedence; profile load is short-circuited.
         mock_load.assert_not_called()
         assert model.config.compartment_id == env_compartment
@@ -160,7 +160,7 @@ class TestProfileMode:
         """Explicit ``compartment_id=`` arg wins over ``OCI_COMPARTMENT`` env."""
         monkeypatch.setenv("OCI_COMPARTMENT", "ocid1.compartment.oc1..env-set")
         explicit = "ocid1.compartment.oc1..explicit"
-        model = OCIOpenAIModel(
+        model = OCIChatCompletionsModel(
             model="openai.gpt-4o-mini",
             profile="ANY",
             compartment_id=explicit,
@@ -175,7 +175,7 @@ class TestProfileMode:
             "locus.models.providers.oci.openai_compat._load_profile_config",
             return_value={"tenancy": "ocid1.tenancy.oc1..ignored"},
         ):
-            model = OCIOpenAIModel(model="openai.gpt-4o-mini", profile="ANY")
+            model = OCIChatCompletionsModel(model="openai.gpt-4o-mini", profile="ANY")
         assert model.config.compartment_id == "ocid1.compartment.oc1..alias"
 
     def test_client_uses_signer_http_client(self):
@@ -183,7 +183,7 @@ class TestProfileMode:
             "locus.models.providers.oci.openai_compat._load_profile_config",
             return_value={"tenancy": COMPARTMENT_OCID},
         ):
-            model = OCIOpenAIModel(model="openai.gpt-5.5", profile="MY_PROFILE")
+            model = OCIChatCompletionsModel(model="openai.gpt-5.5", profile="MY_PROFILE")
 
         signer = MagicMock(name="signer")
         with (
@@ -207,7 +207,7 @@ class TestProfileMode:
             "locus.models.providers.oci.openai_compat._load_profile_config",
             return_value={"tenancy": COMPARTMENT_OCID},
         ):
-            model = OCIOpenAIModel(
+            model = OCIChatCompletionsModel(
                 model="openai.gpt-5.5",
                 profile="MY_PROFILE",
                 config_file="/tmp/oci-config",
@@ -226,7 +226,7 @@ class TestProfileMode:
 
 class TestAuthTypeMode:
     def test_instance_principal(self):
-        model = OCIOpenAIModel(
+        model = OCIChatCompletionsModel(
             model="openai.gpt-5.5",
             auth_type="instance_principal",
             compartment_id=COMPARTMENT_OCID,
@@ -246,7 +246,7 @@ class TestAuthTypeMode:
             mock_build.assert_called_once_with()
 
     def test_resource_principal(self):
-        model = OCIOpenAIModel(
+        model = OCIChatCompletionsModel(
             model="openai.gpt-5.5",
             auth_type="resource_principal",
             compartment_id=COMPARTMENT_OCID,
@@ -311,7 +311,7 @@ class TestClientWiresRefreshSigner:
     the order of 15-30 minutes) silently rot inside the http client."""
 
     def test_instance_principal_passes_signer_refresh_to_signing_wrapper(self):
-        model = OCIOpenAIModel(
+        model = OCIChatCompletionsModel(
             model="openai.gpt-5.5",
             auth_type="instance_principal",
             compartment_id=COMPARTMENT_OCID,
@@ -348,7 +348,7 @@ class TestClientWiresRefreshSigner:
             "locus.models.providers.oci.openai_compat._load_profile_config",
             return_value={"tenancy": COMPARTMENT_OCID},
         ):
-            model = OCIOpenAIModel(model="openai.gpt-5.5", profile="MY_PROFILE")
+            model = OCIChatCompletionsModel(model="openai.gpt-5.5", profile="MY_PROFILE")
 
         # Static signer — no refresh_security_token attribute.
         static_signer = MagicMock(spec=["do_request_sign"])
@@ -371,7 +371,7 @@ class TestBaseURLAndRegion:
             "locus.models.providers.oci.openai_compat._load_profile_config",
             return_value={"tenancy": COMPARTMENT_OCID},
         ):
-            model = OCIOpenAIModel(
+            model = OCIChatCompletionsModel(
                 model="openai.gpt-5.5",
                 profile="MY_PROFILE",
                 base_url="https://custom.example.com/v1",
@@ -383,7 +383,7 @@ class TestBaseURLAndRegion:
             "locus.models.providers.oci.openai_compat._load_profile_config",
             return_value={"tenancy": COMPARTMENT_OCID},
         ):
-            model = OCIOpenAIModel(
+            model = OCIChatCompletionsModel(
                 model="openai.gpt-5.5",
                 profile="MY_PROFILE",
                 region="eu-frankfurt-1",
@@ -399,7 +399,7 @@ class TestClientCaching:
             "locus.models.providers.oci.openai_compat._load_profile_config",
             return_value={"tenancy": COMPARTMENT_OCID},
         ):
-            model = OCIOpenAIModel(model="openai.gpt-5.5", profile="MY_PROFILE")
+            model = OCIChatCompletionsModel(model="openai.gpt-5.5", profile="MY_PROFILE")
         with (
             patch(
                 "locus.models.providers.oci.openai_compat._build_signer_from_profile",
@@ -417,7 +417,7 @@ class TestClientCaching:
 
 class TestConfigInheritsOpenAIFields:
     def test_seed_and_stop_sequences(self):
-        config = OCIOpenAIConfig(
+        config = OCIChatCompletionsConfig(
             model="openai.gpt-5.5",
             seed=42,
             stop_sequences=["STOP"],
@@ -435,7 +435,7 @@ class TestCompleteEndToEndMocked:
             "locus.models.providers.oci.openai_compat._load_profile_config",
             return_value={"tenancy": COMPARTMENT_OCID},
         ):
-            model = OCIOpenAIModel(model="openai.gpt-5.5", profile="MY_PROFILE")
+            model = OCIChatCompletionsModel(model="openai.gpt-5.5", profile="MY_PROFILE")
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "Hi from OCI"

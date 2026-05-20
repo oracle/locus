@@ -5,7 +5,7 @@
 """Embedding providers for RAG.
 
 Available providers:
-- OCIEmbeddings: OCI GenAI with Cohere models (recommended for Oracle)
+- OCIEmbeddings: OCI GenAI with Cohere models
 - OpenAIEmbeddings: OpenAI text-embedding models
 - OracleInDBEmbeddings: Oracle 23ai/26ai in-database ONNX embeddings
 """

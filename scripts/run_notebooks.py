@@ -29,7 +29,7 @@ from pathlib import Path
 #
 # For OCI, examples/config.py auto-routes by model family:
 #   cohere.command-r-* → OCIModel (SDK transport)
-#   everything else    → OCIOpenAIModel (V1, /openai/v1)
+#   everything else    → OCIChatCompletionsModel (V1, /openai/v1)
 #
 # The default below uses an OpenAI-shape model so notebooks exercise the
 # V1 transport. compartment is auto-derived from the profile's tenancy

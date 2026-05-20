@@ -73,7 +73,7 @@ class ProviderConfig(BaseModel):
     region: str = "us-chicago-1"
     compartment_id: str | None = None
     # OCI only: "v1" | "auto" | "sdk" | "responses". v1 = /openai/v1/
-    # chat/completions (OCIOpenAIModel) — the default. sdk = native OCI
+    # chat/completions (OCIChatCompletionsModel) — the default. sdk = native OCI
     # GenAI chat shape (OCIModel). responses = /openai/v1/responses
     # server-stateful transport (OCIResponsesModel). "auto" routes
     # Cohere R-series → sdk, everything else → v1.
@@ -87,7 +87,7 @@ def _is_oci_sdk_family(model_id: str) -> bool:
     """Cohere R-series models go through OCI's proprietary chat shape (SDK
     transport / OCIModel). Everything else (openai.*, meta.*, google.*,
     xai.*, plus non-R Cohere) speaks the OpenAI-compatible v1 endpoint
-    (OCIOpenAIModel). Same rule examples/config.py uses."""
+    (OCIChatCompletionsModel). Same rule examples/config.py uses."""
     mid = model_id.lower()
     return mid.startswith("cohere.command-r")
 
@@ -159,9 +159,9 @@ def build_model(cfg: ProviderConfig) -> Any:
                 service_endpoint=endpoint,
             )
         # Everything else → OpenAI-compatible /openai/v1 transport.
-        from locus.models.providers.oci.openai_compat import OCIOpenAIModel
+        from locus.models.providers.oci.openai_compat import OCIChatCompletionsModel
 
-        return OCIOpenAIModel(
+        return OCIChatCompletionsModel(
             model=model_id,
             profile=profile,
             compartment_id=cfg.compartment_id,
@@ -335,24 +335,6 @@ PATTERNS: list[dict[str, Any]] = [
         ),
     },
     {
-        # The recommended Oracle-backed memory path — sits above the
-        # OracleStore-flavoured variant so the workbench surfaces it
-        # first.
-        "id": "oracle_agent_memory",
-        "title": "Oracle agent memory (recommended)",
-        "notebook": 13,
-        "summary": (
-            "Agent with OracleAgentMemoryManager — wraps Oracle's official "
-            "`oracleagentmemory` package (LongMemEval-tuned extraction + "
-            "scoped context cards). Thread A teaches a fact; a brand-new "
-            "Agent in thread B recalls it via the LLM-extracted memory. "
-            "Requires ORACLE_* on the backend + OPENAI_API_KEY (or OCI "
-            "kwargs) for the embedder/LLM. `pip install "
-            "locus-sdk[agentmemory]`."
-        ),
-        "recommended": True,
-    },
-    {
         "id": "oracle_26ai_cross_thread_memory",
         "title": "Cross-thread memory agent — portable BaseStore path",
         "notebook": 11,
@@ -363,7 +345,7 @@ PATTERNS: list[dict[str, Any]] = [
             "thread B recalls it. Use this when you need a non-Oracle "
             "backend, an LLM-free regex extractor, or a deterministic "
             "test-friendly path. For Oracle workloads prefer the "
-            "`oracle_agent_memory` pattern above."
+            "`oracle_agent_memory` pattern below."
         ),
     },
     {
@@ -375,6 +357,20 @@ PATTERNS: list[dict[str, Any]] = [
             "is written to OracleCheckpointSaver with a monotonic "
             "checkpoint_id and parent link. list_checkpoints shows the full "
             "lineage. Requires ORACLE_* on the backend."
+        ),
+    },
+    {
+        "id": "oracle_agent_memory",
+        "title": "Oracle agent memory",
+        "notebook": 13,
+        "summary": (
+            "Agent with OracleAgentMemoryManager — wraps Oracle's official "
+            "`oracleagentmemory` package (LongMemEval-tuned extraction + "
+            "scoped context cards). Thread A teaches a fact; a brand-new "
+            "Agent in thread B recalls it via the LLM-extracted memory. "
+            "Requires ORACLE_* on the backend + OPENAI_API_KEY (or OCI "
+            "kwargs) for the embedder/LLM. `pip install "
+            "locus-sdk[agentmemory]`."
         ),
     },
     {
@@ -1845,7 +1841,7 @@ async def _run_oracle_26ai_cross_thread_memory(req: RunRequest) -> RunResponse:
 
 
 async def _run_oracle_agent_memory(req: RunRequest) -> RunResponse:
-    """Workbench demo for notebook 69 — Oracle agent memory (recommended).
+    """Workbench demo for notebook 13 — Oracle agent memory.
 
     Same two-session shape as `_run_oracle_26ai_cross_thread_memory`,
     but powered by Oracle's official ``oracleagentmemory`` client via

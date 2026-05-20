@@ -56,10 +56,10 @@ _LIVE_MODELS = [
 
 @pytest.fixture(scope="module")
 def oci_openai_factory():
-    from locus.models.providers.oci import OCIOpenAIModel
+    from locus.models.providers.oci import OCIChatCompletionsModel
 
     def _build(model_id: str):
-        return OCIOpenAIModel(
+        return OCIChatCompletionsModel(
             model=model_id,
             profile=_PROFILE,
             region=_REGION,
@@ -161,7 +161,7 @@ def test_idempotent_dedup_native_sdk(oci_native_factory, model_id: str):
 
     Same scripted scenario as the v1 transport test, just routed through
     ``OCIModel`` (Cohere R+ via the OCI GenAI SDK) instead of
-    ``OCIOpenAIModel``. Cache hits + body invocation count are asserted
+    ``OCIChatCompletionsModel``. Cache hits + body invocation count are asserted
     identically.
     """
     from locus.agent import Agent

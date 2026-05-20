@@ -3,7 +3,7 @@
 # https://oss.oracle.com/licenses/upl/
 """Locus Agent — Quick Start.
 
-Uses ``OCIOpenAIModel`` against OCI GenAI's OpenAI-compatible
+Uses ``OCIChatCompletionsModel`` against OCI GenAI's OpenAI-compatible
 ``/openai/v1`` endpoint — real SSE streaming, day-0 model support, no
 GenAI Project OCID required. The compartment is auto-derived from the
 profile's tenancy.
@@ -16,11 +16,11 @@ to ``DEFAULT``). For Cohere R-series, use ``OCIModel`` instead — see
 import os
 
 from locus.agent import Agent
-from locus.models import OCIOpenAIModel
+from locus.models import OCIChatCompletionsModel
 
 
 def main():
-    model = OCIOpenAIModel(
+    model = OCIChatCompletionsModel(
         model="openai.gpt-5",
         profile=os.environ.get("OCI_PROFILE", "DEFAULT"),
     )

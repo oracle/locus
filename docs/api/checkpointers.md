@@ -1,7 +1,7 @@
 # Checkpointers
 
 State persistence between agent runs. **Oracle Autonomous Database** is
-the recommended production backend: native JSON columns, the
+the production backend: native JSON columns, the
 `OracleCheckpointSaver` versioned saver matching the
 langgraph-oracledb shape, and pool-based async access via `python-oracledb`.
 

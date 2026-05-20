@@ -88,7 +88,7 @@ class ActionQueueHook(HookProvider):
             })
 ```
 
-This is the recommended pattern for [MCP integrations](mcp.md) where
+This is the standard pattern for [MCP integrations](mcp.md) where
 the *real* side effect lives in the host process, not in the tool body.
 
 ### 2. Pass to the agent

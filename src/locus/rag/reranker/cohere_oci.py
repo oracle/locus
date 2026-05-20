@@ -150,7 +150,7 @@ class CohereReranker(Reranker):
             )
         )
         # Compartment auto-derived from the profile's tenancy if not
-        # explicitly set — same convention as OCIModel / OCIOpenAIModel.
+        # explicitly set — same convention as OCIModel / OCIChatCompletionsModel.
         if not self.compartment_id:
             self.compartment_id = oci_client.compartment_id
         self._cached_client = oci_client.client

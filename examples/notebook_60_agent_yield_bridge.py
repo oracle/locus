@@ -16,7 +16,7 @@ completion payload.
 - How nine yielded LocusEvent types map to agent.* bus events.
 - Tool-call telemetry with span_id pairing (agent.tool.started and
   agent.tool.completed share an id).
-- Token usage from result.metrics — the recommended source for cost
+- Token usage from result.metrics — the canonical source for cost
   meters and budget enforcers.
 
 Run it

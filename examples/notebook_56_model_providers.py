@@ -9,7 +9,7 @@ works against any of them — only the model object changes.
 
 Provider matrix (in order of priority):
 
-  OCI GenAI — OCIOpenAIModel /openai/v1 transport for OpenAI, Meta, xAI,
+  OCI GenAI — OCIChatCompletionsModel /openai/v1 transport for OpenAI, Meta, xAI,
     Mistral, Gemini, and non-R Cohere; OCIModel SDK transport for Cohere
     R-series.
   OpenAI    — GPT-4o, o1, o3, gpt-5.x against the direct API.
@@ -66,8 +66,12 @@ def example_providers():
     )
 
     print("\nUsage (OCI first):")
-    print('  model = get_model("oci:openai.gpt-4.1", profile="DEFAULT")        # → OCIOpenAIModel')
-    print('  model = get_model("oci:meta.llama-3.3-70b-instruct")              # → OCIOpenAIModel')
+    print(
+        '  model = get_model("oci:openai.gpt-4.1", profile="DEFAULT")        # → OCIChatCompletionsModel'
+    )
+    print(
+        '  model = get_model("oci:meta.llama-3.3-70b-instruct")              # → OCIChatCompletionsModel'
+    )
     print(
         '  model = get_model("oci:cohere.command-r-plus", '
         'profile_name="DEFAULT", auth_type="api_key")  # → OCIModel'
@@ -77,7 +81,7 @@ def example_providers():
     print('  model = get_model("ollama:llama3.3")')
     print()
     print("The 'oci:' prefix auto-routes by model family — 'cohere.command-r-*'")
-    print("uses OCIModel (SDK transport), everything else uses OCIOpenAIModel")
+    print("uses OCIModel (SDK transport), everything else uses OCIChatCompletionsModel")
     print("(/openai/v1). See docs/how-to/oci-models.md.")
 
 
@@ -88,17 +92,17 @@ def example_direct():
     """Use providers directly without the registry."""
     print("\n=== Direct provider usage ===\n")
     print(
-        f"AI rationale: {_llm_call('In one sentence, when would you instantiate OCIOpenAIModel directly instead of via the registry?')}"
+        f"AI rationale: {_llm_call('In one sentence, when would you instantiate OCIChatCompletionsModel directly instead of via the registry?')}"
     )
 
     # OCI v1 transport — the path used by every OpenAI / Meta / xAI /
     # Mistral / Gemini model on OCI GenAI.
     print("OCI GenAI — V1 (/openai/v1):")
-    print("  from locus.models import OCIOpenAIModel")
-    print('  model = OCIOpenAIModel(model="openai.gpt-4.1", profile="DEFAULT")')
+    print("  from locus.models import OCIChatCompletionsModel")
+    print('  model = OCIChatCompletionsModel(model="openai.gpt-4.1", profile="DEFAULT")')
     print()
     print("  # Workload identity on OCI VM / OKE / Functions:")
-    print("  model = OCIOpenAIModel(")
+    print("  model = OCIChatCompletionsModel(")
     print('      model="openai.gpt-4.1",')
     print('      auth_type="instance_principal",   # or "resource_principal"')
     print('      compartment_id="ocid1.compartment.oc1...",')

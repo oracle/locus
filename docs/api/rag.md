@@ -14,7 +14,7 @@ change.
 
 ## Oracle 26ai
 
-The recommended path. `OracleVectorStore` opens an async pool against
+The Oracle-native path. `OracleVectorStore` opens an async pool against
 an Autonomous Database wallet, auto-creates a `VECTOR(N, FLOAT32)`
 table on first use, and serves cosine / dot / Euclidean similarity via
 `VECTOR_DISTANCE`. `OracleInDBEmbeddings` and `OracleInDBChunker` run

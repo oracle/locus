@@ -297,7 +297,7 @@ class TestParseStreamEventEdgeCases:
 def test_init_requires_compartment_under_workload_auth() -> None:
     """Workload auth without compartment_id raises immediately.
 
-    The model follows ``OCIOpenAIModel``'s precedence exactly: env-var
+    The model follows ``OCIChatCompletionsModel``'s precedence exactly: env-var
     fallback runs only after the compartment-required check, and only
     matters in profile mode where the check doesn't fire. Under
     workload auth (``auth_type=``), an explicit compartment_id kwarg

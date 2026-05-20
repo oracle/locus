@@ -7,7 +7,7 @@ aloud.
 
 Pipeline::
 
-    user prompt ──▶ Agent (OCIOpenAIModel · chat model)
+    user prompt ──▶ Agent (OCIChatCompletionsModel · chat model)
                        │
                        │  reply text
                        ▼

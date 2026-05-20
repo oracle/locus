@@ -110,7 +110,7 @@ def get_model():
 
     OCI: routes ``cohere.command-r-*`` model ids to ``OCIModel`` (the OCI
     SDK transport, required for those) and everything else to
-    ``OCIOpenAIModel`` against ``/openai/v1`` (real SSE streaming, day-0
+    ``OCIChatCompletionsModel`` against ``/openai/v1`` (real SSE streaming, day-0
     model support). See ``docs/how-to/oci-models.md``.
     """
     profile = os.getenv("OCI_PROFILE")
@@ -127,9 +127,9 @@ def get_model():
                 compartment_id=os.getenv("OCI_COMPARTMENT"),
                 max_tokens=4096,
             )
-        from locus.models import OCIOpenAIModel
+        from locus.models import OCIChatCompletionsModel
 
-        return OCIOpenAIModel(
+        return OCIChatCompletionsModel(
             model=model_id,
             profile=profile,
             region=os.getenv("OCI_REGION", "us-chicago-1"),

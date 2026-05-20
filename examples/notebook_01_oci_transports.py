@@ -11,7 +11,7 @@ decision table.
 
 Key concepts:
 
-- ``OCIOpenAIModel`` is the default. It targets the OpenAI-compatible
+- ``OCIChatCompletionsModel`` is the default. It targets the OpenAI-compatible
   endpoint at ``/openai/v1/chat/completions`` and covers OpenAI, Meta,
   Mistral, xAI, Gemini, and non-R-series Cohere in one class.
 - ``OCIModel`` targets OCI's proprietary chat endpoint
@@ -123,18 +123,18 @@ def example_sdk_transport() -> None:
 
 
 # =============================================================================
-# OCIOpenAIModel — OpenAI-compatible endpoint, default for everything else
+# OCIChatCompletionsModel — OpenAI-compatible endpoint, default for everything else
 # =============================================================================
 
 
 def example_v1_transport() -> None:
     """The default. One class for OpenAI, Meta, Mistral, xAI, Gemini, and non-R Cohere."""
     from locus.agent import Agent
-    from locus.models.providers.oci import OCIOpenAIModel
+    from locus.models.providers.oci import OCIChatCompletionsModel
 
-    print("=== OCIOpenAIModel (OpenAI-compatible endpoint, default) ===\n")
+    print("=== OCIChatCompletionsModel (OpenAI-compatible endpoint, default) ===\n")
 
-    model = OCIOpenAIModel(
+    model = OCIChatCompletionsModel(
         model="meta.llama-3.3-70b-instruct",
         profile=_env("OCI_PROFILE"),
         region=os.environ.get("OCI_REGION", "us-chicago-1"),
@@ -164,7 +164,7 @@ def print_comparison() -> None:
             "/20231130/actions/chat",
             "/openai/v1/chat/completions",
         ),
-        ("Class", "OCIResponsesModel", "OCIModel", "OCIOpenAIModel"),
+        ("Class", "OCIResponsesModel", "OCIModel", "OCIChatCompletionsModel"),
         ("Stateful?", "server-side", "stateless", "stateless"),
         (
             "Model families",
@@ -180,7 +180,12 @@ def print_comparison() -> None:
     ]
     width = max(len(r[0]) for r in rows) + 2
     cols = [width, 26, 24, 30]
-    header = ("Field", "Responses (server-stateful)", "OCIModel (SDK)", "OCIOpenAIModel (default)")
+    header = (
+        "Field",
+        "Responses (server-stateful)",
+        "OCIModel (SDK)",
+        "OCIChatCompletionsModel (default)",
+    )
     print(" ".join(f"{c:<{w}}" for c, w in zip(header, cols, strict=False)))
     print(" ".join("-" * w for w in cols))
     for r in rows:
@@ -234,7 +239,7 @@ def main() -> None:
     asyncio.run(_amain(args.transport))
 
     print("=" * 70)
-    print("Next: notebook 02 — OCIOpenAIModel deep dive (the default path)")
+    print("Next: notebook 02 — OCIChatCompletionsModel deep dive (the default path)")
     print("=" * 70)
 
 

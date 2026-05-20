@@ -5,7 +5,7 @@
 """Vector stores for RAG.
 
 Available stores:
-- OracleVectorStore: Oracle 26ai with native VECTOR type (recommended)
+- OracleVectorStore: Oracle 26ai with native VECTOR type
 - OpenSearchVectorStore: OpenSearch with k-NN plugin
 - PgVectorStore: PostgreSQL with pgvector extension
 - InMemoryVectorStore: In-memory store (testing)

@@ -104,7 +104,7 @@ async def main() -> None:
     print("[3/4] create_deepagent(datastores={...}, max_output_tokens=2048)")
     from locus.models import get_model
 
-    # OCIOpenAIModel: profile= XOR auth_type=. We use profile= which
+    # OCIChatCompletionsModel: profile= XOR auth_type=. We use profile= which
     # auto-reads the security_token_file from ~/.oci/config[DEFAULT].
     chat_model = get_model(
         "oci:openai.gpt-4o-mini",  # reliable tool caller for smoke

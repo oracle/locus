@@ -75,7 +75,7 @@ than ~5 lines of plumbing for the standard case.
 ## Rough patches we hit
 
 1. **OCI transport split.** Cohere R-series uses `OCIModel` (native SDK
-   chat shape); openai/meta/llama/grok uses `OCIOpenAIModel` (the
+   chat shape); openai/meta/llama/grok uses `OCIChatCompletionsModel` (the
    `/openai/v1` endpoint). Picking the wrong one = 404. The workbench
    papers over this with an `oci_transport: "auto"` rule that mirrors
    `examples/config.py:_pick_oci_transport`. Would be nicer if the SDK

@@ -4,7 +4,7 @@
 """Notebook 49: Checkpoint backends on Oracle Autonomous Database 26ai.
 
 The checkpointer contract is backend-agnostic, but the production
-recommendation on OCI is Oracle 26ai — native JSON columns, vector and
+default on OCI is Oracle 26ai — native JSON columns, vector and
 text indexes in one schema, and the full capability set (list_threads,
 search, vacuum) over a single durable store. Notebook 06 covers the
 checkpointer contract itself; this notebook drives it against a real
@@ -27,7 +27,7 @@ Run it
 
 Without the env vars the notebook prints what's missing and exits cleanly
 so CI stays green. The in-memory checkpointer covered in notebook 06 is
-the developer default; Oracle 26ai is the production recommendation.
+the developer default; Oracle 26ai is the production default.
 """
 
 import asyncio

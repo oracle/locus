@@ -58,10 +58,10 @@ _LIVE_MODELS = [
 
 @pytest.fixture(scope="module")
 def oci_openai_factory():
-    from locus.models.providers.oci import OCIOpenAIModel
+    from locus.models.providers.oci import OCIChatCompletionsModel
 
     def _build(model_id: str):
-        return OCIOpenAIModel(
+        return OCIChatCompletionsModel(
             model=model_id,
             profile=_PROFILE,
             region=_REGION,

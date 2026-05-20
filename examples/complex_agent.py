@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field
 
 from locus.agent import Agent
 from locus.core.structured import create_schema_prompt, parse_structured
-from locus.models import OCIOpenAIModel
+from locus.models import OCIChatCompletionsModel
 from locus.tools import tool
 
 
@@ -456,7 +456,7 @@ async def run_complex_agent():
     print()
 
     # Create model
-    model = OCIOpenAIModel(
+    model = OCIChatCompletionsModel(
         model="openai.gpt-5",
         profile=os.environ.get("OCI_PROFILE", "DEFAULT"),
         region=os.environ.get("OCI_REGION", "us-chicago-1"),
@@ -544,7 +544,7 @@ async def run_structured_output_demo():
     print("=" * 60)
     print()
 
-    model = OCIOpenAIModel(
+    model = OCIChatCompletionsModel(
         model="openai.gpt-5",
         profile=os.environ.get("OCI_PROFILE", "DEFAULT"),
         region=os.environ.get("OCI_REGION", "us-chicago-1"),

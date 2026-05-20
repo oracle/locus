@@ -77,11 +77,11 @@ class VendorList(BaseModel):
 
 @pytest.fixture(scope="module")
 def oci_openai_factory():
-    """Returns a callable that builds an OCIOpenAIModel for a given model id."""
-    from locus.models.providers.oci import OCIOpenAIModel
+    """Returns a callable that builds an OCIChatCompletionsModel for a given model id."""
+    from locus.models.providers.oci import OCIChatCompletionsModel
 
     def _build(model_id: str):
-        return OCIOpenAIModel(
+        return OCIChatCompletionsModel(
             model=model_id,
             profile=_PROFILE,
             region=_REGION,

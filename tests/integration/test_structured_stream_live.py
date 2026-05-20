@@ -54,9 +54,9 @@ class VendorList(BaseModel):
 def _build_oci_v1():
     if not (_PROFILE and _has_oci_config()):
         return None
-    from locus.models.providers.oci import OCIOpenAIModel
+    from locus.models.providers.oci import OCIChatCompletionsModel
 
-    return OCIOpenAIModel(model="openai.gpt-4o-mini", profile=_PROFILE, region=_REGION)
+    return OCIChatCompletionsModel(model="openai.gpt-4o-mini", profile=_PROFILE, region=_REGION)
 
 
 def _build_openai_native():

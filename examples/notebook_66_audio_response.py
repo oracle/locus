@@ -11,7 +11,7 @@ model on OCI Generative AI so the response can be spoken aloud.
 
 Pipeline::
 
-    user prompt ──▶ Agent (OCIOpenAIModel · chat model)
+    user prompt ──▶ Agent (OCIChatCompletionsModel · chat model)
                        │
                        │  reply text
                        ▼
@@ -72,7 +72,7 @@ OUT_PATH = Path(__file__).resolve().parent / "notebook_66_response.mp3"
 def _build_oci_audio_client():
     """Reuse the OCI v1 signer to talk to /openai/v1/audio/speech.
 
-    OCIOpenAIModel wraps chat completions; for audio.speech.create we
+    OCIChatCompletionsModel wraps chat completions; for audio.speech.create we
     attach the same signer to a fresh openai.AsyncOpenAI so the audio
     endpoint goes through the same authenticated transport.
     """
@@ -86,7 +86,7 @@ def _build_oci_audio_client():
     region = os.environ.get("LOCUS_OCI_REGION", "us-chicago-1")
     compartment_id = os.environ.get("LOCUS_OCI_COMPARTMENT")
 
-    # Build the signer the same way OCIOpenAIModel does internally.
+    # Build the signer the same way OCIChatCompletionsModel does internally.
     import oci  # noqa: PLC0415 — optional dep, lives behind the [oci] extra
 
     cfg = oci.config.from_file(profile_name=profile)

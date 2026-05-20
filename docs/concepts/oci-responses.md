@@ -1,7 +1,7 @@
 # OCI Responses API — when to use it, what changes
 
 Locus exposes the OCI Generative AI **Responses** endpoint as a separate
-transport, `OCIResponsesModel`, alongside the default `OCIOpenAIModel`
+transport, `OCIResponsesModel`, alongside the default `OCIChatCompletionsModel`
 (which speaks `/openai/v1/chat/completions`). Picking it means opting
 into server-side conversation state — the OCI server holds the message
 thread between turns, and Locus references it via a continuation token
@@ -14,7 +14,7 @@ Use it for:
 - **Long conversations** where re-sending the full history per turn is
   wasteful and you trust OCI to retain it server-side for ~30 days.
 
-If those don't apply, use `OCIOpenAIModel` — it covers every OCI model
+If those don't apply, use `OCIChatCompletionsModel` — it covers every OCI model
 family (Cohere, Llama, Mistral, GPT, Grok, Gemini) in one transport with
 no Project OCID, no server-state lock-in.
 
@@ -33,7 +33,7 @@ agent = Agent(model=model, tools=[my_tool])
 result = agent.run_sync("Plan a trip to Tokyo.")
 ```
 
-Auth surface is identical to `OCIOpenAIModel`:
+Auth surface is identical to `OCIChatCompletionsModel`:
 
 | Mode | Constructor |
 |---|---|
@@ -45,7 +45,7 @@ Auth surface is identical to `OCIOpenAIModel`:
 feature needs one; the model raises `OCIProjectRequiredError` at request
 time if the endpoint signals that requirement.
 
-## What changes vs `OCIOpenAIModel`
+## What changes vs `OCIChatCompletionsModel`
 
 **One thing only:** `ConversationManager` strategies (window,
 summarize, truncate) don't apply. They operate on the full message

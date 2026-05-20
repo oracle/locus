@@ -90,11 +90,11 @@ For integration tests, configure these environment variables:
 ```bash
 # OCI GenAI (required for most integration tests). The transport is
 # picked automatically per model id — cohere.command-r-* uses OCIModel
-# (SDK), everything else uses OCIOpenAIModel (/openai/v1). Set
+# (SDK), everything else uses OCIChatCompletionsModel (/openai/v1). Set
 # LOCUS_OCI_TRANSPORT=v1|sdk to override. See docs/how-to/oci-models.md.
 export OCI_PROFILE="DEFAULT"
 export OCI_REGION="us-chicago-1"
-export OCI_MODEL_ID="openai.gpt-5.5"   # → OCIOpenAIModel (V1)
+export OCI_MODEL_ID="openai.gpt-5.5"   # → OCIChatCompletionsModel (V1)
 
 # Only needed when OCI_MODEL_ID is a Cohere R-series model — OCIModel
 # (SDK transport) reads OCI_AUTH_TYPE / OCI_ENDPOINT / OCI_COMPARTMENT:

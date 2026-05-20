@@ -2,7 +2,7 @@
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
 
-"""Integration tests for OCIOpenAIModel (V1 transport).
+"""Integration tests for OCIChatCompletionsModel (V1 transport).
 
 Parallels ``test_oci_integration.py`` but targets the
 ``/openai/v1/chat/completions`` endpoint. Verifies real wire behavior:
@@ -28,7 +28,7 @@ import os
 import pytest
 
 from locus.core.messages import Message
-from locus.models.providers.oci import OCIOpenAIModel
+from locus.models.providers.oci import OCIChatCompletionsModel
 
 
 pytestmark = [
@@ -49,8 +49,8 @@ def _test_region() -> str:
     return os.environ.get("OCI_REGION", DEFAULT_TEST_REGION)
 
 
-def _make_model(*, max_tokens: int = 64) -> OCIOpenAIModel:
-    """Build an ``OCIOpenAIModel`` for integration tests via OCI profile."""
+def _make_model(*, max_tokens: int = 64) -> OCIChatCompletionsModel:
+    """Build an ``OCIChatCompletionsModel`` for integration tests via OCI profile."""
     profile = os.environ.get("OCI_PROFILE")
     if not profile:
         pytest.skip("OCI_PROFILE not set")
@@ -60,7 +60,7 @@ def _make_model(*, max_tokens: int = 64) -> OCIOpenAIModel:
     # rather than fail when the suite's default test model is Cohere R.
     if model_id.lower().startswith("cohere.command-r"):
         pytest.skip(f"{model_id} is not supported on /openai/v1 — use OCIModel for Cohere R-series")
-    return OCIOpenAIModel(
+    return OCIChatCompletionsModel(
         model=model_id,
         profile=profile,
         region=_test_region(),
@@ -104,7 +104,7 @@ class TestStream:
         """SSE proof: a long answer should arrive in multiple chunks.
 
         The regular ``OCIModel.stream()`` fakes this by chunking a finished
-        response client-side. ``OCIOpenAIModel`` uses real openai-SDK SSE.
+        response client-side. ``OCIChatCompletionsModel`` uses real openai-SDK SSE.
         Most providers stream token-by-token; some (Gemini) coalesce short
         outputs into a single chunk. The prompt below is long enough that
         all providers we support today emit at least two content chunks.

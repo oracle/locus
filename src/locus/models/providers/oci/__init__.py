@@ -31,8 +31,8 @@ from locus.models.providers.oci.client import OCIAuthType, OCIClient, OCIClientC
 from locus.models.providers.oci.models import CohereProvider, GenericProvider
 from locus.models.providers.oci.openai_compat import (
     DEFAULT_OCI_GENAI_REGION,
-    OCIOpenAIConfig,
-    OCIOpenAIModel,
+    OCIChatCompletionsConfig,
+    OCIChatCompletionsModel,
     build_oci_openai_base_url,
 )
 from locus.models.providers.oci.responses import (
@@ -92,7 +92,7 @@ class OCIModel(BaseModel):
     def supports_structured_output(self) -> bool:
         """OCI's native SDK transport (Cohere R-series) doesn't expose
         OpenAI-style ``response_format``. Use the V1 transport
-        (``OCIOpenAIModel``) for that."""
+        (``OCIChatCompletionsModel``) for that."""
         return False
 
     def __init__(
@@ -397,8 +397,8 @@ __all__ = [
     "OCIConfig",
     "OCIModel",
     "OCIModelProvider",
-    "OCIOpenAIConfig",
-    "OCIOpenAIModel",
+    "OCIChatCompletionsConfig",
+    "OCIChatCompletionsModel",
     "OCIProjectRequiredError",
     "OCIResponsesConfig",
     "OCIResponsesModel",

@@ -45,7 +45,7 @@ agent.run_sync("What were we discussing?", thread_id="user-c42")
 | **[OCI Object Storage][oci-objectstorage], serverless, lifecycle policies** | `oci_bucket_checkpointer` — the day-1 OCI path |
 | Already have a checkpoint service over HTTP | `HTTPCheckpointer` |
 
-Default recommendation on OCI: `oci_bucket_checkpointer`. No DB to run,
+Default on OCI: `oci_bucket_checkpointer`. No DB to run,
 no Redis to scale, lifecycle policies handle retention, IAM handles
 auth.
 

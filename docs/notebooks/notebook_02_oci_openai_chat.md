@@ -1,7 +1,7 @@
-# OCIOpenAIModel
+# OCIChatCompletionsModel
 
 Deep dive on the default Oracle Cloud Infrastructure (OCI) Generative
-AI client class. `OCIOpenAIModel` targets the OpenAI-compatible
+AI client class. `OCIChatCompletionsModel` targets the OpenAI-compatible
 endpoint at `/openai/v1/chat/completions` and is the right choice for
 almost every agent you'll build on OCI: one class covers OpenAI, Meta,
 Mistral, xAI, Gemini, and non-R-series Cohere; no Project OCID; native

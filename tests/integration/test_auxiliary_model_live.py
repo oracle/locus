@@ -67,10 +67,12 @@ class _CountingModel:
 def test_auxiliary_model_handles_summary_call_live():
     """Two OCI models — the auxiliary wrapper should receive the summary call."""
     from locus.agent import Agent
-    from locus.models.providers.oci import OCIOpenAIModel
+    from locus.models.providers.oci import OCIChatCompletionsModel
 
-    primary = OCIOpenAIModel(model="openai.gpt-4o-mini", profile=_PROFILE, region=_REGION)
-    aux_inner = OCIOpenAIModel(model="openai.gpt-4o-mini", profile=_PROFILE, region=_REGION)
+    primary = OCIChatCompletionsModel(model="openai.gpt-4o-mini", profile=_PROFILE, region=_REGION)
+    aux_inner = OCIChatCompletionsModel(
+        model="openai.gpt-4o-mini", profile=_PROFILE, region=_REGION
+    )
     auxiliary = _CountingModel(aux_inner)
 
     agent = Agent(

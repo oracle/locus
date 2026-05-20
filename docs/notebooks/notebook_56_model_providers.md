@@ -8,7 +8,7 @@ Provider matrix (in order of priority):
 
 | Provider | Model class | Notes |
 | --- | --- | --- |
-| **OCI Generative AI** (default) | `OCIOpenAIModel` | `/openai/v1` transport — OpenAI, Meta, xAI, Mistral, Gemini, non-R Cohere |
+| **OCI Generative AI** (default) | `OCIChatCompletionsModel` | `/openai/v1` transport — OpenAI, Meta, xAI, Mistral, Gemini, non-R Cohere |
 | **OCI Generative AI** | `OCIModel` | OCI SDK transport — required for Cohere R-series |
 | OpenAI | `OpenAIModel` | GPT-4o, o1, o3, gpt-5.x against the direct API |
 | Anthropic | `AnthropicModel` | Claude models |

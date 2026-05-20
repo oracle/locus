@@ -5,7 +5,7 @@
 """End-to-end smoke tests against the **native** OpenAI and Anthropic SDKs.
 
 Existing per-feature integration tests run against OCI's two transports
-(``OCIOpenAIModel`` for openai/llama/grok/gemini families on ``/openai/v1``,
+(``OCIChatCompletionsModel`` for openai/llama/grok/gemini families on ``/openai/v1``,
 ``OCIModel`` for cohere.command-r-* via the native OCI SDK). This file
 adds the third deployment target: the **direct** vendor SDKs hit straight
 against OpenAI's and Anthropic's APIs with their own keys.

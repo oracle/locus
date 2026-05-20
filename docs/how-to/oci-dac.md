@@ -55,7 +55,7 @@ Streaming reply (chunks shown inline):
 What's proven by the run:
 
 - **Routing** — `oci:ocid1.generativeaiendpoint....` resolved to
-  `OCIModel`, not `OCIOpenAIModel`.
+  `OCIModel`, not `OCIChatCompletionsModel`.
 - **Serving mode** — `DedicatedServingMode(endpoint_id=...)` was
   accepted by the live endpoint.
 - **Real SSE** — chunks arrived as character-by-character deltas, not

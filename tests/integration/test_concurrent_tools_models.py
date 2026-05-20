@@ -10,7 +10,7 @@ deterministically with a scripted model. The single-transport twin in
 model.
 
 This file completes the matrix: parallelism is pinned per-transport so a
-regression in either ``OCIOpenAIModel`` (OpenAI-compat wire) or ``OCIModel``
+regression in either ``OCIChatCompletionsModel`` (OpenAI-compat wire) or ``OCIModel``
 (OCI native SDK wire) is caught. Mirrors the model list used by
 ``test_idempotent_models.py`` so dedup and parallelism share a transport
 coverage baseline.
@@ -82,10 +82,10 @@ _NATIVE_SDK_MODELS = [
 
 @pytest.fixture(scope="module")
 def oci_openai_factory() -> Any:
-    from locus.models.providers.oci import OCIOpenAIModel
+    from locus.models.providers.oci import OCIChatCompletionsModel
 
     def _build(model_id: str) -> Any:
-        return OCIOpenAIModel(
+        return OCIChatCompletionsModel(
             model=model_id,
             profile=_PROFILE,
             region=_REGION,

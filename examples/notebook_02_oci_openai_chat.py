@@ -2,10 +2,10 @@
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
-"""Notebook 02: call any non-R-series OCI GenAI model with ``OCIOpenAIModel``.
+"""Notebook 02: call any non-R-series OCI GenAI model with ``OCIChatCompletionsModel``.
 
 This walks through the default Oracle Cloud Infrastructure (OCI)
-Generative AI client class. ``OCIOpenAIModel`` targets the
+Generative AI client class. ``OCIChatCompletionsModel`` targets the
 OpenAI-compatible endpoint at ``/openai/v1/chat/completions`` and is
 the right choice for almost every agent you'll build on OCI.
 
@@ -48,7 +48,7 @@ from pydantic import BaseModel
 from locus.agent import Agent
 from locus.core.events import ModelChunkEvent
 from locus.core.messages import Message
-from locus.models.providers.oci import OCIOpenAIModel
+from locus.models.providers.oci import OCIChatCompletionsModel
 from locus.tools.decorator import tool
 
 
@@ -64,9 +64,9 @@ REGION = os.environ.get("OCI_REGION", "us-chicago-1")
 COMPARTMENT = os.environ.get("OCI_COMPARTMENT")
 
 
-def _make_model(model_id: str) -> OCIOpenAIModel:
+def _make_model(model_id: str) -> OCIChatCompletionsModel:
     """Same class, different model id per part."""
-    return OCIOpenAIModel(
+    return OCIChatCompletionsModel(
         model=model_id,
         profile=_env("OCI_PROFILE"),
         region=REGION,
@@ -199,7 +199,7 @@ def part5_model_swap() -> None:
 
 def main() -> None:
     print("=" * 70)
-    print("Notebook 02 — OCIOpenAIModel: the default OCI GenAI client")
+    print("Notebook 02 — OCIChatCompletionsModel: the default OCI GenAI client")
     print("=" * 70 + "\n")
     print(f"OCI_PROFILE     = {os.environ.get('OCI_PROFILE', '(unset)')}")
     print(f"OCI_REGION      = {REGION}")

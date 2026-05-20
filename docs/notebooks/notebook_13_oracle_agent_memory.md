@@ -1,6 +1,6 @@
-# Oracle agent memory — recommended Oracle-backed memory path
+# Oracle agent memory
 
-The **recommended** Oracle-backed memory manager for a Locus `Agent`.
+An Oracle-backed memory manager for a Locus `Agent`.
 Wires Locus's [`OracleAgentMemoryManager`](../api/memory.md) to
 [`oracleagentmemory`](https://pypi.org/project/oracleagentmemory/) —
 Oracle's official AI-agent-memory client backed by Oracle AI Database.

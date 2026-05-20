@@ -74,7 +74,7 @@ def test_supports_structured_output_capability_on_ollama_model():
 
 
 def test_supports_structured_output_capability_on_oci_native_model():
-    """OCIModel (native SDK transport) reports False; use OCIOpenAIModel for native."""
+    """OCIModel (native SDK transport) reports False; use OCIChatCompletionsModel for native."""
     pytest.importorskip("oci")
     from locus.models.providers.oci import OCIModel
 
@@ -87,11 +87,11 @@ def test_supports_structured_output_capability_on_oci_native_model():
 
 
 def test_oci_openai_compat_inherits_capability():
-    """OCIOpenAIModel inherits from OpenAIModel; reports True."""
+    """OCIChatCompletionsModel inherits from OpenAIModel; reports True."""
     pytest.importorskip("oci")
     from unittest.mock import MagicMock, patch
 
-    from locus.models.providers.oci.openai_compat import OCIOpenAIModel
+    from locus.models.providers.oci.openai_compat import OCIChatCompletionsModel
 
     fake_cfg = {
         "tenancy": "ocid1.tenancy.oc1..aaa",
@@ -113,7 +113,7 @@ def test_oci_openai_compat_inherits_capability():
             return_value=fake_signer,
         ),
     ):
-        model = OCIOpenAIModel(model="openai.gpt-5", profile="DEFAULT")
+        model = OCIChatCompletionsModel(model="openai.gpt-5", profile="DEFAULT")
     assert model.supports_structured_output is True
 
 
@@ -197,7 +197,7 @@ def test_inline_schema_refs_gemini_integration():
 
 
 # ---------------------------------------------------------------------------
-# OCIOpenAIModel Gemini $ref inlining — unit tests
+# OCIChatCompletionsModel Gemini $ref inlining — unit tests
 # ---------------------------------------------------------------------------
 
 
@@ -206,7 +206,7 @@ def test_oci_openai_model_requires_inlined_refs_for_gemini():
     pytest.importorskip("oci")
     from unittest.mock import MagicMock, patch
 
-    from locus.models.providers.oci.openai_compat import OCIOpenAIModel
+    from locus.models.providers.oci.openai_compat import OCIChatCompletionsModel
 
     fake_cfg = {
         "tenancy": "t",
@@ -226,8 +226,8 @@ def test_oci_openai_model_requires_inlined_refs_for_gemini():
             return_value=fake_signer,
         ),
     ):
-        gemini = OCIOpenAIModel(model="google.gemini-2.5-flash", profile="DEFAULT")
-        gpt = OCIOpenAIModel(model="openai.gpt-5", profile="DEFAULT")
+        gemini = OCIChatCompletionsModel(model="google.gemini-2.5-flash", profile="DEFAULT")
+        gpt = OCIChatCompletionsModel(model="openai.gpt-5", profile="DEFAULT")
 
     assert gemini._requires_inlined_schema_refs is True
     assert gpt._requires_inlined_schema_refs is False

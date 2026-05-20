@@ -62,9 +62,9 @@ class MockModel(BaseModel):
 
 
 def _oci_model() -> Any:
-    from locus.models import OCIOpenAIModel
+    from locus.models import OCIChatCompletionsModel
 
-    return OCIOpenAIModel(
+    return OCIChatCompletionsModel(
         model=os.environ.get("LOCUS_MODEL_ID", "openai.gpt-5.5-2026-04-23"),
         profile=os.environ.get("LOCUS_OCI_PROFILE", "DEFAULT"),
         region=os.environ.get("LOCUS_OCI_REGION", "us-chicago-1"),

@@ -4,7 +4,7 @@
 
 """OCI GenAI access via the OpenAI-compatible ``/openai/v1`` endpoint.
 
-This is the recommended OCI transport in locus for any model family that
+This is the V1 OCI transport in locus for any model family that
 speaks the OpenAI request shape on OCI (OpenAI / Meta / xAI / Mistral /
 Gemini). Cohere R-series models are not supported by OCI on this endpoint
 and will fail with a 400 from OCI — for those, use :class:`OCIModel` (the
@@ -27,16 +27,16 @@ Example::
 
     import os
     from locus.core.messages import Message
-    from locus.models.providers.oci import OCIOpenAIModel
+    from locus.models.providers.oci import OCIChatCompletionsModel
 
     # IAM via OCI config profile (typical local dev / CI)
-    model = OCIOpenAIModel(
+    model = OCIChatCompletionsModel(
         model="meta.llama-3.3-70b-instruct",
         profile="DEFAULT",
     )
 
     # Workload identity (OCI VM / OKE / Functions)
-    model = OCIOpenAIModel(
+    model = OCIChatCompletionsModel(
         model="meta.llama-3.3-70b-instruct",
         auth_type="instance_principal",
         compartment_id=os.environ["OCI_COMPARTMENT_ID"],
@@ -76,8 +76,8 @@ def build_oci_openai_base_url(region: str) -> str:
     return f"https://inference.generativeai.{region}.oci.oraclecloud.com/openai/v1"
 
 
-class OCIOpenAIConfig(OpenAIConfig):
-    """Configuration for :class:`OCIOpenAIModel`.
+class OCIChatCompletionsConfig(OpenAIConfig):
+    """Configuration for :class:`OCIChatCompletionsModel`.
 
     Inherits all OpenAI knobs from :class:`OpenAIConfig`. Adds region,
     profile, ``auth_type``, ``compartment_id``, and ``config_file`` for OCI
@@ -244,7 +244,7 @@ def _session_token_disk_refresh(cfg: dict[str, Any]) -> Callable[[], Any]:
     return _refresh
 
 
-class OCIOpenAIModel(OpenAIModel):
+class OCIChatCompletionsModel(OpenAIModel):
     """OCI GenAI model accessed through the ``/openai/v1`` endpoint.
 
     Reuses :class:`OpenAIModel` for message conversion, tool handling,
@@ -254,7 +254,7 @@ class OCIOpenAIModel(OpenAIModel):
     Pass exactly one of ``profile``, ``auth_type``.
     """
 
-    config: OCIOpenAIConfig
+    config: OCIChatCompletionsConfig
 
     def __init__(
         self,
@@ -292,7 +292,7 @@ class OCIOpenAIModel(OpenAIModel):
                 this is automatically forwarded as
                 ``max_completion_tokens`` — see :class:`OpenAIModel`.
             temperature: Default sampling temperature.
-            **kwargs: Forwarded to :class:`OCIOpenAIConfig` (top_p, seed,
+            **kwargs: Forwarded to :class:`OCIChatCompletionsConfig` (top_p, seed,
                 frequency_penalty, presence_penalty, ...).
 
         Raises:
@@ -303,7 +303,7 @@ class OCIOpenAIModel(OpenAIModel):
         modes_set = sum(x is not None for x in (profile, auth_type))
         if modes_set != 1:
             msg = (
-                "OCIOpenAIModel: specify exactly one auth mode. "
+                "OCIChatCompletionsModel: specify exactly one auth mode. "
                 "Either profile='<section_from_~/.oci/config>' (api-key path; "
                 "use profile='DEFAULT' for the default section), "
                 "or auth_type='instance_principal'|'resource_principal'|"
@@ -351,7 +351,7 @@ class OCIOpenAIModel(OpenAIModel):
             except Exception:  # noqa: BLE001 — profile load may fail; keep None
                 compartment_id = None
 
-        config = OCIOpenAIConfig(
+        config = OCIChatCompletionsConfig(
             model=model,
             api_key=None,
             base_url=base_url or build_oci_openai_base_url(region),
@@ -475,7 +475,7 @@ class OCIOpenAIModel(OpenAIModel):
 
 __all__ = [
     "DEFAULT_OCI_GENAI_REGION",
-    "OCIOpenAIConfig",
-    "OCIOpenAIModel",
+    "OCIChatCompletionsConfig",
+    "OCIChatCompletionsModel",
     "build_oci_openai_base_url",
 ]

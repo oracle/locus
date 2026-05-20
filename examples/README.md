@@ -4,9 +4,9 @@
 
 ```python
 from locus.agent import Agent
-from locus.models import OCIOpenAIModel
+from locus.models import OCIChatCompletionsModel
 
-model = OCIOpenAIModel(
+model = OCIChatCompletionsModel(
     model="openai.gpt-5",
     profile="MY_PROFILE",  # any profile in ~/.oci/config
 )
@@ -21,7 +21,7 @@ result = agent.run_sync("What is the capital of France?")
 print(result.message)  # "Paris."
 ```
 
-`OCIOpenAIModel` uses OCI GenAI's OpenAI-compatible `/openai/v1`
+`OCIChatCompletionsModel` uses OCI GenAI's OpenAI-compatible `/openai/v1`
 endpoint — real SSE streaming, day-0 model support, no GenAI Project
 OCID required. For Cohere R-series models, use `OCIModel` instead — see
 [`docs/how-to/oci-models.md`](../docs/how-to/oci-models.md) for the full

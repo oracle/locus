@@ -5,7 +5,7 @@ OpenAI, Anthropic, Ollama) and **hosted** (OCI Generative AI, which
 fronts OpenAI / Meta / xAI / Mistral / Gemini / Cohere via two
 transports).
 
-For Oracle deployments the recommended path is `OCIOpenAIModel` — the
+For Oracle deployments the default path is `OCIChatCompletionsModel` — the
 OpenAI-compatible `/openai/v1` transport with real SSE streaming, day-0
 model support, and the OCI auth chain (instance principal, resource
 principal, session token, API key).
@@ -34,14 +34,14 @@ format.
 
 ## OCI Generative AI
 
-### OpenAI-compatible transport (recommended)
+### OpenAI-compatible transport (V1)
 
-`OCIOpenAIModel` targets the `/openai/v1` transport — real SSE streaming,
+`OCIChatCompletionsModel` targets the `/openai/v1` transport — real SSE streaming,
 day-0 support for new OpenAI / Meta / xAI / Mistral / Gemini releases.
 Use this for everything except Cohere R-series.
 
-::: locus.models.providers.oci.openai_compat.OCIOpenAIModel
-::: locus.models.providers.oci.OCIOpenAIConfig
+::: locus.models.providers.oci.openai_compat.OCIChatCompletionsModel
+::: locus.models.providers.oci.OCIChatCompletionsConfig
 
 ### Cohere R-series transport
 

@@ -46,7 +46,7 @@ python examples/notebook_03_oci_responses.py
 ## See also
 
 - [Notebook 01 — the three OCI client classes side-by-side](notebook_01_oci_transports.md)
-- [Notebook 02 — OCIOpenAIModel deep dive](notebook_02_oci_openai_chat.md)
+- [Notebook 02 — OCIChatCompletionsModel deep dive](notebook_02_oci_openai_chat.md)
 - [Concepts: OCI Responses](../concepts/oci-responses.md)
 - [OCI Responses API — Oracle docs](https://docs.oracle.com/iaas/Content/generative-ai/responses-api.htm)
 - [OCI OpenAI-compatible endpoints — Oracle docs](https://docs.oracle.com/iaas/Content/generative-ai/openai-compatible-api.htm)

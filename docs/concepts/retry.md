@@ -116,7 +116,7 @@ includes retry waits.
 |---|---|
 | Flaky single calls | default `Agent(...)` retry is enough |
 | Predictable rate limits | `ModelRetryHook(max_attempts=5, retry_on=("rate_limit",))` |
-| Multi-region failover | `OCIOpenAIModel(endpoints=[primary, secondary])` |
+| Multi-region failover | `OCIChatCompletionsModel(endpoints=[primary, secondary])` |
 | Customer-facing agents | wrap the *whole agent* in your own outer retry; the inner agent treats one client request = one run |
 
 ## See also

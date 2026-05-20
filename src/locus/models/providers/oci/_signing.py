@@ -4,7 +4,7 @@
 
 """httpx.Auth wrapper that signs requests with an OCI signer.
 
-Used by :class:`OCIOpenAIModel` for IAM authentication against OCI's
+Used by :class:`OCIChatCompletionsModel` for IAM authentication against OCI's
 OpenAI-compatible ``/openai/v1`` endpoint.
 
 We deliberately don't depend on ``requests``, ``oci-openai``, or

@@ -118,13 +118,13 @@ def _register_defaults() -> None:
     #   2. Cohere R-series (``cohere.command-r-*``) needs the OCI SDK's
     #      proprietary chat shape — also ``OCIModel``.
     #   3. Everything else (OpenAI / Meta / xAI / Mistral / Gemini and
-    #      non-R Cohere on-demand) goes through ``OCIOpenAIModel``
+    #      non-R Cohere on-demand) goes through ``OCIChatCompletionsModel``
     #      against ``/openai/v1/chat/completions`` — real SSE streaming,
     #      day-0 model support, no Project OCID required.
     #
     # See docs/how-to/oci-models.md and docs/how-to/oci-dac.md.
     try:
-        from locus.models.providers.oci import OCIModel, OCIOpenAIModel
+        from locus.models.providers.oci import OCIChatCompletionsModel, OCIModel
 
         def _make_oci(m: str, **kw: Any) -> ModelProtocol:
             lowered = m.lower()
@@ -143,7 +143,7 @@ def _register_defaults() -> None:
                 env_profile = os.environ.get("OCI_PROFILE")
                 if env_profile:
                     kw["profile"] = env_profile
-            return cast("ModelProtocol", OCIOpenAIModel(model=m, **kw))
+            return cast("ModelProtocol", OCIChatCompletionsModel(model=m, **kw))
 
         register_provider("oci", _make_oci)
     except ImportError:

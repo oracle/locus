@@ -49,9 +49,9 @@ def echo(msg: str) -> str:
 
 @pytest.fixture(scope="module")
 def oci_v1():
-    from locus.models.providers.oci import OCIOpenAIModel
+    from locus.models.providers.oci import OCIChatCompletionsModel
 
-    return OCIOpenAIModel(model="openai.gpt-4o-mini", profile=_PROFILE, region=_REGION)
+    return OCIChatCompletionsModel(model="openai.gpt-4o-mini", profile=_PROFILE, region=_REGION)
 
 
 @pytest.fixture(scope="module")

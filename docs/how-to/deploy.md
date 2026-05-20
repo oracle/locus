@@ -185,7 +185,7 @@ sudo systemctl enable --now concierge
 
 ## Auth — one surface, four targets
 
-| Deployment target | Recommended `OCI_AUTH_TYPE` |
+| Deployment target | `OCI_AUTH_TYPE` |
 |---|---|
 | OCI Functions | `resource_principal` |
 | OCI Container Instances | `instance_principal` |

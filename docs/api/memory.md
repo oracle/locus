@@ -14,8 +14,7 @@ Three orthogonal layers, each with its own contract:
 
 For checkpointing (state persistence between runs), see
 [Checkpointers](checkpointers.md) — those backends are also in
-`locus.memory.backends`, with **Oracle ADB** as the recommended
-production target.
+`locus.memory.backends`, with **Oracle ADB** as the production target.
 
 ## Conversation management
 

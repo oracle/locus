@@ -5,7 +5,7 @@
 
 """Notebook 13: a Locus agent with Oracle's official agent-memory client.
 
-The recommended Oracle-backed memory path. Wires Locus's
+The Oracle-native memory path. Wires Locus's
 :class:`~locus.memory.managers.OracleAgentMemoryManager` to
 ``oracleagentmemory.core.OracleAgentMemory`` (Oracle's official
 ``oracleagentmemory`` PyPI package). Compared with the BaseStore-flavoured

@@ -6,16 +6,16 @@ Responses transport is opt-in.
 
 | Model family | Transport | Class | Endpoint |
 |---|---|---|---|
-| OpenAI (`openai.gpt-*`, `openai.o*`) | V1 | `OCIOpenAIModel` | `/openai/v1/chat/completions` |
-| Meta Llama (`meta.llama-*`) | V1 | `OCIOpenAIModel` | `/openai/v1/chat/completions` |
-| xAI Grok (`xai.grok-*`) | V1 | `OCIOpenAIModel` | `/openai/v1/chat/completions` |
-| Mistral (`mistral.*`) | V1 | `OCIOpenAIModel` | `/openai/v1/chat/completions` |
-| Google Gemini (`google.gemini-*`) | V1 | `OCIOpenAIModel` | `/openai/v1/chat/completions` |
-| Cohere non-R (`cohere.command-a*`, etc.) | V1 | `OCIOpenAIModel` | `/openai/v1/chat/completions` |
+| OpenAI (`openai.gpt-*`, `openai.o*`) | V1 | `OCIChatCompletionsModel` | `/openai/v1/chat/completions` |
+| Meta Llama (`meta.llama-*`) | V1 | `OCIChatCompletionsModel` | `/openai/v1/chat/completions` |
+| xAI Grok (`xai.grok-*`) | V1 | `OCIChatCompletionsModel` | `/openai/v1/chat/completions` |
+| Mistral (`mistral.*`) | V1 | `OCIChatCompletionsModel` | `/openai/v1/chat/completions` |
+| Google Gemini (`google.gemini-*`) | V1 | `OCIChatCompletionsModel` | `/openai/v1/chat/completions` |
+| Cohere non-R (`cohere.command-a*`, etc.) | V1 | `OCIChatCompletionsModel` | `/openai/v1/chat/completions` |
 | **Cohere R-series** (`cohere.command-r*`) | SDK | `OCIModel` | `/20231130/actions/v1/chat` |
 | **Responses (opt-in)** — gpt-5.5-pro et al. | Responses | `OCIResponsesModel` | `/openai/v1/responses` |
 
-V1 is the recommended default. It uses the standard `openai` SDK against
+V1 is the default. It uses the standard `openai` SDK against
 OCI's OpenAI-compatible endpoint, gives you **real SSE streaming**
 (token-by-token), picks up new OCI models on day-0 with no SDK update,
 and uses the same OpenAI request shape for tool calls and system
@@ -26,15 +26,15 @@ only path that reaches Responses-only OCI models (`openai.gpt-5.5-pro`
 today) and the only one that lets OCI hold conversation state between
 turns via `previous_response_id` — both modes covered below.
 
-## Recommended path — `OCIOpenAIModel`
+## V1 transport — `OCIChatCompletionsModel`
 
 ### From a laptop or CI
 
 ```python
 from locus.agent import Agent
-from locus.models import OCIOpenAIModel
+from locus.models import OCIChatCompletionsModel
 
-model = OCIOpenAIModel(
+model = OCIChatCompletionsModel(
     model="openai.gpt-5.5",
     profile="DEFAULT",        # any [profile] in ~/.oci/config
 )
@@ -53,9 +53,9 @@ profile's `tenancy` field, so you don't pass it.
 
 ```python
 import os
-from locus.models import OCIOpenAIModel
+from locus.models import OCIChatCompletionsModel
 
-model = OCIOpenAIModel(
+model = OCIChatCompletionsModel(
     model="openai.gpt-5.5",
     auth_type="instance_principal",     # or "resource_principal"
     compartment_id=os.environ["OCI_COMPARTMENT_ID"],
@@ -141,7 +141,7 @@ model = OCIModel(
 sends OCI's proprietary `CohereChatRequest` payload. It supports the
 same five auth modes (`api_key`, `security_token`, `session_token`,
 `instance_principal`, `resource_principal`) but its argument names are
-different from `OCIOpenAIModel` — `model_id=`, `profile_name=`,
+different from `OCIChatCompletionsModel` — `model_id=`, `profile_name=`,
 `compartment_id=`, `auth_type=` as an enum / string. Streaming on this
 transport is faked (the full response is chunked client-side) — that's
 an OCI-side limitation of the legacy endpoint, not a locus issue.
@@ -151,7 +151,7 @@ an OCI-side limitation of the legacy endpoint, not a locus issue.
 ```python
 from locus.models import get_model
 
-# Uses OCIOpenAIModel
+# Uses OCIChatCompletionsModel
 m1 = get_model("oci:openai.gpt-5.5", profile="DEFAULT")
 
 # Uses OCIModel (Cohere R-series)
@@ -159,7 +159,7 @@ m2 = get_model("oci:cohere.command-r-plus", profile_name="DEFAULT", auth_type="a
 ```
 
 The string-form factory in `locus.models.registry` picks `OCIModel` for
-any id starting with `cohere.command-r` and `OCIOpenAIModel` otherwise.
+any id starting with `cohere.command-r` and `OCIChatCompletionsModel` otherwise.
 You pass kwargs in the shape the picked class expects.
 
 ## Notebooks and `examples/config.py`
@@ -190,7 +190,7 @@ side-by-side.
 - **GenAI API key auth (Bearer token).** A "create an API key in the
   Console, hand it as `api_key=` and you're done" path is not yet
   reliable on OCI without a Project OCID. When it is, locus will add
-  `api_key=` to `OCIOpenAIModel` as a third auth mode (additive,
+  `api_key=` to `OCIChatCompletionsModel` as a third auth mode (additive,
   non-breaking).
 
 ## Testing
@@ -215,7 +215,7 @@ pytest tests/integration/test_oci_integration.py
 
 ## Reference
 
-- `src/locus/models/providers/oci/openai_compat.py` — `OCIOpenAIModel`.
+- `src/locus/models/providers/oci/openai_compat.py` — `OCIChatCompletionsModel`.
 - `src/locus/models/providers/oci/__init__.py` — `OCIModel`.
 - `src/locus/models/providers/oci/_signing.py` — internal httpx OCI
   request signer used by V1's IAM path.

@@ -41,7 +41,7 @@ transport explicitly when you instantiate the model class yourself.
 ```text
 oci:                                 (one prefix · three transports)
 │
-├── V1 transport       · OCIOpenAIModel       /openai/v1/chat/completions
+├── V1 transport       · OCIChatCompletionsModel       /openai/v1/chat/completions
 │   ├─ openai.*       — OpenAI commercial chat + reasoning
 │   ├─ meta.*         — Meta Llama family
 │   ├─ xai.*          — xAI Grok family
@@ -63,7 +63,7 @@ oci:                                 (one prefix · three transports)
 
 ### V1 transport — `/openai/v1` (OpenAI-compatible)
 
-`OCIOpenAIModel` calls
+`OCIChatCompletionsModel` calls
 `https://inference.generativeai.<region>.oci.oraclecloud.com/openai/v1/chat/completions`.
 
 This is the **default path for the majority of OCI models**:
@@ -226,7 +226,7 @@ The agent doesn't care. That's the OCI provider's whole pitch.
 
 | | |
 |---|---|
-| `OCIOpenAIModel` (V1) | [`src/locus/models/providers/oci/openai_compat.py`](https://github.com/oracle-samples/locus/blob/main/src/locus/models/providers/oci/openai_compat.py) |
+| `OCIChatCompletionsModel` (V1) | [`src/locus/models/providers/oci/openai_compat.py`](https://github.com/oracle-samples/locus/blob/main/src/locus/models/providers/oci/openai_compat.py) |
 | `OCIModel` (SDK + DAC) | [`src/locus/models/providers/oci/__init__.py`](https://github.com/oracle-samples/locus/blob/main/src/locus/models/providers/oci/__init__.py) |
 | Per-family request builders | [`src/locus/models/providers/oci/models/`](https://github.com/oracle-samples/locus/tree/main/src/locus/models/providers/oci/models) |
 | Routing | [`src/locus/models/registry.py`](https://github.com/oracle-samples/locus/blob/main/src/locus/models/registry.py) — `_make_oci()` |
@@ -236,7 +236,7 @@ The agent doesn't care. That's the OCI provider's whole pitch.
 - [Models overview](../models.md) — the full provider tree.
 - [OCI Responses transport](../oci-responses.md) — when to opt in, ZDR mode, server-stateful continuation.
 - [Notebook 00 — three OCI transports side-by-side](../../notebooks/notebook_01_oci_transports.md).
-- [Notebook 58 — `OCIOpenAIModel` deep dive](../../notebooks/notebook_02_oci_openai_chat.md).
+- [Notebook 58 — `OCIChatCompletionsModel` deep dive](../../notebooks/notebook_02_oci_openai_chat.md).
 - [Notebook 59 — `OCIResponsesModel` deep dive](../../notebooks/notebook_03_oci_responses.md).
 - [OCI GenAI models how-to](../../how-to/oci-models.md) — auth setup, region selection, debugging.
 - [OCI Dedicated AI Cluster (DAC)](../../how-to/oci-dac.md) — provisioned-capacity endpoints.
@@ -253,6 +253,6 @@ The agent doesn't care. That's the OCI provider's whole pitch.
 - [OCI Generative AI — Chat (V1 / SDK transport)](https://docs.oracle.com/iaas/Content/generative-ai/use-playground-chat.htm)
   — the `/20231130/actions/chat` endpoint `OCIModel` calls.
 - [OCI OpenAI-compatible endpoints](https://docs.oracle.com/iaas/Content/generative-ai/openai-compatible-api.htm)
-  — the `/openai/v1/*` surface `OCIOpenAIModel` and `OCIResponsesModel` call.
+  — the `/openai/v1/*` surface `OCIChatCompletionsModel` and `OCIResponsesModel` call.
 - [OCI Responses API](https://docs.oracle.com/iaas/Content/generative-ai/responses-api.htm)
   — server-stateful Responses transport reference.
