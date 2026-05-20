@@ -320,3 +320,156 @@ class TestOtelNotAvailable:
                     telemetry.TelemetryHook()
             finally:
                 telemetry.OTEL_AVAILABLE = original_otel
+
+
+def _otel_sdk_available() -> bool:
+    """The SDK (TracerProvider, InMemorySpanExporter) is a separate dep
+    from the OTel API. The TelemetryHook only needs the API at runtime,
+    but trace-tree assertions need the SDK's in-memory exporter."""
+    try:
+        import opentelemetry.sdk.trace  # noqa: F401
+        import opentelemetry.sdk.trace.export.in_memory_span_exporter  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+@pytest.mark.skipif(
+    not OTEL_AVAILABLE or not _otel_sdk_available(),
+    reason="OpenTelemetry API + SDK required",
+)
+class TestTraceContextPropagation:
+    """Regression tests for issue #244 — every span must share a trace tree.
+
+    Before the fix, ``TelemetryHook`` used ``tracer.start_span`` without
+    attaching the span to OTel's current context, so each invocation /
+    iteration / tool span emerged as its own trace root. Langfuse, Jaeger,
+    and any other OTLP backend then rendered N separate traces instead of
+    a single tree per agent run.
+    """
+
+    @pytest.fixture
+    def exporter(self):
+        """Wire an InMemorySpanExporter onto the global TracerProvider.
+
+        OTel's global TracerProvider can only be set once per process —
+        attempting to override it logs a warning and silently keeps the
+        original. So we install our SDK provider on first use and attach
+        a fresh processor + exporter per test, clearing between runs.
+        """
+        from opentelemetry import trace as otel_trace
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+            InMemorySpanExporter,
+        )
+
+        # Install a real SDK provider once; the default no-op provider
+        # has no `add_span_processor` so we'd silently drop spans.
+        current = otel_trace.get_tracer_provider()
+        if not isinstance(current, TracerProvider):
+            otel_trace.set_tracer_provider(TracerProvider())
+        provider = otel_trace.get_tracer_provider()
+
+        exp = InMemorySpanExporter()
+        provider.add_span_processor(SimpleSpanProcessor(exp))
+        return exp
+
+    @pytest.fixture
+    def mock_state(self):
+        """Mock AgentState used by the hook."""
+        state = MagicMock()
+        state.run_id = "trace-test"
+        state.agent_id = "test-agent"
+        state.max_iterations = 3
+        state.iteration = 0
+        state.confidence = 0.0
+        state.tool_executions = []
+        state.errors = []
+        state.messages = []
+        state.started_at = datetime.now(UTC)
+        state.updated_at = datetime.now(UTC) + timedelta(seconds=1)
+        return state
+
+    @pytest.mark.asyncio
+    async def test_all_spans_share_one_trace_id(self, exporter, mock_state):
+        """invocation + iteration + tool spans must share a single trace_id."""
+        hook = TelemetryHook(tracer_name="locus.telemetry.test-244")
+
+        await hook.on_before_invocation("Question?", mock_state)
+        await hook.on_iteration_start(0, mock_state)
+        await hook.on_before_tool_call(_before("calculator", {"x": 1}))
+        await hook.on_after_tool_call(_after("calculator", result=2, error=None))
+        await hook.on_iteration_end(0, mock_state)
+        await hook.on_after_invocation(mock_state, success=True)
+
+        spans = [
+            s
+            for s in exporter.get_finished_spans()
+            if s.instrumentation_scope.name == "locus.telemetry.test-244"
+        ]
+        # We expect: 1 invocation + 1 iteration + 1 tool = 3 spans.
+        assert len(spans) == 3, f"expected 3 spans, got {len(spans)}: {[s.name for s in spans]}"
+
+        trace_ids = {s.context.trace_id for s in spans}
+        assert len(trace_ids) == 1, (
+            f"all spans must share one trace, got {len(trace_ids)} "
+            f"distinct trace_ids — see issue #244"
+        )
+
+    @pytest.mark.asyncio
+    async def test_tool_span_is_child_of_iteration_span(self, exporter, mock_state):
+        """Tool span's parent must be the iteration span (not the invocation)."""
+        hook = TelemetryHook(tracer_name="locus.telemetry.test-244-parent")
+
+        await hook.on_before_invocation("Q", mock_state)
+        await hook.on_iteration_start(0, mock_state)
+        await hook.on_before_tool_call(_before("ping", {}))
+        await hook.on_after_tool_call(_after("ping", result="pong", error=None))
+        await hook.on_iteration_end(0, mock_state)
+        await hook.on_after_invocation(mock_state, success=True)
+
+        by_name = {
+            s.name: s
+            for s in exporter.get_finished_spans()
+            if s.instrumentation_scope.name == "locus.telemetry.test-244-parent"
+        }
+        assert "agent.invocation" in by_name
+        assert "agent.iteration.0" in by_name
+        assert "tool.ping" in by_name
+
+        # iteration's parent = invocation
+        assert by_name["agent.iteration.0"].parent is not None
+        assert (
+            by_name["agent.iteration.0"].parent.span_id
+            == by_name["agent.invocation"].context.span_id
+        ), "iteration span must be a child of invocation span"
+
+        # tool's parent = iteration
+        assert by_name["tool.ping"].parent is not None
+        assert (
+            by_name["tool.ping"].parent.span_id == by_name["agent.iteration.0"].context.span_id
+        ), "tool span must be a child of iteration span"
+
+        # invocation has no parent (it IS the root)
+        assert by_name["agent.invocation"].parent is None, "invocation must be the trace root"
+
+    @pytest.mark.asyncio
+    async def test_invocation_context_detaches_after_run(self, exporter, mock_state):
+        """A span started after `on_after_invocation` must not parent to ours.
+
+        Verifies we don't leak the invocation context into whatever the
+        caller does next (e.g. another framework's span).
+        """
+        from opentelemetry import trace as otel_trace
+
+        hook = TelemetryHook(tracer_name="locus.telemetry.test-244-detach")
+        await hook.on_before_invocation("Q", mock_state)
+        await hook.on_after_invocation(mock_state, success=True)
+
+        # After detach, the current span should be INVALID (no active span).
+        current = otel_trace.get_current_span()
+        # INVALID_SPAN.context.span_id == 0 — the "no span" sentinel.
+        assert current.get_span_context().span_id == 0, (
+            "invocation context wasn't detached — caller's spans would still be parented to ours"
+        )

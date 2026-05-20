@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 
 # Optional OpenTelemetry imports
 try:
+    from opentelemetry import context as otel_context
     from opentelemetry import metrics, trace
     from opentelemetry.trace import Span, Status, StatusCode
 
@@ -32,6 +33,7 @@ except ImportError:
     OTEL_AVAILABLE = False
     trace = None  # type: ignore[assignment]
     metrics = None  # type: ignore[assignment]
+    otel_context = None  # type: ignore[assignment]
     Span = None  # type: ignore[assignment,misc]
     Status = None  # type: ignore[assignment,misc]
     StatusCode = None  # type: ignore[assignment,misc]
@@ -94,9 +96,16 @@ class TelemetryHook(HookProvider):
         self._record_results = record_results
         self._priority = priority
 
-        # Active spans tracking
+        # Active spans tracking + OTel context tokens for proper parent-
+        # child propagation. Without attaching each span to OTel's current
+        # context, exporters see every span as a new trace root — Langfuse
+        # and similar backends then render N separate traces instead of
+        # one tree per invocation. See issue #244.
         self._invocation_span: Span | None = None
+        self._invocation_token: Any = None
         self._iteration_spans: dict[int, Span] = {}
+        self._iteration_tokens: dict[int, Any] = {}
+        self._current_iteration: int | None = None
         self._tool_spans: dict[str, tuple[Span, float]] = {}
 
         # Metrics
@@ -164,7 +173,7 @@ class TelemetryHook(HookProvider):
         prompt: str,
         state: AgentState,
     ) -> AgentState:
-        """Start invocation span.
+        """Start invocation span and attach it as the current OTel context.
 
         Args:
             prompt: User prompt
@@ -183,6 +192,12 @@ class TelemetryHook(HookProvider):
                 "service.name": self._service_name,
             },
         )
+        # Attach the span to OTel's current context so every span the
+        # agent creates inside this invocation is automatically parented
+        # to it. Without this, child spans become disconnected trace
+        # roots (issue #244).
+        ctx = trace.set_span_in_context(self._invocation_span)
+        self._invocation_token = otel_context.attach(ctx)
         self._invocation_counter.add(1, {"agent_id": state.agent_id or "default"})
         return state
 
@@ -220,6 +235,13 @@ class TelemetryHook(HookProvider):
 
             self._invocation_span.end()
             self._invocation_span = None
+
+            # Detach the invocation context — pair to the attach in
+            # `on_before_invocation`. Detaching restores whatever
+            # context was active before locus took over.
+            if self._invocation_token is not None:
+                otel_context.detach(self._invocation_token)
+                self._invocation_token = None
 
             # Record duration metric
             self._invocation_duration.record(
@@ -297,7 +319,7 @@ class TelemetryHook(HookProvider):
         iteration: int,
         state: AgentState,
     ) -> None:
-        """Start iteration span.
+        """Start iteration span as a child of the invocation span.
 
         Args:
             iteration: Iteration number
@@ -311,7 +333,13 @@ class TelemetryHook(HookProvider):
                 "locus.messages": len(state.messages),
             },
         )
+        # Push this iteration's context onto OTel's stack so any tool
+        # spans created during the iteration become children of it
+        # (which is itself a child of the invocation).
+        ctx = trace.set_span_in_context(span)
         self._iteration_spans[iteration] = span
+        self._iteration_tokens[iteration] = otel_context.attach(ctx)
+        self._current_iteration = iteration
         self._iteration_counter.add(1, {"agent_id": state.agent_id or "default"})
 
     async def on_iteration_end(
@@ -335,6 +363,14 @@ class TelemetryHook(HookProvider):
             )
             span.set_status(Status(StatusCode.OK))
             span.end()
+            # Detach the iteration context — pair to attach in
+            # `on_iteration_start`. After detach, subsequent spans
+            # parent to the invocation again.
+            token = self._iteration_tokens.pop(iteration, None)
+            if token is not None:
+                otel_context.detach(token)
+            if self._current_iteration == iteration:
+                self._current_iteration = None
 
 
 class NoOpTelemetryHook(HookProvider):
