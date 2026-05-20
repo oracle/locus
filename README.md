@@ -37,7 +37,7 @@
 </p>
 
 <p align="center">
-  <em>Oracle 26ai is wired in as a first-class backend — native <code>VECTOR(N, FLOAT32)</code> RAG, durable agent threads, in-DB chunking and embeddings, all with zero LangChain dependency.</em>
+  <em>Oracle 26ai is wired in as a first-class backend — native <code>VECTOR(N, FLOAT32)</code> RAG, durable agent threads, in-DB chunking and embeddings.</em>
 </p>
 
 ---
@@ -131,12 +131,12 @@ credentials change.
 ## The cognitive router (PRISM) — describe what you need, get the right shape
 
 Once you know agents, the next step is knowing *which* shape to use.
-The cognitive router takes a natural-language task, fills a typed
-`GoalFrame` from an LLM extractor, deterministically picks one of eight
-built-in coordination protocols, and the `CognitiveCompiler` emits the
-matching runtime primitive (`Agent`, `SequentialPipeline`,
-`ParallelPipeline`, `LoopAgent`, an `A2AClient` call, or an
-approval-gated agent) — without you hand-coding the topology.
+The cognitive router takes a natural-language task, runs an LLM
+classifier that fills a typed `GoalFrame` (intent · domain · complexity ·
+risk), matches it to one of eight built-in coordination protocols, and
+the `CognitiveCompiler` emits the matching runtime primitive (`Agent`,
+`SequentialPipeline`, `ParallelPipeline`, `LoopAgent`, an `A2AClient`
+call, or an approval-gated agent) — without you hand-coding the topology.
 
 ```python
 from locus.agent import Agent
@@ -250,21 +250,26 @@ print(result.text)
 
 ---
 
-## The agent loop
+## Inside locus — the stack, not just the loop
 
-Every locus agent runs the same four-node loop —
-**Think → Execute → Reflect → Terminate** — with one immutable state flowing through.
+A locus agent isn't a one-shot ReAct loop. The same `Agent` class runs
+inside eight orchestration shapes, chosen automatically by the **PRISM
+cognitive router** from a natural-language task, with typed reasoning
+around every Execute and **Oracle Database 26ai** as a first-class
+durable backend. The agent loop is the inner engine — locus is the
+whole stack around it.
 
 <p align="center">
-  <img src="docs/img/agent-loop.svg" alt="Locus agent loop: Think → Execute → Reflect → Terminate" width="100%">
+  <img src="docs/img/locus-stack.svg" alt="The locus stack — PRISM cognitive router compiles natural-language tasks into one of 8 orchestration shapes (SequentialPipeline, ParallelPipeline, LoopAgent, StateGraph, Orchestrator + Specialists, Swarm, Handoff Chain, A2A Mesh), each of which runs the agent loop (Think → Execute → Reflect → Terminate), powered by foundations (Models, Memory, RAG, Observability, Tools/MCP/Skills) and anchored on Oracle Database 26ai" width="100%">
 </p>
 
-- **Think** — model decides the next action or final answer.
-- **Execute** — runs tool calls in parallel; `@tool(idempotent=True)` dedupes on `(name, args)`.
-- **Reflect** — Reflexion, Grounding, Causal on cadence or on error.
-- **Terminate?** — typed stop conditions: `MaxIterations(10) | ToolCalled("submit") & ConfidenceMet(0.9)`.
+- **PRISM Cognitive Router** — an LLM classifier reads the task and fills a typed `GoalFrame` (intent · domain · complexity · risk); the `CognitiveCompiler` emits the matching runtime shape. The model classifies, never authors graph topology.
+- **Eight orchestration shapes** — `SequentialPipeline`, `ParallelPipeline`, `LoopAgent`, `StateGraph`, `Orchestrator + Specialists`, `Swarm`, `Handoff Chain`, and cross-process `A2A Mesh`. One `Agent` class composes them all; one event stream covers them all.
+- **The agent loop** — **Think → Execute → Reflect → Terminate** with one immutable state flowing through. `@tool(idempotent=True)` dedupes Execute on `(name, args)`; Reflect runs Reflexion + Grounding + Causal on cadence or on error; Terminate is composable algebra (`MaxIterations(10) | ToolCalled("submit") & ConfidenceMet(0.9)`).
+- **Foundations** — Models (OCI GenAI V1/SDK/Responses · OpenAI · Anthropic · Ollama), Memory (8 checkpoint backends, long-term store), RAG (4 vector stores, multimodal, rerank), Observability (40+ typed events, EventBus, OpenTelemetry), Tools / MCP / Skills (idempotent, both-ways MCP, guardrails, steering, evaluation).
+- **Oracle Database 26ai** — native `VECTOR(N, FLOAT32)`, durable agent threads, in-DB chunking + embeddings, cross-thread store, versioned saver.
 
-Every node emits a write-protected typed event — same stream powers SSE, telemetry hooks, and your own `async for event in agent.run(…)` consumer.
+Every node at every layer emits a write-protected typed event — the same stream powers SSE, telemetry hooks, and your own `async for event in agent.run(…)` consumer.
 
 ---
 
@@ -272,10 +277,9 @@ Every node emits a write-protected typed event — same stream powers SSE, telem
 
 locus ships native primitives for **Oracle Database 26ai** — vector
 search, durable agent threads, in-database chunking and embeddings, and
-a long-term key/value store, all without a LangChain or LangGraph
-dependency. The contract is owned end-to-end inside `locus.rag.stores`
-and `locus.memory.backends`, and the same connection envelope (DSN +
-wallet) powers every primitive.
+a long-term key/value store. The contract is owned end-to-end inside
+`locus.rag.stores` and `locus.memory.backends`, and the same connection
+envelope (DSN + wallet) powers every primitive.
 
 ```python
 from locus.rag import OCIEmbeddings, OracleVectorStore, RAGRetriever
@@ -306,9 +310,8 @@ The seven primitives:
 | **`OracleInDBChunker`** | Server-side text chunking via `DBMS_VECTOR_CHAIN.UTL_TO_CHUNKS`. Text never leaves the database. |
 | **`OracleInDBEmbeddings`** | In-database ONNX embeddings via `DBMS_VECTOR_CHAIN.UTL_TO_EMBEDDING`. Zero round-trips when the embedding model is loaded in the DB. |
 
-**Zero langchain / langgraph dependency** — the contracts live in
-locus, the SQL is generated locally, and the only runtime requirement
-is `python-oracledb` thin mode.
+The contracts live in locus, the SQL is generated locally, and the
+only runtime requirement is `python-oracledb` thin mode.
 
 → [Notebook 06 — Oracle 26ai RAG](https://oracle-samples.github.io/locus/notebooks/notebook_06_oracle_26ai_rag/) · [Notebook 07 — Oracle 26ai checkpointer](https://oracle-samples.github.io/locus/notebooks/notebook_07_oracle_26ai_checkpointer/) · [Notebooks 08-12 — loader, chunker, embeddings, store, versioned saver](https://oracle-samples.github.io/locus/notebooks/)
 
