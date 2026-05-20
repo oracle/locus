@@ -426,3 +426,9 @@ Oracle pays nothing.
   model is too small for structured output. Use `gpt-5.5-2026-04-23`,
   `gpt-4o`, or `claude-sonnet-4-6` for the demos that use
   `output_schema`.
+- **`oracle_26ai_indb_embeddings` returns 400 "In-DB ONNX model
+  'ALL_MINILM_L12_V2' is not loaded"** — the pattern defaults to the
+  canonical Oracle ONNX model name. If your ADB has the model loaded
+  under a different name (`ALLMINILM`, etc.), set `OCI_INDB_MODEL=<your-model-name>`
+  in the backend's environment before starting it. Verify what's loaded
+  with `SELECT model_name FROM user_mining_models WHERE mining_function = 'EMBEDDING';`.
