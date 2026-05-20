@@ -513,37 +513,32 @@ async def _run_composition(req: RunRequest) -> RunResponse:
 
 
 async def _run_orchestrator(req: RunRequest) -> RunResponse:
-    from locus.agent import Agent, AgentConfig
     from locus.multiagent import Orchestrator, Specialist
 
     model = build_model(req.provider)
     researcher = Specialist(
         name="researcher",
-        agent=Agent(
-            config=AgentConfig(
-                model=model,
-                system_prompt="You research topics. Be thorough.",
-                max_iterations=2,
-            )
-        ),
+        specialist_type="research",
         description="Reads sources and explains topics.",
+        system_prompt="You research topics. Be thorough.",
+        max_iterations=2,
+        model=model,
     )
     editor = Specialist(
         name="editor",
-        agent=Agent(
-            config=AgentConfig(
-                model=model,
-                system_prompt="You polish writing. Tighten, no padding.",
-                max_iterations=2,
-            )
-        ),
+        specialist_type="editor",
         description="Edits and tightens prose.",
+        system_prompt="You polish writing. Tighten, no padding.",
+        max_iterations=2,
+        model=model,
     )
     orch = Orchestrator(
-        coordinator_model=model,
-        specialists=[researcher, editor],
-        system_prompt=("Delegate research to researcher, then ask editor to tighten."),
+        name="research-and-edit",
+        description="Delegates research to a researcher specialist, then asks an editor to tighten.",
+        system_prompt="Delegate research to researcher, then ask editor to tighten.",
+        model=model,
     )
+    orch.register_specialists([researcher, editor])
     reply, events = await _drive_pipeline(orch, req.prompt)
     return RunResponse(reply=reply, events=events)
 
@@ -748,7 +743,12 @@ async def _run_memory_manager(req: RunRequest) -> RunResponse:
     )
 
     # ---- Session 2: follow-up using injected memories --------------------
-    manager2 = LLMMemoryManager(store=store, extract_fn=lambda _: [])
+    # Noop extractor — session 2 only reads memory, never writes. The
+    # extract_fn contract is async, so we wrap an empty list in a coroutine.
+    async def _noop_extract(_: list[Any]) -> list[Memory]:
+        return []
+
+    manager2 = LLMMemoryManager(store=store, extract_fn=_noop_extract)
 
     agent2 = Agent(
         config=AgentConfig(
