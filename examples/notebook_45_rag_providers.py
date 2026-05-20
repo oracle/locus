@@ -87,7 +87,7 @@ def _store(
         "password": os.environ["ORACLE_PASSWORD"],
         "wallet_location": os.path.expanduser(os.environ["ORACLE_WALLET"]),
         "wallet_password": os.environ.get("ORACLE_WALLET_PASSWORD", ""),
-        "table_name": f"locus_notebook_40_{table_suffix}",
+        "table_name": f"locus_notebook_45_{table_suffix}",
         "dimension": dimension,
         "distance_metric": distance,
     }

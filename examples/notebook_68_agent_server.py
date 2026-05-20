@@ -67,7 +67,7 @@ def _build_checkpointer():
         password=os.environ["ORACLE_PASSWORD"],
         wallet_location=os.path.expanduser(os.environ["ORACLE_WALLET"]),
         wallet_password=os.environ.get("ORACLE_WALLET_PASSWORD", ""),
-        table_name="locus_notebook_62",
+        table_name="locus_notebook_68",
     )
 
 

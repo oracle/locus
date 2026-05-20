@@ -367,7 +367,7 @@ async def part5_datastores() -> None:
         password=os.environ["ORACLE_PASSWORD"],
         wallet_location=os.path.expanduser(os.environ["ORACLE_WALLET"]),
         wallet_password=os.environ.get("ORACLE_WALLET_PASSWORD", ""),
-        table_name="locus_notebook_30_medical",
+        table_name="locus_notebook_35_medical",
         dimension=len(probe.embedding),
         distance_metric="COSINE",
     )

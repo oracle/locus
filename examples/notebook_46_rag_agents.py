@@ -67,7 +67,7 @@ def _oracle_store(suffix: str, dim: int) -> OracleVectorStore:
         password=os.environ["ORACLE_PASSWORD"],
         wallet_location=os.path.expanduser(os.environ["ORACLE_WALLET"]),
         wallet_password=os.environ.get("ORACLE_WALLET_PASSWORD", ""),
-        table_name=f"locus_notebook_41_{suffix}",
+        table_name=f"locus_notebook_46_{suffix}",
         dimension=dim,
         distance_metric="COSINE",
     )

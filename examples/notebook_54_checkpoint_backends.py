@@ -81,7 +81,7 @@ async def main() -> None:
         )
         return
 
-    table = "locus_notebook_48"
+    table = "locus_notebook_54"
 
     # Part 1: round-trip an AgentState through the Checkpointer contract.
     print("\n=== Part 1: Save / load via oracle_checkpointer ===\n")
