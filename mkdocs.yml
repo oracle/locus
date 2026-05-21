@@ -1,6 +1,6 @@
 site_name: locus
 site_description: Multi-agent workflows for Python — stream them, branch them, pause for a human, resume next week. Open source, provider-agnostic.
-site_url: https://oracle-samples.github.io/locus/
+site_url: https://locusagents.oracle.com/
 repo_url: https://github.com/oracle-samples/locus
 repo_name: oracle-samples/locus
 edit_uri: edit/main/docs/
@@ -64,7 +64,7 @@ extra_javascript:
 copyright: <span class="footer-brand"><span class="footer-brand__o" aria-hidden="true"></span><span class="footer-brand__text">Oracle Generative AI</span></span><br><span class="footer-copy">Copyright &copy; 2025–2026 <span class="oracle-mark" aria-label="Oracle"></span> and/or its affiliates</span>
 
 extra:
-  homepage: https://oracle-samples.github.io/locus/
+  homepage: https://locusagents.oracle.com/
   social:
   - icon: fontawesome/brands/github
     link: https://github.com/oracle-samples/locus

@@ -22,17 +22,17 @@
 </p>
 
 <p align="center">
-  <a href="https://oracle-samples.github.io/locus/">Documentation</a> ·
-  <a href="https://oracle-samples.github.io/locus/concepts/router/">Cognitive Router</a> ·
-  <a href="https://oracle-samples.github.io/locus/concepts/multi-agent/">Multi-agent</a> ·
-  <a href="https://oracle-samples.github.io/locus/concepts/deepagent/">DeepAgent</a> ·
-  <a href="https://oracle-samples.github.io/locus/notebooks/">68 Notebooks</a> ·
-  <a href="https://oracle-samples.github.io/locus/workbench/">Workbench</a>
+  <a href="https://locusagents.oracle.com/">Documentation</a> ·
+  <a href="https://locusagents.oracle.com/concepts/router/">Cognitive Router</a> ·
+  <a href="https://locusagents.oracle.com/concepts/multi-agent/">Multi-agent</a> ·
+  <a href="https://locusagents.oracle.com/concepts/deepagent/">DeepAgent</a> ·
+  <a href="https://locusagents.oracle.com/notebooks/">68 Notebooks</a> ·
+  <a href="https://locusagents.oracle.com/workbench/">Workbench</a>
 </p>
 
 <p align="center">
   <strong>Try every locus pattern in your browser →</strong>
-  <a href="https://oracle-samples.github.io/locus/workbench/"><strong>Workbench guide</strong></a><br>
+  <a href="https://locusagents.oracle.com/workbench/"><strong>Workbench guide</strong></a><br>
   <em>Step-by-step setup for the browser playground — run it on localhost in three terminals, or in a single Docker container. Wire up an OCI profile, or bring your own OpenAI / Anthropic key.</em>
 </p>
 
@@ -90,7 +90,7 @@ pip install "locus-sdk[sdk]"           # everything
 
 No mandatory cloud account to start — `MockModel` lets every notebook run offline.
 
-→ [Quickstart guide](https://oracle-samples.github.io/locus/how-to/quickstart/)
+→ [Quickstart guide](https://locusagents.oracle.com/how-to/quickstart/)
 
 ---
 
@@ -124,7 +124,7 @@ credentials change.
 | **Ollama** | `OllamaModel` | Any local model (llama, mistral, qwen, deepseek-r1, …) |
 | **Custom** | `register_provider("myco", MyModel)` | Implement `BaseModel` — `complete` · `stream` · `count_tokens` (~50 lines) |
 
-→ [Model providers concept page](https://oracle-samples.github.io/locus/concepts/models/)
+→ [Model providers concept page](https://locusagents.oracle.com/concepts/models/)
 
 ---
 
@@ -191,7 +191,7 @@ approval-gated agent — chosen by protocol selection, not by the model.
 | `handoff_chain` | `SequentialPipeline` of one-tool Agents | `COORDINATE` |
 | `a2a_delegate` | Cross-process A2A call (opt-in) | distributed meshes |
 
-→ [Cognitive router concept](https://oracle-samples.github.io/locus/concepts/router/) ·
+→ [Cognitive router concept](https://locusagents.oracle.com/concepts/router/) ·
 [`examples/notebook_58_cognitive_router.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_58_cognitive_router.py)
 
 ---
@@ -224,7 +224,7 @@ result = await SequentialPipeline(agents=[researcher, critic, writer]).run(
 print(result.text)
 ```
 
-→ [All patterns](https://oracle-samples.github.io/locus/concepts/multi-agent/)
+→ [All patterns](https://locusagents.oracle.com/concepts/multi-agent/)
 
 ---
 
@@ -232,21 +232,21 @@ print(result.text)
 
 | | |
 |---|---|
-| **[🧭 Cognitive router](https://oracle-samples.github.io/locus/concepts/router/)** | Describe a task → eight named protocols → right primitive compiled automatically. LLM fills a typed schema; routing is deterministic. |
-| **[🤝 Multi-agent](https://oracle-samples.github.io/locus/concepts/multi-agent/)** | Seven native patterns + cross-process A2A. One `Agent` class. One event stream. |
-| **[🔬 DeepAgent](https://oracle-samples.github.io/locus/concepts/deepagent/)** | `create_deepagent` (single agent, per-turn grounding) and `create_research_workflow` (StateGraph with post-hoc grounding eval + two-level recovery). |
-| **[📡 Observability](https://oracle-samples.github.io/locus/concepts/observability/)** | Opt-in `EventBus` — one `run_context()` streams 40+ canonical events from every layer, no external broker. `TelemetryHook` for OpenTelemetry/OTLP. |
-| **[🧠 Reasoning](https://oracle-samples.github.io/locus/concepts/reasoning/)** | `reflexion=True` · `grounding=True` · `CausalChain` · **GSAR** typed grounding layer (`arXiv:2604.23366`). |
-| **[🛡 Idempotent tools](https://oracle-samples.github.io/locus/concepts/idempotency/)** | `@tool(idempotent=True)` — dedupes on `(name, args)`. The model can't double-charge, double-book, or double-page. |
-| **[💾 Durable memory](https://oracle-samples.github.io/locus/concepts/checkpointers/)** | 8 checkpoint backends — Oracle 26ai · OCI Object Storage · PostgreSQL · Redis · OpenSearch · in-memory · file · HTTP. |
-| **[🧠 Long-term memory](https://oracle-samples.github.io/locus/concepts/memory-manager/)** | Oracle-native path: `OracleAgentMemoryManager` over Oracle's [`oracleagentmemory`](https://pypi.org/project/oracleagentmemory/) — LongMemEval-tuned recall, context cards, scoped retrieval. Portable path: `LLMMemoryManager` over any `BaseStore` (InMemory / Redis / Postgres / OpenSearch / Oracle). |
-| **[🔎 RAG](https://oracle-samples.github.io/locus/concepts/rag/)** | 4 vector stores — Oracle 26ai · OpenSearch · pgvector · in-memory. OCI Cohere + OpenAI embeddings · multimodal (PDF, image OCR, audio). |
-| **[📡 Streaming + Server](https://oracle-samples.github.io/locus/concepts/server/)** | Typed events · SSE · `AgentServer` (FastAPI, per-principal thread isolation). |
-| **[🪝 Hooks](https://oracle-samples.github.io/locus/concepts/hooks/)** | Logging · OpenTelemetry · ModelRetry · Guardrails · Steering (LLM-as-judge). |
-| **[🪙 MCP](https://oracle-samples.github.io/locus/concepts/mcp/)** | `MCPClient` consumes MCP servers. `LocusMCPServer` exposes locus tools as MCP. |
-| **[🌐 Multi-modal](https://oracle-samples.github.io/locus/concepts/multi-modal-providers/)** | `Agent(web_search=…, web_fetch=…, image_generator=…, speech_provider=…)` auto-registers tools. |
-| **[📊 Evaluation](https://oracle-samples.github.io/locus/concepts/evaluation/)** | `EvalCase` / `EvalRunner` / `EvalReport` regression suites. |
-| **[🧰 Models](https://oracle-samples.github.io/locus/concepts/models/)** | OCI GenAI (90+ models, V1 + SDK) · OpenAI · Anthropic · Ollama. |
+| **[🧭 Cognitive router](https://locusagents.oracle.com/concepts/router/)** | Describe a task → eight named protocols → right primitive compiled automatically. LLM fills a typed schema; routing is deterministic. |
+| **[🤝 Multi-agent](https://locusagents.oracle.com/concepts/multi-agent/)** | Seven native patterns + cross-process A2A. One `Agent` class. One event stream. |
+| **[🔬 DeepAgent](https://locusagents.oracle.com/concepts/deepagent/)** | `create_deepagent` (single agent, per-turn grounding) and `create_research_workflow` (StateGraph with post-hoc grounding eval + two-level recovery). |
+| **[📡 Observability](https://locusagents.oracle.com/concepts/observability/)** | Opt-in `EventBus` — one `run_context()` streams 40+ canonical events from every layer, no external broker. `TelemetryHook` for OpenTelemetry/OTLP. |
+| **[🧠 Reasoning](https://locusagents.oracle.com/concepts/reasoning/)** | `reflexion=True` · `grounding=True` · `CausalChain` · **GSAR** typed grounding layer (`arXiv:2604.23366`). |
+| **[🛡 Idempotent tools](https://locusagents.oracle.com/concepts/idempotency/)** | `@tool(idempotent=True)` — dedupes on `(name, args)`. The model can't double-charge, double-book, or double-page. |
+| **[💾 Durable memory](https://locusagents.oracle.com/concepts/checkpointers/)** | 8 checkpoint backends — Oracle 26ai · OCI Object Storage · PostgreSQL · Redis · OpenSearch · in-memory · file · HTTP. |
+| **[🧠 Long-term memory](https://locusagents.oracle.com/concepts/memory-manager/)** | Oracle-native path: `OracleAgentMemoryManager` over Oracle's [`oracleagentmemory`](https://pypi.org/project/oracleagentmemory/) — LongMemEval-tuned recall, context cards, scoped retrieval. Portable path: `LLMMemoryManager` over any `BaseStore` (InMemory / Redis / Postgres / OpenSearch / Oracle). |
+| **[🔎 RAG](https://locusagents.oracle.com/concepts/rag/)** | 4 vector stores — Oracle 26ai · OpenSearch · pgvector · in-memory. OCI Cohere + OpenAI embeddings · multimodal (PDF, image OCR, audio). |
+| **[📡 Streaming + Server](https://locusagents.oracle.com/concepts/server/)** | Typed events · SSE · `AgentServer` (FastAPI, per-principal thread isolation). |
+| **[🪝 Hooks](https://locusagents.oracle.com/concepts/hooks/)** | Logging · OpenTelemetry · ModelRetry · Guardrails · Steering (LLM-as-judge). |
+| **[🪙 MCP](https://locusagents.oracle.com/concepts/mcp/)** | `MCPClient` consumes MCP servers. `LocusMCPServer` exposes locus tools as MCP. |
+| **[🌐 Multi-modal](https://locusagents.oracle.com/concepts/multi-modal-providers/)** | `Agent(web_search=…, web_fetch=…, image_generator=…, speech_provider=…)` auto-registers tools. |
+| **[📊 Evaluation](https://locusagents.oracle.com/concepts/evaluation/)** | `EvalCase` / `EvalRunner` / `EvalReport` regression suites. |
+| **[🧰 Models](https://locusagents.oracle.com/concepts/models/)** | OCI GenAI (90+ models, V1 + SDK) · OpenAI · Anthropic · Ollama. |
 
 ---
 
@@ -313,7 +313,7 @@ The seven primitives:
 The contracts live in locus, the SQL is generated locally, and the
 only runtime requirement is `python-oracledb` thin mode.
 
-→ [Notebook 06 — Oracle 26ai RAG](https://oracle-samples.github.io/locus/notebooks/notebook_06_oracle_26ai_rag/) · [Notebook 07 — Oracle 26ai checkpointer](https://oracle-samples.github.io/locus/notebooks/notebook_07_oracle_26ai_checkpointer/) · [Notebooks 08-12 — loader, chunker, embeddings, store, versioned saver](https://oracle-samples.github.io/locus/notebooks/)
+→ [Notebook 06 — Oracle 26ai RAG](https://locusagents.oracle.com/notebooks/notebook_06_oracle_26ai_rag/) · [Notebook 07 — Oracle 26ai checkpointer](https://locusagents.oracle.com/notebooks/notebook_07_oracle_26ai_checkpointer/) · [Notebooks 08-12 — loader, chunker, embeddings, store, versioned saver](https://locusagents.oracle.com/notebooks/)
 
 ---
 
@@ -357,7 +357,7 @@ python examples/notebook_69_research_workflow.py     # full research pipeline
 | **Real-world workflows** | 62–66 | Incident response, procurement, contract review, audio |
 | **Server & full pipelines** | 67–68 | Agent server (FastAPI), full research workflow |
 
-→ [Full notebooks index](https://oracle-samples.github.io/locus/notebooks/)
+→ [Full notebooks index](https://locusagents.oracle.com/notebooks/)
 
 ---
 
@@ -435,7 +435,7 @@ The repo ships a multi-stage `Dockerfile` ready to drop into your own image
 pipeline. Deploy anywhere FastAPI runs — OCI Functions, Container Instances,
 OKE, Compute, or any cloud equivalent.
 
-→ [Deploy guide](https://oracle-samples.github.io/locus/how-to/deploy/)
+→ [Deploy guide](https://locusagents.oracle.com/how-to/deploy/)
 
 ---
 

@@ -126,4 +126,4 @@ services, so it works against the same `make research` /
 
 [t34]: https://github.com/oracle-samples/locus/blob/main/examples/notebook_35_a2a_protocol.py
 [a2a]: https://github.com/oracle-samples/locus/blob/main/src/locus/a2a/protocol.py
-[orch]: https://oracle-samples.github.io/locus/concepts/multi-agent/orchestrator/
+[orch]: https://locusagents.oracle.com/concepts/multi-agent/orchestrator/
