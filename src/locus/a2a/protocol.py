@@ -38,7 +38,11 @@ import os
 import time
 import uuid
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+
+if TYPE_CHECKING:
+    import httpx
 
 from pydantic import BaseModel, Field
 
@@ -878,9 +882,18 @@ class A2AClient:
     - :meth:`as_tool` — wrap a remote agent as a Locus ``@tool``.
     """
 
-    def __init__(self, url: str, api_key: str | None = None) -> None:
+    #: Default request timeout (seconds) when caller doesn't override.
+    DEFAULT_TIMEOUT: float = 120.0
+
+    def __init__(
+        self,
+        url: str,
+        api_key: str | None = None,
+        timeout: float | httpx.Timeout | None = None,
+    ) -> None:
         self._url = url.rstrip("/")
         self._api_key = api_key
+        self._timeout: Any = self.DEFAULT_TIMEOUT if timeout is None else timeout
 
     def _auth_headers(self) -> dict[str, str]:
         if self._api_key:
@@ -916,7 +929,13 @@ class A2AClient:
 
     # ---- JSON-RPC client helpers --------------------------------------
 
-    async def _rpc(self, method: str, params: dict[str, Any]) -> Any:
+    async def _rpc(
+        self,
+        method: str,
+        params: dict[str, Any],
+        *,
+        timeout: float | httpx.Timeout | None = None,  # noqa: ASYNC109 — forwarded to httpx, not an asyncio timer
+    ) -> Any:
         import time as _time
 
         import httpx
@@ -935,7 +954,9 @@ class A2AClient:
         }
         await emit(EV_A2A_CLIENT_SEND, target_url=self._url, method=method)
         _started = _time.perf_counter()
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(
+            timeout=self._timeout if timeout is None else timeout
+        ) as client:
             resp = await client.post(f"{self._url}/", json=body, headers=self._auth_headers())
             resp.raise_for_status()
             data = resp.json()
@@ -953,12 +974,26 @@ class A2AClient:
             raise RuntimeError(msg)
         return data["result"]
 
-    async def send_message(self, message: Message) -> Task:
+    async def send_message(
+        self,
+        message: Message,
+        *,
+        timeout: float | httpx.Timeout | None = None,  # noqa: ASYNC109 — forwarded to httpx, not an asyncio timer
+    ) -> Task:
         """Send a message via JSON-RPC ``message/send`` and return the Task."""
-        result = await self._rpc("message/send", {"message": message.model_dump(exclude_none=True)})
+        result = await self._rpc(
+            "message/send",
+            {"message": message.model_dump(exclude_none=True)},
+            timeout=timeout,
+        )
         return Task.model_validate(result)
 
-    async def send_message_streaming(self, message: Message) -> AsyncIterator[dict[str, Any]]:
+    async def send_message_streaming(
+        self,
+        message: Message,
+        *,
+        timeout: float | httpx.Timeout | None = None,  # noqa: ASYNC109 — forwarded to httpx, not an asyncio timer
+    ) -> AsyncIterator[dict[str, Any]]:
         """Send a message via JSON-RPC ``message/stream`` and yield events."""
         import httpx
 
@@ -969,8 +1004,9 @@ class A2AClient:
             "params": {"message": message.model_dump(exclude_none=True)},
         }
         headers = self._auth_headers() | {"Accept": "text/event-stream"}
+        effective_timeout = self._timeout if timeout is None else timeout
         async with (
-            httpx.AsyncClient(timeout=120.0) as client,
+            httpx.AsyncClient(timeout=effective_timeout) as client,
             client.stream("POST", f"{self._url}/", json=body, headers=headers) as resp,
         ):
             resp.raise_for_status()
@@ -1004,7 +1040,12 @@ class A2AClient:
 
     # ---- legacy convenience APIs --------------------------------------
 
-    async def invoke(self, prompt: str) -> str:
+    async def invoke(
+        self,
+        prompt: str,
+        *,
+        timeout: float | httpx.Timeout | None = None,  # noqa: ASYNC109 — forwarded to httpx, not an asyncio timer
+    ) -> str:
         """Send a flat text prompt over the legacy ``/a2a/invoke``.
 
         Useful when you control both ends of the wire and want a one-line
@@ -1014,7 +1055,9 @@ class A2AClient:
         import httpx
 
         request = A2ARequest(messages=[A2AMessage(role="user", content=prompt)])
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(
+            timeout=self._timeout if timeout is None else timeout
+        ) as client:
             resp = await client.post(
                 f"{self._url}/a2a/invoke",
                 json=request.model_dump(),

@@ -668,6 +668,93 @@ class TestA2AClient:
         assert tool.name == "custom"
         assert tool.description == "custom desc"
 
+    def test_default_timeout_matches_class_constant(self) -> None:
+        client = A2AClient(url="http://remote")
+        assert client._timeout == A2AClient.DEFAULT_TIMEOUT
+
+    def test_constructor_timeout_override_is_stored(self) -> None:
+        client = A2AClient(url="http://remote", timeout=600.0)
+        assert client._timeout == 600.0
+
+    def test_constructor_accepts_httpx_timeout_object(self) -> None:
+        t = httpx.Timeout(connect=5.0, read=600.0, write=30.0, pool=5.0)
+        client = A2AClient(url="http://remote", timeout=t)
+        assert client._timeout is t
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_send_message_uses_configured_timeout(self) -> None:
+        """Per-call timeout=None means the client's configured timeout flows
+        through to httpx.AsyncClient."""
+        captured: dict[str, object] = {}
+
+        class _SpyAsyncClient(httpx.AsyncClient):
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                captured["timeout"] = kwargs.get("timeout")
+                super().__init__(*args, **kwargs)  # type: ignore[arg-type]
+
+        respx.post("http://remote/").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": "x",
+                    "result": {
+                        "id": "t-1",
+                        "contextId": "c-1",
+                        "status": {"state": "completed", "timestamp": "2026-01-01T00:00:00Z"},
+                        "history": [],
+                        "artifacts": [],
+                        "kind": "task",
+                    },
+                },
+            )
+        )
+
+        from unittest.mock import patch
+
+        client = A2AClient(url="http://remote", timeout=600.0)
+        msg = Message(role="user", parts=[TextPart(text="hi")], messageId="m1")
+        with patch("httpx.AsyncClient", _SpyAsyncClient):
+            await client.send_message(msg)
+        assert captured["timeout"] == 600.0
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_send_message_per_call_timeout_overrides_default(self) -> None:
+        captured: dict[str, object] = {}
+
+        class _SpyAsyncClient(httpx.AsyncClient):
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                captured["timeout"] = kwargs.get("timeout")
+                super().__init__(*args, **kwargs)  # type: ignore[arg-type]
+
+        respx.post("http://remote/").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": "x",
+                    "result": {
+                        "id": "t-1",
+                        "contextId": "c-1",
+                        "status": {"state": "completed", "timestamp": "2026-01-01T00:00:00Z"},
+                        "history": [],
+                        "artifacts": [],
+                        "kind": "task",
+                    },
+                },
+            )
+        )
+
+        from unittest.mock import patch
+
+        client = A2AClient(url="http://remote")  # default 120s
+        msg = Message(role="user", parts=[TextPart(text="hi")], messageId="m1")
+        with patch("httpx.AsyncClient", _SpyAsyncClient):
+            await client.send_message(msg, timeout=900.0)
+        assert captured["timeout"] == 900.0
+
     def test_as_tool_default_name(self) -> None:
         tool = A2AClient(url="http://remote").as_tool()
         assert tool.name == "remote_agent"
