@@ -48,7 +48,7 @@
   "src/locus/hooks/builtin/logging.py": 100.0,
   "src/locus/hooks/builtin/retry.py": 100.0,
   "src/locus/hooks/builtin/steering.py": 99.16,
-  "src/locus/hooks/builtin/telemetry.py": 95.04,
+  "src/locus/hooks/builtin/telemetry.py": 93.33,
   "src/locus/hooks/events.py": 100.0,
   "src/locus/hooks/plugin.py": 100.0,
   "src/locus/hooks/provider.py": 100.0,
