@@ -13,6 +13,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 from locus.tools.decorator import tool
+from locus.tools.oci import describe_oci, use_oci
 
 
 @tool(idempotent=True)
@@ -54,4 +55,4 @@ def get_today_date() -> dict:
     }
 
 
-__all__ = ["get_today_date"]
+__all__ = ["describe_oci", "get_today_date", "use_oci"]

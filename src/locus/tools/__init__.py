@@ -4,7 +4,7 @@
 
 """Tool system for Locus."""
 
-from locus.tools.builtins import get_today_date
+from locus.tools.builtins import describe_oci, get_today_date, use_oci
 from locus.tools.context import ToolContext
 from locus.tools.decorator import tool
 from locus.tools.executor import ConcurrentExecutor, SequentialExecutor, ToolExecutor
@@ -14,6 +14,7 @@ from locus.tools.schema import generate_schema, pydantic_to_json_schema
 
 __all__ = [
     "ConcurrentExecutor",
+    "describe_oci",
     "SequentialExecutor",
     "ToolContext",
     "ToolExecutor",
@@ -22,4 +23,5 @@ __all__ = [
     "get_today_date",
     "pydantic_to_json_schema",
     "tool",
+    "use_oci",
 ]
