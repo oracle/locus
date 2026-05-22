@@ -1337,3 +1337,62 @@ class TestGraphMethods:
 
         repr_str = repr(graph)
         assert "StateGraph" in repr_str or "test_graph" in repr_str
+
+
+class TestLangGraphParityShims:
+    """Regression tests for the LangGraph-shape sync + rendering shims.
+
+    These match what ``docs/concepts/multi-agent/graph.md`` documents
+    and what LangGraph's ``CompiledStateGraph`` exposes.
+    """
+
+    def _trivial(self) -> StateGraph:
+        from locus.multiagent.graph import END, START
+
+        g = StateGraph()
+
+        async def bump(inputs):
+            return {"x": (inputs.get("x") or 0) + 1}
+
+        g.add_node("bump", bump)
+        g.add_edge(START, "bump")
+        g.add_edge("bump", END)
+        return g.compile()
+
+    def test_invoke_is_sync_and_runs(self):
+        compiled = self._trivial()
+        out = compiled.invoke({"x": 1})
+        assert out["x"] == 2
+
+    def test_run_sync_alias(self):
+        compiled = self._trivial()
+        assert compiled.run_sync({"x": 1})["x"] == compiled.invoke({"x": 1})["x"]
+
+    def test_invoke_refuses_inside_running_loop(self):
+        import asyncio
+
+        compiled = self._trivial()
+
+        async def caller():
+            compiled.invoke({"x": 1})
+
+        with pytest.raises(RuntimeError, match="running event loop"):
+            asyncio.run(caller())
+
+    def test_get_mermaid_and_draw_mermaid_equal(self):
+        compiled = self._trivial()
+        mermaid = compiled.get_mermaid()
+        assert mermaid == compiled.draw_mermaid()
+        assert mermaid.startswith("graph TD")
+        assert "bump" in mermaid
+
+    def test_get_graph_chain_to_draw_mermaid(self):
+        # LangGraph parity: `compiled.get_graph().draw_mermaid()` works.
+        compiled = self._trivial()
+        assert compiled.get_graph().draw_mermaid() == compiled.draw_mermaid()
+
+    def test_draw_ascii_runs(self):
+        compiled = self._trivial()
+        ascii_art = compiled.draw_ascii()
+        assert isinstance(ascii_art, str)
+        assert ascii_art

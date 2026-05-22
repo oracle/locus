@@ -1448,6 +1448,37 @@ class StateGraph(BaseModel):
         result = await self.execute(inputs or {}, config=config)
         return result.final_state
 
+    def invoke(
+        self,
+        inputs: dict[str, Any] | None = None,
+        config: GraphConfig | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Synchronous entry point — LangGraph parity for ``CompiledStateGraph.invoke``.
+
+        Thin sync wrapper around :meth:`ainvoke`. Refuses to run when called
+        from inside a live event loop — use :meth:`ainvoke` there instead.
+        """
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(self.ainvoke(inputs, config=config, **kwargs))
+        msg = (
+            "StateGraph.invoke() called from inside a running event loop. "
+            "Use `await graph.ainvoke(...)` from async code."
+        )
+        raise RuntimeError(msg)
+
+    def run_sync(
+        self,
+        inputs: dict[str, Any] | None = None,
+        config: GraphConfig | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Alias for :meth:`invoke` — matches the spelling used in the
+        ``docs/concepts/multi-agent/graph.md`` examples."""
+        return self.invoke(inputs, config=config, **kwargs)
+
     async def astream(
         self,
         inputs: dict[str, Any] | None = None,
@@ -1459,8 +1490,38 @@ class StateGraph(BaseModel):
             yield event
 
     def get_graph(self) -> StateGraph:
-        """LangGraph-compatible alias — returns self (graph exposes .nodes dict)."""
+        """LangGraph-compatible alias — returns self.
+
+        Self carries ``.nodes``, ``.edges``, ``.draw_mermaid()``, and
+        ``.draw_ascii()`` so the LangGraph chain ``compiled.get_graph().draw_mermaid()``
+        works out of the box.
+        """
         return self
+
+    def draw_mermaid(self, *, direction: str = "TD") -> str:
+        """Render this graph as a Mermaid flowchart.
+
+        LangGraph parity for ``compiled.get_graph().draw_mermaid()``.
+        Delegates to :func:`locus.multiagent.visualize.draw_mermaid`.
+        """
+        from locus.multiagent.visualize import draw_mermaid as _draw_mermaid
+
+        return _draw_mermaid(self, direction=direction)
+
+    def draw_ascii(self) -> str:
+        """Render this graph as ASCII.
+
+        LangGraph parity for ``compiled.get_graph().draw_ascii()``.
+        Delegates to :func:`locus.multiagent.visualize.draw_ascii`.
+        """
+        from locus.multiagent.visualize import draw_ascii as _draw_ascii
+
+        return _draw_ascii(self)
+
+    def get_mermaid(self, *, direction: str = "TD") -> str:
+        """Alias for :meth:`draw_mermaid` — matches the spelling used in
+        ``docs/concepts/multi-agent/graph.md``."""
+        return self.draw_mermaid(direction=direction)
 
     async def aget_state(self, config: Any = None) -> None:
         """LangGraph-compatible stub — locus uses checkpointer.load directly."""
