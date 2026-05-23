@@ -265,16 +265,17 @@ class TestWellKnownAgentCard:
         }
         assert body["security"] == [{"bearerAuth": []}]
 
-    def test_card_security_fields_null_when_unauthenticated(self) -> None:
+    def test_card_security_fields_empty_when_unauthenticated(self) -> None:
         """Mirror: in ``allow_unauthenticated=True`` mode the card stays
-        silent on auth so clients detect the open mode by absence."""
+        explicit about having no auth requirements without emitting nulls."""
         server = _server_with(_StubAgent([]), name="N", description="d")
         client = TestClient(server.app)
         resp = client.get("/.well-known/agent-card.json")
         assert resp.status_code == 200
         body = resp.json()
-        assert body["securitySchemes"] is None
-        assert body["security"] is None
+        assert body["securitySchemes"] == {}
+        assert "security" not in body
+        assert body["securityRequirements"] == []
 
 
 class TestJsonRpcMessageSend:

@@ -30,6 +30,7 @@ from locus.a2a.protocol import (
 from locus.a2a.spec import (
     AgentCapabilities,
     AgentCard,
+    AgentInterface,
     AgentProvider,
     AgentSkill,
     Artifact,
@@ -57,15 +58,50 @@ from locus.a2a.spec import (
     TaskStatusUpdateEvent,
     TextPart,
 )
+from locus.a2a.spec_v1 import (
+    A2A_V1_PROTOCOL_VERSION,
+    A2AV1Artifact,
+    A2AV1CancelTaskRequest,
+    A2AV1GetTaskRequest,
+    A2AV1Message,
+    A2AV1Part,
+    A2AV1Role,
+    A2AV1SendMessageConfiguration,
+    A2AV1SendMessageRequest,
+    A2AV1SendMessageResponse,
+    A2AV1StreamResponse,
+    A2AV1Task,
+    A2AV1TaskArtifactUpdateEvent,
+    A2AV1TaskState,
+    A2AV1TaskStatus,
+    A2AV1TaskStatusUpdateEvent,
+)
 
 
 __all__ = [
+    "A2A_V1_PROTOCOL_VERSION",
+    "A2AV1Artifact",
+    "A2AV1CancelTaskRequest",
+    "A2AV1GetTaskRequest",
+    "A2AV1Message",
+    "A2AV1Part",
+    "A2AV1Role",
+    "A2AV1SendMessageConfiguration",
+    "A2AV1SendMessageRequest",
+    "A2AV1SendMessageResponse",
+    "A2AV1StreamResponse",
+    "A2AV1Task",
+    "A2AV1TaskArtifactUpdateEvent",
+    "A2AV1TaskState",
+    "A2AV1TaskStatus",
+    "A2AV1TaskStatusUpdateEvent",
     # Server / client.
     "A2AClient",
     "A2AServer",
     # Spec models.
     "AgentCapabilities",
     "AgentCard",
+    "AgentInterface",
     "AgentProvider",
     "AgentSkill",
     "Artifact",

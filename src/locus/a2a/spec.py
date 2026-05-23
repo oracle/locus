@@ -58,6 +58,8 @@ UNSUPPORTED_OPERATION = -32004
 CONTENT_TYPE_NOT_SUPPORTED = -32005
 INVALID_AGENT_RESPONSE = -32006
 AUTHENTICATED_EXTENDED_CARD_NOT_CONFIGURED = -32007
+EXTENSION_SUPPORT_REQUIRED = -32008
+VERSION_NOT_SUPPORTED = -32009
 
 
 class JsonRpcRequest(BaseModel):
@@ -119,6 +121,7 @@ class AgentCapabilities(BaseModel):
     streaming: bool = False
     pushNotifications: bool = False
     stateTransitionHistory: bool = False
+    extensions: list[str] = Field(default_factory=list)
 
 
 class AgentSkill(BaseModel):
@@ -129,8 +132,17 @@ class AgentSkill(BaseModel):
     description: str
     tags: list[str] = Field(default_factory=list)
     examples: list[str] = Field(default_factory=list)
-    inputModes: list[str] | None = None
-    outputModes: list[str] | None = None
+    inputModes: list[str] = Field(default_factory=list)
+    outputModes: list[str] = Field(default_factory=list)
+
+
+class AgentInterface(BaseModel):
+    """A concrete protocol binding exposed by an A2A v1.0 agent."""
+
+    protocolBinding: str = "JSONRPC"
+    url: str
+    tenant: str | None = None
+    protocolVersion: str = "1.0"
 
 
 class AgentCard(BaseModel):
@@ -147,10 +159,13 @@ class AgentCard(BaseModel):
     provider: AgentProvider | None = None
     iconUrl: str | None = None
     version: str = "0.1.0"
+    protocolVersion: str = "1.0"
     documentationUrl: str | None = None
     capabilities: AgentCapabilities = Field(default_factory=AgentCapabilities)
-    securitySchemes: dict[str, Any] | None = None
+    securitySchemes: dict[str, Any] = Field(default_factory=dict)
     security: list[dict[str, list[str]]] | None = None
+    securityRequirements: list[dict[str, list[str]]] = Field(default_factory=list)
+    supportedInterfaces: list[AgentInterface] = Field(default_factory=list)
     defaultInputModes: list[str] = Field(default_factory=lambda: ["text/plain"])
     defaultOutputModes: list[str] = Field(default_factory=lambda: ["text/plain"])
     skills: list[AgentSkill] = Field(default_factory=list)
@@ -371,8 +386,11 @@ __all__ = [
     "TASK_NOT_CANCELABLE",
     "TASK_NOT_FOUND",
     "UNSUPPORTED_OPERATION",
+    "EXTENSION_SUPPORT_REQUIRED",
+    "VERSION_NOT_SUPPORTED",
     "AgentCapabilities",
     "AgentCard",
+    "AgentInterface",
     "AgentProvider",
     "AgentSkill",
     "Artifact",

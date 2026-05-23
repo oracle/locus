@@ -12,9 +12,9 @@ Wire surface served by :class:`A2AServer`:
 
 - ``GET  /.well-known/agent-card.json`` — public Agent Card (spec §5.5).
 - ``POST /``                            — JSON-RPC 2.0 method dispatch
-  with the method names ``message/send``, ``message/stream``,
-  ``tasks/get``, ``tasks/cancel``. ``message/stream`` returns SSE.
+  with A2A v1.0 methods when ``A2A-Version: 1.0`` is requested.
 - Backwards-compat aliases preserved from the pre-spec implementation:
+  ``message/send``, ``message/stream``, ``tasks/get``, ``tasks/cancel``,
   ``GET /agent-card``, ``POST /a2a/invoke``, ``POST /a2a/stream``.
 
 Security model
@@ -46,7 +46,18 @@ if TYPE_CHECKING:
 
 from pydantic import BaseModel, Field
 
+from locus.a2a.protocol_v1 import (
+    A2A_V1_PROTOCOL_VERSION,
+    A2A_VERSION_HEADER,
+    A2AV1_JSONRPC_METHODS,
+    A2AV1ProtocolError,
+    A2AV1ServerMixin,
+    legacy_message_to_v1,
+    task_result_to_legacy_payload,
+    v1_stream_response_to_legacy_payload,
+)
 from locus.a2a.spec import (
+    CONTENT_TYPE_NOT_SUPPORTED,
     INTERNAL_ERROR,
     INVALID_PARAMS,
     INVALID_REQUEST,
@@ -54,8 +65,11 @@ from locus.a2a.spec import (
     PUSH_NOTIFICATION_NOT_SUPPORTED,
     TASK_NOT_CANCELABLE,
     TASK_NOT_FOUND,
+    UNSUPPORTED_OPERATION,
+    VERSION_NOT_SUPPORTED,
     AgentCapabilities,
     AgentCard,
+    AgentInterface,
     AgentProvider,
     AgentSkill,
     Artifact,
@@ -176,6 +190,42 @@ def _agent_artifact(text: str) -> Artifact:
     )
 
 
+_A2A_ERROR_REASONS = {
+    TASK_NOT_FOUND: "TASK_NOT_FOUND",
+    TASK_NOT_CANCELABLE: "TASK_NOT_CANCELABLE",
+    PUSH_NOTIFICATION_NOT_SUPPORTED: "PUSH_NOTIFICATION_NOT_SUPPORTED",
+    UNSUPPORTED_OPERATION: "UNSUPPORTED_OPERATION",
+    CONTENT_TYPE_NOT_SUPPORTED: "CONTENT_TYPE_NOT_SUPPORTED",
+    VERSION_NOT_SUPPORTED: "VERSION_NOT_SUPPORTED",
+}
+
+
+def _jsonrpc_error_data(code: int, message: str) -> list[dict[str, Any]] | None:
+    reason = _A2A_ERROR_REASONS.get(code)
+    if reason is None:
+        return None
+    return [
+        {
+            "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+            "reason": reason,
+            "domain": "a2a-protocol.org",
+            "metadata": {
+                "message": message,
+                "timestamp": _now_iso(),
+            },
+        }
+    ]
+
+
+def _jsonrpc_error_response(rpc_id: str | int | None, code: int, message: str) -> dict[str, Any]:
+    error = JsonRpcError(
+        code=code,
+        message=message,
+        data=_jsonrpc_error_data(code, message),
+    )
+    return JsonRpcErrorResponse(id=rpc_id, error=error).model_dump(exclude_none=True)
+
+
 # ---------------------------------------------------------------------------
 # In-memory task store
 # ---------------------------------------------------------------------------
@@ -199,6 +249,9 @@ class _TaskStore:
 
     def get(self, task_id: str) -> Task | None:
         return self._tasks.get(task_id)
+
+    def list(self) -> list[Task]:
+        return list(self._tasks.values())
 
     def cancel(self, task_id: str) -> bool:
         """Mark a task as cancel-requested.
@@ -233,7 +286,7 @@ class _TaskStore:
 # ---------------------------------------------------------------------------
 
 
-class A2AServer:
+class A2AServer(A2AV1ServerMixin):
     """Expose a Locus Agent as a spec-compliant A2A endpoint.
 
     Args:
@@ -322,8 +375,9 @@ class A2AServer:
         # that requirement in the AgentCard so peers can discover it from
         # ``/.well-known/agent-card.json`` instead of finding out via a
         # 401 on the first call. See A2A spec §5.5 + §5.6 — closes #214.
-        security_schemes: dict[str, Any] | None = None
+        security_schemes: dict[str, Any] = {}
         security: list[dict[str, list[str]]] | None = None
+        security_requirements: list[dict[str, list[str]]] = []
         if self._api_key is not None:
             security_schemes = {
                 "bearerAuth": {
@@ -337,6 +391,17 @@ class A2AServer:
                 }
             }
             security = [{"bearerAuth": []}]
+            security_requirements = security
+
+        skills = [
+            skill.model_copy(
+                update={
+                    "inputModes": skill.inputModes or ["text/plain"],
+                    "outputModes": skill.outputModes or ["text/plain"],
+                }
+            )
+            for skill in self._skills
+        ]
 
         return AgentCard(
             name=self._name,
@@ -344,6 +409,7 @@ class A2AServer:
             url=self._url or "http://localhost",
             provider=self._provider,
             version=self._version,
+            protocolVersion=A2A_V1_PROTOCOL_VERSION,
             capabilities=AgentCapabilities(
                 streaming=True,
                 pushNotifications=False,
@@ -351,9 +417,17 @@ class A2AServer:
             ),
             securitySchemes=security_schemes,
             security=security,
+            securityRequirements=security_requirements,
+            supportedInterfaces=[
+                AgentInterface(
+                    protocolBinding="JSONRPC",
+                    url=(self._url or "http://localhost").rstrip("/") + "/",
+                    protocolVersion=A2A_V1_PROTOCOL_VERSION,
+                )
+            ],
             defaultInputModes=["text/plain"],
             defaultOutputModes=["text/plain"],
-            skills=self._skills,
+            skills=skills,
         )
 
     @property
@@ -491,14 +565,28 @@ class A2AServer:
         except Exception as e:  # noqa: BLE001
             raise _RpcError(INVALID_PARAMS, f"invalid params: {e}") from e
         prompt = _extract_user_text(send.message.parts)
-        context_id = send.message.contextId or uuid.uuid4().hex
-        task = Task(
-            id=uuid.uuid4().hex,
-            contextId=context_id,
-            status=TaskStatus(state=TaskState.submitted, timestamp=_now_iso()),
-            history=[send.message],
-        )
-        self._store.put(task)
+        if send.message.taskId:
+            task = self._store.get(send.message.taskId)
+            if task is None:
+                raise _RpcError(TASK_NOT_FOUND, f"task {send.message.taskId} not found")
+            if task.status.state in {
+                TaskState.completed,
+                TaskState.canceled,
+                TaskState.failed,
+                TaskState.rejected,
+            }:
+                raise _RpcError(TASK_NOT_CANCELABLE, "task is in a terminal state")
+            send.message.contextId = send.message.contextId or task.contextId
+            task.history.append(send.message)
+        else:
+            context_id = send.message.contextId or uuid.uuid4().hex
+            task = Task(
+                id=uuid.uuid4().hex,
+                contextId=context_id,
+                status=TaskStatus(state=TaskState.submitted, timestamp=_now_iso()),
+                history=[send.message],
+            )
+            self._store.put(task)
         try:
             await self._drive_agent(prompt, task=task)
         except Exception as e:  # noqa: BLE001
@@ -621,7 +709,7 @@ class A2AServer:
 
     def _create_app(self) -> Any:
         try:
-            from fastapi import Body, Depends, FastAPI
+            from fastapi import Body, Depends, FastAPI, Header
             from fastapi.responses import JSONResponse, StreamingResponse
         except ImportError as e:
             msg = "FastAPI required. Install with: pip install fastapi uvicorn"
@@ -654,7 +742,7 @@ class A2AServer:
         # ----- Agent Card -------------------------------------------------
         @app.get("/.well-known/agent-card.json")
         async def well_known_card(_: str = auth_dep) -> dict[str, Any]:
-            return self._build_card().model_dump()
+            return self._build_card().model_dump(exclude_none=True)
 
         @app.get("/agent-card")
         async def legacy_card(_: str = auth_dep) -> dict[str, Any]:
@@ -662,7 +750,7 @@ class A2AServer:
             # peers that still expect ``skills: list[str]`` keep
             # parsing — we re-emit just id/name/description per skill.
             card = self._build_card()
-            payload = card.model_dump()
+            payload = card.model_dump(exclude_none=True)
             payload["skills"] = [s.name for s in card.skills]
             return payload
 
@@ -670,16 +758,18 @@ class A2AServer:
         @app.post("/")
         async def jsonrpc(
             body: dict[str, Any] = Body(...),  # noqa: B008 — FastAPI dep injection
+            a2a_version: str | None = Header(default=None, alias=A2A_VERSION_HEADER),
             _: str = auth_dep,
         ) -> Any:
             try:
                 req = JsonRpcRequest.model_validate(body)
             except Exception:  # noqa: BLE001
                 return JSONResponse(
-                    JsonRpcErrorResponse(
-                        id=body.get("id") if isinstance(body, dict) else None,
-                        error=JsonRpcError(code=INVALID_REQUEST, message="Invalid Request"),
-                    ).model_dump()
+                    _jsonrpc_error_response(
+                        body.get("id") if isinstance(body, dict) else None,
+                        INVALID_REQUEST,
+                        "Invalid Request",
+                    )
                 )
 
             params = req.params if isinstance(req.params, dict) else {}
@@ -701,7 +791,42 @@ class A2AServer:
             _started = _time.perf_counter()
 
             try:
-                if req.method == "message/send":
+                if a2a_version not in (None, A2A_V1_PROTOCOL_VERSION):
+                    raise _RpcError(
+                        VERSION_NOT_SUPPORTED,
+                        f"A2A version {a2a_version!r} is not supported",
+                    )
+                use_v1 = a2a_version == A2A_V1_PROTOCOL_VERSION or (
+                    a2a_version is None and req.method in A2AV1_JSONRPC_METHODS
+                )
+                if use_v1 and req.method == "SendMessage":
+                    result = await self._handle_v1_send_message(params)
+                elif use_v1 and req.method == "GetTask":
+                    result = await self._handle_v1_get_task(params)
+                elif use_v1 and req.method == "ListTasks":
+                    result = await self._handle_v1_list_tasks(params)
+                elif use_v1 and req.method == "CancelTask":
+                    result = await self._handle_v1_cancel_task(params)
+                elif use_v1 and req.method in {
+                    "CreateTaskPushNotificationConfig",
+                    "GetTaskPushNotificationConfig",
+                    "ListTaskPushNotificationConfigs",
+                    "DeleteTaskPushNotificationConfig",
+                }:
+                    raise _RpcError(
+                        PUSH_NOTIFICATION_NOT_SUPPORTED,
+                        "push notifications are not enabled on this agent",
+                    )
+                elif use_v1 and req.method in {"SendStreamingMessage", "SubscribeToTask"}:
+                    if req.method == "SubscribeToTask":
+                        self._preflight_v1_task_subscription(params)
+                    return await self._stream_response(req, v1=True)
+                elif use_v1 and req.method == "GetExtendedAgentCard":
+                    raise _RpcError(
+                        UNSUPPORTED_OPERATION,
+                        "authenticated extended agent cards are not enabled on this agent",
+                    )
+                elif req.method == "message/send":
                     result = await self._handle_message_send(params)
                 elif req.method == "tasks/get":
                     result = await self._handle_tasks_get(params)
@@ -722,7 +847,7 @@ class A2AServer:
                     return await self._stream_response(req)
                 else:
                     raise _RpcError(METHOD_NOT_FOUND, f"unknown method {req.method!r}")
-            except _RpcError as e:
+            except (_RpcError, A2AV1ProtocolError) as e:
                 await emit(
                     EV_A2A_TASK_COMPLETED,
                     method=req.method,
@@ -730,11 +855,7 @@ class A2AServer:
                     error_code=e.code,
                     duration_ms=(_time.perf_counter() - _started) * 1000,
                 )
-                return JSONResponse(
-                    JsonRpcErrorResponse(
-                        id=req.id, error=JsonRpcError(code=e.code, message=e.message)
-                    ).model_dump()
-                )
+                return JSONResponse(_jsonrpc_error_response(req.id, e.code, e.message))
 
             await emit(
                 EV_A2A_TASK_COMPLETED,
@@ -742,7 +863,9 @@ class A2AServer:
                 success=True,
                 duration_ms=(_time.perf_counter() - _started) * 1000,
             )
-            return JSONResponse(JsonRpcSuccessResponse(id=req.id, result=result).model_dump())
+            return JSONResponse(
+                JsonRpcSuccessResponse(id=req.id, result=result).model_dump(exclude_none=True)
+            )
 
         # ----- backwards-compat invoke + stream ----------------------------
         @app.post("/a2a/invoke")
@@ -757,20 +880,24 @@ class A2AServer:
 
         return app
 
-    async def _stream_response(self, req: JsonRpcRequest) -> Any:
+    async def _stream_response(self, req: JsonRpcRequest, *, v1: bool = False) -> Any:
         from fastapi.responses import StreamingResponse
 
         params = req.params if isinstance(req.params, dict) else {}
 
         async def gen() -> AsyncIterator[str]:
             try:
-                async for result in self._stream_message(params):
-                    payload = JsonRpcSuccessResponse(id=req.id, result=result).model_dump()
+                if v1 and req.method == "SubscribeToTask":
+                    stream = self._stream_v1_task_subscription(params)
+                else:
+                    stream = self._stream_v1_message(params) if v1 else self._stream_message(params)
+                async for result in stream:
+                    payload = JsonRpcSuccessResponse(id=req.id, result=result).model_dump(
+                        exclude_none=True
+                    )
                     yield f"data: {json.dumps(payload)}\n\n"
-            except _RpcError as e:
-                payload = JsonRpcErrorResponse(
-                    id=req.id, error=JsonRpcError(code=e.code, message=e.message)
-                ).model_dump()
+            except (_RpcError, A2AV1ProtocolError) as e:
+                payload = _jsonrpc_error_response(req.id, e.code, e.message)
                 yield f"data: {json.dumps(payload)}\n\n"
             except Exception:  # noqa: BLE001 — sanitise stream errors
                 correlation_id = uuid.uuid4().hex
@@ -782,7 +909,7 @@ class A2AServer:
                         message="internal error",
                         data={"correlation_id": correlation_id},
                     ),
-                ).model_dump()
+                ).model_dump(exclude_none=True)
                 yield f"data: {json.dumps(payload)}\n\n"
 
         return StreamingResponse(gen(), media_type="text/event-stream")
@@ -890,15 +1017,23 @@ class A2AClient:
         url: str,
         api_key: str | None = None,
         timeout: float | httpx.Timeout | None = None,
+        protocol_version: str | None = A2A_V1_PROTOCOL_VERSION,
     ) -> None:
         self._url = url.rstrip("/")
         self._api_key = api_key
         self._timeout: Any = self.DEFAULT_TIMEOUT if timeout is None else timeout
+        self._protocol_version = protocol_version
 
     def _auth_headers(self) -> dict[str, str]:
         if self._api_key:
             return {"Authorization": f"Bearer {self._api_key}"}
         return {}
+
+    def _headers(self, *, include_version: bool = True) -> dict[str, str]:
+        headers = self._auth_headers()
+        if include_version and self._protocol_version:
+            headers[A2A_VERSION_HEADER] = self._protocol_version
+        return headers
 
     async def get_agent_card(self) -> AgentCard:
         """Fetch the remote agent's capability card.
@@ -911,7 +1046,7 @@ class A2AClient:
         async with httpx.AsyncClient() as client:
             for path in ("/.well-known/agent-card.json", "/agent-card"):
                 try:
-                    resp = await client.get(f"{self._url}{path}", headers=self._auth_headers())
+                    resp = await client.get(f"{self._url}{path}", headers=self._headers())
                     if resp.status_code == 200:
                         data = resp.json()
                         # Legacy peers serve flat string skills — promote.
@@ -957,7 +1092,7 @@ class A2AClient:
         async with httpx.AsyncClient(
             timeout=self._timeout if timeout is None else timeout
         ) as client:
-            resp = await client.post(f"{self._url}/", json=body, headers=self._auth_headers())
+            resp = await client.post(f"{self._url}/", json=body, headers=self._headers())
             resp.raise_for_status()
             data = resp.json()
         await emit(
@@ -981,6 +1116,14 @@ class A2AClient:
         timeout: float | httpx.Timeout | None = None,  # noqa: ASYNC109 — forwarded to httpx, not an asyncio timer
     ) -> Task:
         """Send a message via JSON-RPC ``message/send`` and return the Task."""
+        if self._protocol_version == A2A_V1_PROTOCOL_VERSION:
+            v1_message = legacy_message_to_v1(message)
+            result = await self._rpc(
+                "SendMessage",
+                {"message": v1_message.model_dump(exclude_none=True)},
+                timeout=timeout,
+            )
+            return Task.model_validate(task_result_to_legacy_payload(result))
         result = await self._rpc(
             "message/send",
             {"message": message.model_dump(exclude_none=True)},
@@ -994,16 +1137,22 @@ class A2AClient:
         *,
         timeout: float | httpx.Timeout | None = None,  # noqa: ASYNC109 — forwarded to httpx, not an asyncio timer
     ) -> AsyncIterator[dict[str, Any]]:
-        """Send a message via JSON-RPC ``message/stream`` and yield events."""
+        """Send a message via JSON-RPC streaming and yield events."""
         import httpx
 
+        if self._protocol_version == A2A_V1_PROTOCOL_VERSION:
+            method = "SendStreamingMessage"
+            message_payload = legacy_message_to_v1(message).model_dump(exclude_none=True)
+        else:
+            method = "message/stream"
+            message_payload = message.model_dump(exclude_none=True)
         body = {
             "jsonrpc": "2.0",
             "id": uuid.uuid4().hex,
-            "method": "message/stream",
-            "params": {"message": message.model_dump(exclude_none=True)},
+            "method": method,
+            "params": {"message": message_payload},
         }
-        headers = self._auth_headers() | {"Accept": "text/event-stream"}
+        headers = self._headers() | {"Accept": "text/event-stream"}
         effective_timeout = self._timeout if timeout is None else timeout
         async with (
             httpx.AsyncClient(timeout=effective_timeout) as client,
@@ -1023,18 +1172,29 @@ class A2AClient:
                 if "error" in env:
                     yield env  # surface error envelope to caller
                     break
-                yield env.get("result", env)
+                result = env.get("result", env)
+                yield (
+                    v1_stream_response_to_legacy_payload(result)
+                    if method == "SendStreamingMessage"
+                    else result
+                )
 
     async def get_task(self, task_id: str, history_length: int | None = None) -> Task:
         """Fetch a task by id (JSON-RPC ``tasks/get``)."""
         params: dict[str, Any] = {"id": task_id}
         if history_length is not None:
             params["historyLength"] = history_length
+        if self._protocol_version == A2A_V1_PROTOCOL_VERSION:
+            result = await self._rpc("GetTask", params)
+            return Task.model_validate(task_result_to_legacy_payload(result))
         result = await self._rpc("tasks/get", params)
         return Task.model_validate(result)
 
     async def cancel_task(self, task_id: str) -> Task:
         """Cancel a task (JSON-RPC ``tasks/cancel``)."""
+        if self._protocol_version == A2A_V1_PROTOCOL_VERSION:
+            result = await self._rpc("CancelTask", {"id": task_id})
+            return Task.model_validate(task_result_to_legacy_payload(result))
         result = await self._rpc("tasks/cancel", {"id": task_id})
         return Task.model_validate(result)
 

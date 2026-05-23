@@ -15,21 +15,32 @@ without an adapter.
 
 ## Wire surface
 
+`A2AServer` is v1.0-first while preserving the older Locus/pre-v1
+surface. Clients that request v1.0 send `A2A-Version: 1.0`; clients
+that request another version, or use the old method names, continue to
+hit the legacy dispatcher.
+
 `A2AServer` exposes:
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /.well-known/agent-card.json` | Public Agent Card — name, description, skills, capabilities, modes (spec §5.5). |
-| `POST /` | JSON-RPC 2.0 method dispatch — `message/send`, `message/stream`, `tasks/get`, `tasks/cancel`. |
-| `GET /agent-card`, `POST /a2a/{invoke,stream}` | Backwards-compat aliases for peers that haven't picked up the spec yet. |
+| `GET /.well-known/agent-card.json` | Public Agent Card — name, description, skills, capabilities, modes, `protocolVersion`, and `supportedInterfaces`. |
+| `POST /` + `A2A-Version: 1.0` | A2A v1.0 JSON-RPC dispatch — `SendMessage`, `SendStreamingMessage`, `GetTask`, `CancelTask`. |
+| `POST /` with old methods | Legacy JSON-RPC dispatch — `message/send`, `message/stream`, `tasks/get`, `tasks/cancel`. |
+| `GET /agent-card`, `POST /a2a/{invoke,stream}` | Backwards-compat aliases for peers using the original Locus shape. |
 
-The Task lifecycle has eight spec states: `submitted`, `working`,
-`input-required`, `auth-required`, `completed`, `canceled`, `failed`,
-`rejected`. Streaming responses on `message/stream` arrive as SSE
-events of `TaskStatusUpdateEvent` and `TaskArtifactUpdateEvent`.
+The v1.0 Task lifecycle uses protocol enum values such as
+`TASK_STATE_SUBMITTED`, `TASK_STATE_WORKING`, and
+`TASK_STATE_COMPLETED`. Locus still maps those to the Python-facing
+`TaskState` enum (`submitted`, `working`, `completed`, ...) for SDK
+callers. Streaming responses on `SendStreamingMessage` arrive as SSE
+JSON-RPC envelopes whose `result` is a v1.0 `StreamResponse`, containing
+exactly one of `task`, `message`, `statusUpdate`, or `artifactUpdate`.
+The old `final` streaming flag is not emitted on the v1.0 path.
 
-Messages carry typed `parts`: `TextPart`, `FilePart` (inline bytes or
-URI), `DataPart` (structured JSON).
+The Python SDK keeps the familiar `TextPart`, `FilePart`, and `DataPart`
+models. On the v1.0 wire they are converted to the v1.0 oneof part
+shape (`text`, `raw`, `url`, `data`) and back.
 
 ## When to use it
 
@@ -113,6 +124,13 @@ final_text = task.artifacts[-1].parts[0].text
 print(final_text)
 ```
 
+By default `A2AClient` sends `A2A-Version: 1.0` and uses the v1.0 method
+names. If it talks to an older peer that returns a legacy Task directly,
+the client still accepts it and maps it back into the SDK `Task` model.
+To force the older JSON-RPC method names from the client, pass
+`protocol_version=None` or another non-`"1.0"` value and call the legacy
+helpers.
+
 ### Streaming
 
 ```python
@@ -131,6 +149,11 @@ async for event in client.send_message_streaming(
         print("initial task:", event["id"])
 ```
 
+`send_message_streaming()` returns SDK-shaped events to Python callers
+even though the wire format is v1.0 when `A2A-Version: 1.0` is active.
+This keeps existing router and application code stable while the HTTP
+boundary remains protocol-correct.
+
 ### Task lifecycle
 
 ```python
@@ -143,6 +166,29 @@ if fresh.status.state == "input-required":
 # Or cancel.
 await client.cancel_task(task.id)
 ```
+
+## Router delegation
+
+The cognitive router's `a2a_delegate` protocol now delegates through
+`A2AClient.send_message()` first, so router-to-remote-agent calls use
+the v1.0 path by default. If the remote peer answers that `SendMessage`
+is not found, the runnable falls back to the legacy flat
+`/a2a/invoke` convenience call.
+
+```python
+from locus.router import BuilderContext, CognitiveCompiler
+
+ctx = BuilderContext(
+    model=model,
+    capabilities=capability_index,
+    a2a_endpoint="https://research.example.com",
+)
+compiler = CognitiveCompiler(ctx)
+```
+
+The remote agent still owns its tools and orchestration. The router
+passes a single user message, then unwraps the final text from the
+returned Task artifact for the normalized `RunnableResult`.
 
 ## Auth + TLS
 

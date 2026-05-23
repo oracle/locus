@@ -15,6 +15,7 @@ contract plus thin per-primitive adapters.
 from __future__ import annotations
 
 import asyncio
+import uuid
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field
@@ -193,14 +194,46 @@ class A2ARunnable(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
 
     async def execute(self, task: str) -> RunnableResult:
-        text = await self.client.invoke(task)
+        from locus.a2a import Message, TextPart
+
+        message = Message(
+            role="user",
+            parts=[TextPart(text=task)],
+            messageId=uuid.uuid4().hex,
+        )
+        try:
+            remote_task = await self.client.send_message(message)
+            text = self._extract_task_text(remote_task)
+            raw: Any = remote_task
+        except RuntimeError as exc:
+            if "A2A error -32601" not in str(exc):
+                raise
+            text = await self.client.invoke(task)
+            raw = text
         return RunnableResult(
             text=text or "",
             parsed=None,
-            raw=text,
+            raw=raw,
             protocol_id=self.protocol_id,
             frame=self.frame,
         )
+
+    @staticmethod
+    def _extract_task_text(task: Any) -> str:
+        if getattr(task, "artifacts", None):
+            for artifact in reversed(task.artifacts):
+                for part in reversed(getattr(artifact, "parts", [])):
+                    text = getattr(part, "text", None)
+                    if isinstance(text, str) and text:
+                        return text
+        status = getattr(task, "status", None)
+        message = getattr(status, "message", None)
+        if message is not None:
+            for part in reversed(getattr(message, "parts", [])):
+                text = getattr(part, "text", None)
+                if isinstance(text, str) and text:
+                    return text
+        return ""
 
 
 def wrap_agent(agent: Agent, protocol_id: str, frame: GoalFrame) -> Runnable:
