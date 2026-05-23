@@ -8,6 +8,145 @@ policy.
 
 ## [Unreleased]
 
+## [0.2.0b20] - 2026-05-22
+
+Headlined by the open-spec OCI tools (PR #254) — `use_oci` +
+`describe_oci` together let an agent drive any of the ~190 OCI Python
+SDK service modules from natural language, with one execution path
+and a read-only-by-default safety gate. Plus four smaller fixes /
+shims accumulated since b19 (telemetry trace propagation, A2A
+timeout config, LangGraph parity shims, docs canonical URL,
+README rebrand).
+
+### Added — `use_oci` + `describe_oci` built-in tools (PR #254)
+
+Two new built-ins under `locus.tools`:
+
+- **`describe_oci(service?, client?, operation?)`** — runtime
+  introspection of the OCI Python SDK. Progressively zooms: no
+  args lists ~190 services; `service` lists `*Client` classes;
+  `service + client` lists operations partitioned read-only vs
+  mutating; `service + client + operation` returns a parameter
+  schema (name, type, required/optional, description) parsed from
+  the SDK's `:param:` docstrings.
+- **`use_oci(service, client, operation, parameters, ...)`** —
+  dispatch any operation. Builds the right
+  `oci.<service>.<Client>(config)` with the requested auth
+  (`api_key` / `security_token` / `instance_principal` /
+  `resource_principal`), invokes the method, and serialises the
+  response. Result carries `http_status` + `opc-request-id` for
+  OCI-side traceability.
+
+Read-only by default — operation names that don't start with one of
+`list_/get_/head_/summarize_/describe_/search_/fetch_/compute_/
+preview_/validate_/test_` are refused unless `allow_mutations=True`
+is passed explicitly or `LOCUS_USE_OCI_ALLOW_MUTATIONS=1` is set.
+
+The agent loop becomes: NL prompt → `describe_oci` to learn the
+shape → `use_oci` to execute → English summary. One execution path,
+one auth code-path, one serialiser, one mutation gate covering all
+of Identity, Compute, Database, Object Storage, Networking, Vault,
+Functions, Bastion, GenAI, and the rest.
+
+```python
+from locus import Agent
+from locus.models import get_model
+from locus.tools import describe_oci, use_oci
+
+agent = Agent(
+    model=get_model("oci:openai.gpt-5", profile="MY_GENAI"),
+    tools=[describe_oci, use_oci],
+    system_prompt="Discover with describe_oci first, then use_oci.",
+)
+agent.run_sync("Are there any compute instances running anywhere in my tenancy?")
+```
+
+Surface: `locus.tools.use_oci`, `locus.tools.describe_oci`.
+Walk-through: `examples/notebook_70_oci_tools.py` and
+[Notebook 70](https://locusagents.oracle.com/notebooks/notebook_70_oci_tools/).
+Concept: [Tools — Open-spec built-ins for the Oracle estate](https://locusagents.oracle.com/concepts/tools/#open-spec-built-ins-for-the-oracle-estate).
+
+### Added — LangGraph parity shims on `StateGraph` (PR #249)
+
+Closes four documented gaps between locus `StateGraph` and
+LangGraph's `CompiledStateGraph`:
+
+- `invoke()` / `run_sync()` — sync wrappers around `ainvoke`.
+  Refuse with a clear error when called inside a running event
+  loop, pointing at `ainvoke`.
+- `draw_mermaid()` / `draw_ascii()` / `get_mermaid()` on
+  `StateGraph` — so `compiled.get_graph().draw_mermaid()` works
+  LangGraph-style.
+- `get_graph()` docstring spells out the rendering chain.
+
+`run_sync` and `get_mermaid` were already documented in
+`docs/concepts/multi-agent/graph.md` but the methods were missing —
+this brings the API in line with the docs.
+
+### Changed — notebook nav strictly sequential + topical (PR #254)
+
+The Notebooks navigation re-organised to reflect the agentic
+framing: 1-5 OCI Generative AI, 6-15 Agent Foundations, 16-23
+Graphs & composition, 24-34 Multi-agent, 35-37 Reasoning, 38-44 RAG
+(including Oracle 26ai RAG / ADB loader / in-DB chunker / in-DB
+embeddings at 41-44), 45-49 Skills + playbooks + plugins, 50-57
+Production (with Oracle 26ai checkpointer / versioned saver at
+53-54 alongside Checkpoint backends at 52), 58-62 Cognitive router
+& observability, 63-67 Real-world workflows, 68-70 Server & full
+pipelines. The Oracle 26ai notebooks now live in the agent sections
+they belong in — RAG, Agent Foundations, Production — rather than a
+dedicated "database" section.
+
+Mechanically: 48 notebook renames (`.py` + rendered `.md`) executed
+in two phases through a TMP namespace to avoid collisions, plus 376
+cross-reference rewrites across `mkdocs.yml`, README, CHANGELOG,
+every concept page, every rendered notebook, and the workbench
+docs.
+
+### Fixed — `A2AClient` httpx timeout configurable (PR #247 / #251)
+
+`A2AClient` hardcoded `httpx.AsyncClient(timeout=120.0)` in `_rpc`,
+`send_message_streaming`, and `invoke`, with no public API to
+override. Long-running agent calls (code-agents with many tool
+iterations, Terraform validate loops, etc.) exceeded 120s and
+raised `httpx.ReadTimeout` mid-task — forcing callers to drop down
+to raw `httpx` and lose locus auth/error mapping.
+
+Adds a `timeout` parameter to `A2AClient.__init__` (default `120.0`,
+also accepts `httpx.Timeout`) and a per-call `timeout=` override on
+`send_message`, `send_message_streaming`, and `invoke` for one-off
+bumps without rebuilding the client. Default behaviour is
+unchanged — the constant `A2AClient.DEFAULT_TIMEOUT = 120.0` is
+what every existing call site still gets.
+
+### Fixed — OTel trace context propagation through agent run (PR #245)
+
+The agent's `run()` event loop was starting fresh OpenTelemetry
+spans without inheriting the caller's trace context, so spans from
+inside the loop appeared as detached roots in observability
+backends. Propagate the calling trace context so every span emitted
+during a single `agent.run(...)` shares one trace id, making
+distributed traces collapse cleanly across composition / handoff /
+A2A boundaries.
+
+### Changed — README rebrand (PR #246)
+
+Drops the "agent loop" framing — locus is positioned around the
+broader **locus stack** (agent + multi-agent + cognitive router +
+RAG + memory + skills + A2A + observability), not a single ReAct
+loop. Adjusts the header copy, the capability matrix introduction,
+and the README screenshots accordingly.
+
+### Changed — canonical docs URL is `locusagents.oracle.com` (PR #248)
+
+`https://locusagents.oracle.com/` is now the canonical docs URL —
+the old `oracle-samples.github.io/locus/` redirects to it. Updates
+`site_url` + `extra.homepage` in `mkdocs.yml` so the canonical
+link, sitemap, and OG/Twitter card absolute URLs resolve directly
+(no redirect hop). Rewrites the 29 doc links in `README.md` and the
+orchestrator link in `examples/projects/a2a-mesh/README.md` to the
+canonical domain.
+
 ## [0.2.0b19] - 2026-05-20
 
 Bundles the OCI V1 transport rename (`OCIOpenAIModel` → `OCIChatCompletionsModel`,
