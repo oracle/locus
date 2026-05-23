@@ -245,6 +245,17 @@ class TestAgentConfig:
         config = AgentConfig(model="openai:gpt-4o")
         assert "helpful" in config.system_prompt.lower()
 
+    def test_name_accepted_and_stored(self):
+        """``AgentConfig`` accepts a display name without erroring on
+        ``extra='forbid'`` — users putting ``name=`` on the agent
+        reasonably expect to pass it on the config too."""
+        config = AgentConfig(model="openai:gpt-4o", name="planner")
+        assert config.name == "planner"
+
+    def test_name_defaults_to_none(self):
+        config = AgentConfig(model="openai:gpt-4o")
+        assert config.name is None
+
 
 class TestReasoningShorthand:
     """Boolean shorthand for reflexion + grounding configs.

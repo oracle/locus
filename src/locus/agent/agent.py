@@ -214,6 +214,11 @@ class Agent(AgentRuntimeMixin, BaseModel):
 
         initialize_agent(self)
 
+    @property
+    def name(self) -> str | None:
+        """Display name from the config (multi-agent label, logs, traces)."""
+        return self.config.name
+
     def run_sync(
         self,
         prompt: str,

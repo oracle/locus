@@ -48,6 +48,53 @@ class TestOCIModelBasics:
         assert m.config.auth_type == OCIAuthType.API_KEY
 
 
+class TestOCIModelRegionAndProfileAlias:
+    """``region=`` builds the inference endpoint; ``profile=`` is an
+    alias for ``profile_name``. Both exist so users don't have to type
+    out the full ``https://inference.generativeai.<region>.oci.oraclecloud.com``
+    URL just to target a cross-region model, and so ``profile=`` (the
+    natural name) stops being silently swallowed into ``**kwargs``."""
+
+    def test_region_builds_inference_endpoint(self) -> None:
+        m = OCIModel(model_id="openai.gpt-oss-20b", region="us-chicago-1")
+        assert m.config.service_endpoint == (
+            "https://inference.generativeai.us-chicago-1.oci.oraclecloud.com"
+        )
+
+    def test_explicit_endpoint_wins_over_region(self) -> None:
+        explicit = "https://example.invalid/v1"
+        m = OCIModel(
+            model_id="openai.gpt-oss-20b",
+            region="us-chicago-1",
+            service_endpoint=explicit,
+        )
+        assert m.config.service_endpoint == explicit
+
+    def test_no_region_no_endpoint_means_endpoint_stays_none(self) -> None:
+        m = OCIModel(model_id="cohere.command-r-plus")
+        assert m.config.service_endpoint is None
+
+    def test_profile_alias_sets_profile_name(self) -> None:
+        m = OCIModel(model_id="cohere.command-r-plus", profile="MY_SESSION_PROFILE")
+        assert m.config.profile_name == "MY_SESSION_PROFILE"
+
+    def test_profile_and_profile_name_same_value_is_fine(self) -> None:
+        m = OCIModel(
+            model_id="cohere.command-r-plus",
+            profile="MY",
+            profile_name="MY",
+        )
+        assert m.config.profile_name == "MY"
+
+    def test_profile_and_profile_name_conflict_raises(self) -> None:
+        with pytest.raises(ValueError, match=r"profile.*profile_name"):
+            OCIModel(
+                model_id="cohere.command-r-plus",
+                profile="ONE",
+                profile_name="TWO",
+            )
+
+
 # ---------------------------------------------------------------------------
 # _get_provider dispatch
 # ---------------------------------------------------------------------------

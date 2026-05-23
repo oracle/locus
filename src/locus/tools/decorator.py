@@ -43,6 +43,14 @@ class Tool(BaseModel):
 
     model_config = {"arbitrary_types_allowed": True}
 
+    @property
+    def func(self) -> Callable[..., Any]:
+        """Alias for :attr:`fn`. Some samples and downstream code reach
+        for ``.func`` (the LangChain/LangGraph idiom); keep both names
+        pointed at the same underlying callable so users don't have to
+        write ``getattr(t, 'fn', None) or getattr(t, 'func', t)``."""
+        return self.fn
+
     async def execute(self, ctx: ToolContext | None = None, **kwargs: Any) -> Any:
         """
         Execute the tool with given arguments.

@@ -511,6 +511,20 @@ class AgentConfig(BaseModel):
         description="Unique agent identifier",
     )
 
+    # Display name (separate from agent_id). Used by multi-agent
+    # composers (Orchestrator, Swarm, StateGraph nodes) to label the
+    # agent in logs and routing decisions. Users putting ``name=`` on
+    # an ``Agent`` constructor expect it to flow through to here, so
+    # surface it explicitly rather than swallowing it as an extra kwarg.
+    name: str | None = Field(
+        default=None,
+        description=(
+            "Human-readable display name for the agent. Distinct from "
+            "``agent_id`` (which is meant to be unique) — ``name`` is "
+            "what shows up in logs, traces, and multi-agent labels."
+        ),
+    )
+
     # Model parameters
     temperature: float = Field(
         default=0.7,

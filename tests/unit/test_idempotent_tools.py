@@ -183,3 +183,28 @@ class TestBuiltinsGetTodayDate:
 
         result = get_today_date.fn()
         assert {"today", "weekday", "year", "tomorrow", "next_7_days_by_weekday"} <= result.keys()
+
+
+class TestToolFuncAlias:
+    """``.fn`` and ``.func`` both point at the wrapped callable.
+
+    Some downstream samples and frameworks (LangChain/LangGraph idiom) reach
+    for ``.func``; the Pydantic field is named ``fn``. Surfacing both names
+    avoids the ``getattr(t, "fn", None) or getattr(t, "func", t)`` dance.
+    """
+
+    def test_func_returns_same_callable_as_fn(self):
+        @tool(description="t")
+        async def my_tool(x: int) -> int:
+            return x + 1
+
+        assert my_tool.func is my_tool.fn
+
+    def test_func_works_for_sync_tool(self):
+        @tool
+        def my_sync_tool(x: int) -> int:
+            """Doubles x."""
+            return x * 2
+
+        assert my_sync_tool.func(3) == 6
+        assert my_sync_tool.func is my_sync_tool.fn

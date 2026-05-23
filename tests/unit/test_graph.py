@@ -1060,6 +1060,104 @@ class TestStateGraphInterruptBefore:
         assert "__resume_node__" in result.final_state
         assert result.final_state["__resume_node__"] == "step2"
 
+    @pytest.mark.asyncio
+    async def test_interrupt_before_saves_through_checkpointer(self):
+        """When a checkpointer is configured, the interrupt_before pause
+        boundary writes through to it — durable resume needs the paused
+        state on disk, not just on the returned ``GraphResult``."""
+        from locus.memory.backends.memory import MemoryCheckpointer
+
+        graph = StateGraph()
+
+        async def gate(inputs):
+            return {"gated": True}
+
+        async def after(inputs):
+            return {"done": True}
+
+        graph.add_node("gate", gate)
+        graph.add_node("after", after)
+        graph.add_edge(START, "gate")
+        graph.add_edge("gate", "after")
+        graph.add_edge("after", END)
+
+        cp = MemoryCheckpointer()
+        cfg = GraphConfig(
+            interrupt_before=["gate"],
+            checkpointer=cp,
+            thread_id="t-save",
+        )
+        result = await graph.execute({"x": 1}, config=cfg)
+        assert result.interrupt is not None
+        assert result.interrupt.node_id == "gate"
+
+        saved = await cp.load("t-save")
+        assert saved is not None, "interrupt_before must persist when a checkpointer is wired"
+        assert saved.metadata.get("interrupted_node") == "gate"
+        assert saved.metadata.get("graph_state", {}).get("x") == 1
+
+    @pytest.mark.asyncio
+    async def test_resume_after_interrupt_before_advances_past_gate(self):
+        """``Command(resume=...)`` must continue past the gate node — the
+        previous behaviour re-paused on every resume, so durable
+        human-in-the-loop flows needed application-side bookkeeping to
+        rewrite ``__resume_node__``."""
+        from locus.memory.backends.memory import MemoryCheckpointer
+
+        graph = StateGraph()
+
+        async def gate(inputs):
+            return {"gated": True}
+
+        async def after(inputs):
+            return {"done": True}
+
+        graph.add_node("gate", gate)
+        graph.add_node("after", after)
+        graph.add_edge(START, "gate")
+        graph.add_edge("gate", "after")
+        graph.add_edge("after", END)
+
+        cp = MemoryCheckpointer()
+        cfg = GraphConfig(
+            interrupt_before=["gate"],
+            checkpointer=cp,
+            thread_id="t-resume",
+        )
+        first = await graph.execute({}, config=cfg)
+        assert first.interrupt is not None  # paused
+
+        resumed = await graph.execute(Command(resume=True), config=cfg)
+        assert resumed.interrupt is None, "resume should not re-pause at the gate"
+        assert resumed.final_state.get("done") is True
+
+    @pytest.mark.asyncio
+    async def test_resume_without_checkpointer_uses_resume_node_in_state(self):
+        """Same advance-past-gate behaviour for the checkpointer-less path
+        (``Command(resume=..., update={...with __resume_node__})``)."""
+        graph = StateGraph()
+
+        async def gate(inputs):
+            return {"gated": True}
+
+        async def after(inputs):
+            return {"done": True}
+
+        graph.add_node("gate", gate)
+        graph.add_node("after", after)
+        graph.add_edge(START, "gate")
+        graph.add_edge("gate", "after")
+        graph.add_edge("after", END)
+
+        cfg = GraphConfig(interrupt_before=["gate"])
+        first = await graph.execute({}, config=cfg)
+        assert first.interrupt is not None
+        carry = dict(first.final_state)  # includes __resume_node__ == "gate"
+
+        resumed = await graph.execute(Command(resume=True, update=carry), config=cfg)
+        assert resumed.interrupt is None
+        assert resumed.final_state.get("done") is True
+
 
 class TestStateGraphParallelExecution:
     """Tests for parallel node execution."""

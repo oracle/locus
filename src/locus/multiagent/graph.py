@@ -1038,8 +1038,20 @@ class StateGraph(BaseModel):
             iterations += 1
             next_nodes: list[str] = []
 
+            # When resuming from an ``interrupt_before`` pause, the very
+            # first iteration of the new ``execute()`` call re-enters the
+            # gate node we paused on. Without this guard, the gate would
+            # fire immediately and we'd pause again — making "approve once
+            # and continue" semantics impossible. Skip the gate check for
+            # the resume_node on the first iteration only; ``resume_node``
+            # is cleared at the bottom of the iteration so subsequent
+            # iterations gate normally.
+            just_resumed_node = resume_node if iterations == 1 else None
+
             # Check for interrupt_before
             for node_id in current_nodes:
+                if node_id == just_resumed_node:
+                    continue
                 if node_id in cfg.interrupt_before:
                     # Create a placeholder interrupt value for interrupt_before
                     from locus.core.interrupt import InterruptValue
@@ -1055,6 +1067,47 @@ class StateGraph(BaseModel):
                         pending_nodes=current_nodes,
                         state_snapshot=state,
                     )
+
+                    # Save to checkpointer if available so a follow-up
+                    # ``execute(Command(resume=...))`` can recover the
+                    # paused state. Without this, durable cross-process
+                    # resume doesn't work for the ``interrupt_before``
+                    # gate — the reason most users wire a checkpointer
+                    # to a ``StateGraph`` in the first place.
+                    #
+                    # We pack the graph-level fields into
+                    # ``AgentState.metadata`` because the resume side
+                    # (``execute()`` above, line ~999) reads them off
+                    # ``saved_state.metadata`` — MemoryCheckpointer and
+                    # the other in-protocol backends round-trip the
+                    # ``AgentState`` itself, not the ``metadata=`` kwarg.
+                    if cfg.checkpointer and cfg.thread_id:
+                        from locus.core.state import AgentState  # noqa: PLC0415
+
+                        stub_state = AgentState(
+                            metadata={
+                                "graph_state": state,
+                                "interrupted_node": node_id,
+                                "interrupt": interrupt_state.model_dump(),
+                            }
+                        )
+                        await cfg.checkpointer.save(
+                            state=stub_state,
+                            thread_id=cfg.thread_id,
+                        )
+                        from locus.observability.emit import (  # noqa: PLC0415
+                            EV_CHECKPOINT_SAVED,
+                            emit,
+                        )
+
+                        await emit(
+                            EV_CHECKPOINT_SAVED,
+                            thread_id=cfg.thread_id,
+                            backend=type(cfg.checkpointer).__name__,
+                            trigger="graph_interrupt_before",
+                            interrupted_node=node_id,
+                        )
+
                     # Include resume node in final state
                     final_state_with_resume = {**state, "__resume_node__": node_id}
                     return GraphResult(
@@ -1186,16 +1239,22 @@ class StateGraph(BaseModel):
                         state_snapshot=state,
                     )
 
-                    # Save to checkpointer if available
+                    # Save to checkpointer if available. Same packing as
+                    # the ``interrupt_before`` branch above — the resume
+                    # path reads off ``saved_state.metadata``.
                     if cfg.checkpointer and cfg.thread_id:
-                        await cfg.checkpointer.save(
-                            state=None,
-                            thread_id=cfg.thread_id,
+                        from locus.core.state import AgentState  # noqa: PLC0415
+
+                        stub_state = AgentState(
                             metadata={
                                 "graph_state": state,
                                 "interrupted_node": node_id,
                                 "interrupt": interrupt_state.model_dump(),
-                            },
+                            }
+                        )
+                        await cfg.checkpointer.save(
+                            state=stub_state,
+                            thread_id=cfg.thread_id,
                         )
                         from locus.observability.emit import (  # noqa: PLC0415
                             EV_CHECKPOINT_SAVED,

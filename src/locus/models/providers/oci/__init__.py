@@ -103,8 +103,10 @@ class OCIModel(BaseModel):
         auth_type: str | OCIAuthType | None = None,
         config_file: str = "~/.oci/config",
         service_endpoint: str | None = None,
+        region: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
+        profile: str | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize OCI GenAI model.
@@ -118,11 +120,32 @@ class OCIModel(BaseModel):
                 instance_principal). When ``None`` (default), reads
                 ``OCI_AUTH_TYPE`` from env, falling back to ``api_key``.
             config_file: Path to OCI config file
-            service_endpoint: Full OCI GenAI service endpoint URL
+            service_endpoint: Full OCI GenAI service endpoint URL. Takes
+                precedence over ``region`` when both are set.
+            region: OCI region for the GenAI inference endpoint (e.g.
+                ``"us-chicago-1"``). When set and ``service_endpoint`` is
+                not provided, the endpoint is built as
+                ``https://inference.generativeai.{region}.oci.oraclecloud.com``.
+                Use this to target a model hosted outside your profile's
+                home region without writing out the full URL.
             max_tokens: Maximum tokens for response
             temperature: Model temperature (0.0-1.0)
+            profile: Alias for ``profile_name``. Setting both at the same
+                time (to different values) raises ``ValueError``. Exists
+                because ``profile=`` is the natural name users reach for
+                — the previous behaviour silently swallowed it through
+                ``**kwargs`` and fell through to the ``DEFAULT`` profile.
             **kwargs: Additional model parameters
         """
+        # ``profile=`` is the natural name; treat it as an alias.
+        if profile is not None:
+            if profile_name not in ("DEFAULT", profile):
+                raise ValueError(
+                    "OCIModel: pass either `profile` or `profile_name`, not both "
+                    f"(got profile={profile!r}, profile_name={profile_name!r})."
+                )
+            profile_name = profile
+
         if auth_type is None:
             import os
 
@@ -138,6 +161,13 @@ class OCIModel(BaseModel):
             import os
 
             compartment_id = os.getenv("OCI_COMPARTMENT") or os.getenv("OCI_COMPARTMENT_ID")
+
+        # Resolve the endpoint. Explicit ``service_endpoint`` wins; otherwise
+        # build it from ``region`` so users don't have to type out the full
+        # ``https://inference.generativeai.<region>.oci.oraclecloud.com`` URL
+        # just to target a model hosted outside their profile's home region.
+        if service_endpoint is None and region is not None:
+            service_endpoint = f"https://inference.generativeai.{region}.oci.oraclecloud.com"
 
         config = OCIConfig(
             model_id=model_id,
