@@ -9,7 +9,8 @@ scalar over the answer as a whole — often misses this. Each *claim* is
 grounded; the *conclusion* over-reaches.
 
 **GSAR** (Grounding-Stratified Adaptive Replanning, from
-[Kamelhar 2026](https://arxiv.org/abs/2604.23366)) is the upgrade. It
+[Federico A. Kamelhar (2026), arXiv:2604.23366](https://arxiv.org/abs/2604.23366))
+is the upgrade. It
 breaks the synthesis into claims, partitions them four ways, scores
 the partition with per-evidence-type weights, and picks one of three
 responses: `proceed` if the synthesis holds up, `regenerate` if the
@@ -155,4 +156,4 @@ production you'd map your tool taxonomy onto these.
   — live LLM judge driving the full loop.
 - [`examples/notebook_37_gsar_typed_grounding.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_37_gsar_typed_grounding.py)
   — a runnable walkthrough of the four parts.
-- Paper: [arXiv:2604.23366](https://arxiv.org/abs/2604.23366).
+- Paper: [Federico A. Kamelhar (2026), arXiv:2604.23366](https://arxiv.org/abs/2604.23366).

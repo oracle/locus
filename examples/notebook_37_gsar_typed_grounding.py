@@ -4,9 +4,10 @@
 """Notebook 38: GSAR — typed grounding for hallucination detection.
 
 GSAR (Grounded Structured Answer Reasoning) is the Locus layer from
-``arXiv:2604.23366`` (Kamelhar 2026). It partitions an answer's claims
-into four buckets, scores them against evidence, and decides whether
-to proceed, regenerate, or replan.
+`Federico A. Kamelhar (2026), arXiv:2604.23366 <https://arxiv.org/abs/2604.23366>`_.
+It partitions an answer's claims into four buckets, scores them
+against evidence, and decides whether to proceed, regenerate, or
+replan.
 
 - The four-way partition — grounded / ungrounded / contradicted /
   complementary — as a Pydantic type.

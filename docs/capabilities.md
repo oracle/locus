@@ -27,9 +27,9 @@ Everything `locus` ships, what it does, and where to find it.
     - **Reasoning loop nodes** — Reflexion, Grounding, Causal as first-class
       Think → Execute → **Reflect** → Think nodes, not bolted-on libraries.
     - **GSAR** — typed-grounding safety layer from
-      [arXiv:2604.23366](https://arxiv.org/abs/2604.23366): four-way claim
-      partition (grounded / ungrounded / contradicted / complementary) + tiered
-      replanning decisions.
+      [Federico A. Kamelhar (2026), arXiv:2604.23366](https://arxiv.org/abs/2604.23366):
+      four-way claim partition (grounded / ungrounded / contradicted /
+      complementary) + tiered replanning decisions.
     - **Termination algebra** — `MaxIterations(10) | TextMention("DONE") & ConfidenceMet(0.9)` is real Python (`__or__` / `__and__` overloads). Greppable, unit-testable, serialisable.
     - **Idempotent tools** — `@tool(idempotent=True)` dedupes on `(name, args)` inside the Execute node. No double-charge, double-book, double-page — even on model retry or checkpoint resume.
     - **OCI, OpenAI, and Anthropic-compatible providers** — OCI Generative AI
@@ -48,7 +48,7 @@ Everything `locus` ships, what it does, and where to find it.
 | **Reflexion** | Self-evaluation node in the ReAct cycle; rewrites the next turn when the last one was wrong | `Agent(reflexion=True)` · [Reasoning](concepts/reasoning.md) |
 | **Grounding** | LLM-as-judge claim verification against tool results; below-threshold triggers replanning | `Agent(grounding=True)` · [Reasoning](concepts/reasoning.md) |
 | **Causal chains** | Cause-effect graph builder with cycle/contradiction detection | `locus.reasoning.causal.CausalChain` · [Reasoning](concepts/reasoning.md) |
-| **GSAR** | Typed-grounding safety layer (arXiv:2604.23366) — four-way claim partition + tiered replanning | `Agent(gsar=GSARConfig(...))` · [GSAR](concepts/gsar.md) |
+| **GSAR** | Typed-grounding safety layer ([Federico A. Kamelhar (2026), arXiv:2604.23366](https://arxiv.org/abs/2604.23366)) — four-way claim partition + tiered replanning | `Agent(gsar=GSARConfig(...))` · [GSAR](concepts/gsar.md) |
 | **Cancel** | Thread-safe abort during a run; emits `TerminateEvent` with reason | `agent.cancel()` · [Agent loop](concepts/agent-loop.md) |
 | **Interrupts (HITL)** | Pause via `InterruptEvent`; resume with `agent.resume(...)` | `locus.core.interrupt` · [Interrupts](concepts/interrupts.md) |
 | **Structured output** | Pass `output_schema=` (Pydantic), final answer is parsed into a typed instance | `locus.agent.config`, `locus.core.structured` · [Structured output](concepts/structured-output.md) |

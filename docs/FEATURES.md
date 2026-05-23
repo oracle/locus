@@ -9,7 +9,7 @@ Everything `locus` ships, what it does, and where to find it.
     - **Idempotent tools** — `@tool(idempotent=True)` dedupes on `(name, args)` inside the loop. No double-charge, double-book, double-page.
     - **Reasoning loop nodes** — Reflexion, Grounding, Causal as first-class
       Think → Execute → **Reflect** → Think nodes, not bolted-on libraries.
-    - **GSAR** — typed-grounding layer from [arXiv:2604.23366](https://arxiv.org/abs/2604.23366) with four-way claim partition + tiered replanning.
+    - **GSAR** — typed-grounding layer from [Federico A. Kamelhar (2026), arXiv:2604.23366](https://arxiv.org/abs/2604.23366) with four-way claim partition + tiered replanning.
     - **Termination algebra** — `MaxIterations(10) | TextMention("DONE") & ConfidenceMet(0.9)` is real Python (`__or__` / `__and__` operator overloads).
     - **Six multi-agent shapes plus A2A** — Composition, Orchestrator, Swarm, Handoff, StateGraph, Functional + A2A for cross-process meshes.
     - **Cognitive router (PRISM)** — NL → typed `GoalFrame` → typed `ProtocolRegistry` → `PolicyGate` → compiled orchestration. LLM fills a schema; 8 built-in protocols; zero topology hand-writing.
@@ -26,7 +26,7 @@ Everything `locus` ships, what it does, and where to find it.
 | **Reflexion** | Self-evaluation node in the ReAct cycle; rewrites the next turn when the last one was wrong | `Agent(reflexion=True)` · [Reasoning](concepts/reasoning.md) |
 | **Grounding** | LLM-as-judge claim verification against tool results; below-threshold triggers replanning | `Agent(grounding=True)` · [Reasoning](concepts/reasoning.md) |
 | **Causal chains** | Cause-effect graph builder with cycle/contradiction detection | `locus.reasoning.causal.CausalChain` · [Reasoning](concepts/reasoning.md) |
-| **GSAR** | Typed-grounding safety layer (arXiv:2604.23366) — four-way claim partition + tiered replanning | `Agent(gsar=GSARConfig(...))` · [GSAR](concepts/gsar.md) |
+| **GSAR** | Typed-grounding safety layer ([Federico A. Kamelhar (2026), arXiv:2604.23366](https://arxiv.org/abs/2604.23366)) — four-way claim partition + tiered replanning | `Agent(gsar=GSARConfig(...))` · [GSAR](concepts/gsar.md) |
 | **Cancel** | Thread-safe abort during a run; emits `TerminateEvent` with reason | `agent.cancel()` · [Agent loop](concepts/agent-loop.md) |
 | **Interrupts (HITL)** | Pause via `InterruptEvent`; resume with `agent.resume(...)` | `locus.core.interrupt` · [Interrupts](concepts/interrupts.md) |
 | **Structured output** | Pass `output_schema=` (Pydantic), final answer is parsed into a typed instance | `locus.agent.config`, `locus.core.structured` · [Structured output](concepts/structured-output.md) |
