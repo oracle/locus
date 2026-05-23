@@ -171,8 +171,8 @@ es.addEventListener('ModelChunkEvent', (e) => {
 
 ## Notebooks
 
-- [`notebook_17_agent_streaming.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_17_agent_streaming.py) — your first event consumer.
-- [`notebook_19_sse_streaming.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_19_sse_streaming.py) — full SSE wiring against `AgentServer`.
+- [`notebook_11_agent_streaming.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_11_agent_streaming.py) — your first event consumer.
+- [`notebook_13_sse_streaming.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_13_sse_streaming.py) — full SSE wiring against `AgentServer`.
 
 ## Source
 

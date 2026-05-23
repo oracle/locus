@@ -158,10 +158,10 @@ builder, validation-error formatter.
 
 ## Notebooks
 
-- [`notebook_41_structured_output.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_41_structured_output.py)
+- [`notebook_35_structured_output.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_35_structured_output.py)
   covers both the standalone `parse_structured()` parser (useful for
   non-Agent flows) and the Agent `output_schema=` integration above.
-- [`notebook_38_debate_with_judge.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_38_debate_with_judge.py)
+- [`notebook_32_debate_with_judge.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_32_debate_with_judge.py)
   — typed `Verdict` as the workflow boundary artifact.
 - [`notebook_63_incident_response.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_63_incident_response.py)
   — typed `Postmortem` as the terminal artifact of an incident graph.

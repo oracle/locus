@@ -220,8 +220,8 @@ any field; this is intentionally tight.
 
 - [`HookProvider` and `HookOrchestrator`](https://github.com/oracle-samples/locus/blob/main/src/locus/hooks/provider.py)
 - [Built-in hooks](https://github.com/oracle-samples/locus/tree/main/src/locus/hooks/builtin)
-- [`notebook_18_agent_hooks.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_18_agent_hooks.py) — write your first hook.
-- [`notebook_20_hooks_advanced.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_20_hooks_advanced.py) — guardrails + steering, end to end.
+- [`notebook_12_agent_hooks.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_12_agent_hooks.py) — write your first hook.
+- [`notebook_14_hooks_advanced.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_14_hooks_advanced.py) — guardrails + steering, end to end.
 
 ## See also
 

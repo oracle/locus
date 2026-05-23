@@ -234,8 +234,8 @@ interactive prompt, because agent tools must be non-interactive.
 The same open-spec pattern composes with Oracle's own data-plane
 primitives. If your agent needs to **read or write data** (not just
 operate the control plane), wire it up with the Oracle 26ai RAG +
-in-DB primitives — see [Notebook 06 — Oracle 26ai
-RAG](../notebooks/notebook_06_oracle_26ai_rag.md) and the
+in-DB primitives — see [Notebook 41 — Oracle 26ai
+RAG](../notebooks/notebook_41_oracle_26ai_rag.md) and the
 [`docs/concepts/rag.md`](rag.md) chapter. The full agent-driven OCI
 walkthrough is in [Notebook 70 — `use_oci` +
 `describe_oci`](../notebooks/notebook_70_oci_tools.md).

@@ -183,7 +183,7 @@ history = await saver.list_checkpoints(thread_id="t1")  # walk lineage
 ```
 
 Notebook walkthrough: [Notebook 07 — Oracle 26ai
-checkpointer](../notebooks/notebook_07_oracle_26ai_checkpointer.md).
+checkpointer](../notebooks/notebook_53_oracle_26ai_checkpointer.md).
 
 ## Two checkpointer shapes — the gotcha to know
 

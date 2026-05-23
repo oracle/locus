@@ -29,19 +29,27 @@ your browser.
 The catalog leads with the **Oracle primitives** category. Two
 runnable demos pinned to the top of the sidebar:
 
+- **Drive any OCI service from natural language** — the agent picks
+  up `describe_oci` + `use_oci` and dispatches against any of the
+  ~190 OCI Python SDK service modules with one open-spec primitive.
+  Read-only by default; opt in to mutations with
+  `LOCUS_USE_OCI_ALLOW_MUTATIONS=1`. Provider panel set to OCI is
+  enough. See [notebook 70](notebooks/notebook_70_oci_tools.md) and
+  the [open-spec built-ins section](concepts/tools.md#open-spec-built-ins-for-the-oracle-estate).
 - **Oracle 26ai RAG (native VECTOR)** — `OracleVectorStore` against
   an Autonomous Database wallet, native `VECTOR(1024, FLOAT32)` +
   `VECTOR_DISTANCE COSINE`. Requires `ORACLE_DSN` / `ORACLE_USER` /
   `ORACLE_PASSWORD` / `ORACLE_WALLET` on the backend host (plus an
   OCI provider in the UI for embeddings). See
-  [notebook 06](notebooks/notebook_06_oracle_26ai_rag.md).
+  [notebook 41](notebooks/notebook_41_oracle_26ai_rag.md).
 - **Retrieve-then-rerank (Cohere V4)** — `CohereReranker` on OCI
   on-demand `rerank-v4`. Provider panel set to OCI is enough. See
   [notebook 05](notebooks/notebook_05_cohere_reranker.md).
 
 The notebook sidebar also surfaces the rest of the Oracle-native
 path — notebooks 01 / 02 / 03 (transports), 04 (Dedicated AI
-Cluster) — under the same "Oracle primitives" group.
+Cluster), and 41-44 (Oracle 26ai RAG, ADB document loader, in-DB
+chunker / embeddings) — under the same "Oracle primitives" group.
 
 ### Database settings (Oracle 26ai)
 
@@ -179,7 +187,7 @@ make web                                          # pane 3 — :5173
 end-to-end test suite in `workbench/e2e/`. The `make backend` target
 is the workbench runner — distinct from `make backend-research` and
 `make backend-finance`, which spin up the A2A mesh demo peers for
-[notebook 28](notebooks/notebook_34_a2a_protocol.md), not the
+[notebook 28](notebooks/notebook_28_a2a_protocol.md), not the
 workbench.
 
 ### Verify it's up
@@ -391,7 +399,7 @@ correlate findings.
 → specialist_fanout
 ```
 
-See [notebook 34](notebooks/notebook_40_emergent_routing.md) for the
+See [notebook 34](notebooks/notebook_34_emergent_routing.md) for the
 full code path and [concepts/router.md](concepts/router.md#emergent-picker-opt-in-second-mode)
 for the architectural details.
 

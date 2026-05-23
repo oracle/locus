@@ -223,7 +223,7 @@ identifying which path produced the pick:
 | `"llm_picked"` | Picker resolved the disambiguation; `rationale` field populated |
 | `"rule_based_fallback"` | Picker raised or hallucinated; `_rank_key` resolved it |
 
-See [notebook 59](../notebooks/notebook_40_emergent_routing.md) for a
+See [notebook 59](../notebooks/notebook_34_emergent_routing.md) for a
 runnable side-by-side comparison.
 
 ## Skills integration

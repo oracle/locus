@@ -313,7 +313,7 @@ The seven primitives:
 The contracts live in locus, the SQL is generated locally, and the
 only runtime requirement is `python-oracledb` thin mode.
 
-→ [Notebook 06 — Oracle 26ai RAG](https://locusagents.oracle.com/notebooks/notebook_06_oracle_26ai_rag/) · [Notebook 07 — Oracle 26ai checkpointer](https://locusagents.oracle.com/notebooks/notebook_07_oracle_26ai_checkpointer/) · [Notebooks 08-12 — loader, chunker, embeddings, store, versioned saver](https://locusagents.oracle.com/notebooks/)
+→ [Notebook 06 — Oracle 26ai RAG](https://locusagents.oracle.com/notebooks/notebook_41_oracle_26ai_rag/) · [Notebook 07 — Oracle 26ai checkpointer](https://locusagents.oracle.com/notebooks/notebook_53_oracle_26ai_checkpointer/) · [Notebooks 08-12 — loader, chunker, embeddings, store, versioned saver](https://locusagents.oracle.com/notebooks/)
 
 ---
 
@@ -335,10 +335,10 @@ git clone https://github.com/oracle-samples/locus.git
 cd locus && pip install -e .
 
 python examples/notebook_01_oci_transports.py        # start here — three OCI transports
-python examples/notebook_06_oracle_26ai_rag.py       # native VECTOR RAG on Oracle 26ai
-python examples/notebook_07_oracle_26ai_checkpointer.py  # durable agent threads in ADB
-python examples/notebook_14_basic_agent.py           # your first agent
-python examples/notebook_35_deepagent.py             # deep-research factory
+python examples/notebook_41_oracle_26ai_rag.py       # native VECTOR RAG on Oracle 26ai
+python examples/notebook_53_oracle_26ai_checkpointer.py  # durable agent threads in ADB
+python examples/notebook_06_basic_agent.py           # your first agent
+python examples/notebook_29_deepagent.py             # deep-research factory
 python examples/notebook_69_research_workflow.py     # full research pipeline
 ```
 

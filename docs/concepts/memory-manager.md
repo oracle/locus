@@ -190,7 +190,7 @@ The upstream is currently alpha (`oracleagentmemory` 26.4.0, Dev
 Status 3). When you need a portable backend or a fully-deterministic
 LLM-free extractor, fall back to the portable path below.
 
-See [notebook 13](../notebooks/notebook_13_oracle_agent_memory.md) for
+See [notebook 13](../notebooks/notebook_09_oracle_agent_memory.md) for
 a runnable end-to-end demo with two sessions on the same `user_id`.
 
 ### Portable path (any BaseStore backend)

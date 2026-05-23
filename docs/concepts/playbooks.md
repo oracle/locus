@@ -192,7 +192,7 @@ for execution in plan.executions:
 
 ## Source and notebook
 
-- [`notebook_48_playbooks.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_48_playbooks.py) — runnable end-to-end with execution tracking.
+- [`notebook_46_playbooks.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_46_playbooks.py) — runnable end-to-end with execution tracking.
 - [`locus.playbooks`](https://github.com/oracle-samples/locus/tree/main/src/locus/playbooks) — `Playbook`, `PlaybookStep`, `PlaybookEnforcerHook`, `load_playbook`.
 
 ## See also

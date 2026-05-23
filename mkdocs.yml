@@ -189,53 +189,61 @@ nav:
     - 4 · OCI Dedicated AI Cluster: notebooks/notebook_04_oci_dac.md
     - 5 · Cohere Reranker V4 on OCI: notebooks/notebook_05_cohere_reranker.md
   - Agent Foundations:
-    - 14 · Basic agent: notebooks/notebook_14_basic_agent.md
-    - 15 · Agent with tools: notebooks/notebook_15_agent_with_tools.md
-    - 16 · Conversation memory: notebooks/notebook_16_agent_memory.md
-    - 17 · Streaming events: notebooks/notebook_17_agent_streaming.md
-    - 18 · Lifecycle hooks: notebooks/notebook_18_agent_hooks.md
-    - 19 · SSE streaming: notebooks/notebook_19_sse_streaming.md
-    - 20 · Hooks: notebooks/notebook_20_hooks_advanced.md
-    - 21 · Termination conditions: notebooks/notebook_21_termination.md
+    - 6 · Basic agent: notebooks/notebook_06_basic_agent.md
+    - 7 · Agent with tools: notebooks/notebook_07_agent_with_tools.md
+    - 8 · Conversation memory: notebooks/notebook_08_agent_memory.md
+    - 9 · Oracle agent memory: notebooks/notebook_09_oracle_agent_memory.md
+    - 10 · Oracle store (portable BaseStore path): notebooks/notebook_10_oracle_store.md
+    - 11 · Streaming events: notebooks/notebook_11_agent_streaming.md
+    - 12 · Lifecycle hooks: notebooks/notebook_12_agent_hooks.md
+    - 13 · SSE streaming: notebooks/notebook_13_sse_streaming.md
+    - 14 · Hooks: notebooks/notebook_14_hooks_advanced.md
+    - 15 · Termination conditions: notebooks/notebook_15_termination.md
   - Graphs & composition:
-    - 22 · Basic graph: notebooks/notebook_22_basic_graph.md
-    - 23 · Conditional routing: notebooks/notebook_23_conditional_routing.md
-    - 24 · State reducers: notebooks/notebook_24_state_reducers.md
-    - 25 · Human-in-the-loop: notebooks/notebook_25_human_in_the_loop.md
-    - 26 · Command + advanced patterns: notebooks/notebook_26_advanced_patterns.md
-    - 27 · Composition: notebooks/notebook_27_composition.md
-    - 28 · Graph: notebooks/notebook_28_graph_advanced.md
-    - 29 · Functional API: notebooks/notebook_29_functional_api.md
+    - 16 · Basic graph: notebooks/notebook_16_basic_graph.md
+    - 17 · Conditional routing: notebooks/notebook_17_conditional_routing.md
+    - 18 · State reducers: notebooks/notebook_18_state_reducers.md
+    - 19 · Human-in-the-loop: notebooks/notebook_19_human_in_the_loop.md
+    - 20 · Command + advanced patterns: notebooks/notebook_20_advanced_patterns.md
+    - 21 · Composition: notebooks/notebook_21_composition.md
+    - 22 · Graph: notebooks/notebook_22_graph_advanced.md
+    - 23 · Functional API: notebooks/notebook_23_functional_api.md
   - Multi-agent:
-    - 30 · Swarm: notebooks/notebook_30_swarm_multiagent.md
-    - 31 · Agent handoff: notebooks/notebook_31_agent_handoff.md
-    - 32 · Orchestrator pattern: notebooks/notebook_32_orchestrator_pattern.md
-    - 33 · Specialist agents: notebooks/notebook_33_specialist_agents.md
-    - 34 · A2A protocol: notebooks/notebook_34_a2a_protocol.md
-    - 35 · DeepAgent: notebooks/notebook_35_deepagent.md
-    - 36 · Map-reduce code review: notebooks/notebook_36_map_reduce_code_review.md
-    - 37 · Supervisor + critic loop: notebooks/notebook_37_supervisor_critic_loop.md
-    - 38 · Adversarial debate + judge: notebooks/notebook_38_debate_with_judge.md
-    - 39 · Multi-agent + human-in-the-loop: notebooks/notebook_39_multiagent_human_in_loop.md
-    - 40 · Emergent routing: notebooks/notebook_40_emergent_routing.md
+    - 24 · Swarm: notebooks/notebook_24_swarm_multiagent.md
+    - 25 · Agent handoff: notebooks/notebook_25_agent_handoff.md
+    - 26 · Orchestrator pattern: notebooks/notebook_26_orchestrator_pattern.md
+    - 27 · Specialist agents: notebooks/notebook_27_specialist_agents.md
+    - 28 · A2A protocol: notebooks/notebook_28_a2a_protocol.md
+    - 29 · DeepAgent: notebooks/notebook_29_deepagent.md
+    - 30 · Map-reduce code review: notebooks/notebook_30_map_reduce_code_review.md
+    - 31 · Supervisor + critic loop: notebooks/notebook_31_supervisor_critic_loop.md
+    - 32 · Adversarial debate + judge: notebooks/notebook_32_debate_with_judge.md
+    - 33 · Multi-agent + human-in-the-loop: notebooks/notebook_33_multiagent_human_in_loop.md
+    - 34 · Emergent routing: notebooks/notebook_34_emergent_routing.md
   - Reasoning & structured output:
-    - 41 · Structured output: notebooks/notebook_41_structured_output.md
-    - 42 · Reasoning patterns: notebooks/notebook_42_reasoning_patterns.md
-    - 43 · GSAR typed grounding: notebooks/notebook_43_gsar_typed_grounding.md
+    - 35 · Structured output: notebooks/notebook_35_structured_output.md
+    - 36 · Reasoning patterns: notebooks/notebook_36_reasoning_patterns.md
+    - 37 · GSAR typed grounding: notebooks/notebook_37_gsar_typed_grounding.md
   - RAG:
-    - 44 · RAG basics: notebooks/notebook_44_rag_basics.md
-    - 45 · RAG providers: notebooks/notebook_45_rag_providers.md
-    - 46 · RAG agents: notebooks/notebook_46_rag_agents.md
+    - 38 · RAG basics: notebooks/notebook_38_rag_basics.md
+    - 39 · RAG providers: notebooks/notebook_39_rag_providers.md
+    - 40 · RAG agents: notebooks/notebook_40_rag_agents.md
+    - 41 · Oracle 26ai RAG: notebooks/notebook_41_oracle_26ai_rag.md
+    - 42 · Oracle ADB document loader: notebooks/notebook_42_oracle_adb_loader.md
+    - 43 · Oracle in-DB chunker: notebooks/notebook_43_oracle_indb_chunker.md
+    - 44 · Oracle in-DB embeddings: notebooks/notebook_44_oracle_indb_embeddings.md
   - Skills, playbooks & plugins:
-    - 47 · MCP integration: notebooks/notebook_47_mcp_integration.md
-    - 48 · Playbooks: notebooks/notebook_48_playbooks.md
-    - 49 · Plugins: notebooks/notebook_49_plugins.md
-    - 50 · Skills: notebooks/notebook_50_skills.md
-    - 51 · Steering: notebooks/notebook_51_steering.md
+    - 45 · MCP integration: notebooks/notebook_45_mcp_integration.md
+    - 46 · Playbooks: notebooks/notebook_46_playbooks.md
+    - 47 · Plugins: notebooks/notebook_47_plugins.md
+    - 48 · Skills: notebooks/notebook_48_skills.md
+    - 49 · Steering: notebooks/notebook_49_steering.md
   - Production:
-    - 52 · Guardrails & security: notebooks/notebook_52_guardrails_security.md
-    - 53 · Guardrails: notebooks/notebook_53_guardrails_advanced.md
-    - 54 · Checkpoint backends: notebooks/notebook_54_checkpoint_backends.md
+    - 50 · Guardrails & security: notebooks/notebook_50_guardrails_security.md
+    - 51 · Guardrails: notebooks/notebook_51_guardrails_advanced.md
+    - 52 · Checkpoint backends: notebooks/notebook_52_checkpoint_backends.md
+    - 53 · Oracle 26ai checkpointer: notebooks/notebook_53_oracle_26ai_checkpointer.md
+    - 54 · Oracle versioned checkpoint saver: notebooks/notebook_54_oracle_versioned_saver.md
     - 55 · Evaluation: notebooks/notebook_55_evaluation.md
     - 56 · Model providers: notebooks/notebook_56_model_providers.md
     - 57 · Multi-modal providers: notebooks/notebook_57_multimodal_providers.md
@@ -255,15 +263,6 @@ nav:
     - 68 · Agent server: notebooks/notebook_68_agent_server.md
     - 69 · Research workflow: notebooks/notebook_69_research_workflow.md
     - 70 · OCI tools — agents that drive OCI: notebooks/notebook_70_oci_tools.md
-  - Oracle Database 26ai (optional persistence layer):
-    - 6 · Oracle 26ai RAG: notebooks/notebook_06_oracle_26ai_rag.md
-    - 7 · Oracle 26ai checkpointer: notebooks/notebook_07_oracle_26ai_checkpointer.md
-    - 8 · Oracle ADB document loader: notebooks/notebook_08_oracle_adb_loader.md
-    - 9 · Oracle in-DB chunker: notebooks/notebook_09_oracle_indb_chunker.md
-    - 10 · Oracle in-DB embeddings: notebooks/notebook_10_oracle_indb_embeddings.md
-    - 11 · Oracle store (portable BaseStore path): notebooks/notebook_11_oracle_store.md
-    - 12 · Oracle versioned checkpoint saver: notebooks/notebook_12_oracle_versioned_saver.md
-    - 13 · Oracle agent memory: notebooks/notebook_13_oracle_agent_memory.md
   - Guides:
     - Deploy: how-to/deploy.md
     - Persist conversations: how-to/persist-conversations.md

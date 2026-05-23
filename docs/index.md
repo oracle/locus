@@ -105,7 +105,7 @@ agent = Agent(
 print(agent.run_sync("Should I bring an umbrella to Tokyo tomorrow?").text)
 ```
 
-[Notebook 14 — basic agent →](notebooks/notebook_14_basic_agent.md)
+[Notebook 14 — basic agent →](notebooks/notebook_06_basic_agent.md)
 
 ## What locus gives you
 
@@ -218,13 +218,13 @@ the source from there.
 
 | What | Notebooks (click any one) |
 |---|---|
-| Agent + ReAct loop | [13 — Basic agent](notebooks/notebook_14_basic_agent.md) · [14 — Agent with tools](notebooks/notebook_15_agent_with_tools.md) · [17 — Lifecycle hooks](notebooks/notebook_18_agent_hooks.md) |
-| Cognitive router (PRISM) | [57 — Cognitive router](notebooks/notebook_58_cognitive_router.md) · [39 — Emergent routing](notebooks/notebook_40_emergent_routing.md) |
-| Multi-agent shapes | [21 — Basic graph](notebooks/notebook_22_basic_graph.md) · [26 — Composition](notebooks/notebook_27_composition.md) · [29 — Swarm](notebooks/notebook_30_swarm_multiagent.md) · [30 — Handoff](notebooks/notebook_31_agent_handoff.md) · [31 — Orchestrator](notebooks/notebook_32_orchestrator_pattern.md) · [33 — A2A](notebooks/notebook_34_a2a_protocol.md) |
-| Observability | [16 — Streaming events](notebooks/notebook_17_agent_streaming.md) · [58 — Observability basics](notebooks/notebook_59_observability_basics.md) · [61 — Event catalogue](notebooks/notebook_62_event_catalogue.md) |
-| Idempotent tools · termination | [14 — Agent with tools](notebooks/notebook_15_agent_with_tools.md) · [20 — Termination](notebooks/notebook_21_termination.md) |
+| Agent + ReAct loop | [13 — Basic agent](notebooks/notebook_06_basic_agent.md) · [14 — Agent with tools](notebooks/notebook_07_agent_with_tools.md) · [17 — Lifecycle hooks](notebooks/notebook_12_agent_hooks.md) |
+| Cognitive router (PRISM) | [57 — Cognitive router](notebooks/notebook_58_cognitive_router.md) · [39 — Emergent routing](notebooks/notebook_34_emergent_routing.md) |
+| Multi-agent shapes | [21 — Basic graph](notebooks/notebook_16_basic_graph.md) · [26 — Composition](notebooks/notebook_21_composition.md) · [29 — Swarm](notebooks/notebook_24_swarm_multiagent.md) · [30 — Handoff](notebooks/notebook_25_agent_handoff.md) · [31 — Orchestrator](notebooks/notebook_26_orchestrator_pattern.md) · [33 — A2A](notebooks/notebook_28_a2a_protocol.md) |
+| Observability | [16 — Streaming events](notebooks/notebook_11_agent_streaming.md) · [58 — Observability basics](notebooks/notebook_59_observability_basics.md) · [61 — Event catalogue](notebooks/notebook_62_event_catalogue.md) |
+| Idempotent tools · termination | [14 — Agent with tools](notebooks/notebook_07_agent_with_tools.md) · [20 — Termination](notebooks/notebook_15_termination.md) |
 | OCI model transport | [01 — OCI transports](notebooks/notebook_01_oci_transports.md) · [02 — OCI v1](notebooks/notebook_02_oci_openai_chat.md) · [03 — OCI Responses](notebooks/notebook_03_oci_responses.md) · [04 — Dedicated AI Cluster](notebooks/notebook_04_oci_dac.md) |
-| Oracle 26ai primitives | [06 — RAG](notebooks/notebook_06_oracle_26ai_rag.md) · [07 — Checkpointer](notebooks/notebook_07_oracle_26ai_checkpointer.md) · [08 — ADB loader](notebooks/notebook_08_oracle_adb_loader.md) · [09 — In-DB chunker](notebooks/notebook_09_oracle_indb_chunker.md) · [10 — In-DB embeddings](notebooks/notebook_10_oracle_indb_embeddings.md) · [11 — Cross-thread store](notebooks/notebook_11_oracle_store.md) · [12 — Versioned saver](notebooks/notebook_12_oracle_versioned_saver.md) |
+| Oracle 26ai primitives | [06 — RAG](notebooks/notebook_41_oracle_26ai_rag.md) · [07 — Checkpointer](notebooks/notebook_53_oracle_26ai_checkpointer.md) · [08 — ADB loader](notebooks/notebook_42_oracle_adb_loader.md) · [09 — In-DB chunker](notebooks/notebook_43_oracle_indb_chunker.md) · [10 — In-DB embeddings](notebooks/notebook_44_oracle_indb_embeddings.md) · [11 — Cross-thread store](notebooks/notebook_10_oracle_store.md) · [12 — Versioned saver](notebooks/notebook_54_oracle_versioned_saver.md) |
 
 Full catalog → [Notebooks index](notebooks/index.md) · [Capabilities matrix](capabilities.md) · [API reference](api/agent.md)
 

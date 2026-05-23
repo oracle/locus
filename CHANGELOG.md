@@ -75,12 +75,12 @@ held the same primary keys.
 
 Updated 7 files to match their current notebook number:
 
-- `notebook_16_agent_memory.py` (was `locus_notebook_10_*`)
-- `notebook_35_deepagent.py` (was `locus_notebook_30_medical`)
-- `notebook_44_rag_basics.py` (was `locus_notebook_39_*`)
-- `notebook_45_rag_providers.py` (was `locus_notebook_40_*`)
-- `notebook_46_rag_agents.py` (was `locus_notebook_41_*`)
-- `notebook_54_checkpoint_backends.py` (was `locus_notebook_48`)
+- `notebook_08_agent_memory.py` (was `locus_notebook_10_*`)
+- `notebook_29_deepagent.py` (was `locus_notebook_30_medical`)
+- `notebook_38_rag_basics.py` (was `locus_notebook_39_*`)
+- `notebook_39_rag_providers.py` (was `locus_notebook_40_*`)
+- `notebook_40_rag_agents.py` (was `locus_notebook_41_*`)
+- `notebook_52_checkpoint_backends.py` (was `locus_notebook_48`)
 - `notebook_68_agent_server.py` (was `locus_notebook_62`)
 
 A pre-commit / lint check to prevent future drift is tracked in #241.
@@ -125,8 +125,8 @@ reasoning. Cost: Oracle-only, alpha upstream (`oracleagentmemory`
 - New optional dep `[agentmemory]` in `pyproject.toml`
   (`oracleagentmemory>=26.4.0,<27`). Also rolled into `[checkpoints]`
   so `pip install locus-sdk[checkpoints]` covers everything Oracle.
-- New live notebook `examples/notebook_13_oracle_agent_memory.py` +
-  matching docs page `docs/notebooks/notebook_13_oracle_agent_memory.md`,
+- New live notebook `examples/notebook_09_oracle_agent_memory.py` +
+  matching docs page `docs/notebooks/notebook_09_oracle_agent_memory.md`,
   filed in sequential order in the Oracle 26ai notebook block (slot 13).
 - New workbench pattern `oracle_agent_memory` (PATTERNS + PATTERN_RUNNERS
   in `workbench/backend/runner.py`), filed in sequential order after
@@ -191,26 +191,26 @@ wrapping someone else's bindings rather than Locus driving them.
 Every one of those seven notebooks now puts a Locus `Agent` in the
 driver's seat with Oracle 26ai as the durable substrate:
 
-- **06 — `notebook_06_oracle_26ai_rag.py`**: `create_rag_tool` over
+- **06 — `notebook_41_oracle_26ai_rag.py`**: `create_rag_tool` over
   `OracleVectorStore`; the agent decides when to call `VECTOR_DISTANCE`
   and grounds its answer in the returned passages.
-- **07 — `notebook_07_oracle_26ai_checkpointer.py`**: `Agent(checkpointer=
+- **07 — `notebook_53_oracle_26ai_checkpointer.py`**: `Agent(checkpointer=
   oracle_checkpointer(...))`; a brand-new Agent instance resumes the
   same `thread_id` and recalls turn 1 — no manual save/load.
-- **08 — `notebook_08_oracle_adb_loader.py`**: `@tool fetch_articles_by_topic`
+- **08 — `notebook_42_oracle_adb_loader.py`**: `@tool fetch_articles_by_topic`
   wrapping `OracleADBLoader` with `bind_params`; the agent picks the
   topic and runs the parameter-bound SELECT.
-- **09 — `notebook_09_oracle_indb_chunker.py`**: agent with
+- **09 — `notebook_43_oracle_indb_chunker.py`**: agent with
   `chunk_paragraph` + `chunk_table_rows` tools over `OracleInDBChunker`;
   picks the right primitive per prompt.
-- **10 — `notebook_10_oracle_indb_embeddings.py`**: data-residency RAG
+- **10 — `notebook_44_oracle_indb_embeddings.py`**: data-residency RAG
   agent on `OracleInDBEmbeddings` + `OracleVectorStore` — embedding +
   similarity search both stay inside 26ai.
-- **11 — `notebook_11_oracle_store.py`**: `Agent(memory_manager=
+- **11 — `notebook_10_oracle_store.py`**: `Agent(memory_manager=
   LLMMemoryManager(store=OracleStore))`; thread A teaches a fact,
   brand-new Agent in thread B recalls it without seeing thread A's
   messages.
-- **12 — `notebook_12_oracle_versioned_saver.py`**: three-turn agent
+- **12 — `notebook_54_oracle_versioned_saver.py`**: three-turn agent
   with both `oracle_checkpointer` (live thread) and
   `OracleCheckpointSaver` (versioned lineage); shows
   `list_checkpoints`, `get(checkpoint_id=...)`, and `put_writes`.

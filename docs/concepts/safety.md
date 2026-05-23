@@ -150,9 +150,9 @@ runs; the model sees the typed-error message and retries with `"C"`.
 
 ## Source and notebooks
 
-- [`notebook_52_guardrails_security.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_52_guardrails_security.py) — basic guardrails.
-- [`notebook_53_guardrails_advanced.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_53_guardrails_advanced.py) — topic + content + PII layered.
-- [`notebook_51_steering.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_51_steering.py) — judge-model approval.
+- [`notebook_50_guardrails_security.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_50_guardrails_security.py) — basic guardrails.
+- [`notebook_51_guardrails_advanced.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_51_guardrails_advanced.py) — topic + content + PII layered.
+- [`notebook_49_steering.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_49_steering.py) — judge-model approval.
 - [`locus.hooks.builtin.guardrails`](https://github.com/oracle-samples/locus/blob/main/src/locus/hooks/builtin/guardrails.py)
 - [`locus.hooks.builtin.steering`](https://github.com/oracle-samples/locus/blob/main/src/locus/hooks/builtin/steering.py)
 

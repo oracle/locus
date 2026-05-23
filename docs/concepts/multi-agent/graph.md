@@ -119,17 +119,17 @@ a design review.
 
 ## Notebooks
 
-- [`notebook_22_basic_graph.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_22_basic_graph.py)
+- [`notebook_16_basic_graph.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_16_basic_graph.py)
   — your first StateGraph.
-- [`notebook_23_conditional_routing.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_23_conditional_routing.py)
+- [`notebook_17_conditional_routing.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_17_conditional_routing.py)
   — `add_conditional_edges`.
-- [`notebook_24_state_reducers.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_24_state_reducers.py)
+- [`notebook_18_state_reducers.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_18_state_reducers.py)
   — custom state reducers.
-- [`notebook_28_graph_advanced.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_28_graph_advanced.py)
+- [`notebook_22_graph_advanced.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_22_graph_advanced.py)
   — `RetryPolicy`, `CachePolicy`, subgraphs, Mermaid output.
-- [`notebook_36_map_reduce_code_review.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_36_map_reduce_code_review.py)
+- [`notebook_30_map_reduce_code_review.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_30_map_reduce_code_review.py)
   — `Send` fan-out / reduce in a graph.
-- [`notebook_37_supervisor_critic_loop.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_37_supervisor_critic_loop.py)
+- [`notebook_31_supervisor_critic_loop.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_31_supervisor_critic_loop.py)
   — `allow_cycles=True` + `max_iterations` for refine-until-confidence.
 - [`notebook_63_incident_response.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_63_incident_response.py)
   — triage → parallel investigators → severity gate → page-the-human.

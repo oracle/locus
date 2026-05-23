@@ -136,9 +136,9 @@ debugging, or branch off a new thread from the partial conversation.
 - [Hooks](hooks.md) — write custom hooks that return `Cancel`.
 - [Conversation Management](conversation-management.md) — how
   `thread_id` resumption works.
-- [Notebook 09 — human in the loop](https://github.com/oracle-samples/locus/blob/main/examples/notebook_25_human_in_the_loop.py)
+- [Notebook 09 — human in the loop](https://github.com/oracle-samples/locus/blob/main/examples/notebook_19_human_in_the_loop.py)
   — a full runnable example.
-- [Notebook 46 — multi-agent + HITL](https://github.com/oracle-samples/locus/blob/main/examples/notebook_39_multiagent_human_in_loop.py)
+- [Notebook 46 — multi-agent + HITL](https://github.com/oracle-samples/locus/blob/main/examples/notebook_33_multiagent_human_in_loop.py)
   — three HITL patterns in one file (approval gate, human-as-tool,
   long-pause snapshot/resume).
 - [Notebook 47 — incident response](https://github.com/oracle-samples/locus/blob/main/examples/notebook_63_incident_response.py)

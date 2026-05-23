@@ -44,7 +44,7 @@ python examples/notebook_05_cohere_reranker.py
 
 ## See also
 
-- [Notebook 05 — Oracle 26ai RAG (the store this notebook builds on)](notebook_06_oracle_26ai_rag.md)
+- [Notebook 05 — Oracle 26ai RAG (the store this notebook builds on)](notebook_41_oracle_26ai_rag.md)
 - [Concepts — RAG](../concepts/rag.md)
 - [OCI Generative AI — documentation hub](https://docs.oracle.com/en-us/iaas/Content/generative-ai/home.htm)
 - [Oracle AI Database 26ai — AI Vector Search overview](https://docs.oracle.com/en/database/oracle/oracle-database/23/vecse/overview-ai-vector-search.html)

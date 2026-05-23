@@ -42,7 +42,7 @@ export OCI_PROFILE=DEFAULT
 export OCI_REGION=us-chicago-1
 
 # Run any notebook:
-python examples/notebook_14_basic_agent.py
+python examples/notebook_06_basic_agent.py
 ```
 
 When the SDK itself is constructed directly (not via the notebook
