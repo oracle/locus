@@ -293,6 +293,7 @@ class TestOCIClientInstancePrincipalAuth:
             config={},
             signer=mock_signer,
             service_endpoint="https://test.endpoint.com",
+            timeout=(10.0, 300.0),
         )
         assert result == mock_client
 
