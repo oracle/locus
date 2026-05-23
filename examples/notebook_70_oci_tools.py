@@ -1,7 +1,7 @@
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
-"""Notebook 70: drive the entire Oracle Cloud Infrastructure (OCI) control plane from natural language.
+"""Notebook 70: Drive the entire OCI control plane from natural language — `use_oci` + `describe_oci`.
 
 Locus ships two built-in tools that, together, expose every OCI Python
 SDK operation to an agent without per-service plumbing:

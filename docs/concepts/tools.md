@@ -181,6 +181,65 @@ If you've built a tool you want other agents to reach, expose it
 through `LocusMCPServer` — same `@tool`, no rewrite. See
 [MCP](mcp.md).
 
+## Open-spec built-ins for the Oracle estate
+
+For most domains, you write a `@tool` per operation: `search_orders`,
+`get_invoice`, `cancel_subscription`. That stops scaling once the
+domain is *cloud-sized* — the Oracle Cloud Infrastructure (OCI)
+Python SDK alone has ~190 service modules. Locus ships two built-in
+**open-specification** tools that cover the whole surface through a
+single agentic primitive:
+
+```python
+from locus.tools import describe_oci, use_oci
+
+agent = Agent(
+    model=get_model("oci:openai.gpt-5.5", profile="MY_GENAI"),
+    tools=[describe_oci, use_oci],
+    system_prompt="""
+You can call OCI. When unsure of the right service / client /
+operation / parameters, call describe_oci first — then use_oci.
+""",
+)
+
+agent.run_sync("Are there any compute instances running anywhere in my tenancy?")
+```
+
+- **`describe_oci(service?, client?, operation?)`** — runtime
+  introspection. Progressively zooms: no args → list ~190 services;
+  `service` → list `*Client` classes; `service + client` → list
+  operations partitioned read-only vs mutating; `service + client +
+  operation` → parameter schema parsed from the OCI SDK `:param:`
+  docstring.
+- **`use_oci(service, client, operation, parameters, ...)`** —
+  execute. Builds the right `oci.<service>.<Client>` with the
+  requested auth (`api_key`, `security_token`, `instance_principal`,
+  `resource_principal`), invokes the method, returns the serialised
+  response with `http_status` + `opc-request-id` for traceability.
+
+This is the agentic-framework angle on cloud control planes:
+**hand the model two tools, not 190.** The model uses `describe_oci`
+like a `man` page, then dispatches `use_oci`. One execution path, one
+auth code-path, one serialiser, one mutation-safety gate covers all
+of Identity, Compute, Database, Object Storage, Networking, Vault,
+Functions, Bastion, GenAI, and the rest.
+
+`use_oci` is **read-only by default** — operations that don't start
+with a read-only verb (`list_/get_/head_/summarize_/describe_/
+search_/fetch_/compute_/preview_/validate_/test_`) are refused
+unless the caller passes `allow_mutations=True` or sets
+`LOCUS_USE_OCI_ALLOW_MUTATIONS=1`. Enforced in code, not via
+interactive prompt, because agent tools must be non-interactive.
+
+The same open-spec pattern composes with Oracle's own data-plane
+primitives. If your agent needs to **read or write data** (not just
+operate the control plane), wire it up with the Oracle 26ai RAG +
+in-DB primitives — see [Notebook 06 — Oracle 26ai
+RAG](../notebooks/notebook_06_oracle_26ai_rag.md) and the
+[`docs/concepts/rag.md`](rag.md) chapter. The full agent-driven OCI
+walkthrough is in [Notebook 70 — `use_oci` +
+`describe_oci`](../notebooks/notebook_70_oci_tools.md).
+
 ## Common gotchas
 
 | Symptom | Likely cause |
@@ -195,7 +254,7 @@ through `LocusMCPServer` — same `@tool`, no rewrite. See
 
 - [`@tool` decorator and `Tool` class](https://github.com/oracle-samples/locus/blob/main/src/locus/tools/decorator.py)
 - [`ToolRegistry`](https://github.com/oracle-samples/locus/blob/main/src/locus/tools/registry.py)
-- [Built-in tools](https://github.com/oracle-samples/locus/tree/main/src/locus/tools/builtins) — `get_today_date`, `task_complete`, `ask_user`
+- [Built-in tools](https://github.com/oracle-samples/locus/tree/main/src/locus/tools/builtins) — `get_today_date`, `task_complete`, `ask_user`, `use_oci`, `describe_oci`
 
 ## See also
 

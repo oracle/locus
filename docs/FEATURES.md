@@ -90,6 +90,7 @@ Everything `locus` ships, what it does, and where to find it.
 | **CircuitBreaker executor** | Auto-disable a tool after N failures | `locus.tools.executor` · [Executors](concepts/executors.md) |
 | Result-store offload | Move large tool results to object storage; agent sees a pointer | `locus.tools.result_storage` |
 | Path / URL safety | Validate filesystem and network access from tool args | `locus.tools.path_safety`, `locus.tools.url_safety` · [Safety](concepts/safety.md) |
+| **`use_oci` + `describe_oci`** | Open-spec built-ins: drive the whole OCI control plane (~190 services) from one agent — discover with `describe_oci`, execute with `use_oci`; read-only by default | `locus.tools.use_oci`, `locus.tools.describe_oci` · [Tools](concepts/tools.md#open-spec-built-ins-for-the-oracle-estate) |
 | **MCP — client + server** | Talk to / be talked to by Anthropic-spec MCP servers | `locus.integrations.fastmcp` · [MCP](concepts/mcp.md) |
 
 ## Memory — checkpointer backends
