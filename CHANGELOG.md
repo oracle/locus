@@ -8,6 +8,137 @@ policy.
 
 ## [Unreleased]
 
+## [0.2.0b21] - 2026-05-23
+
+Four PRs of fixes accumulated since b20. No new public APIs; this
+release tightens the SDK on durability (StateGraph interrupt resume),
+ergonomics (OCIModel ergonomic aliases, AgentConfig.name, Tool.func),
+deps (httpx<1.0 cap), and brings the docs site in line with the
+approved product name.
+
+### Fixed — StateGraph interrupt + resume now durable (PR #261)
+
+`StateGraph` configured with `interrupt_before=[node]` had two surprising
+behaviours that combined to make cross-process resume not work without
+application-side glue:
+
+- The pause boundary didn't write to the checkpointer. Only the inline
+  `interrupt()` branch saved.
+- Resume re-paused at the same gate on every entry, so even in-process
+  `Command(resume=...)` never advanced past the flagged node.
+
+Both paths now save through the checkpointer at the pause boundary
+(packing `graph_state` / `interrupted_node` / `interrupt` into
+`AgentState.metadata` so it round-trips through every BaseCheckpointer
+backend) and the gate check is skipped for the resume node on the
+first iteration after a `Command(resume=...)` entry. Inline
+`interrupt()` saves were also crashing on `MemoryCheckpointer` and
+every other in-protocol backend because `state=None` was passed
+where the protocol expects a real `AgentState` — fixed in the same
+pass.
+
+Covered by new unit + integration tests against `MemoryCheckpointer`,
+`FileCheckpointer`, real Redis, and real OpenSearch backends.
+
+### Fixed — OCIModel ergonomic aliases (PR #261)
+
+- `OCIModel(region="us-chicago-1", ...)` now builds the inference
+  endpoint from the region when `service_endpoint` is not provided.
+  Previously `region=` was swallowed by `**kwargs` and the model went
+  to the profile's home region — surfacing as 404
+  *"Entity with key … not found"*. `service_endpoint=` still wins
+  when both are set.
+- `OCIModel(profile="MY_PROFILE", ...)` is an explicit alias for
+  `profile_name=`. Previously `profile=` was swallowed by `**kwargs`
+  and the model silently fell through to `DEFAULT`. Setting both at
+  the same time to different values raises `ValueError`.
+
+### Fixed — AgentConfig.name + Tool.func (PR #261)
+
+- `AgentConfig` accepts a `name: str | None = None` field that flows
+  through to a `name` property on `Agent`. Previously `extra='forbid'`
+  rejected `AgentConfig(name=...)` even though `name` is the obvious
+  knob users reach for when labeling an agent in logs and multi-agent
+  composers.
+- `Tool.func` is a `@property` alias for `.fn`. Some downstream
+  samples and the LangChain/LangGraph idiom reach for `.func`;
+  surfacing both names avoids the `getattr(t, "fn", None) or
+  getattr(t, "func", t)` dance.
+
+### Fixed — httpx 1.0 prerelease incompatibility (PR #262)
+
+`httpx 1.0.dev3` drops the top-level `httpx.Auth` re-export. Two
+modules in `locus` subclass `httpx.Auth` at import time
+(`OCIRequestSigner` for the OpenAI-compatible /openai/v1 endpoint and
+the inline `BearerAuth` inside `MCPClient`), and resolving with
+`--prerelease=allow` was breaking both at class-definition time with
+`AttributeError: module 'httpx' has no attribute 'Auth'`. Capped the
+constraint at `httpx>=0.27,<1.0` until the two subclasses are ported
+to the 1.0 auth API. The httpx.Auth contract is now covered by unit
+tests so a future port can't silently break the signing path.
+
+### Fixed — OCI client read timeout default + integration fixture max_tokens (PR #264)
+
+Two test-envelope fixes for reasoning-model traffic (gpt-5.5,
+o-series, etc.) that surfaced in the integration suite:
+
+- `OCIClientConfig` now exposes `connect_timeout` (default 10s) and
+  `read_timeout` (default 300s, up from the OCI SDK's 60s). Reasoning
+  models can sit on the wire for 90-180s before the first response
+  token after they finish hidden chain-of-thought; the prior 60s
+  read timeout surfaced in orchestrator/swarm summarization as
+  `urllib3.ReadTimeoutError` followed by empty `summary=''` /
+  `findings={}`.
+- Integration test fixture `model` was building OCIModel /
+  OpenAIModel with `max_tokens=512`. Reasoning models burn 200-2000+
+  output tokens on hidden chain-of-thought before producing any
+  visible content; at 512 they return empty content with
+  `finish_reason='length'`. Bumped to 8192 as a ceiling — short-
+  answer tests still finish quickly because the model stops
+  naturally when done.
+
+### Docs — Oracle Trademark Legal-approved product naming (PR #257)
+
+Two approved product names applied across the docs site, README, and
+contributor markdown:
+
+- **Full name** — *Oracle Generative AI Multi-Agent Reasoning
+  Orchestrator SDK*. Appears as a wordmark above the hero H1 on
+  the landing + workbench pages and as a small caps line under the
+  `locus` wordmark in the persistent header on every page.
+- **Short name** — *Oracle Generative AI – Multi-Agent Locus SDK*.
+  Used on first prose mention per file; subsequent mentions use
+  *the SDK* (generic noun phrase, not a trademark) to keep copy
+  readable.
+
+OG / Twitter meta tags and the browser tab title carry the short
+name; redundant `locus` nav tab removed (home reachable via the
+diamond logo and wordmark). Technical identifiers (imports,
+package name `locus-sdk`, URLs, file paths, container image tags,
+CSS class names) are unchanged — they're outside the trademark
+restriction.
+
+### Test infrastructure — refresh stale tests (PR #264)
+
+Eight pre-existing integration failures cleared by bringing tests in
+line with code that moved:
+
+- `test_notebooks_subset.py` — 5 methods pointed at notebook filenames
+  that no longer exist (catalogue was renumbered to a contiguous 1-70
+  sequence). Updated paths and method names so the suite reads
+  consistently.
+- `test_workbench_categories.py` — workbench combined the router and
+  observability tracks into a single `router-observability` category
+  in `workbench/backend/runner.py::NOTEBOOK_CATEGORIES`. Test still
+  asserted the old taxonomy. Updated the required-id list and pointed
+  the observability assertion at the new track (notebooks 58-61).
+- `examples/notebook_70_oci_tools.py` — `_env` helper hard-required
+  `OCI_USE_PROFILE` / `OCI_USE_REGION` / `OCI_USE_TENANCY` /
+  `OCI_GENAI_PROFILE`, exiting 2 if any was missing. Added a
+  `fallbacks=` parameter so the standard OCI envelope (`OCI_PROFILE`,
+  `OCI_REGION`, `OCI_COMPARTMENT`) just works without the user having
+  to re-export anything.
+
 ## [0.2.0b20] - 2026-05-22
 
 Headlined by the open-spec OCI tools (PR #254) — `use_oci` +
