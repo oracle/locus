@@ -133,7 +133,10 @@ def _resolve_client_class(oci_mod: Any, service: str, client: str) -> type:
             f"OCI service 'oci.{service}' has no client class '{client}'. "
             f"Available clients: {', '.join(candidates) or '(none)'}."
         )
-    return cast("type", client_cls)
+    # mypy 3.12 needs the cast to narrow Any → type (no-any-return);
+    # mypy 3.14 sees the cast as redundant after the isinstance check.
+    # Suppressing both codes keeps both versions green.
+    return cast("type", client_cls)  # type: ignore[unused-ignore, redundant-cast]
 
 
 def _build_config_and_signer(
