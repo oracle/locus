@@ -155,8 +155,9 @@ The server is plain FastAPI — deploy it however you deploy FastAPI.
 | **Anywhere else FastAPI runs** | …yes |
 
 Auth, rate-limiting, and request logging are FastAPI middleware
-concerns — locus does not own them. Add `slowapi`, `prometheus-fastapi-instrumentator`,
-or whatever your platform expects.
+concerns — Oracle Generative AI – Multi-Agent Locus SDK does not own
+them. Add `slowapi`, `prometheus-fastapi-instrumentator`, or whatever
+your platform expects.
 
 ## Common gotchas
 

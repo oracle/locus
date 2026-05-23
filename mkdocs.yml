@@ -118,7 +118,8 @@ plugins:
           members_order: source
 
 nav:
-- locus: index.md
+# Home (index.md) is reached via the header wordmark + logo (both link to "/"),
+# so we don't repeat it as a tab here.
 - Concepts:
   - concepts/multi-agent.md
   - Capabilities: capabilities.md

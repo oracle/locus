@@ -1,7 +1,8 @@
 # SSE event catalogue
 
-Locus publishes a single canonical stream of events on its in-process
-`EventBus` (see [Observability](observability.md)). Every event
+Oracle Generative AI – Multi-Agent Locus SDK publishes a single
+canonical stream of events on its in-process `EventBus` (see
+[Observability](observability.md)). Every event
 carries a stable `event_type` string keyed by the component that
 produced it (`agent.*`, `multiagent.*`, `composition.*`, `router.*`,
 `rag.*`, `memory.*`, `a2a.*`, `skills.*`, `deepagent.*`).

@@ -1,6 +1,7 @@
 # RAG
 
-Retrieval-Augmented Generation in locus is **three small pieces** —
+Retrieval-Augmented Generation in Oracle Generative AI – Multi-Agent
+Locus SDK is **three small pieces** —
 an embedder, a vector store, and a retriever that wires them — plus a
 one-liner to expose the retriever as a tool the agent calls when it
 needs facts.
@@ -91,9 +92,10 @@ store = OracleVectorStore(
 
 #### Production setup — least-privileged schema
 
-Running Locus against an [Autonomous Database][adb] as `ADMIN` is an Oracle
-security anti-pattern: every connection has full DBA privileges, so a
-compromised credential or a malformed query has unbounded blast radius.
+Running the SDK against an [Autonomous Database][adb] as `ADMIN` is an
+Oracle security anti-pattern: every connection has full DBA privileges,
+so a compromised credential or a malformed query has unbounded blast
+radius.
 Provision a dedicated app user instead — run this once as `ADMIN`:
 
 ```sql
@@ -210,7 +212,7 @@ catches relevance signals embeddings miss. The pattern:
    to the top-N (e.g. 5).
 4. Feed the top-N to the LLM.
 
-Locus ships `CohereReranker` against OCI GenAI's Cohere V4 on-demand
+The SDK ships `CohereReranker` against OCI GenAI's Cohere V4 on-demand
 endpoint (`cohere.rerank-v4.0-fast` by default; `cohere.rerank-v4.0-pro`
 for the higher-accuracy variant; `cohere.rerank-v3.5` as a fallback).
 

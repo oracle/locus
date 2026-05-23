@@ -1,8 +1,9 @@
 # Termination
 
-When does an agent stop? locus answers that with a typed, composable
-**algebra of stop conditions** — small classes that each return `True`
-when the run should end, combined with `&` (and) and `|` (or).
+When does an agent stop? Oracle Generative AI – Multi-Agent Locus SDK
+answers that with a typed, composable **algebra of stop conditions** —
+small classes that each return `True` when the run should end, combined
+with `&` (and) and `|` (or).
 
 ```python
 from locus.core.termination import (
@@ -19,7 +20,7 @@ termination = (
 Read it left to right: *stop when we sent the summary and we're
 confident, **or** the model said "DONE", **or** we hit ten iterations*.
 
-This is one of locus's signature primitives. Every stop condition is
+This is one of the SDK's signature primitives. Every stop condition is
 inspectable, unit-testable, and serialisable — no hand-rolled `if`
 ladders sprinkled through the loop.
 

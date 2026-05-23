@@ -1,8 +1,11 @@
-# Locus workbench
+<p class="locus-product-name">Oracle Generative AI Multi-Agent Reasoning Orchestrator SDK</p>
 
-A browser-based playground for every locus pattern. Two ways to run
-it — straight from source on your laptop, or inside a Docker
-container — both end at the same UI at <http://localhost:5173>.
+# Workbench
+
+A browser-based playground for every Oracle Generative AI – Multi-Agent
+Locus SDK pattern. Two ways to run it — straight from source on your
+laptop, or inside a Docker container — both end at the same UI at
+<http://localhost:5173>.
 
 [View on GitHub](https://github.com/oracle-samples/locus){ .md-button .md-button--primary }
 [Workbench README](https://github.com/oracle-samples/locus/tree/main/workbench){ .md-button }
@@ -11,17 +14,18 @@ Once it's up: open *Provider settings*, paste an OpenAI / Anthropic
 key or wire up an OCI profile, pick a notebook in the sidebar, hit
 **Run**. A real agent streams events back into the browser.
 
-![locus workbench](img/workbench.gif)
+![Workbench UI screenshot](img/workbench.gif)
 
 ## What it is
 
-The workbench is the fastest way to *see* what locus does without
-installing anything locally. It's a single-page UI in front of every
-canonical locus pattern — a basic agent, an agent with tools, a
+The workbench is the fastest way to *see* what Oracle Generative AI –
+Multi-Agent Locus SDK does without installing anything locally. It's a
+single-page UI in front of every canonical Oracle Generative AI –
+Multi-Agent Locus SDK pattern — a basic agent, an agent with tools, a
 structured-output schema, an orchestrator with specialists, a
 sequential pipeline, a map-reduce fan-out, a critic loop with
 `allow_cycles`. Each pattern is wired to a real Python coroutine
-that imports locus, builds the agent, and streams events through to
+that imports the SDK, builds the agent, and streams events through to
 your browser.
 
 ### Start with Oracle
@@ -217,7 +221,7 @@ docker build -t locus-workbench -f workbench/Dockerfile .
 ```
 
 Image is ~1.3 GB on first build (Oracle Linux 9-slim base + Python
-3.12 + Node 20 + locus + workbench source). Subsequent builds hit
+3.12 + Node 20 + the SDK + workbench source). Subsequent builds hit
 the BuildKit layer cache.
 
 ### Run
@@ -384,7 +388,7 @@ field the `router.protocol.selected` SSE event carries.
 Sample prompts that exercise different protocols:
 
 ```
-What does the locus router do in the context of this SDK?
+What does the router do in the context of this SDK?
 → direct_response
 ```
 

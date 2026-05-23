@@ -1,9 +1,9 @@
 # Evaluation
 
 An agent that worked yesterday may not work today — the model
-changed, a tool was renamed, the prompt got a one-line tweak. locus
-ships a small evaluation harness so regressions become **failing
-tests**, not customer tickets.
+changed, a tool was renamed, the prompt got a one-line tweak. Oracle
+Generative AI – Multi-Agent Locus SDK ships a small evaluation harness
+so regressions become **failing tests**, not customer tickets.
 
 ```python
 from locus.evaluation import EvalCase, EvalRunner
@@ -144,7 +144,7 @@ EvalCase(
 )
 ```
 
-A future locus release may bundle a typed judge directly into
+A future SDK release may bundle a typed judge directly into
 `EvalCase`; for today, this pattern is the path.
 
 ## Common gotchas

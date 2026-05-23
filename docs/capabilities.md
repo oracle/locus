@@ -1,14 +1,15 @@
 # Capabilities
 
-Everything `locus` ships, what it does, and where to find it.
+Everything Oracle Generative AI – Multi-Agent Locus SDK ships, what it
+does, and where to find it.
 
-!!! oracle-distinctive "Distinctive to locus"
+!!! oracle-distinctive "Distinctive to the SDK"
     These are architectural choices no other Python agent framework ships
     together in one coherent stack:
 
     - **Multi-agent reasoning orchestrator** — describe a task; a
       typed registry picks one of eight protocols and instantiates the
-      matching locus primitive. The LLM fills a typed `GoalFrame`; routing is
+      matching SDK primitive. The LLM fills a typed `GoalFrame`; routing is
       rule-based. Eight protocols: `direct_response` (single Agent),
       `plan_execute_validate` (SequentialPipeline), `specialist_fanout`
       (ParallelPipeline), `debate` (two debaters + judge),
@@ -73,7 +74,7 @@ Most agent frameworks force a choice: hand-code the topology (predictable
 but brittle) or let the LLM pick it (flexible but unpredictable). The
 cognitive router takes a third path — **bounded graph generation**. The LLM fills exactly
 one typed `GoalFrame`; a typed registry selects from eight
-named protocols; a compiler instantiates real locus primitives. The
+named protocols; a compiler instantiates real SDK primitives. The
 output is always one of the eight proven shapes — never an ad-hoc topology
 the model invented.
 
@@ -83,7 +84,7 @@ the model invented.
 | **`GoalFrame`** | Typed schema the LLM extractor fills — 13 `TaskType`s, `Risk`, `Complexity`, domain, capabilities | `locus.router.GoalFrame` |
 | **`ProtocolRegistry`** | Typed filter (`handles ∋ goal`, `risk_max ≥ frame.risk`) + four-tier ranking (distance · canonical · cost · specificity) | `locus.router.ProtocolRegistry` |
 | **`PolicyGate`** | Two thresholds: `max_risk` (hard deny) and `require_approval_above` (human-in-the-loop gate) | `locus.router.PolicyGate` |
-| **`CognitiveCompiler`** | Instantiates real locus primitives from frame + protocol; emits a `Runnable` adapter | `locus.router.CognitiveCompiler` |
+| **`CognitiveCompiler`** | Instantiates real SDK primitives from frame + protocol; emits a `Runnable` adapter | `locus.router.CognitiveCompiler` |
 | **`builtin_protocols()`** | 8 v1 protocols: `direct_response` · `plan_execute_validate` · `specialist_fanout` · `debate` · `codegen_test_validate` · `approval_gated_execution` · `a2a_delegate` · `handoff_chain` | `locus.router.builtin_protocols` |
 | **`CapabilityIndex`** | Domain + risk overlay on `ToolRegistry` — no parallel storage | `locus.router.CapabilityIndex` |
 | **`SkillIndex`** | Domain-tagged view of installed `Skill` packs; scoped catalog attached to every emitted Agent | `locus.router.SkillIndex` |

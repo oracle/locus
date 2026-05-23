@@ -5,11 +5,11 @@ Each agent runs as its own service, advertises an Agent Card
 (capabilities + skills + endpoint URL) at a well-known URL, and other
 agents discover and call it over HTTP.
 
-Locus implements the public
+Oracle Generative AI – Multi-Agent Locus SDK implements the public
 [A2A protocol](https://a2aproject.github.io/A2A/) — the same wire
-format used by Strands, ADK, and Google's reference SDKs — so a Locus
-agent can call a non-Locus A2A peer (or be called by one) without an
-adapter.
+format used by Strands, ADK, and Google's reference SDKs — so an
+SDK-built agent can call a non-SDK A2A peer (or be called by one)
+without an adapter.
 
 ![A2A pattern — two processes (Process A team-research with A2AServer; Process B team-finance with A2AClient), connected by an HTTP+SSE arc, agents inside each process](../../img/patterns/a2a.svg){ .diagram }
 
@@ -36,7 +36,7 @@ URI), `DataPart` (structured JSON).
 - ✅ **Multi-process or multi-host** agent deployments.
 - ✅ **Different teams own different agents** on different stacks.
 - ✅ You need a **network boundary** for security or scaling.
-- ✅ **Polyglot** — a Locus agent calling a non-Locus A2A peer (or
+- ✅ **Polyglot** — an SDK agent calling a non-SDK A2A peer (or
   vice versa) speaks the same protocol verbatim.
 - ✅ **Capability-based discovery** — the caller reads the Agent
   Card and decides whether to delegate.

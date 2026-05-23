@@ -1,9 +1,10 @@
 # Model providers
 
 A model is a string. The prefix before the colon (`oci:`, `openai:`,
-`anthropic:`, `ollama:`) tells locus which provider to use; the rest is
-the model id that provider expects. `get_model()` parses the string and
-returns a ready client.
+`anthropic:`, `ollama:`) tells Oracle Generative AI – Multi-Agent
+Locus SDK which provider to use; the rest is the model id that
+provider expects. `get_model()` parses the string and returns a ready
+client.
 
 ```python
 # tools, system_prompt, and other kwargs are the same across all providers

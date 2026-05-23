@@ -10,8 +10,9 @@ disclosure** — and it's how you compose **broad agents** (one model,
 many domain skills) without blowing the context budget on capabilities
 the run won't use.
 
-Each skill is a folder with a `SKILL.md`. Point your agent at the parent
-directory and locus handles the disclosure tiers:
+Each skill is a folder with a `SKILL.md`. Point your agent at the
+parent directory and Oracle Generative AI – Multi-Agent Locus SDK
+handles the disclosure tiers:
 
 - **L1 — catalog.** Names + one-line descriptions live in the system
   prompt. Cheap, always loaded.
@@ -166,7 +167,7 @@ of them call.
 
 - [`notebook_48_skills.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_48_skills.py) — programmatic and filesystem-loaded skills end-to-end.
 - [`locus.skills`](https://github.com/oracle-samples/locus/tree/main/src/locus/skills) — `Skill`, `SkillsPlugin`.
-- [AgentSkills.io specification](https://agentskills.io) — the format locus implements.
+- [AgentSkills.io specification](https://agentskills.io) — the format the SDK implements.
 
 ## See also
 

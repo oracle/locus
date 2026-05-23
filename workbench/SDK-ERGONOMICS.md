@@ -1,8 +1,9 @@
-# Locus SDK ergonomics — workbench audit
+# SDK ergonomics — workbench audit
 
 How much code does a developer need to write to do something useful with
-Locus? This is a short, honest snapshot from running the workbench
-against every model-only notebook.
+the Oracle Generative AI – Multi-Agent Locus SDK? This is a short,
+honest snapshot from running the workbench against every model-only
+notebook.
 
 ## The 90% case is one screen
 

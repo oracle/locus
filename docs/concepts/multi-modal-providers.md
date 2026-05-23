@@ -2,9 +2,10 @@
 
 The model is one provider an agent depends on. Production agents pull
 from more: a web index, a page fetcher, an image renderer, a speech
-synthesiser. locus exposes those as a small set of **Protocol** types
-under `locus.providers` and an opt-in auto-registration step that turns
-each one into a model-callable tool.
+synthesiser. Oracle Generative AI – Multi-Agent Locus SDK exposes
+those as a small set of **Protocol** types under `locus.providers` and
+an opt-in auto-registration step that turns each one into a
+model-callable tool.
 
 ```python
 from locus.agent import Agent
@@ -72,7 +73,7 @@ The shared Pydantic types live in `locus.providers.types` (`SearchResult`,
   default `tts-1`) plus `audio.transcriptions.create` (Whisper, default
   `whisper-1`). Round-trips text → audio → text.
 
-All four lazy-import `openai` / `httpx` so locus core stays free of
+All four lazy-import `openai` / `httpx` so the SDK core stays free of
 optional dependencies until you actually wire one of these in.
 
 ## Bring your own
@@ -80,7 +81,7 @@ optional dependencies until you actually wire one of these in.
 The protocols are the contract — implement them and you're in. A
 production user might wrap Bing for search, `trafilatura` for fetch,
 OCI Vision for image generation, or OCI Speech for STT/TTS. The agent
-glue stays identical: set the kwarg on `AgentConfig`, locus registers
+glue stays identical: set the kwarg on `AgentConfig`, the SDK registers
 the tool.
 
 ```python

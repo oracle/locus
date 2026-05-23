@@ -1,8 +1,9 @@
 # Reasoning
 
 A model that loops without thinking just pays you to be wrong faster.
-locus ships three reasoning add-ons. Each catches a different class of
-mistake *before* the next tool call:
+Oracle Generative AI – Multi-Agent Locus SDK ships three reasoning
+add-ons. Each catches a different class of mistake *before* the next
+tool call:
 
 - **Reflexion** catches *wrong premises* — the agent self-evaluates
   after each turn and re-plans if the last step was a dead end,
@@ -136,7 +137,7 @@ observable as their own event types.
 
 Reflexion: [Shinn et al., 2023](https://arxiv.org/abs/2303.11366).
 Grounding-Stratified Adaptive Replanning: see [GSAR](gsar.md) for the
-typed-evidence variant locus also ships.
+typed-evidence variant the SDK also ships.
 
 ## See also
 

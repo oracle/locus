@@ -1,9 +1,10 @@
 # Long-term memory
 
-A locus agent is stateless between sessions by default. Checkpointing
-preserves the full message history for one conversation thread, but
-facts learned in thread A are invisible in thread B — and when a thread
-is deleted, everything in it is gone.
+An Oracle Generative AI – Multi-Agent Locus SDK agent is stateless
+between sessions by default. Checkpointing preserves the full message
+history for one conversation thread, but facts learned in thread A are
+invisible in thread B — and when a thread is deleted, everything in it
+is gone.
 
 `MemoryManager` fills that gap. It runs two lifecycle hooks
 on every agent invocation:
@@ -136,7 +137,7 @@ Each combination gets its own set of memories — no cross-contamination.
 
 ## Persistent backends
 
-Locus exposes memory along a spectrum, from "works everywhere" to
+The SDK exposes memory along a spectrum, from "works everywhere" to
 "opinionated Oracle-specific":
 
 | Path | Manager class | When to pick it |
@@ -210,7 +211,7 @@ manager = LLMMemoryManager(store=RedisBackend("redis://localhost:6379"))
 manager = LLMMemoryManager(store=PostgreSQLBackend(host="...", database="..."))
 
 # [Oracle 26ai][oracle-db] (`OracleStore`) — namespaced key/value with optional [VECTOR][ai-vector-search]
-# search inside a namespace. Native locus, no langchain dep. For
+# search inside a namespace. Native to the SDK, no langchain dep. For
 # Oracle workloads, prefer `OracleAgentMemoryManager` above unless
 # you specifically want the BaseStore protocol or the LLM-free
 # regex extractor.
@@ -226,7 +227,7 @@ manager = LLMMemoryManager(
 )
 ```
 
-`OracleStore` is the locus-native equivalent of
+`OracleStore` is the SDK-native equivalent of
 `langgraph-oracledb.OracleStore`: same connection envelope as the
 checkpointer (one wallet, one schema), namespaces persist as PK columns,
 and `put_with_embedding` + `search_by_embedding` give you semantic

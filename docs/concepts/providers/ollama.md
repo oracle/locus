@@ -1,9 +1,10 @@
 # Ollama
 
-The Ollama provider is **locus pointed at a local model runtime**.
-Ollama runs open-weight models on your laptop or a shared GPU box;
-locus calls it over HTTP exactly the way it would call OpenAI or
-Anthropic. No API key, no network egress, no per-token billing.
+The Ollama provider is **Oracle Generative AI – Multi-Agent Locus SDK
+pointed at a local model runtime**. Ollama runs open-weight models on
+your laptop or a shared GPU box; the SDK calls it over HTTP exactly
+the way it would call OpenAI or Anthropic. No API key, no network
+egress, no per-token billing.
 
 This is the right pick for **offline development**, **reproducible
 tests**, and **iterating on agent design before you spend a dollar
@@ -39,9 +40,9 @@ ollama pull llama3.3
 ```
 
 `ollama list` will show what you've pulled. Anything in that list is
-addressable from locus immediately.
+addressable from the SDK immediately.
 
-### 2. Wire locus
+### 2. Wire the SDK
 
 ```python
 from locus.agent import Agent
@@ -63,10 +64,10 @@ provider — provided the model you pulled supports them.
 
 ## What you get out of the box
 
-### Any pulled local model — no locus change needed
+### Any pulled local model — no SDK change needed
 
 The `model_id` after `ollama:` is whatever appears in `ollama list`.
-locus doesn't maintain an allow-list; if Ollama can run it, locus
+The SDK doesn't maintain an allow-list; if Ollama can run it, the SDK
 can address it.
 
 ```bash
@@ -84,7 +85,7 @@ agent_c = Agent(model="ollama:deepseek-r1:14b")
 
 ### Real local streaming
 
-Ollama emits SSE-shaped chunks; locus reads them as `ModelChunkEvent`s
+Ollama emits SSE-shaped chunks; the SDK reads them as `ModelChunkEvent`s
 just like any other provider. Token-level streaming over localhost
 is fast — typically <5 ms per chunk.
 

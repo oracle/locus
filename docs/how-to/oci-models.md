@@ -1,6 +1,7 @@
 # OCI GenAI models
 
-Locus connects to OCI Generative AI through **three transports**.
+Oracle Generative AI – Multi-Agent Locus SDK connects to OCI Generative
+AI through **three transports**.
 The `oci:` string factory picks V1 or SDK by model family; the
 Responses transport is opt-in.
 
@@ -117,7 +118,7 @@ model = OCIResponsesModel(
 )
 ```
 
-The only Locus primitive that bypasses on the Responses path is
+The only SDK primitive that bypasses on the Responses path is
 `ConversationManager` (window/summarize have nothing to operate on
 when the server owns the history). Memory, Reflexion, GSAR,
 grounding, tool hooks, idempotency, checkpointing, output schema,
@@ -144,7 +145,7 @@ same five auth modes (`api_key`, `security_token`, `session_token`,
 different from `OCIChatCompletionsModel` — `model_id=`, `profile_name=`,
 `compartment_id=`, `auth_type=` as an enum / string. Streaming on this
 transport is faked (the full response is chunked client-side) — that's
-an OCI-side limitation of the legacy endpoint, not a locus issue.
+an OCI-side limitation of the legacy endpoint, not an SDK issue.
 
 ## String factory (`get_model("oci:...")`) auto-routes
 
@@ -179,17 +180,17 @@ side-by-side.
 
 ## What's not supported today
 
-- **OpenAI Responses API on OCI.** Locus deliberately stays on
+- **OpenAI Responses API on OCI.** The SDK deliberately stays on
   chat/completions — the Responses API is built around server-side
-  conversation state which conflicts with locus's own memory and tool
+  conversation state which conflicts with the SDK's own memory and tool
   layers. Practical consequence: `openai.gpt-5-pro` (Responses-only on
-  OCI per the day-0 announcement) is not reachable from locus today.
+  OCI per the day-0 announcement) is not reachable from the SDK today.
   Regular `openai.gpt-5.5` works fine on V1.
 - **Cohere R-series on V1.** OCI's `/openai/v1` returns `400 Unsupported
   OpenAI operation` for these. Use `OCIModel`.
 - **GenAI API key auth (Bearer token).** A "create an API key in the
   Console, hand it as `api_key=` and you're done" path is not yet
-  reliable on OCI without a Project OCID. When it is, locus will add
+  reliable on OCI without a Project OCID. When it is, the SDK will add
   `api_key=` to `OCIChatCompletionsModel` as a third auth mode (additive,
   non-breaking).
 

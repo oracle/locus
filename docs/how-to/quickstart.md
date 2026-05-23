@@ -1,6 +1,7 @@
 # Quickstart
 
-A working locus agent in five minutes.
+A working Oracle Generative AI – Multi-Agent Locus SDK agent in five
+minutes.
 
 ## 1. Install
 
@@ -8,7 +9,7 @@ A working locus agent in five minutes.
 pip install "locus-sdk[oci]"
 ```
 
-This installs locus plus the OCI Generative AI provider. For other
+This installs the SDK plus the OCI Generative AI provider. For other
 providers add the corresponding extra:
 
 ```bash

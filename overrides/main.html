@@ -2,12 +2,12 @@
 
 {#
   Decouples the browser tab / HTML <title> from `site_name`. `site_name`
-  drives the header banner ("locus — Multi-Agent SDK"); the tab uses a
-  longer, SEO-friendly phrase that survives truncation gracefully and
-  shows the full text on hover (mirrors the Strands docs pattern).
+  drives the header wordmark; the tab carries the approved short product
+  name so it survives tab-bar truncation and shows the full string on
+  hover.
 #}
 {% block htmltitle %}
-  {% set tab_title = "locus — Oracle Generative AI Multi-Agent Reasoning SDK" %}
+  {% set tab_title = "Oracle Generative AI – Multi-Agent Locus SDK" %}
   {% if page and page.title and not page.is_homepage %}
     <title>{{ page.title | striptags }} - {{ tab_title }}</title>
   {% else %}
@@ -31,18 +31,18 @@
   {% set og_image = (config.site_url ~ "/img/og-card.png") | replace("//img/", "/img/") %}
 
   <meta property="og:type" content="website">
-  <meta property="og:site_name" content="locus — Oracle Generative AI Multi-Agent SDK">
+  <meta property="og:site_name" content="Oracle Generative AI – Multi-Agent Locus SDK">
   <meta property="og:title" content="{{ page_title }}">
   <meta property="og:description" content="{{ page_desc }}">
   <meta property="og:url" content="{{ page_url }}">
   <meta property="og:image" content="{{ og_image }}">
   <meta property="og:image:width" content="1280">
   <meta property="og:image:height" content="640">
-  <meta property="og:image:alt" content="locus — Multi-Agent SDK · pip install locus-sdk · Built inside Oracle · github.com/oracle-samples/locus">
+  <meta property="og:image:alt" content="Oracle Generative AI – Multi-Agent Locus SDK · pip install locus-sdk · Built inside Oracle · github.com/oracle-samples/locus">
 
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="{{ page_title }}">
   <meta name="twitter:description" content="{{ page_desc }}">
   <meta name="twitter:image" content="{{ og_image }}">
-  <meta name="twitter:image:alt" content="locus — Multi-Agent SDK · pip install locus-sdk · Built inside Oracle · github.com/oracle-samples/locus">
+  <meta name="twitter:image:alt" content="Oracle Generative AI – Multi-Agent Locus SDK · pip install locus-sdk · Built inside Oracle · github.com/oracle-samples/locus">
 {% endblock %}

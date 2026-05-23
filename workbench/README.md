@@ -1,8 +1,8 @@
-# workbench — locus pattern playground
+# workbench — Oracle Generative AI – Multi-Agent Locus SDK pattern playground
 
 A self-contained 3-tier workbench: **vanilla TypeScript front-end** ↔
-**Node BFF** ↔ **Locus Python pattern runner**. Bring your own provider
-credentials (OpenAI / Anthropic / OCI session / OCI api-key) — no
+**Node BFF** ↔ **Python pattern runner built on the SDK**. Bring your own
+provider credentials (OpenAI / Anthropic / OCI session / OCI api-key) — no
 instance principals, no external dependencies beyond the model
 provider.
 

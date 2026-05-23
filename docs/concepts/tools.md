@@ -1,11 +1,11 @@
 # Tools
 
-Tools are how a locus agent affects the world. The model decides
-*"call `search` with query='hnsw'"*; locus runs your `search`
-function, captures the return value, and feeds it back. From your
-side, a tool is **a regular Python function with a `@tool`
-decorator** — locus introspects the signature and docstring to build
-the schema the model sees.
+Tools are how an Oracle Generative AI – Multi-Agent Locus SDK agent
+affects the world. The model decides *"call `search` with query='hnsw'"*;
+the SDK runs your `search` function, captures the return value, and
+feeds it back. From your side, a tool is **a regular Python function
+with a `@tool` decorator** — the SDK introspects the signature and
+docstring to build the schema the model sees.
 
 This is the seam most production code touches. Get tools right and
 the rest of the framework gets out of your way.
@@ -51,16 +51,16 @@ can call it whenever it decides to.
 result = agent.run_sync("Find documents about HNSW.")
 ```
 
-If the model decides to call `search("hnsw")`, locus invokes your
+If the model decides to call `search("hnsw")`, the SDK invokes your
 function with that argument, captures the return value, and feeds it
-into the next model turn. You write Python; locus handles the
+into the next model turn. You write Python; the SDK handles the
 schema marshalling.
 
 ## What you get out of the box
 
 ### Idempotent tools — the model can retry; the side effect can't
 
-This is locus's flagship tool primitive. Some side-effecting tools
+This is the SDK's flagship tool primitive. Some side-effecting tools
 must run *exactly once* per logical request — bookings, charges,
 emails, paging. Mark them `idempotent=True`:
 
@@ -113,7 +113,7 @@ agent = Agent(
 )
 ```
 
-When the model emits multiple tool calls in one turn, locus runs
+When the model emits multiple tool calls in one turn, the SDK runs
 them concurrently via `asyncio.gather`. Three independent searches
 finish in `max(t1, t2, t3)`, not `t1+t2+t3`.
 
@@ -137,7 +137,7 @@ def lookup_by_id(id: str) -> dict:
 ```
 
 The model sees `"no record with id=42"` and decides what to do.
-Behind the scenes, locus chains the original exception as the cause
+Behind the scenes, the SDK chains the original exception as the cause
 on a `ToolExecutionError` for your structured logs.
 
 ### Custom names and descriptions
@@ -186,7 +186,7 @@ through `LocusMCPServer` — same `@tool`, no rewrite. See
 For most domains, you write a `@tool` per operation: `search_orders`,
 `get_invoice`, `cancel_subscription`. That stops scaling once the
 domain is *cloud-sized* — the Oracle Cloud Infrastructure (OCI)
-Python SDK alone has ~190 service modules. Locus ships two built-in
+Python SDK alone has ~190 service modules. The SDK ships two built-in
 **open-specification** tools that cover the whole surface through a
 single agentic primitive:
 

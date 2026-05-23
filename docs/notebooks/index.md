@@ -38,7 +38,7 @@ cluster, on-demand reranking. **Start here if you're shipping on OCI.**
 | 01 | [OCI transports — start here][t01] | The three OCI transports side by side (V1, Responses, generic chat) |
 | 02 | [OCI v1 (`OCIChatCompletionsModel`)][t02] | The default transport — every OCI model family in one class |
 | 03 | [OCI Responses (`OCIResponsesModel`)][t03] | Opt-in stateful path with built-in tools |
-| 04 | [OCI Dedicated AI Cluster (DAC)][t04] | Wiring a private endpoint OCID into Locus |
+| 04 | [OCI Dedicated AI Cluster (DAC)][t04] | Wiring a private endpoint OCID into the SDK |
 | 05 | [Cohere Reranker V4 on OCI][t05] | Retrieve-then-rerank with OCI on-demand `rerank-v4` |
 
 ## 06–07 · Oracle Database 26ai

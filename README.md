@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/oracle-samples/locus/main/docs/img/og-card.png?v=2" alt="locus — Multi-Agent SDK · pip install locus-sdk · Built by Oracle · github.com/oracle-samples/locus" width="720">
+  <img src="https://raw.githubusercontent.com/oracle-samples/locus/main/docs/img/og-card.png?v=2" alt="Oracle Generative AI – Multi-Agent Locus SDK · pip install locus-sdk · Built by Oracle · github.com/oracle-samples/locus" width="720">
 </p>
 
 <p align="center">
@@ -31,7 +31,7 @@
 </p>
 
 <p align="center">
-  <strong>Try every locus pattern in your browser →</strong>
+  <strong>Try every Oracle Generative AI – Multi-Agent Locus SDK pattern in your browser →</strong>
   <a href="https://locusagents.oracle.com/workbench/"><strong>Workbench guide</strong></a><br>
   <em>Step-by-step setup for the browser playground — run it on localhost in three terminals, or in a single Docker container. Wire up an OCI profile, or bring your own OpenAI / Anthropic key.</em>
 </p>
@@ -97,7 +97,7 @@ No mandatory cloud account to start — `MockModel` lets every notebook run offl
 ## Talk to any provider
 
 A model is a string. The prefix before the colon (`oci:`, `openai:`,
-`anthropic:`, `ollama:`) tells locus which provider to use; the rest is
+`anthropic:`, `ollama:`) tells the SDK which provider to use; the rest is
 the model id that provider expects. `get_model()` parses the string and
 returns a ready client.
 
@@ -198,7 +198,7 @@ approval-gated agent — chosen by protocol selection, not by the model.
 
 ## Eight orchestration shapes
 
-When one agent isn't enough, locus gives you seven in-process shapes plus cross-process A2A.
+When one agent isn't enough, the SDK gives you seven in-process shapes plus cross-process A2A.
 Every pattern uses the same `Agent` class and the same event stream.
 
 | Pattern | When to use |
@@ -243,24 +243,24 @@ print(result.text)
 | **[🔎 RAG](https://locusagents.oracle.com/concepts/rag/)** | 4 vector stores — Oracle 26ai · OpenSearch · pgvector · in-memory. OCI Cohere + OpenAI embeddings · multimodal (PDF, image OCR, audio). |
 | **[📡 Streaming + Server](https://locusagents.oracle.com/concepts/server/)** | Typed events · SSE · `AgentServer` (FastAPI, per-principal thread isolation). |
 | **[🪝 Hooks](https://locusagents.oracle.com/concepts/hooks/)** | Logging · OpenTelemetry · ModelRetry · Guardrails · Steering (LLM-as-judge). |
-| **[🪙 MCP](https://locusagents.oracle.com/concepts/mcp/)** | `MCPClient` consumes MCP servers. `LocusMCPServer` exposes locus tools as MCP. |
+| **[🪙 MCP](https://locusagents.oracle.com/concepts/mcp/)** | `MCPClient` consumes MCP servers. `LocusMCPServer` exposes the SDK's tools as MCP. |
 | **[🌐 Multi-modal](https://locusagents.oracle.com/concepts/multi-modal-providers/)** | `Agent(web_search=…, web_fetch=…, image_generator=…, speech_provider=…)` auto-registers tools. |
 | **[📊 Evaluation](https://locusagents.oracle.com/concepts/evaluation/)** | `EvalCase` / `EvalRunner` / `EvalReport` regression suites. |
 | **[🧰 Models](https://locusagents.oracle.com/concepts/models/)** | OCI GenAI (90+ models, V1 + SDK) · OpenAI · Anthropic · Ollama. |
 
 ---
 
-## Inside locus — the stack, not just the loop
+## Inside the SDK — the stack, not just the loop
 
-A locus agent isn't a one-shot ReAct loop. The same `Agent` class runs
-inside eight orchestration shapes, chosen automatically by the **PRISM
-cognitive router** from a natural-language task, with typed reasoning
-around every Execute and **Oracle Database 26ai** as a first-class
-durable backend. The agent loop is the inner engine — locus is the
-whole stack around it.
+An Oracle Generative AI – Multi-Agent Locus SDK agent isn't a one-shot
+ReAct loop. The same `Agent` class runs inside eight orchestration
+shapes, chosen automatically by the **PRISM cognitive router** from a
+natural-language task, with typed reasoning around every Execute and
+**Oracle Database 26ai** as a first-class durable backend. The agent
+loop is the inner engine — the SDK is the whole stack around it.
 
 <p align="center">
-  <img src="docs/img/locus-stack.svg" alt="The locus stack — PRISM cognitive router compiles natural-language tasks into one of 8 orchestration shapes (SequentialPipeline, ParallelPipeline, LoopAgent, StateGraph, Orchestrator + Specialists, Swarm, Handoff Chain, A2A Mesh), each of which runs the agent loop (Think → Execute → Reflect → Terminate), powered by foundations (Models, Memory, RAG, Observability, Tools/MCP/Skills) and anchored on Oracle Database 26ai" width="100%">
+  <img src="docs/img/locus-stack.svg" alt="The SDK stack — PRISM cognitive router compiles natural-language tasks into one of 8 orchestration shapes (SequentialPipeline, ParallelPipeline, LoopAgent, StateGraph, Orchestrator + Specialists, Swarm, Handoff Chain, A2A Mesh), each of which runs the agent loop (Think → Execute → Reflect → Terminate), powered by foundations (Models, Memory, RAG, Observability, Tools/MCP/Skills) and anchored on Oracle Database 26ai" width="100%">
 </p>
 
 - **PRISM Cognitive Router** — an LLM classifier reads the task and fills a typed `GoalFrame` (intent · domain · complexity · risk); the `CognitiveCompiler` emits the matching runtime shape. The model classifies, never authors graph topology.
@@ -275,7 +275,7 @@ Every node at every layer emits a write-protected typed event — the same strea
 
 ## Backed by Oracle Database 26ai
 
-locus ships native primitives for **Oracle Database 26ai** — vector
+The SDK ships native primitives for **Oracle Database 26ai** — vector
 search, durable agent threads, in-database chunking and embeddings, and
 a long-term key/value store. The contract is owned end-to-end inside
 `locus.rag.stores` and `locus.memory.backends`, and the same connection
@@ -310,7 +310,7 @@ The seven primitives:
 | **`OracleInDBChunker`** | Server-side text chunking via `DBMS_VECTOR_CHAIN.UTL_TO_CHUNKS`. Text never leaves the database. |
 | **`OracleInDBEmbeddings`** | In-database ONNX embeddings via `DBMS_VECTOR_CHAIN.UTL_TO_EMBEDDING`. Zero round-trips when the embedding model is loaded in the DB. |
 
-The contracts live in locus, the SQL is generated locally, and the
+The contracts live in the SDK, the SQL is generated locally, and the
 only runtime requirement is `python-oracledb` thin mode.
 
 → [Notebook 06 — Oracle 26ai RAG](https://locusagents.oracle.com/notebooks/notebook_41_oracle_26ai_rag/) · [Notebook 07 — Oracle 26ai checkpointer](https://locusagents.oracle.com/notebooks/notebook_53_oracle_26ai_checkpointer/) · [Notebooks 08-12 — loader, chunker, embeddings, store, versioned saver](https://locusagents.oracle.com/notebooks/)
@@ -363,7 +363,7 @@ python examples/notebook_69_research_workflow.py     # full research pipeline
 
 ## Workbench
 
-A browser-based playground for every locus pattern. Two clicks to a
+A browser-based playground for every SDK pattern. Two clicks to a
 running agent — no CLI install, no editor setup. Three model slots
 (A / B / C) so multi-agent notebooks can mix a fast triage model
 with a deeper specialist. The **Notebooks** sidebar lists all 68

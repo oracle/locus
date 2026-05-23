@@ -7,9 +7,9 @@ agent's primary task — logging, OpenTelemetry traces, retry, guardrails,
 PII redaction, an LLM-as-judge approval gate on tool calls — lives in
 a hook.
 
-You can use the ones locus ships (covers most production needs out
-of the box) or write your own — a hook is a small subclass with the
-methods it cares about.
+You can use the ones Oracle Generative AI – Multi-Agent Locus SDK
+ships (covers most production needs out of the box) or write your own
+— a hook is a small subclass with the methods it cares about.
 
 ## When to write a hook
 
@@ -107,7 +107,7 @@ The hook fires on every agent run — no further wiring.
 
 ## What you get out of the box
 
-locus ships these hooks. Composed in this order, they cover most
+The SDK ships these hooks. Composed in this order, they cover most
 production needs without writing custom code.
 
 ```python

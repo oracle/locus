@@ -3,22 +3,23 @@
 The [Model Context Protocol](https://modelcontextprotocol.io) is an
 Anthropic-spec interop standard for tools. Define a tool once,
 expose it over MCP, and any MCP-compatible client (Claude Desktop,
-Cline, Strands, another locus agent) can call it. Or consume tools
-from existing MCP servers (filesystem, git, postgres, github,
-sequential-thinking) without writing any glue.
+Cline, Strands, another agent built with Oracle Generative AI –
+Multi-Agent Locus SDK) can call it. Or consume tools from existing
+MCP servers (filesystem, git, postgres, github, sequential-thinking)
+without writing any glue.
 
-**locus speaks MCP both ways**. That's a deliberate differentiator —
+**The SDK speaks MCP both ways**. That's a deliberate differentiator —
 most agent frameworks consume MCP servers but don't expose their own
-tools as MCP. Round-trip means an agent built with locus can be
-either side of the conversation.
+tools as MCP. Round-trip means an SDK-built agent can be either side
+of the conversation.
 
 ## When to use MCP
 
 | You want… | Use MCP |
 |---|---|
-| Your locus agent to use Anthropic's published filesystem / git / postgres servers | ✓ — `MCPClient` |
+| Your SDK agent to use Anthropic's published filesystem / git / postgres servers | ✓ — `MCPClient` |
 | Your `@tool` library to be callable by Claude Desktop / Cline / other agents | ✓ — `LocusMCPServer` |
-| Two locus agents to share tools across processes / machines | ✓ — works, but [A2A](multi-agent/a2a.md) is the better protocol |
+| Two SDK agents to share tools across processes / machines | ✓ — works, but [A2A](multi-agent/a2a.md) is the better protocol |
 | In-process multi-agent — share tools by importing | use the [tools](tools.md) directly, not MCP |
 | Reproducible tests | use [Ollama](providers/ollama.md) + plain `@tool` — MCP adds I/O |
 
@@ -50,13 +51,13 @@ stdin/stdout, and discovers what tools the server exposes.
 from locus.agent import Agent
 agent = Agent(
     model="oci:openai.gpt-5.5",
-    tools=[*fs.tools()],          # MCP tools become locus tools
+    tools=[*fs.tools()],          # MCP tools become SDK tools
     system_prompt="You can read files in /data.",
 )
 result = agent.run_sync("Summarise the README in /data.")
 ```
 
-`fs.tools()` returns a list of locus `Tool` objects with full
+`fs.tools()` returns a list of SDK `Tool` objects with full
 schemas, descriptions, and call-through plumbing. The agent doesn't
 know they're MCP — they look like any other `@tool`.
 
@@ -147,7 +148,7 @@ appear in the model's tool list.
 
 `@tool`'s docstring + type hints become the MCP tool's name,
 description, and JSON schema — losslessly. The MCP client sees the
-same parameter types, defaults, and descriptions a locus agent
+same parameter types, defaults, and descriptions an SDK agent
 would.
 
 ### Both transports
@@ -160,12 +161,12 @@ would.
 ### Idempotency carries through
 
 A tool tagged `@tool(idempotent=True)` keeps that semantic when
-exposed via MCP. The dedup happens locus-side; the MCP client
+exposed via MCP. The dedup happens SDK-side; the MCP client
 doesn't need to know.
 
 ## Round-trip example
 
-A common shape: a locus agent A consumes a filesystem MCP server,
+A common shape: an SDK agent A consumes a filesystem MCP server,
 *and* exposes its own tools as MCP for another agent B to consume:
 
 ```python
@@ -193,7 +194,7 @@ implementation detail.
 | `MCP server failed to start` | The MCP server subprocess crashed before establishing the session. Run the command manually to see the error. |
 | `Tool 'X' not found in MCP discovery` | The server exposes a different name than you expected. Print `[t.name for t in fs.tools()]` to see the actual list. |
 | `Schema validation failed on call` | MCP tool returned an arg type that doesn't match its declared schema. Common with hand-written MCP servers; the standard ones are fine. |
-| Claude Desktop doesn't show your locus tools | `claude_desktop_config.json` not picked up — check the file lives at the right path and Claude has been restarted. |
+| Claude Desktop doesn't show your SDK tools | `claude_desktop_config.json` not picked up — check the file lives at the right path and Claude has been restarted. |
 | Hangs on `MCPClient.stdio` startup | The MCP subprocess is waiting for input on stdin (some servers expect a handshake). Pass `wait_for_init=True` and a timeout. |
 
 ## Source and notebook
@@ -204,4 +205,4 @@ implementation detail.
 ## See also
 
 - [Tools](tools.md) — the `@tool` decorator MCP wraps.
-- [A2A](multi-agent/a2a.md) — purpose-built protocol for cross-process locus-to-locus agent meshes.
+- [A2A](multi-agent/a2a.md) — purpose-built protocol for cross-process SDK-to-SDK agent meshes.

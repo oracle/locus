@@ -1,8 +1,9 @@
 # Structured output
 
 Sometimes you want the model to *fill a shape*, not write prose. Set
-`output_schema=` to a Pydantic model and locus parses the agent's final
-answer into a typed instance for you.
+`output_schema=` to a Pydantic model and Oracle Generative AI –
+Multi-Agent Locus SDK parses the agent's final answer into a typed
+instance for you.
 
 ```python
 from pydantic import BaseModel, Field
@@ -33,7 +34,7 @@ for v in picks.vendors:
 nested models, lists, optionals, discriminated unions, and any
 `@field_validator` / `@model_validator` you attach. The schema flows to
 the provider as a strict `response_format` when supported (OpenAI,
-OCI OpenAI-compat); otherwise locus falls back to prompted JSON +
+OCI OpenAI-compat); otherwise the SDK falls back to prompted JSON +
 extraction + validation.
 
 ## What ends up on `AgentResult`
@@ -58,7 +59,7 @@ for v in picks.vendors:
 
 ## Repair on validation failure
 
-If the model's first answer fails validation, locus re-prompts up to
+If the model's first answer fails validation, the SDK re-prompts up to
 `output_schema_retries` times (default 2) with the Pydantic
 `ValidationError` details inlined so the model can fix the response. On
 supporting providers the repair call also ships
@@ -88,11 +89,11 @@ When `output_schema_retries=0`, the first response is the final attempt.
 | `anthropic:claude-*` | ✓ tool-use | synthetic `respond_with_schema` tool + pinned `tool_choice` | ✓ | unit-mocked |
 | `ollama:*` | (prompted) | — | ✓ | unit-only |
 
-For Anthropic, locus translates `response_format` into the idiomatic
+For Anthropic, the SDK translates `response_format` into the idiomatic
 tool-use pattern: a single `respond_with_schema` tool whose
 `input_schema` is your Pydantic schema, with `tool_choice` pinned to it.
 Anthropic's API guarantees the tool's arguments match the schema, and
-locus surfaces those arguments as the message content for downstream
+the SDK surfaces those arguments as the message content for downstream
 parsing — **the synthetic tool never reaches your agent's tool list**.
 
 Strict mode adds two guarantees on supporting providers: (1) the model
@@ -121,7 +122,7 @@ async for partial in stream:
 final: VendorList | None = stream.final
 ```
 
-Each `ModelChunkEvent` is appended to a buffer; locus auto-closes any
+Each `ModelChunkEvent` is appended to a buffer; the SDK auto-closes any
 unbalanced braces / brackets / strings, runs the result through
 `schema.model_validate`, and yields the parsed instance if it succeeds.
 By default identical consecutive partials are deduplicated; pass
@@ -135,7 +136,7 @@ without a single valid partial, `stream.final` is `None`.
 
 `output_schema` only affects the **final answer**, not the iterations
 that use tools. The agent can call any tool during the loop; once it
-emits a non-tool response, locus parses that response into the schema:
+emits a non-tool response, the SDK parses that response into the schema:
 
 ```python
 agent = Agent(

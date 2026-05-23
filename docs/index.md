@@ -7,13 +7,15 @@ hide:
 <div class="locus-hero" markdown>
 <div class="locus-hero__copy" markdown>
 
+<p class="locus-product-name">Oracle Generative AI Multi-Agent Reasoning Orchestrator SDK</p>
+
 # Multi-agent workflows built for <span class="accent">production.</span>
 
-Describe the task. locus selects the protocol and coordinates the agents.
+Describe the task. Oracle Generative AI – Multi-Agent Locus SDK selects the protocol and coordinates the agents.
 
 <div class="locus-stat-strip" markdown><span style="white-space:nowrap">[direct&nbsp;answer](concepts/router.md)</span> · <span style="white-space:nowrap">[pipeline](concepts/multi-agent/composition.md)</span> · <span style="white-space:nowrap">[fan&#8209;out](concepts/multi-agent/composition.md)</span> · <span style="white-space:nowrap">[debate](concepts/multi-agent/composition.md)</span> · <span style="white-space:nowrap">[code&nbsp;+&nbsp;test](concepts/multi-agent/composition.md)</span> · <span style="white-space:nowrap">[approval&nbsp;gate](concepts/interrupts.md)</span> · <span style="white-space:nowrap">[A2A](concepts/multi-agent/a2a.md)</span> · <span style="white-space:nowrap">[handoff](concepts/multi-agent/handoff.md)</span></div>
 
-- **From idea to production agent in minutes, not weeks.** Describe the task; locus picks the pattern and assembles the network from eight production-tested protocols.
+- **From idea to production agent in minutes, not weeks.** Describe the task; Oracle Generative AI – Multi-Agent Locus SDK picks the pattern and assembles the network from eight production-tested protocols.
 - **Self-critiquing agents with grounded outputs.** Every turn is scored; every claim is verified against the tool result that produced it.
 - **Full causal traceability.** Every decision, tool call, and reasoning step is a typed event you can replay, audit, and debug.
 
@@ -107,7 +109,7 @@ print(agent.run_sync("Should I bring an umbrella to Tokyo tomorrow?").text)
 
 [Notebook 14 — basic agent →](notebooks/notebook_06_basic_agent.md)
 
-## What locus gives you
+## What Oracle Generative AI – Multi-Agent Locus SDK gives you
 
 <div class="grid cards locus-feature-cards" markdown>
 
@@ -181,10 +183,10 @@ print(result.text)          # findings from 3 parallel probes
 
 ## Backed by Oracle Database 26ai
 
-locus ships native primitives for Oracle 26ai — native `VECTOR(N, FLOAT32)`
-with `VECTOR_DISTANCE`, durable agent threads in the database, in-DB
-chunking and embeddings, all without a langchain or langgraph
-dependency.
+Oracle Generative AI – Multi-Agent Locus SDK ships native primitives for
+Oracle 26ai — native `VECTOR(N, FLOAT32)` with `VECTOR_DISTANCE`, durable
+agent threads in the database, in-DB chunking and embeddings, all without
+a langchain or langgraph dependency.
 
 ```python
 from locus.rag import OCIEmbeddings, OracleVectorStore, RAGRetriever
@@ -211,7 +213,7 @@ notebooks 06 and 07 walk both end-to-end.
 
 ## Walk the notebooks
 
-The fastest way to read locus is to run the notebooks. Each one is a
+The fastest way to read Oracle Generative AI – Multi-Agent Locus SDK is to run the notebooks. Each one is a
 single self-contained file under [`examples/`][gh-examples] with a
 matching docs page — start at the topic you want, click through to
 the source from there.

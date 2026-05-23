@@ -10,7 +10,8 @@ OCI GenAI exposes two serving modes:
   (`ocid1.generativeaiendpoint.oc1.<region>....`). Inference is routed
   to your cluster, with predictable latency and isolation guarantees.
 
-Locus auto-routes DAC endpoint OCIDs to the SDK transport (`OCIModel`)
+Oracle Generative AI – Multi-Agent Locus SDK auto-routes DAC endpoint
+OCIDs to the SDK transport (`OCIModel`)
 because the V1 OpenAI-compatible endpoint doesn't speak
 `DedicatedServingMode`. Pass the endpoint OCID exactly the way you'd
 pass a model id:
@@ -67,15 +68,15 @@ provisioned by Luigi's tenancy):
 
 - Tool calls come back as `<tool_call>{...}</tool_call>` text blocks
   inside `message.content`, not as structured `tool_calls` array
-  entries. Locus's `GenericProvider.parse_response()` doesn't extract
+  entries. The SDK's `GenericProvider.parse_response()` doesn't extract
   them as `ToolCall`s. Two ways to fix:
   1. **Deploy-side**: configure the DAC with a Qwen3-family flag like
      `--enable-auto-tool-choice` so the model emits OpenAI-style
-     `tool_calls`. Locus picks them up natively.
+     `tool_calls`. The SDK picks them up natively.
   2. **Caller-side**: post-process `result.message` for
      `<tool_call>{...}</tool_call>` blocks and re-issue them via
      `agent.run_sync(...)` with the parsed call. A small regex
-     extraction; not built into locus today.
+     extraction; not built into the SDK today.
 
 ## Streaming
 

@@ -1,8 +1,9 @@
 # Environment variables — `OCI_*` vs `LOCUS_OCI_*`
 
-Locus reads two families of environment variables to configure the OCI
-GenAI transport. Both are valid, and the notebook harness in
-`examples/config.py` reads them with a consistent fallback chain.
+Oracle Generative AI – Multi-Agent Locus SDK reads two families of
+environment variables to configure the OCI GenAI transport. Both are
+valid, and the notebook harness in `examples/config.py` reads them
+with a consistent fallback chain.
 
 ## The rule
 
@@ -22,9 +23,9 @@ harness performs.
 
 - **`OCI_*`** is the OCI CLI / SDK standard. If you already typed
   `oci session authenticate --profile-name DEFAULT` and exported the
-  resulting variables, the Locus notebooks pick them up unchanged.
+  resulting variables, the SDK notebooks pick them up unchanged.
 - **`LOCUS_OCI_*`** is the namespaced form the notebook harness reads
-  first. Useful when you want a Locus notebook to use a *different*
+  first. Useful when you want an SDK notebook to use a *different*
   profile or region from your shell-default OCI configuration —
   point `LOCUS_OCI_PROFILE` somewhere else without touching
   `OCI_PROFILE`.

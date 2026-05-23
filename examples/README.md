@@ -1,4 +1,4 @@
-# Locus Examples
+# Oracle Generative AI – Multi-Agent Locus SDK Examples
 
 ## Quick Start
 

@@ -1,6 +1,7 @@
 # DeepAgent
 
-Locus ships two primitives for long-horizon research:
+Oracle Generative AI – Multi-Agent Locus SDK ships two primitives for
+long-horizon research:
 
 | | `create_deepagent` | `create_research_workflow` |
 |---|---|---|
@@ -222,7 +223,7 @@ agent = create_deepagent(
 )
 ```
 
-Activates locus's `SummarizingManager` so older turns are condensed
+Activates the SDK's `SummarizingManager` so older turns are condensed
 once the conversation exceeds the threshold. Prevents context blowout
 on long research runs without losing recent reasoning steps.
 

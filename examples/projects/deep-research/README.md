@@ -1,10 +1,10 @@
-# deep-research — locus ports of the langchain-oci deep-research gists
+# deep-research — Oracle Generative AI – Multi-Agent Locus SDK ports of the langchain-oci deep-research gists
 
 A runnable suite of seven `create_deepagent(datastores=...)` examples
-covering every retrieval backend locus supports: **in-memory**, **Oracle
+covering every retrieval backend the SDK supports: **in-memory**, **Oracle
 Autonomous Database** (vector), **OCI Object Storage** (tool-based
 retrieval), and **OpenSearch**. Each demo mirrors a published
-langchain-oci deep-research gist 1:1 on locus primitives — no langchain
+langchain-oci deep-research gist 1:1 on the SDK's primitives — no langchain
 or deepagents imports.
 
 ```
@@ -37,7 +37,7 @@ or deepagents imports.
 | [`demo_opensearch_multi_index.py`](demo_opensearch_multi_index.py) | Two OpenSearch indices (medical + news) | [gist 92b9a515](https://gist.github.com/fede-kamel/92b9a515155f4332f794d491602b6e79) (OpenSearch variant) |
 | [`demo_object_storage.py`](demo_object_storage.py) | OCI Object Storage via `@tool`-wrapped SDK (`list_bucket_objects`, `read_bucket_object`, `search_bucket_data`) | [gist 00cb5682](https://gist.github.com/fede-kamel/00cb568227912735e9717ddc12b649c4) |
 
-The Python-published gists with the verified locus ports live at:
+The Python-published gists with the verified SDK ports live at:
 
 - [demo_hello_world](https://gist.github.com/fede-kamel/87f1dc5cabd8b434b5ff0e432804c553)
 - [demo_iron_metabolism (full replay)](https://gist.github.com/fede-kamel/27a6fc50e0df3854e427ecf4715bc005)
@@ -46,7 +46,7 @@ The Python-published gists with the verified locus ports live at:
 - [demo_object_storage](https://gist.github.com/fede-kamel/886293f25576b1589d76a3c18bc3bc4e)
 - [demo_opensearch_multi_index](https://gist.github.com/fede-kamel/eb9c8ef0ef59cf55c0f67cb8ed80feb1)
 
-## Locus translations from langchain-oci
+## SDK translations from langchain-oci
 
 | langchain-oci | locus |
 |---|---|
@@ -105,7 +105,7 @@ the table on exit. A successful run looks like:
 
 ## Gotchas surfaced during the port
 
-The OpenSearch + GPT-5.1 path surfaced three locus-specific behaviors
+The OpenSearch + GPT-5.1 path surfaced three SDK-specific behaviors
 worth pinning:
 
 1. **`locus.memory.InMemoryStore` is async.** Its `put`/`search`/`get`
@@ -120,7 +120,7 @@ worth pinning:
    loop becomes unusable from the agent's tool calls and returns
    silent empty results.
 4. **Some model providers JSON-encode floats as strings.** GPT-5.x
-   sends `"min_score": "0.5"` rather than `0.5` for tool args; locus
+   sends `"min_score": "0.5"` rather than `0.5` for tool args; the SDK
    coerces this defensively in `RAGRetriever.retrieve` and
    `OracleVectorStore.search`. If you implement a custom store,
    coerce at the search boundary too.

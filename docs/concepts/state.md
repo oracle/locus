@@ -99,8 +99,8 @@ serialize whatever `to_checkpoint()` returns and rehydrate with
 ## Reducers (for graphs only)
 
 When two branches of a [StateGraph](multi-agent/graph.md) modify the
-state in parallel, locus needs to know how to merge them. That's
-what reducers do:
+state in parallel, Oracle Generative AI – Multi-Agent Locus SDK needs
+to know how to merge them. That's what reducers do:
 
 | Reducer | Combines two values by… |
 |---|---|

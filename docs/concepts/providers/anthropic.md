@@ -1,7 +1,7 @@
 # Anthropic
 
-The Anthropic provider connects locus directly to Anthropic's API
-(`api.anthropic.com`). Use it when you want **the Claude family** —
+The Anthropic provider connects Oracle Generative AI – Multi-Agent
+Locus SDK directly to Anthropic's API (`api.anthropic.com`). Use it when you want **the Claude family** —
 Opus for the hardest problems, Sonnet as the everyday workhorse,
 Haiku for high-volume cheap calls — and want to talk to Anthropic
 without going through an intermediary.
@@ -39,9 +39,9 @@ agent = Agent(
 )
 ```
 
-The string `"anthropic:claude-sonnet-4-20250514"` tells locus the
+The string `"anthropic:claude-sonnet-4-20250514"` tells the SDK the
 provider (`anthropic:`) and the exact model id. Any model id
-Anthropic accepts, locus accepts — including the dated revision
+Anthropic accepts, the SDK accepts — including the dated revision
 suffixes (`-20250514`).
 
 ### 3. Run it
@@ -68,7 +68,7 @@ Whatever Anthropic ships, you can address by name:
 
 ### Real SSE streaming
 
-Token-level streaming. The model emits content deltas; locus
+Token-level streaming. The model emits content deltas; the SDK
 converts them to `ModelChunkEvent`s; your `async for` loop reads
 them as they arrive.
 
@@ -81,14 +81,14 @@ async for event in agent.run("Write a haiku about latency."):
 ### Tool calling — the Anthropic tool-use protocol
 
 `@tool` functions are translated into Anthropic's `tools` schema; the
-model's structured `tool_use` blocks are parsed back into locus
+model's structured `tool_use` blocks are parsed back into SDK
 `ToolCall`s. Parallel tool calls are supported (the model can
-request multiple tools per turn; locus runs them concurrently via
+request multiple tools per turn; the SDK runs them concurrently via
 the `ConcurrentExecutor`).
 
 ### Structured output — tool-as-schema
 
-Anthropic doesn't expose a `response_format` field, so locus uses
+Anthropic doesn't expose a `response_format` field, so the SDK uses
 the standard "single-tool" trick: define the schema as a tool, force
 the model to call it. From your side, the API is identical to the
 other providers:
@@ -116,7 +116,7 @@ mechanism marks a span of the request as cacheable; subsequent turns
 within the cache window pay **1/10th** the input cost on the cached
 span.
 
-Opt in with `prompt_cache=True` on `AnthropicModel`. Locus then sends
+Opt in with `prompt_cache=True` on `AnthropicModel`. The SDK then sends
 the system prompt as a block list with `cache_control: ephemeral` and
 tags the last entry of the tool catalog the same way (Anthropic walks
 markers in order — the last tag anchors the cache point).
@@ -157,7 +157,7 @@ and the cost saved.
 
 Claude 4 models with `thinking_enabled` think before answering, the
 way the OpenAI o-series does. Anthropic surfaces those thinking
-blocks in the response; locus emits a `ThinkEvent` for each one so
+blocks in the response; the SDK emits a `ThinkEvent` for each one so
 your UI can show what the model is working on:
 
 ```python

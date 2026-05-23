@@ -1,8 +1,8 @@
 # Functional API
 
-The functional API is locus's "agent as a task" shape — `@task` and
-`@entrypoint` decorators that bring agent runs into the regular
-asyncio universe.
+The functional API is the Oracle Generative AI – Multi-Agent Locus
+SDK's "agent as a task" shape — `@task` and `@entrypoint` decorators
+that bring agent runs into the regular asyncio universe.
 
 ![Functional pattern — @entrypoint at top fans out to multiple @task agents via asyncio.gather, results merge into a list](../../img/patterns/functional.svg){ .diagram }
 

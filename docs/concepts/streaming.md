@@ -1,9 +1,9 @@
 # Streaming
 
-Every locus agent emits a typed event stream as it runs. The events are
-frozen Pydantic classes — not strings, not `dict[str, Any]` blobs —
-designed to drop into a `match` statement that your type checker can
-verify exhaustively:
+Every Oracle Generative AI – Multi-Agent Locus SDK agent emits a typed
+event stream as it runs. The events are frozen Pydantic classes — not
+strings, not `dict[str, Any]` blobs — designed to drop into a `match`
+statement that your type checker can verify exhaustively:
 
 ```python
 async for event in agent.run("Plan a trip to Paris."):
@@ -101,7 +101,7 @@ visible in code review.
 
 Why this is important: in callback-based event systems any code can
 silently mutate a field and you find out three hops downstream when
-the value's wrong. locus's frozen events make that impossible.
+the value's wrong. The SDK's frozen events make that impossible.
 
 ## Sync wrapper — when you don't need the stream
 

@@ -1,6 +1,7 @@
-# Contributing to Locus
+# Contributing
 
-Locus — *Oracle Generative AI · Multi-Agent Reasoning Orchestrator SDK* —
+The Oracle Generative AI – Multi-Agent Locus SDK — formally
+*Oracle Generative AI Multi-Agent Reasoning Orchestrator SDK* —
 is built inside Oracle, used in production, and open to everyone.
 This document covers how to set up a development environment, the
 review and sign-off process, the coding standards we hold the codebase
@@ -534,4 +535,4 @@ and how `LocusDeprecationWarning` works.
 - Open a [GitHub Discussion](https://github.com/oracle-samples/locus/discussions)
 - Check existing [Issues](https://github.com/oracle-samples/locus/issues)
 
-Thank you for contributing to Locus!
+Thank you for contributing to the SDK!

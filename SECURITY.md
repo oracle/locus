@@ -2,7 +2,7 @@
 
 ## Reporting a Vulnerability
 
-If you believe you have found a security vulnerability in Locus, please report it to us through coordinated disclosure.
+If you believe you have found a security vulnerability in the Oracle Generative AI – Multi-Agent Locus SDK, please report it to us through coordinated disclosure.
 
 **Please do not report security vulnerabilities through public GitHub issues.**
 
@@ -23,7 +23,7 @@ We will acknowledge receipt of your vulnerability report and send you regular up
 
 ## Security Best Practices
 
-When using Locus in production:
+When using the SDK in production:
 
 1. **API Keys**: Never commit API keys or secrets to version control. Use environment variables or secret management systems.
 

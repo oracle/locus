@@ -1,8 +1,9 @@
 # Agent
 
-`Agent` is the unit you build everything else from. Hand it a model, a
+`Agent` is the unit you build everything else from in
+Oracle Generative AI – Multi-Agent Locus SDK. Hand it a model, a
 list of tools, a system prompt, and any optional features (reflexion,
-grounding, checkpointing) — locus drives the
+grounding, checkpointing) — the SDK drives the
 [Think → Execute → Reflect → Terminate](agent-loop.md) loop, streams
 typed events as it runs, and returns a typed `AgentResult` when it
 stops.

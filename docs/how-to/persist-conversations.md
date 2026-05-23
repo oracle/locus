@@ -108,5 +108,6 @@ await agent2.run("Who am I?", thread_id="t1").__anext__()
 # The model sees the earlier user turn.
 ```
 
-Locus's integration suite has this exact test against a live OCI
-bucket. See `tests/integration/test_checkpointer_adapters.py`.
+Oracle Generative AI – Multi-Agent Locus SDK's integration suite has
+this exact test against a live OCI bucket. See
+`tests/integration/test_checkpointer_adapters.py`.

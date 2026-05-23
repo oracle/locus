@@ -2,10 +2,11 @@
 
 > The single most important word in production agents is **once**.
 
-The model is *allowed* to retry. The side effect *isn't*. locus
-makes that distinction a one-keyword decision on the tool, enforced
-inside the ReAct loop. This is a locus-specific primitive — none of
-LangChain / LangGraph / CrewAI / Strands ship it.
+The model is *allowed* to retry. The side effect *isn't*. Oracle
+Generative AI – Multi-Agent Locus SDK makes that distinction a
+one-keyword decision on the tool, enforced inside the ReAct loop.
+This is an SDK-specific primitive — none of LangChain / LangGraph
+/ CrewAI / Strands ship it.
 
 If you ever plan to run an agent that **books**, **charges**,
 **emails**, **pages**, or **writes**, this is the most important
@@ -17,13 +18,13 @@ single page on the docs site.
 |---|---|
 | Side-effecting tool with real-world cost (charge, email, page, book) | **yes — always** |
 | Database write you can't trivially roll back | **yes** |
-| External service that's already idempotent on its end | yes — locus dedupes the round-trip too |
+| External service that's already idempotent on its end | yes — the SDK dedupes the round-trip too |
 | Read-only catalogue lookup | no — re-reads are cheap, leave it to the model |
 | Tool that *intentionally* generates a new entity each call (e.g. `mint_uuid`) | no — that breaks the contract |
 
 ## How it works
 
-Inside a single agent run, locus hashes the tool's
+Inside a single agent run, the SDK hashes the tool's
 `(name, arguments)` tuple as the model emits each call. **The first
 call with a given key hits the function body** and the result is
 recorded. **Every subsequent call with the same key short-circuits
@@ -83,7 +84,7 @@ When a checkpointer resumes a stalled run, the model may decide to
 re-issue tool calls it's already seen. Idempotent tools see the
 cache pre-populated from the checkpoint and skip the side effect on
 replay. (This requires `tool_executions` to be restored from the
-checkpoint; locus's [native checkpointers](checkpointers.md) handle
+checkpoint; the SDK's [native checkpointers](checkpointers.md) handle
 it.)
 
 ## What it is *not*

@@ -1,11 +1,12 @@
 # OCI Responses API — when to use it, what changes
 
-Locus exposes the OCI Generative AI **Responses** endpoint as a separate
-transport, `OCIResponsesModel`, alongside the default `OCIChatCompletionsModel`
-(which speaks `/openai/v1/chat/completions`). Picking it means opting
-into server-side conversation state — the OCI server holds the message
-thread between turns, and Locus references it via a continuation token
-instead of re-sending the full history each call.
+Oracle Generative AI – Multi-Agent Locus SDK exposes the OCI Generative
+AI **Responses** endpoint as a separate transport, `OCIResponsesModel`,
+alongside the default `OCIChatCompletionsModel` (which speaks
+`/openai/v1/chat/completions`). Picking it means opting into server-side
+conversation state — the OCI server holds the message thread between
+turns, and the SDK references it via a continuation token instead of
+re-sending the full history each call.
 
 Use it for:
 
@@ -56,7 +57,7 @@ anything.
 
 **Everything else works identically:**
 
-| Locus primitive | Status on `OCIResponsesModel` |
+| SDK primitive | Status on `OCIResponsesModel` |
 |---|---|
 | `MemoryStore` (cross-run facts in system prompt) | ✅ Works — system prompt threads into the first Responses call, server carries forward |
 | `Reflexion` | ✅ Works — additional refinement turns in the same Responses thread |
@@ -76,7 +77,7 @@ That's why the bypass is one line, not a matrix.
 ## Tools on the Responses path
 
 User `@tool` functions work identically. The model emits tool calls,
-Locus's `ToolExecutor` runs them client-side, results are sent back in
+the SDK's `ToolExecutor` runs them client-side, results are sent back in
 the next turn as `function_call_output` items (carrying `call_id` for
 correlation). Tool hooks fire normally; idempotency dedup applies; the
 `AfterToolCallEvent.arguments` and `.tool_call_id` fields you'd expect
@@ -84,15 +85,15 @@ from [hooks](hooks.md#on_after_tool_call-what-the-event-carries) are
 all populated.
 
 OCI built-in Responses tools (`file_search`, `web_search`,
-`code_interpreter`) are not exposed in this release. Locus's hook /
+`code_interpreter`) are not exposed in this release. The SDK's hook /
 guardrail layers can't see server-side tool execution, so wrapping
-those tools in Locus would be misleading. If you need them, call OCI
+those tools in the SDK would be misleading. If you need them, call OCI
 directly. We may add an opt-in pass-through in a later release.
 
 ## Continuation state and checkpointing
 
 After each turn, the model returns `provider_state =
-{"previous_response_id": "resp_..."}`. Locus stores it on
+{"previous_response_id": "resp_..."}`. The SDK stores it on
 `AgentState.provider_state` and threads it into the next `complete()`
 call. The `Checkpointer` snapshots `provider_state` alongside the
 message history, so `agent.resume(...)` works across process restarts

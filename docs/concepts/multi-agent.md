@@ -1,6 +1,7 @@
 # Multi-agent workflows
 
-Multi-agent workflows are what locus is for. Seven shapes you compose
+Multi-agent workflows are what Oracle Generative AI – Multi-Agent
+Locus SDK is for. Seven shapes you compose
 in one process or scale across a mesh, every shape backed by the same
 `Agent` class, the same event stream, and the same primitives. Pick a
 shape directly, or let the **cognitive router** select and

@@ -1,7 +1,8 @@
 # Deprecation policy
 
-Locus is pre-1.0. This file explains how breaking changes and
-deprecations work today, and how they will work after 1.0.
+The Oracle Generative AI – Multi-Agent Locus SDK is pre-1.0. This
+file explains how breaking changes and deprecations work today, and
+how they will work after 1.0.
 
 ## Current state (0.x)
 

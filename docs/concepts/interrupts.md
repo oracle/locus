@@ -4,9 +4,10 @@ Sometimes the agent shouldn't decide alone. A human approves the
 $2M PO. A reviewer signs off on the customer refund. A regulator
 requires an audit checkpoint between research and submission.
 
-locus treats human approval as **a tool the model can call** — same
-shape as any other tool, except it surfaces a question to your app
-and resumes when the human responds.
+Oracle Generative AI – Multi-Agent Locus SDK treats human approval as
+**a tool the model can call** — same shape as any other tool, except
+it surfaces a question to your app and resumes when the human
+responds.
 
 ## The shape
 
@@ -35,7 +36,7 @@ agent = Agent(
 ```
 
 `PendingApproval` is your own sentinel exception. When the agent
-calls the tool, locus catches the exception, persists state to the
+calls the tool, the SDK catches the exception, persists state to the
 checkpointer, and exits with `TerminateEvent(reason="PendingApproval")`.
 Your app reads the reason out of `state.metadata` and asks the human.
 

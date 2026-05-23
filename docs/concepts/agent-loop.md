@@ -1,12 +1,13 @@
-# The locus agent loop
+# The agent loop
 
-Every locus agent runs the same loop. Four named nodes
-(`Think → Execute → Reflect → Terminate`), one router that decides what
-runs next, one typed event stream, one piece of immutable state that
-flows through. This page is the architectural reference — what each
-node does, why it exists, what it emits, and how to extend it.
+Every Oracle Generative AI – Multi-Agent Locus SDK agent runs the same
+loop. Four named nodes (`Think → Execute → Reflect → Terminate`), one
+router that decides what runs next, one typed event stream, one piece of
+immutable state that flows through. This page is the architectural
+reference — what each node does, why it exists, what it emits, and how
+to extend it.
 
-![locus agent loop — Think → Execute → Reflect → Terminate, with idempotent dedupe at Execute, Reflexion and Causal at Reflect, and composable termination algebra at Terminate](../img/agent-loop.svg)
+![Agent loop — Think → Execute → Reflect → Terminate, with idempotent dedupe at Execute, Reflexion and Causal at Reflect, and composable termination algebra at Terminate](../img/agent-loop.svg)
 
 The loop is implemented in
 [`src/locus/loop/`](https://github.com/oracle-samples/locus/tree/main/src/locus/loop)
@@ -23,7 +24,7 @@ The base pattern is **ReAct** ([Yao et al., 2022](https://arxiv.org/abs/2210.036
 *Thought → Action → Observation*, repeated until the model decides
 to stop. ReAct is now the default loop in most agentic SDKs.
 
-locus keeps the spirit and adds three things:
+The SDK keeps the spirit and adds three things:
 
 - **Action becomes Execute** — a real node in the graph that owns
   tool dispatch *and* idempotency dedup, not a callback.

@@ -13,11 +13,12 @@ Python over that frame, so two identical requests always produce the
 same shape.
 
 Under the hood: `locus.router` is a meta-orchestration layer on top of
-locus's existing primitives. It compiles the chosen shape onto a real
-`Agent`, `SequentialPipeline`, `ParallelPipeline`, `LoopAgent`, or
-`Orchestrator` from the standard toolkit. The contribution is the
-*layer*, not the primitives — every router execution is just a normal
-locus orchestration you can already inspect, replay, and extend.
+Oracle Generative AI – Multi-Agent Locus SDK's existing primitives. It
+compiles the chosen shape onto a real `Agent`, `SequentialPipeline`,
+`ParallelPipeline`, `LoopAgent`, or `Orchestrator` from the standard
+toolkit. The contribution is the *layer*, not the primitives — every
+router execution is just a normal SDK orchestration you can already
+inspect, replay, and extend.
 
 ## Why a routing layer
 
@@ -38,7 +39,7 @@ A dispatch flows through five stages, in order: an LLM extractor reads
 the prompt into a typed `GoalFrame`, the protocol registry picks the
 matching shape, the policy gate decides whether the request is allowed
 (and whether it needs approval), the compiler instantiates the real
-locus primitive, and the runnable executes. Every stage except the
+SDK primitive, and the runnable executes. Every stage except the
 first is pure Python.
 
 ![Cognitive router pipeline — NL input → GoalFrame Extractor (LLM) → ProtocolRegistry → PolicyGate → CognitiveCompiler → eight compiled shapes → RunnableResult](../img/patterns/router.svg)
@@ -57,7 +58,7 @@ frame = GoalFrame(
 )
 ```
 
-The LLM extractor — a standard locus
+The LLM extractor — a standard SDK
 `Agent(model=..., output_schema=GoalFrame)` — fills exactly this
 schema. It does *not* author orchestration topology.
 
@@ -130,7 +131,7 @@ result = await router.dispatch("Diagnose the checkout slowdown.")
 print(result.protocol_id, result.text)
 ```
 
-The compiler instantiates a real locus primitive and wraps it in a
+The compiler instantiates a real SDK primitive and wraps it in a
 `Runnable` adapter so call sites get a single shape
 (`async execute(task) -> RunnableResult`) regardless of which protocol
 fired.

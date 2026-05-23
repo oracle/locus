@@ -2,8 +2,8 @@
 
 Production model calls fail. Rate limits, gateway timeouts, transient
 5xx, occasional content-policy refusals on retryable inputs.
-locus's retry posture is: **automate what's transient; surface
-what's not.**
+Oracle Generative AI – Multi-Agent Locus SDK's retry posture is:
+**automate what's transient; surface what's not.**
 
 ## The default behaviour
 
@@ -58,7 +58,7 @@ def lookup_inventory(sku: str) -> dict:
     return inventory.get(sku)
 ```
 
-1. **Let the loop handle it.** When `lookup_inventory` raises, locus
+1. **Let the loop handle it.** When `lookup_inventory` raises, the SDK
    captures the exception, returns a `ToolErrorEvent` to state, and
    feeds the error message to the next Think. The model can then
    *decide* whether to retry the call, try a different tool, or
@@ -83,7 +83,7 @@ def lookup_inventory(sku: str) -> dict:
 
 ## Idempotent retry
 
-This is the locus-distinctive bit. If a tool is tagged
+This is the SDK-distinctive bit. If a tool is tagged
 `@tool(idempotent=True)` and the model retries the same call, the
 **Execute node** dedupes inside the loop — the body never runs the
 second time, and the cached receipt is returned.

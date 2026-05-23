@@ -276,6 +276,21 @@ html {
   border-radius: 50%;
   pointer-events: none;
 }
+/* Compound `.locus-hero p.locus-product-name` (specificity 0,3,1) beats
+   `.md-typeset .locus-hero p` (0,2,1), so the eyebrow size actually wins
+   inside the hero. Second selector covers usages outside the hero (e.g.
+   the workbench page) where `.locus-hero p` isn't competing. */
+.md-typeset .locus-hero p.locus-product-name,
+.md-typeset p.locus-product-name {
+  font-size: 0.78rem !important;
+  line-height: 1.35;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--locus-ink);
+  opacity: 0.55;
+  margin: 0 0 1.2rem;
+}
 .md-typeset .locus-hero h1:first-of-type {
   font-size: 2.9rem;
   line-height: 1.05;
@@ -291,6 +306,13 @@ html {
 .md-typeset .locus-hero__copy,
 .md-typeset .locus-hero__code {
   min-width: 0;
+}
+/* Indent the hero copy column so the wordmark + H1 + kicker don't sit
+   flush against the content edge. Mobile drops the indent (handled by the
+   responsive block further down — the single-column stack already has the
+   container's own padding). */
+.md-typeset .locus-hero__copy {
+  padding-left: 1.75rem;
 }
 .md-typeset .locus-hero h1 .accent {
   color: var(--or-red);
@@ -435,6 +457,10 @@ html {
     gap: 1.4rem;
     overflow: visible;
   }
+  /* Drop the desktop hero-copy indent when columns stack. */
+  .md-typeset .locus-hero__copy {
+    padding-left: 0;
+  }
   .md-typeset .locus-hero::before,
   .md-typeset .locus-hero::after {
     display: none;
@@ -556,16 +582,28 @@ html {
 /* Title block in the middle — "locus" wordmark only.
    The slogan lives in the SVG logo and on the homepage; trying to
    stack a tagline beneath the title fights Material's absolute-
-   positioned topic toggle, so we keep the header clean. */
+   positioned topic toggle, so we keep the header clean.
+   `flex: 0 0 auto` keeps the title from taking the full available row;
+   that leaves room for the palette toggle, search, and source slot to
+   cluster together on the right (see `form.md-header__option { margin-left: auto }` below). */
 .md-header__title {
   display: flex;
   align-items: center;
   margin-left: 0.6rem;
   align-self: center;
+  flex: 0 0 auto;
 }
-/* Stack the first topic vertically: "locus" wordmark + the
-   "Multi Agent Reasoning SDK" subtitle beneath, matching
-   the wordmark+tagline lockup the SVG logo carries. */
+/* Push the palette toggle, search, and source slot to the right side
+   of the header inner row, leaving a clean gap after the title. */
+form.md-header__option {
+  margin-left: auto;
+}
+/* Stack the first topic vertically: "locus" wordmark + the approved full
+   product name beneath ('Oracle Generative AI Multi-Agent Reasoning
+   Orchestrator SDK', split across two lines), matching the
+   wordmark+tagline lockup the SVG logo carries. The two-line break keeps
+   each line short enough to fit alongside the dark-mode toggle and the
+   search slot at common viewport widths. */
 .md-header__ellipsis > .md-header__topic:first-of-type {
   display: flex;
   flex-direction: column;
@@ -583,24 +621,32 @@ html {
   color: var(--locus-ink);
 }
 .md-header__ellipsis > .md-header__topic:first-of-type::after {
-  content: "Multi Agent Reasoning SDK";
+  /* `\A` is a CSS newline; `white-space: pre` keeps it as a hard break,
+     so the approved full product name renders on two lines under the
+     wordmark — family brand on top, product descriptor below. */
+  content: "Oracle Generative AI Multi-Agent\AReasoning Orchestrator SDK";
   font-family: var(--locus-sans);
   font-size: 0.55rem;
   font-weight: 600;
   letter-spacing: 0.12em;
   color: var(--or-red);
-  line-height: 1;
-  white-space: nowrap;
+  line-height: 1.25;
+  white-space: pre;
+  /* Push the line away from the dark-mode toggle that sits immediately
+     to the right of the title slot, so they don't visually touch. */
+  padding-right: 1rem;
 }
 @media (max-width: 56em) {
-  /* Show "multi-agent SDK" as a compact tagline below "locus" on mobile. */
+  /* Mobile: same full name, slightly tighter tracking to fit. */
   .md-header__ellipsis > .md-header__topic:first-of-type::after {
-    content: "multi-agent SDK";
-    font-size: 0.52rem;
-    letter-spacing: 0.08em;
+    content: "Oracle Generative AI Multi-Agent\AReasoning Orchestrator SDK";
+    font-size: 0.5rem;
+    letter-spacing: 0.06em;
+    line-height: 1.25;
     font-weight: 600;
     color: var(--or-red);
     display: block;
+    white-space: pre;
   }
   /* Always show "locus" (site title) in the mobile header — suppress
      Material's page-title swap so users always see the brand name. */
@@ -616,10 +662,10 @@ html {
 
 /* Site-wide: never let Material swap the header topic on scroll. The default
    behaviour translates topic #1 (site name + our tagline) up and fades in
-   topic #2 (page title), which strips the
-   "Multi Agent Reasoning SDK" line and replaces it with the
-   current page's name. Pin topic #1 and hide #2 on every page so the brand
-   banner (diamond mark + "locus" + tagline) stays put as the user scrolls. */
+   topic #2 (page title), which strips the approved product-name line and
+   replaces it with the current page's name. Pin topic #1 and hide #2 on every
+   page so the brand banner (diamond mark + "locus" + product name) stays put
+   as the user scrolls. */
 .md-header__ellipsis > .md-header__topic:first-of-type {
   transform: translateY(0) !important;
   opacity: 1 !important;
@@ -1125,7 +1171,7 @@ html {
   height: 36px;
   max-width: none;
   padding: 0;
-  margin-left: 0.4rem;
+  margin-left: 0;
   border-radius: 8px;
   color: var(--locus-ink);
   transition: background-color 0.15s, color 0.15s, transform 0.15s;

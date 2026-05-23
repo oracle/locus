@@ -193,7 +193,8 @@ sudo systemctl enable --now concierge
 | OCI Compute | `instance_principal` |
 | Laptop / CI | `api_key` or `session_token` |
 
-Locus picks the right OCI signer from the `OCI_AUTH_TYPE` env var.
+Oracle Generative AI – Multi-Agent Locus SDK picks the right OCI
+signer from the `OCI_AUTH_TYPE` env var.
 You don't change application code between environments.
 
 ## Sessions — `X-Session-ID` for chat UIs

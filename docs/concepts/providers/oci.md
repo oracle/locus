@@ -1,11 +1,11 @@
 # OCI Generative AI
 
-OCI Generative AI is locus's **day-1 target** and the most capable
-provider in the box. It exposes 90+ models — OpenAI commercial
-families, Meta Llama, Anthropic Claude, Google Gemini, xAI Grok,
-Mistral, and Cohere — through Oracle's hosted inference service.
-**When OCI ships a new model id, locus already supports it** — you
-just pass the new id.
+OCI Generative AI is Oracle Generative AI – Multi-Agent Locus SDK's
+**day-1 target** and the most capable provider in the box. It exposes
+90+ models — OpenAI commercial families, Meta Llama, Anthropic Claude,
+Google Gemini, xAI Grok, Mistral, and Cohere — through Oracle's hosted
+inference service. **When OCI ships a new model id, the SDK already
+supports it** — you just pass the new id.
 
 The headline value over the direct providers:
 
@@ -32,7 +32,7 @@ The headline value over the direct providers:
 
 ## Two transports under one prefix
 
-OCI Generative AI exposes its inference service in three ways. locus
+OCI Generative AI exposes its inference service in three ways. The SDK
 speaks all three and **picks the right one from the model id** — you
 don't have to know which transport a model uses to call it (the
 `oci:` prefix routes by family), and you can also pick a specific
@@ -101,7 +101,7 @@ agent = Agent(model=OCIResponsesModel(
 ))
 ```
 
-The only Locus primitive that bypasses on this path is
+The only SDK primitive that bypasses on this path is
 `ConversationManager`. Memory, Reflexion, GSAR, grounding, tool
 hooks, idempotency, checkpointing, output schema, streaming, and
 termination conditions all work identically. See
@@ -123,7 +123,7 @@ agent = Agent(model="oci:cohere.command-r-plus-08-2024")  # SDK transport
 ### DAC endpoints — dedicated capacity
 
 When you've provisioned a Dedicated AI Cluster (DAC), OCI gives you
-a **generative AI endpoint OCID**. Pass it as the model id and locus
+a **generative AI endpoint OCID**. Pass it as the model id and the SDK
 auto-routes through the SDK transport with `DedicatedServingMode`:
 
 ```python
@@ -141,7 +141,7 @@ streaming, tool-call quirks per model.
 
 ## Transport selection — by the `oci:` prefix
 
-When you use the `oci:<model-id>` string factory, locus looks at the
+When you use the `oci:<model-id>` string factory, the SDK looks at the
 model id and chooses for you:
 
 | Model id pattern | Transport |

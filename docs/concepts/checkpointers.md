@@ -124,10 +124,11 @@ Fastest reads, optional TTL for ephemeral conversations.
 
 ### Oracle 26ai: `oracle_checkpointer` + `OracleCheckpointSaver`
 
-If your stack is already on **[Oracle Autonomous Database 26ai][adb]**, locus
-ships two native checkpointers — one to colocate agent state with the
-rest of your app data, the other to give LangGraph-style versioned
-history in the same database.
+If your stack is already on **[Oracle Autonomous Database 26ai][adb]**,
+Oracle Generative AI – Multi-Agent Locus SDK ships two native
+checkpointers — one to colocate agent state with the rest of your app
+data, the other to give LangGraph-style versioned history in the same
+database.
 
 #### Single-row per thread — `oracle_checkpointer`
 
@@ -187,7 +188,7 @@ checkpointer](../notebooks/notebook_53_oracle_26ai_checkpointer.md).
 
 ## Two checkpointer shapes — the gotcha to know
 
-locus has **two** kinds of checkpointer implementations and you need
+The SDK has **two** kinds of checkpointer implementations and you need
 to wire them differently:
 
 1. **Native checkpointers** implement `BaseCheckpointer` directly and
@@ -282,7 +283,7 @@ directly for anything cross-thread that doesn't need LLM extraction
 
 ### Production: `OracleStore` on Oracle 26ai
 
-Locus ships a native `BaseStore` implementation backed by Oracle 26ai —
+The SDK ships a native `BaseStore` implementation backed by Oracle 26ai —
 the equivalent of `langgraph-oracledb.OracleStore`, with **zero**
 langchain/langgraph dependency. Namespaces persist as primary keys on
 a single table; optional vector search runs natively against an

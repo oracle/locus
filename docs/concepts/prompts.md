@@ -1,7 +1,7 @@
 # Prompts
 
-The model in a locus agent sees three sources of prompt content, in
-this order, every iteration:
+The model in an Oracle Generative AI – Multi-Agent Locus SDK agent
+sees three sources of prompt content, in this order, every iteration:
 
 1. The **system prompt** — `Agent(system_prompt=...)`. Stable across
    the whole run; describes the agent's role, constraints, and tools.

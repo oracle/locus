@@ -1,9 +1,10 @@
 # Errors
 
-Every exception raised from inside locus subclasses a single root —
-`LocusError`. One handler catches any locus-originated failure; a
-stable `kind` attribute on each subclass keeps your structured logs
-and metrics dashboards portable across releases.
+Every exception raised from inside Oracle Generative AI – Multi-Agent
+Locus SDK subclasses a single root — `LocusError`. One handler catches
+any SDK-originated failure; a stable `kind` attribute on each subclass
+keeps your structured logs and metrics dashboards portable across
+releases.
 
 ```python
 from locus.core.errors import LocusError
@@ -22,14 +23,14 @@ except LocusError as exc:
 
 | Situation | Catch |
 |---|---|
-| Anything from locus — single sweep handler at your service boundary | `LocusError` |
+| Anything from the SDK — single sweep handler at your service boundary | `LocusError` |
 | A specific tool blew up; want to retry / skip / re-route | `ToolError` (or one of its three subtypes) |
 | Provider auth or quota issue; want to escalate or back off | `ModelError` (or `ModelAuthError` / `ModelThrottledError`) |
 | Checkpoint resume failed; thread is corrupt or missing | `CheckpointError` |
 | Vector store / embeddings call failed | `RAGError` |
 | Bad config or invalid input at the public-API boundary | `ConfigError` / `ValidationError` |
 
-Outside this hierarchy, nothing locus emits will leak through —
+Outside this hierarchy, nothing the SDK emits will leak through —
 unwrapped third-party exceptions are wrapped at the boundary.
 
 ## Hierarchy
@@ -132,7 +133,7 @@ log adapters — you don't lose context.
 
 | Symptom | Likely cause |
 |---|---|
-| Catching `Exception` instead of `LocusError` | You'll silently swallow `KeyboardInterrupt` and provider SDK bugs. Catch the concrete locus base. |
+| Catching `Exception` instead of `LocusError` | You'll silently swallow `KeyboardInterrupt` and provider SDK bugs. Catch the concrete SDK base. |
 | `ModelThrottledError` retries forever | Cap the loop with a max attempt count or a deadline; don't rely on the provider giving up. |
 | `ToolValidationError` keeps firing for the same call | The model isn't reading the schema error. Tighten the system prompt or reduce the tool's surface. |
 | Cause chain lost in logs | Use `logger.exception(...)`, not `logger.error(str(exc))`. |

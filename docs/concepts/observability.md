@@ -1,9 +1,9 @@
 # Observability
 
 What the agent did, how long each step took, and what it cost — two
-built-in hooks plus the standard OpenTelemetry stack cover every
-piece you need. No vendor lock-in: locus emits OTLP, you point it at
-whatever backend you run.
+built-in hooks plus the standard OpenTelemetry stack cover every piece
+you need. No vendor lock-in: Oracle Generative AI – Multi-Agent Locus
+SDK emits OTLP, you point it at whatever backend you run.
 
 ## When to wire what
 
@@ -46,7 +46,7 @@ Sample (`ToolCompleteEvent`):
 }
 ```
 
-Pipe stdout to your log aggregator. locus doesn't own the transport —
+Pipe stdout to your log aggregator. The SDK doesn't own the transport —
 you choose between stdlib `logging`, `structlog`, or
 `opentelemetry-logs`.
 
@@ -124,7 +124,7 @@ anything leaves, see [Safety](safety.md).
 | `TelemetryHook` raises `ImportError` | `pip install "locus-sdk[telemetry]"` to get the OpenTelemetry SDK. |
 | No spans show up in your backend | Exporter not configured. Set `OTEL_EXPORTER_OTLP_ENDPOINT` (and `OTEL_EXPORTER_OTLP_HEADERS` if your backend needs auth) *before* creating the agent. |
 | Spans land but metrics don't | Some OTLP receivers reject metrics on the trace endpoint. Set `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` separately if needed. |
-| Token totals are zero | The provider isn't returning usage in the response (older Ollama builds, some self-hosted endpoints). The locus loop can't make up the numbers. |
+| Token totals are zero | The provider isn't returning usage in the response (older Ollama builds, some self-hosted endpoints). The SDK's loop can't make up the numbers. |
 | Tool args land in your logs unintentionally | Either `record_arguments=True` or your structured logger is dumping the full event dict. Configure either explicitly. |
 
 ## Source and notebooks
@@ -140,7 +140,7 @@ anything leaves, see [Safety](safety.md).
 
 For workbench streaming, real-time dashboards, or any use case where you need
 to watch the full inner cognition of a run without standing up an OTLP stack,
-locus ships a zero-dependency in-process pub/sub bus.
+the SDK ships a zero-dependency in-process pub/sub bus.
 
 ### How it works
 
