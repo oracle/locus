@@ -64,7 +64,17 @@ class TestNotebookCategories:
         # Must include the cardinal sections — these power the user-
         # facing learning path. Drift here = the README / nav docs are
         # describing categories that no longer exist.
-        for required in ("fundamentals", "graphs", "multi-agent", "router", "observability"):
+        #
+        # ``router-observability`` is a single combined category — the
+        # cognitive router and the EventBus observability surface ship
+        # together as one learning track, and the workbench reflects that
+        # in its NOTEBOOK_CATEGORIES list.
+        for required in (
+            "fundamentals",
+            "graphs",
+            "multi-agent",
+            "router-observability",
+        ):
             assert required in ids, f"missing notebook category: {required}"
         for c in cats:
             assert c["name"], f"category {c['id']} has empty name"
@@ -78,16 +88,20 @@ class TestNotebookCategories:
                 f"notebook {t['id']} has unknown category {t.get('category')!r}"
             )
 
-    def test_observability_category_contains_new_sse_notebooks(self, client: TestClient) -> None:
-        """Notebooks 52-55 (the SSE retrofit suite) must live under
-        ``observability`` so the sidebar surfaces them as a group."""
-        obs_numbers = sorted(
+    def test_router_observability_groups_router_plus_eventbus(self, client: TestClient) -> None:
+        """The combined ``router-observability`` track must surface the
+        cognitive router (notebook 58) and the EventBus / observability
+        notebooks (59, 60, 61) as a single sidebar group. Drift here
+        means the curated learning path lost a notebook to ``misc``."""
+        track_numbers = sorted(
             t["number"]
             for t in client.get("/api/notebooks").json()
-            if t.get("category") == "observability"
+            if t.get("category") == "router-observability"
         )
-        for n in (52, 53, 54, 55):
-            assert n in obs_numbers, f"notebook {n} missing from 'observability'"
+        for n in (58, 59, 60, 61):
+            assert n in track_numbers, (
+                f"notebook {n} missing from 'router-observability' (got {track_numbers})"
+            )
 
     def test_notebooks_sorted_by_category_then_order(self, client: TestClient) -> None:
         """The catalogue is pre-sorted by (category position,

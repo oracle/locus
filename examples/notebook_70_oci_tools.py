@@ -74,11 +74,26 @@ import sys
 from typing import Any
 
 
-def _env(name: str, default: str | None = None) -> str:
-    val = os.environ.get(name, default)
+def _env(name: str, default: str | None = None, *, fallbacks: tuple[str, ...] = ()) -> str:
+    """Read env var ``name``; fall back to any of ``fallbacks`` if unset.
+
+    Supports the ``OCI_USE_*`` aliases documented in this notebook AND
+    the standard ``OCI_PROFILE`` / ``OCI_REGION`` / ``OCI_COMPARTMENT``
+    envelope, so users with stock OCI environment variables don't have
+    to re-export anything just to run this notebook.
+    """
+    val = os.environ.get(name)
     if not val:
+        for fb in fallbacks:
+            val = os.environ.get(fb)
+            if val:
+                break
+    if not val:
+        val = default
+    if not val:
+        tried = [name, *fallbacks]
         sys.stderr.write(
-            f"missing env var {name} — see the prerequisites in the notebook docstring\n"
+            f"missing env var (tried {tried}) — see the prerequisites in the notebook docstring\n"
         )
         sys.exit(2)
     return val
@@ -139,9 +154,9 @@ async def part2_execute() -> None:
     """Call real OCI services directly through use_oci."""
     from locus.tools import use_oci
 
-    profile = _env("OCI_USE_PROFILE")
-    region = _env("OCI_USE_REGION")
-    tenancy = _env("OCI_USE_TENANCY")
+    profile = _env("OCI_USE_PROFILE", fallbacks=("OCI_PROFILE",))
+    region = _env("OCI_USE_REGION", fallbacks=("OCI_REGION", "OCI_GENAI_REGION"))
+    tenancy = _env("OCI_USE_TENANCY", fallbacks=("OCI_COMPARTMENT", "OCI_TENANCY"))
 
     print(f"=== use_oci — direct dispatch (profile={profile}, region={region}) ===\n")
 
@@ -234,11 +249,11 @@ async def part3_agent() -> None:
     from locus.models import get_model
     from locus.tools import describe_oci, use_oci
 
-    use_profile = _env("OCI_USE_PROFILE")
-    use_region = _env("OCI_USE_REGION")
-    tenancy = _env("OCI_USE_TENANCY")
-    genai_profile = _env("OCI_GENAI_PROFILE")
-    genai_region = _env("OCI_GENAI_REGION", "us-chicago-1")
+    use_profile = _env("OCI_USE_PROFILE", fallbacks=("OCI_PROFILE",))
+    use_region = _env("OCI_USE_REGION", fallbacks=("OCI_REGION", "OCI_GENAI_REGION"))
+    tenancy = _env("OCI_USE_TENANCY", fallbacks=("OCI_COMPARTMENT", "OCI_TENANCY"))
+    genai_profile = _env("OCI_GENAI_PROFILE", fallbacks=("OCI_PROFILE",))
+    genai_region = _env("OCI_GENAI_REGION", "us-chicago-1", fallbacks=("OCI_REGION",))
 
     print(
         f"=== Agent loop (model via {genai_profile}@{genai_region}, "

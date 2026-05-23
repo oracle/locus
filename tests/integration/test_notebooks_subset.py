@@ -786,14 +786,50 @@ class TestNotebook21SSEStreaming:
 class TestNotebookExecution:
     """Tests that run actual notebooks (with mock model)."""
 
+    # Test method names mirror the current ``examples/notebook_NN_*.py``
+    # numbering. The notebooks have been renumbered a few times during
+    # development; the previous test methods pointed at filenames that
+    # no longer exist on disk and were failing with FileNotFoundError.
+    # Keep these in sync with the actual ``examples/`` layout.
+
     @pytest.mark.asyncio
-    async def test_notebook_36_runs(self):
-        """Test that notebook 35 runs without error."""
+    async def test_notebook_13_runs(self):
+        """Smoke: notebook 13 (SSE streaming) executes cleanly."""
         import subprocess
         import sys
 
         result = subprocess.run(
-            [sys.executable, "examples/notebook_41_structured_output.py"],
+            [sys.executable, "examples/notebook_13_sse_streaming.py"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        assert result.returncode == 0, f"Notebook 13 failed: {result.stderr}"
+
+    @pytest.mark.asyncio
+    async def test_notebook_35_runs(self):
+        """Smoke: notebook 35 (structured output) executes cleanly."""
+        import subprocess
+        import sys
+
+        result = subprocess.run(
+            [sys.executable, "examples/notebook_35_structured_output.py"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        assert result.returncode == 0, f"Notebook 35 failed: {result.stderr}"
+
+    @pytest.mark.asyncio
+    async def test_notebook_36_runs(self):
+        """Smoke: notebook 36 (reasoning patterns) executes cleanly."""
+        import subprocess
+        import sys
+
+        result = subprocess.run(
+            [sys.executable, "examples/notebook_36_reasoning_patterns.py"],
             capture_output=True,
             text=True,
             timeout=60,
@@ -802,61 +838,31 @@ class TestNotebookExecution:
         assert result.returncode == 0, f"Notebook 36 failed: {result.stderr}"
 
     @pytest.mark.asyncio
-    async def test_notebook_37_runs(self):
-        """Test that notebook 36 runs without error."""
+    async def test_notebook_46_runs(self):
+        """Smoke: notebook 46 (playbooks) executes cleanly."""
         import subprocess
         import sys
 
         result = subprocess.run(
-            [sys.executable, "examples/notebook_42_reasoning_patterns.py"],
+            [sys.executable, "examples/notebook_46_playbooks.py"],
             capture_output=True,
             text=True,
             timeout=60,
             check=False,
         )
-        assert result.returncode == 0, f"Notebook 37 failed: {result.stderr}"
+        assert result.returncode == 0, f"Notebook 46 failed: {result.stderr}"
 
     @pytest.mark.asyncio
-    async def test_notebook_43_runs(self):
-        """Test that notebook 42 runs without error."""
+    async def test_notebook_52_runs(self):
+        """Smoke: notebook 52 (checkpoint backends) executes cleanly."""
         import subprocess
         import sys
 
         result = subprocess.run(
-            [sys.executable, "examples/notebook_48_playbooks.py"],
+            [sys.executable, "examples/notebook_52_checkpoint_backends.py"],
             capture_output=True,
             text=True,
             timeout=60,
             check=False,
         )
-        assert result.returncode == 0, f"Notebook 43 failed: {result.stderr}"
-
-    @pytest.mark.asyncio
-    async def test_notebook_49_runs(self):
-        """Test that notebook 48 runs without error."""
-        import subprocess
-        import sys
-
-        result = subprocess.run(
-            [sys.executable, "examples/notebook_54_checkpoint_backends.py"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-            check=False,
-        )
-        assert result.returncode == 0, f"Notebook 49 failed: {result.stderr}"
-
-    @pytest.mark.asyncio
-    async def test_notebook_14_runs(self):
-        """Test that notebook 13 runs without error."""
-        import subprocess
-        import sys
-
-        result = subprocess.run(
-            [sys.executable, "examples/notebook_19_sse_streaming.py"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-            check=False,
-        )
-        assert result.returncode == 0, f"Notebook 14 failed: {result.stderr}"
+        assert result.returncode == 0, f"Notebook 52 failed: {result.stderr}"
