@@ -188,15 +188,6 @@ nav:
     - 3 · OCI Responses: notebooks/notebook_03_oci_responses.md
     - 4 · OCI Dedicated AI Cluster: notebooks/notebook_04_oci_dac.md
     - 5 · Cohere Reranker V4 on OCI: notebooks/notebook_05_cohere_reranker.md
-  - Oracle Database 26ai:
-    - 6 · Oracle 26ai RAG: notebooks/notebook_06_oracle_26ai_rag.md
-    - 7 · Oracle 26ai checkpointer: notebooks/notebook_07_oracle_26ai_checkpointer.md
-    - 8 · Oracle ADB document loader: notebooks/notebook_08_oracle_adb_loader.md
-    - 9 · Oracle in-DB chunker: notebooks/notebook_09_oracle_indb_chunker.md
-    - 10 · Oracle in-DB embeddings: notebooks/notebook_10_oracle_indb_embeddings.md
-    - 11 · Oracle store (portable BaseStore path): notebooks/notebook_11_oracle_store.md
-    - 12 · Oracle versioned checkpoint saver: notebooks/notebook_12_oracle_versioned_saver.md
-    - 13 · Oracle agent memory: notebooks/notebook_13_oracle_agent_memory.md
   - Agent Foundations:
     - 14 · Basic agent: notebooks/notebook_14_basic_agent.md
     - 15 · Agent with tools: notebooks/notebook_15_agent_with_tools.md
@@ -264,6 +255,15 @@ nav:
     - 68 · Agent server: notebooks/notebook_68_agent_server.md
     - 69 · Research workflow: notebooks/notebook_69_research_workflow.md
     - 70 · OCI tools — agents that drive OCI: notebooks/notebook_70_oci_tools.md
+  - Oracle Database 26ai (optional persistence layer):
+    - 6 · Oracle 26ai RAG: notebooks/notebook_06_oracle_26ai_rag.md
+    - 7 · Oracle 26ai checkpointer: notebooks/notebook_07_oracle_26ai_checkpointer.md
+    - 8 · Oracle ADB document loader: notebooks/notebook_08_oracle_adb_loader.md
+    - 9 · Oracle in-DB chunker: notebooks/notebook_09_oracle_indb_chunker.md
+    - 10 · Oracle in-DB embeddings: notebooks/notebook_10_oracle_indb_embeddings.md
+    - 11 · Oracle store (portable BaseStore path): notebooks/notebook_11_oracle_store.md
+    - 12 · Oracle versioned checkpoint saver: notebooks/notebook_12_oracle_versioned_saver.md
+    - 13 · Oracle agent memory: notebooks/notebook_13_oracle_agent_memory.md
   - Guides:
     - Deploy: how-to/deploy.md
     - Persist conversations: how-to/persist-conversations.md
