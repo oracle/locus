@@ -56,9 +56,13 @@ _NOTEBOOKS_DIR = _REPO / "examples"
 # the default and override per-notebook below.
 _DEFAULT_TIMEOUT = 360
 _NOTEBOOK_TIMEOUT_OVERRIDES: dict[str, int] = {
-    # notebook_40_emergent_routing: 5 dispatches × 2-3 LLM calls each
-    # through a reasoning model — empirical wall time ~7-9 min.
-    "notebook_40_emergent_routing.py": 900,
+    # notebook_34_emergent_routing: 5 dispatches × 2-3 LLM calls each
+    # through a reasoning model — empirical wall time ~7-9 min. The
+    # filename used to be ``notebook_40_emergent_routing.py``; this
+    # override key was stale after the catalogue renumbering and let
+    # the test fall through to the ``_DEFAULT_TIMEOUT`` (360s), which
+    # isn't enough — the subprocess was getting SIGKILL'd at 6 min.
+    "notebook_34_emergent_routing.py": 900,
 }
 
 

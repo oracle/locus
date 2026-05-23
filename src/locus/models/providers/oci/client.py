@@ -68,6 +68,25 @@ class OCIClientConfig(BaseModel):
     auth_type: OCIAuthType = Field(default=OCIAuthType.API_KEY, description="Auth type")
     compartment_id: str | None = Field(default=None, description="OCI compartment OCID")
     service_endpoint: str | None = Field(default=None, description="Full service endpoint URL")
+    # HTTP timeouts in seconds for the underlying OCI Python SDK
+    # ``GenerativeAiInferenceClient``. The SDK defaults to ``(10, 60)``
+    # (connect, read); 60s read is not enough for reasoning models
+    # (gpt-5.5, o-series, etc.) doing long-form summarization in
+    # orchestrator/swarm flows, where the first response token can take
+    # 90-180 seconds to arrive. Bump the read timeout to 300s by
+    # default; callers needing tighter latency contracts can override.
+    connect_timeout: float = Field(
+        default=10.0,
+        description="HTTP connect timeout in seconds.",
+    )
+    read_timeout: float = Field(
+        default=300.0,
+        description=(
+            "HTTP read timeout in seconds. Default 300s accommodates "
+            "reasoning-model summarization (gpt-5.5, o-series) which "
+            "can sit on the wire for 90-180s before the first token."
+        ),
+    )
 
     model_config = {"extra": "allow"}
 
@@ -161,6 +180,7 @@ class OCIClient:
         return GenerativeAiInferenceClient(
             config=self.oci_config,
             service_endpoint=self.config.service_endpoint,
+            timeout=(self.config.connect_timeout, self.config.read_timeout),
         )
 
     def _create_security_token_client(self) -> GenerativeAiInferenceClient:
@@ -207,6 +227,7 @@ class OCIClient:
             config=oci_cfg,
             signer=signer,
             service_endpoint=self.config.service_endpoint,
+            timeout=(self.config.connect_timeout, self.config.read_timeout),
         )
 
     def _create_instance_principal_client(self) -> GenerativeAiInferenceClient:
@@ -223,6 +244,7 @@ class OCIClient:
             config={},
             signer=signer,
             service_endpoint=self.config.service_endpoint,
+            timeout=(self.config.connect_timeout, self.config.read_timeout),
         )
 
     def _create_resource_principal_client(self) -> GenerativeAiInferenceClient:
@@ -239,6 +261,7 @@ class OCIClient:
             config={},
             signer=signer,
             service_endpoint=self.config.service_endpoint,
+            timeout=(self.config.connect_timeout, self.config.read_timeout),
         )
 
     def get_serving_mode(self, model_id: str) -> Any:

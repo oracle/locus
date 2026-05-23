@@ -213,13 +213,22 @@ def _build_model():
         if endpoint and compartment:
             from locus.models.providers.oci import OCIModel
 
+            # max_tokens=8192 is a ceiling, not a target. Reasoning
+            # models (gpt-5.5, o-series, etc.) burn 200-2000+ tokens
+            # of hidden chain-of-thought before producing any visible
+            # output; at 512 they typically return empty content with
+            # finish_reason='length', which surfaces in orchestrator /
+            # swarm tests as ``summary=''``. 8192 leaves room for both
+            # the reasoning trace and a normal-length response without
+            # being wasteful on short-answer tests (the model stops
+            # naturally when done).
             return OCIModel(
                 model_id=model_id,
                 profile_name=os.getenv("OCI_PROFILE", "DEFAULT"),
                 auth_type=os.getenv("OCI_AUTH_TYPE", "api_key"),
                 service_endpoint=endpoint,
                 compartment_id=compartment,
-                max_tokens=512,
+                max_tokens=8192,
             )
 
     # OpenAI fallback
@@ -227,7 +236,7 @@ def _build_model():
         from locus.models.native.openai import OpenAIModel
 
         model_id = os.getenv("OPENAI_MODEL_ID", "gpt-4o-mini")
-        return OpenAIModel(model=model_id, max_tokens=512)
+        return OpenAIModel(model=model_id, max_tokens=8192)
 
     # Anthropic fallback — cheapest path for non-OCI iteration.
     if anthropic_available():
