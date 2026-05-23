@@ -262,6 +262,154 @@ class TestInterruptBeforeResumeLive:
 
 
 # =============================================================================
+# #258 — interrupt_before save shape across non-memory checkpointer backends
+# =============================================================================
+#
+# The fix changes the save shape from ``save(state=None, metadata={...})`` to
+# ``save(state=AgentState(metadata={...}))`` at both the ``interrupt_before``
+# and inline ``interrupt()`` sites in ``StateGraph.execute()``. That shape
+# round-trips correctly through ``MemoryCheckpointer`` and
+# ``FileCheckpointer`` (covered by unit tests). These integration tests
+# prove it also round-trips through the network-backed protocol backends:
+# Redis (in-memory KV) and OpenSearch (JSON document store), with real
+# serialization, network I/O, and indexing semantics in play.
+#
+# Each test skips cleanly when its backend env vars aren't set.
+
+
+def _has_redis() -> bool:
+    return bool(os.environ.get("REDIS_URL"))
+
+
+def _has_opensearch() -> bool:
+    return bool(os.environ.get("OPENSEARCH_HOSTS") or os.environ.get("OPENSEARCH_HOST"))
+
+
+@pytest.mark.skipif(not _has_redis(), reason="REDIS_URL not set")
+class TestInterruptBeforeRedisLive:
+    """Pause→save→reload→resume through a real Redis backend.
+
+    Verifies ``AgentState.metadata`` (which is where the fix packs the
+    graph-level state) survives Redis's JSON serialization round-trip.
+    """
+
+    @pytest.mark.asyncio
+    async def test_redis_backend_persists_and_resumes(self) -> None:
+        from locus.memory.backends import redis_checkpointer
+
+        cp = redis_checkpointer(
+            url=os.environ["REDIS_URL"],
+            prefix="locus:papercut258:",
+        )
+
+        graph = StateGraph()
+
+        async def gate(_inputs: dict) -> dict:
+            return {"approved": True}
+
+        async def after(_inputs: dict) -> dict:
+            return {"done": True}
+
+        graph.add_node("gate", gate)
+        graph.add_node("after", after)
+        graph.add_edge(START, "gate")
+        graph.add_edge("gate", "after")
+        graph.add_edge("after", END)
+
+        thread_id = "papercut258-redis"
+        cfg = GraphConfig(
+            interrupt_before=["gate"],
+            checkpointer=cp,
+            thread_id=thread_id,
+        )
+
+        try:
+            paused = await graph.execute({"seed": 7}, config=cfg)
+            assert paused.interrupt is not None
+            assert paused.interrupt.node_id == "gate"
+
+            saved = await cp.load(thread_id)
+            assert saved is not None, "Redis must hold the paused state"
+            assert saved.metadata.get("interrupted_node") == "gate"
+            assert saved.metadata.get("graph_state", {}).get("seed") == 7
+
+            resumed = await graph.execute(Command(resume=True), config=cfg)
+            assert resumed.interrupt is None
+            assert resumed.final_state.get("done") is True
+        finally:
+            # Idempotent cleanup — tests own their thread namespace.
+            try:
+                await cp.delete(thread_id)
+            except Exception:
+                pass
+            await cp.close()
+
+
+@pytest.mark.skipif(not _has_opensearch(), reason="OPENSEARCH_HOSTS not set")
+class TestInterruptBeforeOpenSearchLive:
+    """Pause→save→reload→resume through a real OpenSearch backend.
+
+    OpenSearch stores the checkpoint as a JSON document with index-level
+    semantics. This test verifies the fix's save shape survives that
+    indexing pass and that resume continues past the gate."""
+
+    @pytest.mark.asyncio
+    async def test_opensearch_backend_persists_and_resumes(self) -> None:
+        from locus.memory.backends import opensearch_checkpointer
+
+        hosts = os.environ.get("OPENSEARCH_HOSTS") or os.environ["OPENSEARCH_HOST"]
+        cp = opensearch_checkpointer(
+            hosts=[hosts],
+            index_name="locus-papercut258",
+            username=os.environ.get("OPENSEARCH_USER"),
+            password=os.environ.get("OPENSEARCH_PASSWORD"),
+            use_ssl=os.environ.get("OPENSEARCH_USE_SSL", "false").lower() == "true",
+            verify_certs=os.environ.get("OPENSEARCH_VERIFY_CERTS", "true").lower() == "true",
+        )
+
+        graph = StateGraph()
+
+        async def gate(_inputs: dict) -> dict:
+            return {"approved": True}
+
+        async def after(_inputs: dict) -> dict:
+            return {"done": True}
+
+        graph.add_node("gate", gate)
+        graph.add_node("after", after)
+        graph.add_edge(START, "gate")
+        graph.add_edge("gate", "after")
+        graph.add_edge("after", END)
+
+        thread_id = "papercut258-opensearch"
+        cfg = GraphConfig(
+            interrupt_before=["gate"],
+            checkpointer=cp,
+            thread_id=thread_id,
+        )
+
+        try:
+            paused = await graph.execute({"seed": 11}, config=cfg)
+            assert paused.interrupt is not None
+            assert paused.interrupt.node_id == "gate"
+
+            saved = await cp.load(thread_id)
+            assert saved is not None, "OpenSearch must hold the paused state"
+            assert saved.metadata.get("interrupted_node") == "gate"
+            assert saved.metadata.get("graph_state", {}).get("seed") == 11
+
+            resumed = await graph.execute(Command(resume=True), config=cfg)
+            assert resumed.interrupt is None
+            assert resumed.final_state.get("done") is True
+        finally:
+            try:
+                await cp.delete(thread_id)
+            except Exception:
+                pass
+            await cp.close()
+
+
+# =============================================================================
 # #260 — AgentConfig.name + Tool.func alias (real Agent run, real LLM call)
 # =============================================================================
 
