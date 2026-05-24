@@ -1190,6 +1190,50 @@ class A2AClient:
         result = await self._rpc("tasks/get", params)
         return Task.model_validate(result)
 
+    async def list_tasks(
+        self,
+        *,
+        context_id: str | None = None,
+        status: TaskState | str | None = None,
+        page_size: int | None = None,
+        page_token: str | None = None,
+        history_length: int | None = None,
+        include_artifacts: bool | None = None,
+    ) -> tuple[list[Task], str]:
+        """List known tasks.
+
+        Returns ``(tasks, next_page_token)``. The client maps v1.0 wire
+        enum states back into SDK-shaped :class:`Task` objects.
+        """
+        params: dict[str, Any] = {}
+        if context_id is not None:
+            params["contextId"] = context_id
+        if status is not None:
+            state = status.value if isinstance(status, TaskState) else str(status)
+            if self._protocol_version == A2A_V1_PROTOCOL_VERSION and not state.startswith(
+                "TASK_STATE_"
+            ):
+                state = "TASK_STATE_" + state.replace("-", "_").upper()
+            params["status"] = state
+        if page_size is not None:
+            params["pageSize"] = page_size
+        if page_token is not None:
+            params["pageToken"] = page_token
+        if history_length is not None:
+            params["historyLength"] = history_length
+        if include_artifacts is not None:
+            params["includeArtifacts"] = include_artifacts
+
+        if self._protocol_version == A2A_V1_PROTOCOL_VERSION:
+            result = await self._rpc("ListTasks", params)
+            tasks = [
+                Task.model_validate(task_result_to_legacy_payload(task))
+                for task in result.get("tasks", [])
+            ]
+            return tasks, str(result.get("nextPageToken", ""))
+
+        raise RuntimeError("list_tasks requires A2A v1.0 protocol_version")
+
     async def cancel_task(self, task_id: str) -> Task:
         """Cancel a task (JSON-RPC ``tasks/cancel``)."""
         if self._protocol_version == A2A_V1_PROTOCOL_VERSION:

@@ -28,6 +28,8 @@ from locus.a2a import (
     A2ARequest,
     A2AResponse,
     A2AServer,
+    A2AV1ListTasksRequest,
+    A2AV1ListTasksResponse,
     AgentCapabilities,
     AgentCard,
     AgentSkill,
@@ -134,6 +136,12 @@ class TestSpecModels:
             "rejected",
             "auth-required",
         }
+
+    def test_v1_list_tasks_models_are_public(self) -> None:
+        req = A2AV1ListTasksRequest(contextId="c-1", pageSize=10)
+        resp = A2AV1ListTasksResponse(tasks=[], pageSize=10, totalSize=0)
+        assert req.contextId == "c-1"
+        assert resp.nextPageToken == ""
 
 
 class TestLegacyFlatModels:
@@ -409,6 +417,132 @@ class TestJsonRpcTaskLifecycle:
         assert body["error"]["code"] == -32002  # TASK_NOT_CANCELABLE
 
 
+class TestJsonRpcV1:
+    def test_v1_send_message_returns_v1_task_wrapper(self) -> None:
+        server = _server_with(_StubAgent([_terminate(final_message="answer")]))
+        client = TestClient(server.app)
+        resp = client.post(
+            "/",
+            headers={"A2A-Version": "1.0"},
+            json={
+                "jsonrpc": "2.0",
+                "id": "req-v1",
+                "method": "SendMessage",
+                "params": {
+                    "message": {
+                        "role": "ROLE_USER",
+                        "parts": [{"text": "what is AI?"}],
+                        "messageId": "m1",
+                    }
+                },
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        task = body["result"]["task"]
+        assert body["id"] == "req-v1"
+        assert task["status"]["state"] == "TASK_STATE_COMPLETED"
+        assert task["history"][0]["role"] == "ROLE_USER"
+        assert task["artifacts"][0]["parts"][0]["text"] == "answer"
+        assert "kind" not in task
+
+    def test_v1_list_tasks_filters_and_paginates(self) -> None:
+        server = _server_with(_StubAgent([_terminate(final_message="one")]))
+        client = TestClient(server.app)
+        client.post(
+            "/",
+            headers={"A2A-Version": "1.0"},
+            json={
+                "jsonrpc": "2.0",
+                "id": "send-1",
+                "method": "SendMessage",
+                "params": {
+                    "message": {
+                        "role": "ROLE_USER",
+                        "parts": [{"text": "hi"}],
+                        "messageId": "m1",
+                        "contextId": "c-1",
+                    }
+                },
+            },
+        ).json()["result"]["task"]
+        server._agent = _StubAgent([_terminate(final_message="two")])
+        client.post(
+            "/",
+            headers={"A2A-Version": "1.0"},
+            json={
+                "jsonrpc": "2.0",
+                "id": "send-2",
+                "method": "SendMessage",
+                "params": {
+                    "message": {
+                        "role": "ROLE_USER",
+                        "parts": [{"text": "hi again"}],
+                        "messageId": "m2",
+                        "contextId": "c-1",
+                    }
+                },
+            },
+        )
+        resp = client.post(
+            "/",
+            headers={"A2A-Version": "1.0"},
+            json={
+                "jsonrpc": "2.0",
+                "id": "list-1",
+                "method": "ListTasks",
+                "params": {
+                    "contextId": "c-1",
+                    "status": "TASK_STATE_COMPLETED",
+                    "pageSize": 1,
+                    "includeArtifacts": False,
+                },
+            },
+        )
+        body = resp.json()["result"]
+        assert body["totalSize"] == 2
+        assert body["pageSize"] == 1
+        assert body["nextPageToken"] == "1"
+        assert len(body["tasks"]) == 1
+        assert body["tasks"][0]["status"]["state"] == "TASK_STATE_COMPLETED"
+        assert body["tasks"][0]["artifacts"] == []
+
+    def test_v1_stream_response_uses_stream_response_oneof(self) -> None:
+        server = _server_with(
+            _StubAgent([_think(reasoning="thinking..."), _terminate(final_message="final")])
+        )
+        client = TestClient(server.app)
+        with client.stream(
+            "POST",
+            "/",
+            headers={"A2A-Version": "1.0"},
+            json={
+                "jsonrpc": "2.0",
+                "id": "stream-v1",
+                "method": "SendStreamingMessage",
+                "params": {
+                    "message": {
+                        "role": "ROLE_USER",
+                        "parts": [{"text": "hi"}],
+                        "messageId": "m1",
+                    }
+                },
+            },
+        ) as resp:
+            assert resp.status_code == 200
+            body = "".join(resp.iter_text())
+        events = [
+            json.loads(line.removeprefix("data: "))
+            for line in body.split("\n\n")
+            if line.startswith("data: ")
+        ]
+        results = [event["result"] for event in events]
+        assert "task" in results[0]
+        assert any("statusUpdate" in result for result in results)
+        assert any("artifactUpdate" in result for result in results)
+        assert all("final" not in result.get("statusUpdate", {}) for result in results)
+
+
 # ---------------------------------------------------------------------------
 # Backward-compat invoke / stream
 # ---------------------------------------------------------------------------
@@ -574,7 +708,7 @@ class TestA2AClient:
     @pytest.mark.asyncio
     @respx.mock
     async def test_send_message_round_trip(self) -> None:
-        respx.post("http://remote/").mock(
+        route = respx.post("http://remote/").mock(
             return_value=httpx.Response(
                 200,
                 json={
@@ -599,8 +733,55 @@ class TestA2AClient:
         client = A2AClient(url="http://remote")
         msg = Message(role="user", parts=[TextPart(text="hi")], messageId="m1")
         task = await client.send_message(msg)
+        assert route.calls.last.request.headers["A2A-Version"] == "1.0"
+        assert json.loads(route.calls.last.request.content)["method"] == "SendMessage"
         assert isinstance(task, Task)
         assert task.status.state == TaskState.completed
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_list_tasks_round_trip(self) -> None:
+        route = respx.post("http://remote/").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": "x",
+                    "result": {
+                        "tasks": [
+                            {
+                                "id": "t-1",
+                                "contextId": "c-1",
+                                "status": {
+                                    "state": "TASK_STATE_COMPLETED",
+                                    "timestamp": "2026-01-01T00:00:00Z",
+                                },
+                                "history": [],
+                                "artifacts": [],
+                            }
+                        ],
+                        "nextPageToken": "2",
+                        "pageSize": 1,
+                        "totalSize": 3,
+                    },
+                },
+            )
+        )
+        client = A2AClient(url="http://remote")
+        tasks, next_page = await client.list_tasks(
+            context_id="c-1",
+            status=TaskState.completed,
+            page_size=1,
+            include_artifacts=False,
+        )
+        sent = json.loads(route.calls.last.request.content)
+        assert route.calls.last.request.headers["A2A-Version"] == "1.0"
+        assert sent["method"] == "ListTasks"
+        assert sent["params"]["status"] == "TASK_STATE_COMPLETED"
+        assert sent["params"]["contextId"] == "c-1"
+        assert tasks[0].id == "t-1"
+        assert tasks[0].status.state == TaskState.completed
+        assert next_page == "2"
 
     @pytest.mark.asyncio
     @respx.mock
