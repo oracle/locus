@@ -163,9 +163,18 @@ fresh = await client.get_task(task.id)
 if fresh.status.state == "input-required":
     # ... gather input from the human, then send a follow-up message
     ...
+# Or list tasks by context / status.
+tasks, next_page = await client.list_tasks(
+    context_id=task.contextId,
+    status="completed",
+    page_size=20,
+)
 # Or cancel.
 await client.cancel_task(task.id)
 ```
+
+`list_tasks()` calls the v1.0 `ListTasks` method and maps the response
+back into SDK `Task` objects, returning `(tasks, next_page_token)`.
 
 ## Router delegation
 
