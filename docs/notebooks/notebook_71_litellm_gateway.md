@@ -50,15 +50,6 @@ export LITELLM_GATEWAY_MODEL="oci-cohere-command"
 python examples/notebook_71_litellm_gateway.py
 ```
 
-## Why no new Locus class
-
-Locus's existing `OpenAIModel` already speaks the wire contract LiteLLM's
-gateway exposes (OpenAI Chat Completions over HTTPS, Bearer-token auth).
-Inventing a `LiteLLMModel` class to wrap `litellm.acompletion()` in-process
-would have meant re-implementing a subset of the proxy's surface — and
-permanently lagging behind it. The how-to page covers the design call in
-detail.
-
 ## See also
 
 - [`docs/how-to/litellm-gateway.md`](../how-to/litellm-gateway.md) — when
