@@ -42,6 +42,38 @@ from locus.a2a import (
     TextPart,
 )
 from locus.a2a.protocol import _is_loopback
+from locus.a2a.protocol_v1 import (
+    A2AV1ProtocolError,
+    A2AV1ServerMixin,
+    legacy_event_to_v1_stream_response,
+    legacy_message_to_v1,
+    legacy_part_to_v1,
+    legacy_task_to_v1,
+    task_result_to_legacy_payload,
+    v1_message_to_legacy,
+    v1_part_to_legacy,
+    v1_stream_response_to_legacy_payload,
+    v1_task_to_legacy_payload,
+)
+from locus.a2a.spec import (
+    CONTENT_TYPE_NOT_SUPPORTED,
+    INVALID_PARAMS,
+    TASK_NOT_FOUND,
+    UNSUPPORTED_OPERATION,
+    Artifact,
+    FileWithUri,
+    TaskArtifactUpdateEvent,
+    TaskStatus,
+    TaskStatusUpdateEvent,
+)
+from locus.a2a.spec_v1 import (
+    A2AV1Message,
+    A2AV1Part,
+    A2AV1Role,
+    A2AV1TaskState,
+    A2AV1TaskStatus,
+    A2AV1TaskStatusUpdateEvent,
+)
 from locus.core.events import TerminateEvent, ThinkEvent
 
 
@@ -77,6 +109,119 @@ def _server_with(agent: Any, **kwargs: Any) -> A2AServer:
     server = A2AServer(agent=agent, allow_unauthenticated=True, **kwargs)
     _ = server.app  # eager-initialise
     return server
+
+
+def _legacy_task(
+    task_id: str = "t-1",
+    *,
+    context_id: str = "c-1",
+    state: TaskState = TaskState.completed,
+    timestamp: str = "2026-05-25T12:00:00Z",
+) -> Task:
+    user_message = Message(
+        role="user",
+        parts=[TextPart(text="hello", metadata={"source": "test"})],
+        messageId=f"{task_id}-m-user",
+        contextId=context_id,
+        referenceTaskIds=["ref-1"],
+        extensions=["urn:test"],
+        metadata={"turn": 1},
+    )
+    agent_message = Message(
+        role="agent",
+        parts=[TextPart(text="done")],
+        messageId=f"{task_id}-m-agent",
+        contextId=context_id,
+    )
+    return Task(
+        id=task_id,
+        contextId=context_id,
+        status=TaskStatus(state=state, message=agent_message, timestamp=timestamp),
+        history=[user_message, agent_message],
+        artifacts=[
+            Artifact(
+                artifactId=f"{task_id}-artifact",
+                name="answer",
+                description="final answer",
+                parts=[
+                    TextPart(text=f"artifact {task_id}"),
+                    DataPart(data={"id": task_id}),
+                    FilePart(
+                        file=FileWithUri(
+                            uri="https://example.com/file.txt",
+                            mimeType="text/plain",
+                            name="file.txt",
+                        )
+                    ),
+                    FilePart(
+                        file=FileWithBytes(
+                            bytes="aGVsbG8=",
+                            mimeType="application/octet-stream",
+                            name="hello.bin",
+                        )
+                    ),
+                ],
+                metadata={"artifact": True},
+                extensions=["urn:artifact"],
+            )
+        ],
+        metadata={"task": task_id},
+    )
+
+
+class _ListStore:
+    def __init__(self, tasks: list[Task]) -> None:
+        self._tasks = tasks
+
+    def list(self) -> list[Task]:
+        return list(self._tasks)
+
+    def get(self, task_id: str) -> Task | None:
+        return next((task for task in self._tasks if task.id == task_id), None)
+
+
+class _V1Host(A2AV1ServerMixin):
+    def __init__(
+        self,
+        tasks: list[Task] | None = None,
+        *,
+        input_modes: list[str] | None = None,
+        stream_events: list[dict[str, Any]] | None = None,
+    ) -> None:
+        self._store = _ListStore(tasks or [_legacy_task()])
+        self._input_modes = input_modes or ["text/plain", "application/json"]
+        self.sent_params: dict[str, Any] | None = None
+        self.get_params: dict[str, Any] | None = None
+        self.cancel_params: dict[str, Any] | None = None
+        self.stream_params: dict[str, Any] | None = None
+        self._stream_events = stream_events or []
+
+    def _build_card(self) -> Any:
+        return AgentCard(
+            name="host",
+            description="test",
+            url="http://testserver",
+            defaultInputModes=self._input_modes,
+        )
+
+    async def _handle_message_send(self, params: dict[str, Any]) -> dict[str, Any]:
+        self.sent_params = params
+        return self._store.list()[0].model_dump(exclude_none=True)
+
+    async def _handle_tasks_get(self, params: dict[str, Any]) -> dict[str, Any]:
+        self.get_params = params
+        task = self._store.get(params["id"]) or self._store.list()[0]
+        return task.model_dump(exclude_none=True)
+
+    async def _handle_tasks_cancel(self, params: dict[str, Any]) -> dict[str, Any]:
+        self.cancel_params = params
+        task = self._store.get(params["id"]) or self._store.list()[0]
+        return task.model_dump(exclude_none=True)
+
+    async def _stream_message(self, params: dict[str, Any]) -> Any:
+        self.stream_params = params
+        for event in self._stream_events:
+            yield event
 
 
 # ---------------------------------------------------------------------------
@@ -541,6 +686,331 @@ class TestJsonRpcV1:
         assert any("statusUpdate" in result for result in results)
         assert any("artifactUpdate" in result for result in results)
         assert all("final" not in result.get("statusUpdate", {}) for result in results)
+
+
+class TestA2AV1ProtocolAdapters:
+    def test_part_conversions_cover_text_data_url_raw_and_empty(self) -> None:
+        text = v1_part_to_legacy(A2AV1Part(text="hi", metadata={"m": 1}))
+        data = v1_part_to_legacy(A2AV1Part(data={"x": 1}, metadata={"m": 2}))
+        url = v1_part_to_legacy(
+            A2AV1Part(url="https://example.com/a.txt", filename="a.txt", mediaType="text/plain")
+        )
+        raw = v1_part_to_legacy(
+            A2AV1Part(raw="aGVsbG8=", filename="a.bin", mediaType="application/octet-stream")
+        )
+        empty = v1_part_to_legacy(A2AV1Part(metadata={"empty": True}))
+
+        assert isinstance(text, TextPart)
+        assert isinstance(data, DataPart)
+        assert isinstance(url, FilePart)
+        assert isinstance(raw, FilePart)
+        assert isinstance(empty, TextPart)
+        assert empty.text == ""
+
+        assert legacy_part_to_v1(text).text == "hi"
+        assert legacy_part_to_v1(data).data == {"x": 1}
+        assert legacy_part_to_v1(url).url == "https://example.com/a.txt"
+        assert legacy_part_to_v1(raw).raw == "aGVsbG8="
+        assert legacy_part_to_v1(object()).text == ""  # type: ignore[arg-type]
+
+    def test_message_and_task_payload_conversions_round_trip(self) -> None:
+        legacy_task = _legacy_task()
+        v1_task = legacy_task_to_v1(legacy_task)
+        legacy_payload = v1_task_to_legacy_payload(v1_task)
+
+        assert v1_task["status"]["state"] == "TASK_STATE_COMPLETED"
+        assert v1_task["history"][0]["role"] == "ROLE_USER"
+        assert v1_task["history"][1]["role"] == "ROLE_AGENT"
+        assert v1_task["artifacts"][0]["parts"][2]["url"] == "https://example.com/file.txt"
+        assert legacy_payload["kind"] == "task"
+        assert legacy_payload["status"]["state"] == "completed"
+        assert legacy_payload["history"][0]["kind"] == "message"
+        assert legacy_payload["artifacts"][0]["parts"][3]["kind"] == "file"
+
+        v1_message = legacy_message_to_v1(legacy_task.history[0])
+        assert v1_message.role == A2AV1Role.user
+        assert v1_message.referenceTaskIds == ["ref-1"]
+        assert v1_message.extensions == ["urn:test"]
+        assert v1_message_to_legacy(v1_message).role == "user"
+
+    def test_task_result_and_stream_response_conversions(self) -> None:
+        legacy_task = _legacy_task()
+        v1_task = legacy_task_to_v1(legacy_task)
+
+        assert task_result_to_legacy_payload(legacy_task.model_dump(exclude_none=True))["kind"] == (
+            "task"
+        )
+        assert task_result_to_legacy_payload({"task": v1_task})["status"]["state"] == "completed"
+
+        task_stream = v1_stream_response_to_legacy_payload({"task": v1_task})
+        status_stream = v1_stream_response_to_legacy_payload(
+            {
+                "statusUpdate": {
+                    "taskId": "t-1",
+                    "contextId": "c-1",
+                    "status": {
+                        "state": "TASK_STATE_WORKING",
+                        "timestamp": "2026-05-25T12:01:00Z",
+                    },
+                    "metadata": {"step": 1},
+                }
+            }
+        )
+        artifact_stream = v1_stream_response_to_legacy_payload(
+            {
+                "artifactUpdate": {
+                    "taskId": "t-1",
+                    "contextId": "c-1",
+                    "artifact": {
+                        "artifactId": "a-1",
+                        "parts": [{"text": "chunk"}],
+                    },
+                    "append": True,
+                    "lastChunk": True,
+                }
+            }
+        )
+        message_stream = v1_stream_response_to_legacy_payload(
+            {
+                "message": {
+                    "role": "ROLE_AGENT",
+                    "parts": [{"text": "hello"}],
+                    "messageId": "m-1",
+                }
+            }
+        )
+
+        assert task_stream["kind"] == "task"
+        assert status_stream["kind"] == "status-update"
+        assert status_stream["status"]["state"] == "working"
+        assert artifact_stream["kind"] == "artifact-update"
+        assert artifact_stream["artifact"]["parts"][0]["text"] == "chunk"
+        assert message_stream["role"] == "agent"
+        assert v1_stream_response_to_legacy_payload({"other": "value"}) == {"other": "value"}
+
+    def test_legacy_event_conversions_cover_all_stream_variants(self) -> None:
+        task_event = legacy_event_to_v1_stream_response(
+            _legacy_task().model_dump(exclude_none=True)
+        )
+        status_event = legacy_event_to_v1_stream_response(
+            TaskStatusUpdateEvent(
+                taskId="t-1",
+                contextId="c-1",
+                status=TaskStatus(
+                    state=TaskState.working,
+                    timestamp="2026-05-25T12:01:00Z",
+                ),
+                metadata={"status": True},
+            ).model_dump(exclude_none=True)
+        )
+        artifact_event = legacy_event_to_v1_stream_response(
+            TaskArtifactUpdateEvent(
+                taskId="t-1",
+                contextId="c-1",
+                artifact=Artifact(artifactId="a-1", parts=[TextPart(text="chunk")]),
+                append=True,
+                lastChunk=True,
+                metadata={"artifact": True},
+            ).model_dump(exclude_none=True)
+        )
+
+        assert task_event["task"]["status"]["state"] == "TASK_STATE_COMPLETED"
+        assert status_event["statusUpdate"]["status"]["state"] == "TASK_STATE_WORKING"
+        assert "final" not in status_event["statusUpdate"]
+        assert artifact_event["artifactUpdate"]["artifact"]["parts"][0]["text"] == "chunk"
+        assert legacy_event_to_v1_stream_response({"kind": "custom"}) == {"kind": "custom"}
+
+    @pytest.mark.asyncio
+    async def test_v1_send_get_cancel_and_stream_delegate_to_legacy_host(self) -> None:
+        task = _legacy_task()
+        host = _V1Host(
+            [task],
+            stream_events=[
+                task.model_dump(exclude_none=True),
+                TaskStatusUpdateEvent(
+                    taskId=task.id,
+                    contextId=task.contextId,
+                    status=TaskStatus(
+                        state=TaskState.working,
+                        timestamp="2026-05-25T12:02:00Z",
+                    ),
+                ).model_dump(exclude_none=True),
+            ],
+        )
+        params = {
+            "message": {
+                "role": "ROLE_USER",
+                "parts": [{"text": "hello"}],
+                "messageId": "m-send",
+            },
+            "configuration": {"history_length": 2, "blocking": True},
+            "metadata": {"request": True},
+        }
+
+        sent = await host._handle_v1_send_message(params)
+        got = await host._handle_v1_get_task(
+            {"id": task.id, "history_length": 1, "metadata": {"get": True}}
+        )
+        canceled = await host._handle_v1_cancel_task({"id": task.id, "metadata": {"cancel": True}})
+        streamed = [event async for event in host._stream_v1_message(params)]
+
+        assert sent["task"]["id"] == task.id
+        assert host.sent_params is not None
+        assert host.sent_params["message"]["role"] == "user"
+        assert host.sent_params["configuration"]["historyLength"] == 2
+        assert got["task"]["id"] == task.id
+        assert host.get_params == {
+            "id": task.id,
+            "historyLength": 1,
+            "metadata": {"get": True},
+        }
+        assert canceled["task"]["id"] == task.id
+        assert host.cancel_params == {"id": task.id, "metadata": {"cancel": True}}
+        assert "task" in streamed[0]
+        assert "statusUpdate" in streamed[1]
+
+    @pytest.mark.asyncio
+    async def test_v1_list_tasks_filters_paginates_and_trims(self) -> None:
+        old = _legacy_task(
+            "old",
+            context_id="keep",
+            state=TaskState.completed,
+            timestamp="2026-05-25T12:00:00Z",
+        )
+        new = _legacy_task(
+            "new",
+            context_id="keep",
+            state=TaskState.completed,
+            timestamp="2026-05-25T13:00:00Z",
+        )
+        other_context = _legacy_task(
+            "other",
+            context_id="drop",
+            state=TaskState.completed,
+            timestamp="2026-05-25T14:00:00Z",
+        )
+        working = _legacy_task(
+            "working",
+            context_id="keep",
+            state=TaskState.working,
+            timestamp="2026-05-25T15:00:00Z",
+        )
+        host = _V1Host([old, new, other_context, working])
+
+        first_page = await host._handle_v1_list_tasks(
+            {
+                "context_id": "keep",
+                "status": "TASK_STATE_COMPLETED",
+                "status_timestamp_after": "2026-05-25T11:00:00Z",
+                "page_size": 1,
+                "page_token": "0",
+                "history_length": 1,
+                "include_artifacts": False,
+            }
+        )
+        second_page = await host._handle_v1_list_tasks(
+            {
+                "contextId": "keep",
+                "status": "TASK_STATE_COMPLETED",
+                "pageSize": 1,
+                "pageToken": first_page["nextPageToken"],
+            }
+        )
+        all_tasks = await host._handle_v1_list_tasks({})
+
+        assert first_page["totalSize"] == 2
+        assert first_page["tasks"][0]["id"] == "new"
+        assert first_page["tasks"][0]["history"][0]["role"] == "ROLE_AGENT"
+        assert first_page["tasks"][0]["artifacts"] == []
+        assert first_page["nextPageToken"] == "1"
+        assert second_page["tasks"][0]["id"] == "old"
+        assert all_tasks["pageSize"] == 4
+        assert all_tasks["nextPageToken"] == ""
+
+    @pytest.mark.asyncio
+    async def test_v1_list_tasks_rejects_invalid_params_and_page_token(self) -> None:
+        host = _V1Host()
+
+        with pytest.raises(A2AV1ProtocolError) as missing_id:
+            await host._handle_v1_get_task({})
+        with pytest.raises(A2AV1ProtocolError) as invalid_page:
+            await host._handle_v1_list_tasks({"pageToken": "not-an-int"})
+
+        assert missing_id.value.code == INVALID_PARAMS
+        assert invalid_page.value.code == INVALID_PARAMS
+        assert invalid_page.value.message == "invalid pageToken"
+
+    @pytest.mark.asyncio
+    async def test_v1_subscribe_preflight_and_stream_errors(self) -> None:
+        active = _legacy_task("active", state=TaskState.working)
+        done = _legacy_task("done", state=TaskState.completed)
+        host = _V1Host([active, done])
+
+        host._preflight_v1_task_subscription({"id": "active"})
+        streamed = [event async for event in host._stream_v1_task_subscription({"id": "active"})]
+        assert streamed[0]["task"]["id"] == "active"
+
+        with pytest.raises(A2AV1ProtocolError) as missing:
+            host._preflight_v1_task_subscription({"id": "missing"})
+        with pytest.raises(A2AV1ProtocolError) as terminal:
+            host._preflight_v1_task_subscription({"id": "done"})
+        with pytest.raises(A2AV1ProtocolError) as invalid:
+            [event async for event in host._stream_v1_task_subscription({})]
+
+        assert missing.value.code == TASK_NOT_FOUND
+        assert terminal.value.code == UNSUPPORTED_OPERATION
+        assert invalid.value.code == INVALID_PARAMS
+
+    @pytest.mark.asyncio
+    async def test_v1_input_mode_validation_rejects_unsupported_parts(self) -> None:
+        host = _V1Host(input_modes=["text/plain"])
+
+        with pytest.raises(A2AV1ProtocolError) as data_part:
+            await host._handle_v1_send_message(
+                {
+                    "message": {
+                        "role": "ROLE_USER",
+                        "parts": [{"data": {"x": 1}, "mediaType": "application/json"}],
+                        "messageId": "m-1",
+                    }
+                }
+            )
+        with pytest.raises(A2AV1ProtocolError) as raw_part:
+            await host._handle_v1_send_message(
+                {
+                    "message": {
+                        "role": "ROLE_USER",
+                        "parts": [{"raw": "aGVsbG8="}],
+                        "messageId": "m-2",
+                    }
+                }
+            )
+        with pytest.raises(A2AV1ProtocolError) as bad_stream:
+            [event async for event in host._stream_v1_message({"message": "not-valid"})]
+
+        assert data_part.value.code == CONTENT_TYPE_NOT_SUPPORTED
+        assert raw_part.value.code == CONTENT_TYPE_NOT_SUPPORTED
+        assert bad_stream.value.code == INVALID_PARAMS
+
+    def test_v1_stream_response_status_model_accepts_v1_status(self) -> None:
+        event = A2AV1TaskStatusUpdateEvent(
+            taskId="t-1",
+            contextId="c-1",
+            status=A2AV1TaskStatus(
+                state=A2AV1TaskState.auth_required,
+                message=A2AV1Message(
+                    role=A2AV1Role.agent,
+                    parts=[A2AV1Part(text="auth please")],
+                    messageId="m-auth",
+                ),
+            ),
+        )
+
+        legacy = v1_stream_response_to_legacy_payload(
+            {"statusUpdate": event.model_dump(exclude_none=True)}
+        )
+        assert legacy["status"]["state"] == "auth-required"
+        assert legacy["status"]["message"]["parts"][0]["text"] == "auth please"
 
 
 # ---------------------------------------------------------------------------

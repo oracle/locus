@@ -28,6 +28,7 @@ from locus.core.state import AgentState
 from locus.multiagent.orchestrator import OrchestratorResult
 from locus.router import (
     HUMAN_SENTINEL,
+    A2ARunnable,
     AgentRunnable,
     BuilderContext,
     CapabilityIndex,
@@ -377,6 +378,70 @@ class TestAdapters:
         )
         result = asyncio.run(runnable.execute("ping"))
         assert result.text == "done"
+
+    def test_a2a_runnable_uses_send_message_task_artifact_text(self):
+        client = MagicMock()
+        task = MagicMock()
+        artifact = MagicMock()
+        artifact.parts = [MagicMock(text="older"), MagicMock(text="newest")]
+        task.artifacts = [artifact]
+        task.status = None
+
+        async def send_message(_message):
+            return task
+
+        client.send_message = send_message
+        runnable = A2ARunnable(client=client, protocol_id="a2a_delegate", frame=_frame())
+        result = asyncio.run(runnable.execute("ping"))
+
+        assert result.text == "newest"
+        assert result.raw is task
+        assert result.protocol_id == "a2a_delegate"
+
+    def test_a2a_runnable_falls_back_to_legacy_invoke_on_missing_send_method(self):
+        client = MagicMock()
+
+        async def send_message(_message):
+            raise RuntimeError("A2A error -32601: method not found")
+
+        async def invoke(_task):
+            return "legacy answer"
+
+        client.send_message = send_message
+        client.invoke = invoke
+        runnable = A2ARunnable(client=client, protocol_id="a2a_delegate", frame=_frame())
+        result = asyncio.run(runnable.execute("ping"))
+
+        assert result.text == "legacy answer"
+        assert result.raw == "legacy answer"
+
+    def test_a2a_runnable_propagates_non_method_not_found_errors(self):
+        client = MagicMock()
+
+        async def send_message(_message):
+            raise RuntimeError("boom")
+
+        client.send_message = send_message
+        runnable = A2ARunnable(client=client, protocol_id="a2a_delegate", frame=_frame())
+
+        with pytest.raises(RuntimeError, match="boom"):
+            asyncio.run(runnable.execute("ping"))
+
+    def test_a2a_extract_task_text_reads_status_message_and_empty_task(self):
+        status_task = MagicMock()
+        status_task.artifacts = []
+        status = MagicMock()
+        message = MagicMock()
+        message.parts = [MagicMock(text=""), MagicMock(text="status text")]
+        status.message = message
+        status_task.status = status
+
+        empty_task = MagicMock()
+        empty_task.artifacts = []
+        empty_task.status = None
+
+        assert A2ARunnable._extract_task_text(status_task) == "status text"
+        assert A2ARunnable._extract_task_text(empty_task) == ""
 
 
 # ---------------------------------------------------------------------------
