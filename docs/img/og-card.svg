@@ -13,10 +13,12 @@
   <text x="430" y="320" font-size="180" font-weight="700" fill="#FAFAF9" letter-spacing="-0.04em">locus</text>
 
   <!-- Tagline -->
-  <text x="438" y="388" font-size="38" font-weight="600" fill="#C74634" letter-spacing="0.16em">MULTI-AGENT SDK</text>
+  <text x="438" y="372" font-size="30" font-weight="600" fill="#C74634" letter-spacing="0.01em">Oracle Generative AI</text>
+  <text x="438" y="408" font-size="30" font-weight="600" fill="#C74634" letter-spacing="0.01em">Multi-Agent Reasoning</text>
+  <text x="438" y="444" font-size="30" font-weight="600" fill="#C74634" letter-spacing="0.01em">Orchestrator SDK</text>
 
   <!-- Install line -->
-  <text x="438" y="468" font-size="28" font-weight="500" fill="#A8A29E" font-family="'JetBrains Mono', 'Menlo', monospace">$ pip install locus-sdk</text>
+  <text x="438" y="500" font-size="28" font-weight="500" fill="#A8A29E" font-family="'JetBrains Mono', 'Menlo', monospace">$ pip install locus-sdk</text>
 
   <!-- Top-right: Oracle wordmark (from official customerlogo asset) -->
   <g transform="translate(1042, 40) scale(0.18)" fill="#C74634">
