@@ -264,7 +264,7 @@ nav:
     - 68 · Agent server: notebooks/notebook_68_agent_server.md
     - 69 · Research workflow: notebooks/notebook_69_research_workflow.md
     - 70 · OCI tools — agents that drive OCI: notebooks/notebook_70_oci_tools.md
-    - 71 · LiteLLM AI Gateway in front of OCI: notebooks/notebook_71_litellm_gateway.md
+    - 71 · LiteLLM AI Gateway: notebooks/notebook_71_litellm_gateway.md
   - Guides:
     - Deploy: how-to/deploy.md
     - Persist conversations: how-to/persist-conversations.md
