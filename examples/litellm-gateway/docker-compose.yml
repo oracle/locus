@@ -1,0 +1,62 @@
+# Sample local-dev LiteLLM AI Gateway in front of OCI Generative AI.
+#
+# Stand up with:
+#
+#   # 1. Set the OCI credentials the *gateway* will use to sign upstream calls.
+#   # These do NOT leak to your Locus app — only the gateway sees them.
+#   export OCI_REGION="us-chicago-1"
+#   export OCI_USER="ocid1.user.oc1..xxx"
+#   export OCI_FINGERPRINT="aa:bb:cc:..."
+#   export OCI_TENANCY="ocid1.tenancy.oc1..xxx"
+#   export OCI_KEY_FILE="$HOME/.oci/keys/your_api_key.pem"
+#   export OCI_COMPARTMENT_ID="ocid1.compartment.oc1..xxx"
+#
+#   # 2. Pick any string as the local master key. The gateway issues
+#   # per-team virtual keys via /key/generate using this as the admin token.
+#   export LITELLM_MASTER_KEY="$LITELLM_VIRTUAL_KEY"
+#
+#   # 3. Start the gateway.
+#   docker compose up
+#
+#   # 4. Point Locus at it (in a second shell):
+#   #   from locus.models.native.openai import OpenAIModel
+#   #   model = OpenAIModel(
+#   #       model="oci-cohere-command",
+#   #       api_key="$LITELLM_VIRTUAL_KEY",
+#   #       base_url="http://localhost:4000",
+#   #   )
+
+services:
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    container_name: locus-litellm-gateway
+    ports:
+    - 4000:4000
+    volumes:
+    # Mount the config alongside the OCI key the gateway will sign with.
+    - ./config.yaml:/app/config.yaml:ro
+    - ${OCI_KEY_FILE:-/dev/null}:/oci-keys/key.pem:ro
+    environment:
+      # Surface env vars referenced by config.yaml's ``os.environ/...`` lookups.
+      OCI_REGION: ${OCI_REGION:?set OCI_REGION before running docker compose up}
+      OCI_USER: ${OCI_USER:?set OCI_USER}
+      OCI_FINGERPRINT: ${OCI_FINGERPRINT:?set OCI_FINGERPRINT}
+      OCI_TENANCY: ${OCI_TENANCY:?set OCI_TENANCY}
+      OCI_COMPARTMENT_ID: ${OCI_COMPARTMENT_ID:?set OCI_COMPARTMENT_ID}
+      # The container sees the key at the mounted path, not the host path.
+      OCI_KEY_FILE: /oci-keys/key.pem
+      # Admin token. Used to call /key/generate from outside.
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-$LITELLM_VIRTUAL_KEY}
+    command: [--config, /app/config.yaml, --port, '4000', --num_workers, '1']
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD, wget, --quiet, --tries=1, --spider, http://localhost:4000/health/liveness]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+# For a production-shaped setup, add a Postgres service here and set
+# ``general_settings.database_url`` in config.yaml. Without it, virtual
+# keys and spend logs live in memory and disappear on restart — fine
+# for local dev, not for production.

@@ -271,6 +271,7 @@ nav:
     - Add a checkpointer backend: how-to/custom-checkpointer.md
     - OCI GenAI models: how-to/oci-models.md
     - OCI Dedicated AI Cluster (DAC): how-to/oci-dac.md
+    - LiteLLM AI Gateway: how-to/litellm-gateway.md
 - Workbench: workbench.md
 - API reference:
   - Agent: api/agent.md

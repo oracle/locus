@@ -5,6 +5,17 @@ AI through **three transports**.
 The `oci:` string factory picks V1 or SDK by model family; the
 Responses transport is opt-in.
 
+!!! tip "Multi-tenant / cross-provider deployments"
+    The direct OCI providers documented on this page are the right
+    default for single-tenant production, dev / CI, and on-OKE
+    workload identity. **If you need centralised virtual keys,
+    per-team budgets, fallback chains across regions or providers,
+    centralised observability (Langfuse / OTel / Datadog), or
+    cross-provider routing, see the
+    [LiteLLM AI Gateway guide](litellm-gateway.md) instead** — Locus
+    connects to that via its existing `OpenAIModel(base_url=...)`
+    client, no new Locus class needed.
+
 | Model family | Transport | Class | Endpoint |
 |---|---|---|---|
 | OpenAI (`openai.gpt-*`, `openai.o*`) | V1 | `OCIChatCompletionsModel` | `/openai/v1/chat/completions` |
