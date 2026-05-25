@@ -39,7 +39,11 @@
 
 services:
   litellm:
-    image: ghcr.io/berriai/litellm:main-stable
+    # Image is configurable so this sample works behind networks that
+    # can't reach ghcr.io directly. The default is the official
+    # ``ghcr.io/berriai/litellm:main-stable``; override with
+    # ``LITELLM_IMAGE`` if you mirror it internally.
+    image: ${LITELLM_IMAGE:-ghcr.io/berriai/litellm:main-stable}
     container_name: locus-litellm-gateway
     ports:
     - 4000:4000
@@ -75,10 +79,16 @@ services:
   # production should point DATABASE_URL at an external Postgres / ADB
   # so the gateway pod is stateless.
   db:
-    # Official postgres image. If your Docker daemon can't reach Docker
-    # Hub directly (corporate proxy / TLS interception), use a registry
-    # mirror you trust, e.g. mirror.gcr.io/library/postgres:17-alpine.
-    image: postgres:17-alpine
+    # Image is configurable so this sample works behind corporate
+    # proxies that block Docker Hub directly. The default targets the
+    # official postgres:17-alpine; export LITELLM_DB_IMAGE to use a
+    # mirror you can reach, e.g.:
+    #
+    #   export LITELLM_DB_IMAGE=mirror.gcr.io/library/postgres:17-alpine
+    #
+    # Any image that exposes the standard postgres entrypoint + env
+    # vars (POSTGRES_DB / POSTGRES_USER / POSTGRES_PASSWORD) works.
+    image: ${LITELLM_DB_IMAGE:-postgres:17-alpine}
     container_name: locus-litellm-db
     environment:
       POSTGRES_DB: litellm

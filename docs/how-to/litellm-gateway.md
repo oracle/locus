@@ -99,8 +99,10 @@ docker compose up
 ```
 
 The gateway listens on `http://localhost:4000` and exposes the model
-aliases declared in `config.yaml` (`oci-grok`, `oci-cohere-command`,
-`oci-gpt5-mini`, `oci-cohere-embed` in the sample).
+aliases declared in `config.yaml`. The sample ships six:
+`oci-cohere-command`, `oci-cohere-embed`, `oci-grok`, `oci-gpt5-mini`,
+`oci-llama-4-maverick`, and `oci-gemini-2.5-flash`. Add more by
+extending `model_list`.
 
 Verify with a `curl`:
 

@@ -46,17 +46,40 @@ _REQUIRED_OCI_ENV = {
     "OCI_COMPARTMENT_ID",
 }
 
-# Aliases the how-to / notebook 71 advertise as available. Drift between
-# these and config.yaml breaks the documented quickstart, so the test
-# asserts they remain in sync.
-_DOCUMENTED_ALIASES = {
-    "oci-cohere-command",
-    "oci-grok",
-    "oci-gpt5-mini",
-    "oci-llama-4-maverick",
-    "oci-gemini-2.5-flash",
-    "oci-cohere-embed",
+# How-to markdown — the single source of truth for which OCI aliases the
+# gateway is documented to expose. The parity test scrapes this file for
+# backticked tokens that start with ``oci-`` and asserts ``config.yaml``
+# exposes exactly that set. No hardcoded alias list to drift against the
+# docs.
+HOWTO_MD = REPO_ROOT / "docs" / "how-to" / "litellm-gateway.md"
+
+# Tokens that scrape positive on ``oci-...`` but aren't gateway aliases —
+# exclude them from the parity set so the regex doesn't false-positive
+# on real text from the docs.
+_NON_ALIAS_OCI_TOKENS = {
+    # OCI service / API names referenced in prose, not gateway aliases.
+    "oci-models.md",
+    "oci-dac.md",
+    # add more here if the docs ever reference an `oci-...` string that
+    # isn't a gateway alias — keep this list tight to keep the test honest.
 }
+
+
+def _aliases_from_docs() -> set[str]:
+    """Return every gateway alias the how-to advertises.
+
+    Looks for backticked tokens matching ``^oci-[a-z0-9.-]+$`` and
+    filters out the documentation cross-references in
+    ``_NON_ALIAS_OCI_TOKENS``. The contract enforced by the parity test
+    is then: *what config.yaml exposes must equal what the docs say it
+    exposes.*
+    """
+    import re
+
+    text = HOWTO_MD.read_text()
+    # Match `oci-foo`, `oci-foo-bar`, `oci-foo.bar` (escape: ``oci-foo``).
+    tokens = set(re.findall(r"`(oci-[a-z0-9][a-z0-9.\-]*)`", text))
+    return {t for t in tokens if t not in _NON_ALIAS_OCI_TOKENS}
 
 
 @pytest.fixture(scope="module")
@@ -93,15 +116,28 @@ class TestConfigYaml:
         assert len(config["model_list"]) >= 1
 
     def test_aliases_match_documentation(self, config: dict[str, Any]):
-        """Every alias the docs / notebook 71 advertise must exist in the
-        config, and every config alias must be one we document — otherwise
-        callers see ``404 not found`` or the docs say a model exists that
-        doesn't."""
-        aliases = {entry["model_name"] for entry in config["model_list"]}
-        assert aliases == _DOCUMENTED_ALIASES, (
-            f"alias drift between config.yaml and docs/how-to/litellm-gateway.md: "
-            f"only-in-config={aliases - _DOCUMENTED_ALIASES}, "
-            f"only-in-docs={_DOCUMENTED_ALIASES - aliases}"
+        """Single source of truth: the set of aliases declared in
+        ``config.yaml`` must equal the set of aliases the how-to
+        markdown mentions in backticks. Updating one without updating
+        the other should fail this test loudly — not silently leave a
+        404 for the reader. The "documented" set is *parsed* from the
+        how-to file, not hardcoded here, so there's no third source to
+        drift against."""
+        from_config = {entry["model_name"] for entry in config["model_list"]}
+        from_docs = _aliases_from_docs()
+        assert from_docs, (
+            "the how-to (docs/how-to/litellm-gateway.md) mentions no "
+            "`oci-...` aliases in backticks — either the file is wrong "
+            "or the scrape regex needs updating."
+        )
+        assert from_config == from_docs, (
+            "alias drift between config.yaml and "
+            "docs/how-to/litellm-gateway.md:\n"
+            f"  only-in-config-yaml: {sorted(from_config - from_docs)}\n"
+            f"  only-in-how-to-md:   {sorted(from_docs - from_config)}\n"
+            "Fix one or the other so they agree (or add the token to "
+            "_NON_ALIAS_OCI_TOKENS if it's a doc cross-reference, "
+            "not a gateway alias)."
         )
 
     def test_aliases_unique(self, config: dict[str, Any]):
@@ -174,10 +210,27 @@ class TestConfigYaml:
 
 class TestComposeYaml:
     def test_uses_official_image(self, compose: dict[str, Any]):
+        """The default LiteLLM image must be the official ghcr.io build.
+        The compose file wraps it in ``${LITELLM_IMAGE:-...}`` so users
+        behind networks that can't reach ghcr.io can override; we assert
+        only the default behaviour here."""
         svc = compose["services"]["litellm"]
-        # The official LiteLLM proxy image. Other community forks exist
-        # but the docs explicitly pin to the upstream one.
-        assert svc["image"].startswith("ghcr.io/berriai/litellm:")
+        img = svc["image"]
+        # Either the literal path or the ${LITELLM_IMAGE:-...} form,
+        # both of which fall back to ghcr.io/berriai/litellm.
+        assert "ghcr.io/berriai/litellm" in img, (
+            f"litellm image should default to ghcr.io/berriai/litellm:..., got {img!r}"
+        )
+
+    def test_litellm_image_is_overridable(self, compose: dict[str, Any]):
+        """Operators behind corporate proxies that block ghcr.io must
+        be able to override the image without editing this file. Assert
+        the env-var-with-default form is in use."""
+        img = compose["services"]["litellm"]["image"]
+        assert "${LITELLM_IMAGE" in img, (
+            f"litellm image must use ${{LITELLM_IMAGE:-...}} form so "
+            f"users can override it; got {img!r}"
+        )
 
     def test_exposes_port_4000(self, compose: dict[str, Any]):
         svc = compose["services"]["litellm"]
@@ -255,9 +308,25 @@ class TestComposePostgres:
         )
 
     def test_db_is_postgres(self, compose: dict[str, Any]):
-        """Image must be an official-shape postgres tag."""
+        """Image must be a postgres-shaped tag. The compose file uses
+        ``${LITELLM_DB_IMAGE:-postgres:17-alpine}`` so operators behind
+        corporate proxies can swap in a mirror (e.g.
+        ``mirror.gcr.io/library/postgres:17-alpine``) without editing
+        this file."""
         db_img = compose["services"]["db"]["image"]
         assert "postgres" in db_img, f"db service image should be postgres, got {db_img!r}"
+
+    def test_db_image_is_overridable(self, compose: dict[str, Any]):
+        """The Postgres pull is the most common failure point behind
+        corporate proxies that TLS-intercept Docker Hub. Asserting the
+        ``${LITELLM_DB_IMAGE:-...}`` form means a reviewer who hits the
+        pull failure can swap to a mirror without forking the sample."""
+        db_img = compose["services"]["db"]["image"]
+        assert "${LITELLM_DB_IMAGE" in db_img, (
+            f"db image must use ${{LITELLM_DB_IMAGE:-...}} form so users "
+            f"behind corporate proxies can override the registry; got "
+            f"{db_img!r}"
+        )
 
     def test_db_creds_env_wired_strictly(self, compose: dict[str, Any]):
         """Postgres POSTGRES_PASSWORD must use the ``${VAR:?…}`` strict

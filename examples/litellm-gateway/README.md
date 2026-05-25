@@ -21,6 +21,7 @@ export OCI_TENANCY="ocid1.tenancy.oc1..xxx"
 export OCI_KEY_FILE="$HOME/.oci/keys/your_api_key.pem"
 export OCI_COMPARTMENT_ID="ocid1.compartment.oc1..xxx"
 export LITELLM_MASTER_KEY="$(openssl rand -hex 32)"  # admin key for /key/generate
+export LITELLM_DB_PASSWORD="$(openssl rand -hex 16)"  # postgres pw — change for non-throwaway
 
 # 2. Start the gateway.
 docker compose up
@@ -30,10 +31,30 @@ docker compose up
 #   from locus.models.native.openai import OpenAIModel
 #   model = OpenAIModel(
 #       model="oci-cohere-command",          # alias from config.yaml
-#       api_key="$LITELLM_VIRTUAL_KEY",              # virtual key
+#       api_key="<gateway-virtual-key>",     # issued via /key/generate
 #       base_url="http://localhost:4000",
 #   )
 ```
+
+### Behind a corporate proxy?
+
+If your Docker daemon can't reach Docker Hub directly (TLS interception
+on a corporate egress proxy is the usual culprit), the `postgres` pull
+fails with `tls: failed to verify certificate: x509: certificate signed
+by unknown authority`. Override the image with any mirror you can
+reach:
+
+```bash
+# Use Google's container-registry mirror — typically reachable through
+# corporate networks that block Docker Hub.
+export LITELLM_DB_IMAGE="mirror.gcr.io/library/postgres:17-alpine"
+docker compose up
+```
+
+The `litellm` image itself ships from `ghcr.io/berriai/litellm` (GitHub
+Container Registry, separate proxy story) — if *that* one fails too,
+override `LITELLM_IMAGE` similarly or pull both via your internal
+registry. Both env vars are honored by `docker-compose.yml`.
 
 ## OKE quickstart
 
