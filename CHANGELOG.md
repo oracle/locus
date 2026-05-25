@@ -8,6 +8,17 @@ policy.
 
 ## [Unreleased]
 
+## [0.2.0b22] - 2026-05-25
+
+One PR landed since b21, but it's a substantive one: Locus is now
+documented + sampled + tested as a first-class consumer of the
+[LiteLLM AI Gateway](https://litellm.ai) in front of Oracle Generative
+AI Infrastructure. The gateway pattern joins the existing direct OCI
+providers as a documented deployment path, recommended for
+multi-tenant / cross-provider / centralised-observability cases.
+**Zero new Python code in Locus**, no new dep — the integration is
+docs + a working sample + tests.
+
 ### Added — LiteLLM AI Gateway integration (PR #268)
 
 Locus is now documented + sampled + tested as a first-class consumer
