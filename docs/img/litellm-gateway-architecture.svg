@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 740" role="img" aria-labelledby="title desc">
+  <title id="title">Locus behind the LiteLLM AI Gateway in front of Oracle Generative AI Infrastructure</title>
+  <desc id="desc">A Locus agent uses its existing OpenAIModel pointed at a LiteLLM AI Gateway. The gateway carries virtual keys, fallback chains, observability, cost tracking, caching, guardrails, and auditing. The gateway signs the upstream call into OCI Generative AI Infrastructure with OCI Signature v1. The same gateway also fronts OpenAI direct, Anthropic, AWS Bedrock, Google Vertex, and Ollama.</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M2 1L9 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+
+  <style>
+    .h-eyebrow    { font: 400 13px "Inter", -apple-system, "Segoe UI", sans-serif; fill: #3D3D3A; }
+    .h-title      { font: 600 18px "Inter", -apple-system, "Segoe UI", sans-serif; fill: #141413; }
+    .lane-title   { font: 600 15px "Inter", -apple-system, "Segoe UI", sans-serif; }
+    .lane-sub     { font: 400 12px "Inter", -apple-system, "Segoe UI", sans-serif; }
+    .block-title  { font: 600 14px "Inter", -apple-system, "Segoe UI", sans-serif; fill: #141413; }
+    .block-body   { font: 400 12.5px "Inter", -apple-system, "Segoe UI", sans-serif; fill: #444441; }
+    .mono         { font: 500 12px "JetBrains Mono", "SF Mono", "Menlo", monospace; }
+    .arrow-label  { font: 500 12px "Inter", -apple-system, "Segoe UI", sans-serif; fill: #5F5E5A; }
+    .feature      { font: 400 12px "Inter", -apple-system, "Segoe UI", sans-serif; fill: #444441; }
+    .feature-key  { font: 600 12px "Inter", -apple-system, "Segoe UI", sans-serif; fill: #3C3489; }
+  </style>
+
+  <!-- Headings -->
+  <text x="450" y="28" text-anchor="middle" class="h-eyebrow">Architecture</text>
+  <text x="450" y="56" text-anchor="middle" class="h-title">Locus → LiteLLM AI Gateway → Oracle Generative AI Infrastructure</text>
+  <line x1="370" y1="68" x2="530" y2="68" stroke="#A32D2D" stroke-width="1.5"/>
+
+  <!-- =================== TIER 1 — Locus agent =================== -->
+  <rect x="50" y="100" width="800" height="110" rx="14" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.6"/>
+  <text x="70" y="130" class="lane-title" style="fill:#444441;">Locus agent</text>
+  <text x="70" y="152" class="lane-sub" style="fill:#5F5E5A;">No OCI credentials. No new model class. Just the existing OpenAI-compatible client.</text>
+
+  <!-- Code block inside Locus -->
+  <rect x="200" y="160" width="560" height="40" rx="6" fill="#FFFFFF" stroke="#8C9AC0" stroke-width="0.5"/>
+  <text x="220" y="184" class="mono" style="fill:#1A1A1A;">
+    OpenAIModel(
+      <tspan fill="#3C3489">model</tspan>=<tspan fill="#0A6D2B">"oci-cohere-command"</tspan>,
+      <tspan fill="#3C3489">base_url</tspan>=<tspan fill="#0A6D2B">"http://litellm-gateway:4000"</tspan>,
+      <tspan fill="#3C3489">api_key</tspan>=<tspan fill="#0A6D2B">"&lt;virtual-key&gt;"</tspan>
+    )
+  </text>
+
+  <!-- Arrow Locus -> Gateway -->
+  <text x="450" y="232" text-anchor="middle" class="arrow-label">OpenAI-shape HTTPS  ·  Bearer &lt;virtual-key&gt;</text>
+  <line x1="450" y1="240" x2="450" y2="262" stroke="#3C3489" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+  <!-- =================== TIER 2 — LiteLLM Gateway =================== -->
+  <rect x="50" y="266" width="800" height="294" rx="14" fill="#EEEDFE" fill-opacity="0.95" stroke="#534AB7" stroke-width="1.2"/>
+  <text x="70" y="294" class="lane-title" style="fill:#3C3489;">LiteLLM AI Gateway</text>
+  <text x="70" y="314" class="lane-sub" style="fill:#534AB7;"><tspan class="mono" style="fill:#534AB7;">litellm --config config.yaml</tspan>  ·  pod / container / sidecar — operated by your platform team</text>
+
+  <!-- Feature grid: 2 columns x 4 rows -->
+  <g transform="translate(70,332)">
+    <!-- Row 1 -->
+    <rect x="0"   y="0"  width="370" height="46" rx="6" fill="#FFFFFF" stroke="#534AB7" stroke-width="0.4"/>
+    <text x="14" y="20" class="feature-key">Virtual keys</text>
+    <text x="14" y="38" class="feature">per-team budgets · RPM/TPM · expiry · model allowlists</text>
+
+    <rect x="390" y="0"  width="370" height="46" rx="6" fill="#FFFFFF" stroke="#534AB7" stroke-width="0.4"/>
+    <text x="404" y="20" class="feature-key">Fallback chains</text>
+    <text x="404" y="38" class="feature">oci-gpt5-mini → oci-grok → oci-cohere-command</text>
+
+    <!-- Row 2 -->
+    <rect x="0"   y="54" width="370" height="46" rx="6" fill="#FFFFFF" stroke="#534AB7" stroke-width="0.4"/>
+    <text x="14" y="74" class="feature-key">Observability</text>
+    <text x="14" y="92" class="feature">Langfuse · OpenTelemetry · Datadog · Helicone</text>
+
+    <rect x="390" y="54" width="370" height="46" rx="6" fill="#FFFFFF" stroke="#534AB7" stroke-width="0.4"/>
+    <text x="404" y="74" class="feature-key">Cost tracking</text>
+    <text x="404" y="92" class="feature">Postgres — per-key / per-team / per-model spend</text>
+
+    <!-- Row 3 -->
+    <rect x="0"   y="108" width="370" height="46" rx="6" fill="#FFFFFF" stroke="#534AB7" stroke-width="0.4"/>
+    <text x="14" y="128" class="feature-key">Cache</text>
+    <text x="14" y="146" class="feature">Redis · S3 · Qdrant  (semantic + exact match)</text>
+
+    <rect x="390" y="108" width="370" height="46" rx="6" fill="#FFFFFF" stroke="#534AB7" stroke-width="0.4"/>
+    <text x="404" y="128" class="feature-key">Guardrails</text>
+    <text x="404" y="146" class="feature">Lakera · Aporia · Presidio · Bedrock Guardrails</text>
+
+    <!-- Row 4 -->
+    <rect x="0"   y="162" width="370" height="46" rx="6" fill="#FFFFFF" stroke="#534AB7" stroke-width="0.4"/>
+    <text x="14" y="182" class="feature-key">Audit</text>
+    <text x="14" y="200" class="feature">every request, response, tool call, stream chunk</text>
+
+    <rect x="390" y="162" width="370" height="46" rx="6" fill="#FFFFFF" stroke="#534AB7" stroke-width="0.4"/>
+    <text x="404" y="182" class="feature-key">Admin UI</text>
+    <text x="404" y="200" class="feature">spend dashboards · virtual-key management</text>
+  </g>
+
+  <text x="70" y="548" class="lane-sub" style="fill:#5F5E5A;">OCI Signature v1 RSA-SHA256 signing happens here, not in Locus. OCI credentials live in the gateway pod
+    via OCI Vault or OKE Workload Identity — never on disk in any Locus service.</text>
+
+  <!-- Arrow Gateway -> OCI -->
+  <text x="450" y="586" text-anchor="middle" class="arrow-label">signed HTTPS  ·  OCI Signature v1</text>
+  <line x1="450" y1="594" x2="450" y2="618" stroke="#A32D2D" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- =================== TIER 3 — OCI Generative AI =================== -->
+  <rect x="50" y="624" width="800" height="100" rx="14" fill="#FCEBEB" stroke="#A32D2D" stroke-width="1.2"/>
+  <text x="70" y="652" class="lane-title" style="fill:#791F1F;">Oracle Generative AI Infrastructure</text>
+  <text x="70" y="672" class="lane-sub" style="fill:#A32D2D;">
+    <tspan class="mono" style="fill:#A32D2D;">/20231130/actions/chat</tspan>  ·
+    <tspan class="mono" style="fill:#A32D2D;">/openai/v1/chat/completions</tspan>  ·
+    <tspan class="mono" style="fill:#A32D2D;">/openai/v1/responses</tspan>
+  </text>
+  <text x="70" y="696" class="block-body">Llama  ·  Grok  ·  Cohere Command  ·  Cohere Embed  ·  Google Gemini  ·  OpenAI gpt-5</text>
+  <text x="70" y="714" class="block-body" style="fill:#5F5E5A;">Same gateway also fronts:  OpenAI direct  ·  Anthropic  ·  AWS Bedrock  ·  Google Vertex AI  ·  Ollama  ·  100+ providers</text>
+</svg>

@@ -4,6 +4,8 @@
 branded the **LiteLLM Proxy Server** and the **LiteLLM AI Gateway** —
 that fronts 100+ model providers behind one OpenAI-shaped HTTP API.
 
+![Locus → LiteLLM AI Gateway → OCI Generative AI](../img/litellm-gateway-architecture.svg)
+
 When you put it in front of Oracle Generative AI Infrastructure (and
 optionally other providers), Locus consumes it through its existing
 [`OpenAIModel`](../concepts/providers/openai.md) with no Locus-side code
