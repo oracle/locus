@@ -8,6 +8,9 @@ Native providers connect directly to model vendor APIs:
 - OpenAI → GPT models (Oracle partnership)
 - Anthropic → Claude models
 - Ollama → Local LLMs (Llama, Mistral, Gemma, etc.)
+- LiteLLM → Unified gateway covering 100+ providers, including the full
+  Oracle Generative AI Infrastructure catalog (xAI Grok, Cohere Command,
+  Cohere Embed, Meta Llama, Google Gemini, OpenAI gpt-5).
 """
 
 from locus.models.native.openai import OpenAIConfig, OpenAIModel
@@ -16,7 +19,9 @@ from locus.models.native.openai import OpenAIConfig, OpenAIModel
 __all__ = [
     "OpenAIModel",
     "OpenAIConfig",
-    # Anthropic and Ollama are lazy imports to avoid hard dependencies:
+    # Anthropic, Ollama, and LiteLLM are lazy imports to avoid hard
+    # dependencies on packages users may not have installed:
     #   from locus.models.native.anthropic import AnthropicModel
     #   from locus.models.native.ollama import OllamaModel
+    #   from locus.models.native.litellm import LiteLLMModel
 ]
