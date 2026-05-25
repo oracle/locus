@@ -2,18 +2,24 @@
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
 
-"""Integration tests: cost tracking and budget enforcement on the
-LiteLLM AI Gateway, driven end-to-end against real OCI Generative AI.
+"""Integration tests: validate that the deployment we ship in
+``examples/litellm-gateway/`` actually delivers the cost-tracking
+promise the how-to advertises.
 
-Asserts that the cost surface documented in
-``docs/how-to/litellm-gateway.md`` — `/spend/logs`,
-`/global/spend/keys`, `/global/spend/models`, per-key `max_budget`
-enforcement — actually works at runtime, not just on paper.
+Scope: these tests are **deployment-validation**, not LiteLLM
+regression-testing. They confirm that the sample ``config.yaml`` +
+``docker-compose.yml`` + the LiteLLM Proxy Server version we pin
+together produce a working ``/spend/logs`` / ``/global/spend/keys``
+/ ``/global/spend/models`` / per-key ``max_budget`` surface for an
+operator following the documented recipe. If LiteLLM restructures
+one of these endpoints in a future release, these tests fail with a
+clean signal — and the right response is to update the docs + the
+``LITELLM_IMAGE`` we recommend, not to chase LiteLLM's internals.
 
 Auto-skipped without the gateway env vars; runs from the same env
-gate as `test_litellm_gateway_live.py`. Requires the Postgres-backed
-gateway from ``examples/litellm-gateway/docker-compose.yml`` —
-``/key/generate`` and the `/spend/*` endpoints all require DB.
+gate as ``test_litellm_gateway_live.py``. Requires the Postgres-
+backed gateway from ``examples/litellm-gateway/docker-compose.yml``
+— ``/key/generate`` and ``/spend/*`` both need the DB.
 """
 
 from __future__ import annotations
