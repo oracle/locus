@@ -26,6 +26,31 @@ LiteLLM Proxy Server  (config.yaml carries every provider + key)
    └──► … 100+ providers
 ```
 
+!!! warning "Scope: the gateway covers OCI's native API path only"
+    LiteLLM's OCI provider targets OCI's **native** chat endpoint at
+    ``/20231130/actions/chat`` with vendor adapters (Cohere v1 transport
+    for `cohere.*`, GENERIC apiFormat for Grok / Llama / Gemini / gpt-5).
+    It does **not** wrap OCI's ``/openai/v1/chat/completions`` shim or
+    its ``/openai/v1/responses`` endpoint.
+
+    If you specifically need:
+
+    - the OCI OpenAI Chat-Completions V1 shim → use
+      [`OCIChatCompletionsModel`](oci-models.md#v1-transport-ocichatcompletionsmodel)
+      directly.
+    - server-stateful OCI Responses API (``previous_response_id``,
+      Responses-only models like `openai.gpt-5.5-pro`) → use
+      [`OCIResponsesModel`](oci-models.md#responses-transport-ociresponsesmodel-opt-in)
+      directly.
+
+    The gateway is the right answer for the OCI native path plus
+    cross-provider routing; the direct providers are the right answer
+    for OCI's other two surfaces.
+
+    Locus has **zero `litellm` Python dependency** — the package only
+    lives inside the gateway's Docker container. Your Locus services
+    only need `openai` (already pulled by `OpenAIModel`).
+
 ## When to choose this over the direct OCI providers
 
 Locus's [direct OCI model providers](oci-models.md) remain the right
@@ -83,6 +108,95 @@ Verify with a `curl`:
 curl -s http://localhost:4000/v1/models \
   -H "Authorization: Bearer $LITELLM_VIRTUAL_KEY" | jq '.data[].id'
 ```
+
+## Issuing per-team virtual keys
+
+The gateway's master key (`LITELLM_MASTER_KEY`) is the admin token —
+treat it as a high-value secret and **never hand it to a Locus
+agent**. Locus services should each carry a scoped **virtual key**
+issued via the gateway's `/key/generate` endpoint:
+
+```bash
+curl http://localhost:4000/key/generate \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "models":   ["oci-cohere-command"],
+    "max_budget": 5.00,
+    "duration": "24h",
+    "metadata": {"team": "platform-demo", "owner": "fede"}
+  }'
+```
+
+Response (truncated):
+
+```json
+{
+  "key": "sk-<example-virtual-key-here>",
+  "models": ["oci-cohere-command"],
+  "max_budget": 5.0,
+  "spend": 0.0,
+  "metadata": {"team": "platform-demo", "owner": "fede"}
+}
+```
+
+The gateway enforces every field at request time:
+
+- **Model allowlist** — a key with `models: ["oci-cohere-command"]`
+  trying to call `oci-gpt5-mini` gets rejected:
+  `key not allowed to access model. This key can only access
+  models=['oci-cohere-command']. Tried to access oci-gpt5-mini`.
+- **Budget** — when cumulative spend exceeds `max_budget`, subsequent
+  calls 429.
+- **Expiry** — `duration: "24h"` automatically deactivates the key
+  after 24 hours.
+- **Metadata** is attached to every request the key makes, so spend
+  reporting and audit logs can group by `team` / `owner` / whatever
+  fields you put there.
+
+!!! note "`/key/generate` requires Postgres"
+    The `docker-compose.yml` in this sample includes a Postgres sidecar
+    for virtual-key storage. Without it the gateway returns
+    `{"error": "DB not connected"}` for `/key/generate`. In production
+    point `DATABASE_URL` at an external Postgres (e.g. an OCI ADB
+    instance) so the gateway pod itself stays stateless.
+
+## Cost tracking
+
+The same Postgres backend logs every request automatically with token
+counts and computed cost. No extra config beyond connecting the DB.
+
+```bash
+# Per-request spend log (flushed asynchronously every ~10s by default).
+curl http://localhost:4000/spend/logs \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY"
+
+# Aggregate spend grouped by virtual key.
+curl http://localhost:4000/global/spend/keys \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY"
+```
+
+Sample output:
+
+```text
+/spend/logs
+  · model=oci/cohere.command-latest  tokens=11  cost=$0.000017
+  · model=oci/cohere.command-latest  tokens=10  cost=$0.000016
+  · model=oci/cohere.command-latest  tokens=9   cost=$0.000014
+
+/global/spend/keys
+  · key=sk-<example-vkey-1>...  total_spend=$0.000034
+  · key=sk-<example-vkey-2>...  total_spend=$0.000014
+```
+
+LiteLLM ships an internal pricing table covering every model it
+routes (so OCI's per-token pricing is applied automatically). Spend
+is keyed by `api_key`, `user`, `team_id`, and any custom field in
+`metadata`, so the same SQL surface answers "what did team X spend
+this week?" and "what did model Y cost across all teams?".
+
+The full admin / analytics API is documented at
+[docs.litellm.ai/docs/proxy/cost_tracking](https://docs.litellm.ai/docs/proxy/cost_tracking).
 
 ## Pointing Locus at the gateway
 

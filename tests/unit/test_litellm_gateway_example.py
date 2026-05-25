@@ -238,6 +238,89 @@ class TestComposeYaml:
 
 
 # ---------------------------------------------------------------------------
+# docker-compose.yml — Postgres sidecar (required for /key/generate +
+# persistent virtual-key state + spend logs)
+# ---------------------------------------------------------------------------
+
+
+class TestComposePostgres:
+    def test_db_service_declared(self, compose: dict[str, Any]):
+        """A Postgres ``db`` service must exist alongside the gateway —
+        without it the gateway runs in stateless mode and
+        ``/key/generate`` 500s with ``{"error": "DB not connected"}``."""
+        assert "db" in compose["services"], (
+            "docker-compose.yml is missing the `db` service. Add a "
+            "postgres sidecar so /key/generate, virtual-key state, and "
+            "spend logs persist across restarts."
+        )
+
+    def test_db_is_postgres(self, compose: dict[str, Any]):
+        """Image must be an official-shape postgres tag."""
+        db_img = compose["services"]["db"]["image"]
+        assert "postgres" in db_img, f"db service image should be postgres, got {db_img!r}"
+
+    def test_db_creds_env_wired_strictly(self, compose: dict[str, Any]):
+        """Postgres POSTGRES_PASSWORD must use the ``${VAR:?…}`` strict
+        form so compose refuses to start without LITELLM_DB_PASSWORD set
+        — otherwise we'd silently boot Postgres with an empty password."""
+        env = compose["services"]["db"]["environment"]
+        pwd = env["POSTGRES_PASSWORD"]
+        assert ":?" in pwd, (
+            f"POSTGRES_PASSWORD should use ${{LITELLM_DB_PASSWORD:?…}} strict form; got {pwd!r}"
+        )
+
+    def test_db_data_persists_via_named_volume(self, compose: dict[str, Any]):
+        """Postgres data must mount a named volume — otherwise virtual
+        keys + spend logs are lost on every ``docker compose down``."""
+        volumes = compose["services"]["db"].get("volumes", [])
+        assert any("/var/lib/postgresql/data" in v for v in volumes), (
+            f"db must mount a volume at /var/lib/postgresql/data; got volumes={volumes!r}"
+        )
+        # Confirm the volume is a top-level named volume, not a bind mount,
+        # so the data survives between compose runs and lives under the
+        # Docker volume store rather than spraying files into the user's
+        # working directory.
+        assert "volumes" in compose, "top-level `volumes:` block must declare the named volume"
+
+    def test_db_has_healthcheck(self, compose: dict[str, Any]):
+        """Without a db healthcheck, the gateway may start before
+        Postgres is ready and Prisma migrations fail with a connection
+        refused that's confusing to debug."""
+        assert "healthcheck" in compose["services"]["db"]
+
+    def test_gateway_depends_on_db_being_healthy(self, compose: dict[str, Any]):
+        """``depends_on: db: condition: service_healthy`` is the
+        difference between 'compose up succeeds eventually' and 'compose
+        up succeeds, then Prisma can't reach Postgres on the first
+        request because the gateway raced past it'."""
+        depends = compose["services"]["litellm"].get("depends_on", {})
+        # Accept the long-form mapping (which is what we ship) — the
+        # short-form list ``["db"]`` doesn't wait for healthy.
+        assert isinstance(depends, dict), (
+            "litellm.depends_on must be the long-form mapping so it can "
+            "carry `condition: service_healthy`, got "
+            f"{type(depends).__name__}"
+        )
+        assert depends.get("db", {}).get("condition") == "service_healthy", (
+            f"litellm should depend_on db with condition: service_healthy; got {depends!r}"
+        )
+
+    def test_gateway_database_url_env_present(self, compose: dict[str, Any]):
+        """The gateway must be told where to reach Postgres. The URL
+        must use the in-network hostname (``db``), not localhost — and
+        must pull the password from LITELLM_DB_PASSWORD with strict
+        env-var form."""
+        env = compose["services"]["litellm"]["environment"]
+        url = env.get("DATABASE_URL", "")
+        assert "@db:" in url, f"DATABASE_URL must use in-network host `db`, got {url!r}"
+        assert "LITELLM_DB_PASSWORD" in url, "DATABASE_URL must reference LITELLM_DB_PASSWORD"
+        assert ":?" in url, (
+            "DATABASE_URL should use the ${LITELLM_DB_PASSWORD:?…} strict "
+            f"form so compose refuses to start without it, got {url!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # helm-values.yaml — OKE wiring
 # ---------------------------------------------------------------------------
 

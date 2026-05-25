@@ -1,9 +1,11 @@
-# Sample local-dev LiteLLM AI Gateway in front of OCI Generative AI.
+# Sample local-dev LiteLLM AI Gateway in front of OCI Generative AI,
+# with a Postgres sidecar so virtual keys, budgets, and spend logs
+# persist across restarts (required for /key/generate, /key/info,
+# per-key budget enforcement, and the admin spend dashboards).
 #
 # Stand up with:
 #
-#   # 1. Set the OCI credentials the *gateway* will use to sign upstream calls.
-#   # These do NOT leak to your Locus app — only the gateway sees them.
+#   # 1. OCI credentials the gateway will sign upstream calls with.
 #   export OCI_REGION="us-chicago-1"
 #   export OCI_USER="ocid1.user.oc1..xxx"
 #   export OCI_FINGERPRINT="aa:bb:cc:..."
@@ -11,18 +13,27 @@
 #   export OCI_KEY_FILE="$HOME/.oci/keys/your_api_key.pem"
 #   export OCI_COMPARTMENT_ID="ocid1.compartment.oc1..xxx"
 #
-#   # 2. Pick any string as the local master key. The gateway issues
-#   # per-team virtual keys via /key/generate using this as the admin token.
-#   export LITELLM_MASTER_KEY="$LITELLM_VIRTUAL_KEY"
+#   # 2. Admin token for /key/generate. Treat as a high-value secret.
+#   export LITELLM_MASTER_KEY="sk-master-$(openssl rand -hex 32)"
 #
-#   # 3. Start the gateway.
-#   docker compose up
+#   # 3. Postgres password. Change it for any non-throwaway deployment.
+#   export LITELLM_DB_PASSWORD="$(openssl rand -hex 16)"
 #
-#   # 4. Point Locus at it (in a second shell):
+#   # 4. Start gateway + db together.
+#   docker compose up -d
+#
+#   # 5. Issue a per-team virtual key from outside:
+#   curl http://localhost:4000/key/generate \
+#     -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+#     -H "Content-Type: application/json" \
+#     -d '{"models":["oci-cohere-command"],"max_budget":5.00,"duration":"24h",
+#          "metadata":{"team":"platform-demo"}}'
+#
+#   # 6. Point Locus at the gateway with the virtual key from (5):
 #   #   from locus.models.native.openai import OpenAIModel
 #   #   model = OpenAIModel(
 #   #       model="oci-cohere-command",
-#   #       api_key="$LITELLM_VIRTUAL_KEY",
+#   #       api_key="<virtual-key-from-step-5>",
 #   #       base_url="http://localhost:4000",
 #   #   )
 
@@ -32,21 +43,25 @@ services:
     container_name: locus-litellm-gateway
     ports:
     - 4000:4000
+    depends_on:
+      db:
+        condition: service_healthy
     volumes:
-    # Mount the config alongside the OCI key the gateway will sign with.
     - ./config.yaml:/app/config.yaml:ro
     - ${OCI_KEY_FILE:-/dev/null}:/oci-keys/key.pem:ro
     environment:
-      # Surface env vars referenced by config.yaml's ``os.environ/...`` lookups.
+      # OCI credentials referenced by config.yaml via os.environ/<NAME>.
       OCI_REGION: ${OCI_REGION:?set OCI_REGION before running docker compose up}
       OCI_USER: ${OCI_USER:?set OCI_USER}
       OCI_FINGERPRINT: ${OCI_FINGERPRINT:?set OCI_FINGERPRINT}
       OCI_TENANCY: ${OCI_TENANCY:?set OCI_TENANCY}
       OCI_COMPARTMENT_ID: ${OCI_COMPARTMENT_ID:?set OCI_COMPARTMENT_ID}
-      # The container sees the key at the mounted path, not the host path.
       OCI_KEY_FILE: /oci-keys/key.pem
-      # Admin token. Used to call /key/generate from outside.
-      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-$LITELLM_VIRTUAL_KEY}
+      # Admin token for /key/generate. Treat as a high-value secret.
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY}
+      # Postgres URL — virtual-key state, spend logs, audit log.
+      DATABASE_URL: postgresql://litellm:${LITELLM_DB_PASSWORD:?set LITELLM_DB_PASSWORD}@db:5432/litellm
+      STORE_MODEL_IN_DB: 'True'
     command: [--config, /app/config.yaml, --port, '4000', --num_workers, '1']
     restart: unless-stopped
     healthcheck:
@@ -56,7 +71,27 @@ services:
       start_period: 20s
       retries: 3
 
-# For a production-shaped setup, add a Postgres service here and set
-# ``general_settings.database_url`` in config.yaml. Without it, virtual
-# keys and spend logs live in memory and disappear on restart — fine
-# for local dev, not for production.
+  # Postgres sidecar for virtual keys + spend logs. Local-dev only —
+  # production should point DATABASE_URL at an external Postgres / ADB
+  # so the gateway pod is stateless.
+  db:
+    # Official postgres image. If your Docker daemon can't reach Docker
+    # Hub directly (corporate proxy / TLS interception), use a registry
+    # mirror you trust, e.g. mirror.gcr.io/library/postgres:17-alpine.
+    image: postgres:17-alpine
+    container_name: locus-litellm-db
+    environment:
+      POSTGRES_DB: litellm
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: ${LITELLM_DB_PASSWORD:?set LITELLM_DB_PASSWORD}
+    volumes:
+    - litellm-db-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U litellm -d litellm]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  litellm-db-data:
