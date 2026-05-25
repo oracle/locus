@@ -385,6 +385,12 @@ async def test_v1_transport_tool_call():
 # on ``OCI_RESPONSES_PROFILE`` so a tenancy missing Responses entitlement
 # doesn't fail this test — OCI returns a 404 "Authorization failed or
 # requested resource not found" rather than a clear 403.
+#
+# Validated live on 2026-05-25 against the Oracle Free Tier
+# (us-chicago-1) with ``openai.gpt-5-mini`` — basic chat, tool calling,
+# and ``store=False`` ZDR mode all passed. Three other tenancies probed
+# (LUIGI_FRA_API, ANUP_API_KEY, BOAT-OC1) returned 404 on the Responses
+# endpoint, confirming entitlement is tenancy-scoped, not region-scoped.
 _RESPONSES_PROFILE = os.environ.get("OCI_RESPONSES_PROFILE")
 _responses_skip = pytest.mark.skipif(
     not _RESPONSES_PROFILE,

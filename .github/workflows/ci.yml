@@ -26,6 +26,13 @@ jobs:
     name: Pre-commit
     uses: ./.github/workflows/_precommit.yml
 
+  # Note: live OCI integration tests for the LiteLLMModel provider live
+  # in .github/workflows/_litellm_integration.yml as a separately
+  # invocable reusable workflow. They are intentionally NOT wired into
+  # this top-level CI on every PR — they run against real OCI tenancies
+  # and consume tokens. Trigger them on demand via workflow_dispatch on
+  # the standalone workflow, or call it from a separate scheduled CI.
+
   # Verify commits are signed off (OCA / DCO compliance). Inline bash
   # check — replaces ``tisonkun/actions-dco`` which was deprecated by
   # GitHub for using Node 16 (caused startup_failure on every CI run).

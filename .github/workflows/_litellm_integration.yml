@@ -1,0 +1,130 @@
+name: litellm-integration
+
+# Runs the live OCI Generative AI Infrastructure integration tests for the
+# native ``LiteLLMModel`` provider. Every test in
+# ``tests/integration/test_litellm_oci_integration.py`` is auto-skipped when
+# its credential set is incomplete, so this workflow is safe to run even on
+# a fork that has none of the secrets configured — it just becomes a no-op.
+#
+# Two layers of gating:
+#
+#   1. The job-level ``if`` (below) skips the entire job when no
+#      OCI_INTEGRATION_REGION secret exists. Saves the runner cost on
+#      forks and on PRs that don't touch the provider.
+#
+#   2. The pytest module's own ``pytest.mark.skipif`` (in
+#      tests/integration/test_litellm_oci_integration.py) auto-skips
+#      individual tests when their specific env vars are missing — so the
+#      job still passes when only the OCI native creds are present but the
+#      ``oci_openai_v1`` / ``oci_responses`` profiles aren't.
+#
+# Required GitHub secrets (configure in repo settings) — all optional;
+# absence triggers the job-level skip:
+#
+#   OCI_INTEGRATION_REGION         e.g. "us-chicago-1"
+#   OCI_INTEGRATION_USER           ocid1.user.oc1..xxx
+#   OCI_INTEGRATION_FINGERPRINT    aa:bb:cc:...
+#   OCI_INTEGRATION_TENANCY        ocid1.tenancy.oc1..xxx
+#   OCI_INTEGRATION_COMPARTMENT_ID ocid1.compartment.oc1..xxx
+#   OCI_INTEGRATION_KEY            the contents of the PEM (base64-encoded
+#                                  to survive newlines in the secret)
+#
+# Optional — enable the V1 shim and Responses-API integration tests:
+#
+#   OCI_INTEGRATION_PROFILE        a [profile] name; if set, the V1 tests run
+#   OCI_RESPONSES_PROFILE          set on a tenancy entitled for the
+#                                  Responses API; if absent the Responses
+#                                  tests skip individually rather than fail
+#   OCI_CONFIG                     contents of ~/.oci/config (used with
+#                                  OCI_INTEGRATION_PROFILE / OCI_RESPONSES_PROFILE)
+#   OCI_INTEGRATION_KEY_FILE_PEM   PEM file referenced by the profile
+
+on:
+  # Reusable callable from another workflow if anyone wants to wire it
+  # into a scheduled / on-demand parent job later.
+  workflow_call:
+  # Manually triggerable from the Actions tab. Use this to validate a
+  # new tenancy entitlement, new model id, or a LiteLLM release before
+  # merging a dependency bump.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  litellm-oci-integration:
+    name: "LiteLLM × OCI integration"
+    runs-on: ubuntu-latest
+    # Skip the whole job on forks / PRs / branches that don't have the
+    # required secret configured. Avoids runner minutes on unrelated PRs.
+    if: ${{ vars.LITELLM_INTEGRATION_ENABLED == 'true' || secrets.OCI_INTEGRATION_USER != '' }}
+    timeout-minutes: 20
+    steps:
+      # actions/checkout@v6.0.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      # actions/setup-python@v6.2.0
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install locus + LiteLLM + oci SDK
+        run: |
+          python -m pip install --upgrade pip
+          # Install locus with every extra so the integration suite has the
+          # full provider surface available.
+          pip install -e ".[dev,sdk]"
+          # litellm itself is a lazy import inside LiteLLMModel — install it
+          # explicitly here so the live tests can actually call out.
+          pip install "litellm[proxy]" oci
+
+      # Materialise OCI credentials. The key arrives base64-encoded
+      # (newlines in PEMs survive that round-trip safely); we decode it
+      # into a real PEM file and point OCI_KEY_FILE at it.
+      - name: Materialise OCI credentials
+        env:
+          OCI_KEY_B64: ${{ secrets.OCI_INTEGRATION_KEY }}
+        run: |
+          mkdir -p "$HOME/.oci/keys"
+          umask 077
+          echo "$OCI_KEY_B64" | base64 -d > "$HOME/.oci/keys/integration_key.pem"
+          chmod 600 "$HOME/.oci/keys/integration_key.pem"
+          ls -l "$HOME/.oci/keys/integration_key.pem"
+
+      # Optional: materialise an ~/.oci/config for the V1 shim + Responses
+      # tests. Only runs if the OCI_CONFIG secret is present — the
+      # individual tests skip when their *_PROFILE env vars aren't set.
+      - name: Materialise OCI config file (V1 + Responses)
+        if: ${{ secrets.OCI_CONFIG != '' }}
+        env:
+          OCI_CONFIG_B64: ${{ secrets.OCI_CONFIG }}
+          OCI_KEY_PEM_B64: ${{ secrets.OCI_INTEGRATION_KEY_FILE_PEM }}
+        run: |
+          mkdir -p "$HOME/.oci"
+          umask 077
+          echo "$OCI_CONFIG_B64" | base64 -d > "$HOME/.oci/config"
+          if [ -n "$OCI_KEY_PEM_B64" ]; then
+            echo "$OCI_KEY_PEM_B64" | base64 -d > "$HOME/.oci/keys/profile_key.pem"
+            chmod 600 "$HOME/.oci/keys/profile_key.pem"
+          fi
+          chmod 600 "$HOME/.oci/config"
+
+      - name: Run LiteLLM × OCI integration tests
+        env:
+          # OCI native transport (always set when the job runs at all).
+          OCI_REGION:         ${{ secrets.OCI_INTEGRATION_REGION }}
+          OCI_USER:           ${{ secrets.OCI_INTEGRATION_USER }}
+          OCI_FINGERPRINT:    ${{ secrets.OCI_INTEGRATION_FINGERPRINT }}
+          OCI_TENANCY:        ${{ secrets.OCI_INTEGRATION_TENANCY }}
+          OCI_KEY_FILE:       /home/runner/.oci/keys/integration_key.pem
+          OCI_COMPARTMENT_ID: ${{ secrets.OCI_INTEGRATION_COMPARTMENT_ID }}
+          # V1 shim + Responses tests — auto-skip when the corresponding
+          # *_PROFILE env var is empty.
+          OCI_INTEGRATION_PROFILE: ${{ secrets.OCI_INTEGRATION_PROFILE }}
+          OCI_RESPONSES_PROFILE:   ${{ secrets.OCI_RESPONSES_PROFILE }}
+        run: |
+          pytest tests/integration/test_litellm_oci_integration.py -v \
+            --tb=short \
+            --maxfail=3
