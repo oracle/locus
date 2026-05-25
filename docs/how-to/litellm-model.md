@@ -14,7 +14,7 @@ Locus model providers.
 |---|---|---|
 | `oci_native` *(default)* | `POST /20231130/actions/chat` | `litellm.acompletion(model="oci/…")` with LiteLLM's vendor adapters (Cohere v1 transport, GENERIC apiFormat for Grok/Llama/Gemini/gpt-5) |
 | `oci_openai_v1` | `POST /openai/v1/chat/completions` | delegates to [`OCIChatCompletionsModel`](oci-models.md#v1-transport-ocichatcompletionsmodel) |
-| `oci_responses` | `POST /openai/v1/responses` | delegates to [`OCIResponsesModel`](oci-models.md#responses-transport-ociresponsesmodel) (server-stateful, supports `previous_response_id`) |
+| `oci_responses` | `POST /openai/v1/responses` | delegates to [`OCIResponsesModel`](oci-models.md#responses-transport-ociresponsesmodel-opt-in) (server-stateful, supports `previous_response_id`) |
 | *(any LiteLLM provider)* | provider-specific | `litellm.acompletion(model="<provider>/<model>")` — OpenAI direct, Anthropic, Bedrock, Vertex, Cohere SaaS, Mistral, Groq, … |
 
 All three OCI transports converge on the **same Locus interface**
