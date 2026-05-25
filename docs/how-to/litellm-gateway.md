@@ -298,6 +298,101 @@ Highlights:
   OTel, Datadog, …).
 - **`litellm_settings.cache`** — Redis / S3 / Qdrant caching config.
 
+## How enterprises use this pattern
+
+The LiteLLM AI Gateway pattern shows up repeatedly inside large
+organisations adopting LLMs across many teams. The recurring shape is
+*one gateway per environment, owned by a platform team, fronting every
+provider, accessed by every service*. What it earns them:
+
+### 1. Charge-back and showback to business units
+
+A single platform team runs the gateway; dozens of business units
+consume it. Every request is logged with a virtual key, a team tag in
+`metadata`, and an attributed USD cost. Finance pulls a SQL report
+each month and chargebacks roll up cleanly — no per-team integration,
+no manual reconciliation, no vendor invoice juggling.
+
+### 2. Compliance, audit, and data-residency controls
+
+Regulated industries (financial services, healthcare, public sector)
+need every prompt, every response, every tool call, every streamed
+chunk persisted for audit. The gateway's spend-log surface is
+ISO-27001 / SOC-2 / PCI-friendly out of the box — append-only,
+Postgres-backed, queryable. Pair it with guardrails (Lakera /
+Presidio) for PII redaction *before* prompts ever leave the
+tenancy, and the gateway becomes the single chokepoint for data-
+governance review.
+
+### 3. Centralised governance — one place to enforce policy
+
+Security and IT govern which providers, which models, which regions
+are approved. Engineering teams consume the catalog through virtual
+keys with model allowlists; they *cannot* bypass the gateway to call
+an unapproved model. When a new provider is approved, one
+`config.yaml` change turns it on for every team. When a model is
+retired, the same surface flips it off.
+
+### 4. Vendor diversification and continuity
+
+Single-vendor lock-in is a real risk for any tier-1 workload. The
+gateway's fallback chains express *"OCI Cohere first; on rate-limit
+or 5xx fail over to OpenAI direct; on outage fail over to AWS
+Bedrock"* declaratively. Application code stays a single
+`OpenAIModel(base_url=...)` call.
+
+### 5. Quota arbitration across teams
+
+Vendor contracts come with shared rate limits. Without a gateway,
+the loudest team monopolises the quota. With it, the platform team
+sets per-key `rpm_limit` / `tpm_limit` / `max_budget` and arbitrates
+the shared pool — fair-share, per-team SLOs, no surprise throttling
+of the team that planned ahead.
+
+### 6. Observability into the agent layer
+
+Enterprise platform teams already have Datadog / OpenTelemetry /
+Splunk for everything else. The gateway plugs LLM traffic into the
+same pipes — `success_callback` / `failure_callback` push request
+spans into the existing observability stack with shared trace IDs.
+The on-call team sees LLM latency, error rate, and cost on the
+same dashboard as everything else.
+
+### 7. Cost optimisation that compounds
+
+Once spend is centralised: cache identical prompts (Redis / S3 /
+Qdrant), route cheap requests to cheap models via a router policy,
+identify the top-10 most expensive prompts and rewrite them. None
+of this is possible when each team holds its own provider keys —
+because no one sees the aggregate. The gateway makes the aggregate
+visible.
+
+### 8. Developer ergonomics across many languages
+
+Python Locus agents, JS workbench UIs, Go / Ruby / Java micro-services
+all need LLM access. With the gateway, every one of them talks the
+same OpenAI-shaped HTTP — no per-language SDK to maintain. New
+provider rollout is a config change, not a code change in every
+service.
+
+### Concrete deployment shape
+
+A typical enterprise rollout looks like:
+
+| Layer | Owner | Lives in |
+|---|---|---|
+| **OCI tenancy + IAM + signing keys** | Cloud / security team | OCI Vault, OKE Workload Identity |
+| **Gateway pod + Postgres + Redis + observability backends** | Platform / SRE team | Kubernetes (OKE), one deployment per env (dev / staging / prod) |
+| **Gateway `config.yaml` — model catalog, fallbacks, callbacks, guardrails** | Platform team | GitOps repo, change-controlled |
+| **Virtual keys + per-team budgets** | Platform team issues; security reviews | Postgres (spend logs); admin UI for issuance |
+| **Locus agents / workbench / other consumers** | Application teams | Their own services, talking to `litellm-gateway.<env>.svc.cluster.local:4000` with their team's virtual key |
+| **Spend reports + audit + alerts** | Finance + security | SQL on the gateway's Postgres; observability dashboards |
+
+The gateway becomes the choke-point that **lets the platform team set
+policy once and the application teams consume it through a single
+contract** — without anyone having to write provider-specific
+integration code or hold provider credentials.
+
 ## See also
 
 - [`docs/how-to/oci-models.md`](oci-models.md) — direct OCI providers
