@@ -8,6 +8,93 @@ policy.
 
 ## [Unreleased]
 
+### Added — LiteLLM AI Gateway integration (PR #268)
+
+Locus is now documented + sampled + tested as a first-class consumer
+of the [LiteLLM AI Gateway](https://litellm.ai) (a.k.a. LiteLLM Proxy
+Server) in front of Oracle Generative AI Infrastructure. The gateway
+pattern is the recommended path for multi-tenant / cross-provider /
+centralised-observability deployments; the existing direct OCI
+providers (`OCIChatCompletionsModel`, `OCIResponsesModel`, `OCIModel`)
+remain the recommended path for single-tenant, dev, and on-OKE
+workload-identity cases.
+
+**No new Locus Python code**, no new dependency added to
+`pyproject.toml`. Locus's existing `OpenAIModel(base_url=...)` is the
+LiteLLM-compatible client by design; the integration is one
+`config.yaml` telling the gateway how to reach OCI.
+
+Live-verified end-to-end against real OCI in `us-chicago-1`:
+
+- 7/7 live integration tests pass (chat, multi-turn + system,
+  streaming, tool calling, full Agent loop, `/v1/models` lookup,
+  unauthenticated-call rejection).
+- 7/7 cost-tracking deployment-validation tests pass — `/spend/logs`
+  grows after a completion, per-row token counts + non-zero USD
+  cost, `/global/spend/keys` and `/global/spend/models` aggregation,
+  schema-fields invariant, `max_budget=1e-9 USD` triggers `429`,
+  allowlist refusals are visible at request time.
+- 29/29 unit tests over the shipped sample
+  (`config.yaml` / `docker-compose.yml` / `helm-values.yaml`) —
+  alias-set parity scraped from the how-to so docs and config can't
+  drift, strict env-var wiring on every entry, fallback chains
+  reference declared aliases, Postgres `depends_on:
+  service_healthy`, helm Service is ClusterIP-only, pod hardened.
+- Fallback chain validated live: a broken-on-purpose primary
+  (`oci/xai.grok-NONEXISTENT-9999`) with fallback
+  `oci-cohere-command` served the eventual response as
+  `cohere.command-latest`, content "Rome." — proving the upstream
+  failure was masked and the agent never saw the 5xx.
+
+What ships:
+
+- `docs/how-to/litellm-gateway.md` — deployment guide. Sections:
+  when to choose the gateway vs. the direct OCI providers; explicit
+  "Scope" admonition (the gateway covers `/20231130/actions/chat`
+  only — direct providers handle OCI's V1 shim and Responses API);
+  local Docker + OKE quickstarts; **issuing per-team virtual keys**;
+  **cost tracking** with `/spend/logs` / `/global/spend/keys` /
+  `/global/spend/models`; auth-boundary table; "How enterprises use
+  this pattern" with the deployment-shape table.
+- `docs/img/litellm-gateway-architecture.svg` — three-tier SVG
+  (Locus → Gateway → OCI) embedded in the how-to + notebook md.
+- `examples/litellm-gateway/` — working sample. `config.yaml` with
+  six OCI aliases wired to the canonical `OCI_*` env vars,
+  `drop_params: true`, fallback chains, master-key from env;
+  `docker-compose.yml` with the gateway + Postgres-17 sidecar
+  (`depends_on: condition: service_healthy`), both images
+  overridable via `LITELLM_IMAGE` / `LITELLM_DB_IMAGE` for networks
+  that can't reach ghcr.io / Docker Hub directly; `helm-values.yaml`
+  for the official `litellm-helm` chart (ClusterIP-only Service,
+  envFrom Kubernetes Secrets, OKE Workload Identity placeholder,
+  pod hardening); `README.md` side-by-side local + OKE quickstarts.
+- `examples/notebook_71_litellm_gateway.py` — runnable gateway
+  companion. Health-checks the gateway, builds an `Agent` around
+  `OpenAIModel(base_url=...)`, runs blocking + streaming prompts.
+  Self-skips with a wiring banner when `LITELLM_GATEWAY_URL` /
+  `LITELLM_GATEWAY_KEY` aren't set.
+- `examples/notebook_72_litellm_gateway_cost.py` — runnable
+  per-team cost-tracking demo. Issues virtual keys for two pretend
+  teams, drives different traffic, walks `/spend/logs`,
+  `/global/spend/keys`, `/global/spend/models` with real numbers.
+- `docs/how-to/oci-models.md` — admonition cross-linking the
+  gateway page for multi-tenant cases.
+- `mkdocs.yml` — Guides + Notebooks nav entries.
+
+The four gateway capabilities the deployment *supports* but that
+this PR does **not** live-verify (Langfuse observability, Redis
+cache passthrough, Lakera/Presidio guardrails, OKE `helm install`
+end-to-end) are tracked as follow-up PRs in [#269](https://github.com/oracle-samples/locus/issues/269)
+— one PR per capability, each with its own live demo + integration
+test.
+
+This PR supersedes the closed PR #266 (in-process `LiteLLMModel`
+wrapper) and closes issue #267 (notebook migration via
+`LOCUS_MODEL_PROVIDER=litellm`) — both rejected in favour of the
+gateway pattern because that's how LiteLLM is designed to be
+consumed and avoids re-implementing a subset of the proxy's surface
+inside Locus.
+
 ## [0.2.0b21] - 2026-05-23
 
 Four PRs of fixes accumulated since b20. No new public APIs; this
