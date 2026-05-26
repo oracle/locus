@@ -415,7 +415,9 @@ class A2AV1ServerMixin:
                 }
             )
         )
-        return {"task": legacy_task_to_v1(task)}
+        # v1 GetTask returns the Task directly; SendMessage stays wrapped
+        # because its response type is a oneof SendMessageResponse.
+        return legacy_task_to_v1(task)
 
     async def _handle_v1_list_tasks(self, params: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -473,7 +475,8 @@ class A2AV1ServerMixin:
         task = Task.model_validate(
             await self._v1_host()._handle_tasks_cancel({"id": q.id, "metadata": q.metadata})
         )
-        return {"task": legacy_task_to_v1(task)}
+        # v1 CancelTask returns the Task directly, matching GetTask.
+        return legacy_task_to_v1(task)
 
     async def _stream_v1_task_subscription(
         self, params: dict[str, Any]

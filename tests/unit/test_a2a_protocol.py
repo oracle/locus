@@ -858,13 +858,17 @@ class TestA2AV1ProtocolAdapters:
         assert host.sent_params is not None
         assert host.sent_params["message"]["role"] == "user"
         assert host.sent_params["configuration"]["historyLength"] == 2
-        assert got["task"]["id"] == task.id
+        # GetTask / CancelTask return the Task directly. SendMessage stays
+        # wrapped because its response shape is a oneof {task | message}.
+        assert got["id"] == task.id
+        assert "task" not in got
         assert host.get_params == {
             "id": task.id,
             "historyLength": 1,
             "metadata": {"get": True},
         }
-        assert canceled["task"]["id"] == task.id
+        assert canceled["id"] == task.id
+        assert "task" not in canceled
         assert host.cancel_params == {"id": task.id, "metadata": {"cancel": True}}
         assert "task" in streamed[0]
         assert "statusUpdate" in streamed[1]
