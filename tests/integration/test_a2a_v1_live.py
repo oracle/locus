@@ -568,7 +568,7 @@ def real_model_server() -> Iterator[tuple[str, str]]:
         max_iterations=2,
     )
 
-    api_key = "v1-real-model-secret"
+    api_key = "real-model-test-fixture"  # gitleaks:allow — loopback test fixture
     port = _free_port()
     server = A2AServer(
         agent=agent,
