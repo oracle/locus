@@ -12,12 +12,16 @@ Wire surface served by :class:`A2AServer`:
 
 - ``GET  /.well-known/agent-card.json`` — public Agent Card (spec §5.5)
 - ``POST /``                            — JSON-RPC 2.0 method dispatch
-  (``message/send``, ``message/stream``, ``tasks/get``,
-  ``tasks/cancel``)
+  for A2A v1.0 methods (``SendMessage``, ``SendStreamingMessage``,
+  ``GetTask``, ``ListTasks``, ``CancelTask``, ``SubscribeToTask``)
+  and compatibility methods (``message/send``, ``message/stream``,
+  ``tasks/get``, ``tasks/cancel``)
 - Backwards-compat: ``GET /agent-card``, ``POST /a2a/{invoke,stream}``
 
 Re-exports the spec models so consumers can do ``from locus.a2a import
-AgentCard, AgentSkill, Message, TextPart, Task`` directly.
+AgentCard, AgentSkill, Message, TextPart, Task`` directly. The
+``A2AV1*`` types are the canonical A2A v1.0 wire models and are stable
+public API for cross-framework interoperability.
 """
 
 from locus.a2a.protocol import (

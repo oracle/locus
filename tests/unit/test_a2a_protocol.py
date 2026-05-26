@@ -928,6 +928,28 @@ class TestA2AV1ProtocolAdapters:
         assert all_tasks["nextPageToken"] == ""
 
     @pytest.mark.asyncio
+    async def test_v1_list_tasks_compares_timestamp_offsets_by_instant(self) -> None:
+        same_instant = _legacy_task(
+            "same-instant",
+            timestamp="2026-05-25T15:00:00+02:00",
+        )
+        later = _legacy_task(
+            "later",
+            timestamp="2026-05-25T13:30:00Z",
+        )
+        earliest = _legacy_task(
+            "earliest",
+            timestamp="2026-05-25T14:00:00+02:00",
+        )
+        host = _V1Host([same_instant, later, earliest])
+
+        response = await host._handle_v1_list_tasks(
+            {"status_timestamp_after": "2026-05-25T13:00:00+00:00"}
+        )
+
+        assert [task["id"] for task in response["tasks"]] == ["later"]
+
+    @pytest.mark.asyncio
     async def test_v1_list_tasks_rejects_invalid_params_and_page_token(self) -> None:
         host = _V1Host()
 

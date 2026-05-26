@@ -796,6 +796,8 @@ class A2AServer(A2AV1ServerMixin):
                         VERSION_NOT_SUPPORTED,
                         f"A2A version {a2a_version!r} is not supported",
                     )
+                # Some v1 clients omit the version header; route known v1
+                # method names to the v1 handlers to preserve interoperability.
                 use_v1 = a2a_version == A2A_V1_PROTOCOL_VERSION or (
                     a2a_version is None and req.method in A2AV1_JSONRPC_METHODS
                 )

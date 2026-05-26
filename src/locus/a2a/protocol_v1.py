@@ -16,6 +16,7 @@ construction, auth, legacy routes, and shared client/server plumbing.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from typing import Any, Protocol, cast
 
 from locus.a2a.spec import (
@@ -83,6 +84,16 @@ class A2AV1ProtocolError(Exception):
         super().__init__(message)
         self.code = code
         self.message = message
+
+
+def _parse_iso_timestamp(value: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as e:
+        raise A2AV1ProtocolError(INVALID_PARAMS, f"invalid timestamp: {value!r}") from e
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 class _TaskStoreProtocol(Protocol):
@@ -419,11 +430,17 @@ class A2AV1ServerMixin:
             desired = _v1_state_to_legacy(q.status)
             tasks = [task for task in tasks if task.status.state == desired]
         if q.statusTimestampAfter is not None:
-            tasks = [task for task in tasks if task.status.timestamp > q.statusTimestampAfter]
+            threshold = _parse_iso_timestamp(q.statusTimestampAfter)
+            tasks = [
+                task for task in tasks if _parse_iso_timestamp(task.status.timestamp) > threshold
+            ]
 
-        tasks.sort(key=lambda task: task.status.timestamp, reverse=True)
+        tasks.sort(key=lambda task: _parse_iso_timestamp(task.status.timestamp), reverse=True)
         total_size = len(tasks)
         try:
+            # MVP pagination keeps pageToken as a stringified list offset; it
+            # is intentionally not opaque so callers can resume deterministic
+            # snapshots without server-side cursor state.
             offset = int(q.pageToken or "0")
         except ValueError as e:
             raise A2AV1ProtocolError(INVALID_PARAMS, "invalid pageToken") from e
@@ -479,6 +496,10 @@ class A2AV1ServerMixin:
                 UNSUPPORTED_OPERATION,
                 "cannot subscribe to a task in a terminal state",
             )
+        # MVP behaviour: SubscribeToTask currently returns a one-shot task
+        # snapshot. Live progress events are available when the caller starts
+        # the run through SendStreamingMessage; subscribing to an already
+        # running in-memory task would need a per-task event bus.
         yield A2AV1StreamResponse(
             task=A2AV1Task.model_validate(legacy_task_to_v1(task))
         ).model_dump(exclude_none=True)
