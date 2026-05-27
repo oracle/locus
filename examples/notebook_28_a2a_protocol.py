@@ -6,17 +6,22 @@ Notebook 29: A2A — publishing a Locus Agent as a spec-compliant peer.
 
 A2A (Agent-to-Agent) is the public cross-framework protocol at
 https://a2aproject.github.io/A2A/. Locus implements the server and
-client sides; this notebook spins up a real Agent behind ``A2AServer``,
-drives every spec endpoint from ``A2AClient``, and inspects the typed
-task lifecycle.
+client sides on the A2A **v1.0** wire format; this notebook spins up a
+real Agent behind ``A2AServer``, drives every v1.0 method from
+``A2AClient``, and inspects the typed task lifecycle.
 
 - Agent Card published at ``/.well-known/agent-card.json`` carries
-  capabilities, typed ``AgentSkill`` entries, and provider metadata —
-  enough for any A2A client to discover and call the agent.
-- JSON-RPC 2.0 endpoints: ``message/send`` (synchronous round-trip),
-  ``tasks/get`` (poll by id), ``tasks/cancel`` (terminal-state errors
-  surface as the spec's ``TaskNotCancelable`` code), and
-  ``message/stream`` (SSE lifecycle events).
+  capabilities, typed ``AgentSkill`` entries, provider metadata,
+  ``protocolVersion``, and ``supportedInterfaces`` — enough for any
+  A2A client to discover and call the agent.
+- A2A v1.0 JSON-RPC methods over ``POST /`` with
+  ``A2A-Version: 1.0``: ``SendMessage`` (synchronous round-trip),
+  ``GetTask`` (poll by id), ``ListTasks`` (page by context / status),
+  ``CancelTask`` (terminal-state errors surface as the spec's
+  ``TaskNotCancelable`` code), and ``SendStreamingMessage`` (SSE
+  lifecycle events as v1.0 ``StreamResponse`` envelopes).
+- The Python surface (``Message``, ``TextPart``, ``Task``, ...) is
+  unchanged; the v1.0 conversion happens at the HTTP boundary.
 - ``A2AClient.invoke`` is the backwards-compatible flat shape for peers
   that haven't picked up the spec yet.
 - ``A2AClient.as_tool(...)`` wraps a remote agent as a Locus ``@tool``
@@ -134,20 +139,25 @@ async def main() -> None:
     # ---------------------------------------------------------------
     print("\n=== Part 2: Agent Card discovery ===\n")
     card = await client.get_agent_card()
-    print(f"  name:         {card.name}")
-    print(f"  description:  {card.description}")
-    print(f"  url:          {card.url}")
+    print(f"  name:             {card.name}")
+    print(f"  description:      {card.description}")
+    print(f"  url:              {card.url}")
+    print(f"  protocolVersion:  {card.protocolVersion}")
     print(
-        f"  capabilities: streaming={card.capabilities.streaming} "
+        f"  capabilities:     streaming={card.capabilities.streaming} "
         f"push={card.capabilities.pushNotifications}"
     )
+    for iface in card.supportedInterfaces or []:
+        print(f"  interface:        {iface.protocolBinding} v{iface.protocolVersion} @ {iface.url}")
     for skill in card.skills:
-        print(f"  skill:        {skill.id} — {skill.name} (tags={skill.tags})")
+        print(f"  skill:            {skill.id} — {skill.name} (tags={skill.tags})")
 
     # ---------------------------------------------------------------
-    # Part 3: message/send returns a typed Task
+    # Part 3: SendMessage (v1.0) returns a typed Task
     # ---------------------------------------------------------------
-    print("\n=== Part 3: message/send → Task ===\n")
+    # A2AClient defaults to protocol_version="1.0", so send_message
+    # dispatches the v1.0 SendMessage method with `A2A-Version: 1.0`.
+    print("\n=== Part 3: SendMessage (v1.0) → Task ===\n")
     task = await client.send_message(
         Message(
             role="user",
@@ -164,9 +174,9 @@ async def main() -> None:
         print(f"  reply artifact:    {text[:120]}")
 
     # ---------------------------------------------------------------
-    # Part 4: tasks/get — poll the task by id
+    # Part 4: GetTask (v1.0) — poll the task by id
     # ---------------------------------------------------------------
-    print("\n=== Part 4: tasks/get ===\n")
+    print("\n=== Part 4: GetTask (v1.0) ===\n")
     refetched = await client.get_task(task.id)
     print(
         f"  re-fetched task is in {refetched.status.state.value} state "
@@ -174,18 +184,31 @@ async def main() -> None:
     )
 
     # ---------------------------------------------------------------
-    # Part 5: tasks/cancel on a terminal task surfaces TaskNotCancelable
+    # Part 5: ListTasks (v1.0) — page tasks by context / status
     # ---------------------------------------------------------------
-    print("\n=== Part 5: tasks/cancel on a terminal task ===\n")
+    print("\n=== Part 5: ListTasks (v1.0) ===\n")
+    listed, next_page = await client.list_tasks(
+        context_id=task.contextId,
+        status=TaskState.completed,
+        page_size=10,
+    )
+    print(f"  context {task.contextId} → {len(listed)} task(s); next_page={next_page!r}")
+    for t in listed:
+        print(f"    - {t.id}  state={t.status.state.value}")
+
+    # ---------------------------------------------------------------
+    # Part 6: CancelTask (v1.0) on a terminal task surfaces TaskNotCancelable
+    # ---------------------------------------------------------------
+    print("\n=== Part 6: CancelTask (v1.0) on a terminal task ===\n")
     try:
         await client.cancel_task(task.id)
     except RuntimeError as e:
         print(f"  spec error surfaced: {e}")
 
     # ---------------------------------------------------------------
-    # Part 6: message/stream — SSE lifecycle events
+    # Part 7: SendStreamingMessage (v1.0) — SSE lifecycle events
     # ---------------------------------------------------------------
-    print("\n=== Part 6: message/stream ===\n")
+    print("\n=== Part 7: SendStreamingMessage (v1.0) ===\n")
     seen: list[str] = []
     async for event in client.send_message_streaming(
         Message(
@@ -209,16 +232,33 @@ async def main() -> None:
     print(f"  total events: {len(seen)}")
 
     # ---------------------------------------------------------------
-    # Part 7: backwards-compat flat invoke for non-spec peers
+    # Part 8: opt out of v1.0 — legacy JSON-RPC method names
     # ---------------------------------------------------------------
-    print("\n=== Part 7: legacy /a2a/invoke (backwards-compat) ===\n")
+    # Pass protocol_version=None to drop the A2A-Version header and use
+    # the legacy methods (message/send, tasks/get, ...). Useful only
+    # when talking to a pre-v1.0 peer; A2AServer still understands both.
+    print("\n=== Part 8: legacy protocol_version=None ===\n")
+    legacy = A2AClient(url=base_url, api_key=api_key, protocol_version=None)
+    legacy_task = await legacy.send_message(
+        Message(
+            role="user",
+            parts=[TextPart(text="One sentence: what is A2A?")],
+            messageId="m-3",
+        )
+    )
+    print(f"  legacy task.status.state: {legacy_task.status.state.value}")
+
+    # ---------------------------------------------------------------
+    # Part 9: backwards-compat flat invoke for non-spec peers
+    # ---------------------------------------------------------------
+    print("\n=== Part 9: legacy /a2a/invoke (backwards-compat) ===\n")
     text = await client.invoke("Give me a one-line summary of A2A.")
     print(f"  flat reply: {text[:120]}")
 
     # ---------------------------------------------------------------
-    # Part 8: wrap a remote agent as a local @tool
+    # Part 10: wrap a remote agent as a local @tool
     # ---------------------------------------------------------------
-    print("\n=== Part 8: A2AClient.as_tool ===\n")
+    print("\n=== Part 10: A2AClient.as_tool ===\n")
     tool = client.as_tool(name="ask_research", description="ask the research agent")
     print(f"  tool.name = {tool.name}, tool.description = {tool.description}")
     # tool.fn calls asyncio.run() internally, so it can only be invoked
