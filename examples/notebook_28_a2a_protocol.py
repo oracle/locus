@@ -2,7 +2,7 @@
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
 """
-Notebook 29: A2A — publishing a Locus Agent as a spec-compliant peer.
+Notebook 28: A2A — publishing a Locus Agent as a spec-compliant peer.
 
 A2A (Agent-to-Agent) is the public cross-framework protocol at
 https://a2aproject.github.io/A2A/. Locus implements the server and
@@ -28,7 +28,7 @@ real Agent behind ``A2AServer``, drives every v1.0 method from
   so a local agent can delegate to it transparently.
 
 Run it:
-    .venv/bin/python examples/notebook_34_a2a_protocol.py
+    .venv/bin/python examples/notebook_28_a2a_protocol.py
 
 The default provider is OCI Generative AI. With ``~/.oci/config``
 present the agent talks to a live OCI model (canonical pick:
@@ -91,7 +91,7 @@ def _start_server(server: A2AServer, port: int) -> threading.Thread:
 
 async def main() -> None:
     print("=" * 60)
-    print("Notebook 29: A2A — Locus Agent as a spec-compliant peer")
+    print("Notebook 28: A2A — Locus Agent as a spec-compliant peer")
     print("=" * 60)
 
     # ---------------------------------------------------------------
