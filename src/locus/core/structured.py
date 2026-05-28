@@ -254,6 +254,110 @@ def _enforce_additional_properties_false(node: Any) -> None:
             _enforce_additional_properties_false(item)
 
 
+# OCI GenAI rejects a few JSON-Schema constructs that Pydantic emits by
+# default. The rejection surfaces as ``Unknown name '<key>' at '<path>'``
+# or ``Proto field is not repeating`` errors from the Gemini Proto
+# validator (Google models on OCI use a stricter Proto schema than
+# the direct Google API surface).
+#
+# Observed in the field (see issue #281):
+#
+#   - ``type: ["string", "null"]`` from ``Optional[str]`` — Gemini's
+#     Proto requires ``type`` to be a SINGLE string, not a list. The
+#     fix is to keep the first non-null entry.
+#   - ``type: "any"`` from ``Any`` annotations — Gemini doesn't know
+#     ``any``; remap to ``object``.
+#   - Metadata keys ``title``, ``const``, ``default: None``, and
+#     ``x-*`` namespaces — OCI rejects unknown metadata in tool
+#     parameter schemas.
+#
+# This helper mirrors ``langchain_oci.common.utils.OCIUtils.sanitize_schema``
+# (Oracle's own langchain-oci package), which is the validated reference
+# implementation used by every Oracle-hosted LangChain agent in
+# production. Apply unconditionally to tool parameter schemas before
+# sending them to the OCI Generative AI endpoint — the sanitization is
+# safe for non-Gemini OCI models too (the keys it strips are pure
+# metadata that the OCI tool API ignores).
+def sanitize_oci_tool_schema(schema: Any) -> Any:
+    """Recursively sanitize a JSON Schema for OCI GenAI tool compatibility.
+
+    Mirrors langchain-oci's ``OCIUtils.sanitize_schema``. Returns a new
+    structure; the input is not mutated.
+
+    Specifically:
+
+      - Strips ``title``, ``const``, ``default: None``, and any ``x-*``
+        metadata keys (OCI rejects them as unknown properties).
+      - Normalises ``type: ["string", "null"]`` (Pydantic's emission
+        for ``Optional[str]``) into the first non-null type — Gemini's
+        Proto validator requires ``type`` to be a single string.
+      - Normalises ``type: "any"`` (Pydantic's emission for ``Any``)
+        into ``"object"`` so the OCI tool API accepts it.
+      - Promotes a top-level ``const: "x"`` into ``enum: ["x"]`` —
+        OCI accepts enum but not const.
+      - Defaults missing ``items`` to ``{"type": "object"}`` when
+        ``type == "array"``.
+      - Recurses into ``properties`` / ``$defs`` / ``definitions`` as
+        dicts of independent sub-schemas (their *keys* are user-defined
+        field names, not metadata, so we don't strip the user's
+        ``title`` field if they happened to name one that way).
+
+    Why mirror an external package: this is the proven sanitization
+    pattern used in production by langchain-oci against the same OCI
+    GenAI endpoint Locus's OCI providers hit. Re-deriving it would
+    just create a parallel set of mistakes; copying it keeps the bug
+    surface narrow and the diff explanation clean.
+    """
+    if isinstance(schema, list):
+        return [sanitize_oci_tool_schema(item) for item in schema]
+
+    if not isinstance(schema, dict):
+        return schema
+
+    const_value = schema.get("const")
+    sanitized: dict[str, Any] = {}
+    for key, value in schema.items():
+        # Strip metadata keys OCI's tool API doesn't accept.
+        if key in ("title", "const"):
+            continue
+        if isinstance(key, str) and key.startswith("x-"):
+            continue
+        if key == "default" and value is None:
+            continue
+
+        # Normalise ``type``: Gemini's Proto requires a single string.
+        if key == "type":
+            if value == "any":
+                sanitized[key] = "object"
+                continue
+            if isinstance(value, list):
+                non_null = [item for item in value if item != "null"]
+                sanitized[key] = non_null[0] if non_null else "string"
+                continue
+
+        # ``properties``, ``$defs``, ``definitions``: dicts of named
+        # sub-schemas. Recurse into each VALUE as an independent
+        # schema, but DON'T apply the metadata-key skip to the keys
+        # themselves (those are user-defined field names — a user
+        # field literally called ``title`` must survive).
+        if key in ("properties", "$defs", "definitions") and isinstance(value, dict):
+            sanitized[key] = {name: sanitize_oci_tool_schema(sub) for name, sub in value.items()}
+            continue
+
+        sanitized[key] = sanitize_oci_tool_schema(value)
+
+    # Promote a string ``const`` into ``enum: [value]`` (OCI accepts
+    # enum, not const).
+    if isinstance(const_value, str):
+        sanitized["enum"] = [const_value]
+
+    # Arrays need an ``items`` schema; default to object when missing.
+    if sanitized.get("type") == "array" and "items" not in sanitized:
+        sanitized["items"] = {"type": "object"}
+
+    return sanitized
+
+
 def inline_schema_refs(schema: dict[str, Any]) -> dict[str, Any]:
     """Resolve all ``$ref`` pointers in a JSON schema by inlining the definitions.
 

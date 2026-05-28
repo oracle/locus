@@ -8,6 +8,60 @@ policy.
 
 ## [Unreleased]
 
+### Fixed — OCI Gemini tool-schema sanitisation (issue #281)
+
+`OCIChatCompletionsModel` (the V1 OpenAI-compat transport that serves
+every non-Cohere-R / non-DAC OCI model, including
+`google.gemini-*`) now sanitises each tool's
+`function.parameters` JSON Schema before sending it to OCI's
+`/openai/v1/chat/completions` endpoint.
+
+Previously, any tool with an `Optional[str]` / `Optional[int]` field
+— which Pydantic emits as `type: ["string", "null"]` — triggered a
+hard 400 from Gemini's Proto schema validator:
+
+> `Unknown name 'type' at 'tools[0].function_declarations[N].parameters
+> .properties[M].value...': Proto field is not repeating, cannot start
+> list.`
+
+Pre-fix the failure was complete: any deepagent or `model.complete()`
+call passing such a tool returned `BadRequestError` before the model
+got a turn. Post-fix the schema is normalised in-flight and the same
+call completes against Gemini 2.5 Flash.
+
+The new helper
+`locus.core.structured.sanitize_oci_tool_schema()` mirrors
+`langchain_oci.common.utils.OCIUtils.sanitize_schema` from Oracle's
+own langchain-oci package — the validated reference pattern used in
+production against this endpoint. It:
+
+- Collapses `type: ["string", "null"]` (Pydantic's `Optional` emission)
+  into the first non-null type — Gemini's Proto requires `type` to be
+  a single string.
+- Remaps `type: "any"` (Pydantic's `Any` emission) to `"object"`.
+- Strips metadata keys OCI rejects: `title`, `const`, `default: None`,
+  and any `x-*` namespace.
+- Promotes `const: "x"` to `enum: ["x"]` (OCI accepts enum, not const).
+- Defaults a missing `items` to `{"type": "object"}` when `type ==
+  "array"`.
+- Recurses safely through `properties` / `$defs` / `definitions` —
+  user-defined field names (e.g. a field literally called `title`)
+  survive even though schema-level `title` is stripped.
+
+The sanitisation is applied unconditionally on the OCI V1 path — the
+keys it strips are pure metadata that non-Gemini vendors ignore,
+matching langchain-oci's design. The earlier vendor-gated
+`response_format` strip (a speculative fix targeting a different OCI
+endpoint) has been removed; only the now-validated `$ref` inline for
+Gemini's `response_format` is preserved.
+
+Verified live against `oci:google.gemini-2.5-flash` in
+`us-chicago-1`: a tool with `Optional[str]`, `Optional[int]`, `Any`,
+and a nested array-of-objects (the exact deepest-nesting shape from
+the issue) clears the validator and the call completes. 12 new unit
+tests cover every bug shape + the wiring; 2 live integration tests
+prove the end-to-end fix against real Gemini.
+
 ## [0.2.0b22] - 2026-05-25
 
 One PR landed since b21, but it's a substantive one: Locus is now

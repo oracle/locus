@@ -374,23 +374,78 @@ class OCIChatCompletionsModel(OpenAIModel):
         model = (self.config.model or "").lower()
         return model.startswith("google.")
 
+    def _munge_response_format_for_gemini(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Inline ``$ref`` for Gemini's response_format schema.
+
+        Gemini's Proto validator rejects ``$ref`` and ``$defs`` in
+        ``response_format.json_schema.schema`` — Pydantic emits both
+        whenever a model contains a nested ``BaseModel``. ``inline_schema_refs``
+        walks the schema and substitutes definitions inline. Vendor-gated
+        because OpenAI handles ``$ref`` natively.
+        """
+        if "response_format" not in kwargs:
+            return kwargs
+        if not self._requires_inlined_schema_refs:
+            return kwargs
+        rf = kwargs["response_format"]
+        if not (isinstance(rf, dict) and rf.get("type") == "json_schema"):
+            return kwargs
+        from locus.core.structured import inline_schema_refs
+
+        schema = inline_schema_refs(rf["json_schema"].get("schema", {}))
+        rf = {**rf, "json_schema": {**rf["json_schema"], "schema": schema}}
+        return {**kwargs, "response_format": rf}
+
+    def _sanitize_tools_for_oci(
+        self, tools: list[dict[str, Any]] | None
+    ) -> list[dict[str, Any]] | None:
+        """Sanitize ``function.parameters`` on every tool before sending.
+
+        OCI GenAI's V1 (OpenAI-compat) endpoint forwards tool schemas
+        to vendor-specific validators. Gemini's Proto validator is the
+        strictest of those vendors — it rejects ``type: ["string", "null"]``
+        (Pydantic's emission for ``Optional[str]``), ``type: "any"``
+        (Pydantic's emission for ``Any``), metadata keys like ``title``,
+        ``const``, ``x-*``, and ``default: None``. The OCI tool API itself
+        also rejects these metadata keys for non-Gemini models, so the
+        sanitization is safe to apply unconditionally — matching the
+        pattern used by ``langchain-oci``'s ``OCIUtils.sanitize_schema``.
+
+        Mutation lands on ``tool["function"]["parameters"]``; tools
+        without a ``function`` block (or without ``parameters``) are
+        passed through untouched. The input list is not mutated; a new
+        list of new dicts is returned so callers can re-send the
+        originals to a non-OCI provider in the same process.
+        """
+        if not tools:
+            return tools
+        from locus.core.structured import sanitize_oci_tool_schema
+
+        out: list[dict[str, Any]] = []
+        for tool in tools:
+            fn = tool.get("function") if isinstance(tool, dict) else None
+            if not isinstance(fn, dict) or "parameters" not in fn:
+                out.append(tool)
+                continue
+            out.append(
+                {
+                    **tool,
+                    "function": {
+                        **fn,
+                        "parameters": sanitize_oci_tool_schema(fn["parameters"]),
+                    },
+                }
+            )
+        return out
+
     async def complete(
         self,
         messages: list[Message],
         tools: list[dict[str, Any]] | None = None,
         **kwargs: Any,
     ) -> ModelResponse:
-        if self._requires_inlined_schema_refs and "response_format" in kwargs:
-            from locus.core.structured import inline_schema_refs
-
-            rf = kwargs["response_format"]
-            if isinstance(rf, dict) and rf.get("type") == "json_schema":
-                schema = rf["json_schema"].get("schema", {})
-                rf = {
-                    **rf,
-                    "json_schema": {**rf["json_schema"], "schema": inline_schema_refs(schema)},
-                }
-                kwargs = {**kwargs, "response_format": rf}
+        kwargs = self._munge_response_format_for_gemini(kwargs)
+        tools = self._sanitize_tools_for_oci(tools)
         return await super().complete(messages, tools=tools, **kwargs)
 
     async def stream(
@@ -399,17 +454,8 @@ class OCIChatCompletionsModel(OpenAIModel):
         tools: list[dict[str, Any]] | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[ModelChunkEvent]:
-        if self._requires_inlined_schema_refs and "response_format" in kwargs:
-            from locus.core.structured import inline_schema_refs
-
-            rf = kwargs["response_format"]
-            if isinstance(rf, dict) and rf.get("type") == "json_schema":
-                schema = rf["json_schema"].get("schema", {})
-                rf = {
-                    **rf,
-                    "json_schema": {**rf["json_schema"], "schema": inline_schema_refs(schema)},
-                }
-                kwargs = {**kwargs, "response_format": rf}
+        kwargs = self._munge_response_format_for_gemini(kwargs)
+        tools = self._sanitize_tools_for_oci(tools)
         async for event in super().stream(messages, tools=tools, **kwargs):
             yield event
 
