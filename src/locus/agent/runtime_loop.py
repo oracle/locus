@@ -454,12 +454,89 @@ class AgentRuntimeMixin:
                             )
                             continue  # Re-enter loop for replanning
 
+                    # Empty-content safety net (fixes #280).
+                    #
+                    # The model can return zero tool_calls AND zero
+                    # ``content`` for several reasons that all look the
+                    # same to the runtime:
+                    #
+                    #   - Reasoning-only iteration (gpt-5.x / o-series /
+                    #     Gemini 2.5 thinking mode generate
+                    #     ``completion_tokens`` that land in a separate
+                    #     reasoning channel — ``message.content`` is
+                    #     None even though tokens were consumed).
+                    #   - The model decided "I'm done" without writing
+                    #     anything after a long context (observed on
+                    #     Gemini with > 50K-token system prompts).
+                    #   - The model returned an empty assistant message
+                    #     between tool calls and the runtime collapses
+                    #     to this branch on the trailing iteration.
+                    #
+                    # Without the safety net, ``TerminateEvent.final_message``
+                    # becomes None → ``AgentResult.message`` becomes ""
+                    # → callers see empty output despite real work done.
+                    # Mirror the MaxIterations summary-injection path:
+                    # force one no-tools completion to extract the
+                    # model's actual answer based on the conversation
+                    # so far. Costs ~one extra call only when the bug
+                    # shape would otherwise produce empty output.
+                    final_content = response.message.content
+                    if not final_content:
+                        state = state.with_message(
+                            Message.system(
+                                "[Final answer requested]\n"
+                                "Your previous turn produced no visible response. "
+                                "Provide your final answer to the user's question "
+                                "based on the conversation so far. Do NOT call any "
+                                "more tools — write the answer as plain text."
+                            )
+                        )
+                        messages = list(state.messages)
+                        if self._conversation_manager:
+                            if hasattr(self._conversation_manager, "async_apply"):
+                                messages = await self._conversation_manager.async_apply(messages)
+                            else:
+                                messages = self._conversation_manager.apply(messages)
+                        messages = self._validate_messages(messages)
+
+                        summary_model = self._auxiliary_model or self._model
+                        try:
+                            summary_resp = await summary_model.complete(
+                                messages=messages,
+                                tools=None,  # No tools — force text
+                                temperature=self.config.temperature,
+                                max_tokens=self.config.max_tokens,
+                            )
+                            s_prompt_toks = summary_resp.usage.get("prompt_tokens", 0)
+                            s_completion_toks = summary_resp.usage.get("completion_tokens", 0)
+                            s_cc_toks = summary_resp.usage.get("cache_creation_input_tokens", 0)
+                            s_cr_toks = summary_resp.usage.get("cache_read_input_tokens", 0)
+                            _total_tokens += s_prompt_toks + s_completion_toks
+                            state = state.with_token_usage(
+                                s_prompt_toks,
+                                s_completion_toks,
+                                cache_creation_tokens=s_cc_toks,
+                                cache_read_tokens=s_cr_toks,
+                            )
+                            final_content = (
+                                summary_resp.message.content
+                                or _last_assistant_content
+                                or self._build_fallback_summary(state)
+                            )
+                        except Exception:  # noqa: BLE001
+                            # Summary call failed — fall back to the
+                            # last assistant content we saw or a
+                            # deterministic stub. Better than empty.
+                            final_content = _last_assistant_content or self._build_fallback_summary(
+                                state
+                            )
+
                     yield TerminateEvent(
                         reason="complete",
                         iterations_used=state.iteration,
                         final_confidence=state.confidence,
                         total_tool_calls=len(state.tool_executions),
-                        final_message=response.message.content,
+                        final_message=final_content,
                     )
                     break
 
