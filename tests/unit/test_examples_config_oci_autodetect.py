@@ -288,3 +288,109 @@ class TestGetModelIntegration:
         captured = self._patch_oci_v1_model(monkeypatch)
         examples_config.get_model()
         assert captured["profile"] == "WORKBENCH_PICK"
+
+
+# --- Integration: all three OCI transports honour the resolver --------------
+#
+# The previous TestGetModelIntegration class only exercises the V1 path. The
+# resolver is documented as transport-agnostic (V1, SDK, Responses) — that's
+# the load-bearing claim, so it gets its own targeted tests.
+
+
+class TestAllThreeTransportsHonourResolver:
+    def test_v1_transport_gets_resolved_profile(self, isolated_home, monkeypatch):
+        """Cohere-free, non-DAC model id → V1 builder
+        (``OCIChatCompletionsModel``)."""
+        _write_oci_config(isolated_home, "[ONE]\nuser=u\n")
+        monkeypatch.setenv("LOCUS_MODEL_ID", "openai.gpt-5.5-2026-04-23")
+
+        captured: dict[str, object] = {}
+
+        class _StubV1:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+
+        import locus.models.providers.oci as oci_pkg
+
+        monkeypatch.setattr(oci_pkg, "OCIChatCompletionsModel", _StubV1, raising=True)
+
+        examples_config.get_model()
+        assert captured["profile"] == "ONE"
+
+    def test_sdk_transport_gets_resolved_profile(self, isolated_home, monkeypatch):
+        """Cohere R-series model id → SDK builder (``OCIModel``).
+
+        ``_pick_oci_transport`` routes ``cohere.command-r-*`` through
+        ``_get_oci_sdk_model``, which now also calls ``_resolve_oci_profile``
+        instead of hard-coding ``"DEFAULT"`` on the api-key path.
+        """
+        _write_oci_config(isolated_home, "[SDK_PROFILE]\nuser=u\n")
+        monkeypatch.setenv("LOCUS_MODEL_ID", "cohere.command-r-plus-08-2024")
+
+        captured: dict[str, object] = {}
+
+        class _StubSdk:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+
+        # ``_get_oci_sdk_model`` does ``from locus.models import OCIModel``
+        # so we patch at that import location.
+        import locus.models as locus_models
+
+        monkeypatch.setattr(locus_models, "OCIModel", _StubSdk, raising=True)
+
+        examples_config.get_model()
+        # SDK transport uses ``profile_name=`` (not ``profile=``) — confirm
+        # the resolved name reaches that exact kwarg.
+        assert captured["profile_name"] == "SDK_PROFILE"
+
+    def test_responses_transport_accepts_resolver_output(self, isolated_home):
+        """Responses transport contract check.
+
+        ``OCIResponsesModel`` is not auto-routed by the harness — it's an
+        opt-in via direct construction. But its ``profile=`` kwarg has the
+        same str-or-None contract as V1, so the resolver's output must be
+        a usable input to it.
+
+        We can't import OCIResponsesModel and construct it for real (it
+        would try to read the (fake) config and fail on missing keys), so
+        we assert the contract: the resolver returns a non-empty ``str``
+        that matches the type expected by all three transports'
+        ``__init__`` signatures (which we verified by inspection at
+        src/locus/models/providers/oci/responses.py:148).
+        """
+        _write_oci_config(isolated_home, "[RESP_PROFILE]\nuser=u\n")
+        result = examples_config._resolve_oci_profile()
+        assert isinstance(result, str)
+        assert result == "RESP_PROFILE"
+        # The Responses constructor's ``profile`` kwarg is ``str | None``;
+        # the resolver never returns None.
+        assert result is not None
+        assert len(result) > 0
+
+    def test_sdk_workload_identity_keeps_default_fallback(self, isolated_home, monkeypatch):
+        """When ``LOCUS_OCI_AUTH_TYPE=instance_principal``, the SDK builder
+        does NOT call the resolver — the profile_name field is unused at
+        signing time, so we keep the literal ``"DEFAULT"`` fallback. This
+        test pins that compatibility shim.
+        """
+        # No ~/.oci/config on disk — workload identity doesn't need one.
+        monkeypatch.setenv("LOCUS_OCI_AUTH_TYPE", "instance_principal")
+        monkeypatch.setenv("LOCUS_OCI_COMPARTMENT", "ocid1.compartment.oc1..test")
+        monkeypatch.setenv("LOCUS_MODEL_ID", "cohere.command-r-plus-08-2024")
+
+        captured: dict[str, object] = {}
+
+        class _StubSdk:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+
+        import locus.models as locus_models
+
+        monkeypatch.setattr(locus_models, "OCIModel", _StubSdk, raising=True)
+
+        examples_config.get_model()
+        # Resolver was not invoked — no file to parse and no env override,
+        # but the builder still produced a model with ``profile_name``
+        # populated by the workload-identity fallback path.
+        assert captured["profile_name"] == "DEFAULT"
