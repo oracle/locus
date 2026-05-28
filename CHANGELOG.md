@@ -8,6 +8,44 @@ policy.
 
 ## [Unreleased]
 
+## [0.2.0b23] - 2026-05-28
+
+Two fixes for the OCI Gemini code path on the V1 OpenAI-compat
+transport, found while running the deepagent flow against
+Gemini 2.5 Flash live. Plus one drive-by dep cap to unblock CI after
+upstream `starlette 1.2.0` broke the existing `httpx<1.0` pin.
+
+### Fixed — Empty-content safety net for terminal iterations (issue #280)
+
+When the model returns an iteration with **no tool calls** AND **no
+content**, the runtime loop's "no-tool-calls → complete" branch
+previously emitted `TerminateEvent(final_message=None)` →
+`AgentResult.message=""`. Operators saw empty output despite real
+work in earlier iterations.
+
+Three field-observed causes all produce the same shape:
+
+- Reasoning-only iterations on gpt-5.x / o-series / Gemini 2.5
+  thinking mode (tokens land in a separate reasoning channel;
+  `message.content` is None).
+- Long-context bail-outs (Gemini occasionally returns empty content
+  after > 50K-token system prompts).
+- Trailing empty assistant messages between tool calls that the
+  runtime collapses onto on the terminal iteration.
+
+The fix detects the empty content in the terminal branch and forces
+one no-tools completion with a system-injected "[Final answer
+requested]" prompt, mirroring the existing `MaxIterations`
+summary-injection path. Falls back to the last assistant content
+seen or a deterministic stub on summary failure. Costs at most one
+extra call, only on the bug shape. Uses `auxiliary_model` if set so
+operators can route the recovery call to a cheaper model.
+
+Verified live against `oci:google.gemini-2.5-flash` in
+`us-chicago-1`: pre-fix runs produced empty `AgentResult.message`;
+post-fix the same run produces a multi-paragraph answer. 8 unit
+tests + 2 live integration tests cover the path.
+
 ### Fixed — OCI Gemini tool-schema sanitisation (issue #281)
 
 `OCIChatCompletionsModel` (the V1 OpenAI-compat transport that serves
@@ -61,6 +99,22 @@ and a nested array-of-objects (the exact deepest-nesting shape from
 the issue) clears the validator and the call completes. 12 new unit
 tests cover every bug shape + the wiring; 2 live integration tests
 prove the end-to-end fix against real Gemini.
+
+### Changed — Cap `starlette<1.2` (httpx2 transitive break)
+
+`starlette 1.2.0` (2026-05-28) made its TestClient `import httpx2 as
+httpx`. Locus's existing `httpx>=0.27,<1.0` pin (kept because
+`OCIRequestSigner` and `BearerAuth` subclass the soon-removed
+top-level `httpx.Auth`) couldn't satisfy starlette 1.2's transitive
+requirement, and `tests/unit/test_a2a_protocol.py` +
+`tests/unit/test_server_app_full.py` failed at collection time with
+`ModuleNotFoundError: No module named 'httpx2'`.
+
+Capped `starlette<1.2` alongside the existing `httpx<1.0` pin in
+`pyproject.toml`. Lift both together when the httpx 2.x auth-API
+port lands. This is a transparent dep-cap; runtime behaviour is
+unchanged — the resolver picks `starlette 1.0.0`, which is what
+shipped in `0.2.0b22` anyway.
 
 ## [0.2.0b22] - 2026-05-25
 
