@@ -199,3 +199,92 @@ class TestResolveOciProfile:
         result = examples_config._resolve_oci_profile()
         assert isinstance(result, str)
         assert result == "DEFAULT"
+
+
+# --- Integration: get_model() end-to-end ------------------------------------
+#
+# These exercise the full harness flow — auto-detect provider, route to the
+# OCI V1 transport builder, call the resolver, hand the resolved profile name
+# to ``OCIChatCompletionsModel(...)``. The SDK constructor is mocked so the
+# test stays offline; the assertion is on the kwargs that flow into it.
+
+
+class TestGetModelIntegration:
+    def _patch_oci_v1_model(self, monkeypatch):
+        """Replace ``OCIChatCompletionsModel`` so we capture its kwargs without
+        triggering the real OCI SDK file-parsing path.
+        """
+        captured: dict[str, object] = {}
+
+        class _StubOCIChatCompletionsModel:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+
+            def __repr__(self):
+                return "<StubOCIChatCompletionsModel>"
+
+        # Patch at the import site used by _get_oci_v1_model.
+        import locus.models.providers.oci as oci_pkg
+
+        monkeypatch.setattr(
+            oci_pkg, "OCIChatCompletionsModel", _StubOCIChatCompletionsModel, raising=True
+        )
+        return captured
+
+    def test_default_section_routes_to_v1_with_default_profile(self, isolated_home, monkeypatch):
+        _write_oci_config(isolated_home, "[DEFAULT]\nuser=u\n")
+        captured = self._patch_oci_v1_model(monkeypatch)
+        examples_config.get_model()
+        assert captured["profile"] == "DEFAULT"
+        # And the auto-derived call shape stays intact.
+        assert "region" in captured
+        assert "model" in captured
+
+    def test_single_named_profile_routes_to_v1_with_that_profile(self, isolated_home, monkeypatch):
+        _write_oci_config(isolated_home, "[BOAT-OC1]\nuser=u\n")
+        captured = self._patch_oci_v1_model(monkeypatch)
+        examples_config.get_model()
+        assert captured["profile"] == "BOAT-OC1"
+
+    def test_oci_profile_env_overrides_default_section(self, isolated_home, monkeypatch):
+        _write_oci_config(isolated_home, "[DEFAULT]\nuser=u\n[OTHER]\nuser=u\n")
+        monkeypatch.setenv("OCI_PROFILE", "OTHER")
+        captured = self._patch_oci_v1_model(monkeypatch)
+        examples_config.get_model()
+        assert captured["profile"] == "OTHER"
+
+    def test_multi_profile_no_default_raises_friendly_error(self, isolated_home, monkeypatch):
+        _write_oci_config(
+            isolated_home,
+            "[PROFILE_A]\nuser=u\n[PROFILE_B]\nuser=u\n",
+        )
+        # OCI_PROFILE unset (isolated_home cleared it). Auto-detect picks OCI
+        # because the file has parseable profiles, then the resolver fails
+        # because there's no [DEFAULT] and no env override.
+        self._patch_oci_v1_model(monkeypatch)
+        with pytest.raises(RuntimeError) as exc:
+            examples_config.get_model()
+        msg = str(exc.value)
+        assert "PROFILE_A" in msg
+        assert "PROFILE_B" in msg
+        assert "OCI_PROFILE" in msg
+
+    def test_no_config_falls_back_to_mock(self, isolated_home, monkeypatch):
+        # No ~/.oci/config and no workload-identity env → auto-detect returns
+        # mock, so OCIChatCompletionsModel is never touched.
+        result = examples_config.get_model()
+        # MockModel is a pydantic BaseModel defined in examples/config.py.
+        assert type(result).__name__ == "MockModel"
+
+    def test_workbench_env_export_pattern_is_honoured(self, isolated_home, monkeypatch):
+        """The workbench backend exports ``LOCUS_OCI_PROFILE`` and
+        ``OCI_PROFILE`` into the notebook subprocess env (see
+        ``workbench/backend/runner.py``). Confirm both names take precedence
+        over file-based resolution so the workbench path is unaffected by
+        the new detector.
+        """
+        _write_oci_config(isolated_home, "[A]\nuser=u\n[B]\nuser=u\n")
+        monkeypatch.setenv("LOCUS_OCI_PROFILE", "WORKBENCH_PICK")
+        captured = self._patch_oci_v1_model(monkeypatch)
+        examples_config.get_model()
+        assert captured["profile"] == "WORKBENCH_PICK"
