@@ -11,7 +11,7 @@ Bundles the standard deep-research configuration into one call:
 - Typed termination::
 
       (ToolCalled(submit_tool) & ConfidenceMet(min_confidence))
-       | TokenLimit(max_tokens)
+       | TokenLimit(total_token_budget)   # only when budget is set
        | MaxIterations(max_iterations)
 
   greppable, unit-testable, and per-recipe overridable.
@@ -23,6 +23,31 @@ Bundles the standard deep-research configuration into one call:
 This is a pure convenience layer over ``locus.Agent`` — it does not
 change agent semantics. Callers who need finer control can build the
 Agent directly.
+
+Naming note (since this trips people up):
+
+  ``total_token_budget``   — cumulative INPUT+OUTPUT tokens across
+                              ALL iterations of one run. Wired into
+                              ``TokenLimit(total_token_budget)``
+                              termination. ``None`` (default) means
+                              "no TokenLimit term" — the run is
+                              bounded only by ToolCalled+Confidence
+                              or MaxIterations.
+  ``max_output_tokens``    — per-completion output cap. Forwarded
+                              to ``AgentConfig.max_tokens`` and from
+                              there to the model provider's
+                              ``max_tokens`` request field on every
+                              completion. ``None`` = use the model's
+                              own default.
+
+**Breaking change in 0.2.0b23**: the old ``max_tokens=`` parameter
+(which used to mean total-run budget but read like a per-completion
+cap to anyone familiar with OpenAI / Gemini / Anthropic SDKs) was
+removed. Use ``total_token_budget=`` for run-level termination and
+``max_output_tokens=`` for per-completion output cap. The old name
+caused empty-output runs when callers passed ``max_tokens=65536``
+expecting per-completion semantics — the run silently exited via
+TokenLimit before the model could write anything.
 """
 
 from __future__ import annotations
@@ -123,7 +148,7 @@ def create_deepagent(
     output_schema: type[BaseModel] | None = None,
     submit_tool: str = "submit_research",
     min_confidence: float = 0.8,
-    max_tokens: int = 80_000,
+    total_token_budget: int | None = None,
     max_output_tokens: int | None = None,
     max_iterations: int = 40,
     reflexion: bool = True,
@@ -159,10 +184,14 @@ def create_deepagent(
             is my structured answer". Default ``submit_research``.
         min_confidence: Confidence threshold the submission must clear
             for early-exit. Default 0.8.
-        max_tokens: Total-run token budget used in the typed termination
-            algebra (``TokenLimit(max_tokens)`` — exits when the cumulative
-            input+output tokens for the whole run exceed this). Default 80k.
-            *Not* a per-completion cap — see ``max_output_tokens`` for that.
+        total_token_budget: Cumulative INPUT+OUTPUT tokens across ALL
+            iterations of one run. Wired into
+            ``TokenLimit(total_token_budget)`` termination. Default
+            ``None`` = no TokenLimit term in the termination algebra
+            (the run is bounded only by ToolCalled+Confidence or
+            MaxIterations). Set this only when you want an explicit
+            cumulative ceiling — and remember that a long system prompt
+            on a multi-iteration run can eat the budget quickly.
         max_output_tokens: Per-LLM-call output token budget, forwarded to
             ``AgentConfig.max_tokens`` (and from there to the model
             provider's ``max_tokens`` request field on every completion).
@@ -237,11 +266,40 @@ def create_deepagent(
         ToolCalled,
     )
 
-    termination = (
-        (ToolCalled(submit_tool) & ConfidenceMet(min_confidence))
-        | TokenLimit(max_tokens)
-        | MaxIterations(max_iterations)
-    )
+    # Reject the legacy ``max_tokens=`` name explicitly. Without this
+    # check it would flow into ``**agent_kwargs`` and ``Agent()`` would
+    # silently set the per-completion cap to that value — completely
+    # different semantics from the old `create_deepagent(max_tokens=)`
+    # behavior. The 0.2.0b23 rename was specifically to kill the
+    # silent foot-gun; the loud error matches that intent.
+    if "max_tokens" in agent_kwargs:
+        raise TypeError(
+            "create_deepagent() no longer accepts ``max_tokens=`` "
+            "(removed in 0.2.0b23). Use ``total_token_budget=`` for "
+            "the run-level TokenLimit termination, or "
+            "``max_output_tokens=`` for the per-completion output cap "
+            "on each LLM call. The old name conflicted with every "
+            "LLM SDK's per-completion ``max_tokens`` field and caused "
+            "silent empty-output runs when callers passed "
+            "``max_tokens=65536`` expecting per-completion semantics."
+        )
+
+    # Build the termination algebra. ``TokenLimit`` only joins the
+    # `or`-chain when the caller opted in to a budget; the default
+    # is no token-based termination at all so a long input prompt
+    # can't silently kill an otherwise-healthy run.
+    #
+    # Breaking change in 0.2.0b23 — the old ``max_tokens=`` kwarg
+    # was removed. Use ``total_token_budget=`` (run-level cap) or
+    # ``max_output_tokens=`` (per-completion cap). If callers pass
+    # ``max_tokens=`` it lands in **agent_kwargs and Agent() rejects
+    # it loudly, which is the right failure shape — better than the
+    # historical silent foot-gun.
+    base = ToolCalled(submit_tool) & ConfidenceMet(min_confidence)
+    if total_token_budget is not None:
+        termination = base | TokenLimit(total_token_budget) | MaxIterations(max_iterations)
+    else:
+        termination = base | MaxIterations(max_iterations)
 
     # Splice filesystem-as-memory tools into the user-supplied list
     # before constructing the Agent. The default backend is an

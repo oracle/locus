@@ -64,9 +64,10 @@ class TestCreateDeepagent:
         assert isinstance(agent, Agent)
 
     def test_typed_termination_attached(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The default ``(submit & confidence) | tokens | iters`` shape must
+        """The ``(submit & confidence) | tokens | iters`` shape must
         attach to ``agent.config.termination`` so the loop's exit logic
-        actually consults it."""
+        actually consults it. ``TokenLimit`` is only present when the
+        caller opts in with an explicit ``total_token_budget``."""
         _stub_oci_env(monkeypatch)
 
         agent = create_deepagent(
@@ -77,7 +78,7 @@ class TestCreateDeepagent:
             reflexion=False,
             grounding=False,
             min_confidence=0.7,
-            max_tokens=12_345,
+            total_token_budget=12_345,
             max_iterations=11,
             submit_tool="submit_research",
         )
@@ -99,6 +100,94 @@ class TestCreateDeepagent:
         assert ConfidenceMet in leaves
         assert TokenLimit in leaves
         assert MaxIterations in leaves
+
+    def test_token_limit_omitted_when_budget_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Default ``total_token_budget=None`` must NOT add a
+        ``TokenLimit`` term to the termination algebra. Previously the
+        80K default silently killed any run whose long input prompt
+        ate the cumulative budget before the model wrote output —
+        verified empirically against gpt-5.5 + Locus's deepagent
+        kernel (see CHANGELOG)."""
+        _stub_oci_env(monkeypatch)
+        agent = create_deepagent(
+            model="oci:openai.gpt-4o-mini",
+            tools=[submit_research],
+            system_prompt="be helpful",
+            output_schema=_Echo,
+            reflexion=False,
+            grounding=False,
+        )
+        term = agent.config.termination
+        leaves: list[type] = []
+
+        def _walk(node):
+            if isinstance(node, (OrCondition, AndCondition)):
+                for child in node._conditions:
+                    _walk(child)
+            else:
+                leaves.append(type(node))
+
+        _walk(term)
+        assert TokenLimit not in leaves, (
+            "Default deepagent termination must not include a "
+            "TokenLimit term. The historical 80K default was a "
+            "foot-gun — callers should opt in explicitly via "
+            "total_token_budget."
+        )
+        # The base algebra (submit+confidence OR iterations) still applies.
+        assert ToolCalled in leaves
+        assert ConfidenceMet in leaves
+        assert MaxIterations in leaves
+
+    def test_legacy_max_tokens_kwarg_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Breaking change in 0.2.0b23 — the old ``max_tokens=`` kwarg
+        was removed. Callers who still pass it should hit a loud
+        TypeError from ``Agent()`` (via **agent_kwargs), not a silent
+        wrong-behavior run."""
+        _stub_oci_env(monkeypatch)
+        with pytest.raises(TypeError):
+            create_deepagent(
+                model="oci:openai.gpt-4o-mini",
+                tools=[submit_research],
+                system_prompt="be helpful",
+                output_schema=_Echo,
+                reflexion=False,
+                grounding=False,
+                max_tokens=54_321,
+            )
+
+    def test_max_output_tokens_propagated_independently_of_budget(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``max_output_tokens`` is the per-completion cap — it goes
+        to AgentConfig.max_tokens, NOT into the termination algebra.
+        Without ``total_token_budget`` set, the termination still
+        has no TokenLimit term."""
+        _stub_oci_env(monkeypatch)
+        agent = create_deepagent(
+            model="oci:openai.gpt-4o-mini",
+            tools=[submit_research],
+            system_prompt="be helpful",
+            output_schema=_Echo,
+            reflexion=False,
+            grounding=False,
+            max_output_tokens=65_536,
+        )
+        # Per-completion cap landed on AgentConfig.
+        assert agent.config.max_tokens == 65_536
+        # No TokenLimit term in termination.
+        term = agent.config.termination
+        leaves: list[type] = []
+
+        def _walk(node):
+            if isinstance(node, (OrCondition, AndCondition)):
+                for child in node._conditions:
+                    _walk(child)
+            else:
+                leaves.append(type(node))
+
+        _walk(term)
+        assert TokenLimit not in leaves
 
     def test_output_schema_propagated(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _stub_oci_env(monkeypatch)
