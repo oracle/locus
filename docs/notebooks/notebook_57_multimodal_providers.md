@@ -12,7 +12,7 @@ hand-written tool — you don't write the wrapper.
   method.
 - Optional OpenAI-backed providers (image, speech, search-preview).
 
-Run it (OCI Generative AI is the default; auto-detected from `~/.oci/config`):
+Run it (OCI Generative AI is the default — the notebook harness picks it when `~/.oci/config` exists; set `OCI_PROFILE` to choose a non-default profile):
 
     python examples/notebook_57_multimodal_providers.py
 

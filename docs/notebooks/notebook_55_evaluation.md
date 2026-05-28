@@ -8,7 +8,7 @@ don't need an external eval framework for the common cases.
 - `EvalRunner` runs the agent against every case.
 - `EvalReport` summarises pass/fail counts and an average score.
 
-Run it (OCI Generative AI is the default; auto-detected from `~/.oci/config`):
+Run it (OCI Generative AI is the default — the notebook harness picks it when `~/.oci/config` exists; set `OCI_PROFILE` to choose a non-default profile):
 
     python examples/notebook_55_evaluation.py
 

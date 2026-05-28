@@ -28,7 +28,7 @@ Pydantic model that can be filed into an ERP without parsing.
   easy to swap a human gate for an automated rule.
 - `output_schema=PurchaseOrder` keeps the terminal artifact typed.
 
-Run it (OCI Generative AI is the default; auto-detected from `~/.oci/config`):
+Run it (OCI Generative AI is the default — the notebook harness picks it when `~/.oci/config` exists; set `OCI_PROFILE` to choose a non-default profile):
 
     python examples/notebook_64_procurement_approval.py
 

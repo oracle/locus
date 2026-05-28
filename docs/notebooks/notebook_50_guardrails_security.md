@@ -11,7 +11,7 @@ so the safety policy is exercised live, not described in the abstract.
 - Tool allowlist vs denylist.
 - Stacked hooks via `HookRegistry` plus a separate `ContentFilterHook`.
 
-Run it (OCI Generative AI is the default; auto-detected from `~/.oci/config`):
+Run it (OCI Generative AI is the default — the notebook harness picks it when `~/.oci/config` exists; set `OCI_PROFILE` to choose a non-default profile):
 
     python examples/notebook_50_guardrails_security.py
 

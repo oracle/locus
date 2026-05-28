@@ -17,7 +17,7 @@ Provider matrix (in order of priority):
 The registry helper `get_model("provider:model_name")` routes OCI ids
 to the right transport automatically.
 
-Run it (OCI Generative AI is the default; auto-detected from `~/.oci/config`):
+Run it (OCI Generative AI is the default — the notebook harness picks it when `~/.oci/config` exists; set `OCI_PROFILE` to choose a non-default profile):
 
     python examples/notebook_56_model_providers.py
 

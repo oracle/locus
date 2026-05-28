@@ -27,7 +27,7 @@ Event mapping::
 - Token usage from `result.metrics` — the canonical source for cost
   meters and budget enforcers.
 
-Run it (OCI Generative AI is the default; auto-detected from `~/.oci/config`):
+Run it (OCI Generative AI is the default — the notebook harness picks it when `~/.oci/config` exists; set `OCI_PROFILE` to choose a non-default profile):
 
     python examples/notebook_60_agent_yield_bridge.py
 

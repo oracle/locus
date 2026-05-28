@@ -15,7 +15,7 @@ automatically.
 
 ## Run it
 
-OCI GenAI is the default (auto-detected from `~/.oci/config`):
+OCI GenAI is the default — the notebook harness picks it when `~/.oci/config` exists (set `OCI_PROFILE` to choose a non-default profile):
 
 ```bash
 LOCUS_MODEL_ID=openai.gpt-4.1 python examples/notebook_47_plugins.py

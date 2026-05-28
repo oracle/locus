@@ -23,7 +23,7 @@ Prefix map::
 - Drive a `SequentialPipeline` + `LoopAgent` that surfaces
   `composition.*` events end-to-end.
 
-Run it (OCI Generative AI is the default; auto-detected from `~/.oci/config`):
+Run it (OCI Generative AI is the default — the notebook harness picks it when `~/.oci/config` exists; set `OCI_PROFILE` to choose a non-default profile):
 
     python examples/notebook_62_event_catalogue.py
 

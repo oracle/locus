@@ -30,7 +30,7 @@ Models the loop a real on-call engineer runs when a page fires::
 - `output_schema=Postmortem`: the final report is a typed Pydantic
   instance, ready to file into a runbook database.
 
-Run it (OCI Generative AI is the default; auto-detected from `~/.oci/config`):
+Run it (OCI Generative AI is the default — the notebook harness picks it when `~/.oci/config` exists; set `OCI_PROFILE` to choose a non-default profile):
 
     python examples/notebook_63_incident_response.py
 

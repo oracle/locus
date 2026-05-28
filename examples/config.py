@@ -22,8 +22,9 @@ one by setting a single environment variable. See
 Environment Variables:
     LOCUS_MODEL_PROVIDER   - "oci" (default when OCI is reachable), "mock",
                               "openai", "anthropic", or "ollama". When unset
-                              we auto-detect: OCI if a profile exists,
-                              otherwise mock.
+                              we auto-detect: OCI if ``~/.oci/config`` has at
+                              least one parseable profile (or a workload-
+                              identity env var is set), otherwise mock.
     LOCUS_MODEL_ID         - Model identifier (provider-specific)
 
     # OCI GenAI — every LOCUS_OCI_* variable below falls back to its
@@ -32,7 +33,10 @@ Environment Variables:
     # and exported the resulting ``OCI_PROFILE``, every locus notebook
     # picks the same profile up automatically.
     LOCUS_OCI_PROFILE      - OCI config profile name. Falls back to
-                              OCI_PROFILE. Default: DEFAULT.
+                              OCI_PROFILE. When neither is set the harness
+                              picks ``[DEFAULT]`` if present, the sole
+                              profile if exactly one exists, or raises a
+                              clear error listing the candidates.
     LOCUS_OCI_AUTH_TYPE    - "api_key", "security_token",
                               "instance_principal", "resource_principal".
                               Falls back to OCI_AUTH_TYPE.
@@ -87,6 +91,7 @@ Examples:
 See `docs/how-to/oci-models.md` for the full transport story.
 """
 
+import configparser
 import os
 import sys
 from collections.abc import AsyncIterator
@@ -218,19 +223,97 @@ def check_structured_output_capable() -> None:
     sys.exit(0)
 
 
+def _oci_config_profiles(config_path: Path) -> list[str]:
+    """Return the section names in an OCI config file.
+
+    The OCI CLI puts the unnamed default section under ``[DEFAULT]``
+    explicitly, which :mod:`configparser` does not surface in
+    ``.sections()``. We re-add it manually so callers see the full picture.
+
+    Returns an empty list when the file is missing, unreadable, or
+    malformed — callers use this as a probe and rely on it never raising.
+    """
+    if not config_path.exists():
+        return []
+    parser = configparser.ConfigParser()
+    try:
+        parser.read(config_path)
+    except (OSError, configparser.Error):
+        return []
+    sections = list(parser.sections())
+    if parser.defaults():
+        sections.insert(0, "DEFAULT")
+    return sections
+
+
+def _resolve_oci_profile() -> str:
+    """Pick the OCI config profile name the harness should use.
+
+    Resolution order:
+
+    1. ``LOCUS_OCI_PROFILE`` / ``OCI_PROFILE`` env var if set — no
+       validation, the user named it and the SDK will tell them if it
+       doesn't exist.
+    2. ``[DEFAULT]`` section in ``~/.oci/config`` → ``"DEFAULT"``.
+    3. Exactly one non-default section in ``~/.oci/config`` → that section.
+    4. Otherwise raise a clear error listing the sections found.
+
+    The returned profile name works with all three OCI transports —
+    :class:`OCIChatCompletionsModel` (V1, ``profile=``),
+    :class:`OCIModel` (SDK, ``profile_name=``), and
+    :class:`OCIResponsesModel` (Responses, ``profile=``) — since they
+    all delegate to the same ``oci.config.from_file`` lookup.
+
+    Closes the long-standing footgun in #276 where a user with multiple
+    profiles and no ``[DEFAULT]`` would get an opaque OCI SDK trace
+    instead of a "set OCI_PROFILE=…" pointer.
+    """
+    explicit = _oci_env("PROFILE")
+    if explicit:
+        return explicit
+
+    config_path = Path.home() / ".oci" / "config"
+    sections = _oci_config_profiles(config_path)
+
+    if "DEFAULT" in sections:
+        return "DEFAULT"
+    if len(sections) == 1:
+        return sections[0]
+    if not sections:
+        msg = (
+            f"No usable profiles found in {config_path}. "
+            "Run `oci session authenticate --profile-name <name>` or add a "
+            "[<name>] section, then set OCI_PROFILE=<name>."
+        )
+        raise RuntimeError(msg)
+    names = ", ".join(sections)
+    msg = (
+        f"{config_path} has multiple profiles ({names}) and no [DEFAULT] "
+        "section. Pick one by setting OCI_PROFILE=<name> (or "
+        "LOCUS_OCI_PROFILE=<name>) before running the notebook."
+    )
+    raise RuntimeError(msg)
+
+
 def _auto_detect_provider() -> str:
     """Pick a sensible default provider when ``LOCUS_MODEL_PROVIDER`` is unset.
 
     Prefer OCI — that is the platform Locus is built on — and only fall
-    back to ``mock`` when an OCI profile clearly isn't available. We probe
-    for ``~/.oci/config`` or any of the workload-identity env vars
-    (instance/resource principal). The probe is cheap and never raises.
+    back to ``mock`` when an OCI profile clearly isn't available.
+    Workload-identity env vars short-circuit to OCI (the harness can't
+    inspect those; trust the user). Otherwise we look for at least one
+    usable profile in ``~/.oci/config``. With no OCI config and no
+    workload-identity hints we fall back to the bundled mock so the
+    notebook still runs end-to-end.
+
+    Never raises — a wrong guess here surfaces later as a friendly
+    error from :func:`_resolve_oci_profile`.
     """
     if os.environ.get("LOCUS_OCI_AUTH_TYPE") in ("instance_principal", "resource_principal"):
         return "oci"
     if os.environ.get("OCI_AUTH_TYPE") in ("instance_principal", "resource_principal"):
         return "oci"
-    if (Path.home() / ".oci" / "config").exists():
+    if _oci_config_profiles(Path.home() / ".oci" / "config"):
         return "oci"
     return "mock"
 
@@ -342,7 +425,7 @@ def _get_oci_v1_model(model_id: str, **kwargs: Any) -> Any:
 
     # Default: profile-based auth. compartment auto-derived from the
     # profile's tenancy unless overridden.
-    profile = _oci_env("PROFILE", "DEFAULT") or "DEFAULT"
+    profile = _resolve_oci_profile()
     return OCIChatCompletionsModel(
         model=model_id,
         profile=profile,
@@ -356,8 +439,14 @@ def _get_oci_sdk_model(model_id: str, **kwargs: Any) -> Any:
     """Build an OCIModel against /20231130/actions/v1/chat (SDK transport)."""
     from locus.models import OCIAuthType, OCIModel
 
-    profile = _oci_env("PROFILE", "DEFAULT") or "DEFAULT"
     auth_type_str = _oci_env("AUTH_TYPE", "api_key") or "api_key"
+    if auth_type_str in ("instance_principal", "resource_principal"):
+        # Workload identity: profile_name is required by the SDK signature
+        # but unused at signing time. Honour an explicit override if the
+        # user set one, else fall back to "DEFAULT" to keep the call shape.
+        profile = _oci_env("PROFILE", "DEFAULT") or "DEFAULT"
+    else:
+        profile = _resolve_oci_profile()
     compartment = _oci_env("COMPARTMENT")
     endpoint = _oci_env("ENDPOINT")
     # The OCI profile's home region is often *not* the GenAI region

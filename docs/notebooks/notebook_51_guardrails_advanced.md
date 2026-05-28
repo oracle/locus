@@ -9,7 +9,7 @@ characters appear in the prompt.
 - `OutputFilterHook`: redact PII or block topics in the agent's reply
   before it leaves the process.
 
-Run it (OCI Generative AI is the default; auto-detected from `~/.oci/config`):
+Run it (OCI Generative AI is the default — the notebook harness picks it when `~/.oci/config` exists; set `OCI_PROFILE` to choose a non-default profile):
 
     python examples/notebook_51_guardrails_advanced.py
 

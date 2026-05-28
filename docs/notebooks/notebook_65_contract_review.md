@@ -33,7 +33,7 @@ parallel, then a back-and-forth negotiation phase, then sign-off::
 - `interrupt()`: negotiation step pauses for human counsel to edit terms.
 - `output_schema=ContractDecision`: typed terminal artifact.
 
-Run it (OCI Generative AI is the default; auto-detected from `~/.oci/config`):
+Run it (OCI Generative AI is the default — the notebook harness picks it when `~/.oci/config` exists; set `OCI_PROFILE` to choose a non-default profile):
 
     python examples/notebook_65_contract_review.py
 

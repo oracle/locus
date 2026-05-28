@@ -39,7 +39,7 @@ Pipeline::
   `debate` / `codegen_test_validate`) and print which protocol fired,
   the compiled runtime shape, and the result.
 
-Run it (OCI Generative AI is the default; auto-detected from `~/.oci/config`):
+Run it (OCI Generative AI is the default — the notebook harness picks it when `~/.oci/config` exists; set `OCI_PROFILE` to choose a non-default profile):
 
     python examples/notebook_58_cognitive_router.py
 
