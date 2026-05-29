@@ -16,8 +16,9 @@ from typing import Any
 
 import httpx
 import pytest
+import requests
 
-from locus.models.providers.oci._signing import OCIRequestSigner, _PreparedRequestProxy
+from locus.models.providers.oci._signing import OCIRequestSigner
 
 
 # ---------------------------------------------------------------------------
@@ -41,29 +42,32 @@ class _FakeSigner:
 
 
 # ---------------------------------------------------------------------------
-# _PreparedRequestProxy
+# Signs against a real requests.PreparedRequest (oracle-samples practice)
 # ---------------------------------------------------------------------------
 
 
-class TestPreparedRequestProxy:
-    def test_basic_attributes(self) -> None:
+class TestSignUsesPreparedRequest:
+    """``_sign`` must hand ``do_request_sign`` a real
+    ``requests.PreparedRequest`` — the object the OCI signer is written and
+    tested against — mirroring oracle-samples/oci-genai-auth-python rather
+    than a hand-rolled duck-type."""
+
+    def test_signer_receives_prepared_request_with_method_url_body(self) -> None:
+        signer = _FakeSigner()
+        auth = OCIRequestSigner(signer)  # type: ignore[arg-type]
         req = httpx.Request(
             "POST",
-            "https://example.com/v1/chat?stream=1",
+            "https://example.com/openai/v1/chat?stream=1",
             headers={"X-Test": "1"},
             content=b'{"x":1}',
         )
-        proxy = _PreparedRequestProxy(req, b'{"x":1}')
-        assert proxy.method == "POST"
-        assert proxy.url == "https://example.com/v1/chat?stream=1"
-        assert proxy.path_url == "/v1/chat?stream=1"
-        assert proxy.headers["x-test"] == "1"
-        assert proxy.body == b'{"x":1}'
-
-    def test_root_path_returns_slash(self) -> None:
-        req = httpx.Request("GET", "https://example.com")
-        proxy = _PreparedRequestProxy(req, b"")
-        assert proxy.path_url == "/"
+        next(auth.auth_flow(req))
+        prepared = signer.last_proxy
+        assert isinstance(prepared, requests.PreparedRequest)
+        assert prepared.method == "POST"
+        assert prepared.url == "https://example.com/openai/v1/chat?stream=1"
+        assert prepared.path_url == "/openai/v1/chat?stream=1"
+        assert prepared.body == b'{"x":1}'
 
 
 # ---------------------------------------------------------------------------

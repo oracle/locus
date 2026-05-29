@@ -7,13 +7,15 @@
 Used by :class:`OCIChatCompletionsModel` for IAM authentication against OCI's
 OpenAI-compatible ``/openai/v1`` endpoint.
 
-We deliberately don't depend on ``requests``, ``oci-openai``, or
-``oci-genai-auth-python`` for this. The OCI signer interface only reads
-``method``, ``url``, ``path_url``, ``headers``, and ``body`` from the
-prepared request, so we duck-type those from an ``httpx.Request`` and skip
-the ``requests`` round-trip entirely.
+The signing path mirrors oracle-samples/oci-genai-auth-python (UPL-1.0):
+each outbound ``httpx.Request`` is rebuilt as a real
+``requests.PreparedRequest`` and handed to the OCI signer, which is the
+object ``do_request_sign`` is written and tested against. ``requests`` is
+already a transitive dependency of the ``oci`` SDK, so this adds nothing
+to the dependency tree — and it avoids the subtle header/body divergences
+a hand-rolled duck-type is prone to.
 
-Reference (not vendored): oracle-samples/oci-genai-auth-python (UPL-1.0).
+Reference: oracle-samples/oci-genai-auth-python (UPL-1.0).
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ from collections.abc import Callable, Generator
 from typing import TYPE_CHECKING, Any
 
 import httpx
+import requests
 
 
 if TYPE_CHECKING:
@@ -32,27 +35,6 @@ if TYPE_CHECKING:
 
 
 _logger = logging.getLogger(__name__)
-
-
-class _PreparedRequestProxy:
-    """Duck-typed stand-in for ``requests.PreparedRequest``.
-
-    The OCI signer reads ``method``, ``url``, ``path_url``, ``headers``,
-    and ``body`` and mutates ``headers`` in place. That's all this proxy
-    has to expose.
-    """
-
-    __slots__ = ("body", "headers", "method", "path_url", "url")
-
-    def __init__(self, request: httpx.Request, content: bytes) -> None:
-        self.method = request.method
-        self.url = str(request.url)
-        # ``raw_path`` already includes ``?query`` if present. Falls back to
-        # "/" for empty paths to match ``requests.PreparedRequest.path_url``.
-        raw = request.url.raw_path.decode("ascii")
-        self.path_url = raw or "/"
-        self.headers = dict(request.headers)
-        self.body = content
 
 
 class OCIRequestSigner(httpx.Auth):
@@ -70,15 +52,16 @@ class OCIRequestSigner(httpx.Auth):
     - Periodically refresh on a timer (``refresh_interval`` seconds).
     - Refresh and retry once on a 401 response.
 
-    The callback can either mutate the current signer in place (typical
-    for instance/resource principals whose ``refresh_security_token``
-    method updates the signer's internal token) **or** return a brand-new
-    signer that should replace the current one (typical for session-token
-    signers that are immutable but need to be rebuilt from a refreshed
-    ``security_token_file`` on disk). Return-value handling: if the
-    callback returns anything that exposes ``do_request_sign``, the
-    wrapper swaps to it; otherwise the existing in-place mutation is
-    assumed.
+    The callback returns a brand-new signer that replaces the current one:
+    instance/resource principals are rebuilt from the instance metadata
+    service and session-token signers are rebuilt from the refreshed
+    ``security_token_file`` on disk. This mirrors
+    oracle-samples/oci-genai-auth-python, which rebuilds the signer on every
+    refresh rather than mutating a cached federation client in place — the
+    in-place ``refresh_security_token`` path is what leaves long-lived
+    processes signing with a stale credential and 401-ing. Return-value
+    handling: if the callback returns anything that exposes
+    ``do_request_sign``, the wrapper swaps to it.
     """
 
     requires_request_body = True
@@ -156,27 +139,34 @@ class OCIRequestSigner(httpx.Auth):
             _logger.debug("OCI signer refresh completed successfully")
 
     def _sign(self, request: httpx.Request) -> None:
-        # Drop any Authorization the openai SDK injected — OCI signing
-        # replaces it.
+        # Strip any auth headers the openai SDK injected — OCI signing
+        # replaces them.
         request.headers.pop("Authorization", None)
         request.headers.pop("X-Api-Key", None)
 
         # OCI requires opc-compartment-id on /openai/v1/chat/completions
-        # under IAM auth. Adding before signing so it's part of the signed
-        # payload.
+        # under IAM auth. Add before signing so it travels with the request.
         if self._compartment_id is not None:
             request.headers["opc-compartment-id"] = self._compartment_id
 
+        # Read the body (forcing a read on streaming requests) so the signer
+        # hashes the exact bytes that go on the wire into x-content-sha256.
         try:
             content = request.content
         except httpx.RequestNotRead:
             content = request.read()
 
-        proxy = _PreparedRequestProxy(request, content)
-        self._signer.do_request_sign(proxy)
-
-        for key, value in proxy.headers.items():
-            request.headers[key] = value
+        # Sign against a real ``requests.PreparedRequest`` — the shape
+        # ``do_request_sign`` expects — rather than a duck-typed stand-in.
+        # Mirrors oracle-samples/oci-genai-auth-python ``_sign_request``.
+        prepared = requests.Request(
+            method=request.method,
+            url=str(request.url),
+            headers=dict(request.headers),
+            data=content,
+        ).prepare()
+        self._signer.do_request_sign(prepared)
+        request.headers.update(prepared.headers)
 
 
 __all__ = ["OCIRequestSigner"]

@@ -168,45 +168,56 @@ def _build_resource_principal_signer() -> AbstractBaseSigner:
 def _refresh_callable_for(
     signer: AbstractBaseSigner,
     *,
+    auth_type: str | None = None,
     profile: str | None = None,
     config_file: str | None = None,
 ) -> Callable[[], Any] | None:
-    """Return a callable that refreshes ``signer``, or ``None`` when there
-    is no recoverable expiring credential.
+    """Return a callable that yields a *fresh* signer, or ``None`` when
+    there is no recoverable expiring credential.
+
+    Every recoverable case rebuilds the signer from scratch rather than
+    mutating one in place — this mirrors oracle-samples/oci-genai-auth-python
+    (``_refresh_signer``) and is the fix for long-lived-process 401s: the
+    in-place ``signer.refresh_security_token()`` path mutates a cached
+    federation client, whereas a full rebuild re-reads the instance leaf
+    certificate / token from the metadata service. :class:`OCIRequestSigner`
+    swaps in whatever signer the callable returns.
 
     Three cases:
 
-    1. **Instance / resource principal / delegation token.** These signers
-       expose ``refresh_security_token`` on the instance itself; the
-       method mutates the cached token so subsequent ``do_request_sign``
-       calls use the new one. We return that bound method directly.
+    1. **Instance / resource principal.** Rebuild a brand-new
+       ``InstancePrincipalsSecurityTokenSigner`` /
+       ``get_resource_principals_signer`` on each refresh. Selected by
+       ``auth_type`` (the only place that knows which principal we built).
     2. **Session token (``SecurityTokenSigner`` from a profile with a
-       ``security_token_file``).** The signer is immutable, but the file
-       on disk is the source of truth — ``oci session refresh`` (and any
-       external token-rotation daemon) updates the file out-of-band.
-       When ``profile`` + ``config_file`` are supplied, we capture them
-       in a closure that re-reads the token file and returns a fresh
-       ``SecurityTokenSigner``; :class:`OCIRequestSigner` swaps it in.
-       Without those args we can't rebuild the signer, so we return None
-       and the auth flow stays dormant.
+       ``security_token_file``).** The file on disk is the source of truth
+       — ``oci session refresh`` (and any external token-rotation daemon)
+       updates it out-of-band. When ``profile`` + ``config_file`` are
+       supplied, capture them in a closure that re-reads the token file and
+       returns a fresh ``SecurityTokenSigner``. Without those args we can't
+       rebuild, so return None and the auth flow stays dormant.
     3. **User principal (API key).** No expiring credential, no refresh.
        Returns None.
 
     Args:
-        signer: The OCI signer in use.
+        signer: The OCI signer in use (unused for dispatch, kept for API
+            symmetry and future signer-type introspection).
+        auth_type: ``"instance_principal"`` / ``"resource_principal"`` when
+            a principal signer is in use; ``None`` for profile-based signers.
         profile: OCI config profile name. Required to enable session-token
             refresh; ignored for instance/resource principal.
         config_file: Path to the OCI config file. Same constraint as
             ``profile``.
 
     Returns:
-        A zero-arg callable to invoke before signing on refresh, or
-        ``None`` when the credential is non-expiring.
+        A zero-arg callable returning a fresh signer, or ``None`` when the
+        credential is non-expiring.
     """
-    # Case 1: in-place refresh on the signer itself.
-    refresh = getattr(signer, "refresh_security_token", None)
-    if callable(refresh):
-        return refresh  # type: ignore[no-any-return]  # signer methods are untyped
+    # Case 1: instance / resource principal — rebuild a fresh signer.
+    if auth_type == "instance_principal":
+        return _build_instance_principal_signer
+    if auth_type == "resource_principal":
+        return _build_resource_principal_signer
 
     # Case 2: SecurityTokenSigner rebuilt from disk.
     if profile is not None and config_file is not None:
@@ -470,17 +481,17 @@ class OCIChatCompletionsModel(OpenAIModel):
 
             signer = self._build_signer()
             # Token-based signers (instance principal, resource principal,
-            # delegation token) carry credentials that expire on the
-            # order of minutes-to-hours; without a refresh callback the
-            # 401 retry path in OCIRequestSigner is a no-op and the
-            # process dies a slow death of "all GenAI calls 401 after
-            # ~15-30min". Pass the signer's own refresh hook so
-            # auth_flow can both (a) refresh-on-401 and (b) periodically
-            # refresh proactively. Static signers (user-principal API
-            # key) return None and the refresh path stays dormant.
-            # refresh_interval defaults to 1 hour upstream; tighten to
-            # 10 minutes here because instance-principal federation
-            # tokens routinely expire faster than that.
+            # session token) carry credentials that expire on the order of
+            # minutes-to-hours; without a refresh callback the 401 retry
+            # path in OCIRequestSigner is a no-op and the process dies a
+            # slow death of "all GenAI calls 401 after ~15-30min". The
+            # callback rebuilds a fresh signer on each refresh (rebuild, not
+            # in-place mutation — see _refresh_callable_for), so auth_flow
+            # can both (a) refresh-on-401 and (b) refresh proactively on a
+            # timer. Static signers (user-principal API key) return None and
+            # the refresh path stays dormant. refresh_interval is tightened
+            # to 10 minutes (upstream default is 1h) to re-mint principal
+            # credentials well inside their lifetime.
             #
             # Pin the same timeout/retry knobs the parent OpenAIModel
             # uses so a stuck OCI request can't hang asyncio.gather()
@@ -493,6 +504,7 @@ class OCIChatCompletionsModel(OpenAIModel):
                     compartment_id=self.config.compartment_id,
                     refresh_signer=_refresh_callable_for(
                         signer,
+                        auth_type=self.config.auth_type,
                         profile=self.config.profile,
                         config_file=self.config.config_file,
                     ),

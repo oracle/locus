@@ -574,6 +574,7 @@ module = [
     "openai.*",
     "google.*",
     "oci.*",
+    "requests.*",
     "portkey_ai.*",
     "mcp.*",
     "anthropic.*",

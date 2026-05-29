@@ -8,6 +8,35 @@ policy.
 
 ## [Unreleased]
 
+### Fixed — OCI instance/resource-principal auth rots in long-lived processes
+
+The OCI V1 (`OCIChatCompletionsModel`) and Responses
+(`OCIResponsesModel`) transports signed fine in a fresh process but
+started returning `401 INVALID_AUTHENTICATION_INFO` on **every** call
+after ~15-30 min in a long-lived server (e.g. a uvicorn worker), while
+the native SDK transport in the same process kept working. Two root
+causes, both fixed by aligning with the canonical
+[`oracle-samples/oci-genai-auth-python`](https://github.com/oracle-samples/oci-genai-auth-python)
+reference:
+
+- **Refresh now rebuilds the signer instead of mutating it in place.**
+  `_refresh_callable_for` returned the signer's own
+  `refresh_security_token` bound method for instance/resource
+  principals, mutating a cached federation client. The reference
+  instead constructs a brand-new `InstancePrincipalsSecurityTokenSigner`
+  / resource-principal signer on every refresh, which re-reads the
+  instance leaf certificate from the metadata service. We now do the
+  same — dispatched on `auth_type` rather than signer attributes — so
+  `OCIRequestSigner` swaps in a freshly-minted signer on the periodic
+  timer and on 401-retry. This is the fix for the "only a restart
+  recovers" failure mode.
+- **Requests are signed against a real `requests.PreparedRequest`.**
+  `OCIRequestSigner._sign` used a hand-rolled `_PreparedRequestProxy`
+  duck-type; it now builds a `requests.Request(...).prepare()` and hands
+  that to `do_request_sign`, matching the object the OCI signer is
+  written and tested against (closes a latent header/`path_url`
+  divergence). `requests` is already a transitive `oci` dependency.
+
 ## [0.2.0b23] - 2026-05-28
 
 Two fixes for the OCI Gemini code path on the V1 OpenAI-compat

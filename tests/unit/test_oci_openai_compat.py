@@ -269,37 +269,40 @@ class TestRefreshCallableFor:
     """``_refresh_callable_for`` is the bridge that prevents the
     "instance principal token expires at ~15min, every subsequent
     GenAI call 401s, only a pod restart recovers" production failure
-    mode. It returns the signer's own ``refresh_security_token``
-    method for token-based signers (instance / resource principal,
-    delegation token) and ``None`` for static signers (user API key).
-    The OCIRequestSigner refresh-on-401 path is dead code without it."""
+    mode. Mirroring oracle-samples/oci-genai-auth-python, it returns a
+    callable that *rebuilds* a fresh signer — instance / resource
+    principal from the metadata service, session token from disk —
+    rather than mutating one in place, and ``None`` for static signers
+    (user API key). The OCIRequestSigner refresh path is dead code
+    without it."""
 
-    def test_signer_with_refresh_security_token_returns_bound_method(self):
-        from locus.models.providers.oci.openai_compat import _refresh_callable_for
+    def test_instance_principal_returns_rebuild_builder(self):
+        from locus.models.providers.oci.openai_compat import (
+            _build_instance_principal_signer,
+            _refresh_callable_for,
+        )
 
-        signer = MagicMock()
-        signer.refresh_security_token = MagicMock(name="refresh")
-        cb = _refresh_callable_for(signer)
-        assert cb is signer.refresh_security_token
-        cb()
-        signer.refresh_security_token.assert_called_once_with()
+        # Rebuild, not in-place: the callable re-mints a brand-new signer
+        # from IMDS on each refresh (the in-place refresh_security_token
+        # path is what rots in long-lived processes).
+        cb = _refresh_callable_for(MagicMock(), auth_type="instance_principal")
+        assert cb is _build_instance_principal_signer
+
+    def test_resource_principal_returns_rebuild_builder(self):
+        from locus.models.providers.oci.openai_compat import (
+            _build_resource_principal_signer,
+            _refresh_callable_for,
+        )
+
+        cb = _refresh_callable_for(MagicMock(), auth_type="resource_principal")
+        assert cb is _build_resource_principal_signer
 
     def test_static_signer_returns_none(self):
         from locus.models.providers.oci.openai_compat import _refresh_callable_for
 
-        # User-principal API-key signer has no refresh_security_token —
-        # the API key doesn't expire so refresh is a no-op.
+        # User-principal API-key signer: no auth_type, no profile — the
+        # API key doesn't expire so refresh is a no-op.
         signer = MagicMock(spec=["do_request_sign"])
-        assert _refresh_callable_for(signer) is None
-
-    def test_non_callable_refresh_attribute_returns_none(self):
-        """Defensive: if a signer happens to have a `refresh_security_token`
-        attribute that isn't callable, fall back to None instead of
-        breaking auth_flow at call time."""
-        from locus.models.providers.oci.openai_compat import _refresh_callable_for
-
-        signer = MagicMock(spec=["do_request_sign", "refresh_security_token"])
-        signer.refresh_security_token = "not callable"  # noqa: S105 — test literal, not a credential
         assert _refresh_callable_for(signer) is None
 
 
@@ -310,20 +313,17 @@ class TestClientWiresRefreshSigner:
     otherwise instance-principal federation tokens (which expire on
     the order of 15-30 minutes) silently rot inside the http client."""
 
-    def test_instance_principal_passes_signer_refresh_to_signing_wrapper(self):
+    def test_instance_principal_passes_rebuild_refresh_to_signing_wrapper(self):
         model = OCIChatCompletionsModel(
             model="openai.gpt-5.5",
             auth_type="instance_principal",
             compartment_id=COMPARTMENT_OCID,
         )
-        signer = MagicMock(name="instance_signer")
-        signer.refresh_security_token = MagicMock(name="refresh")
 
         with (
             patch(
                 "locus.models.providers.oci.openai_compat._build_instance_principal_signer",
-                return_value=signer,
-            ),
+            ) as mock_build,
             patch("locus.models.providers.oci._signing.OCIRequestSigner") as mock_sig_ctor,
             patch("openai.AsyncOpenAI"),
             patch("httpx.AsyncClient"),
@@ -331,10 +331,12 @@ class TestClientWiresRefreshSigner:
             _ = model.client
             kwargs = mock_sig_ctor.call_args.kwargs
             assert kwargs["compartment_id"] == COMPARTMENT_OCID
-            # The signer's own refresh method must be passed so
-            # OCIRequestSigner.auth_flow can refresh on 401 + on the
-            # periodic timer.
-            assert kwargs["refresh_signer"] is signer.refresh_security_token
+            # Rebuild-on-refresh: the refresh callable IS the instance-
+            # principal builder, so auth_flow re-mints a fresh signer from
+            # IMDS on 401 + on the periodic timer (mirrors oracle-samples/
+            # oci-genai-auth-python) rather than mutating a cached
+            # federation client in place.
+            assert kwargs["refresh_signer"] is mock_build
             # 600s is tighter than the upstream 3600s default — short
             # enough that proactive refresh beats the typical 15-30min
             # federation-token TTL.

@@ -252,14 +252,18 @@ def test_init_requires_compartment_for_workload_identity() -> None:
 
 
 class TestHttpClientWiresRefreshSigner:
-    """``_http_client`` must pass the signer's own ``refresh_security_token``
-    method into ``OCIRequestSigner`` so instance-principal federation
-    tokens auto-refresh both on 401 and on the periodic timer.
-    Without this, the captured token expires after ~15-30 min and every
-    subsequent /v1/responses call 401s. Same fix as openai_compat.py."""
+    """``_http_client`` must pass a *rebuild-the-signer* refresh callable
+    into ``OCIRequestSigner`` so instance-principal federation tokens
+    auto-refresh both on 401 and on the periodic timer. Rebuilding (vs
+    in-place ``refresh_security_token``) mirrors oracle-samples/
+    oci-genai-auth-python; without it the captured token expires after
+    ~15-30 min and every subsequent /v1/responses call 401s. Same fix as
+    openai_compat.py."""
 
-    def test_token_signer_gets_refresh_callback_and_short_interval(self) -> None:
+    def test_token_signer_gets_rebuild_refresh_and_short_interval(self) -> None:
         from unittest.mock import MagicMock, patch
+
+        from locus.models.providers.oci.openai_compat import _build_instance_principal_signer
 
         model = OCIResponsesModel(
             model="openai.gpt-5.5-pro",
@@ -268,7 +272,6 @@ class TestHttpClientWiresRefreshSigner:
             base_url="https://fake-oci.test/openai/v1",
         )
         signer = MagicMock(name="instance_signer")
-        signer.refresh_security_token = MagicMock(name="refresh")
         object.__setattr__(model, "_build_signer", lambda: signer)
 
         with (
@@ -278,9 +281,10 @@ class TestHttpClientWiresRefreshSigner:
             _ = model._http_client()
             kwargs = mock_sig_ctor.call_args.kwargs
             assert kwargs["compartment_id"] == "ocid1.compartment.oc1..fake"
-            # The signer's own refresh method must be passed so the
-            # auth_flow refresh-on-401 + periodic-refresh paths fire.
-            assert kwargs["refresh_signer"] is signer.refresh_security_token
+            # Rebuild-on-refresh: the callable re-mints a fresh signer from
+            # IMDS each refresh so the auth_flow refresh-on-401 + periodic
+            # paths fire with valid credentials.
+            assert kwargs["refresh_signer"] is _build_instance_principal_signer
             # 600s beats the typical 15-30min federation-token TTL.
             assert kwargs["refresh_interval"] == 600.0
 
@@ -289,13 +293,17 @@ class TestHttpClientWiresRefreshSigner:
         should be None and the refresh branches stay dormant."""
         from unittest.mock import MagicMock, patch
 
-        model = OCIResponsesModel(
-            model="openai.gpt-5.5-pro",
-            auth_type="instance_principal",
-            compartment_id="ocid1.compartment.oc1..fake",
-            base_url="https://fake-oci.test/openai/v1",
-        )
-        # Signer with no refresh_security_token attribute.
+        with patch(
+            "locus.models.providers.oci.openai_compat._load_profile_config",
+            return_value={"tenancy": "ocid1.compartment.oc1..fake"},
+        ):
+            model = OCIResponsesModel(
+                model="openai.gpt-5.5-pro",
+                profile="MY_PROFILE",
+                base_url="https://fake-oci.test/openai/v1",
+            )
+        # API-key signer — auth_type is None and the profile has no
+        # security_token_file, so the dispatch yields None.
         static_signer = MagicMock(spec=["do_request_sign"])
         object.__setattr__(model, "_build_signer", lambda: static_signer)
 
