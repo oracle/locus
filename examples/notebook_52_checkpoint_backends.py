@@ -8,7 +8,9 @@ default on OCI is Oracle 26ai — native JSON columns, vector and
 text indexes in one schema, and the full capability set (list_threads,
 search, vacuum) over a single durable store. Notebook 06 covers the
 checkpointer contract itself; this notebook drives it against a real
-ADB.
+ADB. Portable SQL deployments can use PostgreSQL or MySQL through the
+same adapter shape; MySQL uses the official Connector/Python asyncio
+driver.
 
 - Save and load AgentState via oracle_checkpointer.
 - Inspect the reported capabilities.

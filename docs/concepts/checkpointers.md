@@ -39,6 +39,7 @@ agent.run_sync("What were we discussing?", thread_id="user-c42")
 | Local development, single machine | `FileCheckpointer` |
 | Multi-worker deployment, fast access, TTLs | `redis_checkpointer` |
 | Postgres shop, want SQL queries on metadata | `postgresql_checkpointer` |
+| MySQL shop, want official Connector/Python async access | `mysql_checkpointer` |
 | Need full-text search across past runs | `opensearch_checkpointer` |
 | Oracle Database shop, want JSON queries | `oracle_checkpointer` |
 | **[Oracle 26ai][oracle-db] with versioned history + pending writes** | `OracleCheckpointSaver` — LangGraph-shape, native |
@@ -104,6 +105,25 @@ agent = Agent(
 
 Tables auto-created on first save. Index on `thread_id` plus a JSONB
 column for ad-hoc metadata queries.
+
+### MySQL: `mysql_checkpointer`
+
+```python
+from locus.memory.backends import mysql_checkpointer
+
+agent = Agent(
+    model=...,
+    tools=[...],
+    checkpointer=mysql_checkpointer(
+        dsn="mysql://user:pass@host:3306/locus",
+        table_name="locus_threads",
+    ),
+)
+```
+
+Tables auto-created on first save. Uses the official
+`mysql-connector-python` asyncio API, MySQL `JSON` columns, and
+`JSON_CONTAINS` metadata queries.
 
 ### Redis: `redis_checkpointer`
 
@@ -199,10 +219,10 @@ to wire them differently:
 
 2. **Storage backends** expose a simpler dict-shaped interface and
    need adapter wrapping:
-   - `RedisBackend`, `PostgreSQLBackend`, `OpenSearchBackend`,
+   - `RedisBackend`, `PostgreSQLBackend`, `MySQLBackend`, `OpenSearchBackend`,
      `OracleBackend`.
    - Use the factory function: `redis_checkpointer(...)`,
-     `postgresql_checkpointer(...)`, etc.
+     `postgresql_checkpointer(...)`, `mysql_checkpointer(...)`, etc.
 
 ```python
 # WRONG — passing a storage backend directly will fail at save time
@@ -317,7 +337,7 @@ schema, both checkpoint state and long-term memory live in Oracle.
 |---|---|
 | `AttributeError: 'RedisBackend' has no attribute 'save'` (with `state` arg) | Storage backend passed without the adapter. Use `redis_checkpointer(...)` factory instead. |
 | Threads forgotten between deployments | `FileCheckpointer` directory inside an ephemeral container. Mount a volume, or move to `oci_bucket_checkpointer`. |
-| Two replicas show different conversation state for the same thread | The checkpointer isn't shared between replicas. `FileCheckpointer` is per-host; switch to a centralised backend (Redis, Postgres, OCI bucket). |
+| Two replicas show different conversation state for the same thread | The checkpointer isn't shared between replicas. `FileCheckpointer` is per-host; switch to a centralised backend (Redis, Postgres, MySQL, OCI bucket). |
 | Slow first save | Some backends auto-create schema on first call. Pre-create in your deployment script if startup latency matters. |
 
 ## Source

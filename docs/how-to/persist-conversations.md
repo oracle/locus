@@ -23,12 +23,13 @@ factory):
 
 - `redis_checkpointer(...)` — Redis cluster (OCI Cache with Redis)
 - `postgresql_checkpointer(...)` — managed Postgres (OCI Database with PostgreSQL)
+- `mysql_checkpointer(...)` — MySQL with the official Connector/Python async driver
 - `opensearch_checkpointer(...)` — OpenSearch cluster (OCI Search with OpenSearch)
 - `oracle_checkpointer(...)` — Oracle Autonomous Database
 
 The native ones are normal classes — `OCIBucketBackend(...)` and
 hand it to `Agent`. The storage-backed ones are the underlying
-`RedisBackend` / `PostgreSQLBackend` / etc. wrapped by an adapter; if
+`RedisBackend` / `PostgreSQLBackend` / `MySQLBackend` / etc. wrapped by an adapter; if
 you instantiate the backend class directly and pass it to `Agent`,
 save/load will fail at runtime (the agent calls
 `checkpointer.save(state, thread_id)` but backends expose
@@ -61,6 +62,17 @@ from locus.memory.backends import postgresql_checkpointer
 
 checkpointer = postgresql_checkpointer(
     dsn="postgresql://locus:locus@db.example.com:5432/locus",
+)
+agent = Agent(model="oci:openai.gpt-5.5", tools=[...], checkpointer=checkpointer)
+```
+
+MySQL with the official async driver:
+
+```python
+from locus.memory.backends import mysql_checkpointer
+
+checkpointer = mysql_checkpointer(
+    dsn="mysql://locus:locus@db.example.com:3306/locus",
 )
 agent = Agent(model="oci:openai.gpt-5.5", tools=[...], checkpointer=checkpointer)
 ```

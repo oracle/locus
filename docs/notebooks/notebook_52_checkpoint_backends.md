@@ -4,6 +4,9 @@ The checkpointer contract is backend-agnostic, but the production
 default on OCI is Oracle 26ai — native JSON columns, vector and
 text indexes in one schema, and the full capability set
 (`list_threads`, `search`, `vacuum`) over a single durable store.
+Portable SQL deployments can use PostgreSQL or MySQL through the
+same adapter shape; MySQL uses the official Connector/Python asyncio
+driver.
 Notebook 06 covers the checkpointer contract itself; this notebook
 drives it against a real ADB.
 

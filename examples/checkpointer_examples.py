@@ -240,7 +240,87 @@ async def example_postgresql_backend():
 
 
 # =============================================================================
-# 4. OpenSearchBackend - For search and analytics
+# 4. MySQLBackend - For official MySQL deployments
+# =============================================================================
+
+
+async def example_mysql_backend():
+    """
+    MySQLBackend stores state in MySQL with JSON columns.
+
+    Use cases:
+    - Existing MySQL infrastructure
+    - Official Connector/Python requirement
+    - ACID guarantees required
+    - Metadata queries over JSON
+
+    Features:
+    - Official mysql-connector-python asyncio driver
+    - JSON columns for checkpoint data and metadata
+    - Connection pooling
+    - MySQL JSON_CONTAINS metadata queries
+
+    Requires: mysql-connector-python and running MySQL server
+    """
+    print("\n" + "=" * 60)
+    print("4. MySQLBackend Example")
+    print("=" * 60)
+
+    try:
+        from locus.memory.backends import MySQLBackend
+
+        # Create backend
+        backend = MySQLBackend(
+            host="localhost",
+            port=3306,
+            database="locus_demo",
+            user="root",
+            password="",
+            table_name="agent_checkpoints",
+        )
+        print("\nConnecting to MySQL...")
+
+        # Or use DSN
+        # backend = MySQLBackend(
+        #     dsn="mysql://user:pass@localhost:3306/mydb"
+        # )
+
+        # Save with metadata
+        state = create_sample_state()
+        data = state.to_checkpoint()
+        checkpoint_id = await backend.save(
+            "mysql-thread-1",
+            data,
+            metadata={"user_id": "user-123", "session_type": "support"},
+        )
+        print(f"Saved checkpoint: {checkpoint_id}")
+
+        # Query by metadata
+        results = await backend.query_by_metadata("user_id", "user-123")
+        print(f"Found {len(results)} threads for user-123")
+
+        # Search by data field
+        results = await backend.search_data("agent_id", "demo-agent")
+        print(f"Found {len(results)} threads with demo-agent")
+
+        # Get count
+        count = await backend.count()
+        print(f"Total checkpoints: {count}")
+
+        # Cleanup
+        await backend.delete("mysql-thread-1")
+        await backend.close()
+
+    except ImportError:
+        print("\nSkipping: mysql-connector-python package not installed")
+        print("Install with: pip install mysql-connector-python")
+    except Exception as e:
+        print(f"\nSkipping: {e}")
+        print("Ensure MySQL is running")
+
+
+# =============================================================================
+# 5. OpenSearchBackend - For search and analytics
 # =============================================================================
 
 
@@ -263,7 +343,7 @@ async def example_opensearch_backend():
     Requires: opensearch-py and running OpenSearch
     """
     print("\n" + "=" * 60)
-    print("4. OpenSearchBackend Example")
+    print("5. OpenSearchBackend Example")
     print("=" * 60)
 
     try:
@@ -314,7 +394,7 @@ async def example_opensearch_backend():
 
 
 # =============================================================================
-# 5. OCIBucketBackend - For OCI cloud deployments
+# 6. OCIBucketBackend - For OCI cloud deployments
 # =============================================================================
 
 
@@ -337,7 +417,7 @@ async def example_oci_bucket_backend():
     Requires: oci package and OCI credentials
     """
     print("\n" + "=" * 60)
-    print("5. OCIBucketBackend Example")
+    print("6. OCIBucketBackend Example")
     print("=" * 60)
 
     try:
@@ -390,7 +470,7 @@ async def example_oci_bucket_backend():
 
 
 # =============================================================================
-# 6. Agent with Checkpointing Example
+# 7. Agent with Checkpointing Example
 # =============================================================================
 
 
@@ -401,7 +481,7 @@ async def example_agent_with_checkpointing():
     This shows how to integrate checkpointing with an agent.
     """
     print("\n" + "=" * 60)
-    print("6. Agent with Checkpointing (Full Integration)")
+    print("7. Agent with Checkpointing (Full Integration)")
     print("=" * 60)
 
     from locus.core.messages import Message, Role
@@ -450,7 +530,7 @@ async def example_agent_with_checkpointing():
     print(f"  Loaded: {len(loaded.messages)} messages, agent_id={loaded.agent_id}")
 
     # ==========================================================================
-    # Option 3: Production backends (Redis, PostgreSQL, Oracle, etc.)
+    # Option 3: Production backends (Redis, PostgreSQL, MySQL, Oracle, etc.)
     # ==========================================================================
     print("\nOption 3: Production Backends")
     print("-" * 40)
@@ -458,6 +538,7 @@ async def example_agent_with_checkpointing():
     print("  Available factory functions:")
     print("    - redis_checkpointer(url='redis://localhost:6379')")
     print("    - postgresql_checkpointer(host='localhost', database='myapp')")
+    print("    - mysql_checkpointer(host='localhost', database='myapp')")
     print("    - opensearch_checkpointer(hosts=['localhost:9200'])")
     print("    - oracle_checkpointer(dsn='mydb_high', user='admin', password='...')")
     print("    - oci_bucket_checkpointer(bucket_name='...', namespace='...')")
@@ -510,6 +591,7 @@ async def main():
     await example_memory_checkpointer()
     await example_redis_backend()
     await example_postgresql_backend()
+    await example_mysql_backend()
     await example_opensearch_backend()
     await example_oci_bucket_backend()
     await example_agent_with_checkpointing()

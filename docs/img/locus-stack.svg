@@ -175,7 +175,7 @@
   <g filter="url(#card-shadow)">
     <rect x="244" y="584" width="196" height="84" rx="10" ry="10" fill="#F0CC71"/>
     <text x="342" y="610" text-anchor="middle" font-size="15" font-weight="800" fill="#3A2A0F">Memory</text>
-    <text x="342" y="630" text-anchor="middle" font-size="10.5" font-weight="500" fill="#3A2A0F" opacity="0.85">8 checkpoint backends</text>
+    <text x="342" y="630" text-anchor="middle" font-size="10.5" font-weight="500" fill="#3A2A0F" opacity="0.85">9 checkpoint backends</text>
     <text x="342" y="647" text-anchor="middle" font-size="10.5" font-weight="500" fill="#3A2A0F" opacity="0.78">durable threads · long-term store</text>
   </g>
   <g filter="url(#card-shadow)">

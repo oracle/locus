@@ -62,8 +62,8 @@ agent = Agent(config=AgentConfig(
 ))
 ```
 
-Seven backend implementations, one `Checkpointer` Protocol — Postgres,
-Redis, OCI Bucket, OCI Object Storage, OpenSearch, Oracle ADB,
+Nine backend implementations, one `Checkpointer` Protocol — Oracle ADB,
+OCI Object Storage, Postgres, MySQL, Redis, OpenSearch, HTTP, file, and
 in-memory. The graph snapshots state at every `interrupt()`
 boundary; you can pause for a human Friday afternoon and resume Monday
 morning from a different process, region, or runtime.

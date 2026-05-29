@@ -38,11 +38,12 @@ Three flavours, depending on how you want state stored:
 ## Other backends
 
 When you can't run on Oracle / OCI, the same `BaseCheckpointer`
-contract is implemented for Redis, PostgreSQL, OpenSearch, file
+contract is implemented for Redis, PostgreSQL, MySQL, OpenSearch, file
 system, and an HTTP-API adapter.
 
 ::: locus.memory.backends.RedisBackend
 ::: locus.memory.backends.PostgreSQLBackend
+::: locus.memory.backends.MySQLBackend
 ::: locus.memory.backends.OpenSearchBackend
 ::: locus.memory.backends.FileCheckpointer
 ::: locus.memory.backends.HTTPCheckpointer
@@ -58,5 +59,6 @@ factory functions below are one-line shortcuts.
 ::: locus.memory.backends.adapters.oracle_checkpointer
 ::: locus.memory.backends.adapters.oci_bucket_checkpointer
 ::: locus.memory.backends.adapters.opensearch_checkpointer
+::: locus.memory.backends.adapters.mysql_checkpointer
 ::: locus.memory.backends.adapters.postgresql_checkpointer
 ::: locus.memory.backends.adapters.redis_checkpointer

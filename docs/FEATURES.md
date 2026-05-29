@@ -104,6 +104,7 @@ does, and where to find it.
 | **`OCIBucketBackend`** | OCI-native, lifecycle policies, region replication | `locus.memory.backends.oci_bucket` |
 | `RedisBackend` | Multi-replica, fast, TTLs (OCI Cache with Redis) | `locus.memory.backends.redis` |
 | `PostgreSQLBackend` | Production DB with metadata queries | `locus.memory.backends.postgresql` |
+| `MySQLBackend` | Production MySQL with official async Connector/Python | `locus.memory.backends.mysql` |
 | `OpenSearchBackend` | Full-text search across past runs | `locus.memory.backends.opensearch` |
 | `OracleBackend` | Oracle DB with JSON queries | `locus.memory.backends.oracle` |
 
