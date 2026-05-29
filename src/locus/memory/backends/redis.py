@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel, Field
 
@@ -114,7 +114,9 @@ class RedisBackend(BaseModel):
         """List all thread IDs matching pattern."""
         client = await self._get_client()
         full_pattern = f"{self.config.prefix}{pattern}"
-        keys = await client.keys(full_pattern)
+        # ``decode_responses=True`` (see _get_client) guarantees str keys at
+        # runtime; the redis stub still types ``keys()`` as list[bytes | str].
+        keys = cast("list[str]", await client.keys(full_pattern))
         prefix_len = len(self.config.prefix)
         threads = [k[prefix_len:] for k in keys]
         # Apply offset and limit
