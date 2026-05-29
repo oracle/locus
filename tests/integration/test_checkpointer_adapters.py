@@ -397,6 +397,42 @@ class TestPostgreSQLAdapter:
 
 
 # =============================================================================
+# MySQL Backend Tests (requires MySQL)
+# =============================================================================
+
+
+@pytest.mark.requires_mysql
+class TestMySQLAdapter:
+    """Test MySQL checkpointer adapter."""
+
+    @pytest.fixture
+    async def adapter(self):
+        from locus.memory.backends import mysql_checkpointer
+
+        adapter = mysql_checkpointer(
+            host=os.getenv("MYSQL_HOST", "localhost"),
+            port=int(os.getenv("MYSQL_PORT", "3306")),
+            database=os.getenv("MYSQL_DB", "locus_test"),
+            user=os.getenv("MYSQL_USER", "root"),
+            password=os.getenv("MYSQL_PASSWORD", ""),
+            table_name="test_adapter_checkpoints",
+        )
+        yield adapter
+        await adapter.delete("mysql-thread")
+        await adapter.close()
+
+    @pytest.mark.asyncio
+    async def test_mysql_adapter_roundtrip(self, adapter, sample_state):
+        """MySQL adapter save/load roundtrip."""
+        checkpoint_id = await adapter.save(sample_state, "mysql-thread")
+        assert checkpoint_id is not None
+
+        loaded = await adapter.load("mysql-thread")
+        assert loaded is not None
+        assert loaded.agent_id == sample_state.agent_id
+
+
+# =============================================================================
 # OpenSearch Backend Tests (requires OpenSearch)
 # =============================================================================
 

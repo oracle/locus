@@ -17,7 +17,7 @@ This file targets the remaining gaps:
 - ``list_threads`` signature variations: ``pattern=`` arg, ``limit=`` arg,
   no-arg, plus client-side pattern filter when backend doesn't support it.
 - ``list_with_metadata`` and ``close`` delegation.
-- Each factory function (``redis``, ``postgresql``, ``opensearch``,
+- Each factory function (``redis``, ``postgresql``, ``mysql``, ``opensearch``,
   ``oci_bucket``, ``oracle``) — uses ``sys.modules`` stubs so we don't
   need the real SDK clients.
 """
@@ -406,6 +406,17 @@ def fake_pg_module() -> Any:
 
 
 @pytest.fixture
+def fake_mysql_module() -> Any:
+    class FakeMySQLBackend:
+        def __init__(self, **kw: Any) -> None:
+            self.kwargs = kw
+
+    _stub_module("locus.memory.backends.mysql", MySQLBackend=FakeMySQLBackend)
+    yield FakeMySQLBackend
+    sys.modules.pop("locus.memory.backends.mysql", None)
+
+
+@pytest.fixture
 def fake_os_module() -> Any:
     class FakeOSBackend:
         def __init__(self, **kw: Any) -> None:
@@ -452,6 +463,13 @@ class TestFactoryFunctions:
         cp = postgresql_checkpointer(database="db", user="u", password="p")  # noqa: S106
         assert isinstance(cp, StorageBackendAdapter)
         assert isinstance(cp._backend, fake_pg_module)
+
+    def test_mysql_checkpointer(self, fake_mysql_module: Any) -> None:
+        from locus.memory.backends.adapters import mysql_checkpointer
+
+        cp = mysql_checkpointer(database="db", user="u", password="p")  # noqa: S106
+        assert isinstance(cp, StorageBackendAdapter)
+        assert isinstance(cp._backend, fake_mysql_module)
 
     def test_opensearch_checkpointer(self, fake_os_module: Any) -> None:
         from locus.memory.backends.adapters import opensearch_checkpointer

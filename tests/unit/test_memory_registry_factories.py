@@ -72,6 +72,20 @@ class TestRealFactoryClosures:
         get_checkpointer("postgresql")
         assert "database" not in captured["kwargs"]
 
+    def test_mysql_factory_passes_database(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        if "mysql" not in list_checkpointers():
+            pytest.skip("mysql backend not registered")
+        captured = _patch_adapter(monkeypatch, "mysql_checkpointer")
+        get_checkpointer("mysql:mydb")
+        assert captured["kwargs"]["database"] == "mydb"
+
+    def test_mysql_factory_no_hint(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        if "mysql" not in list_checkpointers():
+            pytest.skip("mysql backend not registered")
+        captured = _patch_adapter(monkeypatch, "mysql_checkpointer")
+        get_checkpointer("mysql")
+        assert "database" not in captured["kwargs"]
+
     def test_opensearch_factory_single_host(self, monkeypatch: pytest.MonkeyPatch) -> None:
         if "opensearch" not in list_checkpointers():
             pytest.skip("opensearch backend not registered")

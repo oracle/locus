@@ -64,6 +64,22 @@ def postgres_available() -> bool:
 
 
 @lru_cache(maxsize=1)
+def mysql_available() -> bool:
+    """Check if MySQL is available and configured."""
+    # Require explicit configuration to avoid connecting to random local mysql
+    host = os.getenv("MYSQL_HOST")
+    user = os.getenv("MYSQL_USER")
+    database = os.getenv("MYSQL_DB")
+
+    # Must have explicit config
+    if not (host and user and database):
+        return False
+
+    port = int(os.getenv("MYSQL_PORT", "3306"))
+    return _check_port(host, port)
+
+
+@lru_cache(maxsize=1)
 def opensearch_available() -> bool:
     """Check if OpenSearch is available and credentials are set."""
     hosts = os.getenv("OPENSEARCH_HOSTS") or os.getenv("OPENSEARCH_URL")
@@ -152,6 +168,11 @@ skip_without_redis = pytest.mark.skipif(
 skip_without_postgres = pytest.mark.skipif(
     not postgres_available(),
     reason="PostgreSQL not available (check POSTGRES_HOST/PORT or start PostgreSQL)",
+)
+
+skip_without_mysql = pytest.mark.skipif(
+    not mysql_available(),
+    reason="MySQL not available (check MYSQL_HOST/PORT or start MySQL)",
 )
 
 skip_without_opensearch = pytest.mark.skipif(
@@ -273,6 +294,7 @@ def service_status():
     return {
         "redis": redis_available(),
         "postgres": postgres_available(),
+        "mysql": mysql_available(),
         "opensearch": opensearch_available(),
         "oci": oci_config_available(),
         "oci_bucket": oci_bucket_available(),
@@ -316,6 +338,7 @@ def pytest_configure(config):
     """Register custom markers."""
     config.addinivalue_line("markers", "requires_redis: test requires Redis")
     config.addinivalue_line("markers", "requires_postgres: test requires PostgreSQL")
+    config.addinivalue_line("markers", "requires_mysql: test requires MySQL")
     config.addinivalue_line("markers", "requires_opensearch: test requires OpenSearch")
     config.addinivalue_line("markers", "requires_oci: test requires OCI config")
     config.addinivalue_line("markers", "requires_oci_bucket: test requires OCI bucket")
@@ -329,6 +352,7 @@ def pytest_collection_modifyitems(config, items):
     marker_map = {
         "requires_redis": skip_without_redis,
         "requires_postgres": skip_without_postgres,
+        "requires_mysql": skip_without_mysql,
         "requires_opensearch": skip_without_opensearch,
         "requires_oci": skip_without_oci,
         "requires_oci_bucket": skip_without_oci_bucket,
@@ -349,6 +373,7 @@ def pytest_report_header(config):
     services = [
         ("Redis", redis_available()),
         ("PostgreSQL", postgres_available()),
+        ("MySQL", mysql_available()),
         ("OpenSearch", opensearch_available()),
         ("OCI GenAI", oci_config_available()),
         ("OCI Bucket", oci_bucket_available()),

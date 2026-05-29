@@ -488,6 +488,36 @@ class TestPostgreSQLFactoryConfigHint:
             _CHECKPOINTERS["postgresql"] = original_factory
 
 
+class TestMySQLFactoryConfigHint:
+    """Tests for MySQL factory config_hint processing."""
+
+    def test_mysql_factory_sets_database(self):
+        """Test mysql factory sets database from hint."""
+        providers = list_checkpointers()
+        if "mysql" not in providers:
+            pytest.skip("MySQL not available")
+
+        original_factory = _CHECKPOINTERS["mysql"]
+        captured_kwargs = {}
+
+        def mock_mysql_checkpointer(**kwargs):
+            captured_kwargs.update(kwargs)
+            return MagicMock()
+
+        def mysql_factory(config_hint=None, **kwargs):
+            if config_hint:
+                kwargs.setdefault("database", config_hint)
+            return mock_mysql_checkpointer(**kwargs)
+
+        _CHECKPOINTERS["mysql"] = mysql_factory
+
+        try:
+            get_checkpointer("mysql:mydb")
+            assert captured_kwargs.get("database") == "mydb"
+        finally:
+            _CHECKPOINTERS["mysql"] = original_factory
+
+
 class TestOracleFactoryConfigHint:
     """Tests for Oracle factory config_hint processing."""
 

@@ -249,6 +249,88 @@ class TestPostgreSQLBackend:
 
 
 # =============================================================================
+# MySQLBackend Tests (requires MySQL)
+# =============================================================================
+
+
+@pytest.mark.requires_mysql
+class TestMySQLBackend:
+    """Test MySQL checkpoint backend."""
+
+    @pytest.fixture
+    async def backend(self):
+        from locus.memory.backends import MySQLBackend
+
+        backend = MySQLBackend(
+            host=os.getenv("MYSQL_HOST", "localhost"),
+            port=int(os.getenv("MYSQL_PORT", "3306")),
+            database=os.getenv("MYSQL_DB", "locus_test"),
+            user=os.getenv("MYSQL_USER", "root"),
+            password=os.getenv("MYSQL_PASSWORD", ""),
+            table_name="test_checkpoints",
+        )
+        yield backend
+        # Cleanup
+        threads = await backend.list_threads()
+        for t in threads:
+            await backend.delete(t)
+        await backend.close()
+
+    @pytest.mark.asyncio
+    async def test_save_and_load(self, backend, sample_data):
+        """Save and load data."""
+        checkpoint_id = await backend.save("thread-1", sample_data)
+        assert checkpoint_id is not None
+
+        loaded = await backend.load("thread-1")
+        assert loaded is not None
+        assert loaded["agent_id"] == sample_data["agent_id"]
+
+    @pytest.mark.asyncio
+    async def test_metadata_storage(self, backend, sample_data):
+        """Save and query by metadata."""
+        await backend.save(
+            "thread-1",
+            sample_data,
+            metadata={"user_id": "user-123", "session": "abc"},
+        )
+        await backend.save(
+            "thread-2",
+            sample_data,
+            metadata={"user_id": "user-123", "session": "def"},
+        )
+        await backend.save(
+            "thread-3",
+            sample_data,
+            metadata={"user_id": "user-456", "session": "ghi"},
+        )
+
+        results = await backend.query_by_metadata("user_id", "user-123")
+        assert len(results) == 2
+
+    @pytest.mark.asyncio
+    async def test_search_data(self, backend, sample_data):
+        """Search by data field."""
+        await backend.save("thread-1", sample_data)
+
+        modified = {**sample_data, "agent_id": "special-agent"}
+        await backend.save("thread-2", modified)
+
+        results = await backend.search_data("agent_id", "special-agent")
+        assert len(results) == 1
+        assert results[0]["thread_id"] == "thread-2"
+
+    @pytest.mark.asyncio
+    async def test_count(self, backend, sample_data):
+        """Count checkpoints."""
+        await backend.save("thread-1", sample_data)
+        await backend.save("thread-2", sample_data)
+
+        count = await backend.count()
+        assert count >= 2
+
+
+# =============================================================================
 # OpenSearchBackend Tests (requires OpenSearch)
 # =============================================================================
 
