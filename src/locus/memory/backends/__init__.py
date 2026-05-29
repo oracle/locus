@@ -10,6 +10,7 @@ Available backends:
 - HTTPCheckpointer: Remote HTTP API storage
 - RedisBackend: Redis key-value store (runs on OCI Cache with Redis)
 - PostgreSQLBackend: PostgreSQL with JSONB (runs on OCI Database with PostgreSQL)
+- MySQLBackend: MySQL with JSON columns
 - OpenSearchBackend: OpenSearch with full-text search (runs on OCI Search with OpenSearch)
 - OCIBucketBackend: OCI Object Storage for cloud deployments
 - OracleBackend: Oracle Database with JSON support
@@ -18,6 +19,7 @@ Usage:
     ```python
     from locus.memory.backends import (
         MemoryCheckpointer,
+        MySQLBackend,
         RedisBackend,
         PostgreSQLBackend,
     )
@@ -28,6 +30,7 @@ Usage:
     # For production (choose based on your infrastructure)
     checkpointer = RedisBackend("redis://localhost:6379")
     checkpointer = PostgreSQLBackend(host="localhost", database="myapp")
+    checkpointer = MySQLBackend(host="localhost", database="myapp")
     checkpointer = OpenSearchBackend(hosts=["localhost:9200"])
     checkpointer = OCIBucketBackend(bucket_name="checkpoints", namespace="myns")
     checkpointer = OracleBackend(dsn="mydb_high", user="admin", password="secret")
@@ -36,6 +39,7 @@ Usage:
 
 from locus.memory.backends.adapters import (
     StorageBackendAdapter,
+    mysql_checkpointer,
     oci_bucket_checkpointer,
     opensearch_checkpointer,
     oracle_checkpointer,
@@ -45,6 +49,7 @@ from locus.memory.backends.adapters import (
 from locus.memory.backends.file import FileCheckpointer
 from locus.memory.backends.http import HTTPCheckpointer
 from locus.memory.backends.memory import MemoryCheckpointer
+from locus.memory.backends.mysql import MySQLBackend
 from locus.memory.backends.oci_bucket import OCIBucketBackend
 from locus.memory.backends.opensearch import OpenSearchBackend
 from locus.memory.backends.oracle import OracleBackend
@@ -60,6 +65,7 @@ __all__ = [
     "HTTPCheckpointer",
     "MemoryCheckpointer",
     # Storage backends (simple dict interface)
+    "MySQLBackend",
     "OCIBucketBackend",
     "OpenSearchBackend",
     "OracleBackend",
@@ -72,6 +78,7 @@ __all__ = [
     "RedisBackend",
     # Adapter and factory functions
     "StorageBackendAdapter",
+    "mysql_checkpointer",
     "oci_bucket_checkpointer",
     "opensearch_checkpointer",
     "oracle_checkpointer",

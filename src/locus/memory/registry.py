@@ -48,6 +48,7 @@ def get_checkpointer(checkpointer_string: str, **kwargs: Any) -> BaseCheckpointe
         - "file:./checkpoints" -> FileCheckpointer(base_dir="./checkpoints")
         - "redis:localhost:6379" -> RedisCheckpointer(url="redis://localhost:6379")
         - "postgresql:mydb" -> PostgreSQLCheckpointer(database="mydb")
+        - "mysql:mydb" -> MySQLCheckpointer(database="mydb")
         - "opensearch" -> OpenSearchCheckpointer()
         - "oci:bucket/namespace" -> OCIBucketCheckpointer(bucket_name="bucket", namespace="namespace")
         - "oracle:mydb" -> OracleCheckpointer(database="mydb")
@@ -152,6 +153,20 @@ def _register_defaults() -> None:
             return postgresql_checkpointer(**kwargs)
 
         register_checkpointer("postgresql", postgresql_factory)
+    except ImportError:
+        pass
+
+    # MySQL (optional)
+    try:
+
+        def mysql_factory(config_hint: str | None = None, **kwargs: Any) -> BaseCheckpointer:
+            from locus.memory.backends.adapters import mysql_checkpointer
+
+            if config_hint:
+                kwargs.setdefault("database", config_hint)
+            return mysql_checkpointer(**kwargs)
+
+        register_checkpointer("mysql", mysql_factory)
     except ImportError:
         pass
 

@@ -18,6 +18,17 @@ if TYPE_CHECKING:
     from locus.core.state import AgentState
 
 
+def _callable_has_parameter(fn: Any, parameter_name: str) -> bool:
+    """Return whether a callable signature includes a parameter, if introspectable."""
+    import inspect
+
+    try:
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return False
+    return parameter_name in sig.parameters
+
+
 class StorageBackendAdapter(BaseCheckpointer):
     """
     Adapter that wraps simple storage backends to implement BaseCheckpointer.
@@ -110,10 +121,7 @@ class StorageBackendAdapter(BaseCheckpointer):
 
         # Save the checkpoint (some backends support metadata parameter)
         save_method = self._backend.save
-        import inspect
-
-        sig = inspect.signature(save_method)
-        if "metadata" in sig.parameters:
+        if _callable_has_parameter(save_method, "metadata"):
             await save_method(storage_key, data, metadata=metadata)
         else:
             await save_method(storage_key, data)
@@ -382,15 +390,12 @@ class StorageBackendAdapter(BaseCheckpointer):
 
         # Backend might have different signature
         if hasattr(self._backend, "list_threads"):
-            import inspect
-
-            sig = inspect.signature(self._backend.list_threads)
-            if "pattern" in sig.parameters:
+            if _callable_has_parameter(self._backend.list_threads, "pattern"):
                 with_pattern: list[str] = await self._backend.list_threads(
                     pattern=pattern, limit=limit
                 )
                 return with_pattern
-            if "limit" in sig.parameters:
+            if _callable_has_parameter(self._backend.list_threads, "limit"):
                 threads: list[str] = await self._backend.list_threads(limit=limit)
             else:
                 threads = await self._backend.list_threads()
@@ -497,6 +502,55 @@ def postgresql_checkpointer(
     from locus.memory.backends.postgresql import PostgreSQLBackend
 
     backend = PostgreSQLBackend(
+        host=host,
+        port=port,
+        database=database,
+        user=user,
+        password=password,
+        dsn=dsn,
+        **kwargs,
+    )
+    return StorageBackendAdapter(backend)
+
+
+def mysql_checkpointer(
+    host: str = "localhost",
+    port: int = 3306,
+    database: str = "locus",
+    user: str = "root",
+    password: str = "",
+    dsn: str | None = None,
+    **kwargs: Any,
+) -> StorageBackendAdapter:
+    """
+    Create a MySQL-backed checkpointer.
+
+    Args:
+        host: MySQL host
+        port: MySQL port
+        database: Database name
+        user: Database user
+        password: Database password
+        dsn: Connection string (overrides other params)
+        **kwargs: Additional MySQLBackend options
+
+    Returns:
+        StorageBackendAdapter wrapping MySQLBackend
+
+    Capabilities:
+        - search: Yes (via search_data)
+        - metadata_query: Yes (via query_by_metadata)
+        - vacuum: Yes
+        - list_threads: Yes
+        - persistent_checkpoint_ids: Yes
+
+    Example:
+        >>> checkpointer = mysql_checkpointer(database="myapp")
+        >>> agent = Agent(model=model, checkpointer=checkpointer)
+    """
+    from locus.memory.backends.mysql import MySQLBackend
+
+    backend = MySQLBackend(
         host=host,
         port=port,
         database=database,
