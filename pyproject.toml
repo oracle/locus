@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "locus-sdk"
-version = "0.2.0b23"
+version = "0.2.0b24"
 description = "Multi-agent workflows for Python — stream them, branch them, pause for a human, resume next week. Built on Oracle Generative AI."
 readme = "README.md"
 license = "UPL-1.0"

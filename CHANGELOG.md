@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [0.2.0b24] - 2026-05-28
+
 ### Fixed — OCI instance/resource-principal auth rots in long-lived processes
 
 The OCI V1 (`OCIChatCompletionsModel`) and Responses
@@ -36,6 +38,12 @@ reference:
   that to `do_request_sign`, matching the object the OCI signer is
   written and tested against (closes a latent header/`path_url`
   divergence). `requests` is already a transitive `oci` dependency.
+
+### Fixed — `RedisCheckpointBackend.list_threads` return type
+
+Cast `keys()` to `list[str]` (the client sets `decode_responses=True`, so
+keys are `str` at runtime), fixing a mypy `[return-value]` error a newer
+`redis` stub surfaced.
 
 ## [0.2.0b23] - 2026-05-28
 
