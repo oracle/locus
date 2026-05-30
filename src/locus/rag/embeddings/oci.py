@@ -86,7 +86,33 @@ class OCIEmbeddingConfig(BaseModel):
     )
     input_type: str = Field(
         default="SEARCH_DOCUMENT",
-        description="Input type: SEARCH_DOCUMENT, SEARCH_QUERY, CLASSIFICATION, CLUSTERING",
+        description=(
+            "Input type for embed / embed_batch / embed_documents: "
+            "SEARCH_DOCUMENT, SEARCH_QUERY, CLASSIFICATION, CLUSTERING"
+        ),
+    )
+    query_input_type: str = Field(
+        default="SEARCH_QUERY",
+        description=(
+            "Input type used by embed_query. Defaults to SEARCH_QUERY for "
+            "Cohere asymmetric retrieval (query and document embeddings live "
+            "in the same space but are optimised differently). Pin it to the "
+            "same value as input_type if a deployment ever ties output "
+            "dimension or handling to input_type. See issue #292."
+        ),
+    )
+    output_dimensions: int | None = Field(
+        default=None,
+        description=(
+            "Explicit output embedding dimension (Cohere Matryoshka). "
+            "cohere.embed-v4.0 supports 256/512/1024/1536 and returns the "
+            "requested size; left unset, OCI's server-side default applies "
+            "(1536 for v4 today). Pin this to keep every embed / embed_query "
+            "/ embed_documents call — and the stored vector column — on the "
+            "same dimension regardless of the server default. Models without "
+            "Matryoshka support (e.g. embed-v3.0, fixed 1024) ignore it. "
+            "See issue #292."
+        ),
     )
 
 
@@ -151,7 +177,8 @@ class OCIEmbeddings(BaseModel, BaseEmbedding):
         default. The OCI Cohere family covers 384/1024/1536-dim variants.
         """
         dimension = (
-            self._detected_dimension
+            self.oci_config.output_dimensions
+            or self._detected_dimension
             or MODEL_DIMENSION_HINTS.get(self.oci_config.model_id)
             or DEFAULT_DIMENSION
         )
@@ -308,6 +335,28 @@ class OCIEmbeddings(BaseModel, BaseEmbedding):
             if first:
                 self._detected_dimension = len(first)
 
+    def _build_embed_details(self, inputs: list[str], input_type: str) -> Any:
+        """Build an ``EmbedTextDetails`` shared by every embed path.
+
+        ``output_dimensions`` is only attached when the caller set it, so
+        models without Matryoshka support never see the field. See #292.
+        """
+        from oci.generative_ai_inference.models import (
+            EmbedTextDetails,
+            OnDemandServingMode,
+        )
+
+        kwargs: dict[str, Any] = {
+            "inputs": inputs,
+            "serving_mode": OnDemandServingMode(model_id=self.oci_config.model_id),
+            "compartment_id": self._get_compartment_id(),
+            "truncate": self.oci_config.truncate,
+            "input_type": input_type,
+        }
+        if self.oci_config.output_dimensions is not None:
+            kwargs["output_dimensions"] = self.oci_config.output_dimensions
+        return EmbedTextDetails(**kwargs)
+
     async def embed(self, text: str) -> EmbeddingResult:
         """Embed a single text."""
         results = await self.embed_batch([text])
@@ -315,20 +364,9 @@ class OCIEmbeddings(BaseModel, BaseEmbedding):
 
     async def embed_batch(self, texts: list[str]) -> list[EmbeddingResult]:
         """Embed multiple texts."""
-        from oci.generative_ai_inference.models import (
-            EmbedTextDetails,
-            OnDemandServingMode,
-        )
-
         client = await self._get_client()
 
-        embed_details = EmbedTextDetails(
-            inputs=texts,
-            serving_mode=OnDemandServingMode(model_id=self.oci_config.model_id),
-            compartment_id=self._get_compartment_id(),
-            truncate=self.oci_config.truncate,
-            input_type=self.oci_config.input_type,
-        )
+        embed_details = self._build_embed_details(texts, self.oci_config.input_type)
 
         response = client.embed_text(embed_details)
         embeddings = response.data.embeddings
@@ -350,25 +388,13 @@ class OCIEmbeddings(BaseModel, BaseEmbedding):
     async def embed_query(self, query: str) -> EmbeddingResult:
         """Embed a query for retrieval.
 
-        Uses SEARCH_QUERY input type for Cohere models.
+        Uses ``query_input_type`` (default ``SEARCH_QUERY``) instead of
+        hardcoding it, so callers can pin query and document embeddings to
+        the same input_type when needed. See issue #292.
         """
-        # Temporarily set input type for query
-        original_type = self.oci_config.input_type
-        # Note: Can't modify frozen config, so we handle this differently
-        from oci.generative_ai_inference.models import (
-            EmbedTextDetails,
-            OnDemandServingMode,
-        )
-
         client = await self._get_client()
 
-        embed_details = EmbedTextDetails(
-            inputs=[query],
-            serving_mode=OnDemandServingMode(model_id=self.oci_config.model_id),
-            compartment_id=self._get_compartment_id(),
-            truncate=self.oci_config.truncate,
-            input_type="SEARCH_QUERY",  # Query-specific
-        )
+        embed_details = self._build_embed_details([query], self.oci_config.query_input_type)
 
         response = client.embed_text(embed_details)
         self._record_dimension(response.data.embeddings)
@@ -383,13 +409,8 @@ class OCIEmbeddings(BaseModel, BaseEmbedding):
     async def embed_documents(self, documents: list[str]) -> list[EmbeddingResult]:
         """Embed documents for storage.
 
-        Uses SEARCH_DOCUMENT input type for Cohere models.
+        Uses ``input_type`` (default ``SEARCH_DOCUMENT``) from config.
         """
-        from oci.generative_ai_inference.models import (
-            EmbedTextDetails,
-            OnDemandServingMode,
-        )
-
         client = await self._get_client()
 
         # Process in batches
@@ -399,13 +420,7 @@ class OCIEmbeddings(BaseModel, BaseEmbedding):
         for i in range(0, len(documents), batch_size):
             batch = documents[i : i + batch_size]
 
-            embed_details = EmbedTextDetails(
-                inputs=batch,
-                serving_mode=OnDemandServingMode(model_id=self.oci_config.model_id),
-                compartment_id=self._get_compartment_id(),
-                truncate=self.oci_config.truncate,
-                input_type="SEARCH_DOCUMENT",  # Document-specific
-            )
+            embed_details = self._build_embed_details(batch, self.oci_config.input_type)
 
             response = client.embed_text(embed_details)
             self._record_dimension(response.data.embeddings)

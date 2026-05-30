@@ -141,6 +141,8 @@ class TestConfigAndCapabilities:
         assert cfg.model_id == OCIEmbeddingModel.COHERE_EMBED_ENGLISH_V3.value
         assert cfg.profile_name == "DEFAULT"
         assert cfg.input_type == "SEARCH_DOCUMENT"
+        assert cfg.query_input_type == "SEARCH_QUERY"
+        assert cfg.output_dimensions is None
         assert cfg.truncate == "END"
         assert cfg.compartment_id == ""
 
@@ -319,8 +321,18 @@ class TestEmbedQuery:
         probes = _stub_oci_modules(monkeypatch, embeddings=[[0.0] * 1024])
         m = OCIEmbeddings()
         await m.embed_query("what is locus")
-        # Last embed_text call uses ``SEARCH_QUERY``.
+        # Default ``query_input_type`` is ``SEARCH_QUERY``.
         assert probes["embed_text_calls"][-1].input_type == "SEARCH_QUERY"
+
+    @pytest.mark.asyncio
+    async def test_query_input_type_is_configurable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # issue #292: embed_query must honor query_input_type, not hardcode
+        # SEARCH_QUERY. Pinning it to SEARCH_DOCUMENT lets cohere.embed-v4.0
+        # queries match a SEARCH_DOCUMENT-indexed (1536-dim) table.
+        probes = _stub_oci_modules(monkeypatch, embeddings=[[0.0] * 1536])
+        m = OCIEmbeddings(query_input_type="SEARCH_DOCUMENT")
+        await m.embed_query("luxury hotels in Greece")
+        assert probes["embed_text_calls"][-1].input_type == "SEARCH_DOCUMENT"
 
 
 class TestEmbedDocuments:
@@ -330,6 +342,46 @@ class TestEmbedDocuments:
         m = OCIEmbeddings()
         await m.embed_documents(["doc1"])
         assert probes["embed_text_calls"][-1].input_type == "SEARCH_DOCUMENT"
+
+    @pytest.mark.asyncio
+    async def test_input_type_is_configurable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # issue #292: embed_documents reads input_type from config rather than
+        # hardcoding SEARCH_DOCUMENT.
+        probes = _stub_oci_modules(monkeypatch, embeddings=[[0.0] * 1024])
+        m = OCIEmbeddings(input_type="CLASSIFICATION")
+        await m.embed_documents(["doc1"])
+        assert probes["embed_text_calls"][-1].input_type == "CLASSIFICATION"
+
+
+class TestOutputDimensions:
+    """issue #292: Cohere v4 is Matryoshka — output_dimensions controls the
+    returned dimension. Locus must let callers pin it so every embed path
+    (and the stored vector column) stays on one dimension regardless of OCI's
+    server-side default."""
+
+    @pytest.mark.asyncio
+    async def test_omitted_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Unset → field never attached, so non-Matryoshka models never see it.
+        probes = _stub_oci_modules(monkeypatch, embeddings=[[0.0] * 1536])
+        m = OCIEmbeddings(model_id="cohere.embed-v4.0")
+        await m.embed("hello")
+        assert not hasattr(probes["embed_text_calls"][-1], "output_dimensions")
+
+    @pytest.mark.asyncio
+    async def test_forwarded_on_every_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        probes = _stub_oci_modules(monkeypatch, embeddings=[[0.0] * 1024])
+        m = OCIEmbeddings(model_id="cohere.embed-v4.0", output_dimensions=1024)
+        await m.embed("a")
+        await m.embed_query("q")
+        await m.embed_documents(["d"])
+        # embed (via embed_batch), embed_query, embed_documents all pin 1024.
+        assert [c.output_dimensions for c in probes["embed_text_calls"]] == [1024, 1024, 1024]
+
+    def test_config_dimension_reflects_output_dimensions(self) -> None:
+        # The vector store sizes its column from config.dimension; an explicit
+        # output_dimensions must win over the model hint (v4 hint is 1536).
+        m = OCIEmbeddings(model_id="cohere.embed-v4.0", output_dimensions=1024)
+        assert m.config.dimension == 1024
 
     @pytest.mark.asyncio
     async def test_batches_when_inputs_exceed_batch_size(
