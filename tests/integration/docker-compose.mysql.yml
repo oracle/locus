@@ -8,7 +8,7 @@ services:
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-locus}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-locus-root}
     ports:
-    - ${MYSQL_PORT:-3306}:3306
+    - 127.0.0.1:${MYSQL_PORT:-3306}:3306
     healthcheck:
       test: [CMD-SHELL, 'mysqladmin ping -h 127.0.0.1 -u$${MYSQL_USER} -p$${MYSQL_PASSWORD} --silent']
       interval: 5s
