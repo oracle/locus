@@ -8,6 +8,34 @@ policy.
 
 ## [Unreleased]
 
+## [0.2.0b26] - 2026-05-30
+
+### Fixed — OCI embedding dimension now deterministic (`output_dimensions`)
+
+`OCIEmbeddings` left the embedding dimension to OCI's implicit server-side
+default. For `cohere.embed-v4.0` — which is Matryoshka and returns exactly
+the requested `output_dimensions` (256/512/1024/1536), defaulting to 1536 —
+a vector column indexed at one dimension (e.g. by an ingestion pipeline or an
+earlier default) and queried at another raised `ORA-51803` ("Vector dimension
+count must match …") at search time. Verified against live OCI: `input_type`
+(`SEARCH_QUERY` vs `SEARCH_DOCUMENT`) does **not** change the output dimension
+— it's `output_dimensions` (closes #292).
+
+- Added `OCIEmbeddingConfig.output_dimensions` (default `None`), forwarded to
+  `EmbedTextDetails` on every embed path via a shared `_build_embed_details`
+  helper and **only when set**, so non-Matryoshka models (e.g. embed-v3.0,
+  fixed 1024) never receive the field.
+- `config.dimension` now prefers `output_dimensions`, so the vector store
+  sizes its column to match the embeddings being produced.
+
+### Fixed — `OCIEmbeddings` honors configured `input_type`
+
+`embed_query()` hardcoded `input_type="SEARCH_QUERY"` (ignoring config) and
+`embed_documents()` hardcoded `SEARCH_DOCUMENT`. Added
+`OCIEmbeddingConfig.query_input_type` (default `SEARCH_QUERY`) and made both
+methods read from config; removed a dead `original_type` local and an
+incorrect "frozen config" comment in `embed_query`.
+
 ## [0.2.0b25] - 2026-05-30
 
 ### Fixed — explicit `wallet_password=""` dropped for auto-login wallets
@@ -1617,7 +1645,8 @@ First internal-review version. Core shape established:
 - Observability: OpenTelemetry spans and metrics, structured logging.
 - Streaming: `AsyncIterator[LocusEvent]`, SSE, console handler.
 
-[Unreleased]: https://github.com/oracle-samples/locus/compare/v0.2.0b25...main
+[Unreleased]: https://github.com/oracle-samples/locus/compare/v0.2.0b26...main
+[0.2.0b26]: https://github.com/oracle-samples/locus/compare/v0.2.0b25...v0.2.0b26
 [0.2.0b25]: https://github.com/oracle-samples/locus/compare/v0.2.0b24...v0.2.0b25
 [0.2.0b10]: https://github.com/oracle-samples/locus/compare/v0.2.0b9...v0.2.0b10
 [0.2.0b9]: https://github.com/oracle-samples/locus/compare/v0.2.0b7...v0.2.0b9
