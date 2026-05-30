@@ -8,6 +8,29 @@ policy.
 
 ## [Unreleased]
 
+## [0.2.0b25] - 2026-05-30
+
+### Fixed — explicit `wallet_password=""` dropped for auto-login wallets
+
+Every Oracle pool builder converts `wallet_password` to
+`pydantic.SecretStr` and gated forwarding it to
+`oracledb.create_pool_async` with a truthy check
+(`if cfg.wallet_password:`). In Pydantic v2 `SecretStr("")` is **falsy**,
+so an explicit `wallet_password=""` — the documented python-oracledb
+idiom for an auto-login (`cwallet.sso`) wallet — was silently dropped.
+The thin driver then fell through to the encrypted `ewallet.pem` path
+and failed at connection time with `DPY-6005` / `OSError: [Errno 22]`
+(prompting for a PEM passphrase on a TTY); deployments using a real
+vault-supplied wallet password were unaffected, which is why this only
+bit auto-login setups (closes #289).
+
+The guard is now `is not None` across all seven pool builders
+(`memory/backends/oracle.py`, `memory/backends/oracle_versioned.py`,
+`memory/store_backends/oracle.py`, `rag/embeddings/oracle_indb.py`,
+`rag/chunkers/oracle_indb.py`, `rag/stores/oracle.py`,
+`rag/loaders/oracle.py`): an omitted password (`None`) is still skipped,
+while an explicit `""` is forwarded.
+
 ## [0.2.0b24] - 2026-05-28
 
 ### Fixed — OCI instance/resource-principal auth rots in long-lived processes
@@ -1594,7 +1617,8 @@ First internal-review version. Core shape established:
 - Observability: OpenTelemetry spans and metrics, structured logging.
 - Streaming: `AsyncIterator[LocusEvent]`, SSE, console handler.
 
-[Unreleased]: https://github.com/oracle-samples/locus/compare/v0.2.0b10...main
+[Unreleased]: https://github.com/oracle-samples/locus/compare/v0.2.0b25...main
+[0.2.0b25]: https://github.com/oracle-samples/locus/compare/v0.2.0b24...v0.2.0b25
 [0.2.0b10]: https://github.com/oracle-samples/locus/compare/v0.2.0b9...v0.2.0b10
 [0.2.0b9]: https://github.com/oracle-samples/locus/compare/v0.2.0b7...v0.2.0b9
 [0.2.0b8]: https://github.com/oracle-samples/locus/compare/v0.2.0b7...v0.2.0b9
