@@ -66,12 +66,14 @@ def postgres_available() -> bool:
 @lru_cache(maxsize=1)
 def mysql_available() -> bool:
     """Check if MySQL is available and configured."""
-    # Require explicit configuration to avoid connecting to random local mysql
-    host = os.getenv("MYSQL_HOST")
-    user = os.getenv("MYSQL_USER")
-    database = os.getenv("MYSQL_DB")
+    # Require an explicit opt-in to avoid connecting to random local mysql.
+    if os.getenv("LOCUS_MYSQL_INTEGRATION") != "1":
+        return False
 
-    # Must have explicit config
+    host = os.getenv("MYSQL_HOST", "localhost")
+    user = os.getenv("MYSQL_USER", "locus")
+    database = os.getenv("MYSQL_DB", "locus_test")
+
     if not (host and user and database):
         return False
 
@@ -172,7 +174,10 @@ skip_without_postgres = pytest.mark.skipif(
 
 skip_without_mysql = pytest.mark.skipif(
     not mysql_available(),
-    reason="MySQL not available (check MYSQL_HOST/PORT or start MySQL)",
+    reason=(
+        "MySQL integration tests are opt-in "
+        "(set LOCUS_MYSQL_INTEGRATION=1 and MYSQL_HOST/PORT or start MySQL)"
+    ),
 )
 
 skip_without_opensearch = pytest.mark.skipif(

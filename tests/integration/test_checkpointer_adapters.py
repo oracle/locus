@@ -413,8 +413,8 @@ class TestMySQLAdapter:
             host=os.getenv("MYSQL_HOST", "localhost"),
             port=int(os.getenv("MYSQL_PORT", "3306")),
             database=os.getenv("MYSQL_DB", "locus_test"),
-            user=os.getenv("MYSQL_USER", "root"),
-            password=os.getenv("MYSQL_PASSWORD", ""),
+            user=os.getenv("MYSQL_USER", "locus"),
+            password=os.getenv("MYSQL_PASSWORD", "locus"),
             table_name="test_adapter_checkpoints",
         )
         yield adapter

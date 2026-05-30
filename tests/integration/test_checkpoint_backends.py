@@ -265,9 +265,11 @@ class TestMySQLBackend:
             host=os.getenv("MYSQL_HOST", "localhost"),
             port=int(os.getenv("MYSQL_PORT", "3306")),
             database=os.getenv("MYSQL_DB", "locus_test"),
-            user=os.getenv("MYSQL_USER", "root"),
-            password=os.getenv("MYSQL_PASSWORD", ""),
+            user=os.getenv("MYSQL_USER", "locus"),
+            password=os.getenv("MYSQL_PASSWORD", "locus"),
             table_name="test_checkpoints",
+            min_pool_size=0,
+            max_pool_size=5,
         )
         yield backend
         # Cleanup
@@ -328,6 +330,51 @@ class TestMySQLBackend:
 
         count = await backend.count()
         assert count >= 2
+
+    @pytest.mark.asyncio
+    async def test_delete(self, backend, sample_data):
+        """Delete saved checkpoint."""
+        await backend.save("delete-thread", sample_data)
+
+        assert await backend.exists("delete-thread")
+        assert await backend.delete("delete-thread")
+        assert not await backend.exists("delete-thread")
+        assert await backend.load("delete-thread") is None
+
+    @pytest.mark.asyncio
+    async def test_list_threads(self, backend, sample_data):
+        """List saved thread IDs."""
+        await backend.save("mysql-list-1", sample_data)
+        await backend.save("mysql-list-2", sample_data)
+
+        threads = await backend.list_threads(pattern="mysql-list-%")
+
+        assert {"mysql-list-1", "mysql-list-2"}.issubset(set(threads))
+
+    @pytest.mark.asyncio
+    async def test_vacuum(self, backend, sample_data):
+        """Remove stale checkpoints."""
+        await backend.save("vacuum-thread", sample_data)
+
+        deleted = await backend.vacuum(older_than_days=-1)
+
+        assert deleted >= 1
+        assert await backend.load("vacuum-thread") is None
+
+    @pytest.mark.asyncio
+    async def test_concurrent_writes(self, backend, sample_data):
+        """Handle concurrent writes across multiple threads."""
+        thread_ids = [f"mysql-concurrent-{i}" for i in range(20)]
+
+        async def save_thread(thread_id: str) -> str:
+            payload = {**sample_data, "agent_id": thread_id}
+            return await backend.save(thread_id, payload)
+
+        checkpoint_ids = await asyncio.gather(*(save_thread(t) for t in thread_ids))
+
+        assert len(set(checkpoint_ids)) == len(thread_ids)
+        loaded = await asyncio.gather(*(backend.load(t) for t in thread_ids))
+        assert {item["agent_id"] for item in loaded if item is not None} == set(thread_ids)
 
 
 # =============================================================================
