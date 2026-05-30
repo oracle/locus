@@ -253,7 +253,7 @@ features = [
     "dev",
     "openai", "anthropic", "ollama", "oci",
     "telemetry", "mcp", "server",
-    "redis", "postgresql", "opensearch", "oracledb",
+    "redis", "postgresql", "mysql", "opensearch", "oracledb",
     "pgvector",
 ]
 
