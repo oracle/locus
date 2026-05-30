@@ -117,7 +117,11 @@ class OracleBackend(BaseModel):
             if self.config.wallet_location:
                 params["config_dir"] = self.config.wallet_location
                 params["wallet_location"] = self.config.wallet_location
-                if self.config.wallet_password:
+                # ``is not None`` (not truthiness): SecretStr("") is falsy in
+                # Pydantic v2, and "" is the python-oracledb idiom for an
+                # auto-login (cwallet.sso) wallet — a truthy guard would drop
+                # it and force the encrypted ewallet.pem path. See issue #289.
+                if self.config.wallet_password is not None:
                     params["wallet_password"] = self.config.wallet_password.get_secret_value()
 
             return oracledb.create_pool_async(

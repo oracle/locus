@@ -158,7 +158,9 @@ class OracleInDBChunker(BaseModel):
         if cfg.wallet_location:
             params["config_dir"] = cfg.wallet_location
             params["wallet_location"] = cfg.wallet_location
-            if cfg.wallet_password:
+            # ``is not None``: SecretStr("") is falsy in Pydantic v2, but
+            # "" is the auto-login (cwallet.sso) wallet idiom. See #289.
+            if cfg.wallet_password is not None:
                 params["wallet_password"] = cfg.wallet_password.get_secret_value()
 
         dsn = cfg.dsn

@@ -233,7 +233,9 @@ class OracleADBLoader(BaseModel):
             if self.config.wallet_location:
                 params["config_dir"] = self.config.wallet_location
                 params["wallet_location"] = self.config.wallet_location
-                if self.config.wallet_password:
+                # ``is not None``: SecretStr("") is falsy in Pydantic v2, but
+                # "" is the auto-login (cwallet.sso) wallet idiom. See #289.
+                if self.config.wallet_password is not None:
                     params["wallet_password"] = self.config.wallet_password.get_secret_value()
 
             # create_pool_async returns the pool directly (the "async"
