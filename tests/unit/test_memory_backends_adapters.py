@@ -26,12 +26,13 @@ from __future__ import annotations
 
 import sys
 import types
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from locus.memory.backends.adapters import StorageBackendAdapter
+from locus.memory.backends.adapters import StorageBackendAdapter, _callable_has_parameter
 
 
 # ---------------------------------------------------------------------------
@@ -89,6 +90,39 @@ class TestSaveMetadataKwargBranch:
         first_key, _first_data, first_meta = backend.calls[0]
         assert first_key.startswith("t1:")
         assert first_meta == {"tag": "x"}
+
+
+class TestCallableHasParameter:
+    def test_uninspectable_callable_returns_false(self) -> None:
+        assert _callable_has_parameter(42, "metadata") is False
+
+
+class TestUpdateCheckpointIndex:
+    @pytest.mark.asyncio
+    async def test_existing_index_replaces_duplicate_and_sorts_newest_first(self) -> None:
+        backend = MagicMock()
+        backend.load = AsyncMock(
+            return_value={
+                "checkpoints": [
+                    {"checkpoint_id": "cp-old", "timestamp": "2026-01-01T00:00:00+00:00"},
+                    {"checkpoint_id": "cp-1", "timestamp": "2026-01-02T00:00:00+00:00"},
+                ]
+            }
+        )
+        backend.save = AsyncMock()
+        adapter = StorageBackendAdapter(backend)
+
+        await adapter._update_checkpoint_index(
+            "t1",
+            "cp-1",
+            timestamp=datetime(2026, 1, 3, tzinfo=UTC),
+        )
+
+        saved_index = backend.save.await_args.args[1]
+        assert [cp["checkpoint_id"] for cp in saved_index["checkpoints"]] == [
+            "cp-1",
+            "cp-old",
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -278,6 +312,36 @@ class TestCopyThread:
         adapter = StorageBackendAdapter(backend)
         ok = await adapter.copy_thread("nonexistent", "dst")
         assert ok is False
+
+    @pytest.mark.asyncio
+    async def test_copy_thread_skips_missing_checkpoint_state(self) -> None:
+        backend = MagicMock()
+        backend.copy_thread = AsyncMock(return_value=True)
+        backend.load = AsyncMock(
+            side_effect=lambda key: (
+                {"checkpoints": [{"checkpoint_id": "cp1"}]}
+                if key.endswith("_checkpoints")
+                else None
+            )
+        )
+        adapter = StorageBackendAdapter(backend)
+
+        ok = await adapter.copy_thread("src", "dst")
+
+        assert ok is True
+        backend.save.assert_not_called()
+
+
+class TestDelete:
+    @pytest.mark.asyncio
+    async def test_delete_all_keeps_deleted_false_when_checkpoint_delete_misses(self) -> None:
+        backend = MagicMock()
+        backend.load = AsyncMock(return_value={"checkpoints": [{"checkpoint_id": "cp1"}]})
+        backend.delete = AsyncMock(return_value=False)
+        backend.exists = AsyncMock(return_value=False)
+        adapter = StorageBackendAdapter(backend)
+
+        assert await adapter.delete("t1") is False
 
 
 # ---------------------------------------------------------------------------
