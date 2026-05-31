@@ -19,6 +19,7 @@ Coverage mirrors the PostgreSQL backend tests:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 import types
@@ -27,7 +28,13 @@ from typing import Any
 
 import pytest
 
-from locus.memory.backends.mysql import MySQLBackend, MySQLConfig
+from locus.memory.backends.mysql import (
+    MySQLBackend,
+    MySQLConfig,
+    _decode_json,
+    _MySQLConnectionPool,
+    _parse_dsn,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -144,6 +151,64 @@ class TestConfig:
         assert backend.config.port == 3307
         assert backend.config.database == "mydb"
         assert backend.config.password.get_secret_value() == "p"
+
+
+class TestHelpers:
+    def test_decode_json_handles_none_bytes_and_native_values(self) -> None:
+        assert _decode_json(None) is None
+        assert _decode_json(b'{"x": 1}') == {"x": 1}
+        native = {"already": "decoded"}
+        assert _decode_json(native) is native
+
+    def test_parse_dsn_rejects_non_mysql_scheme(self) -> None:
+        with pytest.raises(ValueError, match="mysql://"):
+            _parse_dsn("postgresql://u:p@h/db")
+
+    def test_parse_dsn_accepts_minimal_mysql_url_and_query_options(self) -> None:
+        parsed = _parse_dsn("mysql+connector:///?ssl_disabled=true&charset=utf8mb4")
+        assert parsed == {"ssl_disabled": "true", "charset": "utf8mb4"}
+
+
+class TestConnectionPool:
+    def test_rejects_invalid_pool_sizes(self) -> None:
+        with pytest.raises(ValueError, match="min_pool_size"):
+            _MySQLConnectionPool(MySQLConfig(min_pool_size=-1))
+        with pytest.raises(ValueError, match="max_pool_size"):
+            _MySQLConnectionPool(MySQLConfig(max_pool_size=0))
+        with pytest.raises(ValueError, match="min_pool_size must be <="):
+            _MySQLConnectionPool(MySQLConfig(min_pool_size=2, max_pool_size=1))
+
+    @pytest.mark.asyncio
+    async def test_acquire_rejects_closed_pool(self) -> None:
+        pool = _MySQLConnectionPool(MySQLConfig(min_pool_size=0))
+        await pool.close()
+        with pytest.raises(RuntimeError, match="closed"):
+            async with pool.acquire():
+                pass
+
+    @pytest.mark.asyncio
+    async def test_acquire_closes_connection_if_pool_closes_during_context(self) -> None:
+        conn = _StubConn()
+        pool = _MySQLConnectionPool(MySQLConfig(min_pool_size=0))
+        await pool._available.put(conn)
+
+        async with pool.acquire():
+            pool._closed = True
+
+        assert conn.closed is True
+
+    @pytest.mark.asyncio
+    async def test_acquire_waits_when_pool_is_at_capacity(self) -> None:
+        conn = _StubConn()
+        pool = _MySQLConnectionPool(MySQLConfig(min_pool_size=0, max_pool_size=1))
+        pool._created = 1
+
+        task = asyncio.create_task(pool._acquire())
+        await asyncio.sleep(0)
+        assert not task.done()
+
+        await pool._available.put(conn)
+        assert await task is conn
 
 
 # ---------------------------------------------------------------------------
