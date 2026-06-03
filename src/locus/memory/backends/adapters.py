@@ -52,6 +52,15 @@ class StorageBackendAdapter(BaseCheckpointer):
         >>>
         >>> # Use with Agent
         >>> agent = Agent(model=model, checkpointer=checkpointer)
+
+    Concurrency:
+        The ``{thread}:_checkpoints`` index is updated under a per-thread
+        ``asyncio.Lock``, so concurrent saves/removals to the same thread are
+        safe *within a single process*. The lock is per adapter instance and
+        does NOT serialize separate processes sharing one store, so
+        cross-process writes to the same thread can still drop index entries.
+        Making that case safe requires backend-native atomic index updates;
+        tracked in issue #301.
     """
 
     def __init__(self, backend: Any) -> None:
