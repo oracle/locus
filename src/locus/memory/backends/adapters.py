@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
@@ -62,6 +63,18 @@ class StorageBackendAdapter(BaseCheckpointer):
         """
         self._backend = backend
         self._capabilities_cache: CheckpointerCapabilities | None = None
+        # Per-thread locks serializing the read-modify-write of the checkpoint
+        # index (`{thread}:_checkpoints`). Without this, concurrent saves to the
+        # same thread interleave load/save and silently drop index entries.
+        self._index_locks: dict[str, asyncio.Lock] = {}
+
+    def _index_lock(self, thread_id: str) -> asyncio.Lock:
+        """Get (or lazily create) the index lock for a thread."""
+        lock = self._index_locks.get(thread_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._index_locks[thread_id] = lock
+        return lock
 
     @property
     def capabilities(self) -> CheckpointerCapabilities:
@@ -136,33 +149,38 @@ class StorageBackendAdapter(BaseCheckpointer):
         """Update the persistent checkpoint index."""
         index_key = f"{thread_id}:_checkpoints"
 
-        # Load existing index
-        existing = await self._backend.load(index_key)
-        if existing is None:
-            existing = {"checkpoints": []}
+        # Serialize the read-modify-write so concurrent saves to the same
+        # thread cannot clobber each other's index entries.
+        async with self._index_lock(thread_id):
+            # Load existing index
+            existing = await self._backend.load(index_key)
+            if existing is None:
+                existing = {"checkpoints": []}
 
-        # Remove duplicate if exists (update case)
-        existing["checkpoints"] = [
-            cp for cp in existing.get("checkpoints", []) if cp.get("checkpoint_id") != checkpoint_id
-        ]
+            # Remove duplicate if exists (update case)
+            existing["checkpoints"] = [
+                cp
+                for cp in existing.get("checkpoints", [])
+                if cp.get("checkpoint_id") != checkpoint_id
+            ]
 
-        # Add new/updated checkpoint
-        existing["checkpoints"].append(
-            {
-                "checkpoint_id": checkpoint_id,
-                "timestamp": timestamp.isoformat(),
-                "metadata": metadata or {},
-            }
-        )
+            # Add new/updated checkpoint
+            existing["checkpoints"].append(
+                {
+                    "checkpoint_id": checkpoint_id,
+                    "timestamp": timestamp.isoformat(),
+                    "metadata": metadata or {},
+                }
+            )
 
-        # Sort by timestamp (newest first)
-        existing["checkpoints"].sort(
-            key=lambda x: x.get("timestamp", ""),
-            reverse=True,
-        )
+            # Sort by timestamp (newest first)
+            existing["checkpoints"].sort(
+                key=lambda x: x.get("timestamp", ""),
+                reverse=True,
+            )
 
-        # Save updated index
-        await self._backend.save(index_key, existing)
+            # Save updated index
+            await self._backend.save(index_key, existing)
 
     async def load(
         self,
@@ -252,15 +270,18 @@ class StorageBackendAdapter(BaseCheckpointer):
         """Remove checkpoint from index."""
         index_key = f"{thread_id}:_checkpoints"
 
-        existing = await self._backend.load(index_key)
-        if existing is None:
-            return
+        async with self._index_lock(thread_id):
+            existing = await self._backend.load(index_key)
+            if existing is None:
+                return
 
-        existing["checkpoints"] = [
-            cp for cp in existing.get("checkpoints", []) if cp.get("checkpoint_id") != checkpoint_id
-        ]
+            existing["checkpoints"] = [
+                cp
+                for cp in existing.get("checkpoints", [])
+                if cp.get("checkpoint_id") != checkpoint_id
+            ]
 
-        await self._backend.save(index_key, existing)
+            await self._backend.save(index_key, existing)
 
     async def exists(
         self,

@@ -24,6 +24,7 @@ This file targets the remaining gaps:
 
 from __future__ import annotations
 
+import asyncio
 import sys
 import types
 from typing import Any
@@ -474,3 +475,62 @@ class TestFactoryFunctions:
         cp = oracle_checkpointer(dsn="db_high", user="admin", password="p")  # noqa: S106
         assert isinstance(cp, StorageBackendAdapter)
         assert isinstance(cp._backend, fake_oracle_module)
+
+
+# ---------------------------------------------------------------------------
+# Concurrency — checkpoint index must not lose entries (regression for #297)
+# ---------------------------------------------------------------------------
+
+
+class _YieldingBackend:
+    """In-memory backend that yields on every op, forcing realistic interleaving
+    (stands in for a real DB's await points) so index read-modify-write races
+    surface deterministically without a live database."""
+
+    def __init__(self) -> None:
+        self._data: dict[str, Any] = {}
+
+    async def save(self, key: str, data: dict[str, Any]) -> None:
+        await asyncio.sleep(0)
+        self._data[key] = data
+
+    async def load(self, key: str) -> dict[str, Any] | None:
+        await asyncio.sleep(0)
+        return self._data.get(key)
+
+    async def delete(self, key: str) -> bool:
+        await asyncio.sleep(0)
+        return self._data.pop(key, None) is not None
+
+    async def exists(self, key: str) -> bool:
+        await asyncio.sleep(0)
+        return key in self._data
+
+
+class TestConcurrentIndexUpdates:
+    @pytest.mark.asyncio
+    async def test_concurrent_same_thread_saves_keep_all_checkpoints(self) -> None:
+        """Concurrent saves to one thread must not drop index entries (#297)."""
+        adapter = StorageBackendAdapter(_YieldingBackend())
+        n = 20
+        await asyncio.gather(
+            *(
+                adapter.save(_FakeState(), thread_id="hot", checkpoint_id=f"cp-{i}")
+                for i in range(n)
+            )
+        )
+        listed = await adapter.list_checkpoints("hot", limit=1000)
+        assert len(set(listed)) == n
+
+    @pytest.mark.asyncio
+    async def test_concurrent_removes_keep_index_consistent(self) -> None:
+        """Concurrent removals of distinct checkpoints leave the rest intact (#297)."""
+        adapter = StorageBackendAdapter(_YieldingBackend())
+        n = 20
+        for i in range(n):
+            await adapter.save(_FakeState(), thread_id="hot", checkpoint_id=f"cp-{i}")
+        await asyncio.gather(
+            *(adapter._remove_from_index("hot", f"cp-{i}") for i in range(0, n, 2))
+        )
+        listed = set(await adapter.list_checkpoints("hot", limit=1000))
+        assert listed == {f"cp-{i}" for i in range(1, n, 2)}
