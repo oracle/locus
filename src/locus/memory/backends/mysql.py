@@ -168,32 +168,81 @@ class _MySQLConnectionPool:
             raise RuntimeError(msg)
 
         conn = await self._acquire()
+        discarded = False
         try:
             yield conn
+        except BaseException:
+            await self._discard(conn)
+            discarded = True
+            raise
         finally:
-            if self._closed:
-                await conn.close()
-            else:
+            if discarded:
+                pass
+            elif self._closed:
+                await self._discard(conn)
+            elif not getattr(conn, "closed", False):
                 await self._available.put(conn)
 
     async def _acquire(self) -> MySQLConnectionAbstract:
-        try:
-            return self._available.get_nowait()
-        except asyncio.QueueEmpty:
-            pass
+        while True:
+            try:
+                conn = self._available.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            if await self._is_healthy(conn):
+                return conn
+            await self._discard(conn)
 
         async with self._lock:
             if self._created < self._config.max_pool_size:
                 return await self._connect()
 
-        return await self._available.get()
+        while True:
+            conn = await self._available.get()
+            if await self._is_healthy(conn):
+                return conn
+            await self._discard(conn)
+
+            async with self._lock:
+                if self._created < self._config.max_pool_size:
+                    return await self._connect()
+
+    async def _is_healthy(self, conn: MySQLConnectionAbstract) -> bool:
+        """Validate an idle connection before handing it out again."""
+        if getattr(conn, "closed", False):
+            return False
+
+        error_types: tuple[type[BaseException], ...] = (OSError, RuntimeError, AttributeError)
+        try:
+            from mysql.connector import Error as MySQLError
+        except ImportError:
+            pass
+        else:
+            error_types = (*error_types, MySQLError)
+
+        try:
+            async with await conn.cursor() as cur:
+                await cur.execute("SELECT 1")
+                await cur.fetchone()
+        except error_types:
+            return False
+        return True
+
+    async def _discard(self, conn: MySQLConnectionAbstract) -> None:
+        """Close a bad connection and make room for a replacement."""
+        try:
+            if not getattr(conn, "closed", False):
+                await conn.close()
+        finally:
+            async with self._lock:
+                self._created = max(0, self._created - 1)
 
     async def close(self) -> None:
         """Close all idle connections and prevent future acquisitions."""
         self._closed = True
         while not self._available.empty():
             conn = self._available.get_nowait()
-            await conn.close()
+            await self._discard(conn)
 
 
 class MySQLBackend(BaseModel):

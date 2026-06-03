@@ -73,6 +73,11 @@ class _StubCursor:
         return self.fetchall_value
 
 
+class _BrokenCursor(_StubCursor):
+    async def execute(self, sql: str, params: tuple[Any, ...] | None = None) -> None:
+        raise RuntimeError("connection is stale")
+
+
 class _StubConn:
     """Connection stub with a single reusable cursor."""
 
@@ -191,11 +196,45 @@ class TestConnectionPool:
         conn = _StubConn()
         pool = _MySQLConnectionPool(MySQLConfig(min_pool_size=0))
         await pool._available.put(conn)
+        pool._created = 1
 
         async with pool.acquire():
             pool._closed = True
 
         assert conn.closed is True
+        assert pool._created == 0
+
+    @pytest.mark.asyncio
+    async def test_acquire_discards_stale_idle_connection(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        stale = _StubConn(_BrokenCursor())
+        replacement = _StubConn()
+        _stub_mysql_connector(monkeypatch, replacement)
+        pool = _MySQLConnectionPool(MySQLConfig(min_pool_size=0, max_pool_size=1))
+        pool._created = 1
+        await pool._available.put(stale)
+
+        conn = await pool._acquire()
+
+        assert conn is replacement
+        assert stale.closed is True
+        assert pool._created == 1
+
+    @pytest.mark.asyncio
+    async def test_acquire_discards_connection_after_use_error(self) -> None:
+        conn = _StubConn()
+        pool = _MySQLConnectionPool(MySQLConfig(min_pool_size=0))
+        pool._created = 1
+        await pool._available.put(conn)
+
+        with pytest.raises(RuntimeError, match="query failed"):
+            async with pool.acquire():
+                raise RuntimeError("query failed")
+
+        assert conn.closed is True
+        assert pool._created == 0
+        assert pool._available.empty()
 
     @pytest.mark.asyncio
     async def test_acquire_waits_when_pool_is_at_capacity(self) -> None:
@@ -286,8 +325,13 @@ class TestEnsureTable:
         await backend._ensure_table()
         assert len(cur.execute_calls) == first_count
         assert conn.commits == 1
-        assert first_count == 1
-        sql, params = cur.execute_calls[0]
+        ddl_calls = [
+            (sql, params)
+            for sql, params in cur.execute_calls
+            if "CREATE TABLE IF NOT EXISTS" in sql
+        ]
+        assert len(ddl_calls) == 1
+        sql, params = ddl_calls[0]
         assert "KEY `idx_checkpoints_updated` (updated_at DESC)" in sql
         assert "information_schema.statistics" not in sql
         assert params == ()
