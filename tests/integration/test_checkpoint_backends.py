@@ -376,6 +376,42 @@ class TestMySQLBackend:
         loaded = await asyncio.gather(*(backend.load(t) for t in thread_ids))
         assert {item["agent_id"] for item in loaded if item is not None} == set(thread_ids)
 
+    @pytest.mark.asyncio
+    async def test_concurrent_writes_same_thread_cold_start(self):
+        """Concurrent saves to one thread on a brand-new table must not race
+        table/index creation.
+
+        Regression for the ``_ensure_table`` cold-start race: MySQL has no
+        ``CREATE INDEX IF NOT EXISTS``, so a separate check-then-CREATE INDEX
+        let concurrent first-use saves all issue ``CREATE INDEX`` and the
+        losers crashed with ``1061 (Duplicate key name)``. A fresh table name
+        per run guarantees the cold path is exercised.
+        """
+        import uuid
+
+        from locus.memory.backends import mysql_checkpointer
+
+        ck = mysql_checkpointer(
+            host=os.getenv("MYSQL_HOST", "localhost"),
+            port=int(os.getenv("MYSQL_PORT", "3306")),
+            database=os.getenv("MYSQL_DB", "locus_test"),
+            user=os.getenv("MYSQL_USER", "locus"),
+            password=os.getenv("MYSQL_PASSWORD", "locus"),
+            table_name="test_cold_" + uuid.uuid4().hex[:8],
+        )
+        state = AgentState(agent_id="x", max_iterations=1).with_message(
+            Message(role=Role.USER, content="hi")
+        )
+        try:
+            await asyncio.gather(
+                *(ck.save(state, "hot", checkpoint_id=f"cp-{i}") for i in range(20))
+            )
+            assert await ck.exists("hot")
+            assert await ck.load("hot") is not None
+        finally:
+            await ck.delete("hot")
+            await ck.close()
+
 
 # =============================================================================
 # OpenSearchBackend Tests (requires OpenSearch)

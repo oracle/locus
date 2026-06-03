@@ -268,7 +268,13 @@ class MySQLBackend(BaseModel):
             return
 
         pool = await self._get_pool()
+        index_name = f"idx_{self.config.table_name[:52]}_updated"
 
+        # Define the index inline in CREATE TABLE IF NOT EXISTS so table+index
+        # creation is a single atomic, idempotent statement. MySQL has no
+        # CREATE INDEX IF NOT EXISTS, so a separate check-then-CREATE INDEX
+        # races under concurrent cold start and throws 1061 (Duplicate key
+        # name) for the losers.
         async with pool.acquire() as conn:
             async with await conn.cursor() as cur:
                 await cur.execute(
@@ -280,31 +286,13 @@ class MySQLBackend(BaseModel):
                         created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
                         updated_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
                             ON UPDATE CURRENT_TIMESTAMP(6),
-                        metadata JSON NULL
+                        metadata JSON NULL,
+                        KEY `{index_name}` (updated_at DESC)
                     ) ENGINE=InnoDB
                       DEFAULT CHARSET={self.config.charset}
                       COLLATE={self.config.collation}
                     """
                 )
-                index_name = f"idx_{self.config.table_name[:52]}_updated"
-                await cur.execute(
-                    """
-                    SELECT COUNT(*)
-                    FROM information_schema.statistics
-                    WHERE table_schema = DATABASE()
-                      AND table_name = %s
-                      AND index_name = %s
-                    """,
-                    (self.config.table_name, index_name),
-                )
-                row = await cur.fetchone()
-                if row is None or row[0] == 0:
-                    await cur.execute(
-                        f"""
-                        CREATE INDEX {index_name}
-                        ON {self._quoted_table_name} (updated_at DESC)
-                        """
-                    )
             await conn.commit()
 
         self._initialized = True
