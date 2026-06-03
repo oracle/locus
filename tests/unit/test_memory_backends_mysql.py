@@ -286,6 +286,11 @@ class TestEnsureTable:
         await backend._ensure_table()
         assert len(cur.execute_calls) == first_count
         assert conn.commits == 1
+        assert first_count == 1
+        sql, params = cur.execute_calls[0]
+        assert "KEY `idx_checkpoints_updated` (updated_at DESC)" in sql
+        assert "information_schema.statistics" not in sql
+        assert params == ()
 
     @pytest.mark.asyncio
     async def test_table_name_is_quoted(self) -> None:
