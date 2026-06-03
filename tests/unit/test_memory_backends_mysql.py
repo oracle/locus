@@ -84,6 +84,7 @@ class _StubConn:
     def __init__(self, cursor: _StubCursor | None = None) -> None:
         self.cursor_obj = cursor or _StubCursor()
         self.commits = 0
+        self.rollbacks = 0
         self.closed = False
 
     async def cursor(self) -> _StubCursor:
@@ -91,6 +92,9 @@ class _StubConn:
 
     async def commit(self) -> None:
         self.commits += 1
+
+    async def rollback(self) -> None:
+        self.rollbacks += 1
 
     async def close(self) -> None:
         self.closed = True
@@ -248,6 +252,41 @@ class TestConnectionPool:
 
         await pool._available.put(conn)
         assert await task is conn
+
+    @pytest.mark.asyncio
+    async def test_release_rolls_back_open_transaction(self) -> None:
+        # autocommit=False: a returned connection must be rolled back so it is
+        # not pooled "idle in transaction" (which would hold a shared MDL and
+        # block later DDL such as DROP/ALTER). See ``_release``.
+        conn = _StubConn()
+        pool = _MySQLConnectionPool(MySQLConfig(min_pool_size=0))
+        pool._created = 1
+        await pool._available.put(conn)
+
+        async with pool.acquire():
+            pass
+
+        assert conn.rollbacks == 1
+        assert conn.closed is False
+        assert pool._available.qsize() == 1
+
+    @pytest.mark.asyncio
+    async def test_release_discards_when_rollback_fails(self) -> None:
+        class _RollbackBrokenConn(_StubConn):
+            async def rollback(self) -> None:
+                raise RuntimeError("connection went away")
+
+        conn = _RollbackBrokenConn()
+        pool = _MySQLConnectionPool(MySQLConfig(min_pool_size=0))
+        pool._created = 1
+        await pool._available.put(conn)
+
+        async with pool.acquire():
+            pass
+
+        assert conn.closed is True
+        assert pool._created == 0
+        assert pool._available.empty()
 
 
 # ---------------------------------------------------------------------------

@@ -450,8 +450,7 @@ class TestMySQLAdapter:
         thread_id = "mysql-cold-start-thread"
 
         async def save_checkpoint(i: int) -> str:
-            state = sample_state.model_copy(deep=True)
-            state.agent_id = f"{sample_state.agent_id}-{i}"
+            state = sample_state.model_copy(update={"agent_id": f"{sample_state.agent_id}-{i}"})
             return await adapter.save(state, thread_id)
 
         try:

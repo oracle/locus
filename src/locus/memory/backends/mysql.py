@@ -181,7 +181,35 @@ class _MySQLConnectionPool:
             elif self._closed:
                 await self._discard(conn)
             elif not getattr(conn, "closed", False):
-                await self._available.put(conn)
+                await self._release(conn)
+
+    async def _release(self, conn: MySQLConnectionAbstract) -> None:
+        """Return a connection to the pool with no open transaction.
+
+        Under ``autocommit=False`` a bare ``SELECT`` (including read methods
+        and the ``SELECT 1`` health check) opens a transaction that holds a
+        shared metadata lock on the tables it touched. If the connection were
+        pooled in that state it would sit "idle in transaction", block later
+        DDL (``DROP``/``ALTER``) on an exclusive MDL, and pin a stale
+        REPEATABLE READ snapshot for the next borrower. Roll back first so
+        every pooled connection is handed out clean.
+        """
+        try:
+            await conn.rollback()
+        except self._connection_errors():
+            await self._discard(conn)
+        else:
+            await self._available.put(conn)
+
+    @staticmethod
+    def _connection_errors() -> tuple[type[BaseException], ...]:
+        """Errors that mean a pooled connection is no longer usable."""
+        error_types: tuple[type[BaseException], ...] = (OSError, RuntimeError, AttributeError)
+        try:
+            from mysql.connector import Error as MySQLError
+        except ImportError:
+            return error_types
+        return (*error_types, MySQLError)
 
     async def _acquire(self) -> MySQLConnectionAbstract:
         while True:
@@ -212,19 +240,11 @@ class _MySQLConnectionPool:
         if getattr(conn, "closed", False):
             return False
 
-        error_types: tuple[type[BaseException], ...] = (OSError, RuntimeError, AttributeError)
-        try:
-            from mysql.connector import Error as MySQLError
-        except ImportError:
-            pass
-        else:
-            error_types = (*error_types, MySQLError)
-
         try:
             async with await conn.cursor() as cur:
                 await cur.execute("SELECT 1")
                 await cur.fetchone()
-        except error_types:
+        except self._connection_errors():
             return False
         return True
 
