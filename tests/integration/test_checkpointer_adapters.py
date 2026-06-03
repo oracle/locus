@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from uuid import uuid4
 
 import pytest
 
@@ -405,21 +406,32 @@ class TestPostgreSQLAdapter:
 class TestMySQLAdapter:
     """Test MySQL checkpointer adapter."""
 
-    @pytest.fixture
-    async def adapter(self):
+    def _mysql_adapter(self, table_name: str):
         from locus.memory.backends import mysql_checkpointer
 
-        adapter = mysql_checkpointer(
+        return mysql_checkpointer(
             host=os.getenv("MYSQL_HOST", "localhost"),
             port=int(os.getenv("MYSQL_PORT", "3306")),
             database=os.getenv("MYSQL_DB", "locus_test"),
             user=os.getenv("MYSQL_USER", "locus"),
             password=os.getenv("MYSQL_PASSWORD", "locus"),
-            table_name="test_adapter_checkpoints",
+            table_name=table_name,
         )
+
+    @pytest.fixture
+    async def adapter(self):
+        adapter = self._mysql_adapter("test_adapter_checkpoints")
         yield adapter
         await adapter.delete("mysql-thread")
         await adapter.close()
+
+    async def _drop_adapter_table(self, adapter) -> None:
+        backend = adapter._backend
+        pool = await backend._get_pool()
+        async with pool.acquire() as conn:
+            async with await conn.cursor() as cur:
+                await cur.execute(f"DROP TABLE IF EXISTS {backend._quoted_table_name}")  # noqa: S608
+            await conn.commit()
 
     @pytest.mark.asyncio
     async def test_mysql_adapter_roundtrip(self, adapter, sample_state):
@@ -430,6 +442,26 @@ class TestMySQLAdapter:
         loaded = await adapter.load("mysql-thread")
         assert loaded is not None
         assert loaded.agent_id == sample_state.agent_id
+
+    @pytest.mark.asyncio
+    async def test_mysql_adapter_concurrent_same_thread_cold_start(self, sample_state):
+        """Concurrent first use creates a fresh table/index without duplicate-index races."""
+        adapter = self._mysql_adapter(f"test_adapter_cold_start_{uuid4().hex[:12]}")
+        thread_id = "mysql-cold-start-thread"
+
+        async def save_checkpoint(i: int) -> str:
+            state = sample_state.model_copy(deep=True)
+            state.agent_id = f"{sample_state.agent_id}-{i}"
+            return await adapter.save(state, thread_id)
+
+        try:
+            checkpoint_ids = await asyncio.gather(*(save_checkpoint(i) for i in range(20)))
+
+            assert len(set(checkpoint_ids)) == 20
+            assert await adapter.load(thread_id) is not None
+        finally:
+            await self._drop_adapter_table(adapter)
+            await adapter.close()
 
 
 # =============================================================================
