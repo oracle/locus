@@ -419,6 +419,81 @@ class MySQLBackend(BaseModel):
 
         return checkpoint_id
 
+    async def index_add(self, index_key: str, entry: dict[str, Any]) -> None:
+        """Append an entry to a checkpoint-index row atomically.
+
+        Cross-process safe replacement for the adapter's load-modify-save of
+        the ``{thread}:_checkpoints`` blob (see #301). The whole append is a
+        single statement, so concurrent writers from separate processes are
+        serialized by InnoDB's row lock instead of racing a read-modify-write
+        and dropping each other's entries. The row keeps the adapter's
+        ``{"checkpoints": [...]}`` shape, newest first (``$.checkpoints[0]``).
+        """
+        await self._ensure_table()
+        pool = await self._get_pool()
+
+        now = datetime.now(UTC).replace(tzinfo=None)
+        entry_json = json.dumps(entry)
+
+        async with pool.acquire() as conn:
+            async with await conn.cursor() as cur:
+                await cur.execute(
+                    f"""
+                    INSERT INTO {self._quoted_table_name}
+                        (thread_id, checkpoint_id, data, created_at, updated_at, metadata)
+                    VALUES (%s, %s, JSON_OBJECT('checkpoints', JSON_ARRAY(CAST(%s AS JSON))),
+                            %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        data = JSON_ARRAY_INSERT(data, '$.checkpoints[0]', CAST(%s AS JSON)),
+                        updated_at = VALUES(updated_at)
+                    """,
+                    (
+                        index_key,
+                        entry.get("checkpoint_id"),
+                        entry_json,
+                        now,
+                        now,
+                        json.dumps({}),
+                        entry_json,
+                    ),
+                )
+            await conn.commit()
+
+    async def index_remove(self, index_key: str, checkpoint_id: str) -> None:
+        """Remove a checkpoint from an index row atomically.
+
+        Uses ``SELECT ... FOR UPDATE`` so the read-modify-write of the index
+        row is serialized across processes (companion to :meth:`index_add`).
+        """
+        await self._ensure_table()
+        pool = await self._get_pool()
+
+        now = datetime.now(UTC).replace(tzinfo=None)
+
+        async with pool.acquire() as conn:
+            async with await conn.cursor() as cur:
+                await cur.execute(
+                    f"SELECT data FROM {self._quoted_table_name} WHERE thread_id = %s FOR UPDATE",
+                    (index_key,),
+                )
+                row = await cur.fetchone()
+                if row is None:
+                    await conn.commit()
+                    return
+
+                existing = _decode_json(row[0]) or {"checkpoints": []}
+                existing["checkpoints"] = [
+                    cp
+                    for cp in existing.get("checkpoints", [])
+                    if cp.get("checkpoint_id") != checkpoint_id
+                ]
+                await cur.execute(
+                    f"UPDATE {self._quoted_table_name} SET data = %s, updated_at = %s "
+                    "WHERE thread_id = %s",
+                    (json.dumps(existing), now, index_key),
+                )
+            await conn.commit()
+
     async def load(self, thread_id: str) -> dict[str, Any] | None:
         """Load checkpoint from MySQL."""
         await self._ensure_table()

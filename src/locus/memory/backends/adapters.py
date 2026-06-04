@@ -30,6 +30,19 @@ def _callable_has_parameter(fn: Any, parameter_name: str) -> bool:
     return parameter_name in sig.parameters
 
 
+def _async_backend_op(backend: Any, name: str) -> Any | None:
+    """Return ``backend.<name>`` only when it is a real async method.
+
+    Used to detect optional backend capabilities (e.g. the atomic checkpoint
+    index, #301). Guards against ``MagicMock`` test doubles, whose attribute
+    access auto-creates truthy children that are not coroutine functions.
+    """
+    import inspect
+
+    op = getattr(backend, name, None)
+    return op if inspect.iscoroutinefunction(op) else None
+
+
 class StorageBackendAdapter(BaseCheckpointer):
     """
     Adapter that wraps simple storage backends to implement BaseCheckpointer.
@@ -166,8 +179,23 @@ class StorageBackendAdapter(BaseCheckpointer):
         """Update the persistent checkpoint index."""
         index_key = f"{thread_id}:_checkpoints"
 
+        # If the backend offers an atomic index append, use it: the append is
+        # serialized in the store itself, so it is safe across processes — the
+        # per-instance lock below only covers a single process (see #301).
+        index_add = _async_backend_op(self._backend, "index_add")
+        if index_add is not None:
+            await index_add(
+                index_key,
+                {
+                    "checkpoint_id": checkpoint_id,
+                    "timestamp": timestamp.isoformat(),
+                    "metadata": metadata or {},
+                },
+            )
+            return
+
         # Serialize the read-modify-write so concurrent saves to the same
-        # thread cannot clobber each other's index entries.
+        # thread cannot clobber each other's index entries (in-process only).
         async with self._index_lock(thread_id):
             # Load existing index
             existing = await self._backend.load(index_key)
@@ -237,8 +265,20 @@ class StorageBackendAdapter(BaseCheckpointer):
         if existing is None:
             return []
 
-        checkpoints = existing.get("checkpoints", [])
-        return [cp.get("checkpoint_id") for cp in checkpoints[:limit] if cp.get("checkpoint_id")]
+        # De-duplicate by checkpoint_id, preserving order (newest first). The
+        # atomic-append index path (index_add) does not de-dup on write, so a
+        # re-saved checkpoint_id can appear more than once; keep the first.
+        seen: set[str] = set()
+        result: list[str] = []
+        for cp in existing.get("checkpoints", []):
+            cid = cp.get("checkpoint_id")
+            if not cid or cid in seen:
+                continue
+            seen.add(cid)
+            result.append(cid)
+            if len(result) >= limit:
+                break
+        return result
 
     async def delete(
         self,
@@ -286,6 +326,12 @@ class StorageBackendAdapter(BaseCheckpointer):
     ) -> None:
         """Remove checkpoint from index."""
         index_key = f"{thread_id}:_checkpoints"
+
+        # Prefer the backend's atomic remove (cross-process safe). See #301.
+        index_remove = _async_backend_op(self._backend, "index_remove")
+        if index_remove is not None:
+            await index_remove(index_key, checkpoint_id)
+            return
 
         async with self._index_lock(thread_id):
             existing = await self._backend.load(index_key)

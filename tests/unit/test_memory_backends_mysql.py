@@ -458,6 +458,67 @@ class TestCrudOperations:
 
 
 # ---------------------------------------------------------------------------
+# Atomic checkpoint index (#301)
+# ---------------------------------------------------------------------------
+
+
+class TestIndexOps:
+    @pytest.mark.asyncio
+    async def test_index_add_uses_atomic_json_array_insert(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cur = _StubCursor(fetchone=(1,))
+        _stub_mysql_connector(monkeypatch, _StubConn(cur))
+        backend = MySQLBackend()
+        entry = {"checkpoint_id": "cp-1", "timestamp": "2026-01-01T00:00:00", "metadata": {}}
+
+        await backend.index_add("t:_checkpoints", entry)
+
+        sql, args = cur.execute_calls[-1]
+        # Single atomic statement (no separate read), newest-first append.
+        assert "ON DUPLICATE KEY UPDATE" in sql
+        assert "JSON_ARRAY_INSERT" in sql
+        assert "$.checkpoints[0]" in sql
+        assert args[0] == "t:_checkpoints"
+        assert json.loads(args[2]) == entry
+
+    @pytest.mark.asyncio
+    async def test_index_remove_uses_select_for_update(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        index = {"checkpoints": [{"checkpoint_id": "cp-1"}, {"checkpoint_id": "cp-2"}]}
+        cur = _StubCursor(fetchone=(json.dumps(index),))
+        _stub_mysql_connector(monkeypatch, _StubConn(cur))
+        backend = MySQLBackend()
+
+        await backend.index_remove("t:_checkpoints", "cp-1")
+
+        select_sql = cur.execute_calls[-2][0]
+        update_sql, update_args = cur.execute_calls[-1]
+        assert "FOR UPDATE" in select_sql
+        assert update_sql.strip().startswith("UPDATE")
+        # cp-1 removed, cp-2 kept.
+        assert json.loads(update_args[0]) == {"checkpoints": [{"checkpoint_id": "cp-2"}]}
+
+    @pytest.mark.asyncio
+    async def test_index_remove_is_noop_when_row_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cur = _StubCursor(fetchone=None)
+        conn = _StubConn(cur)
+        _stub_mysql_connector(monkeypatch, conn)
+        backend = MySQLBackend()
+        backend._initialized = True  # skip CREATE TABLE so we observe only index_remove
+
+        await backend.index_remove("t:_checkpoints", "cp-1")
+
+        # Only the SELECT ... FOR UPDATE ran; no UPDATE issued, but still commit
+        # to release the row lock.
+        assert not any(sql.strip().startswith("UPDATE") for sql, _ in cur.execute_calls)
+        assert conn.commits == 1
+
+
+# ---------------------------------------------------------------------------
 # Query operations
 # ---------------------------------------------------------------------------
 

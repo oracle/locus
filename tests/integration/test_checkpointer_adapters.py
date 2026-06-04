@@ -462,6 +462,34 @@ class TestMySQLAdapter:
             await self._drop_adapter_table(adapter)
             await adapter.close()
 
+    @pytest.mark.asyncio
+    async def test_mysql_adapter_cross_process_index_no_loss(self, sample_state):
+        """Two adapter instances over one table keep every index entry (#301).
+
+        Models two processes: each adapter holds its own in-process index lock,
+        so the per-instance lock provides no protection. The MySQL backend's
+        atomic ``index_add`` must serialize the appends in the store itself, so
+        no checkpoint is dropped from the index.
+        """
+        table = f"test_adapter_xproc_{uuid4().hex[:12]}"
+        a = self._mysql_adapter(table)
+        b = self._mysql_adapter(table)  # separate instance => separate lock
+        thread_id = "mysql-xproc-thread"
+
+        async def save_checkpoint(adapter, i: int) -> str:
+            state = sample_state.model_copy(update={"agent_id": f"agent-{i}"})
+            return await adapter.save(state, thread_id, checkpoint_id=f"cp-{i}")
+
+        try:
+            await asyncio.gather(*(save_checkpoint(a if i % 2 == 0 else b, i) for i in range(20)))
+
+            listed = await a.list_checkpoints(thread_id, limit=1000)
+            assert sorted(listed) == sorted(f"cp-{i}" for i in range(20))
+        finally:
+            await self._drop_adapter_table(a)
+            await a.close()
+            await b.close()
+
 
 # =============================================================================
 # OpenSearch Backend Tests (requires OpenSearch)

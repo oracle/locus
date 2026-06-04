@@ -98,6 +98,77 @@ class TestCallableHasParameter:
         assert _callable_has_parameter(42, "metadata") is False
 
 
+class _AtomicIndexBackend:
+    """Backend that advertises atomic index ops (like MySQLBackend, #301)."""
+
+    def __init__(self) -> None:
+        self.store: dict[str, dict[str, Any]] = {}
+        self.index_added: list[tuple[str, dict[str, Any]]] = []
+        self.index_removed: list[tuple[str, str]] = []
+        # Sentinel so we can prove the in-process RMW lock path was NOT used.
+        self.saved_index = False
+
+    async def save(self, key: str, data: dict[str, Any]) -> None:
+        if key.endswith(":_checkpoints"):
+            self.saved_index = True
+        self.store[key] = data
+
+    async def load(self, key: str) -> dict[str, Any] | None:
+        return self.store.get(key)
+
+    async def delete(self, key: str) -> bool:
+        return self.store.pop(key, None) is not None
+
+    async def exists(self, key: str) -> bool:
+        return key in self.store
+
+    async def index_add(self, index_key: str, entry: dict[str, Any]) -> None:
+        self.index_added.append((index_key, entry))
+
+    async def index_remove(self, index_key: str, checkpoint_id: str) -> None:
+        self.index_removed.append((index_key, checkpoint_id))
+
+
+class TestAtomicIndexDelegation:
+    @pytest.mark.asyncio
+    async def test_save_delegates_to_backend_index_add(self) -> None:
+        backend = _AtomicIndexBackend()
+        adapter = StorageBackendAdapter(backend)
+        await adapter.save(_FakeState(), thread_id="t1", checkpoint_id="cp-1")
+
+        assert backend.index_added == [
+            ("t1:_checkpoints", backend.index_added[0][1]),
+        ]
+        assert backend.index_added[0][1]["checkpoint_id"] == "cp-1"
+        # The blob read-modify-write index path must be bypassed entirely.
+        assert backend.saved_index is False
+
+    @pytest.mark.asyncio
+    async def test_delete_delegates_to_backend_index_remove(self) -> None:
+        backend = _AtomicIndexBackend()
+        adapter = StorageBackendAdapter(backend)
+        await adapter.save(_FakeState(), thread_id="t1", checkpoint_id="cp-1")
+
+        await adapter.delete("t1", checkpoint_id="cp-1")
+        assert backend.index_removed == [("t1:_checkpoints", "cp-1")]
+
+    @pytest.mark.asyncio
+    async def test_magic_mock_attr_is_not_mistaken_for_capability(self) -> None:
+        # getattr on a MagicMock auto-creates truthy children; the adapter must
+        # only treat real async methods as the atomic-index capability.
+        backend = MagicMock()
+        backend.save = AsyncMock()
+        backend.load = AsyncMock(return_value=None)
+        adapter = StorageBackendAdapter(backend)
+
+        await adapter.save(_FakeState(), thread_id="t1", checkpoint_id="cp-1")
+
+        # Fell back to the blob path: it saved the index via save(), not index_add().
+        assert any(
+            call.args and call.args[0] == "t1:_checkpoints" for call in backend.save.await_args_list
+        )
+
+
 class TestUpdateCheckpointIndex:
     @pytest.mark.asyncio
     async def test_existing_index_replaces_duplicate_and_sorts_newest_first(self) -> None:
