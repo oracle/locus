@@ -7,26 +7,22 @@ hide:
 <div class="tulip-hero" markdown>
 <div class="tulip-hero__copy" markdown>
 
-<p class="tulip-product-name">Tulip · Multi-Agent Reasoning Orchestrator SDK</p>
+<p class="tulip-product-name"><span class="tpn-brand">tulip agents</span><span class="tpn-sep"> · </span>Multi-Agent SDK</p>
 
 # Multi-agent workflows built for <span class="accent">production.</span>
 
-Describe the task. Tulip selects the protocol and coordinates the agents.
+Describe the task. Tulip selects the protocol and coordinates the agents — then streams every decision back as a typed event you can replay, audit, and debug.
 
 <div class="tulip-stat-strip" markdown><span style="white-space:nowrap">[direct&nbsp;answer](concepts/router.md)</span> · <span style="white-space:nowrap">[pipeline](concepts/multi-agent/composition.md)</span> · <span style="white-space:nowrap">[fan&#8209;out](concepts/multi-agent/composition.md)</span> · <span style="white-space:nowrap">[debate](concepts/multi-agent/composition.md)</span> · <span style="white-space:nowrap">[code&nbsp;+&nbsp;test](concepts/multi-agent/composition.md)</span> · <span style="white-space:nowrap">[approval&nbsp;gate](concepts/interrupts.md)</span> · <span style="white-space:nowrap">[A2A](concepts/multi-agent/a2a.md)</span> · <span style="white-space:nowrap">[handoff](concepts/multi-agent/handoff.md)</span></div>
 
-- **From idea to production agent in minutes, not weeks.** Describe the task; Tulip picks the pattern and assembles the network from eight production-tested protocols.
-- **Self-critiquing agents with grounded outputs.** Every turn is scored; every claim is verified against the tool result that produced it.
-- **Full causal traceability.** Every decision, tool call, and reasoning step is a typed event you can replay, audit, and debug.
-
-[Workbench guide](workbench.md){ .md-button .md-button--primary }
+<div class="tulip-hero__cta" markdown>
+[Get started](how-to/quickstart.md){ .md-button .md-button--primary }
 [GitHub](https://github.com/tuliplabs-ai/sdk-python){ .md-button }
+</div>
 
 ```bash
 pip install "tulip-agents[openai]"   # OpenAI · Anthropic
 ```
-
-Vendor-neutral · Production-tested · Open source
 
 </div>
 

@@ -25,7 +25,7 @@ attaches normally.
   context window.
 - ``datastores={name: {retriever, description, top_k}}``: auto-wire a
   ``search_<name>`` tool from any ``RAGRetriever`` and prepend a routing
-  block to the system prompt. Part 5 wires an ``InMemoryVectorStore`` +
+  block to the system prompt. Part 5 wires an in-memory ``QdrantVectorStore`` +
   ``OpenAIEmbeddings`` retriever and gracefully skips when no embedding
   key is set.
 
@@ -348,13 +348,14 @@ async def part5_datastores() -> None:
             print(f"  - {n}")
         return
 
-    from tulip.rag import InMemoryVectorStore, OpenAIEmbeddings, RAGRetriever
+    from tulip.rag import OpenAIEmbeddings, QdrantVectorStore, RAGRetriever
 
     embedder = OpenAIEmbeddings(model="text-embedding-3-small")
     probe = await embedder.embed_query("probe")
-    store = InMemoryVectorStore(
+    store = QdrantVectorStore(
         dimension=len(probe.embedding),
-        distance_metric="COSINE",
+        location=":memory:",
+        distance_metric="cosine",
     )
     retriever = RAGRetriever(embedder=embedder, store=store)
     await retriever.add_documents(

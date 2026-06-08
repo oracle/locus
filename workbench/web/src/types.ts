@@ -3,7 +3,7 @@ export type Pattern = {
   title: string;
   notebook: number | null;
   summary: string;
-  streamable: boolean;
+  streamable?: boolean;
 };
 
 export type ProviderType = "openai" | "anthropic";

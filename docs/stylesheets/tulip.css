@@ -16,8 +16,8 @@ html {
    Brand (from docs/img/logo.svg):
      - Wordmark is always lowercase "tulip", never capitalized.
      - Type is sans-serif throughout (no serif headings).
-     - Wordmark colour:  #312D2A   (warm near-black)
-     - Mark accent:      #C74634   (tulip red, also accent3)
+     - Wordmark colour:  #1B1620   (warm near-black)
+     - Mark accent:      #D6336C   (tulip red, also accent3)
      - Tagline:          uppercase, weight 500, letter-spacing 0.16em,
                          colour #78716C.
      - Wordmark display: weight 700, letter-spacing -0.04em.
@@ -27,7 +27,7 @@ html {
 
 :root {
   /* tulip brand greys (logo-derived) */
-  --tulip-ink:      #312D2A;   /* wordmark colour */
+  --tulip-ink:      #1B1620;   /* wordmark colour */
   --tulip-mute:     #78716C;   /* tagline grey */
   --tulip-paper:    #FAFAF9;   /* logo white-out — paper */
   --tulip-surface:  #FFFFFF;   /* elevated surface (header, cards, focused inputs) */
@@ -35,21 +35,21 @@ html {
   --tulip-code-inline: var(--or-red-deep);
 
   /* tuliplabs palette */
-  --or-text:        #2A2F2F;   /* dk1 */
+  --or-text:        #1B1620;   /* dk1 */
   --or-bg:          #FBF9F8;   /* lt2 — off-white */
   --or-bg-soft:     #F4EFEC;   /* derived: tint of lt2 */
   --or-rule:        #E5DED9;   /* derived */
 
-  --or-red:         #C74634;   /* accent3 — tulip red, also tulip mark accent */
-  --or-red-deep:    #A03828;   /* derived */
-  --or-red-light:   #E2715F;   /* derived */
+  --or-red:         #D6336C;   /* accent3 — tulip red, also tulip mark accent */
+  --or-red-deep:    #AD2E5C;   /* derived */
+  --or-red-light:   #E86A98;   /* derived */
 
-  --or-teal:        #04536F;   /* accent1 */
-  --or-link:        #00688C;   /* hlink */
-  --or-mauve:       #6C3F49;   /* accent2 */
-  --or-sand:        #F0CC71;   /* accent4 */
-  --or-sage-teal:   #89B2B0;   /* accent5 */
-  --or-sage-green:  #86B596;   /* accent6 */
+  --or-teal:        #E2570E;   /* accent1 */
+  --or-link:        #D6336C;   /* hlink */
+  --or-mauve:       #AD2E5C;   /* accent2 */
+  --or-sand:        #F7A21E;   /* accent4 */
+  --or-sage-teal:   #F4A6C2;   /* accent5 */
+  --or-sage-green:  #16A34A;   /* accent6 */
 
   /* tulip type stack — same as logo SVG, sans throughout */
   --tulip-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
@@ -80,7 +80,7 @@ html {
 
   --md-typeset-color:           var(--or-text);
   --md-typeset-a-color:          var(--or-link);
-  --md-typeset-mark-color:       rgba(240, 204, 113, 0.45);  /* sand */
+  --md-typeset-mark-color:       rgba(247, 162, 30, 0.45);  /* sand */
 
   --md-footer-bg-color:         #1F2424;
   --md-footer-bg-color--dark:    #161A1A;
@@ -88,7 +88,7 @@ html {
   --md-footer-fg-color--light:   #C9CCCC;
 
   --md-code-bg-color:           #F4EFEC;
-  --md-code-fg-color:           #2A2F2F;
+  --md-code-fg-color:           #1B1620;
 }
 
 /* ---------------------------------------------------------------------------
@@ -98,14 +98,14 @@ html {
   --md-hue: 200;
 
   /* tuliplabs warm-dark palette — identical to the workbench dark theme
-     (workbench/web/src/styles/redwood.css [data-theme="dark"]).
+     (workbench/web/src/styles/tulip.css [data-theme="dark"]).
      Same canvas, same red, same sage links. */
   --tulip-ink:        #F0EBE6;
   --tulip-mute:       #95908a;
   --tulip-paper:      #1B1A18;
   --tulip-surface:    #1F1D1A;
   --tulip-table-stripe: rgba(240, 235, 230, 0.04);
-  --tulip-code-inline: #E2715F;
+  --tulip-code-inline: #E86A98;
 
   --or-text:          #F0EBE6;
   --or-text-soft:     #c9c4be;
@@ -116,26 +116,26 @@ html {
   --or-rule:          #36332E;
 
   /* Red stays tulip red; deep variant lightens in dark (matches workbench) */
-  --or-red:           #C74634;
-  --or-red-deep:      #E2715F;
-  --or-red-light:     #F09080;
+  --or-red:           #D6336C;
+  --or-red-deep:      #C2185B;
+  --or-red-light:     #E86A98;
   /* Sage teal becomes the link colour in dark (matches workbench) */
-  --or-teal:          #89B2B0;
-  --or-link:          #89B2B0;
+  --or-teal:          #F4A6C2;
+  --or-link:          #E86A98;
   --or-mauve:         #B07A85;
-  --or-sand:          #F0CC71;
-  --or-sage-teal:     #89B2B0;
-  --or-sage-green:    #86B596;
+  --or-sand:          #F7A21E;
+  --or-sage-teal:     #F4A6C2;
+  --or-sage-green:    #16A34A;
 
   /* Material overrides */
-  --md-primary-fg-color:        #C74634;
-  --md-primary-fg-color--light: #E2715F;
-  --md-primary-fg-color--dark:  #A03828;
+  --md-primary-fg-color:        #D6336C;
+  --md-primary-fg-color--light: #E86A98;
+  --md-primary-fg-color--dark:  #AD2E5C;
   --md-primary-bg-color:        #1B1A18;
   --md-primary-bg-color--light: #1B1A18cc;
 
-  --md-accent-fg-color:         #89B2B0;
-  --md-accent-fg-color--transparent: rgba(137, 178, 176, 0.15);
+  --md-accent-fg-color:         #F4A6C2;
+  --md-accent-fg-color--transparent: rgba(244, 166, 194, 0.15);
   --md-accent-bg-color:         #25231F;
 
   --md-default-bg-color:        #1B1A18;
@@ -145,8 +145,8 @@ html {
   --md-default-fg-color--lightest: #4a4844;
 
   --md-typeset-color:           #F0EBE6;
-  --md-typeset-a-color:         #89B2B0;   /* sage teal, matches workbench links */
-  --md-typeset-mark-color:      rgba(240, 204, 113, 0.28);
+  --md-typeset-a-color:         #F4A6C2;   /* sage teal, matches workbench links */
+  --md-typeset-mark-color:      rgba(247, 162, 30, 0.28);
 
   --md-footer-bg-color:         #131211;
   --md-footer-bg-color--dark:   #0c0b0a;
@@ -255,8 +255,8 @@ html {
   top: -180px; left: -220px;
   width: 760px; height: 760px;
   background: radial-gradient(circle,
-              rgba(199, 70, 52, 0.10) 0%,
-              rgba(240, 204, 113, 0.06) 35%,   /* sand */
+              rgba(237, 47, 126, 0.12) 0%,
+              rgba(247, 101, 30, 0.07) 35%,   /* sand */
               transparent 70%);
   z-index: -1;
   border-radius: 50%;
@@ -269,8 +269,8 @@ html {
   top: 60px; right: -160px;
   width: 560px; height: 560px;
   background: radial-gradient(circle,
-              rgba(134, 181, 150, 0.10) 0%,    /* sage green */
-              rgba(137, 178, 176, 0.05) 40%,   /* sage teal */
+              rgba(22, 163, 74, 0.10) 0%,    /* sage green */
+              rgba(244, 166, 194, 0.05) 40%,   /* sage teal */
               transparent 70%);
   z-index: -1;
   border-radius: 50%;
@@ -419,7 +419,7 @@ html {
 }
 .md-typeset .grid.cards.tulip-feature-cards > ul > li:hover,
 .md-typeset .grid.cards.tulip-feature-cards > ol > li:hover {
-  background-color: var(--or-surface-hover, rgba(199, 70, 52, 0.05));
+  background-color: var(--or-surface-hover, rgba(214, 51, 108, 0.05));
   transform: translateY(-1px);
 }
 .md-typeset .grid.cards.tulip-feature-cards p {
@@ -432,7 +432,7 @@ html {
   font-size: 1rem;
   display: block;
   margin-bottom: 0.25rem;
-  color: var(--or-accent, #C74634);
+  color: var(--or-accent, #D6336C);
 }
 /* Make the whole card clickable: stretch the title's <a> over the card
    surface so anywhere inside the <li> opens the linked concept page. */
@@ -448,7 +448,7 @@ html {
 }
 .md-typeset .grid.cards.tulip-feature-cards > ul > li:focus-within,
 .md-typeset .grid.cards.tulip-feature-cards > ol > li:focus-within {
-  outline: 2px solid var(--or-accent, #C74634);
+  outline: 2px solid var(--or-accent, #D6336C);
   outline-offset: 2px;
 }
 @media (max-width: 76em) {
@@ -567,7 +567,7 @@ html {
 }
 
 /* Dark-mode swap. ``mkdocs.yml`` declares a single ``theme.logo``
-   pointing at ``img/mark.svg`` (outer-diamond stroke ``#312D2A`` —
+   pointing at ``img/mark.svg`` (outer-diamond stroke ``#1B1620`` —
    warm near-black, sized for the light surface). On the slate scheme
    the surface goes dark ``#1F1D1A`` and that stroke is practically
    invisible, especially on mobile where the mark is the only brand
@@ -599,7 +599,7 @@ form.md-header__option {
   margin-left: auto;
 }
 /* Stack the first topic vertically: "tulip" wordmark + the full
-   product name beneath ('Multi-Agent Reasoning Orchestrator SDK',
+   product name beneath ('Multi-Agent SDK',
    split across two lines), matching the wordmark+tagline lockup the
    SVG logo carries. The two-line break keeps each line short enough to
    fit alongside the dark-mode toggle and the search slot at common
@@ -609,44 +609,34 @@ form.md-header__option {
   flex-direction: column;
   align-items: flex-start;
   justify-content: center;
-  gap: 0.25rem;
 }
 .md-header__ellipsis > .md-header__topic:first-of-type > .md-ellipsis {
   font-family: var(--tulip-sans);
   font-weight: 700;
-  font-size: 1.55rem;
-  line-height: 1;
+  font-size: 1.5rem;
+  line-height: 1.2;
   letter-spacing: -0.04em;
   text-transform: lowercase;
   color: var(--tulip-ink);
 }
+/* "SDK" appended inline after "tulip agents" on the same line, washed
+   in the pink->orange brand gradient. */
+.md-header__ellipsis > .md-header__topic:first-of-type > .md-ellipsis::after {
+  content: " SDK";
+  text-transform: none;
+  background: var(--tulip-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
 .md-header__ellipsis > .md-header__topic:first-of-type::after {
-  /* `\A` is a CSS newline; `white-space: pre` keeps it as a hard break,
-     so the approved full product name renders on two lines under the
-     wordmark — family brand on top, product descriptor below. */
-  content: "Multi-Agent Reasoning\AOrchestrator SDK";
-  font-family: var(--tulip-sans);
-  font-size: 0.55rem;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  color: var(--or-red);
-  line-height: 1.25;
-  white-space: pre;
-  /* Push the line away from the dark-mode toggle that sits immediately
-     to the right of the title slot, so they don't visually touch. */
-  padding-right: 1rem;
+  content: none;
 }
 @media (max-width: 56em) {
   /* Mobile: same full name, slightly tighter tracking to fit. */
   .md-header__ellipsis > .md-header__topic:first-of-type::after {
-    content: "Multi-Agent Reasoning\AOrchestrator SDK";
-    font-size: 0.5rem;
-    letter-spacing: 0.06em;
-    line-height: 1.25;
-    font-weight: 600;
-    color: var(--or-red);
-    display: block;
-    white-space: pre;
+    content: none;
   }
   /* Always show "tulip" (site title) in the mobile header — suppress
      Material's page-title swap so users always see the brand name. */
@@ -700,23 +690,23 @@ form.md-header__option {
   transition: background-color 0.15s, transform 0.15s, box-shadow 0.15s;
 }
 .md-header__source.md-header__brand:hover {
-  background-color: rgba(199, 70, 52, 0.08);
+  background-color: rgba(214, 51, 108, 0.08);
   transform: translateY(-1px);
-  box-shadow: 0 2px 8px -2px rgba(199, 70, 52, 0.25);
+  box-shadow: 0 2px 8px -2px rgba(214, 51, 108, 0.25);
 }
 /* Header rounded mark — 32×32 square. */
 .md-header__brand-mark {
-  width: 32px;
-  height: 32px;
+  height: 34px;
+  width: auto;
   display: block;
   flex: 0 0 auto;
 }
 /* Header wordmark — 22px tall × auto width (preserves the
    4.763:1 aspect ratio from the wordmark viewBox 109.36 × 22.96). */
 .md-header__brand-wordmark {
-  height: 22px;
+  height: 24px;
   width: auto;
-  aspect-ratio: 109.36 / 22.96;
+  aspect-ratio: auto;
   display: block;
   flex: 0 0 auto;
 }
@@ -735,7 +725,7 @@ form.md-header__option {
   }
   /* Show brand mark at reduced size; hide wordmark. */
   .md-header__brand-wordmark { display: none; }
-  .md-header__brand-mark { width: 20px; height: 20px; }
+  .md-header__brand-mark { height: 22px; width: auto; }
   .md-header__source.md-header__brand { padding: 0.2rem 0.3rem; }
 }
 
@@ -896,7 +886,7 @@ form.md-header__option {
    Code blocks — soft sand background, tulip red filename tab.
    --------------------------------------------------------------------------- */
 .md-typeset code {
-  background-color: rgba(199, 70, 52, 0.10);
+  background-color: rgba(237, 47, 126, 0.12);
   color: var(--tulip-code-inline);
   border-radius: 3px;
   font-size: 0.85em;
@@ -947,7 +937,7 @@ form.md-header__option {
 }
 .md-typeset .admonition.warning > .admonition-title,
 .md-typeset details.warning > summary {
-  background-color: rgba(199, 70, 52, 0.08);
+  background-color: rgba(214, 51, 108, 0.08);
   color: var(--or-red-deep);
 }
 .md-typeset .admonition.tip,
@@ -956,7 +946,7 @@ form.md-header__option {
 }
 .md-typeset .admonition.tip > .admonition-title,
 .md-typeset details.tip > summary {
-  background-color: rgba(134, 181, 150, 0.18);
+  background-color: rgba(22, 163, 74, 0.18);
   color: #2f6243;
 }
 
@@ -1069,7 +1059,7 @@ form.md-header__option {
 .md-search__input:focus,
 .md-search__input:hover {
   background-color: var(--tulip-surface);
-  box-shadow: 0 0 0 2px rgba(199, 70, 52, 0.20);
+  box-shadow: 0 0 0 2px rgba(214, 51, 108, 0.20);
 }
 
 /* ---------------------------------------------------------------------------
@@ -1092,12 +1082,12 @@ form.md-header__option {
 .md-typeset details.sdk-distinctive {
   border-color: var(--or-red);
   background: linear-gradient(135deg,
-    rgba(199, 70, 52, 0.04) 0%,
-    rgba(240, 204, 113, 0.04) 100%);
+    rgba(214, 51, 108, 0.04) 0%,
+    rgba(247, 162, 30, 0.04) 100%);
 }
 .md-typeset .sdk-distinctive > .admonition-title,
 .md-typeset .sdk-distinctive > summary {
-  background-color: rgba(199, 70, 52, 0.08);
+  background-color: rgba(214, 51, 108, 0.08);
   color: var(--or-red-deep);
   font-weight: 700;
   letter-spacing: -0.01em;
@@ -1148,10 +1138,10 @@ form.md-header__option {
      which has the stroke recoloured to off-white.
    --------------------------------------------------------------------------- */
 [data-md-color-scheme="slate"] .md-header__brand-wordmark {
-  content: url("../img/logo-white.svg");
+  content: url("../img/tuliplabs-wordmark-dark.png");
 }
 [data-md-color-scheme="slate"] .md-header__button.md-logo img {
-  content: url("../img/mark-dark.svg");
+  content: url("../img/tulip-mark.png");
 }
 /* Footer tulip wordmark already inverts the red SVG to white via filter;
    in dark mode swap to the white SVG and drop the filter. */
@@ -1175,7 +1165,7 @@ form.md-header__option {
   transition: background-color 0.15s, color 0.15s, transform 0.15s;
 }
 .md-header__source.md-header__github:hover {
-  background-color: rgba(199, 70, 52, 0.10);
+  background-color: rgba(237, 47, 126, 0.12);
   color: var(--or-red);
   transform: translateY(-1px);
 }
@@ -1372,3 +1362,204 @@ form.md-header__option {
   color: var(--or-red-light);
   opacity: 1;
 }
+
+/* ===================================================================
+   tuliplabs brand — polished, cohesive (light + dark).
+   Light: clean WHITE header showcasing the precise tulip mark.
+   Dark:  deep header. Pink->orange gradient as a thin hairline + the
+   logo + accents; tulip-rose links/CTAs, warm-orange hover.
+   =================================================================== */
+:root { --tulip-grad: linear-gradient(90deg, #ED2F7E 0%, #F7651E 100%); }
+
+/* ---- Light scheme: white header, ink text/icons ---- */
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: #FFFFFF;     /* header / tabs background */
+  --md-primary-bg-color: #241F2B;     /* header text + icons (ink) */
+  --md-accent-fg-color:  #EA6A1E;     /* hover */
+}
+/* ---- Dark scheme: deep header, white text/icons ---- */
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #17141C;
+  --md-primary-bg-color: #FFFFFF;
+  --md-accent-fg-color:  #F0853C;
+}
+
+/* Header + tabs: soft elevation + a pink->orange hairline at the bottom. */
+.md-header {
+  box-shadow: 0 1px 0 rgba(0,0,0,0.04), 0 2px 12px rgba(0,0,0,0.05);
+  border-bottom: 2px solid transparent;
+  border-image: var(--tulip-grad) 1;
+}
+.md-tabs { border-bottom: 1px solid rgba(0,0,0,0.06); }
+[data-md-color-scheme="slate"] .md-tabs { border-bottom-color: rgba(255,255,255,0.06); }
+
+/* Logo mark: a touch larger so the bloom reads clearly. */
+.md-header__button.md-logo img { height: 1.7rem; width: auto; }
+
+/* Wordmark next to the logo — lowercase, tight. */
+.md-header__topic > .md-ellipsis { font-weight: 700; letter-spacing: -0.02em; }
+
+/* Links + active/hover. */
+.md-typeset a { color: #D6336C; }
+.md-nav__link--active, .md-nav__item .md-nav__link--active { color: #D6336C; }
+
+/* Primary CTA → rose, hover → warm orange. */
+.md-typeset .md-button--primary {
+  background-color: #D6336C; border-color: #D6336C; color: #FFFFFF;
+}
+.md-typeset .md-button--primary:hover {
+  background-color: #EA6A1E; border-color: #EA6A1E; color: #FFFFFF;
+}
+
+/* Gradient garnish: hero accent word + footer wordmark. */
+.md-typeset .tulip-hero h1 .accent,
+.md-footer-meta .footer-brand__text {
+  background: var(--tulip-grad);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; color: transparent;
+}
+.md-footer-meta .footer-brand__text { font-weight: 700; }
+
+/* ===================================================================
+   tuliplabs — "modern dev-brand" redesign (distinct from the stock
+   stock Material template): Space Grotesk display type, a CENTERED hero
+   (mark + gradient headline + CTAs, code in a card below), and
+   bordered hover-lift feature cards.
+   =================================================================== */
+:root { --tulip-display: "Space Grotesk", "Inter", system-ui, -apple-system, sans-serif; }
+
+/* Display font on headings, hero, header wordmark, tabs, footer brand. */
+.md-typeset h1, .md-typeset h2, .md-typeset h3,
+.md-typeset .tulip-hero h1,
+.md-header__topic > .md-ellipsis,
+.md-tabs__link,
+.md-footer-meta .footer-brand__text {
+  font-family: var(--tulip-display);
+  letter-spacing: -0.02em;
+}
+
+/* ---- Centered hero ---- */
+.md-typeset .tulip-hero--center {
+  display: block;
+  grid-template-columns: none;
+  text-align: center;
+  max-width: 900px;
+  margin: 0 auto 3rem;
+  padding: 2.2rem 0 0.5rem;
+  overflow: visible;
+}
+.tulip-hero--center .tulip-hero__mark {
+  display: block;
+  height: 96px; width: auto;
+  margin: 0 auto 1.2rem;
+  filter: drop-shadow(0 10px 24px rgba(237,47,126,0.22));
+}
+.md-typeset .tulip-hero--center p.tulip-product-name {
+  text-align: center;
+  margin: 0 0 0.9rem;
+  opacity: 0.6;
+}
+.md-typeset .tulip-hero--center h1:first-of-type {
+  font-size: 3.4rem;
+  line-height: 1.04;
+  letter-spacing: -0.04em;
+  font-weight: 700;
+  text-transform: none;
+  max-width: 18ch;
+  margin: 0 auto 0.9rem;
+}
+.md-typeset .tulip-hero--center > p {
+  font-size: 1.12rem;
+  line-height: 1.6;
+  color: var(--tulip-mute);
+  max-width: 62ch;
+  margin: 0 auto 1.1rem;
+}
+.tulip-hero--center .tulip-stat-strip { max-width: 760px; margin: 1.1rem auto 1.5rem; }
+.tulip-hero--center .tulip-hero__cta { margin: 1.2rem 0 0.4rem; }
+.md-typeset .tulip-hero--center .md-button { margin: 0.35rem 0.4rem; }
+/* pip pill centered */
+.md-typeset .tulip-hero--center > .highlight,
+.md-typeset .tulip-hero--center > .language-bash {
+  display: inline-block;
+  margin: 0.4rem auto 1.6rem;
+  text-align: left;
+}
+/* code sample in a centered, elevated card */
+.md-typeset .tulip-hero--center .tulip-hero__code {
+  max-width: 780px;
+  margin: 1.4rem auto 0;
+  text-align: left;
+}
+.md-typeset .tulip-hero--center .tulip-hero__code .highlight {
+  border-radius: 14px;
+  border-left: 0;
+  box-shadow: 0 24px 60px -20px rgba(20,16,24,0.30);
+  overflow: hidden;
+}
+/* one soft centered glow behind the hero; kill the old side glow */
+.md-typeset .tulip-hero--center::before {
+  top: -120px; left: 50%; transform: translateX(-50%);
+  width: 900px; height: 560px; border-radius: 50%;
+  background: radial-gradient(closest-side,
+              rgba(237,47,126,0.13) 0%, rgba(247,101,30,0.07) 45%, transparent 75%);
+}
+.md-typeset .tulip-hero--center::after { display: none; }
+
+/* ---- Feature cards: full border, rounded, hover-lift ---- */
+.md-typeset .grid.cards.tulip-feature-cards > ul > li,
+.md-typeset .grid.cards.tulip-feature-cards > ol > li {
+  border: 1px solid var(--or-rule);
+  border-radius: 16px;
+  padding: 1.2rem 1.25rem;
+  background: var(--md-default-bg-color);
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+}
+.md-typeset .grid.cards.tulip-feature-cards > ul > li:hover,
+.md-typeset .grid.cards.tulip-feature-cards > ol > li:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 16px 40px -16px rgba(20,16,24,0.18);
+  border-color: rgba(214,51,108,0.40);
+  background: var(--md-default-bg-color);
+}
+.md-typeset .grid.cards.tulip-feature-cards strong { color: var(--tulip-ink); }
+.md-typeset .grid.cards.tulip-feature-cards .lg.middle { color: #D6336C; }
+
+@media (max-width: 60em) {
+  .md-typeset .tulip-hero--center h1:first-of-type { font-size: 2.4rem; }
+  .tulip-hero--center .tulip-hero__mark { height: 76px; }
+}
+
+/* ===================================================================
+   Hero eyebrow ("TULIP AGENTS · MULTI-AGENT SDK") — tracked monospace
+   label (dev-brand), brand half accented in tulip rose.
+   =================================================================== */
+.md-typeset .tulip-hero--center p.tulip-product-name,
+.md-typeset p.tulip-product-name {
+  font-family: var(--tulip-mono, "JetBrains Mono", ui-monospace, monospace);
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  opacity: 1;
+  color: var(--tulip-mute);
+}
+.tulip-product-name .tpn-brand { color: #D6336C; font-weight: 600; }
+.tulip-product-name .tpn-sep   { color: var(--tulip-mute); opacity: 0.5; }
+
+/* ===================================================================
+   Two-column hero (left copy / right code) refinements.
+   =================================================================== */
+.md-typeset .tulip-hero h1:first-of-type {
+  text-transform: none;
+  font-size: 2.9rem;
+  line-height: 1.06;
+}
+.md-typeset .tulip-hero .tulip-hero__code .highlight {
+  border-radius: 14px;
+  box-shadow: 0 24px 60px -20px rgba(20, 16, 24, 0.28);
+  overflow: hidden;
+}
+
+/* Header title is clickable → home (see header-home.js). */
+.md-header__title { cursor: pointer; }

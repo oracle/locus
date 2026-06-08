@@ -7,7 +7,7 @@
 
 Stays entirely on tulip primitives:
 
-    OpenAIEmbeddings + InMemoryVectorStore + RAGRetriever
+    OpenAIEmbeddings + QdrantVectorStore + RAGRetriever
         |
         v
     create_deepagent(datastores={"medical": retriever}, max_output_tokens=...)
@@ -34,7 +34,7 @@ import sys
 
 from tulip.deepagent import create_deepagent
 from tulip.rag import OpenAIEmbeddings, RAGRetriever
-from tulip.rag.stores.memory import InMemoryVectorStore
+from tulip.rag.stores.qdrant import QdrantVectorStore
 
 
 SAMPLE_DOCS = [
@@ -73,11 +73,11 @@ async def main() -> None:
     print("[1/4] Embeddings: text-embedding-3-small (auto-detected dimension)")
     embedder = OpenAIEmbeddings(model="text-embedding-3-small")
 
-    print("[2/4] InMemoryVectorStore (10 sample docs on iron metabolism)")
+    print("[2/4] QdrantVectorStore in-memory (10 sample docs on iron metabolism)")
     # Trigger one probe call so we know the dimension before constructing
     # the store.
     probe = await embedder.embed_query("probe")
-    store = InMemoryVectorStore(dimension=len(probe.embedding))
+    store = QdrantVectorStore(location=":memory:", dimension=len(probe.embedding))
 
     retriever = RAGRetriever(embedder=embedder, store=store)
     await retriever.add_documents(SAMPLE_DOCS)

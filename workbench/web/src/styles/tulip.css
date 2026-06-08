@@ -1,13 +1,13 @@
 /* ============================================================================
-   Redwood-styled CSS for the tulip a2a-mesh console.
+   tulip-branded CSS for the tulip workbench console.
 
    Palette and typography taken from the same palette tokens used by the
-   tulip docs (docs/stylesheets/tulip.css). Layout follows Redwood patterns:
+   tulip docs (docs/stylesheets/tulip.css). Layout: clean dev-brand —
    white surfaces, hairline rules, generous spacing, red CTA, sand secondary.
    ========================================================================== */
 
 :root {
-  --or-text:        #2A2F2F;
+  --or-text:        #1B1620;
   --or-text-soft:   #57605E;
   --or-text-mute:   #8E938F;
   --or-bg:          #FBF9F8;
@@ -15,15 +15,15 @@
   --or-surface:     #FFFFFF;
   --or-rule:        #E5DED9;
 
-  --or-red:         #C74634;
-  --or-red-deep:    #A03828;
-  --or-red-tint:    rgba(199, 70, 52, 0.08);
-  --or-teal:        #04536F;
-  --or-link:        #00688C;
-  --or-mauve:       #6C3F49;
-  --or-sand:        #F0CC71;
-  --or-sage-teal:   #89B2B0;
-  --or-sage-green:  #86B596;
+  --or-red:         #D6336C;
+  --or-red-deep:    #AD2E5C;
+  --or-red-tint:    rgba(214, 51, 108, 0.08);
+  --or-teal:        #E2570E;
+  --or-link:        #D6336C;
+  --or-mauve:       #9D174D;
+  --or-sand:        #F7A21E;
+  --or-sage-teal:   #F4A6C2;
+  --or-sage-green:  #16A34A;
 
   --shadow-1: 0 1px 2px rgba(49, 45, 42, 0.06);
   --shadow-2: 0 6px 18px -10px rgba(49, 45, 42, 0.18);
@@ -49,15 +49,15 @@
   --or-surface:     #1F1D1A;
   --or-rule:        #36332E;
 
-  --or-red:         #C74634;
-  --or-red-deep:    #E2715F;
-  --or-red-tint:    rgba(199, 70, 52, 0.18);
-  --or-teal:        #89B2B0;
-  --or-link:        #89B2B0;
+  --or-red:         #D6336C;
+  --or-red-deep:    #E86A98;
+  --or-red-tint:    rgba(214, 51, 108, 0.18);
+  --or-teal:        #F4A6C2;
+  --or-link:        #E86A98;
   --or-mauve:       #B07A85;
-  --or-sand:        #F0CC71;
-  --or-sage-teal:   #89B2B0;
-  --or-sage-green:  #86B596;
+  --or-sand:        #F7A21E;
+  --or-sage-teal:   #F4A6C2;
+  --or-sage-green:  #16A34A;
 
   --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-2: 0 6px 18px -10px rgba(0, 0, 0, 0.5);
@@ -160,7 +160,7 @@ code, pre { font-family: var(--mono); }
   white-space: nowrap;
 }
 @media (max-width: 880px) { .app__brand-tag { display: none; } }
-[data-theme="dark"] .app__brand-icon { content: url("/tulip-mark-dark.svg"); }
+[data-theme="dark"] .app__brand-icon { content: url("/tulip-mark.png"); }
 .app__header-spacer { flex: 1; }
 .app__header-meta {
   font-size: 0.78rem;
@@ -178,9 +178,9 @@ code, pre { font-family: var(--mono); }
   transition: background 0.12s, transform 0.12s, box-shadow 0.12s;
 }
 .app__brand-link:hover {
-  background: rgba(199, 70, 52, 0.08);
+  background: rgba(214, 51, 108, 0.08);
   transform: translateY(-1px);
-  box-shadow: 0 2px 8px -2px rgba(199, 70, 52, 0.25);
+  box-shadow: 0 2px 8px -2px rgba(214, 51, 108, 0.25);
 }
 .app__brand-link-mark { width: 28px; height: 28px; display: block; }
 .app__brand-link-wordmark {
@@ -190,8 +190,7 @@ code, pre { font-family: var(--mono); }
   display: block;
 }
 @media (max-width: 720px) { .app__brand-link-wordmark { display: none; } }
-[data-theme="dark"] .app__brand-link-wordmark { content: url("/logo-white.svg"); }
-[data-theme="dark"] .app__brand-link:hover { background: rgba(199, 70, 52, 0.16); }
+[data-theme="dark"] .app__brand-link:hover { background: rgba(214, 51, 108, 0.16); }
 
 .app__side {
   grid-area: side;
@@ -497,7 +496,7 @@ code, pre { font-family: var(--mono); }
   border-radius: 3px;
 }
 .skill--match {
-  background: rgba(240, 204, 113, 0.45);
+  background: rgba(247, 162, 30, 0.45);
   color: #5a4318;
 }
 
@@ -533,7 +532,7 @@ code, pre { font-family: var(--mono); }
 }
 .input:focus, .textarea:focus {
   border-color: var(--or-red);
-  box-shadow: 0 0 0 3px rgba(199, 70, 52, 0.18);
+  box-shadow: 0 0 0 3px rgba(214, 51, 108, 0.18);
 }
 .textarea { min-height: 5.5rem; resize: vertical; font-family: var(--sans); }
 
@@ -607,7 +606,7 @@ code, pre { font-family: var(--mono); }
   text-align: center;
 }
 .event__kind--tool { background: rgba(0, 104, 140, 0.10); color: var(--or-link); }
-.event__kind--terminate { background: rgba(134, 181, 150, 0.20); color: #2f6243; }
+.event__kind--terminate { background: rgba(22, 163, 74, 0.20); color: #2f6243; }
 .event__kind--error { background: var(--or-red-tint); color: var(--or-red-deep); }
 
 .event__body {
@@ -646,9 +645,9 @@ code, pre { font-family: var(--mono); }
   width: 6px; height: 6px; border-radius: 50%;
   background: currentColor;
 }
-.pill--up    { background: rgba(134, 181, 150, 0.20); color: #2f6243; }
+.pill--up    { background: rgba(22, 163, 74, 0.20); color: #2f6243; }
 .pill--down  { background: var(--or-red-tint); color: var(--or-red-deep); }
-.pill--busy  { background: rgba(240, 204, 113, 0.30); color: #6a4f15; }
+.pill--busy  { background: rgba(247, 162, 30, 0.30); color: #6a4f15; }
 
 /* ----- Mini "Fusion" footer ----- */
 
@@ -787,8 +786,8 @@ code, pre { font-family: var(--mono); }
 }
 .wb-output .ln { display: block; }
 .wb-output .ln--stderr { color: #f0b8a8; }
-.wb-output .ln--exit { color: #86b596; font-weight: 600; }
-.wb-output .ln--error { color: #c74634; font-weight: 600; }
+.wb-output .ln--exit { color: #16A34A; font-weight: 600; }
+.wb-output .ln--error { color: #D6336C; font-weight: 600; }
 
 /* ----- Workbench inline event chips + live chunks ----- */
 .wb-output .ln--event { display: block; margin: 0.18rem 0; }
@@ -808,7 +807,7 @@ code, pre { font-family: var(--mono); }
   color: #9bd6e8;
 }
 .wb-output .ln--event .event__kind--terminate {
-  background: rgba(134, 181, 150, 0.30);
+  background: rgba(22, 163, 74, 0.30);
   color: #9fdbb1;
 }
 .wb-output .ln--event .event__body {
@@ -819,7 +818,7 @@ code, pre { font-family: var(--mono); }
 }
 .wb-output .ln--chunk {
   color: #f5e9c8;
-  background: rgba(240, 204, 113, 0.10);
+  background: rgba(247, 162, 30, 0.10);
   display: inline;
   padding: 0 0.05rem;
   border-radius: 2px;
@@ -840,7 +839,7 @@ code, pre { font-family: var(--mono); }
   content: "▌";
   display: inline-block;
   margin-left: 1px;
-  color: #f0cc71;
+  color: #F7A21E;
   animation: tulip-caret 0.95s steps(1, end) infinite;
   transform: translateY(-1px);
 }
@@ -850,11 +849,11 @@ code, pre { font-family: var(--mono); }
 }
 /* Sand shimmer under the live transcript. */
 .wb-output .ln--chunk--live {
-  box-shadow: inset 0 0 0 1px rgba(240, 204, 113, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(247, 162, 30, 0.18);
   background-image: linear-gradient(90deg,
-    rgba(240, 204, 113, 0.06) 0%,
-    rgba(240, 204, 113, 0.20) 50%,
-    rgba(240, 204, 113, 0.06) 100%);
+    rgba(247, 162, 30, 0.06) 0%,
+    rgba(247, 162, 30, 0.20) 50%,
+    rgba(247, 162, 30, 0.06) 100%);
   background-size: 240% 100%;
   animation: chunk-shimmer 2.4s ease-in-out infinite;
 }
@@ -1024,15 +1023,15 @@ code, pre { font-family: var(--mono); }
   color: var(--or-text-soft);
 }
 [data-theme="dark"] .pill--up {
-  background: rgba(134, 181, 150, 0.20);
+  background: rgba(22, 163, 74, 0.20);
   color: #b6dfc1;
 }
 [data-theme="dark"] .pill--busy {
-  background: rgba(240, 204, 113, 0.22);
+  background: rgba(247, 162, 30, 0.22);
   color: #f0d391;
 }
 [data-theme="dark"] .pill--down {
-  background: rgba(199, 70, 52, 0.22);
+  background: rgba(214, 51, 108, 0.22);
   color: #ee9b8d;
 }
 /* Icon button in dark mode shouldn't have a subtle border on a dark
@@ -1096,12 +1095,12 @@ code, pre { font-family: var(--mono); }
 
 /* ----- Live THINK chip while tokens are still streaming ----- */
 .wb-output .ln--event--live .event__kind--think {
-  background: rgba(240, 204, 113, 0.30);
+  background: rgba(247, 162, 30, 0.30);
   color: #f0d391;
 }
 .wb-output .ln--event--live .event__body::after {
   content: "▌";
-  color: #f0cc71;
+  color: #F7A21E;
   animation: tulip-caret 0.95s steps(1, end) infinite;
   margin-left: 1px;
 }
@@ -1320,3 +1319,15 @@ code, pre { font-family: var(--mono); }
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
+
+/* ===================================================================
+   tuliplabs brand — match the docs site (Space Grotesk display,
+   pink->orange gradient garnish, tulip-rose accents).
+   =================================================================== */
+:root { --tulip-grad: linear-gradient(90deg, #ED2F7E 0%, #F7651E 100%);
+        --display: "Space Grotesk", "Inter", system-ui, sans-serif; }
+.app__brand-mark, .app__header h1, .app__header h2 { font-family: var(--display); letter-spacing: -0.02em; font-weight: 700; }
+/* gradient hairline under the header, like the docs */
+.app__header { border-bottom: 2px solid transparent; border-image: var(--tulip-grad) 1; }
+.app__brand-icon { height: 1.5rem; width: auto; }
+.app__brand-tag { font-family: var(--display); letter-spacing: 0.02em; }

@@ -7,7 +7,7 @@
   hover.
 #}
 {% block htmltitle %}
-  {% set tab_title = "Tulip — Multi-Agent SDK" %}
+  {% set tab_title = "tulip agents — Multi-Agent SDK" %}
   {% if page and page.title and not page.is_homepage %}
     <title>{{ page.title | striptags }} - {{ tab_title }}</title>
   {% else %}
@@ -31,7 +31,7 @@
   {% set og_image = (config.site_url ~ "/img/tuliplabs-logo.png") | replace("//img/", "/img/") %}
 
   <meta property="og:type" content="website">
-  <meta property="og:site_name" content="Tulip — Multi-Agent SDK">
+  <meta property="og:site_name" content="tulip agents — Multi-Agent SDK">
   <meta property="og:title" content="{{ page_title }}">
   <meta property="og:description" content="{{ page_desc }}">
   <meta property="og:url" content="{{ page_url }}">

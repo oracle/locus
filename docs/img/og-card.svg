@@ -15,7 +15,7 @@
     <path d="M50 86 C 44 60 44 38 50 18 C 56 38 56 60 50 86 Z" fill="url(#tulipGrad)"/>
   </g>
   <text x="470" y="300" font-size="150" font-weight="700" fill="#FAFAF9" letter-spacing="-0.04em">tuliplabs</text>
-  <text x="476" y="356" font-size="30" font-weight="600" fill="#ED5A8B">Multi-Agent Reasoning Orchestrator SDK</text>
+  <text x="476" y="356" font-size="30" font-weight="600" fill="#ED5A8B">Multi-Agent SDK</text>
   <text x="476" y="430" font-size="28" font-weight="500" fill="#A8A29E" font-family="'JetBrains Mono', 'Menlo', monospace">$ pip install tulip-agents</text>
   <text x="1156" y="600" font-size="22" font-weight="500" fill="#78716C" text-anchor="end" letter-spacing="0.05em">github.com/tuliplabs-ai/sdk-python</text>
 </svg>

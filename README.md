@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>Tulip · Multi-Agent Reasoning Orchestrator SDK</strong><br>
+  <strong>Tulip · Multi-Agent SDK</strong><br>
   <em>One <code>Agent</code> class, eight orchestration shapes, typed reasoning, and a vendor-neutral backend stack.</em>
 </p>
 

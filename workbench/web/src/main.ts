@@ -110,22 +110,6 @@ function clearModelOptions() {
   cfgModelC.disabled = true;
 }
 
-// True when the form has enough credentials that an /api/models call is
-// worth firing. We never auto-fetch on partial input — pasting a key
-// of length 5 shouldn't burn a request to the provider, and we never
-// want to render a curated/canned list before the key validates.
-function hasEnoughCredentials(p: ProviderType): boolean {
-  if (p === "openai") return cfgApiKey.value.startsWith("sk-") && cfgApiKey.value.length >= 30;
-  if (p === "anthropic") return cfgApiKey.value.startsWith("sk-ant-") && cfgApiKey.value.length >= 30;
-  return false;
-}
-
-function promptFor(p: ProviderType): string {
-  if (p === "openai") return "enter API key to load models";
-  if (p === "anthropic") return "enter API key to load models";
-  return "";
-}
-
 
 let modelsRefreshSeq = 0;
 

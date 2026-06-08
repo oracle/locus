@@ -1,4 +1,4 @@
-site_name: tulip
+site_name: tulip agents
 site_description: Multi-agent workflows for Python — stream them, branch them, pause for a human, resume next week. Open source, provider-agnostic.
 site_url: https://tuliplabs.ai/
 repo_url: https://github.com/tuliplabs-ai/sdk-python
@@ -16,29 +16,26 @@ exclude_docs: |
 theme:
   name: material
   custom_dir: overrides
-  logo: img/mark.svg
-  favicon: img/mark.svg
+  logo: img/tulip-mark.png
+  favicon: img/tulip-mark.png
   font:
     text: Inter
     code: JetBrains Mono
   palette:
-  # Each scheme advertises the icon for the OTHER mode — clicking it
-  # switches to that mode. So slate (dark) shows a sun (go to light)
-  # and default (light) shows a moon (go to dark). The previous mapping
-  # was reversed: slate showed a moon (already dark!) and default showed
-  # a sun (already light!).
-  - scheme: slate
-    primary: custom
-    accent: custom
-    toggle:
-      icon: material/brightness-7
-      name: Switch to light mode
+  # Light is the default (listed first). Each scheme shows the icon for
+  # the OTHER mode — light shows a moon (go dark), dark shows a sun.
   - scheme: default
     primary: custom
     accent: custom
     toggle:
       icon: material/brightness-4
       name: Switch to dark mode
+  - scheme: slate
+    primary: custom
+    accent: custom
+    toggle:
+      icon: material/brightness-7
+      name: Switch to light mode
   features:
   - navigation.instant
   - navigation.sections
@@ -54,6 +51,7 @@ theme:
   - search.suggest
 
 extra_css:
+- https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap
 - stylesheets/tulip.css
 
 extra_javascript:
@@ -61,7 +59,7 @@ extra_javascript:
 - javascripts/notebook-filter.js
 - javascripts/sidebar-filter.js
 
-copyright: <span class="footer-brand"><span class="footer-brand__text">tuliplabs</span></span><br><span class="footer-copy">Copyright &copy; 2026 tuliplabs</span>
+copyright: <span class="footer-brand"><span class="footer-brand__text">tuliplabs.ai</span></span><br><span class="footer-copy">Copyright &copy; 2026 tuliplabs</span>
 
 extra:
   homepage: https://tuliplabs.ai/

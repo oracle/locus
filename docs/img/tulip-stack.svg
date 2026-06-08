@@ -5,11 +5,11 @@
      preserveAspectRatio="xMidYMid meet">
 
   <!-- ===== tuliplabs palette =====
-       accent1 #04536F  deep teal     — Router · Think
-       accent3 #C74634  tulip pink    — Execute · agent-loop frame
-       accent5 #89B2B0  sage teal     — Reflect · orchestration shapes
-       accent4 #F0CC71  sand          — Terminate · foundations
-       accent2 #6C3F49  mauve         — pgvector · loop-back arrow -->
+       accent1 #E2570E  deep teal     — Router · Think
+       accent3 #D6336C  tulip pink    — Execute · agent-loop frame
+       accent5 #F4A6C2  sage teal     — Reflect · orchestration shapes
+       accent4 #F7A21E  sand          — Terminate · foundations
+       accent2 #9D174D  mauve         — pgvector · loop-back arrow -->
 
   <defs>
     <filter id="card-shadow" x="-10%" y="-10%" width="120%" height="140%">
@@ -21,12 +21,12 @@
 
     <marker id="arrow-fwd" viewBox="0 0 12 12" refX="11" refY="6"
             markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M 0,0 L 12,6 L 0,12 z" fill="#2A2F2F"/>
+      <path d="M 0,0 L 12,6 L 0,12 z" fill="#1B1620"/>
     </marker>
 
     <marker id="arrow-loop" viewBox="0 0 12 12" refX="11" refY="6"
             markerWidth="8" markerHeight="8" orient="auto-start-reverse">
-      <path d="M 0,0 L 12,6 L 0,12 z" fill="#6C3F49"/>
+      <path d="M 0,0 L 12,6 L 0,12 z" fill="#9D174D"/>
     </marker>
 
     <!-- tuliplabs wordmark -->
@@ -47,7 +47,7 @@
 
   <!-- ============ LAYER 1: COGNITIVE ROUTER ============ -->
   <g filter="url(#card-shadow)">
-    <rect x="40" y="48" width="1020" height="86" rx="12" ry="12" fill="#04536F"/>
+    <rect x="40" y="48" width="1020" height="86" rx="12" ry="12" fill="#E2570E"/>
     <text x="550" y="80" text-anchor="middle" font-size="22" font-weight="800"
           fill="#FFFFFF" letter-spacing="-0.01em">PRISM · Cognitive Router</text>
     <text x="550" y="104" text-anchor="middle" font-size="12.5" font-weight="600"
@@ -58,99 +58,99 @@
           fill="#FFFFFF" opacity="0.80">LLM classifier extracts intent · domain · complexity · risk → CognitiveCompiler emits the matching shape</text>
   </g>
 
-  <line x1="550" y1="138" x2="550" y2="170" stroke="#2A2F2F"
+  <line x1="550" y1="138" x2="550" y2="170" stroke="#1B1620"
         stroke-width="2.4" stroke-linecap="round" marker-end="url(#arrow-fwd)"/>
-  <text x="563" y="159" font-size="11" font-weight="600" fill="#2A2F2F" font-style="italic">compiles to</text>
+  <text x="563" y="159" font-size="11" font-weight="600" fill="#1B1620" font-style="italic">compiles to</text>
 
   <!-- ============ LAYER 2: 8 ORCHESTRATION SHAPES ============ -->
   <!-- Row A -->
   <g filter="url(#card-shadow)">
-    <rect x="40" y="184" width="244" height="54" rx="10" ry="10" fill="#89B2B0"/>
+    <rect x="40" y="184" width="244" height="54" rx="10" ry="10" fill="#F4A6C2"/>
     <text x="162" y="208" text-anchor="middle" font-size="14" font-weight="800" fill="#1F2828">SequentialPipeline</text>
     <text x="162" y="226" text-anchor="middle" font-size="10.5" font-weight="500" fill="#1F2828" opacity="0.80">A → B → C in order</text>
   </g>
   <g filter="url(#card-shadow)">
-    <rect x="296" y="184" width="244" height="54" rx="10" ry="10" fill="#89B2B0"/>
+    <rect x="296" y="184" width="244" height="54" rx="10" ry="10" fill="#F4A6C2"/>
     <text x="418" y="208" text-anchor="middle" font-size="14" font-weight="800" fill="#1F2828">ParallelPipeline</text>
     <text x="418" y="226" text-anchor="middle" font-size="10.5" font-weight="500" fill="#1F2828" opacity="0.80">fan-out to N agents · merge</text>
   </g>
   <g filter="url(#card-shadow)">
-    <rect x="552" y="184" width="244" height="54" rx="10" ry="10" fill="#89B2B0"/>
+    <rect x="552" y="184" width="244" height="54" rx="10" ry="10" fill="#F4A6C2"/>
     <text x="674" y="208" text-anchor="middle" font-size="14" font-weight="800" fill="#1F2828">LoopAgent</text>
     <text x="674" y="226" text-anchor="middle" font-size="10.5" font-weight="500" fill="#1F2828" opacity="0.80">refine until PASS / FAIL</text>
   </g>
   <g filter="url(#card-shadow)">
-    <rect x="808" y="184" width="244" height="54" rx="10" ry="10" fill="#89B2B0"/>
+    <rect x="808" y="184" width="244" height="54" rx="10" ry="10" fill="#F4A6C2"/>
     <text x="930" y="208" text-anchor="middle" font-size="14" font-weight="800" fill="#1F2828">StateGraph</text>
     <text x="930" y="226" text-anchor="middle" font-size="10.5" font-weight="500" fill="#1F2828" opacity="0.80">DAG · cycles · HITL gates</text>
   </g>
 
   <!-- Row B -->
   <g filter="url(#card-shadow)">
-    <rect x="40" y="248" width="244" height="54" rx="10" ry="10" fill="#89B2B0"/>
+    <rect x="40" y="248" width="244" height="54" rx="10" ry="10" fill="#F4A6C2"/>
     <text x="162" y="272" text-anchor="middle" font-size="14" font-weight="800" fill="#1F2828">Orchestrator + Specialists</text>
     <text x="162" y="290" text-anchor="middle" font-size="10.5" font-weight="500" fill="#1F2828" opacity="0.80">router → domain experts</text>
   </g>
   <g filter="url(#card-shadow)">
-    <rect x="296" y="248" width="244" height="54" rx="10" ry="10" fill="#89B2B0"/>
+    <rect x="296" y="248" width="244" height="54" rx="10" ry="10" fill="#F4A6C2"/>
     <text x="418" y="272" text-anchor="middle" font-size="14" font-weight="800" fill="#1F2828">Swarm</text>
     <text x="418" y="290" text-anchor="middle" font-size="10.5" font-weight="500" fill="#1F2828" opacity="0.80">peers share task queue</text>
   </g>
   <g filter="url(#card-shadow)">
-    <rect x="552" y="248" width="244" height="54" rx="10" ry="10" fill="#89B2B0"/>
+    <rect x="552" y="248" width="244" height="54" rx="10" ry="10" fill="#F4A6C2"/>
     <text x="674" y="272" text-anchor="middle" font-size="14" font-weight="800" fill="#1F2828">Handoff Chain</text>
     <text x="674" y="290" text-anchor="middle" font-size="10.5" font-weight="500" fill="#1F2828" opacity="0.80">escalation carries history</text>
   </g>
   <g filter="url(#card-shadow)">
-    <rect x="808" y="248" width="244" height="54" rx="10" ry="10" fill="#89B2B0"/>
+    <rect x="808" y="248" width="244" height="54" rx="10" ry="10" fill="#F4A6C2"/>
     <text x="930" y="272" text-anchor="middle" font-size="14" font-weight="800" fill="#1F2828">A2A Mesh</text>
     <text x="930" y="290" text-anchor="middle" font-size="10.5" font-weight="500" fill="#1F2828" opacity="0.80">cross-process · AgentCard</text>
   </g>
 
-  <line x1="550" y1="314" x2="550" y2="346" stroke="#2A2F2F"
+  <line x1="550" y1="314" x2="550" y2="346" stroke="#1B1620"
         stroke-width="2.4" stroke-linecap="round" marker-end="url(#arrow-fwd)"/>
-  <text x="563" y="335" font-size="11" font-weight="600" fill="#2A2F2F" font-style="italic">each shape runs</text>
+  <text x="563" y="335" font-size="11" font-weight="600" fill="#1B1620" font-style="italic">each shape runs</text>
 
   <!-- ============ LAYER 3: AGENT LOOP ============ -->
   <g filter="url(#card-shadow)">
-    <rect x="40" y="360" width="1020" height="166" rx="12" ry="12" fill="#FAFAF9" stroke="#C74634" stroke-width="2"/>
-    <rect x="40" y="360" width="1020" height="5" fill="#C74634"/>
+    <rect x="40" y="360" width="1020" height="166" rx="12" ry="12" fill="#FAFAF9" stroke="#D6336C" stroke-width="2"/>
+    <rect x="40" y="360" width="1020" height="5" fill="#D6336C"/>
   </g>
-  <text x="60" y="386" font-size="13" font-weight="800" fill="#C74634" letter-spacing="0.05em">THE AGENT LOOP — immutable state · typed events · one Agent class</text>
+  <text x="60" y="386" font-size="13" font-weight="800" fill="#D6336C" letter-spacing="0.05em">THE AGENT LOOP — immutable state · typed events · one Agent class</text>
 
   <!-- Think -->
   <g filter="url(#card-shadow)">
-    <rect x="70" y="402" width="220" height="92" rx="10" ry="10" fill="#04536F"/>
+    <rect x="70" y="402" width="220" height="92" rx="10" ry="10" fill="#E2570E"/>
     <text x="180" y="430" text-anchor="middle" font-size="18" font-weight="800" fill="#FFFFFF" letter-spacing="-0.01em">Think</text>
     <text x="180" y="453" text-anchor="middle" font-size="10.5" font-weight="600" fill="#FFFFFF" opacity="0.86" letter-spacing="0.05em">THE MODEL DECIDES</text>
     <text x="180" y="471" text-anchor="middle" font-size="10.5" font-weight="500" fill="#FFFFFF" opacity="0.78">next action / final answer</text>
   </g>
 
-  <line x1="295" y1="448" x2="320" y2="448" stroke="#2A2F2F" stroke-width="2.4" stroke-linecap="round" marker-end="url(#arrow-fwd)"/>
+  <line x1="295" y1="448" x2="320" y2="448" stroke="#1B1620" stroke-width="2.4" stroke-linecap="round" marker-end="url(#arrow-fwd)"/>
 
   <!-- Execute ★ -->
   <g filter="url(#card-shadow)">
-    <rect x="325" y="402" width="220" height="92" rx="10" ry="10" fill="#C74634"/>
+    <rect x="325" y="402" width="220" height="92" rx="10" ry="10" fill="#D6336C"/>
     <text x="435" y="430" text-anchor="middle" font-size="18" font-weight="800" fill="#FFFFFF" letter-spacing="-0.01em">Execute</text>
     <text x="435" y="453" text-anchor="middle" font-size="10.5" font-weight="600" fill="#FFFFFF" opacity="0.86" letter-spacing="0.05em">IDEMPOTENT DEDUPE</text>
     <text x="435" y="471" text-anchor="middle" font-size="10.5" font-weight="500" fill="#FFFFFF" opacity="0.78">retries return cached receipt</text>
   </g>
 
-  <line x1="550" y1="448" x2="575" y2="448" stroke="#2A2F2F" stroke-width="2.4" stroke-linecap="round" marker-end="url(#arrow-fwd)"/>
+  <line x1="550" y1="448" x2="575" y2="448" stroke="#1B1620" stroke-width="2.4" stroke-linecap="round" marker-end="url(#arrow-fwd)"/>
 
   <!-- Reflect -->
   <g filter="url(#card-shadow)">
-    <rect x="580" y="402" width="220" height="92" rx="10" ry="10" fill="#89B2B0"/>
+    <rect x="580" y="402" width="220" height="92" rx="10" ry="10" fill="#F4A6C2"/>
     <text x="690" y="430" text-anchor="middle" font-size="18" font-weight="800" fill="#1F2828" letter-spacing="-0.01em">Reflect</text>
     <text x="690" y="453" text-anchor="middle" font-size="10.5" font-weight="600" fill="#1F2828" opacity="0.86" letter-spacing="0.05em">REFLEXION · GROUNDING · CAUSAL</text>
     <text x="690" y="471" text-anchor="middle" font-size="10.5" font-weight="500" fill="#1F2828" opacity="0.78">GSAR typed claim verification</text>
   </g>
 
-  <line x1="805" y1="448" x2="830" y2="448" stroke="#2A2F2F" stroke-width="2.4" stroke-linecap="round" marker-end="url(#arrow-fwd)"/>
+  <line x1="805" y1="448" x2="830" y2="448" stroke="#1B1620" stroke-width="2.4" stroke-linecap="round" marker-end="url(#arrow-fwd)"/>
 
   <!-- Terminate? ★ -->
   <g filter="url(#card-shadow)">
-    <rect x="835" y="402" width="220" height="92" rx="10" ry="10" fill="#F0CC71"/>
+    <rect x="835" y="402" width="220" height="92" rx="10" ry="10" fill="#F7A21E"/>
     <text x="945" y="430" text-anchor="middle" font-size="18" font-weight="800" fill="#3A2A0F" letter-spacing="-0.01em">Terminate?</text>
     <text x="945" y="453" text-anchor="middle" font-size="10.5" font-weight="600" fill="#3A2A0F" opacity="0.86" letter-spacing="0.05em">ALGEBRA: AND · OR</text>
     <text x="945" y="471" text-anchor="middle" font-size="10.5" font-weight="500" fill="#3A2A0F" opacity="0.78">composable stops, just data</text>
@@ -158,53 +158,53 @@
 
   <!-- loop-back arrow -->
   <path d="M 945 498 Q 945 511, 932 511 L 192 511 Q 180 511, 180 498"
-        stroke="#6C3F49" stroke-width="2.2" fill="none"
+        stroke="#9D174D" stroke-width="2.2" fill="none"
         stroke-dasharray="6,4" stroke-linecap="round"
         marker-end="url(#arrow-loop)"/>
-  <text x="562" y="508" text-anchor="middle" font-size="11" font-weight="600" fill="#6C3F49" font-style="italic">iterate · while termination algebra says continue</text>
+  <text x="562" y="508" text-anchor="middle" font-size="11" font-weight="600" fill="#9D174D" font-style="italic">iterate · while termination algebra says continue</text>
 
-  <line x1="550" y1="538" x2="550" y2="570" stroke="#2A2F2F"
+  <line x1="550" y1="538" x2="550" y2="570" stroke="#1B1620"
         stroke-width="2.4" stroke-linecap="round" marker-end="url(#arrow-fwd)"/>
-  <text x="563" y="559" font-size="11" font-weight="600" fill="#2A2F2F" font-style="italic">powered by</text>
+  <text x="563" y="559" font-size="11" font-weight="600" fill="#1B1620" font-style="italic">powered by</text>
 
   <!-- ============ LAYER 4: FOUNDATIONS ============ -->
   <g filter="url(#card-shadow)">
-    <rect x="40" y="584" width="196" height="84" rx="10" ry="10" fill="#F0CC71"/>
+    <rect x="40" y="584" width="196" height="84" rx="10" ry="10" fill="#F7A21E"/>
     <text x="138" y="610" text-anchor="middle" font-size="15" font-weight="800" fill="#3A2A0F">Model Providers</text>
     <text x="138" y="630" text-anchor="middle" font-size="10.5" font-weight="500" fill="#3A2A0F" opacity="0.85">V1 · SDK · Responses transports</text>
     <text x="138" y="647" text-anchor="middle" font-size="10.5" font-weight="500" fill="#3A2A0F" opacity="0.78">90+ models · day-0</text>
   </g>
   <g filter="url(#card-shadow)">
-    <rect x="244" y="584" width="196" height="84" rx="10" ry="10" fill="#F0CC71"/>
+    <rect x="244" y="584" width="196" height="84" rx="10" ry="10" fill="#F7A21E"/>
     <text x="342" y="610" text-anchor="middle" font-size="15" font-weight="800" fill="#3A2A0F">Memory</text>
     <text x="342" y="630" text-anchor="middle" font-size="10.5" font-weight="500" fill="#3A2A0F" opacity="0.85">9 checkpoint backends</text>
     <text x="342" y="647" text-anchor="middle" font-size="10.5" font-weight="500" fill="#3A2A0F" opacity="0.78">durable threads · long-term store</text>
   </g>
   <g filter="url(#card-shadow)">
-    <rect x="448" y="584" width="196" height="84" rx="10" ry="10" fill="#F0CC71"/>
+    <rect x="448" y="584" width="196" height="84" rx="10" ry="10" fill="#F7A21E"/>
     <text x="546" y="610" text-anchor="middle" font-size="15" font-weight="800" fill="#3A2A0F">RAG</text>
     <text x="546" y="630" text-anchor="middle" font-size="10.5" font-weight="500" fill="#3A2A0F" opacity="0.85">4 vector stores · multimodal</text>
     <text x="546" y="647" text-anchor="middle" font-size="10.5" font-weight="500" fill="#3A2A0F" opacity="0.78">embeddings · rerank · hybrid</text>
   </g>
   <g filter="url(#card-shadow)">
-    <rect x="652" y="584" width="196" height="84" rx="10" ry="10" fill="#F0CC71"/>
+    <rect x="652" y="584" width="196" height="84" rx="10" ry="10" fill="#F7A21E"/>
     <text x="750" y="610" text-anchor="middle" font-size="15" font-weight="800" fill="#3A2A0F">Observability</text>
     <text x="750" y="630" text-anchor="middle" font-size="10.5" font-weight="500" fill="#3A2A0F" opacity="0.85">40+ typed events · EventBus</text>
     <text x="750" y="647" text-anchor="middle" font-size="10.5" font-weight="500" fill="#3A2A0F" opacity="0.78">OpenTelemetry · SSE · hooks</text>
   </g>
   <g filter="url(#card-shadow)">
-    <rect x="856" y="584" width="196" height="84" rx="10" ry="10" fill="#F0CC71"/>
+    <rect x="856" y="584" width="196" height="84" rx="10" ry="10" fill="#F7A21E"/>
     <text x="954" y="610" text-anchor="middle" font-size="15" font-weight="800" fill="#3A2A0F">Tools · MCP · Skills</text>
     <text x="954" y="630" text-anchor="middle" font-size="10.5" font-weight="500" fill="#3A2A0F" opacity="0.85">@tool · idempotent · MCP both-ways</text>
     <text x="954" y="647" text-anchor="middle" font-size="10.5" font-weight="500" fill="#3A2A0F" opacity="0.78">guardrails · steering · evaluation</text>
   </g>
 
-  <line x1="550" y1="678" x2="550" y2="710" stroke="#2A2F2F"
+  <line x1="550" y1="678" x2="550" y2="710" stroke="#1B1620"
         stroke-width="2.4" stroke-linecap="round" marker-end="url(#arrow-fwd)"/>
 
   <!-- ============ LAYER 5: STORAGE BACKENDS ============ -->
   <g filter="url(#card-shadow)">
-    <rect x="40" y="724" width="1020" height="68" rx="12" ry="12" fill="#6C3F49"/>
+    <rect x="40" y="724" width="1020" height="68" rx="12" ry="12" fill="#9D174D"/>
     <use href="#tulip-mark-white" x="92" y="738" width="26" height="26"/>
     <text x="550" y="754" text-anchor="middle" font-size="20" font-weight="800"
           fill="#FFFFFF" letter-spacing="-0.01em">pgvector · Qdrant · S3 · Redis</text>

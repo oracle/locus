@@ -1,4 +1,4 @@
-import type { ProviderConfig } from "./types";
+import type { ProviderConfig, Pattern, RunResponse } from "./types";
 
 export type Notebook = {
   id: string;
@@ -193,17 +193,16 @@ export function runNotebookSource(
 // Pattern runner (the 8 pre-wired tulip patterns).
 // ---------------------------------------------------------------------------
 
-export type Pattern = {
-  id: string;
-  name: string;
-  description: string;
-  streamable: boolean;
-};
-
-export type PatternRunResponse = {
-  output: string;
-  model?: string;
-  provider?: string;
+// A single Server-Sent event from the pattern streamer. The backend emits
+// JSON objects per `data:` line — chunk events ({type, content, done}),
+// a terminate event ({type, final_message}), and errors ({type, message}).
+export type PatternStreamEvent = {
+  type?: string;
+  content?: string;
+  done?: boolean;
+  final_message?: string;
+  message?: string;
+  [key: string]: unknown;
 };
 
 export async function listPatterns(): Promise<Pattern[]> {
@@ -217,7 +216,7 @@ export async function runPattern(
   prompt: string,
   provider: ProviderConfig,
   options: { use_llm_picker?: boolean } = {},
-): Promise<PatternRunResponse> {
+): Promise<RunResponse> {
   const body: Record<string, unknown> = { prompt, provider };
   if (options.use_llm_picker !== undefined) {
     body.use_llm_picker = options.use_llm_picker;
@@ -228,18 +227,20 @@ export async function runPattern(
     body: JSON.stringify(body),
   });
   if (!r.ok) throw new Error(`run ${r.status}: ${await r.text()}`);
-  return (await r.json()) as PatternRunResponse;
+  return (await r.json()) as RunResponse;
 }
 
 export function streamPattern(
   patternId: string,
   prompt: string,
   provider: ProviderConfig,
-  onChunk: (text: string) => void,
-  onClose: () => void,
+  onEvent: (ev: PatternStreamEvent) => void,
+  onFinal: (reply: string) => void,
+  onError: (msg: string) => void,
 ): () => void {
   const ctrl = new AbortController();
   void (async () => {
+    let finalSent = false;
     try {
       const r = await fetch(`/api/run/${encodeURIComponent(patternId)}/stream`, {
         method: "POST",
@@ -247,7 +248,10 @@ export function streamPattern(
         body: JSON.stringify({ prompt, provider }),
         signal: ctrl.signal,
       });
-      if (!r.ok || !r.body) { onClose(); return; }
+      if (!r.ok || !r.body) {
+        onError(`stream ${r.status}: ${r.ok ? "no body" : await r.text()}`);
+        return;
+      }
       const reader = r.body.getReader();
       const dec = new TextDecoder();
       let buf = "";
@@ -260,14 +264,31 @@ export function streamPattern(
           const block = buf.slice(0, nl);
           buf = buf.slice(nl + 2);
           for (const line of block.split("\n")) {
-            if (line.startsWith("data:")) onChunk(line.slice(5).trim());
+            if (!line.startsWith("data:")) continue;
+            const raw = line.slice(5).trim();
+            if (!raw) continue;
+            let ev: PatternStreamEvent;
+            try {
+              ev = JSON.parse(raw) as PatternStreamEvent;
+            } catch {
+              onEvent({ content: raw });
+              continue;
+            }
+            const type = ev.type ?? "";
+            if (type.includes("Error") || ev.message) {
+              onError(ev.message ?? "stream error");
+            } else if (type.includes("Terminate") || ev.final_message !== undefined) {
+              finalSent = true;
+              onFinal(ev.final_message ?? "");
+            } else {
+              onEvent(ev);
+            }
           }
         }
       }
-      onClose();
+      if (!finalSent) onFinal("");
     } catch (err) {
-      if ((err as Error).name !== "AbortError") onChunk(`error: ${(err as Error).message}`);
-      onClose();
+      if ((err as Error).name !== "AbortError") onError((err as Error).message);
     }
   })();
   return () => ctrl.abort();

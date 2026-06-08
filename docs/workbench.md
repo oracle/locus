@@ -1,4 +1,4 @@
-<p class="tulip-product-name">Multi-Agent Reasoning Orchestrator SDK</p>
+<p class="tulip-product-name">Multi-Agent SDK</p>
 
 # Workbench
 
@@ -14,7 +14,7 @@ key, choose a notebook in the
 sidebar, hit **Run**. A real agent streams events back into the
 browser.
 
-![Workbench UI screenshot](img/workbench.gif)
+![Workbench UI screenshot](img/workbench.png)
 
 ## What it is
 

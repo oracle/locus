@@ -1,15 +1,26 @@
-// Make the header title text behave like the logo: click → docs home.
-// Inherit the URL from the mkdocs-material-rendered `.md-logo` anchor
-// rather than hard-coding "/" — the deployed site lives at
-// `https://tuliplabs.ai/`, so "/" would resolve to the wrong
-// place if we ever moved off the apex. `.md-logo` carries the correct
-// site-relative href on every page.
-document.addEventListener("DOMContentLoaded", () => {
-  const title = document.querySelector(".md-header__ellipsis");
+// Make the header title ("tulip agents SDK") behave like the logo:
+// click → docs home. Uses event delegation on `document` so it keeps
+// working across mkdocs-material `navigation.instant` page swaps.
+//
+// `site_url` is the production apex (tuliplabs.ai), so the rendered logo
+// anchor is absolute to that origin. We honour it when we're actually
+// served from that origin, but fall back to the current origin's root
+// for local dev / previews — otherwise "home" would jump off to the
+// production domain.
+document.addEventListener("click", (e) => {
+  const target = e.target;
+  if (!(target instanceof Element)) return;
+  // Only the title slot — never hijack the logo, repo links, or icons.
+  if (!target.closest(".md-header__title") || target.closest("a")) return;
+  e.preventDefault();
   const logo = document.querySelector(".md-header__button.md-logo");
-  if (!title || !logo) return;
-  title.style.cursor = "pointer";
-  title.addEventListener("click", () => {
-    window.location.href = logo.href;
-  });
+  let dest = logo && logo.href ? logo.href : window.location.origin + "/";
+  try {
+    if (new URL(dest).origin !== window.location.origin) {
+      dest = window.location.origin + "/";
+    }
+  } catch {
+    dest = window.location.origin + "/";
+  }
+  window.location.href = dest;
 });

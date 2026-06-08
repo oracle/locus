@@ -35,11 +35,11 @@ brand sheet:
 
 | Use | Hex |
 |---|---|
-| Think / source / structure | `#04536F` (deep teal · accent1) |
-| Execute / primary action / final | `#C74634` (tulip pink) |
-| Reflect / data plane / sage cards | `#89B2B0` (sage teal · accent5) |
-| Terminate / shared state / decision | `#F0CC71` (sand · accent4) |
-| Mauve / dashed result-flow arrows | `#6C3F49` (mauve · accent2) |
+| Think / source / structure | `#E2570E` (deep teal · accent1) |
+| Execute / primary action / final | `#D6336C` (tulip pink) |
+| Reflect / data plane / sage cards | `#F4A6C2` (sage teal · accent5) |
+| Terminate / shared state / decision | `#F7A21E` (sand · accent4) |
+| Mauve / dashed result-flow arrows | `#9D174D` (mauve · accent2) |
 | Card text on dark cards | `#FFFFFF` |
 | Card text on light cards | `#1F2828` / `#3A2A0F` |
 | Hairlines, default text | `#2A2F2F` (dk1) |

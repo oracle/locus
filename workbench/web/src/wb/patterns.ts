@@ -1,6 +1,6 @@
 /** Patterns sidebar + run panel. */
 import { listPatterns, runPattern, streamPattern } from "../api";
-import type { Pattern } from "../types";
+import type { Pattern, RunResponse, RunEvent } from "../types";
 import { loadProvider } from "../settings";
 import { $ } from "./dom";
 
@@ -136,7 +136,7 @@ async function doRun(): Promise<void> {
       cancelStream = await streamPattern(
         current.id, prompt, provider,
         (ev) => {
-          const chunk = ev.extra?.["content"] as string | undefined;
+          const chunk = ev.content;
           if (chunk) { fullText += chunk; out.textContent = fullText; }
         },
         (finalReply) => { out.textContent = finalReply || fullText || "(no reply)"; setRunning(false); cancelStream = null; },
@@ -173,27 +173,17 @@ function readSelectedMode(): "rules" | "llm" {
   return llmRadio?.checked ? "llm" : "rules";
 }
 
-interface RoutingEvent {
-  kind?: string;
-  text?: string;
-  extra?: { protocol_id?: string; mode?: string; rationale?: string };
-}
-
-interface RoutingResult {
-  reply?: string;
-  events?: RoutingEvent[];
-}
-
 function renderRoutingResult(
   out: HTMLElement,
-  result: RoutingResult,
+  result: RunResponse,
   useLLMPicker: boolean,
 ): void {
   const proto = (result.events ?? []).find(
-    (e: RoutingEvent) => e.kind === "ProtocolSelected",
+    (e: RunEvent) => e.kind === "ProtocolSelected",
   );
-  const protocolId = proto?.extra?.protocol_id ?? proto?.text ?? "?";
-  const rationale = proto?.extra?.rationale;
+  const protocolId =
+    (proto?.extra?.["protocol_id"] as string | undefined) ?? proto?.text ?? "?";
+  const rationale = proto?.extra?.["rationale"] as string | undefined;
   const modeLabel = useLLMPicker ? "llm_picked" : "rule_based";
 
   const chip = document.createElement("div");

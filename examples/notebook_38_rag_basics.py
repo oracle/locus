@@ -9,7 +9,7 @@ own documents. The pipeline has four steps:
 - **Embed** — turn text into vectors with ``OpenAIEmbeddings``
   (``text-embedding-3-small``, 1536 dims).
 - **Store** — persist the vectors in a vector store. This notebook uses
-  the bundled ``InMemoryVectorStore`` so it runs with no external
+  an in-memory ``QdrantVectorStore`` so it runs with no external
   service; swap in ``QdrantVectorStore`` / ``PgVectorStore`` /
   ``OpenSearchVectorStore`` for a durable backend.
 - **Search** — find the closest vectors by cosine distance.
@@ -31,7 +31,7 @@ import math
 import os
 import sys
 
-from tulip.rag import InMemoryVectorStore, OpenAIEmbeddings, RAGRetriever
+from tulip.rag import OpenAIEmbeddings, QdrantVectorStore, RAGRetriever
 from tulip.rag.stores.base import Document
 
 
@@ -43,8 +43,8 @@ def _get_embedder() -> OpenAIEmbeddings:
     return OpenAIEmbeddings(model="text-embedding-3-small")
 
 
-def _get_store(dimension: int = 1536) -> InMemoryVectorStore:
-    return InMemoryVectorStore(dimension=dimension)
+def _get_store(dimension: int = 1536) -> QdrantVectorStore:
+    return QdrantVectorStore(location=":memory:", dimension=dimension)
 
 
 # =============================================================================
@@ -88,18 +88,18 @@ async def understand_embeddings():
 
 
 # =============================================================================
-# Step 2: InMemoryVectorStore — store vectors, query by cosine distance.
+# Step 2: QdrantVectorStore (in-memory) — store vectors, query by cosine distance.
 # =============================================================================
 
 
 async def using_vector_store():
     print("\n" + "=" * 60)
-    print("Step 2: InMemoryVectorStore (COSINE)")
+    print("Step 2: QdrantVectorStore (in-memory, cosine)")
     print("=" * 60)
 
     embedder = _get_embedder()
     store = _get_store(dimension=embedder.config.dimension)
-    print(f"Created InMemoryVectorStore dim={store.config.dimension}")
+    print(f"Created QdrantVectorStore dim={store.config.dimension}")
 
     docs_text = [
         "Python is great for data science and machine learning.",

@@ -7,7 +7,7 @@
    ========================================================================== */
 
 :root {
-  --or-text:        #2A2F2F;
+  --or-text:        #1B1620;
   --or-text-soft:   #57605E;
   --or-text-mute:   #8E938F;
   --or-bg:          #FBF9F8;
@@ -15,15 +15,15 @@
   --or-surface:     #FFFFFF;
   --or-rule:        #E5DED9;
 
-  --or-red:         #C74634;
-  --or-red-deep:    #A03828;
-  --or-red-tint:    rgba(199, 70, 52, 0.08);
-  --or-teal:        #04536F;
-  --or-link:        #00688C;
-  --or-mauve:       #6C3F49;
-  --or-sand:        #F0CC71;
-  --or-sage-teal:   #89B2B0;
-  --or-sage-green:  #86B596;
+  --or-red:         #D6336C;
+  --or-red-deep:    #AD2E5C;
+  --or-red-tint:    rgba(214, 51, 108, 0.08);
+  --or-teal:        #E2570E;
+  --or-link:        #C2185B;
+  --or-mauve:       #9D174D;
+  --or-sand:        #F7A21E;
+  --or-sage-teal:   #F4A6C2;
+  --or-sage-green:  #16A34A;
 
   --shadow-1: 0 1px 2px rgba(49, 45, 42, 0.06);
   --shadow-2: 0 6px 18px -10px rgba(49, 45, 42, 0.18);
@@ -278,7 +278,7 @@ code, pre { font-family: var(--mono); }
   border-radius: 3px;
 }
 .skill--match {
-  background: rgba(240, 204, 113, 0.45);
+  background: rgba(247, 162, 30, 0.45);
   color: #5a4318;
 }
 
@@ -314,7 +314,7 @@ code, pre { font-family: var(--mono); }
 }
 .input:focus, .textarea:focus {
   border-color: var(--or-red);
-  box-shadow: 0 0 0 3px rgba(199, 70, 52, 0.18);
+  box-shadow: 0 0 0 3px rgba(214, 51, 108, 0.18);
 }
 .textarea { min-height: 5.5rem; resize: vertical; font-family: var(--sans); }
 
@@ -387,7 +387,7 @@ code, pre { font-family: var(--mono); }
   text-align: center;
 }
 .event__kind--tool { background: rgba(0, 104, 140, 0.10); color: var(--or-link); }
-.event__kind--terminate { background: rgba(134, 181, 150, 0.20); color: #2f6243; }
+.event__kind--terminate { background: rgba(22, 163, 74, 0.20); color: #2f6243; }
 .event__kind--error { background: var(--or-red-tint); color: var(--or-red-deep); }
 
 .event__body {
@@ -426,9 +426,9 @@ code, pre { font-family: var(--mono); }
   width: 6px; height: 6px; border-radius: 50%;
   background: currentColor;
 }
-.pill--up    { background: rgba(134, 181, 150, 0.20); color: #2f6243; }
+.pill--up    { background: rgba(22, 163, 74, 0.20); color: #2f6243; }
 .pill--down  { background: var(--or-red-tint); color: var(--or-red-deep); }
-.pill--busy  { background: rgba(240, 204, 113, 0.30); color: #6a4f15; }
+.pill--busy  { background: rgba(247, 162, 30, 0.30); color: #6a4f15; }
 
 /* ----- Mini "Fusion" footer ----- */
 

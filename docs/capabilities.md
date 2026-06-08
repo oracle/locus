@@ -7,7 +7,7 @@ does, and where to find it.
     These are architectural choices no other Python agent framework ships
     together in one coherent stack:
 
-    - **Multi-agent reasoning orchestrator** — describe a task; a
+    - **Multi-agent SDK** — describe a task; a
       typed registry picks one of eight protocols and instantiates the
       matching SDK primitive. The LLM fills a typed `GoalFrame`; routing is
       rule-based. Eight protocols: `direct_response` (single Agent),
@@ -18,7 +18,7 @@ does, and where to find it.
     - **Seven native multi-agent patterns plus A2A** — Composition
       (Sequential / Parallel / Loop), Orchestrator + Specialists, Swarm,
       Handoff, StateGraph, Functional API (`@task` / `@entrypoint`), DeepAgent,
-      cross-process A2A. Use them directly, or let the reasoning orchestrator
+      cross-process A2A. Use them directly, or let the cognitive router
       dispatch to them. Every pattern shares the same `Agent` class and event
       stream.
     - **In-process observability** — opt-in `EventBus` with agent yield
