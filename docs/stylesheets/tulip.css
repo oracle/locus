@@ -1,0 +1,1374 @@
+html {
+  scroll-behavior: smooth;
+  /* Prevent horizontal scroll from off-viewport nav children on narrow
+     screens. Use `clip` not `hidden`: `overflow-x: hidden` establishes
+     a scroll container on <html> that silently breaks position:sticky
+     on every descendant (including the .md-header tabs strip that we
+     want pinned during scroll). `clip` clips the overflow without
+     establishing a scroll container, so sticky descendants keep working
+     — supported in Chrome 90+ / Safari 16+ / Firefox 81+. */
+  overflow-x: clip;
+}
+
+/* ============================================================================
+   tulip docs — tuliplabs palette + tulip brand rules.
+
+   Brand (from docs/img/logo.svg):
+     - Wordmark is always lowercase "tulip", never capitalized.
+     - Type is sans-serif throughout (no serif headings).
+     - Wordmark colour:  #312D2A   (warm near-black)
+     - Mark accent:      #C74634   (tulip red, also accent3)
+     - Tagline:          uppercase, weight 500, letter-spacing 0.16em,
+                         colour #78716C.
+     - Wordmark display: weight 700, letter-spacing -0.04em.
+
+   Palette: tuliplabs palette.
+   ========================================================================== */
+
+:root {
+  /* tulip brand greys (logo-derived) */
+  --tulip-ink:      #312D2A;   /* wordmark colour */
+  --tulip-mute:     #78716C;   /* tagline grey */
+  --tulip-paper:    #FAFAF9;   /* logo white-out — paper */
+  --tulip-surface:  #FFFFFF;   /* elevated surface (header, cards, focused inputs) */
+  --tulip-table-stripe: rgba(244, 239, 236, 0.45);
+  --tulip-code-inline: var(--or-red-deep);
+
+  /* tuliplabs palette */
+  --or-text:        #2A2F2F;   /* dk1 */
+  --or-bg:          #FBF9F8;   /* lt2 — off-white */
+  --or-bg-soft:     #F4EFEC;   /* derived: tint of lt2 */
+  --or-rule:        #E5DED9;   /* derived */
+
+  --or-red:         #C74634;   /* accent3 — tulip red, also tulip mark accent */
+  --or-red-deep:    #A03828;   /* derived */
+  --or-red-light:   #E2715F;   /* derived */
+
+  --or-teal:        #04536F;   /* accent1 */
+  --or-link:        #00688C;   /* hlink */
+  --or-mauve:       #6C3F49;   /* accent2 */
+  --or-sand:        #F0CC71;   /* accent4 */
+  --or-sage-teal:   #89B2B0;   /* accent5 */
+  --or-sage-green:  #86B596;   /* accent6 */
+
+  /* tulip type stack — same as logo SVG, sans throughout */
+  --tulip-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+                Helvetica, system-ui, sans-serif;
+  --tulip-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo,
+                Consolas, monospace;
+}
+
+/* ---------------------------------------------------------------------------
+   Light scheme (default).
+   --------------------------------------------------------------------------- */
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color:        var(--or-red);
+  --md-primary-fg-color--light:  var(--or-red-light);
+  --md-primary-fg-color--dark:   var(--or-red-deep);
+  --md-primary-bg-color:        #FFFFFF;
+  --md-primary-bg-color--light: #FFFFFFcc;
+
+  --md-accent-fg-color:         var(--or-link);
+  --md-accent-fg-color--transparent: rgba(0, 104, 140, 0.10);
+  --md-accent-bg-color:         #FFFFFF;
+
+  --md-default-bg-color:        var(--or-bg);
+  --md-default-fg-color:        var(--or-text);
+  --md-default-fg-color--light: #4a4f4f;
+  --md-default-fg-color--lighter: #7a7e7e;
+  --md-default-fg-color--lightest: #c5c8c8;
+
+  --md-typeset-color:           var(--or-text);
+  --md-typeset-a-color:          var(--or-link);
+  --md-typeset-mark-color:       rgba(240, 204, 113, 0.45);  /* sand */
+
+  --md-footer-bg-color:         #1F2424;
+  --md-footer-bg-color--dark:    #161A1A;
+  --md-footer-fg-color:         #FFFFFF;
+  --md-footer-fg-color--light:   #C9CCCC;
+
+  --md-code-bg-color:           #F4EFEC;
+  --md-code-fg-color:           #2A2F2F;
+}
+
+/* ---------------------------------------------------------------------------
+   Dark scheme — keep tulip red but tone the canvas.
+   --------------------------------------------------------------------------- */
+[data-md-color-scheme="slate"] {
+  --md-hue: 200;
+
+  /* tuliplabs warm-dark palette — identical to the workbench dark theme
+     (workbench/web/src/styles/redwood.css [data-theme="dark"]).
+     Same canvas, same red, same sage links. */
+  --tulip-ink:        #F0EBE6;
+  --tulip-mute:       #95908a;
+  --tulip-paper:      #1B1A18;
+  --tulip-surface:    #1F1D1A;
+  --tulip-table-stripe: rgba(240, 235, 230, 0.04);
+  --tulip-code-inline: #E2715F;
+
+  --or-text:          #F0EBE6;
+  --or-text-soft:     #c9c4be;
+  --or-text-mute:     #95908a;
+  --or-bg:            #1B1A18;
+  --or-bg-soft:       #25231F;
+  --or-surface:       #1F1D1A;
+  --or-rule:          #36332E;
+
+  /* Red stays tulip red; deep variant lightens in dark (matches workbench) */
+  --or-red:           #C74634;
+  --or-red-deep:      #E2715F;
+  --or-red-light:     #F09080;
+  /* Sage teal becomes the link colour in dark (matches workbench) */
+  --or-teal:          #89B2B0;
+  --or-link:          #89B2B0;
+  --or-mauve:         #B07A85;
+  --or-sand:          #F0CC71;
+  --or-sage-teal:     #89B2B0;
+  --or-sage-green:    #86B596;
+
+  /* Material overrides */
+  --md-primary-fg-color:        #C74634;
+  --md-primary-fg-color--light: #E2715F;
+  --md-primary-fg-color--dark:  #A03828;
+  --md-primary-bg-color:        #1B1A18;
+  --md-primary-bg-color--light: #1B1A18cc;
+
+  --md-accent-fg-color:         #89B2B0;
+  --md-accent-fg-color--transparent: rgba(137, 178, 176, 0.15);
+  --md-accent-bg-color:         #25231F;
+
+  --md-default-bg-color:        #1B1A18;
+  --md-default-fg-color:        #F0EBE6;
+  --md-default-fg-color--light: #c9c4be;
+  --md-default-fg-color--lighter: #95908a;
+  --md-default-fg-color--lightest: #4a4844;
+
+  --md-typeset-color:           #F0EBE6;
+  --md-typeset-a-color:         #89B2B0;   /* sage teal, matches workbench links */
+  --md-typeset-mark-color:      rgba(240, 204, 113, 0.28);
+
+  --md-footer-bg-color:         #131211;
+  --md-footer-bg-color--dark:   #0c0b0a;
+  --md-footer-fg-color:         #F0EBE6;
+  --md-footer-fg-color--light:  #b8b3ad;
+
+  --md-code-bg-color:           #25231F;
+  --md-code-fg-color:           #E8E2DA;
+
+  --md-shadow-z1: 0 0 0.2rem rgba(0,0,0,.4), 0 0.2rem 0.4rem rgba(0,0,0,.3);
+  --md-shadow-z2: 0 0 0.2rem rgba(0,0,0,.5), 0 0.2rem 0.8rem rgba(0,0,0,.4);
+}
+
+/* ---------------------------------------------------------------------------
+   Typography — sans throughout, matching the tulip wordmark.
+   Display headings carry the wordmark's tight tracking (-0.04em on h1, -0.02em
+   below). Subheadings can opt into the tagline pattern (uppercase + 0.16em)
+   via the `.tagline` utility class.
+   --------------------------------------------------------------------------- */
+.md-typeset {
+  font-family: var(--tulip-sans);
+  font-feature-settings: "ss01", "cv11";
+  color: var(--tulip-ink);
+}
+.md-typeset code,
+.md-typeset pre {
+  font-family: var(--tulip-mono);
+}
+
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3,
+.md-typeset h4,
+.md-typeset h5,
+.md-header__topic > .md-ellipsis,
+.md-nav__title {
+  font-family: var(--tulip-sans);
+}
+
+.md-typeset h1 {
+  color: var(--tulip-ink);
+  font-weight: 700;
+  font-size: 2.4rem;
+  line-height: 1.10;
+  letter-spacing: -0.04em;       /* wordmark tracking */
+  margin: 0 0 1.2rem;
+}
+@media (max-width: 76em) {
+  .md-typeset h1 { font-size: 1.7rem !important; }
+}
+@media (max-width: 48em) {
+  .md-typeset h1 { font-size: 1.35rem !important; }
+  .md-typeset h1 a.headerlink { display: none; }
+}
+@media (max-width: 36em) {
+  .md-typeset h1 { font-size: 1.2rem !important; }
+}
+.md-typeset h2 {
+  color: var(--tulip-ink);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  border-bottom: 1px solid var(--or-rule);
+  padding-bottom: 0.4rem;
+  margin-top: 1.6rem;
+}
+.md-typeset h3 {
+  color: var(--or-red-deep);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+.md-typeset h4 {
+  color: var(--tulip-ink);
+  font-weight: 700;
+}
+
+.md-typeset p,
+.md-typeset li {
+  line-height: 1.65;
+}
+
+/* Homepage hero — Strands-format split (copy left, code right) with
+   soft-glow background blobs for visual warmth without
+   enterprise stiffness. */
+.md-typeset .tulip-hero {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1.05fr 1fr;
+  gap: 2.4rem;
+  align-items: start;          /* both columns top-align — no dead vertical space */
+  margin: -0.4rem 0 1.4rem;
+  padding: 0.4rem 0 0.8rem;
+  isolation: isolate;
+  overflow: hidden;
+}
+/* Tighten the gap between the tabs strip and the hero on the home page —
+   the default Material content padding leaves dead space above the H1. */
+.md-content__inner:has(> .tulip-hero),
+.md-content__inner:has(> div > .tulip-hero) {
+  padding-top: 0.2rem;
+  margin-top: 0;
+}
+/* tulip-red soft glow behind the H1 — the warm spotlight */
+.md-typeset .tulip-hero::before {
+  content: "";
+  position: absolute;
+  top: -180px; left: -220px;
+  width: 760px; height: 760px;
+  background: radial-gradient(circle,
+              rgba(199, 70, 52, 0.10) 0%,
+              rgba(240, 204, 113, 0.06) 35%,   /* sand */
+              transparent 70%);
+  z-index: -1;
+  border-radius: 50%;
+  pointer-events: none;
+}
+/* Sage glow on the right side — accent6, behind the code editor */
+.md-typeset .tulip-hero::after {
+  content: "";
+  position: absolute;
+  top: 60px; right: -160px;
+  width: 560px; height: 560px;
+  background: radial-gradient(circle,
+              rgba(134, 181, 150, 0.10) 0%,    /* sage green */
+              rgba(137, 178, 176, 0.05) 40%,   /* sage teal */
+              transparent 70%);
+  z-index: -1;
+  border-radius: 50%;
+  pointer-events: none;
+}
+/* Compound `.tulip-hero p.tulip-product-name` (specificity 0,3,1) beats
+   `.md-typeset .tulip-hero p` (0,2,1), so the eyebrow size actually wins
+   inside the hero. Second selector covers usages outside the hero (e.g.
+   the workbench page) where `.tulip-hero p` isn't competing. */
+.md-typeset .tulip-hero p.tulip-product-name,
+.md-typeset p.tulip-product-name {
+  font-size: 0.78rem !important;
+  line-height: 1.35;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--tulip-ink);
+  opacity: 0.55;
+  margin: 0 0 1.2rem;
+}
+.md-typeset .tulip-hero h1:first-of-type {
+  font-size: 2.9rem;
+  line-height: 1.05;
+  letter-spacing: -0.045em;
+  font-weight: 800;
+  text-transform: lowercase;
+  color: var(--tulip-ink);
+  margin: 0 0 0.6rem;
+}
+/* Grid items must have min-width:0 so the 1fr track isn't forced to
+   max-content width (the Python code block is ~492px and would otherwise
+   blow past the hero's 358px container on mobile). */
+.md-typeset .tulip-hero__copy,
+.md-typeset .tulip-hero__code {
+  min-width: 0;
+}
+/* Indent the hero copy column so the wordmark + H1 + kicker don't sit
+   flush against the content edge. Mobile drops the indent (handled by the
+   responsive block further down — the single-column stack already has the
+   container's own padding). */
+.md-typeset .tulip-hero__copy {
+  padding-left: 1.75rem;
+}
+.md-typeset .tulip-hero h1 .accent {
+  color: var(--or-red);
+}
+.md-typeset .tulip-hero p {
+  font-size: 1.05rem;
+  line-height: 1.55;
+  color: var(--tulip-ink);
+  margin: 0 0 1rem;
+}
+.md-typeset .tulip-hero__copy > p:first-of-type strong {
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.md-typeset .tulip-hero p em {
+  display: block;
+  margin-top: 1rem;
+  font-style: normal;
+  font-size: 0.78rem;
+  color: var(--tulip-mute);
+  letter-spacing: 0.04em;
+}
+.md-typeset .tulip-hero .md-button {
+  margin: 0.5rem 0.5rem 0.5rem 0;
+  padding: 0.55rem 1.4rem;
+  font-size: 0.85rem;
+}
+.md-typeset .tulip-hero pre {
+  font-size: 0.68rem;
+  line-height: 1.45;
+  overflow-x: auto;
+  max-width: 100%;
+}
+.md-typeset .tulip-hero .tulip-hero__code .highlight {
+  border-radius: 8px;
+  box-shadow: 0 18px 50px -16px rgba(49, 45, 42, 0.18);
+  border-left: 0;
+}
+/* Inline `pip install` chip in the hero — clean rounded pill, no duplicate
+   left-rule. The global `.md-typeset .highlight` rule already adds the red
+   left border + rounded corners; we override it inside the hero so the
+   chip reads as a single piece, not stacked borders. */
+.md-typeset .tulip-hero__copy .highlight {
+  border-left: 0;
+  border-radius: 6px;
+  display: inline-block;
+  max-width: 100%;
+}
+.md-typeset .tulip-hero__copy pre {
+  background: var(--or-bg-soft);
+  border: 0;
+  border-radius: 6px;
+  padding: 0.45rem 0.9rem;
+  margin: 0.6rem 0;
+  font-size: 0.78rem;
+}
+
+/* Stat strip — compact metric bar. */
+.md-typeset .tulip-stat-strip {
+  display: block;
+  border-top: 1px solid var(--or-rule);
+  border-bottom: 1px solid var(--or-rule);
+  padding: 0.35rem 0;
+  margin: 0.7rem 0 1rem;
+}
+/* Target the <p> MkDocs injects so font-size and centering apply correctly. */
+.md-typeset .tulip-stat-strip p {
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: var(--tulip-mute);
+  margin: 0;
+  line-height: 1.5;
+  text-align: center;
+}
+.md-typeset .tulip-stat-strip a {
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+.md-typeset .tulip-stat-strip a:hover {
+  color: var(--or-red);
+  border-bottom-color: var(--or-red);
+}
+/* Hide the ¶ permalink on the hero h1. */
+.md-typeset .tulip-hero h1 a.headerlink {
+  display: none;
+}
+
+/* Feature card grid — tighter, icon-first cards for the six-things section. */
+.md-typeset .tulip-feature-cards {
+  margin-bottom: 2.4rem;
+}
+.md-typeset .grid.cards.tulip-feature-cards > ul > li,
+.md-typeset .grid.cards.tulip-feature-cards > ol > li {
+  border-left: 3px solid var(--or-red);
+  border-radius: 0 6px 6px 0;
+  padding: 0.9rem 1rem;
+  /* Anchor the absolutely-positioned overlay link to the card. */
+  position: relative;
+  transition: background-color 0.15s ease, transform 0.15s ease;
+}
+.md-typeset .grid.cards.tulip-feature-cards > ul > li:hover,
+.md-typeset .grid.cards.tulip-feature-cards > ol > li:hover {
+  background-color: var(--or-surface-hover, rgba(199, 70, 52, 0.05));
+  transform: translateY(-1px);
+}
+.md-typeset .grid.cards.tulip-feature-cards p {
+  font-size: 0.82rem;
+  color: var(--or-text);
+  margin: 0;
+  line-height: 1.5;
+}
+.md-typeset .grid.cards.tulip-feature-cards strong {
+  font-size: 1rem;
+  display: block;
+  margin-bottom: 0.25rem;
+  color: var(--or-accent, #C74634);
+}
+/* Make the whole card clickable: stretch the title's <a> over the card
+   surface so anywhere inside the <li> opens the linked concept page. */
+.md-typeset .grid.cards.tulip-feature-cards strong a {
+  color: inherit;
+  text-decoration: none;
+}
+.md-typeset .grid.cards.tulip-feature-cards strong a::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+.md-typeset .grid.cards.tulip-feature-cards > ul > li:focus-within,
+.md-typeset .grid.cards.tulip-feature-cards > ol > li:focus-within {
+  outline: 2px solid var(--or-accent, #C74634);
+  outline-offset: 2px;
+}
+@media (max-width: 76em) {
+  .md-typeset .tulip-hero {
+    grid-template-columns: 1fr;
+    gap: 1.4rem;
+    overflow: visible;
+  }
+  /* Drop the desktop hero-copy indent when columns stack. */
+  .md-typeset .tulip-hero__copy {
+    padding-left: 0;
+  }
+  .md-typeset .tulip-hero::before,
+  .md-typeset .tulip-hero::after {
+    display: none;
+  }
+  .md-typeset .tulip-hero h1:first-of-type {
+    font-size: 2.2rem;
+  }
+  .md-typeset .tulip-hero p {
+    font-size: 1rem;
+  }
+  .md-typeset .tulip-hero__copy > p:first-of-type strong {
+    font-size: 1rem;
+    font-weight: 600;
+  }
+}
+@media (max-width: 48em) {
+  .md-typeset .tulip-hero h1:first-of-type {
+    font-size: 1.9rem;
+    letter-spacing: -0.04em;
+  }
+  .md-typeset .tulip-hero p {
+    font-size: 0.95rem;
+  }
+}
+@media (max-width: 36em) {
+  .md-typeset .tulip-hero h1:first-of-type {
+    font-size: 1.65rem;
+    letter-spacing: -0.035em;
+  }
+  .md-typeset .tulip-hero p {
+    font-size: 0.9rem;
+  }
+}
+
+/* Grid cards (workflows you can build) */
+.md-typeset .grid.cards {
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 0.9rem;
+}
+.md-typeset .grid.cards > ul > li,
+.md-typeset .grid.cards > ol > li {
+  background: var(--tulip-surface);
+  border: 1px solid var(--or-rule);
+  border-radius: 6px;
+  padding: 1rem 1.1rem;
+  transition: box-shadow 0.15s, transform 0.15s, border-color 0.15s;
+}
+.md-typeset .grid.cards > ul > li:hover,
+.md-typeset .grid.cards > ol > li:hover {
+  box-shadow: 0 8px 28px -16px rgba(49, 45, 42, 0.22);
+  transform: translateY(-2px);
+  border-color: var(--or-red-light);
+}
+.md-typeset .grid.cards .twemoji,
+.md-typeset .grid.cards svg {
+  color: var(--or-red);
+}
+
+/* ---------------------------------------------------------------------------
+   Header — white slab, hairline tulip-red rule below.
+   Layout: tulip mark (icon) left · "tulip" + tagline middle · GitHub right.
+   --------------------------------------------------------------------------- */
+.md-header {
+  background-color: var(--tulip-surface);
+  color: var(--tulip-ink);
+  border-bottom: 1px solid var(--or-rule);
+  box-shadow: 0 6px 16px -12px rgba(49, 45, 42, 0.18);
+}
+.md-header::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 2px;
+  background: var(--or-red);
+}
+.md-header__inner {
+  min-height: 4rem;
+  padding: 0.45rem 1rem 0.7rem;
+}
+
+/* Bigger tulip mark on the left — always visible, including mobile where
+   Material hides it by default. */
+.md-header__button.md-logo {
+  display: inline-flex;
+  margin: 0 0.4rem 0 0;
+  padding: 0;
+}
+.md-header__button.md-logo img,
+.md-header__button.md-logo svg {
+  height: 2.6rem;
+  max-height: 56px;
+  width: auto;
+}
+/* Scale the mark down on narrow screens to give the title breathing room. */
+@media (max-width: 56em) {
+  .md-header__button.md-logo img,
+  .md-header__button.md-logo svg {
+    height: 1.8rem;
+    max-height: 32px;
+  }
+}
+.md-header__button.md-logo:hover {
+  opacity: 0.85;
+}
+
+/* Dark-mode swap. ``mkdocs.yml`` declares a single ``theme.logo``
+   pointing at ``img/mark.svg`` (outer-diamond stroke ``#312D2A`` —
+   warm near-black, sized for the light surface). On the slate scheme
+   the surface goes dark ``#1F1D1A`` and that stroke is practically
+   invisible, especially on mobile where the mark is the only brand
+   anchor. Swap the image content to the white-stroke variant
+   (``img/mark-dark.svg``) when the slate scheme is active. ``content:``
+   on ``<img>`` is supported across Chrome/Safari/Firefox 119+ — fine
+   for our browser baseline. */
+[data-md-color-scheme="slate"] .md-header__button.md-logo img[src*="img/mark.svg"] {
+  content: url("../img/mark-dark.svg");
+}
+
+/* Title block in the middle — "tulip" wordmark only.
+   The slogan lives in the SVG logo and on the homepage; trying to
+   stack a tagline beneath the title fights Material's absolute-
+   positioned topic toggle, so we keep the header clean.
+   `flex: 0 0 auto` keeps the title from taking the full available row;
+   that leaves room for the palette toggle, search, and source slot to
+   cluster together on the right (see `form.md-header__option { margin-left: auto }` below). */
+.md-header__title {
+  display: flex;
+  align-items: center;
+  margin-left: 0.6rem;
+  align-self: center;
+  flex: 0 0 auto;
+}
+/* Push the palette toggle, search, and source slot to the right side
+   of the header inner row, leaving a clean gap after the title. */
+form.md-header__option {
+  margin-left: auto;
+}
+/* Stack the first topic vertically: "tulip" wordmark + the full
+   product name beneath ('Multi-Agent Reasoning Orchestrator SDK',
+   split across two lines), matching the wordmark+tagline lockup the
+   SVG logo carries. The two-line break keeps each line short enough to
+   fit alongside the dark-mode toggle and the search slot at common
+   viewport widths. */
+.md-header__ellipsis > .md-header__topic:first-of-type {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0.25rem;
+}
+.md-header__ellipsis > .md-header__topic:first-of-type > .md-ellipsis {
+  font-family: var(--tulip-sans);
+  font-weight: 700;
+  font-size: 1.55rem;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  text-transform: lowercase;
+  color: var(--tulip-ink);
+}
+.md-header__ellipsis > .md-header__topic:first-of-type::after {
+  /* `\A` is a CSS newline; `white-space: pre` keeps it as a hard break,
+     so the approved full product name renders on two lines under the
+     wordmark — family brand on top, product descriptor below. */
+  content: "Multi-Agent Reasoning\AOrchestrator SDK";
+  font-family: var(--tulip-sans);
+  font-size: 0.55rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--or-red);
+  line-height: 1.25;
+  white-space: pre;
+  /* Push the line away from the dark-mode toggle that sits immediately
+     to the right of the title slot, so they don't visually touch. */
+  padding-right: 1rem;
+}
+@media (max-width: 56em) {
+  /* Mobile: same full name, slightly tighter tracking to fit. */
+  .md-header__ellipsis > .md-header__topic:first-of-type::after {
+    content: "Multi-Agent Reasoning\AOrchestrator SDK";
+    font-size: 0.5rem;
+    letter-spacing: 0.06em;
+    line-height: 1.25;
+    font-weight: 600;
+    color: var(--or-red);
+    display: block;
+    white-space: pre;
+  }
+  /* Always show "tulip" (site title) in the mobile header — suppress
+     Material's page-title swap so users always see the brand name. */
+  .md-header__ellipsis > .md-header__topic:not(:first-of-type) {
+    display: none;
+  }
+  .md-header__ellipsis > .md-header__topic:first-of-type {
+    transform: translateY(0) !important;
+    opacity: 1 !important;
+    pointer-events: auto;
+  }
+}
+
+/* Site-wide: never let Material swap the header topic on scroll. The default
+   behaviour translates topic #1 (site name + our tagline) up and fades in
+   topic #2 (page title), which strips the approved product-name line and
+   replaces it with the current page's name. Pin topic #1 and hide #2 on every
+   page so the brand banner (diamond mark + "tulip" + product name) stays put
+   as the user scrolls. */
+.md-header__ellipsis > .md-header__topic:first-of-type {
+  transform: translateY(0) !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+.md-header__ellipsis > .md-header__topic:not(:first-of-type) {
+  display: none !important;
+}
+
+/* Header right slot — keep the brand button and GitHub icon on one row.
+   Material wraps source.html in `<div class="md-header__source">`, and our two
+   anchors inside it are also `md-header__source` (block, width:100%). Force the
+   parent slot to flex-row and let the children size to content. */
+.md-header__source:has(> .md-header__brand) {
+  display: flex !important;
+  align-items: center;
+  flex-direction: row;
+  gap: 0.25rem;
+  width: auto;
+  max-width: none;
+}
+
+/* Right side — rounded mark + wordmark. */
+.md-header__source.md-header__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.55rem;
+  margin-right: 0;
+  margin-left: 0.3rem;
+  border-radius: 7px;
+  transition: background-color 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+.md-header__source.md-header__brand:hover {
+  background-color: rgba(199, 70, 52, 0.08);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px -2px rgba(199, 70, 52, 0.25);
+}
+/* Header rounded mark — 32×32 square. */
+.md-header__brand-mark {
+  width: 32px;
+  height: 32px;
+  display: block;
+  flex: 0 0 auto;
+}
+/* Header wordmark — 22px tall × auto width (preserves the
+   4.763:1 aspect ratio from the wordmark viewBox 109.36 × 22.96). */
+.md-header__brand-wordmark {
+  height: 22px;
+  width: auto;
+  aspect-ratio: 109.36 / 22.96;
+  display: block;
+  flex: 0 0 auto;
+}
+
+@media (max-width: 60em) {
+  /* Tighten header inner padding so logo + hamburger + title + icons fit. */
+  .md-header__inner {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+  }
+  /* Scale the tulip mark down on narrow screens. */
+  .md-header__button.md-logo img,
+  .md-header__button.md-logo svg {
+    height: 1.6rem;
+    max-height: 28px;
+  }
+  /* Show brand mark at reduced size; hide wordmark. */
+  .md-header__brand-wordmark { display: none; }
+  .md-header__brand-mark { width: 20px; height: 20px; }
+  .md-header__source.md-header__brand { padding: 0.2rem 0.3rem; }
+}
+
+/* GitHub icon white when inside the mobile drawer (red primary background). */
+.md-nav--primary .md-header__source.md-header__github,
+.md-drawer .md-header__source.md-header__github {
+  color: #FFFFFF;
+}
+
+/* Header right slot — PyPI version badge sits to the right of the GitHub
+   icon, hugging the far right edge of the header. */
+.md-header__source.md-header__pypi {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 0.4rem;
+  padding: 0;
+  border-radius: 4px;
+  transition: transform 0.15s;
+}
+.md-header__source.md-header__pypi:hover {
+  transform: translateY(-1px);
+}
+.md-header__pypi-badge {
+  height: 20px;
+  width: auto;
+  display: block;
+}
+@media (max-width: 60em) {
+  .md-header__source.md-header__pypi { margin-left: 0.25rem; }
+  .md-header__pypi-badge { height: 16px; }
+}
+.md-nav--primary .md-header__source.md-header__github:hover {
+  color: #FFFFFF;
+  opacity: 0.8;
+}
+
+.md-tabs {
+  background-color: var(--or-bg);
+  color: var(--tulip-ink);
+  border-bottom: 1px solid var(--or-rule);
+}
+/* Tighter tab strip — Material defaults to a 2.4rem item height with a
+   0.8rem top-margin on each link, leaving a tall empty band above the
+   labels. Compact both so the tabs sit closer to the banner. */
+.md-tabs__item {
+  height: 1.8rem;
+}
+.md-tabs__link {
+  color: var(--tulip-mute);
+  font-weight: 600;
+  opacity: 1;
+  letter-spacing: 0.01em;
+  margin-top: 0.35rem;
+}
+.md-tabs__link:hover {
+  color: var(--or-red);
+}
+.md-tabs__link--active {
+  color: var(--tulip-ink);
+  position: relative;
+}
+.md-tabs__link--active::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: -1px;
+  height: 2px;
+  background: var(--or-red);
+}
+
+/* ---------------------------------------------------------------------------
+   Side-nav — calmer, off-white feel.
+   --------------------------------------------------------------------------- */
+.md-nav__title {
+  color: var(--or-text);
+  font-weight: 700;
+}
+
+/* Mobile drawer header — override Material's red primary background with
+   the same surface + red hairline the desktop header uses. */
+.md-nav--primary .md-nav__title[for="__drawer"] {
+  background-color: var(--tulip-surface);
+  color: var(--tulip-ink);
+  border-bottom: 2px solid var(--or-red);
+  box-shadow: none;
+}
+.md-nav--primary .md-nav__title[for="__drawer"] .md-nav__button {
+  color: var(--tulip-ink);
+}
+/* Source slot inside the drawer — target the actual container. */
+.md-nav__source {
+  background-color: #2A2826 !important;
+  border-bottom: 1px solid rgba(255,255,255,0.08) !important;
+}
+[data-md-color-scheme="slate"] .md-nav--primary .md-nav__title[for="__drawer"] {
+  background-color: var(--or-surface);
+  color: var(--or-text);
+}
+[data-md-color-scheme="slate"] .md-nav__source {
+  background-color: #2A2826 !important;
+}
+
+/* Mobile: float the palette toggle into the right rail. At cramped
+   widths the toggle was rendering on top of the "s" in "tulip" because
+   the flex flow placed it immediately after the wordmark, where the
+   title block doesn't end cleanly. ``margin-left: auto`` shoves it to
+   the right edge of the header__inner row, joining the search +
+   source-link cluster — no more overlap, and the toggle stays
+   discoverable next to the other header actions. */
+@media (max-width: 56em) {
+  form.md-header__option {
+    margin-left: auto;
+    margin-right: 0.25rem;
+    flex: 0 0 auto;
+  }
+}
+/* Icons in the dark drawer source strip — white for contrast. */
+.md-drawer .md-header__source .md-header__brand-mark,
+.md-drawer .md-header__source .md-header__brand-wordmark {
+  opacity: 0.85;
+  filter: brightness(0) invert(1);
+}
+
+/* Section headers (Multi-agent, Agents, Tools …) — teal accent, uppercase,
+   small caps so they read as category labels not nav items. */
+.md-nav--primary .md-nav__item--section > .md-nav__link,
+.md-nav--primary .md-nav__item--section > .md-nav__link:not(.md-nav__link--active) {
+  color: var(--or-teal) !important;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--or-rule);
+  opacity: 1;
+}
+.md-nav--primary .md-nav__item--section:first-child > .md-nav__link {
+  border-top: none;
+  margin-top: 0;
+  padding-top: 0.2rem;
+}
+[data-md-color-scheme="slate"] .md-nav--primary .md-nav__item--section > .md-nav__link,
+[data-md-color-scheme="slate"] .md-nav--primary .md-nav__item--section > .md-nav__link:not(.md-nav__link--active) {
+  color: var(--or-sage-teal) !important;
+  border-top-color: var(--or-rule);
+}
+
+.md-nav__link--active,
+.md-nav__link[aria-current="true"] {
+  color: var(--or-red-deep) !important;
+  font-weight: 600;
+}
+.md-nav__item .md-nav__link:hover {
+  color: var(--or-link);
+}
+
+/* ---------------------------------------------------------------------------
+   Code blocks — soft sand background, tulip red filename tab.
+   --------------------------------------------------------------------------- */
+.md-typeset code {
+  background-color: rgba(199, 70, 52, 0.10);
+  color: var(--tulip-code-inline);
+  border-radius: 3px;
+  font-size: 0.85em;
+}
+.md-typeset pre > code {
+  background-color: var(--or-bg-soft);
+  color: var(--or-text);
+}
+.md-typeset .highlight {
+  border-left: 3px solid var(--or-red);
+  border-radius: 0 4px 4px 0;
+}
+
+/* ---------------------------------------------------------------------------
+   Tables — off-white striping, subtle red header underline.
+   --------------------------------------------------------------------------- */
+.md-typeset table:not([class]) {
+  border: 1px solid var(--or-rule);
+  border-radius: 4px;
+  overflow: hidden;
+  font-size: 0.84rem;
+}
+.md-typeset table:not([class]) th {
+  background-color: var(--or-bg-soft);
+  color: var(--or-text);
+  font-weight: 700;
+  border-bottom: 2px solid var(--or-red);
+}
+.md-typeset table:not([class]) tr:nth-child(even) {
+  background-color: var(--tulip-table-stripe);
+}
+
+/* ---------------------------------------------------------------------------
+   Admonitions — re-tint to accents.
+   --------------------------------------------------------------------------- */
+.md-typeset .admonition.note,
+.md-typeset details.note {
+  border-left-color: var(--or-link);
+}
+.md-typeset .admonition.note > .admonition-title,
+.md-typeset details.note > summary {
+  background-color: rgba(0, 104, 140, 0.08);
+  color: var(--or-link);
+}
+.md-typeset .admonition.warning,
+.md-typeset details.warning {
+  border-left-color: var(--or-red);
+}
+.md-typeset .admonition.warning > .admonition-title,
+.md-typeset details.warning > summary {
+  background-color: rgba(199, 70, 52, 0.08);
+  color: var(--or-red-deep);
+}
+.md-typeset .admonition.tip,
+.md-typeset details.tip {
+  border-left-color: var(--or-sage-green);
+}
+.md-typeset .admonition.tip > .admonition-title,
+.md-typeset details.tip > summary {
+  background-color: rgba(134, 181, 150, 0.18);
+  color: #2f6243;
+}
+
+/* ---------------------------------------------------------------------------
+   Buttons / pills — tulip red CTA.
+   --------------------------------------------------------------------------- */
+.md-typeset .md-button {
+  background-color: transparent;
+  border: 1px solid var(--or-red);
+  color: var(--or-red);
+  border-radius: 3px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.md-typeset .md-button:hover,
+.md-typeset .md-button:focus {
+  background-color: var(--or-red);
+  color: #FFFFFF;
+  border-color: var(--or-red);
+}
+.md-typeset .md-button--primary {
+  background-color: var(--or-red);
+  color: #FFFFFF;
+}
+.md-typeset .md-button--primary:hover {
+  background-color: var(--or-red-deep);
+}
+
+/* ---------------------------------------------------------------------------
+   Footer — dark bar with red micro-accent + tulip wordmark.
+   --------------------------------------------------------------------------- */
+.md-footer-meta {
+  background-color: #161A1A;
+}
+.md-footer__inner {
+  border-top: 2px solid var(--or-red);
+}
+
+/* Footer brand block — product title + copyright line.
+   Driven by HTML in mkdocs.yml `copyright:`. */
+.md-copyright {
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  line-height: 1.45;
+}
+.md-copyright__highlight {
+  display: block;
+  padding: 0;
+}
+
+.footer-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-family: var(--tulip-sans);
+  font-weight: 700;
+  font-size: 1.05rem;
+  letter-spacing: -0.005em;
+  color: #FFFFFF;
+  margin: 0 0 0.25rem;
+  text-transform: none;
+}
+.footer-brand__o {
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+  background-image: url("../img/logo.svg");
+  background-size: contain;
+  background-position: center;
+  background-repeat: no-repeat;
+  flex: 0 0 auto;
+}
+.footer-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  color: rgba(255, 255, 255, 0.72);
+}
+/* Footer tulip wordmark — aspect 4.763:1 (109.36 × 22.96).
+   Anchor the height; let width compute from aspect-ratio for pixel-perfect
+   proportions. */
+.brand-mark {
+  display: inline-block;
+  height: 14px;
+  aspect-ratio: 109.36 / 22.96;
+  width: auto;
+  min-width: 66.7px;
+  background-image: url("../img/logo.svg");
+  background-position: left center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  filter: brightness(0) invert(1) opacity(0.85);
+  vertical-align: middle;
+}
+
+/* ---------------------------------------------------------------------------
+   Search input — keep neutral, red focus ring.
+   --------------------------------------------------------------------------- */
+.md-search__input {
+  background-color: var(--or-bg-soft);
+  color: var(--tulip-ink);
+}
+.md-search__input::placeholder {
+  color: var(--tulip-mute);
+}
+.md-search__input + .md-search__icon {
+  color: var(--tulip-mute);
+}
+.md-search__input:focus,
+.md-search__input:hover {
+  background-color: var(--tulip-surface);
+  box-shadow: 0 0 0 2px rgba(199, 70, 52, 0.20);
+}
+
+/* ---------------------------------------------------------------------------
+   Hero treatment for the index page (`# Tulip` h1).
+   --------------------------------------------------------------------------- */
+.md-typeset h1:first-of-type {
+  font-size: 2.8rem;
+  letter-spacing: -0.01em;
+}
+
+/* ---------------------------------------------------------------------------
+   SDK-distinctive callout — used on the Capabilities page to highlight
+   wedge features. tulip-red border + warm sand tint, red star icon.
+   Trigger with: `!!! sdk-distinctive "Distinctive to tulip"`
+   --------------------------------------------------------------------------- */
+:root {
+  --md-admonition-icon--sdk-distinctive: url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>');
+}
+.md-typeset .admonition.sdk-distinctive,
+.md-typeset details.sdk-distinctive {
+  border-color: var(--or-red);
+  background: linear-gradient(135deg,
+    rgba(199, 70, 52, 0.04) 0%,
+    rgba(240, 204, 113, 0.04) 100%);
+}
+.md-typeset .sdk-distinctive > .admonition-title,
+.md-typeset .sdk-distinctive > summary {
+  background-color: rgba(199, 70, 52, 0.08);
+  color: var(--or-red-deep);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.md-typeset .sdk-distinctive > .admonition-title::before,
+.md-typeset .sdk-distinctive > summary::before {
+  background-color: var(--or-red);
+  -webkit-mask-image: var(--md-admonition-icon--sdk-distinctive);
+          mask-image: var(--md-admonition-icon--sdk-distinctive);
+}
+
+/* ---------------------------------------------------------------------------
+   Diagrams — responsive sizing for the agent-loop SVG and similar.
+   --------------------------------------------------------------------------- */
+.md-typeset img[src*="agent-loop"],
+.md-typeset img[src*="multi-agent-patterns"],
+.md-typeset img[src*="img/patterns/"],
+.md-typeset img.diagram {
+  display: block;
+  width: 100%;
+  max-width: 720px;
+  height: auto;
+  margin: 1.5rem auto;
+}
+.md-typeset img[src*="multi-agent-patterns"] {
+  max-width: 920px;
+}
+
+/* The architecture diagrams (agent-loop, multi-agent-patterns, the
+   per-pattern SVGs under img/patterns/, and the architecture / sequence
+   topologies) are authored against a light background. In dark mode the
+   dark-grey strokes and labels vanish, so render them on a near-white
+   card. */
+[data-md-color-scheme="slate"] .md-typeset img[src*="agent-loop"],
+[data-md-color-scheme="slate"] .md-typeset img[src*="multi-agent-patterns"],
+[data-md-color-scheme="slate"] .md-typeset img[src*="img/patterns/"],
+[data-md-color-scheme="slate"] .md-typeset img[src*="architecture"],
+[data-md-color-scheme="slate"] .md-typeset img.diagram {
+  background-color: #FBF9F8;
+  padding: 1rem;
+  border-radius: 0.5rem;
+}
+
+/* ---------------------------------------------------------------------------
+   Dark-mode logo handling.
+   - tulip wordmark (black-fill) → invert filter flips to white.
+   - tulip mark (dark stroke + red accents) → swap to mark-dark.svg variant
+     which has the stroke recoloured to off-white.
+   --------------------------------------------------------------------------- */
+[data-md-color-scheme="slate"] .md-header__brand-wordmark {
+  content: url("../img/logo-white.svg");
+}
+[data-md-color-scheme="slate"] .md-header__button.md-logo img {
+  content: url("../img/mark-dark.svg");
+}
+/* Footer tulip wordmark already inverts the red SVG to white via filter;
+   in dark mode swap to the white SVG and drop the filter. */
+[data-md-color-scheme="slate"] .brand-mark {
+  background-image: url("../img/logo-white.svg");
+  filter: none;
+}
+
+/* Header GitHub link — sits next to the brand source button. */
+.md-header__source.md-header__github {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  max-width: none;
+  padding: 0;
+  margin-left: 0;
+  border-radius: 8px;
+  color: var(--tulip-ink);
+  transition: background-color 0.15s, color 0.15s, transform 0.15s;
+}
+.md-header__source.md-header__github:hover {
+  background-color: rgba(199, 70, 52, 0.10);
+  color: var(--or-red);
+  transform: translateY(-1px);
+}
+.md-header__github-icon {
+  width: 22px;
+  height: 22px;
+  display: block;
+}
+
+/* Hide the ¶ permalink anchor on the hero h1 — noise on a marketing page. */
+.md-typeset .tulip-hero h1 a.headerlink {
+  display: none;
+}
+
+/* Header title area — pointer cursor so users know it goes home. */
+.md-header__ellipsis {
+  cursor: pointer;
+}
+
+/* ---------------------------------------------------------------------------
+ * Notebook index filter — workbench-style live search.
+ * --------------------------------------------------------------------------- */
+
+.notebook-filter {
+  margin: 1rem 0 1.5rem;
+}
+
+.notebook-filter__input {
+  width: 100%;
+  padding: 0.7rem 1rem;
+  font: inherit;
+  font-size: 0.95rem;
+  background: var(--md-default-bg-color);
+  color: var(--md-default-fg-color);
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0.5rem;
+  transition: border-color 120ms, box-shadow 120ms;
+}
+
+.notebook-filter__input:focus {
+  outline: none;
+  border-color: var(--md-accent-fg-color);
+  box-shadow: 0 0 0 3px rgba(196, 36, 32, 0.12);
+}
+
+.notebook-filter__input::placeholder {
+  color: var(--md-default-fg-color--light);
+}
+
+/* Sidebar notebook filter — same UX, scaled to the primary sidebar. */
+.sidebar-filter {
+  margin: 0.4rem 0.6rem 0.8rem;
+  list-style: none;
+}
+.sidebar-filter__input {
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  font: inherit;
+  font-size: 0.72rem;
+  background: var(--md-default-bg-color);
+  color: var(--md-default-fg-color);
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0.35rem;
+  transition: border-color 120ms, box-shadow 120ms;
+}
+.sidebar-filter__input:focus {
+  outline: none;
+  border-color: var(--md-accent-fg-color);
+  box-shadow: 0 0 0 2px rgba(196, 36, 32, 0.18);
+}
+.sidebar-filter__input::placeholder {
+  color: var(--md-default-fg-color--light);
+}
+
+/* ---------------------------------------------------------------------------
+ * Mobile polish — narrow viewports (<= 48em).
+ *
+ *   Material's default per-table horizontal scroll is workable for one
+ *   table but painful on /notebooks/ where the page is a stack of nine.
+ *   We let tables fit the viewport instead: 100% width, auto layout,
+ *   prose wraps with `overflow-wrap: anywhere` (which only breaks when
+ *   needed — unlike `break-all` which splits in the middle of perfectly
+ *   sized tokens like `openai.gpt-5.5-pro`).
+ *
+ *   Also: cap any in-content image (workbench gif, etc.) at the column
+ *   width so it never blows past the viewport edge.
+ * --------------------------------------------------------------------- */
+@media (max-width: 48em) {
+  /* Tables: make them fit the viewport rather than scroll horizontally. */
+  .md-typeset__scrollwrap {
+    margin-left: -0.4rem;
+    margin-right: -0.4rem;
+    overflow-x: hidden;
+  }
+  .md-typeset__table {
+    display: block;
+    width: 100%;
+    padding: 0 0.4rem;
+    overflow-x: visible;
+  }
+  .md-typeset__table > table:not([class]) {
+    width: 100%;
+    table-layout: auto;
+    font-size: 0.78rem;
+  }
+  .md-typeset table:not([class]) th,
+  .md-typeset table:not([class]) td {
+    padding: 0.45em 0.5em;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+  }
+  /* On /notebooks/ index the first column is the row number ("01"…"63") —
+     slim it to a chip so the prose columns get more room. Other pages
+     keep auto-sized first columns (Setting/DSN-style text headers). */
+  .notebook-filter ~ * .md-typeset__table > table:not([class]) th:first-child,
+  .notebook-filter ~ * .md-typeset__table > table:not([class]) td:first-child,
+  article:has(.notebook-filter) .md-typeset__table > table:not([class]) th:first-child,
+  article:has(.notebook-filter) .md-typeset__table > table:not([class]) td:first-child {
+    width: 1.6rem;
+    padding-left: 0.4em;
+    padding-right: 0.3em;
+    text-align: center;
+    color: var(--tulip-mute);
+    font-variant-numeric: tabular-nums;
+  }
+  /* Cap in-content media at the column width. */
+  .md-typeset img,
+  .md-typeset video {
+    max-width: 100%;
+    height: auto;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Mobile header — keep the wordmark, tagline, search icon, and source
+ * badges from colliding at narrow widths.
+ *
+ *   At ~480–560px the "tulip" + tagline title block grows wide enough to
+ *   visually overlap the search magnifier sitting in the right rail. We
+ *   stage the trimming in two steps:
+ *     - ≤ 56em: shrink the wordmark, tighten the tagline letter-spacing.
+ *     - ≤ 30em: drop the tagline + the PyPI version pill entirely; the
+ *       wordmark and brand/GitHub icons stay.
+ * --------------------------------------------------------------------- */
+@media (max-width: 56em) {
+  .md-header__ellipsis > .md-header__topic:first-of-type > .md-ellipsis {
+    font-size: 1.2rem;
+  }
+  .md-header__ellipsis > .md-header__topic:first-of-type::after {
+    letter-spacing: 0.06em;
+  }
+  /* Title takes only the space it needs; the right rail keeps its slot. */
+  .md-header__title { flex: 0 0 auto; }
+}
+@media (max-width: 30em) {
+  /* Drop the tagline and the PyPI badge to free up room on small phones. */
+  .md-header__ellipsis > .md-header__topic:first-of-type::after { display: none; }
+  .md-header__source.md-header__pypi { display: none; }
+  .md-header__ellipsis > .md-header__topic:first-of-type > .md-ellipsis {
+    font-size: 1.1rem;
+  }
+  /* Tighter spacing between right-rail icons. */
+  .md-header__source.md-header__brand { margin-left: 0.15rem; padding: 0.15rem 0.25rem; }
+  .md-header__source.md-header__github { margin-left: 0.2rem; }
+}
+
+/* ---------------------------------------------------------------------------
+ * Code-block copy button
+ *
+ * mkdocs-material's default ``.md-clipboard`` uses
+ * ``--md-default-fg-color--lightest`` (#c5c8c8 in our light scheme,
+ * #4a4844 in slate). On our pale-cream code-block background the
+ * light-scheme variant is practically invisible until you hover.
+ * Promote the resting state to ``--lighter`` (darker neutral) for
+ * baseline contrast, and switch to tulip red on hover so the affordance
+ * is obvious.
+ * --------------------------------------------------------------------- */
+.md-clipboard {
+  color: var(--md-default-fg-color--lighter);
+  opacity: 0.85;
+  transition: color 120ms ease-in-out, opacity 120ms ease-in-out;
+}
+.md-clipboard:focus,
+.md-clipboard:hover {
+  color: var(--or-red);
+  opacity: 1;
+}
+[data-md-color-scheme="slate"] .md-clipboard {
+  color: var(--md-default-fg-color--light);
+  opacity: 0.9;
+}
+[data-md-color-scheme="slate"] .md-clipboard:focus,
+[data-md-color-scheme="slate"] .md-clipboard:hover {
+  color: var(--or-red-light);
+  opacity: 1;
+}

@@ -1,0 +1,10 @@
+# Example test configuration
+# Copy this to config.local.yaml and fill in your values
+
+models:
+  # Default "provider:model" used by examples when set.
+  default: openai:gpt-4o
+  # Provider API keys are read from the environment by default
+  # (OPENAI_API_KEY, ANTHROPIC_API_KEY). List the models you exercise:
+  openai: gpt-4o
+  anthropic: claude-sonnet-4-6

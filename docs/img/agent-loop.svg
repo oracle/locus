@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 380"
+     font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif"
+     shape-rendering="geometricPrecision"
+     preserveAspectRatio="xMidYMid meet">
+
+  <!-- ===== tuliplabs palette =====
+       accent1 #04536F  deep teal     — Think
+       accent3 #C74634  tulip pink    — Execute
+       accent5 #89B2B0  sage teal     — Reflect
+       accent4 #F0CC71  sand          — Terminate
+       accent2 #6C3F49  mauve         — loop-back arrow -->
+
+  <defs>
+    <filter id="card-shadow" x="-20%" y="-20%" width="140%" height="160%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="2.5"/>
+      <feOffset dx="0" dy="2" result="off"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.20"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+    <marker id="arrow-fwd" viewBox="0 0 12 12" refX="11" refY="6"
+            markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0,0 L 12,6 L 0,12 z" fill="#2A2F2F"/>
+    </marker>
+
+    <marker id="arrow-loop" viewBox="0 0 12 12" refX="11" refY="6"
+            markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0,0 L 12,6 L 0,12 z" fill="#6C3F49"/>
+    </marker>
+
+    <symbol id="innov" viewBox="0 0 22 22">
+      <circle cx="11" cy="11" r="10" fill="#C74634"/>
+      <text x="11" y="15.5" text-anchor="middle" font-size="13"
+            font-weight="800" fill="#FFFFFF" font-family="Georgia, serif">★</text>
+    </symbol>
+  </defs>
+
+  <!-- Legend -->
+  <g transform="translate(20, 20)">
+    <use href="#innov" x="0" y="0" width="14" height="14"/>
+    <text x="20" y="11" font-size="10.5" font-weight="600" fill="#2A2F2F"
+          letter-spacing="0.06em">UNIQUE TO TULIP · NO COMPETITOR SHIPS THESE</text>
+  </g>
+
+  <!-- ============ TWO-ROW LAYOUT (160 wide cards, 2x2 grid) ============ -->
+
+  <!-- THINK (top-left) -->
+  <g filter="url(#card-shadow)">
+    <rect x="40" y="60" width="160" height="105" rx="11" ry="11" fill="#04536F"/>
+    <text x="120" y="95" text-anchor="middle" font-size="20" font-weight="800"
+          fill="#FFFFFF" letter-spacing="-0.01em">Think</text>
+    <text x="120" y="121" text-anchor="middle" font-size="10.5" font-weight="600"
+          fill="#FFFFFF" opacity="0.86" letter-spacing="0.06em">THE MODEL DECIDES</text>
+    <text x="120" y="139" text-anchor="middle" font-size="10.5" font-weight="500"
+          fill="#FFFFFF" opacity="0.78">next action / final answer</text>
+  </g>
+
+  <!-- arrow Think → Execute -->
+  <line x1="205" y1="112" x2="245" y2="112" stroke="#2A2F2F"
+        stroke-width="2.4" stroke-linecap="round" marker-end="url(#arrow-fwd)"/>
+
+  <!-- EXECUTE (top-right) — innovation ★ -->
+  <g filter="url(#card-shadow)">
+    <rect x="250" y="60" width="160" height="105" rx="11" ry="11" fill="#C74634"/>
+    <text x="330" y="95" text-anchor="middle" font-size="20" font-weight="800"
+          fill="#FFFFFF" letter-spacing="-0.01em">Execute</text>
+    <text x="330" y="121" text-anchor="middle" font-size="10.5" font-weight="600"
+          fill="#FFFFFF" opacity="0.86" letter-spacing="0.06em">IDEMPOTENT DEDUPE</text>
+    <text x="330" y="139" text-anchor="middle" font-size="10.5" font-weight="500"
+          fill="#FFFFFF" opacity="0.78">retries return cached receipt</text>
+    <use href="#innov" x="395" y="55" width="18" height="18"/>
+  </g>
+
+  <!-- REFLECT (bottom-right, mirroring Execute position) -->
+  <g filter="url(#card-shadow)">
+    <rect x="250" y="220" width="160" height="105" rx="11" ry="11" fill="#89B2B0"/>
+    <text x="330" y="255" text-anchor="middle" font-size="20" font-weight="800"
+          fill="#1F2828" letter-spacing="-0.01em">Reflect</text>
+    <text x="330" y="281" text-anchor="middle" font-size="10.5" font-weight="600"
+          fill="#1F2828" opacity="0.85" letter-spacing="0.06em">REFLEXION · CAUSAL</text>
+    <text x="330" y="299" text-anchor="middle" font-size="10.5" font-weight="500"
+          fill="#1F2828" opacity="0.78">router-integrated graph node</text>
+  </g>
+
+  <!-- arrow Execute → Reflect (vertical, on the right side) -->
+  <path d="M 410 112 Q 460 112, 460 192 Q 460 272, 412 272"
+        stroke="#2A2F2F" stroke-width="2.4" fill="none" stroke-linecap="round"
+        marker-end="url(#arrow-fwd)"/>
+
+  <!-- TERMINATE? (bottom-left) — innovation ★ -->
+  <g filter="url(#card-shadow)">
+    <rect x="40" y="220" width="160" height="105" rx="11" ry="11" fill="#F0CC71"/>
+    <text x="120" y="252" text-anchor="middle" font-size="19" font-weight="800"
+          fill="#3A2A0F" letter-spacing="-0.01em">Terminate?</text>
+    <text x="120" y="278" text-anchor="middle" font-size="10.5" font-weight="600"
+          fill="#3A2A0F" opacity="0.85" letter-spacing="0.06em">ALGEBRA: AND · OR</text>
+    <text x="120" y="296" text-anchor="middle" font-size="10.5" font-weight="500"
+          fill="#3A2A0F" opacity="0.78">composable stops, just data</text>
+    <use href="#innov" x="185" y="215" width="18" height="18"/>
+  </g>
+
+  <!-- arrow Reflect → Terminate -->
+  <line x1="245" y1="272" x2="205" y2="272" stroke="#2A2F2F"
+        stroke-width="2.4" stroke-linecap="round" marker-end="url(#arrow-fwd)"/>
+
+  <!-- arrow Terminate → Think (loop-back, on the left, dashed mauve) -->
+  <path d="M 120 215 Q 120 190, 120 170"
+        stroke="#6C3F49" stroke-width="2.4" fill="none"
+        stroke-dasharray="6,4" stroke-linecap="round"
+        marker-end="url(#arrow-loop)"/>
+  <text x="40" y="195" text-anchor="start" font-size="10.5" font-weight="600"
+        fill="#6C3F49" font-style="italic">
+    iterate
+  </text>
+
+  <!-- "or done" exit arrow from Terminate? going down off-card -->
+  <text x="240" y="357" text-anchor="middle" font-size="10.5" font-weight="600"
+        fill="#2A2F2F" font-style="italic">
+    when the algebra says stop · the loop ends with a typed TerminateEvent
+  </text>
+</svg>

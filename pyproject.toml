@@ -1,0 +1,684 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tulip-agents"
+version = "0.2.0b26"
+description = "Multi-agent workflows for Python — stream them, branch them, pause for a human, resume next week."
+readme = "README.md"
+license = "UPL-1.0"
+requires-python = ">=3.11"
+authors = [
+    { name = "The Tulip Authors" },
+]
+keywords = [
+    "agents",
+    "ai",
+    "llm",
+    "orchestration",
+    "pydantic",
+    "react",
+    "reflexion",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Universal Permissive License (UPL)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
+
+dependencies = [
+    # Capped at <1.0: httpx 1.0.dev3 drops the top-level ``httpx.Auth``
+    # re-export, which ``BearerAuth`` (and other auth helpers) subclass.
+    # Lift the cap after porting those to the 1.0 auth API.
+    "httpx>=0.27,<1.0",
+    # Capped at <1.2: starlette 1.2.0 (2026-05-28) makes its TestClient
+    # require ``httpx2`` instead of ``httpx``; collection-time imports
+    # in ``tests/unit/test_a2a_protocol.py`` and
+    # ``tests/unit/test_server_app_full.py`` raise
+    # ``StarletteDeprecationWarning`` → ``ModuleNotFoundError``. The
+    # ``httpx<1.0`` pin above already prevents installing ``httpx2``
+    # (which is httpx 2.x), so the only sane cap here is starlette
+    # itself. Lift together with the httpx cap.
+    "starlette<1.2",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "typing-extensions>=4.0",
+]
+
+[project.optional-dependencies]
+# Model providers — every provider class under src/tulip/models/native/
+# has a matching extra here. Keep this list in sync when adding a provider.
+openai = ["openai>=1.50"]
+anthropic = ["anthropic>=0.40"]
+
+# All LLM / model providers — short alias for pip discoverability.
+llm = [
+    "openai>=1.50",
+    "anthropic>=0.40",
+]
+
+# Observability
+telemetry = [
+    "opentelemetry-api>=1.20",
+    "opentelemetry-sdk>=1.20",
+    "opentelemetry-exporter-otlp>=1.20",
+]
+
+# MCP support
+mcp = ["mcp>=1.0"]
+
+# Drop-in HTTP server (FastAPI app for AgentServer + SSE streaming).
+# Pulled in production deployments via ``pip install "tulip-agents[server]"``.
+server = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+]
+
+# Checkpoint backends — one extra per backend under
+# src/tulip/memory/backends/ that needs a runtime dep. Keep in sync.
+redis = ["redis>=5.0"]
+postgresql = ["asyncpg>=0.29"]
+mysql = ["mysql-connector-python>=9.0"]
+opensearch = ["opensearch-py>=2.4"]
+# S3 / MinIO / R2 object-storage checkpointer (src/tulip/memory/backends/s3.py).
+s3 = ["boto3>=1.34"]
+
+# Mem0 agent-memory manager (src/tulip/memory/managers/mem0.py) — the
+# portable, self-hostable long-term memory backend.
+mem0 = ["mem0ai>=0.1"]
+
+# All checkpoint backends. `pip install tulip-agents[checkpoints]` is the
+# one-shot install for durable thread state across every backend.
+checkpoints = [
+    "redis>=5.0",
+    "asyncpg>=0.29",
+    "mysql-connector-python>=9.0",
+    "opensearch-py>=2.4",
+    "boto3>=1.34",
+]
+
+# RAG vector stores — one extra per store under src/tulip/rag/stores/
+# that needs a runtime dep. Keep in sync.
+pgvector = ["asyncpg>=0.29"]
+qdrant = ["qdrant-client>=1.9"]
+chroma = ["chromadb>=0.5"]
+
+# Cohere direct API (rerank + embeddings) and a local cross-encoder
+# reranker. Neither requires any cloud vendor SDK.
+cohere = ["cohere>=5.0"]
+rerank-local = ["sentence-transformers>=3.0"]
+rerank = ["cohere>=5.0", "sentence-transformers>=3.0"]
+
+# Full RAG stack — every vector store + embedder + reranker Tulip ships.
+# Use this if you want to pick a store at runtime rather than up front.
+rag = [
+    "asyncpg>=0.29",
+    "opensearch-py>=2.4",
+    "qdrant-client>=1.9",
+    "chromadb>=0.5",
+    "openai>=1.50",
+    "cohere>=5.0",
+    "sentence-transformers>=3.0",
+]
+
+# Full SDK — all providers and backends.
+sdk = [
+    "openai>=1.50",
+    "anthropic>=0.40",
+    "cohere>=5.0",
+    "sentence-transformers>=3.0",
+    "opentelemetry-api>=1.20",
+    "opentelemetry-sdk>=1.20",
+    "opentelemetry-exporter-otlp>=1.20",
+    "mcp>=1.0",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "redis>=5.0",
+    "asyncpg>=0.29",
+    "mysql-connector-python>=9.0",
+    "opensearch-py>=2.4",
+    "boto3>=1.34",
+    "qdrant-client>=1.9",
+    "chromadb>=0.5",
+    "mem0ai>=0.1",
+]
+
+# Development
+dev = [
+    "hatch>=1.12",
+    "pre-commit>=3.8",
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "pytest>=9.0.3",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    "pytest-xdist>=3.5",
+    "respx>=0.21",  # Mock httpx
+    "dirty-equals>=0.8",  # Pydantic test helpers
+    # Dev-time deps that some unit tests import directly. Living here
+    # rather than in ``[dependency-groups].dev`` so a plain
+    # ``pip install -e ".[dev]"`` (used by CI and contributors) covers
+    # the entire test surface.
+    "fastmcp>=3.2.0",     # MCP server tests in tests/unit/test_fastmcp.py
+    "pyyaml>=6.0.3",      # Playbook YAML loader tests
+    "redis>=7.1.0",       # Redis checkpointer tests
+    "sqlalchemy>=2.0.46", # PostgreSQL checkpointer schema tests
+    "moto>=5.0",          # mock S3 for tests/unit/test_memory_backends_s3.py
+]
+
+# Docs
+docs = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.27",
+]
+
+[project.urls]
+Homepage = "https://github.com/tuliplabs-ai/sdk-python"
+Documentation = "https://github.com/tuliplabs-ai/sdk-python#readme"
+Repository = "https://github.com/tuliplabs-ai/sdk-python"
+Issues = "https://github.com/tuliplabs-ai/sdk-python/issues"
+
+# =============================================================================
+# Hatch Configuration
+# =============================================================================
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tulip"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/tests",
+    "/README.md",
+    "/LICENSE.txt",
+    "/THIRD_PARTY_LICENSES.txt",
+]
+
+# Environments
+[tool.hatch.envs.default]
+# Pull in ``server`` (fastapi) and ``mcp`` so the strict mypy pass
+# under ``hatch run check`` has the right type stubs available for
+# ``tulip.server.*``, ``tulip.a2a.*``, and ``tulip.integrations.*``.
+# Without these, mypy reports "Untyped decorator makes function ..."
+# on every FastAPI ``@app.get/.post`` and on MCP imports.
+features = ["dev", "server", "mcp", "openai", "anthropic", "rag", "s3", "mem0"]
+
+[tool.hatch.envs.default.scripts]
+# Default test target = unit tests only (deterministic, no external deps).
+# Integration tests need credentials / live services and are run via
+# `test-integration` or `test-all` when those are available.
+test = "pytest {args:tests/unit}"
+test-integration = "pytest {args:tests/integration}"
+test-all = "pytest {args:tests}"
+test-cov = "pytest --cov=src/tulip --cov-report=term-missing --cov-report=html --cov-report=json {args:tests/unit}"
+# Refresh the per-file coverage baseline (commit the resulting
+# ``scripts/coverage_baseline.json``).
+cov-baseline-update = [
+    "pytest --cov=src/tulip --cov-report=json {args:tests/unit}",
+    "python scripts/coverage_ratchet.py --update",
+]
+test-fast = "pytest -n auto {args:tests/unit}"
+lint = "ruff check src tests examples"
+lint-fix = "ruff check --fix src tests examples"
+format = "ruff format src tests examples"
+format-check = "ruff format --check src tests examples"
+typecheck = "mypy src/tulip"
+# CI gate: every check the project enforces, in one command. A clean run
+# of `hatch run check` is what `_lint.yml` runs.
+check = [
+    "format-check",
+    "lint",
+    "typecheck",
+]
+all = [
+    "format",
+    "lint-fix",
+    "typecheck",
+    "test",
+]
+
+[tool.hatch.envs.test]
+features = [
+    "dev",
+    "openai", "anthropic",
+    "telemetry", "mcp", "server",
+    "redis", "postgresql", "mysql", "opensearch", "s3",
+    "pgvector", "qdrant", "chroma", "cohere", "rerank-local", "mem0",
+]
+
+[[tool.hatch.envs.test.matrix]]
+python = ["3.11", "3.12", "3.13", "3.14"]
+
+[tool.hatch.envs.docs]
+features = ["docs"]
+
+[tool.hatch.envs.docs.scripts]
+serve = "mkdocs serve"
+build = "mkdocs build"
+
+# =============================================================================
+# Ruff Configuration
+# =============================================================================
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "A",      # flake8-builtins
+    "ARG",    # flake8-unused-arguments
+    "ASYNC",  # flake8-async
+    "B",      # flake8-bugbear
+    "BLE",    # flake8-blind-except
+    "C4",     # flake8-comprehensions
+    "C90",    # mccabe complexity
+    "DTZ",    # flake8-datetimez
+    "E",      # pycodestyle errors
+    "EM",     # flake8-errmsg
+    "ERA",    # eradicate (commented code)
+    "EXE",    # flake8-executable
+    "F",      # pyflakes
+    "FA",     # flake8-future-annotations
+    "FBT",    # flake8-boolean-trap
+    "FLY",    # flynt (f-string conversion)
+    "FURB",   # refurb
+    "G",      # flake8-logging-format
+    "I",      # isort
+    "ICN",    # flake8-import-conventions
+    "INT",    # flake8-gettext
+    "ISC",    # flake8-implicit-str-concat
+    "LOG",    # flake8-logging
+    "N",      # pep8-naming
+    "PERF",   # perflint
+    "PGH",    # pygrep-hooks
+    "PIE",    # flake8-pie
+    "PL",     # pylint
+    "PT",     # flake8-pytest-style
+    "PTH",    # flake8-use-pathlib
+    "PYI",    # flake8-pyi
+    "Q",      # flake8-quotes
+    "RET",    # flake8-return
+    "RSE",    # flake8-raise
+    "RUF",    # ruff-specific
+    "S",      # flake8-bandit (security)
+    "SIM",    # flake8-simplify
+    "SLF",    # flake8-self
+    "SLOT",   # flake8-slots
+    "T10",    # flake8-debugger
+    "T20",    # flake8-print
+    "TCH",    # flake8-type-checking
+    "TID",    # flake8-tidy-imports
+    "TRY",    # tryceratops
+    "UP",     # pyupgrade
+    "W",      # pycodestyle warnings
+    "YTT",    # flake8-2020
+]
+ignore = [
+    "E501",    # line too long (handled by formatter)
+    "PLR0913", # too many arguments
+    "PLR2004", # magic value comparison
+    "PLR0915", # too many statements
+    "PLR0912", # too many branches
+    "PLR0911", # too many return statements
+    "S101",    # assert usage (fine in tests)
+    "TRY003",  # long exception messages
+    "TRY301",  # raise within try
+    "EM101",   # string literal in exception
+    "EM102",   # f-string in exception
+    "FBT001",  # boolean positional argument (common in SDK APIs)
+    "FBT002",  # boolean default positional argument
+    "PLC0415", # import not at top level (needed for lazy imports)
+    "TC001",   # move import into type-checking block (too verbose)
+    "TC002",   # move import into type-checking block
+    "TC003",   # move import into type-checking block
+    "ERA001",  # commented out code (might be intentional docs)
+    # BLE001 (blind-except) is NOT ignored globally. Each `except Exception`
+    # must be annotated with `# noqa: BLE001 — reason`, explaining WHY
+    # catching broadly is correct at that site (e.g. "tool body can raise
+    # anything", "missing == absent by design"). New unannotated
+    # `except Exception` clauses will fail CI.
+    "RET504",  # unnecessary assignment before return
+    "RET505",  # unnecessary else after return
+    "RET506",  # unnecessary else after raise
+    "SIM108",  # use ternary operator
+    "ARG002",  # unused method argument
+    "ARG001",  # unused function argument
+    "PERF401", # use list comprehension (style preference)
+    "PERF403", # use dict comprehension
+    "B027",    # empty method without abstract
+    "SIM102",  # collapsible if
+    "SIM103",  # return instead of if-else-bool
+    "SIM105",  # use contextlib.suppress
+    "PLW0603", # global statement (needed for registry pattern)
+    "C901",    # function too complex
+    "TRY300",  # consider moving to else block
+    "PTH123",  # use Path instead of open
+    "RUF022",  # __all__ not sorted
+    "RUF012",  # mutable class variable annotation
+    "RUF100",  # unused noqa directive
+    "RUF005",  # consider unpacking
+    "PYI034",  # __aenter__ return type
+    "PYI036",  # stub bad exit annotation
+    "PERF402", # use list.copy
+    # NOTE: S105 (hardcoded-password-string) is intentionally NOT suppressed
+    # project-wide. Use per-line `# noqa: S105` for known-false-positive
+    # literals (e.g. schema column names that happen to contain "password").
+    "S110",    # try-except-pass
+    "S112",    # try-except-continue
+    "UP041",   # use PEP 585 instead of typing
+    # GSAR (tulip.reasoning.gsar*) reproduces math notation from
+    # arXiv:2604.23366 — Greek letters (ρ, τ), set operators (∪, ⊔),
+    # and section markers (§) appear in docstrings and comments. The
+    # ambiguous-confusable lints would force us to translate them
+    # into ASCII, which loses the trace back to the paper.
+    "RUF001",  # string literal contains ambiguous unicode character
+    "RUF002",  # docstring contains ambiguous unicode character
+    "RUF003",  # comment contains ambiguous unicode character
+]
+
+[tool.ruff.lint.per-file-ignores]
+"examples/checkpointer_examples.py" = ["ALL"]
+"examples/config.py" = ["F821", "RET503"]
+"examples/notebook_11_swarm_multiagent.py" = ["F821"]
+"examples/notebook_05_agent_hooks.py" = ["PLE2510"]
+"examples/projects/**/*.py" = ["PLE2510"]
+"workbench/scripts/*.py" = ["EXE001", "EXE005"]
+"workbench/backend/runner.py" = [
+    "ASYNC240", # os.path in async — wallet-path resolution, fast/local
+    "PTH111",   # os.path.expanduser — wallet / local config paths
+    "S608",     # SQL built from hardcoded demo-table identifiers
+    "SLF001",   # _last_run_state read after agent.run() exhausts —
+                # mirrors what agent.run_sync does internally
+]
+"tests/**/*.py" = [
+    "ARG",     # unused arguments in fixtures
+    "FBT",     # boolean trap in tests
+    "PLR2004", # magic values
+    "S101",    # assert
+    "SLF001",  # private member access
+    "N802",    # test method names with mixed case (test_implicit_AND_…)
+    "RUF059",  # unpacked-but-unused vars in (state, events) destructuring
+    "B011",    # assert False — idiomatic in try/except asserting raise
+    "PT015",   # same as above — pytest's preferred form is opt-in
+    "F841",    # pytest.importorskip("x") stored but unused — intentional
+    "F811",    # multiple TestXxx classes with the same name across sections
+    "PLW0108", # lambdas passed to callbacks in on_event= patterns
+    "PT011",   # pytest.raises too broad — fine in cross-model tests
+    "A001",    # builtin shadowing — fixture param names
+    "DTZ005",  # datetime.now without tz — fine for timing assertions
+    "T201",    # print — diagnostic output in integration tests
+    "BLE001",  # blind except — test fixtures swallow env-setup errors on purpose
+    "PTH110",  # os.path.exists — idiomatic in conftest skip-gates
+    "PTH111",  # os.path.expanduser — idiomatic for local config probing
+    "S108",    # /tmp/... test strings — path construction, not real I/O
+    "S324",    # md5 — non-security fingerprinting in test helpers
+    "S603",    # subprocess — integration tests invoke example scripts intentionally
+    "E402",    # imports after pytest.importorskip() — required pattern
+    "ASYNC221", # subprocess in async test — integration tests run example scripts
+    "ASYNC230", # async open() — fine in tests, simpler than aiofiles round-trip
+    "ASYNC240", # pathlib in async tests — fine, trio.Path/anyio.path overkill
+]
+"examples/**/*.py" = [
+    "S608",     # some notebooks construct SQL from validated identifiers
+    "T201",     # print — notebooks/examples intentionally use print
+    "DTZ005",   # datetime.now without tz — fine for demo UX
+    "BLE001",   # blind except — simplified error handling in examples
+    "S108",     # /tmp/... demo paths — examples write to /tmp on purpose
+    "S311",     # non-cryptographic random — demo data only
+    "S501",     # httpx verify=False — only used in local-docker demo paths
+    "PTH110",   # os.path.exists — keep examples accessible to readers
+    "PTH111",   # os.path.expanduser — idiomatic for user-facing configs
+    "PTH118",   # os.path.join — pedagogical readability over Path / "x"
+    "PTH208",   # os.listdir — same; notebooks avoid pathlib import noise
+    "A002",     # builtin arg shadowing — pedagogical clarity
+    "B007",     # unused loop variable — counter patterns are pedagogical
+    "SLF001",   # private-member access — examples illustrate internals
+    "F401",     # unused imports — notebooks show available API surface
+    "F541",     # f-string without placeholders — pedagogical scaffolding
+    "F841",     # unused local — notebooks demonstrate APIs that return
+                # values for inspection even when they're not consumed
+                # downstream.
+    "ARG005",   # unused lambda arg — demo lambda signatures
+    "ASYNC210", # blocking HTTP — notebooks may demo sync libs alongside async
+    "ASYNC240", # os.path in async — examples favor stdlib readability
+]
+"scripts/**/*.py" = [
+    "T201",    # print — runner scripts are CLI tools that print to stdout
+    "S603",    # subprocess call — runner intentionally execs notebooks
+    "BLE001",  # blind except — runner reports failures generically
+]
+"src/tulip/memory/backends/**/*.py" = [
+    "S608",    # SQL built from validated identifiers (regex-checked at init)
+    "PYI063",  # PEP 570 positional-only — `__context` is Pydantic's spelling
+]
+"src/tulip/rag/stores/**/*.py" = [
+    "S608",    # SQL built from validated identifiers
+    "PYI063",  # PEP 570 positional-only — `__context` is Pydantic's spelling
+]
+"src/tulip/memory/store_backends/**/*.py" = [
+    "S608",    # SQL built from validated identifiers (regex-checked at init)
+    "PYI063",  # PEP 570 positional-only — `__context` is Pydantic's spelling
+]
+"src/tulip/agent/agent.py" = [
+    "SLF001",  # Private attr access for internal state (_has_unverified_writes)
+]
+"src/tulip/agent/initializer.py" = [
+    "SLF001",  # Extracted constructor body — its job is to populate
+               # ``Agent._*`` private attrs in place.
+]
+"src/tulip/integrations/fastmcp.py" = [
+    # S102 (exec) was formerly required for the MCP tool wrapper; the
+    # closure-based implementation in _create_tool_wrapper no longer uses
+    # exec, so the rule stays enforced.
+    "SLF001",  # Private member access for agent integration
+]
+"src/tulip/rag/**/*.py" = [
+    "ASYNC230", # Blocking I/O in async — some client SDKs are sync, wrapped in executor
+    "ASYNC240", # Path methods in async — local file reads are fast/local
+    "F841",     # Unused vars in multimodal processing pipelines
+    "FURB110",  # Ternary vs or — readability preference
+    "PTH108",   # os.unlink vs Path.unlink — temp file cleanup
+    "PTH111",   # os.path.expanduser — local config paths
+    "S608",     # SQL built from validated identifiers (pgvector store)
+    "UP042",    # str+Enum — needed for serialization compat
+]
+"src/tulip/core/interrupt.py" = [
+    "N818",    # Exception names without Error suffix — public API, can't rename
+]
+"src/tulip/hooks/provider.py" = [
+    "FBT003",  # Boolean positional in _init() — internal event construction
+]
+"src/tulip/hooks/plugin.py" = [
+    "SLF001",  # Private attr _is_hook for decorator marker
+]
+"src/tulip/skills/plugin.py" = [
+    "SLF001",  # Closure accessing parent plugin's private members
+]
+"src/tulip/multiagent/graph.py" = [
+    "PYI063",  # PEP 570 positional-only — compat with older Python
+    "PGH003",  # Blanket type: ignore — pydantic internal typing
+]
+"src/tulip/memory/backends/postgresql.py" = [
+    "S608",    # SQL from validated identifiers
+    "PYI063",  # PEP 570 positional-only
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["tulip"]
+force-single-line = false
+lines-after-imports = 2
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.lint.flake8-type-checking]
+strict = true
+
+[tool.ruff.lint.mccabe]
+max-complexity = 12
+
+[tool.ruff.lint.pylint]
+max-args = 8
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+docstring-code-format = true
+docstring-code-line-length = 80
+
+# =============================================================================
+# MyPy Configuration
+# =============================================================================
+
+[tool.mypy]
+python_version = "3.11"
+# Strict mode across the modules that aren't in the ignore_errors
+# override block below. The override list is deliberately shrinking
+# over time — see DEPRECATION.md.
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+disallow_untyped_decorators = true
+warn_return_any = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unused_configs = true
+check_untyped_defs = true
+no_implicit_optional = true
+show_error_codes = true
+show_column_numbers = true
+pretty = true
+
+# Pydantic plugin
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = [
+    "openai.*",
+    "google.*",
+    "requests.*",
+    "portkey_ai.*",
+    "mcp.*",
+    "anthropic.*",
+    "opensearchpy.*",
+    "redis.*",
+    "asyncpg.*",
+    "mysql.*",
+    "fastapi.*",
+    "uvicorn.*",
+    "whisper.*",
+    # Optional integration deps (lazy-imported).
+    "boto3.*",
+    "botocore.*",
+    "qdrant_client.*",
+    "chromadb.*",
+    "cohere.*",
+    "sentence_transformers.*",
+    "mem0.*",
+    "moto.*",
+    # Optional deps for ``tulip.rag.multimodal`` — only loaded inside
+    # try/except for users who want OCR / PDF / image / audio extraction.
+    "pytesseract.*",
+    "PIL.*",
+    "pypdf.*",
+    "PyPDF2.*",
+    "pdf2image.*",
+]
+ignore_missing_imports = true
+
+# Modules with dynamic types from external SDKs — relaxed checking.
+#
+# Migration in progress (issue #34): each module has been audited and either
+# (a) lifted out of this list and back into strict checking, with per-line
+# ``# type: ignore[code]`` for genuine SDK-stub gaps, or (b) retained here
+# until its module-level migration PR lands. The lifted set is enforced by
+# the strict block above.
+# All ``tulip.*`` modules are now type-checked under the strict block
+# above. The ``[[tool.mypy.overrides]]`` ``ignore_errors`` block has been
+# removed — see #34 for the migration history.
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+
+# =============================================================================
+# Pytest Configuration
+# =============================================================================
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = [
+    "-ra",
+    "-q",
+    "--strict-markers",
+    "--strict-config",
+]
+markers = [
+    "slow: marks tests as slow",
+    "integration: marks tests as integration tests",
+]
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning",
+    "ignore::ResourceWarning",
+    "ignore::pytest.PytestUnraisableExceptionWarning",
+]
+
+# =============================================================================
+# Coverage Configuration
+# =============================================================================
+
+[tool.coverage.run]
+source = ["src/tulip"]
+branch = true
+parallel = true
+omit = [
+    "src/tulip/__about__.py",
+    # External integrations requiring database/API connections
+    "src/tulip/rag/stores/opensearch.py",
+    "src/tulip/rag/stores/pgvector.py",
+    "src/tulip/rag/embeddings/openai.py",
+    "src/tulip/memory/backends/opensearch.py",
+    "src/tulip/memory/backends/oci_bucket.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "if typing.TYPE_CHECKING:",
+    "@abstractmethod",
+    "@abc.abstractmethod",
+    "class .*\\bProtocol\\):",
+    "@overload",
+]
+fail_under = 90
+show_missing = true
+
+# Note: ``[dependency-groups]`` (PEP 735) was previously used here but
+# ``pip install -e ".[dev]"`` doesn't pick those up — the same deps are
+# now in the ``[project.optional-dependencies].dev`` extra above. Kept
+# this comment as a marker so a future ``hatch sync`` doesn't reintroduce
+# the duplicate.

@@ -1,0 +1,98 @@
+# Sample local-dev LiteLLM AI Gateway in front of OpenAI + Anthropic,
+# with a Postgres sidecar so virtual keys, budgets, and spend logs
+# persist across restarts (required for /key/generate, /key/info,
+# per-key budget enforcement, and the admin spend dashboards).
+#
+# Stand up with:
+#
+#   # 1. Provider credentials the gateway will use for upstream calls.
+#   export OPENAI_API_KEY="sk-..."
+#   export ANTHROPIC_API_KEY="sk-ant-..."
+#
+#   # 2. Admin token for /key/generate. Treat as a high-value secret.
+#   export LITELLM_MASTER_KEY="sk-master-$(openssl rand -hex 32)"
+#
+#   # 3. Postgres password. Change it for any non-throwaway deployment.
+#   export LITELLM_DB_PASSWORD="$(openssl rand -hex 16)"
+#
+#   # 4. Start gateway + db together.
+#   docker compose up -d
+#
+#   # 5. Issue a per-team virtual key from outside:
+#   curl http://localhost:4000/key/generate \
+#     -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+#     -H "Content-Type: application/json" \
+#     -d '{"models":["gpt-4o"],"max_budget":5.00,"duration":"24h",
+#          "metadata":{"team":"platform-demo"}}'
+#
+#   # 6. Point Tulip at the gateway with the virtual key from (5):
+#   #   from tulip.models.native.openai import OpenAIModel
+#   #   model = OpenAIModel(
+#   #       model="gpt-4o",
+#   #       api_key="<virtual-key-from-step-5>",
+#   #       base_url="http://localhost:4000",
+#   #   )
+
+services:
+  litellm:
+    # Image is configurable so this sample works behind networks that
+    # can't reach ghcr.io directly. The default is the official
+    # ``ghcr.io/berriai/litellm:main-stable``; override with
+    # ``LITELLM_IMAGE`` if you mirror it internally.
+    image: ${LITELLM_IMAGE:-ghcr.io/berriai/litellm:main-stable}
+    container_name: tulip-litellm-gateway
+    ports:
+    - 4000:4000
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+    - ./config.yaml:/app/config.yaml:ro
+    environment:
+      # Provider credentials referenced by config.yaml via os.environ/<NAME>.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?set OPENAI_API_KEY before running docker compose up}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Admin token for /key/generate. Treat as a high-value secret.
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY}
+      # Postgres URL — virtual-key state, spend logs, audit log.
+      DATABASE_URL: postgresql://litellm:${LITELLM_DB_PASSWORD:?set LITELLM_DB_PASSWORD}@db:5432/litellm
+      STORE_MODEL_IN_DB: 'True'
+    command: [--config, /app/config.yaml, --port, '4000', --num_workers, '1']
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD, wget, --quiet, --tries=1, --spider, http://localhost:4000/health/liveness]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  # Postgres sidecar for virtual keys + spend logs. Local-dev only —
+  # production should point DATABASE_URL at an external Postgres
+  # so the gateway pod is stateless.
+  db:
+    # Image is configurable so this sample works behind corporate
+    # proxies that block Docker Hub directly. The default targets the
+    # official postgres:17-alpine; export LITELLM_DB_IMAGE to use a
+    # mirror you can reach, e.g.:
+    #
+    #   export LITELLM_DB_IMAGE=mirror.gcr.io/library/postgres:17-alpine
+    #
+    # Any image that exposes the standard postgres entrypoint + env
+    # vars (POSTGRES_DB / POSTGRES_USER / POSTGRES_PASSWORD) works.
+    image: ${LITELLM_DB_IMAGE:-postgres:17-alpine}
+    container_name: tulip-litellm-db
+    environment:
+      POSTGRES_DB: litellm
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: ${LITELLM_DB_PASSWORD:?set LITELLM_DB_PASSWORD}
+    volumes:
+    - litellm-db-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U litellm -d litellm]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  litellm-db-data:

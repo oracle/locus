@@ -1,0 +1,172 @@
+# Pre-commit hooks for tulip
+# Install: pre-commit install
+# Run all: pre-commit run --all-files
+# Update: pre-commit autoupdate
+
+default_language_version:
+  python: python3
+
+default_stages: [pre-commit]
+
+repos:
+  # ==========================================================================
+  # General file checks
+  # ==========================================================================
+- repo: https://github.com/pre-commit/pre-commit-hooks
+  rev: v5.0.0
+  hooks:
+  - id: check-added-large-files
+    args: [--maxkb=1000]
+  - id: check-case-conflict
+  - id: check-executables-have-shebangs
+  - id: check-json
+  - id: check-merge-conflict
+  - id: check-shebang-scripts-are-executable
+  - id: check-symlinks
+  - id: check-toml
+  - id: check-yaml
+    args: [--unsafe]        # Allow custom tags
+    # Helm chart templates use Go templating ({{ ... }}) — not valid
+    # YAML before render. Exclude every helm chart under deploy/.
+    exclude: ^deploy/.*helm/.*/templates/
+  - id: destroyed-symlinks
+  - id: detect-private-key
+  - id: end-of-file-fixer
+  - id: fix-byte-order-marker
+  - id: mixed-line-ending
+    args: [--fix=lf]
+  - id: no-commit-to-branch
+    args: [--branch=main, --branch=master]
+  - id: trailing-whitespace
+    args: [--markdown-linebreak-ext=md]
+
+  # ==========================================================================
+  # Security scanning
+  # ==========================================================================
+- repo: https://github.com/gitleaks/gitleaks
+  rev: v8.21.2
+  hooks:
+  - id: gitleaks
+
+  # ==========================================================================
+  # Python - Ruff (linting + formatting)
+  # ==========================================================================
+- repo: https://github.com/astral-sh/ruff-pre-commit
+  rev: v0.15.0
+  hooks:
+      # Linter
+  - id: ruff
+    name: ruff lint
+    args: [--fix, --exit-non-zero-on-fix]
+    types_or: [python, pyi]
+
+      # Formatter
+  - id: ruff-format
+    name: ruff format
+    types_or: [python, pyi]
+
+  # ==========================================================================
+  # Python - Type checking
+  # ==========================================================================
+- repo: https://github.com/pre-commit/mirrors-mypy
+  rev: v1.13.0
+  hooks:
+  - id: mypy
+    name: mypy
+    args: [--config-file=pyproject.toml]
+    additional_dependencies:
+    - pydantic>=2.0
+    - pydantic-settings>=2.0
+    - httpx>=0.27
+    - typing-extensions>=4.0
+        # Optional-extra deps required so the now-strictly-checked modules
+        # under ``tulip.a2a``, ``tulip.integrations``, ``tulip.server`` etc.
+        # resolve their third-party imports.
+    - fastapi>=0.110
+    - fastmcp>=3.2.0
+    - mcp>=1.0
+    pass_filenames: false
+    entry: mypy src/tulip
+
+  # ==========================================================================
+  # Commit message linting
+  # ==========================================================================
+- repo: https://github.com/commitizen-tools/commitizen
+  rev: v4.1.0
+  hooks:
+  - id: commitizen
+    stages: [commit-msg]
+
+  # ==========================================================================
+  # Python - Additional checks
+  # ==========================================================================
+- repo: https://github.com/python-poetry/poetry
+  rev: 1.8.0
+  hooks:
+  - id: poetry-check
+    args: [--lock]
+    files: ^pyproject\.toml$
+        # Skip if not using poetry
+    stages: [manual]
+
+  # ==========================================================================
+  # Spell-checking
+  # ==========================================================================
+- repo: https://github.com/codespell-project/codespell
+  rev: v2.3.0
+  hooks:
+  - id: codespell
+    args:
+        # Project-specific terms + identifiers + intentional typo-squat
+        # test fixtures that codespell otherwise mis-flags:
+        #   te          — loop variable for ``tool_execution``
+        #   whats       — test data string ("whats" stripped from query)
+        #   pres        — variable shorthand for ``presence_penalty``
+        #   reqeusts    — intentional typo-squat fixture for OSV malware test
+        #   unparseable — accepted English variant of ``unparsable``
+        #   re-use      — accepted hyphenation
+    - --ignore-words-list=te,whats,re-use,pres,reqeusts,unparseable,transferrin,transferring,ferritin,hepcidin,ferroportin,deferoxamine,deferasirox,deferiprone,erythroferrone,hemojuvelin,IRIDA,IDA,ACD,nin
+    - --skip=*.lock,*.json,*.yaml,*.yml,*.svg,*.gif,*.png,*.jpg,*.pdf
+
+  # ==========================================================================
+  # Documentation
+  # ==========================================================================
+- repo: https://github.com/pycqa/doc8
+  rev: v1.1.2
+  hooks:
+  - id: doc8
+    args: [--max-line-length=100]
+    files: ^docs/.*\.rst$
+
+  # ==========================================================================
+  # YAML formatting
+  # ==========================================================================
+- repo: https://github.com/macisamuele/language-formatters-pre-commit-hooks
+  rev: v2.14.0
+  hooks:
+  - id: pretty-format-yaml
+    args: [--autofix, --indent=2]
+    # Helm templates use Go templating ({{ ... }}) — not valid YAML
+    # before render. The GitHub Actions workflow YAMLs use anchors
+    # the formatter mangles. Exclude every helm chart under deploy/.
+    exclude: ^(\.github/|deploy/.*helm/.*/templates/)
+
+  # ==========================================================================
+  # Markdown
+  # ==========================================================================
+- repo: https://github.com/igorshubovych/markdownlint-cli
+  rev: v0.43.0
+  hooks:
+  - id: markdownlint
+    args: [--fix, '--disable=MD013,MD033,MD040,MD041,MD029']
+    # Generated LLM output (memos, traces) lives under each project's
+    # output/ and isn't hand-authored prose worth linting.
+    exclude: ^(docs/internal/|BA_DEPENDENCIES\.md|RELEASE_REQUEST\.md|tulip_authorization_request\.md|examples/projects/[^/]+/output/)
+
+ci:
+  autofix_commit_msg: 'style: auto-fix by pre-commit hooks'
+  autofix_prs: true
+  autoupdate_branch: main
+  autoupdate_commit_msg: 'chore: update pre-commit hooks'
+  autoupdate_schedule: monthly
+  skip: [mypy]  # Skip mypy in CI pre-commit (run separately)

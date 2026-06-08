@@ -1,0 +1,63 @@
+# ==============================================================================
+# DEVELOPMENT ONLY — do not deploy this file (or copies of it) to any
+# shared, staging, or production environment.
+#
+#  * Credentials below are intentionally weak and well-known defaults; they
+#    exist solely to make notebooks runnable on a fresh checkout.
+#  * All service ports are bound to 127.0.0.1 so services are *only*
+#    reachable from the developer laptop. Do not widen this bind without
+#    replacing the default credentials first.
+#  * OpenSearch here runs with the security plugin disabled. This is only
+#    acceptable on loopback; never expose this container to a network.
+#
+# For anything beyond local dev use environment-overridden secrets, enable
+# security plugins, pin images to immutable digests, and restrict network
+# exposure (e.g. Docker network + reverse-proxy auth).
+# ==============================================================================
+
+services:
+  redis:
+    image: redis:7-alpine
+    # Bind to loopback only — prevents the container from listening on 0.0.0.0.
+    ports:
+    - 127.0.0.1:6379:6379
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  postgres:
+    # pgvector/pgvector image bundles the `vector` extension that the
+    # tests/integration/test_new_vector_stores.py::TestPgVectorStore
+    # suite requires. Plain postgres:16 would force `CREATE EXTENSION
+    # vector` to fail.
+    image: pgvector/pgvector:pg16
+    ports:
+    - 127.0.0.1:5432:5432
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-tulip_test}
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U ${POSTGRES_USER:-postgres}']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  opensearch:
+    image: opensearchproject/opensearch:2.11.0
+    ports:
+    - 127.0.0.1:9200:9200
+    - 127.0.0.1:9600:9600
+    environment:
+    - discovery.type=single-node
+    # Security plugin disabled for LOCAL DEV ONLY. Never enable this config
+    # on any network-reachable host — it removes authentication entirely.
+    - DISABLE_SECURITY_PLUGIN=true
+    - OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_INITIAL_ADMIN_PASSWORD:-Admin123!}
+    healthcheck:
+      test: [CMD-SHELL, curl -s http://localhost:9200 || exit 1]
+      interval: 10s
+      timeout: 5s
+      retries: 10

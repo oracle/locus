@@ -1,0 +1,22 @@
+{
+  "name": "tulip-workbench-bff",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Node BFF for the tulip workbench: front-end talks to this, this talks to tulip python A2A peers.",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "build": "tsc",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "express": "^4.22.2"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    uses: ./.github/workflows/_lint.yml
+
+  test:
+    name: Test
+    uses: ./.github/workflows/_test.yml
+
+  precommit:
+    name: Pre-commit
+    uses: ./.github/workflows/_precommit.yml
+
+  # Verify commits are signed off (OCA / DCO compliance). Inline bash
+  # check — replaces ``tisonkun/actions-dco`` which was deprecated by
+  # GitHub for using Node 16 (caused startup_failure on every CI run).
+  dco:
+    name: DCO Check
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Verify every commit is signed off
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -eu
+          echo "Checking commits between $BASE_SHA and $HEAD_SHA"
+          missing=$(git log --no-merges --pretty='%H %s' "$BASE_SHA..$HEAD_SHA" \
+            | while read sha _subject; do
+                if ! git log -1 --pretty='%B' "$sha" \
+                    | grep -qE '^Signed-off-by: .+ <.+@.+>$'; then
+                  printf '%s\n' "$sha"
+                fi
+              done)
+          if [ -n "$missing" ]; then
+            echo "::error::The following commits are missing a Signed-off-by line:"
+            echo "$missing" | while read sha; do
+              echo "  - $(git log -1 --pretty='%h %s' "$sha")"
+            done
+            echo
+            echo "Add a sign-off with: git commit -s --amend --no-edit"
+            echo "and then force-push the branch."
+            exit 1
+          fi
+          echo "All commits are signed off."
+
+  # Aggregate gate. Branch-protection should require this single status
+  # check rather than each individual one — that lets us add / remove
+  # jobs without retouching protection rules.
+  ci-success:
+    name: CI Success
+    needs: [lint, test, precommit, dco]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify required jobs succeeded
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          set -eu
+          echo "$NEEDS_JSON"
+          if echo "$NEEDS_JSON" | grep -qE '"result":[[:space:]]*"(failure|cancelled)"'; then
+            echo "::error::At least one required job failed or was cancelled."
+            exit 1
+          fi
+          echo "All required jobs passed."

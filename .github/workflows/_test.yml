@@ -1,0 +1,83 @@
+name: test
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: "test #${{ matrix.python-version }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.11"
+          - "3.12"
+          - "3.13"
+          - "3.14"
+    steps:
+      # actions/checkout@v6.0.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      # actions/setup-python@v6.2.0
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
+          cache: pip
+
+      # Install tulip with every optional extra so tests that import
+      # ``openai``, ``fastmcp``, ``mcp``, ``redis``, etc. don't
+      # fail with ModuleNotFoundError. We bypass hatch here because
+      # ``hatch run test`` uses the default env which only carries
+      # ``[dev]`` deps; spinning up ``hatch -e test`` per matrix slot
+      # would re-resolve every dep into a per-Python virtualenv and
+      # dominate the CI wall-clock.
+      - name: Install tulip + all extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,sdk]"
+
+      - name: Run unit tests with coverage
+        # ``--cov-fail-under`` is set in pyproject.toml ([tool.coverage.report].fail_under).
+        # ``coverage.json`` feeds the per-file ratchet step below.
+        # ``coverage.xml`` is uploaded as an artifact so reviewers can
+        # pull it into any local viewer.
+        run: |
+          pytest tests/unit/ \
+            --cov=src/tulip \
+            --cov-report=term-missing \
+            --cov-report=json \
+            --cov-report=xml
+
+      # Per-file regression gate: fail if any tracked file's coverage
+      # dropped below the value committed in scripts/coverage_baseline.json
+      # (refreshed with `python scripts/coverage_ratchet.py --update`).
+      # Only runs on the highest-supported Python so we don't double-fail
+      # the matrix when an older runtime emits slightly different branch
+      # counts.
+      - name: Coverage ratchet (per-file regression gate)
+        if: matrix.python-version == '3.14'
+        run: python scripts/coverage_ratchet.py --check
+
+      # actions/upload-artifact@v7.0.1
+      - name: Upload coverage artifact
+        if: matrix.python-version == '3.14'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: coverage-report
+          path: |
+            coverage.xml
+            coverage.json
+          retention-days: 14
+
+      - name: Ensure tests did not create stray files
+        run: |
+          set -eu
+          STATUS="$(git status)"
+          echo "$STATUS"
+          echo "$STATUS" | grep 'nothing to commit, working tree clean'

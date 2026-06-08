@@ -1,0 +1,54 @@
+name: pre-commit
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: pre-commit hooks
+    runs-on: ubuntu-latest
+    steps:
+      # actions/checkout@v6.0.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          # gitleaks needs full history to scan every commit on the PR.
+          fetch-depth: 0
+
+      # actions/setup-python@v6.2.0
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+
+      - name: Install pre-commit
+        run: pip install pre-commit
+
+      # Cache the pre-commit hook environments keyed off the config file
+      # contents — re-uses across PRs so each run only pays for the new
+      # work.
+      # actions/cache@v5.0.5
+      - name: Cache pre-commit env
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+
+      # Run every hook in `.pre-commit-config.yaml` against the full
+      # working tree. Catches whitespace, EOL, large files, secrets,
+      # markdown lint, YAML format, doc8, codespell, ruff, and ruff
+      # format. mypy stays in `_lint.yml` so its dependency graph is
+      # consistent across the matrix.
+      - name: Run pre-commit
+        run: |
+          pre-commit run --all-files \
+            --show-diff-on-failure \
+            --hook-stage pre-commit
+        env:
+          # Skip mypy (already covered by _lint.yml across the Python
+          # matrix), the manual-only poetry-check hook, and
+          # no-commit-to-branch (a local-only guardrail that always fails
+          # on push events whose ref is main, breaking post-merge CI).
+          SKIP: "mypy,poetry-check,no-commit-to-branch"

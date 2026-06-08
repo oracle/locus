@@ -1,0 +1,83 @@
+# LiteLLM AI Gateway — sample config for fronting OpenAI + Anthropic.
+#
+# Used by docker-compose.yml in this directory. Stand the gateway up with:
+#
+#   cd examples/litellm-gateway/
+#   docker compose up
+#
+# The gateway picks up provider credentials from the env vars exported into
+# the container by docker-compose.yml. See docs/how-to/litellm-gateway.md.
+
+model_list:
+  # ---------------------------------------------------------------------------
+  # OpenAI + Anthropic — LiteLLM handles each provider's auth internally.
+  # ---------------------------------------------------------------------------
+
+- model_name: gpt-4o
+  litellm_params:
+    model: openai/gpt-4o
+    api_key: os.environ/OPENAI_API_KEY
+
+- model_name: gpt-4o-mini
+  litellm_params:
+    model: openai/gpt-4o-mini
+    api_key: os.environ/OPENAI_API_KEY
+
+- model_name: gpt-5-mini
+  litellm_params:
+    model: openai/gpt-5-mini
+    api_key: os.environ/OPENAI_API_KEY
+
+- model_name: claude-sonnet-4-6
+  litellm_params:
+    model: anthropic/claude-sonnet-4-6
+    api_key: os.environ/ANTHROPIC_API_KEY
+
+- model_name: claude-haiku
+  litellm_params:
+    model: anthropic/claude-3-5-haiku-20241022
+    api_key: os.environ/ANTHROPIC_API_KEY
+
+- model_name: text-embedding-3-small
+  litellm_params:
+    model: openai/text-embedding-3-small
+    api_key: os.environ/OPENAI_API_KEY
+
+
+# Fallback chains across the model catalog. If gpt-5-mini returns
+# a 5xx / rate-limit error, the gateway transparently retries against
+# claude-sonnet-4-6, then gpt-4o. The agent never sees the upstream
+# failure — only the eventual successful response.
+router_settings:
+  fallbacks:
+  - gpt-5-mini:
+    - claude-sonnet-4-6
+    - gpt-4o
+  - claude-sonnet-4-6:
+    - gpt-4o
+
+
+# Gateway-wide settings. ``drop_params`` strips OpenAI kwargs the
+# upstream provider doesn't accept so cross-vendor agent loops don't
+# 400. ``set_verbose`` is kept off here; flip it on for debugging.
+litellm_settings:
+  drop_params: true
+  set_verbose: false
+  # Observability — uncomment one or more once you have the backend wired:
+  # success_callback: ["langfuse"]
+  # failure_callback: ["langfuse"]
+  # cache: true
+  # cache_params:
+  #   type: redis
+  #   host: redis
+  #   port: 6379
+
+
+# Master key for the admin API (used by /key/generate to issue
+# per-team virtual keys). Treat as a secret. In production, mount via
+# Kubernetes secrets rather than baking it into the image.
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  # Postgres backing for virtual keys + spend logs.
+  # Comment out for stateless local-dev mode.
+  # database_url: os.environ/DATABASE_URL

@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 360"
+     font-family="-apple-system, BlinkMacSystemFont, 'Inter', sans-serif"
+     shape-rendering="geometricPrecision">
+  <defs>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="2"/>
+      <feOffset dx="0" dy="2" result="o"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.18"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <marker id="a" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0,0 L 12,6 L 0,12 z" fill="#2A2F2F"/>
+    </marker>
+    <marker id="am" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0,0 L 12,6 L 0,12 z" fill="#6C3F49"/>
+    </marker>
+  </defs>
+
+  <!-- SequentialPipeline (top half) -->
+  <text x="20" y="30" font-size="14" font-weight="800" fill="#2A2F2F" letter-spacing="-0.01em">SequentialPipeline · linear chain</text>
+  <g filter="url(#sh)">
+    <rect x="20"  y="55" width="130" height="60" rx="10" fill="#04536F"/><text x="85"  y="92" text-anchor="middle" font-size="14" font-weight="700" fill="#FFFFFF">researcher</text>
+    <rect x="200" y="55" width="130" height="60" rx="10" fill="#04536F"/><text x="265" y="92" text-anchor="middle" font-size="14" font-weight="700" fill="#FFFFFF">summariser</text>
+    <rect x="380" y="55" width="130" height="60" rx="10" fill="#04536F"/><text x="445" y="92" text-anchor="middle" font-size="14" font-weight="700" fill="#FFFFFF">fact_checker</text>
+    <rect x="560" y="55" width="130" height="60" rx="10" fill="#C74634"/><text x="625" y="92" text-anchor="middle" font-size="14" font-weight="700" fill="#FFFFFF">final report</text>
+  </g>
+  <line x1="155" y1="85" x2="195" y2="85" stroke="#2A2F2F" stroke-width="2.4" marker-end="url(#a)"/>
+  <line x1="335" y1="85" x2="375" y2="85" stroke="#2A2F2F" stroke-width="2.4" marker-end="url(#a)"/>
+  <line x1="515" y1="85" x2="555" y2="85" stroke="#2A2F2F" stroke-width="2.4" marker-end="url(#a)"/>
+
+  <!-- ParallelPipeline (bottom half) -->
+  <text x="20" y="170" font-size="14" font-weight="800" fill="#2A2F2F" letter-spacing="-0.01em">ParallelPipeline · fan-out + merge</text>
+  <g filter="url(#sh)">
+    <rect x="20"  y="195" width="120" height="50" rx="10" fill="#04536F"/><text x="80"  y="226" text-anchor="middle" font-size="13" font-weight="700" fill="#FFFFFF">prompt</text>
+    <rect x="240" y="155" width="160" height="40" rx="10" fill="#89B2B0"/><text x="320" y="180" text-anchor="middle" font-size="12" font-weight="700" fill="#1F2828">vector search</text>
+    <rect x="240" y="220" width="160" height="40" rx="10" fill="#89B2B0"/><text x="320" y="245" text-anchor="middle" font-size="12" font-weight="700" fill="#1F2828">keyword search</text>
+    <rect x="240" y="285" width="160" height="40" rx="10" fill="#89B2B0"/><text x="320" y="310" text-anchor="middle" font-size="12" font-weight="700" fill="#1F2828">graph search</text>
+    <rect x="500" y="195" width="190" height="50" rx="10" fill="#C74634"/><text x="595" y="226" text-anchor="middle" font-size="13" font-weight="700" fill="#FFFFFF">merged answer</text>
+  </g>
+  <line x1="145" y1="220" x2="235" y2="175" stroke="#2A2F2F" stroke-width="1.8" marker-end="url(#a)"/>
+  <line x1="145" y1="220" x2="235" y2="240" stroke="#2A2F2F" stroke-width="1.8" marker-end="url(#a)"/>
+  <line x1="145" y1="220" x2="235" y2="305" stroke="#2A2F2F" stroke-width="1.8" marker-end="url(#a)"/>
+  <line x1="405" y1="175" x2="495" y2="217" stroke="#6C3F49" stroke-width="1.6" stroke-dasharray="5,3" marker-end="url(#am)"/>
+  <line x1="405" y1="240" x2="495" y2="220" stroke="#6C3F49" stroke-width="1.6" stroke-dasharray="5,3" marker-end="url(#am)"/>
+  <line x1="405" y1="305" x2="495" y2="225" stroke="#6C3F49" stroke-width="1.6" stroke-dasharray="5,3" marker-end="url(#am)"/>
+</svg>

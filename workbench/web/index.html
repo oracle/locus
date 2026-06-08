@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>tulip · workbench</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/src/styles/redwood.css" />
+  </head>
+  <body>
+    <div class="app" id="app">
+      <header class="app__header">
+        <button class="icon-btn" id="sidebar-btn" aria-label="Toggle sidebar" title="Toggle sidebar">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+        </button>
+        <div class="app__brand">
+          <img class="app__brand-icon" id="app-brand-icon" src="/tulip-mark.svg" alt="tulip" />
+          <span class="app__brand-mark">tulip</span>
+          <span class="app__brand-tag">Multi-Agent Reasoning Orchestrator SDK</span>
+        </div>
+        <div class="app__header-spacer"></div>
+        <button class="icon-btn" id="theme-btn" data-testid="theme-btn" title="Toggle theme" aria-label="Toggle theme">
+          <svg id="theme-icon-sun" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="4"></circle>
+            <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"></path>
+          </svg>
+          <svg id="theme-icon-moon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="display:none">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+          </svg>
+        </button>
+        <button class="btn" id="settings-btn" data-testid="settings-btn">
+          <span class="settings-btn__full">Provider settings</span>
+          <span class="settings-btn__short">Settings</span>
+        </button>
+      </header>
+
+      <aside class="app__side" id="app-side" data-testid="app-side">
+        <div class="side__tabs" role="tablist" aria-label="Sidebar section">
+          <button class="side__tab side__tab--active" id="side-tab-notebooks" data-testid="side-tab-notebooks" role="tab" aria-selected="true">Notebooks</button>
+        </div>
+        <div id="side-pane-notebooks">
+          <input type="search" class="input" id="notebook-search" placeholder="filter…" style="margin: 0 0.5rem 0.5rem; width: calc(100% - 1rem)" />
+          <div id="side-notebooks" data-testid="side-notebooks"></div>
+        </div>
+      </aside>
+
+      <main class="app__main">
+        <div class="page__crumbs" id="crumbs">Workbench</div>
+
+        <div class="card" id="provider-warning" style="display: none">
+          <div class="card__header">
+            <h2 class="card__title">Connect a model provider</h2>
+            <span class="pill pill--down"><span class="pill__dot"></span>setup required</span>
+          </div>
+          <p>
+            Click <strong>Provider settings</strong> to authenticate. The workbench
+            runs against any model provider tulip supports —
+            <em>OpenAI</em> or <em>Anthropic</em>.
+            Keys are session-only — closing the tab discards them.
+          </p>
+        </div>
+
+        <!-- Patterns run panel -->
+        <div id="patterns-view" data-testid="patterns-view" style="display: none">
+          <div class="card">
+            <div class="card__header">
+              <div>
+                <h2 class="card__title" id="pattern-title">…</h2>
+                <div class="card__sub" id="pattern-sub"></div>
+              </div>
+              <span class="pill" id="pattern-stream-badge" style="display:none">streamable</span>
+            </div>
+            <div class="field" style="margin-top: 0.6rem">
+              <label class="field__label">Prompt</label>
+              <textarea id="pattern-prompt" data-testid="pattern-prompt" class="input" rows="3"
+                style="width:100%;resize:vertical;font-family:var(--font-mono,monospace);font-size:0.82rem"></textarea>
+            </div>
+            <div id="pattern-routing-toggle" data-testid="pattern-routing-toggle"
+              style="display:none;margin-top:0.75rem;font-size:0.82rem">
+              <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap">
+                <span style="font-weight:600">Selection mode</span>
+                <div role="radiogroup" aria-label="Cognitive routing mode"
+                  style="display:inline-flex;border:1px solid var(--or-border);border-radius:999px;padding:2px;background:var(--or-surface)">
+                  <label data-testid="pattern-mode-rules"
+                    style="display:inline-flex;align-items:center;gap:0.35rem;padding:0.25rem 0.7rem;border-radius:999px;cursor:pointer;user-select:none">
+                    <input type="radio" name="pattern-mode" value="rules" checked
+                      style="appearance:none;-webkit-appearance:none;width:0;height:0;margin:0" />
+                    <span class="mode-label">Rule-based</span>
+                  </label>
+                  <label data-testid="pattern-mode-llm"
+                    style="display:inline-flex;align-items:center;gap:0.35rem;padding:0.25rem 0.7rem;border-radius:999px;cursor:pointer;user-select:none">
+                    <input type="radio" name="pattern-mode" value="llm"
+                      style="appearance:none;-webkit-appearance:none;width:0;height:0;margin:0" />
+                    <span class="mode-label">LLM picker</span>
+                  </label>
+                </div>
+                <span id="pattern-mode-hint"
+                  style="color:var(--or-text-mute);font-size:0.75rem;line-height:1.4;flex-basis:100%">
+                  <strong>Rule-based</strong>: deterministic <code>_rank_key</code> ranker — auditable, reproducible.
+                  <strong>LLM picker</strong>: opt-in <code>LLMProtocolPicker</code> — the model picks among
+                  filtered candidates and emits a rationale.
+                </span>
+              </div>
+              <input type="checkbox" id="pattern-use-llm-picker"
+                data-testid="pattern-use-llm-picker" style="display:none" />
+            </div>
+            <div class="form-row" style="margin-top: 0.5rem">
+              <div style="flex:1"></div>
+              <button class="btn btn--primary" id="pattern-run-btn" data-testid="pattern-run-btn">Run</button>
+              <button class="btn" id="pattern-stop-btn" data-testid="pattern-stop-btn" style="display:none">Stop</button>
+            </div>
+            <div id="pattern-error" style="display:none;color:var(--or-red-deep);font-size:0.82rem;margin-top:0.5rem" data-testid="pattern-error"></div>
+            <pre id="pattern-output" data-testid="pattern-output"
+              style="display:none;margin-top:0.8rem;white-space:pre-wrap;font-size:0.8rem;max-height:60vh;overflow:auto"></pre>
+          </div>
+        </div>
+
+        <div id="protocols-view" data-testid="protocols-view" style="display: none">
+          <div class="card">
+            <div class="card__header">
+              <div>
+                <h2 class="card__title" id="protocol-title">…</h2>
+                <div class="card__sub" id="protocol-sub"></div>
+              </div>
+              <div style="display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap">
+                <span class="pill" id="protocol-cost-pill" style="display: none"></span>
+                <span class="pill" id="protocol-risk-pill" style="display: none"></span>
+                <span class="pill" id="protocol-latency-pill" style="display: none"></span>
+              </div>
+            </div>
+            <div id="protocol-shape" class="protocol-shape" data-testid="protocol-shape"></div>
+            <div id="protocol-meta" class="card__sub" style="margin-top: 0.6rem"></div>
+            <div id="protocol-handles" data-testid="protocol-handles"></div>
+            <div id="protocol-primary" data-testid="protocol-primary" style="margin-top: 0.5rem"></div>
+            <div id="protocol-caps" data-testid="protocol-caps" style="margin-top: 0.5rem"></div>
+          </div>
+        </div>
+
+        <div id="skills-view" data-testid="skills-view" style="display: none">
+          <div class="card">
+            <div class="card__header">
+              <div>
+                <h2 class="card__title" id="skill-title">…</h2>
+                <div class="card__sub" id="skill-sub"></div>
+              </div>
+              <div style="display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap">
+                <span class="pill" id="skill-domain-pill" style="display: none"></span>
+                <span class="pill" id="skill-license-pill" style="display: none"></span>
+              </div>
+            </div>
+            <div id="skill-meta" class="card__sub" style="margin: 0.4rem 0 0.6rem"></div>
+            <div id="skill-instructions" class="skill-md" data-testid="skill-instructions"></div>
+            <div id="skill-resources" class="skill-resources" data-testid="skill-resources" style="display: none"></div>
+          </div>
+        </div>
+
+        <div id="workbench" data-testid="wb-root">
+          <div class="wb-split">
+          <div class="card" id="wb-editor-card" data-testid="wb-editor-card">
+            <div class="card__header">
+              <div>
+                <h2 class="card__title" id="wb-title">…</h2>
+                <div class="card__sub" id="wb-sub">Edit the source. Run executes a Python subprocess against your configured provider; events stream into the Output pane on the right.</div>
+              </div>
+              <div style="display: flex; gap: 0.4rem; align-items: center">
+                <button class="icon-btn" id="wb-prev-btn" data-testid="wb-prev-btn" title="Previous notebook" aria-label="Previous notebook">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="15 18 9 12 15 6"></polyline>
+                  </svg>
+                </button>
+                <button class="icon-btn" id="wb-next-btn" data-testid="wb-next-btn" title="Next notebook" aria-label="Next notebook">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="9 18 15 12 9 6"></polyline>
+                  </svg>
+                </button>
+                <span class="pill" id="wb-provider-pill"></span>
+                <button class="icon-btn" id="wb-fullscreen-btn" data-testid="wb-fullscreen-btn" title="Toggle full screen (Esc to exit)" aria-label="Toggle workbench full screen">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="4 9 4 4 9 4"></polyline>
+                    <polyline points="20 9 20 4 15 4"></polyline>
+                    <polyline points="20 15 20 20 15 20"></polyline>
+                    <polyline points="4 15 4 20 9 20"></polyline>
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div id="wb-editor" data-testid="wb-editor" class="wb-editor"></div>
+            <div class="form-row" style="margin-top: 0.6rem">
+              <span class="card__sub" id="wb-status"></span>
+              <div style="flex: 1"></div>
+              <button class="btn" id="wb-reset-btn">Reset to original</button>
+              <button class="btn" id="wb-stop-btn" style="display:none">Stop</button>
+              <button class="btn btn--primary" id="wb-run-btn" data-testid="wb-run-btn">Run</button>
+            </div>
+          </div>
+          <div class="wb-resize" id="wb-resize" data-testid="wb-resize" role="separator" aria-orientation="vertical" tabindex="0" title="Drag to resize">
+            <span class="wb-resize__grip"></span>
+          </div>
+          <div class="card" id="wb-output-card" data-testid="wb-output-card">
+            <div class="card__header">
+              <h2 class="card__title">Output</h2>
+              <span class="pill" id="wb-output-pill" style="display:none"></span>
+            </div>
+            <pre id="wb-output" class="wb-output" data-testid="wb-output"></pre>
+          </div>
+          </div>
+        </div>
+
+      </main>
+
+      <footer class="app__footer">tulip · open-source multi-agent SDK</footer>
+    </div>
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+    <!-- Provider settings modal (vanilla TS, hidden by default) -->
+    <div class="modal" id="settings-modal" aria-hidden="true">
+      <div class="modal__panel">
+        <div class="modal__header">
+          <h2>Provider settings</h2>
+          <button class="modal__close" id="settings-close" aria-label="Close">×</button>
+        </div>
+        <p class="modal__lede">
+          Held in this tab's memory only. Never persisted to localStorage and never sent anywhere except the local BFF — closing the tab discards everything.
+        </p>
+
+        <div class="field">
+          <label class="field__label">Provider</label>
+          <select id="cfg-provider" class="input" data-testid="cfg-provider">
+            <option value="openai">OpenAI (api key)</option>
+            <option value="anthropic">Anthropic (api key)</option>
+          </select>
+        </div>
+
+        <div class="field" id="row-apikey">
+          <label class="field__label">API key</label>
+          <input type="password" id="cfg-apikey" class="input" autocomplete="off" data-testid="cfg-apikey" />
+        </div>
+
+        <div class="field" id="row-model">
+          <label class="field__label">Model A
+            <span id="cfg-model-status" style="font-weight:400;color:var(--or-text-mute);margin-left:0.4rem"></span>
+          </label>
+          <select id="cfg-model" class="input" data-testid="cfg-model"></select>
+        </div>
+
+        <div class="field" id="row-model-b">
+          <label class="field__label">Model B
+            <span style="font-weight:400;color:var(--or-text-mute);margin-left:0.4rem">optional · falls back to A</span>
+          </label>
+          <select id="cfg-model-b" class="input" data-testid="cfg-model-b"></select>
+        </div>
+
+        <div class="field" id="row-model-c">
+          <label class="field__label">Model C
+            <span style="font-weight:400;color:var(--or-text-mute);margin-left:0.4rem">optional · falls back to A</span>
+          </label>
+          <select id="cfg-model-c" class="input" data-testid="cfg-model-c"></select>
+        </div>
+
+        <div class="form-row" style="margin-top: 1rem">
+          <div style="flex: 1"></div>
+          <button class="btn" id="settings-cancel">Cancel</button>
+          <button class="btn btn--primary" id="settings-save" data-testid="settings-save">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

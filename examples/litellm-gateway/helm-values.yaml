@@ -1,0 +1,116 @@
+# LiteLLM AI Gateway — sample Kubernetes values for fronting providers.
+#
+# Pairs with the official LiteLLM Helm chart:
+#   ghcr.io/berriai/litellm-helm
+#   https://github.com/BerriAI/litellm/tree/main/deploy/charts/litellm-helm
+#
+# Deploy with:
+#
+#   # 1. Create the provider credentials secret (the gateway pod uses
+#   #    these for upstream calls). Prefer External Secrets in
+#   #    production; the kubectl form below is for illustration only.
+#   kubectl create namespace litellm
+#   kubectl -n litellm create secret generic provider-credentials \
+#     --from-literal=OPENAI_API_KEY="sk-..." \
+#     --from-literal=ANTHROPIC_API_KEY="sk-ant-..."
+#
+#   # 2. Master key for /key/generate. Treat as a high-value secret.
+#   kubectl -n litellm create secret generic litellm-master \
+#     --from-literal=LITELLM_MASTER_KEY="$(openssl rand -hex 32)"
+#
+#   # 3. Install / upgrade the chart.
+#   helm repo add litellm oci://ghcr.io/berriai/litellm-helm
+#   helm -n litellm upgrade --install gateway litellm/litellm \
+#     --values examples/litellm-gateway/helm-values.yaml
+#
+# Tulip services in the same cluster then point at:
+#   http://gateway-litellm.litellm.svc.cluster.local:4000
+
+# ---------------------------------------------------------------------------
+# Image / replicas
+# ---------------------------------------------------------------------------
+image:
+  repository: ghcr.io/berriai/litellm
+  tag: main-stable
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+# ---------------------------------------------------------------------------
+# Inline config — alternatively mount the contents of config.yaml from
+# this directory via a ConfigMap. The Helm chart accepts either.
+# ---------------------------------------------------------------------------
+# Set proxy_config to the contents of config.yaml. When using --set-file
+# you can reference the sibling file directly:
+#   --set-file proxy_config=examples/litellm-gateway/config.yaml
+# proxy_config: |
+#   model_list:
+#     - model_name: gpt-4o
+#       litellm_params:
+#         model: openai/gpt-4o
+#         …
+
+# ---------------------------------------------------------------------------
+# Environment — provider credentials + master key sourced from secrets.
+# ---------------------------------------------------------------------------
+envFrom:
+- secretRef:
+    name: provider-credentials
+- secretRef:
+    name: litellm-master
+
+# ---------------------------------------------------------------------------
+# Resources — sized for a small platform tier. Adjust to traffic.
+# ---------------------------------------------------------------------------
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: 2000m
+    memory: 4Gi
+
+# ---------------------------------------------------------------------------
+# Service — cluster-internal only. The gateway issues virtual keys and
+# carries upstream provider credentials; do NOT expose it via a
+# LoadBalancer. Use an in-cluster Ingress + mTLS / OAuth2 proxy if you
+# need it reachable from other namespaces / clusters.
+# ---------------------------------------------------------------------------
+service:
+  type: ClusterIP
+  port: 4000
+
+# ---------------------------------------------------------------------------
+# Postgres — required for persistent virtual keys + spend logs in
+# production. The chart bundles an option to provision it; the form
+# below points at an external Postgres instance.
+# ---------------------------------------------------------------------------
+db:
+  useExisting: true
+  endpoint: postgres.your-platform.svc.cluster.local:5432
+  database: litellm
+  url: postgresql://litellm:$(POSTGRES_PASSWORD)@$(DB_HOST)/$(DB_DATABASE)
+  secret:
+    name: litellm-db
+    usernameKey: username
+    passwordKey: password
+
+# ---------------------------------------------------------------------------
+# Service account — bind to a workload identity / IRSA-style principal
+# if your platform supports keyless cloud auth.
+# ---------------------------------------------------------------------------
+serviceAccount:
+  create: true
+  name: litellm-gateway
+
+# ---------------------------------------------------------------------------
+# Pod hardening
+# ---------------------------------------------------------------------------
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+securityContext:
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]

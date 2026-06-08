@@ -1,0 +1,155 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+# Default to read-only. Individual publishing jobs declare the scopes they
+# actually need (id-token for PyPI trusted publishing in future; none of
+# these jobs currently need contents: write).
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.11"
+  HATCH_VERSION: "1.16.5"
+
+jobs:
+  # Releases are cut from tagged commits that already passed the full
+  # `ci.yml` matrix (lint + tests on Python 3.11–3.14 + pre-commit + DCO).
+  # Re-running a single-version `hatch run test` here was redundant, so
+  # the release pipeline starts at `build`.
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      pkg-name: ${{ steps.check-version.outputs.pkg-name }}
+      version: ${{ steps.check-version.outputs.version }}
+    steps:
+      # actions/checkout@v6.0.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      # actions/setup-python@v6.2.0
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Hatch
+        run: pip install hatch==${{ env.HATCH_VERSION }}
+
+      - name: Build project for distribution
+        run: hatch build
+
+      # actions/upload-artifact@v7.0.1
+      - name: Upload build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: dist
+          path: dist/
+
+      - name: Check Version
+        id: check-version
+        run: |
+          echo "pkg-name=tulip-agents" >> "$GITHUB_OUTPUT"
+          echo "version=$(hatch version)" >> "$GITHUB_OUTPUT"
+
+  test-pypi-publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # OIDC: mint a short-lived token for PyPI Trusted Publishing — no
+      # long-lived TEST_PYPI_TOKEN secret to leak, expire, or rotate.
+      id-token: write
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/project/${{ needs.build.outputs.pkg-name }}/
+    steps:
+      # actions/download-artifact@v8.0.1
+      - name: Download build artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: dist
+          path: dist/
+
+      # pypa/gh-action-pypi-publish@v1.14.0 — Trusted Publishing (OIDC).
+      # Requires a "pending/trusted publisher" registered on test.pypi.org:
+      #   repo=tuliplabs-ai/sdk-python, workflow=_release.yml, environment=testpypi
+      # continue-on-error so a TestPyPI hiccup never blocks the prod publish;
+      # skip-existing tolerates re-runs over an already-uploaded version.
+      - name: Publish to TestPyPI
+        continue-on-error: true
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: dist/
+          skip-existing: true
+
+  pre-release-checks:
+    needs:
+      - build
+      - test-pypi-publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # actions/checkout@v6.0.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      # actions/setup-python@v6.2.0
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Import published package
+        # Download the built artifacts and verify the package imports
+        # correctly using the local wheel (no TestPyPI dependency).
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: dist
+          path: dist/
+      - name: Verify package imports
+        env:
+          PKG_NAME: ${{ needs.build.outputs.pkg-name }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -eu
+          # Install the wheel directly from the build artifacts.
+          pip install "dist/${PKG_NAME//-/_}-${VERSION}-py3-none-any.whl"
+          python -c "import tulip; print(dir(tulip))"
+
+  publish:
+    needs:
+      - build
+      - test-pypi-publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    environment:
+      name: pypi
+      url: https://pypi.org/p/${{ needs.build.outputs.pkg-name }}
+    steps:
+      # actions/download-artifact@v8.0.1
+      - name: Download build artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: dist
+          path: dist/
+
+      # actions/setup-python@v6.2.0
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.x"
+
+      - name: Publish to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+        run: |
+          pip install twine
+          twine upload dist/*

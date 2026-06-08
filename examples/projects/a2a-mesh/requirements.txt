@@ -1,0 +1,4 @@
+tulip[a2a] @ git+https://github.com/tuliplabs-ai/sdk-python.git
+fastapi>=0.110
+uvicorn[standard]>=0.27
+httpx>=0.27
