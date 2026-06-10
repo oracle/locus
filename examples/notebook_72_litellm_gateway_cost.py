@@ -1,12 +1,17 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
-"""Notebook 72: Per-team cost tracking on the LiteLLM AI Gateway.
+"""Notebook 72: Cost guardrails for always-on SOC automation.
 
-Follows notebook 71 (the gateway happy path) with the part enterprise
-operators actually care about: **who spent what on which model**.
-Issues virtual keys for two pretend teams, drives traffic on each,
-then walks the spend surface — per-request rows, per-key rollups,
-per-model rollups, and per-team filtering via metadata.
+Follows notebook 71 (the gateway happy path) with the part SOC platform
+owners actually care about: **who spent what on which model**. An
+always-on triage fleet burns tokens 24/7, so each automation gets a
+budget-capped virtual key — a runaway agent loop hits its budget, not
+your invoice. A per-key hard budget is the gateway's answer to unbounded
+consumption (OWASP LLM10): a looping or hijacked automation is capped at
+the source instead of running up an unbounded bill. Issues virtual keys
+for two SOC teams, drives traffic on each, then walks the spend surface —
+per-request rows, per-key rollups, per-model rollups, and per-team
+filtering via metadata.
 
 Run it::
 
@@ -52,14 +57,14 @@ _REQUIRED_ENV = (
 
 def _print_skip_banner(missing: list[str]) -> None:
     print("=" * 72)
-    print(" LiteLLM AI Gateway not configured — skipping the cost demo.")
+    print(" LiteLLM AI Gateway not configured — skipping the SOC cost demo.")
     print("=" * 72)
     print(
         f"\n Missing environment variables: {', '.join(missing)}\n\n"
         " Bring up the gateway (with the Postgres sidecar so /spend/* works):\n\n"
         "     cd examples/litellm-gateway/\n"
-        "     export OCI_REGION=... OCI_USER=... OCI_FINGERPRINT=...\n"
-        "     export OCI_TENANCY=... OCI_KEY_FILE=... OCI_COMPARTMENT_ID=...\n"
+        '     export OPENAI_API_KEY="sk-..."\n'
+        '     export ANTHROPIC_API_KEY="sk-ant-..."\n'
         '     export LITELLM_MASTER_KEY="sk-master-$(openssl rand -hex 16)"\n'
         '     export LITELLM_DB_PASSWORD="$(openssl rand -hex 16)"\n'
         "     docker compose up -d\n\n"
@@ -98,7 +103,7 @@ def issue_virtual_key(
     models: list[str],
     max_budget_usd: float = 5.0,
 ) -> str:
-    """Issue a per-team virtual key. Returns the raw token."""
+    """Issue a budget-capped per-team virtual key. Returns the raw token."""
     resp = httpx.post(
         f"{url}/key/generate",
         headers=_admin(master_key),
@@ -177,34 +182,38 @@ def main() -> None:
 
     print()
     print("=" * 72)
-    print(" Per-team cost tracking on the LiteLLM AI Gateway")
+    print(" Cost guardrails for always-on SOC automation (LiteLLM AI Gateway)")
     print("=" * 72)
     print(f" Gateway: {url}")
     print()
 
-    # ----- Step 1: issue two virtual keys, one per pretend team -----------
-    team_a_key = issue_virtual_key(url, master_key, team="team-alpha", models=["gpt-4o"])
-    team_b_key = issue_virtual_key(
-        url, master_key, team="team-beta", models=["gpt-4o", "claude-sonnet-4-6"]
+    # ----- Step 1: issue two virtual keys, one per SOC team ----------------
+    soc_triage_key = issue_virtual_key(url, master_key, team="soc-triage", models=["gpt-4o"])
+    threat_intel_key = issue_virtual_key(
+        url, master_key, team="threat-intel", models=["gpt-4o", "claude-sonnet-4-6"]
     )
-    print(" Virtual keys issued:")
-    print(f"   team-alpha (gpt-4o only):  {team_a_key[:24]}...")
-    print(f"   team-beta  (gpt-4o, claude): {team_b_key[:24]}...")
+    print(" Virtual keys issued (each with a $5 hard budget):")
+    print(f"   soc-triage   (gpt-4o only):   {soc_triage_key[:24]}...")
+    print(f"   threat-intel (gpt-4o, claude): {threat_intel_key[:24]}...")
     print()
 
     # ----- Step 2: drive different traffic on each team --------------------
     print(" Driving traffic:")
-    for prompt in ("Capital of France?", "Capital of Spain?", "Capital of Italy?"):
-        out = chat(url, team_a_key, "gpt-4o", prompt)
+    for prompt in (
+        "Expand the acronym SIEM.",
+        "Expand the acronym EDR.",
+        "Expand the acronym SOAR.",
+    ):
+        out = chat(url, soc_triage_key, "gpt-4o", prompt)
         content = out["choices"][0]["message"]["content"].strip()
         toks = out["usage"]["total_tokens"]
-        print(f"   [team-alpha] {prompt} → {content!r}  ({toks} tokens)")
+        print(f"   [soc-triage]   {prompt} → {content!r}  ({toks} tokens)")
 
-    for prompt in ("Capital of Norway?", "Capital of Sweden?"):
-        out = chat(url, team_b_key, "gpt-4o", prompt)
+    for prompt in ("Expand the acronym TTP.", "Expand the acronym APT."):
+        out = chat(url, threat_intel_key, "gpt-4o", prompt)
         content = out["choices"][0]["message"]["content"].strip()
         toks = out["usage"]["total_tokens"]
-        print(f"   [team-beta]  {prompt} → {content!r}  ({toks} tokens)")
+        print(f"   [threat-intel] {prompt} → {content!r}  ({toks} tokens)")
 
     # ----- Step 3: wait for the gateway's async spend flusher --------------
     print()
@@ -214,9 +223,9 @@ def main() -> None:
     # ----- Step 4: walk the spend surface ---------------------------------
     print()
     print("=" * 72)
-    print(" /spend/logs — per-request rows for team-alpha")
+    print(" /spend/logs — per-request rows for soc-triage")
     print("=" * 72)
-    for row in fetch_spend_logs(url, master_key, virtual_key=team_a_key):
+    for row in fetch_spend_logs(url, master_key, virtual_key=soc_triage_key):
         team = (row.get("metadata") or {}).get("team", "?")
         print(
             f"   model={row.get('model', '?'):<32} "
@@ -243,10 +252,10 @@ def main() -> None:
 
     print()
     print("=" * 72)
-    print(" Done. Finance / platform teams can answer:")
-    print("   · 'What did team-alpha spend last month?'  → /spend/logs + metadata.team")
-    print("   · 'What did Cohere Command cost across all teams?' → /global/spend/models")
-    print("   · 'Who is over budget right now?' → /global/spend/keys + max_budget")
+    print(" Done. SOC platform owners can answer:")
+    print("   · 'What did soc-triage spend last month?'  → /spend/logs + metadata.team")
+    print("   · 'What does the claude alias cost across teams?' → /global/spend/models")
+    print("   · 'Which automation key is over budget right now?' → /global/spend/keys")
     print(" — all from one SQL-backed surface. No Tulip integration glue.")
     print("=" * 72)
 

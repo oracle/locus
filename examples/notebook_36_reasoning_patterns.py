@@ -1,29 +1,39 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
-"""Notebook 37: reasoning patterns — reflexion, grounding, causal chains.
+"""Notebook 36: reasoning patterns — a missed-detection postmortem.
 
-Each part exercises one piece of the Tulip reasoning toolkit against a
-live model and prints a ``[model call: X.XXs · prompt→completion tokens]``
-banner.
+A purple-team exercise dropped the EICAR test file on a workstation and
+no alert fired. The postmortem question is why the detection pipeline
+stayed silent: a stale EDR agent and a saturated alert queue amount to an
+unintended defense gap (the kind an adversary would exploit deliberately —
+MITRE ATT&CK T1562.001, Impair Defenses: Disable or Modify Tools). Each
+part exercises one piece of the Tulip reasoning toolkit against that
+postmortem with a live model and prints a
+``[model call: X.XXs · prompt→completion tokens]`` banner.
+
+The thesis the reasoning layer enforces here: an ungrounded claim in a
+postmortem is how a false root cause gets written into a runbook, so each
+claim is scored against tool evidence before it is allowed to stand.
 
 - ``@tool`` + ``Agent(tools=...)`` — let the agent call real Python
-  functions.
+  functions over the detection pipeline's logs and stats.
 - ``Agent(reflexion=True)`` and ``Reflector`` — Reflexion is a
   self-critique loop; the agent looks at its own trajectory and
   decides whether it is making progress or stuck.
-- ``Agent(output_schema=...)`` — typed JSON for claims and event
-  timelines.
+- ``Agent(output_schema=...)`` — typed JSON for postmortem claims and
+  event timelines.
 - ``GroundingEvaluator`` — score each claim against tool evidence and
-  decide whether to replan.
+  decide whether to replan. Ungrounded claims in a postmortem are how
+  false root causes get written into runbooks.
 - ``CausalChain`` / ``build_causal_chain`` — build and walk a graph of
-  cause/effect relationships.
+  cause/effect relationships from drop to missed alert.
 
 Run it:
     # The bundled mock model is the default; set TULIP_MODEL_PROVIDER for a live provider.
-    TULIP_MODEL_ID=openai.gpt-4.1 python examples/notebook_42_reasoning_patterns.py
+    TULIP_MODEL_ID=openai.gpt-4.1 python examples/notebook_36_reasoning_patterns.py
 
     # Offline:
-    TULIP_MODEL_PROVIDER=mock python examples/notebook_42_reasoning_patterns.py
+    TULIP_MODEL_PROVIDER=mock python examples/notebook_36_reasoning_patterns.py
 
 Prerequisites:
 - An OpenAI or Anthropic API key, or set ``TULIP_MODEL_PROVIDER`` to
@@ -84,37 +94,38 @@ def _llm_call(prompt: str, *, system: str = "Reply in one sentence.", max_tokens
 
 
 class ClaimList(BaseModel):
-    """Three factual claims about an incident."""
+    """Three factual claims about the missed detection."""
 
     claims: list[str] = Field(..., description="Three short factual claims.")
 
 
 class EventList(BaseModel):
-    """Causal-ordered list of events leading to an outage."""
+    """Causal-ordered list of events leading to the missed alert."""
 
     events: list[str] = Field(..., description="Events in causal order.")
 
 
 # ---------------------------------------------------------------------------
-# Tools the agent can call. Real Python — not mocks.
+# Tools the agent can call. Real Python — deterministic mock telemetry.
 # ---------------------------------------------------------------------------
 
 
 @tool
-def read_logs(file: str) -> str:
-    """Pull the last few lines of a log file."""
+def read_detection_logs(file: str) -> str:
+    """Pull the last few lines of the detection pipeline's log."""
     return (
-        "[14:02:01] ERROR db.pool exhausted (50/50 conns)\n"
-        "[14:02:14] WARN api.handler timeout calling /v1/orders\n"
-        "[14:02:18] ERROR retry budget exceeded"
+        "[14:02:01] INFO purple-team EICAR test file written on ws-0231\n"
+        "[14:02:14] WARN edr heartbeat stale on ws-0231 (last seen 46 min ago)\n"
+        "[14:02:18] ERROR alert pipeline dropped 3 events (queue full)"
     )
 
 
 @tool
-def query_metrics(host: str) -> str:
-    """Query the metrics backend for the host's vital signs."""
+def query_siem(host: str) -> str:
+    """Query the SIEM for the host's detection-pipeline vital signs."""
     return (
-        f"host={host} cpu_pct=89 memory_pct=95 db_conns=45/50 api_p99_ms=2500 api_threshold_ms=200"
+        f"host={host} edr_agent_version=4.2.1 latest_version=5.0.3 events_dropped=3 "
+        "alerts_fired=0 detection_latency_min=45 queue_depth_pct=98"
     )
 
 
@@ -128,27 +139,30 @@ def main():
 
     check_structured_output_capable()
     print("=" * 60)
-    print("Notebook 37: reasoning patterns")
+    print("Notebook 36: reasoning patterns — missed-detection postmortem")
     print("=" * 60)
 
     # =========================================================================
     # Part 1: Reflexion — self-critique on a real agent trajectory.
     # =========================================================================
     print("\n=== Part 1: Reflexion on a real Agent run (Agent + tool) ===\n")
-    sre_agent = Agent(
+    postmortem_agent = Agent(
         model=get_model(max_tokens=300),
-        tools=[read_logs],
+        tools=[read_detection_logs],
         system_prompt=(
-            "You are an SRE on call. Use the read_logs tool to investigate, "
-            "then summarise what's wrong in one short sentence."
+            "You are a detection engineer running a missed-detection postmortem. "
+            "Use the read_detection_logs tool to investigate, then summarise "
+            "what went wrong in one short sentence."
         ),
     )
-    sre_result = sre_agent.run_sync("Investigate the recent database errors in app.log.")
-    _banner(sre_result, "Part 1")
-    print(f"Agent verdict: {sre_result.message[:200]}")
+    postmortem_result = postmortem_agent.run_sync(
+        "Investigate why no alert fired for the purple-team EICAR drop on ws-0231."
+    )
+    _banner(postmortem_result, "Part 1")
+    print(f"Agent verdict: {postmortem_result.message[:200]}")
 
     reflector = Reflector(loop_threshold=3, success_weight=0.15, error_penalty=0.2)
-    reflection = reflector.reflect(sre_result.state)
+    reflection = reflector.reflect(postmortem_result.state)
     print(f"Reflexion assessment: {reflection.assessment.value}")
     print(f"Confidence delta: {reflection.confidence_delta:+.2f}")
     if reflection.guidance:
@@ -159,15 +173,15 @@ def main():
     # =========================================================================
     print("\n=== Part 2: Loop detection (model explains, SDK detects) ===\n")
     rationale = _llm_call(
-        "In one sentence, why does an autonomous agent need to detect when "
-        "it's stuck calling the same tool over and over?",
-        system="Explain like an SRE.",
+        "In one sentence, why does an autonomous security agent need to detect "
+        "when it's stuck calling the same tool over and over?",
+        system="Explain like a SOC lead.",
     )
     print(f"AI rationale: {rationale}")
 
     loop_state = AgentState(
         agent_id="looping_agent",
-        tool_history=("search_logs",) * 4,
+        tool_history=("search_siem",) * 4,
     )
     loop_reflection = reflector.reflect(loop_state)
     print(f"Assessment: {loop_reflection.assessment.value}")
@@ -178,11 +192,11 @@ def main():
     # Part 3: evaluate_progress — one-shot progress check, no Reflector instance.
     # =========================================================================
     print("\n=== Part 3: Quick progress evaluation ===\n")
-    quick = evaluate_progress(state=sre_result.state, loop_threshold=3, success_weight=0.2)
+    quick = evaluate_progress(state=postmortem_result.state, loop_threshold=3, success_weight=0.2)
     print(f"Quick assessment: {quick.assessment.value}")
     suggestion = _llm_call(
         f"An agent's reflexion module says it is '{quick.assessment.value}' "
-        "after one tool call. Suggest the SRE's next step in one sentence.",
+        "after one tool call. Suggest the detection engineer's next step in one sentence.",
         max_tokens=80,
     )
     print(f"AI next step: {suggestion}")
@@ -196,13 +210,13 @@ def main():
 
     evidence_agent = Agent(
         model=get_model(max_tokens=200),
-        tools=[query_metrics],
+        tools=[query_siem],
         system_prompt=(
-            "You are an SRE. Call query_metrics for host db-prod-1 and report "
+            "You are a SOC analyst. Call query_siem for host ws-0231 and report "
             "back what it returned, verbatim, on a single line."
         ),
     )
-    evidence_result = evidence_agent.run_sync("Pull the metrics for db-prod-1 right now.")
+    evidence_result = evidence_agent.run_sync("Pull the detection stats for ws-0231 right now.")
     _banner(evidence_result, "Part 4a")
     evidence_line = evidence_result.message
     evidence_pieces = [chunk.strip() for chunk in evidence_line.split() if "=" in chunk]
@@ -216,13 +230,14 @@ def main():
         model=get_model(max_tokens=200),
         output_schema=ClaimList,
         system_prompt=(
-            "You are an SRE writing an incident summary. Make exactly three "
-            "factual claims about the system based on the metrics provided."
+            "You are a SOC analyst writing a missed-detection postmortem. Make "
+            "exactly three factual claims about the detection pipeline based on "
+            "the stats provided."
         ),
     )
     claim_result = claim_agent.run_sync(
-        f"Metrics from query_metrics: {evidence_line}\n"
-        "Produce three factual claims about the system state."
+        f"Stats from query_siem: {evidence_line}\n"
+        "Produce three factual claims about the detection-pipeline state."
     )
     _banner(claim_result, "Part 4b")
 
@@ -258,13 +273,14 @@ def main():
         print(guidance)
         plan = _llm_call(
             f"The grounding evaluator gave this guidance:\n{guidance}\n"
-            "List two concrete tools the SRE should call next, one per line.",
+            "List two concrete tools the SOC analyst should call next, one per line.",
             max_tokens=120,
         )
         print(f"\nAI replan plan:\n{plan}")
     else:
         observation = _llm_call(
-            "All claims are sufficiently grounded. In one sentence, what does the SRE do next?",
+            "All postmortem claims are sufficiently grounded. In one sentence, "
+            "what does the detection engineer do next?",
             max_tokens=80,
         )
         print(f"AI says: {observation}")
@@ -277,13 +293,13 @@ def main():
         model=get_model(max_tokens=300),
         output_schema=EventList,
         system_prompt=(
-            "You are an SRE describing a failure timeline. Output exactly five "
-            "events in causal order, no numbering."
+            "You are a detection engineer describing a missed-detection "
+            "timeline. Output exactly five events in causal order, no numbering."
         ),
     )
     event_result = event_agent.run_sync(
-        "Walk through what happens when a service hits an OutOfMemoryError. "
-        "Output exactly five events in causal order."
+        "Walk through how an outdated EDR agent plus a saturated event queue "
+        "leads to a missed alert. Output exactly five events in causal order."
     )
     _banner(event_result, "Part 6")
     parsed_events: EventList | None = event_result.parsed
@@ -350,7 +366,7 @@ def main():
             print(f"  Built-in hint: {c.resolution_hint}")
         ai_fix = _llm_call(
             f"A causal chain has this conflict: {c.description}. Suggest a "
-            "one-sentence resolution an SRE could apply.",
+            "one-sentence resolution a detection engineer could apply.",
             max_tokens=80,
         )
         print(f"  AI resolution: {ai_fix}\n")
@@ -372,10 +388,10 @@ def main():
     print("\n=== Part 10: Full reasoning pipeline ===\n")
     pipeline_paragraph = _llm_call(
         "Walk through this reasoning pipeline as one short paragraph: "
-        "(1) the agent makes claims about a database incident, "
-        "(2) the grounding evaluator checks each claim against evidence, "
+        "(1) the agent makes claims about a missed detection, "
+        "(2) the grounding evaluator checks each claim against SIEM evidence, "
         "(3) replan guidance fires if grounding is too low, "
-        "(4) a causal chain is built from the events, "
+        "(4) a causal chain is built from the timeline events, "
         "(5) reflexion monitors the agent for loops. "
         "Mention how each step ties to the next.",
         max_tokens=320,
@@ -389,14 +405,15 @@ def main():
     reflexive_agent = Agent(
         model=get_model(max_tokens=300),
         system_prompt=(
-            "You are an SRE root-cause analyst. Reason step by step before "
-            "giving a final one-paragraph conclusion."
+            "You are a detection-engineering root-cause analyst. Reason step by "
+            "step before giving a final one-paragraph conclusion."
         ),
         reflexion=True,
     )
     live = reflexive_agent.run_sync(
-        "Database P99 latency jumped from 30ms to 800ms after a deploy. "
-        "Connection pool is saturated. What's the most likely root cause?"
+        "A purple-team EICAR drop on ws-0231 produced no alert. The EDR agent "
+        "is two major versions behind and the alert queue sat at 98% capacity. "
+        "What's the most likely root cause?"
     )
     _banner(live, "Part 11")
     print(f"Conclusion: {live.message[:400]}")

@@ -1,15 +1,20 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
-"""Notebook 52: Multi-modal providers — web search, web fetch, image, speech.
+"""Notebook 57: Multi-modal phishing triage — lure pages, intel, image, speech.
 
-Set a provider on the Agent kwargs (web_search, web_fetch, image_generator,
-speech_provider) and Tulip auto-registers a matching @tool. The model
-calls it the same way it calls a hand-written tool — you don't write the
-wrapper.
+A reported phishing case is rarely just text. The analyst has a lure URL
+to fetch, a threat-intel feed to query, a screenshot of the lure page to
+reproduce for the awareness-training corpus, and a vishing voicemail to
+transcribe. Set a provider on the Agent kwargs (web_search, web_fetch,
+image_generator, speech_provider) and Tulip auto-registers a matching
+@tool. The model calls it the same way it calls a hand-written tool —
+you don't write the wrapper.
 
 - Four Protocols under tulip.providers: search, fetch, image, speech.
-- Live demo with HTTPXWebFetcher (no API key needed) against example.com.
-- Bring-your-own: any duck-typed object that implements the protocol method.
+- Live demo with HTTPXWebFetcher (no API key needed) — example.com
+  stands in for a reported suspicious lure URL.
+- Bring-your-own: any duck-typed object that implements the protocol
+  method, e.g. an internal threat-intel search.
 - Optional OpenAI-backed providers (image, speech, search-preview).
 
 Run it
@@ -69,7 +74,7 @@ def example_auto_register():
     agent = Agent(
         config=AgentConfig(
             model=get_model(),
-            system_prompt="Use web_fetch to look up pages when asked.",
+            system_prompt="Use web_fetch to retrieve reported URLs for analysis when asked.",
             max_iterations=4,
             web_fetch=fetcher,
         )
@@ -87,7 +92,8 @@ def example_auto_register():
     print("`speak` and/or `transcribe` depending on `provider.capabilities`).")
 
 
-# Part 3: live demo — fetch example.com through the auto-registered tool.
+# Part 3: live demo — fetch the page behind a reported link through the
+# auto-registered tool. example.com stands in for the suspicious URL.
 
 
 async def example_live_fetch():
@@ -107,31 +113,33 @@ async def example_live_fetch():
     assert tool is not None, "web_fetch tool was not registered"
 
     # Calling tool.fn directly bypasses the model so we can verify wiring
-    # without spending a round-trip on a trivial fetch.
+    # without spending a round-trip on a trivial fetch. In a real triage
+    # run the model would call this with the URL from the phishing report.
     rendered = await tool.fn(url="https://example.com", max_chars=400)
     print("First 200 chars of the rendered tool output:")
     print(rendered[:200])
     print("...")
 
 
-# Part 4: any duck-typed object implementing the protocol method works.
+# Part 4: any duck-typed object implementing the protocol method works —
+# here, a stand-in for an internal threat-intel search service.
 
 
 def example_byo_backend():
-    """A toy custom search provider — any duck-typed class works."""
-    print("\n=== Part 4: Bring your own backend ===\n")
+    """A toy threat-intel search provider — any duck-typed class works."""
+    print("\n=== Part 4: Bring your own intel backend ===\n")
 
     from tulip.providers.types import SearchResult
 
-    class StaticSearch:
-        """Hard-coded results — swap for a real Bing / Tavily client."""
+    class StaticIntelSearch:
+        """Hard-coded intel hits — swap for your real intel-platform client."""
 
         async def search(self, query, *, max_results=5):
             return [
                 SearchResult(
-                    title=f"Result {i + 1} for {query!r}",
-                    url=f"https://example.org/{i}",
-                    snippet="snippet text",
+                    title=f"Intel hit {i + 1} for {query!r}",
+                    url=f"https://intel.example/advisories/{i}",
+                    snippet="advisory snippet (mock)",
                 )
                 for i in range(min(max_results, 3))
             ]
@@ -139,15 +147,15 @@ def example_byo_backend():
     agent = Agent(
         config=AgentConfig(
             model=get_model(),
-            system_prompt="Use web_search when asked to look something up.",
-            web_search=StaticSearch(),
+            system_prompt="Use web_search to query the intel feed when asked about an indicator.",
+            web_search=StaticIntelSearch(),
         )
     )
     print(f"Registered tools: {sorted(agent._tool_registry.tools.keys())}")
     print()
     print("The model now has a `web_search(query, max_results)` tool that")
-    print("calls our StaticSearch.search() under the hood. Swap StaticSearch")
-    print("for a real client and you have a Bing / Tavily / DuckDuckGo agent.")
+    print("calls our StaticIntelSearch.search() under the hood. Swap it for")
+    print("your intel-platform client and the agent queries live feeds.")
 
 
 # Part 5: OpenAI-backed providers (only if OPENAI_API_KEY is set).
@@ -187,7 +195,10 @@ def example_openai_providers():
     print(f"Speech provider: {type(speech).__name__}, capabilities={speech.capabilities}")
     print()
     print("Set them on AgentConfig and the agent gets `generate_image`, ")
-    print("`speak`, and `transcribe` tools without any extra wiring.")
+    print("`speak`, and `transcribe` tools without extra wiring — e.g.")
+    print("reproducing a reported lure screenshot for the awareness-training")
+    print("corpus, spoken advisories, and vishing-voicemail transcription")
+    print("in one phishing-triage agent.")
 
 
 if __name__ == "__main__":

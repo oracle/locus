@@ -2,21 +2,22 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 
-"""Notebook 55: Agent yield bridge and token usage.
+"""Notebook 60: Scanner telemetry — the agent yield bridge.
 
+A scanning agent's tool calls are the part auditors care about most.
 Every Agent.run is decorated with @_bus_bridge so the nine typed events
 it yields (ThinkEvent, ToolStartEvent, ToolCompleteEvent, ReflectEvent,
 GroundingEvent, ModelChunkEvent, ModelCompleteEvent, InterruptEvent,
 TerminateEvent) get republished on the bus as agent.* events when a
-run_context is open. ModelCompleteEvent additionally fires
-agent.tokens.used so cost dashboards subscribe without parsing the
-completion payload.
+run_context is open — every lookup the scanner makes is visible in the
+run stream. ModelCompleteEvent additionally fires agent.tokens.used so
+cost dashboards subscribe without parsing the completion payload.
 
 - How nine yielded TulipEvent types map to agent.* bus events.
 - Tool-call telemetry with span_id pairing (agent.tool.started and
-  agent.tool.completed share an id).
+  agent.tool.completed share an id) — start/finish of each scan step.
 - Token usage from result.metrics — the canonical source for cost
-  meters and budget enforcers.
+  meters and budget enforcers on always-on SOC automation.
 
 Run it
     # Default: the bundled mock model (set TULIP_MODEL_PROVIDER for a live provider)
@@ -38,19 +39,21 @@ from tulip.tools import tool
 
 
 @tool
-def add_numbers(a: int, b: int) -> int:
-    """Return the sum of two integers."""
-    return a + b
+def lookup_ip_reputation(ip: str) -> str:
+    """Return a canned reputation verdict for an IP address (offline mock data)."""
+    # RFC 5737 documentation range stands in for a known-bad block.
+    return "malicious" if ip.startswith("192.0.2.") else "clean"
 
 
 @tool
-def multiply_numbers(a: int, b: int) -> int:
-    """Return the product of two integers."""
-    return a * b
+def count_failed_logins(host: str) -> int:
+    """Return a canned count of failed SSH logins for a host (offline mock data)."""
+    return 42 if host == "web-01" else 3
 
 
-# Part 1: full agent.* lifecycle on one tool-using run. Print every
-# event with its span_id so you can see start/complete pairing.
+# Part 1: full agent.* lifecycle on one scanning run. Print every
+# event with its span_id so you can see start/complete pairing — each
+# tool span is one auditable scan step.
 
 
 async def part1_full_lifecycle() -> None:
@@ -58,10 +61,11 @@ async def part1_full_lifecycle() -> None:
 
     agent = Agent(
         model=get_model(),
-        tools=[add_numbers, multiply_numbers],
+        tools=[lookup_ip_reputation, count_failed_logins],
         max_iterations=4,
         system_prompt=(
-            "You answer with one tool call at a time. After all tool calls, give the final answer."
+            "You are a SOC scanning agent. Make one tool call at a time. After all "
+            "tool calls, report your findings."
         ),
     )
 
@@ -81,7 +85,10 @@ async def part1_full_lifecycle() -> None:
         await asyncio.sleep(0)
 
         result = None
-        async for event in agent.run("Compute (3 + 4) and then (5 * 7), and tell me both."):
+        async for event in agent.run(
+            "Check the reputation of 192.0.2.44, count failed logins on web-01, "
+            "and report both."
+        ):
             from tulip.core.events import TerminateEvent
 
             if isinstance(event, TerminateEvent):
@@ -93,7 +100,8 @@ async def part1_full_lifecycle() -> None:
 
 # Part 2: token usage as a cost meter. result.metrics is authoritative;
 # agent.tokens.used SSE events are for streaming consumers that want
-# per-call deltas instead of the final total.
+# per-call deltas instead of the final total. Always-on triage automation
+# needs both: budget enforcement and live burn-rate dashboards.
 
 
 async def part2_token_meter() -> None:
@@ -101,10 +109,10 @@ async def part2_token_meter() -> None:
 
     running_prompt = running_completion = running_total = 0
 
-    # Multi-run session: accumulate token totals across calls.
+    # Multi-run shift: accumulate token totals across triage calls.
     prompts = [
-        "In one sentence: what is JSON?",
-        "In one sentence: what is a REST API?",
+        "In one sentence: what is an indicator of compromise?",
+        "In one sentence: what is lateral movement?",
     ]
 
     for prompt in prompts:
@@ -121,7 +129,7 @@ async def part2_token_meter() -> None:
         )
 
     print(
-        f"  ─── session total: prompt={running_prompt}  "
+        f"  ─── shift total: prompt={running_prompt}  "
         f"completion={running_completion}  total={running_total}"
     )
 

@@ -1,12 +1,15 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 """
-Chain agents, run them in parallel, or loop one until it's satisfied.
+Notebook 21: Composing security agents into pipelines.
 
-When the work decomposes cleanly into agent-shaped pieces, you don't
-need a full StateGraph. The three pipeline classes here are batteries-
-included composition primitives that take a list of Agent instances
-and orchestrate them for you.
+When security work decomposes cleanly into agent-shaped pieces — a
+recon summary feeding an exposure-validation report, two assessors
+working the same finding in parallel — you don't need a full
+StateGraph. The three pipeline classes here are batteries-included
+composition primitives that take a list of Agent instances and
+orchestrate them for you. Scenario: external attack-surface review
+(MITRE ATT&CK T1595, Active Scanning).
 
 - SequentialPipeline — each agent's output becomes the next agent's input.
 - ParallelPipeline — run agents concurrently, then merge their results.
@@ -14,7 +17,7 @@ and orchestrate them for you.
 - Helpers sequential() / parallel() / loop() exist for one-liners.
 
 Run it:
-    TULIP_MODEL_PROVIDER=mock python examples/notebook_27_composition.py
+    TULIP_MODEL_PROVIDER=mock python examples/notebook_21_composition.py
 
 The default provider is the bundled mock model; set TULIP_MODEL_PROVIDER for a live provider.
 Set TULIP_MODEL_PROVIDER=mock for offline runs. Pick a live provider with
@@ -35,70 +38,79 @@ from tulip.agent import (
 
 
 # =============================================================================
-# Part 1: Sequential — researcher then writer
+# Part 1: Sequential — recon summary then exposure-validation report
 # =============================================================================
 
 
 async def example_sequential():
-    """Researcher gathers facts; writer turns them into prose."""
-    print("=== Part 1: Sequential — researcher then writer ===\n")
+    """Recon analyst summarizes exposures; report writer validates them in prose."""
+    print("=== Part 1: Sequential — recon summary then validation report ===\n")
 
     model = get_model()
 
-    researcher = Agent(
+    recon_analyst = Agent(
         config=AgentConfig(
-            system_prompt="You are a researcher. Provide 3 key facts about the topic.",
+            system_prompt=(
+                "You are a recon analyst. From the scan notes, list the 3 most "
+                "significant external exposures."
+            ),
             max_iterations=3,
             model=model,
         )
     )
-    writer = Agent(
+    report_writer = Agent(
         config=AgentConfig(
-            system_prompt="You are a writer. Take the research and write a short paragraph.",
+            system_prompt=(
+                "You are an exposure-validation report writer. Take the exposure "
+                "summary and write a short validation paragraph for the asset owner."
+            ),
             max_iterations=3,
             model=model,
         )
     )
 
-    pipeline = SequentialPipeline(agents=[researcher, writer])
-    result = await pipeline.run("Benefits of regular exercise")
+    pipeline = SequentialPipeline(agents=[recon_analyst, report_writer])
+    result = await pipeline.run(
+        "External scan of example.com: ports 22/80/443 open, stale subdomain "
+        "old.example.com still resolving, TLS cert expires in 9 days."
+    )
 
-    print(f"Stage 1 (Researcher): {result.outputs[0][:100]}...")
-    print(f"Stage 2 (Writer): {result.outputs[1][:100]}...")
+    print(f"Stage 1 (Recon summary): {result.outputs[0][:100]}...")
+    print(f"Stage 2 (Validation report): {result.outputs[1][:100]}...")
     print(f"Duration: {result.duration_ms:.0f}ms")
 
 
 # =============================================================================
-# Part 2: Parallel — pros vs cons in one call
+# Part 2: Parallel — risks vs mitigations in one call
 # =============================================================================
 
 
 async def example_parallel():
-    """Two agents form independent perspectives; the pipeline merges them."""
-    print("\n=== Part 2: Parallel — pros vs cons in one call ===\n")
+    """Two agents assess the same exposure independently; the pipeline merges them."""
+    print("\n=== Part 2: Parallel — risks vs mitigations in one call ===\n")
 
     model = get_model()
 
-    pros = Agent(
+    risk_assessor = Agent(
         config=AgentConfig(
-            system_prompt="List 2 pros of the topic. Be concise.",
+            system_prompt="List 2 risks this exposure creates for the business. Be concise.",
             max_iterations=3,
             model=model,
         )
     )
-    cons = Agent(
+    mitigation_planner = Agent(
         config=AgentConfig(
-            system_prompt="List 2 cons of the topic. Be concise.",
+            system_prompt="List 2 mitigations that would close this exposure. Be concise.",
             max_iterations=3,
             model=model,
         )
     )
 
-    pipeline = ParallelPipeline(agents=[pros, cons])
-    result = await pipeline.run("Remote work for engineers")
+    pipeline = ParallelPipeline(agents=[risk_assessor, mitigation_planner])
+    result = await pipeline.run("Publicly exposed admin panel at admin.example.com")
 
-    print(f"Pros: {result.outputs[0][:100]}...")
-    print(f"Cons: {result.outputs[1][:100]}...")
+    print(f"Risks: {result.outputs[0][:100]}...")
+    print(f"Mitigations: {result.outputs[1][:100]}...")
     print(f"Merged: {result.final_output[:150]}...")
 
 
@@ -108,16 +120,16 @@ async def example_parallel():
 
 
 async def example_loop():
-    """LoopAgent re-runs the same agent, feeding back the previous output."""
+    """LoopAgent re-runs the same agent, feeding back the previous draft."""
     print("\n=== Part 3: Loop — iterate until APPROVED or max_loops ===\n")
 
     model = get_model()
 
-    improver = Agent(
+    report_hardener = Agent(
         config=AgentConfig(
             system_prompt=(
-                "You improve text quality. When the text is good enough, "
-                "include the word APPROVED at the end."
+                "You tighten incident-report drafts. When the draft is ready for "
+                "the incident commander, include the word APPROVED at the end."
             ),
             max_iterations=3,
             model=model,
@@ -125,13 +137,15 @@ async def example_loop():
     )
 
     loop = LoopAgent(
-        agent=improver,
+        agent=report_hardener,
         condition=lambda output: "APPROVED" in output.upper(),
         max_loops=3,
-        loop_prompt="Improve this text. Say APPROVED when done:\n{previous_output}",
+        loop_prompt="Tighten this incident report. Say APPROVED when ready:\n{previous_output}",
     )
 
-    result = await loop.run("The quick brown fox jumps over the lazy dog.")
+    result = await loop.run(
+        "Suspicious login on prod-web-01 from 198.51.100.23; password reset issued."
+    )
     print(f"Iterations: {len(result.outputs)}")
     print(f"Final: {result.final_output[:100]}...")
 

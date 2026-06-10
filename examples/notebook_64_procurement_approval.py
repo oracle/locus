@@ -2,35 +2,39 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 
-"""Notebook 59: Procurement approval with tiered human gates.
+"""Notebook 64: Vendor security review with risk-tiered approval gates.
 
-Real procurement workflows have a threshold-based escalation chain::
+Real third-party-risk programs have a tier-based escalation chain::
 
-    Request submitted
+    Vendor intake (questionnaire on file)
        │
        ▼
-    Justifier  (drafts business justification)
+    Questionnaire analyst  (summarises the vendor's security questionnaire)
        │
        ▼
-    Vendor analyst  (validates vendor + pricing)
+    Posture analyst  (assesses data exposure + control posture)
        │
        ▼
-    Tier router   ── < $1k     ──> auto-approve
-                  ── $1k-$10k  ──> manager approval (interrupt)
-                  ── $10k-$100k──> manager + finance approval (two interrupts)
-                  ── > $100k   ──> manager + finance + CFO approval (three interrupts)
+    Risk-tier router ── score < 25 ──> auto-approve (low risk)
+                     ── 25–49     ──> security-manager approval (interrupt)
+                     ── 50–74     ──> manager + GRC approval (two interrupts)
+                     ── >= 75     ──> manager + GRC + CISO approval (three interrupts)
        │
        ▼
-    PO generator  (emits structured PurchaseOrder)
+    Decision recorder  (emits structured VendorDecision)
 
 Each approval gate is a separate interrupt() so a reviewer can come back
-to it later. The workflow ends with a typed PurchaseOrder Pydantic model
-that can be filed into an ERP without parsing.
+to it later. The terminal node is SCRIBE, the SOC's compliance reporter:
+it emits a typed VendorDecision Pydantic model that files into the
+vendor-risk register without parsing. Third-party AI services widen the
+agentic supply chain (OWASP ASI04), so the posture step is where you
+weigh attestations (SOC 2, ISO 27001) against what data the vendor would
+actually touch.
 
-- Tier router is a plain conditional edge — no DSL, no policy file.
+- Risk-tier router is a plain conditional edge — no DSL, no policy file.
 - Each gate is its own node — easy to add a tier, easy to re-order,
   easy to swap a human gate for an automated rule.
-- output_schema=PurchaseOrder keeps the terminal artifact typed.
+- output_schema=VendorDecision keeps SCRIBE's terminal artifact typed.
 
 Run it
     # Default: the bundled mock model (set TULIP_MODEL_PROVIDER for a live provider)
@@ -39,7 +43,7 @@ Run it
     # Offline / no credentials:
     TULIP_MODEL_PROVIDER=mock python examples/notebook_64_procurement_approval.py
 
-    # Pin a strong-enough model for the structured PurchaseOrder schema:
+    # Pin a strong-enough model for the structured VendorDecision schema:
     TULIP_MODEL_ID=openai.gpt-4.1 python examples/notebook_64_procurement_approval.py
 """
 
@@ -60,15 +64,15 @@ from tulip.multiagent.graph import END, START, StateGraph
 # Data shape for the terminal artifact.
 
 
-class PurchaseOrder(BaseModel):
-    """Final structured artifact filed into ERP."""
+class VendorDecision(BaseModel):
+    """Final structured artifact filed into the vendor-risk register."""
 
     request_id: str
     vendor: str
-    item: str
-    amount_usd: float
-    business_justification: str
-    vendor_assessment: str
+    service: str
+    risk_score: float
+    questionnaire_summary: str
+    posture_assessment: str
     approvals: list[str] = Field(description="ordered list of approver titles")
     approved_at: str
     status: str = Field(description="approved | denied")
@@ -78,14 +82,16 @@ class PurchaseOrder(BaseModel):
 
 
 PROMPTS = {
-    "justify": (
-        "You are a procurement analyst. Given an item and use-case, write a "
-        "two-sentence business justification."
+    "questionnaire": (
+        "You are a third-party-risk analyst. Given a vendor's security-"
+        "questionnaire excerpt, write a two-sentence summary of the security "
+        "posture the vendor claims."
     ),
-    "vendor": (
-        "You are a vendor-risk analyst. Given a vendor name and an item, write "
-        "a one-paragraph assessment covering: financial stability, data-handling "
-        "posture (if applicable), and pricing reasonableness for this category."
+    "posture": (
+        "You are a vendor security assessor. Given a vendor and the service it "
+        "provides, write a one-paragraph assessment covering: the data the "
+        "vendor would touch, the attestations you would expect (SOC 2, ISO "
+        "27001), and any obvious exposure concerns for this category."
     ),
 }
 
@@ -93,7 +99,7 @@ PROMPTS = {
 def _make_agent(role: str, model: Any) -> Agent:
     return Agent(
         config=AgentConfig(
-            agent_id=f"proc-{role}",
+            agent_id=f"vsr-{role}",
             model=model,
             system_prompt=PROMPTS[role],
             max_iterations=2,
@@ -113,28 +119,31 @@ async def _run(agent: Agent, prompt: str) -> str:
 # Graph nodes.
 
 
-async def justify(state: dict[str, Any]) -> dict[str, Any]:
-    agent = _make_agent("justify", state["__model__"])
-    text = await _run(agent, f"Item: {state['item']}\nUse-case: {state['use_case']}")
-    return {"justification": text}
+async def summarize_questionnaire(state: dict[str, Any]) -> dict[str, Any]:
+    agent = _make_agent("questionnaire", state["__model__"])
+    text = await _run(
+        agent,
+        f"Vendor: {state['vendor']}\nQuestionnaire excerpt: {state['questionnaire']}",
+    )
+    return {"questionnaire_summary": text}
 
 
-async def assess_vendor(state: dict[str, Any]) -> dict[str, Any]:
-    agent = _make_agent("vendor", state["__model__"])
-    text = await _run(agent, f"Vendor: {state['vendor']}\nItem: {state['item']}")
-    return {"vendor_assessment": text}
+async def assess_posture(state: dict[str, Any]) -> dict[str, Any]:
+    agent = _make_agent("posture", state["__model__"])
+    text = await _run(agent, f"Vendor: {state['vendor']}\nService: {state['service']}")
+    return {"posture_assessment": text}
 
 
-def tier_router(state: dict[str, Any]) -> str:
-    """Route by amount; each tier picks up the prior tier's approvals."""
-    amt = float(state.get("amount_usd", 0.0))
-    if amt < 1_000:
+def risk_tier_router(state: dict[str, Any]) -> str:
+    """Route by risk score; each tier picks up the prior tier's approvals."""
+    score = float(state.get("risk_score", 0.0))
+    if score < 25:
         return "auto"
-    if amt < 10_000:
+    if score < 50:
         return "manager"
-    if amt < 100_000:
-        return "finance"
-    return "cfo"
+    if score < 75:
+        return "grc"
+    return "ciso"
 
 
 async def approve_manager(state: dict[str, Any]) -> dict[str, Any]:
@@ -143,42 +152,44 @@ async def approve_manager(state: dict[str, Any]) -> dict[str, Any]:
             "type": "approval",
             "tier": "manager",
             "question": (
-                f"Manager approval needed for ${state['amount_usd']:,.2f} "
-                f"({state['vendor']} — {state['item']}). Approve?"
+                f"Security-manager approval needed at risk score "
+                f"{state['risk_score']:.0f}/100 "
+                f"({state['vendor']} — {state['service']}). Approve?"
             ),
             "options": ["yes", "no"],
         }
     )
-    return _record_decision(state, "Manager", decision)
+    return _record_decision(state, "Security Manager", decision)
 
 
-async def approve_finance(state: dict[str, Any]) -> dict[str, Any]:
+async def approve_grc(state: dict[str, Any]) -> dict[str, Any]:
     decision = interrupt(
         {
             "type": "approval",
-            "tier": "finance",
+            "tier": "grc",
             "question": (
-                f"Finance approval needed for ${state['amount_usd']:,.2f} "
+                f"GRC approval needed at risk score {state['risk_score']:.0f}/100 "
                 f"({state['vendor']}). Approve?"
             ),
             "options": ["yes", "no"],
         }
     )
-    return _record_decision(state, "Finance Director", decision)
+    return _record_decision(state, "GRC Lead", decision)
 
 
-async def approve_cfo(state: dict[str, Any]) -> dict[str, Any]:
+async def approve_ciso(state: dict[str, Any]) -> dict[str, Any]:
     decision = interrupt(
         {
             "type": "approval",
-            "tier": "cfo",
+            "tier": "ciso",
             "question": (
-                f"CFO approval needed for ${state['amount_usd']:,.2f} ({state['vendor']}). Approve?"
+                f"CISO approval needed at risk score {state['risk_score']:.0f}/100 "
+                f"({state['vendor']}). Approve?"
             ),
             "options": ["yes", "no"],
         }
     )
-    return _record_decision(state, "CFO", decision)
+    return _record_decision(state, "CISO", decision)
 
 
 def _record_decision(state: dict[str, Any], role: str, decision: str) -> dict[str, Any]:
@@ -190,47 +201,47 @@ def _record_decision(state: dict[str, Any], role: str, decision: str) -> dict[st
 
 
 def gate_after_manager(state: dict[str, Any]) -> str:
-    """A denial at any tier jumps straight to the PO node (status=denied)."""
+    """A denial at any tier jumps straight to the decision node (status=denied)."""
     if state.get("status") == "denied":
-        return "emit_po"
-    amt = float(state.get("amount_usd", 0.0))
-    if amt >= 10_000:
-        return "approve_finance"
-    return "emit_po"
+        return "record_decision"
+    score = float(state.get("risk_score", 0.0))
+    if score >= 50:
+        return "approve_grc"
+    return "record_decision"
 
 
-def gate_after_finance(state: dict[str, Any]) -> str:
+def gate_after_grc(state: dict[str, Any]) -> str:
     if state.get("status") == "denied":
-        return "emit_po"
-    amt = float(state.get("amount_usd", 0.0))
-    if amt >= 100_000:
-        return "approve_cfo"
-    return "emit_po"
+        return "record_decision"
+    score = float(state.get("risk_score", 0.0))
+    if score >= 75:
+        return "approve_ciso"
+    return "record_decision"
 
 
 async def auto_approve(state: dict[str, Any]) -> dict[str, Any]:
-    return {"approvals": ["AUTO (under threshold)"], "status": "pending"}
+    return {"approvals": ["AUTO (low risk tier)"], "status": "pending"}
 
 
-async def emit_po(state: dict[str, Any]) -> dict[str, Any]:
-    """Build the PO via Agent.output_schema=PurchaseOrder.
+async def record_decision(state: dict[str, Any]) -> dict[str, Any]:
+    """SCRIBE writes the record via Agent.output_schema=VendorDecision.
 
     Routing through an Agent with output_schema means the artifact is a
     typed Pydantic instance — the workflow can POST it directly to the
-    ERP without parsing.
+    vendor-risk register without parsing.
     """
     import asyncio as _asyncio
 
     final_status = "approved" if state.get("status") != "denied" else "denied"
     agent = Agent(
         config=AgentConfig(
-            agent_id="po-emitter",
+            agent_id="scribe-decision-recorder",
             model=state["__model__"],
             system_prompt=(
-                "You are a procurement-ops officer producing a PurchaseOrder. "
-                "Use the supplied fields verbatim. Don't invent vendors or amounts."
+                "You are a vendor-risk officer producing a VendorDecision. "
+                "Use the supplied fields verbatim. Don't invent vendors or scores."
             ),
-            output_schema=PurchaseOrder,
+            output_schema=VendorDecision,
             max_iterations=2,
             max_tokens=300,
         )
@@ -238,13 +249,13 @@ async def emit_po(state: dict[str, Any]) -> dict[str, Any]:
     prompt = (
         f"Request: {state.get('request_id')}\n"
         f"Vendor: {state['vendor']}\n"
-        f"Item: {state['item']}\n"
-        f"Amount: {float(state['amount_usd'])}\n"
+        f"Service: {state['service']}\n"
+        f"Risk score: {float(state['risk_score'])}\n"
         f"Status: {final_status}\n"
         f"Approvals: {state.get('approvals', [])}\n"
-        f"Justification: {state.get('justification', '')[:200]}\n"
-        f"Vendor assessment: {state.get('vendor_assessment', '')[:200]}\n\n"
-        "Emit the PurchaseOrder."
+        f"Questionnaire summary: {state.get('questionnaire_summary', '')[:200]}\n"
+        f"Posture assessment: {state.get('posture_assessment', '')[:200]}\n\n"
+        "Emit the VendorDecision."
     )
     last_exc: BaseException | None = None
     result = None
@@ -257,76 +268,76 @@ async def emit_po(state: dict[str, Any]) -> dict[str, Any]:
             await _asyncio.sleep(0.5 * (attempt + 1))
     if result is None:
         raise RuntimeError(
-            f"PO emitter failed after 3 attempts. Last error: {last_exc!r}"
+            f"Decision recorder failed after 3 attempts. Last error: {last_exc!r}"
         ) from last_exc
-    po = result.parsed
-    if po is None:
+    decision = result.parsed
+    if decision is None:
         raise RuntimeError(
-            "PO emitter returned no parsed PurchaseOrder. The configured model "
-            "could not honor the JSON schema. Use a stronger model "
+            "Decision recorder returned no parsed VendorDecision. The configured "
+            "model could not honor the JSON schema. Use a stronger model "
             "(e.g. openai.gpt-4o, openai.gpt-5, anthropic.claude-3-5-sonnet) "
-            f"for notebook 58. Raw output: {result.message!r}"
+            f"for notebook 64. Raw output: {result.message!r}"
         )
-    return {"purchase_order": po}
+    return {"vendor_decision": decision}
 
 
-# Build the procurement graph.
+# Build the vendor-review graph.
 
 
-def build_procurement_graph() -> StateGraph:
-    g = StateGraph(name="procurement-approval")
-    g.add_node("justify", justify)
-    g.add_node("assess_vendor", assess_vendor)
+def build_review_graph() -> StateGraph:
+    g = StateGraph(name="vendor-security-review")
+    g.add_node("summarize_questionnaire", summarize_questionnaire)
+    g.add_node("assess_posture", assess_posture)
     g.add_node("auto_approve", auto_approve)
     g.add_node("approve_manager", approve_manager)
-    g.add_node("approve_finance", approve_finance)
-    g.add_node("approve_cfo", approve_cfo)
-    g.add_node("emit_po", emit_po)
+    g.add_node("approve_grc", approve_grc)
+    g.add_node("approve_ciso", approve_ciso)
+    g.add_node("record_decision", record_decision)
 
-    g.add_edge(START, "justify")
-    g.add_edge("justify", "assess_vendor")
+    g.add_edge(START, "summarize_questionnaire")
+    g.add_edge("summarize_questionnaire", "assess_posture")
     g.add_conditional_edges(
-        "assess_vendor",
-        tier_router,
+        "assess_posture",
+        risk_tier_router,
         targets={
             "auto": "auto_approve",
             "manager": "approve_manager",
-            "finance": "approve_manager",
-            "cfo": "approve_manager",
+            "grc": "approve_manager",
+            "ciso": "approve_manager",
         },
     )
-    g.add_edge("auto_approve", "emit_po")
+    g.add_edge("auto_approve", "record_decision")
     g.add_conditional_edges(
         "approve_manager",
         gate_after_manager,
-        targets={"approve_finance": "approve_finance", "emit_po": "emit_po"},
+        targets={"approve_grc": "approve_grc", "record_decision": "record_decision"},
     )
     g.add_conditional_edges(
-        "approve_finance",
-        gate_after_finance,
-        targets={"approve_cfo": "approve_cfo", "emit_po": "emit_po"},
+        "approve_grc",
+        gate_after_grc,
+        targets={"approve_ciso": "approve_ciso", "record_decision": "record_decision"},
     )
-    g.add_edge("approve_cfo", "emit_po")
-    g.add_edge("emit_po", END)
+    g.add_edge("approve_ciso", "record_decision")
+    g.add_edge("record_decision", END)
     return g
 
 
 # Driver.
 
 
-def _print_po(po: PurchaseOrder | None) -> None:
-    print("\nPurchase order:")
+def _print_decision(d: VendorDecision | None) -> None:
+    print("\nVendor decision:")
     print("-" * 60)
-    if po is None:
+    if d is None:
         print("(missing)")
         return
-    print(f"  Request:        {po.request_id}")
-    print(f"  Status:         {po.status}")
-    print(f"  Vendor:         {po.vendor}")
-    print(f"  Item:           {po.item}")
-    print(f"  Amount:         ${po.amount_usd:,.2f}")
-    print(f"  Approvals:      " + (" → ".join(po.approvals) if po.approvals else "(none)"))
-    print(f"  Justification:  {po.business_justification[:120]}")
+    print(f"  Request:        {d.request_id}")
+    print(f"  Status:         {d.status}")
+    print(f"  Vendor:         {d.vendor}")
+    print(f"  Service:        {d.service}")
+    print(f"  Risk score:     {d.risk_score:.0f}/100")
+    print(f"  Approvals:      " + (" → ".join(d.approvals) if d.approvals else "(none)"))
+    print(f"  Questionnaire:  {d.questionnaire_summary[:120]}")
 
 
 async def _drive(graph: StateGraph, initial: dict[str, Any], answers: list[str]) -> Any:
@@ -346,31 +357,56 @@ async def _drive(graph: StateGraph, initial: dict[str, Any], answers: list[str])
 
 
 async def main() -> None:
-    print("Notebook 59: Procurement approval with tiered human gates")
+    print("Notebook 64: Vendor security review with risk-tiered approval gates")
     print("=" * 60)
 
     model = get_model()
-    graph = build_procurement_graph()
+    graph = build_review_graph()
 
+    # (request, vendor, service, risk score, questionnaire excerpt)
     scenarios = [
-        ("REQ-1001", "Acme Corp", "USB hubs (10x)", 280.00, "office equipment refresh"),
-        ("REQ-1002", "DataDog", "APM annual subscription", 9_500.00, "production observability"),
-        ("REQ-1003", "Salesforce", "Sales Cloud (50 seats, 1 yr)", 75_000.00, "GTM ramp"),
-        ("REQ-1004", "Acme DB", "Managed database — 12-month commit", 480_000.00, "DB platform"),
+        (
+            "VSR-1001",
+            "PrintFleet Co",
+            "office print-management SaaS (no customer data)",
+            12.0,
+            "SOC 2 Type II on file; SSO enforced; no PII processed.",
+        ),
+        (
+            "VSR-1002",
+            "MailMetrics",
+            "marketing email analytics (contact emails only)",
+            38.0,
+            "SOC 2 Type I; MFA optional for admins; data encrypted at rest.",
+        ),
+        (
+            "VSR-1003",
+            "WarehouseQL",
+            "hosted analytics over a copy of the production database",
+            62.0,
+            "ISO 27001 claimed, certificate expired; sub-processors undisclosed.",
+        ),
+        (
+            "VSR-1004",
+            "CloudPay",
+            "payroll processing (employee PII + bank details)",
+            88.0,
+            "No current attestation; breach disclosed in 2025; remediation in progress.",
+        ),
     ]
 
-    for req_id, vendor, item, amt, use_case in scenarios:
-        print(f"\n--- {req_id}: ${amt:,.2f} — {vendor} — {item} ---")
+    for req_id, vendor, service, score, questionnaire in scenarios:
+        print(f"\n--- {req_id}: risk {score:.0f}/100 — {vendor} — {service} ---")
         initial = {
             "request_id": req_id,
             "vendor": vendor,
-            "item": item,
-            "amount_usd": amt,
-            "use_case": use_case,
+            "service": service,
+            "risk_score": score,
+            "questionnaire": questionnaire,
             "__model__": model,
         }
         result = await _drive(graph, initial, ["yes", "yes", "yes"])
-        _print_po(result.final_state.get("purchase_order"))
+        _print_decision(result.final_state.get("vendor_decision"))
 
 
 if __name__ == "__main__":

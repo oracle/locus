@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
-"""Interactive Coding Assistant powered by Tulip.
+"""Interactive Secure-Coding Assistant powered by Tulip.
+
+An application-security reviewer that hunts for vulnerabilities in a
+codebase, applies fixes, and verifies them — and only reports findings
+it can point to in the code. It looks for the usual suspects: injection
+(CWE-89 SQL, CWE-78 OS command), hard-coded secrets (CWE-798), unsafe
+deserialization (CWE-502), and path traversal (CWE-22).
 
 Demonstrates the full interactive agent loop:
 - completion_mode="explicit" — agent keeps going until task_complete
 - ask_user — agent asks clarifying questions mid-execution
-- verification reminders — agent reminded to test after writing
+- verification reminders — agent reminded to test after fixing
 - reflexion — agent self-assesses progress
 
 Usage:
-    python examples/coding_assistant.py "Build a FastAPI todo app with SQLite"
+    python examples/coding_assistant.py "Audit /tmp/myapp for injection bugs, then fix them"
 
 Requires:
     OPENAI_API_KEY or ANTHROPIC_API_KEY set for a live model.
@@ -36,7 +42,7 @@ from tulip.tools.decorator import tool
 
 
 # =============================================================================
-# Coding Tools (user-land, not SDK)
+# Code-Review Tools (user-land, not SDK)
 # =============================================================================
 
 
@@ -127,9 +133,10 @@ def get_model():
 async def main():
     task = " ".join(sys.argv[1:]) if len(sys.argv) > 1 else None
     if not task:
-        print('Usage: python examples/coding_assistant.py "<task description>"')
+        print('Usage: python examples/coding_assistant.py "<review task>"')
         print(
-            'Example: python examples/coding_assistant.py "Build a FastAPI todo app in /tmp/myapp"'
+            "Example: python examples/coding_assistant.py "
+            '"Audit /tmp/myapp for SQL injection and hard-coded secrets, then fix them"'
         )
         sys.exit(1)
 
@@ -139,23 +146,27 @@ async def main():
         model=model,
         tools=[read_file, write_file, list_directory, run_command],
         system_prompt=(
-            "You are a senior Python engineer and coding assistant.\n\n"
+            "You are a senior application-security engineer doing a secure code review.\n\n"
             "Available tools:\n"
-            "- write_file(path, content): Create/update files\n"
+            "- list_directory(path): Map the project structure\n"
             "- read_file(path): Read file contents\n"
-            "- list_directory(path): See project structure\n"
-            "- run_command(command, working_dir): Run shell commands\n"
+            "- write_file(path, content): Apply fixes to files\n"
+            "- run_command(command, working_dir): Run tests / linters\n"
             "- ask_user(question, options): Ask the user a question\n"
             "- task_complete(summary, status): Signal you're done\n\n"
             "Workflow:\n"
-            "1. If requirements are ambiguous, use ask_user to clarify\n"
-            "2. Create project structure and write ALL files\n"
-            "3. Install dependencies if needed\n"
-            "4. Run tests to verify everything works\n"
-            "5. If tests fail, read errors, fix code, rerun\n"
-            "6. Only call task_complete after tests pass\n\n"
-            "Write MULTIPLE files in parallel when possible.\n"
-            "Always verify your changes work before completing.\n"
+            "1. If the review scope is ambiguous, use ask_user to clarify\n"
+            "2. Map the codebase, then read the files in scope\n"
+            "3. Hunt for: SQL/command injection (CWE-89, CWE-78), missing\n"
+            "   authz checks, hard-coded secrets (CWE-798), unsafe\n"
+            "   deserialization (CWE-502), path traversal (CWE-22)\n"
+            "4. For each finding, cite the exact file and line — never report\n"
+            "   a vulnerability you cannot point to in the code\n"
+            "5. Apply minimal fixes with write_file, then run the test suite\n"
+            "6. If tests fail, read errors, fix code, rerun\n"
+            "7. Only call task_complete after fixes are verified\n\n"
+            "In your summary, list each finding with severity (low/medium/high/critical).\n"
+            "Always verify your fixes work before completing.\n"
             "Use python3 for running commands."
         ),
         completion_mode="explicit",
@@ -166,7 +177,7 @@ async def main():
     )
 
     print(f"\n{'=' * 60}")
-    print(f"  TULIP CODING ASSISTANT")
+    print(f"  TULIP SECURE-CODING ASSISTANT")
     print(f"{'=' * 60}")
     print(f"  Task: {task}")
     print(f"  Mode: explicit (agent runs until task_complete)")
@@ -192,7 +203,7 @@ async def main():
                 for tc in event.tool_calls:
                     if tc.name == "write_file":
                         path = tc.arguments.get("path", "?")
-                        print(f"     ✏️  write {path}")
+                        print(f"     ✏️  fix {path}")
                     elif tc.name == "run_command":
                         cmd = tc.arguments.get("command", "?")[:50]
                         print(f"     ⚡ run: {cmd}")
@@ -245,7 +256,7 @@ async def main():
             print(f"     Iterations: {event.iterations_used}")
             print(f"     Tool calls: {event.total_tool_calls}")
             if event.final_message:
-                print(f"\n  Final message:")
+                print(f"\n  Final report:")
                 for line in event.final_message.split("\n")[:10]:
                     print(f"     {line}")
             print(f"{'=' * 60}")

@@ -2,20 +2,24 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 
-"""Notebook 64: Research workflow — execute, causal, summarise, ground, replan.
+"""Notebook 69: Vulnerability research workflow — recon, hypothesize, validate, report.
 
 create_research_workflow composes six node primitives into a StateGraph
-that mirrors the production pattern used in research-shaped specialist
-agents: a ReAct loop that gathers evidence, causal inference before
-summary, LLM-as-judge grounding evaluation, and a two-level recovery
-loop.
+that mirrors how a vulnerability-research agent should work: a ReAct
+loop that gathers evidence from advisory tools (recon), causal
+inference that proposes a root-cause hypothesis before the summary,
+LLM-as-judge grounding evaluation that scores whether the report is
+actually backed by that evidence, and a two-level recovery loop — an
+ungrounded vulnerability claim is a false positive (OWASP LLM09,
+Misinformation), so it gets regenerated or re-planned instead of
+shipped. No claim reaches the report without evidence behind it.
 
 Recovery strategy::
 
     grounding score < threshold (first failure) → regenerate_summary (cheap)
     grounding score < threshold (subsequent)    → replan + full execute retry
 
-Every node emits research.* SSE events so you can stream the workflow
+Every node emits research.* SSE events so you can stream the engagement
 end-to-end the same way you would stream an Agent run.
 
 - Run create_research_workflow with the convenience factory.
@@ -53,65 +57,66 @@ from tulip.observability import get_event_bus, run_context
 from tulip.tools import tool
 
 
-# Tiny module catalogue the agent can investigate via its three tools.
+# Tiny advisory catalogue the agent can investigate via its three tools.
+# All advisory IDs and data are invented (CVE-2024-999xx is a fake range).
 
 
-_CATALOGUE = {
-    "tulip.router": {
-        "purpose": "Cognitive router — compiles NL to orchestration shape.",
-        "key_classes": ["Router", "GoalFrame", "ProtocolRegistry", "CognitiveCompiler"],
-        "since": "0.2.0",
-        "stability": "stable",
+_ADVISORIES = {
+    "CVE-2024-99901": {
+        "summary": "SQL injection in the ticket-search endpoint of HelpDeskPro.",
+        "affected_components": ["helpdeskpro-api", "ticket-search", "legacy-reports"],
+        "cvss": 9.1,
+        "patch_available": True,
     },
-    "tulip.deepagent": {
-        "purpose": "Research-shaped agent factory + research workflow primitives.",
-        "key_classes": ["create_deepagent", "create_research_workflow", "make_execute_node"],
-        "since": "0.2.0",
-        "stability": "stable",
+    "CVE-2024-99902": {
+        "summary": "Hard-coded credential shipped in the AcmeBackup agent installer.",
+        "affected_components": ["acmebackup-agent", "installer"],
+        "cvss": 7.4,
+        "patch_available": True,
     },
-    "tulip.observability": {
-        "purpose": "In-process SSE bus — run_context, EventBus, canonical EV_* constants.",
-        "key_classes": ["EventBus", "run_context", "get_event_bus"],
-        "since": "0.2.0",
-        "stability": "stable",
+    "CVE-2024-99903": {
+        "summary": "Path traversal in StaticServe file downloads (intranet only).",
+        "affected_components": ["staticserve"],
+        "cvss": 5.8,
+        "patch_available": False,
     },
 }
 
 
 @tool
-def list_modules() -> list[str]:
-    """Return the list of available modules."""
-    return list(_CATALOGUE.keys())
+def list_advisories() -> list[str]:
+    """Return the list of tracked advisory IDs."""
+    return list(_ADVISORIES.keys())
 
 
 @tool
-def describe_module(name: str) -> dict:
-    """Return purpose, key classes, and stability for a module.
+def describe_advisory(cve_id: str) -> dict:
+    """Return summary, affected components, CVSS, and patch status for an advisory.
 
     Args:
-        name: Dotted module name (e.g. ``tulip.router``).
+        cve_id: Advisory identifier (e.g. ``CVE-2024-99901``).
     """
-    return _CATALOGUE.get(name, {"error": f"module '{name}' not found"})
+    return _ADVISORIES.get(cve_id, {"error": f"advisory '{cve_id}' not found"})
 
 
 @tool
-def count_classes(name: str) -> int:
-    """Return the number of key public classes in a module.
+def count_affected_components(cve_id: str) -> int:
+    """Return the number of components affected by an advisory.
 
     Args:
-        name: Dotted module name.
+        cve_id: Advisory identifier.
     """
-    entry = _CATALOGUE.get(name, {})
-    return len(entry.get("key_classes", []))
+    entry = _ADVISORIES.get(cve_id, {})
+    return len(entry.get("affected_components", []))
 
 
 # Structured output schema — the workflow emits this typed instance.
 
 
-class ModuleSurvey(BaseModel):
-    modules_covered: list[str] = Field(description="Modules that were researched.")
-    summary: str = Field(description="2-3 sentence survey of what was found.")
-    stability: str = Field(description="Overall stability assessment.")
+class ExposureAssessment(BaseModel):
+    advisories_covered: list[str] = Field(description="Advisory IDs that were researched.")
+    summary: str = Field(description="2-3 sentence exposure assessment of what was found.")
+    overall_risk: str = Field(description="Overall risk rating: low, medium, high, or critical.")
     confidence: float = Field(ge=0.0, le=1.0)
 
 
@@ -119,16 +124,17 @@ class ModuleSurvey(BaseModel):
 
 
 async def part1_factory_with_sse() -> None:
-    print("\n--- Part 1: research workflow with SSE ---")
+    print("\n--- Part 1: vulnerability research workflow with SSE ---")
 
     workflow = create_research_workflow(
         model=get_model(),
-        tools=[list_modules, describe_module, count_classes],
+        tools=[list_advisories, describe_advisory, count_affected_components],
         system_prompt=(
-            "You are a tulip SDK analyst. Use tools to survey the available modules. "
-            "List all modules, then describe each one in detail."
+            "You are a vulnerability research analyst. Use tools to survey the tracked "
+            "advisories. List all advisories, then describe each one in detail. "
+            "Every claim must trace to tool evidence."
         ),
-        output_schema=ModuleSurvey,
+        output_schema=ExposureAssessment,
         grounding_threshold=0.60,
         max_replans=1,
         max_regenerations=1,
@@ -146,7 +152,9 @@ async def part1_factory_with_sse() -> None:
 
     async with run_context() as rid:
         streamer = asyncio.create_task(stream_research_events(rid))
-        result = await workflow.execute({KEY_PROMPT: "Survey all tulip modules."})
+        result = await workflow.execute(
+            {KEY_PROMPT: "Assess our exposure across all tracked advisories."}
+        )
         await get_event_bus().close_stream(rid)
         await asyncio.wait_for(streamer, timeout=5.0)
 
@@ -157,11 +165,11 @@ async def part1_factory_with_sse() -> None:
     print(f"  replans used     : {final.get(KEY_REPLAN_COUNT, 0)}")
     print(f"  regenerations    : {final.get(KEY_REGENERATION_COUNT, 0)}")
 
-    survey: ModuleSurvey | None = final.get(KEY_STRUCTURED_OUTPUT)
-    if survey:
-        print(f"\n  modules covered: {survey.modules_covered}")
-        print(f"  summary: {survey.summary[:200]}")
-        print(f"  stability: {survey.stability} | confidence: {survey.confidence:.0%}")
+    assessment: ExposureAssessment | None = final.get(KEY_STRUCTURED_OUTPUT)
+    if assessment:
+        print(f"\n  advisories covered: {assessment.advisories_covered}")
+        print(f"  summary: {assessment.summary[:200]}")
+        print(f"  risk: {assessment.overall_risk} | confidence: {assessment.confidence:.0%}")
     else:
         summary = final.get(KEY_SUMMARY, "")
         print(f"\n  summary: {summary[:300]}")
@@ -170,7 +178,7 @@ async def part1_factory_with_sse() -> None:
     print(f"\n  research.* events fired: {research_events}")
 
 
-# Part 2: build a minimal graph manually — execute + summarise, no causal.
+# Part 2: build a minimal graph manually — recon + summarise, no causal step.
 
 
 async def part2_custom_graph() -> None:
@@ -186,7 +194,7 @@ async def part2_custom_graph() -> None:
     from tulip.multiagent.graph import END, START, StateGraph  # noqa: PLC0415
 
     graph = StateGraph()
-    graph.add_node("execute", make_execute_node(get_model(), [list_modules, describe_module]))
+    graph.add_node("execute", make_execute_node(get_model(), [list_advisories, describe_advisory]))
     graph.add_node("summarize", make_summarize_node(get_model()))
     graph.add_node("grounding_eval", make_grounding_eval_node(get_model()))
 
@@ -204,7 +212,7 @@ async def part2_custom_graph() -> None:
     workflow = graph.compile()
 
     async with run_context() as rid:
-        result = await workflow.execute({KEY_PROMPT: "What does tulip.router do?"})
+        result = await workflow.execute({KEY_PROMPT: "What does CVE-2024-99901 affect?"})
         await get_event_bus().close_stream(rid)
 
     final = result.final_state

@@ -1,8 +1,11 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
-"""Notebook 39: RAG providers — choose embeddings and vector store.
+"""Notebook 39: RAG providers — a CVE/advisory KB on any vector store.
 
-Production RAG is two pluggable pieces, both behind one Tulip interface:
+A vulnerability-management team's advisory corpus outlives any single
+backend choice. The same corpus that feeds the ATLAS Index (notebook 38)
+also carries CVE write-ups and internal advisories, and production RAG is
+two pluggable pieces, both behind one Tulip interface:
 
 - **Embeddings** — ``OpenAIEmbeddings`` (``text-embedding-3-small`` /
   ``-3-large``) or ``CohereEmbeddings`` (Cohere's direct API).
@@ -11,7 +14,10 @@ Production RAG is two pluggable pieces, both behind one Tulip interface:
   ``QdrantVectorStore``, ``ChromaVectorStore``. Swapping is a one-line
   change; the retrieve/add API is identical.
 
-What each part covers:
+Choice of embedding model and distance metric is a security decision,
+not just a tuning knob: it sets retrieval precision, and weak retrieval
+is the soft underbelly behind OWASP LLM08 (Vector & Embedding
+Weaknesses). What each part covers (all against the same advisory corpus):
 
 - Part 1 — embedding-model selection (small vs large dimensions).
 - Part 2 — distance metric choices (COSINE / DOT / EUCLIDEAN).
@@ -51,18 +57,26 @@ def _store(*, dimension: int, distance: str = "COSINE") -> InMemoryVectorStore:
     return InMemoryVectorStore(dimension=dimension, distance_metric=distance)
 
 
+# A small internal advisory corpus. All CVE ids and products are fictitious;
+# IPs are RFC 5737 documentation ranges and domains are *.example.
 CORPUS = [
-    "A vector index speeds up nearest-neighbour search over embeddings.",
-    "Cosine, dot-product, and Euclidean are common distance metrics.",
-    "Tulip exposes pgvector, OpenSearch, Qdrant, and Chroma stores.",
-    "An in-memory store is ideal for demos, tests, and small corpora.",
-    "Embedding models map text to dense float vectors.",
-    "text-embedding-3-small returns 1536-dim vectors.",
+    "CVE-2024-99999 (CVSS 9.8, critical): remote code execution in AcmeWeb 2.x "
+    "via a crafted file upload reaching a deserialization sink; fixed in 2.4.1.",
+    "CVE-2024-99998 (CVSS 8.2, high): SQL injection in the OrderDesk reporting "
+    "module; sanitization fix shipped in 5.7.",
+    "CVE-2025-99997 (CVSS 9.1, critical): authentication bypass in GateKeeper "
+    "SSO when the SAML audience restriction is unchecked.",
+    "CVE-2025-99996 (CVSS 7.8, high): local privilege escalation in FleetAgent "
+    "via a world-writable config directory.",
+    "ADV-2026-014: mail-gateway malware scanning validated end-to-end using the "
+    "EICAR test file; no production payloads handled.",
+    "ADV-2026-021: rotate API tokens for any account that touched the "
+    "phish.example.net credential-phishing lure tracked under TULIP-STORM.",
 ]
 
 
 # =============================================================================
-# Part 1: small vs large embedding models against the same corpus.
+# Part 1: small vs large embedding models against the same advisory corpus.
 # =============================================================================
 
 
@@ -77,7 +91,7 @@ async def part1_embedding_models():
         retriever = RAGRetriever(embedder=embedder, store=store)
         print(f"\n  {model} → dim={embedder.config.dimension}")
         await retriever.add_documents(CORPUS)
-        hits = await retriever.retrieve("how does vector search work?", limit=2)
+        hits = await retriever.retrieve("remote code execution in the web framework", limit=2)
         for i, h in enumerate(hits.documents, start=1):
             print(f"    #{i} score={h.score:.4f} {h.document.content[:70]}…")
 
@@ -94,7 +108,7 @@ async def part2_distance_metrics():
     print("=" * 60)
 
     embedder = _embedder("text-embedding-3-small")
-    query = "vector index types"
+    query = "authentication bypass in single sign-on"
 
     for metric in ["COSINE", "DOT", "EUCLIDEAN"]:
         store = _store(dimension=embedder.config.dimension, distance=metric)
@@ -126,16 +140,16 @@ async def part3_swap_backend():
         emb = await embedder.embed(text)
         await store.add(
             Document(
-                id=f"q_{i}",
+                id=f"adv_{i}",
                 content=text,
                 embedding=emb.embedding,
-                metadata={"shard": i % 2},
+                metadata={"severity": "high" if i % 2 == 0 else "medium"},
             )
         )
 
-    q = await embedder.embed("how do vector indexes work?")
+    q = await embedder.embed("how could an attacker escalate privileges?")
     hits = await store.search(query_embedding=q.embedding, limit=3)
-    print(f"  Searched {await store.count()} rows in the Qdrant store:")
+    print(f"  Searched {await store.count()} advisories in the Qdrant store:")
     for i, hit in enumerate(hits, start=1):
         print(f"    #{i} score={hit.score:.4f}  {hit.document.content[:70]}…")
 
@@ -155,9 +169,9 @@ async def part4_batch():
     retriever = RAGRetriever(embedder=embedder, store=store)
 
     await retriever.add_documents(CORPUS)
-    print(f"  After add_documents: rows = {await store.count()}")
+    print(f"  After add_documents: advisories = {await store.count()}")
     await store.clear()
-    print(f"  After clear():       rows = {await store.count()}")
+    print(f"  After clear():       advisories = {await store.count()}")
 
 
 # =============================================================================
@@ -168,7 +182,7 @@ async def part4_batch():
 async def main():
     missing = _missing_env()
     if missing:
-        print("\n--- Notebook 39: RAG providers ---")
+        print("\n--- Notebook 39: RAG providers (CVE/advisory KB) ---")
         print(
             "Required environment variables not set; skipping the live "
             "demo so this file still runs cleanly in CI.\n"

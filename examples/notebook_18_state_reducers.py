@@ -1,12 +1,15 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 """
-Control how state updates combine instead of overwriting each other.
+Notebook 18: Merging multi-scanner findings with state reducers.
 
 By default, when two nodes write to the same state field, the second
-one wins. A reducer is a function attached to a field that says how to
-merge an incoming update with the current value — append to a list,
-sum numbers, merge dicts, keep the max, and so on.
+one wins — which means a SAST scanner's findings vanish the moment the
+dependency scanner reports. A reducer is a function attached to a field
+that says how to merge an incoming update with the current value, so
+every scanner's findings land in one investigation state. The findings
+here span SQL injection (CWE-89), a hardcoded secret (CWE-798), and a
+vulnerable dependency.
 
 - Annotated[type, reducer] on a Pydantic state schema declares the rule.
 - Built-in reducers: add_messages, add_numbers, merge_dict, append_list, last_value.
@@ -14,7 +17,7 @@ sum numbers, merge dicts, keep the max, and so on.
 - Multiple reducers on one schema — each field merges independently.
 
 Run it:
-    TULIP_MODEL_PROVIDER=mock python examples/notebook_24_state_reducers.py
+    TULIP_MODEL_PROVIDER=mock python examples/notebook_18_state_reducers.py
 
 The default provider is the bundled mock model; set TULIP_MODEL_PROVIDER for a live provider.
 Set TULIP_MODEL_PROVIDER=mock for offline runs. Pick a live provider with
@@ -61,70 +64,72 @@ def _llm_call(
 
 
 async def example_without_reducers():
-    """Without a reducer the last write wins — earlier values are lost."""
+    """Without a reducer the last write wins — earlier findings are lost."""
     print("=== Part 1: Why reducers exist ===\n")
-    note = _llm_call("In one sentence, explain why a graph that overwrites state can lose data.")
+    note = _llm_call(
+        "In one sentence, explain why a triage graph that overwrites findings loses evidence."
+    )
     print(f"AI note: {note}")
 
     graph = StateGraph()
 
-    async def node_a(inputs):
-        return {"items": ["apple"]}
+    async def sast_scan(inputs):
+        return {"findings": ["SQL injection in login.py"]}
 
-    async def node_b(inputs):
-        # No reducer on "items" — this overwrites ["apple"] entirely.
-        return {"items": ["banana"]}
+    async def deps_scan(inputs):
+        # No reducer on "findings" — this overwrites the SAST finding entirely.
+        return {"findings": ["CVE-2024-99999 in libfoo 1.2"]}
 
-    async def node_c(inputs):
-        return {"items": ["cherry"]}
+    async def secrets_scan(inputs):
+        return {"findings": ["hardcoded API key in config.py"]}
 
-    graph.add_node("a", node_a)
-    graph.add_node("b", node_b)
-    graph.add_node("c", node_c)
+    graph.add_node("sast", sast_scan)
+    graph.add_node("deps", deps_scan)
+    graph.add_node("secrets", secrets_scan)
 
-    graph.add_edge(START, "a")
-    graph.add_edge("a", "b")
-    graph.add_edge("b", "c")
-    graph.add_edge("c", END)
+    graph.add_edge(START, "sast")
+    graph.add_edge("sast", "deps")
+    graph.add_edge("deps", "secrets")
+    graph.add_edge("secrets", END)
 
     result = await graph.execute({})
-    print(f"Without reducers: items = {result.final_state.get('items')}")
-    print("  (Only 'cherry' - we lost 'apple' and 'banana'!)")
+    print(f"Without reducers: findings = {result.final_state.get('findings')}")
+    print("  (Only the secrets finding - we lost the SAST and dependency findings!)")
     print()
 
 
 async def example_with_reducers():
-    """Same graph, but `items` is annotated with the append_list reducer."""
+    """Same graph, but `findings` is annotated with the append_list reducer."""
     print("=== Part 1b: Same graph, with append_list ===\n")
-    note = _llm_call("In one sentence, explain what a reducer does in a state graph.")
+    note = _llm_call("In one sentence, explain what a reducer does in an investigation graph.")
     print(f"AI note: {note}")
 
-    class AppState(BaseModel):
-        items: Annotated[list, append_list] = []
+    class ScanState(BaseModel):
+        findings: Annotated[list, append_list] = []
 
-    graph = StateGraph(state_schema=AppState)
+    graph = StateGraph(state_schema=ScanState)
 
-    async def node_a(inputs):
-        return {"items": ["apple"]}
+    async def sast_scan(inputs):
+        return {"findings": ["SQL injection in login.py"]}
 
-    async def node_b(inputs):
-        return {"items": ["banana"]}
+    async def deps_scan(inputs):
+        return {"findings": ["CVE-2024-99999 in libfoo 1.2"]}
 
-    async def node_c(inputs):
-        return {"items": ["cherry"]}
+    async def secrets_scan(inputs):
+        return {"findings": ["hardcoded API key in config.py"]}
 
-    graph.add_node("a", node_a)
-    graph.add_node("b", node_b)
-    graph.add_node("c", node_c)
+    graph.add_node("sast", sast_scan)
+    graph.add_node("deps", deps_scan)
+    graph.add_node("secrets", secrets_scan)
 
-    graph.add_edge(START, "a")
-    graph.add_edge("a", "b")
-    graph.add_edge("b", "c")
-    graph.add_edge("c", END)
+    graph.add_edge(START, "sast")
+    graph.add_edge("sast", "deps")
+    graph.add_edge("deps", "secrets")
+    graph.add_edge("secrets", END)
 
     result = await graph.execute({})
-    print(f"With append_list reducer: items = {result.final_state.get('items')}")
-    print("  (All three items preserved!)")
+    print(f"With append_list reducer: findings = {result.final_state.get('findings')}")
+    print("  (All three scanners' findings preserved!)")
     print()
 
 
@@ -134,36 +139,36 @@ async def example_with_reducers():
 
 
 async def example_builtin_reducers():
-    """add_messages appends conversation turns, add_numbers sums numeric fields."""
+    """add_messages appends case-log turns, add_numbers sums numeric fields."""
     print("=== Part 2: Built-in reducers ===\n")
     note = _llm_call(
-        "In one sentence, when would you use add_messages vs add_numbers in a Tulip graph?"
+        "In one sentence, when would you use add_messages vs add_numbers in a Tulip triage graph?"
     )
     print(f"AI note: {note}")
 
-    class ChatState(BaseModel):
+    class CaseLogState(BaseModel):
         messages: Annotated[list, add_messages] = []
-        total_tokens: Annotated[int, add_numbers] = 0
+        ioc_count: Annotated[int, add_numbers] = 0
 
-    graph = StateGraph(state_schema=ChatState)
+    graph = StateGraph(state_schema=CaseLogState)
 
-    async def user_turn(inputs):
+    async def analyst_turn(inputs):
         return {
-            "messages": [Message.user("Hello!")],
-            "total_tokens": 5,
+            "messages": [Message.user("New alert on host WS-204 — anything related?")],
+            "ioc_count": 2,
         }
 
-    async def assistant_turn(inputs):
+    async def copilot_turn(inputs):
         return {
-            "messages": [Message.assistant("Hi there!")],
-            "total_tokens": 8,
+            "messages": [Message.assistant("Correlated: same sender domain as case 1042.")],
+            "ioc_count": 3,
         }
 
-    graph.add_node("user", user_turn)
-    graph.add_node("assistant", assistant_turn)
-    graph.add_edge(START, "user")
-    graph.add_edge("user", "assistant")
-    graph.add_edge("assistant", END)
+    graph.add_node("analyst", analyst_turn)
+    graph.add_node("copilot", copilot_turn)
+    graph.add_edge(START, "analyst")
+    graph.add_edge("analyst", "copilot")
+    graph.add_edge("copilot", END)
 
     result = await graph.execute({})
 
@@ -173,41 +178,41 @@ async def example_builtin_reducers():
         print(f"  [{msg.role.value}] {msg.content}")
 
     print("\nadd_numbers reducer:")
-    print(f"  total_tokens = {result.final_state.get('total_tokens')}")
+    print(f"  ioc_count = {result.final_state.get('ioc_count')}")
     print()
 
 
 async def example_merge_dict():
     """merge_dict shallow-merges incoming keys into the existing dict."""
     print("=== Part 2b: merge_dict ===\n")
-    note = _llm_call("In one sentence, give an example use-case for merge_dict.")
+    note = _llm_call("In one sentence, give a security use-case for merge_dict.")
     print(f"AI note: {note}")
 
-    class ConfigState(BaseModel):
-        config: Annotated[dict, merge_dict] = {}
+    class ScanConfigState(BaseModel):
+        scan_config: Annotated[dict, merge_dict] = {}
 
-    graph = StateGraph(state_schema=ConfigState)
+    graph = StateGraph(state_schema=ScanConfigState)
 
     async def set_defaults(inputs):
-        return {"config": {"debug": False, "timeout": 30, "retries": 3}}
+        return {"scan_config": {"deep_scan": False, "timeout": 30, "retries": 3}}
 
-    async def override_debug(inputs):
-        return {"config": {"debug": True}}
+    async def enable_deep_scan(inputs):
+        return {"scan_config": {"deep_scan": True}}
 
-    async def override_timeout(inputs):
-        return {"config": {"timeout": 60}}
+    async def extend_timeout(inputs):
+        return {"scan_config": {"timeout": 60}}
 
     graph.add_node("defaults", set_defaults)
-    graph.add_node("debug", override_debug)
-    graph.add_node("timeout", override_timeout)
+    graph.add_node("deep_scan", enable_deep_scan)
+    graph.add_node("timeout", extend_timeout)
 
     graph.add_edge(START, "defaults")
-    graph.add_edge("defaults", "debug")
-    graph.add_edge("debug", "timeout")
+    graph.add_edge("defaults", "deep_scan")
+    graph.add_edge("deep_scan", "timeout")
     graph.add_edge("timeout", END)
 
     result = await graph.execute({})
-    print(f"Final config: {result.final_state.get('config')}")
+    print(f"Final scan config: {result.final_state.get('scan_config')}")
     print("  (All settings merged together)")
     print()
 
@@ -220,7 +225,7 @@ async def example_merge_dict():
 async def example_custom_reducer():
     """The @reducer decorator wraps any (current, new) -> merged function."""
     print("=== Part 3: Custom reducers ===\n")
-    note = _llm_call("In one sentence, name two cases where a custom reducer beats add_messages.")
+    note = _llm_call("In one sentence, name two cases where a custom reducer beats append_list.")
     print(f"AI note: {note}")
 
     @reducer
@@ -237,33 +242,33 @@ async def example_custom_reducer():
                 result.append(item)
         return result
 
-    class GameState(BaseModel):
-        high_score: Annotated[int, max_value] = 0
-        achievements: Annotated[list, unique_append] = []
+    class InvestigationState(BaseModel):
+        peak_risk_score: Annotated[int, max_value] = 0
+        observed_iocs: Annotated[list, unique_append] = []
 
-    graph = StateGraph(state_schema=GameState)
+    graph = StateGraph(state_schema=InvestigationState)
 
-    async def level_1(inputs):
-        return {"high_score": 100, "achievements": ["first_step"]}
+    async def sast_scanner(inputs):
+        return {"peak_risk_score": 70, "observed_iocs": ["192.0.2.10"]}
 
-    async def level_2(inputs):
-        return {"high_score": 50, "achievements": ["first_step", "speedrun"]}
+    async def edr_scanner(inputs):
+        return {"peak_risk_score": 45, "observed_iocs": ["192.0.2.10", "192.0.2.22"]}
 
-    async def level_3(inputs):
-        return {"high_score": 200, "achievements": ["speedrun", "perfectionist"]}
+    async def intel_scanner(inputs):
+        return {"peak_risk_score": 90, "observed_iocs": ["192.0.2.22", "198.51.100.5"]}
 
-    graph.add_node("level1", level_1)
-    graph.add_node("level2", level_2)
-    graph.add_node("level3", level_3)
+    graph.add_node("sast", sast_scanner)
+    graph.add_node("edr", edr_scanner)
+    graph.add_node("intel", intel_scanner)
 
-    graph.add_edge(START, "level1")
-    graph.add_edge("level1", "level2")
-    graph.add_edge("level2", "level3")
-    graph.add_edge("level3", END)
+    graph.add_edge(START, "sast")
+    graph.add_edge("sast", "edr")
+    graph.add_edge("edr", "intel")
+    graph.add_edge("intel", END)
 
     result = await graph.execute({})
-    print(f"High score (max): {result.final_state.get('high_score')}")
-    print(f"Achievements (unique): {result.final_state.get('achievements')}")
+    print(f"Peak risk score (max): {result.final_state.get('peak_risk_score')}")
+    print(f"Observed IOCs (unique): {result.final_state.get('observed_iocs')}")
     print()
 
 
@@ -276,37 +281,37 @@ async def example_last_value():
     """last_value spells out the default behaviour: take the latest write."""
     print("=== Part 4: last_value ===\n")
     note = _llm_call(
-        "In one sentence, what kind of field is a good fit for the last_value reducer?"
+        "In one sentence, what kind of investigation field fits the last_value reducer?"
     )
     print(f"AI note: {note}")
 
-    class ProcessState(BaseModel):
-        status: Annotated[str, last_value] = "pending"
-        log: Annotated[list, append_list] = []
+    class CaseState(BaseModel):
+        status: Annotated[str, last_value] = "new"
+        timeline: Annotated[list, append_list] = []
 
-    graph = StateGraph(state_schema=ProcessState)
+    graph = StateGraph(state_schema=CaseState)
 
-    async def step1(inputs):
-        return {"status": "processing", "log": ["Step 1 complete"]}
+    async def collect(inputs):
+        return {"status": "collecting", "timeline": ["Evidence collection complete"]}
 
-    async def step2(inputs):
-        return {"status": "validating", "log": ["Step 2 complete"]}
+    async def analyze(inputs):
+        return {"status": "analyzing", "timeline": ["Scanner correlation complete"]}
 
-    async def step3(inputs):
-        return {"status": "done", "log": ["Step 3 complete"]}
+    async def contain(inputs):
+        return {"status": "contained", "timeline": ["Containment actions logged"]}
 
-    graph.add_node("step1", step1)
-    graph.add_node("step2", step2)
-    graph.add_node("step3", step3)
+    graph.add_node("collect", collect)
+    graph.add_node("analyze", analyze)
+    graph.add_node("contain", contain)
 
-    graph.add_edge(START, "step1")
-    graph.add_edge("step1", "step2")
-    graph.add_edge("step2", "step3")
-    graph.add_edge("step3", END)
+    graph.add_edge(START, "collect")
+    graph.add_edge("collect", "analyze")
+    graph.add_edge("analyze", "contain")
+    graph.add_edge("contain", END)
 
     result = await graph.execute({})
     print(f"Status (last value): {result.final_state.get('status')}")
-    print(f"Log (accumulated): {result.final_state.get('log')}")
+    print(f"Timeline (accumulated): {result.final_state.get('timeline')}")
     print()
 
 
@@ -316,74 +321,74 @@ async def example_last_value():
 
 
 async def example_complex_state():
-    """An order schema where each field merges differently."""
+    """An investigation schema where each field merges differently."""
     print("=== Part 5: Mixing reducers on one schema ===\n")
     note = _llm_call(
         "In one sentence, explain why combining append_list, add_numbers, and "
-        "merge_dict reducers is useful for an order-processing graph."
+        "merge_dict reducers is useful when merging multi-scanner output."
     )
     print(f"AI note: {note}")
 
-    class OrderState(BaseModel):
-        items: Annotated[list, append_list] = []
-        total: Annotated[float, add_numbers] = 0.0
-        discounts: Annotated[dict, merge_dict] = {}
+    class InvestigationState(BaseModel):
+        findings: Annotated[list, append_list] = []
+        risk_score: Annotated[float, add_numbers] = 0.0
+        adjustments: Annotated[dict, merge_dict] = {}
         status: Annotated[str, last_value] = "new"
         messages: Annotated[list, add_messages] = []
 
-    graph = StateGraph(state_schema=OrderState)
+    graph = StateGraph(state_schema=InvestigationState)
 
-    async def add_item(inputs):
+    async def record_sast(inputs):
         return {
-            "items": [{"name": "Laptop", "price": 999.99}],
-            "total": 999.99,
-            "status": "items_added",
-            "messages": [Message.system("Item added: Laptop")],
+            "findings": [{"source": "SAST", "title": "SQL injection in login.py"}],
+            "risk_score": 40.0,
+            "status": "findings_recorded",
+            "messages": [Message.system("Finding added: SQL injection in login.py")],
         }
 
-    async def add_another(inputs):
+    async def record_deps(inputs):
         return {
-            "items": [{"name": "Mouse", "price": 49.99}],
-            "total": 49.99,
-            "status": "items_added",
-            "messages": [Message.system("Item added: Mouse")],
+            "findings": [{"source": "deps", "title": "CVE-2024-99999 in libfoo 1.2"}],
+            "risk_score": 25.0,
+            "status": "findings_recorded",
+            "messages": [Message.system("Finding added: CVE-2024-99999 in libfoo 1.2")],
         }
 
-    async def apply_discount(inputs):
-        discount_amount = inputs.get("total", 0) * 0.1
+    async def review_false_positives(inputs):
+        deduction = inputs.get("risk_score", 0) * 0.1
         return {
-            "discounts": {"loyalty": discount_amount},
+            "adjustments": {"fp_review": deduction},
             # add_numbers will sum this in — a negative delta acts like a subtraction.
-            "total": -discount_amount,
-            "status": "discount_applied",
-            "messages": [Message.system(f"10% loyalty discount: -${discount_amount:.2f}")],
+            "risk_score": -deduction,
+            "status": "fp_reviewed",
+            "messages": [Message.system(f"10% false-positive deduction: -{deduction:.2f}")],
         }
 
     async def finalize(inputs):
         return {
             "status": "finalized",
-            "messages": [Message.system(f"Order total: ${inputs.get('total', 0):.2f}")],
+            "messages": [Message.system(f"Case risk score: {inputs.get('risk_score', 0):.2f}")],
         }
 
-    graph.add_node("add_item", add_item)
-    graph.add_node("add_another", add_another)
-    graph.add_node("discount", apply_discount)
+    graph.add_node("record_sast", record_sast)
+    graph.add_node("record_deps", record_deps)
+    graph.add_node("fp_review", review_false_positives)
     graph.add_node("finalize", finalize)
 
-    graph.add_edge(START, "add_item")
-    graph.add_edge("add_item", "add_another")
-    graph.add_edge("add_another", "discount")
-    graph.add_edge("discount", "finalize")
+    graph.add_edge(START, "record_sast")
+    graph.add_edge("record_sast", "record_deps")
+    graph.add_edge("record_deps", "fp_review")
+    graph.add_edge("fp_review", "finalize")
     graph.add_edge("finalize", END)
 
     result = await graph.execute({})
 
-    print("Final Order State:")
-    print(f"  Items: {len(result.final_state.get('items', []))} items")
-    print(f"  Total: ${result.final_state.get('total', 0):.2f}")
-    print(f"  Discounts: {result.final_state.get('discounts')}")
+    print("Final Investigation State:")
+    print(f"  Findings: {len(result.final_state.get('findings', []))} findings")
+    print(f"  Risk score: {result.final_state.get('risk_score', 0):.2f}")
+    print(f"  Adjustments: {result.final_state.get('adjustments')}")
     print(f"  Status: {result.final_state.get('status')}")
-    print(f"  Messages: {len(result.final_state.get('messages', []))} entries")
+    print(f"  Messages: {len(result.final_state.get('messages', []))} audit entries")
     print()
 
 
@@ -396,44 +401,44 @@ async def example_reducer_with_llm():
     """Both nodes generate text and append a Message — add_messages keeps both."""
     print("=== Part 6: add_messages with two LLM-producing nodes ===\n")
 
-    class ChatLog(BaseModel):
+    class CaseLog(BaseModel):
         messages: Annotated[list, add_messages] = []
 
-    graph = StateGraph(state_schema=ChatLog)
+    graph = StateGraph(state_schema=CaseLog)
 
     import time as _t
 
-    async def headline(_inputs):
+    async def summary(_inputs):
         agent = Agent(
             model=get_model(max_tokens=40),
-            system_prompt="You write punchy one-line product headlines.",
+            system_prompt="You write punchy one-line incident summaries.",
         )
         t0 = _t.perf_counter()
-        result = agent.run_sync("Write a headline for an SDK that orchestrates AI agents.")
+        result = agent.run_sync("Summarize an incident merging SAST, EDR, and intel findings.")
         dt = _t.perf_counter() - t0
         print(
-            f"  [model call (headline): {dt:.2f}s · {result.metrics.prompt_tokens}→{result.metrics.completion_tokens} tokens]"
+            f"  [model call (summary): {dt:.2f}s · {result.metrics.prompt_tokens}→{result.metrics.completion_tokens} tokens]"
         )
-        return {"messages": [Message.assistant(f"[headline] {result.message.strip()}")]}
+        return {"messages": [Message.assistant(f"[summary] {result.message.strip()}")]}
 
-    async def tagline(_inputs):
+    async def recommendation(_inputs):
         agent = Agent(
             model=get_model(max_tokens=40),
-            system_prompt="You write 6-word taglines.",
+            system_prompt="You write 6-word containment recommendations.",
         )
         t0 = _t.perf_counter()
-        result = agent.run_sync("Tagline for a multi-agent reasoning SDK.")
+        result = agent.run_sync("Recommendation for a multi-scanner credential-theft case.")
         dt = _t.perf_counter() - t0
         print(
-            f"  [model call (tagline):  {dt:.2f}s · {result.metrics.prompt_tokens}→{result.metrics.completion_tokens} tokens]"
+            f"  [model call (recommendation):  {dt:.2f}s · {result.metrics.prompt_tokens}→{result.metrics.completion_tokens} tokens]"
         )
-        return {"messages": [Message.assistant(f"[tagline] {result.message.strip()}")]}
+        return {"messages": [Message.assistant(f"[recommendation] {result.message.strip()}")]}
 
-    graph.add_node("headline", headline)
-    graph.add_node("tagline", tagline)
-    graph.add_edge(START, "headline")
-    graph.add_edge("headline", "tagline")
-    graph.add_edge("tagline", END)
+    graph.add_node("summary", summary)
+    graph.add_node("recommendation", recommendation)
+    graph.add_edge(START, "summary")
+    graph.add_edge("summary", "recommendation")
+    graph.add_edge("recommendation", END)
 
     result = await graph.execute({})
     for msg in result.final_state.get("messages", []):
@@ -448,7 +453,7 @@ async def example_reducer_with_llm():
 
 async def main():
     print("=" * 60)
-    print("Notebook 19: State reducers")
+    print("Notebook 18: Merging scanner findings with state reducers")
     print("=" * 60)
     print()
 
@@ -462,7 +467,7 @@ async def main():
     await example_reducer_with_llm()
 
     print("=" * 60)
-    print("Next: Notebook 20 — Human-in-the-loop")
+    print("Next: Notebook 19 — Containment approval gates (human-in-the-loop)")
     print("=" * 60)
 
 

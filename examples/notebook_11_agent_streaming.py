@@ -1,13 +1,15 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 """
-Notebook 11: streaming events from an agent.
+Notebook 11: streaming a phishing-email analysis.
 
 Every Tulip agent run is a stream of events: thinking, tool start, tool
 complete, terminate. ``agent.run(prompt)`` returns an async iterator
-that yields them in order. This notebook walks through the full set,
-then shows useful patterns built on top — a live console UI, event
-filtering, metric collection, and a progress bar.
+that yields them in order — so an analyst can watch a phishing-email
+analysis unfold instead of waiting for an opaque verdict. This notebook
+walks through the full event set, then shows useful patterns built on
+top — a live console UI, an audit log via event filtering, metric
+collection, and a progress bar.
 
 Key ideas:
 - ``ThinkEvent``: the model produced a plan (and possibly tool calls).
@@ -19,20 +21,22 @@ Key ideas:
 - ``StructuredStream`` (mentioned at the end) wraps the stream and
   yields partial Pydantic instances as JSON arrives.
 
+The scenario is phishing triage (ATT&CK T1566). All emails, senders,
+and links are fabricated — ``*.example`` domains and RFC 5737 IPs.
+
 Run it:
-    .venv/bin/python examples/notebook_17_agent_streaming.py
+    .venv/bin/python examples/notebook_11_agent_streaming.py
 
 The default provider is the mock model; set TULIP_MODEL_PROVIDER for a live one (e.g.
 ``openai.gpt-4.1`` or ``meta.llama-3.3-70b-instruct``). For an offline
 run set ``TULIP_MODEL_PROVIDER=mock``; OpenAI, Anthropic
 work too.
 
-Prerequisite: notebook 09.
+Prerequisite: notebook 07.
 """
 
-import ast
 import asyncio
-import operator as _op
+import re
 from datetime import datetime
 
 # Import shared config
@@ -53,43 +57,29 @@ from tulip.tools import tool
 # =============================================================================
 
 
-_SAFE_MATH_BIN_OPS = {
-    ast.Add: _op.add,
-    ast.Sub: _op.sub,
-    ast.Mult: _op.mul,
-    ast.Div: _op.truediv,
-    ast.FloorDiv: _op.floordiv,
-    ast.Mod: _op.mod,
-    ast.Pow: _op.pow,
-}
-_SAFE_MATH_UNARY_OPS = {ast.USub: _op.neg, ast.UAdd: _op.pos}
+# Deterministic local extraction — plain regexes, no network calls.
+_URL_RE = re.compile(r"https?://[^\s'\"<>]+")
+_IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+_PHISH_CUES = ("verify your account", "urgent", "suspended", "password", "click")
 
 
-def _safe_math_eval(expression: str) -> float:
-    """Evaluate arithmetic via AST — no eval, no attribute access, no names."""
-    tree = ast.parse(expression, mode="eval")
-
-    def _eval(node: ast.AST) -> float:
-        if isinstance(node, ast.Expression):
-            return _eval(node.body)
-        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
-            return node.value
-        if isinstance(node, ast.BinOp) and type(node.op) in _SAFE_MATH_BIN_OPS:
-            return _SAFE_MATH_BIN_OPS[type(node.op)](_eval(node.left), _eval(node.right))
-        if isinstance(node, ast.UnaryOp) and type(node.op) in _SAFE_MATH_UNARY_OPS:
-            return _SAFE_MATH_UNARY_OPS[type(node.op)](_eval(node.operand))
-        raise ValueError("Unsupported expression")
-
-    return _eval(tree)
+def _extract_indicators(text: str) -> dict:
+    """Pull URLs, IPs, and social-engineering cues out of raw email text."""
+    lowered = text.lower()
+    return {
+        "urls": _URL_RE.findall(text),
+        "ips": _IP_RE.findall(text),
+        "cues": [cue for cue in _PHISH_CUES if cue in lowered],
+    }
 
 
 @tool
-def calculate(expression: str) -> str:
-    """Evaluate a mathematical expression safely."""
-    try:
-        return str(_safe_math_eval(expression))
-    except (ValueError, SyntaxError, ZeroDivisionError):
-        return "Error: Invalid expression"
+def extract_iocs(text: str) -> str:
+    """Extract URLs, IP addresses, and phishing cues from raw email text."""
+    found = _extract_indicators(text)
+    if not any(found.values()):
+        return "No IOCs or phishing cues found"
+    return f"urls={found['urls']} ips={found['ips']} cues={found['cues']}"
 
 
 async def example_all_events():
@@ -100,14 +90,15 @@ async def example_all_events():
 
     agent = Agent(
         model=model,
-        tools=[calculate],
-        system_prompt="You are a calculator. Always use the calculate tool for math.",
+        tools=[extract_iocs],
+        system_prompt="You are a phishing-email analyst. Always run extract_iocs on the email.",
     )
 
-    print("Running: 'What is 25 * 4?'\n")
+    email = "Account suspended! Click http://phish.example.net/login to verify your account."
+    print(f"Running: 'Analyze this email: {email}'\n")
     print("Events received:")
 
-    async for event in agent.run("What is 25 * 4?"):
+    async for event in agent.run(f"Analyze this email: {email}"):
         print(f"\n  Event Type: {event.event_type}")
         print(f"  Timestamp:  {event.timestamp}")
 
@@ -144,34 +135,34 @@ async def example_all_events():
 
 
 async def example_console_ui():
-    """Render a tiny progress UI as the agent thinks and calls tools."""
+    """Render a tiny progress UI as the agent fetches and checks the email."""
     print("=== Part 2: Console UI ===\n")
 
     model = get_model(max_tokens=200)
 
     @tool
-    def search_database(query: str) -> str:
-        """Search the internal database."""
+    def fetch_email(message_id: str) -> str:
+        """Fetch a quarantined email by message id."""
         # Sleep so the UI has visible work to show.
         import time
 
         time.sleep(0.5)
-        return f"Found 3 results for '{query}'"
+        return f"{message_id}: from billing@phish.example.net, subject 'Invoice overdue'"
 
     @tool
-    def analyze_results(data: str) -> str:
-        """Analyze search results."""
-        return f"Analysis complete: {data} contains useful information"
+    def check_sender_reputation(domain: str) -> str:
+        """Check a sender domain against the reputation feed."""
+        return f"{domain}: first seen 3 days ago, 14 abuse reports, reputation score 2/100"
 
     agent = Agent(
         model=model,
-        tools=[search_database, analyze_results],
-        system_prompt="You are a research assistant. Search and analyze data.",
+        tools=[fetch_email, check_sender_reputation],
+        system_prompt="You are a phishing triage assistant. Fetch emails and check senders.",
     )
 
-    print("Query: Find information about Python and analyze it\n")
+    print("Query: Triage quarantined message MSG-1042 and check its sender's reputation\n")
 
-    async for event in agent.run("Find information about Python and analyze it"):
+    async for event in agent.run("Triage quarantined message MSG-1042 and check its sender"):
         if isinstance(event, ThinkEvent):
             print("[Thinking...]")
             if event.tool_calls:
@@ -190,7 +181,7 @@ async def example_console_ui():
         elif isinstance(event, TerminateEvent):
             print(f"\n[Complete] {event.reason}")
             if event.final_message:
-                print(f"\nAnswer: {event.final_message}")
+                print(f"\nVerdict: {event.final_message}")
 
     print()
 
@@ -208,13 +199,15 @@ async def example_event_filtering():
 
     agent = Agent(
         model=model,
-        tools=[calculate],
-        system_prompt="Use the calculate tool for math.",
+        tools=[extract_iocs],
+        system_prompt="Use the extract_iocs tool on any email text you're given.",
     )
 
     tool_log = []
 
-    async for event in agent.run("Calculate 10 + 20 + 30"):
+    async for event in agent.run(
+        "Extract IOCs from: 'Reset now at http://evil.example/reset, sent from 203.0.113.9'"
+    ):
         if isinstance(event, ToolStartEvent):
             tool_log.append(
                 {
@@ -235,7 +228,7 @@ async def example_event_filtering():
                 }
             )
 
-    print("Tool execution log:")
+    print("Tool execution audit log:")
     for entry in tool_log:
         print(f"  {entry}")
     print()
@@ -253,19 +246,19 @@ async def example_collect_metrics():
     model = get_model(max_tokens=200)
 
     @tool
-    def step_one(data: str) -> str:
-        """First processing step."""
-        return f"Step 1 processed: {data}"
+    def parse_email(data: str) -> str:
+        """First analysis step — parse headers and body."""
+        return f"Parsed headers and body of: {data}"
 
     @tool
-    def step_two(data: str) -> str:
-        """Second processing step."""
-        return f"Step 2 processed: {data}"
+    def classify_email(data: str) -> str:
+        """Second analysis step — classify as phishing or benign."""
+        return f"Classified: {data} matches 3 phishing heuristics"
 
     agent = Agent(
         model=model,
-        tools=[step_one, step_two],
-        system_prompt="Process data through step_one then step_two.",
+        tools=[parse_email, classify_email],
+        system_prompt="Process emails through parse_email then classify_email.",
     )
 
     metrics = {
@@ -278,7 +271,7 @@ async def example_collect_metrics():
 
     start_time = datetime.now()
 
-    async for event in agent.run("Process 'hello world' through both steps"):
+    async for event in agent.run("Run the quarantined email 'MSG-1043' through both steps"):
         if isinstance(event, ThinkEvent):
             metrics["think_events"] += 1
         elif isinstance(event, ToolStartEvent):
@@ -307,67 +300,68 @@ async def example_collect_metrics():
 
 
 async def example_progress_tracking():
-    """Draw a textual progress bar as each tool completes."""
+    """Draw a textual progress bar as each analysis step completes."""
     print("=== Part 5: Progress Tracking ===\n")
 
     model = get_model(max_tokens=300)
 
-    # Deterministic tool bodies: fetch_data returns a real summary of an
-    # in-memory source, process_data hashes its input. No canned strings.
+    # Deterministic tool bodies: fetch_messages returns a real summary of
+    # an in-memory mail store, scan_messages hashes its input. No canned
+    # strings, no network — all message data below is invented.
     sources = {
-        "users": [
-            {"id": 1, "name": "Alice", "role": "engineer"},
-            {"id": 2, "name": "Bob", "role": "designer"},
-            {"id": 3, "name": "Charlie", "role": "researcher"},
+        "quarantine": [
+            {"id": "MSG-1042", "sender": "billing@phish.example.net", "subject": "Invoice due"},
+            {"id": "MSG-1043", "sender": "it@evil.example", "subject": "Password expiry notice"},
+            {"id": "MSG-1044", "sender": "hr@corp.example", "subject": "Holiday schedule"},
         ],
-        "orders": [
-            {"id": 101, "user_id": 1, "total": 49.99},
-            {"id": 102, "user_id": 2, "total": 19.99},
+        "reported": [
+            {"id": "MSG-0991", "sender": "ceo@evil.example", "subject": "Wire transfer needed"},
+            {"id": "MSG-0987", "sender": "alerts@phish.example.net", "subject": "Verify account"},
         ],
     }
 
     @tool
-    def fetch_data(source: str) -> str:
-        """Fetch records from a named in-memory source (users, orders, ...)."""
+    def fetch_messages(source: str) -> str:
+        """Fetch emails from a named mail store (quarantine, reported, ...)."""
         import json
         import time
 
         time.sleep(0.3)
         rows = sources.get(source.lower())
         if rows is None:
-            return f"unknown source {source!r}; try one of: {sorted(sources)}"
-        return f"{len(rows)} record(s) from {source}: {json.dumps(rows)}"
+            return f"unknown store {source!r}; try one of: {sorted(sources)}"
+        return f"{len(rows)} message(s) from {source}: {json.dumps(rows)}"
 
     @tool
-    def process_data(data: str) -> str:
-        """Process fetched data — counts records and emits a checksum."""
+    def scan_messages(data: str) -> str:
+        """Scan fetched messages — counts bytes and emits a checksum for the case file."""
         import hashlib
         import time
 
         time.sleep(0.2)
         digest = hashlib.sha256(data.encode()).hexdigest()[:12]
-        return f"processed {len(data)} bytes, sha256:{digest}"
+        return f"scanned {len(data)} bytes, sha256:{digest}"
 
     @tool
-    def store_results(results: str) -> str:
-        """Store processed results."""
+    def file_report(results: str) -> str:
+        """File the triage report in the case system."""
         import time
 
         time.sleep(0.1)
-        return "Results stored successfully"
+        return "Triage report filed successfully"
 
     agent = Agent(
         model=model,
-        tools=[fetch_data, process_data, store_results],
-        system_prompt="Fetch data from 'api', process it, and store the results.",
+        tools=[fetch_messages, scan_messages, file_report],
+        system_prompt="Fetch messages from 'quarantine', scan them, and file a report.",
     )
 
     steps_done = 0
-    total_steps = 3  # we expect three tool calls: fetch, process, store
+    total_steps = 3  # we expect three tool calls: fetch, scan, file
 
-    print("Processing...")
+    print("Processing quarantine folder...")
 
-    async for event in agent.run("Fetch, process, and store data from the API"):
+    async for event in agent.run("Fetch, scan, and report on the quarantine folder"):
         if isinstance(event, ToolCompleteEvent):
             steps_done += 1
             progress = (steps_done / total_steps) * 100
@@ -388,7 +382,7 @@ async def example_progress_tracking():
 def main():
     """Run all notebook parts."""
     print("=" * 60)
-    print("Notebook 11: Agent Streaming & Events")
+    print("Notebook 11: Streaming a Phishing-Email Analysis")
     print("=" * 60)
     print()
 
@@ -412,10 +406,10 @@ def main():
     print(
         """    from tulip.streaming import StructuredStream
 
-    stream = StructuredStream(agent.run("Top 3 vendors."), schema=VendorList)
+    stream = StructuredStream(agent.run("Top 3 IOCs in this email."), schema=IndicatorList)
     async for partial in stream:
-        ui.render(partial)               # may have 0, 1, 2, then 3 vendors
-    final: VendorList | None = stream.final
+        ui.render(partial)               # may have 0, 1, 2, then 3 indicators
+    final: IndicatorList | None = stream.final
 """
     )
     print(
@@ -426,7 +420,7 @@ def main():
     )
 
     print("=" * 60)
-    print("Next: Notebook 12 — Agent Hooks")
+    print("Next: Notebook 12 — Audit Hooks")
     print("=" * 60)
 
 

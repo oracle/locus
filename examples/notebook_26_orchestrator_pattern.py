@@ -1,16 +1,22 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 """
-Notebook 27: orchestrator — one supervisor, many specialists, parallel fan-out.
+Notebook 26: MARSHAL — one incident commander, many security specialists.
 
-An orchestrator routes a task to a chosen set of specialist agents, runs
-them in parallel under a semaphore, then correlates their outputs into a
-single summary. Compared with a swarm (Notebook 25), the decision of who
-does what is centralised here instead of emerging from capability tags.
+MARSHAL is the SOC's named incident-commander agent. An orchestrator
+routes an incident to a chosen set of specialist agents, runs them in
+parallel under a semaphore, then correlates their outputs into a single
+situation report. Compared with a swarm (Notebook 24), the decision of
+who investigates what is centralised in the commander instead of emerging
+from capability tags — which means the routing step is a single,
+auditable choke point. That matters for agentic risk: a central router
+constrains tool reach and makes goal-hijack or rogue-specialist behaviour
+(OWASP ASI01 Agent Goal Hijack, ASI10 Rogue Agents) far easier to detect
+than the same fleet self-organizing.
 
 - ``Specialist`` is a domain-focused agent with tools, a system prompt,
   and a confidence threshold. Tulip ships pre-built ones for logs,
-  metrics, traces, and code.
+  metrics, traces, and code — all useful evidence sources in an incident.
 - ``Orchestrator`` registers specialists, emits ``RoutingDecision``
   objects, and runs the chosen specialists concurrently behind
   ``max_parallel_specialists`` (an asyncio.Semaphore).
@@ -21,7 +27,7 @@ does what is centralised here instead of emerging from capability tags.
   the decisions trail, and a correlated summary.
 
 Run it:
-    .venv/bin/python examples/notebook_32_orchestrator_pattern.py
+    .venv/bin/python examples/notebook_26_orchestrator_pattern.py
 
 The default provider is the bundled mock model. Set TULIP_MODEL_PROVIDER=openai
 (or anthropic) and the matching credentials to use a live model. Set
@@ -32,8 +38,8 @@ short commentary calls — set a cheaper model there to cut runtime; falls
 back to Model A when unset.
 
 Prerequisites:
-- Notebook 08 (Agent basics).
-- Notebook 25 (Swarm) for the unsupervised counterpoint.
+- Notebook 06 (Agent basics).
+- Notebook 24 (Swarm) for the unsupervised counterpoint.
 """
 
 import asyncio
@@ -73,7 +79,7 @@ def _llm_call(
 
 async def main():
     print("=" * 60)
-    print("Notebook 27: orchestrator — supervisor + specialists + parallel fan-out")
+    print("Notebook 26: MARSHAL incident commander — orchestrator + specialists + fan-out")
     print("=" * 60)
     print()
     print_config()
@@ -98,7 +104,9 @@ async def main():
         print()
 
     t0 = time.perf_counter()
-    p1 = await log_analyst.execute(task="In one sentence, summarise what a log analyst does.")
+    p1 = await log_analyst.execute(
+        task="In one sentence, what does a log analyst contribute to incident response?"
+    )
     dt = time.perf_counter() - t0
     print(f"  [model call: {dt:.2f}s · log_analyst.execute()]")
     if p1.output:
@@ -109,35 +117,35 @@ async def main():
     # =========================================================================
     print("\n=== Part 2: Custom Specialists ===\n")
 
-    @tool(name="check_database", description="Check database health and connections")
-    async def check_database() -> str:
-        return "Database: 45/50 connections used, avg query time 250ms"
+    @tool(name="query_edr", description="Query EDR for open detections on a host")
+    async def query_edr() -> str:
+        return "EDR: 3 open detections on WS-0142, latest: encoded PowerShell from winword.exe"
 
-    @tool(name="check_cache", description="Check cache hit rates")
-    async def check_cache() -> str:
-        return "Cache hit rate: 85%, memory usage: 2.1GB/4GB"
+    @tool(name="check_auth_logs", description="Check recent authentication failures")
+    async def check_auth_logs() -> str:
+        return "Auth logs: 17 failed logins for svc-backup from 192.0.2.55 in the last hour"
 
-    database_specialist = Specialist(
-        name="Database Specialist",
-        specialist_type="database_analyst",
-        description="Analyzes database performance, connections, and queries",
-        system_prompt="""You are a database specialist. Your expertise includes:
-- Analyzing query performance
-- Monitoring connection pools
-- Identifying slow queries
-- Recommending optimizations
+    endpoint_specialist = Specialist(
+        name="Endpoint Specialist",
+        specialist_type="endpoint_analyst",
+        description="Analyzes EDR detections, process activity, and host state",
+        system_prompt="""You are an endpoint security specialist. Your expertise includes:
+- Reviewing EDR detections and process trees
+- Spotting suspicious parent-child process pairs
+- Correlating host activity with authentication logs
+- Recommending containment steps
 
-When analyzing, look for connection leaks, slow queries, and lock contention.""",
-        tools=[check_database, check_cache],
+When analyzing, look for unsigned binaries, encoded command lines, and odd logon patterns.""",
+        tools=[query_edr, check_auth_logs],
         max_iterations=5,
         confidence_threshold=0.8,
         model=model,
     )
 
-    print(f"Custom Specialist: {database_specialist.name}")
-    print(f"  Tools: {[t.name for t in database_specialist.tools]}")
+    print(f"Custom Specialist: {endpoint_specialist.name}")
+    print(f"  Tools: {[t.name for t in endpoint_specialist.tools]}")
     print(
-        f"AI commentary: {_llm_call('In one sentence, why is a custom Specialist with domain tools better than a generic Agent for DB diagnostics?')}"
+        f"AI commentary: {_llm_call('In one sentence, why is a custom Specialist with EDR tools better than a generic Agent for endpoint triage?')}"
     )
 
     # =========================================================================
@@ -145,9 +153,9 @@ When analyzing, look for connection leaks, slow queries, and lock contention."""
     # =========================================================================
     print("\n=== Part 3: Executing a Specialist ===\n")
 
-    result = await database_specialist.execute(
-        task="Analyze current database performance and identify issues",
-        context={"incident_id": "INC-12345", "reported_issue": "Slow API responses"},
+    result = await endpoint_specialist.execute(
+        task="Analyze the open EDR detections on WS-0142 and identify the likely entry point",
+        context={"incident_id": "IR-2026-042", "reported_issue": "Encoded PowerShell alert"},
     )
 
     print("Specialist Result:")
@@ -158,13 +166,13 @@ When analyzing, look for connection leaks, slow queries, and lock contention."""
         print(f"  Output: {result.output[:300]}...")
 
     # =========================================================================
-    # Part 4: wire the orchestrator
+    # Part 4: wire the incident commander
     # =========================================================================
     print("\n=== Part 4: Creating an Orchestrator ===\n")
 
     orchestrator = create_orchestrator(
-        name="Incident Analysis Orchestrator",
-        specialists=[log_analyst, metrics_analyst, database_specialist],
+        name="MARSHAL Incident Commander",
+        specialists=[log_analyst, metrics_analyst, endpoint_specialist],
         model=model,
     )
 
@@ -188,16 +196,16 @@ When analyzing, look for connection leaks, slow queries, and lock contention."""
     print(f"Correlation threshold: {orchestrator.correlation_threshold}")
 
     custom_orchestrator = Orchestrator(
-        name="Custom Orchestrator",
-        description="Orchestrates analysis with custom logic",
-        system_prompt="""You coordinate specialist agents for incident analysis.
+        name="SOC Commander",
+        description="Coordinates security specialists for incident analysis",
+        system_prompt="""You coordinate specialist agents for security-incident analysis.
 
 When routing:
-1. For performance issues -> metrics + database specialists
-2. For error spikes -> log + trace specialists
-3. For unknown issues -> all specialists
+1. For endpoint alerts -> endpoint + log specialists
+2. For credential abuse -> log + metrics specialists
+3. For unknown alerts -> all specialists
 
-Prioritize based on urgency indicated in the task.""",
+Prioritize based on the severity indicated in the task.""",
         model=model,
     )
     custom_orchestrator.register_specialists([log_analyst, metrics_analyst])
@@ -211,12 +219,12 @@ Prioritize based on urgency indicated in the task.""",
 
     routing = RoutingDecision(
         decision_type="invoke",
-        specialists=["log_analyst", "metrics_analyst"],
-        reasoning="Performance issue requires log and metrics analysis",
+        specialists=["log_analyst", "endpoint_analyst"],
+        reasoning="Encoded-PowerShell alert needs host context plus log corroboration",
         context={
             "subtasks": {
-                "log_analyst": "Search for timeout errors in the last hour",
-                "metrics_analyst": "Check CPU and memory trends",
+                "log_analyst": "Search auth logs for activity from 192.0.2.55 in the last 24h",
+                "endpoint_analyst": "Pull the process tree for the flagged PowerShell on WS-0142",
             }
         },
     )
@@ -233,8 +241,9 @@ Prioritize based on urgency indicated in the task.""",
     print("\n=== Part 7: Full Orchestration ===\n")
 
     orch_result = await orchestrator.execute(
-        task="API response times have increased from 200ms to 2000ms in the last 30 minutes",
-        context={"severity": "high", "affected_services": ["api-gateway", "user-service"]},
+        task="EDR raised a high-severity alert: encoded PowerShell spawned by winword.exe "
+        "on workstation WS-0142 at 09:14 UTC",
+        context={"severity": "high", "affected_assets": ["WS-0142", "fileserver FS-03"]},
     )
 
     print("Orchestration Result:")
@@ -268,10 +277,10 @@ Prioritize based on urgency indicated in the task.""",
     print("\n=== Part 8: Dynamic Specialist Registration ===\n")
 
     network_specialist = Specialist(
-        name="Network Analyst",
-        specialist_type="network_analyst",
-        description="Analyzes network connectivity and latency",
-        system_prompt="You analyze network issues including DNS, latency, and connectivity.",
+        name="Network Forensics Analyst",
+        specialist_type="network_forensics",
+        description="Analyzes firewall logs, DNS activity, and beaconing patterns",
+        system_prompt="You analyze network evidence: DNS queries, firewall denies, beaconing.",
         model=model,
     )
 
@@ -281,7 +290,7 @@ Prioritize based on urgency indicated in the task.""",
 
     t0 = time.perf_counter()
     p8 = await network_specialist.execute(
-        task="In one short sentence, what would you check first if a service had intermittent timeouts?",
+        task="In one short sentence, what would you check first if a host made periodic connections to an unknown domain?",
     )
     dt = time.perf_counter() - t0
     print(f"  [model call: {dt:.2f}s · network_specialist.execute()]")
@@ -294,27 +303,27 @@ Prioritize based on urgency indicated in the task.""",
     print("\n=== Part 9: Common Patterns ===\n")
 
     print("Pattern 1: Parallel Analysis")
-    print("  Invoke multiple specialists at once, correlate, produce one summary.")
+    print("  Invoke multiple specialists at once, correlate, produce one sitrep.")
     print()
 
     print("Pattern 2: Sequential Refinement")
-    print("  Broad pass first, then route to a specific specialist based on findings.")
+    print("  Broad triage first, then route to a specific specialist based on findings.")
     print()
 
     print("Pattern 3: Hierarchical Routing")
-    print("  Top-level orchestrator routes to sub-orchestrators per domain.")
+    print("  Top-level commander routes to sub-orchestrators per domain (endpoint, network).")
     print()
 
     print("Pattern 4: Consensus Analysis")
-    print("  Multiple specialists analyse the same data; flag disagreements.")
+    print("  Multiple specialists analyse the same evidence; flag disagreements.")
 
     # =========================================================================
     # Part 10: things to keep in mind
     # =========================================================================
     print("\n=== Part 10: Best Practices ===\n")
 
-    print("1. Give specialists focused, non-overlapping domains.")
-    print("2. Use clear specialist_type names — they show up in audit logs.")
+    print("1. Give specialists focused, non-overlapping evidence domains.")
+    print("2. Use clear specialist_type names — they show up in the audit trail.")
     print("3. Write domain-specific system prompts.")
     print("4. Set max_parallel_specialists to match your provider quota.")
     print("5. Include correlation logic in the summariser.")
@@ -322,7 +331,7 @@ Prioritize based on urgency indicated in the task.""",
     print("7. Track per-specialist confidence and duration.")
 
     print("\n" + "=" * 60)
-    print("Next: Notebook 28 — Specialist Agents")
+    print("Next: Notebook 27 — Specialist Agents")
     print("=" * 60)
 
 

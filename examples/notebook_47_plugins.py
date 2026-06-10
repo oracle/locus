@@ -1,10 +1,12 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
-"""Notebook 44: plugins — composable agent extensions.
+"""Notebook 47: plugins — package phishing triage as a reusable extension.
 
-Plugins bundle hooks (and optionally tools) into one reusable object.
-Drop a plugin onto an agent and every relevant hook method runs
-automatically. Three pieces:
+Plugins bundle hooks (and optionally tools) into one reusable object —
+the natural way to ship a SOC capability like phishing triage
+(MITRE ATT&CK T1566) with its audit trail attached, so every verdict is
+attributable after the fact. Drop a plugin onto an agent and every
+relevant hook method runs automatically. Three pieces:
 
 - ``Plugin`` base class — subclass it, give it a ``name``, decorate any
   method with ``@hook`` and the agent picks it up.
@@ -17,10 +19,10 @@ automatically. Three pieces:
 
 Run it:
     # The bundled mock model is the default; set TULIP_MODEL_PROVIDER for a live provider.
-    TULIP_MODEL_ID=openai.gpt-4.1 python examples/notebook_49_plugins.py
+    TULIP_MODEL_ID=openai.gpt-4.1 python examples/notebook_47_plugins.py
 
     # Offline:
-    TULIP_MODEL_PROVIDER=mock python examples/notebook_49_plugins.py
+    TULIP_MODEL_PROVIDER=mock python examples/notebook_47_plugins.py
 
 Prerequisites:
 - An OpenAI or Anthropic API key, or set ``TULIP_MODEL_PROVIDER`` to
@@ -38,7 +40,8 @@ from tulip.tools.decorator import tool
 
 
 # =============================================================================
-# Part 1: A small audit plugin — logs every model and tool call.
+# Part 1: A phishing-triage plugin — audit-logs every model and tool call,
+#         so each verdict is attributable after the fact.
 # =============================================================================
 
 
@@ -47,10 +50,10 @@ def example_plugin():
 
     model = get_model()
 
-    class AuditPlugin(Plugin):
-        """Tracks all model and tool calls."""
+    class TriageAuditPlugin(Plugin):
+        """Tracks all model and tool calls — the triage audit trail."""
 
-        name = "audit"
+        name = "triage-audit"
 
         def __init__(self):
             self.log = []
@@ -64,22 +67,30 @@ def example_plugin():
             self.log.append(f"tool: {event.tool_name}")
 
     @tool
-    def search(query: str) -> str:
-        """Search for information."""
-        return f"Results for: {query}"
+    def check_url_reputation(url: str) -> str:
+        """Check a URL against the reputation service (mock data)."""
+        if "phish.example.net" in url or "evil.example" in url:
+            return f"Reputation for {url}: MALICIOUS — known credential-phishing host"
+        return f"Reputation for {url}: no adverse record"
 
-    plugin = AuditPlugin()
+    plugin = TriageAuditPlugin()
     agent = Agent(
         config=AgentConfig(
-            system_prompt="Use the search tool to answer questions.",
+            system_prompt=(
+                "You triage suspected phishing emails. Use the check_url_reputation "
+                "tool on any URL before giving a verdict."
+            ),
             max_iterations=5,
             model=model,
-            tools=[search],
+            tools=[check_url_reputation],
             plugins=[plugin],
         )
     )
 
-    result = agent.run_sync("Search for Python best practices")
+    result = agent.run_sync(
+        "Triage this email: 'Your account is locked — verify at "
+        "hxxp://phish.example.net/login' (URL defanged)"
+    )
     print(f"Response: {result.message[:100]}...")
     print(f"Audit log: {plugin.log}")
 
@@ -97,14 +108,14 @@ def example_callback():
 
     agent = Agent(
         config=AgentConfig(
-            system_prompt="Answer concisely.",
+            system_prompt="You are a SOC assistant. Answer concisely.",
             max_iterations=3,
             model=model,
             callback_handler=lambda e: events.append(e.event_type),
         )
     )
 
-    agent.run_sync("What is 2+2?")
+    agent.run_sync("Is 'invoice.pdf.exe' a suspicious attachment name?")
     print(f"Events received: {events}")
 
 
@@ -127,7 +138,9 @@ def example_cancel():
         )
     )
     t0 = time.perf_counter()
-    live_result = live_agent.run_sync("In one sentence, why does an agent need a cancel signal?")
+    live_result = live_agent.run_sync(
+        "In one sentence, why does a SOC automation agent need a cancel signal?"
+    )
     dt = time.perf_counter() - t0
     print(
         f"  [model call: {dt:.2f}s · "
@@ -144,7 +157,7 @@ def example_cancel():
         )
     )
     agent.cancel()
-    result = agent.run_sync("This should be cancelled")
+    result = agent.run_sync("Sweep every mailbox in the fleet — this should be cancelled")
     print(f"Stop reason: {result.stop_reason}")
 
 

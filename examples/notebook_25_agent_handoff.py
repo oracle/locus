@@ -1,12 +1,18 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 """
-Notebook 26: agent-to-agent handoff with a structured context payload.
+Notebook 25: SOC tier escalation — L1 → L2 → L3 handoff with typed context.
 
-A handoff is one agent saying "I'm done, please take this further." The
-source agent packages the task, its findings, and an explicit reason
-into a typed ``HandoffContext`` so the target inherits the full work
-state — not just a string.
+A handoff is one analyst agent saying "I'm done, please take this further."
+The source agent packages the alert, its findings, and an explicit reason
+into a typed ``HandoffContext`` so the next tier inherits the full
+investigation state — not just a string. No re-triage, no lost evidence.
+
+The running case is a classic-SOC tier escalation: an EDR alert for
+encoded PowerShell spawned by a document handler (ATT&CK T1059.001
+PowerShell, T1566 Phishing as the suspected initial access) walks L1 → L2
+→ L3. The typed chain is also the audit trail — every transfer, reason,
+and confidence value is recorded for the post-incident review.
 
 - ``HandoffContext`` carries the source/target ids, original task,
   conversation summary, findings dict, confidence, instructions, and the
@@ -18,10 +24,10 @@ state — not just a string.
   ``max_handoff_chain`` cap (prevents loops), and records every transfer
   for inspection or replay.
 - ``manager.chain_handoff([a, b, c], task)`` walks the chain end-to-end
-  with each agent inheriting the previous one's findings.
+  with each tier inheriting the previous one's findings.
 
 Run it:
-    .venv/bin/python examples/notebook_31_agent_handoff.py
+    .venv/bin/python examples/notebook_25_agent_handoff.py
 
 The default provider is the bundled mock model. Set TULIP_MODEL_PROVIDER=openai
 (or anthropic) and the matching credentials to use a live model. Set
@@ -29,11 +35,11 @@ The default provider is the bundled mock model. Set TULIP_MODEL_PROVIDER=openai
 
 This notebook fires ~9 handoffs serially, so it can use Tulip's "Model B"
 slot — a second, typically cheaper model id read from ``TULIP_MODEL_ID_B``
-— for the triage seat. With Model B unset, the slot collapses to Model A.
+— for the L1 triage seat. With Model B unset, the slot collapses to Model A.
 
 Prerequisites:
-- Notebook 08 (Agent basics).
-- Notebook 25 (Swarm) for the unsupervised counterpoint.
+- Notebook 06 (Agent basics).
+- Notebook 24 (Swarm) for the unsupervised counterpoint.
 """
 
 import asyncio
@@ -58,65 +64,65 @@ def _banner(label: str, dt: float, prompt_tok: int = 0, completion_tok: int = 0)
 
 async def main():
     print("=" * 60)
-    print("Notebook 26: agent-to-agent handoff with structured context")
+    print("Notebook 25: SOC tier escalation — typed L1 → L2 → L3 handoffs")
     print("=" * 60)
     print()
     print_config()
 
     # =========================================================================
-    # Part 1: build the agent pool and wire allowed handoff paths
+    # Part 1: build the SOC tiers and wire allowed escalation paths
     # =========================================================================
     print("\n=== Part 1: Creating Handoff Agents ===\n")
 
-    triage_agent = create_handoff_agent(
-        name="Triage Agent",
-        description="Initial assessment and routing of issues",
-        system_prompt="You are a triage agent. Assess issues and route to specialists.",
+    l1_analyst = create_handoff_agent(
+        name="L1 Triage Analyst",
+        description="First-line alert triage and routing",
+        system_prompt="You are an L1 SOC analyst. Triage alerts and route them to specialists.",
     )
 
-    technical_agent = create_handoff_agent(
-        name="Technical Specialist",
-        description="Deep technical analysis and debugging",
-        system_prompt="You are a technical specialist. Perform detailed analysis.",
+    l2_investigator = create_handoff_agent(
+        name="L2 Investigator",
+        description="Deep investigation of escalated alerts",
+        system_prompt="You are an L2 SOC investigator. Perform detailed analysis of escalations.",
     )
 
-    escalation_agent = create_handoff_agent(
-        name="Escalation Manager",
-        description="Handles critical issues requiring senior attention",
-        system_prompt="You are an escalation manager. Handle critical issues.",
+    l3_commander = create_handoff_agent(
+        name="L3 Incident Commander",
+        description="Handles confirmed incidents requiring senior response",
+        system_prompt="You are an L3 incident commander. Direct the response to confirmed incidents.",
     )
 
     print("Created agents:")
-    print(f"  - {triage_agent.name} (id: {triage_agent.id})")
-    print(f"  - {technical_agent.name} (id: {technical_agent.id})")
-    print(f"  - {escalation_agent.name} (id: {escalation_agent.id})")
+    print(f"  - {l1_analyst.name} (id: {l1_analyst.id})")
+    print(f"  - {l2_investigator.name} (id: {l2_investigator.id})")
+    print(f"  - {l3_commander.name} (id: {l3_commander.id})")
 
-    triage_agent.can_delegate_to = [technical_agent.id]
-    triage_agent.can_escalate_to = [escalation_agent.id]
-    technical_agent.can_escalate_to = [escalation_agent.id]
+    l1_analyst.can_delegate_to = [l2_investigator.id]
+    l1_analyst.can_escalate_to = [l3_commander.id]
+    l2_investigator.can_escalate_to = [l3_commander.id]
 
     print("\nHandoff paths:")
-    print("  Triage -> Technical (delegation)")
-    print("  Triage -> Escalation (escalation)")
-    print("  Technical -> Escalation (escalation)")
+    print("  L1 -> L2 (delegation)")
+    print("  L1 -> L3 (escalation)")
+    print("  L2 -> L3 (escalation)")
 
-    # The triage seat reads from Tulip's "Model B" slot
+    # The L1 triage seat reads from Tulip's "Model B" slot
     # (env: TULIP_MODEL_ID_B). Set a cheaper/faster model there to cut
     # round-trip latency; falls back to Model A when unset.
     triage_model = get_model_b(max_tokens=2000)
     model = get_model(max_tokens=2000)
-    triage_with_model = triage_agent.with_model(triage_model)
+    l1_with_model = l1_analyst.with_model(triage_model)
     smoke_ctx = HandoffContext(
         source_agent_id="user",
-        target_agent_id=triage_agent.id,
+        target_agent_id=l1_analyst.id,
         reason=HandoffReason.SPECIALIZATION,
-        original_task="Smoke test the triage agent",
+        original_task="Smoke test the L1 triage seat",
         conversation_summary="Need a one-line confirmation the agent is alive.",
         confidence=0.5,
-        instructions="Reply 'triage agent online'.",
+        instructions="Reply 'L1 triage online'.",
     )
     t0 = time.perf_counter()
-    smoke_result = await triage_with_model.receive_handoff(smoke_ctx)
+    smoke_result = await l1_with_model.receive_handoff(smoke_ctx)
     _banner("Part 1", time.perf_counter() - t0)
     print(f"  Smoke output: {(smoke_result.output or '')[:120]}")
 
@@ -126,19 +132,19 @@ async def main():
     print("\n=== Part 2: Handoff Context ===\n")
 
     context = HandoffContext(
-        source_agent_id=triage_agent.id,
-        target_agent_id=technical_agent.id,
+        source_agent_id=l1_analyst.id,
+        target_agent_id=l2_investigator.id,
         reason=HandoffReason.SPECIALIZATION,
-        original_task="Investigate slow API response times",
-        conversation_summary="User reported 5s response times. Initial check shows normal CPU.",
+        original_task="Investigate a suspected phishing email reported by finance",
+        conversation_summary="User reported a credential-prompt email. Sender domain is 3 days old.",
         findings={
-            "api_latency_p99": "5200ms",
-            "cpu_usage": "45%",
-            "memory_usage": "62%",
+            "sender_domain": "phish.example.net",
+            "domain_age_days": "3",
+            "url_reputation": "uncategorized",
         },
         confidence=0.4,
-        instructions="Focus on database query performance",
-        handoff_chain=[triage_agent.id],
+        instructions="Determine whether any credentials were actually submitted",
+        handoff_chain=[l1_analyst.id],
     )
 
     print("Handoff Context:")
@@ -161,10 +167,10 @@ async def main():
 
     for reason in HandoffReason:
         descriptions = {
-            HandoffReason.SPECIALIZATION: "Target has better capabilities for this task",
-            HandoffReason.ESCALATION: "Issue needs higher authority or expertise",
-            HandoffReason.DELEGATION: "Sub-task delegation to another agent",
-            HandoffReason.COMPLETION: "Task completed, returning to parent",
+            HandoffReason.SPECIALIZATION: "Target has better capabilities for this alert",
+            HandoffReason.ESCALATION: "Incident needs a higher tier or more authority",
+            HandoffReason.DELEGATION: "Sub-task delegated to another analyst agent",
+            HandoffReason.COMPLETION: "Work completed, returning to parent",
             HandoffReason.FAILURE: "Agent failed, trying another approach",
         }
         print(f"  {reason.value}: {descriptions[reason]}")
@@ -175,7 +181,7 @@ async def main():
     print("\n=== Part 4: Handoff Manager ===\n")
 
     manager = create_handoff_manager(
-        agents=[triage_agent, technical_agent, escalation_agent],
+        agents=[l1_analyst, l2_investigator, l3_commander],
         max_chain=5,
     )
 
@@ -185,17 +191,17 @@ async def main():
 
     for agent_id in list(manager.agents):
         manager.agents[agent_id] = manager.agents[agent_id].with_model(model)
-    state_smoke = AgentState(agent_id=triage_agent.id).with_message(
-        Message.user("DB latency spiked to 5s, cpu normal.")
+    state_smoke = AgentState(agent_id=l1_analyst.id).with_message(
+        Message.user("EDR flagged encoded PowerShell on WS-0142; user also reported phishing.")
     )
     t0 = time.perf_counter()
     mgr_result = await manager.execute_handoff(
-        source_agent=triage_agent,
-        target_agent_id=technical_agent.id,
-        task="Diagnose the latency spike",
+        source_agent=l1_analyst,
+        target_agent_id=l2_investigator.id,
+        task="Investigate the suspicious PowerShell execution",
         reason=HandoffReason.SPECIALIZATION,
         state=state_smoke,
-        findings={"p99_ms": 5000},
+        findings={"related_alerts": 3},
     )
     _banner("Part 4", time.perf_counter() - t0)
     print(f"  Manager handoff output: {(mgr_result.output or '')[:160]}")
@@ -206,20 +212,20 @@ async def main():
     print("\n=== Part 5: Creating Handoffs ===\n")
 
     state = AgentState(
-        agent_id=triage_agent.id,
-        tool_history=("check_metrics", "query_logs"),
+        agent_id=l1_analyst.id,
+        tool_history=("lookup_hash", "query_siem"),
     )
-    state = state.with_message(Message.user("API is slow"))
-    state = state.with_message(Message.assistant("I'll investigate the API performance."))
+    state = state.with_message(Message.user("EDR alert fired on WS-0142"))
+    state = state.with_message(Message.assistant("I'll triage the alert and gather context."))
 
     handoff_context = await manager.create_handoff(
-        source_agent=triage_agent,
-        target_agent_id=technical_agent.id,
-        task="Investigate slow API response times",
+        source_agent=l1_analyst,
+        target_agent_id=l2_investigator.id,
+        task="Investigate suspicious PowerShell execution on WS-0142",
         reason=HandoffReason.SPECIALIZATION,
         state=state,
-        findings={"initial_metrics": "Normal CPU, high DB latency"},
-        instructions="Focus on database performance",
+        findings={"initial_triage": "Encoded command line; parent process is winword.exe"},
+        instructions="Determine whether the payload executed and what it touched",
     )
 
     print("Created handoff:")
@@ -236,16 +242,16 @@ async def main():
     print("the chain demo in Part 7 for back-to-back execution.")
 
     # =========================================================================
-    # Part 7: chain_handoff — walk Triage -> Technical -> Escalation
+    # Part 7: chain_handoff — walk L1 -> L2 -> L3
     # =========================================================================
     print("\n=== Part 7: Chain Handoffs ===\n")
 
-    manager.agents[triage_agent.id] = triage_agent.with_model(triage_model)
-    manager.agents[escalation_agent.id] = escalation_agent.with_model(model)
+    manager.agents[l1_analyst.id] = l1_analyst.with_model(triage_model)
+    manager.agents[l3_commander.id] = l3_commander.with_model(model)
 
     chain_results = await manager.chain_handoff(
-        agent_chain=[triage_agent.id, technical_agent.id, escalation_agent.id],
-        task="Critical production outage affecting all users",
+        agent_chain=[l1_analyst.id, l2_investigator.id, l3_commander.id],
+        task="Suspected ransomware on file server FS-03 — mass file renames in progress",
         initial_state=state,
     )
 
@@ -270,41 +276,41 @@ async def main():
     # =========================================================================
     print("\n=== Part 9: Common Handoff Patterns ===\n")
 
-    print("Pattern 1: Triage -> Specialist")
-    print("  A generalist agent assesses and routes to domain experts")
+    print("Pattern 1: L1 Triage -> Specialist")
+    print("  A generalist analyst assesses alerts and routes to domain experts")
     print()
 
     print("Pattern 2: Hierarchical Escalation")
-    print("  L1 -> L2 -> L3 support escalation chain")
+    print("  L1 -> L2 -> L3 SOC tier escalation chain")
     print()
 
     print("Pattern 3: Parallel Specialists")
-    print("  Multiple specialists analyze in parallel, results aggregated")
+    print("  Forensics and threat-intel analyze in parallel, results aggregated")
     print()
 
     print("Pattern 4: Return with Findings")
-    print("  Specialist completes work and returns to coordinator")
+    print("  Specialist completes work and returns to the incident commander")
     print()
 
     print("Pattern 5: Failover")
-    print("  If one agent fails, handoff to backup agent")
+    print("  If one analyst agent fails, handoff to a backup agent")
 
     # =========================================================================
     # Part 10: things to keep in mind
     # =========================================================================
     print("\n=== Part 10: Best Practices ===\n")
 
-    print("1. Keep handoff contexts focused — transfer only relevant info.")
-    print("2. Set max_chain to prevent infinite loops.")
-    print("3. Give the target agent explicit instructions, not just the task.")
+    print("1. Keep handoff contexts focused — transfer only case-relevant evidence.")
+    print("2. Set max_chain to prevent infinite escalation loops.")
+    print("3. Give the next tier explicit instructions, not just the alert.")
     print("4. Track confidence through the chain so you can audit decay.")
     print("5. Pick the right HandoffReason — it drives prompt templating.")
-    print("6. Preserve key findings — don't drop them mid-chain.")
-    print("7. Watch manager.history during debugging.")
+    print("6. Preserve key findings — don't drop evidence mid-chain.")
+    print("7. manager.history is your audit trail for the post-incident review.")
 
     # =========================================================================
     print("\n" + "=" * 60)
-    print("Next: Notebook 27 — Orchestrator Pattern")
+    print("Next: Notebook 26 — Orchestrator Pattern")
     print("=" * 60)
 
 

@@ -2,23 +2,30 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 
-"""Notebook 54: Observability basics — opt-in SSE telemetry.
+"""Notebook 59: Forensic audit trail — events as evidence.
 
-Tulip ships an in-process pub/sub EventBus that publishes typed
-StreamEvents for every meaningful step of execution: agent thinking,
-tool calls, model completions, token usage, multi-agent fan-outs,
-checkpoints — all under one canonical event_type per component.
+When a security agent touches an alert, you need to prove — later, to an
+auditor or an incident review board — exactly what it did. Tulip ships an
+in-process pub/sub EventBus that publishes typed StreamEvents for every
+meaningful step of execution: agent thinking, tool calls, model
+completions, token usage, multi-agent fan-outs, checkpoints — all under
+one canonical event_type per component. That stream is the Ledger: the
+SOC's typed, ordered, replayable record of every action an agent took.
+
+An auditable action trail is itself a control against ASI10 (Rogue
+Agents) — you can reconstruct, after the fact, whether an agent stayed
+inside its authorized scope.
 
 Telemetry is opt-in. Code that never enters a run_context pays one
 ContextVar.get() per emission site — no bus, no events, no
 allocations.
 
 - Run an Agent with no telemetry: the SDK-default path.
-- Wrap the same call in run_context() and subscribe to the bus.
+- Wrap the same triage call in run_context() and subscribe to the bus.
 - The canonical events: agent.think, agent.tool.started/completed,
   agent.tokens.used, agent.terminate.
 - Read the per-run history buffer after the fact (replay semantics for
-  late subscribers).
+  late subscribers — i.e. reconstruct the case file after the run).
 
 Run it
     # Default: the bundled mock model (set TULIP_MODEL_PROVIDER for a live provider)
@@ -46,7 +53,9 @@ async def part1_no_telemetry() -> None:
     print("\n--- Part 1: no run_context — bus stays uninstantiated ---")
 
     agent = Agent(model=get_model(), max_iterations=2)
-    result = agent.run_sync("In one sentence, what is tulip?")
+    result = agent.run_sync(
+        "In one sentence, summarize alert SOC-1042: repeated failed logins on web-01."
+    )
     print("agent reply:", result.message[:120])
 
     # Probe the module-level singleton to prove it was never built.
@@ -58,13 +67,13 @@ async def part1_no_telemetry() -> None:
     print("bus singleton is None — zero allocations spent on telemetry")
 
 
-# Part 2: opt in by wrapping the call in run_context(); subscribe to the
-# bus and watch every event_type land.
+# Part 2: opt in by wrapping the triage call in run_context(); subscribe
+# to the bus and watch every action the agent takes land as evidence.
 
 
 async def part2_subscribe() -> None:
-    """Same Agent.run, this time inside a run_context."""
-    print("\n--- Part 2: run_context active — subscribe to the bus ---")
+    """Same Agent.run, this time inside a run_context — the audit trail is live."""
+    print("\n--- Part 2: run_context active — subscribe to the audit trail ---")
 
     agent = Agent(model=get_model(), max_iterations=2)
     seen: list[str] = []
@@ -83,33 +92,34 @@ async def part2_subscribe() -> None:
 
         # The contextvar set by run_context() means the @_bus_bridge
         # decorator on Agent.run forwards every yielded TulipEvent to
-        # the bus automatically.
-        result = await asyncio.to_thread(agent.run_sync, "Reply with the single word: hello")
+        # the bus automatically — nothing the agent does goes unrecorded.
+        result = await asyncio.to_thread(agent.run_sync, "Reply with the single word: triaged")
         print("agent reply:", result.message[:120])
 
         await asyncio.wait_for(consumer_task, timeout=10.0)
         # Closing the stream ends any other subscribers cleanly.
         await bus.close_stream(rid)
 
-    print(f"events seen ({len(seen)}):")
+    print(f"audit events recorded ({len(seen)}):")
     for e in seen:
         print(f"  - {e}")
 
 
 # Part 3: late subscribers see the whole run replayed from history
-# (capped at 500 events x 200 retained runs).
+# (capped at 500 events x 200 retained runs) — an after-the-fact
+# incident review reads the same evidence the live console saw.
 
 
 async def part3_history_replay() -> None:
-    """Subscribe after the run finished; the history deque replays."""
-    print("\n--- Part 3: late subscriber — history replay ---")
+    """Subscribe after the run finished; the history deque replays the case."""
+    print("\n--- Part 3: late subscriber — post-incident replay ---")
 
     agent = Agent(model=get_model(), max_iterations=2)
 
     async with run_context() as rid:
         bus = get_event_bus()
         # Run first; close the stream; subscribe second.
-        await asyncio.to_thread(agent.run_sync, "Reply: ok")
+        await asyncio.to_thread(agent.run_sync, "Reply: acknowledged")
         await bus.close_stream(rid)
 
         replayed: list[str] = []

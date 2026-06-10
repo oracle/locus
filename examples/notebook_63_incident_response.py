@@ -2,9 +2,9 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 
-"""Notebook 58: Incident-response runbook (SRE workflow).
+"""Notebook 63: Security incident-response runbook.
 
-Models the loop a real on-call engineer runs when a page fires::
+Models the loop a security on-call runs when a page fires::
 
     Page fires
       │
@@ -32,7 +32,7 @@ Models the loop a real on-call engineer runs when a page fires::
 - interrupt(): critical severity pauses for explicit human approval
   before any mitigation runs.
 - output_schema=Postmortem: the final report is a typed Pydantic
-  instance, ready to file into a runbook database.
+  instance, ready to file into the incident-review database.
 
 Run it
     # Default: the bundled mock model (set TULIP_MODEL_PROVIDER for a live provider)
@@ -85,12 +85,13 @@ class InvestigatorReport(BaseModel):
 
 PROMPTS = {
     "triage": (
-        "You are an SRE triage bot. Given an incident description, classify "
-        "severity as one of: info, warn, critical. Reply with one word."
+        "You are a security on-call triage bot. Given an incident description, "
+        "classify severity as one of: info, warn, critical. Reply with one word."
     ),
     "logs": (
         "You are a log-analysis bot. List 1–3 concrete error patterns or "
-        "warning sequences a human should investigate. Be specific. Bullets only."
+        "suspicious auth/error sequences a human should investigate. Be "
+        "specific. Bullets only."
     ),
     "metrics": (
         "You are a metrics-analysis bot. List 1–3 specific anomalies (latency "
@@ -105,7 +106,7 @@ PROMPTS = {
         "single most likely root-cause hypothesis. One sentence."
     ),
     "mitigate": (
-        "You are an automated remediator. Given a root-cause hypothesis, "
+        "You are an automated responder. Given a root-cause hypothesis, "
         "propose ONE specific mitigation step. One sentence."
     ),
 }
@@ -114,7 +115,7 @@ PROMPTS = {
 def _make_agent(role: str, model: Any) -> Agent:
     return Agent(
         config=AgentConfig(
-            agent_id=f"sre-{role}",
+            agent_id=f"ir-{role}",
             model=model,
             system_prompt=PROMPTS[role],
             max_iterations=2,
@@ -226,8 +227,8 @@ async def write_postmortem(state: dict[str, Any]) -> dict[str, Any]:
             agent_id="postmortem-writer",
             model=state["__model__"],
             system_prompt=(
-                "You are an SRE writing a postmortem. Produce a Postmortem "
-                "object. Be terse and factual."
+                "You are an incident responder writing a postmortem. Produce a "
+                "Postmortem object. Be terse and factual."
             ),
             output_schema=Postmortem,
             max_iterations=2,
@@ -262,7 +263,7 @@ async def write_postmortem(state: dict[str, Any]) -> dict[str, Any]:
             "Postmortem writer returned no parsed Postmortem. The configured "
             "model could not honor the JSON schema. Use a stronger model "
             "(e.g. openai.gpt-4o, openai.gpt-5, anthropic.claude-3-5-sonnet) "
-            f"for notebook 57. Raw output: {result.message!r}"
+            f"for notebook 63. Raw output: {result.message!r}"
         )
     return {"postmortem": pm}
 
@@ -314,7 +315,7 @@ def _print_postmortem(pm: Postmortem | None) -> None:
 
 
 async def main() -> None:
-    print("Notebook 58: Incident response runbook")
+    print("Notebook 63: Security incident-response runbook")
     print("=" * 60)
 
     model = get_model()
@@ -326,10 +327,11 @@ async def main() -> None:
     initial = {
         "incident_id": "INC-2026-0517",
         "symptom": (
-            "API p99 latency is 8x its baseline and approximately 12% of "
-            "requests return 503. The regression started at 04:12 UTC and is "
-            "ongoing. Customer-facing checkout is degraded for paying users "
-            "across multiple regions; on-call has been paged."
+            "Login API p99 latency is 8x its baseline and approximately 12% of "
+            "requests return 503, coinciding with a credential-stuffing wave "
+            "from 198.51.100.0/24 that started at 04:12 UTC and is ongoing. "
+            "Customer-facing checkout is degraded for paying users across "
+            "multiple regions; on-call has been paged."
         ),
         "__model__": model,
     }

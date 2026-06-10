@@ -2,14 +2,17 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 
-"""Notebook 29: DeepAgent — a research-shaped Agent factory with RAG grounding.
+"""Notebook 29: DeepAgent — scoped attack-surface recon grounded in prior notes.
 
-``create_deepagent`` bundles the configuration patterns for deep research
-into one call: reflexion + grounding on by default, a typed termination
-algebra, plus opt-in filesystem scratchspace, todo tracking, subagent
-spawning, and datastore auto-wiring. The result is a plain ``tulip.Agent``
-— every hook, checkpointer, and observability primitive in the SDK
-attaches normally.
+``create_deepagent`` bundles the configuration patterns for deep, methodical
+investigation into one call: reflexion + grounding on by default, a typed
+termination algebra, plus opt-in filesystem scratchspace, todo tracking,
+subagent spawning, and datastore auto-wiring. Here the agent runs a scoped,
+authorized attack-surface review over an in-scope asset inventory — the
+external enumeration step of an engagement (MITRE ATT&CK TA0043
+Reconnaissance, T1595 Active Scanning), bounded to assets the rules of
+engagement permit. The result is a plain ``tulip.Agent`` — every hook,
+checkpointer, and observability primitive in the SDK attaches normally.
 
 - Typed termination: ``(ToolCalled('submit') & ConfidenceMet(0.85))
   | TokenLimit(N) | MaxIterations(M)`` — composable and testable
@@ -20,13 +23,13 @@ attaches normally.
 - Todo tracking: ``write_todos`` / ``read_todos`` backed by a
   ``TodoState`` the caller can inspect after the run.
 - Subagent dispatch: ``SubAgentDef`` + ``task(...)`` for one-shot
-  delegated investigations whose trajectories never reach the parent's
+  delegated reviews whose trajectories never reach the parent's
   context window.
 - ``datastores={name: {retriever, description, top_k}}``: auto-wire a
   ``search_<name>`` tool from any ``RAGRetriever`` and prepend a routing
   block to the system prompt. Part 5 wires an in-memory ``QdrantVectorStore`` +
-  ``OpenAIEmbeddings`` retriever and gracefully skips when no embedding
-  key is set.
+  ``OpenAIEmbeddings`` retriever over prior recon notes and gracefully
+  skips when no embedding key is set.
 
 Run it:
     python examples/notebook_29_deepagent.py
@@ -60,80 +63,70 @@ from tulip.tools import tool
 
 
 # =============================================================================
-# Shared domain — a tiny module catalogue the agent will research
+# Shared domain — the in-scope asset inventory the agent will review.
+# Scope discipline matters: the agent enumerates exposure on assets named in
+# the rules of engagement and refuses anything outside that set.
 # =============================================================================
 
-_MODULE_CATALOGUE = {
-    "tulip.router": {
-        "description": "Meta-orchestration layer — GoalFrame extraction, protocol registry, policy gate, cognitive compiler.",
-        "public_api": [
-            "Router",
-            "GoalFrame",
-            "TaskType",
-            "ProtocolRegistry",
-            "PolicyGate",
-            "CognitiveCompiler",
+_ASSET_INVENTORY = {
+    "vpn.corp.example": {
+        "description": "Employee VPN gateway — TLS portal plus OpenVPN endpoint, MFA enforced.",
+        "exposed_services": [
+            "443/https",
+            "1194/openvpn",
         ],
-        "since": "0.2.0",
+        "last_review": "2026-03",
     },
-    "tulip.observability": {
-        "description": "In-process SSE pub/sub bus — EventBus, run_context, canonical EV_* constants.",
-        "public_api": [
-            "EventBus",
-            "EventBusHook",
-            "run_context",
-            "get_event_bus",
-            "emit",
-            "emit_sync",
+    "mail.corp.example": {
+        "description": "Mail gateway — inbound MX with SPF/DKIM/DMARC enforced, webmail disabled.",
+        "exposed_services": [
+            "25/smtp",
+            "443/https",
         ],
-        "since": "0.2.0",
+        "last_review": "2026-01",
     },
-    "tulip.deepagent": {
-        "description": "Research-shaped agent factory: create_deepagent, filesystem tools, todos, subagents.",
-        "public_api": [
-            "create_deepagent",
-            "SubAgentDef",
-            "TodoState",
-            "make_filesystem_tools",
-            "make_todo_tools",
+    "shop.corp.example": {
+        "description": "Customer storefront — behind the WAF, rate-limited login, no admin panel.",
+        "exposed_services": [
+            "443/https",
         ],
-        "since": "0.2.0",
+        "last_review": "2026-05",
     },
 }
 
 
 @tool
-def list_modules() -> list[str]:
-    """List all modules available in the tulip catalogue."""
-    return list(_MODULE_CATALOGUE.keys())
+def list_assets() -> list[str]:
+    """List all in-scope assets in the engagement inventory."""
+    return list(_ASSET_INVENTORY.keys())
 
 
 @tool
-def inspect_module(name: str) -> dict:
-    """Return description, public API, and version for a module.
+def inspect_asset(name: str) -> dict:
+    """Return description, exposed services, and last review date for an asset.
 
     Args:
-        name: Module dotted name, e.g. ``tulip.router``.
+        name: Asset hostname, e.g. ``vpn.corp.example``.
 
     Returns:
-        Dict with ``description``, ``public_api``, and ``since``.
+        Dict with ``description``, ``exposed_services``, and ``last_review``.
     """
-    if name not in _MODULE_CATALOGUE:
-        return {"error": f"module '{name}' not found"}
-    return _MODULE_CATALOGUE[name]
+    if name not in _ASSET_INVENTORY:
+        return {"error": f"asset '{name}' is not in the engagement scope"}
+    return _ASSET_INVENTORY[name]
 
 
 @tool
-def count_public_symbols(name: str) -> int:
-    """Return the number of public symbols exported by a module.
+def count_exposed_services(name: str) -> int:
+    """Return the number of externally exposed services on an asset.
 
     Args:
-        name: Module dotted name.
+        name: Asset hostname.
     """
-    entry = _MODULE_CATALOGUE.get(name)
+    entry = _ASSET_INVENTORY.get(name)
     if not entry:
         return 0
-    return len(entry["public_api"])
+    return len(entry["exposed_services"])
 
 
 # =============================================================================
@@ -141,22 +134,22 @@ def count_public_symbols(name: str) -> int:
 # =============================================================================
 
 
-class ModuleReport(BaseModel):
-    module: str = Field(description="Dotted module name researched.")
-    summary: str = Field(description="2-3 sentence summary of what the module does.")
-    public_symbols: list[str] = Field(description="All public symbols in the module.")
-    available_since: str = Field(description="Version the module was introduced.")
+class AssetReport(BaseModel):
+    asset: str = Field(description="Hostname of the asset reviewed.")
+    summary: str = Field(description="2-3 sentence summary of the asset's exposure.")
+    exposed_services: list[str] = Field(description="All externally exposed services.")
+    last_review: str = Field(description="Date of the asset's last security review.")
     confidence: float = Field(ge=0.0, le=1.0, description="Confidence in the report (0–1).")
 
 
 @tool
-def submit_research(report: ModuleReport) -> str:
-    """Submit the completed research report. Call when confidence ≥ 0.85.
+def submit_recon(report: AssetReport) -> str:
+    """Submit the completed recon report. Call when confidence ≥ 0.85.
 
     Args:
-        report: The completed ``ModuleReport``.
+        report: The completed ``AssetReport``.
     """
-    return f"submitted: {report.module} ({report.confidence:.0%} confidence)"
+    return f"submitted: {report.asset} ({report.confidence:.0%} confidence)"
 
 
 # =============================================================================
@@ -170,24 +163,25 @@ async def part1_basic() -> None:
 
     agent = create_deepagent(
         model=get_model(),
-        tools=[list_modules, inspect_module, count_public_symbols, submit_research],
+        tools=[list_assets, inspect_asset, count_exposed_services, submit_recon],
         system_prompt=(
-            "You are a tulip module researcher. "
-            "Use list_modules, inspect_module, and count_public_symbols to gather facts. "
-            "Submit a complete ModuleReport via submit_research once you reach ≥ 0.85 confidence."
+            "You are an attack-surface recon analyst on a scoped, authorized engagement. "
+            "Use list_assets, inspect_asset, and count_exposed_services to gather facts "
+            "about in-scope assets only. "
+            "Submit a complete AssetReport via submit_recon once you reach ≥ 0.85 confidence."
         ),
-        output_schema=ModuleReport,
-        submit_tool="submit_research",
+        output_schema=AssetReport,
+        submit_tool="submit_recon",
         min_confidence=0.85,
         max_iterations=12,
     )
 
-    result = agent.run_sync("Research the tulip.observability module.")
+    result = agent.run_sync("Review the exposure of vpn.corp.example.")
     print("protocol terminated:", result.stop_reason)
     if result.parsed:
-        rpt: ModuleReport = result.parsed  # type: ignore[assignment]
-        print(f"module:    {rpt.module}")
-        print(f"symbols:   {', '.join(rpt.public_symbols[:4])} …")
+        rpt: AssetReport = result.parsed  # type: ignore[assignment]
+        print(f"asset:     {rpt.asset}")
+        print(f"services:  {', '.join(rpt.exposed_services[:4])} …")
         print(f"confidence:{rpt.confidence:.0%}")
 
 
@@ -204,15 +198,15 @@ async def part2_filesystem_and_todos() -> None:
 
     agent = create_deepagent(
         model=get_model(),
-        tools=[list_modules, inspect_module, count_public_symbols, submit_research],
+        tools=[list_assets, inspect_asset, count_exposed_services, submit_recon],
         system_prompt=(
-            "You are a tulip module researcher. "
-            "Use write_file to take scratchpad notes as you gather facts. "
-            "Use write_todos to track which modules you've checked. "
+            "You are an attack-surface recon analyst on a scoped, authorized engagement. "
+            "Use write_file to keep scratchpad notes as you review each asset. "
+            "Use write_todos to track which assets you've covered. "
             "Submit when you have a complete report with ≥ 0.85 confidence."
         ),
-        output_schema=ModuleReport,
-        submit_tool="submit_research",
+        output_schema=AssetReport,
+        submit_tool="submit_recon",
         min_confidence=0.85,
         max_iterations=16,
         enable_filesystem=True,
@@ -220,7 +214,7 @@ async def part2_filesystem_and_todos() -> None:
         todo_state=todo_state,
     )
 
-    result = agent.run_sync("Research all three modules in the catalogue.")
+    result = agent.run_sync("Review all three assets in the engagement scope.")
     print("terminated:", result.stop_reason)
     print("todos after run:")
     for todo in todo_state.snapshot():
@@ -237,34 +231,34 @@ async def part3_subagents() -> None:
     print("\n--- Part 3: subagent dispatch ---")
 
     # The subagent only carries one tool — focused, cheap, easy to test.
-    symbol_analyst = SubAgentDef(
-        name="symbol_analyst",
-        description="Deep-dives on a single module's public API.",
-        system_prompt="Inspect the given module and return a plain list of its public symbols.",
-        tools=[inspect_module],
+    service_analyst = SubAgentDef(
+        name="service_analyst",
+        description="Deep-dives on a single asset's exposed services.",
+        system_prompt="Inspect the given asset and return a plain list of its exposed services.",
+        tools=[inspect_asset],
         max_iterations=4,
     )
 
     agent = create_deepagent(
         model=get_model(),
-        tools=[list_modules, submit_research],
+        tools=[list_assets, submit_recon],
         system_prompt=(
-            "Use list_modules to discover modules, then delegate symbol analysis "
-            "to the symbol_analyst subagent via the task() tool. "
-            "Submit a ModuleReport for tulip.router once you have the symbol list."
+            "Use list_assets to discover in-scope assets, then delegate service analysis "
+            "to the service_analyst subagent via the task() tool. "
+            "Submit an AssetReport for vpn.corp.example once you have the service list."
         ),
-        output_schema=ModuleReport,
-        submit_tool="submit_research",
+        output_schema=AssetReport,
+        submit_tool="submit_recon",
         min_confidence=0.8,
         max_iterations=12,
-        subagents=[symbol_analyst],
+        subagents=[service_analyst],
     )
 
-    result = agent.run_sync("Research tulip.router using the symbol_analyst subagent.")
+    result = agent.run_sync("Review vpn.corp.example using the service_analyst subagent.")
     print("terminated:", result.stop_reason)
     if result.parsed:
-        rpt: ModuleReport = result.parsed  # type: ignore[assignment]
-        print(f"symbols from subagent: {rpt.public_symbols}")
+        rpt: AssetReport = result.parsed  # type: ignore[assignment]
+        print(f"services from subagent: {rpt.exposed_services}")
 
 
 # =============================================================================
@@ -277,30 +271,30 @@ async def part4_observability() -> None:
     print("\n--- Part 4: deepagent.* SSE events ---")
 
     todo_state = TodoState()
-    symbol_analyst = SubAgentDef(
-        name="symbol_analyst",
-        description="Inspect one module.",
-        system_prompt="Inspect the given module and list its public symbols.",
-        tools=[inspect_module],
+    service_analyst = SubAgentDef(
+        name="service_analyst",
+        description="Inspect one asset.",
+        system_prompt="Inspect the given asset and list its exposed services.",
+        tools=[inspect_asset],
         max_iterations=4,
     )
 
     agent = create_deepagent(
         model=get_model(),
-        tools=[list_modules, submit_research],
+        tools=[list_assets, submit_recon],
         system_prompt=(
-            "Use list_modules, delegate symbol analysis via task(), "
+            "Use list_assets, delegate service analysis via task(), "
             "write scratchpad notes, track progress with todos. "
-            "Submit a report for tulip.deepagent."
+            "Submit a report for mail.corp.example."
         ),
-        output_schema=ModuleReport,
-        submit_tool="submit_research",
+        output_schema=AssetReport,
+        submit_tool="submit_recon",
         min_confidence=0.8,
         max_iterations=14,
         enable_filesystem=True,
         enable_todos=True,
         todo_state=todo_state,
-        subagents=[symbol_analyst],
+        subagents=[service_analyst],
     )
 
     deepagent_events: list[str] = []
@@ -312,7 +306,7 @@ async def part4_observability() -> None:
 
     async with run_context() as rid:
         collector = asyncio.create_task(_collect(rid))
-        result = agent.run_sync("Research tulip.deepagent module.")
+        result = agent.run_sync("Review the mail.corp.example asset.")
         await asyncio.sleep(0.1)
         collector.cancel()
 
@@ -332,7 +326,8 @@ async def part4_observability() -> None:
 async def part5_datastores() -> None:
     """Pass ``datastores={name: {retriever, description, top_k}}`` and the
     factory appends a ``search_<name>`` tool plus a per-store routing block
-    in the system prompt. The agent then picks the right store per query.
+    in the system prompt. The agent then grounds its answers in the prior
+    recon notes instead of guessing.
 
     This Part requires an embedding key (``OPENAI_API_KEY``). Without it,
     Part 5 exits cleanly and the earlier parts still run.
@@ -342,7 +337,7 @@ async def part5_datastores() -> None:
     required = ("OPENAI_API_KEY",)
     missing = [n for n in required if not os.environ.get(n)]
     if missing:
-        print("\n[multi_datastore_routing] skipped — missing env vars:")
+        print("\n[recon_notes_datastore] skipped — missing env vars:")
         for n in missing:
             print(f"  - {n}")
         return
@@ -359,10 +354,12 @@ async def part5_datastores() -> None:
     retriever = RAGRetriever(embedder=embedder, store=store)
     await retriever.add_documents(
         [
-            "Hepcidin is the master regulator of iron homeostasis.",
-            "Ferritin is the primary iron storage protein.",
-            "Transferrin saturation below 16% suggests iron deficiency.",
-            "Phlebotomy is first-line treatment for hereditary hemochromatosis.",
+            "vpn.corp.example: only 443 and 1194 exposed after the 2025 hardening pass; "
+            "TLS certificate renewed 2026-03.",
+            "mail.corp.example: SPF, DKIM and DMARC enforced since 2025-11; webmail disabled.",
+            "shop.corp.example sits behind the WAF; login endpoint rate-limited after the "
+            "2025 credential-stuffing attempt.",
+            "test.corp.example was decommissioned in 2026-01 — any new sighting is a finding.",
         ]
     )
 
@@ -370,14 +367,15 @@ async def part5_datastores() -> None:
         model=get_model(),
         tools=[],
         system_prompt=(
-            "You are a medical research assistant. When asked a hematology "
-            "question, call search_medical first, then answer briefly with "
+            "You are an attack-surface recon analyst. When asked about an asset's "
+            "history, call search_recon_notes first, then answer briefly with "
             "(doc-NN) citations."
         ),
         datastores={
-            "medical": {
+            "recon_notes": {
                 "retriever": retriever,
-                "description": "iron metabolism, anemia, hemochromatosis",
+                "description": "prior recon notes: exposed services, hardening history, "
+                "decommissioned hosts",
                 "top_k": 3,
             }
         },
@@ -386,7 +384,9 @@ async def part5_datastores() -> None:
         max_iterations=4,
     )
 
-    result = agent.run_sync("What regulates iron homeostasis? Cite the retrieved doc.")
+    result = agent.run_sync(
+        "What do prior recon notes say about vpn.corp.example? Cite the retrieved doc."
+    )
     print("part 5 response:", (result.text or "")[:300])
     print("part 5 tool calls:", len(result.tool_executions or ()))
 

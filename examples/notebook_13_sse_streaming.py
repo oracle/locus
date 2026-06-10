@@ -1,13 +1,13 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 """
-Notebook 14: stream agent events to a browser with Server-Sent Events.
+Notebook 13: stream an investigation to a SOC dashboard with SSE.
 
-SSE is the simplest way to push live updates from a Python backend to a
-web client — one HTTP response, one event per line. Tulip ships two
-handlers that turn the agent event stream into SSE wire format: a
-buffered ``SSEHandler`` and a queue-based ``AsyncSSEHandler`` for true
-streaming.
+SSE is the simplest way to push live investigation updates from a
+Python backend to a SOC dashboard — one HTTP response, one event per
+line. Tulip ships two handlers that turn the agent event stream into
+SSE wire format: a buffered ``SSEHandler`` and a queue-based
+``AsyncSSEHandler`` for true streaming.
 
 Key ideas:
 - An ``SSEMessage`` is a small dataclass with ``event``, ``data``, and
@@ -19,10 +19,10 @@ Key ideas:
 - ``create_sse_response_headers()`` returns the correct
   ``text/event-stream`` headers and disables proxy buffering.
 - Pass ``custom_serializer=...`` to either handler to shape what the
-  client sees.
+  dashboard sees.
 
 Run it:
-    .venv/bin/python examples/notebook_19_sse_streaming.py
+    .venv/bin/python examples/notebook_13_sse_streaming.py
 
 This notebook does not call an LLM — it only exercises the SSE
 plumbing, so no provider configuration is needed. The mock provider is
@@ -48,7 +48,7 @@ from tulip.streaming.sse import (
 
 async def main():
     print("=" * 60)
-    print("Notebook 14: SSE Streaming")
+    print("Notebook 13: SOC Dashboard SSE Streaming")
     print("=" * 60)
 
     # =========================================================================
@@ -58,7 +58,7 @@ async def main():
 
     message = SSEMessage(
         event="thinking",
-        data='{"content": "Analyzing the request..."}',
+        data='{"content": "Correlating alert SOC-1042 with sign-in history..."}',
         id="1",
     )
 
@@ -79,9 +79,9 @@ async def main():
     print("\n=== Part 2: Creating SSE Messages ===\n")
 
     messages = [
-        SSEMessage(event="start", data='{"session_id": "abc123"}'),
-        SSEMessage(event="chunk", data="Hello"),
-        SSEMessage(event="chunk", data=" World!"),
+        SSEMessage(event="start", data='{"investigation_id": "SOC-1042"}'),
+        SSEMessage(event="chunk", data="Sender domain registered"),
+        SSEMessage(event="chunk", data=" 3 days ago — suspicious."),
         SSEMessage(event="done", data='{"status": "complete"}'),
     ]
 
@@ -90,9 +90,10 @@ async def main():
         print(f"  [{msg.event}] {msg.data}")
 
     # Multi-line payloads are valid; format() emits one data: line per line.
+    # A brute-force detection rule (ATT&CK T1110).
     multiline_msg = SSEMessage(
-        event="code",
-        data="def hello():\n    print('Hello!')\n    return True",
+        event="detection_rule",
+        data="rule: repeated_failed_logins\n  when: failed_logins > 5\n  then: page on-call",
     )
     print("\nMulti-line message format:")
     print(multiline_msg.format())
@@ -113,11 +114,18 @@ async def main():
     print(f"  Include ID: {handler.include_id}")
     print(f"  ID prefix: {handler.id_prefix}")
 
-    # Stand-in events; in a real app these come from agent.run(...).
+    # Stand-in events; in a real app these come from the triage agent's
+    # agent.run(...).
     events = [
-        ThinkEvent(iteration=1, reasoning="Analyzing user request"),
-        ToolStartEvent(tool_name="search", tool_call_id="call_001", arguments={"query": "test"}),
-        ToolCompleteEvent(tool_name="search", tool_call_id="call_001", result="Found 5 results"),
+        ThinkEvent(iteration=1, reasoning="Triaging alert SOC-1042"),
+        ToolStartEvent(
+            tool_name="lookup_ip", tool_call_id="call_001", arguments={"ip": "198.51.100.7"}
+        ),
+        ToolCompleteEvent(
+            tool_name="lookup_ip",
+            tool_call_id="call_001",
+            result="198.51.100.7: 2 abuse reports in the last 30 days",
+        ),
     ]
 
     for event in events:
@@ -144,20 +152,20 @@ async def main():
 
     # pop_messages drains and returns — get_messages copies and keeps.
     handler.clear()
-    await handler.on_event(ThinkEvent(iteration=1, reasoning="New thought"))
+    await handler.on_event(ThinkEvent(iteration=1, reasoning="New pivot: check sender domain"))
     popped = handler.pop_messages()
     remaining = handler.get_messages()
     print(f"\nAfter pop: got {len(popped)}, remaining {len(remaining)}")
 
     # =========================================================================
-    # Part 5: report errors to the client
+    # Part 5: report errors to the dashboard
     # =========================================================================
     print("\n=== Part 5: Error Handling ===\n")
 
     handler.clear()
 
-    await handler.on_event(ThinkEvent(iteration=1, reasoning="Starting..."))
-    await handler.on_error(ValueError("Something went wrong"))
+    await handler.on_event(ThinkEvent(iteration=1, reasoning="Starting enrichment..."))
+    await handler.on_error(ValueError("Intel feed unavailable"))
 
     print(f"Has error: {handler.has_error}")
     print(f"Is complete: {handler.is_complete}")
@@ -171,17 +179,18 @@ async def main():
     print("\n=== Part 6: Async SSE Handler ===\n")
 
     # AsyncSSEHandler backs the stream with an asyncio.Queue, so producer
-    # and consumer can run concurrently — the pattern web frameworks need.
+    # and consumer run concurrently — the pattern a live SOC dashboard
+    # needs.
     async_handler = AsyncSSEHandler(
         include_timestamp=True,
         include_id=True,
     )
 
     async def produce_events():
-        await async_handler.on_event(ThinkEvent(iteration=1, reasoning="Processing..."))
+        await async_handler.on_event(ThinkEvent(iteration=1, reasoning="Enriching indicators..."))
         await asyncio.sleep(0.1)
         await async_handler.on_event(
-            ToolStartEvent(tool_name="analyze", tool_call_id="call_002", arguments={})
+            ToolStartEvent(tool_name="whois_domain", tool_call_id="call_002", arguments={})
         )
         await asyncio.sleep(0.1)
         await async_handler.on_complete()
@@ -225,7 +234,9 @@ async def main():
 
     custom_handler = SSEHandler(custom_serializer=custom_serializer)
 
-    await custom_handler.on_event(ThinkEvent(iteration=1, reasoning="Custom serialization"))
+    await custom_handler.on_event(
+        ThinkEvent(iteration=1, reasoning="Custom serialization for the dashboard")
+    )
     msg = custom_handler.get_messages()[0]
 
     print("Custom serialized event:")
@@ -245,15 +256,15 @@ from tulip.streaming.sse import AsyncSSEHandler, create_sse_response_headers
 
 app = FastAPI()
 
-@app.get("/stream")
+@app.get("/investigations/stream")
 async def stream_events():
     handler = AsyncSSEHandler()
 
     async def generate():
-        # Start agent in background
+        # Start the triage agent in the background
         task = asyncio.create_task(run_agent(handler))
 
-        # Stream events
+        # Stream events to the dashboard
         async for sse_text in handler.stream():
             yield sse_text
 
@@ -266,8 +277,8 @@ async def stream_events():
     )
 
 async def run_agent(handler):
-    # Your agent logic
-    await handler.on_event(ThinkEvent(iteration=1, reasoning="Working..."))
+    # Your investigation logic
+    await handler.on_event(ThinkEvent(iteration=1, reasoning="Investigating..."))
     await handler.on_complete()
 """)
     print("-" * 40)
@@ -297,7 +308,7 @@ async def run_agent(handler):
         ("after_invocation", "After agent invocation"),
     ]
 
-    print("Event types for SSE streaming:")
+    print("Event types a SOC dashboard can subscribe to:")
     for event_type, description in supported_events:
         print(f"  {event_type}: {description}")
 
@@ -307,19 +318,19 @@ async def run_agent(handler):
     print("\n=== Part 11: Best Practices ===\n")
 
     print("1. Always set proper SSE headers")
-    print("2. Include event IDs so clients can reconnect with Last-Event-ID")
-    print("3. Send a 'done' event when the agent terminates")
-    print("4. Send error events on failure — never leave the stream hanging")
+    print("2. Include event IDs so dashboards can reconnect with Last-Event-ID")
+    print("3. Send a 'done' event when the investigation terminates")
+    print("4. Send error events on failure — never leave the analyst's stream hanging")
     print("5. Use AsyncSSEHandler for real streaming, not the buffered one")
     print("6. Keep individual event payloads small (< 65KB)")
     print("7. Implement client-side reconnection")
-    print("8. Send periodic heartbeats during long tool calls")
+    print("8. Send periodic heartbeats during long-running scans")
 
     heartbeat = SSEMessage(event="heartbeat", data='{"status": "alive"}')
     print(f"\nHeartbeat message:\n{heartbeat.format()}")
 
     print("\n" + "=" * 60)
-    print("Notebook 14 complete.")
+    print("Notebook 13 complete.")
     print("=" * 60)
 
 

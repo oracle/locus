@@ -1,21 +1,24 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 """
-Per-node retry and caching, plus graph diagrams and live streaming.
+Notebook 22: Resilient sandbox-detonation workflows.
 
-The graph executor lets you attach policies to individual nodes — so a
-flaky API call retries with backoff without touching the rest of the
-graph, and an expensive lookup gets cached without changing how it's
-called. The visualisation helpers and streaming hooks give you the
-operational story to go with it.
+Sandbox infrastructure is flaky by nature — detonation nodes get busy,
+reputation feeds rate-limit, reports take time. The graph executor lets
+you attach policies to individual nodes: the sandbox submission retries
+with backoff without touching the rest of the workflow, and a repeated
+hash-reputation lookup gets cached without changing how it's called.
+The visualisation helpers and streaming hooks give you the operational
+story to go with it. Scenario: malware detonation using EICAR as the
+benign test sample (MITRE ATT&CK T1204, User Execution).
 
 - RetryPolicy — exponential backoff with optional jitter, per node.
 - CachePolicy — TTL-based result caching, per node, keyed on inputs.
-- draw_mermaid / draw_ascii — print the graph as a diagram.
-- graph.stream(...) + emit_custom — push progress events from inside a node.
+- draw_mermaid / draw_ascii — print the workflow as a diagram.
+- graph.stream(...) + emit_custom — push detonation progress from inside a node.
 
 Run it:
-    TULIP_MODEL_PROVIDER=mock python examples/notebook_28_graph_advanced.py
+    TULIP_MODEL_PROVIDER=mock python examples/notebook_22_graph_advanced.py
 
 The default provider is the bundled mock model; set TULIP_MODEL_PROVIDER for a live provider.
 Set TULIP_MODEL_PROVIDER=mock for offline runs. Pick a live provider with
@@ -59,7 +62,7 @@ def _llm_call(
 
 
 async def example_retry():
-    """A flaky node fails twice, succeeds on the third attempt thanks to retry."""
+    """A busy sandbox fails twice, accepts the sample on the third attempt."""
     print("=== Part 1: RetryPolicy ===\n")
     print(
         f"AI rationale: {_llm_call('In one sentence, why is exponential backoff with jitter the right retry default?')}"
@@ -67,26 +70,27 @@ async def example_retry():
 
     attempt = 0
 
-    async def flaky_api(inputs):
+    async def submit_sample(inputs):
         nonlocal attempt
         attempt += 1
         if attempt < 3:
-            raise ConnectionError(f"Attempt {attempt}: API unreachable")
-        return {"data": "success"}
+            raise ConnectionError(f"Attempt {attempt}: sandbox node busy")
+        # Mock detonation verdict — EICAR is the standard harmless test file.
+        return {"verdict": "malicious (EICAR test signature)"}
 
     graph = StateGraph(config=GraphConfig(parallel=False))
     graph.add_node(
-        "api_call",
-        flaky_api,
+        "submit",
+        submit_sample,
         retry_policy=RetryPolicy(max_attempts=3, initial_interval=0.1, jitter=False),
     )
-    graph.add_edge(START, "api_call")
-    graph.add_edge("api_call", END)
+    graph.add_edge(START, "submit")
+    graph.add_edge("submit", END)
 
     result = await graph.execute({})
     print(f"Success: {result.success}")
     print(f"Attempts needed: {attempt}")
-    print(f"Result: {result.final_state.get('data')}")
+    print(f"Verdict: {result.final_state.get('verdict')}")
 
 
 # =============================================================================
@@ -95,7 +99,7 @@ async def example_retry():
 
 
 async def example_cache():
-    """Identical inputs to the same node return the cached output for ttl_seconds."""
+    """Identical hashes to the same node return the cached verdict for ttl_seconds."""
     print("\n=== Part 2: CachePolicy ===\n")
     print(
         f"AI rationale: {_llm_call('In one sentence, when does CachePolicy on a node beat memoising the function yourself?')}"
@@ -103,25 +107,27 @@ async def example_cache():
 
     call_count = 0
 
-    async def expensive_lookup(inputs):
+    async def reputation_lookup(inputs):
         nonlocal call_count
         call_count += 1
-        return {"result": f"computed_{call_count}"}
+        return {"reputation": f"lookup_{call_count}"}
 
     graph = StateGraph(config=GraphConfig(parallel=False))
     graph.add_node(
         "lookup",
-        expensive_lookup,
+        reputation_lookup,
         cache_policy=CachePolicy(ttl_seconds=60),
     )
     graph.add_edge(START, "lookup")
     graph.add_edge("lookup", END)
 
-    r1 = await graph.execute({"query": "test"})
-    r2 = await graph.execute({"query": "test"})
+    r1 = await graph.execute({"sha256": "aa11bb22cc33dd44"})
+    r2 = await graph.execute({"sha256": "aa11bb22cc33dd44"})
 
-    print(f"Call count: {call_count}")  # 1 — second run was a cache hit
-    print(f"Both same result: {r1.final_state.get('result') == r2.final_state.get('result')}")
+    print(f"Call count: {call_count}")  # 1 — second lookup was a cache hit
+    print(
+        f"Both same result: {r1.final_state.get('reputation') == r2.final_state.get('reputation')}"
+    )
 
 
 # =============================================================================
@@ -130,7 +136,7 @@ async def example_cache():
 
 
 async def example_visualization():
-    """draw_mermaid and draw_ascii print the graph as a diagram."""
+    """draw_mermaid and draw_ascii print the detonation workflow as a diagram."""
     print("\n=== Part 3: Diagrams ===\n")
     print(
         f"AI rationale: {_llm_call('In one sentence, why are Mermaid diagrams useful when reviewing a Tulip StateGraph?')}"
@@ -138,29 +144,29 @@ async def example_visualization():
 
     graph = StateGraph(config=GraphConfig(parallel=False))
 
-    async def validate(i):
-        return {"valid": True}
+    async def submit(i):
+        return {"submitted": True}
 
-    async def process(i):
-        return {"processed": True}
+    async def detonate(i):
+        return {"detonated": True}
 
-    async def notify(i):
+    async def report(i):
         return {"done": True}
 
-    graph.add_node("validate", validate)
-    graph.add_node("process", process)
-    graph.add_node("notify", notify)
-    graph.add_edge(START, "validate")
-    graph.add_edge("validate", "process")
+    graph.add_node("submit", submit)
+    graph.add_node("detonate", detonate)
+    graph.add_node("report", report)
+    graph.add_edge(START, "submit")
+    graph.add_edge("submit", "detonate")
     graph.add_conditional_edges(
-        "process",
-        lambda s: "notify" if s.get("valid") else "__END__",
+        "detonate",
+        lambda s: "report" if s.get("submitted") else "__END__",
         {
-            "notify": "notify",
+            "report": "report",
             "__END__": "__END__",
         },
     )
-    graph.add_edge("notify", END)
+    graph.add_edge("report", END)
 
     print("Mermaid (paste into https://mermaid.live):")
     print(draw_mermaid(graph))
@@ -169,24 +175,24 @@ async def example_visualization():
 
 
 async def example_realtime_streaming():
-    """Stream node updates while also pushing custom progress events."""
+    """Stream node updates while also pushing detonation progress events."""
     print("\n=== Part 4: Live streaming with emit_custom ===\n")
     print(
-        f"AI rationale: {_llm_call('In one sentence, why is streaming progress events better than polling for graph status?')}"
+        f"AI rationale: {_llm_call('In one sentence, why is streaming progress events better than polling for sandbox status?')}"
     )
     from tulip.multiagent import StreamMode, emit_custom
 
     graph = StateGraph(config=GraphConfig(parallel=False))
 
-    async def slow_node(inputs):
+    async def detonate(inputs):
         for i in range(3):
-            await emit_custom({"step": i + 1, "of": 3}, node_id="slow_node")
+            await emit_custom({"stage": i + 1, "of": 3}, node_id="detonate")
             await asyncio.sleep(0.05)
         return {"done": True}
 
-    graph.add_node("slow_node", slow_node)
-    graph.add_edge(START, "slow_node")
-    graph.add_edge("slow_node", END)
+    graph.add_node("detonate", detonate)
+    graph.add_edge(START, "detonate")
+    graph.add_edge("detonate", END)
 
     seen_custom = 0
     seen_updates = 0
@@ -204,12 +210,12 @@ async def example_retry_with_llm() -> None:
     """RetryPolicy applies to any node — including ones that call an LLM."""
     print("\n=== Part 5: RetryPolicy around a real LLM call ===\n")
 
-    async def llm_node(inputs):
+    async def summarize_report(inputs):
         import time as _t
 
         agent = Agent(
             model=get_model(max_tokens=60),
-            system_prompt="Answer in one sentence.",
+            system_prompt="Answer in one sentence for a SOC analyst.",
         )
         t0 = _t.perf_counter()
         result = agent.run_sync(inputs["question"])
@@ -217,19 +223,26 @@ async def example_retry_with_llm() -> None:
         print(
             f"  [model call: {dt:.2f}s · {result.metrics.prompt_tokens}→{result.metrics.completion_tokens} tokens]"
         )
-        return {"answer": result.message.strip()}
+        return {"summary": result.message.strip()}
 
     graph = StateGraph(config=GraphConfig(parallel=False))
     graph.add_node(
-        "llm",
-        llm_node,
+        "summarize",
+        summarize_report,
         retry_policy=RetryPolicy(max_attempts=2, initial_interval=0.2, jitter=False),
     )
-    graph.add_edge(START, "llm")
-    graph.add_edge("llm", END)
+    graph.add_edge(START, "summarize")
+    graph.add_edge("summarize", END)
 
-    result = await graph.execute({"question": "What is retrieval-augmented generation?"})
-    print(f"Answer: {result.final_state.get('answer')}")
+    result = await graph.execute(
+        {
+            "question": (
+                "Summarize this sandbox report: the sample copied itself to the "
+                "startup folder and beaconed to evil.example."
+            )
+        }
+    )
+    print(f"Summary: {result.final_state.get('summary')}")
 
 
 if __name__ == "__main__":

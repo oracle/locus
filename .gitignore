@@ -267,3 +267,7 @@ examples/notebook_50_question.wav
 examples/notebook_50_answer.wav
 examples/notebook_50_answer.mp3
 examples/notebook_67_answer.wav
+
+# Generated audio demo artifacts (notebooks 66/67 recreate them on live runs)
+examples/*.mp3
+examples/*.wav

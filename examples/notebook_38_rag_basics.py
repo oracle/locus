@@ -1,9 +1,13 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
-"""Notebook 38: RAG basics.
+"""Notebook 38: RAG basics — a MITRE ATLAS technique knowledge base.
 
 Retrieval-Augmented Generation (RAG) grounds an agent's answers in your
-own documents. The pipeline has four steps:
+own documents. For an AI-security team that means the MITRE ATLAS
+adversarial-ML technique catalogue, mapped to internal detections — not
+whatever the model half-remembers about AML.Txxxx ids. This notebook
+builds the Index that the threat-intel agent (AUGUR, notebook 40) reads
+from. The pipeline has four steps:
 
 - **Embed** — turn text into vectors with ``OpenAIEmbeddings``
   (``text-embedding-3-small``, 1536 dims).
@@ -15,6 +19,11 @@ own documents. The pipeline has four steps:
 - **Generate** — feed the retrieved chunks to the LLM as grounded
   context. (This notebook focuses on steps 1–3; notebook 40 wires it
   into an agent.)
+
+The corpus is MITRE ATLAS techniques (``AML.Txxxx``); the retrieval
+quality of this Index directly bounds how grounded AUGUR's answers can
+be. A poisoned or low-coverage Index maps to OWASP LLM08 (Vector &
+Embedding Weaknesses) — covered in notebook 40.
 
 Run it:
     # Embeddings need an OpenAI api key:
@@ -61,9 +70,9 @@ async def understand_embeddings():
     print(f"Embedding dimension: {embedder.config.dimension}")
 
     texts = [
-        "Python is a programming language",
-        "Python is used for machine learning",
-        "Cats are fluffy animals",
+        "Prompt injection overrides an LLM's instructions via crafted input",
+        "Indirect prompt injection hides instructions in content the model retrieves",
+        "Disk snapshots are rotated nightly for backup retention",
     ]
     results = await embedder.embed_batch(texts)
 
@@ -82,8 +91,8 @@ async def understand_embeddings():
     sim_01 = cosine(results[0].embedding, results[1].embedding)
     sim_02 = cosine(results[0].embedding, results[2].embedding)
     print("\nCosine similarity:")
-    print(f"  'Python programming' vs 'Python ML': {sim_01:.4f}")
-    print(f"  'Python programming' vs 'Cats':     {sim_02:.4f}")
+    print(f"  'Prompt injection' vs 'Indirect injection': {sim_01:.4f}")
+    print(f"  'Prompt injection' vs 'Backups':            {sim_02:.4f}")
 
 
 # =============================================================================
@@ -100,29 +109,36 @@ async def using_vector_store():
     store = _get_store(dimension=embedder.config.dimension)
     print(f"Created QdrantVectorStore dim={store.config.dimension}")
 
+    # MITRE ATLAS technique summaries — the AI-security analogue of the
+    # ATT&CK matrix. Ids are the canonical AML.Txxxx.
     docs_text = [
-        "Python is great for data science and machine learning.",
-        "JavaScript is the language of the web browser.",
-        "A relational database stores data in tables with rows and columns.",
-        "PostgreSQL is a popular open-source database.",
-        "Docker containers package applications with dependencies.",
+        "AML.T0051 LLM Prompt Injection: adversaries craft input that overrides "
+        "the model's instructions, directly or indirectly via retrieved content.",
+        "AML.T0054 LLM Jailbreak: adversaries bypass model safety controls to "
+        "elicit restricted behaviour.",
+        "AML.T0020 Poison Training Data: adversaries tamper with training or "
+        "fine-tuning data to bias or backdoor a model.",
+        "AML.T0024 Exfiltration via AI Inference API: adversaries probe an "
+        "inference endpoint to extract model parameters or memorized data.",
+        "AML.T0110 AI Agent Tool Poisoning: adversaries corrupt a tool's output "
+        "or schema so the agent acts on attacker-controlled data.",
     ]
 
-    print("\nEmbedding and inserting documents…")
+    print("\nEmbedding and inserting ATLAS technique summaries…")
     for i, text in enumerate(docs_text):
         result = await embedder.embed(text)
         await store.add(
             Document(
-                id=f"doc_{i}",
+                id=f"technique_{i}",
                 content=text,
                 embedding=result.embedding,
-                metadata={"source": "notebook", "index": i},
+                metadata={"source": "atlas_kb", "index": i},
             )
         )
         print(f"  inserted: {text[:50]}…")
 
-    print("\nSearching for 'database systems'…")
-    q = await embedder.embed("database systems")
+    print("\nSearching for 'hidden instructions in retrieved documents'…")
+    q = await embedder.embed("hidden instructions in retrieved documents")
     hits = await store.search(query_embedding=q.embedding, limit=3)
     for i, hit in enumerate(hits, start=1):
         print(f"  #{i}  score={hit.score:.4f}  {hit.document.content}")
@@ -154,40 +170,48 @@ async def using_rag_retriever():
 
     knowledge_base = [
         """
-        Python was created by Guido van Rossum and first released in 1991.
-        It emphasizes code readability with its notable use of significant
-        indentation. Python is dynamically typed and garbage-collected.
+        AML.T0051 LLM Prompt Injection: adversaries supply input that the model
+        treats as instructions, overriding the system prompt. Indirect variants
+        plant the payload in documents the RAG layer will retrieve. Detection:
+        flag retrieved chunks containing imperative phrases addressed to the
+        model, and isolate untrusted tool output from the instruction channel.
         """,
         """
         A vector store keeps embeddings in a structure that supports fast
         nearest-neighbour search. Tulip ships in-memory, pgvector,
-        OpenSearch, Qdrant, and Chroma stores behind one interface.
+        OpenSearch, Qdrant, and Chroma stores behind one interface —
+        the same API whether the Index holds five ATLAS techniques or the
+        full matrix plus the OWASP LLM Top 10.
         """,
         """
-        Machine learning is a subset of artificial intelligence (AI) that
-        provides systems the ability to automatically learn and improve
-        from experience without being explicitly programmed.
+        AML.T0024 Exfiltration via AI Inference API: adversaries query an
+        inference endpoint to reconstruct parameters or extract memorized
+        training data. Detection: rate-limit per-principal inference volume and
+        alert on query patterns consistent with model-extraction sweeps.
         """,
     ]
 
     for doc in knowledge_base:
         ids = await retriever.add_document(doc.strip())
-        print(f"  inserted document → {len(ids)} chunk(s)")
+        print(f"  inserted technique note → {len(ids)} chunk(s)")
 
-    print("\nQuerying: 'When was Python created?'")
-    result = await retriever.retrieve("When was Python created?", limit=2)
+    print("\nQuerying: 'How do attackers smuggle instructions into a model?'")
+    result = await retriever.retrieve(
+        "How do attackers smuggle instructions into a model?", limit=2
+    )
     for i, doc_result in enumerate(result.documents, 1):
         print(f"\n  result {i} (score={doc_result.score:.4f}):")
         print(f"  {doc_result.document.content[:200]}…")
 
-    print("\nUsing retrieve_text() for the same query on a different prompt:")
-    text = await retriever.retrieve_text("What is a vector store?", limit=2)
+    print("\nUsing retrieve_text() for the same Index on a different question:")
+    text = await retriever.retrieve_text("How is model extraction detected?", limit=2)
     print(f"\n{text[:300]}…")
 
 
 # =============================================================================
-# Step 4: Metadata-tagged retrieval — store arbitrary JSON alongside the
-#         vector and use it to narrow results beyond similarity alone.
+# Step 4: Metadata-tagged retrieval — store ATLAS tactic/technique tags
+#         alongside the vector and use them to narrow results beyond
+#         similarity alone.
 # =============================================================================
 
 
@@ -202,24 +226,24 @@ async def rag_with_metadata():
 
     documents = [
         (
-            "Python supports async/await syntax for concurrency.",
-            {"category": "programming", "language": "python"},
+            "Crafted input overrides the system prompt to change the agent's goal.",
+            {"tactic": "ml-attack-staging", "technique": "AML.T0051"},
         ),
         (
-            "Use pip to install Python packages.",
-            {"category": "programming", "language": "python"},
+            "A jailbreak prompt elicits behaviour the model's controls forbid.",
+            {"tactic": "defense-evasion", "technique": "AML.T0054"},
         ),
         (
-            "JavaScript uses async/await for async operations.",
-            {"category": "programming", "language": "javascript"},
+            "Adversaries poison fine-tuning data to plant a trigger phrase.",
+            {"tactic": "resource-development", "technique": "AML.T0020"},
         ),
         (
-            "Set up a relational database with these steps.",
-            {"category": "database", "type": "relational"},
+            "Repeated targeted queries reconstruct model parameters over the API.",
+            {"tactic": "exfiltration", "technique": "AML.T0024"},
         ),
         (
-            "PostgreSQL is an open-source database.",
-            {"category": "database", "type": "postgresql"},
+            "A poisoned tool schema redirects the agent to attacker infrastructure.",
+            {"tactic": "ml-attack-staging", "technique": "AML.T0110"},
         ),
     ]
 
@@ -227,8 +251,8 @@ async def rag_with_metadata():
         await retriever.add_document(content, metadata=metadata)
         print(f"  inserted: {content[:40]}… {metadata}")
 
-    print("\nQuerying 'async programming'…")
-    result = await retriever.retrieve("async programming", limit=3)
+    print("\nQuerying 'overriding the model's instructions'…")
+    result = await retriever.retrieve("overriding the model's instructions", limit=3)
     for r in result.documents:
         print(f"  score={r.score:.4f}  {r.document.content[:60]}…")
         print(f"    metadata: {r.document.metadata}")
@@ -242,7 +266,7 @@ async def rag_with_metadata():
 async def main():
     missing = _missing_env()
     if missing:
-        print("\n--- Notebook 38: RAG basics ---")
+        print("\n--- Notebook 38: RAG basics (MITRE ATLAS Index) ---")
         print(
             "Required environment variables not set; skipping the live "
             "demo so this file still runs cleanly in CI.\n"

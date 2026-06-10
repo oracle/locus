@@ -1,13 +1,14 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 """
-Notebook 09: give an agent tools.
+Notebook 07: IOC enrichment with tools.
 
-A model without tools can only answer from what's already in its
-context. Tools let the agent reach out — do math, look up data, call
-APIs — and bring the result back into the conversation. Tulip runs this
-as a small loop: the model decides whether to call a tool, Tulip runs
-the tool, the result is fed back into the next model call.
+A model without tools can only guess about indicators from what's
+already in its context — and guessed verdicts are how false positives
+are born. Tools let the agent reach out — look up a hash, pull WHOIS
+data — and bring real evidence back into the conversation. Tulip runs
+this as a small ReAct loop: the model decides whether to call a tool,
+Tulip runs the tool, the result is fed back into the next model call.
 
 Key ideas:
 - ``@tool`` turns a plain Python function into something the model can
@@ -15,19 +16,23 @@ Key ideas:
 - Pass tools to ``Agent(tools=[...])`` and the agent picks when to use
   them.
 - Each tool call shows up as a ``ToolStartEvent`` / ``ToolCompleteEvent``
-  pair in the event stream.
+  pair in the event stream — an auditable record of every lookup.
 - Tools can take typed arguments (including optional ones) and return
   anything JSON-serialisable — strings, dicts, lists.
 
+The indicators here are benign by design: clearly fake hashes, RFC 5737
+documentation IPs, and ``*.example`` domains. The credential-stuffing
+sightings map to ATT&CK T1110.004.
+
 Run it:
-    .venv/bin/python examples/notebook_15_agent_with_tools.py
+    .venv/bin/python examples/notebook_07_agent_with_tools.py
 
 The default provider is the mock model; set TULIP_MODEL_PROVIDER for a live one (e.g.
 ``openai.gpt-4.1`` or ``meta.llama-3.3-70b-instruct``). Drop in
 ``TULIP_MODEL_PROVIDER=mock`` for an offline run. Tool-calling also
 works against OpenAI, Anthropic.
 
-Prerequisite: notebook 08.
+Prerequisite: notebook 06.
 """
 
 import asyncio
@@ -41,35 +46,44 @@ from tulip.tools import tool
 
 
 # =============================================================================
-# Part 1: define a tool
+# Part 1: define an enrichment tool
 # =============================================================================
 
 # A tool is a plain Python function decorated with @tool. The docstring
-# is what the model reads to decide when to call it.
+# is what the model reads to decide when to call it. All intel data
+# below is invented — clearly fake hashes and RFC 5737 / .example IOCs.
 
 
 @tool
-def add_numbers(a: int, b: int) -> int:
-    """Add two numbers together."""
-    return a + b
+def lookup_hash(sha256: str) -> str:
+    """Look up a file hash in the malware intel database."""
+    known = {
+        "aa11bb22cc33dd44": "EICAR test file — flagged by 60/70 engines",
+        "aa11aa11aa11aa11": "FakeLoader sample (test corpus) — flagged by 41/70 engines",
+    }
+    return known.get(sha256.lower(), f"Hash {sha256} not present in any intel feed")
 
 
 @tool
-def multiply_numbers(a: int, b: int) -> int:
-    """Multiply two numbers together."""
-    return a * b
+def whois_domain(domain: str) -> str:
+    """Look up WHOIS registration data for a domain."""
+    records = {
+        "evil.example": "registered 12 days ago, registrant redacted, NS ns1.cheaphost.example",
+        "phish.example.net": "registered 3 days ago, registrant redacted, free TLS certificate",
+    }
+    return records.get(domain.lower(), f"{domain}: registered 2014, corporate registrant on file")
 
 
 def example_simple_tools():
     """Show the tool metadata Tulip generates from a decorated function."""
     print("=== Part 1: Simple Tools ===\n")
 
-    result = add_numbers(5, 3)
-    print(f"Direct call: add_numbers(5, 3) = {result}")
+    result = lookup_hash("aa11bb22cc33dd44")
+    print(f"Direct call: lookup_hash('aa11bb22cc33dd44') = {result}")
 
-    print(f"\nTool name: {add_numbers.name}")
-    print(f"Tool description: {add_numbers.description}")
-    print(f"Tool parameters: {add_numbers.parameters}")
+    print(f"\nTool name: {lookup_hash.name}")
+    print(f"Tool description: {lookup_hash.description}")
+    print(f"Tool parameters: {lookup_hash.parameters}")
 
     import time as _t
 
@@ -79,8 +93,8 @@ def example_simple_tools():
     )
     t0 = _t.perf_counter()
     desc = agent.run_sync(
-        f"In one sentence, when would an LLM agent use a tool called '{add_numbers.name}' "
-        f"that {add_numbers.description}?"
+        f"In one sentence, when would a SOC agent use a tool called '{lookup_hash.name}' "
+        f"that {lookup_hash.description}?"
     )
     dt = _t.perf_counter() - t0
     print(
@@ -92,7 +106,7 @@ def example_simple_tools():
 
 
 # =============================================================================
-# Part 2: hand tools to an agent
+# Part 2: hand tools to an enrichment agent
 # =============================================================================
 
 
@@ -104,14 +118,15 @@ def example_agent_with_tools():
 
     agent = Agent(
         model=model,
-        tools=[add_numbers, multiply_numbers],
-        system_prompt="You are a calculator assistant. Use the provided tools to perform calculations.",
+        tools=[lookup_hash, whois_domain],
+        system_prompt="You are an IOC-enrichment assistant. Use the provided tools to look up "
+        "indicators before giving a verdict.",
     )
 
     print(f"Agent has {len(agent.tools)} tools registered")
 
-    result = agent.run_sync("What is 15 + 27?")
-    print("\nQ: What is 15 + 27?")
+    result = agent.run_sync("Is the hash aa11bb22cc33dd44 known malware?")
+    print("\nQ: Is the hash aa11bb22cc33dd44 known malware?")
     print(f"A: {result.message}")
     print(f"Tool calls made: {result.metrics.tool_calls}")
     print()
@@ -124,29 +139,29 @@ def example_agent_with_tools():
 
 @tool
 def get_current_time() -> str:
-    """Get the current date and time."""
+    """Get the current date and time, for case-log timestamps."""
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 @tool
-def calculate_age(birth_year: int) -> str:
-    """Calculate someone's age given their birth year."""
+def certificate_age(issued_year: int) -> str:
+    """Calculate how old a TLS certificate is given its issuance year."""
     current_year = datetime.now().year
-    age = current_year - birth_year
-    return f"A person born in {birth_year} is {age} years old."
+    age = current_year - issued_year
+    return f"A certificate issued in {issued_year} is {age} years old."
 
 
 @tool
-def format_greeting(name: str, formal: bool = False) -> str:
-    """Create a greeting for someone.
+def format_case_title(indicator: str, urgent: bool = False) -> str:
+    """Create a case title for an indicator under investigation.
 
     Args:
-        name: The person's name
-        formal: Whether to use formal greeting (default: False)
+        indicator: The IOC the case is about
+        urgent: Whether to flag the case as urgent (default: False)
     """
-    if formal:
-        return f"Good day, {name}. It is a pleasure to meet you."
-    return f"Hey {name}! Nice to meet you!"
+    if urgent:
+        return f"[URGENT] Investigation: {indicator} — immediate triage required."
+    return f"Investigation: {indicator} — routine triage."
 
 
 def example_complex_tools():
@@ -157,14 +172,14 @@ def example_complex_tools():
 
     agent = Agent(
         model=model,
-        tools=[get_current_time, calculate_age, format_greeting],
-        system_prompt="You are a helpful assistant with access to time and greeting tools.",
+        tools=[get_current_time, certificate_age, format_case_title],
+        system_prompt="You are a SOC assistant with access to time and case-management tools.",
     )
 
     prompts = [
-        "What time is it right now?",
-        "How old would someone born in 1990 be?",
-        "Give me a formal greeting for Dr. Smith",
+        "What time is it right now? I need it for the case log.",
+        "How old is a TLS certificate issued in 2019?",
+        "Give me an urgent case title for the domain evil.example",
     ]
 
     for prompt in prompts:
@@ -175,26 +190,29 @@ def example_complex_tools():
 
 
 # =============================================================================
-# Part 4: watch tool calls happen in the event stream
+# Part 4: watch enrichment lookups happen in the event stream
 # =============================================================================
 
 
 async def example_tool_events():
-    """Stream events to see the model plan, call a tool, and use its result."""
+    """Stream events to see the model plan, call a tool, and use its evidence."""
     print("=== Part 4: Tool Execution Events ===\n")
 
     model = get_model(max_tokens=200)
 
     agent = Agent(
         model=model,
-        tools=[add_numbers, multiply_numbers],
-        system_prompt="Use tools to calculate. Always use tools for math.",
+        tools=[lookup_hash, whois_domain],
+        system_prompt="Use tools to enrich indicators. Always look up hashes and domains "
+        "before answering.",
     )
 
-    print("Q: What is (5 + 3) * 2?\n")
+    print("Q: Enrich hash aa11bb22cc33dd44 and domain evil.example, then give a verdict.\n")
     print("Events:")
 
-    async for event in agent.run("What is (5 + 3) * 2?"):
+    async for event in agent.run(
+        "Enrich hash aa11bb22cc33dd44 and domain evil.example, then give a verdict."
+    ):
         event_type = event.event_type
 
         if event_type == "tool_start":
@@ -218,89 +236,96 @@ async def example_tool_events():
 
 
 @tool
-def search_products(query: str, max_results: int = 3) -> list[dict]:
-    """Search for products in the catalog.
+def search_iocs(query: str, max_results: int = 3) -> list[dict]:
+    """Search for indicators of compromise in the intel catalogue.
 
     Args:
-        query: Search query
+        query: Search query (matches indicator or type)
         max_results: Maximum number of results to return
     """
-    # In-memory catalogue stands in for a database. The search logic
-    # below is the part worth reading.
-    products = [
-        {"id": 1, "name": "Laptop", "price": 999.99, "category": "electronics", "in_stock": True},
+    # In-memory catalogue stands in for a threat-intel platform. The
+    # search logic below is the part worth reading. All IOCs are fake.
+    iocs = [
+        {"id": 1, "indicator": "198.51.100.7", "type": "ip", "verdict": "suspicious"},
         {
             "id": 2,
-            "name": "Headphones",
-            "price": 149.99,
-            "category": "electronics",
-            "in_stock": True,
+            "indicator": "evil.example",
+            "type": "domain",
+            "verdict": "malicious",
         },
-        {"id": 3, "name": "Mouse", "price": 49.99, "category": "electronics", "in_stock": True},
-        {"id": 4, "name": "Keyboard", "price": 79.99, "category": "electronics", "in_stock": False},
-        {"id": 5, "name": "Monitor", "price": 299.99, "category": "electronics", "in_stock": True},
-        {"id": 6, "name": "Webcam", "price": 89.99, "category": "electronics", "in_stock": True},
+        {"id": 3, "indicator": "203.0.113.9", "type": "ip", "verdict": "suspicious"},
+        {"id": 4, "indicator": "phish.example.net", "type": "domain", "verdict": "malicious"},
+        {"id": 5, "indicator": "aa11bb22cc33dd44", "type": "hash", "verdict": "malicious"},
+        {"id": 6, "indicator": "192.0.2.55", "type": "ip", "verdict": "benign"},
         {
             "id": 7,
-            "name": "Standing Desk",
-            "price": 449.99,
-            "category": "furniture",
-            "in_stock": True,
+            "indicator": "corp.example",
+            "type": "domain",
+            "verdict": "benign",
         },
         {
             "id": 8,
-            "name": "Office Chair",
-            "price": 329.99,
-            "category": "furniture",
-            "in_stock": False,
+            "indicator": "aa11aa11aa11aa11",
+            "type": "hash",
+            "verdict": "malicious",
         },
     ]
 
-    # Case-insensitive match on name OR category.
+    # Case-insensitive match on indicator OR type.
     q = query.lower()
-    matches = [p for p in products if q in p["name"].lower() or q in p["category"].lower()]
+    matches = [i for i in iocs if q in i["indicator"].lower() or q in i["type"].lower()]
     return matches[:max_results]
 
 
 @tool
-def get_product_details(product_id: int) -> dict:
-    """Get detailed information about a specific product."""
+def get_ioc_details(ioc_id: int) -> dict:
+    """Get detailed intel about a specific indicator of compromise."""
     details = {
         1: {
             "id": 1,
-            "name": "Laptop",
-            "price": 999.99,
-            "specs": '16GB RAM, 512GB SSD, 14" 2.8K display',
+            "indicator": "198.51.100.7",
+            "verdict": "suspicious",
+            "notes": "seen in 2 credential-stuffing campaigns (ATT&CK T1110.004), last 30 days",
         },
         2: {
             "id": 2,
-            "name": "Headphones",
-            "price": 149.99,
-            "specs": "Noise-canceling, 40h battery, USB-C",
+            "indicator": "evil.example",
+            "verdict": "malicious",
+            "notes": "phishing landing pages, registered 12 days ago",
         },
         3: {
             "id": 3,
-            "name": "Mouse",
-            "price": 49.99,
-            "specs": "Wireless, 16k DPI, programmable buttons",
+            "indicator": "203.0.113.9",
+            "verdict": "suspicious",
+            "notes": "scanning activity reported by 3 partner orgs",
         },
-        4: {"id": 4, "name": "Keyboard", "price": 79.99, "specs": "Mechanical, hot-swappable, RGB"},
-        5: {"id": 5, "name": "Monitor", "price": 299.99, "specs": '27" 4K IPS, 144Hz, USB-C 90W'},
-        6: {"id": 6, "name": "Webcam", "price": 89.99, "specs": "1080p60, dual mic, auto-framing"},
+        4: {
+            "id": 4,
+            "indicator": "phish.example.net",
+            "verdict": "malicious",
+            "notes": "credential-harvesting kit",
+        },
+        5: {"id": 5, "indicator": "aa11bb22cc33dd44", "verdict": "malicious", "notes": "EICAR"},
+        6: {
+            "id": 6,
+            "indicator": "192.0.2.55",
+            "verdict": "benign",
+            "notes": "documentation range, no sightings",
+        },
         7: {
             "id": 7,
-            "name": "Standing Desk",
-            "price": 449.99,
-            "specs": "Sit-stand, 60×30, programmable presets",
+            "indicator": "corp.example",
+            "verdict": "benign",
+            "notes": "company-owned domain, allowlisted",
         },
         8: {
             "id": 8,
-            "name": "Office Chair",
-            "price": 329.99,
-            "specs": "Lumbar support, adjustable arms",
+            "indicator": "aa11aa11aa11aa11",
+            "verdict": "malicious",
+            "notes": "test-corpus loader sample",
         },
     }
-    return details.get(product_id, {"error": f"Product {product_id} not found"})
+    return details.get(ioc_id, {"error": f"IOC {ioc_id} not found"})
 
 
 def example_structured_tools():
@@ -311,12 +336,12 @@ def example_structured_tools():
 
     agent = Agent(
         model=model,
-        tools=[search_products, get_product_details],
-        system_prompt="You are a shopping assistant. Help users find products.",
+        tools=[search_iocs, get_ioc_details],
+        system_prompt="You are a threat-intel assistant. Help analysts look up indicators.",
     )
 
-    result = agent.run_sync("Find me some electronics, then tell me about the laptop")
-    print("Q: Find me some electronics, then tell me about the laptop")
+    result = agent.run_sync("Find domain IOCs, then tell me more about evil.example")
+    print("Q: Find domain IOCs, then tell me more about evil.example")
     print(f"A: {result.message}")
     print(f"\nTool calls made: {result.metrics.tool_calls}")
     print()
@@ -330,7 +355,7 @@ def example_structured_tools():
 def main():
     """Run all notebook parts."""
     print("=" * 60)
-    print("Notebook 09: Agent with Tools")
+    print("Notebook 07: IOC Enrichment with Tools")
     print("=" * 60)
     print()
 
@@ -344,7 +369,7 @@ def main():
     example_structured_tools()
 
     print("=" * 60)
-    print("Next: Notebook 10 — Agent Memory")
+    print("Next: Notebook 08 — Investigation Memory")
     print("=" * 60)
 
 

@@ -1,12 +1,30 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 """
-Notebook 28: specialist agents — domain focus, tools, and playbooks.
+Notebook 27: CURATOR — the inference-fingerprinting specialist.
 
-Notebook 27 introduced the Specialist as the worker an orchestrator
-hands tasks to. This notebook dives into the Specialist itself: how to
-narrow a model's failure surface with a focused system prompt, a
-hand-picked tool set, optional playbooks, and a confidence threshold.
+Notebook 26 introduced the Specialist as the worker MARSHAL hands tasks
+to. This notebook dives into the Specialist itself, using CURATOR — the
+SOC's inference-forensics specialist — as the running case: how to narrow
+a model's failure surface with a focused system prompt, a hand-picked
+tool set, optional playbooks (your runbooks, encoded), and a confidence
+threshold.
+
+CURATOR's job is timing side-channel inference fingerprinting: identifying
+which model, inference engine, and accelerator are serving an endpoint
+purely from observable streaming-timing features (TTFT, inter-token
+latency, cadence variance) — no privileges, no exploit. The defensive use
+is inventory verification and detecting model-extraction reconnaissance
+against the org's own inference endpoints (MITRE ATLAS AML.T0040 AI Model
+Inference API Access, AML.T0024 Exfiltration via AI Inference API).
+
+The capability is demonstrated with ``tulip.security``: a deterministic
+mock classifier maps a timing feature vector to a ``FingerprintVerdict``,
+and ``ground_fingerprint`` turns that verdict into a finding **only** when
+the evidence clears the GSAR grounding threshold. Low feature coverage
+yields a weak evidence partition, so an under-observed endpoint abstains
+rather than asserting a fingerprint — a false fingerprint is worse than
+none.
 
 - A ``Specialist`` is a Tulip ``Agent`` with role metadata
   (``specialist_type``, ``description``), a tool list, and a
@@ -18,22 +36,23 @@ hand-picked tool set, optional playbooks, and a confidence threshold.
   picks one based on task description matching.
 - Pre-built helpers (``create_log_analyst``, ``create_metrics_analyst``,
   ``create_trace_analyst``, ``create_code_analyst``) ship with sensible
-  defaults for common observability domains.
+  defaults for evidence domains every investigation touches.
 
 Run it:
-    .venv/bin/python examples/notebook_33_specialist_agents.py
+    .venv/bin/python examples/notebook_27_specialist_agents.py
 
 The default provider is the bundled mock model. Set TULIP_MODEL_PROVIDER=openai
 (or anthropic) and the matching credentials to use a live model. Set
 ``TULIP_MODEL_PROVIDER=mock`` for offline runs.
 
 Prerequisites:
-- Notebook 08 (Agent basics).
-- Notebook 27 (Orchestrator) — Specialists are the workers it routes to.
+- Notebook 06 (Agent basics).
+- Notebook 26 (Orchestrator) — Specialists are the workers MARSHAL routes to.
 """
 
 import asyncio
 import time
+from collections.abc import Mapping
 
 from config import get_model, print_config
 
@@ -46,6 +65,16 @@ from tulip.multiagent.specialist import (
     create_log_analyst,
     create_metrics_analyst,
     create_trace_analyst,
+)
+from tulip.reasoning.gsar import Claim, EvidenceType, Partition
+from tulip.security import (
+    AtlasTechnique,
+    FingerprintVerdict,
+    Indicator,
+    IndicatorType,
+    Severity,
+    ground_fingerprint,
+    is_finding,
 )
 from tulip.tools.decorator import tool
 
@@ -64,9 +93,61 @@ def _llm_call(
     return res.message.strip()
 
 
+# The expected timing-feature schema for a streaming-API fingerprint.
+# Coverage is the fraction of these the probe actually measured; below
+# this floor the classifier returns low confidence and grounding abstains.
+_FINGERPRINT_FEATURES = ("ttft_ms_p50", "itl_ms_mean", "itl_cv", "tps_mean")
+_COVERAGE_FLOOR = 0.60
+
+
+def classify_fingerprint(features: Mapping[str, float]) -> FingerprintVerdict:
+    """Deterministic mock inference-fingerprint classifier.
+
+    Maps a timing feature vector to a ``(model, engine, hardware)`` verdict
+    over a fixed lookup — no model file, no scikit, no network. A real
+    deployment swaps in a fingerprinting service behind this same
+    signature. Coverage below :data:`_COVERAGE_FLOOR` returns a
+    low-confidence "unknown" verdict so the caller abstains under GSAR.
+
+    Args:
+        features: Observed timing features keyed by name.
+
+    Returns:
+        A :class:`~tulip.security.FingerprintVerdict`.
+    """
+    observed = [f for f in _FINGERPRINT_FEATURES if f in features]
+    coverage = len(observed) / len(_FINGERPRINT_FEATURES)
+    if coverage < _COVERAGE_FLOOR:
+        return FingerprintVerdict(
+            model="unknown",
+            engine="unknown",
+            hardware="unknown",
+            confidence=0.30,
+            feature_coverage=coverage,
+        )
+    # Fixed lookup: continuous-batching cadence + 7B-class inter-token
+    # latency reads as an open-weights model behind vLLM on a datacenter GPU.
+    itl = features.get("itl_ms_mean", 0.0)
+    if itl <= 15.0:
+        return FingerprintVerdict(
+            model="open-weights-7b",
+            engine="vLLM",
+            hardware="datacenter-gpu",
+            confidence=0.91,
+            feature_coverage=coverage,
+        )
+    return FingerprintVerdict(
+        model="open-weights-70b",
+        engine="TGI",
+        hardware="datacenter-gpu",
+        confidence=0.78,
+        feature_coverage=coverage,
+    )
+
+
 async def main():
     print("=" * 60)
-    print("Notebook 28: specialist agents — domain focus, tools, playbooks")
+    print("Notebook 27: CURATOR — the inference-fingerprinting specialist")
     print("=" * 60)
     print()
     print_config()
@@ -79,22 +160,22 @@ async def main():
     print("\n=== Part 1: Specialist Anatomy ===\n")
 
     # A specialist pairs a focused system prompt with domain tools,
-    # optional playbooks, and a confidence threshold.
+    # optional playbooks, and a confidence threshold. CURATOR is the SOC's
+    # inference-forensics specialist.
     specialist = Specialist(
-        name="API Specialist",
-        specialist_type="api_analyst",
-        description="Analyzes API performance, errors, and patterns",
-        system_prompt="""You are an API analysis specialist. Your expertise:
-1. Analyzing HTTP status codes and error rates
-2. Identifying slow endpoints
-3. Detecting anomalous traffic patterns
-4. Recommending API optimizations
+        name="CURATOR",
+        specialist_type="inference_forensics",
+        description="Fingerprints inference endpoints from timing side-channels",
+        system_prompt="""You are CURATOR, an inference-forensics specialist. Your expertise:
+1. Measuring streaming-API timing features (TTFT, inter-token latency, cadence variance)
+2. Mapping a timing feature vector to a (model, engine, hardware) verdict
+3. Verifying served endpoints against the approved inventory
+4. Flagging model-extraction reconnaissance against the org's own endpoints
 
-When analyzing:
-- Check error rates by endpoint
-- Look for latency outliers
-- Identify authentication issues
-- Note rate limiting triggers""",
+When fingerprinting:
+- Treat a single sample as inference, not evidence — collect a stable feature vector
+- Report feature coverage; abstain when too little of the schema is observed
+- Never assert a fingerprint you cannot ground — a wrong model attribution is worse than none""",
         max_iterations=10,
         confidence_threshold=0.85,
         model=model,
@@ -116,80 +197,84 @@ When analyzing:
     # =========================================================================
     print("\n=== Part 2: Domain Tools ===\n")
 
-    @tool(name="get_endpoint_stats", description="Get statistics for an API endpoint")
-    async def get_endpoint_stats(endpoint: str) -> str:
-        return f"Endpoint {endpoint}: 1000 req/min, 2.5% error rate, p99=450ms"
+    @tool(name="probe_timing", description="Measure streaming-timing features for an endpoint")
+    async def probe_timing(endpoint: str) -> str:
+        # Benign, fixed measurements against a documentation-range endpoint.
+        return (
+            f"Probe {endpoint}: ttft_ms_p50=38.2 itl_ms_mean=11.4 itl_cv=0.07 tps_mean=87.6 "
+            "(4/4 features observed)"
+        )
 
-    @tool(name="get_error_breakdown", description="Get error breakdown by status code")
-    async def get_error_breakdown() -> str:
-        return "Errors: 400=15%, 401=5%, 403=2%, 500=75%, 503=3%"
+    @tool(name="classify_endpoint", description="Map the timing feature vector to a model verdict")
+    async def classify_endpoint() -> str:
+        return "Verdict: open-weights-7b on vLLM / datacenter-gpu, confidence 0.91, coverage 1.00"
 
-    @tool(name="get_top_slow_endpoints", description="Get slowest API endpoints")
-    async def get_top_slow_endpoints() -> str:
-        return "Slowest: /api/users (800ms), /api/search (650ms), /api/reports (500ms)"
+    @tool(name="check_inventory", description="Compare a verdict against the approved inventory")
+    async def check_inventory() -> str:
+        return "Inventory: endpoint 203.0.113.10:443 approved to serve open-weights-7b on vLLM"
 
     specialist = Specialist(
-        name="API Specialist",
-        specialist_type="api_analyst",
-        description="Analyzes API performance, errors, and patterns",
-        system_prompt="You analyze API behavior and performance.",
-        tools=[get_endpoint_stats, get_error_breakdown, get_top_slow_endpoints],
+        name="CURATOR",
+        specialist_type="inference_forensics",
+        description="Fingerprints inference endpoints from timing side-channels",
+        system_prompt="You fingerprint inference endpoints from streaming-timing features.",
+        tools=[probe_timing, classify_endpoint, check_inventory],
         model=model,
     )
 
     print(f"Tools available: {[t.name for t in specialist.tools]}")
     print(
-        f"AI commentary: {_llm_call('In one sentence, why does giving a Specialist domain-specific tools dramatically narrow its failure surface?')}"
+        f"AI commentary: {_llm_call('In one sentence, why does giving a Specialist domain-specific security tools dramatically narrow its failure surface?')}"
     )
 
     # =========================================================================
-    # Part 3: encode a procedure as a Playbook
+    # Part 3: encode a runbook as a Playbook
     # =========================================================================
     print("\n=== Part 3: Specialist Playbooks ===\n")
 
-    api_debug_playbook = Playbook(
-        name="API Debug Procedure",
-        description="Standard procedure for debugging API issues",
+    fingerprint_playbook = Playbook(
+        name="Inference Fingerprint Procedure",
+        description="Standard procedure for fingerprinting an inference endpoint",
         preconditions=[
-            "Incident ticket exists",
-            "Basic metrics are accessible",
+            "Endpoint is in scope for inventory verification",
+            "Probing is rate-limited and authorized against our own endpoint",
         ],
         steps=[
             PlaybookStep(
-                instruction="Check overall API health metrics",
-                required_tools=["get_endpoint_stats"],
-                expected_output="Current request rate and error percentages",
+                instruction="Measure the streaming-timing feature vector",
+                required_tools=["probe_timing"],
+                expected_output="TTFT, inter-token latency, cadence variance, and coverage",
             ),
             PlaybookStep(
-                instruction="Analyze error distribution",
-                required_tools=["get_error_breakdown"],
-                expected_output="Breakdown of errors by type",
-                on_failure="Escalate if unable to get error data",
+                instruction="Classify the feature vector to a model/engine/hardware verdict",
+                required_tools=["classify_endpoint"],
+                expected_output="Verdict with confidence and feature coverage",
+                on_failure="Abstain if feature coverage is below the schema floor",
             ),
             PlaybookStep(
-                instruction="Identify slow endpoints",
-                required_tools=["get_top_slow_endpoints"],
-                expected_output="List of endpoints exceeding latency threshold",
+                instruction="Compare the verdict against the approved inventory",
+                required_tools=["check_inventory"],
+                expected_output="Match / mismatch against what the endpoint is approved to serve",
             ),
         ],
-        success_criteria="Root cause identified or escalation path determined",
+        success_criteria="Grounded verdict reconciled against inventory, or a logged abstention",
     )
 
-    specialist.playbooks.append(api_debug_playbook)
+    specialist.playbooks.append(fingerprint_playbook)
 
-    print(f"Playbook: {api_debug_playbook.name}")
-    print(f"  Preconditions: {api_debug_playbook.preconditions}")
-    print(f"  Steps: {len(api_debug_playbook.steps)}")
-    print(f"  Success criteria: {api_debug_playbook.success_criteria}")
+    print(f"Playbook: {fingerprint_playbook.name}")
+    print(f"  Preconditions: {fingerprint_playbook.preconditions}")
+    print(f"  Steps: {len(fingerprint_playbook.steps)}")
+    print(f"  Success criteria: {fingerprint_playbook.success_criteria}")
 
     # ``to_prompt()`` renders the playbook as the text block injected
     # into the system prompt when the playbook is selected.
-    playbook_prompt = api_debug_playbook.to_prompt()
+    playbook_prompt = fingerprint_playbook.to_prompt()
     print("\nPlaybook prompt:")
     print("-" * 40)
     print(playbook_prompt[:500] + "...")
     print(
-        f"AI commentary: {_llm_call('In one sentence, when does attaching a Playbook to a Specialist matter most?')}"
+        f"AI commentary: {_llm_call('In one sentence, when does attaching a fixed Playbook to a security Specialist matter most?')}"
     )
 
     # =========================================================================
@@ -197,34 +282,34 @@ When analyzing:
     # =========================================================================
     print("\n=== Part 4: Playbook Selection ===\n")
 
-    performance_playbook = Playbook(
-        name="Performance Optimization",
-        description="Procedure for optimizing API performance",
+    extraction_recon_playbook = Playbook(
+        name="Model Extraction Recon Triage",
+        description="Procedure for investigating suspected model-extraction probing",
         steps=[
-            PlaybookStep(instruction="Profile slow endpoints"),
-            PlaybookStep(instruction="Identify bottlenecks"),
-            PlaybookStep(instruction="Recommend optimizations"),
+            PlaybookStep(instruction="Profile request volume and prompt diversity per client"),
+            PlaybookStep(instruction="Check whether timing-probe patterns target a single endpoint"),
+            PlaybookStep(instruction="Correlate the source against the partner-mesh allowlist"),
         ],
     )
 
-    security_playbook = Playbook(
-        name="Security Analysis",
-        description="Procedure for analyzing security issues",
+    inventory_drift_playbook = Playbook(
+        name="Inventory Drift Investigation",
+        description="Procedure for investigating an endpoint serving an unexpected model",
         steps=[
-            PlaybookStep(instruction="Check authentication failures"),
-            PlaybookStep(instruction="Review access patterns"),
-            PlaybookStep(instruction="Identify suspicious activity"),
+            PlaybookStep(instruction="Re-fingerprint the endpoint to confirm the served model"),
+            PlaybookStep(instruction="Diff the verdict against the approved inventory record"),
+            PlaybookStep(instruction="Escalate a confirmed mismatch to the change-control owner"),
         ],
     )
 
-    specialist.playbooks.extend([performance_playbook, security_playbook])
+    specialist.playbooks.extend([extraction_recon_playbook, inventory_drift_playbook])
 
     # select_playbook matches the task description against each playbook's
     # name and description; it returns None if nothing fits.
     tasks = [
-        "Debug the API errors we're seeing",
-        "Optimize the slow /api/search endpoint",
-        "Check for unauthorized access attempts",
+        "Fingerprint the inference endpoint at 203.0.113.10 for case IR-2026-017",
+        "Investigate suspected model-extraction recon against the public API",
+        "Investigate an endpoint that appears to be serving an unexpected model",
     ]
 
     for task in tasks:
@@ -233,8 +318,94 @@ When analyzing:
             print(f"Task: '{task[:40]}...'")
             print(f"  Selected playbook: {selected.name}")
     print(
-        f"AI commentary: {_llm_call('In one sentence, why is automatic playbook selection by task description risky and how do you mitigate it?')}"
+        f"AI commentary: {_llm_call('In one sentence, why is automatic playbook selection by task description risky in a SOC and how do you mitigate it?')}"
     )
+
+    # =========================================================================
+    # Part 4b: ground the fingerprint — emit a finding only with evidence
+    # =========================================================================
+    # CURATOR's verdict is not a finding until it clears the GSAR grounding
+    # threshold. ``ground_fingerprint`` (tulip.security) admits a
+    # FingerprintFinding only when the evidence partition proceeds; a weak
+    # partition abstains. This is the inference-fingerprinting capability
+    # the mythos calls "the Probe" — MITRE ATLAS AML.T0040 / AML.T0024.
+    print("\n=== Part 4b: Grounding the Fingerprint ===\n")
+
+    # Full-coverage probe: 4/4 timing features observed. The classifier
+    # returns a high-confidence verdict; the timing feature vector is the
+    # finding's evidence, partitioned by GSAR evidence type.
+    full_features = {"ttft_ms_p50": 38.2, "itl_ms_mean": 11.4, "itl_cv": 0.07, "tps_mean": 87.6}
+    verdict = classify_fingerprint(full_features)
+    print(
+        f"Verdict (coverage {verdict.feature_coverage:.0%}): "
+        f"{verdict.model} on {verdict.engine} / {verdict.hardware} "
+        f"@ confidence {verdict.confidence:.0%}"
+    )
+
+    grounded_partition = Partition(
+        grounded=[
+            Claim(
+                text="TTFT p50 38.2ms matches the vLLM continuous-batching profile",
+                type=EvidenceType.TOOL_MATCH,
+                evidence_refs=["probe:ttft_ms_p50=38.2"],
+            ),
+            Claim(
+                text="inter-token latency 11.4ms/token is consistent with the 7B class",
+                type=EvidenceType.SPECIFIC_DATA,
+                evidence_refs=["probe:itl_ms_mean=11.4"],
+            ),
+            Claim(
+                text="cadence variance 0.07 sits in the datacenter-GPU DVFS residual band",
+                type=EvidenceType.SIGNAL_MATCH,
+                evidence_refs=["probe:itl_cv=0.07"],
+            ),
+        ],
+    )
+    fp_result = ground_fingerprint(
+        verdict=verdict,
+        asset="203.0.113.10:443",
+        partition=grounded_partition,
+        severity=Severity.MEDIUM,
+        indicators=[Indicator(type=IndicatorType.ENDPOINT, value="203.0.113.10:443")],
+        taxonomy=[
+            AtlasTechnique.INFERENCE_API_ACCESS,
+            AtlasTechnique.EXFILTRATION_VIA_INFERENCE_API,
+        ],
+    )
+    if is_finding(fp_result):
+        print(f"  SHIPPED finding: {fp_result.title}")
+        print(f"    gsar_score={fp_result.gsar_score:.2f} severity={fp_result.severity.value}")
+        print(f"    taxonomy={[t.value for t in fp_result.taxonomy]}")
+    else:
+        print(f"  abstained: {fp_result.reason}")
+
+    # Low-coverage probe: 1/4 features. The classifier returns "unknown"
+    # at low confidence; the partition is a lone inference claim, so GSAR
+    # abstains rather than asserting a fingerprint.
+    sparse_features = {"ttft_ms_p50": 41.0}
+    weak_verdict = classify_fingerprint(sparse_features)
+    print(
+        f"\nUnder-observed endpoint (coverage {weak_verdict.feature_coverage:.0%}): "
+        f"classifier confidence {weak_verdict.confidence:.0%}"
+    )
+    weak_partition = Partition(
+        ungrounded=[
+            Claim(
+                text="a single TTFT sample loosely resembles a batched server",
+                type=EvidenceType.INFERENCE,
+                evidence_refs=["probe:ttft_ms_p50=41.0"],
+            ),
+        ],
+    )
+    weak_result = ground_fingerprint(
+        verdict=weak_verdict,
+        asset="203.0.113.20:443",
+        partition=weak_partition,
+    )
+    if is_finding(weak_result):
+        print(f"  SHIPPED finding: {weak_result.title}")
+    else:
+        print(f"  abstained ({weak_result.decision.value}): {weak_result.reason}")
 
     # =========================================================================
     # Part 5: drive the specialist end-to-end
@@ -242,11 +413,12 @@ When analyzing:
     print("\n=== Part 5: Executing Specialists ===\n")
 
     result = await specialist.execute(
-        task="API error rates have spiked in the last hour. Investigate and identify the cause.",
+        task="Fingerprint the inference endpoint at 203.0.113.10:443 and reconcile the verdict "
+        "against the approved inventory.",
         context={
-            "incident_id": "INC-2024-001",
-            "affected_services": ["api-gateway"],
-            "start_time": "2024-01-15T10:00:00Z",
+            "case_id": "IR-2026-017",
+            "endpoint": "203.0.113.10:443",
+            "submitted_by": "inventory-verification sweep",
         },
     )
 
@@ -260,7 +432,7 @@ When analyzing:
         print(f"  Error: {result.error}")
 
     # =========================================================================
-    # Part 6: pre-built specialists for common domains
+    # Part 6: pre-built specialists for common evidence domains
     # =========================================================================
     print("\n=== Part 6: Pre-built Specialists ===\n")
 
@@ -278,7 +450,9 @@ When analyzing:
         prompt_preview = spec.system_prompt.split("\n")[0]
         print(f"    Focus: {prompt_preview[:60]}...")
     t0 = time.perf_counter()
-    p6 = await metrics_analyst.execute(task="In one sentence, what does a metrics analyst do?")
+    p6 = await metrics_analyst.execute(
+        task="In one sentence, what does a metrics analyst contribute to incident response?"
+    )
     dt = time.perf_counter() - t0
     print(f"\n  [model call: {dt:.2f}s · metrics_analyst.execute()]")
     if p6.output:
@@ -289,23 +463,23 @@ When analyzing:
     # =========================================================================
     print("\n=== Part 7: Custom Tools Integration ===\n")
 
-    @tool(name="search_logs", description="Search logs for patterns")
-    async def search_logs(pattern: str, timerange: str = "1h") -> str:
-        return f"Found 42 matches for '{pattern}' in last {timerange}"
+    @tool(name="search_auth_logs", description="Search authentication logs for patterns")
+    async def search_auth_logs(pattern: str, timerange: str = "1h") -> str:
+        return f"Found 42 auth-log matches for '{pattern}' in last {timerange}"
 
-    @tool(name="get_error_logs", description="Get recent error logs")
-    async def get_error_logs(limit: int = 10) -> str:
-        return f"Retrieved {limit} most recent error logs"
+    @tool(name="get_alert_history", description="Get recent security alerts for a host")
+    async def get_alert_history(limit: int = 10) -> str:
+        return f"Retrieved {limit} most recent security alerts"
 
     custom_log_analyst = create_log_analyst(
         model=model,
-        tools=[search_logs, get_error_logs],
+        tools=[search_auth_logs, get_alert_history],
     )
 
     print(f"Custom log analyst tools: {[t.name for t in custom_log_analyst.tools]}")
 
     log_result = await custom_log_analyst.execute(
-        task="Search for NullPointerException errors in the last hour",
+        task="Search for failed admin logins from 192.0.2.55 in the last hour",
     )
 
     print("Log analysis result:")
@@ -322,10 +496,10 @@ When analyzing:
     # certainty markers — a rough proxy that you'd typically replace
     # with a domain-specific scorer in production.
     responses = [
-        ("definitely the root cause", "High confidence markers"),
-        ("might be related to", "Low confidence markers"),
-        ("confirmed by the logs", "Verification markers"),
-        ("unclear what is causing", "Uncertainty markers"),
+        ("definitely vLLM — timing profile is unambiguous", "High confidence markers"),
+        ("might be a batched server, hard to say from one sample", "Low confidence markers"),
+        ("confirmed by the full timing feature vector", "Verification markers"),
+        ("unclear which engine produced this cadence", "Uncertainty markers"),
     ]
 
     print("Confidence markers in responses:")
@@ -333,7 +507,7 @@ When analyzing:
         confidence = specialist._estimate_confidence(response)
         print(f"  '{response}' -> {confidence:.0%} ({description})")
     print(
-        f"AI commentary: {_llm_call('In one sentence, why is keyword-based confidence estimation only a rough proxy?')}"
+        f"AI commentary: {_llm_call('In one sentence, why is keyword-based confidence estimation only a rough proxy for a security verdict?')}"
     )
 
     # =========================================================================
@@ -346,17 +520,17 @@ When analyzing:
     print()
 
     print("Pattern 2: Procedure Follower")
-    print("  Playbook-driven; each step validated against expected output.")
+    print("  Runbook-driven; each step validated against expected output.")
     print()
 
     print("Pattern 3: Adaptive Analyst")
-    print("  Multiple playbooks; the right one selected per task.")
+    print("  Multiple playbooks; the right one selected per alert.")
     print()
 
     print("Pattern 4: Pipeline Stage")
-    print("  Drops into a larger workflow; structured output, context in/out.")
+    print("  Drops into a larger IR workflow; structured output, context in/out.")
     print(
-        f"AI suggestion: {_llm_call('Suggest one extra Specialist pattern not in the four listed above. One short sentence.')}"
+        f"AI suggestion: {_llm_call('Suggest one extra security Specialist pattern not in the four listed above. One short sentence.')}"
     )
 
     # =========================================================================
@@ -370,8 +544,8 @@ When analyzing:
             "triage": Specialist(
                 name="Triage Specialist",
                 specialist_type="triage",
-                description="Initial incident assessment and severity classification",
-                system_prompt="Assess incidents and determine severity and routing.",
+                description="Initial alert assessment and severity classification",
+                system_prompt="Assess security alerts and determine severity and routing.",
                 model=model,
             ),
             "logs": create_log_analyst(model=model),
@@ -385,7 +559,7 @@ When analyzing:
         print(f"  {role}: {spec.name}")
     t0 = time.perf_counter()
     p10 = await team["triage"].execute(
-        task="In one sentence, classify this incident: 'API p99 jumped from 30ms to 800ms after a deploy.'",
+        task="In one sentence, classify this alert: 'EDR flagged encoded PowerShell spawned by winword.exe on WS-0142.'",
     )
     dt = time.perf_counter() - t0
     print(f"  [model call: {dt:.2f}s · triage.execute()]")
@@ -394,7 +568,7 @@ When analyzing:
 
     # =========================================================================
     print("\n" + "=" * 60)
-    print("Next: Notebook 29 — A2A Protocol")
+    print("Next: Notebook 28 — A2A Protocol")
     print("=" * 60)
 
 

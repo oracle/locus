@@ -1,10 +1,12 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 """
-Checkpointer Examples - Demonstrates all checkpoint backends.
+Checkpointer Examples - Durable investigation state across backends.
 
-This file shows how to use each checkpoint backend for persisting
-agent state across sessions.
+Security investigations run for days and outlive any single process:
+shift changes, restarts, crashes. This file shows how to persist an
+investigation agent's state with each checkpoint backend so a case
+can be picked up exactly where the last analyst (or process) left it.
 
 Run with: uv run python examples/checkpointer_examples.py
 """
@@ -18,25 +20,40 @@ import asyncio
 
 
 def create_sample_state():
-    """Create a sample agent state for testing."""
+    """Create a sample investigation state for testing."""
     from tulip.core.messages import Message, Role
     from tulip.core.state import AgentState
 
     state = AgentState(
-        agent_id="demo-agent",
+        agent_id="ir-copilot",
         max_iterations=20,
         confidence=0.75,
-        metadata={"session": "example", "user_id": "user-123"},
+        metadata={"case_id": "IR-2026-0042", "analyst": "analyst-7"},
     )
-    state = state.with_message(Message(role=Role.USER, content="Hello, agent!"))
-    state = state.with_message(Message(role=Role.ASSISTANT, content="Hi! How can I help?"))
-    state = state.with_message(Message(role=Role.USER, content="What's the weather?"))
+    state = state.with_message(
+        Message(
+            role=Role.USER,
+            content="New alert: impossible travel for jdoe — Toronto and Warsaw 40 minutes apart.",
+        )
+    )
+    state = state.with_message(
+        Message(
+            role=Role.ASSISTANT,
+            content="Logged. Pulling jdoe's sign-in history before judging the alert.",
+        )
+    )
+    state = state.with_message(
+        Message(
+            role=Role.USER,
+            content="Also check whether source IP 198.51.100.23 has prior reports.",
+        )
+    )
 
     return state
 
 
 def print_state_summary(state):
-    """Print a summary of the state."""
+    """Print a summary of the investigation state."""
     print(f"  Agent ID: {state.agent_id}")
     print(f"  Messages: {len(state.messages)}")
     print(f"  Confidence: {state.confidence}")
@@ -56,7 +73,7 @@ async def example_memory_checkpointer():
     Use cases:
     - Unit testing
     - Development/prototyping
-    - Short-lived sessions
+    - Short-lived triage sessions
     - Caching layer on top of persistent storage
     """
     print("\n" + "=" * 60)
@@ -71,23 +88,23 @@ async def example_memory_checkpointer():
 
     # Save state
     state = create_sample_state()
-    checkpoint_id = await backend.save(state, "demo-thread")
+    checkpoint_id = await backend.save(state, "case-0042")
     print(f"\nSaved checkpoint: {checkpoint_id}")
 
     # Load state
-    loaded = await backend.load("demo-thread")
+    loaded = await backend.load("case-0042")
     print("\nLoaded state:")
     print_state_summary(loaded)
 
-    # Create multiple checkpoints
+    # Create multiple checkpoints as the investigation firms up
     state = state.with_confidence(0.85)
-    await backend.save(state, "demo-thread", "checkpoint-v2")
+    await backend.save(state, "case-0042", "checkpoint-v2")
 
     state = state.with_confidence(0.95)
-    await backend.save(state, "demo-thread", "checkpoint-v3")
+    await backend.save(state, "case-0042", "checkpoint-v3")
 
     # List checkpoints
-    checkpoints = await backend.list_checkpoints("demo-thread")
+    checkpoints = await backend.list_checkpoints("case-0042")
     print(f"\nAll checkpoints: {checkpoints}")
 
     # Get thread count
@@ -105,10 +122,10 @@ async def example_redis_backend():
     RedisBackend stores state in Redis.
 
     Use cases:
-    - Distributed systems
+    - Distributed SOC deployments
     - High-performance requirements
     - Session caching
-    - Multi-instance deployments
+    - Multi-instance triage services
 
     Requires: redis-py and running Redis server
     """
@@ -130,16 +147,16 @@ async def example_redis_backend():
         # Save state
         state = create_sample_state()
         data = state.to_checkpoint()
-        await backend.save("redis-thread-1", data)
+        await backend.save("redis-case-0042", data)
         print("Saved checkpoint to Redis")
 
         # Load state
-        loaded = await backend.load("redis-thread-1")
+        loaded = await backend.load("redis-case-0042")
         if loaded:
             print(f"Loaded: {loaded.get('agent_id')}")
 
         # Check existence
-        exists = await backend.exists("redis-thread-1")
+        exists = await backend.exists("redis-case-0042")
         print(f"Exists: {exists}")
 
         # List threads
@@ -147,7 +164,7 @@ async def example_redis_backend():
         print(f"Threads: {threads}")
 
         # Cleanup
-        await backend.delete("redis-thread-1")
+        await backend.delete("redis-case-0042")
         await backend.close()
 
     except ImportError:
@@ -168,8 +185,8 @@ async def example_postgresql_backend():
     PostgreSQLBackend stores state in PostgreSQL with JSONB.
 
     Use cases:
-    - Enterprise applications
-    - Complex querying needs
+    - Enterprise SOC platforms
+    - Complex querying needs (find every case touching one analyst)
     - ACID guarantees required
     - Integration with existing PostgreSQL infrastructure
 
@@ -208,26 +225,26 @@ async def example_postgresql_backend():
         state = create_sample_state()
         data = state.to_checkpoint()
         checkpoint_id = await backend.save(
-            "pg-thread-1",
+            "pg-case-0042",
             data,
-            metadata={"user_id": "user-123", "session_type": "support"},
+            metadata={"analyst": "analyst-7", "session_type": "investigation"},
         )
         print(f"Saved checkpoint: {checkpoint_id}")
 
         # Query by metadata
-        results = await backend.query_by_metadata("user_id", "user-123")
-        print(f"Found {len(results)} threads for user-123")
+        results = await backend.query_by_metadata("analyst", "analyst-7")
+        print(f"Found {len(results)} cases for analyst-7")
 
         # Search by data field
-        results = await backend.search_data("agent_id", "demo-agent")
-        print(f"Found {len(results)} threads with demo-agent")
+        results = await backend.search_data("agent_id", "ir-copilot")
+        print(f"Found {len(results)} threads with ir-copilot")
 
         # Get count
         count = await backend.count()
         print(f"Total checkpoints: {count}")
 
         # Cleanup
-        await backend.delete("pg-thread-1")
+        await backend.delete("pg-case-0042")
         await backend.close()
 
     except ImportError:
@@ -288,26 +305,26 @@ async def example_mysql_backend():
         state = create_sample_state()
         data = state.to_checkpoint()
         checkpoint_id = await backend.save(
-            "mysql-thread-1",
+            "mysql-case-0042",
             data,
-            metadata={"user_id": "user-123", "session_type": "support"},
+            metadata={"analyst": "analyst-7", "session_type": "investigation"},
         )
         print(f"Saved checkpoint: {checkpoint_id}")
 
         # Query by metadata
-        results = await backend.query_by_metadata("user_id", "user-123")
-        print(f"Found {len(results)} threads for user-123")
+        results = await backend.query_by_metadata("analyst", "analyst-7")
+        print(f"Found {len(results)} cases for analyst-7")
 
         # Search by data field
-        results = await backend.search_data("agent_id", "demo-agent")
-        print(f"Found {len(results)} threads with demo-agent")
+        results = await backend.search_data("agent_id", "ir-copilot")
+        print(f"Found {len(results)} threads with ir-copilot")
 
         # Get count
         count = await backend.count()
         print(f"Total checkpoints: {count}")
 
         # Cleanup
-        await backend.delete("mysql-thread-1")
+        await backend.delete("mysql-case-0042")
         await backend.close()
 
     except ImportError:
@@ -328,8 +345,8 @@ async def example_opensearch_backend():
     OpenSearchBackend stores state in OpenSearch.
 
     Use cases:
-    - Full-text search across conversations
-    - Analytics and reporting
+    - Full-text search across past investigations
+    - Analytics and reporting ("how many cases mentioned this IP?")
     - Log aggregation
     - Complex queries
 
@@ -359,29 +376,29 @@ async def example_opensearch_backend():
         state = create_sample_state()
         data = state.to_checkpoint()
         await backend.save(
-            "os-thread-1",
+            "os-case-0042",
             data,
-            metadata={"category": "demo", "priority": "high"},
+            metadata={"category": "intrusion", "priority": "high"},
         )
         print("Saved checkpoint to OpenSearch")
 
         # Wait for indexing
         await asyncio.sleep(1)
 
-        # Full-text search
-        results = await backend.search("Hello agent")
+        # Full-text search across investigation transcripts
+        results = await backend.search("impossible travel")
         print(f"Search results: {len(results)}")
 
         # Query by metadata
-        results = await backend.get_by_metadata("category", "demo")
-        print(f"Category 'demo' results: {len(results)}")
+        results = await backend.get_by_metadata("category", "intrusion")
+        print(f"Category 'intrusion' results: {len(results)}")
 
         # List threads
         threads = await backend.list_threads()
         print(f"All threads: {threads}")
 
         # Cleanup
-        await backend.delete("os-thread-1")
+        await backend.delete("os-case-0042")
         await backend.close()
 
     except ImportError:
@@ -405,7 +422,7 @@ async def example_s3_backend():
     - Cloud deployments
     - Serverless applications
     - Cross-region replication
-    - Cost-effective long-term storage
+    - Cost-effective long-term case retention (compliance archives)
 
     Features:
     - Scalable cloud storage
@@ -440,14 +457,14 @@ async def example_s3_backend():
         state = create_sample_state()
         data = state.to_checkpoint()
         await backend.save(
-            "s3-thread-1",
+            "s3-case-0042",
             data,
-            metadata={"environment": "demo"},
+            metadata={"environment": "ir-demo"},
         )
         print("Saved checkpoint to S3 Object Storage")
 
         # Load state
-        loaded = await backend.load("s3-thread-1")
+        loaded = await backend.load("s3-case-0042")
         if loaded:
             print(f"Loaded agent: {loaded.get('agent_id')}")
 
@@ -456,7 +473,7 @@ async def example_s3_backend():
         print(f"Threads with metadata: {len(results)}")
 
         # Cleanup
-        await backend.delete("s3-thread-1")
+        await backend.delete("s3-case-0042")
 
     except ImportError:
         print("\nSkipping: boto3 not installed")
@@ -472,9 +489,10 @@ async def example_s3_backend():
 
 async def example_agent_with_checkpointing():
     """
-    Complete example: Agent with checkpoint persistence.
+    Complete example: investigation agent with checkpoint persistence.
 
-    This shows how to integrate checkpointing with an agent.
+    This shows how to integrate checkpointing with an agent so a case
+    survives restarts and hand-offs between analysts.
     """
     print("\n" + "=" * 60)
     print("7. Agent with Checkpointing (Full Integration)")
@@ -498,15 +516,19 @@ async def example_agent_with_checkpointing():
     #     checkpointer=memory_checkpointer,
     #     checkpoint_every_n_iterations=1,
     # )
-    # result = agent.run_sync("Hello!", thread_id="my-session")
+    # result = agent.run_sync("Open a case for this alert.", thread_id="case-0042")
 
     # Manual state management for demo
-    state = AgentState(agent_id="demo-agent")
-    state = state.with_message(Message(role=Role.USER, content="Hello"))
-    state = state.with_message(Message(role=Role.ASSISTANT, content="Hi!"))
+    state = AgentState(agent_id="ir-copilot")
+    state = state.with_message(
+        Message(role=Role.USER, content="Open a case for the jdoe impossible-travel alert.")
+    )
+    state = state.with_message(
+        Message(role=Role.ASSISTANT, content="Case opened. Gathering sign-in telemetry.")
+    )
 
-    await memory_checkpointer.save(state, "demo-thread")
-    loaded = await memory_checkpointer.load("demo-thread")
+    await memory_checkpointer.save(state, "case-0042")
+    loaded = await memory_checkpointer.load("case-0042")
     print(f"  Saved and loaded state: {len(loaded.messages)} messages")
 
     # ==========================================================================
@@ -518,11 +540,11 @@ async def example_agent_with_checkpointing():
     checkpointer = FileCheckpointer(base_dir="/tmp/agent_sessions")
 
     # Save a state
-    checkpoint_id = await checkpointer.save(state, "file-session")
+    checkpoint_id = await checkpointer.save(state, "file-case-0042")
     print(f"  Checkpoint saved: {checkpoint_id[:8]}...")
 
     # Load it back
-    loaded = await checkpointer.load("file-session")
+    loaded = await checkpointer.load("file-case-0042")
     print(f"  Loaded: {len(loaded.messages)} messages, agent_id={loaded.agent_id}")
 
     # ==========================================================================
@@ -562,12 +584,12 @@ async def example_agent_with_checkpointing():
         checkpoint_every_n_iterations=1,  # Auto-save after each iteration
     )
 
-    # First conversation
-    result = agent.run_sync("Hi!", thread_id="user-123")
+    # First shift opens the case
+    result = agent.run_sync("Triage the jdoe alert.", thread_id="case-0042")
 
-    # Resume later (different process, same thread_id)
-    result = agent.run_sync("What did I say?", thread_id="user-123")
-    # Agent will load previous state and continue conversation
+    # Next shift resumes it (different process, same thread_id)
+    result = agent.run_sync("Where did we leave this case?", thread_id="case-0042")
+    # Agent will load previous state and continue the investigation
     """)
 
 
@@ -579,7 +601,7 @@ async def example_agent_with_checkpointing():
 async def main():
     """Run all examples."""
     print("=" * 60)
-    print("Tulip Checkpointer Examples")
+    print("Tulip Checkpointer Examples — durable investigation state")
     print("=" * 60)
 
     # Run examples

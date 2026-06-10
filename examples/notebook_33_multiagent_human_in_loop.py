@@ -2,20 +2,25 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 
-"""Notebook 34: multi-agent workflows with a human in the loop.
+"""Notebook 33: human-approved containment — multi-agent HITL.
 
-Notebook 20 covered HITL for a single agent. Production systems
-typically have a triage agent, several specialists, and a human gate
-for irreversible actions. This notebook walks three combinations:
+Notebook 19 covered HITL for a single agent. A production SOC fleet
+typically has a triage agent, several specialists, and a human gate
+for irreversible actions — nobody isolates a production host on an
+agent's say-so alone. Host isolation is a high-blast-radius response
+(ATT&CK D3FEND defensive technique, and the inverse of LLM06 Excessive
+Agency: a containment agent must not act without a human in the loop).
+This notebook walks three combinations:
 
-- Pattern A — approval gate: triage classifies a refund, a specialist
-  drafts the response, a human approves before it ships.
-- Pattern B — human-as-tool: when triage isn't confident, it asks the
-  human for the category instead of guessing. The answer becomes part
-  of state for downstream specialists.
+- Pattern A — approval gate: triage classifies an alert, a containment
+  specialist drafts the isolation action, a human approves before it
+  executes.
+- Pattern B — human-as-tool: when triage isn't confident about the
+  alert family, it asks the human instead of guessing. The answer
+  becomes part of state for downstream specialists.
 - Pattern C — long-pause workflow: state survives across an interrupt
-  boundary so the human can come back hours later (different process,
-  different caller) and the workflow resumes where it left off.
+  boundary so the approver on the next shift (different process,
+  different caller) can resume the containment where it left off.
 
 - ``interrupt(payload)`` is a function-level primitive. Any node can
   call it; the graph catches the InterruptException, snapshots state,
@@ -26,15 +31,15 @@ for irreversible actions. This notebook walks three combinations:
   preserve every specialist's context.
 
 Run it:
-    .venv/bin/python examples/notebook_39_multiagent_human_in_loop.py
+    .venv/bin/python examples/notebook_33_multiagent_human_in_loop.py
 
 The default provider is the bundled mock model. Set TULIP_MODEL_PROVIDER=openai
 (or anthropic) and the matching credentials to use a live model. Set
 ``TULIP_MODEL_PROVIDER=mock`` for offline runs.
 
 Prerequisites:
-- Notebook 17 (basic graph).
-- Notebook 20 (single-agent HITL).
+- Notebook 16 (basic graph).
+- Notebook 19 (single-agent HITL).
 """
 
 from __future__ import annotations
@@ -51,7 +56,7 @@ from tulip.multiagent.graph import END, START, StateGraph
 
 
 # ---------------------------------------------------------------------------
-# Specialists — triage classifier and a refund drafter
+# Specialists — triage classifier and a containment drafter
 # ---------------------------------------------------------------------------
 
 
@@ -68,14 +73,15 @@ def _make_agent(role: str, system_prompt: str, model: Any) -> Agent:
 
 
 TRIAGE_PROMPT = (
-    "You are a customer-support triage agent. Read the request and "
-    "respond with EXACTLY ONE of: refund, billing, technical, escalate. "
-    "Use 'escalate' only when the request is ambiguous or requires "
-    "manager judgment."
+    "You are a SOC triage agent. Read the alert and "
+    "respond with EXACTLY ONE of: malware, phishing, policy, escalate. "
+    "Use 'escalate' only when the alert is ambiguous or requires "
+    "senior-analyst judgment."
 )
-REFUND_PROMPT = (
-    "You are a refund specialist. Draft a polite, concise reply confirming "
-    "the refund will be processed. Two sentences max."
+CONTAINMENT_PROMPT = (
+    "You are a containment specialist. Draft a concise containment action for "
+    "the affected host: isolate it from the network and preserve volatile "
+    "evidence for forensics. Two sentences max."
 )
 
 
@@ -94,20 +100,20 @@ async def _run_agent(agent: Agent, prompt: str) -> str:
 
 async def triage_node(state: dict[str, Any]) -> dict[str, Any]:
     agent = _make_agent("triage", TRIAGE_PROMPT, state["__model__"])
-    category = await _run_agent(agent, f"Customer request: {state['request']!r}")
+    category = await _run_agent(agent, f"Alert: {state['alert']!r}")
     return {"category": category.strip().lower().split()[0] if category else "escalate"}
 
 
-async def draft_refund_node(state: dict[str, Any]) -> dict[str, Any]:
-    agent = _make_agent("refund", REFUND_PROMPT, state["__model__"])
+async def draft_containment_node(state: dict[str, Any]) -> dict[str, Any]:
+    agent = _make_agent("containment", CONTAINMENT_PROMPT, state["__model__"])
     draft = await _run_agent(
-        agent, f"Customer request: {state['request']!r}\nDraft the refund response."
+        agent, f"Alert: {state['alert']!r}\nDraft the containment action."
     )
     return {"draft": draft}
 
 
 async def human_approval_node(state: dict[str, Any]) -> dict[str, Any]:
-    """Pause the graph until the human approves or rejects the draft.
+    """Pause the graph until the human approves or rejects the containment.
 
     ``interrupt()`` raises an InterruptException; the graph catches it,
     snapshots state, and hands an ``InterruptState`` back to the caller.
@@ -116,7 +122,7 @@ async def human_approval_node(state: dict[str, Any]) -> dict[str, Any]:
     response = interrupt(
         {
             "type": "approval",
-            "question": "Approve this refund response?",
+            "question": "Approve isolating this production host?",
             "draft": state.get("draft", ""),
             "options": ["yes", "no"],
         }
@@ -124,32 +130,38 @@ async def human_approval_node(state: dict[str, Any]) -> dict[str, Any]:
     return {"approved": response == "yes", "human_response": response}
 
 
-async def send_or_cancel_node(state: dict[str, Any]) -> dict[str, Any]:
+async def execute_or_cancel_node(state: dict[str, Any]) -> dict[str, Any]:
     if state.get("approved"):
-        return {"result": "✓ Sent to customer", "outcome": "sent"}
-    return {"result": "✗ Cancelled by human reviewer", "outcome": "cancelled"}
+        return {"result": "✓ Containment executed — host isolated", "outcome": "executed"}
+    return {"result": "✗ Containment cancelled by human approver", "outcome": "cancelled"}
 
 
 def build_approval_graph() -> StateGraph:
-    g = StateGraph(name="hitl-approval-gate")
+    g = StateGraph(name="hitl-containment-gate")
     g.add_node("triage", triage_node)
-    g.add_node("draft", draft_refund_node)
+    g.add_node("draft", draft_containment_node)
     g.add_node("approve", human_approval_node)
-    g.add_node("send", send_or_cancel_node)
+    g.add_node("execute", execute_or_cancel_node)
     g.add_edge(START, "triage")
     g.add_edge("triage", "draft")
     g.add_edge("draft", "approve")
-    g.add_edge("approve", "send")
-    g.add_edge("send", END)
+    g.add_edge("approve", "execute")
+    g.add_edge("execute", END)
     return g
 
 
 async def demo_pattern_a(model: Any) -> None:
     print("\n=== Pattern A: Approval gate ===\n")
     graph = build_approval_graph()
-    initial = {"request": "I want a refund for order #42 — it never shipped.", "__model__": model}
+    initial = {
+        "alert": (
+            "EDR flagged ransomware-like mass file renames on host WS-0231 "
+            "(user jdoe) — possible ATT&CK T1486 Data Encrypted for Impact."
+        ),
+        "__model__": model,
+    }
 
-    # Runs triage, drafts the reply, then pauses at the approval node.
+    # Runs triage, drafts the containment, then pauses at the approval node.
     result = await graph.execute(initial)
     if not result.interrupt:
         print(f"  ✗ unexpected: graph completed without interrupt: {result.final_state}")
@@ -157,7 +169,7 @@ async def demo_pattern_a(model: Any) -> None:
     payload = result.interrupt.interrupt.payload
     print(f"  ⏸  Paused at: {result.interrupt.node_id}")
     print(f"     Question:  {payload.get('question')}")
-    print(f"     Draft:     {payload.get('draft')}")
+    print(f"     Action:    {payload.get('draft')}")
 
     print("  ▶  Human responds: 'yes'")
     final = await graph.execute(
@@ -173,13 +185,14 @@ async def demo_pattern_a(model: Any) -> None:
 
 async def smart_triage_node(state: dict[str, Any]) -> dict[str, Any]:
     """Triage with an explicit escalation fallback to the human."""
-    valid = {"refund", "billing", "technical"}
+    valid = {"malware", "phishing", "policy"}
     agent = _make_agent("triage", TRIAGE_PROMPT, state["__model__"])
-    raw = await _run_agent(agent, f"Customer request: {state['request']!r}")
+    raw = await _run_agent(agent, f"Alert: {state['alert']!r}")
     first = (raw.lower().split() or ["escalate"])[0]
     # Anything outside the explicit category set — including the mock
     # model's filler text — falls through to escalation. In production
-    # you never want a specialist running with a bogus category.
+    # you never want a containment specialist running with a bogus
+    # alert family.
     category = first if first in valid else "escalate"
 
     if category == "escalate":
@@ -187,16 +200,16 @@ async def smart_triage_node(state: dict[str, Any]) -> dict[str, Any]:
             {
                 "type": "escalation",
                 "question": (
-                    f"Triage agent is not confident. Pick a category for: {state['request']!r}"
+                    f"Triage agent is not confident. Pick an alert family for: {state['alert']!r}"
                 ),
-                "options": ["refund", "billing", "technical", "drop"],
+                "options": ["malware", "phishing", "policy", "dismiss"],
             }
         )
     return {"category": category}
 
 
 async def route_node(state: dict[str, Any]) -> dict[str, Any]:
-    return {"final_category": state.get("category", "drop")}
+    return {"final_category": state.get("category", "dismiss")}
 
 
 def build_escalation_graph() -> StateGraph:
@@ -213,7 +226,11 @@ async def demo_pattern_b(model: Any) -> None:
     print("\n=== Pattern B: Human-as-tool (escalation) ===\n")
     graph = build_escalation_graph()
     initial = {
-        "request": "weird flickering on the dashboard but only on Tuesdays?",
+        "alert": (
+            "intermittent outbound connections from the build server to a "
+            "newly registered domain (cdn-sync.example), but only during "
+            "nightly CI runs?"
+        ),
         "__model__": model,
     }
 
@@ -222,8 +239,8 @@ async def demo_pattern_b(model: Any) -> None:
         payload = result.interrupt.interrupt.payload
         print(f"  ⏸  Triage escalated. Asking human:")
         print(f"     {payload.get('question')}")
-        print("  ▶  Human responds: 'technical'")
-        final = await graph.execute(Command(resume="technical", update=result.final_state))
+        print("  ▶  Human responds: 'malware'")
+        final = await graph.execute(Command(resume="malware", update=result.final_state))
         print(f"  ✓ Routed to: {final.final_state.get('final_category')}")
     else:
         print(f"  ✓ Triage confident ({result.final_state.get('category')}) — no escalation")
@@ -235,22 +252,28 @@ async def demo_pattern_b(model: Any) -> None:
 
 
 async def demo_pattern_c(model: Any) -> None:
-    """Long-pause workflow: persist the snapshot, resume later.
+    """Long-pause workflow: persist the snapshot, resume next shift.
 
     The simple in-memory shape is: hold the InterruptState from the
     first ``execute`` call somewhere durable, then call ``execute``
-    again with ``Command(resume=...)`` when the human responds.
+    again with ``Command(resume=...)`` when the approver responds.
 
-    For multi-process / multi-day workflows, swap the in-memory snapshot
-    for a checkpointer (Redis / Postgres / MySQL / S3 object storage).
-    The graph's built-in checkpointer hook expects an AgentState; for
-    pure-graph flows like this one, persisting the InterruptState
-    yourself is the simpler path.
+    For multi-process / multi-day investigations, swap the in-memory
+    snapshot for a checkpointer (Redis / Postgres / MySQL / S3 object
+    storage). The graph's built-in checkpointer hook expects an
+    AgentState; for pure-graph flows like this one, persisting the
+    InterruptState yourself is the simpler path.
     """
     print("\n=== Pattern C: Long-pause workflow (snapshot + resume) ===\n")
 
     graph = build_approval_graph()
-    initial = {"request": "Refund for order #42 — never arrived.", "__model__": model}
+    initial = {
+        "alert": (
+            "EDR flagged credential-dumping behavior on host DB-PROD-7 — "
+            "possible ATT&CK T1003 OS Credential Dumping."
+        ),
+        "__model__": model,
+    }
 
     paused = await graph.execute(initial)
     if not paused.interrupt:
@@ -260,11 +283,11 @@ async def demo_pattern_c(model: Any) -> None:
     print(f"  ⏸  Paused at {paused.interrupt.node_id}")
     print(
         f"     Snapshot has {len(snapshot_state)} state keys — persist these "
-        "to Redis / Postgres / a queue / etc."
+        "to Redis / Postgres / a case-management queue / etc."
     )
 
-    # ... time passes; reviewer comes back ...
-    print("  ▶  Hours later: load snapshot, resume with the human's answer")
+    # ... time passes; the next shift's approver comes back ...
+    print("  ▶  Next shift: load snapshot, resume with the approver's answer")
     # The snapshot only carries JSON-friendly state. Re-attach the model
     # object explicitly; production code would also rebuild it from
     # config rather than holding a reference in memory.
@@ -280,7 +303,7 @@ async def demo_pattern_c(model: Any) -> None:
 
 
 async def main() -> None:
-    print("Notebook 34: multi-agent workflows with a human in the loop")
+    print("Notebook 33: human-approved containment — multi-agent HITL")
     print("=" * 60)
 
     model = get_model()

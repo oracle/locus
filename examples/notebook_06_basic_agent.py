@@ -1,25 +1,31 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 """
-Notebook 08: your first Tulip agent.
+Notebook 06: SOC triage assistant — your first Tulip agent.
 
-Build a single agent, send it prompts two different ways (blocking and
-streaming), and inspect what comes back. This is the smallest possible
-end-to-end Tulip example.
+Build SENTINEL, the SOC's tier-1 alert-triage agent, ask it the
+question every analyst asks all day — "is this alert worth escalating?"
+— two different ways (blocking and streaming), and inspect what comes
+back. This is the smallest possible end-to-end Tulip example, and the
+first appearance of an agent that recurs across the later notebooks.
 
 Key ideas:
 - An ``Agent`` pairs a model with a system prompt and optional tools.
 - ``agent.run_sync(prompt)`` returns a single ``AgentResult``.
-- ``agent.run(prompt)`` is an async generator that yields events.
+- ``agent.run(prompt)`` is an async generator that yields events — the
+  agent shows its work instead of handing you an opaque verdict.
 - ``AgentResult`` carries the final message, success flag, stop reason,
   and per-run metrics.
-- The same agent can answer many prompts in a row.
+- The same agent can triage many alerts in a row.
+
+The sample alerts map to common ATT&CK behaviors — brute force
+(T1110), valid-account misuse (T1078), and benign scanner traffic.
 
 Run it:
-    .venv/bin/python examples/notebook_14_basic_agent.py
+    .venv/bin/python examples/notebook_06_basic_agent.py
 
 The default provider is the bundled mock model. Set TULIP_MODEL_PROVIDER=openai (or anthropic)
-the agent talks to a live model (e.g.
+and the agent talks to a live model (e.g.
 ``openai:gpt-4o`` or ``anthropic:claude-sonnet-4-6``). Without a
 config — or for offline runs — set ``TULIP_MODEL_PROVIDER=mock`` to use
 the bundled deterministic model. OpenAI, Anthropic are also
@@ -36,19 +42,19 @@ from tulip.agent import Agent
 
 
 # =============================================================================
-# Part 1: build an agent and call it once
+# Part 1: build SENTINEL and call it once
 # =============================================================================
 
 
 def example_create_agent():
-    """Build an agent and run one tiny prompt to confirm the provider works."""
+    """Build SENTINEL and run one tiny prompt to confirm the provider works."""
     print("=== Part 1: Creating an Agent ===\n")
 
     model = get_model(max_tokens=40)
 
     agent = Agent(
         model=model,
-        system_prompt="You are a helpful assistant. Be concise.",
+        system_prompt="You are SENTINEL, the SOC's tier-1 alert-triage agent. Be concise.",
     )
 
     print(f"Agent created with model: {type(model).__name__}")
@@ -75,19 +81,21 @@ def example_create_agent():
 
 
 def example_sync_run():
-    """Block until the agent finishes — simplest possible call."""
+    """Block until the agent finishes — simplest possible triage call."""
     print("=== Part 2: Synchronous Execution ===\n")
 
     model = get_model(max_tokens=100)
 
     agent = Agent(
         model=model,
-        system_prompt="You are a helpful assistant. Keep responses under 20 words.",
+        system_prompt="You are SENTINEL, a SOC triage agent. Keep responses under 20 words.",
     )
 
-    result = agent.run_sync("What is Python?")
+    # Brute force then a successful auth (ATT&CK T1110 → T1078).
+    alert = "Alert: 5 failed logins then a success for one account from 198.51.100.7. Escalate?"
+    result = agent.run_sync(alert)
 
-    print("Prompt: What is Python?")
+    print(f"Prompt: {alert}")
     print(f"Response: {result.message}")
     print(f"Success: {result.success}")
     print(f"Stop reason: {result.stop_reason}")
@@ -100,22 +108,22 @@ def example_sync_run():
 
 
 async def example_async_run():
-    """Stream the agent's lifecycle events as they happen."""
+    """Stream the agent's lifecycle events as it works the alert."""
     print("=== Part 3: Async Execution with Events ===\n")
 
     model = get_model(max_tokens=100)
 
     agent = Agent(
         model=model,
-        system_prompt="You are a helpful assistant. Be brief.",
+        system_prompt="You are SENTINEL, a SOC triage agent. Be brief.",
     )
 
-    print("Prompt: Name 3 programming languages.")
+    print("Prompt: Name 3 signs that a failed-login alert is a false positive.")
     print("Events:")
 
     # agent.run(...) yields ThinkEvent, ToolStartEvent, ToolCompleteEvent,
     # TerminateEvent, etc., in order. Notebook 11 covers the full event set.
-    async for event in agent.run("Name 3 programming languages."):
+    async for event in agent.run("Name 3 signs that a failed-login alert is a false positive."):
         print(f"  {event.event_type}: ", end="")
         if hasattr(event, "reasoning") and event.reasoning:
             print(f"{event.reasoning[:60]}...")
@@ -140,10 +148,10 @@ def example_agent_result():
 
     agent = Agent(
         model=model,
-        system_prompt="You are helpful. One sentence answers only.",
+        system_prompt="You are SENTINEL, a SOC analyst. One sentence answers only.",
     )
 
-    result = agent.run_sync("What is 2 + 2?")
+    result = agent.run_sync("Is a port scan from the internal vulnerability scanner suspicious?")
 
     print("AgentResult fields:")
     print(f"  .message     = {result.message}")
@@ -159,25 +167,27 @@ def example_agent_result():
 
 
 # =============================================================================
-# Part 5: reuse the same agent across prompts
+# Part 5: reuse the same agent across alerts
 # =============================================================================
 
 
 def example_multiple_prompts():
-    """One agent, many prompts. Each call is independent unless you opt in to memory."""
-    print("=== Part 5: Multiple Prompts ===\n")
+    """One agent, many alerts. Each call is independent unless you opt in to memory."""
+    print("=== Part 5: Multiple Alerts ===\n")
 
     model = get_model(max_tokens=50)
 
     agent = Agent(
         model=model,
-        system_prompt="You are a math tutor. Answer in one line.",
+        system_prompt="You are SENTINEL, a SOC triage agent. Reply in one line: escalate or close.",
     )
 
+    # A brute-force/valid-account chain, a benign test artifact, and
+    # sanctioned scanner traffic — the bread-and-butter of a tier-1 queue.
     prompts = [
-        "What is 5 * 5?",
-        "What is the square root of 144?",
-        "What is 10% of 200?",
+        "Triage: 5 failed logins then a success from 198.51.100.7.",  # T1110 → T1078
+        "Triage: EICAR test file detected on a build server.",
+        "Triage: port sweep of 192.0.2.0/24 from the approved internal scanner.",
     ]
 
     for prompt in prompts:
@@ -195,7 +205,7 @@ def example_multiple_prompts():
 def main():
     """Run all notebook parts."""
     print("=" * 60)
-    print("Notebook 08: Basic Agent")
+    print("Notebook 06: SENTINEL — SOC Triage Assistant")
     print("=" * 60)
     print()
 
@@ -209,7 +219,7 @@ def main():
     example_multiple_prompts()
 
     print("=" * 60)
-    print("Next: Notebook 09 — Agent With Tools")
+    print("Next: Notebook 07 — IOC Enrichment with Tools")
     print("=" * 60)
 
 

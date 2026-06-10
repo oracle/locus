@@ -1,16 +1,19 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
-"""Notebook 45: skills — packaged instruction bundles with progressive disclosure.
+"""Notebook 48: skills — a SOC analyst skill library with progressive disclosure.
 
 A Skill (the AgentSkills.io shape) bundles a name, a description, and
-a block of instructions. The ``SkillsPlugin`` exposes a catalog of
-skills to the agent and only injects the full instructions once the
-agent activates a specific one. Progressive disclosure keeps the
-system prompt small and the agent focused.
+a block of instructions — think of each one as a vetted analyst
+procedure: alert triage, secure code review, safe SQL against the
+SIEM. The ``SkillsPlugin`` exposes a catalog of skills to the agent
+and only injects the full instructions once the agent activates a
+specific one. Progressive disclosure keeps the system prompt small and
+the analyst agent focused on the procedure that matters right now.
 
 - ``Skill`` — built in code or loaded from a ``SKILL.md`` file with
   YAML front-matter.
-- ``Skill.from_directory(path)`` — load every skill under a directory.
+- ``Skill.from_directory(path)`` — load every skill under a directory
+  (your team's reviewed, versioned procedure library).
 - ``Agent(skills=[...])`` — wires up the SkillsPlugin and the
   ``skills`` tool that the agent calls to activate one.
 - The ``SKILL.md`` format itself — front-matter for ``name``,
@@ -20,16 +23,17 @@ system prompt small and the agent focused.
 
 Run it:
     # The bundled mock model is the default; set TULIP_MODEL_PROVIDER for a live provider.
-    TULIP_MODEL_ID=openai.gpt-4.1 python examples/notebook_50_skills.py
+    TULIP_MODEL_ID=openai.gpt-4.1 python examples/notebook_48_skills.py
 
     # Offline:
-    TULIP_MODEL_PROVIDER=mock python examples/notebook_50_skills.py
+    TULIP_MODEL_PROVIDER=mock python examples/notebook_48_skills.py
 
 Prerequisites:
 - An OpenAI or Anthropic API key, or set ``TULIP_MODEL_PROVIDER`` to
   ``openai`` / ``anthropic`` / ``mock``.
 - Optional: an ``examples/skills/`` directory with one or more
-  ``SKILL.md`` files for Part 2 to find.
+  ``SKILL.md`` files for Part 2 to find (the bundled ones include
+  incident-triage and a security-minded code-review checklist).
 """
 
 from pathlib import Path
@@ -50,29 +54,29 @@ def example_programmatic():
 
     model = get_model()
 
-    code_review = Skill(
-        name="code-review",
-        description="Use when reviewing code for bugs and security issues.",
+    alert_triage = Skill(
+        name="alert-triage",
+        description="Use when triaging a SOC alert to decide true/false positive.",
         instructions=(
-            "# Code Review Checklist\n"
-            "1. Check for SQL injection\n"
-            "2. Check for hardcoded credentials\n"
-            "3. Check error handling\n"
+            "# Alert Triage Checklist\n"
+            "1. Check the source IP's reputation and history\n"
+            "2. Check whether the account behaviour matches its baseline\n"
+            "3. Classify as TRUE POSITIVE or FALSE POSITIVE with confidence\n"
             "4. Report findings as: FINDING: <description>"
         ),
     )
 
     agent = Agent(
         config=AgentConfig(
-            system_prompt="You are a security reviewer. Use available skills.",
+            system_prompt="You are a SOC analyst. Use available skills.",
             max_iterations=5,
             model=model,
-            skills=[code_review],
+            skills=[alert_triage],
         )
     )
 
     result = agent.run_sync(
-        "Review: def login(u,p): return db.query(f'SELECT * FROM users WHERE name={u}')"
+        "Triage: 14 failed logins for 'admin' from 198.51.100.7 followed by a success at 03:14Z"
     )
     print(f"Response: {result.message[:200]}...")
 
@@ -81,7 +85,8 @@ def example_programmatic():
 
 
 # =============================================================================
-# Part 2: Load every SKILL.md under a directory.
+# Part 2: Load every SKILL.md under a directory — the team's vetted
+#         procedure library (incident-triage, code-review, sql-query, …).
 # =============================================================================
 
 
@@ -102,8 +107,8 @@ def example_filesystem():
     agent = Agent(model=get_model(max_tokens=80), system_prompt="Reply in one sentence.")
     t0 = _t.perf_counter()
     res = agent.run_sync(
-        "In one sentence, why is loading skills from SKILL.md files better than "
-        "hard-coding system prompts in source?"
+        "In one sentence, why should a SOC version its analyst procedures as "
+        "reviewable SKILL.md files instead of hard-coding prompts in source?"
     )
     dt = _t.perf_counter() - t0
     print(
@@ -122,19 +127,19 @@ def example_format():
 
     print("""
 ---
-name: my-skill
-description: Use when the user asks about X.
-allowed-tools: search analyze
+name: ioc-enrichment
+description: Use when the user provides an indicator (hash, IP, domain) to enrich.
+allowed-tools: lookup_hash whois_domain
 metadata:
-  author: your-name
+  author: soc-team
   version: "1.0"
 ---
 
 # Instructions for the Agent
 
-1. First, do this
-2. Then, do that
-3. Finally, summarize
+1. First, identify the indicator type
+2. Then, enrich it with the allowed tools
+3. Finally, summarize the verdict with evidence
 
 ## Resource Files
 Place additional files in:
@@ -149,7 +154,8 @@ Place additional files in:
     t0 = _t.perf_counter()
     res = agent.run_sync(
         "Write a one-paragraph SKILL.md description for a skill named "
-        "'sql-debug' that helps an agent diagnose slow SQL queries."
+        "'log-forensics' that helps an agent reconstruct an attacker's "
+        "activity timeline from authentication logs."
     )
     dt = _t.perf_counter() - t0
     print(

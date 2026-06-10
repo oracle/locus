@@ -2,29 +2,34 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 
-"""Notebook 66: Voice output — turn an agent's reply into speech.
+"""Notebook 66: Spoken security advisory — voice output.
 
-A real agent often needs to talk, not just type. This notebook pairs a
-regular chat-completions agent (text in, text out) with OpenAI's
-audio.speech endpoint so the response can be spoken aloud.
+A security team often needs to talk, not just type — recorded
+advisories for the security hotline, awareness broadcasts, IVR
+announcements. This notebook pairs a regular chat-completions agent
+(text in, text out) with OpenAI's audio.speech endpoint so a
+vishing-awareness advisory can be spoken aloud. Vishing — voice
+phishing, MITRE ATT&CK T1566.004 (Spearphishing Voice) — is exactly the
+kind of social-engineering vector a recorded awareness advisory is meant
+to inoculate staff against.
 
 Pipeline::
 
-    user prompt ──▶ Agent (chat model)
-                       │
-                       │  reply text
-                       ▼
-                 OpenAI /v1/audio/speech
-                 (gpt-4o-mini-tts)
-                       │
-                       │  mp3 bytes
-                       ▼
-                 ./notebook_66_response.mp3
+    advisory request ──▶ Agent (chat model)
+                            │
+                            │  advisory text
+                            ▼
+                      OpenAI /v1/audio/speech
+                      (gpt-4o-mini-tts)
+                            │
+                            │  mp3 bytes
+                            ▼
+                      ./notebook_66_response.mp3
 
 - Bring-your-own-voice via the voice= parameter (alloy, ash, ballad,
   coral, echo, sage, shimmer, verse).
 - Output is a normal MP3 you can pipe into a frontend <audio> element,
-  an IVR system, or a podcast feed.
+  the security-hotline IVR, or an awareness-training feed.
 
 Prerequisites: an OpenAI API key with access to a TTS model. The
 notebook uses gpt-4o-mini-tts for synthesis.
@@ -54,8 +59,10 @@ from tulip.agent import Agent, AgentConfig
 
 
 PROMPT = (
-    "Give me a 25-word elevator pitch for the tulip SDK aimed at a senior "
-    "platform engineer. Speak it in the second person."
+    "Write a 60-word spoken security advisory warning employees about an "
+    "ongoing vishing campaign: callers posing as the IT help desk are asking "
+    "staff to read out one-time passcodes. Remind everyone that IT never asks "
+    "for codes, and to report any such call to the security hotline."
 )
 TTS_MODEL = "gpt-4o-mini-tts"
 TTS_VOICE = "alloy"
@@ -78,17 +85,18 @@ def _build_audio_client():
 
 
 async def main() -> None:
-    print("Notebook 66: Voice output via OpenAI text-to-speech")
+    print("Notebook 66: Spoken security advisory via OpenAI text-to-speech")
     print("=" * 60)
 
-    # Step 1: a regular Tulip Agent answers the prompt as text.
+    # Step 1: a regular Tulip Agent drafts the advisory as text.
     agent = Agent(
         config=AgentConfig(
-            agent_id="elevator-pitch",
+            agent_id="vishing-advisory",
             model=get_model(max_tokens=600),
             system_prompt=(
-                "You are a senior developer-relations engineer. Reply in "
-                "natural spoken English, no markdown, no bullet points."
+                "You are a security-awareness lead recording a short voice "
+                "advisory. Reply in natural spoken English, no markdown, no "
+                "bullet points. Calm, clear, and specific."
             ),
             max_iterations=2,
         )
@@ -99,7 +107,7 @@ async def main() -> None:
     if not reply:
         msg = "Agent returned no text — check provider creds + max_tokens"
         raise RuntimeError(msg)
-    print(f"\n← agent reply ({len(reply)} chars):\n{reply}\n")
+    print(f"\n← advisory text ({len(reply)} chars):\n{reply}\n")
 
     # Step 2: synthesise speech through the audio.speech endpoint.
     print(f"→ synthesising speech with model={TTS_MODEL!r} voice={TTS_VOICE!r}")

@@ -1,13 +1,26 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
-"""Complex Agent with FastMCP-style tools - Full demonstration.
+"""Full SOC analyst agent — the complete tool-using triage workflow.
+
+A senior-analyst agent that works a shift-handover request end to end:
+queries the case database, enriches indicators against intel APIs,
+crunches alert metrics, searches the runbook, and writes the handover
+report — verifying each conclusion against tool output before it ships.
 
 This example shows:
-- Complex system prompt
-- Multiple sophisticated tools
-- Reflexion (self-reflection)
-- Structured outputs
-- Async streaming
+- A detailed analyst system prompt with an explicit verify step
+- Multiple deterministic SOC tools (case DB, intel APIs, analysis, runbook)
+- Reflexion (self-reflection) through the agent run loop
+- Structured incident-report output
+- Async streaming of the agent's reasoning
+
+It runs offline against the bundled mock model by default via
+``config.get_model`` and upgrades to a live provider when
+``TULIP_MODEL_PROVIDER`` (plus the matching API key) is set.
+
+All security data below (IPs, hashes, incidents) is invented and uses
+documentation-safe placeholders (RFC 5737 addresses, EICAR-style test
+entries).
 """
 
 import ast
@@ -15,16 +28,14 @@ import asyncio
 import json
 import math
 import operator as _op
-import os
-import random
 from datetime import datetime
 from typing import Any
 
+from config import check_structured_output_capable, get_model
 from pydantic import BaseModel, Field
 
 from tulip.agent import Agent
 from tulip.core.structured import create_schema_prompt, parse_structured
-from tulip.models import OCIChatCompletionsModel
 from tulip.tools import tool
 
 
@@ -100,19 +111,19 @@ def _safe_math_eval(
 # =============================================================================
 
 
-class AnalysisReport(BaseModel):
-    """Structured analysis report."""
+class IncidentReport(BaseModel):
+    """Structured incident analysis report."""
 
     title: str = Field(description="Report title")
     summary: str = Field(description="Executive summary")
-    findings: list[str] = Field(description="Key findings")
-    recommendations: list[str] = Field(description="Action recommendations")
+    findings: list[str] = Field(description="Key findings, each traceable to evidence")
+    recommendations: list[str] = Field(description="Defensive action recommendations")
     confidence: float = Field(ge=0, le=1, description="Confidence score 0-1")
-    data_sources: list[str] = Field(description="Sources used")
+    data_sources: list[str] = Field(description="Telemetry and intel sources used")
 
 
-class TaskPlan(BaseModel):
-    """Structured task execution plan."""
+class ContainmentPlan(BaseModel):
+    """Structured containment execution plan."""
 
     goal: str
     steps: list[str]
@@ -122,25 +133,25 @@ class TaskPlan(BaseModel):
 
 
 # =============================================================================
-# Simulated Database
+# Simulated SOC Database
 # =============================================================================
 
 MOCK_DATABASE = {
-    "users": [
-        {"id": 1, "name": "Alice", "role": "admin", "department": "Engineering"},
-        {"id": 2, "name": "Bob", "role": "developer", "department": "Engineering"},
-        {"id": 3, "name": "Charlie", "role": "analyst", "department": "Data"},
-        {"id": 4, "name": "Diana", "role": "manager", "department": "Product"},
+    "analysts": [
+        {"id": 1, "name": "Alice", "role": "soc_lead", "shift": "day"},
+        {"id": 2, "name": "Bob", "role": "tier1_analyst", "shift": "day"},
+        {"id": 3, "name": "Charlie", "role": "threat_hunter", "shift": "night"},
+        {"id": 4, "name": "Diana", "role": "ir_manager", "shift": "day"},
     ],
-    "projects": [
-        {"id": 1, "name": "Tulip SDK", "status": "active", "budget": 150000},
-        {"id": 2, "name": "Data Pipeline", "status": "active", "budget": 80000},
-        {"id": 3, "name": "ML Platform", "status": "planning", "budget": 200000},
+    "incidents": [
+        {"id": 1, "name": "Phishing wave vs. finance", "status": "open", "severity": "high"},
+        {"id": 2, "name": "Impossible travel — jdoe", "status": "open", "severity": "medium"},
+        {"id": 3, "name": "EICAR test-file detection", "status": "closed", "severity": "low"},
     ],
-    "metrics": [
-        {"date": "2024-01", "revenue": 50000, "users": 1200, "churn": 0.05},
-        {"date": "2024-02", "revenue": 55000, "users": 1350, "churn": 0.04},
-        {"date": "2024-03", "revenue": 62000, "users": 1500, "churn": 0.03},
+    "alert_metrics": [
+        {"date": "2026-01", "alerts": 1250, "true_positives": 85, "mttr_hours": 6.5},
+        {"date": "2026-02", "alerts": 1310, "true_positives": 92, "mttr_hours": 5.8},
+        {"date": "2026-03", "alerts": 1190, "true_positives": 78, "mttr_hours": 5.1},
     ],
 }
 
@@ -157,10 +168,10 @@ async def query_database(
     limit: int = 10,
 ) -> str:
     """
-    Query the internal database.
+    Query the SOC case database.
 
     Args:
-        table: Table name (users, projects, metrics)
+        table: Table name (analysts, incidents, alert_metrics)
         filters: Optional filters as key-value pairs
         limit: Maximum results to return
 
@@ -193,47 +204,48 @@ async def call_external_api(
     body: dict[str, Any] | None = None,
 ) -> str:
     """
-    Make an external API call.
+    Call a (simulated) security intel API.
 
     Args:
-        endpoint: API endpoint (e.g., /users, /analytics)
+        endpoint: API endpoint (e.g., /ip_reputation, /hash_lookup, /alert_stats)
         method: HTTP method (GET, POST, PUT, DELETE)
         body: Request body for POST/PUT
 
     Returns:
-        API response as JSON string
+        API response as JSON string (all data is invented, clearly fake)
     """
     await asyncio.sleep(0.2)  # Simulate API latency
 
-    # Simulate various API endpoints
-    if endpoint == "/weather":
+    # Simulate various intel endpoints with deterministic fake data
+    if endpoint == "/ip_reputation":
+        ip = body.get("ip", "198.51.100.23") if body else "198.51.100.23"
         return json.dumps(
             {
-                "location": "San Francisco",
-                "temperature": 68,
-                "conditions": "Partly cloudy",
-                "forecast": ["Sunny tomorrow", "Rain expected Thursday"],
+                "ip": ip,
+                "reputation": "suspicious",
+                "last_seen": "2026-03-02T14:11:00Z",
+                "reports": ["port scanning", "brute-force attempts"],
             }
         )
 
-    if endpoint == "/stock":
-        symbol = body.get("symbol", "AAPL") if body else "AAPL"
+    if endpoint == "/hash_lookup":
+        file_hash = body.get("hash", "aa11bb22cc33dd44") if body else "aa11bb22cc33dd44"
         return json.dumps(
             {
-                "symbol": symbol,
-                "price": round(random.uniform(100, 200), 2),
-                "change": round(random.uniform(-5, 5), 2),
-                "volume": random.randint(1000000, 5000000),
+                "hash": file_hash,
+                "verdict": "known-test-file",
+                "family": "EICAR test signature",
+                "first_seen": "2026-01-15",
             }
         )
 
-    if endpoint == "/analytics":
+    if endpoint == "/alert_stats":
         return json.dumps(
             {
-                "daily_active_users": 12500,
-                "session_duration_avg": 8.5,
-                "conversion_rate": 0.032,
-                "top_features": ["dashboard", "reports", "exports"],
+                "alerts_today": 412,
+                "auto_closed": 358,
+                "escalated": 9,
+                "top_alert_types": ["phishing", "impossible travel", "test-file detection"],
             }
         )
 
@@ -246,7 +258,7 @@ async def analyze_data(
     analysis_type: str = "summary",
 ) -> str:
     """
-    Perform statistical analysis on data.
+    Perform statistical analysis on alert/incident data.
 
     Args:
         data: List of records to analyze
@@ -280,10 +292,13 @@ async def analyze_data(
         return f"Summary Statistics:\n{json.dumps(stats, indent=2)}"
 
     if analysis_type == "trends":
-        return "Trend Analysis: Upward trend detected in key metrics. Growth rate: +15% MoM"
+        return (
+            "Trend Analysis: Alert volume steady while MTTR improved 22% over the "
+            "quarter — detection tuning is working."
+        )
 
     if analysis_type == "anomalies":
-        return "Anomaly Detection: No significant anomalies detected in the dataset."
+        return "Anomaly Detection: No significant anomalies detected in the alert dataset."
 
     return f"Unknown analysis type: {analysis_type}"
 
@@ -326,7 +341,7 @@ async def execute_calculation(expression: str) -> str:
     Safely evaluate a mathematical expression.
 
     Args:
-        expression: Math expression (e.g., "2 + 2", "sqrt(16)", "100 * 0.15")
+        expression: Math expression (e.g., "412 - 358", "sqrt(16)", "85 / 1250")
 
     Returns:
         Calculation result
@@ -348,38 +363,38 @@ async def search_knowledge_base(
     max_results: int = 5,
 ) -> str:
     """
-    Search the internal knowledge base.
+    Search the internal security runbook knowledge base.
 
     Args:
         query: Search query
         max_results: Maximum results to return
 
     Returns:
-        Relevant knowledge base entries
+        Relevant runbook entries
     """
     await asyncio.sleep(0.1)
 
-    # Simulated knowledge base
+    # Simulated runbook knowledge base
     kb = [
         {
-            "topic": "Agent Architecture",
-            "content": "Agents use ReAct loop with optional Reflexion for self-correction.",
+            "topic": "Phishing Triage",
+            "content": "Quarantine the message, extract indicators, check who else received it.",
         },
         {
-            "topic": "Tool Calling",
-            "content": "Tools are defined with @tool decorator and auto-generate JSON schemas.",
+            "topic": "Containment",
+            "content": "Isolate the host at the EDR layer before rotating credentials.",
         },
         {
-            "topic": "Streaming",
-            "content": "Events are streamed via AsyncIterator for real-time updates.",
+            "topic": "IOC Enrichment",
+            "content": "Cross-check indicators against internal telemetry before external feeds.",
         },
         {
-            "topic": "Multi-Agent",
-            "content": "Swarm pattern allows multiple agents to collaborate on tasks.",
+            "topic": "Escalation",
+            "content": "Escalate to IR when scope crosses one host or credentials are stolen.",
         },
         {
-            "topic": "Checkpointing",
-            "content": "State can be persisted to Redis, PostgreSQL, MySQL, OpenSearch, S3 object storage, or custom backends.",
+            "topic": "Audit Trail",
+            "content": "Every agent action is recorded as a typed event for the case audit trail.",
         },
     ]
 
@@ -401,36 +416,36 @@ async def search_knowledge_base(
 # Complex System Prompt
 # =============================================================================
 
-COMPLEX_SYSTEM_PROMPT = """You are an advanced AI assistant with access to multiple tools and capabilities.
+COMPLEX_SYSTEM_PROMPT = """You are an advanced SOC analyst assistant with access to multiple tools and capabilities.
 
 ## Your Identity
-- You are a senior analyst with expertise in data analysis, research, and report generation
+- You are a senior security analyst with expertise in alert triage, investigation, and reporting
 - You think step-by-step and explain your reasoning
-- You verify information before presenting conclusions
-- You acknowledge uncertainty and limitations
+- You verify claims against tool output before presenting conclusions
+- You acknowledge uncertainty — an unverified finding is a false positive waiting to happen
 
 ## Available Capabilities
-1. **Database Queries**: Access internal databases (users, projects, metrics)
-2. **API Integration**: Call external APIs for real-time data
-3. **Data Analysis**: Perform statistical analysis and trend detection
+1. **Case Database**: Access SOC data (analysts, incidents, alert_metrics)
+2. **Intel APIs**: Look up IP reputation, file hashes, and alert statistics
+3. **Data Analysis**: Perform statistical analysis and trend detection on alert data
 4. **Report Generation**: Create formatted reports in markdown/HTML
-5. **Calculations**: Execute mathematical computations
-6. **Knowledge Search**: Query the internal knowledge base
+5. **Calculations**: Execute mathematical computations (rates, deltas, ratios)
+6. **Runbook Search**: Query the internal security runbook knowledge base
 
 ## Working Process
-1. **Understand**: Carefully analyze the user's request
-2. **Plan**: Break down complex tasks into steps
+1. **Understand**: Carefully analyze the request
+2. **Plan**: Break down complex investigations into steps
 3. **Execute**: Use appropriate tools for each step
 4. **Verify**: Check results for accuracy and completeness
-5. **Synthesize**: Combine findings into coherent response
+5. **Synthesize**: Combine findings into a coherent assessment
 6. **Reflect**: Consider if the answer is complete and accurate
 
 ## Guidelines
 - Always explain your reasoning process
-- Use tools when you need factual information
+- Use tools when you need factual information — never invent indicators
 - Cross-reference multiple sources when possible
 - Provide confidence levels for your conclusions
-- Suggest follow-up actions when appropriate
+- Recommend defensive follow-up actions when appropriate
 - Format responses for clarity (use headers, lists, etc.)
 
 ## Response Format
@@ -448,19 +463,15 @@ Structure your responses with:
 
 
 async def run_complex_agent():
-    """Run the complex agent demonstration."""
+    """Run the SOC agent demonstration."""
     print("=" * 60)
-    print("TULIP Complex Agent Demo")
+    print("TULIP SOC Analyst Agent Demo")
     print("=" * 60)
     print()
 
-    # Create model
-    model = OCIChatCompletionsModel(
-        model="openai.gpt-5",
-        profile=os.environ.get("OCI_PROFILE", "DEFAULT"),
-        region=os.environ.get("OCI_REGION", "us-chicago-1"),
-        max_tokens=2048,
-    )
+    # Pick up the configured provider (mock by default; live when
+    # TULIP_MODEL_PROVIDER + credentials are set).
+    model = get_model(max_tokens=2048)
 
     # Create agent with all tools
     agent = Agent(
@@ -479,13 +490,13 @@ async def run_complex_agent():
 
     # Complex multi-step task
     task = """
-    I need a comprehensive analysis of our engineering team and projects.
+    I need a comprehensive shift-handover analysis for the SOC.
 
     Please:
-    1. Query the database for all engineering team members
-    2. Get the list of active projects
-    3. Analyze the project budgets
-    4. Search the knowledge base for information about our architecture
+    1. Query the database for all day-shift analysts
+    2. Get the list of open incidents
+    3. Analyze the alert metrics for trends
+    4. Search the knowledge base for our escalation runbook
     5. Generate a brief executive report with your findings
 
     Include specific numbers and actionable recommendations.
@@ -537,34 +548,39 @@ async def run_complex_agent():
 
 
 async def run_structured_output_demo():
-    """Demonstrate structured output parsing."""
+    """Demonstrate structured incident-report parsing.
+
+    Constrained JSON output needs a model that can honor a schema. The
+    bundled mock returns plain text, so under it this part prints guidance
+    and exits cleanly rather than fabricating a report.
+    """
     print("\n" + "=" * 60)
     print("Structured Output Demo")
     print("=" * 60)
     print()
 
-    model = OCIChatCompletionsModel(
-        model="openai.gpt-5",
-        profile=os.environ.get("OCI_PROFILE", "DEFAULT"),
-        region=os.environ.get("OCI_REGION", "us-chicago-1"),
-    )
+    check_structured_output_capable()
+
+    model = get_model()
 
     # Create prompt with schema instructions
-    schema_prompt = create_schema_prompt(AnalysisReport)
+    schema_prompt = create_schema_prompt(IncidentReport)
 
     agent = Agent(
         model=model,
-        system_prompt=f"You are a data analyst. {schema_prompt}",
+        system_prompt=f"You are a SOC analyst. {schema_prompt}",
     )
 
-    result = agent.run_sync("Analyze the trends in AI adoption for enterprise companies in 2024.")
+    result = agent.run_sync(
+        "Analyze the trends in phishing alert volume for enterprise SOCs in Q1 2026."
+    )
 
     print(f"Raw response:\n{result.message[:300]}...")
     print()
 
     # Parse structured output
     try:
-        structured = parse_structured(result.message, AnalysisReport, strict=False)
+        structured = parse_structured(result.message, IncidentReport, strict=False)
         if structured.success:
             report = structured.parsed
             print("✅ Parsed successfully!")
