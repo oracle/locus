@@ -346,18 +346,19 @@ with a deeper specialist. The **Notebooks** sidebar lists the runnable
 filtering. A per-tab **Provider Settings** panel collects OpenAI /
 Anthropic credentials.
 
+It lives in its own repo —
+[tuliplabs-ai/workbench](https://github.com/tuliplabs-ai/workbench).
 Two ways to run it. Pick whichever fits.
 
 ### Run locally (from source)
 
 ```bash
-git clone https://github.com/tuliplabs-ai/sdk-python.git && cd tulip-agents
-pip install -e ".[server,openai,anthropic]"
+git clone https://github.com/tuliplabs-ai/workbench.git && cd workbench
 
-# Three terminals, one per tier:
-cd workbench/bff     && npm install && npm run dev   # BFF on :3101
-cd workbench/web     && npm install && npm run dev   # Vite on :5173
-cd workbench/backend && python -m uvicorn --app-dir . runner:app --port 8100
+# Three terminals, one per tier (the python tier is hatch-managed):
+cd backend && hatch run sdk && hatch run serve   # FastAPI runner on :8100
+cd bff     && npm install && npm run dev         # BFF on :3101
+cd web     && npm install && npm run dev         # Vite on :5173
 ```
 
 Open <http://localhost:5173>, click **Provider settings**, pick a
@@ -366,15 +367,15 @@ provider, paste the key, and save.
 ### Run in Docker
 
 ```bash
-git clone https://github.com/tuliplabs-ai/sdk-python.git && cd tulip-agents
-docker build -t tulip-workbench -f workbench/Dockerfile .
+git clone https://github.com/tuliplabs-ai/workbench.git && cd workbench
+docker build -t tulip-workbench .
 docker run --rm -p 5173:5173 -p 3101:3101 -p 8100:8100 tulip-workbench
 # open http://localhost:5173
 ```
 
 OpenAI and Anthropic work as-is — paste the key into *Provider settings*.
 
-→ Full walkthrough: [Workbench guide](docs/workbench.md) · [Provider settings](docs/workbench.md#provider-settings) · [Cognitive routing pattern](docs/workbench.md#cognitive-routing-pattern) · [Troubleshooting](docs/workbench.md#troubleshooting)
+→ Full walkthrough: [Workbench guide](https://tulipagents.ai/workbench/)
 
 ---
 
@@ -426,15 +427,15 @@ src/tulip/
 ├── evaluation/     EvalCase + EvalRunner + EvalReport
 └── integrations/   MCP (client + server)
 
-workbench/          Browser playground — Notebooks sidebar with live filter,
-                    three model slots (A / B / C), SSE event stream,
-                    Docker-ready.
-docs/               mkdocs Material site — concept pages, how-tos, notebook
-                    catalog, API reference. Live filter on /notebooks/.
 examples/           Progressive notebooks, each a single runnable file.
 tests/unit/         Deterministic, no external deps. Runs in CI on every PR.
 tests/integration/  Live OpenAI / Anthropic. Gated on credentials.
 ```
+
+The documentation site and the browser workbench live in sibling repos:
+[tuliplabs-ai/docs](https://github.com/tuliplabs-ai/docs) (published at
+[tulipagents.ai](https://tulipagents.ai/)) and
+[tuliplabs-ai/workbench](https://github.com/tuliplabs-ai/workbench).
 
 ---
 

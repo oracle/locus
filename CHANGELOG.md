@@ -24,6 +24,11 @@ deprecation path described in [`DEPRECATION.md`](DEPRECATION.md).
 - **Docs:** documentation moves to <https://tulipagents.ai/> with a new
   information architecture (Learn / Cookbook / Workbench / Reference)
   and a redesigned home page.
+- **Repo split:** the documentation site and the browser workbench move
+  to dedicated repositories —
+  [tuliplabs-ai/docs](https://github.com/tuliplabs-ai/docs) and
+  [tuliplabs-ai/workbench](https://github.com/tuliplabs-ai/workbench).
+  This repository carries the SDK and its cookbook (`examples/`).
 
 ### Added
 

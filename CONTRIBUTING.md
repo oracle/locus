@@ -131,9 +131,10 @@ then take the next free number at the end of that range:
 | Real-world workflows | 62–66 |
 | Server & full pipelines | 67–68 |
 
-`workbench/backend/runner.py` `NOTEBOOK_CATEGORIES` is the source of
-truth — update it when you add a notebook so the workbench sidebar
-groups the new entry correctly.
+`NOTEBOOK_CATEGORIES` in the workbench's `backend/runner.py`
+([tuliplabs-ai/workbench](https://github.com/tuliplabs-ai/workbench))
+is the source of truth — open a companion PR there when you add a
+notebook so the workbench sidebar groups the new entry correctly.
 
 ### File requirements
 
@@ -156,11 +157,13 @@ groups the new entry correctly.
 5. **`tulip.core.interrupt()`**: notebooks that call `interrupt()`
    for human approval (Notebooks 24, 38, 62, 63, 64 today) get a
    `needs_stdin: true` badge in the workbench. Add the notebook
-   number to `NOTEBOOK_NEEDS_STDIN` in `workbench/backend/runner.py`
-   when you add another one.
-6. **Docs stub**: add a matching markdown stub at
-   `docs/notebooks/notebook_NN_short_topic.md`. The docs tooling
-   generates one page per `examples/notebook_*.py`.
+   number to `NOTEBOOK_NEEDS_STDIN` in the workbench repo's
+   `backend/runner.py` when you add another one.
+6. **Docs page**: the docs repo
+   ([tuliplabs-ai/docs](https://github.com/tuliplabs-ai/docs)) carries
+   one page per `examples/notebook_*.py` — run its
+   `scripts/gen_notebook_pages.py` against your SDK checkout to
+   scaffold the new page, edit the prose, and open a companion PR.
 7. **Real-provider check**: run it through the workbench against the
    provider your audience cares about before opening the PR — the
    Playwright sweeps catch regressions, but a manual click-through
@@ -423,22 +426,31 @@ class TestAgent:
 
 ### Workbench end-to-end sweeps
 
-The workbench app (`workbench/`) ships three Playwright specs that drive
-every non-stdin notebook through the UI against a single provider:
+The workbench
+([tuliplabs-ai/workbench](https://github.com/tuliplabs-ai/workbench))
+ships Playwright specs that drive every non-stdin notebook through the
+UI against a single provider. Check it out next to this repo, point its
+backend at your SDK checkout, and sweep:
 
 ```bash
-# Bring up the three workbench tiers (terminal 1).
-hatch run python -m uvicorn --app-dir workbench/backend runner:app --port 8100
-( cd workbench/bff && npm install && npm run dev )    # terminal 2 — :3101
-( cd workbench/web && npm install && npm run dev )    # terminal 3 — :5173
-( cd workbench/e2e && npm install && npx playwright install chromium )
+git clone https://github.com/tuliplabs-ai/workbench.git ../workbench
+cd ../workbench
+
+# Bring up the three tiers (terminal 1–3); the backend runs your local
+# SDK and cookbook instead of the published package. The backend env is
+# hatch-managed — `sdk-local` installs ../../tulip-agents editable.
+( cd backend && hatch run sdk-local && \
+  TULIP_WORKBENCH_NOTEBOOKS=../../tulip-agents/examples hatch run serve )
+( cd bff && npm install && npm run dev )    # terminal 2 — :3101
+( cd web && npm install && npm run dev )    # terminal 3 — :5173
+( cd e2e && npm install && npx playwright install chromium )
 
 # Run a sweep against your provider of choice (terminal 4).
 ANTHROPIC_API_KEY=sk-ant-... \
-  npx --prefix workbench/e2e playwright test tests/all-anthropic.spec.ts --workers=3
+  npx --prefix e2e playwright test tests/all-anthropic.spec.ts --workers=3
 
 OPENAI_API_KEY=sk-... \
-  npx --prefix workbench/e2e playwright test tests/all-openai.spec.ts --workers=3
+  npx --prefix e2e playwright test tests/all-openai.spec.ts --workers=3
 ```
 
 The sweeps honour the per-slot model env vars (slot A / B / C) so you
@@ -465,8 +477,9 @@ workbench sidebar.
 
 For significant features, update:
 
-- **Capability matrix** in `docs/FEATURES.md` and `docs/capabilities.md`
-  (these are the source of truth — `README.md` mirrors them).
+- **Capability matrix** in the docs repo's `docs/FEATURES.md` and
+  `docs/capabilities.md` (these are the source of truth — `README.md`
+  mirrors them).
 - **`README.md` hero** — the *"OpenAI · Anthropic"* provider
   strip and the *"Talk to any provider"* table only need updates when
   you add a new provider.
@@ -474,8 +487,8 @@ For significant features, update:
   table in sync with `tulip.rag.stores`, `tulip.rag.reranker`, and
   `tulip.memory.backends`. Bump when you add a new backend.
 - **`README.md` notebook track table** — the ranges must match
-  `workbench/backend/runner.py` `NOTEBOOK_CATEGORIES` and
-  `docs/notebooks/index.md`.
+  `NOTEBOOK_CATEGORIES` in the workbench repo's `backend/runner.py`
+  and the docs repo's `docs/notebooks/index.md`.
 - **`README.md` Quick Start examples** — only when the feature changes
   the *five-things-that-make-tulip-different* shape.
 - **`README.md` Repo layout** — only when a new top-level module lands.

@@ -67,16 +67,6 @@ publish:
 	hatch publish
 
 ######################
-# DOCUMENTATION
-######################
-
-docs-serve:
-	hatch run docs:serve
-
-docs-build:
-	hatch run docs:build
-
-######################
 # HELP
 ######################
 
@@ -104,7 +94,3 @@ help:
 	@echo 'Build & Publish:'
 	@echo '  make build             - build package'
 	@echo '  make publish           - publish to PyPI'
-	@echo ''
-	@echo 'Documentation:'
-	@echo '  make docs-serve        - serve docs locally'
-	@echo '  make docs-build        - build documentation'

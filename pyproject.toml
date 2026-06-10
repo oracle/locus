@@ -176,16 +176,9 @@ dev = [
     "moto>=5.0",          # mock S3 for tests/unit/test_memory_backends_s3.py
 ]
 
-# Docs
-docs = [
-    "mkdocs>=1.6",
-    "mkdocs-material>=9.5",
-    "mkdocstrings[python]>=0.27",
-]
-
 [project.urls]
 Homepage = "https://github.com/tuliplabs-ai/sdk-python"
-Documentation = "https://github.com/tuliplabs-ai/sdk-python#readme"
+Documentation = "https://tulipagents.ai/"
 Repository = "https://github.com/tuliplabs-ai/sdk-python"
 Issues = "https://github.com/tuliplabs-ai/sdk-python/issues"
 
@@ -261,13 +254,6 @@ features = [
 
 [[tool.hatch.envs.test.matrix]]
 python = ["3.11", "3.12", "3.13", "3.14"]
-
-[tool.hatch.envs.docs]
-features = ["docs"]
-
-[tool.hatch.envs.docs.scripts]
-serve = "mkdocs serve"
-build = "mkdocs build"
 
 # =============================================================================
 # Ruff Configuration
@@ -397,14 +383,6 @@ ignore = [
 "examples/notebook_11_swarm_multiagent.py" = ["F821"]
 "examples/notebook_05_agent_hooks.py" = ["PLE2510"]
 "examples/projects/**/*.py" = ["PLE2510"]
-"workbench/scripts/*.py" = ["EXE001", "EXE005"]
-"workbench/backend/runner.py" = [
-    "ASYNC240", # os.path in async — wallet-path resolution, fast/local
-    "PTH111",   # os.path.expanduser — wallet / local config paths
-    "S608",     # SQL built from hardcoded demo-table identifiers
-    "SLF001",   # _last_run_state read after agent.run() exhausts —
-                # mirrors what agent.run_sync does internally
-]
 "tests/**/*.py" = [
     "ARG",     # unused arguments in fixtures
     "FBT",     # boolean trap in tests
