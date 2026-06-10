@@ -1,15 +1,28 @@
-# locus-sdk — DEPRECATED
+# locus-sdk
 
-> [!CAUTION]
-> **This project is deprecated and no longer maintained.** The final release is `0.2.0b27`.
+> [!IMPORTANT]
+> **This project has been deprecated and is no longer maintained.**
 
-Oracle has decided to deprecate this repository. This is **strictly a management
-decision about prioritization** — a reallocation of engineering focus toward other
-initiatives — and is **not** a reflection of any problem with the project, its
-contributors, or the quality of the code.
+## A note on this repository
 
-The source code has been removed from this repository. No further releases,
-updates, bug fixes, or support will be provided.
+After careful consideration, Oracle has made the difficult decision to wind
+down this project so that engineering efforts can be focused elsewhere. We
+want to be clear: this outcome is solely the result of a shift in internal
+priorities. It is in no way a reflection on the quality of the project, the
+soundness of its design, or — above all — the dedication and skill of the
+people who built and contributed to it.
+
+As part of this wind-down, the source code has been removed from this
+repository. Going forward, no further releases, updates, bug fixes, security
+patches, or support of any kind will be provided, and we kindly ask that
+users plan accordingly.
+
+We are sincerely grateful to everyone who used this project, reported
+issues, suggested improvements, or contributed code and documentation. Your
+engagement and generosity meant a great deal to the team, and we hope our
+paths cross again on future projects.
+
+Thank you for your understanding.
 
 ## Licensing
 
