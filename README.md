@@ -11,18 +11,6 @@ contributors, or the quality of the code.
 The source code has been removed from this repository. No further releases,
 updates, bug fixes, or support will be provided.
 
-## PyPI
-
-Previously published versions remain available on PyPI and installable —
-**nothing has been removed or yanked:**
-
-```
-pip install locus-sdk
-```
-
-The final release (`0.2.0b27`) is published with an `Inactive` development-status
-classifier and emits a `DeprecationWarning` on import.
-
 ## Licensing
 
 This project was distributed under the **Universal Permissive License v1.0
