@@ -1,0 +1,21 @@
+name: CI
+
+# This repository is deprecated and contains no code (see README).
+# The CI pipeline is intentionally reduced to a single no-op gate so the
+# required "CI Success" status check still reports on pull requests.
+# There is nothing to lint, build, or test.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ci-success:
+    name: CI Success
+    runs-on: ubuntu-latest
+    steps:
+      - name: No-op (repository deprecated — no code to validate)
+        run: echo "locus-sdk is deprecated; repository contains no code to lint, build, or test."
