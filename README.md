@@ -1,3 +1,9 @@
+> [!CAUTION]
+> **`locus-sdk` is deprecated and no longer maintained.**
+> `0.2.0b27` is the final release. All previously published versions remain
+> installable from PyPI, but the project will receive **no further updates,
+> bug fixes, or support**. If you depend on it, pin to an existing version.
+
 <p align="center">
   <img src="https://raw.githubusercontent.com/oracle-samples/locus/main/docs/img/og-card.png?v=3" alt="Oracle Generative AI – Multi-Agent Locus SDK · pip install locus-sdk · Built by Oracle · github.com/oracle-samples/locus" width="720">
 </p>

@@ -26,6 +26,12 @@ Usage:
         print(event)
 """
 
+# locus-sdk is deprecated and no longer maintained. 0.2.0b27 is the final
+# release. Previously published versions remain installable from PyPI, but the
+# project will receive no further updates, bug fixes, or support. The warning
+# fires once per process on first import of ``locus``.
+import warnings
+
 from locus.core.config import LocusSettings
 from locus.core.errors import LocusError
 from locus.core.events import (
@@ -41,6 +47,15 @@ from locus.core.messages import Message, Role, ToolCall
 from locus.core.state import AgentState
 from locus.tools.context import ToolContext
 from locus.tools.decorator import tool
+
+
+warnings.warn(
+    "locus-sdk is deprecated and no longer maintained. 0.2.0b27 is the final "
+    "release; previously published versions remain available on PyPI but will "
+    "receive no further updates, bug fixes, or support.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 
 # Lazy import mapping for optional dependencies
