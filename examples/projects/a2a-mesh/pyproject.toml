@@ -1,0 +1,45 @@
+# Copyright 2026 Tulip Labs
+# SPDX-License-Identifier: Apache-2.0
+#
+# Hatch-managed example project — no requirements.txt; everything lives here.
+#
+#   hatch run sdk          # install the published SDK into the env
+#   hatch run sdk-local    # …or the editable repo this example ships in
+#   hatch run research     # specialist on :8001
+#   hatch run finance      # specialist on :8002
+#   hatch run demo         # orchestrator discovers + queries both
+#   hatch run test         # pytest
+
+[project]
+name = "a2a-mesh"
+version = "1.0.0"
+description = "Two specialist A2A services and an orchestrator that discovers them"
+requires-python = ">=3.11"
+
+[tool.hatch.envs.default]
+# The mesh runs straight from src/ — nothing installable here.
+skip-install = true
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "httpx>=0.27",
+    "pytest>=8.0",
+]
+
+[tool.hatch.envs.default.env-vars]
+PYTHONPATH = "src"
+
+[tool.hatch.envs.default.scripts]
+# The A2A layer's fastapi / uvicorn / httpx come from this env's
+# dependencies, so the bare SDK is enough.
+sdk = "python -m pip install \"tulip-agents @ git+https://github.com/tuliplabs-ai/sdk-python.git\""
+sdk-local = "python -m pip install -e {env:TULIP_SDK_DIR:../../..}"
+research = "python -m a2a_mesh.research --port {env:PORT_RESEARCH:8001}"
+finance = "python -m a2a_mesh.finance --port {env:PORT_FINANCE:8002}"
+demo = "python -m a2a_mesh.orchestrator {args:\"Should I buy TSLA?\"}"
+test = "pytest tests/ {args:-v}"
+
+# Anchor pytest's rootdir here — without this it walks up to the SDK
+# repo's pyproject and reads config for plugins this env doesn't have.
+[tool.pytest.ini_options]
+testpaths = ["tests"]

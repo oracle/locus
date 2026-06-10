@@ -35,7 +35,8 @@ integration test.
 
 ```bash
 cd examples/projects/a2a-mesh
-make install            # pip install -r requirements.txt (in a venv)
+make install            # hatch env + published SDK (`hatch run sdk-local`
+                        # runs against this repo's checkout instead)
 
 # In three separate terminals (or use `make mesh` for tmux):
 make research           # boots :8001
@@ -103,6 +104,7 @@ against them, and asserts the reply round-trips. No real network.
 | `src/a2a_mesh/finance.py` | Finance `A2AServer` on `:8002` |
 | `src/a2a_mesh/orchestrator.py` | CLI client — discovers + delegates by skill tag |
 | `web/` | React + Vite UI — Redwood-styled A2A console (see [`web/README.md`](web/README.md)) |
+| `pyproject.toml` | Hatch env — deps and the `sdk`/`research`/`finance`/`demo`/`test` scripts |
 | `Makefile` | `install`, `research`, `finance`, `demo`, `test`, `mesh` (tmux) |
 | `tests/test_mesh.py` | In-process integration test |
 
