@@ -8,6 +8,39 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **`tulip.security` — evidence-grounded findings.** A new layer that
+  makes Tulip a cybersecurity SDK rather than a general one:
+  - `ground_finding()` / `ground_fingerprint()` turn a GSAR evidence
+    partition into a typed `Finding` **only** when it clears the
+    grounding threshold; otherwise they return an auditable
+    `Abstention`. A `Finding` has no public constructor without a
+    grounding score, so an ungrounded finding is unshippable by
+    construction.
+  - Typed schemas: `Finding`, `Indicator`, `FingerprintFinding`,
+    `FingerprintVerdict`, and a `FingerprintClassifier` protocol for
+    timing side-channel inference fingerprinting.
+  - Threat-taxonomy reference enums: `AtlasTechnique` (MITRE ATLAS),
+    `OwaspLLM` (OWASP Top 10 for LLM Applications, 2025), `OwaspASI`
+    (OWASP Top 10 for Agentic Applications, 2026).
+  - Pydantic + stdlib only — no new dependencies. mypy-strict, tested.
+
+### Changed
+
+- **Positioning: Tulip is the AI-cybersecurity agent SDK.** The cookbook
+  (`examples/`) is re-aimed to security workflows, AI-security-led:
+  prompt injection, jailbreaks, inference fingerprinting, RAG/memory
+  poisoning, model extraction, and excessive agency as the primary
+  track, with classic SOC/IR (triage, IOC enrichment, phishing, secure
+  code review, incident response with approval gates) as the second.
+  Scenarios are tagged to MITRE ATLAS / OWASP LLM / OWASP ASI, and the
+  grounded-findings showcases (notebooks 27, 35, 37, 38–40, 45, 50) use
+  the new `tulip.security` layer. GSAR typed grounding is the flagship:
+  an ungrounded finding is a false positive by construction, so the
+  agent abstains instead of shipping it. README, package description,
+  keywords, and the `Topic :: Security` classifier updated to match.
+
 ## [1.0.0] — 2026-06-09
 
 First general-availability release. From 1.0.0 Tulip follows Semantic

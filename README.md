@@ -3,8 +3,8 @@
 </p>
 
 <p align="center">
-  <strong>tulip — agent teams that show their work</strong><br>
-  <em>Eight coordination shapes behind one <code>Agent</code> class, every run narrated as typed events you can replay.</em>
+  <strong>tulip — the cybersecurity agent SDK</strong><br>
+  <em>Agent teams for security work that show their work: every claim grounded in evidence, every action a typed replayable event, every risky step gated.</em>
 </p>
 
 <p align="center">
@@ -22,6 +22,7 @@
 
 <p align="center">
   <a href="https://tulipagents.ai/">Documentation</a> ·
+  <a href="https://tulipagents.ai/concepts/gsar/">GSAR grounding</a> ·
   <a href="https://tulipagents.ai/concepts/router/">Cognitive Router</a> ·
   <a href="https://tulipagents.ai/concepts/multi-agent/">Multi-agent</a> ·
   <a href="https://tulipagents.ai/concepts/deepagent/">DeepAgent</a> ·
@@ -46,8 +47,8 @@
 ```python
 from tulip.agent import Agent
 agent = Agent(model="openai:gpt-4o")
-print(agent.run_sync("What is the capital of France?").text)
-# → Paris
+print(agent.run_sync("Triage: outbound beaconing from 192.0.2.14 to a domain registered yesterday.").text)
+# → a one-paragraph verdict with the evidence that backs it
 ```
 
 Construction, the model call, retries, and the reply all live behind that
@@ -62,21 +63,21 @@ A tool is an ordinary Python function — `@tool` publishes its signature and do
 from tulip.agent import Agent
 from tulip.tools import tool
 @tool
-def get_weather(city: str) -> str:
-    """Return the current weather for a city."""
-    return weather_api.fetch(city)
+def domain_reputation(domain: str) -> str:
+    """Return registrar age, category, and reputation for a domain."""
+    return intel_db.lookup(domain)
 
 agent = Agent(
     model="openai:gpt-4o",
-    tools=[get_weather],
-    system_prompt="You are a helpful travel assistant.",
+    tools=[domain_reputation],
+    system_prompt="You are a SOC triage analyst. Cite the evidence behind every verdict.",
 )
 
-print(agent.run_sync("Should I bring an umbrella to Tokyo tomorrow?").text)
+print(agent.run_sync("Users got mail linking to login.phish.example.net — phishing or legit?").text)
 ```
 
 Behind the scenes the agent alternates reasoning with tool calls until it can answer.
-For tools where a duplicate call would hurt — payments, pages, bookings — declare `@tool(idempotent=True)`:
+For tools where a duplicate call would hurt — isolating a host, paging an on-call, filing a ticket — declare `@tool(idempotent=True)`:
 the loop keys every invocation on `(name, args)` and refuses to fire the same one twice, even across retries.
 
 ## Install
@@ -91,6 +92,75 @@ pip install "tulip-agents[sdk]"           # everything
 No mandatory cloud account to start — `MockModel` lets every notebook run offline.
 
 → [Quickstart guide](https://tulipagents.ai/how-to/quickstart/)
+
+---
+
+## Why security teams: grounded or it doesn't ship
+
+Security is the one domain where a hallucinated claim isn't an
+embarrassment — it's a false positive that burns an analyst's night, or
+a false negative that ships a breach. Tulip is built around that fact:
+
+- **GSAR typed grounding** ([paper](https://arxiv.org/abs/2604.23366)) —
+  every claim an agent makes is partitioned **grounded / ungrounded /
+  contradicted / unknown** against typed evidence, with scanner and tool
+  output outranking inference and inference outranking domain priors.
+  Below threshold the run regenerates, replans, or **abstains**. An
+  ungrounded finding is a false positive *by construction* — it doesn't
+  reach your queue.
+- **Typed, replayable event streams** — every model call, tool call,
+  guardrail verdict, and approval is an immutable event you can ship to
+  a SIEM and replay in a postmortem. The audit trail is the default, not
+  an add-on.
+- **Risk-gated actions** — the router's PolicyGate ranks operations by
+  risk; HIGH-risk steps (isolate a host, block a domain) require a
+  durable human approval that survives restarts (`interrupt()` +
+  checkpointers).
+- **Enforced runbooks** — `PlaybookEnforcer` pins an investigation to
+  its IR playbook: steps in order, tools per step, violations recorded.
+- **Hardened tool layer** — SSRF-safe fetchers (cloud metadata and
+  private ranges blocked, DNS fail-closed), prompt-injection and
+  secret-leak guardrails on both input and output, idempotent
+  side-effecting tools.
+
+That last point is a type-level guarantee, not a convention. The
+`tulip.security` layer turns a GSAR evidence partition into a finding
+only when it clears the grounding threshold — otherwise you get an
+auditable abstention, never a finding:
+
+```python
+from tulip.security import ground_finding, Severity, is_finding
+from tulip.reasoning.gsar import Claim, EvidenceType, Partition
+
+result = ground_finding(
+    title="Expired TLS certificate on 192.0.2.10:443",
+    description="Serving endpoint presents an expired certificate.",
+    severity=Severity.HIGH,
+    asset="192.0.2.10:443",
+    remediation="Rotate the certificate; enforce automated renewal.",
+    partition=Partition(grounded=[
+        Claim(text="cert expired 2026-05-30", type=EvidenceType.TOOL_MATCH,
+              evidence_refs=["tool:tls_scan:not_after=2026-05-30"]),
+    ]),
+)
+# A grounded partition → a typed Finding. An ungrounded one → an
+# Abstention with the reason it was withheld. There is no third path,
+# and no public constructor that makes a Finding without a score.
+print(result.title if is_finding(result) else f"withheld: {result.reason}")
+```
+
+`Finding` tags carry the standard catalogues — **MITRE ATLAS**
+(`AML.Txxxx`), **OWASP Top 10 for LLM Applications (2025)**, and the
+**OWASP Top 10 for Agentic Applications (2026)** — so findings drop into
+a SIEM or a **NIST AI RMF** report without a translation layer.
+
+Every example in [`examples/`](examples/) is a security workflow.
+**AI-security is the primary track** — prompt injection, jailbreaks,
+inference fingerprinting, RAG and memory poisoning, model extraction,
+excessive agency — with **classic SOC/IR** (triage, IOC enrichment,
+phishing, secure code review, incident response with approval gates) as
+the second track. Start with
+[`notebook_37_gsar_typed_grounding.py`](examples/notebook_37_gsar_typed_grounding.py).
 
 ---
 
@@ -210,12 +280,12 @@ Every pattern uses the same `Agent` class and the same event stream.
 
 ```python
 from tulip.agent import Agent, SequentialPipeline
-researcher = Agent(model=model, system_prompt="Find three key facts about the topic.")
-critic     = Agent(model=model, system_prompt="Identify any gaps or errors in the research.")
-writer     = Agent(model=model, system_prompt="Write a clear one-paragraph summary.")
+recon    = Agent(model=model, system_prompt="Summarise the exposed services on the host.")
+validate = Agent(model=model, system_prompt="Flag which exposures are exploitable; cite evidence.")
+report   = Agent(model=model, system_prompt="Write the finding: severity, asset, remediation.")
 
-result = await SequentialPipeline(agents=[researcher, critic, writer]).run(
-    "Explain quantum entanglement to a high-schooler."
+result = await SequentialPipeline(agents=[recon, validate, report]).run(
+    "Triage the attack surface on 192.0.2.10."
 )
 print(result.text)
 ```
@@ -228,6 +298,7 @@ print(result.text)
 
 | | |
 |---|---|
+| **[🔒 Grounded findings](https://tulipagents.ai/concepts/security/)** | `tulip.security` — `ground_finding()` emits a typed `Finding` only above the GSAR threshold, else an auditable `Abstention`. Tagged to MITRE ATLAS · OWASP LLM · OWASP ASI. Plus `FingerprintFinding` for timing side-channel inference fingerprinting. |
 | **[🧭 Cognitive router](https://tulipagents.ai/concepts/router/)** | Describe a task → eight named protocols → right primitive compiled automatically. LLM fills a typed schema; routing is deterministic. |
 | **[🤝 Multi-agent](https://tulipagents.ai/concepts/multi-agent/)** | Seven native patterns + cross-process A2A. One `Agent` class. One event stream. |
 | **[🔬 DeepAgent](https://tulipagents.ai/concepts/deepagent/)** | `create_deepagent` (single agent, per-turn grounding) and `create_research_workflow` (StateGraph with post-hoc grounding eval + two-level recovery). |
@@ -455,12 +526,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Every PR runs format, lint, mypy, unit t
 
 ## Citing GSAR
 
-Paper: [GSAR: Typed Grounding for Hallucination Detection and Recovery in Multi-Agent LLMs](https://arxiv.org/abs/2604.23366) ([PDF](https://arxiv.org/pdf/2604.23366)) — Federico A. Tulip, 2026.
+Paper: [GSAR: Typed Grounding for Hallucination Detection and Recovery in Multi-Agent LLMs](https://arxiv.org/abs/2604.23366) ([PDF](https://arxiv.org/pdf/2604.23366)), 2026.
 
 ```bibtex
-@article{kamelhar2026gsar,
+@article{gsar2026,
   title   = {GSAR: Typed Grounding for Hallucination Detection and Recovery in Multi-Agent LLMs},
-  author  = {Tulip, Federico A.},
   journal = {arXiv preprint arXiv:2604.23366},
   year    = {2026},
   url     = {https://arxiv.org/abs/2604.23366},
