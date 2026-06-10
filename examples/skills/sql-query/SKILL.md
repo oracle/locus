@@ -2,7 +2,7 @@
 name: sql-query
 description: Use when the user asks the agent to write, review, or explain a SQL query — enforces correctness, safety, and read-only-by-default behavior.
 allowed-tools: kb_search
-license: UPL-1.0
+license: Apache-2.0
 metadata:
   author: tulip
   domain: data

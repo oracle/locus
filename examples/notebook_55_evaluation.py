@@ -1,6 +1,5 @@
-# Copyright (c) 2026 tuliplabs.
-# Licensed under the Universal Permissive License v1.0 as shown at
-# https://opensource.org/license/UPL
+# Copyright 2026 Tulip Labs
+# SPDX-License-Identifier: Apache-2.0
 """Notebook 50: Evaluation — score an agent against a test suite.
 
 Treat the agent like any other piece of code. Declare cases, run them,

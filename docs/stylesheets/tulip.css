@@ -32,24 +32,24 @@ html {
   --tulip-paper:    #FAFAF9;   /* logo white-out — paper */
   --tulip-surface:  #FFFFFF;   /* elevated surface (header, cards, focused inputs) */
   --tulip-table-stripe: rgba(244, 239, 236, 0.45);
-  --tulip-code-inline: var(--or-red-deep);
+  --tulip-code-inline: var(--tl-red-deep);
 
   /* tuliplabs palette */
-  --or-text:        #1B1620;   /* dk1 */
-  --or-bg:          #FBF9F8;   /* lt2 — off-white */
-  --or-bg-soft:     #F4EFEC;   /* derived: tint of lt2 */
-  --or-rule:        #E5DED9;   /* derived */
+  --tl-text:        #1B1620;   /* dk1 */
+  --tl-bg:          #FBF9F8;   /* lt2 — off-white */
+  --tl-bg-soft:     #F4EFEC;   /* derived: tint of lt2 */
+  --tl-rule:        #E5DED9;   /* derived */
 
-  --or-red:         #D6336C;   /* accent3 — tulip red, also tulip mark accent */
-  --or-red-deep:    #AD2E5C;   /* derived */
-  --or-red-light:   #E86A98;   /* derived */
+  --tl-red:         #D6336C;   /* accent3 — tulip red, also tulip mark accent */
+  --tl-red-deep:    #AD2E5C;   /* derived */
+  --tl-red-light:   #E86A98;   /* derived */
 
-  --or-teal:        #E2570E;   /* accent1 */
-  --or-link:        #D6336C;   /* hlink */
-  --or-mauve:       #AD2E5C;   /* accent2 */
-  --or-sand:        #F7A21E;   /* accent4 */
-  --or-sage-teal:   #F4A6C2;   /* accent5 */
-  --or-sage-green:  #16A34A;   /* accent6 */
+  --tl-teal:        #E2570E;   /* accent1 */
+  --tl-link:        #D6336C;   /* hlink */
+  --tl-mauve:       #AD2E5C;   /* accent2 */
+  --tl-sand:        #F7A21E;   /* accent4 */
+  --tl-sage-teal:   #F4A6C2;   /* accent5 */
+  --tl-sage-green:  #16A34A;   /* accent6 */
 
   /* tulip type stack — same as logo SVG, sans throughout */
   --tulip-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
@@ -62,24 +62,24 @@ html {
    Light scheme (default).
    --------------------------------------------------------------------------- */
 [data-md-color-scheme="default"] {
-  --md-primary-fg-color:        var(--or-red);
-  --md-primary-fg-color--light:  var(--or-red-light);
-  --md-primary-fg-color--dark:   var(--or-red-deep);
+  --md-primary-fg-color:        var(--tl-red);
+  --md-primary-fg-color--light:  var(--tl-red-light);
+  --md-primary-fg-color--dark:   var(--tl-red-deep);
   --md-primary-bg-color:        #FFFFFF;
   --md-primary-bg-color--light: #FFFFFFcc;
 
-  --md-accent-fg-color:         var(--or-link);
-  --md-accent-fg-color--transparent: rgba(0, 104, 140, 0.10);
+  --md-accent-fg-color:         var(--tl-link);
+  --md-accent-fg-color--transparent: rgba(214, 51, 108, 0.10);
   --md-accent-bg-color:         #FFFFFF;
 
-  --md-default-bg-color:        var(--or-bg);
-  --md-default-fg-color:        var(--or-text);
+  --md-default-bg-color:        var(--tl-bg);
+  --md-default-fg-color:        var(--tl-text);
   --md-default-fg-color--light: #4a4f4f;
   --md-default-fg-color--lighter: #7a7e7e;
   --md-default-fg-color--lightest: #c5c8c8;
 
-  --md-typeset-color:           var(--or-text);
-  --md-typeset-a-color:          var(--or-link);
+  --md-typeset-color:           var(--tl-text);
+  --md-typeset-a-color:          var(--tl-link);
   --md-typeset-mark-color:       rgba(247, 162, 30, 0.45);  /* sand */
 
   --md-footer-bg-color:         #1F2424;
@@ -107,25 +107,25 @@ html {
   --tulip-table-stripe: rgba(240, 235, 230, 0.04);
   --tulip-code-inline: #E86A98;
 
-  --or-text:          #F0EBE6;
-  --or-text-soft:     #c9c4be;
-  --or-text-mute:     #95908a;
-  --or-bg:            #1B1A18;
-  --or-bg-soft:       #25231F;
-  --or-surface:       #1F1D1A;
-  --or-rule:          #36332E;
+  --tl-text:          #F0EBE6;
+  --tl-text-soft:     #c9c4be;
+  --tl-text-mute:     #95908a;
+  --tl-bg:            #1B1A18;
+  --tl-bg-soft:       #25231F;
+  --tl-surface:       #1F1D1A;
+  --tl-rule:          #36332E;
 
   /* Red stays tulip red; deep variant lightens in dark (matches workbench) */
-  --or-red:           #D6336C;
-  --or-red-deep:      #C2185B;
-  --or-red-light:     #E86A98;
+  --tl-red:           #D6336C;
+  --tl-red-deep:      #C2185B;
+  --tl-red-light:     #E86A98;
   /* Sage teal becomes the link colour in dark (matches workbench) */
-  --or-teal:          #F4A6C2;
-  --or-link:          #E86A98;
-  --or-mauve:         #B07A85;
-  --or-sand:          #F7A21E;
-  --or-sage-teal:     #F4A6C2;
-  --or-sage-green:    #16A34A;
+  --tl-teal:          #F4A6C2;
+  --tl-link:          #E86A98;
+  --tl-mauve:         #B07A85;
+  --tl-sand:          #F7A21E;
+  --tl-sage-teal:     #F4A6C2;
+  --tl-sage-green:    #16A34A;
 
   /* Material overrides */
   --md-primary-fg-color:        #D6336C;
@@ -208,12 +208,12 @@ html {
   color: var(--tulip-ink);
   font-weight: 700;
   letter-spacing: -0.02em;
-  border-bottom: 1px solid var(--or-rule);
+  border-bottom: 1px solid var(--tl-rule);
   padding-bottom: 0.4rem;
   margin-top: 1.6rem;
 }
 .md-typeset h3 {
-  color: var(--or-red-deep);
+  color: var(--tl-red-deep);
   font-weight: 700;
   letter-spacing: -0.015em;
 }
@@ -315,7 +315,7 @@ html {
   padding-left: 1.75rem;
 }
 .md-typeset .tulip-hero h1 .accent {
-  color: var(--or-red);
+  color: var(--tl-red);
 }
 .md-typeset .tulip-hero p {
   font-size: 1.05rem;
@@ -363,7 +363,7 @@ html {
   max-width: 100%;
 }
 .md-typeset .tulip-hero__copy pre {
-  background: var(--or-bg-soft);
+  background: var(--tl-bg-soft);
   border: 0;
   border-radius: 6px;
   padding: 0.45rem 0.9rem;
@@ -374,8 +374,8 @@ html {
 /* Stat strip — compact metric bar. */
 .md-typeset .tulip-stat-strip {
   display: block;
-  border-top: 1px solid var(--or-rule);
-  border-bottom: 1px solid var(--or-rule);
+  border-top: 1px solid var(--tl-rule);
+  border-bottom: 1px solid var(--tl-rule);
   padding: 0.35rem 0;
   margin: 0.7rem 0 1rem;
 }
@@ -396,8 +396,8 @@ html {
   transition: color 0.15s, border-color 0.15s;
 }
 .md-typeset .tulip-stat-strip a:hover {
-  color: var(--or-red);
-  border-bottom-color: var(--or-red);
+  color: var(--tl-red);
+  border-bottom-color: var(--tl-red);
 }
 /* Hide the ¶ permalink on the hero h1. */
 .md-typeset .tulip-hero h1 a.headerlink {
@@ -410,7 +410,7 @@ html {
 }
 .md-typeset .grid.cards.tulip-feature-cards > ul > li,
 .md-typeset .grid.cards.tulip-feature-cards > ol > li {
-  border-left: 3px solid var(--or-red);
+  border-left: 3px solid var(--tl-red);
   border-radius: 0 6px 6px 0;
   padding: 0.9rem 1rem;
   /* Anchor the absolutely-positioned overlay link to the card. */
@@ -419,12 +419,12 @@ html {
 }
 .md-typeset .grid.cards.tulip-feature-cards > ul > li:hover,
 .md-typeset .grid.cards.tulip-feature-cards > ol > li:hover {
-  background-color: var(--or-surface-hover, rgba(214, 51, 108, 0.05));
+  background-color: var(--tl-surface-hover, rgba(214, 51, 108, 0.05));
   transform: translateY(-1px);
 }
 .md-typeset .grid.cards.tulip-feature-cards p {
   font-size: 0.82rem;
-  color: var(--or-text);
+  color: var(--tl-text);
   margin: 0;
   line-height: 1.5;
 }
@@ -432,7 +432,7 @@ html {
   font-size: 1rem;
   display: block;
   margin-bottom: 0.25rem;
-  color: var(--or-accent, #D6336C);
+  color: var(--tl-accent, #D6336C);
 }
 /* Make the whole card clickable: stretch the title's <a> over the card
    surface so anywhere inside the <li> opens the linked concept page. */
@@ -448,7 +448,7 @@ html {
 }
 .md-typeset .grid.cards.tulip-feature-cards > ul > li:focus-within,
 .md-typeset .grid.cards.tulip-feature-cards > ol > li:focus-within {
-  outline: 2px solid var(--or-accent, #D6336C);
+  outline: 2px solid var(--tl-accent, #D6336C);
   outline-offset: 2px;
 }
 @media (max-width: 76em) {
@@ -503,7 +503,7 @@ html {
 .md-typeset .grid.cards > ul > li,
 .md-typeset .grid.cards > ol > li {
   background: var(--tulip-surface);
-  border: 1px solid var(--or-rule);
+  border: 1px solid var(--tl-rule);
   border-radius: 6px;
   padding: 1rem 1.1rem;
   transition: box-shadow 0.15s, transform 0.15s, border-color 0.15s;
@@ -512,11 +512,11 @@ html {
 .md-typeset .grid.cards > ol > li:hover {
   box-shadow: 0 8px 28px -16px rgba(49, 45, 42, 0.22);
   transform: translateY(-2px);
-  border-color: var(--or-red-light);
+  border-color: var(--tl-red-light);
 }
 .md-typeset .grid.cards .twemoji,
 .md-typeset .grid.cards svg {
-  color: var(--or-red);
+  color: var(--tl-red);
 }
 
 /* ---------------------------------------------------------------------------
@@ -526,7 +526,7 @@ html {
 .md-header {
   background-color: var(--tulip-surface);
   color: var(--tulip-ink);
-  border-bottom: 1px solid var(--or-rule);
+  border-bottom: 1px solid var(--tl-rule);
   box-shadow: 0 6px 16px -12px rgba(49, 45, 42, 0.18);
 }
 .md-header::after {
@@ -534,7 +534,7 @@ html {
   position: absolute;
   left: 0; right: 0; bottom: 0;
   height: 2px;
-  background: var(--or-red);
+  background: var(--tl-red);
 }
 .md-header__inner {
   min-height: 4rem;
@@ -763,9 +763,9 @@ form.md-header__option {
 }
 
 .md-tabs {
-  background-color: var(--or-bg);
+  background-color: var(--tl-bg);
   color: var(--tulip-ink);
-  border-bottom: 1px solid var(--or-rule);
+  border-bottom: 1px solid var(--tl-rule);
 }
 /* Tighter tab strip — Material defaults to a 2.4rem item height with a
    0.8rem top-margin on each link, leaving a tall empty band above the
@@ -781,7 +781,7 @@ form.md-header__option {
   margin-top: 0.35rem;
 }
 .md-tabs__link:hover {
-  color: var(--or-red);
+  color: var(--tl-red);
 }
 .md-tabs__link--active {
   color: var(--tulip-ink);
@@ -792,14 +792,14 @@ form.md-header__option {
   position: absolute;
   left: 0; right: 0; bottom: -1px;
   height: 2px;
-  background: var(--or-red);
+  background: var(--tl-red);
 }
 
 /* ---------------------------------------------------------------------------
    Side-nav — calmer, off-white feel.
    --------------------------------------------------------------------------- */
 .md-nav__title {
-  color: var(--or-text);
+  color: var(--tl-text);
   font-weight: 700;
 }
 
@@ -808,7 +808,7 @@ form.md-header__option {
 .md-nav--primary .md-nav__title[for="__drawer"] {
   background-color: var(--tulip-surface);
   color: var(--tulip-ink);
-  border-bottom: 2px solid var(--or-red);
+  border-bottom: 2px solid var(--tl-red);
   box-shadow: none;
 }
 .md-nav--primary .md-nav__title[for="__drawer"] .md-nav__button {
@@ -820,8 +820,8 @@ form.md-header__option {
   border-bottom: 1px solid rgba(255,255,255,0.08) !important;
 }
 [data-md-color-scheme="slate"] .md-nav--primary .md-nav__title[for="__drawer"] {
-  background-color: var(--or-surface);
-  color: var(--or-text);
+  background-color: var(--tl-surface);
+  color: var(--tl-text);
 }
 [data-md-color-scheme="slate"] .md-nav__source {
   background-color: #2A2826 !important;
@@ -852,14 +852,14 @@ form.md-header__option {
    small caps so they read as category labels not nav items. */
 .md-nav--primary .md-nav__item--section > .md-nav__link,
 .md-nav--primary .md-nav__item--section > .md-nav__link:not(.md-nav__link--active) {
-  color: var(--or-teal) !important;
+  color: var(--tl-teal) !important;
   font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   margin-top: 0.5rem;
   padding-top: 0.5rem;
-  border-top: 1px solid var(--or-rule);
+  border-top: 1px solid var(--tl-rule);
   opacity: 1;
 }
 .md-nav--primary .md-nav__item--section:first-child > .md-nav__link {
@@ -869,17 +869,17 @@ form.md-header__option {
 }
 [data-md-color-scheme="slate"] .md-nav--primary .md-nav__item--section > .md-nav__link,
 [data-md-color-scheme="slate"] .md-nav--primary .md-nav__item--section > .md-nav__link:not(.md-nav__link--active) {
-  color: var(--or-sage-teal) !important;
-  border-top-color: var(--or-rule);
+  color: var(--tl-sage-teal) !important;
+  border-top-color: var(--tl-rule);
 }
 
 .md-nav__link--active,
 .md-nav__link[aria-current="true"] {
-  color: var(--or-red-deep) !important;
+  color: var(--tl-red-deep) !important;
   font-weight: 600;
 }
 .md-nav__item .md-nav__link:hover {
-  color: var(--or-link);
+  color: var(--tl-link);
 }
 
 /* ---------------------------------------------------------------------------
@@ -892,11 +892,11 @@ form.md-header__option {
   font-size: 0.85em;
 }
 .md-typeset pre > code {
-  background-color: var(--or-bg-soft);
-  color: var(--or-text);
+  background-color: var(--tl-bg-soft);
+  color: var(--tl-text);
 }
 .md-typeset .highlight {
-  border-left: 3px solid var(--or-red);
+  border-left: 3px solid var(--tl-red);
   border-radius: 0 4px 4px 0;
 }
 
@@ -904,16 +904,16 @@ form.md-header__option {
    Tables — off-white striping, subtle red header underline.
    --------------------------------------------------------------------------- */
 .md-typeset table:not([class]) {
-  border: 1px solid var(--or-rule);
+  border: 1px solid var(--tl-rule);
   border-radius: 4px;
   overflow: hidden;
   font-size: 0.84rem;
 }
 .md-typeset table:not([class]) th {
-  background-color: var(--or-bg-soft);
-  color: var(--or-text);
+  background-color: var(--tl-bg-soft);
+  color: var(--tl-text);
   font-weight: 700;
-  border-bottom: 2px solid var(--or-red);
+  border-bottom: 2px solid var(--tl-red);
 }
 .md-typeset table:not([class]) tr:nth-child(even) {
   background-color: var(--tulip-table-stripe);
@@ -924,25 +924,25 @@ form.md-header__option {
    --------------------------------------------------------------------------- */
 .md-typeset .admonition.note,
 .md-typeset details.note {
-  border-left-color: var(--or-link);
+  border-left-color: var(--tl-link);
 }
 .md-typeset .admonition.note > .admonition-title,
 .md-typeset details.note > summary {
   background-color: rgba(0, 104, 140, 0.08);
-  color: var(--or-link);
+  color: var(--tl-link);
 }
 .md-typeset .admonition.warning,
 .md-typeset details.warning {
-  border-left-color: var(--or-red);
+  border-left-color: var(--tl-red);
 }
 .md-typeset .admonition.warning > .admonition-title,
 .md-typeset details.warning > summary {
   background-color: rgba(214, 51, 108, 0.08);
-  color: var(--or-red-deep);
+  color: var(--tl-red-deep);
 }
 .md-typeset .admonition.tip,
 .md-typeset details.tip {
-  border-left-color: var(--or-sage-green);
+  border-left-color: var(--tl-sage-green);
 }
 .md-typeset .admonition.tip > .admonition-title,
 .md-typeset details.tip > summary {
@@ -955,24 +955,24 @@ form.md-header__option {
    --------------------------------------------------------------------------- */
 .md-typeset .md-button {
   background-color: transparent;
-  border: 1px solid var(--or-red);
-  color: var(--or-red);
+  border: 1px solid var(--tl-red);
+  color: var(--tl-red);
   border-radius: 3px;
   font-weight: 600;
   letter-spacing: 0.01em;
 }
 .md-typeset .md-button:hover,
 .md-typeset .md-button:focus {
-  background-color: var(--or-red);
+  background-color: var(--tl-red);
   color: #FFFFFF;
-  border-color: var(--or-red);
+  border-color: var(--tl-red);
 }
 .md-typeset .md-button--primary {
-  background-color: var(--or-red);
+  background-color: var(--tl-red);
   color: #FFFFFF;
 }
 .md-typeset .md-button--primary:hover {
-  background-color: var(--or-red-deep);
+  background-color: var(--tl-red-deep);
 }
 
 /* ---------------------------------------------------------------------------
@@ -982,7 +982,7 @@ form.md-header__option {
   background-color: #161A1A;
 }
 .md-footer__inner {
-  border-top: 2px solid var(--or-red);
+  border-top: 2px solid var(--tl-red);
 }
 
 /* Footer brand block — product title + copyright line.
@@ -1047,7 +1047,7 @@ form.md-header__option {
    Search input — keep neutral, red focus ring.
    --------------------------------------------------------------------------- */
 .md-search__input {
-  background-color: var(--or-bg-soft);
+  background-color: var(--tl-bg-soft);
   color: var(--tulip-ink);
 }
 .md-search__input::placeholder {
@@ -1080,7 +1080,7 @@ form.md-header__option {
 }
 .md-typeset .admonition.sdk-distinctive,
 .md-typeset details.sdk-distinctive {
-  border-color: var(--or-red);
+  border-color: var(--tl-red);
   background: linear-gradient(135deg,
     rgba(214, 51, 108, 0.04) 0%,
     rgba(247, 162, 30, 0.04) 100%);
@@ -1088,13 +1088,13 @@ form.md-header__option {
 .md-typeset .sdk-distinctive > .admonition-title,
 .md-typeset .sdk-distinctive > summary {
   background-color: rgba(214, 51, 108, 0.08);
-  color: var(--or-red-deep);
+  color: var(--tl-red-deep);
   font-weight: 700;
   letter-spacing: -0.01em;
 }
 .md-typeset .sdk-distinctive > .admonition-title::before,
 .md-typeset .sdk-distinctive > summary::before {
-  background-color: var(--or-red);
+  background-color: var(--tl-red);
   -webkit-mask-image: var(--md-admonition-icon--sdk-distinctive);
           mask-image: var(--md-admonition-icon--sdk-distinctive);
 }
@@ -1166,7 +1166,7 @@ form.md-header__option {
 }
 .md-header__source.md-header__github:hover {
   background-color: rgba(237, 47, 126, 0.12);
-  color: var(--or-red);
+  color: var(--tl-red);
   transform: translateY(-1px);
 }
 .md-header__github-icon {
@@ -1350,7 +1350,7 @@ form.md-header__option {
 }
 .md-clipboard:focus,
 .md-clipboard:hover {
-  color: var(--or-red);
+  color: var(--tl-red);
   opacity: 1;
 }
 [data-md-color-scheme="slate"] .md-clipboard {
@@ -1359,7 +1359,7 @@ form.md-header__option {
 }
 [data-md-color-scheme="slate"] .md-clipboard:focus,
 [data-md-color-scheme="slate"] .md-clipboard:hover {
-  color: var(--or-red-light);
+  color: var(--tl-red-light);
   opacity: 1;
 }
 
@@ -1509,7 +1509,7 @@ form.md-header__option {
 /* ---- Feature cards: full border, rounded, hover-lift ---- */
 .md-typeset .grid.cards.tulip-feature-cards > ul > li,
 .md-typeset .grid.cards.tulip-feature-cards > ol > li {
-  border: 1px solid var(--or-rule);
+  border: 1px solid var(--tl-rule);
   border-radius: 16px;
   padding: 1.2rem 1.25rem;
   background: var(--md-default-bg-color);

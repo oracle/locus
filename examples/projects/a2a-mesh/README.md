@@ -126,4 +126,4 @@ services, so it works against the same `make research` /
 
 [t34]: https://github.com/tuliplabs-ai/sdk-python/blob/main/examples/notebook_35_a2a_protocol.py
 [a2a]: https://github.com/tuliplabs-ai/sdk-python/blob/main/src/tulip/a2a/protocol.py
-[orch]: https://tuliplabs.ai/concepts/multi-agent/orchestrator/
+[orch]: https://tulipagents.ai/concepts/multi-agent/orchestrator/

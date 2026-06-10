@@ -1,6 +1,5 @@
-# Copyright (c) 2026 tuliplabs.
-# Licensed under the Universal Permissive License v1.0 as shown at
-# https://opensource.org/license/UPL
+# Copyright 2026 Tulip Labs
+# SPDX-License-Identifier: Apache-2.0
 """Notebook 36: structured output — get typed JSON back from an LLM.
 
 Every part calls the configured model and prints a

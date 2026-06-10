@@ -8,10 +8,27 @@ policy.
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-06-09
+
+First general-availability release. From 1.0.0 Tulip follows Semantic
+Versioning: breaking changes only land in major versions, with the
+deprecation path described in [`DEPRECATION.md`](DEPRECATION.md).
+
+### Changed
+
+- **License:** relicensed from UPL-1.0 to **Apache-2.0**. Portions
+  originally released under UPL-1.0 remain available under those terms —
+  see `NOTICE`.
+- **Versioning:** the `0.2.0bN` beta line is retired; Tulip goes GA at
+  `1.0.0` with no further pre-releases.
+- **Docs:** documentation moves to <https://tulipagents.ai/> with a new
+  information architecture (Learn / Cookbook / Workbench / Reference)
+  and a redesigned home page.
+
 ### Added
 
 - Initial public release of **Tulip** (`tulip-agents`), a vendor-neutral
-  multi-agent reasoning orchestrator SDK.
+  SDK for building auditable agent teams.
 - Agent runtime with the Think → Execute → Reflect → Terminate loop,
   idempotent tools, composable termination algebra, Reflexion, Grounding,
   and the GSAR typed-grounding layer.

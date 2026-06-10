@@ -2,17 +2,19 @@
 
 ## License
 
-tulip is released under the **Universal Permissive License (UPL), Version 1.0**.
+tulip is released under the **Apache License, Version 2.0**.
 
-Copyright (c) 2026 tuliplabs.
+Copyright 2026 Tulip Labs.
 
-Permission is hereby granted, free of charge and under any and all copyright rights in the Software, and any and all patent rights owned or freely licensable by each licensor, to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following condition:
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use this software except in compliance with the License. You may obtain a copy of the License at <https://www.apache.org/licenses/LICENSE-2.0>.
 
-The above copyright notice and either this complete permission notice or at a minimum a reference to the UPL must be included in all copies or substantial portions of the Software.
+Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+### Provenance
 
-Full text: [LICENSE](https://github.com/tuliplabs-ai/sdk-python/blob/main/LICENSE)
+Tulip began as a fork of an earlier project released under the **Universal Permissive License v1.0 (UPL-1.0)**. Those original portions remain available under the UPL-1.0; all new contributions are licensed under the Apache License, Version 2.0. See the [`NOTICE`](https://github.com/tuliplabs-ai/sdk-python/blob/main/NOTICE) file for attribution details.
+
+Full text: [LICENSE](https://github.com/tuliplabs-ai/sdk-python/blob/main/LICENSE) · [NOTICE](https://github.com/tuliplabs-ai/sdk-python/blob/main/NOTICE)
 
 ---
 

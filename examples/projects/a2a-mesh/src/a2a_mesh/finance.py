@@ -1,6 +1,5 @@
-# Copyright (c) 2026 tuliplabs.
-# Licensed under the Universal Permissive License v1.0 as shown at
-# https://opensource.org/license/UPL
+# Copyright 2026 Tulip Labs
+# SPDX-License-Identifier: Apache-2.0
 """Finance agent — exposed over A2A on :8002 by default.
 
 Skills: ``finance``, ``valuation``.

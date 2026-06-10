@@ -25,7 +25,7 @@
   matches the brand assets the team designed.
 #}
 {% block extrahead %}
-  {% set page_title = page.title | striptags if page and page.title and not page.is_homepage else "Multi-agent workflows built for production" %}
+  {% set page_title = page.title | striptags if page and page.title and not page.is_homepage else "Agent teams that show their work" %}
   {% set page_desc = page.meta.description if page and page.meta and page.meta.description else config.site_description %}
   {% set page_url = page.canonical_url if page and page.canonical_url else config.site_url %}
   {% set og_image = (config.site_url ~ "/img/tuliplabs-logo.png") | replace("//img/", "/img/") %}

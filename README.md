@@ -3,35 +3,35 @@
 </p>
 
 <p align="center">
-  <strong>Tulip · Multi-Agent SDK</strong><br>
-  <em>One <code>Agent</code> class, eight orchestration shapes, typed reasoning, and a vendor-neutral backend stack.</em>
+  <strong>tulip — agent teams that show their work</strong><br>
+  <em>Eight coordination shapes behind one <code>Agent</code> class, every run narrated as typed events you can replay.</em>
 </p>
 
 <p align="center">
   <a href="https://pypi.org/project/tulip-agents/"><img src="https://img.shields.io/pypi/v/tulip-agents.svg?label=PyPI&color=ED5A8B" alt="PyPI version"></a>
   <img src="https://img.shields.io/badge/Python-3.11%E2%80%933.14-blue.svg" alt="Python 3.11–3.14">
-  <img src="https://img.shields.io/badge/License-UPL--1.0-green.svg" alt="License">
+  <a href="https://www.apache.org/licenses/LICENSE-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache 2.0"></a>
   <img src="https://img.shields.io/badge/mypy-strict-brightgreen.svg" alt="mypy strict">
   <img src="https://img.shields.io/badge/ruff-clean-brightgreen.svg" alt="ruff clean">
 </p>
 
 <p align="center">
-  <strong>OpenAI · Anthropic</strong><br>
-  <em>Same <code>Agent</code>, same loop, same event stream — only the model id changes.</em>
+  <strong>OpenAI · Anthropic · bring your own</strong><br>
+  <em>Providers are a one-string swap; the loop, the tools, and the event stream stay put.</em>
 </p>
 
 <p align="center">
-  <a href="https://tuliplabs.ai/">Documentation</a> ·
-  <a href="https://tuliplabs.ai/concepts/router/">Cognitive Router</a> ·
-  <a href="https://tuliplabs.ai/concepts/multi-agent/">Multi-agent</a> ·
-  <a href="https://tuliplabs.ai/concepts/deepagent/">DeepAgent</a> ·
-  <a href="https://tuliplabs.ai/notebooks/">Notebooks</a> ·
-  <a href="https://tuliplabs.ai/workbench/">Workbench</a>
+  <a href="https://tulipagents.ai/">Documentation</a> ·
+  <a href="https://tulipagents.ai/concepts/router/">Cognitive Router</a> ·
+  <a href="https://tulipagents.ai/concepts/multi-agent/">Multi-agent</a> ·
+  <a href="https://tulipagents.ai/concepts/deepagent/">DeepAgent</a> ·
+  <a href="https://tulipagents.ai/notebooks/">Notebooks</a> ·
+  <a href="https://tulipagents.ai/workbench/">Workbench</a>
 </p>
 
 <p align="center">
   <strong>Try every Tulip pattern in your browser →</strong>
-  <a href="https://tuliplabs.ai/workbench/"><strong>Workbench guide</strong></a><br>
+  <a href="https://tulipagents.ai/workbench/"><strong>Workbench guide</strong></a><br>
   <em>Step-by-step setup for the browser playground — run it on localhost in three terminals, or in a single Docker container. Bring your own OpenAI / Anthropic key.</em>
 </p>
 
@@ -50,12 +50,13 @@ print(agent.run_sync("What is the capital of France?").text)
 # → Paris
 ```
 
-That's it. `Agent` handles the model call, the response, and any retries.
-Swap `"openai:gpt-4o"` for `"anthropic:claude-sonnet-4-6"` or `"anthropic:claude-sonnet-4-6"` — the interface stays the same.
+Construction, the model call, retries, and the reply all live behind that
+one class. Point `model=` at `"anthropic:claude-sonnet-4-6"` instead and
+nothing else moves.
 
 ## Add a tool
 
-Tools are plain Python functions. The model sees the docstring and decides when to call them.
+A tool is an ordinary Python function — `@tool` publishes its signature and docstring so the model knows when to reach for it.
 
 ```python
 from tulip.agent import Agent
@@ -74,9 +75,9 @@ agent = Agent(
 print(agent.run_sync("Should I bring an umbrella to Tokyo tomorrow?").text)
 ```
 
-The agent loops — Think → call tool → Think → answer — until it's done.
-Add `@tool(idempotent=True)` to any tool that must not fire twice (bookings, payments, alerts).
-The loop dedupes on `(name, args)` so retries are safe by design.
+Behind the scenes the agent alternates reasoning with tool calls until it can answer.
+For tools where a duplicate call would hurt — payments, pages, bookings — declare `@tool(idempotent=True)`:
+the loop keys every invocation on `(name, args)` and refuses to fire the same one twice, even across retries.
 
 ## Install
 
@@ -89,7 +90,7 @@ pip install "tulip-agents[sdk]"           # everything
 
 No mandatory cloud account to start — `MockModel` lets every notebook run offline.
 
-→ [Quickstart guide](https://tuliplabs.ai/how-to/quickstart/)
+→ [Quickstart guide](https://tulipagents.ai/how-to/quickstart/)
 
 ---
 
@@ -119,7 +120,7 @@ Because OpenAI-compatible endpoints accept a `base_url`, `OpenAIModel`
 also fronts gateways and self-hosted servers (LiteLLM, vLLM, Azure
 OpenAI, together.ai, groq, …) without a dedicated provider.
 
-→ [Model providers concept page](https://tuliplabs.ai/concepts/models/)
+→ [Model providers concept page](https://tulipagents.ai/concepts/models/)
 
 ---
 
@@ -186,7 +187,7 @@ approval-gated agent — chosen by protocol selection, not by the model.
 | `handoff_chain` | `SequentialPipeline` of one-tool Agents | `COORDINATE` |
 | `a2a_delegate` | Cross-process A2A call (opt-in) | distributed meshes |
 
-→ [Cognitive router concept](https://tuliplabs.ai/concepts/router/) ·
+→ [Cognitive router concept](https://tulipagents.ai/concepts/router/) ·
 [`examples/notebook_58_cognitive_router.py`](https://github.com/tuliplabs-ai/sdk-python/blob/main/examples/notebook_58_cognitive_router.py)
 
 ---
@@ -219,7 +220,7 @@ result = await SequentialPipeline(agents=[researcher, critic, writer]).run(
 print(result.text)
 ```
 
-→ [All patterns](https://tuliplabs.ai/concepts/multi-agent/)
+→ [All patterns](https://tulipagents.ai/concepts/multi-agent/)
 
 ---
 
@@ -227,21 +228,21 @@ print(result.text)
 
 | | |
 |---|---|
-| **[🧭 Cognitive router](https://tuliplabs.ai/concepts/router/)** | Describe a task → eight named protocols → right primitive compiled automatically. LLM fills a typed schema; routing is deterministic. |
-| **[🤝 Multi-agent](https://tuliplabs.ai/concepts/multi-agent/)** | Seven native patterns + cross-process A2A. One `Agent` class. One event stream. |
-| **[🔬 DeepAgent](https://tuliplabs.ai/concepts/deepagent/)** | `create_deepagent` (single agent, per-turn grounding) and `create_research_workflow` (StateGraph with post-hoc grounding eval + two-level recovery). |
-| **[📡 Observability](https://tuliplabs.ai/concepts/observability/)** | Opt-in `EventBus` — one `run_context()` streams 40+ canonical events from every layer, no external broker. `TelemetryHook` for OpenTelemetry/OTLP. |
-| **[🧠 Reasoning](https://tuliplabs.ai/concepts/reasoning/)** | `reflexion=True` · `grounding=True` · `CausalChain` · **GSAR** typed grounding layer (`arXiv:2604.23366`). |
-| **[🛡 Idempotent tools](https://tuliplabs.ai/concepts/idempotency/)** | `@tool(idempotent=True)` — dedupes on `(name, args)`. The model can't double-charge, double-book, or double-page. |
-| **[💾 Durable memory](https://tuliplabs.ai/concepts/checkpointers/)** | 8 checkpoint backends — PostgreSQL · MySQL · Redis · OpenSearch · S3 / MinIO / R2 · in-memory · file · HTTP. |
-| **[🧠 Long-term memory](https://tuliplabs.ai/concepts/memory-manager/)** | `Mem0MemoryManager` over [`mem0`](https://github.com/mem0ai/mem0) — fact extraction, scoped retrieval, self-hostable. Portable path: `LLMMemoryManager` over any `BaseStore` (InMemory / Redis / Postgres / OpenSearch). |
-| **[🔎 RAG](https://tuliplabs.ai/concepts/rag/)** | 5 vector stores — pgvector · Qdrant · Chroma · OpenSearch · in-memory. OpenAI + Cohere embeddings · local + Cohere rerankers · multimodal (PDF, image OCR, audio). |
-| **[📡 Streaming + Server](https://tuliplabs.ai/concepts/server/)** | Typed events · SSE · `AgentServer` (FastAPI, per-principal thread isolation). |
-| **[🪝 Hooks](https://tuliplabs.ai/concepts/hooks/)** | Logging · OpenTelemetry · ModelRetry · Guardrails · Steering (LLM-as-judge). |
-| **[🪙 MCP](https://tuliplabs.ai/concepts/mcp/)** | `MCPClient` consumes MCP servers. `TulipMCPServer` exposes the SDK's tools as MCP. |
-| **[🌐 Multi-modal](https://tuliplabs.ai/concepts/multi-modal-providers/)** | `Agent(web_search=…, web_fetch=…, image_generator=…, speech_provider=…)` auto-registers tools. |
-| **[📊 Evaluation](https://tuliplabs.ai/concepts/evaluation/)** | `EvalCase` / `EvalRunner` / `EvalReport` regression suites. |
-| **[🧰 Models](https://tuliplabs.ai/concepts/models/)** | OpenAI · Anthropic — plus any OpenAI-compatible gateway via `base_url`. |
+| **[🧭 Cognitive router](https://tulipagents.ai/concepts/router/)** | Describe a task → eight named protocols → right primitive compiled automatically. LLM fills a typed schema; routing is deterministic. |
+| **[🤝 Multi-agent](https://tulipagents.ai/concepts/multi-agent/)** | Seven native patterns + cross-process A2A. One `Agent` class. One event stream. |
+| **[🔬 DeepAgent](https://tulipagents.ai/concepts/deepagent/)** | `create_deepagent` (single agent, per-turn grounding) and `create_research_workflow` (StateGraph with post-hoc grounding eval + two-level recovery). |
+| **[📡 Observability](https://tulipagents.ai/concepts/observability/)** | Opt-in `EventBus` — one `run_context()` streams 40+ canonical events from every layer, no external broker. `TelemetryHook` for OpenTelemetry/OTLP. |
+| **[🧠 Reasoning](https://tulipagents.ai/concepts/reasoning/)** | `reflexion=True` · `grounding=True` · `CausalChain` · **GSAR** typed grounding layer (`arXiv:2604.23366`). |
+| **[🛡 Idempotent tools](https://tulipagents.ai/concepts/idempotency/)** | `@tool(idempotent=True)` — dedupes on `(name, args)`. The model can't double-charge, double-book, or double-page. |
+| **[💾 Durable memory](https://tulipagents.ai/concepts/checkpointers/)** | 8 checkpoint backends — PostgreSQL · MySQL · Redis · OpenSearch · S3 / MinIO / R2 · in-memory · file · HTTP. |
+| **[🧠 Long-term memory](https://tulipagents.ai/concepts/memory-manager/)** | `Mem0MemoryManager` over [`mem0`](https://github.com/mem0ai/mem0) — fact extraction, scoped retrieval, self-hostable. Portable path: `LLMMemoryManager` over any `BaseStore` (InMemory / Redis / Postgres / OpenSearch). |
+| **[🔎 RAG](https://tulipagents.ai/concepts/rag/)** | 5 vector stores — pgvector · Qdrant · Chroma · OpenSearch · in-memory. OpenAI + Cohere embeddings · local + Cohere rerankers · multimodal (PDF, image OCR, audio). |
+| **[📡 Streaming + Server](https://tulipagents.ai/concepts/server/)** | Typed events · SSE · `AgentServer` (FastAPI, per-principal thread isolation). |
+| **[🪝 Hooks](https://tulipagents.ai/concepts/hooks/)** | Logging · OpenTelemetry · ModelRetry · Guardrails · Steering (LLM-as-judge). |
+| **[🪙 MCP](https://tulipagents.ai/concepts/mcp/)** | `MCPClient` consumes MCP servers. `TulipMCPServer` exposes the SDK's tools as MCP. |
+| **[🌐 Multi-modal](https://tulipagents.ai/concepts/multi-modal-providers/)** | `Agent(web_search=…, web_fetch=…, image_generator=…, speech_provider=…)` auto-registers tools. |
+| **[📊 Evaluation](https://tulipagents.ai/concepts/evaluation/)** | `EvalCase` / `EvalRunner` / `EvalReport` regression suites. |
+| **[🧰 Models](https://tulipagents.ai/concepts/models/)** | OpenAI · Anthropic — plus any OpenAI-compatible gateway via `base_url`. |
 
 ---
 
@@ -331,7 +332,7 @@ python examples/notebook_69_research_workflow.py     # full research pipeline
 | **Real-world workflows** | Incident response, procurement, contract review, audio |
 | **Server & full pipelines** | Agent server (FastAPI), full research workflow |
 
-→ [Full notebooks index](https://tuliplabs.ai/notebooks/)
+→ [Full notebooks index](https://tulipagents.ai/notebooks/)
 
 ---
 
@@ -396,7 +397,7 @@ The repo ships a multi-stage `Dockerfile` ready to drop into your own image
 pipeline. Deploy anywhere FastAPI runs — Kubernetes, ECS / Fargate, Cloud
 Run, Fly.io, a plain VM, or any cloud equivalent.
 
-→ [Deploy guide](https://tuliplabs.ai/how-to/deploy/)
+→ [Deploy guide](https://tulipagents.ai/how-to/deploy/)
 
 ---
 
@@ -475,7 +476,12 @@ Please consult the [security guide](./SECURITY.md) for our responsible security 
 
 ## License
 
-Copyright (c) 2026 tuliplabs.
+Copyright 2026 Tulip Labs.
 
-Released under the Universal Permissive License v1.0 as shown at
-<https://opensource.org/license/UPL>.
+Released under the **Apache License, Version 2.0** — see [LICENSE](LICENSE) and
+[NOTICE](NOTICE). Full text at <https://www.apache.org/licenses/LICENSE-2.0>.
+
+Tulip began as a fork of an earlier project released under the Universal
+Permissive License v1.0 (UPL-1.0); those original portions remain available
+under the UPL-1.0, while all new contributions are licensed under Apache-2.0.
+See [NOTICE](NOTICE) for details.

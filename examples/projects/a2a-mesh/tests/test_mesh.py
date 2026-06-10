@@ -1,6 +1,5 @@
-# Copyright (c) 2026 tuliplabs.
-# Licensed under the Universal Permissive License v1.0 as shown at
-# https://opensource.org/license/UPL
+# Copyright 2026 Tulip Labs
+# SPDX-License-Identifier: Apache-2.0
 """In-process integration test for the A2A mesh.
 
 Boots both A2AServers via FastAPI's TestClient (no real network),

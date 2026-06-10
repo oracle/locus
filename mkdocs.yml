@@ -1,6 +1,6 @@
 site_name: tulip agents
-site_description: Multi-agent workflows for Python — stream them, branch them, pause for a human, resume next week. Open source, provider-agnostic.
-site_url: https://tuliplabs.ai/
+site_description: Python SDK for agent teams that show their work — typed event streams, grounded claims, eight coordination shapes, durable human-in-the-loop runs.
+site_url: https://tulipagents.ai/
 repo_url: https://github.com/tuliplabs-ai/sdk-python
 repo_name: tuliplabs-ai/sdk-python
 edit_uri: edit/main/docs/
@@ -59,10 +59,10 @@ extra_javascript:
 - javascripts/notebook-filter.js
 - javascripts/sidebar-filter.js
 
-copyright: <span class="footer-brand"><span class="footer-brand__text">tuliplabs.ai</span></span><br><span class="footer-copy">Copyright &copy; 2026 tuliplabs</span>
+copyright: <span class="footer-brand"><span class="footer-brand__text">tulipagents.ai</span></span><br><span class="footer-copy">Copyright &copy; 2026 Tulip Labs</span>
 
 extra:
-  homepage: https://tuliplabs.ai/
+  homepage: https://tulipagents.ai/
   social:
   - icon: fontawesome/brands/github
     link: https://github.com/tuliplabs-ai/sdk-python
@@ -118,7 +118,7 @@ plugins:
 nav:
 # Home (index.md) is reached via the header wordmark + logo (both link to "/"),
 # so we don't repeat it as a tab here.
-- Concepts:
+- Learn:
   - concepts/multi-agent.md
   - Capabilities: capabilities.md
   - Multi-agent:
@@ -175,85 +175,86 @@ nav:
     - SSE event catalogue: concepts/sse-events.md
     - Safety & Guardrails: concepts/safety.md
     - Evaluation: concepts/evaluation.md
-- Notebooks:
+- Cookbook:
   - Quickstart: how-to/quickstart.md
   - Overview: notebooks/index.md
-  - Agent Foundations:
-    - 6 · Basic agent: notebooks/notebook_06_basic_agent.md
-    - 7 · Agent with tools: notebooks/notebook_07_agent_with_tools.md
-    - 8 · Conversation memory: notebooks/notebook_08_agent_memory.md
-    - 11 · Streaming events: notebooks/notebook_11_agent_streaming.md
-    - 12 · Lifecycle hooks: notebooks/notebook_12_agent_hooks.md
-    - 13 · SSE streaming: notebooks/notebook_13_sse_streaming.md
-    - 14 · Hooks: notebooks/notebook_14_hooks_advanced.md
-    - 15 · Termination conditions: notebooks/notebook_15_termination.md
-  - Graphs & composition:
-    - 16 · Basic graph: notebooks/notebook_16_basic_graph.md
-    - 17 · Conditional routing: notebooks/notebook_17_conditional_routing.md
-    - 18 · State reducers: notebooks/notebook_18_state_reducers.md
-    - 19 · Human-in-the-loop: notebooks/notebook_19_human_in_the_loop.md
-    - 20 · Command + advanced patterns: notebooks/notebook_20_advanced_patterns.md
-    - 21 · Composition: notebooks/notebook_21_composition.md
-    - 22 · Graph: notebooks/notebook_22_graph_advanced.md
-    - 23 · Functional API: notebooks/notebook_23_functional_api.md
-  - Multi-agent:
-    - 24 · Swarm: notebooks/notebook_24_swarm_multiagent.md
-    - 25 · Agent handoff: notebooks/notebook_25_agent_handoff.md
-    - 26 · Orchestrator pattern: notebooks/notebook_26_orchestrator_pattern.md
-    - 27 · Specialist agents: notebooks/notebook_27_specialist_agents.md
-    - 28 · A2A protocol: notebooks/notebook_28_a2a_protocol.md
-    - 29 · DeepAgent: notebooks/notebook_29_deepagent.md
-    - 30 · Map-reduce code review: notebooks/notebook_30_map_reduce_code_review.md
-    - 31 · Supervisor + critic loop: notebooks/notebook_31_supervisor_critic_loop.md
-    - 32 · Adversarial debate + judge: notebooks/notebook_32_debate_with_judge.md
-    - 33 · Multi-agent + human-in-the-loop: notebooks/notebook_33_multiagent_human_in_loop.md
-    - 34 · Emergent routing: notebooks/notebook_34_emergent_routing.md
-  - Reasoning & structured output:
-    - 35 · Structured output: notebooks/notebook_35_structured_output.md
-    - 36 · Reasoning patterns: notebooks/notebook_36_reasoning_patterns.md
-    - 37 · GSAR typed grounding: notebooks/notebook_37_gsar_typed_grounding.md
+  - First steps:
+    - Basic agent: notebooks/notebook_06_basic_agent.md
+    - Agent with tools: notebooks/notebook_07_agent_with_tools.md
+    - Conversation memory: notebooks/notebook_08_agent_memory.md
+    - Streaming events: notebooks/notebook_11_agent_streaming.md
+    - Lifecycle hooks: notebooks/notebook_12_agent_hooks.md
+    - SSE streaming: notebooks/notebook_13_sse_streaming.md
+    - Hooks: notebooks/notebook_14_hooks_advanced.md
+    - Termination conditions: notebooks/notebook_15_termination.md
+  - Composing graphs:
+    - Basic graph: notebooks/notebook_16_basic_graph.md
+    - Conditional routing: notebooks/notebook_17_conditional_routing.md
+    - State reducers: notebooks/notebook_18_state_reducers.md
+    - Human-in-the-loop: notebooks/notebook_19_human_in_the_loop.md
+    - Command + advanced patterns: notebooks/notebook_20_advanced_patterns.md
+    - Composition: notebooks/notebook_21_composition.md
+    - Graph: notebooks/notebook_22_graph_advanced.md
+    - Functional API: notebooks/notebook_23_functional_api.md
+  - Agent teams:
+    - Swarm: notebooks/notebook_24_swarm_multiagent.md
+    - Agent handoff: notebooks/notebook_25_agent_handoff.md
+    - Orchestrator pattern: notebooks/notebook_26_orchestrator_pattern.md
+    - Specialist agents: notebooks/notebook_27_specialist_agents.md
+    - A2A protocol: notebooks/notebook_28_a2a_protocol.md
+    - DeepAgent: notebooks/notebook_29_deepagent.md
+    - Map-reduce code review: notebooks/notebook_30_map_reduce_code_review.md
+    - Supervisor + critic loop: notebooks/notebook_31_supervisor_critic_loop.md
+    - Adversarial debate + judge: notebooks/notebook_32_debate_with_judge.md
+    - Multi-agent + human-in-the-loop: notebooks/notebook_33_multiagent_human_in_loop.md
+    - Emergent routing: notebooks/notebook_34_emergent_routing.md
+  - Reasoning & typed output:
+    - Structured output: notebooks/notebook_35_structured_output.md
+    - Reasoning patterns: notebooks/notebook_36_reasoning_patterns.md
+    - GSAR typed grounding: notebooks/notebook_37_gsar_typed_grounding.md
   - RAG:
-    - 38 · RAG basics: notebooks/notebook_38_rag_basics.md
-    - 39 · RAG providers: notebooks/notebook_39_rag_providers.md
-    - 40 · RAG agents: notebooks/notebook_40_rag_agents.md
+    - RAG basics: notebooks/notebook_38_rag_basics.md
+    - RAG providers: notebooks/notebook_39_rag_providers.md
+    - RAG agents: notebooks/notebook_40_rag_agents.md
   - Skills, playbooks & plugins:
-    - 45 · MCP integration: notebooks/notebook_45_mcp_integration.md
-    - 46 · Playbooks: notebooks/notebook_46_playbooks.md
-    - 47 · Plugins: notebooks/notebook_47_plugins.md
-    - 48 · Skills: notebooks/notebook_48_skills.md
-    - 49 · Steering: notebooks/notebook_49_steering.md
-  - Production:
-    - 50 · Guardrails & security: notebooks/notebook_50_guardrails_security.md
-    - 51 · Guardrails: notebooks/notebook_51_guardrails_advanced.md
-    - 52 · Checkpoint backends: notebooks/notebook_52_checkpoint_backends.md
-    - 55 · Evaluation: notebooks/notebook_55_evaluation.md
-    - 56 · Model providers: notebooks/notebook_56_model_providers.md
-    - 57 · Multi-modal providers: notebooks/notebook_57_multimodal_providers.md
-  - Cognitive router & observability:
-    - 58 · Cognitive router: notebooks/notebook_58_cognitive_router.md
-    - 59 · Observability basics: notebooks/notebook_59_observability_basics.md
-    - 60 · Agent yield bridge + token usage: notebooks/notebook_60_agent_yield_bridge.md
-    - 61 · EventBus subscriber patterns: notebooks/notebook_61_eventbus_subscribers.md
-    - 62 · Full event catalogue tour: notebooks/notebook_62_event_catalogue.md
-  - Real-world workflows:
-    - 63 · On-call incident response: notebooks/notebook_63_incident_response.md
-    - 64 · Tiered procurement approval: notebooks/notebook_64_procurement_approval.md
-    - 65 · Contract review + negotiation: notebooks/notebook_65_contract_review.md
-    - 66 · Voice output: notebooks/notebook_66_audio_response.md
-    - 67 · Voice in → voice out: notebooks/notebook_67_audio_chat.md
-  - Server & full pipelines:
-    - 68 · Agent server: notebooks/notebook_68_agent_server.md
-    - 69 · Research workflow: notebooks/notebook_69_research_workflow.md
-    - 71 · LiteLLM AI Gateway: notebooks/notebook_71_litellm_gateway.md
-    - 72 · LiteLLM AI Gateway — cost tracking: notebooks/notebook_72_litellm_gateway_cost.md
+    - MCP integration: notebooks/notebook_45_mcp_integration.md
+    - Playbooks: notebooks/notebook_46_playbooks.md
+    - Plugins: notebooks/notebook_47_plugins.md
+    - Skills: notebooks/notebook_48_skills.md
+    - Steering: notebooks/notebook_49_steering.md
+  - Hardening for production:
+    - Guardrails & security: notebooks/notebook_50_guardrails_security.md
+    - Guardrails: notebooks/notebook_51_guardrails_advanced.md
+    - Checkpoint backends: notebooks/notebook_52_checkpoint_backends.md
+    - Evaluation: notebooks/notebook_55_evaluation.md
+    - Model providers: notebooks/notebook_56_model_providers.md
+    - Multi-modal providers: notebooks/notebook_57_multimodal_providers.md
+  - Routing & observability:
+    - Cognitive router: notebooks/notebook_58_cognitive_router.md
+    - Observability basics: notebooks/notebook_59_observability_basics.md
+    - Agent yield bridge + token usage: notebooks/notebook_60_agent_yield_bridge.md
+    - EventBus subscriber patterns: notebooks/notebook_61_eventbus_subscribers.md
+    - Full event catalogue tour: notebooks/notebook_62_event_catalogue.md
+  - End-to-end builds:
+    - On-call incident response: notebooks/notebook_63_incident_response.md
+    - Tiered procurement approval: notebooks/notebook_64_procurement_approval.md
+    - Contract review + negotiation: notebooks/notebook_65_contract_review.md
+    - Voice output: notebooks/notebook_66_audio_response.md
+    - Voice in → voice out: notebooks/notebook_67_audio_chat.md
+  - Serving & pipelines:
+    - Agent server: notebooks/notebook_68_agent_server.md
+    - Research workflow: notebooks/notebook_69_research_workflow.md
+    - LiteLLM AI Gateway: notebooks/notebook_71_litellm_gateway.md
+    - LiteLLM AI Gateway — cost tracking: notebooks/notebook_72_litellm_gateway_cost.md
   - Guides:
     - Deploy: how-to/deploy.md
     - Persist conversations: how-to/persist-conversations.md
     - Build a custom tool: how-to/custom-tools.md
     - Add a checkpointer backend: how-to/custom-checkpointer.md
     - LiteLLM AI Gateway: how-to/litellm-gateway.md
+    - Environment variables: how-to/environment-variables.md
 - Workbench: workbench.md
-- API reference:
+- Reference:
   - Agent: api/agent.md
   - Multi-agent: api/multiagent.md
   - Cognitive Router: api/router.md
@@ -277,3 +278,4 @@ nav:
   - Skills: api/skills.md
   - Integrations: api/integrations.md
   - Core primitives: api/core.md
+  - Legal notices: legal.md

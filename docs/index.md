@@ -9,9 +9,9 @@ hide:
 
 <p class="tulip-product-name"><span class="tpn-brand">tulip agents</span><span class="tpn-sep"> · </span>Multi-Agent SDK</p>
 
-# Multi-agent workflows built for <span class="accent">production.</span>
+# Agent teams that <span class="accent">show their work.</span>
 
-Describe the task. Tulip selects the protocol and coordinates the agents — then streams every decision back as a typed event you can replay, audit, and debug.
+Give Tulip a goal and it assembles the right coordination shape — a single agent, a pipeline, a debate, an approval gate — then writes every decision to a typed event stream you can rewind, inspect, and test against.
 
 <div class="tulip-stat-strip" markdown><span style="white-space:nowrap">[direct&nbsp;answer](concepts/router.md)</span> · <span style="white-space:nowrap">[pipeline](concepts/multi-agent/composition.md)</span> · <span style="white-space:nowrap">[fan&#8209;out](concepts/multi-agent/composition.md)</span> · <span style="white-space:nowrap">[debate](concepts/multi-agent/composition.md)</span> · <span style="white-space:nowrap">[code&nbsp;+&nbsp;test](concepts/multi-agent/composition.md)</span> · <span style="white-space:nowrap">[approval&nbsp;gate](concepts/interrupts.md)</span> · <span style="white-space:nowrap">[A2A](concepts/multi-agent/a2a.md)</span> · <span style="white-space:nowrap">[handoff](concepts/multi-agent/handoff.md)</span></div>
 
@@ -69,7 +69,7 @@ async with run_context() as rid:
 </div>
 </div>
 
-## Your first agent in five lines
+## A working agent in five lines
 
 ```python
 from tulip.agent import Agent
@@ -79,13 +79,12 @@ print(agent.run_sync("What is the capital of France?").text)
 # → Paris
 ```
 
-That's the entire interface. `Agent` handles the model call, the
-response, and any retries. Swap `openai:gpt-4o` for
-`anthropic:claude-sonnet-4-6` or `anthropic:claude-sonnet-4-6` — the call stays the
-same.
+Construction, the model call, retries, and the reply all live behind
+that one class. Point `model=` at `anthropic:claude-sonnet-4-6`
+instead and nothing else moves.
 
-Add a tool, and the agent loops Think → call tool → Think → answer
-until it's done:
+Hand it a tool and it starts reasoning in turns — thinking, calling,
+thinking again — until it has an answer:
 
 ```python
 from tulip.tools import tool
@@ -103,7 +102,7 @@ agent = Agent(
 print(agent.run_sync("Should I bring an umbrella to Tokyo tomorrow?").text)
 ```
 
-[Notebook 14 — basic agent →](notebooks/notebook_06_basic_agent.md)
+[Cookbook · your first agent →](notebooks/notebook_06_basic_agent.md)
 
 ## What Tulip gives you
 
