@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>tulip — the agent SDK for security-grade systems</strong><br>
+  <strong>tulip — the cybersecurity agent SDK</strong><br>
   <em>Agent teams for security work that show their work: every claim grounded in evidence, every action a typed replayable event, every risky step gated.</em>
 </p>
 
