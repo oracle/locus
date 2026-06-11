@@ -220,7 +220,7 @@ class LoopAgent(BaseModel):
         ...     max_loops=5,
         ...     loop_prompt="Review and improve:\\n{previous_output}\\n\\nSay APPROVED if quality is good.",
         ... )
-        >>> result = await loop.run("Write a haiku about Python")
+        >>> result = await loop.run("Draft the incident report for case IR-2026-014")
     """
 
     agent: Any = None

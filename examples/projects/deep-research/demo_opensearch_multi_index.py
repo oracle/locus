@@ -4,8 +4,8 @@
 
 """Multi-index OpenSearch Deep Research demo.
 
-Two OpenSearch indices (medical + news), agent routes between them
-via `create_deepagent(datastores={...})`.
+Two OpenSearch indices (threat intel + CVE/vulnerability), the agent routes
+between them via `create_deepagent(datastores={...})`.
 
 Reads OpenSearch credentials from env vars and uses OpenAI embeddings.
 
@@ -36,34 +36,37 @@ from tulip.rag.stores.base import Document
 from tulip.rag.stores.opensearch import OpenSearchVectorStore
 
 
-MEDICAL_CORPUS = [
-    "Iron is primarily absorbed in the duodenum and proximal jejunum of the small intestine.",
-    "Hepcidin, produced by the liver, is the master regulator of systemic iron homeostasis.",
-    "Iron deficiency anemia is the most common nutritional deficiency worldwide.",
-    "Hereditary hemochromatosis is most commonly caused by C282Y homozygosity in the HFE gene.",
-    "Transferrin saturation below 16% suggests iron deficiency; above 45% raises concern for iron overload.",
-    "Ferritin is the primary iron storage protein and an acute-phase reactant.",
-    "First-line treatment for iron deficiency anemia is oral ferrous sulfate.",
-    "Phlebotomy is the first-line treatment for hereditary hemochromatosis.",
-    "Anemia of chronic disease is driven by elevated hepcidin in inflammatory states.",
-    "Reticulocyte hemoglobin content (CHr) is an early functional marker of iron deficiency.",
-    "MRI T2* relaxometry is the gold standard for non-invasive iron quantification.",
-    "Iron-refractory iron deficiency anemia (IRIDA) is caused by TMPRSS6 mutations.",
+# Benign, education-level threat-intelligence facts (no live IOCs; RFC 5737
+# documentation ranges only).
+INTEL_CORPUS = [
+    "Cobalt Strike beacons commonly use malleable C2 profiles to blend with normal web traffic.",
+    "ATT&CK technique T1059.001 covers adversary use of PowerShell for execution.",
+    "Living-off-the-land binaries (LOLBins) such as certutil are abused to download payloads.",
+    "Domain generation algorithms (DGAs) produce many candidate C2 domains to evade blocklists.",
+    "Credential dumping from LSASS memory maps to ATT&CK technique T1003.001.",
+    "Fast-flux DNS rotates the IPs behind a domain rapidly to frustrate takedown.",
+    "Beaconing traffic shows a regular periodicity that stands out from human-driven sessions.",
+    "RFC 5737 reserves 198.51.100.0/24 for documentation; it is never routed on the public internet.",
+    "Encoded PowerShell (-enc) is frequently used to obfuscate malicious command lines.",
+    "Lateral movement via SMB and remote service creation maps to ATT&CK technique T1021.",
+    "Phishing remains the most commonly reported initial-access vector in intrusions.",
+    "MITRE ATT&CK orders tactics from Reconnaissance through Impact across the intrusion lifecycle.",
 ]
 
-NEWS_CORPUS = [
-    "Markets closed mixed on Friday as tech stocks rallied while energy shares declined.",
-    "The central bank held interest rates steady, citing persistent inflation in services.",
-    "A major airline announced new transatlantic routes opening next quarter.",
-    "Local elections saw record turnout in three coastal districts, officials reported.",
-    "A new infrastructure bill cleared the lower chamber by a 215-204 margin.",
-    "The national weather service issued advisories for severe thunderstorms across the plains.",
-    "An automaker recalled 120,000 SUVs over a brake-line manufacturing defect.",
-    "Box office returns this weekend were dominated by an animated sequel.",
-    "Tech regulators proposed new rules on cross-border data transfers for cloud providers.",
-    "Universities reported a 6% rise in international graduate applications this cycle.",
-    "A diplomatic delegation arrived in the capital ahead of next week's trade talks.",
-    "Sports authorities approved a new playoff format starting next season.",
+# Benign, education-level vulnerability facts.
+CVE_CORPUS = [
+    "CVSS v3.1 scores range from 0.0 to 10.0, with 9.0-10.0 classified as Critical.",
+    "A CVE identifier uniquely names a publicly disclosed vulnerability, e.g. CVE-2021-44228.",
+    "Log4Shell (CVE-2021-44228) allowed remote code execution via JNDI lookups in Log4j.",
+    "An SSRF vulnerability lets an attacker coerce a server into making unintended requests.",
+    "Path-traversal flaws use ../ sequences to read files outside the intended directory.",
+    "The EPSS score estimates the probability that a vulnerability will be exploited in the wild.",
+    "Patching cadence and asset exposure drive real-world risk more than CVSS alone.",
+    "A vulnerability is exploitable only when a reachable, affected code path is exposed.",
+    "Deserialization of untrusted data can lead to remote code execution (CWE-502).",
+    "Default credentials on internet-facing services are a recurring source of compromise.",
+    "Coordinated disclosure gives a vendor time to ship a fix before details go public.",
+    "SQL injection (CWE-89) arises when untrusted input is concatenated into a query.",
 ]
 
 
@@ -101,8 +104,8 @@ async def main() -> int:
     model_id = os.environ.get("TULIP_RESEARCH_MODEL", "anthropic:claude-sonnet-4-6")
 
     run_id = uuid.uuid4().hex[:8].lower()
-    med_index = f"tulip_med_{run_id}"
-    news_index = f"tulip_news_{run_id}"
+    intel_index = f"tulip_intel_{run_id}"
+    cve_index = f"tulip_cve_{run_id}"
     out_dir = Path(__file__).parent / "output"
     out_dir.mkdir(exist_ok=True)
 
@@ -110,7 +113,7 @@ async def main() -> int:
     print("MULTI-INDEX OPENSEARCH DEEP RESEARCH — TULIP PORT")
     print("=" * 70)
     print(f"  OpenSearch  : {endpoint} (user={username})")
-    print(f"  Indices     : {med_index}, {news_index}")
+    print(f"  Indices     : {intel_index}, {cve_index}")
     print(f"  Model       : {model_id}")
     print()
 
@@ -128,44 +131,45 @@ async def main() -> int:
         "verify_certs": verify_certs,
     }
 
-    med_store = OpenSearchVectorStore(index_name=med_index, **common_kwargs)
-    news_store = OpenSearchVectorStore(index_name=news_index, **common_kwargs)
+    intel_store = OpenSearchVectorStore(index_name=intel_index, **common_kwargs)
+    cve_store = OpenSearchVectorStore(index_name=cve_index, **common_kwargs)
 
-    print(f"\n[2/4] Seeding OpenSearch indices …")
+    print("\n[2/4] Seeding OpenSearch indices …")
     try:
-        await _ingest(med_store, embedder, MEDICAL_CORPUS, "med")
-        await _ingest(news_store, embedder, NEWS_CORPUS, "news")
+        await _ingest(intel_store, embedder, INTEL_CORPUS, "intel")
+        await _ingest(cve_store, embedder, CVE_CORPUS, "cve")
         # OpenSearch default refresh interval is 1s; force a refresh so the
         # docs are visible to the next search. The underlying client is
         # AsyncOpenSearch, so its `indices.refresh` is a coroutine.
-        for s, name in [(med_store, med_index), (news_store, news_index)]:
+        for s, name in [(intel_store, intel_index), (cve_store, cve_index)]:
             client = getattr(s, "_client", None) or getattr(s, "client", None)
             if client is not None:
                 await client.indices.refresh(index=name)
-        print(f"       medical: {len(MEDICAL_CORPUS)} docs  (count={await med_store.count()})")
-        print(f"       news   : {len(NEWS_CORPUS)} docs  (count={await news_store.count()})")
+        print(f"       threat-intel: {len(INTEL_CORPUS)} docs  (count={await intel_store.count()})")
+        print(f"       cve         : {len(CVE_CORPUS)} docs  (count={await cve_store.count()})")
 
-        print(f"\n[3/4] Building deepagent with datastores={{medical, news}} …")
-        med_retriever = RAGRetriever(embedder=embedder, store=med_store)
-        news_retriever = RAGRetriever(embedder=embedder, store=news_store)
+        print("\n[3/4] Building deepagent with datastores={intel, cve} …")
+        intel_retriever = RAGRetriever(embedder=embedder, store=intel_store)
+        cve_retriever = RAGRetriever(embedder=embedder, store=cve_store)
         chat = get_model(model_id)
         agent = create_deepagent(
             model=chat,
             system_prompt=(
-                "You are a research assistant with access to two OpenSearch "
-                "indices (medical + news). Route each search at the right "
-                "index based on the topic. Cite document ids (med-NN, news-NN)."
+                "You are a security research assistant with access to two "
+                "OpenSearch indices (threat intel + CVE/vulnerability). Route "
+                "each search to the right index based on the topic. Cite "
+                "document ids (intel-NN, cve-NN)."
             ),
             tools=[],
             datastores={
-                "medical": {
-                    "retriever": med_retriever,
-                    "description": "clinical/hematology knowledge: iron metabolism, anemia, hemochromatosis, diagnostics, treatment",
+                "intel": {
+                    "retriever": intel_retriever,
+                    "description": "threat intelligence: malware C2, ATT&CK techniques, intrusion TTPs, indicators",
                     "top_k": 4,
                 },
-                "news": {
-                    "retriever": news_retriever,
-                    "description": "general news headlines: markets, politics, weather, transportation, sports",
+                "cve": {
+                    "retriever": cve_retriever,
+                    "description": "vulnerability knowledge: CVEs, CVSS/EPSS scoring, CWE classes, exploitation concepts",
                     "top_k": 4,
                 },
             },
@@ -175,13 +179,14 @@ async def main() -> int:
             grounding=False,
         )
 
-        print(f"\n[4/4] Running cross-domain prompt …")
+        print("\n[4/4] Running cross-domain prompt …")
         print("-" * 70)
         prompt = (
-            "Using only the two indices: (a) summarize the key regulators "
-            "of iron homeostasis from the medical index, and (b) list two "
-            "distinct items from the news index. Keep each section short "
-            "(3-5 bullets). Cite document ids (med-NN / news-NN)."
+            "Using only the two indices: (a) summarize how adversaries hide "
+            "command-and-control traffic, drawing on the threat-intel index, "
+            "and (b) list two distinct vulnerability concepts from the CVE "
+            "index. Keep each section short (3-5 bullets). Cite document ids "
+            "(intel-NN / cve-NN)."
         )
         # `agent.run(...)` returns an async generator of events. We can't
         # use `agent.run_sync()` here because we're already inside an
@@ -215,10 +220,10 @@ async def main() -> int:
                 text = event.final_message or ""
         elapsed = time.time() - t0
 
-        med_calls = sum(1 for n, _, _ in tool_records if n == "search_medical")
-        news_calls = sum(1 for n, _, _ in tool_records if n == "search_news")
+        intel_calls = sum(1 for n, _, _ in tool_records if n == "search_intel")
+        cve_calls = sum(1 for n, _, _ in tool_records if n == "search_cve")
 
-        print(f"\nTool calls    : {len(tool_records)} (medical={med_calls}, news={news_calls})")
+        print(f"\nTool calls    : {len(tool_records)} (intel={intel_calls}, cve={cve_calls})")
         for name, args, n in tool_records:
             q = args.get("query", args) if isinstance(args, dict) else args
             print(f"  - {name}({q!r}) -> {n} chars")
@@ -228,14 +233,14 @@ async def main() -> int:
         out_path = out_dir / "opensearch_multi_index_report.md"
         out_path.write_text(text)
         print(f"\nReport saved to: {out_path}")
-        if med_calls > 0 and news_calls > 0:
+        if intel_calls > 0 and cve_calls > 0:
             print("\nROUTING CHECK: agent hit BOTH indices — PASS")
         else:
-            print(f"\nROUTING CHECK: med={med_calls}, news={news_calls} — partial")
+            print(f"\nROUTING CHECK: intel={intel_calls}, cve={cve_calls} — partial")
     finally:
         # Drop the indices so we leave the cluster clean. AsyncOpenSearch
         # exposes `indices.exists` / `indices.delete` as coroutines.
-        for s, name in [(med_store, med_index), (news_store, news_index)]:
+        for s, name in [(intel_store, intel_index), (cve_store, cve_index)]:
             try:
                 client = getattr(s, "_client", None) or getattr(s, "client", None)
                 if client is not None and await client.indices.exists(index=name):

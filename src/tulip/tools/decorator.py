@@ -156,10 +156,10 @@ def tool(
             return x * 2
 
         @tool(idempotent=True)
-        def book_flight(flight_id: str, customer_id: str) -> dict:
-            '''Book a flight — safe to mark idempotent because repeated
-            calls with the same flight/customer would create duplicate
-            bookings, which we never want.'''
+        def open_incident(alert_id: str, severity: str) -> dict:
+            '''Open an incident — safe to mark idempotent because repeated
+            calls for the same alert would open duplicate incidents,
+            which we never want.'''
             ...
 
     Args:

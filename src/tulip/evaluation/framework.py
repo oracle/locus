@@ -25,10 +25,10 @@ class EvalCase(BaseModel):
 
     Example:
         >>> case = EvalCase(
-        ...     name="weather_lookup",
-        ...     prompt="What's the weather in NYC?",
-        ...     expected_tools=["get_weather"],
-        ...     expected_output_contains=["temperature", "New York"],
+        ...     name="ioc_triage",
+        ...     prompt="Is 198.51.100.23 malicious? Enrich it and decide.",
+        ...     expected_tools=["enrich_indicator"],
+        ...     expected_output_contains=["malicious", "198.51.100.23"],
         ...     max_iterations=5,
         ... )
     """
