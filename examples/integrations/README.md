@@ -16,11 +16,19 @@ Every integration reads its credential from the environment:
 The return *shape* is identical on both paths, so an agent's downstream
 reasoning doesn't change between the offline demo and a live deployment.
 
-| Module | Vendor shape | Credential(s) | Offline behavior |
-|---|---|---|---|
-| `threat_intel.py` | VirusTotal / GreyNoise | `VT_API_KEY` | sample IOC reputation |
-| `siem_query.py` | Splunk / Elastic | `SIEM_URL`, `SIEM_TOKEN` | sample events |
-| `gpu_probe_dispatch.py` | RunPod / Lambda | `RUNPOD_API_KEY` or `LAMBDA_API_KEY` | deterministic feature vector |
+| Module | Vendor shape | Credential(s) | Offline behavior | Live-path status |
+|---|---|---|---|---|
+| `threat_intel.py` | VirusTotal / GreyNoise | `VT_API_KEY` | sample IOC reputation | ⚠ written to VT v3 shape, **untested live** |
+| `siem_query.py` | Splunk / Elastic | `SIEM_URL`, `SIEM_TOKEN` | sample events | ⚠ illustrative endpoint, **untested live** |
+| `gpu_probe_dispatch.py` | RunPod / Lambda | `RUNPOD_API_KEY` or `LAMBDA_API_KEY` | deterministic feature vector | ⚠ no-op: probe image doesn't ship (clusiana work) |
+| `remote_timing.py` | any OpenAI-compatible endpoint | `OPENAI_API_KEY` | deterministic feature vector | ✓ **verified live** vs OpenAI gpt-4o-mini (measurement real; classifier still mock) |
+
+**Honesty note:** only the offline sample paths and the timing math are
+verified in CI. The live API branches are written to each vendor's
+documented shape but have not been run against the real services — treat
+them as starting points to validate with your own credentials, not as
+battle-tested clients. The GPU dispatch is the least real: it can launch
+hardware but has no probe to run until the CUDA artifact (clusiana) exists.
 
 Run any module standalone to see the offline path:
 

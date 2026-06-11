@@ -17,11 +17,15 @@ Probe contract: the probe emits a JSON object of timing features, e.g.::
 
     {"ttft_ms_p50": 38.2, "itl_ms_mean": 11.4, "itl_cv": 0.07, "tps_mean": 87.6}
 
-The live paths below are illustrative integration code. They require a
-probe artifact you supply (a container image for RunPod, a result sink the
-probe uploads to for Lambda — see ``examples/integrations/README.md``); the
-control flow is complete and honest, but only the offline path runs without
-credentials.
+UNVERIFIED LIVE PATH: the RunPod/Lambda branches are real lifecycle code
+but depend on a probe artifact that does NOT ship — ``_PROBE_IMAGE`` is a
+placeholder, and no container/result-sink exists yet. So the live path is
+currently a no-op: with credentials set it would launch hardware but has
+nothing to measure with. Building that probe (the CUDA kernels) is research
+work that lives in the clusiana repo, not here. Only the offline sample
+path runs today; the co-located GPU side-channel is not wired end-to-end.
+For a probe that genuinely measures with no extra artifact, see
+``remote_timing.py`` (remote-API timing, no GPU).
 """
 
 from __future__ import annotations

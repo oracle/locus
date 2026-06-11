@@ -10,6 +10,11 @@ events so the cookbook runs offline.
 
 Use it as a Tulip ``@tool`` (``siem_query_tool``) handed to an agent, or
 call :func:`query_siem` directly.
+
+UNVERIFIED LIVE PATH: the ``SIEM_URL``/``SIEM_TOKEN`` branch posts to a
+Splunk/Elastic-shaped endpoint that has NOT been run against a real SIEM —
+the path and field names are illustrative and will need adjusting per
+product. Only the offline sample path is exercised in CI.
 """
 
 from __future__ import annotations

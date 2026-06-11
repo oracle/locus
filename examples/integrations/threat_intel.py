@@ -11,6 +11,11 @@ domains, the well-known EICAR test hash) so the cookbook runs offline.
 
 Use it as a Tulip ``@tool`` (``enrich_indicator_tool``) handed to an
 agent, or call :func:`enrich_indicator` directly.
+
+UNVERIFIED LIVE PATH: the ``VT_API_KEY`` branch is written to VirusTotal's
+documented v3 shape but has NOT been run against the live API — expect to
+adjust field paths before relying on it in production. Only the offline
+sample path is exercised in CI.
 """
 
 from __future__ import annotations

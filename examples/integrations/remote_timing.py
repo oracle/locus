@@ -20,6 +20,14 @@ Defensive framing: run this against *your own* endpoints to verify what
 they reveal (inventory verification) — the same measurement an attacker
 would use for model-extraction reconnaissance (MITRE ATLAS AML.T0040 /
 AML.T0024).
+
+VERIFIED LIVE: the streaming parse + timing math were confirmed against
+OpenAI ``gpt-4o-mini`` (measured ttft≈750ms / itl≈15-20ms / tps≈31 over the
+public internet — real numbers, not the sample). The *measurement* is real.
+Note the classifier that maps the feature vector to a model identity (see
+``scenarios/model_extraction.py``) is still a deterministic mock — that is
+the piece a trained model (the Clusiana program) replaces. CV is inflated
+here by public-internet jitter; a co-located probe reads much lower.
 """
 
 from __future__ import annotations
