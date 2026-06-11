@@ -363,7 +363,7 @@ When fingerprinting:
                 evidence_refs=["probe:itl_ms_mean=11.4"],
             ),
             Claim(
-                text="cadence variance 0.07 sits in the datacenter-GPU DVFS residual band",
+                text="cadence variance 0.07 sits in the expected datacenter-GPU timing band",
                 type=EvidenceType.SIGNAL_MATCH,
                 evidence_refs=["probe:itl_cv=0.07"],
             ),

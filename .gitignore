@@ -271,3 +271,9 @@ examples/notebook_67_answer.wav
 # Generated audio demo artifacts (notebooks 66/67 recreate them on live runs)
 examples/*.mp3
 examples/*.wav
+
+# Internal-only notes (mythos, roadmaps, competitive comparison, and the
+# side-channel method shape). MUST NOT ship in the public repo — kept on
+# disk for local use only. NOTE: these remain in git HISTORY; a filter-repo
+# scrub of docs/internal/** is REQUIRED before this repo goes public.
+docs/internal/
