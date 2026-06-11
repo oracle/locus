@@ -55,6 +55,7 @@ import time
 from collections.abc import Mapping
 
 from config import get_model, print_config
+from integrations.gpu_probe_dispatch import dispatch_timing_probe
 
 from tulip.agent import Agent
 from tulip.multiagent.specialist import (
@@ -198,11 +199,16 @@ When fingerprinting:
     print("\n=== Part 2: Domain Tools ===\n")
 
     @tool(name="probe_timing", description="Measure streaming-timing features for an endpoint")
-    async def probe_timing(endpoint: str) -> str:
-        # Benign, fixed measurements against a documentation-range endpoint.
+    async def probe_timing(endpoint: str, provider: str = "runpod") -> str:
+        # Dispatch the probe to a dedicated GPU cluster (RunPod / Lambda),
+        # where the measurement actually runs; falls back to a deterministic
+        # sample offline. See examples/integrations/gpu_probe_dispatch.py.
+        feats = dispatch_timing_probe(endpoint, provider=provider)
+        observed = sum(1 for f in _FINGERPRINT_FEATURES if f in feats)
+        body = " ".join(f"{k}={v}" for k, v in feats.items())
         return (
-            f"Probe {endpoint}: ttft_ms_p50=38.2 itl_ms_mean=11.4 itl_cv=0.07 tps_mean=87.6 "
-            "(4/4 features observed)"
+            f"Probe {endpoint} via {provider}: {body} "
+            f"({observed}/{len(_FINGERPRINT_FEATURES)} features observed)"
         )
 
     @tool(name="classify_endpoint", description="Map the timing feature vector to a model verdict")
@@ -287,7 +293,9 @@ When fingerprinting:
         description="Procedure for investigating suspected model-extraction probing",
         steps=[
             PlaybookStep(instruction="Profile request volume and prompt diversity per client"),
-            PlaybookStep(instruction="Check whether timing-probe patterns target a single endpoint"),
+            PlaybookStep(
+                instruction="Check whether timing-probe patterns target a single endpoint"
+            ),
             PlaybookStep(instruction="Correlate the source against the partner-mesh allowlist"),
         ],
     )
