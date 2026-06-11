@@ -15,6 +15,7 @@ Each content type is converted to text for embedding.
 from __future__ import annotations
 
 import base64
+import inspect
 import io
 import mimetypes
 from dataclasses import dataclass, field
@@ -129,6 +130,19 @@ class ImageProcessor:
         use_vision_llm: bool = False,
         vision_model: Any | None = None,
     ):
+        """Initialise the image processor.
+
+        Args:
+            use_ocr: Extract embedded text with Tesseract OCR (if installed).
+            use_vision_llm: Also request a natural-language description via
+                ``vision_model``.
+            vision_model: A bring-your-own vision callback —
+                ``Callable[[bytes], str]`` (sync or async) that takes the
+                raw image bytes and returns a description. Plug in an
+                OpenAI/Anthropic vision call, a local captioner, or any
+                service; the SDK stays provider-agnostic. ``None`` disables
+                the description path (OCR / basic info still apply).
+        """
         self.use_ocr = use_ocr
         self.use_vision_llm = use_vision_llm
         self.vision_model = vision_model
@@ -217,18 +231,24 @@ class ImageProcessor:
             return None
 
     async def _get_vision_description(self, image_bytes: bytes) -> str | None:
-        """Get image description from vision model."""
+        """Describe an image via the user-supplied ``vision_model`` callback.
+
+        ``vision_model`` is a callable ``(image_bytes: bytes) -> str`` (sync
+        or async). Keeping it a plain callback rather than a hardwired
+        provider keeps the SDK provider-agnostic — the caller wires whatever
+        vision backend they have. Any failure returns ``None`` so processing
+        degrades gracefully to OCR / basic image info.
+        """
         if not self.vision_model:
             return None
 
         try:
-            # Encode image as base64
-            b64_image = base64.b64encode(image_bytes).decode()
-
-            # Call vision model (implementation depends on model type)
-            # This is a placeholder for the actual implementation
-            return None
-        except Exception:  # noqa: BLE001 — best-effort extraction; return None on any failure
+            result = self.vision_model(image_bytes)
+            if inspect.isawaitable(result):
+                result = await result
+            text = str(result).strip()
+            return text or None
+        except Exception:  # noqa: BLE001 — best-effort; degrade to OCR/basic info
             return None
 
 

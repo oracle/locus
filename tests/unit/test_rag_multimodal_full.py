@@ -234,14 +234,22 @@ class TestImageProcessor:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_vision_llm_branch_runs_when_enabled(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        # Vision LLM is a placeholder (returns None), but the branch
-        # still runs when ``use_vision_llm=True`` and a model is set.
-        proc = ImageProcessor(use_ocr=False, use_vision_llm=True, vision_model=MagicMock())
+    async def test_vision_llm_branch_runs_when_enabled(self) -> None:
+        # When use_vision_llm=True and a vision callback is supplied, its
+        # description is folded into the result text and metadata.
+        proc = ImageProcessor(
+            use_ocr=False,
+            use_vision_llm=True,
+            vision_model=lambda img: "a login page screenshot",
+        )
         result = await proc.process(PNG_HEADER + b"\x00")
-        # No OCR, no vision result → fallback metadata string.
+        assert "a login page screenshot" in result.text
+        assert result.metadata["description"] == "a login page screenshot"
+
+    async def test_vision_llm_empty_result_falls_back(self) -> None:
+        # A callback that yields nothing degrades to the fallback string.
+        proc = ImageProcessor(use_ocr=False, use_vision_llm=True, vision_model=lambda img: "")
+        result = await proc.process(PNG_HEADER + b"\x00")
         assert "format=png" in result.text
 
     @pytest.mark.parametrize(
