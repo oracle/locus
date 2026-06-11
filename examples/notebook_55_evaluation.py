@@ -71,10 +71,7 @@ def example_evaluation():
         # a single failed-then-successful login is not evidence of an APT.
         EvalCase(
             name="no_invented_attribution",
-            prompt=(
-                "Alert: a single failed login for one user, then success. "
-                "Escalate or benign?"
-            ),
+            prompt=("Alert: a single failed login for one user, then success. Escalate or benign?"),
             expected_output_not_contains=["nation-state", "zero-day"],
         ),
     ]

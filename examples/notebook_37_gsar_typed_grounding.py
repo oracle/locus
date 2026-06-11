@@ -426,8 +426,7 @@ async def example_outer_loop() -> None:
     print("  Trajectory:")
     for entry in result.trajectory:
         print(
-            f"    iter={entry.iteration}  score={entry.score:.4f}  "
-            f"decision={entry.decision.value}"
+            f"    iter={entry.iteration}  score={entry.score:.4f}  decision={entry.decision.value}"
         )
 
     # The loop never silently ships an ungrounded report: a degraded result is

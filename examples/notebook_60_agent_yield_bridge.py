@@ -86,8 +86,7 @@ async def part1_full_lifecycle() -> None:
 
         result = None
         async for event in agent.run(
-            "Check the reputation of 192.0.2.44, count failed logins on web-01, "
-            "and report both."
+            "Check the reputation of 192.0.2.44, count failed logins on web-01, and report both."
         ):
             from tulip.core.events import TerminateEvent
 

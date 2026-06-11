@@ -95,8 +95,7 @@ async def part2_composition() -> None:
         await asyncio.sleep(0)
 
         await pipeline.run(
-            "Summarize this alert in one line: repeated failed logins on web-01 "
-            "from 198.51.100.7."
+            "Summarize this alert in one line: repeated failed logins on web-01 from 198.51.100.7."
         )
         await bus.close_stream(rid)
         await consumer_task

@@ -322,10 +322,7 @@ def main() -> None:
             f"for notebook 35 (Part 8). Raw output: {live.message!r}"
         )
     for f in report.findings:
-        print(
-            f"  {f.title[:40]:<40}  confidence={f.confidence:.2f}  "
-            f"severity={f.severity.value}"
-        )
+        print(f"  {f.title[:40]:<40}  confidence={f.confidence:.2f}  severity={f.severity.value}")
 
     print("\n" + "=" * 60)
     print("Done. Next: notebook 36 — reasoning patterns.")

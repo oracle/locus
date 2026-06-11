@@ -106,9 +106,7 @@ async def triage_node(state: dict[str, Any]) -> dict[str, Any]:
 
 async def draft_containment_node(state: dict[str, Any]) -> dict[str, Any]:
     agent = _make_agent("containment", CONTAINMENT_PROMPT, state["__model__"])
-    draft = await _run_agent(
-        agent, f"Alert: {state['alert']!r}\nDraft the containment action."
-    )
+    draft = await _run_agent(agent, f"Alert: {state['alert']!r}\nDraft the containment action.")
     return {"draft": draft}
 
 

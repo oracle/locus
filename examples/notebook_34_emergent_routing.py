@@ -77,8 +77,7 @@ def intel_search(query: str) -> str:
             "email-security specialist."
         ),
         "beaconing": (
-            "Beaconing (ATT&CK T1071) = periodic outbound callbacks; route to "
-            "network forensics."
+            "Beaconing (ATT&CK T1071) = periodic outbound callbacks; route to network forensics."
         ),
     }
     return canned.get(query.lower(), f"No intel KB entry for {query!r}.")
