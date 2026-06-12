@@ -11,7 +11,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from tulip.security.aws import (
+    _session,
     describe_aws,
+    describe_aws_tool,
     is_readonly_operation,
     use_aws,
     use_aws_tool,
@@ -110,3 +112,28 @@ async def test_use_aws_tool_refused_write_returns_error_json() -> None:
     # No boto3 needed — the read-only gate fires first.
     payload = json.loads(await use_aws_tool("iam", "CreateUser", {"UserName": "nope"}))
     assert "not a read-only" in payload["error"]
+
+
+def test_session_uses_profile_and_region_from_env() -> None:
+    with patch.dict(
+        "os.environ", {"TULIP_AWS_PROFILE": "myprof", "TULIP_AWS_REGION": "eu-west-1"}
+    ), patch("boto3.Session") as session:
+        _session()
+        session.assert_called_once_with(profile_name="myprof", region_name="eu-west-1")
+
+
+async def test_describe_aws_tool_returns_services_json() -> None:
+    with patch("tulip.security.aws._session") as sess:
+        sess.return_value.get_available_services.return_value = ["s3", "ec2"]
+        payload = json.loads(await describe_aws_tool())
+        assert payload["services"] == ["s3", "ec2"]
+
+
+async def test_use_aws_tool_executes_readonly_and_returns_json() -> None:
+    client = MagicMock()
+    client.list_buckets.return_value = {"Buckets": [], "ResponseMetadata": {"x": 1}}
+    with patch("tulip.security.aws._session") as sess:
+        sess.return_value.client.return_value = client
+        payload = json.loads(await use_aws_tool("s3", "ListBuckets"))
+        assert payload["Buckets"] == []
+        assert "ResponseMetadata" not in payload
