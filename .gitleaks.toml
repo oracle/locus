@@ -1,0 +1,27 @@
+# gitleaks configuration for tulip-agents.
+#
+# Extends the default ruleset and allowlists the *illustrative* fake secrets
+# that necessarily live in an AI-security SDK: a scenario that demonstrates
+# secret leakage, and a test fixture asserting on a fake key. The allowlist is
+# surgical — the leak-demo file by path, the test fixture by exact value — so a
+# real credential committed anywhere else is still caught.
+
+title = "tulip-agents gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Illustrative/fake secrets in security demos and test fixtures"
+
+# The sensitive-disclosure scenario exists to show an agent leaking a secret;
+# fake keys in its sample data are intentional.
+paths = [
+  '''examples/scenarios/sensitive_disclosure\.py''',
+]
+
+# Exact fake values used elsewhere (not whole-file allowlists, so real keys in
+# the same files are still flagged).
+regexes = [
+  '''sk-proj-abc123def456''',
+]

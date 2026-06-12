@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import socket
 from functools import lru_cache
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -38,10 +39,10 @@ def redis_available() -> bool:
     if not url:
         return False
 
-    # Parse host:port from redis URL
-    url = url.removeprefix("redis://")
-    host, _, port = url.partition(":")
-    port = int(port) if port else 6379
+    # Parse robustly — handles redis://[user:pass@]host:port/db and rediss://.
+    parts = urlsplit(url)
+    host = parts.hostname or "localhost"
+    port = parts.port or 6379
     return _check_port(host, port)
 
 

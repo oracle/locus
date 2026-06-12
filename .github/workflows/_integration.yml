@@ -1,0 +1,70 @@
+name: integration
+
+on:
+  workflow_call:
+    secrets:
+      OPENAI_API_KEY:
+        required: false
+      ANTHROPIC_API_KEY:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    name: integration (postgres + redis)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: tulip
+          POSTGRES_PASSWORD: tulip
+          POSTGRES_DB: tulip_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tulip -d tulip_test"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+
+    env:
+      # Service-backed tests run; the rest auto-skip via tests/integration/conftest.py.
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: tulip
+      POSTGRES_PASSWORD: tulip
+      POSTGRES_DB: tulip_test
+      REDIS_URL: redis://localhost:6379/0
+      # Optional — live-model tests run only when these org/repo secrets are set.
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+    steps:
+      # actions/checkout@v6.0.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      # actions/setup-python@v6.2.0
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+          allow-prereleases: true
+          cache: pip
+
+      - name: Install tulip + extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,sdk,pgvector,qdrant,chroma,mem0]"
+
+      - name: Run integration tests
+        # -rs shows skip reasons so CI logs make clear which services were absent.
+        run: pytest tests/integration -q -rs

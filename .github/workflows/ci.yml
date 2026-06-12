@@ -22,6 +22,16 @@ jobs:
     name: Test
     uses: ./.github/workflows/_test.yml
 
+  integration:
+    name: Integration
+    uses: ./.github/workflows/_integration.yml
+    secrets: inherit
+
+  secret-scan:
+    name: Secret Scan
+    uses: ./.github/workflows/_secrets.yml
+    secrets: inherit
+
   precommit:
     name: Pre-commit
     uses: ./.github/workflows/_precommit.yml
@@ -71,7 +81,7 @@ jobs:
   # jobs without retouching protection rules.
   ci-success:
     name: CI Success
-    needs: [lint, test, precommit, dco]
+    needs: [lint, test, integration, secret-scan, precommit, dco]
     if: always()
     runs-on: ubuntu-latest
     steps:
