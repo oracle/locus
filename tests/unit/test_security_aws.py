@@ -115,9 +115,10 @@ async def test_use_aws_tool_refused_write_returns_error_json() -> None:
 
 
 def test_session_uses_profile_and_region_from_env() -> None:
-    with patch.dict(
-        "os.environ", {"TULIP_AWS_PROFILE": "myprof", "TULIP_AWS_REGION": "eu-west-1"}
-    ), patch("boto3.Session") as session:
+    with (
+        patch.dict("os.environ", {"TULIP_AWS_PROFILE": "myprof", "TULIP_AWS_REGION": "eu-west-1"}),
+        patch("boto3.Session") as session,
+    ):
         _session()
         session.assert_called_once_with(profile_name="myprof", region_name="eu-west-1")
 
