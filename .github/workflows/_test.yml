@@ -57,16 +57,16 @@ jobs:
       # Per-file regression gate: fail if any tracked file's coverage
       # dropped below the value committed in scripts/coverage_baseline.json
       # (refreshed with `python scripts/coverage_ratchet.py --update`).
-      # Only runs on the highest-supported Python so we don't double-fail
-      # the matrix when an older runtime emits slightly different branch
-      # counts.
+      # Runs on the highest-supported STABLE Python (3.13) — not the 3.14
+      # prerelease, where deps that aren't built for it yet make some tests
+      # skip, dropping coverage and tripping the ratchet spuriously.
       - name: Coverage ratchet (per-file regression gate)
-        if: matrix.python-version == '3.14'
+        if: matrix.python-version == '3.13'
         run: python scripts/coverage_ratchet.py --check
 
       # actions/upload-artifact@v7.0.1
       - name: Upload coverage artifact
-        if: matrix.python-version == '3.14'
+        if: matrix.python-version == '3.13'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: coverage-report

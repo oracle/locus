@@ -194,7 +194,9 @@ def part2_live_agent() -> None:
     print(f"\nsummary: {report.summary[:200]}")
     for grounded in ground_report(report, controls):
         if is_finding(grounded):
-            print(f"  SHIP    [{grounded.severity:<8}] {grounded.title} (gsar={grounded.gsar_score:.2f})")
+            print(
+                f"  SHIP    [{grounded.severity:<8}] {grounded.title} (gsar={grounded.gsar_score:.2f})"
+            )
         else:
             print(f"  ABSTAIN  {grounded.reason[:80]}")
 

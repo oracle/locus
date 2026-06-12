@@ -12,6 +12,7 @@ python examples/scenarios/prompt_injection.py   # or run one
 ```
 
 Each gist's defense is one of three kinds:
+
 - **primitive** — a built-in SDK control (`url_safety`/`path_safety`, `GuardrailsHook`, `ground_finding`/`ground_fingerprint`);
 - **pattern** — an allowlist/audit pattern with SDK taxonomy + wiring points (where there is no single built-in);
 - both, where they stack.
