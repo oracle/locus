@@ -96,22 +96,27 @@ def _stream_once(base_url: str, api_key: str, model: str, prompt: str) -> dict |
     start = time.perf_counter()
     first: float | None = None
     arrivals: list[float] = []
-    with (
-        httpx.Client(base_url=base_url, headers=headers, timeout=60.0) as client,
-        client.stream("POST", "/chat/completions", json=body) as resp,
-    ):
-        resp.raise_for_status()
-        for line in resp.iter_lines():
-            if not line.startswith("data:"):
-                continue
-            payload = line[len("data:") :].strip()
-            if payload == "[DONE]":
-                break
-            if _has_content(payload):
-                now = time.perf_counter()
-                if first is None:
-                    first = now
-                arrivals.append(now)
+    try:
+        with (
+            httpx.Client(base_url=base_url, headers=headers, timeout=60.0) as client,
+            client.stream("POST", "/chat/completions", json=body) as resp,
+        ):
+            resp.raise_for_status()
+            for line in resp.iter_lines():
+                if not line.startswith("data:"):
+                    continue
+                payload = line[len("data:") :].strip()
+                if payload == "[DONE]":
+                    break
+                if _has_content(payload):
+                    now = time.perf_counter()
+                    if first is None:
+                        first = now
+                    arrivals.append(now)
+    except httpx.HTTPError:
+        # Transient proxy/network error (e.g. a flaky RunPod proxy 404) — skip
+        # this sample rather than failing the whole measurement.
+        return None
     if first is None or len(arrivals) < 2:
         return None
     gaps_ms = [(b - a) * 1000.0 for a, b in pairwise(arrivals)]
