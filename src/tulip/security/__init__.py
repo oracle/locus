@@ -36,6 +36,15 @@ Example usage:
         print("withheld:", result.reason)
 """
 
+from tulip.security.aws import (
+    READONLY_PREFIXES,
+    aws_services,
+    describe_aws,
+    describe_aws_tool,
+    is_readonly_operation,
+    use_aws,
+    use_aws_tool,
+)
 from tulip.security.findings import (
     Confidence,
     Finding,
@@ -86,4 +95,12 @@ __all__ = [
     "Severity",
     "TaxonomyTag",
     "severity_at_least",
+    # AWS posture (spec-driven, read-only)
+    "READONLY_PREFIXES",
+    "aws_services",
+    "describe_aws",
+    "describe_aws_tool",
+    "is_readonly_operation",
+    "use_aws",
+    "use_aws_tool",
 ]

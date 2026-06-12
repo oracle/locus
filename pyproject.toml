@@ -100,6 +100,10 @@ opensearch = ["opensearch-py>=2.4"]
 # S3 / MinIO / R2 object-storage checkpointer (src/tulip/memory/backends/s3.py).
 s3 = ["boto3>=1.34"]
 
+# AWS cloud-posture tools (src/tulip/security/aws.py) — boto3 + its botocore
+# service models are the spec that drives use_aws / describe_aws.
+aws = ["boto3>=1.34"]
+
 # Mem0 agent-memory manager (src/tulip/memory/managers/mem0.py) — the
 # portable, self-hostable long-term memory backend.
 mem0 = ["mem0ai>=0.1"]
