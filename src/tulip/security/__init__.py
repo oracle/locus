@@ -60,6 +60,15 @@ from tulip.security.grounded import (
     ground_fingerprint,
     is_finding,
 )
+from tulip.security.soc import (
+    PostureEvidence,
+    PostureFinding,
+    PostureReport,
+    SecurityControls,
+    create_soc_analyst,
+    ground_report,
+    submit_posture,
+)
 from tulip.security.taxonomy import (
     SEVERITY_ORDER,
     AtlasTechnique,
@@ -103,4 +112,12 @@ __all__ = [
     "is_readonly_operation",
     "use_aws",
     "use_aws_tool",
+    # SOC-analyst factory + grounded posture reporting
+    "PostureEvidence",
+    "PostureFinding",
+    "PostureReport",
+    "SecurityControls",
+    "create_soc_analyst",
+    "ground_report",
+    "submit_posture",
 ]
