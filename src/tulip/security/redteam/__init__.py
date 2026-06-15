@@ -12,14 +12,32 @@ against the :class:`~tulip.security.target.Target`, and grounds the outcomes.
 from __future__ import annotations
 
 from tulip.security.redteam.base import Probe, ProbeOutcome
-from tulip.security.redteam.probes import DirectPromptInjection
+from tulip.security.redteam.probes import (
+    DirectPromptInjection,
+    ExcessiveAgency,
+    IndirectPromptInjection,
+    Jailbreak,
+    SensitiveInformationDisclosure,
+)
 
 
-# Named suites → the probes they run. Stage 1 seeds both suites with the
-# reference probe; the catalogue grows here without touching the runner.
+# Named suites → the probes they run. The catalogue grows here without
+# touching the runner. ``owasp-asi`` is the agentic superset; ``owasp-llm``
+# is the LLM-application subset.
 _SUITES: dict[str, list[Probe]] = {
-    "owasp-asi": [DirectPromptInjection()],
-    "owasp-llm": [DirectPromptInjection()],
+    "owasp-asi": [
+        DirectPromptInjection(),
+        IndirectPromptInjection(),
+        Jailbreak(),
+        ExcessiveAgency(),
+        SensitiveInformationDisclosure(),
+    ],
+    "owasp-llm": [
+        DirectPromptInjection(),
+        Jailbreak(),
+        ExcessiveAgency(),
+        SensitiveInformationDisclosure(),
+    ],
 }
 
 
@@ -43,8 +61,12 @@ def all_probes() -> list[Probe]:
 
 __all__ = [
     "DirectPromptInjection",
+    "ExcessiveAgency",
+    "IndirectPromptInjection",
+    "Jailbreak",
     "Probe",
     "ProbeOutcome",
+    "SensitiveInformationDisclosure",
     "all_probes",
     "suite_probes",
 ]

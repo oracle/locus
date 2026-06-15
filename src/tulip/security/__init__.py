@@ -114,8 +114,12 @@ from tulip.security.playbooks import (
 )
 from tulip.security.redteam import (
     DirectPromptInjection,
+    ExcessiveAgency,
+    IndirectPromptInjection,
+    Jailbreak,
     Probe,
     ProbeOutcome,
+    SensitiveInformationDisclosure,
     all_probes,
     suite_probes,
 )
@@ -289,6 +293,10 @@ __all__ = [
     "Probe",
     "ProbeOutcome",
     "DirectPromptInjection",
+    "IndirectPromptInjection",
+    "Jailbreak",
+    "ExcessiveAgency",
+    "SensitiveInformationDisclosure",
     "all_probes",
     "suite_probes",
 ]
