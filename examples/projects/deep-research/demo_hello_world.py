@@ -24,15 +24,15 @@ from tulip.tools import tool
 
 
 @tool
-def hello_world() -> str:
-    """Return a hello string."""
-    return "Hello from tulip deepagent!"
+def lookup_cve(cve_id: str) -> str:
+    """Return the CVSS severity and a one-line summary for a CVE id."""
+    return f"{cve_id}: CVSS 10.0 (Critical) — remote code execution via JNDI lookup in Log4j."
 
 
 @tool
-def add(a: int, b: int) -> int:
-    """Add two integers and return the sum."""
-    return a + b
+def fetch_advisory(vendor: str) -> str:
+    """Fetch the latest security advisory headline for a vendor."""
+    return f"{vendor} advisory: patched release available — upgrade immediately and rotate exposed secrets."
 
 
 def main() -> int:
@@ -40,25 +40,25 @@ def main() -> int:
 
     print("== tulip hello-world deepagent ==")
     print(f"   model      : {model_id}")
-    print(f"   tools      : hello_world, add")
+    print(f"   tools      : lookup_cve, fetch_advisory")
     print()
 
     chat = get_model(model_id)
 
     agent = create_deepagent(
         model=chat,
-        tools=[hello_world, add],
+        tools=[lookup_cve, fetch_advisory],
         system_prompt=(
-            "You are a helpful assistant. When asked to call tools, use them "
-            "before responding. After all tools have returned, summarize the "
-            "results in one short sentence."
+            "You are a vulnerability-research assistant. When asked to call "
+            "tools, use them before responding. After all tools have returned, "
+            "summarize the findings in one short sentence."
         ),
         reflexion=False,
         grounding=False,
         max_iterations=6,
     )
 
-    result = agent.run_sync("Call hello_world and add 17 + 25, then summarize.")
+    result = agent.run_sync("Look up CVE-2021-44228 and fetch the Apache advisory, then summarize.")
 
     text = getattr(result, "text", "") or ""
     tool_execs = list(result.tool_executions or ())  # type: ignore[arg-type]

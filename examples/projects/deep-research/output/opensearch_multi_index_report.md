@@ -1,11 +1,13 @@
-### Key Regulators of Iron Homeostasis (Medical Index)
+### Adversary Tradecraft (Threat-Intel Index)
 
-- **Hepcidin**: The master regulator of systemic iron homeostasis, produced by the liver. (med-01)
-- **Ferritin**: The primary iron storage protein and an acute-phase reactant, crucial for iron metabolism. (med-05)
-- **MRI T2* Relaxometry**: Considered the gold standard for non-invasive iron quantification, helping assess iron overload. (med-10)
-- **Reticulocyte Hemoglobin Content (CHr)**: An early functional marker of iron deficiency, indicating available iron for erythropoiesis. (med-09)
+- **Malleable C2**: Cobalt Strike beacons use malleable C2 profiles to blend in with normal web traffic. (intel-01)
+- **PowerShell execution**: Adversary use of PowerShell for execution maps to ATT&CK technique T1059.001. (intel-02)
+- **Credential dumping**: Dumping credentials from LSASS memory maps to ATT&CK technique T1003.001. (intel-05)
+- **Beaconing periodicity**: C2 beaconing shows a regular periodicity that stands out from human-driven sessions. (intel-07)
 
-### Latest News (News Index)
+### Notable Vulnerabilities (CVE Index)
 
-- A new infrastructure bill cleared the lower chamber by a 215-204 margin. (news-04)
-- Local elections saw record turnout in three coastal districts, officials reported. (news-03)
+- **Log4Shell (CVE-2021-44228)**: Remote code execution via JNDI lookups in Log4j. (cve-03)
+- **Severity bands**: CVSS v3.1 scores 9.0-10.0 are classified as Critical. (cve-01)
+- **Exploit likelihood**: The EPSS score estimates the probability a vulnerability is exploited in the wild. (cve-06)
+- **Exposure over score**: Patching cadence and asset exposure drive real-world risk more than CVSS alone. (cve-07)

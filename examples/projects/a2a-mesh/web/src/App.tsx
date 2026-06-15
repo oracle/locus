@@ -5,32 +5,32 @@ import { fetchCard, invoke, stream } from "./api";
 const PEERS: Peer[] = [
   {
     url: "http://127.0.0.1:8001",
-    proxy: "/api/research",
-    fallbackName: "research-agent",
+    proxy: "/api/intel",
+    fallbackName: "threat-intel-agent",
     status: "checking",
   },
   {
     url: "http://127.0.0.1:8002",
-    proxy: "/api/finance",
-    fallbackName: "finance-agent",
+    proxy: "/api/triage",
+    fallbackName: "soc-triage-agent",
     status: "checking",
   },
 ];
 
-const TICKER_RE = /\b[A-Z]{2,5}\b/;
-const FINANCE_HINTS = ["buy", "sell", "valuation", "price", "stock", "ticker"];
+const ALERT_RE = /\bA-\d+\b/i;
+const TRIAGE_HINTS = ["alert", "triage", "severity", "escalate", "true positive", "false positive", "incident"];
 
 function suggestSkill(query: string): string {
-  if (!query) return "research";
-  if (TICKER_RE.test(query)) return "valuation";
-  if (FINANCE_HINTS.some((w) => query.toLowerCase().includes(w))) return "valuation";
-  return "research";
+  if (!query) return "threat_intel";
+  if (ALERT_RE.test(query)) return "alert_triage";
+  if (TRIAGE_HINTS.some((w) => query.toLowerCase().includes(w))) return "alert_triage";
+  return "threat_intel";
 }
 
 export default function App() {
   const [peers, setPeers] = useState<Peer[]>(PEERS);
   const [selected, setSelected] = useState<string | null>(null);
-  const [query, setQuery] = useState("Should I buy TSLA?");
+  const [query, setQuery] = useState("Is alert A-101 a true positive?");
   const [streaming, setStreaming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [events, setEvents] = useState<StreamedEvent[]>([]);
@@ -103,7 +103,7 @@ export default function App() {
           <span className="app__brand-tag">a2a mesh console</span>
         </div>
         <div className="app__header-spacer" />
-        <span className="app__header-meta">Multi-Agent Reasoning Orchestrator SDK</span>
+        <span className="app__header-meta">tulip — the cybersecurity agent SDK</span>
       </header>
 
       <aside className="app__side">
@@ -184,7 +184,7 @@ export default function App() {
               {peers.map((p) => {
                 const card = p.card;
                 const isSelected = selected === p.url;
-                const isFinance = (card?.name ?? p.fallbackName).includes("finance");
+                const isTriage = (card?.name ?? p.fallbackName).includes("triage");
                 return (
                   <div
                     key={p.url}
@@ -194,7 +194,7 @@ export default function App() {
                     tabIndex={0}
                   >
                     <div
-                      className={"peer__icon " + (isFinance ? "peer__icon--finance" : "")}
+                      className={"peer__icon " + (isTriage ? "peer__icon--triage" : "")}
                     >
                       {(card?.name ?? p.fallbackName).slice(0, 2).toUpperCase()}
                     </div>
@@ -253,7 +253,7 @@ export default function App() {
                   className="textarea"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Ask the mesh anything…"
+                  placeholder="Ask the SOC mesh… (e.g. enrich an IOC or triage an alert)"
                 />
               </div>
 

@@ -4,13 +4,13 @@
 
 Usage::
 
-    python -m a2a_mesh.orchestrator "Should I buy TSLA?"
-    python -m a2a_mesh.orchestrator --stream "Summarise quantum computing."
-    python -m a2a_mesh.orchestrator --skill summarize "Summarise this..."
+    python -m a2a_mesh.orchestrator "Is alert A-101 a true positive?"
+    python -m a2a_mesh.orchestrator --stream "Enrich 198.51.100.7."
+    python -m a2a_mesh.orchestrator --skill ioc_enrichment "Enrich this domain..."
 
 The orchestrator does **not** itself wrap an agent — it's a pure A2A
-client. The decision logic ("ticker → finance, summary → research") is
-deliberately rule-based so the demo stays inspectable; in real life
+client. The decision logic ("alert id → triage, indicator → threat-intel")
+is deliberately rule-based so the demo stays inspectable; in real life
 you'd put a small Tulip ``Orchestrator`` here whose specialists are
 ``A2AClient.as_tool()``-wrapped peers.
 """
@@ -29,11 +29,11 @@ from tulip.a2a import A2AClient
 
 
 DEFAULT_PEERS = (
-    "http://127.0.0.1:8001",  # research
-    "http://127.0.0.1:8002",  # finance
+    "http://127.0.0.1:8001",  # threat-intel
+    "http://127.0.0.1:8002",  # soc-triage
 )
 
-TICKER_RE = re.compile(r"\b[A-Z]{2,5}\b")
+ALERT_RE = re.compile(r"\bA-\d+\b", re.IGNORECASE)
 
 
 async def discover(urls: tuple[str, ...]) -> list[tuple[str, list[str]]]:
@@ -55,12 +55,21 @@ def pick(query: str, peers: list[tuple[str, list[str]]], force: str | None) -> s
     wanted: str
     if force:
         wanted = force
-    elif TICKER_RE.search(query) or any(
-        w in query.lower() for w in ("buy", "sell", "valuation", "price", "stock")
+    elif ALERT_RE.search(query) or any(
+        w in query.lower()
+        for w in (
+            "alert",
+            "triage",
+            "severity",
+            "escalate",
+            "true positive",
+            "false positive",
+            "incident",
+        )
     ):
-        wanted = "valuation"
+        wanted = "alert_triage"
     else:
-        wanted = "research"
+        wanted = "threat_intel"
 
     for url, skills in peers:
         if wanted in skills:
@@ -107,7 +116,7 @@ async def main_async(args: argparse.Namespace) -> int:
     print("Discovering peers…")
     peers = await discover(tuple(args.peer))
     if not peers:
-        print("No peers reachable. Did you `make research` and `make finance`?")
+        print("No peers reachable. Did you `make intel` and `make triage`?")
         return 2
 
     target = pick(args.query, peers, args.skill)
@@ -129,7 +138,7 @@ def main() -> None:
         "--peer",
         action="append",
         default=list(DEFAULT_PEERS),
-        help="repeat to add A2A peer URLs (default: research:8001 + finance:8002)",
+        help="repeat to add A2A peer URLs (default: threat-intel:8001 + soc-triage:8002)",
     )
     p.add_argument("--skill", help="force route to a specific skill tag")
     p.add_argument("--stream", action="store_true", help="stream via /a2a/stream (SSE)")

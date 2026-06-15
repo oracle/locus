@@ -123,10 +123,10 @@ class ParallelPipeline(BaseModel):
 
     Example:
         >>> pipeline = ParallelPipeline(
-        ...     agents=[fact_checker, analyst, summarizer],
+        ...     agents=[triage, forensics, reporter],
         ...     merge_strategy="concatenate",
         ... )
-        >>> result = await pipeline.run("Analyze climate change impacts")
+        >>> result = await pipeline.run("Investigate the ws-0042 ransomware alert")
     """
 
     agents: list[Any] = Field(default_factory=list)

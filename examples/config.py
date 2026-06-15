@@ -66,16 +66,16 @@ class MockModel(BaseModel):
     max_tokens: int = 100
     temperature: float = 0.7
 
-    # Simulated responses
+    # Simulated responses — security-flavoured so the offline output reads
+    # like the real thing. Keyed on words that show up in SOC/IR prompts.
     _responses: dict[str, str] = {
         "default": "This is a mock response for testing purposes.",
-        "python": "Python is a high-level programming language known for readability.",
-        "languages": "Python, JavaScript, and Rust are popular programming languages.",
-        "math": "The answer is 42.",
-        "2 + 2": "4",
-        "5 * 5": "25",
-        "square root": "12",
-        "10%": "20",
+        "triage": "Escalate: the indicators line up with an active phishing campaign.",
+        "phishing": "Classic phishing markers (lookalike domain, urgent lure) — treat as malicious.",
+        "alert": "Alert assessment: likely true positive. Recommend containment.",
+        "severity": "Severity: HIGH — the exposure is reachable and exploitable.",
+        "ioc": "Indicator enriched: multiple vendor detections, first seen 2 days ago.",
+        "abstain": "Insufficient grounded evidence — abstaining rather than guessing.",
     }
 
     async def complete(
@@ -95,8 +95,20 @@ class MockModel(BaseModel):
 
     def _get_response(self, prompt: str, tools: list[dict[str, Any]] | None) -> str:
         """Get appropriate response based on prompt content."""
-        # Check for tool calls
-        if tools and ("weather" in prompt or "calculate" in prompt):
+        # Check for tool calls — fire when a tool-bound prompt looks like a
+        # SOC task the agent would reach for a tool to answer.
+        tool_hints = (
+            "triage",
+            "alert",
+            "domain",
+            "ioc",
+            "lookup",
+            "enrich",
+            "phishing",
+            "reputation",
+            "scan",
+        )
+        if tools and any(hint in prompt for hint in tool_hints):
             return self._get_tool_response(prompt, tools)
 
         # Match keywords to responses

@@ -18,37 +18,43 @@ from fastapi.testclient import TestClient
 # Force MockModel for the test even if the user has env vars set.
 os.environ["TULIP_MODEL_PROVIDER"] = "mock"
 
-from a2a_mesh.finance import build_server as build_finance  # noqa: E402
 from a2a_mesh.orchestrator import pick  # noqa: E402
-from a2a_mesh.research import build_server as build_research  # noqa: E402
+from a2a_mesh.soc_triage import build_server as build_triage  # noqa: E402
+from a2a_mesh.threat_intel import build_server as build_intel  # noqa: E402
 
 
 @pytest.fixture
-def research_client() -> TestClient:
-    return TestClient(build_research().app)
+def intel_client() -> TestClient:
+    return TestClient(build_intel().app)
 
 
 @pytest.fixture
-def finance_client() -> TestClient:
-    return TestClient(build_finance().app)
+def triage_client() -> TestClient:
+    return TestClient(build_triage().app)
 
 
-def test_research_card(research_client: TestClient) -> None:
-    card = research_client.get("/agent-card").json()
-    assert card["name"] == "research-agent"
-    assert "research" in card["skills"]
-    assert "summarize" in card["skills"]
+PEERS = [
+    ("http://127.0.0.1:8001", ["threat_intel", "ioc_enrichment"]),
+    ("http://127.0.0.1:8002", ["alert_triage", "severity_scoring"]),
+]
 
 
-def test_finance_card(finance_client: TestClient) -> None:
-    card = finance_client.get("/agent-card").json()
-    assert card["name"] == "finance-agent"
-    assert "finance" in card["skills"]
-    assert "valuation" in card["skills"]
+def test_intel_card(intel_client: TestClient) -> None:
+    card = intel_client.get("/agent-card").json()
+    assert card["name"] == "threat-intel-agent"
+    assert "threat_intel" in card["skills"]
+    assert "ioc_enrichment" in card["skills"]
 
 
-def test_research_invoke(research_client: TestClient) -> None:
-    resp = research_client.post(
+def test_triage_card(triage_client: TestClient) -> None:
+    card = triage_client.get("/agent-card").json()
+    assert card["name"] == "soc-triage-agent"
+    assert "alert_triage" in card["skills"]
+    assert "severity_scoring" in card["skills"]
+
+
+def test_intel_invoke(intel_client: TestClient) -> None:
+    resp = intel_client.post(
         "/a2a/invoke",
         json={"messages": [{"role": "user", "content": "hi", "metadata": {}}], "metadata": {}},
     )
@@ -58,35 +64,23 @@ def test_research_invoke(research_client: TestClient) -> None:
     assert body["status"] in {"completed", "ok", "success"} or body["messages"]
 
 
-def test_finance_invoke(finance_client: TestClient) -> None:
-    resp = finance_client.post(
+def test_triage_invoke(triage_client: TestClient) -> None:
+    resp = triage_client.post(
         "/a2a/invoke",
-        json={"messages": [{"role": "user", "content": "TSLA", "metadata": {}}], "metadata": {}},
+        json={"messages": [{"role": "user", "content": "A-101", "metadata": {}}], "metadata": {}},
     )
     assert resp.status_code == 200
 
 
-def test_orchestrator_routing_finance() -> None:
-    peers = [
-        ("http://127.0.0.1:8001", ["research", "summarize"]),
-        ("http://127.0.0.1:8002", ["finance", "valuation"]),
-    ]
-    assert pick("Should I buy TSLA?", peers, force=None).endswith(":8002")
-    assert pick("price of AAPL", peers, force=None).endswith(":8002")
+def test_orchestrator_routing_triage() -> None:
+    assert pick("Is alert A-101 a true positive?", PEERS, force=None).endswith(":8002")
+    assert pick("score the severity of this finding", PEERS, force=None).endswith(":8002")
 
 
-def test_orchestrator_routing_research() -> None:
-    peers = [
-        ("http://127.0.0.1:8001", ["research", "summarize"]),
-        ("http://127.0.0.1:8002", ["finance", "valuation"]),
-    ]
-    assert pick("Summarise quantum computing", peers, force=None).endswith(":8001")
+def test_orchestrator_routing_intel() -> None:
+    assert pick("Enrich 198.51.100.7", PEERS, force=None).endswith(":8001")
 
 
 def test_orchestrator_force_skill() -> None:
-    peers = [
-        ("http://127.0.0.1:8001", ["research", "summarize"]),
-        ("http://127.0.0.1:8002", ["finance", "valuation"]),
-    ]
-    # Even though the query mentions a ticker, --skill summarize forces research.
-    assert pick("TSLA", peers, force="summarize").endswith(":8001")
+    # Even though the query names an alert, --skill ioc_enrichment forces threat-intel.
+    assert pick("alert A-101", PEERS, force="ioc_enrichment").endswith(":8001")

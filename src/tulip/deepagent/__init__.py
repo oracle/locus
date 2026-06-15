@@ -28,23 +28,23 @@ Quick start::
     from pydantic import BaseModel
 
 
-    class TableInfo(BaseModel):
-        schema_owner: str
-        table: str
+    class ExposureInfo(BaseModel):
+        asset: str
+        service: str
         confidence: float
 
 
     agent = create_deepagent(
         model="openai:gpt-4o",
-        tools=[list_tables, query_db, submit_research],
-        system_prompt="You research your data. Submit when confident.",
-        output_schema=TableInfo,
+        tools=[list_services, probe_service, submit_finding],
+        system_prompt="You recon the attack surface. Submit when confident.",
+        output_schema=ExposureInfo,
     )
-    async for ev in agent.run("Research FUSION.AP_INVOICES_ALL on EJOF"):
+    async for ev in agent.run("Map the exposed services on 192.0.2.10"):
         ...
 
-For multi-item scans (per-item iteration over a discoverable surface),
-implement :class:`KnowledgeProvider` and feed it to your scan loop.
+For multi-item scans (per-host iteration over a discoverable attack
+surface), implement :class:`KnowledgeProvider` and feed it to your scan loop.
 """
 
 from tulip.deepagent.backends import (

@@ -1,11 +1,13 @@
-### Key Regulators of Iron Homeostasis
+### Adversary Tradecraft
 
-- **Hepcidin**: The master regulator of systemic iron homeostasis, produced by the liver (med-01).
-- **Ferritin**: The primary iron storage protein and an acute-phase reactant that is elevated in inflammation (med-05).
-- **MRI T2***: This method is the gold standard for non-invasive iron quantification in organs like the liver and heart (med-10).
-- **Iron-refractory iron deficiency anemia (IRIDA)**: This condition is caused by mutations in the TMPRSS6 gene, affecting iron regulation (med-11).
+- **Malleable C2**: Cobalt Strike beacons use malleable C2 profiles to blend in with normal web traffic (intel-01).
+- **Living off the land**: LOLBins such as `certutil` are abused to download payloads (intel-03).
+- **Fast-flux DNS**: Rotating the IPs behind a domain rapidly frustrates takedown efforts (intel-06).
+- **Lateral movement**: Movement over SMB and remote service creation maps to ATT&CK technique T1021 (intel-10).
 
-### Latest News Items
+### Vulnerability Landscape
 
-- A new infrastructure bill cleared the lower chamber by a 215-204 margin (news-04).
-- The national weather service issued advisories for severe thunderstorms across the plains (news-05).
+- **Log4Shell (CVE-2021-44228)**: Remote code execution via JNDI lookups in Log4j (cve-03).
+- **Deserialization**: Deserializing untrusted data can lead to remote code execution, CWE-502 (cve-09).
+- **Real-world risk**: Patching cadence and asset exposure drive risk more than CVSS alone (cve-07).
+- **Default credentials**: Default credentials on internet-facing services are a recurring source of compromise (cve-10).

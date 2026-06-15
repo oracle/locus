@@ -1,8 +1,10 @@
-# a2a-mesh — multi-process Tulip agents over A2A
+# a2a-mesh — multi-process Tulip security agents over A2A
 
 A runnable example of three Tulip agents talking to each other across
 process boundaries via the Agent-to-Agent (A2A) protocol — HTTP + SSE
-with capability-based discovery via `AgentCard`.
+with capability-based discovery via `AgentCard`. The mesh models a SOC
+where a threat-intel service and an alert-triage service run as separate
+peers, and an orchestrator routes each request to the right one.
 
 The starting point was [`notebook_35_a2a_protocol.py`][t34]; this is
 the project version with proper service boundaries, a Makefile, an
@@ -21,10 +23,11 @@ integration test.
                           │ HTTP+SSE              │ HTTP+SSE
                           ▼                       ▼
         ┌──────────────────────────┐  ┌──────────────────────────┐
-        │  research agent          │  │  finance agent           │
+        │  threat-intel agent      │  │  soc-triage agent        │
         │  :8001                   │  │  :8002                   │
         │  skills:                 │  │  skills:                 │
-        │   research, summarize    │  │   finance, valuation     │
+        │   threat_intel,          │  │   alert_triage,          │
+        │   ioc_enrichment         │  │   severity_scoring       │
         │                          │  │                          │
         │  A2AServer wraps an      │  │  A2AServer wraps an      │
         │  Agent + tools.          │  │  Agent + tools.          │
@@ -39,8 +42,8 @@ make install            # hatch env + published SDK (`hatch run sdk-local`
                         # runs against this repo's checkout instead)
 
 # In three separate terminals (or use `make mesh` for tmux):
-make research           # boots :8001
-make finance            # boots :8002
+make intel              # boots the threat-intel peer on :8001
+make triage             # boots the SOC-triage peer on :8002
 make demo               # discovers + queries both, prints the answer
 ```
 
@@ -52,7 +55,7 @@ before booting each service:
 export TULIP_MODEL_PROVIDER=openai
 export TULIP_MODEL_ID=gpt-4o
 export OPENAI_API_KEY=sk-...
-make research
+make intel
 ```
 
 Anthropic works the same way (`TULIP_MODEL_PROVIDER=anthropic
@@ -61,16 +64,16 @@ ANTHROPIC_API_KEY=...`). The model factory is in
 
 ## What the demo shows
 
-`make demo` runs `python -m a2a_mesh.orchestrator "Should I buy TSLA?"`
+`make demo` runs `python -m a2a_mesh.orchestrator "Is alert A-101 a true positive?"`
 which:
 
 1. Calls `GET http://localhost:8001/agent-card` and
    `GET http://localhost:8002/agent-card` to discover both peers.
-2. Picks the finance agent because the query mentions a ticker — the
-   `valuation` skill matches.
-3. Calls `POST /a2a/invoke` on the finance agent and prints the reply.
-4. As a follow-up, calls the research agent with `summarize` to one-line
-   the result.
+2. Picks the SOC-triage agent because the query names an alert id — the
+   `alert_triage` skill matches.
+3. Calls `POST /a2a/invoke` on the triage agent and prints the verdict.
+4. As a follow-up, calls the threat-intel agent with `ioc_enrichment` to
+   enrich the indicators behind the alert.
 
 Both calls use `A2AClient`, so the wire format is the typed JSON
 envelope from [`tulip.a2a.protocol`][a2a]. Streaming is also
@@ -82,7 +85,8 @@ events from the remote agent stream over SSE in real time.
 A2A is for the case where each agent runs **as its own service**:
 different teams, different deploy cadences, different tenancy, possibly
 different runtimes (a Tulip agent calling a non-Tulip A2A peer or vice
-versa). Single-process mesh? Use [Orchestrator + Specialists][orch]
+versa) — e.g. a threat-intel platform and a SOC's triage stack owned by
+two teams. Single-process mesh? Use [Orchestrator + Specialists][orch]
 instead — this project is the cross-process equivalent.
 
 ## Tests
@@ -100,21 +104,21 @@ against them, and asserts the reply round-trips. No real network.
 | Path | What it is |
 |---|---|
 | `src/a2a_mesh/_model.py` | Shared model factory (mock by default, OpenAI / Anthropic via env) |
-| `src/a2a_mesh/research.py` | Research `A2AServer` on `:8001` |
-| `src/a2a_mesh/finance.py` | Finance `A2AServer` on `:8002` |
+| `src/a2a_mesh/threat_intel.py` | Threat-intel `A2AServer` on `:8001` |
+| `src/a2a_mesh/soc_triage.py` | SOC-triage `A2AServer` on `:8002` |
 | `src/a2a_mesh/orchestrator.py` | CLI client — discovers + delegates by skill tag |
-| `web/` | React + Vite UI — Redwood-styled A2A console (see [`web/README.md`](web/README.md)) |
-| `pyproject.toml` | Hatch env — deps and the `sdk`/`research`/`finance`/`demo`/`test` scripts |
-| `Makefile` | `install`, `research`, `finance`, `demo`, `test`, `mesh` (tmux) |
+| `web/` | React + Vite UI — console-styled A2A dashboard (see [`web/README.md`](web/README.md)) |
+| `pyproject.toml` | Hatch env — deps and the `sdk`/`intel`/`triage`/`demo`/`test` scripts |
+| `Makefile` | `install`, `intel`, `triage`, `demo`, `test`, `mesh` (tmux) |
 | `tests/test_mesh.py` | In-process integration test |
 
 ## Web console
 
-A React + Vite UI ships in [`web/`](web/), styled in a Redwood-style
-design language — global header with a thin red rule, sidebar
-workspace nav, white cards on warm off-white. Discovers
-both peers, auto-suggests a skill from the prompt, and streams the
-typed event log from `/a2a/stream`.
+A React + Vite UI ships in [`web/`](web/), styled in a clean console
+design language — global header with a thin red rule, sidebar workspace
+nav, white cards on warm off-white. Discovers both peers, auto-suggests
+a skill from the prompt, and streams the typed event log from
+`/a2a/stream`.
 
 ```bash
 cd web
@@ -122,9 +126,9 @@ npm install
 npm run dev          # http://localhost:5173
 ```
 
-Vite proxies `/api/research/*` and `/api/finance/*` to the two
-services, so it works against the same `make research` /
-`make finance` pair from above.
+Vite proxies `/api/intel/*` and `/api/triage/*` to the two services,
+so it works against the same `make intel` / `make triage` pair from
+above.
 
 [t34]: https://github.com/tuliplabs-ai/sdk-python/blob/main/examples/notebook_35_a2a_protocol.py
 [a2a]: https://github.com/tuliplabs-ai/sdk-python/blob/main/src/tulip/a2a/protocol.py

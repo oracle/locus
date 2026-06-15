@@ -400,7 +400,7 @@ python examples/notebook_69_research_workflow.py     # full research pipeline
 | **Skills, playbooks, plugins** | MCP, playbooks, plugins, skills, steering |
 | **Production** | Guardrails, checkpoints, evaluation, providers, multi-modal |
 | **Cognitive router + observability** | Routing, EventBus, yield bridge, event catalogue |
-| **Real-world workflows** | Incident response, procurement, contract review, audio |
+| **Real-world workflows** | Incident response, vendor security review, DPA review, spoken advisories |
 | **Server & full pipelines** | Agent server (FastAPI), full research workflow |
 
 → [Full notebooks index](https://tulipagents.ai/notebooks/)

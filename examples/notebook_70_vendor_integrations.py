@@ -39,11 +39,20 @@ Prerequisites:
 import asyncio
 
 from config import get_model, print_config
-from integrations.gpu_probe_dispatch import FEATURE_KEYS, dispatch_timing_probe
-from integrations.siem_query import query_siem, siem_query_tool
-from integrations.threat_intel import enrich_indicator, enrich_indicator_tool
 
 from tulip.multiagent.specialist import Specialist
+
+# These adapters are now first-class in the SDK (graduated from the example
+# cookbook). The old `from integrations.X import ...` paths still work via
+# back-compat shims, but the SDK path is the one to use.
+from tulip.security import (
+    FEATURE_KEYS,
+    dispatch_timing_probe,
+    enrich_indicator,
+    enrich_indicator_tool,
+    query_siem,
+    siem_query_tool,
+)
 
 
 # The EICAR test hash — a safe, well-known indicator for the offline demo.
