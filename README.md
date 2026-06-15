@@ -3,8 +3,8 @@
 </p>
 
 <p align="center">
-  <strong>tulip — the cybersecurity agent SDK</strong><br>
-  <em>Agent teams for security work that show their work: every claim grounded in evidence, every action a typed replayable event, every risky step gated.</em>
+  <strong>tulip — the agentic AI-security SDK</strong><br>
+  <em>Build agents that red-team and assure other AI systems — graded against OWASP-ASI / MITRE-ATLAS — where every result is grounded in evidence or an explicit abstention. The same engine, pointed at infrastructure, runs classic SOC/IR.</em>
 </p>
 
 <p align="center">
@@ -94,6 +94,35 @@ No mandatory cloud account to start — `MockModel` lets every notebook run offl
 → [Quickstart guide](https://tulipagents.ai/how-to/quickstart/)
 
 ---
+
+## Red-team and assure another AI
+
+Point a `Target` at an AI system — a remote endpoint, an in-process
+`tulip.Agent`, or an A2A peer — and run the OWASP-ASI / MITRE-ATLAS suite.
+Every result is a grounded `Finding` or an explicit `Abstention`: a vulnerable
+target yields findings, a hardened one abstains across the board.
+
+```python
+from tulip.security import Target, red_team, assure, is_finding
+
+target = Target.endpoint("https://support-bot.example/chat")
+
+report = await red_team(target, suite="owasp-asi")   # attack → grounded findings
+for r in report:
+    print(r.title, r.taxonomy) if is_finding(r) else print("abstained:", r.reason)
+
+posture = await assure(target)                        # assess → grounded guardrail coverage
+```
+
+The agent doing the work is itself **secure by default** — grounded, guarded,
+risk-gated, and recorded in a tamper-evident audit trail:
+
+```python
+from tulip.security import secure_agent
+
+secured = secure_agent(model="openai:gpt-4o", tools=[...])
+assert secured.audit_trail.verify()   # every action is replayable evidence
+```
 
 ## Why security teams: grounded or it doesn't ship
 
