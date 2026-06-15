@@ -133,6 +133,7 @@ from tulip.security.scanner import (
     scan_endpoint_to_finding,
     scan_endpoint_tool,
 )
+from tulip.security.secure import AuditHook, SecureAgent, SecurityProfile, secure_agent
 from tulip.security.siem import query_siem, siem_query_tool
 from tulip.security.soc import (
     PostureEvidence,
@@ -296,6 +297,10 @@ __all__ = [
     "guardrail_coverage",
     "AuditTrail",
     "AuditRecord",
+    "SecureAgent",
+    "SecurityProfile",
+    "AuditHook",
+    "secure_agent",
     "Probe",
     "ProbeOutcome",
     "DirectPromptInjection",
