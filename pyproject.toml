@@ -104,6 +104,13 @@ s3 = ["boto3>=1.34"]
 # service models are the spec that drives use_aws / describe_aws.
 aws = ["boto3>=1.34"]
 
+# Security domain layer (src/tulip/security/) — one install for the vertical.
+# The intel / SIEM / EDR / fingerprint adapters run their live paths on the
+# core httpx dependency and the scanner uses only the stdlib, so the sole
+# extra dep is boto3 for the AWS cloud-posture tools. The full read-only
+# triage loop works on core deps alone (offline samples need nothing).
+security = ["boto3>=1.34"]
+
 # Mem0 agent-memory manager (src/tulip/memory/managers/mem0.py) — the
 # portable, self-hostable long-term memory backend.
 mem0 = ["mem0ai>=0.1"]
@@ -389,6 +396,9 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
+# The grounding benchmark is a `python -m tulip.security.grounding_eval` CLI —
+# printing its report is the point.
+"src/tulip/security/grounding_eval.py" = ["T201"]
 "examples/checkpointer_examples.py" = ["ALL"]
 "examples/config.py" = ["F821", "RET503"]
 "examples/notebook_11_swarm_multiagent.py" = ["F821"]

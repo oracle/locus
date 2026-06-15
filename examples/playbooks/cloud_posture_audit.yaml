@@ -1,0 +1,19 @@
+# Cloud posture audit — mirror of tulip.security.cloud_posture_audit().
+id: cloud_posture_audit
+name: Cloud posture audit
+description: >-
+  Map the account from the API spec, gather read-only evidence, and submit
+  a grounded posture report.
+allow_extra_tools: true
+tags: [cloud, posture, audit]
+steps:
+- id: discover
+  description: Discover the account's services and read-only operations.
+  expected_tools: [describe_aws]
+- id: gather
+  description: Gather evidence with read-only API calls.
+  expected_tools: [use_aws]
+  hints: [Cite the exact API fact behind every proposed finding.]
+- id: report
+  description: Submit the grounded posture report.
+  expected_tools: [submit_posture]

@@ -1,0 +1,22 @@
+# Ransomware containment — mirror of tulip.security.ransomware_containment().
+id: ransomware_containment
+name: Ransomware containment
+description: >-
+  Containment-first playbook: confirm the detection, isolate the host
+  quickly, then assess lateral movement and preserve the timeline.
+allow_extra_tools: true
+tags: [incident-response, ransomware, containment]
+steps:
+- id: confirm
+  description: Confirm the detection on the host.
+  expected_tools: [list_detections, fetch_host_timeline]
+- id: contain
+  description: Isolate the affected host(s) - speed matters.
+  expected_tools: [isolate_host]
+- id: assess_scope
+  description: Hunt for lateral movement from the host.
+  expected_tools: [query_siem]
+  hints: [Look for SMB / remote-service creation from the contained host.]
+- id: preserve
+  description: Preserve the forensic timeline for the report.
+  expected_tools: [fetch_host_timeline]

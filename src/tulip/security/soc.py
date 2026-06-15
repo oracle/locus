@@ -41,7 +41,16 @@ from pydantic import BaseModel, Field
 
 from tulip.reasoning.gsar import Claim, EvidenceType, GSARThresholds, Partition
 from tulip.security.aws import describe_aws_tool, use_aws_tool
+from tulip.security.edr import (
+    fetch_host_timeline_tool,
+    isolate_host_tool,
+    list_detections_tool,
+)
+from tulip.security.fingerprint import fingerprint_endpoint_tool
 from tulip.security.grounded import GroundedFinding, ground_finding
+from tulip.security.intel import enrich_indicator_tool
+from tulip.security.scanner import scan_dependencies_tool, scan_endpoint_tool
+from tulip.security.siem import siem_query_tool
 from tulip.security.taxonomy import Severity, TaxonomyTag
 from tulip.tools.decorator import tool
 
@@ -147,6 +156,18 @@ class SecurityControls:
     """Submission-confidence floor wired into the agent's termination."""
     readonly_aws: bool = True
     """Attach the read-only ``describe_aws`` / ``use_aws`` tools."""
+    threat_intel: bool = False
+    """Attach the IOC-enrichment tool (``enrich_indicator``)."""
+    siem: bool = False
+    """Attach the SIEM search tool (``query_siem``)."""
+    edr: bool = False
+    """Attach the EDR forensics tools (``fetch_host_timeline`` / ``list_detections``)."""
+    scanner: bool = False
+    """Attach the vuln/posture scanners (``scan_dependencies`` / ``scan_endpoint``)."""
+    fingerprint: bool = False
+    """Attach the inference-fingerprinting tool (``fingerprint_endpoint``)."""
+    allow_containment: bool = False
+    """Attach the containment write (``isolate_host``). Requires ``edr``; off by default."""
     region: str | None = None
     """Default AWS region hint (informational; tools read ``TULIP_AWS_REGION``)."""
 
@@ -155,9 +176,36 @@ class SecurityControls:
         """The standard read-only cloud-posture control set."""
         return cls()
 
+    @classmethod
+    def soc_triage(cls) -> SecurityControls:
+        """The read-only SOC triage loop — intel, SIEM, EDR, scanner, fingerprint."""
+        return cls(
+            readonly_aws=False,
+            threat_intel=True,
+            siem=True,
+            edr=True,
+            scanner=True,
+            fingerprint=True,
+        )
+
     def tools(self) -> list[Any]:
         """The security toolset implied by these controls."""
-        return [describe_aws_tool, use_aws_tool] if self.readonly_aws else []
+        bag: list[Any] = []
+        if self.readonly_aws:
+            bag.extend([describe_aws_tool, use_aws_tool])
+        if self.threat_intel:
+            bag.append(enrich_indicator_tool)
+        if self.siem:
+            bag.append(siem_query_tool)
+        if self.edr:
+            bag.extend([fetch_host_timeline_tool, list_detections_tool])
+            if self.allow_containment:
+                bag.append(isolate_host_tool)
+        if self.scanner:
+            bag.extend([scan_dependencies_tool, scan_endpoint_tool])
+        if self.fingerprint:
+            bag.append(fingerprint_endpoint_tool)
+        return bag
 
     def thresholds(self) -> GSARThresholds:
         """GSAR thresholds derived from ``min_gsar`` (``τ_regenerate < τ_proceed``)."""
