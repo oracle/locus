@@ -44,17 +44,21 @@
 
 ## What is Tulip?
 
-Tulip is a Python SDK for building **AI agents that test other AI for security
-flaws**. You point it at a target AI — a chatbot, an agent, or a model endpoint
-— and it runs known attacks (prompt injection, jailbreaks, data exfiltration,
-tool abuse) and reports back **only the flaws it can prove**, with the evidence.
-When it can't prove something, it abstains instead of guessing — so you get real
-findings, not the false alarms that plague AI-graded testing.
+Tulip is a Python SDK for building **agentic AI for cybersecurity** — AI agents
+that do security work you can trust, because every finding is backed by evidence
+or the agent **abstains** instead of guessing. Two pillars, one engine:
 
-The agent doing the testing is itself **secure by default** (grounded, guarded,
-audited), and the same engine — pointed at your infrastructure instead of an AI —
-runs classic SOC / incident-response workflows. See
-[Red-team and assure another AI](#red-team-and-assure-another-ai) for the short version.
+- **Test other AI** *(the sharpest use today)* — point it at a chatbot, an agent,
+  or a model endpoint and it runs known attacks (prompt injection, jailbreaks,
+  data exfiltration, tool abuse), reporting **only the flaws it can prove**. No
+  false alarms from an AI grader that hallucinates.
+- **Do regular cyber** — the same engine, pointed at your infrastructure, runs
+  SOC triage, incident response, and cloud-posture work — every verdict grounded
+  in the evidence behind it.
+
+The agent doing the work is itself **secure by default** (grounded, guarded,
+audited). See [Red-team and assure another AI](#red-team-and-assure-another-ai)
+for the short version.
 
 ## Your first agent — 5 lines
 
