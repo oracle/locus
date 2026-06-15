@@ -1,7 +1,11 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 
-"""EDR host telemetry + containment — a CrowdStrike/Defender-shaped adapter.
+"""EDR host telemetry + containment — a CrowdStrike/Defender-shaped reference adapter.
+
+Reference template — offline-by-default; the live path's shape and field names
+are illustrative and unverified. For maintained, proven vendor adapters see the
+``tulip-integrations`` package.
 
 After triage points at a host, the next moves are forensic (what happened on
 it) and, if confirmed, containment (cut it off). With ``EDR_URL`` +

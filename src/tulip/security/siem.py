@@ -1,7 +1,11 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 
-"""SIEM log/alert search — a Splunk/Elastic-shaped adapter.
+"""SIEM log/alert search — a Splunk/Elastic-shaped reference adapter.
+
+Reference template — offline-by-default; the live path's shape and field names
+are illustrative and unverified. For a proven, maintained vendor adapter see
+``tulip-integrations`` (``tulip_integrations.security.splunk``).
 
 Pulling the events behind an alert is the second move of triage, right
 after IOC enrichment. With ``SIEM_URL`` + ``SIEM_TOKEN`` set,

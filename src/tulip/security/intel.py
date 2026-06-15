@@ -1,7 +1,11 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 
-"""Threat-intel IOC enrichment — a VirusTotal/GreyNoise-shaped adapter.
+"""Threat-intel IOC enrichment — a VirusTotal/GreyNoise-shaped reference adapter.
+
+Reference template — offline-by-default; the live path's shape and field names
+are illustrative and unverified. For maintained, proven vendor adapters see the
+``tulip-integrations`` package.
 
 Looking up the reputation and context of an indicator (file hash, IP,
 domain) is the first move of SOC triage. With ``VT_API_KEY`` set,

@@ -89,7 +89,7 @@ from tulip.security.findings import (
 from tulip.security.fingerprint import (
     FEATURE_KEYS,
     default_classifier,
-    dispatch_timing_probe,
+    dispatch_timing_probe_reference,
     fingerprint_endpoint_tool,
     fingerprint_to_finding,
     measure_endpoint_timing,
@@ -240,7 +240,7 @@ __all__ = [
     # Inference fingerprinting
     "FEATURE_KEYS",
     "default_classifier",
-    "dispatch_timing_probe",
+    "dispatch_timing_probe_reference",
     "fingerprint_endpoint_tool",
     "fingerprint_to_finding",
     "measure_endpoint_timing",

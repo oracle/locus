@@ -11,8 +11,10 @@ inference engine in the cadence, and the hardware shifts the whole profile.
 - :func:`measure_endpoint_timing` — remote-API timing (no GPU). Live with
   ``OPENAI_API_KEY`` (+ optional ``TIMING_BASE_URL`` for any
   OpenAI-compatible endpoint); deterministic offline sample otherwise.
-- :func:`dispatch_timing_probe` — *reference* (offline) GPU-probe dispatch. The
-  real RunPod / Lambda lifecycle lives in ``tulip-integrations`` (compute).
+- :func:`dispatch_timing_probe_reference` — *reference* (offline) GPU-probe
+  dispatch. The real RunPod / Lambda lifecycle lives in ``tulip-integrations``
+  (compute) as ``dispatch_timing_probe`` — the names differ so the offline
+  reference is never mistaken for the live probe.
 - :func:`default_classifier` — a deterministic heuristic mapping a feature
   vector to a :class:`~tulip.security.FingerprintVerdict`. **Placeholder**
   for a trained classifier (the Clusiana research program); honest about it.
@@ -155,7 +157,7 @@ def _has_content(payload: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def dispatch_timing_probe(endpoint: str, provider: str = "runpod") -> dict[str, float]:
+def dispatch_timing_probe_reference(endpoint: str, provider: str = "runpod") -> dict[str, float]:
     """Reference (offline) co-located GPU-probe dispatch — returns the sample vector.
 
     The credential-free remote-API measurement is :func:`measure_endpoint_timing`.
@@ -251,7 +253,7 @@ async def fingerprint_endpoint_tool(endpoint: str, model: str = "gpt-4o-mini") -
 __all__ = [
     "FEATURE_KEYS",
     "default_classifier",
-    "dispatch_timing_probe",
+    "dispatch_timing_probe_reference",
     "fingerprint_endpoint_tool",
     "fingerprint_to_finding",
     "measure_endpoint_timing",
