@@ -155,6 +155,13 @@ from tulip.security.taxonomy import (
     TaxonomyTag,
     severity_at_least,
 )
+from tulip.security.verify import (
+    EvidenceQualitySkeptic,
+    Refutation,
+    Skeptic,
+    Verdict,
+    verify,
+)
 
 
 def security_toolset(
@@ -301,6 +308,12 @@ __all__ = [
     "SecurityProfile",
     "AuditHook",
     "secure_agent",
+    # Verification — independent challenge that prevents security hallucinations
+    "verify",
+    "Verdict",
+    "Refutation",
+    "Skeptic",
+    "EvidenceQualitySkeptic",
     "Probe",
     "ProbeOutcome",
     "DirectPromptInjection",
