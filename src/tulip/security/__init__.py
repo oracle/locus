@@ -101,12 +101,23 @@ from tulip.security.intel import (
     enrich_indicator_tool,
     enrich_to_finding,
 )
+
+# Agentic AI-security surface: a Target (the AI under assessment), the job
+# verbs that act on it, and the red-team probe library.
+from tulip.security.jobs import assure, monitor, red_team
 from tulip.security.playbooks import (
     all_playbooks,
     cloud_posture_audit,
     nist_800_61_ir,
     phishing_triage,
     ransomware_containment,
+)
+from tulip.security.redteam import (
+    DirectPromptInjection,
+    Probe,
+    ProbeOutcome,
+    all_probes,
+    suite_probes,
 )
 from tulip.security.scanner import (
     scan_dependencies,
@@ -125,6 +136,7 @@ from tulip.security.soc import (
     ground_report,
     submit_posture,
 )
+from tulip.security.target import Sender, Target
 from tulip.security.taxonomy import (
     SEVERITY_ORDER,
     AtlasTechnique,
@@ -268,4 +280,15 @@ __all__ = [
     "create_soc_analyst",
     "ground_report",
     "submit_posture",
+    # Agentic AI-security: the Target + the job verbs + the red-team probes
+    "Target",
+    "Sender",
+    "red_team",
+    "assure",
+    "monitor",
+    "Probe",
+    "ProbeOutcome",
+    "DirectPromptInjection",
+    "all_probes",
+    "suite_probes",
 ]
