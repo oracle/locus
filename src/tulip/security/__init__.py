@@ -55,6 +55,7 @@ from tulip.security.adapter import (
     inference_claim,
     tool_match,
 )
+from tulip.security.admit import AdmissionError, admit
 
 # Agentic AI-security surface: a Target (the AI under assessment), the job
 # verbs that act on it, the red-team probe library, posture assessments, and a
@@ -336,6 +337,9 @@ __all__ = [
     "ApprovalDecision",
     "ApprovalOutcome",
     "approve",
+    # Admission control — the runtime's enforcement point
+    "admit",
+    "AdmissionError",
     # SecurityContext — investigate by domain, not by vendor
     "SecurityContext",
     "LogSource",
