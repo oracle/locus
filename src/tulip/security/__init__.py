@@ -57,8 +57,10 @@ from tulip.security.adapter import (
 )
 
 # Agentic AI-security surface: a Target (the AI under assessment), the job
-# verbs that act on it, the red-team probe library, and posture assessments.
+# verbs that act on it, the red-team probe library, posture assessments, and a
+# tamper-evident audit trail.
 from tulip.security.assess import guardrail_coverage
+from tulip.security.audit import AuditRecord, AuditTrail
 from tulip.security.aws import (
     READONLY_PREFIXES,
     aws_services,
@@ -292,6 +294,8 @@ __all__ = [
     "assure",
     "monitor",
     "guardrail_coverage",
+    "AuditTrail",
+    "AuditRecord",
     "Probe",
     "ProbeOutcome",
     "DirectPromptInjection",
