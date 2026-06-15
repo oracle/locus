@@ -2,9 +2,7 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 
-"""PROPOSAL — Notebook 80: Incident response with a tamper-evident audit chain.
-
-STATUS: PROPOSAL — not yet promoted to a full notebook.
+"""Notebook 81: Incident response with a tamper-evident audit chain.
 
 Scenario
 ────────
@@ -37,11 +35,11 @@ The ``nist_800_61_ir`` playbook pins the agent to the four NIST IR phases;
 are absent and the agent operates read-only.
 
 Run:
-    python examples/proposal_80_ir_audit_trail.py
+    python examples/notebook_81_ir_audit_trail.py
 
     # With a live provider (OpenAI):
     TULIP_MODEL_PROVIDER=openai OPENAI_API_KEY=sk-... \\
-        python examples/proposal_80_ir_audit_trail.py
+        python examples/notebook_81_ir_audit_trail.py
 """
 
 from __future__ import annotations
@@ -51,7 +49,7 @@ import sys
 from pathlib import Path
 
 
-# Allow running from repo root: python examples/proposal_80_ir_audit_trail.py
+# Allow running from repo root: python examples/notebook_81_ir_audit_trail.py
 sys.path.insert(0, str(Path(__file__).parent))
 from config import get_model  # noqa: E402
 

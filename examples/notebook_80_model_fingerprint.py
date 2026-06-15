@@ -2,9 +2,7 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 
-"""PROPOSAL — Notebook 79: Model & hardware fingerprinting via timing side-channels.
-
-STATUS: PROPOSAL — not yet promoted to a full notebook.
+"""Notebook 80: Model & hardware fingerprinting via timing side-channels.
 
 Scenario
 ────────
@@ -41,11 +39,11 @@ The ``AuditTrail`` records the probe and its grounding decision, exportable
 as JSONL for vendor SLA disputes or procurement audit evidence.
 
 Run (offline, no credentials):
-    python examples/proposal_79_model_fingerprint.py
+    python examples/notebook_80_model_fingerprint.py
 
 Run against a real OpenAI-compatible endpoint:
     OPENAI_API_KEY=sk-... TIMING_BASE_URL=https://vendor-api.example.com/v1 \\
-    python examples/proposal_79_model_fingerprint.py
+    python examples/notebook_80_model_fingerprint.py
 """
 
 from __future__ import annotations
@@ -179,7 +177,7 @@ def run_fingerprint() -> None:
             f"  FINGERPRINT_MODEL=gpt-4o \\\n"
             f"  FINGERPRINT_SAMPLES=20 \\\n"
             f"  FINGERPRINT_ASSET='VendorCo-contract-2026' \\\n"
-            f"  python examples/proposal_79_model_fingerprint.py"
+            f"  python examples/notebook_80_model_fingerprint.py"
         )
 
 

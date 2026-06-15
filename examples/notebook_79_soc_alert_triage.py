@@ -2,9 +2,8 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 
-"""PROPOSAL — Notebook 76: SOC alert triage with SIEM-grounded verdicts.
+"""Notebook 79: SOC alert triage with SIEM-grounded verdicts.
 
-STATUS: PROPOSAL — not yet promoted to a full notebook.
 Demonstrates the grounded/abstain differentiation in the Pillar A (SOC) context.
 
 The core idea
@@ -33,7 +32,7 @@ for ``security_toolset(siem=True, edr=True, threat_intel=True)`` and a real
 model to run against a live environment.
 
 Run:
-    python examples/proposal_76_soc_alert_triage.py
+    python examples/notebook_79_soc_alert_triage.py
 """
 
 from __future__ import annotations
