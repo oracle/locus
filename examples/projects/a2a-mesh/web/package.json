@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "React UI for the tulip a2a-mesh demo — Redwood-styled.",
+  "description": "React UI for the tulip a2a-mesh security demo — console-styled.",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

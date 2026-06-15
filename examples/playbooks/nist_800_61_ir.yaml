@@ -1,0 +1,27 @@
+# Incident response (NIST SP 800-61) — mirror of tulip.security.nist_800_61_ir().
+id: nist_800_61_ir
+name: Incident response (NIST 800-61)
+description: >-
+  Detection & analysis -> containment -> eradication & recovery ->
+  post-incident, mapped onto the SIEM/EDR/intel tools.
+allow_extra_tools: true
+tags: [incident-response, nist-800-61]
+steps:
+- id: detect
+  description: 'Detection & analysis: gather telemetry and open detections.'
+  expected_tools: [query_siem, list_detections]
+- id: analyze
+  description: Enrich indicators and reconstruct the host timeline.
+  expected_tools: [enrich_indicator, fetch_host_timeline]
+- id: contain
+  description: 'Containment: isolate the affected host(s).'
+  expected_tools: [isolate_host]
+  hints: [Containment is a write - confirm scope before isolating.]
+- id: recover
+  description: 'Eradication & recovery: verify the exposure is closed.'
+  expected_tools: [scan_endpoint]
+  required: false
+- id: report
+  description: 'Post-incident: write the typed incident report.'
+  expected_tools: []
+  hints: ['Summarise root cause, scope, actions taken, and lessons.']

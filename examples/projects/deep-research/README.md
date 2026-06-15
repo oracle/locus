@@ -8,7 +8,7 @@ deepagents imports.
 ```
                     ┌────────────────────────────────┐
                     │  create_deepagent(             │
-                    │    datastores={"medical": ...},│
+                    │    datastores={"intel": ...},  │
                     │    max_output_tokens=4096,     │
                     │  )                             │
                     │  + auto-wired search_<name>    │
@@ -28,7 +28,7 @@ deepagents imports.
 |---|---|
 | [`demo_hello_world.py`](demo_hello_world.py) | none — just `@tool` functions |
 | [`demo_smoke.py`](demo_smoke.py) | InMemoryVectorStore |
-| [`demo_opensearch_multi_index.py`](demo_opensearch_multi_index.py) | Two OpenSearch indices (medical + news) |
+| [`demo_opensearch_multi_index.py`](demo_opensearch_multi_index.py) | Two OpenSearch indices (threat intel + CVE) |
 
 ## Quick start (InMemory smoke — no DB required)
 
@@ -39,9 +39,9 @@ python examples/projects/deep-research/demo_smoke.py
 ```
 
 Uses OpenAI for embeddings (`text-embedding-3-small`) and Anthropic for
-chat completions; auto-wires the `search_medical` tool from the
+chat completions; auto-wires the `search_intel` tool from the
 in-memory `RAGRetriever`. Expects 1 tool call + a short memo on 10
-inline sentences.
+inline threat-intel sentences.
 
 ## OpenSearch multi-index replay
 

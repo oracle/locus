@@ -31,7 +31,7 @@ class Reranker(ABC):
         from tulip.rag.reranker import CohereReranker
 
         reranker = CrossEncoderReranker(top_n=5)
-        top = await reranker.rerank("hepcidin role in iron", candidates)
+        top = await reranker.rerank("lateral movement over SMB", candidates)
     """
 
     @abstractmethod

@@ -1,8 +1,8 @@
 /* ============================================================================
-   Redwood-styled CSS for the tulip a2a-mesh console.
+   Console-styled CSS for the tulip a2a-mesh security console.
 
    Palette and typography taken from the same palette tokens used by the
-   tulip docs (docs/stylesheets/tulip.css). Layout follows Redwood patterns:
+   tulip docs (docs/stylesheets/tulip.css). Layout follows a clean console style:
    white surfaces, hairline rules, generous spacing, red CTA, sand secondary.
    ========================================================================== */
 
@@ -58,7 +58,7 @@ button { font-family: inherit; cursor: pointer; }
 input, textarea, select { font-family: inherit; font-size: inherit; }
 code, pre { font-family: var(--mono); }
 
-/* ----- App shell — Fusion-style global header + sidebar + main ----- */
+/* ----- App shell — console-style global header + sidebar + main ----- */
 
 .app {
   display: grid;
@@ -252,7 +252,7 @@ code, pre { font-family: var(--mono); }
   font-size: 0.78rem;
   flex: 0 0 auto;
 }
-.peer__icon--finance { background: var(--or-mauve); }
+.peer__icon--triage { background: var(--or-mauve); }
 .peer__name {
   font-weight: 600;
   font-size: 0.92rem;
@@ -430,7 +430,7 @@ code, pre { font-family: var(--mono); }
 .pill--down  { background: var(--or-red-tint); color: var(--or-red-deep); }
 .pill--busy  { background: rgba(247, 162, 30, 0.30); color: #6a4f15; }
 
-/* ----- Mini "Fusion" footer ----- */
+/* ----- Mini app footer ----- */
 
 .app__footer {
   position: fixed;

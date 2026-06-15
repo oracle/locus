@@ -15,7 +15,7 @@ Usage::
     from tulip.rag.reranker import CrossEncoderReranker
 
     reranker = CrossEncoderReranker(top_n=5)
-    top = await reranker.rerank("hepcidin in iron metabolism", candidates)
+    top = await reranker.rerank("Cobalt Strike C2 detection", candidates)
 
 Plugged into a retriever::
 

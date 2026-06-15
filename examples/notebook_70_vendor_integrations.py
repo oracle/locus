@@ -20,7 +20,8 @@ change between this offline demo and a live deployment.
   (``VT_API_KEY``).
 - ``query_siem`` — Splunk/Elastic-shaped log/alert search
   (``SIEM_URL`` + ``SIEM_TOKEN``).
-- ``dispatch_timing_probe`` — RunPod/Lambda inference-fingerprint probe
+- ``dispatch_timing_probe_reference`` — the *offline reference* GPU probe; the
+  live RunPod/Lambda probe is ``tulip_integrations.compute.dispatch_timing_probe``
   (``RUNPOD_API_KEY`` / ``LAMBDA_API_KEY``); see notebook 27 for grounding
   the verdict.
 
@@ -39,11 +40,20 @@ Prerequisites:
 import asyncio
 
 from config import get_model, print_config
-from integrations.gpu_probe_dispatch import FEATURE_KEYS, dispatch_timing_probe
-from integrations.siem_query import query_siem, siem_query_tool
-from integrations.threat_intel import enrich_indicator, enrich_indicator_tool
 
 from tulip.multiagent.specialist import Specialist
+
+# These adapters are now first-class in the SDK (graduated from the example
+# cookbook). The old `from integrations.X import ...` paths still work via
+# back-compat shims, but the SDK path is the one to use.
+from tulip.security import (
+    FEATURE_KEYS,
+    dispatch_timing_probe_reference,
+    enrich_indicator,
+    enrich_indicator_tool,
+    query_siem,
+    siem_query_tool,
+)
 
 
 # The EICAR test hash — a safe, well-known indicator for the offline demo.
@@ -77,8 +87,8 @@ async def main() -> None:
     for ev in hits["events"]:
         print(f"    [{ev['severity']}] {ev['host']}: {ev['detail']}")
 
-    print("\nGPU inference-fingerprint probe dispatch:")
-    feats = dispatch_timing_probe("203.0.113.10:443")
+    print("\nGPU inference-fingerprint probe dispatch (offline reference):")
+    feats = dispatch_timing_probe_reference("203.0.113.10:443")
     observed = sum(1 for k in FEATURE_KEYS if k in feats)
     print(f"  features ({observed}/{len(FEATURE_KEYS)} observed): {feats}")
 

@@ -86,7 +86,7 @@ def example_programmatic():
 
 # =============================================================================
 # Part 2: Load every SKILL.md under a directory — the team's vetted
-#         procedure library (incident-triage, code-review, sql-query, …).
+#         procedure library (incident-triage, code-review, ioc-enrichment, siem-query, …).
 # =============================================================================
 
 

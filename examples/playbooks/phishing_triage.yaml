@@ -1,0 +1,26 @@
+# Phishing triage — editable mirror of tulip.security.phishing_triage().
+# Load with: from tulip.playbooks import load_playbook; load_playbook("phishing_triage.yaml")
+id: phishing_triage
+name: Phishing triage
+description: >-
+  Triage a reported phishing message: pull events, enrich the indicators,
+  scope affected hosts, and contain on confirmation.
+allow_extra_tools: true
+tags: [soc, phishing, triage]
+steps:
+- id: gather
+  description: Pull the events around the reported message.
+  expected_tools: [query_siem]
+  hints: [Search the alert window for the sender/URL/attachment.]
+- id: enrich
+  description: Enrich the indicators (sender domain, URL, attachment hash).
+  expected_tools: [enrich_indicator]
+  hints: [A newly-registered lookalike domain is a strong phishing signal.]
+- id: scope
+  description: Check which hosts interacted with the indicators.
+  expected_tools: [fetch_host_timeline, list_detections]
+- id: contain
+  description: Isolate confirmed-compromised hosts (only on confirmation).
+  expected_tools: [isolate_host]
+  required: false
+  hints: [Only contain when enrichment + telemetry agree it is malicious.]

@@ -13,7 +13,7 @@ Usage::
     from tulip.rag.reranker import CohereReranker
 
     reranker = CohereReranker(model="rerank-v3.5", top_n=5)
-    top = await reranker.rerank("hepcidin in iron metabolism", candidates)
+    top = await reranker.rerank("Log4Shell exploitation in the wild", candidates)
 """
 
 from __future__ import annotations
