@@ -23,6 +23,7 @@ imports a vendor; you wire them explicitly.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
@@ -96,6 +97,17 @@ class ActionsPort(Protocol):
         finding: Finding | None = None,
         verdict: Verdict | None = None,
     ) -> ApprovalDecision: ...
+
+    async def execute(
+        self,
+        action: Action,
+        perform: Callable[[], Awaitable[Any]],
+        *,
+        finding: Finding | None = None,
+        verdict: Verdict | None = None,
+    ) -> Any:
+        """Admission control: run ``perform`` only if the action is admitted."""
+        ...
 
 
 # --------------------------------------------------------------------------- #
@@ -207,6 +219,18 @@ class _RefActions:
         verdict: Verdict | None = None,
     ) -> ApprovalDecision:
         return approve(action, policy=self.policy, finding=finding, verdict=verdict)
+
+    async def execute(
+        self,
+        action: Action,
+        perform: Callable[[], Awaitable[Any]],
+        *,
+        finding: Finding | None = None,
+        verdict: Verdict | None = None,
+    ) -> Any:
+        from tulip.security.admit import admit
+
+        return await admit(action, perform, policy=self.policy, finding=finding, verdict=verdict)
 
 
 # --------------------------------------------------------------------------- #
