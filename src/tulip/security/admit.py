@@ -19,7 +19,7 @@ appended to the audit trail, so there is **no un-recorded path to a side effect*
     verdict = await verify(finding)
     await admit(
         Action(name="disable_user", asset="mallory@corp", environment="production"),
-        lambda: ctx.identity.disable("mallory@corp"),     # the side effect
+        lambda: ctx.identity.disable("mallory@corp"),  # the side effect
         policy=SecurityPolicy(),
         finding=finding,
         verdict=verdict,
@@ -52,8 +52,7 @@ class AdmissionError(Exception):
     def __init__(self, decision: ApprovalDecision) -> None:
         self.decision = decision
         super().__init__(
-            f"action {decision.action.name!r} not admitted "
-            f"({decision.outcome}): {decision.reason}"
+            f"action {decision.action.name!r} not admitted ({decision.outcome}): {decision.reason}"
         )
 
 

@@ -230,9 +230,7 @@ class _RefActions:
     ) -> Any:
         from tulip.security.admit import admit
 
-        return await admit(
-            action, perform, policy=self.policy, finding=finding, verdict=verdict
-        )
+        return await admit(action, perform, policy=self.policy, finding=finding, verdict=verdict)
 
 
 # --------------------------------------------------------------------------- #
