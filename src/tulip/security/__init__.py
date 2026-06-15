@@ -115,6 +115,13 @@ from tulip.security.playbooks import (
     phishing_triage,
     ransomware_containment,
 )
+from tulip.security.policy import (
+    Action,
+    ApprovalDecision,
+    ApprovalOutcome,
+    SecurityPolicy,
+    approve,
+)
 from tulip.security.redteam import (
     DirectPromptInjection,
     ExcessiveAgency,
@@ -314,6 +321,12 @@ __all__ = [
     "Refutation",
     "Skeptic",
     "EvidenceQualitySkeptic",
+    # Policy + approval — safe-before-action (the CISO knob)
+    "SecurityPolicy",
+    "Action",
+    "ApprovalDecision",
+    "ApprovalOutcome",
+    "approve",
     "Probe",
     "ProbeOutcome",
     "DirectPromptInjection",
