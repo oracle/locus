@@ -42,6 +42,7 @@ def _run(notebook: str) -> subprocess.CompletedProcess[str]:
         ("notebook_79_soc_alert_triage.py", "Alert"),
         ("notebook_80_model_fingerprint.py", "fingerprint"),
         ("notebook_81_ir_audit_trail.py", "Incident Response"),
+        ("notebook_82_investigate_with_ctx.py", "logs.search"),
     ],
 )
 def test_security_example_runs(notebook: str, expected: str) -> None:

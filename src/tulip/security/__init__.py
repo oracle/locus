@@ -70,6 +70,15 @@ from tulip.security.aws import (
     use_aws,
     use_aws_tool,
 )
+from tulip.security.context import (
+    ActionsPort,
+    CloudSource,
+    EndpointSource,
+    IdentitySource,
+    LogSource,
+    SecurityContext,
+    ThreatIntelSource,
+)
 from tulip.security.edr import (
     fetch_host_timeline,
     fetch_host_timeline_tool,
@@ -327,6 +336,14 @@ __all__ = [
     "ApprovalDecision",
     "ApprovalOutcome",
     "approve",
+    # SecurityContext — investigate by domain, not by vendor
+    "SecurityContext",
+    "LogSource",
+    "EndpointSource",
+    "IdentitySource",
+    "CloudSource",
+    "ThreatIntelSource",
+    "ActionsPort",
     "Probe",
     "ProbeOutcome",
     "DirectPromptInjection",
