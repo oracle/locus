@@ -50,6 +50,7 @@ import asyncio
 import sys
 from pathlib import Path
 
+
 # Allow running from repo root: python examples/proposal_80_ir_audit_trail.py
 sys.path.insert(0, str(Path(__file__).parent))
 from config import get_model  # noqa: E402
@@ -64,6 +65,7 @@ from tulip.security import (
     security_toolset,
 )
 from tulip.security.taxonomy import AtlasTechnique, OwaspASI
+
 
 # ---------------------------------------------------------------------------
 # Simulated ransomware incident context
@@ -106,6 +108,7 @@ Requested action: Follow NIST SP 800-61 IR procedure.
 # ---------------------------------------------------------------------------
 # IR runner
 # ---------------------------------------------------------------------------
+
 
 async def run_incident_response(incident: str) -> None:
     trail = AuditTrail()
@@ -179,6 +182,7 @@ async def run_incident_response(incident: str) -> None:
 
     # Show first and last records as sample
     import json
+
     first = json.loads(lines[0])
     last = json.loads(lines[-1])
     print(f"   First record: seq={first['seq']}  type={first['event_type']}  ts={first['ts']}")

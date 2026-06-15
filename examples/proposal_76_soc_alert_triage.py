@@ -38,8 +38,8 @@ Run:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Sequence
 
 from tulip.security import (
     PostureEvidence,
@@ -57,6 +57,7 @@ from tulip.security.taxonomy import OwaspLLM
 # ---------------------------------------------------------------------------
 # Mock alert data — stands in for SIEM alert queue
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class Alert:
@@ -105,7 +106,7 @@ _ALERTS: list[Alert] = [
             "process": "msiexec.exe",
             "parent": "Teams.exe",
             "siem_corroboration": False,  # mock: no corroborating SIEM events
-            "edr_corroboration": False,   # mock: EDR shows benign update path
+            "edr_corroboration": False,  # mock: EDR shows benign update path
             "known_fp": True,
         },
     ),
@@ -117,6 +118,7 @@ _ALERTS: list[Alert] = [
 # The real version calls query_siem(), fetch_host_timeline(), enrich_indicator()
 # and returns actual API responses as evidence refs.
 # ---------------------------------------------------------------------------
+
 
 def _build_mock_evidence(alert: Alert) -> tuple[list[PostureFinding], SecurityControls]:
     """
@@ -133,109 +135,117 @@ def _build_mock_evidence(alert: Alert) -> tuple[list[PostureFinding], SecurityCo
     controls = SecurityControls(siem=True, edr=True, threat_intel=True)
 
     if alert.id == "ALT-001":
-        proposed.append(PostureFinding(
-            asset=alert.id,
-            title="User clicked confirmed phishing URL",
-            description=(
-                "User jsmith clicked http://login.phish.example.net/reset. "
-                "SIEM corroborates 3 follow-on DNS lookups to the same domain. "
-                "URL not in allowlist."
-            ),
-            severity=Severity.HIGH,
-            evidence=[
-                PostureEvidence(
-                    ref="siem:ALT-001:dns_lookups=3",
-                    statement="3 DNS lookups to phish.example.net post-click",
-                    grounded=True,
+        proposed.append(
+            PostureFinding(
+                asset=alert.id,
+                title="User clicked confirmed phishing URL",
+                description=(
+                    "User jsmith clicked http://login.phish.example.net/reset. "
+                    "SIEM corroborates 3 follow-on DNS lookups to the same domain. "
+                    "URL not in allowlist."
                 ),
-                PostureEvidence(
-                    ref="siem:ALT-001:url_not_in_allowlist",
-                    statement="URL absent from approved domain list",
-                    grounded=True,
-                ),
-            ],
-            remediation="Reset jsmith credentials; block phish.example.net at DNS filter.",
-            taxonomy=[OwaspLLM.PROMPT_INJECTION],
-        ))
+                severity=Severity.HIGH,
+                evidence=[
+                    PostureEvidence(
+                        ref="siem:ALT-001:dns_lookups=3",
+                        statement="3 DNS lookups to phish.example.net post-click",
+                        grounded=True,
+                    ),
+                    PostureEvidence(
+                        ref="siem:ALT-001:url_not_in_allowlist",
+                        statement="URL absent from approved domain list",
+                        grounded=True,
+                    ),
+                ],
+                remediation="Reset jsmith credentials; block phish.example.net at DNS filter.",
+                taxonomy=[OwaspLLM.PROMPT_INJECTION],
+            )
+        )
 
     elif alert.id == "ALT-002":
-        proposed.append(PostureFinding(
-            asset=alert.id,
-            title="PsExec lateral movement: WKSTN-04 → SRV-FINANCE",
-            description=(
-                "PsExec executed on WKSTN-04 targeting SRV-FINANCE. "
-                "EDR timeline shows process tree: explorer.exe → cmd.exe → psexec.exe. "
-                "SIEM corroborates SMB admin share access within same minute."
-            ),
-            severity=Severity.CRITICAL,
-            evidence=[
-                PostureEvidence(
-                    ref="edr:WKSTN-04:process_tree:psexec",
-                    statement="EDR process tree shows psexec spawned from cmd.exe",
-                    grounded=True,
+        proposed.append(
+            PostureFinding(
+                asset=alert.id,
+                title="PsExec lateral movement: WKSTN-04 → SRV-FINANCE",
+                description=(
+                    "PsExec executed on WKSTN-04 targeting SRV-FINANCE. "
+                    "EDR timeline shows process tree: explorer.exe → cmd.exe → psexec.exe. "
+                    "SIEM corroborates SMB admin share access within same minute."
                 ),
-                PostureEvidence(
-                    ref="siem:ALT-002:smb_admin_share_access",
-                    statement="SMB admin share WKSTN-04→SRV-FINANCE within 60s of psexec",
-                    grounded=True,
-                ),
-            ],
-            remediation="Isolate WKSTN-04 and SRV-FINANCE; rotate all service account credentials.",
-            taxonomy=[],
-        ))
+                severity=Severity.CRITICAL,
+                evidence=[
+                    PostureEvidence(
+                        ref="edr:WKSTN-04:process_tree:psexec",
+                        statement="EDR process tree shows psexec spawned from cmd.exe",
+                        grounded=True,
+                    ),
+                    PostureEvidence(
+                        ref="siem:ALT-002:smb_admin_share_access",
+                        statement="SMB admin share WKSTN-04→SRV-FINANCE within 60s of psexec",
+                        grounded=True,
+                    ),
+                ],
+                remediation="Isolate WKSTN-04 and SRV-FINANCE; rotate all service account credentials.",
+                taxonomy=[],
+            )
+        )
 
     elif alert.id == "ALT-003":
-        proposed.append(PostureFinding(
-            asset=alert.id,
-            title="Outbound C2 beacon to 203.0.113.99 (threat-intel confirmed malicious)",
-            description=(
-                "Three hosts beaconed to 203.0.113.99 over 90 minutes. "
-                "Threat intel: IP listed in Emerging Threats + VirusTotal 47/72. "
-                "SIEM shows beaconing pattern (60-second intervals)."
-            ),
-            severity=Severity.HIGH,
-            evidence=[
-                PostureEvidence(
-                    ref="intel:203.0.113.99:emerging_threats",
-                    statement="IP listed in Emerging Threats ruleset",
-                    grounded=True,
+        proposed.append(
+            PostureFinding(
+                asset=alert.id,
+                title="Outbound C2 beacon to 203.0.113.99 (threat-intel confirmed malicious)",
+                description=(
+                    "Three hosts beaconed to 203.0.113.99 over 90 minutes. "
+                    "Threat intel: IP listed in Emerging Threats + VirusTotal 47/72. "
+                    "SIEM shows beaconing pattern (60-second intervals)."
                 ),
-                PostureEvidence(
-                    ref="intel:203.0.113.99:vt_score=47/72",
-                    statement="VirusTotal: 47/72 engines flagged as malicious",
-                    grounded=True,
-                ),
-                PostureEvidence(
-                    ref="siem:ALT-003:beacon_pattern_60s",
-                    statement="60-second beaconing interval observed over 90 min",
-                    grounded=True,
-                ),
-            ],
-            remediation="Block 203.0.113.99 at perimeter; image affected hosts; rotate keys.",
-            taxonomy=[],
-        ))
+                severity=Severity.HIGH,
+                evidence=[
+                    PostureEvidence(
+                        ref="intel:203.0.113.99:emerging_threats",
+                        statement="IP listed in Emerging Threats ruleset",
+                        grounded=True,
+                    ),
+                    PostureEvidence(
+                        ref="intel:203.0.113.99:vt_score=47/72",
+                        statement="VirusTotal: 47/72 engines flagged as malicious",
+                        grounded=True,
+                    ),
+                    PostureEvidence(
+                        ref="siem:ALT-003:beacon_pattern_60s",
+                        statement="60-second beaconing interval observed over 90 min",
+                        grounded=True,
+                    ),
+                ],
+                remediation="Block 203.0.113.99 at perimeter; image affected hosts; rotate keys.",
+                taxonomy=[],
+            )
+        )
 
     elif alert.id == "ALT-004":
         # No corroboration — the agent correctly finds nothing to cite
-        proposed.append(PostureFinding(
-            asset=alert.id,
-            title="msiexec.exe spawned by Teams.exe — possible software update",
-            description=(
-                "msiexec.exe observed as child of Teams.exe. "
-                "No SIEM corroboration; EDR shows standard Microsoft Teams auto-update path. "
-                "No network IOCs observed."
-            ),
-            severity=Severity.INFO,
-            evidence=[
-                PostureEvidence(
-                    ref="edr:WKSTN-06:msiexec-teams-no-ioc",
-                    statement="EDR shows standard Teams auto-update path; no network IOCs",
-                    grounded=False,  # agent found no corroborating evidence
+        proposed.append(
+            PostureFinding(
+                asset=alert.id,
+                title="msiexec.exe spawned by Teams.exe — possible software update",
+                description=(
+                    "msiexec.exe observed as child of Teams.exe. "
+                    "No SIEM corroboration; EDR shows standard Microsoft Teams auto-update path. "
+                    "No network IOCs observed."
                 ),
-            ],
-            remediation="No action required. Monitor for recurrence with unexpected network IOCs.",
-            taxonomy=[],
-        ))
+                severity=Severity.INFO,
+                evidence=[
+                    PostureEvidence(
+                        ref="edr:WKSTN-06:msiexec-teams-no-ioc",
+                        statement="EDR shows standard Teams auto-update path; no network IOCs",
+                        grounded=False,  # agent found no corroborating evidence
+                    ),
+                ],
+                remediation="No action required. Monitor for recurrence with unexpected network IOCs.",
+                taxonomy=[],
+            )
+        )
 
     return proposed, controls  # noqa: RET504
 
@@ -243,6 +253,7 @@ def _build_mock_evidence(alert: Alert) -> tuple[list[PostureFinding], SecurityCo
 # ---------------------------------------------------------------------------
 # Main: triage each alert, ground the report, print results
 # ---------------------------------------------------------------------------
+
 
 def triage_alerts(alerts: Sequence[Alert]) -> None:
     total_findings = 0

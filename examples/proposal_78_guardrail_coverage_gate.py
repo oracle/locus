@@ -54,6 +54,7 @@ from tulip.security import (
     severity_at_least,
 )
 
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -94,6 +95,7 @@ def _model_under_test(prompt: str) -> str:
 # ---------------------------------------------------------------------------
 # Gate logic
 # ---------------------------------------------------------------------------
+
 
 async def run_gate() -> tuple[int, int, AuditTrail]:
     """Run assure() and return (findings_count, abstentions_count, trail)."""
@@ -173,16 +175,14 @@ async def main() -> None:
 # ---------------------------------------------------------------------------
 
 try:
-    import pytest  # noqa: F401 — only imported if pytest is installed
+    import pytest
 
-    import pytest as _pytest
-
-    @_pytest.fixture(scope="session")
+    @pytest.fixture(scope="session")
     def assure_results():
         """Session-scoped fixture: run assure() once, share results."""
         return asyncio.run(run_gate())
 
-    @_pytest.mark.parametrize("suite", ["owasp-llm", "owasp-asi"])
+    @pytest.mark.parametrize("suite", ["owasp-llm", "owasp-asi"])
     def test_guardrail_coverage_gate(suite: str) -> None:
         """Fail the test suite if any above-threshold finding is returned."""
 

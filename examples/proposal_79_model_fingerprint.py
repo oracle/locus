@@ -54,8 +54,8 @@ import asyncio
 import os
 
 from tulip.security import (
-    AuditTrail,
     FEATURE_KEYS,
+    AuditTrail,
     fingerprint_to_finding,
     is_finding,
     measure_endpoint_timing,
@@ -82,6 +82,7 @@ _ASSET = os.environ.get("FINGERPRINT_ASSET", "vendor-inference-api")
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def run_fingerprint() -> None:
     """
