@@ -55,6 +55,10 @@ from tulip.security.adapter import (
     inference_claim,
     tool_match,
 )
+
+# Agentic AI-security surface: a Target (the AI under assessment), the job
+# verbs that act on it, the red-team probe library, and posture assessments.
+from tulip.security.assess import guardrail_coverage
 from tulip.security.aws import (
     READONLY_PREFIXES,
     aws_services,
@@ -101,9 +105,6 @@ from tulip.security.intel import (
     enrich_indicator_tool,
     enrich_to_finding,
 )
-
-# Agentic AI-security surface: a Target (the AI under assessment), the job
-# verbs that act on it, and the red-team probe library.
 from tulip.security.jobs import assure, monitor, red_team
 from tulip.security.playbooks import (
     all_playbooks,
@@ -290,6 +291,7 @@ __all__ = [
     "red_team",
     "assure",
     "monitor",
+    "guardrail_coverage",
     "Probe",
     "ProbeOutcome",
     "DirectPromptInjection",

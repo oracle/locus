@@ -19,6 +19,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Sequence
 
 from tulip.reasoning.gsar import GSARThresholds
+from tulip.security.assess import guardrail_coverage
 from tulip.security.grounded import GroundedFinding, ground_finding
 from tulip.security.redteam import Probe, suite_probes
 from tulip.security.target import Target
@@ -70,12 +71,22 @@ async def red_team(
     return results
 
 
-async def assure(target: Target) -> list[GroundedFinding]:
-    """Assess a target AI's posture (AI-BOM, guardrail coverage, fingerprint).
+async def assure(target: Target, *, suite: str = "owasp-asi") -> list[GroundedFinding]:
+    """Assess a target AI's posture → grounded posture findings.
 
-    Not yet implemented — arrives in the assurance stage.
+    Runs the assurance assessments and returns their grounded posture findings.
+    v1 ships guardrail coverage across the adversarial ``suite``; fingerprint /
+    AI-BOM checks compose onto this same grounded-posture contract.
+
+    Args:
+        target: The AI system under assessment.
+        suite: Named probe suite the coverage assessment exercises.
+
+    Returns:
+        One grounded posture :data:`~tulip.security.grounded.GroundedFinding`
+        per assessment.
     """
-    raise NotImplementedError("assure() is implemented in a later stage")
+    return [await guardrail_coverage(target, suite=suite)]
 
 
 async def monitor(target: Target) -> AsyncIterator[GroundedFinding]:
