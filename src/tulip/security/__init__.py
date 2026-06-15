@@ -202,7 +202,7 @@ def security_toolset(
     ``extra`` merges tools from **external integrations** you imported
     explicitly (the LangChain model — no auto-discovery), e.g.::
 
-        from tulip_integrations.security.splunk import splunk_siem_tool
+        from tulip_integrations.siem.splunk import splunk_siem_tool
 
         tools = security_toolset(siem=False, extra=[splunk_siem_tool])
 

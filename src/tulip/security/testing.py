@@ -16,7 +16,7 @@ Example (in an integration's test)::
         assert_adapter_conformance,
         assert_tool_returns_json,
     )
-    from tulip_integrations.security.splunk import splunk_adapter
+    from tulip_integrations.siem.splunk import splunk_adapter
 
 
     def test_conforms():

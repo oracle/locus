@@ -5,7 +5,7 @@
 
 Reference template — offline-by-default; the live path's shape and field names
 are illustrative and unverified. For a proven, maintained vendor adapter see
-``tulip-integrations`` (``tulip_integrations.security.splunk``).
+``tulip-integrations`` (``tulip_integrations.siem.splunk``).
 
 Pulling the events behind an alert is the second move of triage, right
 after IOC enrichment. With ``SIEM_URL`` + ``SIEM_TOKEN`` set,
