@@ -15,7 +15,12 @@ Importing from here still works; prefer::
 
 from __future__ import annotations
 
-from tulip.security.fingerprint import FEATURE_KEYS, default_classifier, measure_endpoint_timing
+from tulip.security.fingerprint import (
+    _SAMPLE_FEATURES,
+    FEATURE_KEYS,
+    default_classifier,
+    measure_endpoint_timing,
+)
 
 
-__all__ = ["FEATURE_KEYS", "default_classifier", "measure_endpoint_timing"]
+__all__ = ["FEATURE_KEYS", "_SAMPLE_FEATURES", "default_classifier", "measure_endpoint_timing"]
