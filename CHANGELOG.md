@@ -8,6 +8,14 @@ policy.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-16
+
+First stable release. The repository and SDK are no longer deprecated; the
+prior deprecation (removal of all code, README disclaimer) has been reversed
+and the full codebase restored. This release promotes the `0.2.0b*` beta line
+to a stable `0.2.0` with no API changes from `0.2.0b26` — the version bump
+drops the pre-release suffix and reinstates active maintenance.
+
 ## [0.2.0b26] - 2026-05-30
 
 ### Fixed — OCI embedding dimension now deterministic (`output_dimensions`)
