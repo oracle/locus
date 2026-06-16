@@ -1,0 +1,14 @@
+**/node_modules
+**/dist
+**/.vite
+**/test-results
+**/playwright-report
+**/__pycache__
+**/.pytest_cache
+**/*.tsbuildinfo
+**/*.log
+.git
+.venv
+build
+dist
+*.egg-info

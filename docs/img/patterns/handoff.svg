@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 360"
+     font-family="-apple-system, BlinkMacSystemFont, 'Inter', sans-serif"
+     shape-rendering="geometricPrecision">
+  <defs>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="2"/>
+      <feOffset dx="0" dy="2" result="o"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.18"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <marker id="a" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0,0 L 12,6 L 0,12 z" fill="#C74634"/>
+    </marker>
+    <marker id="ag" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0,0 L 12,6 L 0,12 z" fill="#2A2F2F"/>
+    </marker>
+  </defs>
+
+  <!-- Customer message -->
+  <g filter="url(#sh)">
+    <rect x="20" y="30" width="180" height="50" rx="10" fill="#FBF9F8" stroke="#2A2F2F" stroke-width="1.2"/>
+    <text x="110" y="52" text-anchor="middle" font-size="11" font-weight="600" fill="#2A2F2F">Customer:</text>
+    <text x="110" y="68" text-anchor="middle" font-size="10" fill="#2A2F2F" font-style="italic">"My order #4321 was charged twice"</text>
+  </g>
+  <line x1="200" y1="55" x2="245" y2="55" stroke="#2A2F2F" stroke-width="2" marker-end="url(#ag)"/>
+
+  <!-- Triage agent -->
+  <g filter="url(#sh)">
+    <rect x="250" y="20" width="160" height="70" rx="12" fill="#04536F"/>
+    <text x="330" y="50" text-anchor="middle" font-size="15" font-weight="800" fill="#FFFFFF">Triage agent</text>
+    <text x="330" y="69" text-anchor="middle" font-size="10" fill="#FFFFFF" opacity="0.85">classifies the conversation</text>
+    <text x="330" y="83" text-anchor="middle" font-size="10" font-weight="700" fill="#F0CC71">→ Handoff(target="billing")</text>
+  </g>
+
+  <!-- Handoff arrow with transcript label -->
+  <path d="M 410 55 Q 470 55, 470 165 Q 470 200, 510 200" stroke="#C74634" stroke-width="2.6" fill="none" marker-end="url(#a)"/>
+  <text x="478" y="135" font-size="11" font-weight="700" fill="#C74634" letter-spacing="0.04em">FULL TRANSCRIPT</text>
+  <text x="478" y="150" font-size="11" font-weight="700" fill="#C74634" letter-spacing="0.04em">+ thread_id</text>
+
+  <!-- Billing agent -->
+  <g filter="url(#sh)">
+    <rect x="510" y="170" width="200" height="70" rx="12" fill="#04536F"/>
+    <text x="610" y="200" text-anchor="middle" font-size="15" font-weight="800" fill="#FFFFFF">Billing agent</text>
+    <text x="610" y="220" text-anchor="middle" font-size="10" fill="#FFFFFF" opacity="0.85">picks up the thread</text>
+    <text x="610" y="233" text-anchor="middle" font-size="10" fill="#FFFFFF" opacity="0.85">issues the refund</text>
+  </g>
+
+  <!-- Other possible targets (faded) -->
+  <g opacity="0.4">
+    <rect x="510" y="260" width="200" height="40" rx="10" fill="#04536F"/>
+    <text x="610" y="285" text-anchor="middle" font-size="12" font-weight="700" fill="#FFFFFF">Shipping agent</text>
+    <rect x="510" y="310" width="200" height="40" rx="10" fill="#04536F"/>
+    <text x="610" y="335" text-anchor="middle" font-size="12" font-weight="700" fill="#FFFFFF">Returns agent</text>
+  </g>
+
+  <!-- Customer reply arrow back -->
+  <path d="M 510 220 Q 360 270, 110 110" stroke="#6C3F49" stroke-width="1.6" fill="none" stroke-dasharray="5,3" marker-end="url(#ag)"/>
+  <text x="180" y="240" font-size="10.5" font-weight="600" fill="#6C3F49" font-style="italic">customer sees one continuous conversation</text>
+
+  <text x="20" y="100" font-size="11" font-style="italic" fill="#2A2F2F">conversation ownership transfers · the previous agent is out of the loop</text>
+</svg>

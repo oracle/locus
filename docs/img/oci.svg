@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 56"
+     font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Helvetica, sans-serif">
+  <text x="0" y="36" font-size="34" font-weight="900"
+        fill="#C74634" letter-spacing="0.02em">ORACLE</text>
+  <text x="2" y="52" font-size="8.5" font-weight="500"
+        fill="#78716C" letter-spacing="0.20em">CLOUD INFRASTRUCTURE</text>
+</svg>

@@ -1,0 +1,236 @@
+{
+  "model": "oci:openai.gpt-5.1",
+  "max_output_tokens": 65536,
+  "elapsed_seconds": 111.05180478096008,
+  "corpus_size": 241,
+  "metrics": {
+    "iterations": null,
+    "tool_calls": 20,
+    "total_tokens": 0,
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "duration_ms": 111051.80478096008
+  },
+  "tool_calls": [
+    {
+      "name": "search_medical",
+      "arguments": {
+        "query": "dietary iron absorption heme non-heme DMT1 HCP1 DCYTB hephaestin gastric anatomic factors celiac bariatric drugs that impair absorption",
+        "max_results": 10,
+        "min_score": "0.5"
+      },
+      "result_chars": 2925,
+      "error": null,
+      "duration_ms": 2096.8204589999004
+    },
+    {
+      "name": "search_medical",
+      "arguments": {
+        "query": "transferrin holotransferrin apotransferrin TfR1 TfR2 soluble transferrin receptor ceruloplasmin hephaestin plasma iron transport",
+        "max_results": 10,
+        "min_score": "0.5"
+      },
+      "result_chars": 2943,
+      "error": null,
+      "duration_ms": 1629.2210000001432
+    },
+    {
+      "name": "search_medical",
+      "arguments": {
+        "query": "ferritin biology H and L chains mitochondrial ferritin hemosiderin FTL FTH1 mutations body iron distribution",
+        "max_results": 10,
+        "min_score": "0.5"
+      },
+      "result_chars": 2904,
+      "error": null,
+      "duration_ms": 1340.8422500006054
+    },
+    {
+      "name": "search_medical",
+      "arguments": {
+        "query": "cellular iron uptake transferrin receptor endocytosis DMT1 ferroportin iron sulfur cluster biogenesis mitochondrial ISC assembly",
+        "max_results": 10,
+        "min_score": "0.5"
+      },
+      "result_chars": 2956,
+      "error": null,
+      "duration_ms": 1408.8674170006925
+    },
+    {
+      "name": "search_medical",
+      "arguments": {
+        "query": "hepcidin ferroportin BMP6 SMAD IL-6 STAT3 erythroferrone HJV TMPRSS6 HFE TfR2 regulation of systemic iron",
+        "max_results": 10,
+        "min_score": "0.5"
+      },
+      "result_chars": 2840,
+      "error": null,
+      "duration_ms": 1412.3422089996893
+    },
+    {
+      "name": "search_medical",
+      "arguments": {
+        "query": "iron deficiency anemia epidemiology pathophysiology causes menstrual GI blood loss H pylori celiac hookworm bariatric",
+        "max_results": 10,
+        "min_score": "0.5"
+      },
+      "result_chars": 2958,
+      "error": null,
+      "duration_ms": 1180.1256250000733
+    },
+    {
+      "name": "search_medical",
+      "arguments": {
+        "query": "iron deficiency diagnosis ferritin transferrin saturation sTfR oral iron preparations ferrous sulfate gluconate fumarate elemental iron content",
+        "max_results": 10,
+        "min_score": "0.5"
+      },
+      "result_chars": 2914,
+      "error": null,
+      "duration_ms": 1349.9799579994942
+    },
+    {
+      "name": "search_medical",
+      "arguments": {
+        "query": "IV iron formulations iron sucrose ferric carboxymaltose iron dextran ferric derisomaltose dosing adverse events monitoring",
+        "max_results": 10,
+        "min_score": "0.5"
+      },
+      "result_chars": 2997,
+      "error": null,
+      "duration_ms": 1161.1064170001555
+    },
+    {
+      "name": "search_medical",
+      "arguments": {
+        "query": "hereditary hemochromatosis types 1 2A 2B 3 4A 4B HFE hepcidin ferroportin pathophysiology clinical manifestations phlebotomy chelation family screening",
+        "max_results": 10,
+        "min_score": "0.5"
+      },
+      "result_chars": 2913,
+      "error": null,
+      "duration_ms": 1158.7506669993672
+    },
+    {
+      "name": "search_medical",
+      "arguments": {
+        "query": "iron chelators deferoxamine deferasirox deferiprone binding stoichiometry dosing adverse effects combination therapy",
+        "max_results": 10,
+        "min_score": "0.5"
+      },
+      "result_chars": 2955,
+      "error": null,
+      "duration_ms": 1248.3544169999732
+    },
+    {
+      "name": "search_medical",
+      "arguments": {
+        "query": "anemia of chronic disease inflammation IL-6 hepcidin CKD anemia ESA therapy HIF prolyl hydroxylase inhibitors roxadustat vadadustat daprodustat",
+        "max_results": 10,
+        "min_score": "0.5"
+      },
+      "result_chars": 3094,
+      "error": null,
+      "duration_ms": 1173.5125410004912
+    },
+    {
+      "name": "search_medical",
+      "arguments": {
+        "query": "iron refractory iron deficiency anemia IRIDA TMPRSS6 clinical features labs hepcidin treatment response oral vs IV iron",
+        "max_results": 10,
+        "min_score": "0.5"
+      },
+      "result_chars": 2963,
+      "error": null,
+      "duration_ms": 1329.4552920006026
+    },
+    {
+      "name": "search_medical",
+      "arguments": {
+        "query": "sideroblastic anemia X-linked ALAS2 acquired clonal MDS-RARS drug-induced isoniazid linezolid",
+        "max_results": 10,
+        "min_score": "0.5"
+      },
+      "result_chars": 2824,
+      "error": null,
+      "duration_ms": 1363.7236660006238
+    },
+    {
+      "name": "search_medical",
+      "arguments": {
+        "query": "thalassemia ineffective erythropoiesis iron overload transfusion luspatercept erythroferrone",
+        "max_results": 10,
+        "min_score": "0.5"
+      },
+      "result_chars": 2939,
+      "error": null,
+      "duration_ms": 1186.7244160002883
+    },
+    {
+      "name": "search_medical",
+      "arguments": {
+        "query": "special populations iron metabolism pregnancy pediatric athletes CKD elderly geriatric",
+        "max_results": 10,
+        "min_score": "0.5"
+      },
+      "result_chars": 2956,
+      "error": null,
+      "duration_ms": 1215.3594589999557
+    },
+    {
+      "name": "search_medical",
+      "arguments": {
+        "query": "iron and immunity infection cancer neurodegeneration macrophages hepcidin role in host defense",
+        "max_results": 10,
+        "min_score": "0.5"
+      },
+      "result_chars": 2907,
+      "error": null,
+      "duration_ms": 1370.1296250001178
+    },
+    {
+      "name": "search_medical",
+      "arguments": {
+        "query": "iron overload imaging MRI T2* R2* FerriScan liver cardiac iron quantification",
+        "max_results": 10,
+        "min_score": "0.5"
+      },
+      "result_chars": 2824,
+      "error": null,
+      "duration_ms": 1156.1529999999038
+    },
+    {
+      "name": "search_medical",
+      "arguments": {
+        "query": "laboratory evaluation of iron disorders ferritin transferrin saturation sTfR hepcidin diagnostic algorithms monitoring response to therapy",
+        "max_results": 10,
+        "min_score": "0.5"
+      },
+      "result_chars": 2867,
+      "error": null,
+      "duration_ms": 1378.8487499996336
+    },
+    {
+      "name": "search_medical",
+      "arguments": {
+        "query": "novel iron therapeutics mini-hepcidins erythroferrone antibodies vamifeport TMPRSS6 antisense oligonucleotides",
+        "max_results": 10,
+        "min_score": "0.5"
+      },
+      "result_chars": 2811,
+      "error": null,
+      "duration_ms": 1172.8046670004915
+    },
+    {
+      "name": "search_medical",
+      "arguments": {
+        "query": "public health aspects of iron deficiency anemia fortification screening guidelines perioperative iron optimization patient blood management",
+        "max_results": 10,
+        "min_score": "0.5"
+      },
+      "result_chars": 2952,
+      "error": null,
+      "duration_ms": 1174.6354160004557
+    }
+  ]
+}

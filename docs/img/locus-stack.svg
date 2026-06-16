@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 800"
+     font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif"
+     shape-rendering="geometricPrecision"
+     preserveAspectRatio="xMidYMid meet">
+
+  <!-- ===== Oracle FY26 palette =====
+       accent1 #04536F  deep teal     — Router · Think
+       accent3 #C74634  Oracle red    — Execute · agent-loop frame
+       accent5 #89B2B0  sage teal     — Reflect · orchestration shapes
+       accent4 #F0CC71  sand          — Terminate · foundations
+       accent2 #6C3F49  mauve         — Oracle 26ai · loop-back arrow -->
+
+  <defs>
+    <filter id="card-shadow" x="-10%" y="-10%" width="120%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="2"/>
+      <feOffset dx="0" dy="2" result="off"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.18"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+    <marker id="arrow-fwd" viewBox="0 0 12 12" refX="11" refY="6"
+            markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0,0 L 12,6 L 0,12 z" fill="#2A2F2F"/>
+    </marker>
+
+    <marker id="arrow-loop" viewBox="0 0 12 12" refX="11" refY="6"
+            markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0,0 L 12,6 L 0,12 z" fill="#6C3F49"/>
+    </marker>
+
+    <!-- Oracle wordmark — red on light, white on dark -->
+    <symbol id="oracle-red" viewBox="0 0 109.36 22.96">
+      <path d="M47.91 13.42 54.46 13.42 51 7.84 44.65 17.92 41.75 17.92 49.48 5.82C49.81 5.33 50.38 5.03 51 5.03 51.61 5.03 52.16 5.32 52.49 5.8L60.24 17.92 57.35 17.92 55.99 15.67 49.36 15.67 47.91 13.42M77.95 15.67 77.95 5.16 75.49 5.16 75.49 16.7C75.49 17.01 75.62 17.32 75.85 17.55 76.08 17.79 76.41 17.93 76.74 17.93L87.92 17.93 89.38 15.68 77.95 15.68M37.35 13.79C39.74 13.79 41.66 11.86 41.66 9.47 41.66 7.08 39.74 5.16 37.35 5.16L26.61 5.16 26.61 17.92 29.06 17.92 29.06 7.42 37.18 7.42C38.32 7.42 39.24 8.34 39.24 9.48 39.24 10.62 38.32 11.55 37.18 11.55L30.26 11.54 37.59 17.92 41.15 17.92 36.23 13.79 37.35 13.79M11.51 17.92 18.93 17.92C22.46 17.92 25.3 15.07 25.3 11.54 25.3 8.01 22.46 5.15 18.93 5.15L11.51 5.15C7.98 5.15 5.13 8.01 5.13 11.54 5.13 15.07 7.99 17.92 11.51 17.92M18.76 15.68 11.67 15.68C9.39 15.68 7.54 13.83 7.54 11.55 7.54 9.26 9.39 7.42 11.67 7.42L18.76 7.42C21.05 7.42 22.89 9.26 22.89 11.55 22.9 13.82 21.05 15.68 18.76 15.68M65.37 17.92 72.94 17.92 74.37 15.67 65.53 15.67C63.24 15.67 61.39 13.82 61.39 11.54 61.39 9.25 63.24 7.41 65.53 7.41L72.73 7.41 74.18 5.15 65.37 5.15C61.84 5.15 58.98 8.01 58.98 11.54 58.97 15.07 61.84 17.92 65.37 17.92M95.38 15.68C93.49 15.68 91.9 14.41 91.4 12.67L101.89 12.67 103.34 10.42 91.4 10.42C91.89 8.68 93.49 7.41 95.38 7.41L102.58 7.41 104.02 5.15 95.22 5.15C91.7 5.15 88.84 8.01 88.84 11.54 88.84 15.07 91.7 17.92 95.22 17.92L102.79 17.92 104.23 15.67 95.38 15.67"
+            fill="#C74634"/>
+    </symbol>
+    <symbol id="oracle-white" viewBox="0 0 109.36 22.96">
+      <path d="M47.91 13.42 54.46 13.42 51 7.84 44.65 17.92 41.75 17.92 49.48 5.82C49.81 5.33 50.38 5.03 51 5.03 51.61 5.03 52.16 5.32 52.49 5.8L60.24 17.92 57.35 17.92 55.99 15.67 49.36 15.67 47.91 13.42M77.95 15.67 77.95 5.16 75.49 5.16 75.49 16.7C75.49 17.01 75.62 17.32 75.85 17.55 76.08 17.79 76.41 17.93 76.74 17.93L87.92 17.93 89.38 15.68 77.95 15.68M37.35 13.79C39.74 13.79 41.66 11.86 41.66 9.47 41.66 7.08 39.74 5.16 37.35 5.16L26.61 5.16 26.61 17.92 29.06 17.92 29.06 7.42 37.18 7.42C38.32 7.42 39.24 8.34 39.24 9.48 39.24 10.62 38.32 11.55 37.18 11.55L30.26 11.54 37.59 17.92 41.15 17.92 36.23 13.79 37.35 13.79M11.51 17.92 18.93 17.92C22.46 17.92 25.3 15.07 25.3 11.54 25.3 8.01 22.46 5.15 18.93 5.15L11.51 5.15C7.98 5.15 5.13 8.01 5.13 11.54 5.13 15.07 7.99 17.92 11.51 17.92M18.76 15.68 11.67 15.68C9.39 15.68 7.54 13.83 7.54 11.55 7.54 9.26 9.39 7.42 11.67 7.42L18.76 7.42C21.05 7.42 22.89 9.26 22.89 11.55 22.9 13.82 21.05 15.68 18.76 15.68M65.37 17.92 72.94 17.92 74.37 15.67 65.53 15.67C63.24 15.67 61.39 13.82 61.39 11.54 61.39 9.25 63.24 7.41 65.53 7.41L72.73 7.41 74.18 5.15 65.37 5.15C61.84 5.15 58.98 8.01 58.98 11.54 58.97 15.07 61.84 17.92 65.37 17.92M95.38 15.68C93.49 15.68 91.9 14.41 91.4 12.67L101.89 12.67 103.34 10.42 91.4 10.42C91.89 8.68 93.49 7.41 95.38 7.41L102.58 7.41 104.02 5.15 95.22 5.15C91.7 5.15 88.84 8.01 88.84 11.54 88.84 15.07 91.7 17.92 95.22 17.92L102.79 17.92 104.23 15.67 95.38 15.67"
+            fill="#FFFFFF"/>
+    </symbol>
+  </defs>
+
+  <!-- Oracle wordmark — top-left -->
+  <use href="#oracle-red" x="20" y="10" width="143" height="30"/>
+
+  <!-- ============ LAYER 1: COGNITIVE ROUTER ============ -->
+  <g filter="url(#card-shadow)">
+    <rect x="40" y="48" width="1020" height="86" rx="12" ry="12" fill="#04536F"/>
+    <text x="550" y="80" text-anchor="middle" font-size="22" font-weight="800"
+          fill="#FFFFFF" letter-spacing="-0.01em">PRISM · Cognitive Router</text>
+    <text x="550" y="104" text-anchor="middle" font-size="12.5" font-weight="600"
+          fill="#FFFFFF" opacity="0.92" letter-spacing="0.04em">
+      NATURAL-LANGUAGE TASK → TYPED GOALFRAME → 8 PROTOCOLS → COMPILED RUNTIME SHAPE
+    </text>
+    <text x="550" y="123" text-anchor="middle" font-size="11" font-weight="500"
+          fill="#FFFFFF" opacity="0.80">LLM classifier extracts intent · domain · complexity · risk → CognitiveCompiler emits the matching shape</text>
+  </g>
+
+  <line x1="550" y1="138" x2="550" y2="170" stroke="#2A2F2F"
+        stroke-width="2.4" stroke-linecap="round" marker-end="url(#arrow-fwd)"/>
+  <text x="563" y="159" font-size="11" font-weight="600" fill="#2A2F2F" font-style="italic">compiles to</text>
+
+  <!-- ============ LAYER 2: 8 ORCHESTRATION SHAPES ============ -->
+  <!-- Row A -->
+  <g filter="url(#card-shadow)">
+    <rect x="40" y="184" width="244" height="54" rx="10" ry="10" fill="#89B2B0"/>
+    <text x="162" y="208" text-anchor="middle" font-size="14" font-weight="800" fill="#1F2828">SequentialPipeline</text>
+    <text x="162" y="226" text-anchor="middle" font-size="10.5" font-weight="500" fill="#1F2828" opacity="0.80">A → B → C in order</text>
+  </g>
+  <g filter="url(#card-shadow)">
+    <rect x="296" y="184" width="244" height="54" rx="10" ry="10" fill="#89B2B0"/>
+    <text x="418" y="208" text-anchor="middle" font-size="14" font-weight="800" fill="#1F2828">ParallelPipeline</text>
+    <text x="418" y="226" text-anchor="middle" font-size="10.5" font-weight="500" fill="#1F2828" opacity="0.80">fan-out to N agents · merge</text>
+  </g>
+  <g filter="url(#card-shadow)">
+    <rect x="552" y="184" width="244" height="54" rx="10" ry="10" fill="#89B2B0"/>
+    <text x="674" y="208" text-anchor="middle" font-size="14" font-weight="800" fill="#1F2828">LoopAgent</text>
+    <text x="674" y="226" text-anchor="middle" font-size="10.5" font-weight="500" fill="#1F2828" opacity="0.80">refine until PASS / FAIL</text>
+  </g>
+  <g filter="url(#card-shadow)">
+    <rect x="808" y="184" width="244" height="54" rx="10" ry="10" fill="#89B2B0"/>
+    <text x="930" y="208" text-anchor="middle" font-size="14" font-weight="800" fill="#1F2828">StateGraph</text>
+    <text x="930" y="226" text-anchor="middle" font-size="10.5" font-weight="500" fill="#1F2828" opacity="0.80">DAG · cycles · HITL gates</text>
+  </g>
+
+  <!-- Row B -->
+  <g filter="url(#card-shadow)">
+    <rect x="40" y="248" width="244" height="54" rx="10" ry="10" fill="#89B2B0"/>
+    <text x="162" y="272" text-anchor="middle" font-size="14" font-weight="800" fill="#1F2828">Orchestrator + Specialists</text>
+    <text x="162" y="290" text-anchor="middle" font-size="10.5" font-weight="500" fill="#1F2828" opacity="0.80">router → domain experts</text>
+  </g>
+  <g filter="url(#card-shadow)">
+    <rect x="296" y="248" width="244" height="54" rx="10" ry="10" fill="#89B2B0"/>
+    <text x="418" y="272" text-anchor="middle" font-size="14" font-weight="800" fill="#1F2828">Swarm</text>
+    <text x="418" y="290" text-anchor="middle" font-size="10.5" font-weight="500" fill="#1F2828" opacity="0.80">peers share task queue</text>
+  </g>
+  <g filter="url(#card-shadow)">
+    <rect x="552" y="248" width="244" height="54" rx="10" ry="10" fill="#89B2B0"/>
+    <text x="674" y="272" text-anchor="middle" font-size="14" font-weight="800" fill="#1F2828">Handoff Chain</text>
+    <text x="674" y="290" text-anchor="middle" font-size="10.5" font-weight="500" fill="#1F2828" opacity="0.80">escalation carries history</text>
+  </g>
+  <g filter="url(#card-shadow)">
+    <rect x="808" y="248" width="244" height="54" rx="10" ry="10" fill="#89B2B0"/>
+    <text x="930" y="272" text-anchor="middle" font-size="14" font-weight="800" fill="#1F2828">A2A Mesh</text>
+    <text x="930" y="290" text-anchor="middle" font-size="10.5" font-weight="500" fill="#1F2828" opacity="0.80">cross-process · AgentCard</text>
+  </g>
+
+  <line x1="550" y1="314" x2="550" y2="346" stroke="#2A2F2F"
+        stroke-width="2.4" stroke-linecap="round" marker-end="url(#arrow-fwd)"/>
+  <text x="563" y="335" font-size="11" font-weight="600" fill="#2A2F2F" font-style="italic">each shape runs</text>
+
+  <!-- ============ LAYER 3: AGENT LOOP ============ -->
+  <g filter="url(#card-shadow)">
+    <rect x="40" y="360" width="1020" height="166" rx="12" ry="12" fill="#FAFAF9" stroke="#C74634" stroke-width="2"/>
+    <rect x="40" y="360" width="1020" height="5" fill="#C74634"/>
+  </g>
+  <text x="60" y="386" font-size="13" font-weight="800" fill="#C74634" letter-spacing="0.05em">THE AGENT LOOP — immutable state · typed events · one Agent class</text>
+
+  <!-- Think -->
+  <g filter="url(#card-shadow)">
+    <rect x="70" y="402" width="220" height="92" rx="10" ry="10" fill="#04536F"/>
+    <text x="180" y="430" text-anchor="middle" font-size="18" font-weight="800" fill="#FFFFFF" letter-spacing="-0.01em">Think</text>
+    <text x="180" y="453" text-anchor="middle" font-size="10.5" font-weight="600" fill="#FFFFFF" opacity="0.86" letter-spacing="0.05em">THE MODEL DECIDES</text>
+    <text x="180" y="471" text-anchor="middle" font-size="10.5" font-weight="500" fill="#FFFFFF" opacity="0.78">next action / final answer</text>
+  </g>
+
+  <line x1="295" y1="448" x2="320" y2="448" stroke="#2A2F2F" stroke-width="2.4" stroke-linecap="round" marker-end="url(#arrow-fwd)"/>
+
+  <!-- Execute ★ -->
+  <g filter="url(#card-shadow)">
+    <rect x="325" y="402" width="220" height="92" rx="10" ry="10" fill="#C74634"/>
+    <text x="435" y="430" text-anchor="middle" font-size="18" font-weight="800" fill="#FFFFFF" letter-spacing="-0.01em">Execute</text>
+    <text x="435" y="453" text-anchor="middle" font-size="10.5" font-weight="600" fill="#FFFFFF" opacity="0.86" letter-spacing="0.05em">IDEMPOTENT DEDUPE</text>
+    <text x="435" y="471" text-anchor="middle" font-size="10.5" font-weight="500" fill="#FFFFFF" opacity="0.78">retries return cached receipt</text>
+  </g>
+
+  <line x1="550" y1="448" x2="575" y2="448" stroke="#2A2F2F" stroke-width="2.4" stroke-linecap="round" marker-end="url(#arrow-fwd)"/>
+
+  <!-- Reflect -->
+  <g filter="url(#card-shadow)">
+    <rect x="580" y="402" width="220" height="92" rx="10" ry="10" fill="#89B2B0"/>
+    <text x="690" y="430" text-anchor="middle" font-size="18" font-weight="800" fill="#1F2828" letter-spacing="-0.01em">Reflect</text>
+    <text x="690" y="453" text-anchor="middle" font-size="10.5" font-weight="600" fill="#1F2828" opacity="0.86" letter-spacing="0.05em">REFLEXION · GROUNDING · CAUSAL</text>
+    <text x="690" y="471" text-anchor="middle" font-size="10.5" font-weight="500" fill="#1F2828" opacity="0.78">GSAR typed claim verification</text>
+  </g>
+
+  <line x1="805" y1="448" x2="830" y2="448" stroke="#2A2F2F" stroke-width="2.4" stroke-linecap="round" marker-end="url(#arrow-fwd)"/>
+
+  <!-- Terminate? ★ -->
+  <g filter="url(#card-shadow)">
+    <rect x="835" y="402" width="220" height="92" rx="10" ry="10" fill="#F0CC71"/>
+    <text x="945" y="430" text-anchor="middle" font-size="18" font-weight="800" fill="#3A2A0F" letter-spacing="-0.01em">Terminate?</text>
+    <text x="945" y="453" text-anchor="middle" font-size="10.5" font-weight="600" fill="#3A2A0F" opacity="0.86" letter-spacing="0.05em">ALGEBRA: AND · OR</text>
+    <text x="945" y="471" text-anchor="middle" font-size="10.5" font-weight="500" fill="#3A2A0F" opacity="0.78">composable stops, just data</text>
+  </g>
+
+  <!-- loop-back arrow -->
+  <path d="M 945 498 Q 945 511, 932 511 L 192 511 Q 180 511, 180 498"
+        stroke="#6C3F49" stroke-width="2.2" fill="none"
+        stroke-dasharray="6,4" stroke-linecap="round"
+        marker-end="url(#arrow-loop)"/>
+  <text x="562" y="508" text-anchor="middle" font-size="11" font-weight="600" fill="#6C3F49" font-style="italic">iterate · while termination algebra says continue</text>
+
+  <line x1="550" y1="538" x2="550" y2="570" stroke="#2A2F2F"
+        stroke-width="2.4" stroke-linecap="round" marker-end="url(#arrow-fwd)"/>
+  <text x="563" y="559" font-size="11" font-weight="600" fill="#2A2F2F" font-style="italic">powered by</text>
+
+  <!-- ============ LAYER 4: FOUNDATIONS ============ -->
+  <g filter="url(#card-shadow)">
+    <rect x="40" y="584" width="196" height="84" rx="10" ry="10" fill="#F0CC71"/>
+    <text x="138" y="610" text-anchor="middle" font-size="15" font-weight="800" fill="#3A2A0F">OCI Generative AI</text>
+    <text x="138" y="630" text-anchor="middle" font-size="10.5" font-weight="500" fill="#3A2A0F" opacity="0.85">V1 · SDK · Responses transports</text>
+    <text x="138" y="647" text-anchor="middle" font-size="10.5" font-weight="500" fill="#3A2A0F" opacity="0.78">90+ models · day-0</text>
+  </g>
+  <g filter="url(#card-shadow)">
+    <rect x="244" y="584" width="196" height="84" rx="10" ry="10" fill="#F0CC71"/>
+    <text x="342" y="610" text-anchor="middle" font-size="15" font-weight="800" fill="#3A2A0F">Memory</text>
+    <text x="342" y="630" text-anchor="middle" font-size="10.5" font-weight="500" fill="#3A2A0F" opacity="0.85">9 checkpoint backends</text>
+    <text x="342" y="647" text-anchor="middle" font-size="10.5" font-weight="500" fill="#3A2A0F" opacity="0.78">durable threads · long-term store</text>
+  </g>
+  <g filter="url(#card-shadow)">
+    <rect x="448" y="584" width="196" height="84" rx="10" ry="10" fill="#F0CC71"/>
+    <text x="546" y="610" text-anchor="middle" font-size="15" font-weight="800" fill="#3A2A0F">RAG</text>
+    <text x="546" y="630" text-anchor="middle" font-size="10.5" font-weight="500" fill="#3A2A0F" opacity="0.85">4 vector stores · multimodal</text>
+    <text x="546" y="647" text-anchor="middle" font-size="10.5" font-weight="500" fill="#3A2A0F" opacity="0.78">embeddings · rerank · hybrid</text>
+  </g>
+  <g filter="url(#card-shadow)">
+    <rect x="652" y="584" width="196" height="84" rx="10" ry="10" fill="#F0CC71"/>
+    <text x="750" y="610" text-anchor="middle" font-size="15" font-weight="800" fill="#3A2A0F">Observability</text>
+    <text x="750" y="630" text-anchor="middle" font-size="10.5" font-weight="500" fill="#3A2A0F" opacity="0.85">40+ typed events · EventBus</text>
+    <text x="750" y="647" text-anchor="middle" font-size="10.5" font-weight="500" fill="#3A2A0F" opacity="0.78">OpenTelemetry · SSE · hooks</text>
+  </g>
+  <g filter="url(#card-shadow)">
+    <rect x="856" y="584" width="196" height="84" rx="10" ry="10" fill="#F0CC71"/>
+    <text x="954" y="610" text-anchor="middle" font-size="15" font-weight="800" fill="#3A2A0F">Tools · MCP · Skills</text>
+    <text x="954" y="630" text-anchor="middle" font-size="10.5" font-weight="500" fill="#3A2A0F" opacity="0.85">@tool · idempotent · MCP both-ways</text>
+    <text x="954" y="647" text-anchor="middle" font-size="10.5" font-weight="500" fill="#3A2A0F" opacity="0.78">guardrails · steering · evaluation</text>
+  </g>
+
+  <line x1="550" y1="678" x2="550" y2="710" stroke="#2A2F2F"
+        stroke-width="2.4" stroke-linecap="round" marker-end="url(#arrow-fwd)"/>
+
+  <!-- ============ LAYER 5: ORACLE 26ai ============ -->
+  <g filter="url(#card-shadow)">
+    <rect x="40" y="724" width="1020" height="68" rx="12" ry="12" fill="#6C3F49"/>
+    <use href="#oracle-white" x="62" y="744" width="86" height="18"/>
+    <text x="550" y="754" text-anchor="middle" font-size="20" font-weight="800"
+          fill="#FFFFFF" letter-spacing="-0.01em">Database 26ai — first-class backend</text>
+    <text x="550" y="775" text-anchor="middle" font-size="11" font-weight="500"
+          fill="#FFFFFF" opacity="0.92">native VECTOR(N, FLOAT32) · durable agent threads · in-DB chunking + embeddings · cross-thread store · versioned saver</text>
+  </g>
+
+</svg>

@@ -1,0 +1,4 @@
+locus[a2a] @ git+https://github.com/oracle-samples/locus.git
+fastapi>=0.110
+uvicorn[standard]>=0.27
+httpx>=0.27

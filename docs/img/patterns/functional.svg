@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 360"
+     font-family="-apple-system, BlinkMacSystemFont, 'Inter', sans-serif"
+     shape-rendering="geometricPrecision">
+  <defs>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="2"/>
+      <feOffset dx="0" dy="2" result="o"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.18"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <marker id="a" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0,0 L 12,6 L 0,12 z" fill="#2A2F2F"/>
+    </marker>
+    <marker id="am" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0,0 L 12,6 L 0,12 z" fill="#6C3F49"/>
+    </marker>
+  </defs>
+
+  <!-- @entrypoint -->
+  <g filter="url(#sh)">
+    <rect x="260" y="20" width="200" height="55" rx="12" fill="#C74634"/>
+    <text x="360" y="45" text-anchor="middle" font-size="14" font-weight="800" fill="#FFFFFF">@entrypoint</text>
+    <text x="360" y="63" text-anchor="middle" font-size="11" fill="#FFFFFF" opacity="0.85">vet_all(vendors)</text>
+  </g>
+
+  <!-- asyncio.gather indicator -->
+  <text x="360" y="100" text-anchor="middle" font-size="11" font-weight="600" fill="#6C3F49" letter-spacing="0.04em" font-style="italic">asyncio.gather(*[vet_vendor(v) for v in vendors])</text>
+
+  <!-- @task fan-out -->
+  <g filter="url(#sh)">
+    <rect x="40"  y="125" width="130" height="60" rx="10" fill="#04536F"/>
+    <text x="105" y="153" text-anchor="middle" font-size="13" font-weight="700" fill="#FFFFFF">@task</text>
+    <text x="105" y="170" text-anchor="middle" font-size="10" fill="#FFFFFF" opacity="0.85">vet_vendor(A)</text>
+
+    <rect x="195" y="125" width="130" height="60" rx="10" fill="#04536F"/>
+    <text x="260" y="153" text-anchor="middle" font-size="13" font-weight="700" fill="#FFFFFF">@task</text>
+    <text x="260" y="170" text-anchor="middle" font-size="10" fill="#FFFFFF" opacity="0.85">vet_vendor(B)</text>
+
+    <rect x="350" y="125" width="130" height="60" rx="10" fill="#04536F"/>
+    <text x="415" y="153" text-anchor="middle" font-size="13" font-weight="700" fill="#FFFFFF">@task</text>
+    <text x="415" y="170" text-anchor="middle" font-size="10" fill="#FFFFFF" opacity="0.85">vet_vendor(C)</text>
+
+    <rect x="505" y="125" width="130" height="60" rx="10" fill="#04536F"/>
+    <text x="570" y="153" text-anchor="middle" font-size="13" font-weight="700" fill="#FFFFFF">@task</text>
+    <text x="570" y="170" text-anchor="middle" font-size="10" fill="#FFFFFF" opacity="0.85">vet_vendor(D)</text>
+  </g>
+
+  <!-- fan-out arrows -->
+  <line x1="320" y1="80" x2="105" y2="120" stroke="#2A2F2F" stroke-width="1.6" marker-end="url(#a)"/>
+  <line x1="340" y1="80" x2="260" y2="120" stroke="#2A2F2F" stroke-width="1.6" marker-end="url(#a)"/>
+  <line x1="380" y1="80" x2="415" y2="120" stroke="#2A2F2F" stroke-width="1.6" marker-end="url(#a)"/>
+  <line x1="400" y1="80" x2="570" y2="120" stroke="#2A2F2F" stroke-width="1.6" marker-end="url(#a)"/>
+
+  <!-- gather (merge back) -->
+  <line x1="105" y1="190" x2="320" y2="240" stroke="#6C3F49" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#am)"/>
+  <line x1="260" y1="190" x2="340" y2="240" stroke="#6C3F49" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#am)"/>
+  <line x1="415" y1="190" x2="380" y2="240" stroke="#6C3F49" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#am)"/>
+  <line x1="570" y1="190" x2="400" y2="240" stroke="#6C3F49" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#am)"/>
+
+  <!-- list result -->
+  <g filter="url(#sh)">
+    <rect x="240" y="245" width="240" height="55" rx="12" fill="#F0CC71"/>
+    <text x="360" y="271" text-anchor="middle" font-size="14" font-weight="700" fill="#3A2A0F">list[VendorScore]</text>
+    <text x="360" y="290" text-anchor="middle" font-size="10" fill="#3A2A0F" opacity="0.85">all four results, in order</text>
+  </g>
+
+  <text x="20" y="335" font-size="11" font-style="italic" fill="#2A2F2F">agents-as-asyncio · @task / @entrypoint integrate with everything else asyncio gives you (gather, timeout, retries, schedulers)</text>
+</svg>

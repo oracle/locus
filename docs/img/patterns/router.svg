@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 500"
+     font-family="-apple-system, BlinkMacSystemFont, 'Inter', sans-serif"
+     shape-rendering="geometricPrecision">
+
+  <!-- Oracle FY26 palette
+       #04536F  deep teal   — LLM + compiler boxes
+       #C74634  Oracle red  — result + deny
+       #89B2B0  sage teal   — compiled shapes
+       #F0CC71  sand        — PolicyGate
+       #6C3F49  mauve       — dashed result arrows
+       #2A2F2F  dark        — text + forward arrows
+       #FBF9F8  off-white   — neutral input box -->
+
+  <defs>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="2.5"/>
+      <feOffset dx="0" dy="2" result="o"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.18"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <marker id="arr" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0,0 L 12,6 L 0,12 z" fill="#2A2F2F"/>
+    </marker>
+    <marker id="arr-red" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0,0 L 12,6 L 0,12 z" fill="#C74634"/>
+    </marker>
+    <marker id="arr-dash" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0,0 L 12,6 L 0,12 z" fill="#6C3F49"/>
+    </marker>
+  </defs>
+
+  <!-- ── Row 1: NL input ──────────────────────────────────── -->
+  <g filter="url(#sh)">
+    <rect x="40" y="30" width="150" height="50" rx="10" fill="#FBF9F8" stroke="#2A2F2F" stroke-width="1.2"/>
+    <text x="115" y="52" text-anchor="middle" font-size="12" font-weight="700" fill="#2A2F2F">natural-language</text>
+    <text x="115" y="68" text-anchor="middle" font-size="12" font-weight="700" fill="#2A2F2F">task description</text>
+  </g>
+
+  <!-- arrow NL → extractor -->
+  <line x1="190" y1="55" x2="228" y2="55" stroke="#2A2F2F" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- ── GoalFrame Extractor ───────────────────────────────── -->
+  <g filter="url(#sh)">
+    <rect x="230" y="18" width="200" height="74" rx="12" fill="#04536F"/>
+    <text x="330" y="44" text-anchor="middle" font-size="15" font-weight="800" fill="#FFFFFF">GoalFrame Extractor</text>
+    <text x="330" y="62" text-anchor="middle" font-size="11" font-weight="500" fill="#FFFFFF" opacity="0.85">Agent(output_schema=GoalFrame)</text>
+    <text x="330" y="80" text-anchor="middle" font-size="10" font-weight="600" fill="#F0CC71" letter-spacing="0.04em">← LLM · only this step</text>
+  </g>
+
+  <!-- arrow extractor → registry (right then up via elbow) -->
+  <polyline points="430,55 490,55 490,55 528,55" fill="none" stroke="#2A2F2F" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- GoalFrame label on arrow -->
+  <text x="476" y="48" text-anchor="middle" font-size="9.5" font-style="italic" fill="#04536F" font-weight="600">GoalFrame</text>
+
+  <!-- ── ProtocolRegistry ──────────────────────────────────── -->
+  <g filter="url(#sh)">
+    <rect x="530" y="25" width="190" height="60" rx="12" fill="#04536F"/>
+    <text x="625" y="51" text-anchor="middle" font-size="15" font-weight="800" fill="#FFFFFF">ProtocolRegistry</text>
+    <text x="625" y="68" text-anchor="middle" font-size="11" font-weight="500" fill="#FFFFFF" opacity="0.85">deterministic filter + rank</text>
+  </g>
+
+  <!-- arrow registry → policy (vertical down) -->
+  <line x1="625" y1="85" x2="625" y2="143" stroke="#2A2F2F" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="635" y="120" font-size="9.5" font-style="italic" fill="#2A2F2F" font-weight="600">Protocol</text>
+
+  <!-- ── PolicyGate ────────────────────────────────────────── -->
+  <g filter="url(#sh)">
+    <rect x="535" y="145" width="180" height="68" rx="12" fill="#F0CC71"/>
+    <text x="625" y="172" text-anchor="middle" font-size="15" font-weight="800" fill="#3A2A0F">PolicyGate</text>
+    <text x="625" y="190" text-anchor="middle" font-size="10.5" font-weight="600" fill="#3A2A0F">allow · require_approval · deny</text>
+  </g>
+
+  <!-- deny arrow → right -->
+  <line x1="715" y1="179" x2="746" y2="179" stroke="#C74634" stroke-width="2" marker-end="url(#arr-red)"/>
+  <!-- PolicyDeniedError box -->
+  <g filter="url(#sh)">
+    <rect x="648" y="198" width="100" height="32" rx="8" fill="#C74634"/>
+    <text x="698" y="219" text-anchor="middle" font-size="9.5" font-weight="700" fill="#FFFFFF">PolicyDeniedError</text>
+  </g>
+  <text x="720" y="173" font-size="9" font-weight="700" fill="#C74634">deny</text>
+
+  <!-- allow arrow → down -->
+  <line x1="625" y1="213" x2="625" y2="258" stroke="#2A2F2F" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="635" y="243" font-size="9.5" font-style="italic" fill="#2A2F2F" font-weight="600">allow</text>
+
+  <!-- ── CognitiveCompiler ─────────────────────────────────── -->
+  <g filter="url(#sh)">
+    <rect x="490" y="260" width="270" height="68" rx="12" fill="#04536F"/>
+    <text x="625" y="288" text-anchor="middle" font-size="15" font-weight="800" fill="#FFFFFF">CognitiveCompiler</text>
+    <text x="625" y="306" text-anchor="middle" font-size="11" font-weight="500" fill="#FFFFFF" opacity="0.85">compiles onto real locus primitives</text>
+  </g>
+
+  <!-- fan-out arrows from compiler to 4 shapes -->
+  <line x1="520" y1="328" x2="100"  y2="368" stroke="#2A2F2F" stroke-width="1.6" marker-end="url(#arr)"/>
+  <line x1="560" y1="328" x2="250"  y2="368" stroke="#2A2F2F" stroke-width="1.6" marker-end="url(#arr)"/>
+  <line x1="625" y1="328" x2="400"  y2="368" stroke="#2A2F2F" stroke-width="1.6" marker-end="url(#arr)"/>
+  <line x1="690" y1="328" x2="560"  y2="368" stroke="#2A2F2F" stroke-width="1.6" marker-end="url(#arr)"/>
+
+  <!-- ── Four compiled shapes ──────────────────────────────── -->
+  <g filter="url(#sh)">
+    <!-- direct_response -->
+    <rect x="30"  y="370" width="138" height="52" rx="10" fill="#89B2B0"/>
+    <text x="99"  y="393" text-anchor="middle" font-size="11" font-weight="700" fill="#1F2828">direct_response</text>
+    <text x="99"  y="410" text-anchor="middle" font-size="10" fill="#1F2828" opacity="0.85">single Agent</text>
+
+    <!-- specialist_fanout -->
+    <rect x="180" y="370" width="138" height="52" rx="10" fill="#89B2B0"/>
+    <text x="249" y="393" text-anchor="middle" font-size="11" font-weight="700" fill="#1F2828">specialist_fanout</text>
+    <text x="249" y="410" text-anchor="middle" font-size="10" fill="#1F2828" opacity="0.85">ParallelPipeline</text>
+
+    <!-- plan_execute_validate -->
+    <rect x="330" y="370" width="138" height="52" rx="10" fill="#89B2B0"/>
+    <text x="399" y="390" text-anchor="middle" font-size="11" font-weight="700" fill="#1F2828">plan_execute</text>
+    <text x="399" y="406" text-anchor="middle" font-size="11" font-weight="700" fill="#1F2828">_validate</text>
+    <text x="399" y="420" text-anchor="middle" font-size="10" fill="#1F2828" opacity="0.85">SequentialPipeline</text>
+
+    <!-- codegen_test_validate -->
+    <rect x="480" y="370" width="138" height="52" rx="10" fill="#89B2B0"/>
+    <text x="549" y="390" text-anchor="middle" font-size="11" font-weight="700" fill="#1F2828">codegen_test</text>
+    <text x="549" y="406" text-anchor="middle" font-size="11" font-weight="700" fill="#1F2828">_validate</text>
+    <text x="549" y="420" text-anchor="middle" font-size="10" fill="#1F2828" opacity="0.85">LoopAgent</text>
+
+    <!-- +4 more -->
+    <rect x="630" y="370" width="90"  height="52" rx="10" fill="none" stroke="#89B2B0" stroke-width="2" stroke-dasharray="5,3"/>
+    <text x="675" y="393" text-anchor="middle" font-size="11" font-weight="600" fill="#89B2B0">+ 4 more</text>
+    <text x="675" y="410" text-anchor="middle" font-size="10" fill="#89B2B0">protocols</text>
+  </g>
+
+  <!-- dashed result arrows → RunnableResult -->
+  <line x1="99"  y1="422" x2="240" y2="462" stroke="#6C3F49" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arr-dash)"/>
+  <line x1="249" y1="422" x2="310" y2="462" stroke="#6C3F49" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arr-dash)"/>
+  <line x1="399" y1="422" x2="399" y2="462" stroke="#6C3F49" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arr-dash)"/>
+  <line x1="549" y1="422" x2="490" y2="462" stroke="#6C3F49" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arr-dash)"/>
+
+  <!-- ── RunnableResult ─────────────────────────────────────── -->
+  <g filter="url(#sh)">
+    <rect x="185" y="464" width="430" height="24" rx="10" fill="#C74634"/>
+    <text x="400" y="481" text-anchor="middle" font-size="12" font-weight="700" fill="#FFFFFF">RunnableResult · text · protocol_id · frame</text>
+  </g>
+
+  <!-- footer note -->
+  <text x="40" y="498" font-size="10.5" font-style="italic" fill="#2A2F2F" opacity="0.7">LLM fills one typed schema · everything else is rule-based · output is always one of eight named protocols</text>
+</svg>

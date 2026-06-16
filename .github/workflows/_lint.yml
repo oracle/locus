@@ -1,0 +1,43 @@
+name: lint
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  HATCH_VERSION: "1.16.5"
+  RUFF_OUTPUT_FORMAT: github
+
+jobs:
+  build:
+    name: "lint+typecheck #${{ matrix.python-version }}"
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # Lint on the min and max supported Python versions. mypy can
+        # surface version-specific type errors (e.g. ``typing.Self`` in
+        # 3.11 vs 3.12+) so we cover both ends of the matrix.
+        python-version:
+          - "3.11"
+          - "3.14"
+    steps:
+      # actions/checkout@v6.0.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      # actions/setup-python@v6.2.0
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
+
+      - name: Install Hatch
+        run: pip install hatch==${{ env.HATCH_VERSION }}
+
+      # `hatch run check` runs format-check + ruff lint + mypy in one
+      # command (defined in pyproject.toml). All three must pass for
+      # the job to succeed.
+      - name: Run format-check + ruff + mypy
+        run: hatch run check

@@ -1,0 +1,10 @@
+# Example test configuration
+# Copy this to config.local.yaml and fill in your values
+
+oci:
+  profile_name: YOUR_PROFILE
+  auth_type: api_key    # or "security_token"
+  region: us-phoenix-1
+  models:
+    gpt: openai.gpt-4o
+    cohere: cohere.command-r-plus
