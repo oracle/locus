@@ -190,6 +190,25 @@ Repository = "https://github.com/oracle-samples/locus"
 Issues = "https://github.com/oracle-samples/locus/issues"
 
 # =============================================================================
+# uv Configuration
+# =============================================================================
+
+[tool.uv]
+# Security overrides for transitive deps whose upstreams pin them below the
+# patched version. There is no clean upgrade path: the latest `oci` (2.179)
+# still caps `cryptography` < 48, and `oracleagentmemory` (alpha, pinned < 27)
+# caps `litellm`/`aiohttp`. We force the patched versions to clear the
+# advisories — litellm (critical), cryptography (high), aiohttp. Drop each
+# entry once its upstream relaxes the cap. NOTE: oci uses cryptography for
+# request signing — verify OCI auth against cryptography 48 before relying on
+# this in production; CI unit tests mock OCI and won't exercise live signing.
+override-dependencies = [
+    "litellm>=1.84.0",
+    "cryptography>=48.0.1",
+    "aiohttp>=3.14.1",
+]
+
+# =============================================================================
 # Hatch Configuration
 # =============================================================================
 
