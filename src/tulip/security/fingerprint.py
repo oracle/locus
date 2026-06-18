@@ -28,8 +28,10 @@ model-extraction recon (MITRE ATLAS AML.T0040 / AML.T0024).
 
 The remote-API timing measurement is real (confirmed against ``gpt-4o-mini``);
 the classifier remains a heuristic placeholder. The co-located GPU-cloud probe
-(RunPod / Lambda) is a vendor integration in ``tulip-integrations.compute`` —
-core ships only the offline reference dispatch.
+is split by provider in ``tulip-integrations.compute`` — ``runpod`` (pod +
+container image, extra ``compute-runpod``) and ``lambda_cloud`` (instance +
+result sink, extra ``compute-lambda``) — and core ships only the offline
+reference dispatch.
 """
 
 from __future__ import annotations
@@ -161,10 +163,12 @@ def dispatch_timing_probe_reference(endpoint: str, provider: str = "runpod") -> 
     """Reference (offline) co-located GPU-probe dispatch — returns the sample vector.
 
     The credential-free remote-API measurement is :func:`measure_endpoint_timing`.
-    The *real* GPU-cloud lifecycle (provision -> probe -> tear down) for RunPod /
-    Lambda is a vendor integration in the ``tulip-integrations`` package
-    (``tulip_integrations.compute``); install ``tulip-integrations[compute-runpod]``
-    and call its ``dispatch_timing_probe``. Core ships no vendor GPU code.
+    The *real* GPU-cloud lifecycle (provision -> probe -> tear down) lives in the
+    ``tulip-integrations`` package as two separate provider modules — RunPod
+    (``tulip_integrations.compute.runpod.runpod_probe``, extra ``compute-runpod``)
+    and Lambda Cloud (``tulip_integrations.compute.lambda_cloud.lambda_probe``,
+    extra ``compute-lambda``); ``compute.dispatch_timing_probe(endpoint, provider=…)``
+    routes between them. Core ships no vendor GPU code.
     """
     return dict(_SAMPLE_FEATURES)
 

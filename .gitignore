@@ -277,3 +277,6 @@ examples/*.wav
 # disk for local use only. NOTE: these remain in git HISTORY; a filter-repo
 # scrub of docs/internal/** is REQUIRED before this repo goes public.
 docs/internal/
+
+# Local credentials — never commit (home: ~/Projects/tuliplabs/secrets.env)
+secrets.env

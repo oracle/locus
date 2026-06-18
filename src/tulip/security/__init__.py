@@ -173,6 +173,7 @@ from tulip.security.taxonomy import (
     severity_at_least,
 )
 from tulip.security.verify import (
+    AdversarialSkeptic,
     EvidenceQualitySkeptic,
     Refutation,
     Skeptic,
@@ -331,6 +332,7 @@ __all__ = [
     "Refutation",
     "Skeptic",
     "EvidenceQualitySkeptic",
+    "AdversarialSkeptic",
     # Policy + approval — safe-before-action (the CISO knob)
     "SecurityPolicy",
     "Action",

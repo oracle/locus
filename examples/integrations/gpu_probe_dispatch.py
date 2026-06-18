@@ -5,8 +5,10 @@
 
 The co-located timing-probe lifecycle is now first-class in
 :mod:`tulip.security.fingerprint`. Core ships the *offline reference*
-(``dispatch_timing_probe_reference``); the live RunPod / Lambda probe lives in
-``tulip-integrations`` (``tulip_integrations.compute.dispatch_timing_probe``).
+(``dispatch_timing_probe_reference``); the live probe is split by provider in
+``tulip-integrations`` — RunPod (``tulip_integrations.compute.runpod``) and
+Lambda Cloud (``tulip_integrations.compute.lambda_cloud``), routed by
+``tulip_integrations.compute.dispatch_timing_probe(endpoint, provider=…)``.
 This shim re-exports the offline reference under the example's local name::
 
     from tulip.security import dispatch_timing_probe_reference, FEATURE_KEYS

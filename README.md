@@ -284,8 +284,8 @@ result = await router.dispatch(
     "We just got a sev-1 latency alert on the checkout service. "
     "Investigate and recommend remediation."
 )
-print(f"protocol={result.protocol_id} shape={result.runtime_shape}")
-print(result.output)
+print(f"protocol={result.protocol_id}")
+print(result.text)
 ```
 
 The same `router.dispatch(...)` call resolves a one-shot lookup to a
@@ -417,6 +417,38 @@ hits = await retriever.retrieve("…", limit=5)
 
 Every backend is an optional extra — install only what you use
 (`pip install "tulip-agents[qdrant,s3,rerank-local]"`).
+
+---
+
+## Vendor security integrations
+
+Core ships **offline reference adapters** for every security domain, so the SDK
+runs standalone with no credentials. The maintained, vendor-specific integrations
+live in a separate community package —
+**[`tulip-integrations`](https://github.com/tuliplabs-ai/tulip-integrations)**
+(import `tulip_integrations`) — which depends one-way on core (the LangChain
+`core` + `community` split).
+
+```bash
+pip install "tulip-integrations[edr-crowdstrike]"   # + any per-vendor extra
+```
+
+| Domain | Vendors |
+|---|---|
+| **SIEM** | Splunk / Elastic |
+| **EDR** | CrowdStrike Falcon |
+| **Identity** | Okta · Auth0 |
+| **Threat intel** | VirusTotal |
+| **Vuln / AI-SPM** | Wiz |
+| **Compute** | RunPod · Lambda (GPU fingerprint probe) |
+
+Wire one in via `security_toolset(extra=[…])` or a `SecurityContext` provider —
+see the [integrations docs](https://tulipagents.ai/integrations/) and the
+[`tulip-integrations` repo](https://github.com/tuliplabs-ai/tulip-integrations).
+
+> **Not to be confused with `tulip.integrations`** (this repo) — that's the
+> built-in **MCP** client/server (`MCPClient`, `TulipMCPServer`). The community
+> **`tulip-integrations`** package is the vendor security adapters above.
 
 ---
 

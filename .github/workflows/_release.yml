@@ -129,6 +129,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # OIDC: mint a short-lived token for PyPI Trusted Publishing — no
+      # long-lived PYPI_TOKEN secret to leak, expire, or rotate.
+      id-token: write
     environment:
       name: pypi
       url: https://pypi.org/p/${{ needs.build.outputs.pkg-name }}
@@ -140,16 +143,10 @@ jobs:
           name: dist
           path: dist/
 
-      # actions/setup-python@v6.2.0
-      - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
-        with:
-          python-version: "3.x"
-
+      # pypa/gh-action-pypi-publish@v1.14.0 — Trusted Publishing (OIDC).
+      # Requires a "pending/trusted publisher" on pypi.org:
+      #   repo=tuliplabs-ai/sdk-python, workflow=_release.yml, environment=pypi
       - name: Publish to PyPI
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
-        run: |
-          pip install twine
-          twine upload dist/*
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b
+        with:
+          packages-dir: dist/

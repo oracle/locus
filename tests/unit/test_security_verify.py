@@ -112,3 +112,68 @@ async def test_confidence_threshold_is_respected() -> None:
         evidence_refs=["r1"],
     )
     assert not (await verify(one_ref, threshold=0.9)).survives
+
+
+class _ScriptedModel:
+    """Offline stand-in for an LLM: returns one canned JSON completion."""
+
+    def __init__(self, content: str) -> None:
+        self._content = content
+
+    async def complete(self, messages, tools=None, **kwargs):  # noqa: ANN001, ANN003
+        from tulip.core.messages import Message
+        from tulip.models.base import ModelResponse
+
+        return ModelResponse(message=Message.assistant(content=self._content), usage={})
+
+
+async def test_adversarial_skeptic_refutes_overreach() -> None:
+    import json
+
+    from tulip.security import AdversarialSkeptic
+
+    review = json.dumps(
+        {
+            "supported": False,
+            "objections": [
+                {
+                    "reason": "Critical severity asserted on a single inference-level reference.",
+                    "weight": "concern",
+                }
+            ],
+            "alternatives": ["A benign scanner could produce the same signal."],
+        }
+    )
+    skeptic = AdversarialSkeptic(model=_ScriptedModel(review))
+    assert isinstance(skeptic, Skeptic)  # satisfies the protocol
+    refs = await skeptic.challenge(_strong_finding())
+    assert any("single inference-level reference" in r.reason for r in refs)
+    assert any("Alternative explanation not ruled out" in r.reason for r in refs)
+    verdict = await verify(_strong_finding(), skeptics=[skeptic])
+    assert verdict.confidence < 1.0  # the challenge cost it confidence
+
+
+async def test_adversarial_skeptic_can_clear_a_finding() -> None:
+    import json
+
+    from tulip.security import AdversarialSkeptic
+
+    review = json.dumps({"supported": True, "objections": [], "alternatives": []})
+    verdict = await verify(
+        _strong_finding(), skeptics=[AdversarialSkeptic(model=_ScriptedModel(review))]
+    )
+    assert verdict.survives
+    assert verdict.refutations == []
+
+
+async def test_adversarial_skeptic_fails_safe_on_model_error() -> None:
+    from tulip.security import AdversarialSkeptic
+
+    class _Boom:
+        async def complete(self, *args, **kwargs):  # noqa: ANN002, ANN003, ANN201
+            raise RuntimeError("provider down")
+
+    refs = await AdversarialSkeptic(model=_Boom()).challenge(_strong_finding())
+    assert refs
+    assert all(r.weight == "weak" for r in refs)
+    assert "not independently challenged" in refs[0].reason
