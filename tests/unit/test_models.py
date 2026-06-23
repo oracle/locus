@@ -243,8 +243,8 @@ class TestAnthropicModel:
         pytest.importorskip("anthropic")
         from tulip.models.native.anthropic import AnthropicModel
 
-        model = AnthropicModel(model="claude-sonnet-4-20250514", api_key="test-key")
-        assert model.config.model == "claude-sonnet-4-20250514"
+        model = AnthropicModel(model="claude-sonnet-4-6", api_key="test-key")
+        assert model.config.model == "claude-sonnet-4-6"
         assert model.config.api_key == "test-key"
 
     def test_convert_messages_extracts_system(self):

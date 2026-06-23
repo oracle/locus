@@ -43,7 +43,7 @@ def _rejects_temperature(model_id: str) -> bool:
 class AnthropicConfig(ModelConfig):
     """Configuration for Anthropic models."""
 
-    model: str = "claude-sonnet-4-20250514"
+    model: str = "claude-sonnet-4-6"
     max_tokens: int = 4096
     temperature: float = 0.7
     top_p: float = 0.9
@@ -81,7 +81,7 @@ class AnthropicModel(BaseModel):
     Supports Claude 4.6, 4.5, 3.5 models with streaming and tool calling.
 
     Example:
-        >>> model = AnthropicModel(model="claude-sonnet-4-20250514")
+        >>> model = AnthropicModel(model="claude-sonnet-4-6")
         >>> response = await model.complete([Message.user("Hello!")])
     """
 
@@ -101,7 +101,7 @@ class AnthropicModel(BaseModel):
 
     def __init__(
         self,
-        model: str = "claude-sonnet-4-20250514",
+        model: str = "claude-sonnet-4-6",
         api_key: str | None = None,
         base_url: str | None = None,
         max_tokens: int = 4096,

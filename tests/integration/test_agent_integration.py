@@ -1313,7 +1313,7 @@ class TestAnthropicProvider:
         from tulip.core.messages import Message
         from tulip.models.native.anthropic import AnthropicModel
 
-        model = AnthropicModel(model="claude-sonnet-4-20250514", api_key=api_key)
+        model = AnthropicModel(model="claude-sonnet-4-6", api_key=api_key)
         response = await model.complete(
             [
                 Message.system("Answer in one word."),

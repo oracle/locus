@@ -56,7 +56,7 @@ class TestAgentNormalizeStopReason:
 
 def _make_agent() -> Agent:
     """Build an Agent with a mocked model (skip real provider construction)."""
-    cfg = AgentConfig(model="anthropic:claude-sonnet-4-20250514")
+    cfg = AgentConfig(model="anthropic:claude-sonnet-4-6")
     agent = Agent(config=cfg)
     # Avoid touching the real Anthropic SDK during attribute access.
     agent._model = MagicMock()  # type: ignore[assignment]

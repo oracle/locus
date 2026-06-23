@@ -233,7 +233,7 @@ def _get_anthropic_model(**kwargs: Any) -> Any:
     """Get Anthropic model."""
     from tulip.models.native.anthropic import AnthropicModel
 
-    model_id = kwargs.pop("model_id", os.environ.get("TULIP_MODEL_ID", "claude-sonnet-4-20250514"))
+    model_id = kwargs.pop("model_id", os.environ.get("TULIP_MODEL_ID", "claude-sonnet-4-6"))
     api_key = os.environ.get("ANTHROPIC_API_KEY")
 
     if not api_key:

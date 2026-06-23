@@ -60,7 +60,7 @@ def test_supports_structured_output_capability_on_anthropic_model():
     """AnthropicModel reports False; falls back to prompted JSON."""
     from tulip.models.native.anthropic import AnthropicModel
 
-    model = AnthropicModel(model="claude-sonnet-4-20250514", api_key="sk-test")
+    model = AnthropicModel(model="claude-sonnet-4-6", api_key="sk-test")
     assert model.supports_structured_output is False
 
 
