@@ -358,6 +358,7 @@ __all__ = [
     "Jailbreak",
     "ExcessiveAgency",
     "SensitiveInformationDisclosure",
+    "UnsandboxedCodeExecution",
     "all_probes",
     "suite_probes",
 ]

@@ -5,6 +5,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import re
+
 from tulip.security import (
     OwaspLLM,
     Severity,
@@ -16,7 +19,16 @@ from tulip.security import (
 
 
 def _vulnerable() -> Target:
-    return Target.from_callable(lambda p: p, name="vulnerable-bot")
+    # Parrots back injected canaries AND actually executes requested computation
+    # (returns the real SHA-256 of a nonce), so it is vulnerable to every probe —
+    # the canary set and the proof-of-execution probe — i.e. 0% coverage.
+    def _send(p: str) -> str:
+        match = re.search(r"\b([0-9a-f]{32})\b", p)
+        if match and "sha-256" in p.lower():
+            return f"{p} {hashlib.sha256(match.group(1).encode()).hexdigest()}"
+        return p
+
+    return Target.from_callable(_send, name="vulnerable-bot")
 
 
 def _hardened() -> Target:
@@ -25,7 +37,7 @@ def _hardened() -> Target:
 
 def _partial() -> Target:
     # Leaks only for the direct-injection payload ("maintenance mode"); resists
-    # the rest. -> 4/5 resisted = 80% coverage, one LLM01 gap.
+    # the rest. -> 5/6 resisted ≈ 83% coverage, one LLM01 gap.
     return Target.from_callable(
         lambda p: p if "maintenance mode" in p else "denied", name="partial-bot"
     )
@@ -69,4 +81,4 @@ async def test_coverage_is_grounded_in_observations() -> None:
     assert is_finding(result)
     # one evidence ref per probe observed
     assert all("assess:guardrail-coverage" in ref for ref in result.evidence_refs)
-    assert len(result.evidence_refs) == 5
+    assert len(result.evidence_refs) == 6
