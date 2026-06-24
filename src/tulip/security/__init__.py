@@ -140,6 +140,7 @@ from tulip.security.redteam import (
     Probe,
     ProbeOutcome,
     SensitiveInformationDisclosure,
+    UnsandboxedCodeExecution,
     all_probes,
     suite_probes,
 )

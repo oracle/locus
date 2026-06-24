@@ -3,8 +3,8 @@
 </p>
 
 <p align="center">
-  <strong>tulip — the agentic AI-security SDK</strong><br>
-  <em>Build agents that red-team and assure other AI systems — graded against OWASP-ASI / MITRE-ATLAS — where every result is grounded in evidence or an explicit abstention. The same engine, pointed at infrastructure, runs classic SOC/IR.</em>
+  <strong>Tulip — the SDK for agents you can let <em>act</em>.</strong><br>
+  <em>Agents that take real action — isolate a host, block an IP, disable an account — where every risky step is policy-gated and human-approvable, and every decision lands in a tamper-evident audit trail. You can fool the model; you can't talk past the runtime. Built for cybersecurity, where a wrong action is a breach.</em>
 </p>
 
 <p align="center">
@@ -44,34 +44,72 @@
 
 ## What is Tulip?
 
-Tulip is a Python SDK for building **agentic AI for cybersecurity** — AI agents
-that do security work you can trust, because every finding is backed by evidence
-or the agent **abstains** instead of guessing. Two pillars, one engine:
+Frontier models are smart. The one thing they **can't** do — no matter how smart —
+is *prove they won't take a catastrophic action.* That's the gap Tulip closes:
+agents that **act** in the real world, where every consequential step is gated by
+policy, held for a human when it matters, and recorded so you can prove what
+happened. The moat is **control**, not raw intelligence — the model supplies the
+brains; Tulip makes its actions safe and provable.
 
-- **Test other AI** *(the sharpest use today)* — point it at a chatbot, an agent,
-  or a model endpoint and it runs known attacks (prompt injection, jailbreaks,
-  data exfiltration, tool abuse), reporting **only the flaws it can prove**. No
-  false alarms from an AI grader that hallucinates.
-- **Do regular cyber** — the same engine, pointed at your infrastructure, runs
-  SOC triage, incident response, and cloud-posture work — every verdict grounded
-  in the evidence behind it.
+- **Agents that act, not just advise.** Most agents are stuck at read-only
+  suggestions because nobody trusts them to pull the trigger. Tulip's admission
+  gate (`admit` / `approve`) lets an agent take real response actions safely — and
+  a bare LLM reaching for something dangerous gets **stopped cold**.
+- **Tamper-evident audit.** Every action and decision is a hash-chained record you
+  can replay and **cannot forge** — SOC/forensics-ready.
+- **Evidence-grounded findings.** Security findings carry the tool-backed evidence
+  behind them (GSAR); abstentions are explicit, not silent guesses.
+- **Red-team & assure other AI** *(the fun front door)* — point it at a chatbot,
+  agent, or endpoint and run OWASP-ASI / MITRE-ATLAS attacks.
 
-The agent doing the work is itself **secure by default** (grounded, guarded,
-audited). See [Red-team and assure another AI](#red-team-and-assure-another-ai)
-for the short version.
+> **Can you make the agent go rogue?** Give an agent live prod tools, then try to
+> jailbreak it into wiping the database. You'll fool the model — and the runtime
+> won't care. See [`examples/can_you_make_it_go_rogue.py`](examples/can_you_make_it_go_rogue.py).
 
-## Your first agent — 5 lines
+## See it in 60 seconds
+
+| Run | What it shows |
+|-----|---------------|
+| [`examples/can_you_make_it_go_rogue.py`](examples/can_you_make_it_go_rogue.py) | Jailbreak an agent with live prod tools — the admission gate blocks the action anyway. 🏆 breaches: 0. |
+| [`examples/governed_soc_action.py`](examples/governed_soc_action.py) | Grounded finding → policy gate → execute **or hold-for-human** → tamper-evident audit you can replay. |
+| [`examples/grounding_ablation.py`](examples/grounding_ablation.py) | Honest ablation: same model, with vs without grounding. |
+
+## Drop it into the agent you already have
+
+Already have an agent (any framework) that takes actions? Add Tulip's gate +
+tamper-evident audit around the dangerous one — **~8 lines, no rebuild**:
+
+```python
+from tulip.security import Action, AuditTrail, SecurityPolicy, admit, AdmissionError
+
+trail = AuditTrail()
+
+async def safe_isolate(host: str):
+    try:
+        return await admit(
+            Action(name="isolate_host", asset=host, blast_radius=50, environment="production"),
+            lambda: my_edr.isolate(host),          # your code, any SDK / framework
+            policy=SecurityPolicy(), trail=trail,
+        )
+    except AdmissionError as e:
+        page_oncall(e.decision)                    # the gate held it; the trail has the record
+```
+
+Production-blast isolation now requires a human, the attempt is recorded in a
+hash-chained trail you can't forge, and your agent keeps working unchanged.
+**You can fool the model; you can't talk past the gate.**
+Try it: [`examples/can_you_make_it_go_rogue.py`](examples/can_you_make_it_go_rogue.py).
+
+## Build a full agent — 5 lines
 
 ```python
 from tulip.agent import Agent
-agent = Agent(model="openai:gpt-4o")
-print(agent.run_sync("Triage: outbound beaconing from 192.0.2.14 to a domain registered yesterday.").text)
-# → a one-paragraph verdict with the evidence that backs it
+agent = Agent(model="anthropic:claude-sonnet-4-6")
+print(agent.run_sync("Triage: outbound beaconing from 192.0.2.14 to a domain registered yesterday.").message)
 ```
 
-Construction, the model call, retries, and the reply all live behind that
-one class. Point `model=` at `"anthropic:claude-sonnet-4-6"` instead and
-nothing else moves.
+Construction, the model call, retries, and the reply all live behind that one
+class. Point `model=` at `"openai:gpt-4o"` instead and nothing else moves.
 
 ## Add a tool
 

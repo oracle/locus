@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tulip-agents"
-version = "1.0.0"
-description = "The cybersecurity agent SDK — agent teams whose findings are grounded in evidence (GSAR), whose actions are typed replayable events, and whose risky steps are approval-gated."
+version = "1.1.0"
+description = "The cybersecurity agent SDK for agents you can let act — every risky action policy-gated and human-approvable, every step a tamper-evident replayable event, findings evidence-grounded (GSAR). Drop the gate + audit into any agent."
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
