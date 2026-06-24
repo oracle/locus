@@ -601,6 +601,17 @@ module = [
 ]
 ignore_missing_imports = true
 
+# numpy ships type stubs, but some numpy/Python combinations make mypy abort
+# with a stub parse error ("errors prevented further checking" in
+# numpy/__init__.pyi) — seen on the 3.13/3.14 CI runners. numpy is only a
+# transitive dependency (chromadb / torch / scikit-learn), never part of
+# Tulip's typed surface, so skip analyzing it entirely.
+[[tool.mypy.overrides]]
+module = ["numpy", "numpy.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true
+ignore_missing_imports = true
+
 # Modules with dynamic types from external SDKs — relaxed checking.
 #
 # Migration in progress (issue #34): each module has been audited and either
