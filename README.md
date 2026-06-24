@@ -4,7 +4,7 @@
 
 <p align="center">
   <strong>Tulip — the SDK for agents you can let <em>act</em>.</strong><br>
-  <em>Agents that take real action — isolate a host, block an IP, disable an account — where every risky step is policy-gated and human-approvable, and every decision lands in a tamper-evident audit trail. You can fool the model; you can't talk past the runtime. Built for cybersecurity, where a wrong action is a breach.</em>
+  <em>Agents that take real action — move money, delete a resource, disable an account, isolate a host — where every risky step is policy-gated and human-approvable, and every decision lands in a tamper-evident audit trail. You can fool the model; you can't talk past the runtime. Proven first in security, where a wrong action is a breach.</em>
 </p>
 
 <p align="center">
