@@ -74,18 +74,42 @@ brains; Tulip makes its actions safe and provable.
 | [`examples/governed_soc_action.py`](examples/governed_soc_action.py) | Grounded finding → policy gate → execute **or hold-for-human** → tamper-evident audit you can replay. |
 | [`examples/grounding_ablation.py`](examples/grounding_ablation.py) | Honest ablation: same model, with vs without grounding. |
 
-## Your first agent — 5 lines
+## Drop it into the agent you already have
+
+Already have an agent (any framework) that takes actions? Add Tulip's gate +
+tamper-evident audit around the dangerous one — **~8 lines, no rebuild**:
+
+```python
+from tulip.security import Action, AuditTrail, SecurityPolicy, admit, AdmissionError
+
+trail = AuditTrail()
+
+async def safe_isolate(host: str):
+    try:
+        return await admit(
+            Action(name="isolate_host", asset=host, blast_radius=50, environment="production"),
+            lambda: my_edr.isolate(host),          # your code, any SDK / framework
+            policy=SecurityPolicy(), trail=trail,
+        )
+    except AdmissionError as e:
+        page_oncall(e.decision)                    # the gate held it; the trail has the record
+```
+
+Production-blast isolation now requires a human, the attempt is recorded in a
+hash-chained trail you can't forge, and your agent keeps working unchanged.
+**You can fool the model; you can't talk past the gate.**
+Try it: [`examples/can_you_make_it_go_rogue.py`](examples/can_you_make_it_go_rogue.py).
+
+## Build a full agent — 5 lines
 
 ```python
 from tulip.agent import Agent
-agent = Agent(model="openai:gpt-4o")
-print(agent.run_sync("Triage: outbound beaconing from 192.0.2.14 to a domain registered yesterday.").text)
-# → a one-paragraph verdict with the evidence that backs it
+agent = Agent(model="anthropic:claude-sonnet-4-6")
+print(agent.run_sync("Triage: outbound beaconing from 192.0.2.14 to a domain registered yesterday.").message)
 ```
 
-Construction, the model call, retries, and the reply all live behind that
-one class. Point `model=` at `"anthropic:claude-sonnet-4-6"` instead and
-nothing else moves.
+Construction, the model call, retries, and the reply all live behind that one
+class. Point `model=` at `"openai:gpt-4o"` instead and nothing else moves.
 
 ## Add a tool
 

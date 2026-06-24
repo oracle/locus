@@ -1,7 +1,12 @@
 # Contributing
 
-Tulip — the *Multi-Agent Reasoning Orchestrator SDK* — is
-vendor-neutral, production-tested, and open to everyone.
+Tulip — the SDK for **agents you can let act** (every risky action policy-gated,
+human-approvable, and recorded in a tamper-evident trail) — is vendor-neutral,
+production-tested, and open to everyone. The bar everywhere: *a result ships on
+evidence or it abstains; a side effect runs only gated and audited — never on
+best intentions.* New probes prove their success with an observable effect, and
+new actions go through `admit()`.
+
 This document covers how to set up a development environment, the
 review and sign-off process, the coding standards we hold the codebase
 to, and how to verify your change against the workbench end-to-end

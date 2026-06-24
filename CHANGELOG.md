@@ -6,6 +6,21 @@ onward — [Semantic Versioning](https://semver.org). See
 [`DEPRECATION.md`](DEPRECATION.md) for the deprecation and breaking-change
 policy.
 
+## [1.1.0] - 2026-06-24
+
+### Added
+
+- **Control-first repositioning — `admit()` as the headline.** The drop-in story:
+  add the admission gate + tamper-evident audit around the agent you already have
+  (any framework) in ~8 lines — risky actions are policy-gated and
+  human-approvable, and every decision is a hash-chained record you can replay and
+  cannot forge. New runnable examples: `can_you_make_it_go_rogue.py` (jailbreak the
+  model — the gate still blocks the action), `governed_soc_action.py`
+  (gate → hold-for-human → audit), `grounding_ablation.py` (same model ± grounding).
+- **`UnsandboxedCodeExecution` red-team probe** (OWASP ASI05) — effect-grounded
+  proof-of-execution via an unforgeable nonce digest; registered in the `owasp-asi`
+  suite. Response-only, target-agnostic, cannot false-positive.
+
 ## [Unreleased]
 
 ### Added
