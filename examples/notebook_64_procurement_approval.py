@@ -2,26 +2,20 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 
-"""Notebook 64: Security-tooling vendor evaluation with risk-tiered approval gates.
+"""Notebook 64: Vendor security review with risk-tiered approval gates.
 
-Before a new security vendor — a threat-intel feed, a managed SIEM, an
-EDR/MDR with active response — is wired into the SOC, it has to clear a
-tier-based escalation chain. The more access it gets (raw telemetry, the
-ability to isolate a host or run code on an endpoint), the more approvals
-it takes: a compromised security vendor is a supply-chain compromise of
-the security stack itself — the SolarWinds / Kaseya shape, OWASP ASI04
-agentic supply chain::
+Real third-party-risk programs have a tier-based escalation chain::
 
-    Vendor intake (security questionnaire on file)
+    Vendor intake (questionnaire on file)
        │
        ▼
-    Questionnaire analyst  (summarises the vendor's claimed security posture)
+    Questionnaire analyst  (summarises the vendor's security questionnaire)
        │
        ▼
-    Posture analyst  (what telemetry/access the vendor gets + blast radius)
+    Posture analyst  (assesses data exposure + control posture)
        │
        ▼
-    Risk-tier router ── score < 25 ──> auto-approve (read-only, low blast radius)
+    Risk-tier router ── score < 25 ──> auto-approve (low risk)
                      ── 25–49     ──> security-manager approval (interrupt)
                      ── 50–74     ──> manager + GRC approval (two interrupts)
                      ── >= 75     ──> manager + GRC + CISO approval (three interrupts)
@@ -32,10 +26,10 @@ agentic supply chain::
 Each approval gate is a separate interrupt() so a reviewer can come back
 to it later. The terminal node is SCRIBE, the SOC's compliance reporter:
 it emits a typed VendorDecision Pydantic model that files into the
-security vendor-risk register without parsing. A security vendor widens
-the agentic supply chain (OWASP ASI04), so the posture step is where you
-weigh attestations (SOC 2, ISO 27001) against the telemetry the vendor
-ingests and the response actions it could take.
+vendor-risk register without parsing. Third-party AI services widen the
+agentic supply chain (OWASP ASI04), so the posture step is where you
+weigh attestations (SOC 2, ISO 27001) against what data the vendor would
+actually touch.
 
 - Risk-tier router is a plain conditional edge — no DSL, no policy file.
 - Each gate is its own node — easy to add a tier, easy to re-order,
@@ -71,7 +65,7 @@ from tulip.multiagent.graph import END, START, StateGraph
 
 
 class VendorDecision(BaseModel):
-    """Final structured artifact filed into the security vendor-risk register."""
+    """Final structured artifact filed into the vendor-risk register."""
 
     request_id: str
     vendor: str
@@ -89,17 +83,15 @@ class VendorDecision(BaseModel):
 
 PROMPTS = {
     "questionnaire": (
-        "You are a SOC third-party-risk analyst. Given a security vendor's "
+        "You are a third-party-risk analyst. Given a vendor's security-"
         "questionnaire excerpt, write a two-sentence summary of the security "
         "posture the vendor claims."
     ),
     "posture": (
-        "You are a security-vendor assessor. Given a security vendor and the "
-        "service it provides, write a one-paragraph assessment covering: what "
-        "security telemetry or endpoint access the vendor would receive, the "
-        "response actions it could take (e.g. host isolation, code execution), "
-        "the attestations you would expect (SOC 2, ISO 27001), and the "
-        "supply-chain blast radius if the vendor itself were compromised."
+        "You are a vendor security assessor. Given a vendor and the service it "
+        "provides, write a one-paragraph assessment covering: the data the "
+        "vendor would touch, the attestations you would expect (SOC 2, ISO "
+        "27001), and any obvious exposure concerns for this category."
     ),
 }
 
@@ -246,7 +238,7 @@ async def record_decision(state: dict[str, Any]) -> dict[str, Any]:
             agent_id="scribe-decision-recorder",
             model=state["__model__"],
             system_prompt=(
-                "You are a security vendor-risk officer producing a VendorDecision. "
+                "You are a vendor-risk officer producing a VendorDecision. "
                 "Use the supplied fields verbatim. Don't invent vendors or scores."
             ),
             output_schema=VendorDecision,
@@ -365,7 +357,7 @@ async def _drive(graph: StateGraph, initial: dict[str, Any], answers: list[str])
 
 
 async def main() -> None:
-    print("Notebook 64: Security-tooling vendor evaluation with risk-tiered approval gates")
+    print("Notebook 64: Vendor security review with risk-tiered approval gates")
     print("=" * 60)
 
     model = get_model()
@@ -375,31 +367,31 @@ async def main() -> None:
     scenarios = [
         (
             "VSR-1001",
-            "IntelStream",
-            "threat-intel enrichment feed (read-only IOC/hash lookups, no telemetry egress)",
+            "PrintFleet Co",
+            "office print-management SaaS (no customer data)",
             12.0,
-            "SOC 2 Type II on file; SSO enforced; queries leave the org, no logs ingested.",
+            "SOC 2 Type II on file; SSO enforced; no PII processed.",
         ),
         (
             "VSR-1002",
-            "PhishLab",
-            "phishing-analysis sandbox (ingests submitted suspicious emails + attachments)",
+            "MailMetrics",
+            "marketing email analytics (contact emails only)",
             38.0,
-            "SOC 2 Type I; MFA optional for analysts; submissions may carry employee PII.",
+            "SOC 2 Type I; MFA optional for admins; data encrypted at rest.",
         ),
         (
             "VSR-1003",
-            "PanOptic SIEM",
-            "managed SIEM ingesting all security logs (auth, EDR, netflow) into vendor cloud",
+            "WarehouseQL",
+            "hosted analytics over a copy of the production database",
             62.0,
-            "ISO 27001 claimed, certificate expired; sub-processors undisclosed; full telemetry leaves the perimeter.",
+            "ISO 27001 claimed, certificate expired; sub-processors undisclosed.",
         ),
         (
             "VSR-1004",
-            "SentinelMDR",
-            "managed EDR/MDR with active response (can isolate hosts + run remediation on endpoints)",
+            "CloudPay",
+            "payroll processing (employee PII + bank details)",
             88.0,
-            "No current attestation; vendor breach disclosed in 2025; agent runs as SYSTEM on every host.",
+            "No current attestation; breach disclosed in 2025; remediation in progress.",
         ),
     ]
 
