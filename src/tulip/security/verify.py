@@ -241,7 +241,9 @@ def _describe(finding: FindingLike, v: _View) -> str:
     lines.append(f"GROUNDING SCORE: {v.gsar_score:.2f}")
     lines.append(f"STATED CONFIDENCE: {v.confidence:.2f}")
     lines.append(f"EVIDENCE REFERENCES ({len(v.evidence_refs)}):")
-    lines.extend(f"  - {r}" for r in v.evidence_refs) if v.evidence_refs else lines.append("  (none)")
+    lines.extend(f"  - {r}" for r in v.evidence_refs) if v.evidence_refs else lines.append(
+        "  (none)"
+    )
     lines.append("\nRefute this finding. Return JSON only.")
     return "\n".join(lines)
 
@@ -258,10 +260,13 @@ class AdversarialSkeptic:
 
     Pair it with :class:`EvidenceQualitySkeptic` in a panel::
 
-        await verify(finding, skeptics=[
-            EvidenceQualitySkeptic(),
-            AdversarialSkeptic("anthropic:claude-sonnet-4-6"),
-        ])
+        await verify(
+            finding,
+            skeptics=[
+                EvidenceQualitySkeptic(),
+                AdversarialSkeptic("anthropic:claude-sonnet-4-6"),
+            ],
+        )
     """
 
     name = "adversarial-llm"
@@ -299,7 +304,9 @@ class AdversarialSkeptic:
                 )
             ]
 
-        parsed = parse_structured(response.message.content or "{}", _AdversarialReview, strict=False)
+        parsed = parse_structured(
+            response.message.content or "{}", _AdversarialReview, strict=False
+        )
         if not parsed.success or parsed.parsed is None:
             return [
                 Refutation(

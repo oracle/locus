@@ -154,7 +154,9 @@ def main() -> None:
         bad = [
             n
             for n in names
-            if any(w in n.lower() for w in ("create", "delete", "put", "update", "attach", "remove"))
+            if any(
+                w in n.lower() for w in ("create", "delete", "put", "update", "attach", "remove")
+            )
             and "posture" not in n.lower()  # submit_posture is the output channel, not an AWS write
         ]
         record(
@@ -206,12 +208,21 @@ def main() -> None:
         record("fingerprint: measure_endpoint_timing", FAIL, f"{type(exc).__name__}: {exc}")
 
     # ── Credential / billable claims — reported, not run ─────────────────────
-    record("Clusiana: 94% model-ID, 1.2s probe, ~25% mitigation cost", SKIP,
-           "private clusiana repo; trace to eval_report.json + experiments/0007,0017,0018")
-    record("compute: live RunPod/Lambda GPU probe", SKIP,
-           "BILLABLE H100 spin-up — needs explicit auth + RUNPOD_API_KEY / LAMBDA_API_KEY")
-    record("integrations: live VirusTotal / Auth0 / SIEM / EDR", SKIP,
-           "needs vendor keys (source ~/.profile); VT + Auth0 previously live-verified")
+    record(
+        "Clusiana: 94% model-ID, 1.2s probe, ~25% mitigation cost",
+        SKIP,
+        "private clusiana repo; trace to eval_report.json + experiments/0007,0017,0018",
+    )
+    record(
+        "compute: live RunPod/Lambda GPU probe",
+        SKIP,
+        "BILLABLE H100 spin-up — needs explicit auth + RUNPOD_API_KEY / LAMBDA_API_KEY",
+    )
+    record(
+        "integrations: live VirusTotal / Auth0 / SIEM / EDR",
+        SKIP,
+        "needs vendor keys (source ~/.profile); VT + Auth0 previously live-verified",
+    )
 
     # ── report ───────────────────────────────────────────────────────────────
     print("\n" + "=" * 80)
