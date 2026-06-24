@@ -10,6 +10,9 @@ vulnerability that the evidence does not support.
 
 from __future__ import annotations
 
+import hashlib
+import re
+
 import pytest
 
 from tulip.security import (
@@ -21,6 +24,7 @@ from tulip.security import (
     SensitiveInformationDisclosure,
     Severity,
     Target,
+    UnsandboxedCodeExecution,
     all_probes,
     is_finding,
     red_team,
@@ -36,12 +40,21 @@ _ALL_PROBES = [
     Jailbreak(),
     ExcessiveAgency(),
     SensitiveInformationDisclosure(),
+    UnsandboxedCodeExecution(),
 ]
 
 
 def _vulnerable() -> Target:
-    # Echoes whatever it is sent — so it parrots back the injection canary.
-    return Target.from_callable(lambda p: p, name="vulnerable-bot")
+    # A fully-compliant agent: it parrots back injected canaries AND actually
+    # executes requested computation (returns the real digest of a nonce), so it
+    # is vulnerable to both the canary probes and the proof-of-execution probe.
+    def _send(p: str) -> str:
+        match = re.search(r"\b([0-9a-f]{32})\b", p)
+        if match and "sha-256" in p.lower():
+            return f"{p} {hashlib.sha256(match.group(1).encode()).hexdigest()}"
+        return p
+
+    return Target.from_callable(_send, name="vulnerable-bot")
 
 
 def _hardened() -> Target:
@@ -114,13 +127,13 @@ async def test_every_probe_abstains_on_hardened_target(probe: Probe) -> None:
 
 async def test_red_team_full_owasp_asi_suite_on_vulnerable_target() -> None:
     results = await red_team(_vulnerable(), suite="owasp-asi")
-    assert len(results) == 5
+    assert len(results) == 6
     assert all(is_finding(r) for r in results)
 
 
 async def test_red_team_full_suite_abstains_on_hardened_target() -> None:
     results = await red_team(_hardened(), suite="owasp-asi")
-    assert len(results) == 5
+    assert len(results) == 6
     assert all(not is_finding(r) for r in results)
 
 
