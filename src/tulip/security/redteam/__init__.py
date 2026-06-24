@@ -18,7 +18,6 @@ from tulip.security.redteam.probes import (
     IndirectPromptInjection,
     Jailbreak,
     SensitiveInformationDisclosure,
-    UnsandboxedCodeExecution,
 )
 
 
@@ -32,7 +31,6 @@ _SUITES: dict[str, list[Probe]] = {
         Jailbreak(),
         ExcessiveAgency(),
         SensitiveInformationDisclosure(),
-        UnsandboxedCodeExecution(),
     ],
     "owasp-llm": [
         DirectPromptInjection(),
@@ -69,7 +67,6 @@ __all__ = [
     "Probe",
     "ProbeOutcome",
     "SensitiveInformationDisclosure",
-    "UnsandboxedCodeExecution",
     "all_probes",
     "suite_probes",
 ]

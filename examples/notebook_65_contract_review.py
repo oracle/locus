@@ -2,9 +2,9 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 
-"""Notebook 65: DPA and security-addendum review for compliance gaps.
+"""Notebook 65: Security-vendor DPA review — breach-notice, encryption, IR-clause gaps.
 
-Reviewing a vendor's Data Processing Agreement involves multiple
+Reviewing a security vendor's Data Processing Agreement involves multiple
 stakeholders working in parallel, then a back-and-forth negotiation
 phase, then sign-off::
 
@@ -32,10 +32,13 @@ phase, then sign-off::
                                                 ▼
                                           ContractDecision (typed)
 
-The DPA governs a processor in the AI stack's supply chain (OWASP ASI04),
-so a weak breach-notification window or a missing audit right is a real
-control gap, not a paperwork nit. SCRIBE — the SOC's compliance reporter
-— writes the typed sign-off.
+The processor here is a managed-SIEM / MDR vendor that ingests your
+security telemetry — a security supplier in the SOC's own supply chain
+(OWASP ASI04). A weak breach-notification window or a missing audit right
+on the vendor that holds your security logs is a compounding control gap,
+not a paperwork nit: its incident-response obligations should track the
+NIST 800-61 timeline you hold yourself to. SCRIBE — the SOC's compliance
+reporter — writes the typed sign-off.
 
 - Send: three reviewers run concurrently.
 - add_conditional_edges with cycles enabled: negotiation can loop back
@@ -100,9 +103,11 @@ PROMPTS = {
         "BLOCKERS=<count>."
     ),
     "security": (
-        "You are a security-assurance reviewer. Identify concrete security-"
-        "control gaps (encryption commitments, audit rights, incident-response "
-        "obligations). Bullets. End with: BLOCKERS=<count>."
+        "You are a security-assurance reviewer assessing a vendor that will "
+        "hold the SOC's security telemetry. Identify concrete security-control "
+        "gaps (encryption commitments, audit rights, and incident-response "
+        "obligations — the breach-notification window should track NIST 800-61 "
+        "timelines). Bullets. End with: BLOCKERS=<count>."
     ),
     "compliance": (
         "You are a compliance analyst. Identify certification and regulatory "
@@ -351,14 +356,15 @@ SAMPLE_CONTRACT = """\
 DATA PROCESSING ADDENDUM — EXCERPT
 
 This Data Processing Addendum ("DPA") is entered into by and between
-MegaCorp Cloud Solutions, Inc. ("Vendor", the processor) and the customer
+SentinelStream Managed SIEM, Inc. ("Vendor", the processor) and the customer
 entity named on the order form ("Customer", the controller), and forms part
 of the Master Services Agreement between the parties.
 
 1. PROCESSING AND SUB-PROCESSORS
 
-1.1 Vendor processes Customer Personal Data to provide the Services as
-described in the applicable order form.
+1.1 Vendor processes Customer Personal Data and security telemetry (logs,
+alerts, endpoint events) to provide the managed-SIEM Services as described
+in the applicable order form.
 
 1.2 Vendor may appoint sub-processors at its sole discretion and without
 prior notice to Customer. A list of current sub-processors is available on
@@ -476,14 +482,14 @@ def _print_decision(d: ContractDecision | None) -> None:
 
 
 async def main() -> None:
-    print("Notebook 65: DPA / security-addendum review")
+    print("Notebook 65: Security-vendor DPA / security-addendum review")
     print("=" * 60)
 
     model = get_model()
     graph = build_review_graph()
     initial = {
         "contract_id": "DPA-2026-0815",
-        "counterparty": "MegaCorp Cloud Solutions",
+        "counterparty": "SentinelStream Managed SIEM",
         "contract_text": SAMPLE_CONTRACT,
         "__model__": model,
     }
