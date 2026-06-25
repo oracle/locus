@@ -18,14 +18,16 @@ from __future__ import annotations
 import asyncio
 from dataclasses import replace
 
-from tulip.reasoning.gsar import Partition
-from tulip.security import (
+from tulip.control import (
     Action,
     AdmissionError,
     AuditTrail,
-    SecurityPolicy,
-    Severity,
+    ControlPolicy,
     admit,
+)
+from tulip.reasoning.gsar import Partition
+from tulip.security import (
+    Severity,
     ground_finding,
     is_finding,
     tool_match,
@@ -54,7 +56,7 @@ def grounded_finding():
 
 
 async def main() -> None:
-    policy = SecurityPolicy()  # defaults: verify>=0.80, blast<=1, production->human
+    policy = ControlPolicy()  # defaults: verify>=0.80, blast<=1, production->human
     trail = AuditTrail()
 
     f = grounded_finding()
@@ -110,7 +112,7 @@ async def main() -> None:
         )
 
     # C) Hard-denied label (irreversible) -> DENY.
-    deny_policy = SecurityPolicy(deny_for=frozenset({"irreversible"}))
+    deny_policy = ControlPolicy(deny_for=frozenset({"irreversible"}))
     c = Action(
         name="wipe_disk", asset="ws-7", environment="staging", tags=frozenset({"irreversible"})
     )

@@ -10,7 +10,7 @@ goes live: can someone **inject instructions** into it (directly, or via a
 poisoned KB doc), and can they make it **leak data** it was told to protect?
 
 This notebook points Tulip at a support bot and runs the OWASP-ASI / MITRE-ATLAS
-suite, then prints graded results — a `Finding` (the attack worked, here's the
+suite, then prints graded results — a `Evidence` (the attack worked, here's the
 evidence) or an `Abstention` (no proof, so no claim). It assesses two versions:
 a *naive* bot with no trust boundary, and a *hardened* one.
 

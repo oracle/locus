@@ -3,7 +3,7 @@
 
 """Unit tests for ``tulip.security`` — evidence-grounded findings.
 
-Covers the core invariant — a ``Finding`` only exists when its evidence
+Covers the core invariant — a ``Evidence`` only exists when its evidence
 clears the GSAR proceed threshold, otherwise an ``Abstention`` is
 returned — plus the schema, taxonomy, and fingerprint surfaces.
 """
@@ -23,7 +23,7 @@ from tulip.reasoning.gsar import (
 from tulip.security import (
     Abstention,
     AtlasTechnique,
-    Finding,
+    Evidence,
     FingerprintClassifier,
     FingerprintFinding,
     FingerprintVerdict,
@@ -98,9 +98,9 @@ def test_finding_is_frozen() -> None:
 
 
 def test_no_finding_without_score() -> None:
-    """A Finding cannot be constructed without a grounding score."""
+    """A Evidence cannot be constructed without a grounding score."""
     with pytest.raises(ValidationError):
-        Finding(  # type: ignore[call-arg]
+        Evidence(  # type: ignore[call-arg]
             title="t",
             description="d",
             severity=Severity.LOW,

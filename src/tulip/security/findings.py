@@ -3,10 +3,10 @@
 
 """Typed security findings — the artifacts a Tulip security agent emits.
 
-A :class:`Finding` is the unit a SOC consumes: a titled, severity-banded
+A :class:`Evidence` is the unit a SOC consumes: a titled, severity-banded
 statement about an asset, tagged with the threat taxonomy, and — the part
 that matters — carrying the grounding score and evidence references that
-admitted it. There is no public path that builds a ``Finding`` without a
+admitted it. There is no public path that builds a ``Evidence`` without a
 grounding score; the sanctioned factory is
 :func:`tulip.security.ground_finding`, which only returns one when its
 evidence clears the GSAR threshold. An ungrounded finding is therefore a
@@ -44,11 +44,11 @@ class Indicator(BaseModel):
     model_config = {"frozen": True}
 
 
-class Finding(BaseModel):
+class Evidence(BaseModel):
     """A grounded security finding.
 
     The ``gsar_score`` and ``evidence_refs`` fields are required: a
-    ``Finding`` always knows how strongly it is grounded and what it is
+    ``Evidence`` always knows how strongly it is grounded and what it is
     grounded in. Build findings via :func:`tulip.security.ground_finding`
     rather than constructing them directly — that is the path that
     enforces the grounding threshold.
@@ -117,8 +117,8 @@ class FingerprintClassifier(Protocol):
     def __call__(self, features: Mapping[str, float]) -> FingerprintVerdict: ...
 
 
-class FingerprintFinding(Finding):
-    """A :class:`Finding` specialised for inference fingerprinting.
+class FingerprintFinding(Evidence):
+    """A :class:`Evidence` specialised for inference fingerprinting.
 
     Carries the :class:`FingerprintVerdict` whose feature vector is the
     finding's evidence.
@@ -131,7 +131,7 @@ class FingerprintFinding(Finding):
 
 __all__ = [
     "Confidence",
-    "Finding",
+    "Evidence",
     "FingerprintClassifier",
     "FingerprintFinding",
     "FingerprintVerdict",

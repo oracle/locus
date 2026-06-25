@@ -6,7 +6,7 @@
 
 Scenario
 ────────
-A ransomware alert fires at 2 AM.  A ``SecureAgent`` runs the
+A ransomware alert fires at 2 AM.  A ``GovernedAgent`` runs the
 ``nist_800_61_r3`` IR playbook (detect → contain → eradicate → recover).
 Every tool call — host isolation, SIEM query, IOC enrichment — is logged to
 an immutable ``AuditTrail`` via ``AuditHook``.
@@ -25,7 +25,7 @@ without an immutable audit log are a liability.  If the agent is later
 questioned — "why was this server taken offline?" — "the AI decided" is not
 a defensible answer.  This demo shows that the SDK provides:
 
-  1. ``SecurityProfile(audit=True)`` — all tool calls go through ``AuditHook``
+  1. ``GovernanceProfile(audit=True)`` — all tool calls go through ``AuditHook``
   2. ``AuditTrail.verify()`` — cryptographic integrity before export
   3. ``AuditTrail.export_jsonl()`` — SIEM-ready output for legal hold
 
@@ -53,13 +53,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from config import get_model  # noqa: E402
 
-from tulip.security import (
+from tulip.control import (
     AuditHook,
     AuditTrail,
-    SecurityProfile,
+    GovernanceProfile,
+    governed_agent,
+)
+from tulip.security import (
     Severity,
     nist_800_61_ir,
-    secure_agent,
     security_toolset,
 )
 from tulip.security.taxonomy import AtlasTechnique, OwaspASI
@@ -113,7 +115,7 @@ async def run_incident_response(incident: str) -> None:
     # Input guardrails are off here because the incident brief arrives from
     # the SIEM (trusted internal source), not from an untrusted user.
     # Output guardrails (PII, injection in model output) remain on via grounding.
-    profile = SecurityProfile(grounding=True, guardrails=False, audit=True)
+    profile = GovernanceProfile(grounding=True, guardrails=False, audit=True)
     hook = AuditHook(trail)
 
     playbook = nist_800_61_ir()
@@ -127,7 +129,7 @@ async def run_incident_response(incident: str) -> None:
         allow_containment=True,  # opt-in: enables isolate_host
     )
 
-    agent = secure_agent(
+    agent = governed_agent(
         model=get_model(),
         tools=tools,
         system_prompt=(

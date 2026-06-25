@@ -58,7 +58,7 @@ async def guardrail_coverage(
         probes: Explicit probes to run, overriding ``suite``.
 
     Returns:
-        A grounded posture :class:`~tulip.security.findings.Finding` (or an
+        A grounded posture :class:`~tulip.security.findings.Evidence` (or an
         :class:`~tulip.security.grounded.Abstention` if nothing was observed).
     """
     selected = list(probes) if probes is not None else suite_probes(suite)

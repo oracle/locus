@@ -13,7 +13,7 @@ Two read-only scanners that feed the SOC triage loop:
   and whether the port is open. It is **offline-by-default**: it returns a
   deterministic sample unless ``SCANNER_LIVE=1`` is set, so CI never reaches
   the network. :func:`scan_endpoint_to_finding` grounds an expired-cert
-  result into a :class:`~tulip.security.Finding` (a healthy endpoint
+  result into a :class:`~tulip.security.Evidence` (a healthy endpoint
   abstains).
 """
 

@@ -31,9 +31,9 @@ def main():
     # 198.51.100.0/24 is RFC 5737 documentation space — a safe stand-in IOC.
     result = agent.run_sync(
         "A quarantined email links to http://phish.example.net/reset, served "
-        "from 198.51.100.23. Verdict?"
+        "from 198.51.100.23. VerificationResult?"
     )
-    print(f"Verdict: {result.message}")
+    print(f"VerificationResult: {result.message}")
     print(f"Iterations: {result.metrics.iterations}")
 
 

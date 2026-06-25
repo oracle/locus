@@ -4,11 +4,11 @@
 """Policy + approval — safe-before-action, the way a CISO reasons about it.
 
 An agent that *finds* something still must not *act* on its own authority. A
-`SecurityPolicy` encodes the rules a security org actually has — how strong the
+`ControlPolicy` encodes the rules a security org actually has — how strong the
 verification must be, how large a blast radius may auto-proceed, and which
 actions always need a human — and :func:`approve` weighs a proposed
-:class:`Action` against the **evidence** (the grounded `Finding`), the
-**verification** (the :class:`~tulip.security.verify.Verdict`), and the policy
+:class:`Action` against the **evidence** (the grounded `Evidence`), the
+**verification** (the :class:`~tulip.security.verify.VerificationResult`), and the policy
 to return an :class:`ApprovalDecision`: allow, require a human, or deny.
 
 This is the "safe before action" half of the trust quartet (grounded · verified
@@ -20,9 +20,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from tulip.security.findings import Finding
+from tulip.security.findings import Evidence
 from tulip.security.taxonomy import Severity, severity_at_least
-from tulip.security.verify import Verdict
+from tulip.security.verify import VerificationResult
 
 
 class ApprovalOutcome:
@@ -38,10 +38,10 @@ _ORDER = {ApprovalOutcome.ALLOW: 0, ApprovalOutcome.REQUIRE_HUMAN: 1, ApprovalOu
 
 
 @dataclass(frozen=True)
-class SecurityPolicy:
+class ControlPolicy:
     """The CISO knobs. Defaults are conservative — auto-allow only the safe path.
 
-    - ``require_verification_score``: minimum :class:`Verdict` confidence to
+    - ``require_verification_score``: minimum :class:`VerificationResult` confidence to
       auto-allow; below it (or with no verdict) a human is required.
     - ``max_blast_radius``: most assets an action may affect to auto-allow.
     - ``require_human_for``: action labels (environment / kind / tag) that always
@@ -90,9 +90,9 @@ class ApprovalDecision:
 def approve(
     action: Action,
     *,
-    policy: SecurityPolicy,
-    finding: Finding | None = None,
-    verdict: Verdict | None = None,
+    policy: ControlPolicy,
+    finding: Evidence | None = None,
+    verdict: VerificationResult | None = None,
 ) -> ApprovalDecision:
     """Decide whether ``action`` may proceed: allow / require_human / deny.
 
@@ -102,7 +102,7 @@ def approve(
 
     Args:
         action: The proposed action.
-        policy: The governing :class:`SecurityPolicy`.
+        policy: The governing :class:`ControlPolicy`.
         finding: The evidence the action responds to (optional).
         verdict: The :func:`~tulip.security.verify.verify` result (optional, but
             auto-allow needs one that clears the policy bar).
@@ -174,6 +174,6 @@ __all__ = [
     "Action",
     "ApprovalDecision",
     "ApprovalOutcome",
-    "SecurityPolicy",
+    "ControlPolicy",
     "approve",
 ]

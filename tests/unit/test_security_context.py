@@ -7,16 +7,15 @@ from __future__ import annotations
 
 from typing import Any
 
+from tulip.control import Action, ApprovalOutcome
 from tulip.security import (
-    Action,
-    ApprovalOutcome,
     CloudSource,
     EndpointSource,
     IdentitySource,
     LogSource,
     SecurityContext,
     ThreatIntelSource,
-    Verdict,
+    VerificationResult,
 )
 from tulip.security.context import _RefCloud, _RefEndpoint, _RefIdentity, _RefLogs
 
@@ -58,7 +57,7 @@ async def test_threat_intel_and_cloud_return_dicts() -> None:
 
 async def test_actions_gates_via_policy() -> None:
     ctx = SecurityContext()
-    verdict = Verdict(survives=True, confidence=0.95, evidence_quality=0.95)
+    verdict = VerificationResult(survives=True, confidence=0.95, evidence_quality=0.95)
     decision = ctx.actions.request_approval(
         Action(name="quarantine", asset="WS-0142", blast_radius=1, environment="staging"),
         verdict=verdict,

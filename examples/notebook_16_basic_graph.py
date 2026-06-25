@@ -129,7 +129,7 @@ async def example_sequence():
     print("Input:    report = '  user clicked link to phish.example.net  '")
     print(f"Parsed:   has_content = {result.final_state.get('has_content')}")
     print(f"Enriched: mentions_lure_domain = {result.final_state.get('mentions_lure_domain')}")
-    print(f"Verdict:  {result.final_state.get('verdict')}")
+    print(f"VerificationResult:  {result.final_state.get('verdict')}")
     print()
 
 

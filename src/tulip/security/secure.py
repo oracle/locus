@@ -4,7 +4,7 @@
 """Secure-by-default agents — the floor a trustworthy security agent stands on.
 
 An agent that red-teams or assures *other* AI must itself be trustworthy.
-:func:`secure_agent` builds a :class:`tulip.Agent` with the security spine
+:func:`governed_agent` builds a :class:`tulip.Agent` with the security spine
 turned on by default: GSAR grounding (abstain rather than fabricate),
 input/output guardrails (PII redaction, injection checks, tool allowlist),
 and a tamper-evident :class:`~tulip.security.audit.AuditTrail` of every action.
@@ -32,8 +32,8 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
-class SecurityProfile:
-    """Which secure-by-default controls a :func:`secure_agent` turns on.
+class GovernanceProfile:
+    """Which secure-by-default controls a :func:`governed_agent` turns on.
 
     All on by default — that is what makes the agent secure out of the box.
     """
@@ -92,7 +92,7 @@ class AuditHook(HookProvider):
 
 
 @dataclass(frozen=True)
-class SecureAgent:
+class GovernedAgent:
     """A secure-by-default :class:`tulip.Agent` plus its audit trail.
 
     ``run`` / ``run_sync`` pass through to the wrapped agent; ``audit_trail``
@@ -101,7 +101,7 @@ class SecureAgent:
 
     agent: Agent
     audit_trail: AuditTrail
-    profile: SecurityProfile
+    profile: GovernanceProfile
 
     def run(self, prompt: str, **kwargs: Any) -> Any:
         return self.agent.run(prompt, **kwargs)
@@ -110,16 +110,16 @@ class SecureAgent:
         return self.agent.run_sync(prompt, **kwargs)
 
 
-def secure_agent(
+def governed_agent(
     model: Any = None,
     tools: list[Any] | None = None,
     *,
     system_prompt: str | None = None,
-    profile: SecurityProfile | None = None,
+    profile: GovernanceProfile | None = None,
     audit_trail: AuditTrail | None = None,
     hooks: list[Any] | None = None,
     **kwargs: Any,
-) -> SecureAgent:
+) -> GovernedAgent:
     """Build a secure-by-default agent: grounded, guarded, and audited.
 
     Args:
@@ -132,9 +132,9 @@ def secure_agent(
         **kwargs: Passed through to :class:`tulip.Agent`.
 
     Returns:
-        A :class:`SecureAgent` wrapping the configured agent and its audit trail.
+        A :class:`GovernedAgent` wrapping the configured agent and its audit trail.
     """
-    profile = profile or SecurityProfile()
+    profile = profile or GovernanceProfile()
     # NB: an empty AuditTrail is falsy (len 0), so check identity, not truthiness.
     trail = audit_trail if audit_trail is not None else AuditTrail()
     hook_list: list[Any] = list(hooks or [])
@@ -150,7 +150,7 @@ def secure_agent(
         hooks=hook_list,
         **kwargs,
     )
-    return SecureAgent(agent=agent, audit_trail=trail, profile=profile)
+    return GovernedAgent(agent=agent, audit_trail=trail, profile=profile)
 
 
-__all__ = ["AuditHook", "SecureAgent", "SecurityProfile", "secure_agent"]
+__all__ = ["AuditHook", "GovernedAgent", "GovernanceProfile", "governed_agent"]

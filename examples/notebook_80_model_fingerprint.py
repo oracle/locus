@@ -51,9 +51,9 @@ from __future__ import annotations
 import asyncio
 import os
 
+from tulip.control import AuditTrail
 from tulip.security import (
     FEATURE_KEYS,
-    AuditTrail,
     fingerprint_to_finding,
     is_finding,
     measure_endpoint_timing,
@@ -73,7 +73,7 @@ _MODEL = os.environ.get("FINGERPRINT_MODEL", "gpt-4o-mini")
 # More samples = better feature coverage but more API cost and latency.
 _SAMPLES = int(os.environ.get("FINGERPRINT_SAMPLES", "10"))
 
-# Human-readable asset name for the Finding (e.g., the vendor + contract ref).
+# Human-readable asset name for the Evidence (e.g., the vendor + contract ref).
 _ASSET = os.environ.get("FINGERPRINT_ASSET", "vendor-inference-api")
 
 

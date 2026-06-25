@@ -35,7 +35,7 @@ import json
 from typing import Any
 
 from tulip.security.adapter import SecurityAdapter
-from tulip.security.findings import Finding
+from tulip.security.findings import Evidence
 from tulip.security.grounded import Abstention, GroundedFinding
 from tulip.tools.decorator import Tool
 
@@ -72,15 +72,15 @@ async def assert_tool_returns_json(tool: Tool, *args: Any, **kwargs: Any) -> Any
 
 
 def assert_grounds_or_abstains(result: GroundedFinding) -> GroundedFinding:
-    """Assert a ``*_to_finding`` result is a grounded :class:`Finding` or an :class:`Abstention`.
+    """Assert a ``*_to_finding`` result is a grounded :class:`Evidence` or an :class:`Abstention`.
 
     A shipped finding must carry a score in ``[0, 1]`` and at least one evidence
     ref — the abstain-by-construction guarantee.
     """
-    assert isinstance(result, (Finding, Abstention)), "must be a Finding or an Abstention"
-    if isinstance(result, Finding):
+    assert isinstance(result, (Evidence, Abstention)), "must be a Evidence or an Abstention"
+    if isinstance(result, Evidence):
         assert 0.0 <= result.gsar_score <= 1.0, "gsar_score out of range"
-        assert result.evidence_refs, "a shipped Finding must carry evidence refs"
+        assert result.evidence_refs, "a shipped Evidence must carry evidence refs"
     return result
 
 

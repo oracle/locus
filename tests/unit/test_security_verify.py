@@ -10,20 +10,20 @@ Works on Tulip Findings and on finding-shaped mappings from any other framework.
 from __future__ import annotations
 
 from tulip.security import (
+    Evidence,
     EvidenceQualitySkeptic,
-    Finding,
     Refutation,
     Severity,
     Skeptic,
-    Verdict,
+    VerificationResult,
     verify,
 )
 from tulip.security.verify import FindingLike
 
 
-def _strong_finding() -> Finding:
+def _strong_finding() -> Evidence:
     # Two tool-backed evidence refs, cleared grounding at 1.0 — should survive.
-    return Finding(
+    return Evidence(
         title="Direct prompt injection on bot",
         description="Target echoed the injected canary.",
         severity=Severity.HIGH,
@@ -37,7 +37,7 @@ def _strong_finding() -> Finding:
 
 async def test_strong_finding_survives() -> None:
     verdict = await verify(_strong_finding())
-    assert isinstance(verdict, Verdict)
+    assert isinstance(verdict, VerificationResult)
     assert verdict.survives
     assert verdict.confidence >= 0.8
     assert verdict.refutations == []
@@ -61,7 +61,7 @@ async def test_ungrounded_external_finding_does_not_survive() -> None:
 
 
 async def test_single_ref_high_severity_raises_concern_but_can_survive() -> None:
-    finding = Finding(
+    finding = Evidence(
         title="Expired TLS cert",
         description="…",
         severity=Severity.HIGH,
@@ -101,7 +101,7 @@ async def test_confidence_threshold_is_respected() -> None:
     # gsar 1.0, no refutations -> confidence 1.0 -> survives even at 0.99
     assert verdict.survives
     # but a single-ref high-sev (confidence 0.8) fails a 0.9 bar
-    one_ref = Finding(
+    one_ref = Evidence(
         title="x",
         description="x",
         severity=Severity.HIGH,

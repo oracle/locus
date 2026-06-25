@@ -9,12 +9,12 @@ GSAR :class:`~tulip.reasoning.gsar.Partition` of its claims, scores the
 partition with the existing :func:`~tulip.reasoning.gsar.gsar_score` /
 :func:`~tulip.reasoning.gsar.decide` functions, and:
 
-- returns a :class:`~tulip.security.findings.Finding` **only** when the
+- returns a :class:`~tulip.security.findings.Evidence` **only** when the
   decision is :attr:`~tulip.reasoning.gsar.Decision.PROCEED`;
 - otherwise returns an :class:`Abstention` recording why it did not ship.
 
 An ungrounded finding is a false positive by construction — the caller
-literally cannot get a ``Finding`` back for one. Abstentions are kept
+literally cannot get a ``Evidence`` back for one. Abstentions are kept
 (not discarded) so the non-finding is auditable: a SOC can review what
 the agent declined to assert and why.
 """
@@ -36,7 +36,7 @@ from tulip.reasoning.gsar import (
 )
 from tulip.security.findings import (
     Confidence,
-    Finding,
+    Evidence,
     FingerprintFinding,
     FingerprintVerdict,
     Indicator,
@@ -61,12 +61,12 @@ class Abstention(BaseModel):
 
 # A grounding call yields either a shipped finding or an audited
 # abstention; callers branch on the type (use :func:`is_finding`).
-GroundedFinding = Finding | Abstention
+GroundedFinding = Evidence | Abstention
 
 
-def is_finding(result: GroundedFinding) -> TypeGuard[Finding]:
-    """Narrow a :data:`GroundedFinding` to :class:`Finding` (vs Abstention)."""
-    return isinstance(result, Finding)
+def is_finding(result: GroundedFinding) -> TypeGuard[Evidence]:
+    """Narrow a :data:`GroundedFinding` to :class:`Evidence` (vs Abstention)."""
+    return isinstance(result, Evidence)
 
 
 def _evidence_refs(partition: Partition) -> list[str]:
@@ -102,12 +102,12 @@ def ground_finding(
     weight_map: dict[EvidenceType, float] | None = None,
     contradiction_penalty: float = DEFAULT_CONTRADICTION_PENALTY,
 ) -> GroundedFinding:
-    """Emit a :class:`Finding` only if its evidence clears the GSAR threshold.
+    """Emit a :class:`Evidence` only if its evidence clears the GSAR threshold.
 
     Scores ``partition`` with :func:`~tulip.reasoning.gsar.gsar_score` and
     routes it through :func:`~tulip.reasoning.gsar.decide`. On
     :attr:`~tulip.reasoning.gsar.Decision.PROCEED` returns a
-    :class:`Finding` carrying the score and the partition's flattened
+    :class:`Evidence` carrying the score and the partition's flattened
     evidence refs; otherwise returns an :class:`Abstention`.
 
     Args:
@@ -126,7 +126,7 @@ def ground_finding(
             :func:`~tulip.reasoning.gsar.gsar_score`.
 
     Returns:
-        A :class:`Finding` when grounded, else an :class:`Abstention`.
+        A :class:`Evidence` when grounded, else an :class:`Abstention`.
     """
     score = gsar_score(
         partition,
@@ -141,7 +141,7 @@ def ground_finding(
             candidate_title=title,
             reason=_abstention_reason(partition, decision),
         )
-    return Finding(
+    return Evidence(
         title=title,
         description=description,
         severity=severity,

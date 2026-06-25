@@ -13,14 +13,15 @@ actions. ``perform`` fires only if :func:`~tulip.security.policy.approve` return
 ALLOW; otherwise it raises :class:`AdmissionError`. Either way the decision is
 appended to the audit trail, so there is **no un-recorded path to a side effect**::
 
-    from tulip.security import Action, SecurityPolicy, admit, verify, AuditTrail
+    from tulip.control import Action, ControlPolicy, admit, AuditTrail
+    from tulip.security import verify
 
     trail = AuditTrail()
     verdict = await verify(finding)
     await admit(
         Action(name="disable_user", asset="mallory@corp", environment="production"),
         lambda: ctx.identity.disable("mallory@corp"),  # the side effect
-        policy=SecurityPolicy(),
+        policy=ControlPolicy(),
         finding=finding,
         verdict=verdict,
         trail=trail,
@@ -34,9 +35,9 @@ from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
 from tulip.security.audit import AuditTrail
-from tulip.security.findings import Finding
-from tulip.security.policy import Action, ApprovalDecision, SecurityPolicy, approve
-from tulip.security.verify import Verdict
+from tulip.security.findings import Evidence
+from tulip.security.policy import Action, ApprovalDecision, ControlPolicy, approve
+from tulip.security.verify import VerificationResult
 
 
 T = TypeVar("T")
@@ -60,9 +61,9 @@ async def admit(
     action: Action,
     perform: Callable[[], Awaitable[T]],
     *,
-    policy: SecurityPolicy,
-    finding: Finding | None = None,
-    verdict: Verdict | None = None,
+    policy: ControlPolicy,
+    finding: Evidence | None = None,
+    verdict: VerificationResult | None = None,
     trail: AuditTrail | None = None,
 ) -> T:
     """Run ``perform`` only if ``action`` clears the trust chain; else reject.
@@ -79,7 +80,7 @@ async def admit(
     Args:
         action: The proposed side-effecting action.
         perform: A zero-arg async callable that performs the side effect.
-        policy: The governing :class:`~tulip.security.policy.SecurityPolicy`.
+        policy: The governing :class:`~tulip.security.policy.ControlPolicy`.
         finding: The evidence the action responds to.
         verdict: The :func:`~tulip.security.verify.verify` result.
         trail: An :class:`~tulip.security.audit.AuditTrail` to record the decision on.

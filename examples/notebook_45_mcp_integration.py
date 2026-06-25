@@ -446,7 +446,7 @@ async def example_fingerprint_probe():
     verdict = _classify_fingerprint(full)
     print(f"Measured features (full): {full}")
     print(
-        f"  Verdict: {verdict.model} / {verdict.engine} / {verdict.hardware} "
+        f"  VerificationResult: {verdict.model} / {verdict.engine} / {verdict.hardware} "
         f"(confidence={verdict.confidence}, coverage={verdict.feature_coverage})"
     )
 
@@ -486,7 +486,7 @@ async def example_fingerprint_probe():
     weak_verdict = _classify_fingerprint(sparse)
     print(f"\nMeasured features (sparse): {sparse}")
     print(
-        f"  Verdict coverage={weak_verdict.feature_coverage}, confidence={weak_verdict.confidence}"
+        f"  VerificationResult coverage={weak_verdict.feature_coverage}, confidence={weak_verdict.confidence}"
     )
     abstained = ground_fingerprint(
         verdict=weak_verdict,

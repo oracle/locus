@@ -15,13 +15,15 @@ from __future__ import annotations
 
 import pytest
 
-from tulip.security import (
+from tulip.control import (
     Action,
     ApprovalOutcome,
     AuditTrail,
-    SecurityPolicy,
-    Target,
+    ControlPolicy,
     approve,
+)
+from tulip.security import (
+    Target,
     is_finding,
     red_team,
     verify,
@@ -41,7 +43,7 @@ def _hardened() -> Target:
 
 async def test_trust_pipeline_allows_a_verified_finding_and_audits_it() -> None:
     trail = AuditTrail()
-    policy = SecurityPolicy(require_verification_score=0.8, max_blast_radius=1)
+    policy = ControlPolicy(require_verification_score=0.8, max_blast_radius=1)
 
     # 1. Attack → grounded findings.
     report = await red_team(_vulnerable(), suite="owasp-asi")
@@ -78,7 +80,7 @@ async def test_pipeline_blocks_unverifiable_external_finding() -> None:
     assert not verdict.survives
     decision = approve(
         Action(name="isolate_host", environment="production"),
-        policy=SecurityPolicy(),
+        policy=ControlPolicy(),
         verdict=verdict,
     )
     assert decision.outcome == ApprovalOutcome.DENY

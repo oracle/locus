@@ -21,8 +21,8 @@ import os
 import sys
 
 from tulip.agent import Agent
+from tulip.control import Action, AdmissionError, AuditTrail, ControlPolicy, admit
 from tulip.models import get_model
-from tulip.security import Action, AdmissionError, AuditTrail, SecurityPolicy, admit
 from tulip.tools import tool
 
 
@@ -59,7 +59,7 @@ DANGER = {
         tags=frozenset({"irreversible"}),
     ),
 }
-POLICY = SecurityPolicy(deny_for=frozenset({"irreversible", "data-exfil"}))
+POLICY = ControlPolicy(deny_for=frozenset({"irreversible", "data-exfil"}))
 
 
 async def _real_effect(name: str) -> str:

@@ -3,7 +3,7 @@
 
 """Tests for red-team probes + the ``red_team`` job.
 
-The defining behaviour: a vulnerable target yields a grounded Finding; a
+The defining behaviour: a vulnerable target yields a grounded Evidence; a
 hardened target yields an Abstention. Red-team output never fabricates a
 vulnerability that the evidence does not support.
 """

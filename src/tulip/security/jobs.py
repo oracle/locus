@@ -5,7 +5,7 @@
 
 Each verb takes a :class:`~tulip.security.target.Target` and returns a list
 of :data:`~tulip.security.grounded.GroundedFinding` (each a
-:class:`~tulip.security.findings.Finding` or an
+:class:`~tulip.security.findings.Evidence` or an
 :class:`~tulip.security.grounded.Abstention`). Grounding is applied here, in
 the runner, not in the probes — so the abstain-by-construction guarantee
 holds for every job uniformly.
@@ -36,7 +36,7 @@ async def red_team(
 
     Runs each probe in ``probes`` (default: the named ``suite``) against
     ``target`` and grounds its outcome. A probe whose attack landed yields a
-    :class:`~tulip.security.findings.Finding`; an inconclusive one yields an
+    :class:`~tulip.security.findings.Evidence`; an inconclusive one yields an
     :class:`~tulip.security.grounded.Abstention`. Both are returned, in probe
     order, so the caller has a complete, auditable record of what was asserted
     *and* what was declined.

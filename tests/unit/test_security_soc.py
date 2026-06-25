@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from tulip.security import (
     Abstention,
-    Finding,
+    Evidence,
     PostureEvidence,
     PostureFinding,
     PostureReport,
@@ -82,7 +82,7 @@ class TestGroundReport:
         out = ground_report(report)
         assert len(out) == 1
         assert is_finding(out[0])
-        assert isinstance(out[0], Finding)
+        assert isinstance(out[0], Evidence)
         assert out[0].gsar_score >= 0.6
 
     def test_speculative_finding_abstains(self) -> None:
