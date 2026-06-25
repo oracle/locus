@@ -56,10 +56,14 @@ brains; Tulip makes its actions safe and provable.
 
 - **Agents that act, not just advise.** Most agents are stuck at read-only
   suggestions because nobody trusts them to pull the trigger. Tulip's admission
-  gate (`admit` / `approve`) lets an agent take real response actions safely — and
-  a bare LLM reaching for something dangerous gets **stopped cold**.
+  gate (`admit` / `approve`) lets an agent take real actions safely — issue a
+  refund, roll out a deploy, grant access, isolate a host — and a bare LLM
+  reaching for something dangerous gets **stopped cold**.
 - **Tamper-evident audit.** Every action and decision is a hash-chained record you
-  can replay and **cannot forge** — SOC/forensics-ready.
+  can replay; any edit to a sealed record breaks the chain against a trusted head
+  hash, so tampering is **detectable** — SOC/forensics-ready. (It's a keyless
+  in-memory SHA-256 chain: tamper-evident, not signed/notarized — add signing or
+  an external anchor before treating it as legally authoritative.)
 - **Evidence-grounded findings.** Security findings carry the tool-backed evidence
   behind them (GSAR); abstentions are explicit, not silent guesses.
 - **Red-team & assure other AI** — point it at a chatbot, agent, or endpoint and
@@ -83,7 +87,7 @@ Already have an agent (any framework) that takes actions? Add Tulip's gate +
 tamper-evident audit around the dangerous one — **~8 lines, no rebuild**:
 
 ```python
-from tulip.security import Action, AuditTrail, SecurityPolicy, admit, AdmissionError
+from tulip.control import Action, AuditTrail, ControlPolicy, admit, AdmissionError
 
 trail = AuditTrail()
 
@@ -92,14 +96,14 @@ async def safe_isolate(host: str):
         return await admit(
             Action(name="isolate_host", asset=host, blast_radius=50, environment="production"),
             lambda: my_edr.isolate(host),          # your code, any SDK / framework
-            policy=SecurityPolicy(), trail=trail,
+            policy=ControlPolicy(), trail=trail,
         )
     except AdmissionError as e:
         page_oncall(e.decision)                    # the gate held it; the trail has the record
 ```
 
 Production-blast isolation now requires a human, the attempt is recorded in a
-hash-chained trail you can't forge, and your agent keeps working unchanged.
+hash-chained, tamper-evident trail, and your agent keeps working unchanged.
 **You can fool the model; you can't talk past the gate.**
 Try it: [`examples/can_you_make_it_go_rogue.py`](examples/can_you_make_it_go_rogue.py).
 
@@ -163,7 +167,7 @@ No mandatory cloud account to start — `MockModel` lets every notebook run offl
 
 Point a `Target` at an AI system — a remote endpoint, an in-process
 `tulip.Agent`, or an A2A peer — and run the OWASP-ASI / MITRE-ATLAS suite.
-Every result is a grounded `Finding` or an explicit `Abstention`: a vulnerable
+Every result is a grounded `Evidence` or an explicit `Abstention`: a vulnerable
 target yields findings, a hardened one abstains across the board.
 
 ```python
@@ -178,14 +182,15 @@ for r in report:
 posture = await assure(target)                        # assess → grounded guardrail coverage
 ```
 
-The agent doing the work is itself **secure by default** — grounded, guarded,
-risk-gated, and recorded in a tamper-evident audit trail:
+The agent doing the work is itself **governed by default** — grounded, guarded,
+risk-gated (a dangerous-tool denylist on by default; allowlist opt-in), and
+recorded in a tamper-evident audit trail:
 
 ```python
-from tulip.security import secure_agent
+from tulip.control import governed_agent
 
-secured = secure_agent(model="openai:gpt-4o", tools=[...])
-assert secured.audit_trail.verify()   # every action is replayable evidence
+secured = governed_agent(model="openai:gpt-4o", tools=[...])
+assert secured.audit_trail.verify()   # the chain is intact — no record was altered
 ```
 
 ## Why security teams: grounded or it doesn't ship
@@ -202,7 +207,7 @@ a false negative that ships a breach. Tulip is built around that fact:
   ungrounded finding is a false positive *by construction* — it doesn't
   reach your queue.
 - **Typed, replayable event streams** — every model call, tool call,
-  guardrail verdict, and approval is an immutable event you can ship to
+  guardrail verdict, and approval is a write-protected typed event you can ship to
   a SIEM and replay in a postmortem. The audit trail is the default, not
   an add-on.
 - **Risk-gated actions** — the router's PolicyGate ranks operations by
@@ -236,13 +241,13 @@ result = ground_finding(
               evidence_refs=["tool:tls_scan:not_after=2026-05-30"]),
     ]),
 )
-# A grounded partition → a typed Finding. An ungrounded one → an
+# A grounded partition → a typed Evidence. An ungrounded one → an
 # Abstention with the reason it was withheld. There is no third path,
-# and no public constructor that makes a Finding without a score.
+# and no public constructor that makes an Evidence without a score.
 print(result.title if is_finding(result) else f"withheld: {result.reason}")
 ```
 
-`Finding` tags carry the standard catalogues — **MITRE ATLAS**
+`Evidence` tags carry the standard catalogues — **MITRE ATLAS**
 (`AML.Txxxx`), **OWASP Top 10 for LLM Applications (2025)**, and the
 **OWASP Top 10 for Agentic Applications (2026)** — so findings drop into
 a SIEM or a **NIST AI RMF** report without a translation layer.
@@ -277,7 +282,7 @@ credentials change.
 |---|---|---|
 | **OpenAI** | `OpenAIModel` | Chat completions, reasoning models (o-series), `base_url` override for Azure · Portkey · LiteLLM · vLLM · together.ai · fireworks · groq |
 | **Anthropic** | `AnthropicModel` | Claude family with prompt caching + extended thinking |
-| **Custom** | `register_provider("myco", MyModel)` | Implement `BaseModel` — `complete` · `stream` · `count_tokens` (~50 lines) |
+| **Custom** | `register_provider("myco", MyModel)` | Implement `ModelProtocol` — `complete` · `stream` (~50 lines) |
 
 Because OpenAI-compatible endpoints accept a `base_url`, `OpenAIModel`
 also fronts gateways and self-hosted servers (LiteLLM, vLLM, Azure
@@ -306,7 +311,7 @@ from tulip.router import (
 from tulip.tools.registry import create_registry
 
 # 1. Capabilities the router can bind to specialists.
-registry = create_registry([kb_search, get_metric, list_alerts])
+registry = create_registry(kb_search, get_metric, list_alerts)
 
 # 2. All 8 built-in protocols (answer / plan / specialist-fanout / debate
 #    / codegen-loop / approval / a2a-delegate / handoff-chain).
@@ -319,7 +324,7 @@ for p in builtin_protocols():
 router = Router(
     frame_extractor=Agent(model=get_model(), output_schema=GoalFrame),
     protocols=protocols,
-    capabilities=CapabilityIndex.from_registry(registry),
+    capabilities=CapabilityIndex(registry),
     skills=SkillIndex(),
     gate=PolicyGate(),
     compiler=CognitiveCompiler(),
@@ -391,7 +396,7 @@ print(result.text)
 
 | | |
 |---|---|
-| **[🔒 Grounded findings](https://tulipagents.ai/concepts/security/)** | `tulip.security` — `ground_finding()` emits a typed `Finding` only above the GSAR threshold, else an auditable `Abstention`. Tagged to MITRE ATLAS · OWASP LLM · OWASP ASI. Plus `FingerprintFinding` for timing side-channel inference fingerprinting. |
+| **[🔒 Grounded findings](https://tulipagents.ai/concepts/security/)** | `tulip.security` — `ground_finding()` emits a typed `Evidence` only above the GSAR threshold, else an auditable `Abstention`. Tagged to MITRE ATLAS · OWASP LLM · OWASP ASI. Plus `FingerprintFinding` for timing side-channel inference fingerprinting. |
 | **[🧭 Cognitive router](https://tulipagents.ai/concepts/router/)** | Describe a task → eight named protocols → right primitive compiled automatically. LLM fills a typed schema; routing is deterministic. |
 | **[🤝 Multi-agent](https://tulipagents.ai/concepts/multi-agent/)** | Seven native patterns + cross-process A2A. One `Agent` class. One event stream. |
 | **[🔬 DeepAgent](https://tulipagents.ai/concepts/deepagent/)** | `create_deepagent` (single agent, per-turn grounding) and `create_research_workflow` (StateGraph with post-hoc grounding eval + two-level recovery). |
@@ -401,7 +406,7 @@ print(result.text)
 | **[💾 Durable memory](https://tulipagents.ai/concepts/checkpointers/)** | 8 checkpoint backends — PostgreSQL · MySQL · Redis · OpenSearch · S3 / MinIO / R2 · in-memory · file · HTTP. |
 | **[🧠 Long-term memory](https://tulipagents.ai/concepts/memory-manager/)** | `Mem0MemoryManager` over [`mem0`](https://github.com/mem0ai/mem0) — fact extraction, scoped retrieval, self-hostable. Portable path: `LLMMemoryManager` over any `BaseStore` (InMemory / Redis / Postgres / OpenSearch). |
 | **[🔎 RAG](https://tulipagents.ai/concepts/rag/)** | 5 vector stores — pgvector · Qdrant · Chroma · OpenSearch · in-memory. OpenAI + Cohere embeddings · local + Cohere rerankers · multimodal (PDF, image OCR, audio). |
-| **[📡 Streaming + Server](https://tulipagents.ai/concepts/server/)** | Typed events · SSE · `AgentServer` (FastAPI, per-principal thread isolation). |
+| **[📡 Streaming + Server](https://tulipagents.ai/concepts/server/)** | Typed events · SSE · `AgentServer` (FastAPI, single shared-key bearer auth, thread persistence). |
 | **[🪝 Hooks](https://tulipagents.ai/concepts/hooks/)** | Logging · OpenTelemetry · ModelRetry · Guardrails · Steering (LLM-as-judge). |
 | **[🪙 MCP](https://tulipagents.ai/concepts/mcp/)** | `MCPClient` consumes MCP servers. `TulipMCPServer` exposes the SDK's tools as MCP. |
 | **[🌐 Multi-modal](https://tulipagents.ai/concepts/multi-modal-providers/)** | `Agent(web_search=…, web_fetch=…, image_generator=…, speech_provider=…)` auto-registers tools. |
@@ -481,7 +486,7 @@ pip install "tulip-integrations[edr-crowdstrike]"   # + any per-vendor extra
 
 | Domain | Vendors |
 |---|---|
-| **SIEM** | Splunk / Elastic |
+| **SIEM** | Splunk (Elastic-compatible SPL endpoint) |
 | **EDR** | CrowdStrike Falcon |
 | **Identity** | Okta · Auth0 |
 | **Threat intel** | VirusTotal |
