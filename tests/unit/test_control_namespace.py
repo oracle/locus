@@ -59,7 +59,14 @@ def test_old_names_are_gone_everywhere() -> None:
     import tulip.control as c
     import tulip.security as s
 
-    for old in ("SecurityPolicy", "Finding", "Verdict", "SecureAgent", "secure_agent", "SecurityProfile"):
+    for old in (
+        "SecurityPolicy",
+        "Finding",
+        "Verdict",
+        "SecureAgent",
+        "secure_agent",
+        "SecurityProfile",
+    ):
         assert not hasattr(s, old), f"old name {old!r} still on tulip.security"
         assert not hasattr(c, old), f"old name {old!r} leaked onto tulip.control"
 
