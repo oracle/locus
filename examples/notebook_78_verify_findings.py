@@ -4,12 +4,12 @@
 
 """Notebook 78: verify findings — the SDK that prevents security hallucinations.
 
-A `Finding` is a *claim*. Before you act on it, `verify()` puts it through an
+A `Evidence` is a *claim*. Before you act on it, `verify()` puts it through an
 independent skeptic that challenges the evidence and scores confidence. A
 well-grounded finding **survives**; an unsupported or fabricated one is
 **refuted** — so a hallucinated "critical" never drives a real action.
 
-`verify()` is framework-agnostic: it takes a Tulip `Finding` *or* a
+`verify()` is framework-agnostic: it takes a Tulip `Evidence` *or* a
 finding-shaped dict produced by any other agent (LangGraph/CrewAI/anything),
 which is what lets Tulip sit above the stack as the verification layer.
 
@@ -31,7 +31,7 @@ def _vulnerable_bot(prompt: str) -> str:
 
 
 def _show(label: str, verdict: object) -> None:
-    v = verdict  # Verdict
+    v = verdict  # VerificationResult
     status = "SURVIVES" if v.survives else "REFUTED"  # type: ignore[attr-defined]
     print(f"\n[{status}] {label}  (confidence {v.confidence:.2f})")  # type: ignore[attr-defined]
     for r in v.refutations:  # type: ignore[attr-defined]

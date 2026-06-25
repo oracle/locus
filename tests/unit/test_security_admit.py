@@ -12,19 +12,19 @@ from __future__ import annotations
 
 import pytest
 
-from tulip.security import (
+from tulip.control import (
     Action,
     AdmissionError,
     AuditTrail,
-    SecurityContext,
-    SecurityPolicy,
+    ControlPolicy,
     admit,
 )
-from tulip.security.verify import Verdict
+from tulip.security import SecurityContext
+from tulip.security.verify import VerificationResult
 
 
 # A verdict strong enough to clear the default policy bar (0.8).
-_STRONG = Verdict(survives=True, confidence=0.95, evidence_quality=0.95)
+_STRONG = VerificationResult(survives=True, confidence=0.95, evidence_quality=0.95)
 
 
 async def test_admitted_action_runs_and_returns_result() -> None:
@@ -37,7 +37,7 @@ async def test_admitted_action_runs_and_returns_result() -> None:
     result = await admit(
         Action(name="rotate_key", asset="svc-1", environment="staging"),
         perform,
-        policy=SecurityPolicy(),
+        policy=ControlPolicy(),
         verdict=_STRONG,
     )
     assert result == "ok"
@@ -55,7 +55,7 @@ async def test_production_requires_human_and_blocks_the_side_effect() -> None:
         await admit(
             Action(name="disable_user", asset="mallory@corp", environment="production"),
             perform,
-            policy=SecurityPolicy(),
+            policy=ControlPolicy(),
             verdict=_STRONG,
         )
     assert exc.value.decision.outcome == "require_human"
@@ -66,7 +66,7 @@ async def test_denied_label_blocks_the_side_effect() -> None:
     async def perform() -> str:
         raise AssertionError("must not run")
 
-    policy = SecurityPolicy(deny_for=frozenset({"prod"}))
+    policy = ControlPolicy(deny_for=frozenset({"prod"}))
     with pytest.raises(AdmissionError) as exc:
         await admit(
             Action(name="wipe_disk", asset="db-1", environment="prod"),
@@ -86,7 +86,7 @@ async def test_every_admission_is_recorded_admitted_or_not() -> None:
     await admit(
         Action(name="rotate_key", environment="staging"),
         perform,
-        policy=SecurityPolicy(),
+        policy=ControlPolicy(),
         verdict=_STRONG,
         trail=trail,
     )
@@ -94,7 +94,7 @@ async def test_every_admission_is_recorded_admitted_or_not() -> None:
         await admit(
             Action(name="disable_user", environment="production"),
             perform,
-            policy=SecurityPolicy(),
+            policy=ControlPolicy(),
             verdict=_STRONG,
             trail=trail,
         )

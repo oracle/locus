@@ -11,12 +11,12 @@ observed. ``create_soc_analyst`` composes two spec-driven, read-only tools —
 and ``use_aws`` (run one read-only operation, return the raw response as
 evidence) — behind a ``create_deepagent`` core. The agent proposes findings;
 ``ground_report`` decides which survive: a proposed finding becomes a typed
-``Finding`` only if its cited evidence clears the GSAR threshold, otherwise it
+``Evidence`` only if its cited evidence clears the GSAR threshold, otherwise it
 abstains. The model gathers and proposes; Python decides what ships.
 
 This is the differentiator. A commodity "AWS agent" will confidently narrate
 misconfigurations it never actually observed. Here, an ungrounded claim cannot
-become a Finding — it abstains — so the report is trustworthy by construction.
+become a Evidence — it abstains — so the report is trustworthy by construction.
 
 Maps to OWASP ASI: Identity & Privilege Abuse (the root-access-key class of
 finding); the read-only-by-construction tooling is the control that keeps the
@@ -91,7 +91,7 @@ def _sample_report() -> PostureReport:
                     )
                 ],
             ),
-            # Grounded positive observation → ships as an informational Finding.
+            # Grounded positive observation → ships as an informational Evidence.
             PostureFinding(
                 title="Root account MFA is enabled",
                 description="The root user has an MFA device, per the account summary.",

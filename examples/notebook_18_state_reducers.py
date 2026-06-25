@@ -343,7 +343,7 @@ async def example_complex_state():
             "findings": [{"source": "SAST", "title": "SQL injection in login.py"}],
             "risk_score": 40.0,
             "status": "findings_recorded",
-            "messages": [Message.system("Finding added: SQL injection in login.py")],
+            "messages": [Message.system("Evidence added: SQL injection in login.py")],
         }
 
     async def record_deps(inputs):
@@ -351,7 +351,7 @@ async def example_complex_state():
             "findings": [{"source": "deps", "title": "CVE-2024-99999 in libfoo 1.2"}],
             "risk_score": 25.0,
             "status": "findings_recorded",
-            "messages": [Message.system("Finding added: CVE-2024-99999 in libfoo 1.2")],
+            "messages": [Message.system("Evidence added: CVE-2024-99999 in libfoo 1.2")],
         }
 
     async def review_false_positives(inputs):

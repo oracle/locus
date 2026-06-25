@@ -90,7 +90,7 @@ async def example_retry():
     result = await graph.execute({})
     print(f"Success: {result.success}")
     print(f"Attempts needed: {attempt}")
-    print(f"Verdict: {result.final_state.get('verdict')}")
+    print(f"VerificationResult: {result.final_state.get('verdict')}")
 
 
 # =============================================================================

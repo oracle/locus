@@ -3,7 +3,7 @@
 
 """Security severity, indicator, and threat-taxonomy reference enums.
 
-These are the vocabulary a :class:`~tulip.security.findings.Finding` tags
+These are the vocabulary a :class:`~tulip.security.findings.Evidence` tags
 itself with. The threat enums mirror the published catalogues so a
 finding is portable into a SIEM, a compliance report, or another tool
 without a translation layer:

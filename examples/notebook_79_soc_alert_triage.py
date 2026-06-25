@@ -10,7 +10,7 @@ The core idea
 ─────────────
 A commodity AI SOC agent emits a verdict for every alert it sees, whether or
 not it can back that verdict with evidence.  Here, the SOC analyst grounded
-every verdict through ``ground_report``: a proposed Finding only ships if
+every verdict through ``ground_report``: a proposed Evidence only ships if
 the evidence the agent actually cited clears the GSAR threshold.  When the
 agent opines without evidence, the result is an ``Abstention`` — nothing is
 filed, and the analyst knows to review it manually.
@@ -22,9 +22,9 @@ right output: don't file a finding you can't prove.
 Scenario
 ────────
 Four SIEM alerts arrive in a 1-hour window:
-  1. Phishing link click        → SIEM corroboration found → HIGH Finding
-  2. Lateral movement (PsExec)  → EDR timeline + SIEM corroboration → CRITICAL Finding
-  3. C2 beacon (known bad IP)   → Threat-intel enrichment → HIGH Finding
+  1. Phishing link click        → SIEM corroboration found → HIGH Evidence
+  2. Lateral movement (PsExec)  → EDR timeline + SIEM corroboration → CRITICAL Evidence
+  3. C2 beacon (known bad IP)   → Threat-intel enrichment → HIGH Evidence
   4. benign process noise       → No corroborating evidence → Abstention
 
 This runs fully offline using mock SIEM/EDR/intel adapters.  Swap the mocks
@@ -271,7 +271,7 @@ def triage_alerts(alerts: Sequence[Alert]) -> None:
         )
 
         # ground_report applies the GSAR grounding decision to each proposed
-        # finding: evidence-backed ones become Finding; ungrounded ones abstain.
+        # finding: evidence-backed ones become Evidence; ungrounded ones abstain.
         grounded = ground_report(report, controls)
 
         for result in grounded:

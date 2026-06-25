@@ -127,7 +127,7 @@ def example_output_key():
         )
     )
 
-    result = agent.run_sync("Verdict for an EICAR test file found on a developer laptop?")
+    result = agent.run_sync("VerificationResult for an EICAR test file found on a developer laptop?")
     print(f"Response: {result.message}")
     print(f"State metadata['verdict']: {result.state.metadata.get('verdict')}")
     print("Downstream agents read state.metadata['verdict'] directly — no parsing.")

@@ -6,7 +6,7 @@
 Each probe sends a benign, uniquely-tokenised payload and checks the
 response for an observable success criterion (a canary the target should
 never emit). When the criterion is met the attack *landed*: tool-backed
-evidence that grounds to a :class:`~tulip.security.findings.Finding`. When
+evidence that grounds to a :class:`~tulip.security.findings.Evidence`. When
 it is not, the probe asserts only that an attempt was made (inference
 tier), which **abstains**. The probe never decides whether to ship — the
 grounding step does — so the catalogue cannot fabricate vulnerabilities.

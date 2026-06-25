@@ -11,7 +11,7 @@ Composes the read-only AWS posture tools (:func:`~tulip.security.describe_aws`
 3. proposes posture findings, each citing the exact API facts it stood on.
 
 The proposals are then run through GSAR grounding (:func:`ground_report`):
-each proposed finding becomes a typed :class:`~tulip.security.Finding` only if
+each proposed finding becomes a typed :class:`~tulip.security.Evidence` only if
 its cited evidence clears the grounding threshold — otherwise it abstains. The
 model gathers and proposes; Python decides what survives grounding. That split
 is the point — an analyst's report is trustworthy by construction, not by
@@ -225,7 +225,7 @@ def ground_report(
     """Run every proposed finding through GSAR grounding.
 
     Each :class:`PostureFinding` becomes a typed
-    :class:`~tulip.security.Finding` only if its cited evidence clears the
+    :class:`~tulip.security.Evidence` only if its cited evidence clears the
     grounding threshold; otherwise it yields an
     :class:`~tulip.security.Abstention`. Direct API observations
     (``grounded=True``) become grounded GSAR claims; inferences become
@@ -330,7 +330,7 @@ def create_soc_analyst(
     in the read-only AWS posture tools, a SOC-analyst system prompt, the
     :class:`PostureReport` output schema, and grounding/reflexion. The agent
     proposes findings; pass its ``result.output`` to :func:`ground_report` to
-    get typed :class:`~tulip.security.Finding` / ``Abstention`` results.
+    get typed :class:`~tulip.security.Evidence` / ``Abstention`` results.
 
     Args:
         model: A tulip model string (``"anthropic:claude-sonnet-4-6"``) or a

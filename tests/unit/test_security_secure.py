@@ -1,31 +1,31 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for secure-by-default agents (SecurityProfile / secure_agent / AuditHook)."""
+"""Tests for secure-by-default agents (GovernanceProfile / governed_agent / AuditHook)."""
 
 from __future__ import annotations
 
 from tulip.agent.config import GroundingConfig
-from tulip.hooks.builtin.guardrails import GuardrailsHook
-from tulip.security import (
+from tulip.control import (
     AuditHook,
     AuditTrail,
-    SecureAgent,
-    SecurityProfile,
-    secure_agent,
+    GovernanceProfile,
+    GovernedAgent,
+    governed_agent,
 )
+from tulip.hooks.builtin.guardrails import GuardrailsHook
 
 
 def test_security_profile_defaults_all_on() -> None:
-    profile = SecurityProfile()
+    profile = GovernanceProfile()
     assert profile.grounding
     assert profile.guardrails
     assert profile.audit
 
 
 def test_secure_agent_wires_grounding_guardrails_and_audit() -> None:
-    secured = secure_agent(model="openai:gpt-4o", tools=[])
-    assert isinstance(secured, SecureAgent)
+    secured = governed_agent(model="openai:gpt-4o", tools=[])
+    assert isinstance(secured, GovernedAgent)
     # grounding on by default -> a GroundingConfig on the agent
     assert isinstance(secured.agent.config.grounding, GroundingConfig)
     hooks = secured.agent.config.hooks
@@ -35,8 +35,8 @@ def test_secure_agent_wires_grounding_guardrails_and_audit() -> None:
 
 
 def test_secure_agent_respects_disabled_profile() -> None:
-    profile = SecurityProfile(grounding=False, guardrails=False, audit=False)
-    secured = secure_agent(model="openai:gpt-4o", tools=[], profile=profile)
+    profile = GovernanceProfile(grounding=False, guardrails=False, audit=False)
+    secured = governed_agent(model="openai:gpt-4o", tools=[], profile=profile)
     assert secured.agent.config.grounding is None
     hooks = secured.agent.config.hooks
     assert not any(isinstance(h, GuardrailsHook) for h in hooks)
@@ -45,7 +45,7 @@ def test_secure_agent_respects_disabled_profile() -> None:
 
 def test_secure_agent_reuses_provided_trail_and_extra_hooks() -> None:
     trail = AuditTrail()
-    secured = secure_agent(model="openai:gpt-4o", audit_trail=trail)
+    secured = governed_agent(model="openai:gpt-4o", audit_trail=trail)
     assert secured.audit_trail is trail
 
 

@@ -3,16 +3,16 @@
 
 """Verification — the independent challenge that prevents security hallucinations.
 
-A `Finding` is a *claim*. Before it drives an action or reaches an analyst,
+A `Evidence` is a *claim*. Before it drives an action or reaches an analyst,
 :func:`verify` subjects it to an independent **skeptic** whose job is to *refute*
 it — challenge the assumptions, weigh the evidence quality, and flag any
 inconsistency between what is claimed and what is supported. The result is a
-:class:`Verdict`: ``survives`` (with a confidence), or refuted, with the
+:class:`VerificationResult`: ``survives`` (with a confidence), or refuted, with the
 refutations recorded.
 
 This is the question generic agent frameworks don't answer — *"how do I know the
 agent is right?"* — and it works on **any** finding, not just Tulip's: pass a
-:class:`~tulip.security.findings.Finding` or a finding-shaped mapping from an
+:class:`~tulip.security.findings.Evidence` or a finding-shaped mapping from an
 external agent (LangGraph/CrewAI/anything), so Tulip can sit above the stack as
 the verification layer.
 
@@ -38,16 +38,16 @@ from typing import Any, Protocol, cast, runtime_checkable
 
 from pydantic import BaseModel, Field
 
-from tulip.security.findings import Finding
+from tulip.security.findings import Evidence
 from tulip.security.taxonomy import Severity, severity_at_least
 
 
-# A finding to verify: Tulip's typed Finding, or a finding-shaped mapping from
+# A finding to verify: Tulip's typed Evidence, or a finding-shaped mapping from
 # any other agent/framework (keys: title, severity, gsar_score, evidence_refs,
 # confidence).
-FindingLike = Finding | Mapping[str, Any]
+FindingLike = Evidence | Mapping[str, Any]
 
-# The GSAR proceed threshold (Appendix B) — a grounded Finding cleared this.
+# The GSAR proceed threshold (Appendix B) — a grounded Evidence cleared this.
 _PROCEED_THRESHOLD = 0.80
 
 
@@ -60,7 +60,7 @@ class Refutation:
 
 
 @dataclass(frozen=True)
-class Verdict:
+class VerificationResult:
     """The outcome of verifying a finding.
 
     ``survives`` is False if any refutation is ``fatal`` or confidence falls
@@ -78,7 +78,7 @@ class Verdict:
 
 @dataclass(frozen=True)
 class _View:
-    """Normalised view over a Finding or a finding-shaped mapping."""
+    """Normalised view over a Evidence or a finding-shaped mapping."""
 
     title: str
     severity: Severity | None
@@ -102,7 +102,7 @@ def _parse_severity(value: Any) -> Severity | None:
 
 
 def _coerce(finding: FindingLike) -> _View:
-    if isinstance(finding, Finding):
+    if isinstance(finding, Evidence):
         return _View(
             title=finding.title,
             severity=finding.severity,
@@ -235,7 +235,7 @@ conclusion. Return JSON only.
 def _describe(finding: FindingLike, v: _View) -> str:
     """Render a finding as the reviewer's prompt body."""
     lines = [f"TITLE: {v.title}"]
-    if isinstance(finding, Finding) and finding.description:
+    if isinstance(finding, Evidence) and finding.description:
         lines.append(f"DESCRIPTION: {finding.description}")
     lines.append(f"SEVERITY: {v.severity.value if v.severity else 'unspecified'}")
     lines.append(f"GROUNDING SCORE: {v.gsar_score:.2f}")
@@ -349,7 +349,7 @@ async def verify(
     *,
     skeptics: Sequence[Skeptic] | None = None,
     threshold: float = 0.6,
-) -> Verdict:
+) -> VerificationResult:
     """Independently challenge a finding; return whether it survives.
 
     Runs each skeptic (default: a single :class:`EvidenceQualitySkeptic`),
@@ -361,14 +361,14 @@ async def verify(
     ``threshold``.
 
     Args:
-        finding: A :class:`~tulip.security.findings.Finding` or finding-shaped
+        finding: A :class:`~tulip.security.findings.Evidence` or finding-shaped
             mapping (framework-agnostic).
         skeptics: The challenge panel; defaults to the deterministic skeptic.
             Plug semantic/LLM skeptics here.
         threshold: Minimum confidence to survive (default 0.6).
 
     Returns:
-        A :class:`Verdict`.
+        A :class:`VerificationResult`.
     """
     panel: list[Skeptic] = list(skeptics) if skeptics is not None else [EvidenceQualitySkeptic()]
     refutations: list[Refutation] = []
@@ -386,7 +386,7 @@ async def verify(
         if survives
         else "Refuted by independent challenge — do not act on this finding as-is."
     )
-    return Verdict(
+    return VerificationResult(
         survives=survives,
         confidence=confidence,
         evidence_quality=confidence,
@@ -402,6 +402,6 @@ __all__ = [
     "FindingLike",
     "Refutation",
     "Skeptic",
-    "Verdict",
+    "VerificationResult",
     "verify",
 ]

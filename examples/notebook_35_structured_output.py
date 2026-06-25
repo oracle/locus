@@ -262,7 +262,7 @@ def main() -> None:
     verdict_res = parse_structured(raw, FingerprintVerdict, strict=False)
     if verdict_res.success:
         v = verdict_res.parsed
-        print(f"  Verdict: {v.model} on {v.engine} / {v.hardware}")
+        print(f"  FingerprintVerdict: {v.model} on {v.engine} / {v.hardware}")
         print(f"  Classifier confidence: {v.confidence:.0%}")
         print(f"  Feature coverage: {v.feature_coverage:.0%}")
     else:

@@ -24,7 +24,7 @@ vulnerability claim is a false positive *by construction* and never ships.
   through graph state keys (``notes``, ``draft``, ``revision_request``).
 - The reviewer node is where prose review meets mechanical grounding:
   ``ground_finding(...)`` scores the evidence partition and returns a
-  ``Finding`` or an ``Abstention``. ``is_finding(...)`` narrows the union.
+  ``Evidence`` or an ``Abstention``. ``is_finding(...)`` narrows the union.
 - ``stream(mode=StreamMode.NODES)`` emits one event per node completion,
   so a UI can show "Evidence gathered / Author drafting / Reviewer
   adjudicating…" with no extra code.
@@ -32,7 +32,7 @@ vulnerability claim is a false positive *by construction* and never ships.
   ``GraphResult`` with timing and iteration metrics.
 
 ```text
-START → gather → draft → review → END (ship grounded Finding | abstain)
+START → gather → draft → review → END (ship grounded Evidence | abstain)
                    ↑        │
                    └── revise (cap: 2)
 ```
@@ -194,7 +194,7 @@ async def gather_node(state: dict[str, Any]) -> dict[str, Any]:
 async def draft_node(state: dict[str, Any]) -> dict[str, Any]:
     agent = _make_agent("author", AUTHOR_PROMPT, state["__model__"])
     revision = state.get("revision_request", "")
-    prompt = f"Finding: {state['finding']}\nEvidence notes:\n{state.get('notes', '')}\n"
+    prompt = f"Evidence: {state['finding']}\nEvidence notes:\n{state.get('notes', '')}\n"
     if revision:
         prompt += f"\nReviewer feedback (apply this): {revision}\n"
     prompt += "\nWrite the report now."
@@ -209,7 +209,7 @@ async def review_node(state: dict[str, Any]) -> dict[str, Any]:
 
     First the reviewer Agent gives a prose verdict (APPROVE / REVISE). Then
     — regardless of how persuasive the prose is — the drafted finding is
-    run through ``ground_finding``. The function returns a ``Finding`` only
+    run through ``ground_finding``. The function returns a ``Evidence`` only
     when the evidence partition clears the GSAR proceed threshold; below it
     the caller gets an ``Abstention`` and nothing ships. That is what makes
     "kill unproven claims" a guarantee rather than a hope.
@@ -220,8 +220,8 @@ async def review_node(state: dict[str, Any]) -> dict[str, Any]:
     revision_request = "" if approved else verdict
 
     # The grounding gate. ground_finding scores the evidence partition and
-    # returns Finding | Abstention — an ungrounded claim cannot become a
-    # Finding. Tag with the relevant taxonomy IDs so the artifact is
+    # returns Evidence | Abstention — an ungrounded claim cannot become a
+    # Evidence. Tag with the relevant taxonomy IDs so the artifact is
     # portable into a SIEM or report (SQLi is CWE-89; in the AI-stack
     # threat model an injection-class flaw maps to OWASP LLM05 improper
     # output handling and MITRE ATLAS T0048 external harms).

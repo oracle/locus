@@ -20,7 +20,8 @@ from __future__ import annotations
 
 import asyncio
 
-from tulip.security import Action, SecurityContext, Verdict
+from tulip.control import Action
+from tulip.security import SecurityContext, VerificationResult
 
 
 async def main() -> int:
@@ -47,7 +48,7 @@ async def main() -> int:
 
     # 5. Action: propose containment — but gate it through policy first.
     #    (High-confidence verification stands in for a verified finding.)
-    verdict = Verdict(survives=True, confidence=0.93, evidence_quality=0.93)
+    verdict = VerificationResult(survives=True, confidence=0.93, evidence_quality=0.93)
     decision = ctx.actions.request_approval(
         Action(name="disable_user", asset="mallory@example.com", environment="production"),
         verdict=verdict,

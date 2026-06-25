@@ -10,7 +10,7 @@ into the output of a tool the agent itself called, which then tries to
 talk the agent into exfiltrating data or invoking a destructive tool
 (LLM02 Sensitive Information Disclosure / LLM06 Excessive Agency). The
 guardrail scans that tool output, and the detection is surfaced as a
-grounded ``Finding`` via ``tulip.security.ground_finding`` — the
+grounded ``Evidence`` via ``tulip.security.ground_finding`` — the
 embedded instruction is the evidence, so the finding ships only because
 it traces to the tool-output row that carried it.
 
@@ -19,7 +19,7 @@ it traces to the tool-output row that carried it.
 - PII detection and redaction on untrusted input before the model sees it.
 - Injection-pattern blocking on text arriving via tickets and tool output.
 - Indirect-injection detection in tool output, surfaced as a grounded
-  Finding tagged LLM01 / LLM02 / AML.T0051.
+  Evidence tagged LLM01 / LLM02 / AML.T0051.
 - Tool allowlist vs denylist for the agent's security tooling.
 - Secret-leakage filtering and stacked hooks via HookRegistry.
 
@@ -212,7 +212,7 @@ async def main():
     # Surface the strongest detection as a *grounded* security finding.
     # The evidence is the tool-output row that carried the instruction:
     # the claim is TOOL_MATCH provenance, so ground_finding clears the
-    # GSAR threshold and a Finding ships. An unsupported claim (e.g. "this
+    # GSAR threshold and a Evidence ships. An unsupported claim (e.g. "this
     # is TULIP-STORM") would stay ungrounded and drag the score down.
     print("\n--- Grounding the detection via tulip.security ---")
     if flagged:
@@ -256,7 +256,7 @@ async def main():
             ],
         )
         if is_finding(finding):
-            print(f"  Finding shipped: {finding.title}")
+            print(f"  Evidence shipped: {finding.title}")
             print(f"    severity={finding.severity.value} gsar_score={finding.gsar_score:.3f}")
             print(f"    taxonomy={[t.value for t in finding.taxonomy]}")
             print(f"    evidence_refs={finding.evidence_refs}")

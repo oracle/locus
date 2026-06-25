@@ -8,7 +8,7 @@ and returns a :class:`ProbeOutcome`: a *candidate* finding plus the GSAR
 :class:`~tulip.reasoning.gsar.Partition` of its evidence. The job runner
 (:func:`tulip.security.red_team`) routes that partition through
 :func:`tulip.security.ground_finding`, so a probe whose attack actually
-landed (strong, tool-backed evidence) yields a :class:`~tulip.security.findings.Finding`,
+landed (strong, tool-backed evidence) yields a :class:`~tulip.security.findings.Evidence`,
 while an inconclusive attempt (weak / inference-only evidence) **abstains**.
 The probe never decides whether to ship — grounding does. That is what
 keeps red-team output free of hallucinated vulnerabilities.

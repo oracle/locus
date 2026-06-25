@@ -128,7 +128,7 @@ _LAZY_IMPORTS = {
     "ItemRef": ("tulip.deepagent", "ItemRef"),
     "Grounding": ("tulip.deepagent", "Grounding"),
     # Security — evidence-grounded findings (the cybersecurity layer).
-    "Finding": ("tulip.security", "Finding"),
+    "Evidence": ("tulip.security", "Evidence"),
     "Indicator": ("tulip.security", "Indicator"),
     "Severity": ("tulip.security", "Severity"),
     "IndicatorType": ("tulip.security", "IndicatorType"),
@@ -159,7 +159,7 @@ def __getattr__(name: str) -> object:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-__version__ = "1.1.0"
+__version__ = "2.0.0"
 __all__ = [
     "Agent",
     "AgentConfig",
@@ -225,7 +225,7 @@ __all__ = [
     # Security — evidence-grounded findings (lazy)
     "Abstention",
     "AtlasTechnique",
-    "Finding",
+    "Evidence",
     "FingerprintClassifier",
     "FingerprintFinding",
     "FingerprintVerdict",

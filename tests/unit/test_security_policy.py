@@ -1,27 +1,25 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 
-"""Unit tests for SecurityPolicy + approve() — safe-before-action."""
+"""Unit tests for ControlPolicy + approve() — safe-before-action."""
 
 from __future__ import annotations
 
-from tulip.security import (
+from tulip.control import (
     Action,
     ApprovalOutcome,
-    Finding,
-    SecurityPolicy,
-    Severity,
-    Verdict,
+    ControlPolicy,
     approve,
 )
+from tulip.security import Evidence, Severity, VerificationResult
 
 
-def _verdict(confidence: float, *, survives: bool = True) -> Verdict:
-    return Verdict(survives=survives, confidence=confidence, evidence_quality=confidence)
+def _verdict(confidence: float, *, survives: bool = True) -> VerificationResult:
+    return VerificationResult(survives=survives, confidence=confidence, evidence_quality=confidence)
 
 
-def _finding(severity: Severity = Severity.HIGH) -> Finding:
-    return Finding(
+def _finding(severity: Severity = Severity.HIGH) -> Evidence:
+    return Evidence(
         title="t",
         description="d",
         severity=severity,
@@ -36,7 +34,7 @@ def _finding(severity: Severity = Severity.HIGH) -> Finding:
 def test_clean_low_risk_action_is_allowed() -> None:
     d = approve(
         Action(name="enrich", asset="host-1", blast_radius=1, environment="staging"),
-        policy=SecurityPolicy(),
+        policy=ControlPolicy(),
         finding=_finding(),
         verdict=_verdict(0.95),
     )
@@ -46,7 +44,7 @@ def test_clean_low_risk_action_is_allowed() -> None:
 
 
 def test_no_verdict_requires_human() -> None:
-    d = approve(Action(name="isolate", environment="staging"), policy=SecurityPolicy())
+    d = approve(Action(name="isolate", environment="staging"), policy=ControlPolicy())
     assert d.outcome == ApprovalOutcome.REQUIRE_HUMAN
     assert "no verification" in d.reason
 
@@ -54,7 +52,7 @@ def test_no_verdict_requires_human() -> None:
 def test_refuted_verdict_is_denied() -> None:
     d = approve(
         Action(name="isolate", environment="staging"),
-        policy=SecurityPolicy(),
+        policy=ControlPolicy(),
         verdict=_verdict(0.0, survives=False),
     )
     assert d.outcome == ApprovalOutcome.DENY
@@ -64,7 +62,7 @@ def test_refuted_verdict_is_denied() -> None:
 def test_low_confidence_requires_human() -> None:
     d = approve(
         Action(name="isolate", environment="staging"),
-        policy=SecurityPolicy(require_verification_score=0.9),
+        policy=ControlPolicy(require_verification_score=0.9),
         verdict=_verdict(0.7),
     )
     assert d.outcome == ApprovalOutcome.REQUIRE_HUMAN
@@ -74,7 +72,7 @@ def test_low_confidence_requires_human() -> None:
 def test_blast_radius_requires_human() -> None:
     d = approve(
         Action(name="isolate", blast_radius=12, environment="staging"),
-        policy=SecurityPolicy(max_blast_radius=10),
+        policy=ControlPolicy(max_blast_radius=10),
         verdict=_verdict(0.95),
     )
     assert d.outcome == ApprovalOutcome.REQUIRE_HUMAN
@@ -84,7 +82,7 @@ def test_blast_radius_requires_human() -> None:
 def test_production_requires_human() -> None:
     d = approve(
         Action(name="isolate", environment="production"),
-        policy=SecurityPolicy(),
+        policy=ControlPolicy(),
         verdict=_verdict(0.95),
     )
     assert d.outcome == ApprovalOutcome.REQUIRE_HUMAN
@@ -94,7 +92,7 @@ def test_production_requires_human() -> None:
 def test_deny_for_label_hard_denies() -> None:
     d = approve(
         Action(name="delete_bucket", kind="destructive", environment="staging"),
-        policy=SecurityPolicy(deny_for=frozenset({"destructive"})),
+        policy=ControlPolicy(deny_for=frozenset({"destructive"})),
         verdict=_verdict(0.99),
     )
     assert d.outcome == ApprovalOutcome.DENY
@@ -104,7 +102,7 @@ def test_deny_for_label_hard_denies() -> None:
 def test_finding_below_min_severity_is_denied() -> None:
     d = approve(
         Action(name="isolate", environment="staging"),
-        policy=SecurityPolicy(min_severity=Severity.HIGH),
+        policy=ControlPolicy(min_severity=Severity.HIGH),
         finding=_finding(Severity.LOW),
         verdict=_verdict(0.95),
     )
@@ -116,7 +114,7 @@ def test_strongest_outcome_wins_and_all_checks_recorded() -> None:
     # production (require_human) + refuted verdict (deny) -> DENY wins, both recorded.
     d = approve(
         Action(name="isolate", environment="production", blast_radius=50),
-        policy=SecurityPolicy(),
+        policy=ControlPolicy(),
         verdict=_verdict(0.0, survives=False),
     )
     assert d.outcome == ApprovalOutcome.DENY

@@ -29,11 +29,11 @@ from typing import Any, Protocol, runtime_checkable
 
 from tulip.security.aws import describe_aws, use_aws
 from tulip.security.edr import fetch_host_timeline, isolate_host, list_detections
-from tulip.security.findings import Finding
+from tulip.security.findings import Evidence
 from tulip.security.intel import enrich_indicator
-from tulip.security.policy import Action, ApprovalDecision, SecurityPolicy, approve
+from tulip.security.policy import Action, ApprovalDecision, ControlPolicy, approve
 from tulip.security.siem import query_siem
-from tulip.security.verify import Verdict
+from tulip.security.verify import VerificationResult
 
 
 # --------------------------------------------------------------------------- #
@@ -94,8 +94,8 @@ class ActionsPort(Protocol):
         self,
         action: Action,
         *,
-        finding: Finding | None = None,
-        verdict: Verdict | None = None,
+        finding: Evidence | None = None,
+        verdict: VerificationResult | None = None,
     ) -> ApprovalDecision: ...
 
     async def execute(
@@ -103,8 +103,8 @@ class ActionsPort(Protocol):
         action: Action,
         perform: Callable[[], Awaitable[Any]],
         *,
-        finding: Finding | None = None,
-        verdict: Verdict | None = None,
+        finding: Evidence | None = None,
+        verdict: VerificationResult | None = None,
     ) -> Any:
         """Admission control: run ``perform`` only if the action is admitted."""
         ...
@@ -209,14 +209,14 @@ class _RefThreatIntel:
 
 @dataclass(frozen=True)
 class _RefActions:
-    policy: SecurityPolicy = field(default_factory=SecurityPolicy)
+    policy: ControlPolicy = field(default_factory=ControlPolicy)
 
     def request_approval(
         self,
         action: Action,
         *,
-        finding: Finding | None = None,
-        verdict: Verdict | None = None,
+        finding: Evidence | None = None,
+        verdict: VerificationResult | None = None,
     ) -> ApprovalDecision:
         return approve(action, policy=self.policy, finding=finding, verdict=verdict)
 
@@ -225,8 +225,8 @@ class _RefActions:
         action: Action,
         perform: Callable[[], Awaitable[Any]],
         *,
-        finding: Finding | None = None,
-        verdict: Verdict | None = None,
+        finding: Evidence | None = None,
+        verdict: VerificationResult | None = None,
     ) -> Any:
         from tulip.security.admit import admit
 

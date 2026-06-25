@@ -22,7 +22,7 @@ import pytest
 
 from tulip.security import (
     Abstention,
-    Finding,
+    Evidence,
     PostureReport,
     SecurityControls,
     create_soc_analyst,
@@ -82,7 +82,7 @@ def test_soc_analyst_grounds_account_posture_live() -> None:
     # the model chose to report.
     for g in grounded:
         if is_finding(g):
-            assert isinstance(g, Finding)
+            assert isinstance(g, Evidence)
             assert g.gsar_score >= controls.min_gsar
         else:
             assert isinstance(g, Abstention)

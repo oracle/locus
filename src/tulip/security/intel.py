@@ -16,7 +16,7 @@ SDK runs offline.
 
 Hand :data:`enrich_indicator_tool` to an agent, call :func:`enrich_indicator`
 directly, or use :func:`enrich_to_finding` to turn an enrichment into a
-GSAR-grounded :class:`~tulip.security.Finding` (a clean indicator abstains
+GSAR-grounded :class:`~tulip.security.Evidence` (a clean indicator abstains
 rather than shipping a non-finding).
 
 UNVERIFIED LIVE PATH: the ``VT_API_KEY`` branch is written to VirusTotal's
@@ -110,7 +110,7 @@ def enrich_to_finding(
     severity: Severity | None = None,
     taxonomy: list[TaxonomyTag] | None = None,
 ) -> GroundedFinding:
-    """Enrich an indicator and ground the verdict into a :class:`Finding`.
+    """Enrich an indicator and ground the verdict into a :class:`Evidence`.
 
     A vendor detection count is tool-backed evidence, so a flagged indicator
     ships a finding (severity scaling with the detection count). A clean

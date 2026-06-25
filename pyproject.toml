@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tulip-agents"
-version = "1.1.0"
+version = "2.0.0"
 description = "The SDK for agents you can let act — every risky action policy-gated and human-approvable, every step a tamper-evident replayable event. Drop the gate + audit into any agent; proven first in security."
 readme = "README.md"
 license = "Apache-2.0"

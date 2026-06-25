@@ -12,7 +12,7 @@ checks, reusable subgraphs, and cross-exercise key/value storage.
 
 The detection branch closes the loop with the grounded-findings
 primitive: a confirmed injection — one a detection tool actually matched
-in untrusted tool output — ships as a typed Finding via ground_finding;
+in untrusted tool output — ships as a typed Evidence via ground_finding;
 a merely-suspected one returns an Abstention, so an unproven injection
 claim never reaches the queue. Tagged OWASP LLM01 (Prompt Injection) /
 MITRE ATLAS AML.T0051.
@@ -219,7 +219,7 @@ async def example_broadcast():
 
     The fan-in node closes the purple-team loop with ground_finding: a
     prompt-injection lure that a detection control actually matched ships
-    as a grounded Finding (OWASP LLM01 / ATLAS AML.T0051); one only
+    as a grounded Evidence (OWASP LLM01 / ATLAS AML.T0051); one only
     *suspected* abstains, so an unproven injection never reaches the queue.
     """
     print("=== Part 2b: broadcast() + grounded detection ===\n")

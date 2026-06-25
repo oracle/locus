@@ -9,10 +9,10 @@ sentence in it. An ungrounded vulnerability claim is a false positive
 
 The primitive is :func:`tulip.security.ground_finding`. You hand it a
 candidate finding plus a GSAR partition of its claims; it scores the
-partition, and either returns a typed :class:`~tulip.security.Finding`
+partition, and either returns a typed :class:`~tulip.security.Evidence`
 (the finding ships) or an :class:`~tulip.security.Abstention` (the
 finding is withheld, with an audit record of why). There is no public
-path that constructs a ``Finding`` without clearing the grounding bar.
+path that constructs a ``Evidence`` without clearing the grounding bar.
 
 GSAR — Grounding-Stratified Adaptive Replanning (``tulip.reasoning.gsar``,
 from `arXiv:2604.23366 (2026) <https://arxiv.org/abs/2604.23366>`_) — is
@@ -25,7 +25,7 @@ applies to a junior analyst's write-up — "show me the log line" — encoded
 as a typed, auditable function.
 
 Key ideas:
-- ``ground_finding(...)`` returns ``Finding | Abstention``. A finding
+- ``ground_finding(...)`` returns ``Evidence | Abstention``. A finding
   backed by scanner rows ships; an "it's probably exploitable" hunch with
   no evidence abstains. ``is_finding(result)`` narrows the union.
 - The four-way partition (Eq. 1) and the evidence-typed grounding score
@@ -81,7 +81,7 @@ from tulip.reasoning.gsar import (
 )
 from tulip.security import (
     AtlasTechnique,
-    Finding,
+    Evidence,
     Indicator,
     IndicatorType,
     OwaspLLM,
@@ -107,9 +107,9 @@ def _llm_call(
 
 
 def _report(result) -> None:
-    """Print the outcome of a ``ground_finding`` call — Finding or Abstention."""
+    """Print the outcome of a ``ground_finding`` call — Evidence or Abstention."""
     if is_finding(result):
-        print(f"  SHIPPED  Finding(S={result.gsar_score:.4f}, severity={result.severity.value})")
+        print(f"  SHIPPED  Evidence(S={result.gsar_score:.4f}, severity={result.severity.value})")
         print(f"           {result.title}")
         if result.taxonomy:
             print(f"           taxonomy: {', '.join(t.value for t in result.taxonomy)}")
@@ -124,7 +124,7 @@ def _report(result) -> None:
 # Part 1: A grounded finding ships.
 #         Every sentence traces to a scanner row, a TLS-handshake field, or
 #         the originating signal. One model-internal aside lands in U but does
-#         not sink the score. ground_finding() returns a typed Finding.
+#         not sink the score. ground_finding() returns a typed Evidence.
 # =============================================================================
 
 
@@ -154,7 +154,7 @@ def example_grounded_ships() -> None:
                 evidence_refs=["tool:tls_scan:host=192.0.2.10:proto=TLSv1.0"],
             ),
             Claim(
-                text="Finding F-2209 fired on the cert_expired check at 14:02",
+                text="Evidence F-2209 fired on the cert_expired check at 14:02",
                 type=EvidenceType.SIGNAL_MATCH,
                 evidence_refs=["signal:F-2209:check=cert_expired:fired_at=14:02:00"],
             ),
@@ -349,7 +349,7 @@ def example_threshold_recalibration() -> None:
         ],
     )
     s = gsar_score(partition)
-    print(f"  Finding score S = {s:.4f}\n")
+    print(f"  Evidence score S = {s:.4f}\n")
 
     print("  Reference evidence weights (Appendix B) — the hierarchy, made explicit:")
     for etype, weight in sorted(DEFAULT_WEIGHT_MAP.items(), key=lambda kv: -kv[1]):
@@ -430,10 +430,10 @@ async def example_outer_loop() -> None:
         )
 
     # The loop never silently ships an ungrounded report: a degraded result is
-    # flagged, not hidden. Convert a proceed into a typed Finding for the queue.
+    # flagged, not hidden. Convert a proceed into a typed Evidence for the queue.
     print()
     if result.final_decision.value == "proceed":
-        shipped = Finding(
+        shipped = Evidence(
             title="Expired TLS certificate and TLS 1.0 negotiation on 192.0.2.10:443",
             description=report,
             severity=Severity.HIGH,
@@ -442,7 +442,7 @@ async def example_outer_loop() -> None:
             gsar_score=result.final_score,
             evidence_refs=["tool:tls_scan:not_after=2026-05-30", "signal:F-2209"],
         )
-        print(f"  Loop proceeded → Finding ready for the queue (S={shipped.gsar_score:.4f}).")
+        print(f"  Loop proceeded → Evidence ready for the queue (S={shipped.gsar_score:.4f}).")
     else:
         print("  Loop did not proceed → no finding emitted; degraded result flagged for review.")
 

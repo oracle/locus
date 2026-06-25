@@ -3,10 +3,12 @@
 
 """Security layer for Tulip — evidence-grounded findings.
 
-The primitive that makes Tulip the cybersecurity agent SDK: a security
-:class:`Finding` can only be produced from an evidence partition that
+The grounding primitive behind Tulip's first proven domain: a security finding
+(an :class:`Evidence`) can only be produced from an evidence partition that
 clears the GSAR grounding threshold. Ungrounded claims abstain instead of
-shipping, so an agent's findings are trustworthy by construction.
+shipping, so an agent's findings are trustworthy by construction. The
+domain-neutral control runtime this builds on — the admission gate, policy,
+audit trail, and governed agent — lives in :mod:`tulip.control`.
 
 This package is the **core** (langchain-core style): the grounding
 contracts, the :class:`~tulip.security.adapter.SecurityAdapter` protocol +
@@ -55,13 +57,10 @@ from tulip.security.adapter import (
     inference_claim,
     tool_match,
 )
-from tulip.security.admit import AdmissionError, admit
 
 # Agentic AI-security surface: a Target (the AI under assessment), the job
-# verbs that act on it, the red-team probe library, posture assessments, and a
-# tamper-evident audit trail.
+# verbs that act on it, the red-team probe library, and posture assessments.
 from tulip.security.assess import guardrail_coverage
-from tulip.security.audit import AuditRecord, AuditTrail
 from tulip.security.aws import (
     READONLY_PREFIXES,
     aws_services,
@@ -90,7 +89,7 @@ from tulip.security.edr import (
 )
 from tulip.security.findings import (
     Confidence,
-    Finding,
+    Evidence,
     FingerprintClassifier,
     FingerprintFinding,
     FingerprintVerdict,
@@ -125,13 +124,6 @@ from tulip.security.playbooks import (
     phishing_triage,
     ransomware_containment,
 )
-from tulip.security.policy import (
-    Action,
-    ApprovalDecision,
-    ApprovalOutcome,
-    SecurityPolicy,
-    approve,
-)
 from tulip.security.redteam import (
     DirectPromptInjection,
     ExcessiveAgency,
@@ -151,7 +143,6 @@ from tulip.security.scanner import (
     scan_endpoint_to_finding,
     scan_endpoint_tool,
 )
-from tulip.security.secure import AuditHook, SecureAgent, SecurityProfile, secure_agent
 from tulip.security.siem import query_siem, siem_query_tool
 from tulip.security.soc import (
     PostureEvidence,
@@ -178,7 +169,7 @@ from tulip.security.verify import (
     EvidenceQualitySkeptic,
     Refutation,
     Skeptic,
-    Verdict,
+    VerificationResult,
     verify,
 )
 
@@ -278,7 +269,7 @@ __all__ = [
     "ransomware_containment",
     # Schemas
     "Confidence",
-    "Finding",
+    "Evidence",
     "Indicator",
     "FingerprintClassifier",
     "FingerprintFinding",
@@ -321,28 +312,13 @@ __all__ = [
     "assure",
     "monitor",
     "guardrail_coverage",
-    "AuditTrail",
-    "AuditRecord",
-    "SecureAgent",
-    "SecurityProfile",
-    "AuditHook",
-    "secure_agent",
     # Verification — independent challenge that prevents security hallucinations
     "verify",
-    "Verdict",
+    "VerificationResult",
     "Refutation",
     "Skeptic",
     "EvidenceQualitySkeptic",
     "AdversarialSkeptic",
-    # Policy + approval — safe-before-action (the CISO knob)
-    "SecurityPolicy",
-    "Action",
-    "ApprovalDecision",
-    "ApprovalOutcome",
-    "approve",
-    # Admission control — the runtime's enforcement point
-    "admit",
-    "AdmissionError",
     # SecurityContext — investigate by domain, not by vendor
     "SecurityContext",
     "LogSource",

@@ -213,7 +213,7 @@ When fingerprinting:
 
     @tool(name="classify_endpoint", description="Map the timing feature vector to a model verdict")
     async def classify_endpoint() -> str:
-        return "Verdict: open-weights-7b on vLLM / datacenter-gpu, confidence 0.91, coverage 1.00"
+        return "VerificationResult: open-weights-7b on vLLM / datacenter-gpu, confidence 0.91, coverage 1.00"
 
     @tool(name="check_inventory", description="Compare a verdict against the approved inventory")
     async def check_inventory() -> str:
@@ -254,7 +254,7 @@ When fingerprinting:
             PlaybookStep(
                 instruction="Classify the feature vector to a model/engine/hardware verdict",
                 required_tools=["classify_endpoint"],
-                expected_output="Verdict with confidence and feature coverage",
+                expected_output="VerificationResult with confidence and feature coverage",
                 on_failure="Abstain if feature coverage is below the schema floor",
             ),
             PlaybookStep(
@@ -345,7 +345,7 @@ When fingerprinting:
     full_features = {"ttft_ms_p50": 38.2, "itl_ms_mean": 11.4, "itl_cv": 0.07, "tps_mean": 87.6}
     verdict = classify_fingerprint(full_features)
     print(
-        f"Verdict (coverage {verdict.feature_coverage:.0%}): "
+        f"VerificationResult (coverage {verdict.feature_coverage:.0%}): "
         f"{verdict.model} on {verdict.engine} / {verdict.hardware} "
         f"@ confidence {verdict.confidence:.0%}"
     )
