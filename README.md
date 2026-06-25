@@ -3,8 +3,8 @@
 </p>
 
 <p align="center">
-  <strong>Tulip — the SDK for agents you can let <em>act</em>.</strong><br>
-  <em>Agents that take real action — move money, delete a resource, disable an account, isolate a host — where every risky step is policy-gated and human-approvable, and every decision lands in a tamper-evident audit trail. You can fool the model; you can't talk past the runtime. Proven first in security, where a wrong action is a breach.</em>
+  <strong>Tulip — the control layer for agents that <em>act</em>.</strong><br>
+  <em>Add policy gating, human approval, and a tamper-evident audit trail to the agent you already have — on any framework (LangChain, CrewAI, the OpenAI Agents SDK, …). Every risky action — move money, delete a resource, disable an account, isolate a host — runs only after it clears the gate. You can fool the model; you can't talk past the runtime. Proven first in security, where a wrong action is a breach.</em>
 </p>
 
 <p align="center">
@@ -21,11 +21,10 @@
 </p>
 
 <p align="center">
-  <a href="https://tulipagents.ai/">Documentation</a> ·
+  <a href="https://tulipagents.ai/why-tulip/">Why Tulip</a> ·
+  <a href="https://tulipagents.ai/integrations/frameworks/">Drop into your framework</a> ·
+  <a href="https://tulipagents.ai/concepts/security/">Admission gate</a> ·
   <a href="https://tulipagents.ai/concepts/gsar/">GSAR grounding</a> ·
-  <a href="https://tulipagents.ai/concepts/router/">Cognitive Router</a> ·
-  <a href="https://tulipagents.ai/concepts/multi-agent/">Multi-agent</a> ·
-  <a href="https://tulipagents.ai/concepts/deepagent/">DeepAgent</a> ·
   <a href="https://tulipagents.ai/notebooks/">Notebooks</a> ·
   <a href="https://tulipagents.ai/workbench/">Workbench</a>
 </p>
@@ -44,6 +43,10 @@
 
 ## What is Tulip?
 
+**Tulip is the control layer for AI agents** — add it to the agent you already have,
+on any framework, and it decides whether each action is allowed to run, holds it for a
+human when the stakes warrant, and records the decision so you can prove what happened.
+
 Frontier models are smart. The one thing they **can't** do — no matter how smart —
 is *prove they won't take a catastrophic action.* That's the gap Tulip closes:
 agents that **act** in the real world, where every consequential step is gated by
@@ -59,8 +62,8 @@ brains; Tulip makes its actions safe and provable.
   can replay and **cannot forge** — SOC/forensics-ready.
 - **Evidence-grounded findings.** Security findings carry the tool-backed evidence
   behind them (GSAR); abstentions are explicit, not silent guesses.
-- **Red-team & assure other AI** *(the fun front door)* — point it at a chatbot,
-  agent, or endpoint and run OWASP-ASI / MITRE-ATLAS attacks.
+- **Red-team & assure other AI** — point it at a chatbot, agent, or endpoint and
+  run OWASP-ASI / MITRE-ATLAS attacks. Security is the beachhead, not the ceiling.
 
 > **Can you make the agent go rogue?** Give an agent live prod tools, then try to
 > jailbreak it into wiping the database. You'll fool the model — and the runtime
@@ -100,7 +103,12 @@ hash-chained trail you can't forge, and your agent keeps working unchanged.
 **You can fool the model; you can't talk past the gate.**
 Try it: [`examples/can_you_make_it_go_rogue.py`](examples/can_you_make_it_go_rogue.py).
 
-## Build a full agent — 5 lines
+## Prefer to build on Tulip? It's a full agent runtime too — 5 lines
+
+The control layer works around *any* framework (above). But Tulip is also a
+complete, batteries-included agent runtime if you'd rather build on it directly —
+loop, tools, memory, RAG, multi-agent, and the cognitive router, all behind one
+`Agent` class:
 
 ```python
 from tulip.agent import Agent
