@@ -118,7 +118,7 @@ def main():
     playbook = Playbook(
         id="dsar_right_of_access",
         name="DSAR Playbook — Right of Access",
-        description="GDPR Article 15 right-of-access fulfilment procedure for verified subjects",
+        description="GDPR Article 15 right-of-access fulfillment procedure for verified subjects",
         version="1.0.0",
         steps=[step1, step2, step3, step4],
         strict_sequence=True,
