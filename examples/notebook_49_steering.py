@@ -1,25 +1,26 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
-"""Notebook 49: steering — a policy LLM gates a live investigation.
+"""Notebook 49: steering — a policy LLM gates a live production incident.
 
 ``SteeringHook`` runs a second LLM ("the steering model") in front of
-every tool call, which is how you steer an investigation while it is
-running — keep it read-only, redirect it ("pivot to lateral movement"),
-or stop a containment action that nobody approved. The steering model
+every tool call, which is how you steer an on-call agent while it is
+running — keep it read-only, redirect it ("check the canary first"),
+or stop a mutating action that nobody approved. The steering model
 reads a natural-language policy plus the agent's activity so far, then
 returns one of three actions:
 
 - ``PROCEED`` — let the tool call go through.
 - ``GUIDE`` — let it through but inject a note for the agent to read
-  (e.g. "pivot to lateral movement next").
+  (e.g. "check the canary metrics before scaling").
 - ``INTERRUPT`` — block the tool call and return a refusal message.
 
 The result is a real-time guardrail you can author in plain English —
 no rules engine, no policy DSL — and every decision is recorded for
-the post-incident audit. Holding an investigation read-only is a direct
-control against excessive agency (OWASP LLM06) and tool misuse
-(OWASP ASI02): the agent can read the SIEM all day but cannot reach a
-containment action no one approved.
+the post-incident review. Holding a diagnostics session read-only is a
+direct control against blast radius: the agent can query Prometheus and
+read logs all day, but it cannot reach a mutating operation — restarting
+a service, scaling a deployment, terminating an instance — that no one
+approved.
 
 - ``SteeringHook(model=..., policy="...")`` — attach it to any agent
   via the ``hooks=`` parameter.
@@ -47,8 +48,8 @@ from tulip.tools.decorator import tool
 
 
 # =============================================================================
-# Part 1: A read-only investigation policy. Containment is blocked,
-#         SIEM queries are allowed.
+# Part 1: A read-only diagnostics policy. Mutating ops are blocked,
+#         metric queries are allowed.
 # =============================================================================
 
 
@@ -58,60 +59,62 @@ def example_steering():
     model = get_model()
 
     @tool
-    def query_siem(query: str) -> str:
-        """Run a read-only query against the SIEM."""
-        return f"SIEM results: {query}"
+    def query_metrics(query: str) -> str:
+        """Run a read-only PromQL query against the metrics backend."""
+        return f"Metrics results: {query}"
 
     @tool
-    def isolate_host(hostname: str) -> str:
-        """Isolate a host from the network (containment action)."""
-        return f"Isolated {hostname}"
+    def restart_service(service: str) -> str:
+        """Restart a production service (mutating action)."""
+        return f"Restarted {service}"
 
     steering = SteeringHook(
         model=model,
         policy=(
-            "This is a read-only investigation. Only allow queries and log reads. "
-            "Never allow containment or destructive actions such as host isolation."
+            "This is a read-only diagnostics session. Only allow metric and log queries. "
+            "Never allow mutating or destructive operations such as restarting services, "
+            "scaling deployments, or terminating instances."
         ),
     )
 
     agent = Agent(
         config=AgentConfig(
-            system_prompt="You are a SOC investigation assistant.",
+            system_prompt="You are an SRE incident diagnostics assistant.",
             max_iterations=5,
             model=model,
-            tools=[query_siem, isolate_host],
+            tools=[query_metrics, restart_service],
             hooks=[steering],
         )
     )
 
-    # Should be INTERRUPTed — the policy forbids containment actions.
-    print("Attempt: Isolate host web-prod-03")
-    result = agent.run_sync("Isolate host web-prod-03")
+    # Should be INTERRUPTed — the policy forbids mutating actions.
+    print("Attempt: Restart service checkout-api")
+    result = agent.run_sync("Restart service checkout-api")
     print(f"Response: {result.message[:150]}")
     print(f"\nSteering decisions:")
     for d in steering.decisions:
         print(f"  {d.action}: {d.reason[:60]}")
 
-    # Should PROCEED — read-only SIEM queries are allowed.
-    print("\nAttempt: Query failed logins from 198.51.100.7")
+    # Should PROCEED — read-only metric queries are allowed.
+    print("\nAttempt: Query p99 latency for checkout-api")
     steering2 = SteeringHook(
         model=model,
         policy=(
-            "This is a read-only investigation. Only allow queries and log reads. "
-            "Never allow containment or destructive actions such as host isolation."
+            "This is a read-only diagnostics session. Only allow metric and log queries. "
+            "Never allow mutating or destructive operations such as restarting services, "
+            "scaling deployments, or terminating instances."
         ),
     )
     agent2 = Agent(
         config=AgentConfig(
-            system_prompt="You are a SOC investigation assistant.",
+            system_prompt="You are an SRE incident diagnostics assistant.",
             max_iterations=5,
             model=model,
-            tools=[query_siem, isolate_host],
+            tools=[query_metrics, restart_service],
             hooks=[steering2],
         )
     )
-    result2 = agent2.run_sync("Query the SIEM for failed logins from 198.51.100.7")
+    result2 = agent2.run_sync("Query the metrics backend for p99 latency on checkout-api")
     print(f"Response: {result2.message[:150]}")
 
 

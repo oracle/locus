@@ -1,17 +1,17 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
-"""Notebook 72: Cost guardrails for always-on SOC automation.
+"""Notebook 72: Cost guardrails for always-on payments automation.
 
-Follows notebook 71 (the gateway happy path) with the part SOC platform
-owners actually care about: **who spent what on which model**. An
-always-on triage fleet burns tokens 24/7, so each automation gets a
-budget-capped virtual key — a runaway agent loop hits its budget, not
-your invoice. A per-key hard budget is the gateway's answer to unbounded
-consumption (OWASP LLM10): a looping or hijacked automation is capped at
-the source instead of running up an unbounded bill. Issues virtual keys
-for two SOC teams, drives traffic on each, then walks the spend surface —
-per-request rows, per-key rollups, per-model rollups, and per-team
-filtering via metadata.
+Follows notebook 71 (the gateway happy path) with the part payments
+platform owners actually care about: **who spent what on which model**.
+An always-on fraud-and-disputes fleet burns tokens 24/7, so each
+automation gets a budget-capped virtual key — a runaway agent loop hits
+its budget, not your invoice. A per-key hard budget is the gateway's
+answer to unbounded consumption (OWASP LLM10): a looping or hijacked
+automation is capped at the source instead of running up an unbounded
+bill. Issues virtual keys for two payments teams, drives traffic on
+each, then walks the spend surface — per-request rows, per-key rollups,
+per-model rollups, and per-team filtering via metadata.
 
 Run it::
 
@@ -57,7 +57,7 @@ _REQUIRED_ENV = (
 
 def _print_skip_banner(missing: list[str]) -> None:
     print("=" * 72)
-    print(" LiteLLM AI Gateway not configured — skipping the SOC cost demo.")
+    print(" LiteLLM AI Gateway not configured — skipping the payments cost demo.")
     print("=" * 72)
     print(
         f"\n Missing environment variables: {', '.join(missing)}\n\n"
@@ -182,38 +182,38 @@ def main() -> None:
 
     print()
     print("=" * 72)
-    print(" Cost guardrails for always-on SOC automation (LiteLLM AI Gateway)")
+    print(" Cost guardrails for always-on payments automation (LiteLLM AI Gateway)")
     print("=" * 72)
     print(f" Gateway: {url}")
     print()
 
-    # ----- Step 1: issue two virtual keys, one per SOC team ----------------
-    soc_triage_key = issue_virtual_key(url, master_key, team="soc-triage", models=["gpt-4o"])
-    threat_intel_key = issue_virtual_key(
-        url, master_key, team="threat-intel", models=["gpt-4o", "claude-sonnet-4-6"]
+    # ----- Step 1: issue two virtual keys, one per payments team -----------
+    fraud_ops_key = issue_virtual_key(url, master_key, team="fraud-ops", models=["gpt-4o"])
+    dispute_ops_key = issue_virtual_key(
+        url, master_key, team="dispute-ops", models=["gpt-4o", "claude-sonnet-4-6"]
     )
     print(" Virtual keys issued (each with a $5 hard budget):")
-    print(f"   soc-triage   (gpt-4o only):   {soc_triage_key[:24]}...")
-    print(f"   threat-intel (gpt-4o, claude): {threat_intel_key[:24]}...")
+    print(f"   fraud-ops   (gpt-4o only):    {fraud_ops_key[:24]}...")
+    print(f"   dispute-ops (gpt-4o, claude): {dispute_ops_key[:24]}...")
     print()
 
     # ----- Step 2: drive different traffic on each team --------------------
     print(" Driving traffic:")
     for prompt in (
-        "Expand the acronym SIEM.",
-        "Expand the acronym EDR.",
-        "Expand the acronym SOAR.",
+        "Expand the acronym AVS.",
+        "Expand the acronym CVV.",
+        "Expand the acronym 3DS.",
     ):
-        out = chat(url, soc_triage_key, "gpt-4o", prompt)
+        out = chat(url, fraud_ops_key, "gpt-4o", prompt)
         content = out["choices"][0]["message"]["content"].strip()
         toks = out["usage"]["total_tokens"]
-        print(f"   [soc-triage]   {prompt} → {content!r}  ({toks} tokens)")
+        print(f"   [fraud-ops]   {prompt} → {content!r}  ({toks} tokens)")
 
-    for prompt in ("Expand the acronym TTP.", "Expand the acronym APT."):
-        out = chat(url, threat_intel_key, "gpt-4o", prompt)
+    for prompt in ("Expand the acronym ACH.", "Expand the acronym SEPA."):
+        out = chat(url, dispute_ops_key, "gpt-4o", prompt)
         content = out["choices"][0]["message"]["content"].strip()
         toks = out["usage"]["total_tokens"]
-        print(f"   [threat-intel] {prompt} → {content!r}  ({toks} tokens)")
+        print(f"   [dispute-ops] {prompt} → {content!r}  ({toks} tokens)")
 
     # ----- Step 3: wait for the gateway's async spend flusher --------------
     print()
@@ -223,9 +223,9 @@ def main() -> None:
     # ----- Step 4: walk the spend surface ---------------------------------
     print()
     print("=" * 72)
-    print(" /spend/logs — per-request rows for soc-triage")
+    print(" /spend/logs — per-request rows for fraud-ops")
     print("=" * 72)
-    for row in fetch_spend_logs(url, master_key, virtual_key=soc_triage_key):
+    for row in fetch_spend_logs(url, master_key, virtual_key=fraud_ops_key):
         team = (row.get("metadata") or {}).get("team", "?")
         print(
             f"   model={row.get('model', '?'):<32} "
@@ -252,8 +252,8 @@ def main() -> None:
 
     print()
     print("=" * 72)
-    print(" Done. SOC platform owners can answer:")
-    print("   · 'What did soc-triage spend last month?'  → /spend/logs + metadata.team")
+    print(" Done. Payments platform owners can answer:")
+    print("   · 'What did fraud-ops spend last month?'  → /spend/logs + metadata.team")
     print("   · 'What does the claude alias cost across teams?' → /global/spend/models")
     print("   · 'Which automation key is over budget right now?' → /global/spend/keys")
     print(" — all from one SQL-backed surface. No Tulip integration glue.")

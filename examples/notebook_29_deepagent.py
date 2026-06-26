@@ -2,17 +2,16 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 
-"""Notebook 29: DeepAgent — scoped attack-surface recon grounded in prior notes.
+"""Notebook 29: DeepAgent — scoped service-fleet reliability review grounded in prior notes.
 
 ``create_deepagent`` bundles the configuration patterns for deep, methodical
 investigation into one call: reflexion + grounding on by default, a typed
 termination algebra, plus opt-in filesystem scratchspace, todo tracking,
-subagent spawning, and datastore auto-wiring. Here the agent runs a scoped,
-authorized attack-surface review over an in-scope asset inventory — the
-external enumeration step of an engagement (MITRE ATT&CK TA0043
-Reconnaissance, T1595 Active Scanning), bounded to assets the rules of
-engagement permit. The result is a plain ``tulip.Agent`` — every hook,
-checkpointer, and observability primitive in the SDK attaches normally.
+subagent spawning, and datastore auto-wiring. Here the agent runs a scoped
+reliability review over a service-fleet inventory — the pre-release readiness
+step of an on-call rotation, bounded to the services a deploy window actually
+touches. The result is a plain ``tulip.Agent`` — every hook, checkpointer,
+and observability primitive in the SDK attaches normally.
 
 - Typed termination: ``(ToolCalled('submit') & ConfidenceMet(0.85))
   | TokenLimit(N) | MaxIterations(M)`` — composable and testable
@@ -28,7 +27,7 @@ checkpointer, and observability primitive in the SDK attaches normally.
 - ``datastores={name: {retriever, description, top_k}}``: auto-wire a
   ``search_<name>`` tool from any ``RAGRetriever`` and prepend a routing
   block to the system prompt. Part 5 wires an in-memory ``QdrantVectorStore`` +
-  ``OpenAIEmbeddings`` retriever over prior recon notes and gracefully
+  ``OpenAIEmbeddings`` retriever over prior incident notes and gracefully
   skips when no embedding key is set.
 
 Run it:
@@ -63,70 +62,67 @@ from tulip.tools import tool
 
 
 # =============================================================================
-# Shared domain — the in-scope asset inventory the agent will review.
-# Scope discipline matters: the agent enumerates exposure on assets named in
-# the rules of engagement and refuses anything outside that set.
+# Shared domain — the service-fleet inventory the agent will review.
+# Scope discipline matters: the agent inspects services inside the deploy
+# window and refuses anything outside that set.
 # =============================================================================
 
-_ASSET_INVENTORY = {
-    "vpn.corp.example": {
-        "description": "Employee VPN gateway — TLS portal plus OpenVPN endpoint, MFA enforced.",
-        "exposed_services": [
-            "443/https",
-            "1194/openvpn",
+_SERVICE_INVENTORY = {
+    "api-gateway": {
+        "description": "Public edge API gateway — terminates TLS, fans out to upstream services, autoscaled 4-12 replicas.",
+        "active_alerts": [
+            "p99-latency-warn",
+            "upstream-5xx-warn",
         ],
-        "last_review": "2026-03",
+        "last_deploy": "2026-06-22",
     },
-    "mail.corp.example": {
-        "description": "Mail gateway — inbound MX with SPF/DKIM/DMARC enforced, webmail disabled.",
-        "exposed_services": [
-            "25/smtp",
-            "443/https",
+    "payments-worker": {
+        "description": "Async payments settlement worker — consumes the ledger queue, idempotent retries, PCI scope.",
+        "active_alerts": [
+            "queue-depth-warn",
         ],
-        "last_review": "2026-01",
+        "last_deploy": "2026-06-18",
     },
-    "shop.corp.example": {
-        "description": "Customer storefront — behind the WAF, rate-limited login, no admin panel.",
-        "exposed_services": [
-            "443/https",
-        ],
-        "last_review": "2026-05",
+    "web-frontend": {
+        "description": "Server-rendered web frontend — behind the CDN, blue/green rollout, no open alerts this week.",
+        "active_alerts": [],
+        "last_deploy": "2026-06-24",
     },
 }
 
 
 @tool
-def list_assets() -> list[str]:
-    """List all in-scope assets in the engagement inventory."""
-    return list(_ASSET_INVENTORY.keys())
+def list_services() -> list[str]:
+    """List all services in the current deploy-window inventory."""
+    return list(_SERVICE_INVENTORY.keys())
 
 
 @tool
-def inspect_asset(name: str) -> dict:
-    """Return description, exposed services, and last review date for an asset.
+def inspect_service(name: str) -> dict:
+    """Return description, active alerts, and last deploy date for a service.
 
     Args:
-        name: Asset hostname, e.g. ``vpn.corp.example``.
+        name: Service name, e.g. ``api-gateway``.
 
     Returns:
-        Dict with ``description``, ``exposed_services``, and ``last_review``.
+        Dict with ``description``, ``active_alerts``, and ``last_deploy``.
     """
-    if name not in _ASSET_INVENTORY:
-        return {"error": f"asset '{name}' is not in the engagement scope"}
-    return _ASSET_INVENTORY[name]
+    if name not in _SERVICE_INVENTORY:
+        return {"error": f"service '{name}' is not in the deploy window"}
+    return _SERVICE_INVENTORY[name]
 
 
 @tool
-def count_exposed_services(name: str) -> int:
-    """Return the number of externally exposed services on an asset.
+def count_active_alerts(name: str) -> int:
+    """Return the number of firing alerts on a service.
 
     Args:
-        name: Asset hostname.
+        name: Service name.
     """
-    entry = _ASSET_INVENTORY.get(name)
+    entry = _SERVICE_INVENTORY.get(name)
     if not entry:
         return 0
-    return len(entry["exposed_services"])
+    return len(entry["active_alerts"])
 
 
 # =============================================================================
@@ -134,22 +130,22 @@ def count_exposed_services(name: str) -> int:
 # =============================================================================
 
 
-class AssetReport(BaseModel):
-    asset: str = Field(description="Hostname of the asset reviewed.")
-    summary: str = Field(description="2-3 sentence summary of the asset's exposure.")
-    exposed_services: list[str] = Field(description="All externally exposed services.")
-    last_review: str = Field(description="Date of the asset's last security review.")
+class ServiceReport(BaseModel):
+    service: str = Field(description="Name of the service reviewed.")
+    summary: str = Field(description="2-3 sentence summary of the service's reliability posture.")
+    active_alerts: list[str] = Field(description="All currently firing alerts.")
+    last_deploy: str = Field(description="Date of the service's last deploy.")
     confidence: float = Field(ge=0.0, le=1.0, description="Confidence in the report (0–1).")
 
 
 @tool
-def submit_recon(report: AssetReport) -> str:
-    """Submit the completed recon report. Call when confidence ≥ 0.85.
+def submit_review(report: ServiceReport) -> str:
+    """Submit the completed reliability review. Call when confidence ≥ 0.85.
 
     Args:
-        report: The completed ``AssetReport``.
+        report: The completed ``ServiceReport``.
     """
-    return f"submitted: {report.asset} ({report.confidence:.0%} confidence)"
+    return f"submitted: {report.service} ({report.confidence:.0%} confidence)"
 
 
 # =============================================================================
@@ -163,25 +159,25 @@ async def part1_basic() -> None:
 
     agent = create_deepagent(
         model=get_model(),
-        tools=[list_assets, inspect_asset, count_exposed_services, submit_recon],
+        tools=[list_services, inspect_service, count_active_alerts, submit_review],
         system_prompt=(
-            "You are an attack-surface recon analyst on a scoped, authorized engagement. "
-            "Use list_assets, inspect_asset, and count_exposed_services to gather facts "
-            "about in-scope assets only. "
-            "Submit a complete AssetReport via submit_recon once you reach ≥ 0.85 confidence."
+            "You are a site-reliability engineer running a pre-release readiness review. "
+            "Use list_services, inspect_service, and count_active_alerts to gather facts "
+            "about services inside the deploy window only. "
+            "Submit a complete ServiceReport via submit_review once you reach ≥ 0.85 confidence."
         ),
-        output_schema=AssetReport,
-        submit_tool="submit_recon",
+        output_schema=ServiceReport,
+        submit_tool="submit_review",
         min_confidence=0.85,
         max_iterations=12,
     )
 
-    result = agent.run_sync("Review the exposure of vpn.corp.example.")
+    result = agent.run_sync("Review the reliability posture of api-gateway.")
     print("protocol terminated:", result.stop_reason)
     if result.parsed:
-        rpt: AssetReport = result.parsed  # type: ignore[assignment]
-        print(f"asset:     {rpt.asset}")
-        print(f"services:  {', '.join(rpt.exposed_services[:4])} …")
+        rpt: ServiceReport = result.parsed  # type: ignore[assignment]
+        print(f"service:   {rpt.service}")
+        print(f"alerts:    {', '.join(rpt.active_alerts[:4])} …")
         print(f"confidence:{rpt.confidence:.0%}")
 
 
@@ -198,15 +194,15 @@ async def part2_filesystem_and_todos() -> None:
 
     agent = create_deepagent(
         model=get_model(),
-        tools=[list_assets, inspect_asset, count_exposed_services, submit_recon],
+        tools=[list_services, inspect_service, count_active_alerts, submit_review],
         system_prompt=(
-            "You are an attack-surface recon analyst on a scoped, authorized engagement. "
-            "Use write_file to keep scratchpad notes as you review each asset. "
-            "Use write_todos to track which assets you've covered. "
+            "You are a site-reliability engineer running a pre-release readiness review. "
+            "Use write_file to keep scratchpad notes as you review each service. "
+            "Use write_todos to track which services you've covered. "
             "Submit when you have a complete report with ≥ 0.85 confidence."
         ),
-        output_schema=AssetReport,
-        submit_tool="submit_recon",
+        output_schema=ServiceReport,
+        submit_tool="submit_review",
         min_confidence=0.85,
         max_iterations=16,
         enable_filesystem=True,
@@ -214,7 +210,7 @@ async def part2_filesystem_and_todos() -> None:
         todo_state=todo_state,
     )
 
-    result = agent.run_sync("Review all three assets in the engagement scope.")
+    result = agent.run_sync("Review all three services in the deploy window.")
     print("terminated:", result.stop_reason)
     print("todos after run:")
     for todo in todo_state.snapshot():
@@ -231,34 +227,34 @@ async def part3_subagents() -> None:
     print("\n--- Part 3: subagent dispatch ---")
 
     # The subagent only carries one tool — focused, cheap, easy to test.
-    service_analyst = SubAgentDef(
-        name="service_analyst",
-        description="Deep-dives on a single asset's exposed services.",
-        system_prompt="Inspect the given asset and return a plain list of its exposed services.",
-        tools=[inspect_asset],
+    alert_analyst = SubAgentDef(
+        name="alert_analyst",
+        description="Deep-dives on a single service's firing alerts.",
+        system_prompt="Inspect the given service and return a plain list of its active alerts.",
+        tools=[inspect_service],
         max_iterations=4,
     )
 
     agent = create_deepagent(
         model=get_model(),
-        tools=[list_assets, submit_recon],
+        tools=[list_services, submit_review],
         system_prompt=(
-            "Use list_assets to discover in-scope assets, then delegate service analysis "
-            "to the service_analyst subagent via the task() tool. "
-            "Submit an AssetReport for vpn.corp.example once you have the service list."
+            "Use list_services to discover services in the deploy window, then delegate "
+            "alert analysis to the alert_analyst subagent via the task() tool. "
+            "Submit a ServiceReport for api-gateway once you have the alert list."
         ),
-        output_schema=AssetReport,
-        submit_tool="submit_recon",
+        output_schema=ServiceReport,
+        submit_tool="submit_review",
         min_confidence=0.8,
         max_iterations=12,
-        subagents=[service_analyst],
+        subagents=[alert_analyst],
     )
 
-    result = agent.run_sync("Review vpn.corp.example using the service_analyst subagent.")
+    result = agent.run_sync("Review api-gateway using the alert_analyst subagent.")
     print("terminated:", result.stop_reason)
     if result.parsed:
-        rpt: AssetReport = result.parsed  # type: ignore[assignment]
-        print(f"services from subagent: {rpt.exposed_services}")
+        rpt: ServiceReport = result.parsed  # type: ignore[assignment]
+        print(f"alerts from subagent: {rpt.active_alerts}")
 
 
 # =============================================================================
@@ -271,30 +267,30 @@ async def part4_observability() -> None:
     print("\n--- Part 4: deepagent.* SSE events ---")
 
     todo_state = TodoState()
-    service_analyst = SubAgentDef(
-        name="service_analyst",
-        description="Inspect one asset.",
-        system_prompt="Inspect the given asset and list its exposed services.",
-        tools=[inspect_asset],
+    alert_analyst = SubAgentDef(
+        name="alert_analyst",
+        description="Inspect one service.",
+        system_prompt="Inspect the given service and list its active alerts.",
+        tools=[inspect_service],
         max_iterations=4,
     )
 
     agent = create_deepagent(
         model=get_model(),
-        tools=[list_assets, submit_recon],
+        tools=[list_services, submit_review],
         system_prompt=(
-            "Use list_assets, delegate service analysis via task(), "
+            "Use list_services, delegate alert analysis via task(), "
             "write scratchpad notes, track progress with todos. "
-            "Submit a report for mail.corp.example."
+            "Submit a report for payments-worker."
         ),
-        output_schema=AssetReport,
-        submit_tool="submit_recon",
+        output_schema=ServiceReport,
+        submit_tool="submit_review",
         min_confidence=0.8,
         max_iterations=14,
         enable_filesystem=True,
         enable_todos=True,
         todo_state=todo_state,
-        subagents=[service_analyst],
+        subagents=[alert_analyst],
     )
 
     deepagent_events: list[str] = []
@@ -306,7 +302,7 @@ async def part4_observability() -> None:
 
     async with run_context() as rid:
         collector = asyncio.create_task(_collect(rid))
-        result = agent.run_sync("Review the mail.corp.example asset.")
+        result = agent.run_sync("Review the payments-worker service.")
         await asyncio.sleep(0.1)
         collector.cancel()
 
@@ -327,7 +323,7 @@ async def part5_datastores() -> None:
     """Pass ``datastores={name: {retriever, description, top_k}}`` and the
     factory appends a ``search_<name>`` tool plus a per-store routing block
     in the system prompt. The agent then grounds its answers in the prior
-    recon notes instead of guessing.
+    incident notes instead of guessing.
 
     This Part requires an embedding key (``OPENAI_API_KEY``). Without it,
     Part 5 exits cleanly and the earlier parts still run.
@@ -337,7 +333,7 @@ async def part5_datastores() -> None:
     required = ("OPENAI_API_KEY",)
     missing = [n for n in required if not os.environ.get(n)]
     if missing:
-        print("\n[recon_notes_datastore] skipped — missing env vars:")
+        print("\n[incident_notes_datastore] skipped — missing env vars:")
         for n in missing:
             print(f"  - {n}")
         return
@@ -354,12 +350,13 @@ async def part5_datastores() -> None:
     retriever = RAGRetriever(embedder=embedder, store=store)
     await retriever.add_documents(
         [
-            "vpn.corp.example: only 443 and 1194 exposed after the 2025 hardening pass; "
-            "TLS certificate renewed 2026-03.",
-            "mail.corp.example: SPF, DKIM and DMARC enforced since 2025-11; webmail disabled.",
-            "shop.corp.example sits behind the WAF; login endpoint rate-limited after the "
-            "2025 credential-stuffing attempt.",
-            "test.corp.example was decommissioned in 2026-01 — any new sighting is a finding.",
+            "api-gateway: p99 latency regressed after the 2026-05 connection-pool change; "
+            "fixed by raising the upstream keep-alive limit, alert auto-resolved 2026-06-01.",
+            "payments-worker: queue-depth alert fired during the 2026-04 ledger backfill; "
+            "scaling consumers to 8 drained it; idempotency kept retries safe.",
+            "web-frontend: blue/green rollout has had zero rollbacks since the 2026-03 "
+            "CDN cache-key fix.",
+            "billing-cron was decommissioned 2026-01 — any new alert from it is a finding.",
         ]
     )
 
@@ -367,15 +364,15 @@ async def part5_datastores() -> None:
         model=get_model(),
         tools=[],
         system_prompt=(
-            "You are an attack-surface recon analyst. When asked about an asset's "
-            "history, call search_recon_notes first, then answer briefly with "
-            "(doc-NN) citations."
+            "You are a site-reliability engineer. When asked about a service's "
+            "incident history, call search_incident_notes first, then answer briefly "
+            "with (doc-NN) citations."
         ),
         datastores={
-            "recon_notes": {
+            "incident_notes": {
                 "retriever": retriever,
-                "description": "prior recon notes: exposed services, hardening history, "
-                "decommissioned hosts",
+                "description": "prior incident notes: alert history, remediations, "
+                "decommissioned services",
                 "top_k": 3,
             }
         },
@@ -385,7 +382,7 @@ async def part5_datastores() -> None:
     )
 
     result = agent.run_sync(
-        "What do prior recon notes say about vpn.corp.example? Cite the retrieved doc."
+        "What do prior incident notes say about api-gateway? Cite the retrieved doc."
     )
     print("part 5 response:", (result.text or "")[:300])
     print("part 5 tool calls:", len(result.tool_executions or ()))

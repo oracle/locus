@@ -2,20 +2,20 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 
-"""Notebook 31: vulnerability report vs skeptical reviewer — kill unproven claims.
+"""Notebook 31: PII-exposure report vs skeptical reviewer — kill unproven claims.
 
-An analyst gathers evidence, an author drafts a vulnerability report, and
-a skeptical reviewer (MIRROR — the team's adversarial review role) either
-signs off or sends it back because a claim isn't backed by evidence. The
-revise loop caps at two passes to bound runtime.
+An analyst gathers evidence, an author drafts a data-exposure report, and
+a skeptical reviewer (MIRROR — the privacy team's adversarial review role)
+either signs off or sends it back because a claim isn't backed by evidence.
+The revise loop caps at two passes to bound runtime.
 
 The point of the notebook is the *last* step, not the loop: a report that
 reads well is not the same as a report that is grounded. Before anything
 ships, the reviewer runs the drafted finding through ``ground_finding`` —
 the GSAR grounding gate from ``tulip.security``. A finding is emitted only
 when its evidence partition clears the proceed threshold; otherwise the
-call returns an ``Abstention`` and nothing reaches the queue. An unproven
-vulnerability claim is a false positive *by construction* and never ships.
+call returns an ``Abstention`` and nothing reaches the privacy queue. An
+unproven exposure claim is a false positive *by construction* and never ships.
 
 - The control flow is a ``StateGraph`` with conditional edges — no
   hand-rolled ``while True`` plus message passing.
@@ -91,28 +91,28 @@ def _make_agent(role: str, system_prompt: str, model: Any, max_iterations: int =
 
 
 SUPERVISOR_PROMPT = (
-    "You are the disclosure-team lead. Given the suspected vulnerability "
+    "You are the privacy-review team lead. Given the suspected PII exposure "
     "and the current state, decide whether the Analyst, Author, or Reviewer "
     "should run next. Respond with ONE word: gather, draft, or review."
 )
 
 ANALYST_PROMPT = (
-    "You are a vulnerability analyst. Given a suspected vulnerability, return "
-    "3-5 concise evidence notes drawn from scanner output and code review. "
-    "No speculation. Bullet points only."
+    "You are a data-privacy analyst. Given a suspected PII exposure, return "
+    "3-5 concise evidence notes drawn from DLP scan output and data-lineage "
+    "review. No speculation. Bullet points only."
 )
 
 AUTHOR_PROMPT = (
-    "You are a vulnerability-report author. Given evidence notes (and optionally "
-    "a reviewer's revision request), produce a concise 1-2 paragraph report. "
-    "State only what the evidence supports. Plain prose."
+    "You are a privacy-incident report author. Given evidence notes (and "
+    "optionally a reviewer's revision request), produce a concise 1-2 "
+    "paragraph report. State only what the evidence supports. Plain prose."
 )
 
-# MIRROR is the team's skeptical / adversarial review role: it reflects the
-# author's claims back against the evidence and refuses anything that can't
-# be traced to it.
+# MIRROR is the privacy team's skeptical / adversarial review role: it
+# reflects the author's claims back against the evidence and refuses
+# anything that can't be traced to it.
 REVIEWER_PROMPT = (
-    "You are a skeptical security reviewer. Read the draft report and kill "
+    "You are a skeptical privacy reviewer. Read the draft report and kill "
     "unproven claims: every stated impact must trace to the evidence notes. "
     "If the report is defensible, respond with exactly: APPROVE. "
     "If not, respond with: REVISE: <one-line specific instruction>."
@@ -123,7 +123,7 @@ REVIEWER_PROMPT = (
 # The evidence partition — what the reviewer's grounding gate scores.
 #
 # In a live run the analyst's notes would be parsed into typed claims; here
-# the partition is built deterministically from the seeded scanner facts so
+# the partition is built deterministically from the seeded DLP scan facts so
 # the grounding gate exercises the same admit/abstain path under the mock
 # model. Each claim carries the provenance label GSAR weights against:
 # a scanner/tool row outranks inference, which outranks domain priors.
@@ -133,34 +133,34 @@ REVIEWER_PROMPT = (
 def _evidence_partition(state: dict[str, Any]) -> Partition:
     """Build the GSAR partition for the drafted finding.
 
-    The grounded claims trace to scanner rows and the source line itself;
-    the lone unproven claim ("remotely exploitable without auth") sits in
-    ``ungrounded`` until traffic confirms it.
+    The grounded claims trace to DLP scan rows and the data-lineage graph;
+    the lone unproven claim ("records were accessed by a third party") sits
+    in ``ungrounded`` until access logs confirm it.
     """
     return Partition(
         grounded=[
             Claim(
-                text="Unsanitized 'q' parameter interpolated into a SQL string.",
+                text="Unmasked 'email' column is selected in the customer_export view.",
                 type=EvidenceType.TOOL_MATCH,
-                evidence_refs=["scanner:S-2209:orders/search.py:41:taint=q->query"],
+                evidence_refs=["dlp-scan:DLP-4471:analytics/customer_export.sql:23:class=email"],
             ),
             Claim(
-                text="The query is built with an f-string, not a parameterized statement.",
+                text="The column is exported with no masking or hashing applied.",
                 type=EvidenceType.SPECIFIC_DATA,
-                evidence_refs=["code-review:orders/search.py:41"],
+                evidence_refs=["schema-review:analytics/customer_export.sql:23"],
             ),
             Claim(
-                text="A second scanner pass confirmed the same sink on the staging build.",
+                text="Data lineage shows customer_export feeds the public BI dashboard.",
                 type=EvidenceType.COMPLEMENTARY_FINDING,
-                evidence_refs=["scanner:S-2211:staging:orders/search.py:41"],
+                evidence_refs=["lineage:DLP-4475:customer_export->bi_public_dashboard"],
             ),
         ],
-        # The author wanted to assert remote exploitability with no auth, but
-        # nothing in evidence proves the endpoint is reachable pre-auth — so
+        # The author wanted to assert that the records were actually exfiltrated,
+        # but nothing in evidence proves any unauthorized access occurred — so
         # MIRROR's gate keeps that claim out of the grounded set.
         ungrounded=[
             Claim(
-                text="Remotely exploitable without authentication.",
+                text="The exposed records were accessed by an unauthorized third party.",
                 type=EvidenceType.INFERENCE,
             ),
         ],
@@ -187,7 +187,7 @@ async def _run_agent(agent: Agent, prompt: str) -> str:
 
 async def gather_node(state: dict[str, Any]) -> dict[str, Any]:
     agent = _make_agent("analyst", ANALYST_PROMPT, state["__model__"])
-    notes = await _run_agent(agent, f"Suspected vulnerability: {state['finding']}")
+    notes = await _run_agent(agent, f"Suspected PII exposure: {state['finding']}")
     return {"notes": notes}
 
 
@@ -222,22 +222,25 @@ async def review_node(state: dict[str, Any]) -> dict[str, Any]:
     # The grounding gate. ground_finding scores the evidence partition and
     # returns Evidence | Abstention — an ungrounded claim cannot become a
     # Evidence. Tag with the relevant taxonomy IDs so the artifact is
-    # portable into a SIEM or report (SQLi is CWE-89; in the AI-stack
-    # threat model an injection-class flaw maps to OWASP LLM05 improper
-    # output handling and MITRE ATLAS T0048 external harms).
+    # portable into a privacy register or DPIA (unmasked-PII exposure is
+    # CWE-359; in the AI-stack threat model it maps to OWASP LLM02 sensitive
+    # information disclosure and MITRE ATLAS exfiltration via an agent tool).
     result = ground_finding(
-        title="SQL injection in orders /search endpoint",
+        title="Unmasked PII (email) exposed via analytics customer_export view",
         description=(
-            "The 'q' parameter is interpolated into a SQL string in "
-            "orders/search.py:41 with no parameterization; confirmed by "
-            "scanner S-2209 and a second pass on staging."
+            "The 'email' column is exported without masking in "
+            "analytics/customer_export.sql:23 and flows to a public BI "
+            "dashboard; confirmed by DLP scan DLP-4471 and a lineage trace."
         ),
         severity=Severity.HIGH,
-        asset="orders-service:/search",
-        remediation="Replace the f-string query with a parameterized statement.",
+        asset="analytics-export:customer_export",
+        remediation="Mask or hash the 'email' column, or drop it from the dashboard feed.",
         partition=_evidence_partition(state),
-        indicators=[Indicator(type=IndicatorType.HOST, value="orders.corp.example")],
-        taxonomy=[OwaspLLM.IMPROPER_OUTPUT_HANDLING, AtlasTechnique.EXTERNAL_HARMS],
+        indicators=[Indicator(type=IndicatorType.HOST, value="analytics.corp.example")],
+        taxonomy=[
+            OwaspLLM.SENSITIVE_INFORMATION_DISCLOSURE,
+            AtlasTechnique.EXFILTRATION_VIA_AGENT_TOOL,
+        ],
     )
 
     return {
@@ -267,7 +270,7 @@ def route_after_review(state: dict[str, Any]) -> str:
 
 
 def build_supervisor_graph() -> StateGraph:
-    graph = StateGraph(name="vuln-report-review-loop")
+    graph = StateGraph(name="pii-exposure-review-loop")
     graph.add_node("gather", gather_node)
     graph.add_node("draft", draft_node)
     graph.add_node("review", review_node)
@@ -289,7 +292,7 @@ def build_supervisor_graph() -> StateGraph:
 
 
 async def main() -> None:
-    print("Notebook 31: vulnerability report vs skeptical reviewer")
+    print("Notebook 31: PII-exposure report vs skeptical reviewer")
     print("=" * 60)
 
     model = get_model()
@@ -297,9 +300,9 @@ async def main() -> None:
 
     initial = {
         "finding": (
-            "Suspected SQL injection in the /search endpoint of the orders "
-            "service — scanner S-2209 flagged unsanitized use of the 'q' "
-            "parameter in a string-built query"
+            "Suspected PII exposure in the analytics-export pipeline — DLP "
+            "scan DLP-4471 flagged an unmasked 'email' column in the "
+            "customer_export view"
         ),
         "__model__": model,
     }

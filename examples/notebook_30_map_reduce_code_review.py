@@ -2,22 +2,21 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 
-"""Notebook 30: secure code review at scale — scatter-gather with Send.
+"""Notebook 30: customer-support triage at scale — scatter-gather with Send.
 
-Three source files, three security lenses (injection, authz, secrets)
-= nine reviewer agents running in parallel, then one synthesizer
-collapses everything into a single findings report. Each lens maps to
-a CWE class — injection (CWE-89 / CWE-78), broken access control
-(CWE-862 / CWE-639), and hardcoded credentials (CWE-798) — so findings
-land in vocabulary a SAST pipeline or triage queue already speaks.
+Three inbound tickets, three triage lenses (sentiment, routing, resolution)
+= nine analyst agents running in parallel, then one synthesizer collapses
+everything into a single triage summary. Each lens emits a structured tag —
+SENTIMENT, QUEUE, PRIORITY — so the output lands in vocabulary a helpdesk
+or routing pipeline already speaks.
 
 - ``Send(node, payload, metadata)`` is a first-class graph primitive.
   The splitter node returns a list of Sends; the executor fans them out
   and runs them concurrently. No queues, no manual ``asyncio.gather``.
-- Each reviewer is a distinct ``Agent`` with its own lens-specific
+- Each analyst is a distinct ``Agent`` with its own lens-specific
   system prompt — the graph orchestrates them, not a hand-rolled loop.
 - The synthesizer reads each Send's output back from merged state and
-  emits a single Markdown findings report.
+  emits a single Markdown triage summary.
 - The whole pipeline is one ``StateGraph.execute`` call. Streaming,
   cancellation, checkpointing, and GSAR judgment attach for free.
 
@@ -46,74 +45,67 @@ from tulip.multiagent.graph import END, START, StateGraph
 
 
 # ----------------------------------------------------------------------------
-# Three independent files to review in parallel. Each snippet carries a
-# deliberately planted, provable weakness so reviewers have something
-# concrete to cite — no real secrets: the AWS key below is the documented
-# example value from AWS docs, not a live credential.
-#   auth.py   — hardcoded credential + role from untrusted input (CWE-798)
-#   export.py — missing ownership check + hardcoded API key (CWE-862, CWE-798)
-#   search.py — SQL injection via string interpolation (CWE-89)
+# Three independent tickets to triage in parallel. Each message carries a
+# concrete, quotable issue so the analysts have something specific to cite.
+#   T-4821 — duplicate billing charge, refund request (billing)
+#   T-4822 — login failure / app hang, time-sensitive (technical)
+#   T-4823 — cancellation / churn risk, open to a downgrade (account)
 # ----------------------------------------------------------------------------
 
-SAMPLE_FILES = {
-    "auth.py": """
-def login(username, password):
-    if password == "admin123":
-        return {"role": "admin", "token": username}
-    return {"role": "user", "token": username}
-""",
-    "export.py": """
-def export_report(user, report_id, db):
-    # TODO: check report ownership
-    report = db.get_report(report_id)
-    return report.render(api_key="AKIAIOSFODNN7EXAMPLE")
-""",
-    "search.py": """
-def search(query, db):
-    sql = f"SELECT * FROM products WHERE name LIKE '%{query}%'"
-    return db.execute(sql).fetchall()
-""",
-}
-
-
-# ----------------------------------------------------------------------------
-# Review lenses — each runs as its own Agent with a lens-specific prompt
-# ----------------------------------------------------------------------------
-
-REVIEWER_ROLES = {
-    "injection": (
-        "You are an application-security reviewer hunting injection bugs "
-        "(CWE-89 SQL injection, CWE-78 OS command injection). "
-        "Read the code and list every injection issue you can prove with "
-        "the snippet — unsanitized string interpolation into a query or a "
-        "shell command, untrusted input reaching an interpreter. Be "
-        "specific and quote the offending line. Do not invent issues you "
-        "cannot point to in the code. End with a single "
-        "line: SEVERITY=<low|medium|high|critical>."
+SAMPLE_TICKETS = {
+    "T-4821": (
+        "I was charged twice for my June subscription — $29.99 on the 3rd and "
+        "again on the 5th. I only have one account. Please refund the duplicate "
+        "charge today; this is the second time this has happened."
     ),
-    "authz": (
-        "You are a broken-access-control reviewer (CWE-862 missing "
-        "authorization, CWE-639 IDOR). List every authorization "
-        "issue you can prove in the code: missing ownership checks, role "
-        "decisions from untrusted input, insecure direct object references, "
-        "privilege-escalation paths. Quote the offending line. Do not "
-        "invent issues. End with: SEVERITY=<...>."
+    "T-4822": (
+        "I've been trying to log in for the past hour and the app just spins on a "
+        "blank screen. I'm on the latest iOS build. I have a client demo in 30 "
+        "minutes and I'm locked out — terrible timing."
     ),
-    "secrets": (
-        "You are a secrets-hygiene reviewer (CWE-798 hardcoded credentials) "
-        "focused on API keys, tokens, and passwords embedded in source. "
-        "Quote the offending literal. Be terse. End with: SEVERITY=<...>."
+    "T-4823": (
+        "I'd like to cancel my plan. The product is fine but I'm not using it "
+        "enough to justify the cost, and the renewal hit before I could downgrade. "
+        "If there's a cheaper tier I might stay; otherwise please close the account."
     ),
 }
 
 
-def _make_reviewer(role: str, model: Any) -> Agent:
+# ----------------------------------------------------------------------------
+# Triage lenses — each runs as its own Agent with a lens-specific prompt
+# ----------------------------------------------------------------------------
+
+ANALYST_ROLES = {
+    "sentiment": (
+        "You are a customer-sentiment analyst. Read the support ticket and "
+        "gauge the customer's emotional state and frustration level. Quote the "
+        "specific phrases that signal how the customer feels. Do not invent "
+        "emotions the text does not show. End with a single "
+        "line: SENTIMENT=<calm|frustrated|angry|at-risk>."
+    ),
+    "routing": (
+        "You are a support-routing analyst. Classify the ticket into the right "
+        "queue (billing, technical, account, or shipping) and name the single "
+        "most likely root cause you can support from the message. Quote the line "
+        "that decides the category. Do not invent details. End "
+        "with: QUEUE=<billing|technical|account|shipping>."
+    ),
+    "resolution": (
+        "You are a resolution analyst. Propose the single best next action to "
+        "resolve the ticket — a concrete step the agent can take. Quote the part "
+        "of the ticket that drives your recommendation. Be terse. End "
+        "with: PRIORITY=<low|medium|high|urgent>."
+    ),
+}
+
+
+def _make_analyst(role: str, model: Any) -> Agent:
     return Agent(
         config=AgentConfig(
-            agent_id=f"reviewer-{role}",
+            agent_id=f"analyst-{role}",
             model=model,
-            system_prompt=REVIEWER_ROLES[role],
-            # One model call is enough for static review of a short snippet.
+            system_prompt=ANALYST_ROLES[role],
+            # One model call is enough to triage a short ticket.
             max_iterations=2,
             max_tokens=400,
         )
@@ -125,24 +117,23 @@ def _make_reviewer(role: str, model: Any) -> Agent:
 # ----------------------------------------------------------------------------
 
 
-async def split_files(state: dict[str, Any]) -> list[Send]:
-    """Fan out: one Send per (file, lens) — 3 × 3 = 9 reviewers, all concurrent."""
-    files: dict[str, str] = state["files"]
-    roles = list(REVIEWER_ROLES)
+async def split_tickets(state: dict[str, Any]) -> list[Send]:
+    """Fan out: one Send per (ticket, lens) — 3 × 3 = 9 analysts, all concurrent."""
+    tickets: dict[str, str] = state["tickets"]
+    roles = list(ANALYST_ROLES)
     return [
         Send(
-            node="review_one",
-            payload={"file_name": fname, "code": code, "role": role},
-            metadata={"file": fname, "role": role},
+            node="analyze_one",
+            payload={"ticket_id": ticket_id, "message": message, "role": role},
+            metadata={"ticket": ticket_id, "role": role},
         )
-        for fname in files
-        for code, _ in [(files[fname], None)]
+        for ticket_id, message in tickets.items()
         for role in roles
     ]
 
 
-async def review_one(state: dict[str, Any]) -> dict[str, Any]:
-    """One reviewer Agent against one (file, lens).
+async def analyze_one(state: dict[str, Any]) -> dict[str, Any]:
+    """One analyst Agent against one (ticket, lens).
 
     Uses ``async for event in agent.run(...)`` instead of ``run_sync()``
     so the 9 instances run truly in parallel inside the graph's
@@ -152,15 +143,15 @@ async def review_one(state: dict[str, Any]) -> dict[str, Any]:
     from tulip.core.events import TerminateEvent
 
     role: str = state["role"]
-    file_name: str = state["file_name"]
-    code: str = state["code"]
+    ticket_id: str = state["ticket_id"]
+    message: str = state["message"]
     model = state["__model__"]
-    agent = _make_reviewer(role, model)
+    agent = _make_analyst(role, model)
     prompt = (
-        f"File: {file_name}\n"
+        f"Ticket: {ticket_id}\n"
         f"Lens: {role}\n\n"
-        f"```python\n{code}\n```\n\n"
-        f"Review the code through the {role} lens."
+        f'"""\n{message}\n"""\n\n'
+        f"Analyze the ticket through the {role} lens."
     )
     final_msg: str = ""
     iterations = 0
@@ -169,8 +160,8 @@ async def review_one(state: dict[str, Any]) -> dict[str, Any]:
             final_msg = event.final_message or ""
             iterations = event.iterations_used
     return {
-        "review": {
-            "file": file_name,
+        "analysis": {
+            "ticket": ticket_id,
             "role": role,
             "comments": final_msg.strip(),
             "iterations": iterations,
@@ -179,20 +170,20 @@ async def review_one(state: dict[str, Any]) -> dict[str, Any]:
 
 
 async def synthesize(state: dict[str, Any]) -> dict[str, Any]:
-    """Reduce: walk the merged state, collect every ``review`` payload, render."""
-    reviews = [v["review"] for v in state.values() if isinstance(v, dict) and "review" in v]
-    by_file: dict[str, list[dict[str, Any]]] = {}
-    for r in reviews:
-        by_file.setdefault(r["file"], []).append(r)
+    """Reduce: walk the merged state, collect every ``analysis`` payload, render."""
+    analyses = [v["analysis"] for v in state.values() if isinstance(v, dict) and "analysis" in v]
+    by_ticket: dict[str, list[dict[str, Any]]] = {}
+    for a in analyses:
+        by_ticket.setdefault(a["ticket"], []).append(a)
 
-    lines = ["# Secure code review — findings report", ""]
-    for fname in sorted(by_file):
-        lines.append(f"## {fname}")
-        for r in sorted(by_file[fname], key=lambda x: x["role"]):
-            lines.append(f"### {r['role']}")
-            lines.append(r["comments"])
+    lines = ["# Customer-support triage — summary report", ""]
+    for ticket_id in sorted(by_ticket):
+        lines.append(f"## {ticket_id}")
+        for a in sorted(by_ticket[ticket_id], key=lambda x: x["role"]):
+            lines.append(f"### {a['role']}")
+            lines.append(a["comments"])
             lines.append("")
-    return {"report": "\n".join(lines), "review_count": len(reviews)}
+    return {"report": "\n".join(lines), "analysis_count": len(analyses)}
 
 
 # ----------------------------------------------------------------------------
@@ -200,19 +191,19 @@ async def synthesize(state: dict[str, Any]) -> dict[str, Any]:
 # ----------------------------------------------------------------------------
 
 
-def build_review_graph(model: Any) -> StateGraph:
-    """Wire the three nodes: split → review_one (parallel) → synthesize → END.
+def build_triage_graph(model: Any) -> StateGraph:
+    """Wire the three nodes: split → analyze_one (parallel) → synthesize → END.
 
     The model is threaded through state under ``__model__`` rather than
     captured by closure so the graph stays picklable for checkpointing.
     """
-    graph = StateGraph(name="secure-review-crew")
-    graph.add_node("split", split_files)
-    graph.add_node("review_one", review_one)
+    graph = StateGraph(name="support-triage-crew")
+    graph.add_node("split", split_tickets)
+    graph.add_node("analyze_one", analyze_one)
     graph.add_node("synthesize", synthesize)
 
     graph.add_edge(START, "split")
-    # No explicit edge "split → review_one" — the Sends from ``split``
+    # No explicit edge "split → analyze_one" — the Sends from ``split``
     # carry their own routing. Once every Send finishes, control returns
     # to ``split``'s adjacency, which points at ``synthesize``.
     graph.add_edge("split", "synthesize")
@@ -226,17 +217,17 @@ def build_review_graph(model: Any) -> StateGraph:
 
 
 async def main() -> None:
-    print("Notebook 30: secure code review at scale — scatter-gather with Send")
+    print("Notebook 30: customer-support triage at scale — scatter-gather with Send")
     print("=" * 60)
 
     model = get_model()
-    graph = build_review_graph(model)
+    graph = build_triage_graph(model)
 
-    initial = {"files": SAMPLE_FILES, "__model__": model}
+    initial = {"tickets": SAMPLE_TICKETS, "__model__": model}
 
     print(
-        f"\nFanning out {len(SAMPLE_FILES)} files × {len(REVIEWER_ROLES)} lenses "
-        f"= {len(SAMPLE_FILES) * len(REVIEWER_ROLES)} reviewer agents in parallel...\n"
+        f"\nFanning out {len(SAMPLE_TICKETS)} tickets × {len(ANALYST_ROLES)} lenses "
+        f"= {len(SAMPLE_TICKETS) * len(ANALYST_ROLES)} analyst agents in parallel...\n"
     )
 
     result = await graph.execute(initial)
@@ -245,7 +236,7 @@ async def main() -> None:
         f"Graph completed in {result.duration_ms:.0f} ms across "
         f"{result.iterations} graph iteration(s)"
     )
-    print(f"Reviews collected: {result.final_state.get('review_count', 0)}")
+    print(f"Analyses collected: {result.final_state.get('analysis_count', 0)}")
     print()
     print(result.final_state.get("report", "(no report)"))
 

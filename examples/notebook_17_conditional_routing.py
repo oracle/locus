@@ -1,14 +1,14 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 """
-Notebook 17: Severity-based alert escalation routing.
+Notebook 17: Severity-based cloud incident escalation routing.
 
 A conditional edge is a function attached to a node. It runs after the
 node returns, looks at the current state, and picks the next node by
-name. That's all a SOC needs to express escalation policy: low-severity
-alerts auto-close, high-severity ones page a human, and an LLM can sort
-raw alerts into families (phishing T1566, malware execution T1204,
-suspicious access T1078 — all MITRE ATT&CK).
+name. That's all a cloud ops team needs to express escalation policy:
+low-severity monitoring alerts auto-resolve, high-severity ones page an
+on-call SRE, and an LLM can sort raw alerts into families (compute,
+storage, network).
 
 - Binary and multi-way branching with `add_conditional_edges`.
 - Router function — receives state, returns a node name.
@@ -48,13 +48,13 @@ def _llm_call(
 
 
 # =============================================================================
-# Part 1: Binary branch — escalate or auto-close
+# Part 1: Binary branch — page or auto-resolve
 # =============================================================================
 
 
 async def example_binary_routing():
     """Pick one of two downstream nodes based on a boolean in state."""
-    print("=== Part 1: Binary branch — escalate or auto-close ===\n")
+    print("=== Part 1: Binary branch — page or auto-resolve ===\n")
 
     graph = StateGraph()
 
@@ -64,15 +64,15 @@ async def example_binary_routing():
 
     async def escalate_path(inputs):
         msg = _llm_call(
-            f"Write a one-line escalation note for a security alert with "
-            f"{inputs.get('confidence')}% detection confidence that needs analyst review.",
+            f"Write a one-line escalation note for a cloud monitoring alert with "
+            f"{inputs.get('confidence')}% anomaly confidence that needs on-call SRE review.",
         )
         return {"disposition": msg}
 
     async def auto_close_path(inputs):
         msg = _llm_call(
-            f"Write a one-line auto-close note for a security alert with only "
-            f"{inputs.get('confidence')}% detection confidence, mentioning it stays on record.",
+            f"Write a one-line auto-resolve note for a cloud monitoring alert with only "
+            f"{inputs.get('confidence')}% anomaly confidence, mentioning it stays on record.",
         )
         return {"disposition": msg}
 
@@ -116,11 +116,13 @@ async def example_multiway_routing():
         return {"severity": severity}
 
     async def handle_critical(inputs):
-        line = _llm_call("In one short line, page on-call IR for a CRITICAL alert. SLA 15 min.")
+        line = _llm_call(
+            "In one short line, page the on-call SRE for a CRITICAL outage. SLA 15 min."
+        )
         return {"response": line, "sla": "15 minutes"}
 
     async def handle_high(inputs):
-        line = _llm_call("In one short line, assign a HIGH alert to Tier 2. SLA 1 hour.")
+        line = _llm_call("In one short line, assign a HIGH alert to the platform team. SLA 1 hour.")
         return {"response": line, "sla": "1 hour"}
 
     async def handle_medium(inputs):
@@ -169,35 +171,35 @@ async def example_multiway_routing():
 
 
 async def example_chained_conditions():
-    """First check the alert source, then — if trusted — check the analyst's role."""
+    """First check the alert source, then — if trusted — check the operator's role."""
     print("=== Part 3: Two routers in sequence ===\n")
 
     graph = StateGraph()
 
     async def validate_source(inputs):
-        sensor_key = inputs.get("sensor_key", "")
-        is_trusted = sensor_key == "sensor-key-123"  # noqa: S105 — notebook literal, not a secret
+        webhook_key = inputs.get("webhook_key", "")
+        is_trusted = webhook_key == "webhook-key-123"  # noqa: S105 — notebook literal, not a secret
         return {"trusted_source": is_trusted}
 
     async def check_role(inputs):
         role = inputs.get("role", "readonly")
-        return {"is_responder": role == "responder"}
+        return {"is_operator": role == "operator"}
 
-    async def contain_action(inputs):
-        line = _llm_call("In one line, log that a responder isolated the affected host.")
+    async def rollback_action(inputs):
+        line = _llm_call("In one line, log that an operator rolled back the affected service.")
         return {"result": line}
 
     async def ticket_action(inputs):
-        line = _llm_call("In one line, log that a read-only analyst opened a containment ticket.")
+        line = _llm_call("In one line, log that a read-only viewer opened a remediation ticket.")
         return {"result": line}
 
     async def discard_alert(inputs):
-        line = _llm_call("In one line, log that an alert from an untrusted sensor was discarded.")
+        line = _llm_call("In one line, log that an alert from an untrusted webhook was discarded.")
         return {"result": line}
 
     graph.add_node("source", validate_source)
     graph.add_node("role", check_role)
-    graph.add_node("contain", contain_action)
+    graph.add_node("rollback", rollback_action)
     graph.add_node("ticket", ticket_action)
     graph.add_node("discard", discard_alert)
 
@@ -206,21 +208,21 @@ async def example_chained_conditions():
     graph.add_conditional_edges(
         "source", lambda s: "role" if s.get("trusted_source") else "discard"
     )
-    graph.add_conditional_edges("role", lambda s: "contain" if s.get("is_responder") else "ticket")
+    graph.add_conditional_edges("role", lambda s: "rollback" if s.get("is_operator") else "ticket")
 
-    graph.add_edge("contain", END)
+    graph.add_edge("rollback", END)
     graph.add_edge("ticket", END)
     graph.add_edge("discard", END)
 
     test_cases = [
-        {"sensor_key": "forged", "role": "responder"},
-        {"sensor_key": "sensor-key-123", "role": "readonly"},
-        {"sensor_key": "sensor-key-123", "role": "responder"},
+        {"webhook_key": "forged", "role": "operator"},
+        {"webhook_key": "webhook-key-123", "role": "readonly"},
+        {"webhook_key": "webhook-key-123", "role": "operator"},
     ]
 
     for case in test_cases:
         result = await graph.execute(case)
-        print(f"Sensor key: {case['sensor_key'][:6]}..., Role: {case['role']}")
+        print(f"Webhook key: {case['webhook_key'][:6]}..., Role: {case['role']}")
         print(f"  -> {result.final_state.get('result')}")
     print()
 
@@ -240,25 +242,25 @@ async def example_default_route():
         family = inputs.get("family", "unknown")
         return {"family": family}
 
-    async def handle_phishing(inputs):
-        line = _llm_call("In one short line, name the team that handles phishing alerts.")
+    async def handle_compute(inputs):
+        line = _llm_call("In one short line, name the team that handles compute alerts.")
         return {"handler": line}
 
-    async def handle_malware(inputs):
-        line = _llm_call("In one short line, name the team that handles malware alerts.")
+    async def handle_storage(inputs):
+        line = _llm_call("In one short line, name the team that handles storage alerts.")
         return {"handler": line}
 
     async def handle_network(inputs):
-        line = _llm_call("In one short line, name the team that handles network anomaly alerts.")
+        line = _llm_call("In one short line, name the team that handles network alerts.")
         return {"handler": line}
 
     async def handle_other(inputs):
-        line = _llm_call("In one short line, name a generic SOC queue for unmatched alerts.")
+        line = _llm_call("In one short line, name a generic on-call queue for unmatched alerts.")
         return {"handler": line}
 
     graph.add_node("categorize", categorize)
-    graph.add_node("phishing", handle_phishing)
-    graph.add_node("malware", handle_malware)
+    graph.add_node("compute", handle_compute)
+    graph.add_node("storage", handle_storage)
     graph.add_node("network", handle_network)
     graph.add_node("other", handle_other)
 
@@ -268,19 +270,19 @@ async def example_default_route():
         "categorize",
         lambda s: s.get("family", "other"),
         targets={
-            "phishing": "phishing",
-            "malware": "malware",
+            "compute": "compute",
+            "storage": "storage",
             "network": "network",
         },
         default="other",
     )
 
-    graph.add_edge("phishing", END)
-    graph.add_edge("malware", END)
+    graph.add_edge("compute", END)
+    graph.add_edge("storage", END)
     graph.add_edge("network", END)
     graph.add_edge("other", END)
 
-    for family in ["phishing", "malware", "insider", "xyz"]:
+    for family in ["compute", "storage", "database", "xyz"]:
         result = await graph.execute({"family": family})
         print(f"Alert family '{family}': {result.final_state.get('handler')}")
     print()
@@ -298,17 +300,17 @@ async def example_complex_routing():
     graph = StateGraph()
 
     async def evaluate_incident(inputs):
-        cvss = inputs.get("cvss", 0.0)
-        asset_tier = inputs.get("asset_tier", "standard")
-        hosts = inputs.get("hosts", 1)
+        error_rate = inputs.get("error_rate", 0.0)
+        service_tier = inputs.get("service_tier", "standard")
+        instances = inputs.get("instances", 1)
 
         return {
-            "cvss": cvss,
-            "asset_tier": asset_tier,
-            "hosts": hosts,
-            "is_widespread": hosts > 10,
-            "is_crown_jewel": asset_tier == "crown_jewel",
-            "is_high_cvss": cvss > 7.0,
+            "error_rate": error_rate,
+            "service_tier": service_tier,
+            "instances": instances,
+            "is_widespread": instances > 10,
+            "is_tier_zero": service_tier == "tier_zero",
+            "is_high_error": error_rate > 10.0,
         }
 
     async def page_oncall(inputs):
@@ -331,13 +333,13 @@ async def example_complex_routing():
     graph.add_edge(START, "evaluate")
 
     def incident_router(state):
-        is_crown_jewel = state.get("is_crown_jewel", False)
-        is_high_cvss = state.get("is_high_cvss", False)
+        is_tier_zero = state.get("is_tier_zero", False)
+        is_high_error = state.get("is_high_error", False)
         is_widespread = state.get("is_widespread", False)
 
-        if is_crown_jewel and is_high_cvss:
+        if is_tier_zero and is_high_error:
             return "page"
-        elif is_crown_jewel or is_high_cvss or is_widespread:
+        elif is_tier_zero or is_high_error or is_widespread:
             return "priority"
         else:
             return "standard"
@@ -349,15 +351,18 @@ async def example_complex_routing():
     graph.add_edge("standard", END)
 
     test_cases = [
-        {"cvss": 4.3, "asset_tier": "standard", "hosts": 2},
-        {"cvss": 4.3, "asset_tier": "crown_jewel", "hosts": 2},
-        {"cvss": 9.8, "asset_tier": "standard", "hosts": 2},
-        {"cvss": 9.8, "asset_tier": "crown_jewel", "hosts": 20},
+        {"error_rate": 2.5, "service_tier": "standard", "instances": 2},
+        {"error_rate": 2.5, "service_tier": "tier_zero", "instances": 2},
+        {"error_rate": 35.0, "service_tier": "standard", "instances": 2},
+        {"error_rate": 35.0, "service_tier": "tier_zero", "instances": 20},
     ]
 
     for case in test_cases:
         result = await graph.execute(case)
-        print(f"Incident: CVSS {case['cvss']}, {case['asset_tier']}, {case['hosts']} hosts")
+        print(
+            f"Incident: error rate {case['error_rate']}%, "
+            f"{case['service_tier']}, {case['instances']} instances"
+        )
         print(
             f"  -> {result.final_state.get('routing')}: {result.final_state.get('response_window')}"
         )
@@ -382,8 +387,8 @@ async def example_llm_router():
         agent = Agent(
             model=get_model(max_tokens=10),
             system_prompt=(
-                "Classify the security alert into exactly one of: "
-                "phishing, malware, access. Reply with just the single word."
+                "Classify the cloud alert into exactly one of: "
+                "compute, storage, network. Reply with just the single word."
             ),
         )
         t0 = _t.perf_counter()
@@ -395,34 +400,34 @@ async def example_llm_router():
         label = result.message.strip().lower()
         # Defensive: clamp anything unexpected back onto a known label
         # so the conditional edge always finds a target.
-        if label not in {"phishing", "malware", "access"}:
-            label = "access"
+        if label not in {"compute", "storage", "network"}:
+            label = "network"
         return {"family": label}
 
-    async def phishing(_inputs):
-        return {"handler": "Phishing Response Team"}
+    async def compute(_inputs):
+        return {"handler": "Compute Platform Team"}
 
-    async def malware(_inputs):
-        return {"handler": "Malware Analysis Team"}
+    async def storage(_inputs):
+        return {"handler": "Storage Platform Team"}
 
-    async def access(_inputs):
-        return {"handler": "Identity & Access Team"}
+    async def network(_inputs):
+        return {"handler": "Network Platform Team"}
 
     graph.add_node("classify", classify_with_llm)
-    graph.add_node("phishing", phishing)
-    graph.add_node("malware", malware)
-    graph.add_node("access", access)
+    graph.add_node("compute", compute)
+    graph.add_node("storage", storage)
+    graph.add_node("network", network)
 
     graph.add_edge(START, "classify")
     graph.add_conditional_edges("classify", lambda s: s["family"])
-    graph.add_edge("phishing", END)
-    graph.add_edge("malware", END)
-    graph.add_edge("access", END)
+    graph.add_edge("compute", END)
+    graph.add_edge("storage", END)
+    graph.add_edge("network", END)
 
     samples = [
-        "User reports an email asking them to verify a password at phish.example.net.",
-        "EDR flagged a binary with test hash aa11bb22 on workstation WS-204.",
-        "Login for j.doe from 198.51.100.7 minutes after a login from another country.",
+        "CPU pinned at 100% on autoscaling group web-asg for ten minutes.",
+        "Object store bucket prod-assets returning 503 SlowDown on PUT requests.",
+        "Cross-region VPC peering link dropping 4% of packets to eu-west-1.",
     ]
     for alert in samples:
         result = await graph.execute({"alert": alert})
@@ -437,7 +442,7 @@ async def example_llm_router():
 
 async def main():
     print("=" * 60)
-    print("Notebook 17: Severity-based escalation routing")
+    print("Notebook 17: Severity-based cloud incident escalation routing")
     print("=" * 60)
     print()
 
@@ -449,7 +454,7 @@ async def main():
     await example_llm_router()
 
     print("=" * 60)
-    print("Next: Notebook 18 — Merging scanner findings with state reducers")
+    print("Next: Notebook 18 — Merging telemetry findings with state reducers")
     print("=" * 60)
 
 

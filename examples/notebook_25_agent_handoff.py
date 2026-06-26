@@ -1,18 +1,18 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 """
-Notebook 25: SOC tier escalation — L1 → L2 → L3 handoff with typed context.
+Notebook 25: Support tier escalation — L1 → L2 → L3 handoff with typed context.
 
-A handoff is one analyst agent saying "I'm done, please take this further."
-The source agent packages the alert, its findings, and an explicit reason
-into a typed ``HandoffContext`` so the next tier inherits the full
-investigation state — not just a string. No re-triage, no lost evidence.
+A handoff is one support agent saying "I'm done, please take this further."
+The source agent packages the ticket, its findings, and an explicit reason
+into a typed ``HandoffContext`` so the next tier inherits the full case
+state — not just a string. No re-asking the customer, no lost context.
 
-The running case is a classic-SOC tier escalation: an EDR alert for
-encoded PowerShell spawned by a document handler (ATT&CK T1059.001
-PowerShell, T1566 Phishing as the suspected initial access) walks L1 → L2
-→ L3. The typed chain is also the audit trail — every transfer, reason,
-and confidence value is recorded for the post-incident review.
+The running case is a classic support tier escalation: a customer reports
+that a paid subscription was charged twice but only one plan is active. The
+ticket walks L1 → L2 → L3, with billing-system lookups and account history
+gathered along the way. The typed chain is also the audit trail — every
+transfer, reason, and confidence value is recorded for the QA review.
 
 - ``HandoffContext`` carries the source/target ids, original task,
   conversation summary, findings dict, confidence, instructions, and the
@@ -35,7 +35,7 @@ The default provider is the bundled mock model. Set TULIP_MODEL_PROVIDER=openai
 
 This notebook fires ~9 handoffs serially, so it can use Tulip's "Model B"
 slot — a second, typically cheaper model id read from ``TULIP_MODEL_ID_B``
-— for the L1 triage seat. With Model B unset, the slot collapses to Model A.
+— for the L1 front-line seat. With Model B unset, the slot collapses to Model A.
 
 Prerequisites:
 - Notebook 06 (Agent basics).
@@ -64,62 +64,62 @@ def _banner(label: str, dt: float, prompt_tok: int = 0, completion_tok: int = 0)
 
 async def main():
     print("=" * 60)
-    print("Notebook 25: SOC tier escalation — typed L1 → L2 → L3 handoffs")
+    print("Notebook 25: Support tier escalation — typed L1 → L2 → L3 handoffs")
     print("=" * 60)
     print()
     print_config()
 
     # =========================================================================
-    # Part 1: build the SOC tiers and wire allowed escalation paths
+    # Part 1: build the support tiers and wire allowed escalation paths
     # =========================================================================
     print("\n=== Part 1: Creating Handoff Agents ===\n")
 
-    l1_analyst = create_handoff_agent(
-        name="L1 Triage Analyst",
-        description="First-line alert triage and routing",
-        system_prompt="You are an L1 SOC analyst. Triage alerts and route them to specialists.",
+    l1_agent = create_handoff_agent(
+        name="L1 Support Agent",
+        description="First-line ticket triage and routing",
+        system_prompt="You are an L1 support agent. Triage tickets and route them to specialists.",
     )
 
-    l2_investigator = create_handoff_agent(
-        name="L2 Investigator",
-        description="Deep investigation of escalated alerts",
-        system_prompt="You are an L2 SOC investigator. Perform detailed analysis of escalations.",
+    l2_specialist = create_handoff_agent(
+        name="L2 Support Specialist",
+        description="Deep investigation of escalated tickets",
+        system_prompt="You are an L2 support specialist. Perform detailed analysis of escalations.",
     )
 
-    l3_commander = create_handoff_agent(
-        name="L3 Incident Commander",
-        description="Handles confirmed incidents requiring senior response",
-        system_prompt="You are an L3 incident commander. Direct the response to confirmed incidents.",
+    l3_manager = create_handoff_agent(
+        name="L3 Escalation Manager",
+        description="Handles confirmed issues requiring senior authority",
+        system_prompt="You are an L3 escalation manager. Direct the resolution of confirmed issues.",
     )
 
     print("Created agents:")
-    print(f"  - {l1_analyst.name} (id: {l1_analyst.id})")
-    print(f"  - {l2_investigator.name} (id: {l2_investigator.id})")
-    print(f"  - {l3_commander.name} (id: {l3_commander.id})")
+    print(f"  - {l1_agent.name} (id: {l1_agent.id})")
+    print(f"  - {l2_specialist.name} (id: {l2_specialist.id})")
+    print(f"  - {l3_manager.name} (id: {l3_manager.id})")
 
-    l1_analyst.can_delegate_to = [l2_investigator.id]
-    l1_analyst.can_escalate_to = [l3_commander.id]
-    l2_investigator.can_escalate_to = [l3_commander.id]
+    l1_agent.can_delegate_to = [l2_specialist.id]
+    l1_agent.can_escalate_to = [l3_manager.id]
+    l2_specialist.can_escalate_to = [l3_manager.id]
 
     print("\nHandoff paths:")
     print("  L1 -> L2 (delegation)")
     print("  L1 -> L3 (escalation)")
     print("  L2 -> L3 (escalation)")
 
-    # The L1 triage seat reads from Tulip's "Model B" slot
+    # The L1 front-line seat reads from Tulip's "Model B" slot
     # (env: TULIP_MODEL_ID_B). Set a cheaper/faster model there to cut
     # round-trip latency; falls back to Model A when unset.
     triage_model = get_model_b(max_tokens=2000)
     model = get_model(max_tokens=2000)
-    l1_with_model = l1_analyst.with_model(triage_model)
+    l1_with_model = l1_agent.with_model(triage_model)
     smoke_ctx = HandoffContext(
         source_agent_id="user",
-        target_agent_id=l1_analyst.id,
+        target_agent_id=l1_agent.id,
         reason=HandoffReason.SPECIALIZATION,
-        original_task="Smoke test the L1 triage seat",
+        original_task="Smoke test the L1 front-line seat",
         conversation_summary="Need a one-line confirmation the agent is alive.",
         confidence=0.5,
-        instructions="Reply 'L1 triage online'.",
+        instructions="Reply 'L1 support online'.",
     )
     t0 = time.perf_counter()
     smoke_result = await l1_with_model.receive_handoff(smoke_ctx)
@@ -132,19 +132,19 @@ async def main():
     print("\n=== Part 2: Handoff Context ===\n")
 
     context = HandoffContext(
-        source_agent_id=l1_analyst.id,
-        target_agent_id=l2_investigator.id,
+        source_agent_id=l1_agent.id,
+        target_agent_id=l2_specialist.id,
         reason=HandoffReason.SPECIALIZATION,
-        original_task="Investigate a suspected phishing email reported by finance",
-        conversation_summary="User reported a credential-prompt email. Sender domain is 3 days old.",
+        original_task="Investigate a duplicate subscription charge reported by a customer",
+        conversation_summary="Customer was billed twice this month but only one plan is active.",
         findings={
-            "sender_domain": "phish.example.net",
-            "domain_age_days": "3",
-            "url_reputation": "uncategorized",
+            "customer_id": "CUST-48213",
+            "charges_this_cycle": "2",
+            "active_subscriptions": "1",
         },
         confidence=0.4,
-        instructions="Determine whether any credentials were actually submitted",
-        handoff_chain=[l1_analyst.id],
+        instructions="Determine whether the second charge was a genuine duplicate or a retry",
+        handoff_chain=[l1_agent.id],
     )
 
     print("Handoff Context:")
@@ -167,9 +167,9 @@ async def main():
 
     for reason in HandoffReason:
         descriptions = {
-            HandoffReason.SPECIALIZATION: "Target has better capabilities for this alert",
-            HandoffReason.ESCALATION: "Incident needs a higher tier or more authority",
-            HandoffReason.DELEGATION: "Sub-task delegated to another analyst agent",
+            HandoffReason.SPECIALIZATION: "Target has better capabilities for this ticket",
+            HandoffReason.ESCALATION: "Issue needs a higher tier or more authority",
+            HandoffReason.DELEGATION: "Sub-task delegated to another support agent",
             HandoffReason.COMPLETION: "Work completed, returning to parent",
             HandoffReason.FAILURE: "Agent failed, trying another approach",
         }
@@ -181,7 +181,7 @@ async def main():
     print("\n=== Part 4: Handoff Manager ===\n")
 
     manager = create_handoff_manager(
-        agents=[l1_analyst, l2_investigator, l3_commander],
+        agents=[l1_agent, l2_specialist, l3_manager],
         max_chain=5,
     )
 
@@ -191,17 +191,17 @@ async def main():
 
     for agent_id in list(manager.agents):
         manager.agents[agent_id] = manager.agents[agent_id].with_model(model)
-    state_smoke = AgentState(agent_id=l1_analyst.id).with_message(
-        Message.user("EDR flagged encoded PowerShell on WS-0142; user also reported phishing.")
+    state_smoke = AgentState(agent_id=l1_agent.id).with_message(
+        Message.user("Customer says they were charged twice but only have one active plan.")
     )
     t0 = time.perf_counter()
     mgr_result = await manager.execute_handoff(
-        source_agent=l1_analyst,
-        target_agent_id=l2_investigator.id,
-        task="Investigate the suspicious PowerShell execution",
+        source_agent=l1_agent,
+        target_agent_id=l2_specialist.id,
+        task="Investigate the duplicate subscription charge",
         reason=HandoffReason.SPECIALIZATION,
         state=state_smoke,
-        findings={"related_alerts": 3},
+        findings={"related_tickets": 3},
     )
     _banner("Part 4", time.perf_counter() - t0)
     print(f"  Manager handoff output: {(mgr_result.output or '')[:160]}")
@@ -212,20 +212,24 @@ async def main():
     print("\n=== Part 5: Creating Handoffs ===\n")
 
     state = AgentState(
-        agent_id=l1_analyst.id,
-        tool_history=("lookup_hash", "query_siem"),
+        agent_id=l1_agent.id,
+        tool_history=("lookup_account", "query_billing"),
     )
-    state = state.with_message(Message.user("EDR alert fired on WS-0142"))
-    state = state.with_message(Message.assistant("I'll triage the alert and gather context."))
+    state = state.with_message(Message.user("I was charged twice for my subscription this month"))
+    state = state.with_message(
+        Message.assistant("I'll triage the ticket and pull your billing history.")
+    )
 
     handoff_context = await manager.create_handoff(
-        source_agent=l1_analyst,
-        target_agent_id=l2_investigator.id,
-        task="Investigate suspicious PowerShell execution on WS-0142",
+        source_agent=l1_agent,
+        target_agent_id=l2_specialist.id,
+        task="Investigate duplicate subscription charge for CUST-48213",
         reason=HandoffReason.SPECIALIZATION,
         state=state,
-        findings={"initial_triage": "Encoded command line; parent process is winword.exe"},
-        instructions="Determine whether the payload executed and what it touched",
+        findings={
+            "initial_triage": "Two charges on the same plan; second has a different invoice id"
+        },
+        instructions="Determine whether a refund is warranted and which charge to reverse",
     )
 
     print("Created handoff:")
@@ -246,12 +250,12 @@ async def main():
     # =========================================================================
     print("\n=== Part 7: Chain Handoffs ===\n")
 
-    manager.agents[l1_analyst.id] = l1_analyst.with_model(triage_model)
-    manager.agents[l3_commander.id] = l3_commander.with_model(model)
+    manager.agents[l1_agent.id] = l1_agent.with_model(triage_model)
+    manager.agents[l3_manager.id] = l3_manager.with_model(model)
 
     chain_results = await manager.chain_handoff(
-        agent_chain=[l1_analyst.id, l2_investigator.id, l3_commander.id],
-        task="Suspected ransomware on file server FS-03 — mass file renames in progress",
+        agent_chain=[l1_agent.id, l2_specialist.id, l3_manager.id],
+        task="Enterprise customer threatening to churn over repeated billing errors — needs a goodwill credit",
         initial_state=state,
     )
 
@@ -277,36 +281,36 @@ async def main():
     print("\n=== Part 9: Common Handoff Patterns ===\n")
 
     print("Pattern 1: L1 Triage -> Specialist")
-    print("  A generalist analyst assesses alerts and routes to domain experts")
+    print("  A generalist agent assesses tickets and routes to domain experts")
     print()
 
     print("Pattern 2: Hierarchical Escalation")
-    print("  L1 -> L2 -> L3 SOC tier escalation chain")
+    print("  L1 -> L2 -> L3 support tier escalation chain")
     print()
 
     print("Pattern 3: Parallel Specialists")
-    print("  Forensics and threat-intel analyze in parallel, results aggregated")
+    print("  Billing and technical agents work in parallel, results aggregated")
     print()
 
     print("Pattern 4: Return with Findings")
-    print("  Specialist completes work and returns to the incident commander")
+    print("  Specialist completes work and returns to the escalation manager")
     print()
 
     print("Pattern 5: Failover")
-    print("  If one analyst agent fails, handoff to a backup agent")
+    print("  If one support agent fails, handoff to a backup agent")
 
     # =========================================================================
     # Part 10: things to keep in mind
     # =========================================================================
     print("\n=== Part 10: Best Practices ===\n")
 
-    print("1. Keep handoff contexts focused — transfer only case-relevant evidence.")
+    print("1. Keep handoff contexts focused — transfer only case-relevant details.")
     print("2. Set max_chain to prevent infinite escalation loops.")
-    print("3. Give the next tier explicit instructions, not just the alert.")
+    print("3. Give the next tier explicit instructions, not just the ticket.")
     print("4. Track confidence through the chain so you can audit decay.")
     print("5. Pick the right HandoffReason — it drives prompt templating.")
-    print("6. Preserve key findings — don't drop evidence mid-chain.")
-    print("7. manager.history is your audit trail for the post-incident review.")
+    print("6. Preserve key findings — don't make the customer repeat themselves.")
+    print("7. manager.history is your audit trail for the QA review.")
 
     # =========================================================================
     print("\n" + "=" * 60)

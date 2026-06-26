@@ -1,14 +1,14 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 """
-Notebook 23: CVE impact assessment with the functional API.
+Notebook 23: Payment dispute triage with the functional API.
 
-If `StateGraph` feels like overkill for a straight-line vulnerability
-workflow, the functional API lets you write the same CVE impact
-assessment as ordinary Python: decorate the units of work with
+If `StateGraph` feels like overkill for a straight-line dispute
+workflow, the functional API lets you write the same payment dispute
+triage as ordinary Python: decorate the units of work with
 `@task`, decorate the orchestrator with `@entrypoint`, and Tulip
 tracks timing, retries, and caching for you behind the scenes. Scenario:
-vulnerability management — fetch advisory, look up CVSS, assess impact.
+payments operations — fetch transaction, look up risk score, assess dispute.
 
 - @task — a unit of work; can declare retry_attempts and cache.
 - @entrypoint — the top-level coroutine; tracks every task it awaits.
@@ -59,21 +59,21 @@ async def example_basic():
     )
 
     @task
-    async def fetch_advisory(cve_id: str) -> dict:
-        # Mock advisory fetch — invented data, clearly fake.
-        return {"advisory": f"advisory text for {cve_id}", "status": 200}
+    async def fetch_transaction(txn_id: str) -> dict:
+        # Mock transaction fetch — invented data, clearly fake.
+        return {"transaction": f"transaction record for {txn_id}", "status": 200}
 
     @task
-    async def assess(advisory: dict) -> str:
-        return f"impact assessed: {advisory['advisory']}"
+    async def assess(transaction: dict) -> str:
+        return f"dispute assessed: {transaction['transaction']}"
 
     @entrypoint
-    async def pipeline(cve_id: str) -> str:
-        advisory = await fetch_advisory(cve_id)
-        result = await assess(advisory)
+    async def pipeline(txn_id: str) -> str:
+        transaction = await fetch_transaction(txn_id)
+        result = await assess(transaction)
         return result
 
-    result = await pipeline("CVE-2024-99999")
+    result = await pipeline("TXN-2024-99999")
     print(f"Result: {result}")
 
     ep = pipeline.get_result()
@@ -89,7 +89,7 @@ async def example_basic():
 
 
 async def example_retry():
-    """retry_attempts on the decorator handles a flaky vulnerability feed."""
+    """retry_attempts on the decorator handles a flaky payment processor feed."""
     print("\n=== Part 2: @task(retry_attempts=3) ===\n")
     print(
         f"AI rationale: {_llm_call('In one sentence, why does @task(retry_attempts=3) belong on the task and not in caller code?')}"
@@ -98,16 +98,16 @@ async def example_retry():
     attempt = 0
 
     @task(retry_attempts=3)
-    async def query_vuln_feed(cve_id: str) -> str:
+    async def query_processor_feed(txn_id: str) -> str:
         nonlocal attempt
         attempt += 1
         if attempt < 3:
-            raise ConnectionError("vulnerability feed timeout")
-        return f"feed entry for: {cve_id}"
+            raise ConnectionError("payment processor feed timeout")
+        return f"processor entry for: {txn_id}"
 
     @entrypoint
     async def retry_pipeline() -> str:
-        return await query_vuln_feed("CVE-2024-99999")
+        return await query_processor_feed("TXN-2024-99999")
 
     result = await retry_pipeline()
     print(f"Result: {result}")
@@ -120,25 +120,25 @@ async def example_retry():
 
 
 async def example_cache():
-    """Same CVE id returns the cached score without re-running the lookup."""
+    """Same transaction id returns the cached score without re-running the lookup."""
     print("\n=== Part 3: @task(cache=True) ===\n")
     print(
-        f"AI rationale: {_llm_call('In one sentence, when should you turn @task(cache=True) ON for a CVE-enrichment pipeline?')}"
+        f"AI rationale: {_llm_call('In one sentence, when should you turn @task(cache=True) ON for a transaction-enrichment pipeline?')}"
     )
 
     call_count = 0
 
     @task(cache=True)
-    async def lookup_cvss(cve_id: str) -> str:
+    async def lookup_risk_score(txn_id: str) -> str:
         nonlocal call_count
         call_count += 1
         return f"score_lookup_{call_count}"
 
     @entrypoint
     async def cache_pipeline() -> tuple:
-        r1 = await lookup_cvss("CVE-2024-99999")
-        r2 = await lookup_cvss("CVE-2024-99999")  # cache hit
-        r3 = await lookup_cvss("CVE-2024-88888")
+        r1 = await lookup_risk_score("TXN-2024-99999")
+        r2 = await lookup_risk_score("TXN-2024-99999")  # cache hit
+        r3 = await lookup_risk_score("TXN-2024-88888")
         return (r1, r2, r3)
 
     r1, r2, r3 = await cache_pipeline()
@@ -151,16 +151,16 @@ async def example_with_llm():
     print("\n=== Part 4: @task wrapping an LLM call ===\n")
 
     @task
-    async def build_question(cve_id: str) -> str:
-        return f"Assess the likely impact of {cve_id} on a typical web stack."
+    async def build_question(txn_id: str) -> str:
+        return f"Assess the likely fraud risk of {txn_id} for a typical card-not-present charge."
 
     @task
-    async def assess_impact(prompt: str) -> str:
+    async def assess_risk(prompt: str) -> str:
         import time as _t
 
         agent = Agent(
             model=get_model(max_tokens=80),
-            system_prompt="Answer in one factual sentence for a vulnerability analyst.",
+            system_prompt="Answer in one factual sentence for a payments fraud analyst.",
         )
         t0 = _t.perf_counter()
         result = agent.run_sync(prompt)
@@ -171,11 +171,11 @@ async def example_with_llm():
         return result.message.strip()
 
     @entrypoint
-    async def pipeline(cve_id: str) -> str:
-        question = await build_question(cve_id)
-        return await assess_impact(question)
+    async def pipeline(txn_id: str) -> str:
+        question = await build_question(txn_id)
+        return await assess_risk(question)
 
-    answer = await pipeline("CVE-2024-99999")
+    answer = await pipeline("TXN-2024-99999")
     print(f"Assessment: {answer}")
 
 

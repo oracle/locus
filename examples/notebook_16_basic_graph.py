@@ -1,14 +1,14 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 """
-Notebook 16: Phishing triage pipeline as a graph.
+Notebook 16: Data-subject-request triage pipeline as a graph.
 
 A StateGraph is a directed graph where each node is an async function
 that takes the current state in and returns updates to merge back. Use
-it when one Agent isn't enough — here we build a phishing triage
+it when one Agent isn't enough — here we build a privacy-request triage
 pipeline (parse → enrich → verdict) plus the fan-out and streaming
-shapes a SOC workflow needs. Scenario: phishing intake
-(MITRE ATT&CK T1566, Phishing).
+shapes a data-protection workflow needs. Scenario: data subject access
+request (DSAR) intake under GDPR Article 15.
 
 - Nodes and edges: nodes do triage work, edges describe order.
 - START and END: the two sentinel node ids that frame execution.
@@ -61,9 +61,9 @@ async def example_first_graph():
     async def assess(inputs):
         subject = inputs.get("subject", "(no subject)")
         ai_line = _llm_call(
-            f"Give a one-sentence first-pass phishing assessment of an email "
+            f"Give a one-sentence first-pass privacy-request assessment of a message "
             f"with the subject '{subject}'.",
-            system="You are a SOC phishing-triage assistant.",
+            system="You are a data-protection request-triage assistant.",
         )
         return {"assessment": ai_line}
 
@@ -71,9 +71,9 @@ async def example_first_graph():
     graph.add_edge(START, "assess")
     graph.add_edge("assess", END)
 
-    result = await graph.execute({"subject": "URGENT: verify your account now"})
+    result = await graph.execute({"subject": "Please delete all data you hold about me"})
 
-    print("Input:   subject = 'URGENT: verify your account now'")
+    print("Input:   subject = 'Please delete all data you hold about me'")
     print(f"Output:  assessment = '{result.final_state.get('assessment')}'")
     print(f"Success: {result.success}")
     print()
@@ -91,28 +91,28 @@ async def example_sequence():
     graph = StateGraph()
 
     async def parse(inputs):
-        report = inputs.get("report", "")
+        request = inputs.get("request", "")
         return {
-            "report": report.strip(),
-            "has_content": len(report.strip()) > 0,
+            "request": request.strip(),
+            "has_content": len(request.strip()) > 0,
         }
 
     async def enrich(inputs):
-        report = inputs.get("report", "")
+        request = inputs.get("request", "")
         return {
-            "mentions_lure_domain": "phish.example.net" in report,
-            "token_count": len(report.split()),
+            "mentions_special_category": "health record" in request,
+            "token_count": len(request.split()),
         }
 
     async def verdict(inputs):
         tc = inputs.get("token_count")
         ai = _llm_call(
-            f"In one short sentence, give a triage verdict for a {tc}-token user "
-            f"report that {'does' if inputs.get('mentions_lure_domain') else 'does not'} "
-            "mention a known lure domain.",
+            f"In one short sentence, give a triage verdict for a {tc}-token DSAR "
+            f"that {'does' if inputs.get('mentions_special_category') else 'does not'} "
+            "mention special-category personal data.",
         )
         return {
-            "verdict": f"{tc} tokens, lure_domain={inputs.get('mentions_lure_domain')} — {ai}",
+            "verdict": f"{tc} tokens, special_category={inputs.get('mentions_special_category')} — {ai}",
         }
 
     graph.add_node("parse", parse)
@@ -124,11 +124,15 @@ async def example_sequence():
     graph.add_edge("enrich", "verdict")
     graph.add_edge("verdict", END)
 
-    result = await graph.execute({"report": "  user clicked link to phish.example.net  "})
+    result = await graph.execute(
+        {"request": "  please export my health record and contact details  "}
+    )
 
-    print("Input:    report = '  user clicked link to phish.example.net  '")
+    print("Input:    request = '  please export my health record and contact details  '")
     print(f"Parsed:   has_content = {result.final_state.get('has_content')}")
-    print(f"Enriched: mentions_lure_domain = {result.final_state.get('mentions_lure_domain')}")
+    print(
+        f"Enriched: mentions_special_category = {result.final_state.get('mentions_special_category')}"
+    )
     print(f"VerificationResult:  {result.final_state.get('verdict')}")
     print()
 
@@ -139,28 +143,32 @@ async def example_sequence():
 
 
 async def example_state_flow():
-    """Print what each node receives so you can watch investigation state grow."""
+    """Print what each node receives so you can watch the request state grow."""
     print("=== Part 3: How state accumulates ===\n")
 
     graph = StateGraph()
 
     async def intake(inputs):
         print(f"  Intake receives:    {list(inputs.keys())}")
-        return {"intake_note": "alert ingested", "risk_score": 10}
+        return {"intake_note": "request ingested", "exposure_score": 10}
 
     async def correlate(inputs):
         print(f"  Correlate receives: {list(inputs.keys())}")
-        risk = inputs.get("risk_score", 0)
-        # Two related alerts on the same host double the working risk score.
-        return {"correlate_note": "matched a sibling alert", "combined_risk": risk * 2}
+        exposure = inputs.get("exposure_score", 0)
+        # Two requests from the same data subject double the working exposure score.
+        return {"correlate_note": "matched a sibling request", "combined_exposure": exposure * 2}
 
     async def score(inputs):
         print(f"  Score receives:     {list(inputs.keys())}")
-        combined = inputs.get("combined_risk", 0)
+        combined = inputs.get("combined_exposure", 0)
         ai = _llm_call(
-            f"Comment on a triage pipeline that raised an alert's risk score to {combined}.",
+            f"Comment on a triage pipeline that raised a request's exposure score to {combined}.",
         )
-        return {"score_note": "final score issued", "final_risk": combined + 5, "ai_comment": ai}
+        return {
+            "score_note": "final score issued",
+            "final_exposure": combined + 5,
+            "ai_comment": ai,
+        }
 
     graph.add_node("intake", intake)
     graph.add_node("correlate", correlate)
@@ -172,7 +180,7 @@ async def example_state_flow():
     graph.add_edge("score", END)
 
     print("Executing graph...")
-    result = await graph.execute({"alert_id": "ALR-1042"})
+    result = await graph.execute({"request_id": "DSAR-1042"})
 
     print("\nFinal state:")
     for key, value in result.final_state.items():
@@ -193,47 +201,47 @@ async def example_parallel():
     graph = StateGraph()
     graph.config.parallel = True
 
-    async def classify_tone(inputs):
-        email = inputs.get("email", "")
+    async def classify_sensitivity(inputs):
+        record = inputs.get("record", "")
         label = _llm_call(
-            f"Classify the tone of the email '{email}' as urgent, neutral, or "
-            "friendly. Reply with one word.",
-            system="Output one of: urgent | neutral | friendly. Nothing else.",
+            f"Classify the sensitivity of the data in '{record}' as high, medium, or "
+            "low. Reply with one word.",
+            system="Output one of: high | medium | low. Nothing else.",
             max_tokens=10,
         )
-        return {"tone": label.lower()}
+        return {"sensitivity": label.lower()}
 
-    async def count_links(inputs):
-        email = inputs.get("email", "")
+    async def count_identifiers(inputs):
+        record = inputs.get("record", "")
         await asyncio.sleep(0.1)
-        return {"link_count": email.count("http")}
+        return {"identifier_count": record.count("@") + record.count("id:")}
 
-    async def check_sender(inputs):
+    async def check_consent(inputs):
         await asyncio.sleep(0.1)
-        # Mock reputation lookup — invented data, clearly fake.
-        return {"sender_reputation": "unknown-newly-registered"}
+        # Mock consent-ledger lookup — invented data, clearly fake.
+        return {"consent_status": "withdrawn-no-active-basis"}
 
     async def combine_results(inputs):
         return {
             "enrichment": {
-                "tone": inputs.get("tone"),
-                "links": inputs.get("link_count"),
-                "sender": inputs.get("sender_reputation"),
+                "sensitivity": inputs.get("sensitivity"),
+                "identifiers": inputs.get("identifier_count"),
+                "consent": inputs.get("consent_status"),
             }
         }
 
-    graph.add_node("tone", classify_tone)
-    graph.add_node("links", count_links)
-    graph.add_node("sender", check_sender)
+    graph.add_node("sensitivity", classify_sensitivity)
+    graph.add_node("identifiers", count_identifiers)
+    graph.add_node("consent", check_consent)
     graph.add_node("combine", combine_results)
 
-    graph.add_edge(START, "tone")
-    graph.add_edge(START, "links")
-    graph.add_edge(START, "sender")
+    graph.add_edge(START, "sensitivity")
+    graph.add_edge(START, "identifiers")
+    graph.add_edge(START, "consent")
 
-    graph.add_edge("tone", "combine")
-    graph.add_edge("links", "combine")
-    graph.add_edge("sender", "combine")
+    graph.add_edge("sensitivity", "combine")
+    graph.add_edge("identifiers", "combine")
+    graph.add_edge("consent", "combine")
 
     graph.add_edge("combine", END)
 
@@ -241,11 +249,11 @@ async def example_parallel():
 
     start = time.time()
     result = await graph.execute(
-        {"email": "Your account is suspended! Verify at http://phish.example.net/login"}
+        {"record": "subject id:8842 email jordan@example.com phone +1-555-0100"}
     )
     elapsed = (time.time() - start) * 1000
 
-    print("Input: 'Your account is suspended! Verify at http://phish.example.net/login'")
+    print("Input: 'subject id:8842 email jordan@example.com phone +1-555-0100'")
     print(f"Enrichment: {result.final_state.get('enrichment')}")
     print(f"Time: {elapsed:.0f}ms (parallel nodes run concurrently)")
     print()
@@ -264,8 +272,8 @@ async def example_results():
 
     async def normalize(inputs):
         v = inputs.get("raw_score", 0)
-        comment = _llm_call(f"In one sentence, comment on normalizing a raw alert score of {v}.")
-        return {"normalized": True, "risk_score": v * 2, "comment": comment}
+        comment = _llm_call(f"In one sentence, comment on normalizing a raw exposure score of {v}.")
+        return {"normalized": True, "exposure_score": v * 2, "comment": comment}
 
     graph.add_node("normalize", normalize)
     graph.add_edge(START, "normalize")
@@ -301,20 +309,20 @@ async def example_streaming():
     async def enrich(inputs):
         # emit_custom — push an arbitrary payload onto the event stream
         # while the node is still running. Useful for long-running lookups.
-        await emit_custom({"phase": "starting", "ioc_count": inputs.get("iocs", 0)})
+        await emit_custom({"phase": "starting", "record_count": inputs.get("records", 0)})
         ai = _llm_call(
-            f"In one sentence, narrate an enrichment pass that grew the IOC list "
-            f"to {inputs.get('iocs', 0) * 2} entries.",
+            f"In one sentence, narrate a discovery pass that grew the matched-record list "
+            f"to {inputs.get('records', 0) * 2} entries.",
         )
         await emit_custom({"phase": "halfway"})
-        return {"enriched_iocs": inputs.get("iocs", 0) * 2, "ai": ai}
+        return {"matched_records": inputs.get("records", 0) * 2, "ai": ai}
 
     async def report(inputs):
         ai = _llm_call(
-            f"In one short sentence, narrate adding 10 context entries to "
-            f"{inputs.get('enriched_iocs', 0)} IOCs in a triage report.",
+            f"In one short sentence, narrate adding 10 redaction notes to "
+            f"{inputs.get('matched_records', 0)} records in a DSAR response pack.",
         )
-        return {"report_entries": inputs.get("enriched_iocs", 0) + 10, "ai": ai}
+        return {"report_entries": inputs.get("matched_records", 0) + 10, "ai": ai}
 
     graph.add_node("enrich", enrich)
     graph.add_node("report", report)
@@ -323,7 +331,7 @@ async def example_streaming():
     graph.add_edge("report", END)
 
     print("Streaming UPDATES + CUSTOM events as they arrive:")
-    async for event in graph.stream({"iocs": 21}, mode=StreamMode.UPDATES):
+    async for event in graph.stream({"records": 21}, mode=StreamMode.UPDATES):
         if event.mode == StreamMode.CUSTOM:
             print(f"  [CUSTOM]  {event.node_id}: {event.data}")
         else:
@@ -345,13 +353,13 @@ async def example_graph_with_llm():
     async def ai_summarize(inputs):
         import time as _t
 
-        campaign = inputs.get("campaign", "")
+        activity = inputs.get("activity", "")
         agent = Agent(
             model=get_model(max_tokens=80),
-            system_prompt="You write one-sentence factual summaries for SOC handover notes.",
+            system_prompt="You write one-sentence factual summaries for DPO handover notes.",
         )
         t0 = _t.perf_counter()
-        result = agent.run_sync(f"Summarize the threat campaign '{campaign}' in one sentence.")
+        result = agent.run_sync(f"Summarize the processing activity '{activity}' in one sentence.")
         dt = _t.perf_counter() - t0
         print(
             f"  [model call: {dt:.2f}s · {result.metrics.prompt_tokens}→{result.metrics.completion_tokens} tokens]"
@@ -362,7 +370,9 @@ async def example_graph_with_llm():
     graph.add_edge(START, "summarize")
     graph.add_edge("summarize", END)
 
-    result = await graph.execute({"campaign": "credential-phishing wave spoofing IT helpdesk"})
+    result = await graph.execute(
+        {"activity": "marketing analytics joining email opens to CRM profiles"}
+    )
     print(f"AI summary: {result.final_state.get('summary')}")
     print()
 
@@ -374,7 +384,7 @@ async def example_graph_with_llm():
 
 async def main():
     print("=" * 60)
-    print("Notebook 16: Phishing triage pipeline as a graph")
+    print("Notebook 16: Data-subject-request triage pipeline as a graph")
     print("=" * 60)
     print()
 
@@ -387,7 +397,7 @@ async def main():
     await example_graph_with_llm()
 
     print("=" * 60)
-    print("Next: Notebook 17 — Severity-based escalation routing")
+    print("Next: Notebook 17 — Routing requests by privacy risk")
     print("=" * 60)
 
 

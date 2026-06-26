@@ -1,25 +1,27 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 """
-Notebook 14: WARDEN — guardrails around a vuln-triage agent.
+Notebook 14: RELEASE GUARD — guardrails around a deploy-ops agent.
 
-Notebook 12 covered hook basics. Here we build WARDEN, the SOC's
-risk-gating layer: the hooks that sit between a triage agent and its
-tools and refuse the actions that would destroy evidence or overreach.
-This notebook focuses on the safety properties Tulip enforces on the
-event objects hooks see, and on the control lever a hook pulls
-mid-flight — ``event.cancel`` to block a destructive tool call.
-Write-protected events are what keep the audit trail honest: a hook
-cannot quietly relabel the action an agent took.
+Notebook 12 covered hook basics. Here we build RELEASE GUARD, the
+platform team's change-gating layer: the hooks that sit between a
+deploy-ops agent and its tools and refuse the actions that would tear
+down running infrastructure or violate a change freeze. This notebook
+focuses on the safety properties Tulip enforces on the event objects
+hooks see, and on the control lever a hook pulls mid-flight —
+``event.cancel`` to block a destructive tool call. Write-protected
+events are what keep the change log honest: a hook cannot quietly
+relabel the action an agent took.
 
-A triage agent that can delete quarantined samples or isolate hosts on
-its own initiative is a textbook case of excessive agency (OWASP LLM06)
-and tool misuse (OWASP ASI02). WARDEN is the bound on that agency.
+A deploy agent that can delete namespaces or destroy environments on
+its own initiative is exactly the kind of unbounded blast radius that
+turns a routine rollout into an outage. RELEASE GUARD is the bound on
+that agency.
 
 Key ideas:
 - Most fields on hook event objects are read-only. Try to overwrite
   ``event.tool_name`` and you get an ``AttributeError`` — that's the
-  framework guarding the agent's invariants (and your audit log).
+  framework guarding the agent's invariants (and your change log).
 - A small set of fields *is* writable: ``event.arguments`` (so a hook
   can rewrite tool input) and ``event.cancel`` (set it to a string to
   block the call and surface that message as the tool's "result").
@@ -45,7 +47,7 @@ from tulip.tools.decorator import tool
 
 
 # =============================================================================
-# Part 1: WARDEN cancels a destructive tool call
+# Part 1: RELEASE GUARD cancels a destructive tool call
 # =============================================================================
 
 
@@ -55,48 +57,50 @@ def example_cancel_tool():
 
     model = get_model()
 
-    class WardenEvidenceHook(HookProvider):
-        """WARDEN: block any tool whose name contains 'delete' — samples are evidence.
+    class ReleaseGuardHook(HookProvider):
+        """RELEASE GUARD: block any tool whose name contains 'delete' — infra is live.
 
-        Deleting a quarantined sample mid-investigation would destroy the
-        artifact a finding rests on. WARDEN gates it (OWASP LLM06,
-        Excessive Agency).
+        Deleting a namespace mid-rollout would take down the very
+        workloads the deploy is supposed to ship. RELEASE GUARD gates
+        it so a destructive op can't fire without a human in the loop.
         """
 
         @property
         def priority(self):
-            return 50  # Lower than the default security band so this runs first.
+            return 50  # Lower than the default band so this runs first.
 
         async def on_before_tool_call(self, event):
             if "delete" in event.tool_name:
                 # event.cancel = "<reason>" tells the loop: don't run the
                 # tool; surface "<reason>" as the tool's result so the
                 # model sees what happened.
-                event.cancel = f"BLOCKED: {event.tool_name} is forbidden while the case is open"
+                event.cancel = (
+                    f"BLOCKED: {event.tool_name} is forbidden during an active change freeze"
+                )
                 # event.tool_name = "spoofed"  # would raise AttributeError
 
     @tool
-    def delete_sample(path: str) -> str:
-        """Delete a quarantined malware sample."""
-        return f"Deleted {path}"
+    def delete_namespace(name: str) -> str:
+        """Delete a Kubernetes namespace and everything in it."""
+        return f"Deleted namespace {name}"
 
     @tool
-    def read_sandbox_report(path: str) -> str:
-        """Read the sandbox detonation report for a quarantined sample."""
-        return f"Report for {path}: matches EICAR test signature, severity low"
+    def get_rollout_status(name: str) -> str:
+        """Read the rollout status for a deployment."""
+        return f"Status for {name}: 3/3 replicas ready, last revision healthy"
 
     agent = Agent(
         config=AgentConfig(
-            system_prompt="You manage quarantined samples. If an action is blocked, "
-            "tell the analyst why.",
+            system_prompt="You operate the production cluster. If an action is blocked, "
+            "tell the on-call engineer why.",
             max_iterations=5,
             model=model,
-            tools=[delete_sample, read_sandbox_report],
-            hooks=[WardenEvidenceHook()],
+            tools=[delete_namespace, get_rollout_status],
+            hooks=[ReleaseGuardHook()],
         )
     )
 
-    result = agent.run_sync("Delete /quarantine/sample_aa11bb22.bin")
+    result = agent.run_sync("Delete the namespace payments-staging")
     print(f"Response: {result.message[:150]}")
     for te in result.tool_executions:
         print(f"  Tool: {te.tool_name} → {te.result}")
@@ -114,12 +118,12 @@ def example_write_protection():
     from tulip.hooks.provider import BeforeToolCallEvent
 
     event = BeforeToolCallEvent(
-        tool_name="isolate_host", tool_call_id="c1", arguments={"host": "web-01"}
+        tool_name="scale_deployment", tool_call_id="c1", arguments={"replicas": 10}
     )
 
     # Writable: arguments and cancel.
-    event.arguments = {"host": "web-02"}
-    event.cancel = "blocked pending approval"
+    event.arguments = {"replicas": 3}
+    event.cancel = "blocked pending change-approval ticket"
     print(f"arguments (writable): {event.arguments}")
     print(f"cancel (writable): {event.cancel}")
 
@@ -137,7 +141,7 @@ def example_write_protection():
     res = agent.run_sync(
         "In one sentence, why does Tulip mark BeforeToolCallEvent.tool_name as "
         "read-only while letting hooks edit `arguments` and `cancel` — and why "
-        "does that matter for a security audit trail?"
+        "does that matter for an infrastructure change log?"
     )
     dt = _t.perf_counter() - t0
     print(

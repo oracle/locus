@@ -1,15 +1,15 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
-"""Notebook 56: Model providers — one security agent, swap models with a string.
+"""Notebook 56: Model providers — one cloud-ops agent, swap models with a string.
 
 The Gateway is the seam every AI request in the org flows through: one
-triage-agent codebase, any backing model. Tulip supports OpenAI and
-Anthropic as first-class providers, and the same agent code runs against
-either — only the model object changes, so a SOC team can re-platform a
-provider (for cost, latency, residency, or an outage failover) without
-rewriting a single playbook. The provider abstraction is also a control
-point: routing, rate limits, and audit live at the Gateway, not in each
-agent.
+cloud-operations agent codebase, any backing model. Tulip supports OpenAI
+and Anthropic as first-class providers, and the same agent code runs
+against either — only the model object changes, so a platform team can
+re-platform a provider (for cost, latency, data residency, or an outage
+failover) without rewriting a single runbook. The provider abstraction is
+also a control point: routing, rate limits, and audit live at the Gateway,
+not in each agent.
 
 Provider matrix:
 
@@ -61,7 +61,7 @@ def example_providers():
     providers = list_providers()
     print(f"Registered providers: {providers}")
     print(
-        f"AI rationale: {_llm_call('In one sentence, why does a SOC automation team want a model registry instead of hard-coding one provider?')}"
+        f"AI rationale: {_llm_call('In one sentence, why does a cloud platform team want a model registry instead of hard-coding one provider?')}"
     )
 
     print("\nUsage:")
@@ -79,7 +79,7 @@ def example_direct():
     """Use providers directly without the registry."""
     print("\n=== Direct provider usage ===\n")
     print(
-        f"AI rationale: {_llm_call('In one sentence, when would a security team instantiate a model class directly instead of via the registry?')}"
+        f"AI rationale: {_llm_call('In one sentence, when would a cloud operations team instantiate a model class directly instead of via the registry?')}"
     )
 
     print("OpenAI (direct API, requires OPENAI_API_KEY):")
@@ -92,18 +92,18 @@ def example_direct():
 
 
 async def example_live_call() -> None:
-    """Run the triage agent on whichever provider the environment configures."""
+    """Run the cloud-ops agent on whichever provider the environment configures."""
     print("\n=== Live provider call ===\n")
     model = get_configured_model(max_tokens=80)
     agent = Agent(
         model=model,
-        system_prompt="You are a concise SOC assistant. Reply with one short sentence.",
+        system_prompt="You are a concise cloud operations assistant. Reply with one short sentence.",
     )
     import time as _t
 
     t0 = _t.perf_counter()
     result = agent.run_sync(
-        "Name two reasons a SOC team routes every model through one Gateway "
+        "Name two reasons a cloud platform team routes every model through one Gateway "
         "rather than letting each agent call a provider directly."
     )
     dt = _t.perf_counter() - t0
