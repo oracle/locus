@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Any
 
 from config import get_model
 
@@ -132,7 +133,7 @@ def _load_skills() -> SkillIndex:
     return idx
 
 
-def build_router() -> Router:
+def build_router() -> tuple[Router, Any]:
     """Stand up a fully configured Router for this demo."""
     model = get_model()
 
@@ -194,7 +195,7 @@ def build_router() -> Router:
         f"[router] {len(protocols.all())} protocols · {len(capabilities)} capabilities · "
         f"{len(skills)} skills",
     )
-    return Router(
+    router = Router(
         extractor=extractor,
         compiler=compiler,
         on_frame=lambda f: print(
@@ -203,6 +204,7 @@ def build_router() -> Router:
             f"caps={f.required_capabilities}",
         ),
     )
+    return router, model
 
 
 # Demo cases. Each entry: (prompt, fallback_frame). The fallback is used
@@ -299,31 +301,36 @@ async def _dispatch_with_fallback(
 
 
 async def run_demo() -> None:
-    router = build_router()
+    router, model = build_router()
     fired: dict[str, int] = {}
-    for i, (prompt, fallback) in enumerate(DEMO_CASES, start=1):
-        print(f"\n=== Prompt {i} ===\n  {prompt}")
-        try:
-            protocol_id, text = await _dispatch_with_fallback(router, prompt, fallback)
-        except PolicyDeniedError as exc:
-            # PolicyGate held a HIGH-risk action for human approval; the
-            # default approval callback denies, so the drain/restart never ran.
-            print("  [policy]   held for approval — not executed")
-            print(f"  [verdict]  {exc}")
-            fired["(held for approval)"] = fired.get("(held for approval)", 0) + 1
-            continue
-        except Exception as exc:  # noqa: BLE001 — surface every failure for the demo
-            print(f"  [error] {type(exc).__name__}: {exc}")
-            continue
-        fired[protocol_id] = fired.get(protocol_id, 0) + 1
-        shape = RUNTIME_SHAPES.get(protocol_id, "(unknown shape)")
-        print(f"  [protocol] {protocol_id}")
-        print(f"  [shape]    {shape}")
-        head = "\n  ".join(text.strip().splitlines()[:6])
-        print(f"  [result]\n  {head}")
-    print("\n=== Protocol histogram ===")
-    for pid, n in sorted(fired.items()):
-        print(f"  {pid:28s} × {n}")
+    try:
+        for i, (prompt, fallback) in enumerate(DEMO_CASES, start=1):
+            print(f"\n=== Prompt {i} ===\n  {prompt}")
+            try:
+                protocol_id, text = await _dispatch_with_fallback(router, prompt, fallback)
+            except PolicyDeniedError as exc:
+                # PolicyGate held a HIGH-risk action for human approval; the
+                # default approval callback denies, so the drain/restart never ran.
+                print("  [policy]   held for approval — not executed")
+                print(f"  [verdict]  {exc}")
+                fired["(held for approval)"] = fired.get("(held for approval)", 0) + 1
+                continue
+            except Exception as exc:  # noqa: BLE001 — surface every failure for the demo
+                print(f"  [error] {type(exc).__name__}: {exc}")
+                continue
+            fired[protocol_id] = fired.get(protocol_id, 0) + 1
+            shape = RUNTIME_SHAPES.get(protocol_id, "(unknown shape)")
+            print(f"  [protocol] {protocol_id}")
+            print(f"  [shape]    {shape}")
+            head = "\n  ".join(text.strip().splitlines()[:6])
+            print(f"  [result]\n  {head}")
+        print("\n=== Protocol histogram ===")
+        for pid, n in sorted(fired.items()):
+            print(f"  {pid:28s} × {n}")
+    finally:
+        close = getattr(model, "close", None)
+        if close is not None:
+            await close()
 
 
 if __name__ == "__main__":

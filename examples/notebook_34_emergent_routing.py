@@ -45,6 +45,7 @@ Prerequisites:
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 from config import get_model
 
@@ -122,7 +123,7 @@ def _build_extractor(model) -> Agent:
     )
 
 
-def build_routers() -> tuple[Router, Router]:
+def build_routers() -> tuple[Router, Router, Any]:
     """Return (default, emergent) — same registry, only the picker differs."""
     model = get_model()
 
@@ -163,7 +164,7 @@ def build_routers() -> tuple[Router, Router]:
             picker=LLMProtocolPicker(model=model),
         ),
     )
-    return default, emergent
+    return default, emergent, model
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +185,7 @@ PROMPTS = [
 
 
 async def main() -> None:
-    default, emergent = build_routers()
+    default, emergent, model = build_routers()
 
     print(f"{'─' * 90}")
     print(f"  REQUEST                                         | DEFAULT             | EMERGENT")
@@ -214,6 +215,10 @@ async def main() -> None:
         "filter, policy gate, and builder dispatch are identical in both modes —\n"
         "only the disambiguation step changed."
     )
+
+    close = getattr(model, "close", None)
+    if close is not None:
+        await close()
 
 
 if __name__ == "__main__":
