@@ -1,22 +1,25 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 """
-Notebook 26: MARSHAL — one incident commander, many security specialists.
+Notebook 26: STEWARD — one privacy officer, many data-privacy specialists.
 
-MARSHAL is the SOC's named incident-commander agent. An orchestrator
-routes an incident to a chosen set of specialist agents, runs them in
-parallel under a semaphore, then correlates their outputs into a single
-situation report. Compared with a swarm (Notebook 24), the decision of
-who investigates what is centralised in the commander instead of emerging
-from capability tags — which means the routing step is a single,
-auditable choke point. That matters for agentic risk: a central router
-constrains tool reach and makes goal-hijack or rogue-specialist behaviour
-(OWASP ASI01 Agent Goal Hijack, ASI10 Rogue Agents) far easier to detect
-than the same fleet self-organizing.
+STEWARD is the privacy team's named data-protection-officer agent. An
+orchestrator routes a privacy request (a data-subject access/erasure
+request) to a chosen set of specialist agents, runs them in parallel
+under a semaphore, then correlates their outputs into a single privacy
+assessment. Compared with a swarm (Notebook 24), the decision of who
+investigates what is centralised in the privacy officer instead of
+emerging from capability tags — which means the routing step is a
+single, auditable choke point. That matters for compliance: a central
+router constrains which systems each specialist may touch and makes
+over-collection or unauthorized access far easier to evidence than the
+same fleet self-organizing — exactly the accountability and
+data-minimization posture GDPR and CCPA expect you to demonstrate.
 
 - ``Specialist`` is a domain-focused agent with tools, a system prompt,
   and a confidence threshold. Tulip ships pre-built ones for logs,
-  metrics, traces, and code — all useful evidence sources in an incident.
+  metrics, traces, and code — all useful evidence sources when tracing
+  where personal data flows.
 - ``Orchestrator`` registers specialists, emits ``RoutingDecision``
   objects, and runs the chosen specialists concurrently behind
   ``max_parallel_specialists`` (an asyncio.Semaphore).
@@ -79,7 +82,7 @@ def _llm_call(
 
 async def main():
     print("=" * 60)
-    print("Notebook 26: MARSHAL incident commander — orchestrator + specialists + fan-out")
+    print("Notebook 26: STEWARD privacy officer — orchestrator + specialists + fan-out")
     print("=" * 60)
     print()
     print_config()
@@ -105,7 +108,7 @@ async def main():
 
     t0 = time.perf_counter()
     p1 = await log_analyst.execute(
-        task="In one sentence, what does a log analyst contribute to incident response?"
+        task="In one sentence, what does a log analyst contribute to a data-privacy investigation?"
     )
     dt = time.perf_counter() - t0
     print(f"  [model call: {dt:.2f}s · log_analyst.execute()]")
@@ -117,35 +120,41 @@ async def main():
     # =========================================================================
     print("\n=== Part 2: Custom Specialists ===\n")
 
-    @tool(name="query_edr", description="Query EDR for open detections on a host")
-    async def query_edr() -> str:
-        return "EDR: 3 open detections on WS-0142, latest: encoded PowerShell from winword.exe"
+    @tool(
+        name="query_data_catalog",
+        description="Query the data catalog for stores holding a subject's records",
+    )
+    async def query_data_catalog() -> str:
+        return "Catalog: 3 stores hold records for subject S-8842, latest: crm.customers with email, phone, home address"
 
-    @tool(name="check_auth_logs", description="Check recent authentication failures")
-    async def check_auth_logs() -> str:
-        return "Auth logs: 17 failed logins for svc-backup from 192.0.2.55 in the last hour"
+    @tool(
+        name="check_consent_ledger",
+        description="Check the consent ledger for a subject's current permissions",
+    )
+    async def check_consent_ledger() -> str:
+        return "Consent ledger: marketing consent withdrawn 2026-03-12 for S-8842; 2 systems still receiving feeds"
 
-    endpoint_specialist = Specialist(
-        name="Endpoint Specialist",
-        specialist_type="endpoint_analyst",
-        description="Analyzes EDR detections, process activity, and host state",
-        system_prompt="""You are an endpoint security specialist. Your expertise includes:
-- Reviewing EDR detections and process trees
-- Spotting suspicious parent-child process pairs
-- Correlating host activity with authentication logs
-- Recommending containment steps
+    inventory_specialist = Specialist(
+        name="Data Inventory Specialist",
+        specialist_type="data_inventory_analyst",
+        description="Maps where personal data for a subject lives and which purposes it serves",
+        system_prompt="""You are a data-inventory privacy specialist. Your expertise includes:
+- Locating personal data for a subject across catalogued stores
+- Mapping each data element to a processing purpose and lawful basis
+- Correlating storage with the subject's current consent status
+- Recommending minimization, restriction, or erasure steps
 
-When analyzing, look for unsigned binaries, encoded command lines, and odd logon patterns.""",
-        tools=[query_edr, check_auth_logs],
+When analyzing, look for processing without a lawful basis, stale retention, and untracked copies.""",
+        tools=[query_data_catalog, check_consent_ledger],
         max_iterations=5,
         confidence_threshold=0.8,
         model=model,
     )
 
-    print(f"Custom Specialist: {endpoint_specialist.name}")
-    print(f"  Tools: {[t.name for t in endpoint_specialist.tools]}")
+    print(f"Custom Specialist: {inventory_specialist.name}")
+    print(f"  Tools: {[t.name for t in inventory_specialist.tools]}")
     print(
-        f"AI commentary: {_llm_call('In one sentence, why is a custom Specialist with EDR tools better than a generic Agent for endpoint triage?')}"
+        f"AI commentary: {_llm_call('In one sentence, why is a custom Specialist with data-catalog tools better than a generic Agent for personal-data discovery?')}"
     )
 
     # =========================================================================
@@ -153,9 +162,9 @@ When analyzing, look for unsigned binaries, encoded command lines, and odd logon
     # =========================================================================
     print("\n=== Part 3: Executing a Specialist ===\n")
 
-    result = await endpoint_specialist.execute(
-        task="Analyze the open EDR detections on WS-0142 and identify the likely entry point",
-        context={"incident_id": "IR-2026-042", "reported_issue": "Encoded PowerShell alert"},
+    result = await inventory_specialist.execute(
+        task="Map every store holding personal data for subject S-8842 and flag any processing without a lawful basis",
+        context={"request_id": "DSAR-2026-042", "request_type": "Access + Erasure"},
     )
 
     print("Specialist Result:")
@@ -166,13 +175,13 @@ When analyzing, look for unsigned binaries, encoded command lines, and odd logon
         print(f"  Output: {result.output[:300]}...")
 
     # =========================================================================
-    # Part 4: wire the incident commander
+    # Part 4: wire the privacy officer
     # =========================================================================
     print("\n=== Part 4: Creating an Orchestrator ===\n")
 
     orchestrator = create_orchestrator(
-        name="MARSHAL Incident Commander",
-        specialists=[log_analyst, metrics_analyst, endpoint_specialist],
+        name="STEWARD Privacy Officer",
+        specialists=[log_analyst, metrics_analyst, inventory_specialist],
         model=model,
     )
 
@@ -196,16 +205,16 @@ When analyzing, look for unsigned binaries, encoded command lines, and odd logon
     print(f"Correlation threshold: {orchestrator.correlation_threshold}")
 
     custom_orchestrator = Orchestrator(
-        name="SOC Commander",
-        description="Coordinates security specialists for incident analysis",
-        system_prompt="""You coordinate specialist agents for security-incident analysis.
+        name="Privacy Response Coordinator",
+        description="Coordinates privacy specialists for data-subject request handling",
+        system_prompt="""You coordinate specialist agents for data-subject request handling.
 
 When routing:
-1. For endpoint alerts -> endpoint + log specialists
-2. For credential abuse -> log + metrics specialists
-3. For unknown alerts -> all specialists
+1. For access/erasure requests -> data_inventory + log specialists
+2. For consent disputes -> log + metrics specialists
+3. For unknown requests -> all specialists
 
-Prioritize based on the severity indicated in the task.""",
+Prioritize based on the urgency and statutory deadline indicated in the task.""",
         model=model,
     )
     custom_orchestrator.register_specialists([log_analyst, metrics_analyst])
@@ -219,12 +228,12 @@ Prioritize based on the severity indicated in the task.""",
 
     routing = RoutingDecision(
         decision_type="invoke",
-        specialists=["log_analyst", "endpoint_analyst"],
-        reasoning="Encoded-PowerShell alert needs host context plus log corroboration",
+        specialists=["log_analyst", "data_inventory_analyst"],
+        reasoning="Erasure request needs a full data map plus access-log corroboration",
         context={
             "subtasks": {
-                "log_analyst": "Search auth logs for activity from 192.0.2.55 in the last 24h",
-                "endpoint_analyst": "Pull the process tree for the flagged PowerShell on WS-0142",
+                "log_analyst": "Search access logs for reads of subject S-8842's records in the last 90 days",
+                "data_inventory_analyst": "Enumerate every store holding personal data for subject S-8842",
             }
         },
     )
@@ -241,9 +250,12 @@ Prioritize based on the severity indicated in the task.""",
     print("\n=== Part 7: Full Orchestration ===\n")
 
     orch_result = await orchestrator.execute(
-        task="EDR raised a high-severity alert: encoded PowerShell spawned by winword.exe "
-        "on workstation WS-0142 at 09:14 UTC",
-        context={"severity": "high", "affected_assets": ["WS-0142", "fileserver FS-03"]},
+        task="A data subject filed a DSAR (access + erasure) for subject S-8842: locate all "
+        "personal data and flag any processing without a lawful basis",
+        context={
+            "request_type": "access+erasure",
+            "affected_systems": ["crm.customers", "marketing.feeds"],
+        },
     )
 
     print("Orchestration Result:")
@@ -276,24 +288,24 @@ Prioritize based on the severity indicated in the task.""",
     # =========================================================================
     print("\n=== Part 8: Dynamic Specialist Registration ===\n")
 
-    network_specialist = Specialist(
-        name="Network Forensics Analyst",
-        specialist_type="network_forensics",
-        description="Analyzes firewall logs, DNS activity, and beaconing patterns",
-        system_prompt="You analyze network evidence: DNS queries, firewall denies, beaconing.",
+    retention_specialist = Specialist(
+        name="Retention Policy Analyst",
+        specialist_type="retention_analyst",
+        description="Reviews retention schedules, minimization gaps, and lawful-basis records",
+        system_prompt="You analyze retention evidence: retention schedules, minimization gaps, lawful-basis records.",
         model=model,
     )
 
-    orchestrator.register_specialist(network_specialist)
-    print(f"Added specialist: {network_specialist.name}")
+    orchestrator.register_specialist(retention_specialist)
+    print(f"Added specialist: {retention_specialist.name}")
     print(f"Total specialists: {len(orchestrator.specialists)}")
 
     t0 = time.perf_counter()
-    p8 = await network_specialist.execute(
-        task="In one short sentence, what would you check first if a host made periodic connections to an unknown domain?",
+    p8 = await retention_specialist.execute(
+        task="In one short sentence, what would you check first if a dataset has no documented retention period?",
     )
     dt = time.perf_counter() - t0
-    print(f"  [model call: {dt:.2f}s · network_specialist.execute()]")
+    print(f"  [model call: {dt:.2f}s · retention_specialist.execute()]")
     if p8.output:
         print(f"  Output: {p8.output[:160]}")
 
@@ -303,26 +315,28 @@ Prioritize based on the severity indicated in the task.""",
     print("\n=== Part 9: Common Patterns ===\n")
 
     print("Pattern 1: Parallel Analysis")
-    print("  Invoke multiple specialists at once, correlate, produce one sitrep.")
+    print("  Invoke multiple specialists at once, correlate, produce one privacy assessment.")
     print()
 
     print("Pattern 2: Sequential Refinement")
-    print("  Broad triage first, then route to a specific specialist based on findings.")
+    print("  Broad data discovery first, then route to a specific specialist based on findings.")
     print()
 
     print("Pattern 3: Hierarchical Routing")
-    print("  Top-level commander routes to sub-orchestrators per domain (endpoint, network).")
+    print(
+        "  Top-level officer routes to sub-orchestrators per domain (customer data, employee data)."
+    )
     print()
 
     print("Pattern 4: Consensus Analysis")
-    print("  Multiple specialists analyse the same evidence; flag disagreements.")
+    print("  Multiple specialists analyse the same records; flag disagreements.")
 
     # =========================================================================
     # Part 10: things to keep in mind
     # =========================================================================
     print("\n=== Part 10: Best Practices ===\n")
 
-    print("1. Give specialists focused, non-overlapping evidence domains.")
+    print("1. Give specialists focused, non-overlapping data domains.")
     print("2. Use clear specialist_type names — they show up in the audit trail.")
     print("3. Write domain-specific system prompts.")
     print("4. Set max_parallel_specialists to match your provider quota.")

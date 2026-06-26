@@ -4,10 +4,10 @@
 Notebook 12: audit hooks — every agent action on the record.
 
 A ``HookProvider`` plugs into four lifecycle points: before/after the
-whole invocation, and before/after each tool call. For a security
-agent that's an audit trail for free — every action it takes can be
-logged, timed, validated, or blocked without touching the agent or the
-tools themselves.
+whole invocation, and before/after each tool call. For a cloud-ops
+agent that's an audit trail for free — every scaling action it takes
+can be logged, timed, validated, or blocked without touching the agent
+or the tools themselves.
 
 Key ideas:
 - Subclass ``HookProvider`` and override only the callbacks you need.
@@ -18,10 +18,10 @@ Key ideas:
   for clamping or sanitising values before the tool actually runs.
 - Multiple hooks compose. Tulip iterates them in priority order.
 
-The Part 5 guardrail watches untrusted ticket text for secrets before
+The Part 5 guardrail watches untrusted manifest text for secrets before
 they flow onward — the control behind OWASP LLM02 (Sensitive Information
-Disclosure). Notebook 14 builds on this with WARDEN, the SOC's
-risk-gating agent.
+Disclosure). Notebook 14 builds on this with a deploy-gating agent that
+risk-scores each change before it lands.
 
 Run it:
     .venv/bin/python examples/notebook_12_agent_hooks.py
@@ -74,26 +74,26 @@ class AuditTrailHook(HookProvider):
 
 
 @tool
-def adjust_risk(base: int, delta: int) -> int:
-    """Add a delta to an alert's base risk score."""
+def adjust_capacity(base: int, delta: int) -> int:
+    """Add a delta to a service's current instance count."""
     return base + delta
 
 
 def example_simple_hook():
-    """Wire an audit hook into a triage agent and run one prompt."""
+    """Wire an audit hook into an autoscaling agent and run one prompt."""
     print("=== Part 1: Understanding Hooks ===\n")
 
     model = get_model(max_tokens=100)
 
     agent = Agent(
         model=model,
-        tools=[adjust_risk],
-        system_prompt="Use the adjust_risk tool to update alert risk scores.",
+        tools=[adjust_capacity],
+        system_prompt="Use the adjust_capacity tool to scale service instances.",
         hooks=[AuditTrailHook()],
     )
 
     print("Running agent with audit-trail hook:\n")
-    result = agent.run_sync("Adjust the risk score: base 5, delta 3")
+    result = agent.run_sync("Scale the service: base 5, delta 3")
     print(f"\nResult: {result.message}")
     print()
 
@@ -104,7 +104,7 @@ def example_simple_hook():
 
 
 class TimingHook(HookProvider):
-    """Time the whole invocation and each tool call — SOC telemetry."""
+    """Time the whole invocation and each tool call — cloud-ops telemetry."""
 
     def __init__(self):
         self.start_time = None
@@ -142,12 +142,12 @@ def example_timing_hook():
 
     agent = Agent(
         model=model,
-        tools=[adjust_risk],
-        system_prompt="Use the adjust_risk tool to update alert risk scores.",
+        tools=[adjust_capacity],
+        system_prompt="Use the adjust_capacity tool to scale service instances.",
         hooks=[TimingHook()],
     )
 
-    result = agent.run_sync("Adjust the risk score: base 10, delta 20")
+    result = agent.run_sync("Scale the service: base 10, delta 20")
     print(f"Result: {result.message}")
     print()
 
@@ -158,7 +158,7 @@ def example_timing_hook():
 
 
 class ValidationHook(HookProvider):
-    """Clamp out-of-range risk adjustments before the tool runs."""
+    """Clamp out-of-range capacity changes before the tool runs."""
 
     def __init__(self, max_value: int = 1000):
         self.max_value = max_value
@@ -169,12 +169,13 @@ class ValidationHook(HookProvider):
         return HookPriority.SECURITY_DEFAULT
 
     async def on_before_tool_call(self, event):
-        if event.tool_name == "adjust_risk":
+        if event.tool_name == "adjust_capacity":
             base = event.arguments.get("base", 0)
             delta = event.arguments.get("delta", 0)
 
             # event.arguments is writable; mutating it changes what the
-            # tool actually receives — risk scores stay in policy range.
+            # tool actually receives — instance counts stay within the
+            # quota that keeps the cloud bill in check.
             if base > self.max_value:
                 print(f"  [VALIDATION] Clamping base={base} to {self.max_value}")
                 event.arguments["base"] = self.max_value
@@ -191,12 +192,12 @@ def example_validation_hook():
 
     agent = Agent(
         model=model,
-        tools=[adjust_risk],
-        system_prompt="Use the adjust_risk tool. Try large numbers if asked.",
+        tools=[adjust_capacity],
+        system_prompt="Use the adjust_capacity tool. Try large numbers if asked.",
         hooks=[ValidationHook(max_value=100)],
     )
 
-    result = agent.run_sync("Adjust the risk score: base 5000, delta 3000")
+    result = agent.run_sync("Scale the service: base 5000, delta 3000")
     print(f"Result: {result.message}")
     print()
 
@@ -253,12 +254,12 @@ def example_multiple_hooks():
     # Lower priority value runs earlier: timing (100) then audit (200).
     agent = Agent(
         model=model,
-        tools=[adjust_risk],
-        system_prompt="Use the adjust_risk tool.",
+        tools=[adjust_capacity],
+        system_prompt="Use the adjust_capacity tool.",
         hooks=[timing, audit],
     )
 
-    result = agent.run_sync("Adjust the risk score: base 7, delta 8")
+    result = agent.run_sync("Scale the service: base 7, delta 8")
     print(f"Result: {result.message}")
 
     print("\nAudit Log:")
@@ -313,8 +314,8 @@ class GuardrailsHook(HookProvider):
 
 
 @tool
-def analyze_ticket(text: str) -> str:
-    """Word and character counts plus a sha-256 digest of the ticket text."""
+def analyze_manifest(text: str) -> str:
+    """Word and character counts plus a sha-256 digest of the manifest text."""
     import hashlib
     import re
 
@@ -332,18 +333,18 @@ def example_guardrails_hook():
 
     model = get_model(max_tokens=100)
 
-    guardrails = GuardrailsHook(blocked_patterns=["password", "api key", "credit card"])
+    guardrails = GuardrailsHook(blocked_patterns=["password", "api key", "access key"])
 
     agent = Agent(
         model=model,
-        tools=[analyze_ticket],
-        system_prompt="Analyze any ticket text the analyst provides.",
+        tools=[analyze_manifest],
+        system_prompt="Analyze any deployment manifest text the operator provides.",
         hooks=[guardrails],
     )
 
-    # The word "password" trips the guardrail — ticket text is untrusted
+    # The word "password" trips the guardrail — manifest text is untrusted
     # input and may carry secrets that must not flow onward.
-    result = agent.run_sync("Analyze this ticket: 'user says my password is 1234'")
+    result = agent.run_sync("Analyze this manifest: 'env: DB_PASSWORD=hunter2'")
     print(f"Result: {result.message}")
 
     if guardrails.blocked_calls:
@@ -373,7 +374,7 @@ def main():
     example_guardrails_hook()
 
     print("=" * 60)
-    print("Next: Notebook 13 — SOC Dashboard SSE Streaming")
+    print("Next: Notebook 13 — Cloud Ops Dashboard SSE Streaming")
     print("=" * 60)
 
 

@@ -2,14 +2,14 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 
-"""Notebook 32: alert adjudication debate — true positive vs false positive.
+"""Notebook 32: incident adjudication debate — real incident vs noise.
 
-A TRUE-POSITIVE advocate and a FALSE-POSITIVE advocate take turns
-arguing over a SOC alert — here a possible DNS-based command-and-control
-beacon (MITRE ATT&CK T1071.004 Application Layer Protocol: DNS). After N
-rounds a Judge reads the full transcript and emits a typed ``Verdict`` —
-call, confidence, key points, reasoning — that downstream systems (SOAR
-cases, audit logs, ticketing) can consume directly. Two-advocate
+An INCIDENT advocate and a NOISE advocate take turns arguing over a
+cloud-monitoring alert — here a possible production reliability incident
+(a p99 latency spike paired with autoscaling churn). After N rounds a
+Judge reads the full transcript and emits a typed ``Verdict`` — call,
+confidence, key points, reasoning — that downstream systems (incident
+tooling, audit logs, on-call paging) can consume directly. Two-advocate
 adjudication is a cheap way to surface the disconfirming evidence a
 single-pass triage agent tends to skip.
 
@@ -58,7 +58,7 @@ from tulip.multiagent.graph import END, START, StateGraph
 class Turn(BaseModel):
     """One turn of the adjudication."""
 
-    side: str  # "tp" | "fp"
+    side: str  # "incident" | "noise"
     round: int
     text: str
 
@@ -66,29 +66,29 @@ class Turn(BaseModel):
 class Verdict(BaseModel):
     """Judge's structured ruling on the alert."""
 
-    call: str = Field(description="'true_positive', 'false_positive', or 'inconclusive'")
+    call: str = Field(description="'incident', 'noise', or 'inconclusive'")
     confidence: float = Field(ge=0.0, le=1.0, description="0..1 confidence in the call")
     key_points: list[str] = Field(description="The 2–4 strongest arguments that drove the decision")
     reasoning: str = Field(description="One-paragraph rationale")
 
 
-TP_PROMPT = (
-    "You are the TRUE-POSITIVE advocate in a SOC adjudication. Argue that "
-    "the alert is real and worth escalating. Cite the alert telemetry, and "
-    "directly rebut the false-positive side's most recent point if any. "
-    "Three sentences max."
+INCIDENT_PROMPT = (
+    "You are the INCIDENT advocate in a cloud-reliability adjudication. "
+    "Argue that the alert is a real production incident worth paging "
+    "on-call. Cite the alert telemetry, and directly rebut the noise "
+    "side's most recent point if any. Three sentences max."
 )
-FP_PROMPT = (
-    "You are the FALSE-POSITIVE advocate in a SOC adjudication. Argue that "
-    "the alert has a benign explanation. Cite the alert telemetry, and "
-    "directly rebut the true-positive side's most recent point if any. "
-    "Three sentences max."
+NOISE_PROMPT = (
+    "You are the NOISE advocate in a cloud-reliability adjudication. "
+    "Argue that the alert has a benign explanation and does not warrant "
+    "paging. Cite the alert telemetry, and directly rebut the incident "
+    "side's most recent point if any. Three sentences max."
 )
 JUDGE_PROMPT = (
-    "You are an impartial SOC shift lead. Read the full adjudication "
-    "transcript and emit a Verdict object. Call true_positive or "
-    "false_positive only if one side clearly outargued the other; "
-    "otherwise return 'inconclusive'."
+    "You are an impartial SRE on-call lead. Read the full adjudication "
+    "transcript and emit a Verdict object. Call incident or noise only "
+    "if one side clearly outargued the other; otherwise return "
+    "'inconclusive'."
 )
 
 
@@ -131,19 +131,21 @@ async def _argue(agent: Agent, transcript: list[Turn], alert: str, side: str, rn
 # ---------------------------------------------------------------------------
 
 
-async def tp_turn(state: dict[str, Any]) -> dict[str, Any]:
-    agent = _make_agent("tp", TP_PROMPT, state["__model__"])
+async def incident_turn(state: dict[str, Any]) -> dict[str, Any]:
+    agent = _make_agent("incident", INCIDENT_PROMPT, state["__model__"])
     rnd = state.get("round", 0)
-    text = await _argue(agent, state.get("transcript", []), state["alert"], "tp", rnd)
-    return {"transcript": state.get("transcript", []) + [Turn(side="tp", round=rnd, text=text)]}
-
-
-async def fp_turn(state: dict[str, Any]) -> dict[str, Any]:
-    agent = _make_agent("fp", FP_PROMPT, state["__model__"])
-    rnd = state.get("round", 0)
-    text = await _argue(agent, state.get("transcript", []), state["alert"], "fp", rnd)
+    text = await _argue(agent, state.get("transcript", []), state["alert"], "incident", rnd)
     return {
-        "transcript": state.get("transcript", []) + [Turn(side="fp", round=rnd, text=text)],
+        "transcript": state.get("transcript", []) + [Turn(side="incident", round=rnd, text=text)]
+    }
+
+
+async def noise_turn(state: dict[str, Any]) -> dict[str, Any]:
+    agent = _make_agent("noise", NOISE_PROMPT, state["__model__"])
+    rnd = state.get("round", 0)
+    text = await _argue(agent, state.get("transcript", []), state["alert"], "noise", rnd)
+    return {
+        "transcript": state.get("transcript", []) + [Turn(side="noise", round=rnd, text=text)],
         "round": rnd + 1,
     }
 
@@ -197,27 +199,29 @@ async def judge_turn(state: dict[str, Any]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Routing — N rounds of tp/fp, then judge once
+# Routing — N rounds of incident/noise, then judge once
 # ---------------------------------------------------------------------------
 
 
 N_ROUNDS = 2
 
 
-def route_after_fp(state: dict[str, Any]) -> str:
+def route_after_noise(state: dict[str, Any]) -> str:
     if state.get("round", 0) >= N_ROUNDS:
         return "judge"
-    return "tp"
+    return "incident"
 
 
 def build_debate_graph() -> StateGraph:
-    graph = StateGraph(name="alert-adjudication")
-    graph.add_node("tp", tp_turn)
-    graph.add_node("fp", fp_turn)
+    graph = StateGraph(name="incident-adjudication")
+    graph.add_node("incident", incident_turn)
+    graph.add_node("noise", noise_turn)
     graph.add_node("judge", judge_turn)
-    graph.add_edge(START, "tp")
-    graph.add_edge("tp", "fp")
-    graph.add_conditional_edges("fp", route_after_fp, targets={"tp": "tp", "judge": "judge"})
+    graph.add_edge(START, "incident")
+    graph.add_edge("incident", "noise")
+    graph.add_conditional_edges(
+        "noise", route_after_noise, targets={"incident": "incident", "judge": "judge"}
+    )
     graph.add_edge("judge", END)
     return graph
 
@@ -232,19 +236,19 @@ async def main() -> None:
 
     # Short-circuits the notebook when the model can't produce JSON.
     check_structured_output_capable()
-    print("Notebook 32: alert adjudication debate — TP vs FP with a typed judge")
+    print("Notebook 32: incident adjudication debate — incident vs noise with a typed judge")
     print("=" * 60)
 
     model = get_model()
     graph = build_debate_graph()
     initial = {
         "alert": (
-            "Alert SOC-4189 (suspected DNS C2, ATT&CK T1071.004): workstation "
-            "WS-0231 issued 412 DNS queries to subdomains of "
-            "updates.evil.example over 35 minutes at fixed 5-second intervals. "
-            "The domain was registered 12 days ago; the proxy shows no related "
-            "HTTP traffic; the user was logged in and an inventory-sync agent "
-            "is also installed on this host."
+            "Alert CLOUD-4189 (suspected reliability incident): service "
+            "checkout-api p99 latency rose from 120ms to 2.4s over 8 minutes; "
+            "the HPA scaled the deployment from 6 to 20 pods; one node in the "
+            "autoscaling group reported MemoryPressure. The error rate held "
+            "flat at 0.1%, a scheduled nightly reindex job is running on the "
+            "same cluster, and no recent deploy preceded the spike."
         ),
         "transcript": [],
         "round": 0,
@@ -252,7 +256,7 @@ async def main() -> None:
     }
 
     print(f"\nAlert: {initial['alert']!r}\n")
-    print(f"Running {N_ROUNDS} rounds of TP vs FP, then judge…\n")
+    print(f"Running {N_ROUNDS} rounds of incident vs noise, then judge…\n")
 
     result = await graph.execute(initial)
     failed = [

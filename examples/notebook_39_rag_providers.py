@@ -1,11 +1,11 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
-"""Notebook 39: RAG providers — a CVE/advisory KB on any vector store.
+"""Notebook 39: RAG providers — a payments runbook KB on any vector store.
 
-A vulnerability-management team's advisory corpus outlives any single
-backend choice. The same corpus that feeds the ATLAS Index (notebook 38)
-also carries CVE write-ups and internal advisories, and production RAG is
-two pluggable pieces, both behind one Tulip interface:
+A payments operations team's runbook corpus outlives any single backend
+choice. The same corpus that feeds the dispute assistant (notebook 38)
+also carries decline-code playbooks and chargeback procedures, and
+production RAG is two pluggable pieces, both behind one Tulip interface:
 
 - **Embeddings** — ``OpenAIEmbeddings`` (``text-embedding-3-small`` /
   ``-3-large``) or ``CohereEmbeddings`` (Cohere's direct API).
@@ -14,10 +14,11 @@ two pluggable pieces, both behind one Tulip interface:
   ``QdrantVectorStore``, ``ChromaVectorStore``. Swapping is a one-line
   change; the retrieve/add API is identical.
 
-Choice of embedding model and distance metric is a security decision,
-not just a tuning knob: it sets retrieval precision, and weak retrieval
-is the soft underbelly behind OWASP LLM08 (Vector & Embedding
-Weaknesses). What each part covers (all against the same advisory corpus):
+Choice of embedding model and distance metric is an operations
+decision, not just a tuning knob: it sets retrieval precision, and weak
+retrieval is what routes an agent to the wrong runbook and a wrong
+answer to a merchant. What each part covers (all against the same
+runbook corpus):
 
 - Part 1 — embedding-model selection (small vs large dimensions).
 - Part 2 — distance metric choices (COSINE / DOT / EUCLIDEAN).
@@ -57,26 +58,31 @@ def _store(*, dimension: int, distance: str = "COSINE") -> InMemoryVectorStore:
     return InMemoryVectorStore(dimension=dimension, distance_metric=distance)
 
 
-# A small internal advisory corpus. All CVE ids and products are fictitious;
-# IPs are RFC 5737 documentation ranges and domains are *.example.
+# A small payments-operations runbook corpus. All reason codes and
+# merchant ids are fictitious; amounts and accounts are illustrative only.
 CORPUS = [
-    "CVE-2024-99999 (CVSS 9.8, critical): remote code execution in AcmeWeb 2.x "
-    "via a crafted file upload reaching a deserialization sink; fixed in 2.4.1.",
-    "CVE-2024-99998 (CVSS 8.2, high): SQL injection in the OrderDesk reporting "
-    "module; sanitization fix shipped in 5.7.",
-    "CVE-2025-99997 (CVSS 9.1, critical): authentication bypass in GateKeeper "
-    "SSO when the SAML audience restriction is unchecked.",
-    "CVE-2025-99996 (CVSS 7.8, high): local privilege escalation in FleetAgent "
-    "via a world-writable config directory.",
-    "ADV-2026-014: mail-gateway malware scanning validated end-to-end using the "
-    "EICAR test file; no production payloads handled.",
-    "ADV-2026-021: rotate API tokens for any account that touched the "
-    "phish.example.net credential-phishing lure tracked under TULIP-STORM.",
+    "Reason code 4853 (cardholder dispute): merchandise not received. Request "
+    "proof of delivery and tracking; represent within 30 days or accept the "
+    "chargeback.",
+    "Decline code 51 (insufficient funds): the issuer rejected the auth for a "
+    "low balance. Safe to retry with a smaller amount or after payday; do not "
+    "force-post.",
+    "Decline code 05 (do not honor): a generic issuer refusal. Do not retry "
+    "blindly; route the customer to update their card or contact their bank.",
+    "Refund SLA: card refunds settle in 5-10 business days; the funds leave the "
+    "merchant account immediately but appear on the statement after the issuer "
+    "posts them.",
+    "Chargeback reason 10.4 (fraud, card-absent): the cardholder denies the "
+    "transaction. Submit AVS match, 3-D Secure result, and prior order history "
+    "as compelling evidence.",
+    "ACH return R01 (insufficient funds): the bank account had no balance to "
+    "cover the debit. Reattempt once after 2 business days, then dun the "
+    "customer if it fails again.",
 ]
 
 
 # =============================================================================
-# Part 1: small vs large embedding models against the same advisory corpus.
+# Part 1: small vs large embedding models against the same runbook corpus.
 # =============================================================================
 
 
@@ -91,7 +97,7 @@ async def part1_embedding_models():
         retriever = RAGRetriever(embedder=embedder, store=store)
         print(f"\n  {model} → dim={embedder.config.dimension}")
         await retriever.add_documents(CORPUS)
-        hits = await retriever.retrieve("remote code execution in the web framework", limit=2)
+        hits = await retriever.retrieve("customer says their package never arrived", limit=2)
         for i, h in enumerate(hits.documents, start=1):
             print(f"    #{i} score={h.score:.4f} {h.document.content[:70]}…")
 
@@ -108,7 +114,7 @@ async def part2_distance_metrics():
     print("=" * 60)
 
     embedder = _embedder("text-embedding-3-small")
-    query = "authentication bypass in single sign-on"
+    query = "issuer declined the card for not enough money"
 
     for metric in ["COSINE", "DOT", "EUCLIDEAN"]:
         store = _store(dimension=embedder.config.dimension, distance=metric)
@@ -140,16 +146,16 @@ async def part3_swap_backend():
         emb = await embedder.embed(text)
         await store.add(
             Document(
-                id=f"adv_{i}",
+                id=f"runbook_{i}",
                 content=text,
                 embedding=emb.embedding,
-                metadata={"severity": "high" if i % 2 == 0 else "medium"},
+                metadata={"channel": "card" if i % 2 == 0 else "bank"},
             )
         )
 
-    q = await embedder.embed("how could an attacker escalate privileges?")
+    q = await embedder.embed("how do I handle a cardholder disputing a charge?")
     hits = await store.search(query_embedding=q.embedding, limit=3)
-    print(f"  Searched {await store.count()} advisories in the Qdrant store:")
+    print(f"  Searched {await store.count()} runbooks in the Qdrant store:")
     for i, hit in enumerate(hits, start=1):
         print(f"    #{i} score={hit.score:.4f}  {hit.document.content[:70]}…")
 
@@ -169,9 +175,9 @@ async def part4_batch():
     retriever = RAGRetriever(embedder=embedder, store=store)
 
     await retriever.add_documents(CORPUS)
-    print(f"  After add_documents: advisories = {await store.count()}")
+    print(f"  After add_documents: runbooks = {await store.count()}")
     await store.clear()
-    print(f"  After clear():       advisories = {await store.count()}")
+    print(f"  After clear():       runbooks = {await store.count()}")
 
 
 # =============================================================================
@@ -182,7 +188,7 @@ async def part4_batch():
 async def main():
     missing = _missing_env()
     if missing:
-        print("\n--- Notebook 39: RAG providers (CVE/advisory KB) ---")
+        print("\n--- Notebook 39: RAG providers (payments runbook KB) ---")
         print(
             "Required environment variables not set; skipping the live "
             "demo so this file still runs cleanly in CI.\n"

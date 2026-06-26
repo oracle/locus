@@ -4,19 +4,19 @@
 
 """Notebook 62: The event taxonomy as a compliance artifact.
 
-When an auditor asks "what can your agents do, and how would you know
-they did it?" — the question behind a SOC 2 CC7 monitoring control — the
-answer is the event catalogue. Every component in Tulip emits typed
-events under one stable prefix: agent.*, multiagent.*, composition.*,
-router.*, rag.*, memory.*, a2a.*, skills.*, deepagent.*. The EV_*
-constants in tulip.observability.emit are the canonical registry —
-change one place, propagates everywhere — so the artifact you hand an
-auditor is generated from the code itself, not a spreadsheet that drifts
-out of date the day after it's signed.
+When a PCI DSS assessor asks "what can your payment agents do, and how
+would you know they did it?" — the question behind a payments-operations
+monitoring control — the answer is the event catalogue. Every component
+in Tulip emits typed events under one stable prefix: agent.*,
+multiagent.*, composition.*, router.*, rag.*, memory.*, a2a.*, skills.*,
+deepagent.*. The EV_* constants in tulip.observability.emit are the
+canonical registry — change one place, propagates everywhere — so the
+artifact you hand an assessor is generated from the code itself, not a
+spreadsheet that drifts out of date the day after it's signed.
 
 - List every EV_* constant and its category prefix (always in sync with
   the codebase because it's read at import time — no stale spreadsheet).
-- Drive a two-stage alert-triage pipeline (SequentialPipeline +
+- Drive a two-stage dispute-triage pipeline (SequentialPipeline +
   LoopAgent machinery) that surfaces composition.* events end-to-end.
 
 Run it
@@ -65,7 +65,7 @@ def part1_catalogue_tour() -> None:
 
 
 # Part 2: SequentialPipeline and LoopAgent emit composition.* events
-# at every stage / iteration boundary — each stage of the triage
+# at every stage / iteration boundary — each stage of the dispute-triage
 # pipeline leaves its own entry in the audit trail.
 
 
@@ -95,7 +95,8 @@ async def part2_composition() -> None:
         await asyncio.sleep(0)
 
         await pipeline.run(
-            "Summarize this alert in one line: repeated failed logins on web-01 from 198.51.100.7."
+            "Summarize this disputed charge in one line: cardholder reports an "
+            "unrecognized $420.00 payment to merchant ACME-STORE on card ending 4242."
         )
         await bus.close_stream(rid)
         await consumer_task

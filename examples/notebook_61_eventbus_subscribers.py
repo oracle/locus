@@ -2,22 +2,22 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 
-"""Notebook 61: Shipping agent events to a SIEM.
+"""Notebook 61: Shipping agent events to a cloud telemetry platform.
 
 The bus has three subscribe shapes, each suited to a different consumer
-in a SOC pipeline:
+in a cloud-ops pipeline:
 
-- bus.subscribe(run_id): events for one investigation, with history
+- bus.subscribe(run_id): events for one deployment, with history
   replay on connect then live events, terminated by a sentinel on
-  stream close. The shape an analyst console uses for a single case.
+  stream close. The shape a rollout console uses for a single release.
 - bus.subscribe_global(): every event from every run, no history
-  replay. The shape a SIEM forwarder uses — one tap covering all
-  concurrent investigations.
+  replay. The shape a telemetry forwarder uses — one tap covering all
+  concurrent deployments.
 - bus._history.get(run_id, ()): direct read of the per-run history
   deque (test helper; capped at 500 events x 200 runs LRU).
 
-- Per-case subscriber alongside a SIEM-style global subscriber on two
-  concurrent investigations.
+- Per-deployment subscriber alongside an observability-style global
+  subscriber on two concurrent rollouts.
 - bus.stats() snapshot — queue sizes, history depth, drop counter,
   retained-run count: the health metrics of your event pipeline.
 
@@ -39,28 +39,29 @@ from tulip.agent import Agent
 from tulip.observability import get_event_bus, run_context
 
 
-# Part 1: the SIEM forwarder (global subscriber) sees both
-# investigations; a per-case subscriber sees only its own.
+# Part 1: the telemetry forwarder (global subscriber) sees both
+# deployments; a per-deployment subscriber sees only its own.
 
 
 async def part1_global_vs_per_run() -> None:
-    print("\n--- Part 1: SIEM forwarder vs per-case subscriber ---")
+    print("\n--- Part 1: telemetry forwarder vs per-deployment subscriber ---")
 
     bus = get_event_bus()
-    siem_kinds: list[str] = []
-    case_a_kinds: list[str] = []
+    telemetry_kinds: list[str] = []
+    deploy_a_kinds: list[str] = []
 
-    async def siem_forwarder() -> None:
-        # In production this loop would POST each event to your SIEM's
-        # HTTP event collector; here it just records what it would ship.
+    async def telemetry_forwarder() -> None:
+        # In production this loop would POST each event to your
+        # observability platform's intake API; here it just records
+        # what it would ship.
         async for ev in bus.subscribe_global():
-            siem_kinds.append(f"{ev.run_id[:6]}/{ev.event_type}")
-            if ev.event_type == "agent.terminate" and len(siem_kinds) >= 4:
+            telemetry_kinds.append(f"{ev.run_id[:6]}/{ev.event_type}")
+            if ev.event_type == "agent.terminate" and len(telemetry_kinds) >= 4:
                 return
 
-    async def case_a_sub(rid: str) -> None:
+    async def deploy_a_sub(rid: str) -> None:
         async for ev in bus.subscribe(rid):
-            case_a_kinds.append(ev.event_type)
+            deploy_a_kinds.append(ev.event_type)
             if ev.event_type == "agent.terminate":
                 return
 
@@ -70,30 +71,31 @@ async def part1_global_vs_per_run() -> None:
             await asyncio.to_thread(agent.run_sync, prompt)
             await bus.close_stream(rid)
 
-    g_task = asyncio.create_task(siem_forwarder())
-    a_task = asyncio.create_task(case_a_sub("case-A"))
+    g_task = asyncio.create_task(telemetry_forwarder())
+    a_task = asyncio.create_task(deploy_a_sub("deploy-A"))
     await asyncio.sleep(0)
 
     await asyncio.gather(
-        dispatch("case-A", "Reply: triage note filed for case A"),
-        dispatch("case-B", "Reply: triage note filed for case B"),
+        dispatch("deploy-A", "Reply: rollout recorded for deployment A"),
+        dispatch("deploy-B", "Reply: rollout recorded for deployment B"),
     )
     # Both subscribers exit on their close-stream sentinels.
     await asyncio.wait_for(asyncio.gather(g_task, a_task), timeout=15.0)
 
-    print(f"SIEM forwarder saw {len(siem_kinds)} events across both investigations:")
-    for k in siem_kinds[:6]:
+    print(f"telemetry forwarder saw {len(telemetry_kinds)} events across both deployments:")
+    for k in telemetry_kinds[:6]:
         print(f"  - {k}")
-    if len(siem_kinds) > 6:
-        print(f"  ... +{len(siem_kinds) - 6} more")
+    if len(telemetry_kinds) > 6:
+        print(f"  ... +{len(telemetry_kinds) - 6} more")
 
-    print(f"case-A subscriber saw {len(case_a_kinds)} events (only its own case):")
-    for k in case_a_kinds[:6]:
+    print(f"deploy-A subscriber saw {len(deploy_a_kinds)} events (only its own rollout):")
+    for k in deploy_a_kinds[:6]:
         print(f"  - {k}")
 
 
 # Part 2: bus.stats() snapshot. Pipe these into the same dashboard that
-# watches your log-shipping pipeline — dropped events are missing evidence.
+# watches your telemetry-shipping pipeline — dropped events are missing
+# metrics.
 
 
 async def part2_stats() -> None:

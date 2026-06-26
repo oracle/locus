@@ -2,25 +2,25 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 
-"""Notebook 69: Vulnerability research workflow — recon, hypothesize, validate, report.
+"""Notebook 69: Customer-support research workflow — recon, hypothesize, validate, report.
 
 create_research_workflow composes six node primitives into a StateGraph
-that mirrors how a vulnerability-research agent should work: a ReAct
-loop that gathers evidence from advisory tools (recon), causal
+that mirrors how a customer-support research agent should work: a ReAct
+loop that gathers evidence from knowledge-base tools (recon), causal
 inference that proposes a root-cause hypothesis before the summary,
-LLM-as-judge grounding evaluation that scores whether the report is
+LLM-as-judge grounding evaluation that scores whether the reply is
 actually backed by that evidence, and a two-level recovery loop — an
-ungrounded vulnerability claim is a false positive (OWASP LLM09,
-Misinformation), so it gets regenerated or re-planned instead of
-shipped. No claim reaches the report without evidence behind it.
+ungrounded support claim is a hallucinated answer, so it gets
+regenerated or re-planned instead of sent to the customer. No claim
+reaches the reply without evidence behind it.
 
 Recovery strategy::
 
     grounding score < threshold (first failure) → regenerate_summary (cheap)
     grounding score < threshold (subsequent)    → replan + full execute retry
 
-Every node emits research.* SSE events so you can stream the engagement
-end-to-end the same way you would stream an Agent run.
+Every node emits research.* SSE events so you can stream the
+investigation end-to-end the same way you would stream an Agent run.
 
 - Run create_research_workflow with the convenience factory.
 - Subscribe to research.* SSE events in real time.
@@ -57,66 +57,68 @@ from tulip.observability import get_event_bus, run_context
 from tulip.tools import tool
 
 
-# Tiny advisory catalogue the agent can investigate via its three tools.
-# All advisory IDs and data are invented (CVE-2024-999xx is a fake range).
+# Tiny knowledge base the agent can investigate via its three tools.
+# All article IDs and data are invented for this offline demo.
 
 
-_ADVISORIES = {
-    "CVE-2024-99901": {
-        "summary": "SQL injection in the ticket-search endpoint of HelpDeskPro.",
-        "affected_components": ["helpdeskpro-api", "ticket-search", "legacy-reports"],
-        "cvss": 9.1,
-        "patch_available": True,
+_KB_ARTICLES = {
+    "KB-2024-00101": {
+        "summary": "Checkout hangs when a saved card has an expired billing address.",
+        "affected_features": ["checkout", "saved-payments", "address-book"],
+        "impact": 9.1,
+        "fix_shipped": True,
     },
-    "CVE-2024-99902": {
-        "summary": "Hard-coded credential shipped in the AcmeBackup agent installer.",
-        "affected_components": ["acmebackup-agent", "installer"],
-        "cvss": 7.4,
-        "patch_available": True,
+    "KB-2024-00102": {
+        "summary": "Password-reset emails land in spam for self-hosted mail domains.",
+        "affected_features": ["password-reset", "email-delivery"],
+        "impact": 7.4,
+        "fix_shipped": True,
     },
-    "CVE-2024-99903": {
-        "summary": "Path traversal in StaticServe file downloads (intranet only).",
-        "affected_components": ["staticserve"],
-        "cvss": 5.8,
-        "patch_available": False,
+    "KB-2024-00103": {
+        "summary": "Mobile app shows stale order status until a manual refresh.",
+        "affected_features": ["mobile-app"],
+        "impact": 5.8,
+        "fix_shipped": False,
     },
 }
 
 
 @tool
-def list_advisories() -> list[str]:
-    """Return the list of tracked advisory IDs."""
-    return list(_ADVISORIES.keys())
+def list_articles() -> list[str]:
+    """Return the list of tracked knowledge-base article IDs."""
+    return list(_KB_ARTICLES.keys())
 
 
 @tool
-def describe_advisory(cve_id: str) -> dict:
-    """Return summary, affected components, CVSS, and patch status for an advisory.
+def describe_article(article_id: str) -> dict:
+    """Return summary, affected features, impact, and fix status for an article.
 
     Args:
-        cve_id: Advisory identifier (e.g. ``CVE-2024-99901``).
+        article_id: Knowledge-base identifier (e.g. ``KB-2024-00101``).
     """
-    return _ADVISORIES.get(cve_id, {"error": f"advisory '{cve_id}' not found"})
+    return _KB_ARTICLES.get(article_id, {"error": f"article '{article_id}' not found"})
 
 
 @tool
-def count_affected_components(cve_id: str) -> int:
-    """Return the number of components affected by an advisory.
+def count_affected_features(article_id: str) -> int:
+    """Return the number of product features affected by an article.
 
     Args:
-        cve_id: Advisory identifier.
+        article_id: Knowledge-base identifier.
     """
-    entry = _ADVISORIES.get(cve_id, {})
-    return len(entry.get("affected_components", []))
+    entry = _KB_ARTICLES.get(article_id, {})
+    return len(entry.get("affected_features", []))
 
 
 # Structured output schema — the workflow emits this typed instance.
 
 
-class ExposureAssessment(BaseModel):
-    advisories_covered: list[str] = Field(description="Advisory IDs that were researched.")
-    summary: str = Field(description="2-3 sentence exposure assessment of what was found.")
-    overall_risk: str = Field(description="Overall risk rating: low, medium, high, or critical.")
+class SupportAssessment(BaseModel):
+    articles_covered: list[str] = Field(description="Article IDs that were researched.")
+    summary: str = Field(description="2-3 sentence assessment of the customer impact found.")
+    overall_severity: str = Field(
+        description="Overall severity rating: low, medium, high, or critical."
+    )
     confidence: float = Field(ge=0.0, le=1.0)
 
 
@@ -124,17 +126,17 @@ class ExposureAssessment(BaseModel):
 
 
 async def part1_factory_with_sse() -> None:
-    print("\n--- Part 1: vulnerability research workflow with SSE ---")
+    print("\n--- Part 1: customer-support research workflow with SSE ---")
 
     workflow = create_research_workflow(
         model=get_model(),
-        tools=[list_advisories, describe_advisory, count_affected_components],
+        tools=[list_articles, describe_article, count_affected_features],
         system_prompt=(
-            "You are a vulnerability research analyst. Use tools to survey the tracked "
-            "advisories. List all advisories, then describe each one in detail. "
+            "You are a customer-support research analyst. Use tools to survey the tracked "
+            "knowledge-base articles. List all articles, then describe each one in detail. "
             "Every claim must trace to tool evidence."
         ),
-        output_schema=ExposureAssessment,
+        output_schema=SupportAssessment,
         grounding_threshold=0.60,
         max_replans=1,
         max_regenerations=1,
@@ -153,7 +155,7 @@ async def part1_factory_with_sse() -> None:
     async with run_context() as rid:
         streamer = asyncio.create_task(stream_research_events(rid))
         result = await workflow.execute(
-            {KEY_PROMPT: "Assess our exposure across all tracked advisories."}
+            {KEY_PROMPT: "Assess the customer impact across all tracked articles."}
         )
         await get_event_bus().close_stream(rid)
         await asyncio.wait_for(streamer, timeout=5.0)
@@ -165,11 +167,13 @@ async def part1_factory_with_sse() -> None:
     print(f"  replans used     : {final.get(KEY_REPLAN_COUNT, 0)}")
     print(f"  regenerations    : {final.get(KEY_REGENERATION_COUNT, 0)}")
 
-    assessment: ExposureAssessment | None = final.get(KEY_STRUCTURED_OUTPUT)
+    assessment: SupportAssessment | None = final.get(KEY_STRUCTURED_OUTPUT)
     if assessment:
-        print(f"\n  advisories covered: {assessment.advisories_covered}")
+        print(f"\n  articles covered: {assessment.articles_covered}")
         print(f"  summary: {assessment.summary[:200]}")
-        print(f"  risk: {assessment.overall_risk} | confidence: {assessment.confidence:.0%}")
+        print(
+            f"  severity: {assessment.overall_severity} | confidence: {assessment.confidence:.0%}"
+        )
     else:
         summary = final.get(KEY_SUMMARY, "")
         print(f"\n  summary: {summary[:300]}")
@@ -194,7 +198,7 @@ async def part2_custom_graph() -> None:
     from tulip.multiagent.graph import END, START, StateGraph  # noqa: PLC0415
 
     graph = StateGraph()
-    graph.add_node("execute", make_execute_node(get_model(), [list_advisories, describe_advisory]))
+    graph.add_node("execute", make_execute_node(get_model(), [list_articles, describe_article]))
     graph.add_node("summarize", make_summarize_node(get_model()))
     graph.add_node("grounding_eval", make_grounding_eval_node(get_model()))
 
@@ -212,7 +216,7 @@ async def part2_custom_graph() -> None:
     workflow = graph.compile()
 
     async with run_context() as rid:
-        result = await workflow.execute({KEY_PROMPT: "What does CVE-2024-99901 affect?"})
+        result = await workflow.execute({KEY_PROMPT: "What does KB-2024-00101 affect?"})
         await get_event_bus().close_stream(rid)
 
     final = result.final_state

@@ -1,10 +1,10 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
-"""Notebook 47: plugins — package phishing triage as a reusable extension.
+"""Notebook 47: plugins — package cloud-cost triage as a reusable extension.
 
 Plugins bundle hooks (and optionally tools) into one reusable object —
-the natural way to ship a SOC capability like phishing triage
-(MITRE ATT&CK T1566) with its audit trail attached, so every verdict is
+the natural way to ship a cloud-ops capability like resource-cost triage
+with its audit trail attached, so every right-sizing recommendation is
 attributable after the fact. Drop a plugin onto an agent and every
 relevant hook method runs automatically. Three pieces:
 
@@ -40,8 +40,8 @@ from tulip.tools.decorator import tool
 
 
 # =============================================================================
-# Part 1: A phishing-triage plugin — audit-logs every model and tool call,
-#         so each verdict is attributable after the fact.
+# Part 1: A cloud-cost-triage plugin — audit-logs every model and tool call,
+#         so each right-sizing recommendation is attributable after the fact.
 # =============================================================================
 
 
@@ -50,10 +50,10 @@ def example_plugin():
 
     model = get_model()
 
-    class TriageAuditPlugin(Plugin):
-        """Tracks all model and tool calls — the triage audit trail."""
+    class CostAuditPlugin(Plugin):
+        """Tracks all model and tool calls — the right-sizing audit trail."""
 
-        name = "triage-audit"
+        name = "cost-audit"
 
         def __init__(self):
             self.log = []
@@ -67,29 +67,32 @@ def example_plugin():
             self.log.append(f"tool: {event.tool_name}")
 
     @tool
-    def check_url_reputation(url: str) -> str:
-        """Check a URL against the reputation service (mock data)."""
-        if "phish.example.net" in url or "evil.example" in url:
-            return f"Reputation for {url}: MALICIOUS — known credential-phishing host"
-        return f"Reputation for {url}: no adverse record"
+    def check_instance_utilization(instance_id: str) -> str:
+        """Check an instance's utilization against the metrics service (mock data)."""
+        if "idle" in instance_id or "i-0badcafe" in instance_id:
+            return (
+                f"Utilization for {instance_id}: IDLE — 2% avg CPU over 30 days, "
+                "over-provisioned (m5.4xlarge)"
+            )
+        return f"Utilization for {instance_id}: healthy — 55% avg CPU, right-sized"
 
-    plugin = TriageAuditPlugin()
+    plugin = CostAuditPlugin()
     agent = Agent(
         config=AgentConfig(
             system_prompt=(
-                "You triage suspected phishing emails. Use the check_url_reputation "
-                "tool on any URL before giving a verdict."
+                "You triage cloud spend. Use the check_instance_utilization "
+                "tool on any instance before recommending a right-sizing action."
             ),
             max_iterations=5,
             model=model,
-            tools=[check_url_reputation],
+            tools=[check_instance_utilization],
             plugins=[plugin],
         )
     )
 
     result = agent.run_sync(
-        "Triage this email: 'Your account is locked — verify at "
-        "hxxp://phish.example.net/login' (URL defanged)"
+        "Triage this alert: 'Monthly bill spiked — instance i-0badcafe in "
+        "us-east-1 is the top line item'"
     )
     print(f"Response: {result.message[:100]}...")
     print(f"Audit log: {plugin.log}")
@@ -108,14 +111,14 @@ def example_callback():
 
     agent = Agent(
         config=AgentConfig(
-            system_prompt="You are a SOC assistant. Answer concisely.",
+            system_prompt="You are a cloud-ops assistant. Answer concisely.",
             max_iterations=3,
             model=model,
             callback_handler=lambda e: events.append(e.event_type),
         )
     )
 
-    agent.run_sync("Is 'invoice.pdf.exe' a suspicious attachment name?")
+    agent.run_sync("Is a 't3.nano' a sensible size for a production database?")
     print(f"Events received: {events}")
 
 
@@ -139,7 +142,7 @@ def example_cancel():
     )
     t0 = time.perf_counter()
     live_result = live_agent.run_sync(
-        "In one sentence, why does a SOC automation agent need a cancel signal?"
+        "In one sentence, why does a cloud automation agent need a cancel signal?"
     )
     dt = time.perf_counter() - t0
     print(
@@ -157,7 +160,7 @@ def example_cancel():
         )
     )
     agent.cancel()
-    result = agent.run_sync("Sweep every mailbox in the fleet — this should be cancelled")
+    result = agent.run_sync("Terminate every instance in the fleet — this should be cancelled")
     print(f"Stop reason: {result.stop_reason}")
 
 

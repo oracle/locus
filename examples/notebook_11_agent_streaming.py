@@ -1,12 +1,12 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 """
-Notebook 11: streaming a phishing-email analysis.
+Notebook 11: streaming a data-subject-request (DSAR) analysis.
 
 Every Tulip agent run is a stream of events: thinking, tool start, tool
 complete, terminate. ``agent.run(prompt)`` returns an async iterator
-that yields them in order — so an analyst can watch a phishing-email
-analysis unfold instead of waiting for an opaque verdict. This notebook
+that yields them in order — so a privacy analyst can watch a data-subject
+request unfold instead of waiting for an opaque verdict. This notebook
 walks through the full event set, then shows useful patterns built on
 top — a live console UI, an audit log via event filtering, metric
 collection, and a progress bar.
@@ -21,8 +21,9 @@ Key ideas:
 - ``StructuredStream`` (mentioned at the end) wraps the stream and
   yields partial Pydantic instances as JSON arrives.
 
-The scenario is phishing triage (ATT&CK T1566). All emails, senders,
-and links are fabricated — ``*.example`` domains and RFC 5737 IPs.
+The scenario is data-privacy triage (GDPR Art. 15 right of access). All
+subjects, records, and contact details are fabricated — ``*.example``
+domains and 555-01xx phone numbers.
 
 Run it:
     .venv/bin/python examples/notebook_11_agent_streaming.py
@@ -58,28 +59,28 @@ from tulip.tools import tool
 
 
 # Deterministic local extraction — plain regexes, no network calls.
-_URL_RE = re.compile(r"https?://[^\s'\"<>]+")
-_IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
-_PHISH_CUES = ("verify your account", "urgent", "suspended", "password", "click")
+_EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+_PHONE_RE = re.compile(r"\b\d{3}[-.]\d{3}[-.]\d{4}\b")
+_SENSITIVE_CUES = ("ssn", "social security", "date of birth", "passport", "credit card")
 
 
-def _extract_indicators(text: str) -> dict:
-    """Pull URLs, IPs, and social-engineering cues out of raw email text."""
+def _extract_personal_data(text: str) -> dict:
+    """Pull emails, phone numbers, and sensitive-data cues out of raw record text."""
     lowered = text.lower()
     return {
-        "urls": _URL_RE.findall(text),
-        "ips": _IP_RE.findall(text),
-        "cues": [cue for cue in _PHISH_CUES if cue in lowered],
+        "emails": _EMAIL_RE.findall(text),
+        "phones": _PHONE_RE.findall(text),
+        "cues": [cue for cue in _SENSITIVE_CUES if cue in lowered],
     }
 
 
 @tool
-def extract_iocs(text: str) -> str:
-    """Extract URLs, IP addresses, and phishing cues from raw email text."""
-    found = _extract_indicators(text)
+def extract_pii(text: str) -> str:
+    """Extract email addresses, phone numbers, and sensitive-data cues from raw record text."""
+    found = _extract_personal_data(text)
     if not any(found.values()):
-        return "No IOCs or phishing cues found"
-    return f"urls={found['urls']} ips={found['ips']} cues={found['cues']}"
+        return "No PII or sensitive-data cues found"
+    return f"emails={found['emails']} phones={found['phones']} cues={found['cues']}"
 
 
 async def example_all_events():
@@ -90,15 +91,17 @@ async def example_all_events():
 
     agent = Agent(
         model=model,
-        tools=[extract_iocs],
-        system_prompt="You are a phishing-email analyst. Always run extract_iocs on the email.",
+        tools=[extract_pii],
+        system_prompt="You are a data-privacy analyst. Always run extract_pii on the record.",
     )
 
-    email = "Account suspended! Click http://phish.example.net/login to verify your account."
-    print(f"Running: 'Analyze this email: {email}'\n")
+    record = (
+        "Subject record: contact jane.doe@example.com or 555-0142. SSN and date of birth on file."
+    )
+    print(f"Running: 'Analyze this record: {record}'\n")
     print("Events received:")
 
-    async for event in agent.run(f"Analyze this email: {email}"):
+    async for event in agent.run(f"Analyze this record: {record}"):
         print(f"\n  Event Type: {event.event_type}")
         print(f"  Timestamp:  {event.timestamp}")
 
@@ -135,34 +138,34 @@ async def example_all_events():
 
 
 async def example_console_ui():
-    """Render a tiny progress UI as the agent fetches and checks the email."""
+    """Render a tiny progress UI as the agent fetches and checks the record."""
     print("=== Part 2: Console UI ===\n")
 
     model = get_model(max_tokens=200)
 
     @tool
-    def fetch_email(message_id: str) -> str:
-        """Fetch a quarantined email by message id."""
+    def fetch_record(subject_id: str) -> str:
+        """Fetch a data-subject record by subject id."""
         # Sleep so the UI has visible work to show.
         import time
 
         time.sleep(0.5)
-        return f"{message_id}: from billing@phish.example.net, subject 'Invoice overdue'"
+        return f"{subject_id}: jane.doe@example.com, marketing profile, last updated 2026-01-12"
 
     @tool
-    def check_sender_reputation(domain: str) -> str:
-        """Check a sender domain against the reputation feed."""
-        return f"{domain}: first seen 3 days ago, 14 abuse reports, reputation score 2/100"
+    def check_consent(data_category: str) -> str:
+        """Check the consent status for a data category."""
+        return f"{data_category}: consent withdrawn 9 days ago, retention basis expired"
 
     agent = Agent(
         model=model,
-        tools=[fetch_email, check_sender_reputation],
-        system_prompt="You are a phishing triage assistant. Fetch emails and check senders.",
+        tools=[fetch_record, check_consent],
+        system_prompt="You are a DSAR triage assistant. Fetch records and check consent.",
     )
 
-    print("Query: Triage quarantined message MSG-1042 and check its sender's reputation\n")
+    print("Query: Triage data-subject request DSR-1042 and check its marketing consent\n")
 
-    async for event in agent.run("Triage quarantined message MSG-1042 and check its sender"):
+    async for event in agent.run("Triage data-subject request DSR-1042 and check its consent"):
         if isinstance(event, ThinkEvent):
             print("[Thinking...]")
             if event.tool_calls:
@@ -199,14 +202,14 @@ async def example_event_filtering():
 
     agent = Agent(
         model=model,
-        tools=[extract_iocs],
-        system_prompt="Use the extract_iocs tool on any email text you're given.",
+        tools=[extract_pii],
+        system_prompt="Use the extract_pii tool on any record text you're given.",
     )
 
     tool_log = []
 
     async for event in agent.run(
-        "Extract IOCs from: 'Reset now at http://evil.example/reset, sent from 203.0.113.9'"
+        "Extract PII from: 'Reach me at john.roe@example.org or 555-0188, passport number on file'"
     ):
         if isinstance(event, ToolStartEvent):
             tool_log.append(
@@ -246,19 +249,19 @@ async def example_collect_metrics():
     model = get_model(max_tokens=200)
 
     @tool
-    def parse_email(data: str) -> str:
-        """First analysis step — parse headers and body."""
-        return f"Parsed headers and body of: {data}"
+    def parse_request(data: str) -> str:
+        """First processing step — parse the request and locate the subject."""
+        return f"Parsed request and located subject for: {data}"
 
     @tool
-    def classify_email(data: str) -> str:
-        """Second analysis step — classify as phishing or benign."""
-        return f"Classified: {data} matches 3 phishing heuristics"
+    def classify_request(data: str) -> str:
+        """Second processing step — classify as access, rectification, or erasure."""
+        return f"Classified: {data} is a right-to-erasure request under Art. 17"
 
     agent = Agent(
         model=model,
-        tools=[parse_email, classify_email],
-        system_prompt="Process emails through parse_email then classify_email.",
+        tools=[parse_request, classify_request],
+        system_prompt="Process requests through parse_request then classify_request.",
     )
 
     metrics = {
@@ -271,7 +274,7 @@ async def example_collect_metrics():
 
     start_time = datetime.now()
 
-    async for event in agent.run("Run the quarantined email 'MSG-1043' through both steps"):
+    async for event in agent.run("Run the data-subject request 'DSR-1043' through both steps"):
         if isinstance(event, ThinkEvent):
             metrics["think_events"] += 1
         elif isinstance(event, ToolStartEvent):
@@ -300,41 +303,41 @@ async def example_collect_metrics():
 
 
 async def example_progress_tracking():
-    """Draw a textual progress bar as each analysis step completes."""
+    """Draw a textual progress bar as each processing step completes."""
     print("=== Part 5: Progress Tracking ===\n")
 
     model = get_model(max_tokens=300)
 
-    # Deterministic tool bodies: fetch_messages returns a real summary of
-    # an in-memory mail store, scan_messages hashes its input. No canned
-    # strings, no network — all message data below is invented.
+    # Deterministic tool bodies: fetch_records returns a real summary of
+    # an in-memory subject store, scan_records hashes its input. No canned
+    # strings, no network — all subject data below is invented.
     sources = {
-        "quarantine": [
-            {"id": "MSG-1042", "sender": "billing@phish.example.net", "subject": "Invoice due"},
-            {"id": "MSG-1043", "sender": "it@evil.example", "subject": "Password expiry notice"},
-            {"id": "MSG-1044", "sender": "hr@corp.example", "subject": "Holiday schedule"},
+        "pending": [
+            {"id": "DSR-1042", "subject": "jane.doe@example.com", "type": "access"},
+            {"id": "DSR-1043", "subject": "john.roe@example.org", "type": "erasure"},
+            {"id": "DSR-1044", "subject": "sam.lee@example.net", "type": "rectification"},
         ],
-        "reported": [
-            {"id": "MSG-0991", "sender": "ceo@evil.example", "subject": "Wire transfer needed"},
-            {"id": "MSG-0987", "sender": "alerts@phish.example.net", "subject": "Verify account"},
+        "escalated": [
+            {"id": "DSR-0991", "subject": "alex.kim@example.com", "type": "erasure"},
+            {"id": "DSR-0987", "subject": "pat.ray@example.org", "type": "access"},
         ],
     }
 
     @tool
-    def fetch_messages(source: str) -> str:
-        """Fetch emails from a named mail store (quarantine, reported, ...)."""
+    def fetch_records(source: str) -> str:
+        """Fetch requests from a named queue (pending, escalated, ...)."""
         import json
         import time
 
         time.sleep(0.3)
         rows = sources.get(source.lower())
         if rows is None:
-            return f"unknown store {source!r}; try one of: {sorted(sources)}"
-        return f"{len(rows)} message(s) from {source}: {json.dumps(rows)}"
+            return f"unknown queue {source!r}; try one of: {sorted(sources)}"
+        return f"{len(rows)} request(s) from {source}: {json.dumps(rows)}"
 
     @tool
-    def scan_messages(data: str) -> str:
-        """Scan fetched messages — counts bytes and emits a checksum for the case file."""
+    def scan_records(data: str) -> str:
+        """Scan fetched records — counts bytes and emits a checksum for the case file."""
         import hashlib
         import time
 
@@ -352,16 +355,16 @@ async def example_progress_tracking():
 
     agent = Agent(
         model=model,
-        tools=[fetch_messages, scan_messages, file_report],
-        system_prompt="Fetch messages from 'quarantine', scan them, and file a report.",
+        tools=[fetch_records, scan_records, file_report],
+        system_prompt="Fetch requests from 'pending', scan them, and file a report.",
     )
 
     steps_done = 0
     total_steps = 3  # we expect three tool calls: fetch, scan, file
 
-    print("Processing quarantine folder...")
+    print("Processing pending queue...")
 
-    async for event in agent.run("Fetch, scan, and report on the quarantine folder"):
+    async for event in agent.run("Fetch, scan, and report on the pending queue"):
         if isinstance(event, ToolCompleteEvent):
             steps_done += 1
             progress = (steps_done / total_steps) * 100
@@ -382,7 +385,7 @@ async def example_progress_tracking():
 def main():
     """Run all notebook parts."""
     print("=" * 60)
-    print("Notebook 11: Streaming a Phishing-Email Analysis")
+    print("Notebook 11: Streaming a Data-Subject-Request Analysis")
     print("=" * 60)
     print()
 
@@ -406,10 +409,10 @@ def main():
     print(
         """    from tulip.streaming import StructuredStream
 
-    stream = StructuredStream(agent.run("Top 3 IOCs in this email."), schema=IndicatorList)
+    stream = StructuredStream(agent.run("Top 3 PII items in this record."), schema=PiiList)
     async for partial in stream:
-        ui.render(partial)               # may have 0, 1, 2, then 3 indicators
-    final: IndicatorList | None = stream.final
+        ui.render(partial)               # may have 0, 1, 2, then 3 items
+    final: PiiList | None = stream.final
 """
     )
     print(

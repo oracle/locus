@@ -2,22 +2,23 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 
-"""Notebook 60: Scanner telemetry — the agent yield bridge.
+"""Notebook 60: Privacy-review telemetry — the agent yield bridge.
 
-A scanning agent's tool calls are the part auditors care about most.
-Every Agent.run is decorated with @_bus_bridge so the nine typed events
-it yields (ThinkEvent, ToolStartEvent, ToolCompleteEvent, ReflectEvent,
-GroundingEvent, ModelChunkEvent, ModelCompleteEvent, InterruptEvent,
-TerminateEvent) get republished on the bus as agent.* events when a
-run_context is open — every lookup the scanner makes is visible in the
-run stream. ModelCompleteEvent additionally fires agent.tokens.used so
-cost dashboards subscribe without parsing the completion payload.
+A data-privacy agent's tool calls are the part DPOs and auditors care
+about most. Every Agent.run is decorated with @_bus_bridge so the nine
+typed events it yields (ThinkEvent, ToolStartEvent, ToolCompleteEvent,
+ReflectEvent, GroundingEvent, ModelChunkEvent, ModelCompleteEvent,
+InterruptEvent, TerminateEvent) get republished on the bus as agent.*
+events when a run_context is open — every dataset the reviewer inspects
+is visible in the run stream. ModelCompleteEvent additionally fires
+agent.tokens.used so cost dashboards subscribe without parsing the
+completion payload.
 
 - How nine yielded TulipEvent types map to agent.* bus events.
 - Tool-call telemetry with span_id pairing (agent.tool.started and
-  agent.tool.completed share an id) — start/finish of each scan step.
+  agent.tool.completed share an id) — start/finish of each review step.
 - Token usage from result.metrics — the canonical source for cost
-  meters and budget enforcers on always-on SOC automation.
+  meters and budget enforcers on always-on privacy-review automation.
 
 Run it
     # Default: the bundled mock model (set TULIP_MODEL_PROVIDER for a live provider)
@@ -39,21 +40,21 @@ from tulip.tools import tool
 
 
 @tool
-def lookup_ip_reputation(ip: str) -> str:
-    """Return a canned reputation verdict for an IP address (offline mock data)."""
-    # RFC 5737 documentation range stands in for a known-bad block.
-    return "malicious" if ip.startswith("192.0.2.") else "clean"
+def classify_field_sensitivity(field: str) -> str:
+    """Return a canned sensitivity tier for a data field (offline mock data)."""
+    restricted = {"national_id", "ssn", "email", "phone", "dob"}
+    return "restricted" if field in restricted else "public"
 
 
 @tool
-def count_failed_logins(host: str) -> int:
-    """Return a canned count of failed SSH logins for a host (offline mock data)."""
-    return 42 if host == "web-01" else 3
+def count_pii_records(dataset: str) -> int:
+    """Return a canned count of records containing PII in a dataset (offline mock data)."""
+    return 1287 if dataset == "customers" else 12
 
 
-# Part 1: full agent.* lifecycle on one scanning run. Print every
+# Part 1: full agent.* lifecycle on one privacy-review run. Print every
 # event with its span_id so you can see start/complete pairing — each
-# tool span is one auditable scan step.
+# tool span is one auditable review step.
 
 
 async def part1_full_lifecycle() -> None:
@@ -61,11 +62,11 @@ async def part1_full_lifecycle() -> None:
 
     agent = Agent(
         model=get_model(),
-        tools=[lookup_ip_reputation, count_failed_logins],
+        tools=[classify_field_sensitivity, count_pii_records],
         max_iterations=4,
         system_prompt=(
-            "You are a SOC scanning agent. Make one tool call at a time. After all "
-            "tool calls, report your findings."
+            "You are a data-privacy review agent. Make one tool call at a time. After "
+            "all tool calls, report your findings."
         ),
     )
 
@@ -86,7 +87,8 @@ async def part1_full_lifecycle() -> None:
 
         result = None
         async for event in agent.run(
-            "Check the reputation of 192.0.2.44, count failed logins on web-01, and report both."
+            "Classify the sensitivity of the 'national_id' field, count PII records in "
+            "the 'customers' dataset, and report both."
         ):
             from tulip.core.events import TerminateEvent
 
@@ -99,8 +101,8 @@ async def part1_full_lifecycle() -> None:
 
 # Part 2: token usage as a cost meter. result.metrics is authoritative;
 # agent.tokens.used SSE events are for streaming consumers that want
-# per-call deltas instead of the final total. Always-on triage automation
-# needs both: budget enforcement and live burn-rate dashboards.
+# per-call deltas instead of the final total. Always-on privacy-review
+# automation needs both: budget enforcement and live burn-rate dashboards.
 
 
 async def part2_token_meter() -> None:
@@ -108,10 +110,10 @@ async def part2_token_meter() -> None:
 
     running_prompt = running_completion = running_total = 0
 
-    # Multi-run shift: accumulate token totals across triage calls.
+    # Multi-run shift: accumulate token totals across review calls.
     prompts = [
-        "In one sentence: what is an indicator of compromise?",
-        "In one sentence: what is lateral movement?",
+        "In one sentence: what is personally identifiable information?",
+        "In one sentence: what is data minimization?",
     ]
 
     for prompt in prompts:

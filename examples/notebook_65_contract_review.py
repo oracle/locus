@@ -2,9 +2,9 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 
-"""Notebook 65: Security-vendor DPA review — breach-notice, encryption, IR-clause gaps.
+"""Notebook 65: Vendor DPA review — data-subject rights, retention, transfer gaps.
 
-Reviewing a security vendor's Data Processing Agreement involves multiple
+Reviewing a data processor's Data Processing Agreement involves multiple
 stakeholders working in parallel, then a back-and-forth negotiation
 phase, then sign-off::
 
@@ -15,9 +15,9 @@ phase, then sign-off::
        │
        ▼
     Scatter to 3 parallel reviewers
-       ├── Privacy     (breach notice, residency, sub-processors, deletion)
-       ├── Security    (encryption, audit rights, incident response)
-       └── Compliance  (attestations, GDPR Art. 28 terms, liability for fines)
+       ├── Legal       (lawful basis, data-subject rights, consent, purpose)
+       ├── Governance  (minimisation, retention/deletion, residency, sub-processors)
+       └── Compliance  (GDPR/CCPA, DPIA, transfer mechanisms, liability for fines)
        ▼
     Synthesizer  (consolidated review report)
        │
@@ -32,19 +32,20 @@ phase, then sign-off::
                                                 ▼
                                           ContractDecision (typed)
 
-The processor here is a managed-SIEM / MDR vendor that ingests your
-security telemetry — a security supplier in the SOC's own supply chain
-(OWASP ASI04). A weak breach-notification window or a missing audit right
-on the vendor that holds your security logs is a compounding control gap,
-not a paperwork nit: its incident-response obligations should track the
-NIST 800-61 timeline you hold yourself to. SCRIBE — the SOC's compliance
-reporter — writes the typed sign-off.
+The processor here is a marketing-analytics SaaS that ingests your
+customers' personal data (email addresses, device identifiers,
+behavioural events) — a data processor in the controller's vendor chain.
+A weak erasure SLA or a vague international-transfer mechanism is a real
+compliance gap, not a paperwork nit: the vendor's breach-notification
+window should track the GDPR Art. 33 72-hour timeline you owe your own
+supervisory authority. The DPO — the privacy office's data-protection
+officer — writes the typed sign-off.
 
 - Send: three reviewers run concurrently.
 - add_conditional_edges with cycles enabled: negotiation can loop back
   to re-review when terms change. Hard cap of 3 rounds.
 - interrupt(): negotiation step pauses for human counsel to edit terms.
-- output_schema=ContractDecision: SCRIBE's typed terminal artifact.
+- output_schema=ContractDecision: the DPO's typed terminal artifact.
 
 Run it
     # Default: the bundled mock model (set TULIP_MODEL_PROVIDER for a live provider)
@@ -76,7 +77,7 @@ from tulip.multiagent.graph import END, START, GraphConfig, StateGraph
 
 
 class ReviewerFinding(BaseModel):
-    perspective: str  # "privacy" | "security" | "compliance"
+    perspective: str  # "legal" | "governance" | "compliance"
     blockers: list[str]
     recommended_changes: list[str]
     risk_score: float = Field(ge=0.0, le=1.0)
@@ -96,23 +97,24 @@ class ContractDecision(BaseModel):
 
 
 PROMPTS = {
-    "privacy": (
-        "You are a privacy counsel. Read the DPA excerpt and identify concrete "
-        "privacy blockers (breach-notification window, data residency, "
-        "sub-processor controls, retention and deletion). Bullets. End with: "
+    "legal": (
+        "You are privacy legal counsel. Read the DPA excerpt and identify "
+        "concrete data-protection blockers (lawful basis, data-subject rights "
+        "— access, erasure, portability — consent, and purpose limitation). "
+        "Bullets. End with: BLOCKERS=<count>."
+    ),
+    "governance": (
+        "You are a data-governance reviewer assessing a vendor that will "
+        "process the company's customer personal data. Identify concrete "
+        "governance gaps (data minimisation, retention and deletion SLAs, "
+        "data residency, and sub-processor controls). Bullets. End with: "
         "BLOCKERS=<count>."
     ),
-    "security": (
-        "You are a security-assurance reviewer assessing a vendor that will "
-        "hold the SOC's security telemetry. Identify concrete security-control "
-        "gaps (encryption commitments, audit rights, and incident-response "
-        "obligations — the breach-notification window should track NIST 800-61 "
-        "timelines). Bullets. End with: BLOCKERS=<count>."
-    ),
     "compliance": (
-        "You are a compliance analyst. Identify certification and regulatory "
-        "gaps (SOC 2 / ISO 27001 attestations, GDPR Art. 28 terms, liability "
-        "for regulatory fines). Bullets. End with: BLOCKERS=<count>."
+        "You are a privacy-compliance analyst. Identify regulatory gaps "
+        "(GDPR / CCPA obligations, DPIA requirements, cross-border transfer "
+        "mechanisms such as SCCs, GDPR Art. 28 terms, and liability for "
+        "regulatory fines). Bullets. End with: BLOCKERS=<count>."
     ),
 }
 
@@ -146,7 +148,7 @@ async def parse_contract(state: dict[str, Any]) -> dict[str, Any]:
 
 
 async def scatter_reviewers(state: dict[str, Any]) -> list[Send]:
-    perspectives = ("privacy", "security", "compliance")
+    perspectives = ("legal", "governance", "compliance")
     return [
         Send(node="review_one", payload={"perspective": p}, metadata={"perspective": p})
         for p in perspectives
@@ -274,10 +276,10 @@ async def sign_off(state: dict[str, Any]) -> dict[str, Any]:
 
     agent = Agent(
         config=AgentConfig(
-            agent_id="scribe-dpa-signoff",
+            agent_id="dpo-dpa-signoff",
             model=state["__model__"],
             system_prompt=(
-                "You are a vendor-assurance officer writing the final ContractDecision. "
+                "You are a data-protection officer writing the final ContractDecision. "
                 "Use the supplied fields. Summarise the final terms in one sentence."
             ),
             output_schema=ContractDecision,
@@ -356,15 +358,16 @@ SAMPLE_CONTRACT = """\
 DATA PROCESSING ADDENDUM — EXCERPT
 
 This Data Processing Addendum ("DPA") is entered into by and between
-SentinelStream Managed SIEM, Inc. ("Vendor", the processor) and the customer
+PixelPulse Analytics, Inc. ("Vendor", the processor) and the customer
 entity named on the order form ("Customer", the controller), and forms part
 of the Master Services Agreement between the parties.
 
 1. PROCESSING AND SUB-PROCESSORS
 
-1.1 Vendor processes Customer Personal Data and security telemetry (logs,
-alerts, endpoint events) to provide the managed-SIEM Services as described
-in the applicable order form.
+1.1 Vendor processes Customer Personal Data (end-user email addresses,
+device identifiers, and page-view and behavioural events) to provide the
+marketing-analytics Services as described in the applicable order form.
+Vendor may also use Customer Personal Data to improve its own products.
 
 1.2 Vendor may appoint sub-processors at its sole discretion and without
 prior notice to Customer. A list of current sub-processors is available on
@@ -389,7 +392,7 @@ breach. Whether an incident constitutes a notifiable breach is determined
 by Vendor in its sole discretion.
 
 3.2 Vendor's notification obligations are satisfied by posting to the
-Vendor status page; direct notice to Customer's security contact is not
+Vendor status page; direct notice to Customer's privacy contact is not
 required.
 
 4. AUDIT RIGHTS
@@ -408,12 +411,19 @@ region rely on appropriate safeguards as determined by Vendor.
 6. RETENTION AND DELETION
 
 6.1 Upon termination, Vendor will retain Customer Personal Data for at
-least thirty (30) days for operational continuity. Backup copies may be
+least thirty (30) days for billing reconciliation. Backup copies may be
 retained indefinitely. Deletion certifications are not provided.
 
-7. LIABILITY FOR DATA INCIDENTS
+7. DATA SUBJECT REQUESTS
 
-7.1 Vendor's aggregate liability for any breach of this DPA, including
+7.1 Vendor will forward any data-subject access, erasure, or portability
+request it receives to Customer within thirty (30) days. Vendor does not
+otherwise assist Customer in responding, and charges professional-services
+fees for any data export performed on Customer's behalf.
+
+8. LIABILITY FOR DATA INCIDENTS
+
+8.1 Vendor's aggregate liability for any breach of this DPA, including
 regulatory fines and penalties arising from Vendor's negligence, is capped
 at one times (1×) the fees paid by Customer in the twelve months preceding
 the claim.
@@ -433,12 +443,12 @@ this DPA control; the online Security Policy may only add protections, not
 reduce them.
 
 3.1 Breach notification window shortened to seventy-two (72) hours from
-confirmation, with direct notice to Customer's designated security contact.
+confirmation, with direct notice to Customer's designated privacy contact.
 The status-page-only provision in 3.2 is deleted.
 
 All other clauses (sub-processor discretion, audit rights, data residency,
-retention and deletion, liability cap including fines) are unchanged from
-the prior draft.
+retention and deletion, data-subject requests, liability cap including
+fines) are unchanged from the prior draft.
 """
 
 REDLINE_ROUND_2 = """\
@@ -459,6 +469,12 @@ Personal Data Breach.
 6.1 Vendor will delete Customer Personal Data, including backups, within
 sixty (60) days of termination and provide a written deletion certification
 at no charge.
+
+7.1 Vendor will assist Customer in fulfilling data-subject access, erasure,
+and portability requests within ten (10) business days at no charge, and
+provides a self-service export endpoint. The product-improvement use in 1.1
+is removed; Vendor processes Customer Personal Data only on documented
+instructions.
 
 Open items (vendor's position): liability cap remains 1× annual fees and
 continues to include regulatory fines; data-residency clause remains "any
@@ -482,14 +498,14 @@ def _print_decision(d: ContractDecision | None) -> None:
 
 
 async def main() -> None:
-    print("Notebook 65: Security-vendor DPA / security-addendum review")
+    print("Notebook 65: Vendor DPA / data-processing-agreement review")
     print("=" * 60)
 
     model = get_model()
     graph = build_review_graph()
     initial = {
         "contract_id": "DPA-2026-0815",
-        "counterparty": "SentinelStream Managed SIEM",
+        "counterparty": "PixelPulse Analytics",
         "contract_text": SAMPLE_CONTRACT,
         "__model__": model,
     }

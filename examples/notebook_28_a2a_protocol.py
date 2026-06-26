@@ -1,27 +1,27 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 """
-Notebook 28: A2A — cross-org threat-intel sharing between spec-compliant peers.
+Notebook 28: A2A — cross-org payment-intel sharing between spec-compliant peers.
 
 A2A (Agent-to-Agent) is the public cross-framework protocol at
 https://a2aproject.github.io/A2A/. Tulip implements the server and
 client sides on the A2A **v1.0** wire format; this notebook publishes one
-organization's threat-intel agent behind ``A2AServer``, drives every v1.0
-method from a partner organization's ``A2AClient``, and inspects the typed
-task lifecycle — the plumbing of a cross-org intel-sharing mesh.
+payment network's risk agent behind ``A2AServer``, drives every v1.0
+method from a partner bank's ``A2AClient``, and inspects the typed
+task lifecycle — the plumbing of a cross-org payment-risk mesh.
 
-Security note: a cross-org intel mesh is exactly the surface OWASP ASI07
-(Insecure Inter-Agent Communication) covers. The wire here is
+Trust note: a cross-org payment mesh spans organizational boundaries,
+so treat every inbound message as untrusted input. The wire here is
 authenticated with a bearer token and the partner agent's reach is
-bounded by its published ``AgentSkill`` set, but treat every inbound
-message as untrusted input — a partner's response can carry indirect
-prompt injection (AML.T0051) the same way any other tool output can.
-Ground what a peer asserts; do not promote it to a finding unverified.
+bounded by its published ``AgentSkill`` set, but a partner's response
+can still carry indirect prompt injection the same way any other tool
+output can. Ground what a peer asserts about a merchant or a card BIN;
+do not promote it to a decline or a chargeback unverified.
 
 - Agent Card published at ``/.well-known/agent-card.json`` carries
   capabilities, typed ``AgentSkill`` entries, provider metadata,
   ``protocolVersion``, and ``supportedInterfaces`` — enough for any
-  partner org's A2A client to discover and call the agent.
+  partner bank's A2A client to discover and call the agent.
 - A2A v1.0 JSON-RPC methods over ``POST /`` with
   ``A2A-Version: 1.0``: ``SendMessage`` (synchronous round-trip),
   ``GetTask`` (poll by id), ``ListTasks`` (page by context / status),
@@ -33,7 +33,7 @@ Ground what a peer asserts; do not promote it to a finding unverified.
 - ``A2AClient.invoke`` is the backwards-compatible flat shape for peers
   that haven't picked up the spec yet.
 - ``A2AClient.as_tool(...)`` wraps a remote agent as a Tulip ``@tool``
-  so a local SOC agent can delegate intel questions transparently.
+  so a local payments agent can delegate risk questions transparently.
 
 Run it:
     .venv/bin/python examples/notebook_28_a2a_protocol.py
@@ -98,19 +98,19 @@ def _start_server(server: A2AServer, port: int) -> threading.Thread:
 
 async def main() -> None:
     print("=" * 60)
-    print("Notebook 28: A2A — cross-org threat-intel sharing mesh")
+    print("Notebook 28: A2A — cross-org payment-risk sharing mesh")
     print("=" * 60)
 
     # ---------------------------------------------------------------
-    # Part 1: publish Org A's intel agent behind A2A
+    # Part 1: publish the Network's risk agent behind A2A
     # ---------------------------------------------------------------
     print("\n=== Part 1: A2AServer with typed skills ===\n")
 
     model = get_model()
-    intel_agent = Agent(
+    risk_agent = Agent(
         config=AgentConfig(
             system_prompt=(
-                "You are a threat-intelligence analyst for Org A. Reply in one short sentence."
+                "You are a payment-risk analyst for Acme Pay network. Reply in one short sentence."
             ),
             max_iterations=2,
             model=model,
@@ -122,17 +122,17 @@ async def main() -> None:
     api_key = "partner-mesh-token"  # noqa: S105
 
     server = A2AServer(
-        agent=intel_agent,
-        name="org-a-intel",
-        description="Shares indicator context and campaign summaries with partner orgs.",
+        agent=risk_agent,
+        name="acme-pay-risk",
+        description="Shares merchant risk context and chargeback summaries with partner banks.",
         url=f"http://127.0.0.1:{port}",
         skills=[
             AgentSkill(
-                id="ioc-context",
-                name="IOC Context",
-                description="Summarise what Org A knows about an indicator.",
-                tags=["threat-intel", "ioc"],
-                examples=["What do we know about the domain evil.example?"],
+                id="merchant-risk",
+                name="Merchant Risk",
+                description="Summarise what Acme Pay knows about a merchant's risk profile.",
+                tags=["payments", "risk"],
+                examples=["What do we know about the merchant MID-4471?"],
             ),
         ],
         api_key=api_key,
@@ -141,7 +141,7 @@ async def main() -> None:
     print(f"  A2AServer listening on http://127.0.0.1:{port}")
 
     base_url = f"http://127.0.0.1:{port}"
-    # Org B's client — authenticated like any partner in the mesh.
+    # The partner bank's client — authenticated like any partner in the mesh.
     client = A2AClient(url=base_url, api_key=api_key)
 
     # ---------------------------------------------------------------
@@ -171,7 +171,7 @@ async def main() -> None:
     task = await client.send_message(
         Message(
             role="user",
-            parts=[TextPart(text="What do we know about the domain evil.example?")],
+            parts=[TextPart(text="What do we know about the merchant MID-4471?")],
             messageId="m-1",
         )
     )
@@ -223,7 +223,7 @@ async def main() -> None:
     async for event in client.send_message_streaming(
         Message(
             role="user",
-            parts=[TextPart(text="Stream a one-sentence assessment of the IP 192.0.2.77.")],
+            parts=[TextPart(text="Stream a one-sentence assessment of the card BIN 411111.")],
             messageId="m-2",
         )
     ):
@@ -246,14 +246,14 @@ async def main() -> None:
     # ---------------------------------------------------------------
     # Pass protocol_version=None to drop the A2A-Version header and use
     # the legacy methods (message/send, tasks/get, ...). Useful only
-    # when a partner org hasn't picked up v1.0 yet; A2AServer still
+    # when a partner bank hasn't picked up v1.0 yet; A2AServer still
     # understands both.
     print("\n=== Part 8: legacy protocol_version=None ===\n")
     legacy = A2AClient(url=base_url, api_key=api_key, protocol_version=None)
     legacy_task = await legacy.send_message(
         Message(
             role="user",
-            parts=[TextPart(text="One sentence: why share threat intel across orgs?")],
+            parts=[TextPart(text="One sentence: why share payment-risk signals across banks?")],
             messageId="m-3",
         )
     )
@@ -263,15 +263,15 @@ async def main() -> None:
     # Part 9: backwards-compat flat invoke for non-spec peers
     # ---------------------------------------------------------------
     print("\n=== Part 9: legacy /a2a/invoke (backwards-compat) ===\n")
-    text = await client.invoke("Give me a one-line summary of the current phishing campaign.")
+    text = await client.invoke("Give me a one-line summary of the current card-testing fraud wave.")
     print(f"  flat reply: {text[:120]}")
 
     # ---------------------------------------------------------------
-    # Part 10: wrap a partner org's agent as a local @tool
+    # Part 10: wrap a partner bank's agent as a local @tool
     # ---------------------------------------------------------------
     print("\n=== Part 10: A2AClient.as_tool ===\n")
     tool = client.as_tool(
-        name="ask_partner_intel", description="ask the partner org's threat-intel agent"
+        name="ask_partner_risk", description="ask the partner network's payment-risk agent"
     )
     print(f"  tool.name = {tool.name}, tool.description = {tool.description}")
     # tool.fn calls asyncio.run() internally, so it can only be invoked

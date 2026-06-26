@@ -2,62 +2,141 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 
-"""Notebook 70: Live vendor integrations — IOC intel, SIEM, GPU probe dispatch.
+"""Notebook 70: Live vendor integrations — PII discovery, data map, scan dispatch.
 
 The earlier notebooks used inline mock tools to keep the focus on agent
-mechanics. Real SOC work calls real systems: a threat-intel feed to score
-an indicator, a SIEM to pull the events behind an alert, a GPU cloud to run
-an inference-fingerprint probe. This notebook wires three *worked* vendor
-integrations (``examples/integrations/``) into a triage agent.
+mechanics. Real privacy work calls real systems: a data-classification
+feed to score an identifier, a data catalog to pull the records behind a
+subject request, a scanning cloud to run a PII-discovery probe over a
+data store. This notebook wires three *worked* vendor integrations into a
+data-subject-request (DSAR) triage agent.
 
 Every integration follows one convention: read the vendor credential from
 the environment and call the live API when it's set; otherwise return a
-deterministic, benign sample so the cookbook runs offline with no account.
-The return shape is identical either way, so the agent's reasoning doesn't
-change between this offline demo and a live deployment.
+deterministic, synthetic sample so the cookbook runs offline with no
+account. The return shape is identical either way, so the agent's
+reasoning doesn't change between this offline demo and a live deployment.
 
-- ``enrich_indicator`` — VirusTotal/GreyNoise-shaped IOC reputation
-  (``VT_API_KEY``).
-- ``query_siem`` — Splunk/Elastic-shaped log/alert search
-  (``SIEM_URL`` + ``SIEM_TOKEN``).
-- ``dispatch_timing_probe_reference`` — the *offline reference* GPU probe; the
-  live RunPod/Lambda probe is ``tulip_integrations.compute.dispatch_timing_probe``
-  (``RUNPOD_API_KEY`` / ``LAMBDA_API_KEY``); see notebook 27 for grounding
-  the verdict.
+- ``scan_for_pii`` — BigID/OneTrust-shaped identifier classification
+  (``DATAMAP_API_KEY``).
+- ``query_data_map`` — Collibra/Atlan-shaped data-catalog search
+  (``DATAMAP_URL`` + ``DATAMAP_TOKEN``).
+- ``scan_dataset_reference`` — the *offline reference* PII discovery scan;
+  the live version dispatches the scan to a classification cloud
+  (``SCANNER_API_KEY``). It returns the same category map either way.
 
 Run it:
     .venv/bin/python examples/notebook_70_vendor_integrations.py
 
 The default provider is the bundled mock model, and every vendor tool falls
-back to its offline sample, so this runs end-to-end with no credentials. See
-``examples/integrations/README.md`` for the live-credential contract.
+back to its offline sample, so this runs end-to-end with no credentials.
+Set the matching credential to swap any offline sample for the live API.
 
 Prerequisites:
 - Notebook 07 (Agent with tools).
-- Notebook 27 (CURATOR) — grounds the fingerprint the probe feeds.
+- Notebook 27 (CURATOR) — grounds the data inventory the scan feeds.
 """
 
 import asyncio
+import os
 
 from config import get_model, print_config
 
 from tulip.multiagent.specialist import Specialist
+from tulip.tools import tool
 
-# These adapters are now first-class in the SDK (graduated from the example
-# cookbook). The old `from integrations.X import ...` paths still work via
-# back-compat shims, but the SDK path is the one to use.
-from tulip.security import (
-    FEATURE_KEYS,
-    dispatch_timing_probe_reference,
-    enrich_indicator,
-    enrich_indicator_tool,
-    query_siem,
-    siem_query_tool,
+
+# The PII categories a discovery scan reports on — a fixed, well-known set
+# so the offline reference and a live scan share one vocabulary.
+PII_CATEGORIES = (
+    "email",
+    "phone",
+    "national_id",
+    "payment_card",
+    "location",
+    "health",
 )
 
+# A synthetic, pseudonymized subject id — the SHA-256 of the literal string
+# "test". Safe to print and never maps to a real person, so the offline demo
+# stays deterministic and PII-free.
+_TEST_SUBJECT = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
 
-# The EICAR test hash — a safe, well-known indicator for the offline demo.
-_EICAR = "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f"
+
+def scan_for_pii(identifier: str) -> dict:
+    """Classify an identifier against the data-inventory vendor.
+
+    Live path (``DATAMAP_API_KEY`` set) calls the classification API;
+    otherwise returns a deterministic synthetic sample with the same shape.
+    """
+    if os.getenv("DATAMAP_API_KEY"):  # pragma: no cover - live path
+        raise NotImplementedError(
+            "Live BigID/OneTrust call goes here; this demo runs the sample path."
+        )
+    # Offline sample: a small, deterministic reputation-style verdict.
+    high_risk = {_TEST_SUBJECT, "jane.doe@example.com"}
+    minimal = {"unsubscribed@example.net"}
+    if identifier in high_risk:
+        return {"verdict": "high-risk", "sensitive": True, "categories": ["email", "health"]}
+    if identifier in minimal:
+        return {"verdict": "minimal", "sensitive": False, "categories": []}
+    return {"verdict": "standard", "sensitive": True, "categories": ["email", "location"]}
+
+
+def query_data_map(term: str, scope: str = "all") -> dict:
+    """Search the data catalog for records mentioning a subject term.
+
+    Live path (``DATAMAP_URL`` + ``DATAMAP_TOKEN`` set) queries the catalog;
+    otherwise returns a deterministic synthetic result set.
+    """
+    if os.getenv("DATAMAP_URL") and os.getenv("DATAMAP_TOKEN"):  # pragma: no cover
+        raise NotImplementedError(
+            "Live Collibra/Atlan query goes here; this demo runs the sample path."
+        )
+    return {
+        "count": 2,
+        "source": "data-catalog (sample)",
+        "records": [
+            {
+                "sensitivity": "high",
+                "system": "crm.customers",
+                "detail": f"row matches '{term}': email, billing_address retained 5y",
+            },
+            {
+                "sensitivity": "medium",
+                "system": "marketing.events",
+                "detail": f"row matches '{term}': open/click events, no consent flag set",
+            },
+        ],
+    }
+
+
+def scan_dataset_reference(target: str) -> dict:
+    """Offline reference PII-discovery scan over a named data store.
+
+    Returns the category->sample-value map a live classification scan would
+    produce. The live version dispatches the scan to a cloud classifier
+    (``SCANNER_API_KEY``); this reference path is fully deterministic.
+    """
+    return {
+        "email": "1 column (customers.email)",
+        "phone": "1 column (customers.phone)",
+        "payment_card": "1 column (billing.card_last4)",
+        "location": "2 columns (customers.city, customers.country)",
+    }
+
+
+# Tool wrappers the agent can call. The docstring is what the model reads.
+@tool
+def scan_for_pii_tool(identifier: str) -> dict:
+    """Classify an identifier (email/subject id) and return its PII risk verdict."""
+    return scan_for_pii(identifier)
+
+
+@tool
+def query_data_map_tool(term: str, scope: str = "all") -> dict:
+    """Search the data catalog for systems and records that hold a subject's data."""
+    return query_data_map(term, scope=scope)
 
 
 async def main() -> None:
@@ -76,66 +155,67 @@ async def main() -> None:
     # sample. Here we exercise the offline path so the output is deterministic.
     print("\n=== Part 1: Vendor Tools (offline sample path) ===\n")
 
-    print("Threat-intel enrichment:")
-    for ioc in (_EICAR, "198.51.100.23", "phish.example.net"):
-        rep = enrich_indicator(ioc)
-        print(f"  {ioc[:24]:<24} -> {rep['verdict']} (malicious={rep['malicious']})")
+    print("PII classification:")
+    for ident in (_TEST_SUBJECT, "jane.doe@example.com", "unsubscribed@example.net"):
+        rep = scan_for_pii(ident)
+        print(f"  {ident[:24]:<24} -> {rep['verdict']} (sensitive={rep['sensitive']})")
 
-    print("\nSIEM query ('powershell', last 6h):")
-    hits = query_siem("powershell", window="6h")
-    print(f"  {hits['count']} event(s) from {hits['source']}")
-    for ev in hits["events"]:
-        print(f"    [{ev['severity']}] {ev['host']}: {ev['detail']}")
+    print("\nData-map query ('jane.doe@example.com', scope=all):")
+    hits = query_data_map("jane.doe@example.com", scope="all")
+    print(f"  {hits['count']} record(s) from {hits['source']}")
+    for rec in hits["records"]:
+        print(f"    [{rec['sensitivity']}] {rec['system']}: {rec['detail']}")
 
-    print("\nGPU inference-fingerprint probe dispatch (offline reference):")
-    feats = dispatch_timing_probe_reference("203.0.113.10:443")
-    observed = sum(1 for k in FEATURE_KEYS if k in feats)
-    print(f"  features ({observed}/{len(FEATURE_KEYS)} observed): {feats}")
+    print("\nPII-discovery scan dispatch (offline reference):")
+    feats = scan_dataset_reference("crm.customers")
+    observed = sum(1 for k in PII_CATEGORIES if k in feats)
+    print(f"  categories ({observed}/{len(PII_CATEGORIES)} found): {feats}")
 
     # =========================================================================
-    # Part 2: hand the tools to a triage agent
+    # Part 2: hand the tools to a DSAR triage agent
     # =========================================================================
     # The same integrations, this time as Tulip @tools the agent can call.
     # Under the mock model the agent narrates rather than truly tool-calls;
     # point TULIP_MODEL_PROVIDER at a live model to see it drive the tools.
-    print("\n=== Part 2: A triage agent with vendor tools ===\n")
+    print("\n=== Part 2: A DSAR triage agent with vendor tools ===\n")
 
-    sentinel = Specialist(
-        name="SENTINEL",
+    steward = Specialist(
+        name="STEWARD",
         specialist_type="triage",
-        description="First-line SOC triage with live vendor tools",
+        description="First-line data-subject-request triage with live vendor tools",
         system_prompt=(
-            "You are SENTINEL, a SOC triage analyst. Given an alert, enrich "
-            "the indicators (enrich_indicator), pull the supporting events "
-            "(query_siem), and state a severity with the evidence behind it. "
-            "Never assert a verdict you cannot back with a tool result."
+            "You are STEWARD, a data-privacy triage analyst. Given a subject "
+            "request, classify the identifier (scan_for_pii), pull the systems "
+            "that hold the subject's data (query_data_map), and state a "
+            "handling priority with the evidence behind it. Never assert that "
+            "data exists (or doesn't) without a tool result to back it."
         ),
-        tools=[enrich_indicator_tool, siem_query_tool],
+        tools=[scan_for_pii_tool, query_data_map_tool],
         confidence_threshold=0.8,
         max_iterations=6,
         model=model,
     )
 
-    print(f"Specialist: {sentinel.name}  tools={[t.name for t in sentinel.tools]}")
+    print(f"Specialist: {steward.name}  tools={[t.name for t in steward.tools]}")
 
-    result = await sentinel.execute(
+    result = await steward.execute(
         task=(
-            "Triage this alert: EDR flagged encoded PowerShell spawned by "
-            "winword.exe on WS-0142, beaconing to 198.51.100.23. Enrich the "
-            "IP and pull the related events."
+            "Triage this DSAR: a subject submitted an erasure request for "
+            "jane.doe@example.com. Classify the identifier and pull the systems "
+            "that still hold her personal data, then state the handling priority."
         ),
-        context={"case_id": "IR-2026-070", "host": "WS-0142"},
+        context={"request_id": "DSAR-2026-070", "type": "erasure"},
     )
 
     print(f"  success={result.success}  confidence={result.confidence:.0%}")
     if result.output:
-        print(f"  verdict: {result.output[:240]}")
+        print(f"  disposition: {result.output[:240]}")
     if result.error:
         print(f"  error: {result.error}")
 
     print("\n" + "=" * 60)
-    print("Vendor integrations live in examples/integrations/ — set the")
-    print("matching credential to swap any offline sample for the live API.")
+    print("Each vendor tool reads its credential from the environment — set")
+    print("the matching credential to swap any offline sample for the live API.")
     print("=" * 60)
 
 

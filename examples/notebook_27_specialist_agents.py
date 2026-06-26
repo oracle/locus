@@ -1,30 +1,29 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 """
-Notebook 27: CURATOR — the inference-fingerprinting specialist.
+Notebook 27: RIGHTSIZER — the cloud-rightsizing specialist.
 
 Notebook 26 introduced the Specialist as the worker MARSHAL hands tasks
-to. This notebook dives into the Specialist itself, using CURATOR — the
-SOC's inference-forensics specialist — as the running case: how to narrow
-a model's failure surface with a focused system prompt, a hand-picked
-tool set, optional playbooks (your runbooks, encoded), and a confidence
-threshold.
+to. This notebook dives into the Specialist itself, using RIGHTSIZER —
+the platform team's cloud cost-and-capacity specialist — as the running
+case: how to narrow a model's failure surface with a focused system
+prompt, a hand-picked tool set, optional playbooks (your runbooks,
+encoded), and a confidence threshold.
 
-CURATOR's job is timing side-channel inference fingerprinting: identifying
-which model, inference engine, and accelerator are serving an endpoint
-purely from observable streaming-timing features (TTFT, inter-token
-latency, cadence variance) — no privileges, no exploit. The defensive use
-is inventory verification and detecting model-extraction reconnaissance
-against the org's own inference endpoints (MITRE ATLAS AML.T0040 AI Model
-Inference API Access, AML.T0024 Exfiltration via AI Inference API).
+RIGHTSIZER's job is workload fingerprinting for rightsizing: identifying
+which instance family and size a compute workload should run on purely
+from observable utilization telemetry (CPU p50, memory mean, IOPS,
+network throughput) — no agent on the box, no guesswork. The payoff is
+cutting waste on over-provisioned instances and catching capacity risk
+on hot ones before it pages someone.
 
-The capability is demonstrated with ``tulip.security``: a deterministic
-mock classifier maps a timing feature vector to a ``FingerprintVerdict``,
-and ``ground_fingerprint`` turns that verdict into a finding **only** when
-the evidence clears the GSAR grounding threshold. Low feature coverage
-yields a weak evidence partition, so an under-observed endpoint abstains
-rather than asserting a fingerprint — a false fingerprint is worse than
-none.
+The capability is demonstrated with the domain-neutral GSAR grounding
+core (``tulip.reasoning.gsar``): a deterministic classifier maps a
+utilization feature vector to a ``WorkloadVerdict``, and the verdict
+becomes a recommendation **only** when the evidence partition clears the
+grounding threshold. Low feature coverage yields a weak evidence
+partition, so an under-observed instance abstains rather than asserting a
+rightsizing — a wrong instance-type call is worse than none.
 
 - A ``Specialist`` is a Tulip ``Agent`` with role metadata
   (``specialist_type``, ``description``), a tool list, and a
@@ -53,9 +52,9 @@ Prerequisites:
 import asyncio
 import time
 from collections.abc import Mapping
+from dataclasses import dataclass
 
 from config import get_model, print_config
-from integrations.gpu_probe_dispatch import dispatch_timing_probe
 
 from tulip.agent import Agent
 from tulip.multiagent.specialist import (
@@ -67,15 +66,13 @@ from tulip.multiagent.specialist import (
     create_metrics_analyst,
     create_trace_analyst,
 )
-from tulip.reasoning.gsar import Claim, EvidenceType, Partition
-from tulip.security import (
-    AtlasTechnique,
-    FingerprintVerdict,
-    Indicator,
-    IndicatorType,
-    Severity,
-    ground_fingerprint,
-    is_finding,
+from tulip.reasoning.gsar import (
+    Claim,
+    Decision,
+    EvidenceType,
+    Partition,
+    decide,
+    gsar_score,
 )
 from tulip.tools.decorator import tool
 
@@ -94,53 +91,74 @@ def _llm_call(
     return res.message.strip()
 
 
-# The expected timing-feature schema for a streaming-API fingerprint.
-# Coverage is the fraction of these the probe actually measured; below
-# this floor the classifier returns low confidence and grounding abstains.
-_FINGERPRINT_FEATURES = ("ttft_ms_p50", "itl_ms_mean", "itl_cv", "tps_mean")
+# The expected utilization-feature schema for a rightsizing verdict.
+# Coverage is the fraction of these the telemetry pull actually returned;
+# below this floor the classifier returns low confidence and grounding abstains.
+_WORKLOAD_FEATURES = ("cpu_p50", "mem_mean", "iops_mean", "net_mbps")
 _COVERAGE_FLOOR = 0.60
 
 
-def classify_fingerprint(features: Mapping[str, float]) -> FingerprintVerdict:
-    """Deterministic mock inference-fingerprint classifier.
+@dataclass
+class WorkloadVerdict:
+    """A rightsizing call: which family/size a workload fits, and how sure."""
 
-    Maps a timing feature vector to a ``(model, engine, hardware)`` verdict
-    over a fixed lookup — no model file, no scikit, no network. A real
-    deployment swaps in a fingerprinting service behind this same
+    family: str
+    size: str
+    action: str
+    confidence: float
+    feature_coverage: float
+
+
+def _sample_utilization(instance: str) -> dict[str, float]:
+    """Deterministic offline utilization sample for an instance.
+
+    A real deployment swaps in a CloudWatch / Stackdriver query behind
+    this same signature; offline we return a fixed feature vector so the
+    notebook runs end-to-end with no cloud credentials.
+    """
+    return {"cpu_p50": 18.4, "mem_mean": 22.1, "iops_mean": 140.0, "net_mbps": 31.5}
+
+
+def classify_workload(features: Mapping[str, float]) -> WorkloadVerdict:
+    """Deterministic mock rightsizing classifier.
+
+    Maps a utilization feature vector to a ``(family, size, action)``
+    verdict over a fixed lookup — no model file, no scikit, no network.
+    A real deployment swaps in a rightsizing service behind this same
     signature. Coverage below :data:`_COVERAGE_FLOOR` returns a
-    low-confidence "unknown" verdict so the caller abstains under GSAR.
+    low-confidence "unknown" verdict so the caller abstains.
 
     Args:
-        features: Observed timing features keyed by name.
+        features: Observed utilization features keyed by name.
 
     Returns:
-        A :class:`~tulip.security.FingerprintVerdict`.
+        A :class:`WorkloadVerdict`.
     """
-    observed = [f for f in _FINGERPRINT_FEATURES if f in features]
-    coverage = len(observed) / len(_FINGERPRINT_FEATURES)
+    observed = [f for f in _WORKLOAD_FEATURES if f in features]
+    coverage = len(observed) / len(_WORKLOAD_FEATURES)
     if coverage < _COVERAGE_FLOOR:
-        return FingerprintVerdict(
-            model="unknown",
-            engine="unknown",
-            hardware="unknown",
+        return WorkloadVerdict(
+            family="unknown",
+            size="unknown",
+            action="unknown",
             confidence=0.30,
             feature_coverage=coverage,
         )
-    # Fixed lookup: continuous-batching cadence + 7B-class inter-token
-    # latency reads as an open-weights model behind vLLM on a datacenter GPU.
-    itl = features.get("itl_ms_mean", 0.0)
-    if itl <= 15.0:
-        return FingerprintVerdict(
-            model="open-weights-7b",
-            engine="vLLM",
-            hardware="datacenter-gpu",
+    # Fixed lookup: sustained low CPU p50 with memory headroom reads as an
+    # over-provisioned workload that fits a smaller general-purpose size.
+    cpu = features.get("cpu_p50", 100.0)
+    if cpu <= 25.0:
+        return WorkloadVerdict(
+            family="general-purpose",
+            size="m6i.large",
+            action="downsize",
             confidence=0.91,
             feature_coverage=coverage,
         )
-    return FingerprintVerdict(
-        model="open-weights-70b",
-        engine="TGI",
-        hardware="datacenter-gpu",
+    return WorkloadVerdict(
+        family="compute-optimized",
+        size="c6i.2xlarge",
+        action="upsize",
         confidence=0.78,
         feature_coverage=coverage,
     )
@@ -148,7 +166,7 @@ def classify_fingerprint(features: Mapping[str, float]) -> FingerprintVerdict:
 
 async def main():
     print("=" * 60)
-    print("Notebook 27: CURATOR — the inference-fingerprinting specialist")
+    print("Notebook 27: RIGHTSIZER — the cloud-rightsizing specialist")
     print("=" * 60)
     print()
     print_config()
@@ -161,22 +179,22 @@ async def main():
     print("\n=== Part 1: Specialist Anatomy ===\n")
 
     # A specialist pairs a focused system prompt with domain tools,
-    # optional playbooks, and a confidence threshold. CURATOR is the SOC's
-    # inference-forensics specialist.
+    # optional playbooks, and a confidence threshold. RIGHTSIZER is the
+    # platform team's cost-and-capacity specialist.
     specialist = Specialist(
-        name="CURATOR",
-        specialist_type="inference_forensics",
-        description="Fingerprints inference endpoints from timing side-channels",
-        system_prompt="""You are CURATOR, an inference-forensics specialist. Your expertise:
-1. Measuring streaming-API timing features (TTFT, inter-token latency, cadence variance)
-2. Mapping a timing feature vector to a (model, engine, hardware) verdict
-3. Verifying served endpoints against the approved inventory
-4. Flagging model-extraction reconnaissance against the org's own endpoints
+        name="RIGHTSIZER",
+        specialist_type="cloud_rightsizing",
+        description="Recommends instance rightsizing from utilization telemetry",
+        system_prompt="""You are RIGHTSIZER, a cloud cost-and-capacity specialist. Your expertise:
+1. Pulling utilization telemetry (CPU p50, memory mean, IOPS, network throughput)
+2. Mapping a utilization feature vector to a (family, size, action) verdict
+3. Reconciling a recommendation against the approved instance catalog
+4. Flagging over-provisioned waste and capacity risk on hot fleets
 
-When fingerprinting:
-- Treat a single sample as inference, not evidence — collect a stable feature vector
+When rightsizing:
+- Treat a single data point as a hint, not evidence — collect a stable feature vector
 - Report feature coverage; abstain when too little of the schema is observed
-- Never assert a fingerprint you cannot ground — a wrong model attribution is worse than none""",
+- Never assert a rightsizing you cannot ground — a wrong instance-type call is worse than none""",
         max_iterations=10,
         confidence_threshold=0.85,
         model=model,
@@ -198,39 +216,43 @@ When fingerprinting:
     # =========================================================================
     print("\n=== Part 2: Domain Tools ===\n")
 
-    @tool(name="probe_timing", description="Measure streaming-timing features for an endpoint")
-    async def probe_timing(endpoint: str, provider: str = "runpod") -> str:
-        # Dispatch the probe to a dedicated GPU cluster (RunPod / Lambda),
-        # where the measurement actually runs; falls back to a deterministic
-        # sample offline. See examples/integrations/gpu_probe_dispatch.py.
-        feats = dispatch_timing_probe(endpoint, provider=provider)
-        observed = sum(1 for f in _FINGERPRINT_FEATURES if f in feats)
+    @tool(name="pull_utilization", description="Pull utilization telemetry for an instance")
+    async def pull_utilization(instance: str, source: str = "cloudwatch") -> str:
+        # Query the metrics backend (CloudWatch / Stackdriver) where the
+        # measurement actually lives; falls back to a deterministic sample
+        # offline so the notebook runs with no cloud credentials.
+        feats = _sample_utilization(instance)
+        observed = sum(1 for f in _WORKLOAD_FEATURES if f in feats)
         body = " ".join(f"{k}={v}" for k, v in feats.items())
         return (
-            f"Probe {endpoint} via {provider}: {body} "
-            f"({observed}/{len(_FINGERPRINT_FEATURES)} features observed)"
+            f"Telemetry {instance} via {source}: {body} "
+            f"({observed}/{len(_WORKLOAD_FEATURES)} features observed)"
         )
 
-    @tool(name="classify_endpoint", description="Map the timing feature vector to a model verdict")
-    async def classify_endpoint() -> str:
-        return "VerificationResult: open-weights-7b on vLLM / datacenter-gpu, confidence 0.91, coverage 1.00"
+    @tool(
+        name="classify_instance", description="Map the utilization vector to a rightsizing verdict"
+    )
+    async def classify_instance() -> str:
+        return "WorkloadVerdict: downsize to m6i.large (general-purpose), confidence 0.91, coverage 1.00"
 
-    @tool(name="check_inventory", description="Compare a verdict against the approved inventory")
-    async def check_inventory() -> str:
-        return "Inventory: endpoint 203.0.113.10:443 approved to serve open-weights-7b on vLLM"
+    @tool(
+        name="check_catalog", description="Compare a verdict against the approved instance catalog"
+    )
+    async def check_catalog() -> str:
+        return "Catalog: instance i-0abc123def currently on c6i.2xlarge; m6i.large is an approved target"
 
     specialist = Specialist(
-        name="CURATOR",
-        specialist_type="inference_forensics",
-        description="Fingerprints inference endpoints from timing side-channels",
-        system_prompt="You fingerprint inference endpoints from streaming-timing features.",
-        tools=[probe_timing, classify_endpoint, check_inventory],
+        name="RIGHTSIZER",
+        specialist_type="cloud_rightsizing",
+        description="Recommends instance rightsizing from utilization telemetry",
+        system_prompt="You recommend instance rightsizing from utilization telemetry.",
+        tools=[pull_utilization, classify_instance, check_catalog],
         model=model,
     )
 
     print(f"Tools available: {[t.name for t in specialist.tools]}")
     print(
-        f"AI commentary: {_llm_call('In one sentence, why does giving a Specialist domain-specific security tools dramatically narrow its failure surface?')}"
+        f"AI commentary: {_llm_call('In one sentence, why does giving a Specialist domain-specific cloud tools dramatically narrow its failure surface?')}"
     )
 
     # =========================================================================
@@ -238,49 +260,49 @@ When fingerprinting:
     # =========================================================================
     print("\n=== Part 3: Specialist Playbooks ===\n")
 
-    fingerprint_playbook = Playbook(
-        name="Inference Fingerprint Procedure",
-        description="Standard procedure for fingerprinting an inference endpoint",
+    rightsizing_playbook = Playbook(
+        name="Rightsizing Procedure",
+        description="Standard procedure for rightsizing a compute instance",
         preconditions=[
-            "Endpoint is in scope for inventory verification",
-            "Probing is rate-limited and authorized against our own endpoint",
+            "Instance is in scope for the cost-optimization review",
+            "Telemetry covers a representative window, not a quiet weekend",
         ],
         steps=[
             PlaybookStep(
-                instruction="Measure the streaming-timing feature vector",
-                required_tools=["probe_timing"],
-                expected_output="TTFT, inter-token latency, cadence variance, and coverage",
+                instruction="Pull the utilization feature vector",
+                required_tools=["pull_utilization"],
+                expected_output="CPU p50, memory mean, IOPS, network throughput, and coverage",
             ),
             PlaybookStep(
-                instruction="Classify the feature vector to a model/engine/hardware verdict",
-                required_tools=["classify_endpoint"],
-                expected_output="VerificationResult with confidence and feature coverage",
+                instruction="Classify the feature vector to a family/size/action verdict",
+                required_tools=["classify_instance"],
+                expected_output="WorkloadVerdict with confidence and feature coverage",
                 on_failure="Abstain if feature coverage is below the schema floor",
             ),
             PlaybookStep(
-                instruction="Compare the verdict against the approved inventory",
-                required_tools=["check_inventory"],
-                expected_output="Match / mismatch against what the endpoint is approved to serve",
+                instruction="Compare the verdict against the approved instance catalog",
+                required_tools=["check_catalog"],
+                expected_output="Match / mismatch against what the catalog allows",
             ),
         ],
-        success_criteria="Grounded verdict reconciled against inventory, or a logged abstention",
+        success_criteria="Grounded verdict reconciled against the catalog, or a logged abstention",
     )
 
-    specialist.playbooks.append(fingerprint_playbook)
+    specialist.playbooks.append(rightsizing_playbook)
 
-    print(f"Playbook: {fingerprint_playbook.name}")
-    print(f"  Preconditions: {fingerprint_playbook.preconditions}")
-    print(f"  Steps: {len(fingerprint_playbook.steps)}")
-    print(f"  Success criteria: {fingerprint_playbook.success_criteria}")
+    print(f"Playbook: {rightsizing_playbook.name}")
+    print(f"  Preconditions: {rightsizing_playbook.preconditions}")
+    print(f"  Steps: {len(rightsizing_playbook.steps)}")
+    print(f"  Success criteria: {rightsizing_playbook.success_criteria}")
 
     # ``to_prompt()`` renders the playbook as the text block injected
     # into the system prompt when the playbook is selected.
-    playbook_prompt = fingerprint_playbook.to_prompt()
+    playbook_prompt = rightsizing_playbook.to_prompt()
     print("\nPlaybook prompt:")
     print("-" * 40)
     print(playbook_prompt[:500] + "...")
     print(
-        f"AI commentary: {_llm_call('In one sentence, when does attaching a fixed Playbook to a security Specialist matter most?')}"
+        f"AI commentary: {_llm_call('In one sentence, when does attaching a fixed Playbook to a cloud Specialist matter most?')}"
     )
 
     # =========================================================================
@@ -288,36 +310,34 @@ When fingerprinting:
     # =========================================================================
     print("\n=== Part 4: Playbook Selection ===\n")
 
-    extraction_recon_playbook = Playbook(
-        name="Model Extraction Recon Triage",
-        description="Procedure for investigating suspected model-extraction probing",
+    cost_anomaly_playbook = Playbook(
+        name="Cost Anomaly Triage",
+        description="Procedure for investigating a sudden cloud-spend spike",
         steps=[
-            PlaybookStep(instruction="Profile request volume and prompt diversity per client"),
-            PlaybookStep(
-                instruction="Check whether timing-probe patterns target a single endpoint"
-            ),
-            PlaybookStep(instruction="Correlate the source against the partner-mesh allowlist"),
+            PlaybookStep(instruction="Break the spend spike down by service and account"),
+            PlaybookStep(instruction="Check whether new resources were launched in the window"),
+            PlaybookStep(instruction="Correlate the spike against the deploy and scaling history"),
         ],
     )
 
-    inventory_drift_playbook = Playbook(
-        name="Inventory Drift Investigation",
-        description="Procedure for investigating an endpoint serving an unexpected model",
+    config_drift_playbook = Playbook(
+        name="Configuration Drift Investigation",
+        description="Procedure for investigating an instance running an unexpected type",
         steps=[
-            PlaybookStep(instruction="Re-fingerprint the endpoint to confirm the served model"),
-            PlaybookStep(instruction="Diff the verdict against the approved inventory record"),
+            PlaybookStep(instruction="Re-pull telemetry to confirm the running instance type"),
+            PlaybookStep(instruction="Diff the running type against the approved catalog record"),
             PlaybookStep(instruction="Escalate a confirmed mismatch to the change-control owner"),
         ],
     )
 
-    specialist.playbooks.extend([extraction_recon_playbook, inventory_drift_playbook])
+    specialist.playbooks.extend([cost_anomaly_playbook, config_drift_playbook])
 
     # select_playbook matches the task description against each playbook's
     # name and description; it returns None if nothing fits.
     tasks = [
-        "Fingerprint the inference endpoint at 203.0.113.10 for case IR-2026-017",
-        "Investigate suspected model-extraction recon against the public API",
-        "Investigate an endpoint that appears to be serving an unexpected model",
+        "Recommend rightsizing for instance i-0abc123def for ticket FIN-2026-017",
+        "Investigate a sudden cloud-spend spike on the public-api fleet",
+        "Investigate an instance that appears to be running an unexpected type",
     ]
 
     for task in tasks:
@@ -326,94 +346,83 @@ When fingerprinting:
             print(f"Task: '{task[:40]}...'")
             print(f"  Selected playbook: {selected.name}")
     print(
-        f"AI commentary: {_llm_call('In one sentence, why is automatic playbook selection by task description risky in a SOC and how do you mitigate it?')}"
+        f"AI commentary: {_llm_call('In one sentence, why is automatic playbook selection by task description risky for cloud ops and how do you mitigate it?')}"
     )
 
     # =========================================================================
-    # Part 4b: ground the fingerprint — emit a finding only with evidence
+    # Part 4b: ground the verdict — emit a recommendation only with evidence
     # =========================================================================
-    # CURATOR's verdict is not a finding until it clears the GSAR grounding
-    # threshold. ``ground_fingerprint`` (tulip.security) admits a
-    # FingerprintFinding only when the evidence partition proceeds; a weak
-    # partition abstains. This is the inference-fingerprinting capability
-    # the mythos calls "the Probe" — MITRE ATLAS AML.T0040 / AML.T0024.
-    print("\n=== Part 4b: Grounding the Fingerprint ===\n")
+    # RIGHTSIZER's verdict is not a recommendation until it clears the GSAR
+    # grounding threshold. We partition the evidence, score it with
+    # ``gsar_score``, and ``decide`` whether to ship or abstain; a weak
+    # partition abstains. This is the domain-neutral grounding core that
+    # keeps a confident-sounding model from acting on thin evidence.
+    print("\n=== Part 4b: Grounding the Verdict ===\n")
 
-    # Full-coverage probe: 4/4 timing features observed. The classifier
-    # returns a high-confidence verdict; the timing feature vector is the
-    # finding's evidence, partitioned by GSAR evidence type.
-    full_features = {"ttft_ms_p50": 38.2, "itl_ms_mean": 11.4, "itl_cv": 0.07, "tps_mean": 87.6}
-    verdict = classify_fingerprint(full_features)
+    # Full-coverage telemetry: 4/4 utilization features observed. The
+    # classifier returns a high-confidence verdict; the utilization feature
+    # vector is the recommendation's evidence, partitioned by GSAR type.
+    full_features = {"cpu_p50": 18.4, "mem_mean": 22.1, "iops_mean": 140.0, "net_mbps": 31.5}
+    verdict = classify_workload(full_features)
     print(
-        f"VerificationResult (coverage {verdict.feature_coverage:.0%}): "
-        f"{verdict.model} on {verdict.engine} / {verdict.hardware} "
+        f"WorkloadVerdict (coverage {verdict.feature_coverage:.0%}): "
+        f"{verdict.action} to {verdict.size} ({verdict.family}) "
         f"@ confidence {verdict.confidence:.0%}"
     )
 
     grounded_partition = Partition(
         grounded=[
             Claim(
-                text="TTFT p50 38.2ms matches the vLLM continuous-batching profile",
+                text="CPU p50 18.4% sits well below the 40% rightsizing band",
                 type=EvidenceType.TOOL_MATCH,
-                evidence_refs=["probe:ttft_ms_p50=38.2"],
+                evidence_refs=["telemetry:cpu_p50=18.4"],
             ),
             Claim(
-                text="inter-token latency 11.4ms/token is consistent with the 7B class",
+                text="memory mean 22.1% confirms ample headroom on the current size",
                 type=EvidenceType.SPECIFIC_DATA,
-                evidence_refs=["probe:itl_ms_mean=11.4"],
+                evidence_refs=["telemetry:mem_mean=22.1"],
             ),
             Claim(
-                text="cadence variance 0.07 sits in the expected datacenter-GPU timing band",
+                text="IOPS mean 140 fits comfortably inside the m6i.large envelope",
                 type=EvidenceType.SIGNAL_MATCH,
-                evidence_refs=["probe:itl_cv=0.07"],
+                evidence_refs=["telemetry:iops_mean=140.0"],
             ),
         ],
     )
-    fp_result = ground_fingerprint(
-        verdict=verdict,
-        asset="203.0.113.10:443",
-        partition=grounded_partition,
-        severity=Severity.MEDIUM,
-        indicators=[Indicator(type=IndicatorType.ENDPOINT, value="203.0.113.10:443")],
-        taxonomy=[
-            AtlasTechnique.INFERENCE_API_ACCESS,
-            AtlasTechnique.EXFILTRATION_VIA_INFERENCE_API,
-        ],
-    )
-    if is_finding(fp_result):
-        print(f"  SHIPPED finding: {fp_result.title}")
-        print(f"    gsar_score={fp_result.gsar_score:.2f} severity={fp_result.severity.value}")
-        print(f"    taxonomy={[t.value for t in fp_result.taxonomy]}")
+    score = gsar_score(grounded_partition)
+    decision = decide(score)
+    if decision == Decision.PROCEED:
+        print(f"  SHIPPED recommendation: {verdict.action} i-0abc123def to {verdict.size}")
+        print(f"    gsar_score={score:.2f} decision={decision.value}")
     else:
-        print(f"  abstained: {fp_result.reason}")
+        print(
+            f"  abstained ({decision.value}): grounding score {score:.2f} below proceed threshold"
+        )
 
-    # Low-coverage probe: 1/4 features. The classifier returns "unknown"
+    # Low-coverage telemetry: 1/4 features. The classifier returns "unknown"
     # at low confidence; the partition is a lone inference claim, so GSAR
-    # abstains rather than asserting a fingerprint.
-    sparse_features = {"ttft_ms_p50": 41.0}
-    weak_verdict = classify_fingerprint(sparse_features)
+    # decides replan rather than asserting a rightsizing.
+    sparse_features = {"cpu_p50": 41.0}
+    weak_verdict = classify_workload(sparse_features)
     print(
-        f"\nUnder-observed endpoint (coverage {weak_verdict.feature_coverage:.0%}): "
+        f"\nUnder-observed instance (coverage {weak_verdict.feature_coverage:.0%}): "
         f"classifier confidence {weak_verdict.confidence:.0%}"
     )
     weak_partition = Partition(
         ungrounded=[
             Claim(
-                text="a single TTFT sample loosely resembles a batched server",
+                text="a single CPU sample loosely resembles a busy workload",
                 type=EvidenceType.INFERENCE,
-                evidence_refs=["probe:ttft_ms_p50=41.0"],
+                evidence_refs=["telemetry:cpu_p50=41.0"],
             ),
         ],
     )
-    weak_result = ground_fingerprint(
-        verdict=weak_verdict,
-        asset="203.0.113.20:443",
-        partition=weak_partition,
-    )
-    if is_finding(weak_result):
-        print(f"  SHIPPED finding: {weak_result.title}")
+    weak_score = gsar_score(weak_partition)
+    weak_decision = decide(weak_score)
+    if weak_decision == Decision.PROCEED:
+        print(f"  SHIPPED recommendation: {weak_verdict.action} to {weak_verdict.size}")
     else:
-        print(f"  abstained ({weak_result.decision.value}): {weak_result.reason}")
+        print(f"  abstained ({weak_decision.value}): grounding score {weak_score:.2f}")
 
     # =========================================================================
     # Part 5: drive the specialist end-to-end
@@ -421,12 +430,12 @@ When fingerprinting:
     print("\n=== Part 5: Executing Specialists ===\n")
 
     result = await specialist.execute(
-        task="Fingerprint the inference endpoint at 203.0.113.10:443 and reconcile the verdict "
-        "against the approved inventory.",
+        task="Recommend rightsizing for instance i-0abc123def and reconcile the verdict "
+        "against the approved instance catalog.",
         context={
-            "case_id": "IR-2026-017",
-            "endpoint": "203.0.113.10:443",
-            "submitted_by": "inventory-verification sweep",
+            "ticket_id": "FIN-2026-017",
+            "instance": "i-0abc123def",
+            "submitted_by": "quarterly cost-optimization review",
         },
     )
 
@@ -459,7 +468,7 @@ When fingerprinting:
         print(f"    Focus: {prompt_preview[:60]}...")
     t0 = time.perf_counter()
     p6 = await metrics_analyst.execute(
-        task="In one sentence, what does a metrics analyst contribute to incident response?"
+        task="In one sentence, what does a metrics analyst contribute to capacity planning?"
     )
     dt = time.perf_counter() - t0
     print(f"\n  [model call: {dt:.2f}s · metrics_analyst.execute()]")
@@ -471,23 +480,23 @@ When fingerprinting:
     # =========================================================================
     print("\n=== Part 7: Custom Tools Integration ===\n")
 
-    @tool(name="search_auth_logs", description="Search authentication logs for patterns")
-    async def search_auth_logs(pattern: str, timerange: str = "1h") -> str:
-        return f"Found 42 auth-log matches for '{pattern}' in last {timerange}"
+    @tool(name="search_app_logs", description="Search application logs for patterns")
+    async def search_app_logs(pattern: str, timerange: str = "1h") -> str:
+        return f"Found 42 app-log matches for '{pattern}' in last {timerange}"
 
-    @tool(name="get_alert_history", description="Get recent security alerts for a host")
-    async def get_alert_history(limit: int = 10) -> str:
-        return f"Retrieved {limit} most recent security alerts"
+    @tool(name="get_scaling_history", description="Get recent autoscaling events for a service")
+    async def get_scaling_history(limit: int = 10) -> str:
+        return f"Retrieved {limit} most recent autoscaling events"
 
     custom_log_analyst = create_log_analyst(
         model=model,
-        tools=[search_auth_logs, get_alert_history],
+        tools=[search_app_logs, get_scaling_history],
     )
 
     print(f"Custom log analyst tools: {[t.name for t in custom_log_analyst.tools]}")
 
     log_result = await custom_log_analyst.execute(
-        task="Search for failed admin logins from 192.0.2.55 in the last hour",
+        task="Search for OOMKilled events on the checkout service in the last hour",
     )
 
     print("Log analysis result:")
@@ -504,10 +513,13 @@ When fingerprinting:
     # certainty markers — a rough proxy that you'd typically replace
     # with a domain-specific scorer in production.
     responses = [
-        ("definitely vLLM — timing profile is unambiguous", "High confidence markers"),
-        ("might be a batched server, hard to say from one sample", "Low confidence markers"),
-        ("confirmed by the full timing feature vector", "Verification markers"),
-        ("unclear which engine produced this cadence", "Uncertainty markers"),
+        (
+            "definitely over-provisioned — utilization profile is unambiguous",
+            "High confidence markers",
+        ),
+        ("might fit a smaller size, hard to say from one data point", "Low confidence markers"),
+        ("confirmed by the full utilization feature vector", "Verification markers"),
+        ("unclear which family this workload belongs on", "Uncertainty markers"),
     ]
 
     print("Confidence markers in responses:")
@@ -515,7 +527,7 @@ When fingerprinting:
         confidence = specialist._estimate_confidence(response)
         print(f"  '{response}' -> {confidence:.0%} ({description})")
     print(
-        f"AI commentary: {_llm_call('In one sentence, why is keyword-based confidence estimation only a rough proxy for a security verdict?')}"
+        f"AI commentary: {_llm_call('In one sentence, why is keyword-based confidence estimation only a rough proxy for a rightsizing decision?')}"
     )
 
     # =========================================================================
@@ -532,28 +544,28 @@ When fingerprinting:
     print()
 
     print("Pattern 3: Adaptive Analyst")
-    print("  Multiple playbooks; the right one selected per alert.")
+    print("  Multiple playbooks; the right one selected per request.")
     print()
 
     print("Pattern 4: Pipeline Stage")
-    print("  Drops into a larger IR workflow; structured output, context in/out.")
+    print("  Drops into a larger FinOps workflow; structured output, context in/out.")
     print(
-        f"AI suggestion: {_llm_call('Suggest one extra security Specialist pattern not in the four listed above. One short sentence.')}"
+        f"AI suggestion: {_llm_call('Suggest one extra cloud Specialist pattern not in the four listed above. One short sentence.')}"
     )
 
     # =========================================================================
-    # Part 10: assemble an incident-response team
+    # Part 10: assemble a capacity-review team
     # =========================================================================
     print("\n=== Part 10: Specialist Teams ===\n")
 
-    def create_incident_response_team(model):
-        """One triage specialist plus three pre-built analysts."""
+    def create_capacity_review_team(model):
+        """One intake specialist plus three pre-built analysts."""
         return {
-            "triage": Specialist(
-                name="Triage Specialist",
-                specialist_type="triage",
-                description="Initial alert assessment and severity classification",
-                system_prompt="Assess security alerts and determine severity and routing.",
+            "intake": Specialist(
+                name="Intake Specialist",
+                specialist_type="intake",
+                description="Initial request assessment and priority classification",
+                system_prompt="Assess rightsizing requests and determine priority and routing.",
                 model=model,
             ),
             "logs": create_log_analyst(model=model),
@@ -561,18 +573,18 @@ When fingerprinting:
             "code": create_code_analyst(model=model),
         }
 
-    team = create_incident_response_team(model)
-    print("Incident Response Team:")
+    team = create_capacity_review_team(model)
+    print("Capacity Review Team:")
     for role, spec in team.items():
         print(f"  {role}: {spec.name}")
     t0 = time.perf_counter()
-    p10 = await team["triage"].execute(
-        task="In one sentence, classify this alert: 'EDR flagged encoded PowerShell spawned by winword.exe on WS-0142.'",
+    p10 = await team["intake"].execute(
+        task="In one sentence, classify this request: 'p95 CPU on the checkout fleet held above 85% for 6 hours.'",
     )
     dt = time.perf_counter() - t0
-    print(f"  [model call: {dt:.2f}s · triage.execute()]")
+    print(f"  [model call: {dt:.2f}s · intake.execute()]")
     if p10.output:
-        print(f"  Triage verdict: {p10.output[:160]}")
+        print(f"  Intake verdict: {p10.output[:160]}")
 
     # =========================================================================
     print("\n" + "=" * 60)

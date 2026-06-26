@@ -2,16 +2,16 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 
-"""Notebook 66: Spoken security advisory — voice output.
+"""Notebook 66: Spoken cloud status advisory — voice output.
 
-A security team often needs to talk, not just type — recorded
-advisories for the security hotline, awareness broadcasts, IVR
-announcements. This notebook pairs a regular chat-completions agent
-(text in, text out) with OpenAI's audio.speech endpoint so a
-vishing-awareness advisory can be spoken aloud. Vishing — voice
-phishing, MITRE ATT&CK T1566.004 (Spearphishing Voice) — is exactly the
-kind of social-engineering vector a recorded awareness advisory is meant
-to inoculate staff against.
+A cloud platform team often needs to talk, not just type — recorded
+advisories for the on-call hotline, status-page audio, IVR announcements
+about a region degradation. This notebook pairs a regular
+chat-completions agent (text in, text out) with OpenAI's audio.speech
+endpoint so an incident advisory can be spoken aloud. A regional
+degradation — say an availability zone losing capacity while autoscaling
+backs off — is exactly the kind of fast-moving event a recorded spoken
+advisory is meant to keep on-call engineers ahead of.
 
 Pipeline::
 
@@ -29,10 +29,10 @@ Pipeline::
 - Bring-your-own-voice via the voice= parameter (alloy, ash, ballad,
   coral, echo, sage, shimmer, verse).
 - Output is a normal MP3 you can pipe into a frontend <audio> element,
-  the security-hotline IVR, or an awareness-training feed.
+  the on-call IVR, or a status-page audio feed.
 
-Prerequisites: an OpenAI API key with access to a TTS model. The
-notebook uses gpt-4o-mini-tts for synthesis.
+Prerequisites for live speech: an OpenAI API key with access to a TTS
+model. The notebook uses gpt-4o-mini-tts for synthesis.
 
 Run it
     TULIP_MODEL_PROVIDER=openai \\
@@ -42,9 +42,10 @@ Run it
     afplay notebook_66_response.mp3   # macOS
     # or open it in any media player
 
-Note: this notebook does not run under TULIP_MODEL_PROVIDER=mock —
-it calls a real TTS endpoint, so it needs real credentials.
-The smoke test for mock environments is `python -m py_compile <file>`.
+Offline: under TULIP_MODEL_PROVIDER=mock (or with no OPENAI_API_KEY) the
+agent still drafts the advisory text against the mock model, and the
+notebook prints the synthesis step it *would* run instead of calling the
+real TTS endpoint — so it runs end-to-end with zero credentials.
 """
 
 from __future__ import annotations
@@ -59,42 +60,46 @@ from tulip.agent import Agent, AgentConfig
 
 
 PROMPT = (
-    "Write a 60-word spoken security advisory warning employees about an "
-    "ongoing vishing campaign: callers posing as the IT help desk are asking "
-    "staff to read out one-time passcodes. Remind everyone that IT never asks "
-    "for codes, and to report any such call to the security hotline."
+    "Write a 60-word spoken cloud status advisory for on-call engineers about "
+    "an ongoing degradation in the us-east-1 region: one availability zone is "
+    "losing compute capacity and autoscaling is backing off, so new instance "
+    "launches are failing. Tell them to fail workloads over to us-west-2 and "
+    "to watch the status page for the next update."
 )
 TTS_MODEL = "gpt-4o-mini-tts"
 TTS_VOICE = "alloy"
 OUT_PATH = Path(__file__).resolve().parent / "notebook_66_response.mp3"
 
 
-def _build_audio_client():
-    """An OpenAI async client for /v1/audio/speech.
+def _audio_client():
+    """An OpenAI async client for /v1/audio/speech, or None if offline.
 
     Tulip's chat model wraps chat completions; for audio.speech.create
-    we use a plain ``openai.AsyncOpenAI`` against the same key.
+    we use a plain ``openai.AsyncOpenAI`` against the same key. When no
+    ``OPENAI_API_KEY`` is set (e.g. the mock-model walkthrough) we return
+    None so the caller can describe the synthesis step without a network
+    call.
     """
-    import openai
-
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        msg = "OPENAI_API_KEY is required for the TTS endpoint"
-        raise RuntimeError(msg)
+        return None
+
+    import openai
+
     return openai.AsyncOpenAI(api_key=api_key)
 
 
 async def main() -> None:
-    print("Notebook 66: Spoken security advisory via OpenAI text-to-speech")
+    print("Notebook 66: Spoken cloud status advisory via OpenAI text-to-speech")
     print("=" * 60)
 
     # Step 1: a regular Tulip Agent drafts the advisory as text.
     agent = Agent(
         config=AgentConfig(
-            agent_id="vishing-advisory",
+            agent_id="cloud-status-advisory",
             model=get_model(max_tokens=600),
             system_prompt=(
-                "You are a security-awareness lead recording a short voice "
+                "You are a cloud platform on-call lead recording a short voice "
                 "advisory. Reply in natural spoken English, no markdown, no "
                 "bullet points. Calm, clear, and specific."
             ),
@@ -110,8 +115,16 @@ async def main() -> None:
     print(f"\n← advisory text ({len(reply)} chars):\n{reply}\n")
 
     # Step 2: synthesise speech through the audio.speech endpoint.
+    client = _audio_client()
+    if client is None:
+        print(
+            "→ offline: skipping synthesis (no OPENAI_API_KEY). Would call "
+            f"audio.speech.create model={TTS_MODEL!r} voice={TTS_VOICE!r}"
+        )
+        print("  Set OPENAI_API_KEY to write a real mp3 to", OUT_PATH)
+        return
+
     print(f"→ synthesising speech with model={TTS_MODEL!r} voice={TTS_VOICE!r}")
-    client = _build_audio_client()
     speech = await client.audio.speech.create(
         model=TTS_MODEL,
         voice=TTS_VOICE,

@@ -2,9 +2,9 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 
-"""Notebook 63: Security incident-response runbook.
+"""Notebook 63: SRE on-call incident runbook.
 
-Models the loop a security on-call runs when a page fires::
+Models the loop an infra/devops on-call engineer runs when a page fires::
 
     Page fires
       │
@@ -32,7 +32,7 @@ Models the loop a security on-call runs when a page fires::
 - interrupt(): critical severity pauses for explicit human approval
   before any mitigation runs.
 - output_schema=Postmortem: the final report is a typed Pydantic
-  instance, ready to file into the incident-review database.
+  instance, ready to file into the reliability-review database.
 
 Run it
     # Default: the bundled mock model (set TULIP_MODEL_PROVIDER for a live provider)
@@ -85,29 +85,33 @@ class InvestigatorReport(BaseModel):
 
 PROMPTS = {
     "triage": (
-        "You are a security on-call triage bot. Given an incident description, "
-        "classify severity as one of: info, warn, critical. Reply with one word."
+        "You are an SRE on-call triage bot. Given a production incident "
+        "description, classify severity as one of: info, warn, critical. "
+        "Reply with one word."
     ),
     "logs": (
         "You are a log-analysis bot. List 1–3 concrete error patterns or "
-        "suspicious auth/error sequences a human should investigate. Be "
-        "specific. Bullets only."
+        "crash/exception sequences in the service and pod logs that a human "
+        "should investigate. Be specific. Bullets only."
     ),
     "metrics": (
         "You are a metrics-analysis bot. List 1–3 specific anomalies (latency "
-        "spikes, error rate, saturation, traffic) that match the symptom. Bullets only."
+        "spikes, error rate, CPU/memory saturation, pod restarts, request "
+        "volume) that match the symptom. Bullets only."
     ),
     "traces": (
-        "You are a distributed-trace bot. Identify 1–3 specific code paths or "
-        "downstream calls likely involved. Bullets only."
+        "You are a distributed-trace bot. Identify 1–3 specific code paths, "
+        "downstream service calls, or database queries likely involved. "
+        "Bullets only."
     ),
     "synthesize": (
         "You are an incident commander. Given investigator reports, name the "
         "single most likely root-cause hypothesis. One sentence."
     ),
     "mitigate": (
-        "You are an automated responder. Given a root-cause hypothesis, "
-        "propose ONE specific mitigation step. One sentence."
+        "You are an automated remediation runner. Given a root-cause "
+        "hypothesis, propose ONE specific mitigation step (e.g. rollback, "
+        "scale-up, feature-flag toggle, restart). One sentence."
     ),
 }
 
@@ -136,7 +140,7 @@ async def _run(agent: Agent, prompt: str) -> str:
 
 
 async def triage(state: dict[str, Any]) -> dict[str, Any]:
-    """Classify severity by asking the triage agent."""
+    """Classify severity by asking the on-call triage agent."""
     symptom = state.get("symptom", "")
     agent = _make_agent("triage", state["__model__"])
     raw = await _run(agent, f"Incident: {symptom}")
@@ -227,7 +231,7 @@ async def write_postmortem(state: dict[str, Any]) -> dict[str, Any]:
             agent_id="postmortem-writer",
             model=state["__model__"],
             system_prompt=(
-                "You are an incident responder writing a postmortem. Produce a "
+                "You are an SRE writing a reliability postmortem. Produce a "
                 "Postmortem object. Be terse and factual."
             ),
             output_schema=Postmortem,
@@ -315,7 +319,7 @@ def _print_postmortem(pm: Postmortem | None) -> None:
 
 
 async def main() -> None:
-    print("Notebook 63: Security incident-response runbook")
+    print("Notebook 63: SRE on-call incident runbook")
     print("=" * 60)
 
     model = get_model()
@@ -327,9 +331,11 @@ async def main() -> None:
     initial = {
         "incident_id": "INC-2026-0517",
         "symptom": (
-            "Login API p99 latency is 8x its baseline and approximately 12% of "
-            "requests return 503, coinciding with a credential-stuffing wave "
-            "from 198.51.100.0/24 that started at 04:12 UTC and is ongoing. "
+            "Checkout API p99 latency is 8x its baseline and approximately 12% "
+            "of requests return 503, starting 6 minutes after the v4.12.0 "
+            "deploy rolled out to production at 04:12 UTC. The payments-service "
+            "pods are in CrashLoopBackOff with rising memory usage and OOMKills, "
+            "and the connection pool to the orders database is saturated. "
             "Customer-facing checkout is degraded for paying users across "
             "multiple regions; on-call has been paged."
         ),

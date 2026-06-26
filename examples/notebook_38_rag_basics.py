@@ -1,13 +1,13 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
-"""Notebook 38: RAG basics — a MITRE ATLAS technique knowledge base.
+"""Notebook 38: RAG basics — a cloud Well-Architected knowledge base.
 
 Retrieval-Augmented Generation (RAG) grounds an agent's answers in your
-own documents. For an AI-security team that means the MITRE ATLAS
-adversarial-ML technique catalogue, mapped to internal detections — not
-whatever the model half-remembers about AML.Txxxx ids. This notebook
-builds the Index that the threat-intel agent (AUGUR, notebook 40) reads
-from. The pipeline has four steps:
+own documents. For a cloud-platform team that means the AWS
+Well-Architected best-practice catalogue, mapped to your internal
+runbooks — not whatever the model half-remembers about ``REL`` or
+``COST`` ids. This notebook builds the Index that the cloud-ops agent
+(STRATUS, notebook 40) reads from. The pipeline has four steps:
 
 - **Embed** — turn text into vectors with ``OpenAIEmbeddings``
   (``text-embedding-3-small``, 1536 dims).
@@ -20,10 +20,11 @@ from. The pipeline has four steps:
   context. (This notebook focuses on steps 1–3; notebook 40 wires it
   into an agent.)
 
-The corpus is MITRE ATLAS techniques (``AML.Txxxx``); the retrieval
-quality of this Index directly bounds how grounded AUGUR's answers can
-be. A poisoned or low-coverage Index maps to OWASP LLM08 (Vector &
-Embedding Weaknesses) — covered in notebook 40.
+The corpus is Well-Architected best practices (``REL-xx``, ``COST-xx``,
+``SEC-xx``, ``OPS-xx``); the retrieval quality of this Index directly
+bounds how grounded STRATUS's answers can be. A low-coverage or stale
+Index leaves the ops agent guessing instead of citing your runbooks —
+the failure mode notebook 40 hardens against.
 
 Run it:
     # Embeddings need an OpenAI api key:
@@ -70,9 +71,9 @@ async def understand_embeddings():
     print(f"Embedding dimension: {embedder.config.dimension}")
 
     texts = [
-        "Prompt injection overrides an LLM's instructions via crafted input",
-        "Indirect prompt injection hides instructions in content the model retrieves",
-        "Disk snapshots are rotated nightly for backup retention",
+        "Auto Scaling groups add instances when average CPU exceeds the target",
+        "Horizontal pod autoscaling adds replicas when observed CPU rises",
+        "IAM policies grant least-privilege access to cloud resources",
     ]
     results = await embedder.embed_batch(texts)
 
@@ -91,8 +92,8 @@ async def understand_embeddings():
     sim_01 = cosine(results[0].embedding, results[1].embedding)
     sim_02 = cosine(results[0].embedding, results[2].embedding)
     print("\nCosine similarity:")
-    print(f"  'Prompt injection' vs 'Indirect injection': {sim_01:.4f}")
-    print(f"  'Prompt injection' vs 'Backups':            {sim_02:.4f}")
+    print(f"  'Auto Scaling' vs 'Pod autoscaling': {sim_01:.4f}")
+    print(f"  'Auto Scaling' vs 'IAM policies':    {sim_02:.4f}")
 
 
 # =============================================================================
@@ -109,36 +110,36 @@ async def using_vector_store():
     store = _get_store(dimension=embedder.config.dimension)
     print(f"Created QdrantVectorStore dim={store.config.dimension}")
 
-    # MITRE ATLAS technique summaries — the AI-security analogue of the
-    # ATT&CK matrix. Ids are the canonical AML.Txxxx.
+    # AWS Well-Architected best-practice summaries — the operational
+    # backbone the ops agent cites. Ids follow the pillar-prefixed form.
     docs_text = [
-        "AML.T0051 LLM Prompt Injection: adversaries craft input that overrides "
-        "the model's instructions, directly or indirectly via retrieved content.",
-        "AML.T0054 LLM Jailbreak: adversaries bypass model safety controls to "
-        "elicit restricted behaviour.",
-        "AML.T0020 Poison Training Data: adversaries tamper with training or "
-        "fine-tuning data to bias or backdoor a model.",
-        "AML.T0024 Exfiltration via AI Inference API: adversaries probe an "
-        "inference endpoint to extract model parameters or memorized data.",
-        "AML.T0110 AI Agent Tool Poisoning: adversaries corrupt a tool's output "
-        "or schema so the agent acts on attacker-controlled data.",
+        "REL-04 Auto Scaling: scale compute horizontally on demand metrics so "
+        "capacity tracks load and unhealthy instances are replaced automatically.",
+        "REL-07 Multi-AZ Deployment: spread workloads across availability zones "
+        "so a single zone failure does not take the whole service down.",
+        "COST-03 Rightsizing: match instance types to measured utilization to "
+        "stop paying for idle compute and memory headroom you never use.",
+        "SEC-02 Least-Privilege IAM: grant the minimum permissions a workload "
+        "needs and rotate long-lived credentials on a schedule.",
+        "OPS-05 Infrastructure as Code: define resources in version-controlled "
+        "templates for repeatable, reviewable, auditable provisioning.",
     ]
 
-    print("\nEmbedding and inserting ATLAS technique summaries…")
+    print("\nEmbedding and inserting Well-Architected best practices…")
     for i, text in enumerate(docs_text):
         result = await embedder.embed(text)
         await store.add(
             Document(
-                id=f"technique_{i}",
+                id=f"practice_{i}",
                 content=text,
                 embedding=result.embedding,
-                metadata={"source": "atlas_kb", "index": i},
+                metadata={"source": "well_architected_kb", "index": i},
             )
         )
         print(f"  inserted: {text[:50]}…")
 
-    print("\nSearching for 'hidden instructions in retrieved documents'…")
-    q = await embedder.embed("hidden instructions in retrieved documents")
+    print("\nSearching for 'surviving a datacenter zone outage'…")
+    q = await embedder.embed("surviving a datacenter zone outage")
     hits = await store.search(query_embedding=q.embedding, limit=3)
     for i, hit in enumerate(hits, start=1):
         print(f"  #{i}  score={hit.score:.4f}  {hit.document.content}")
@@ -170,47 +171,47 @@ async def using_rag_retriever():
 
     knowledge_base = [
         """
-        AML.T0051 LLM Prompt Injection: adversaries supply input that the model
-        treats as instructions, overriding the system prompt. Indirect variants
-        plant the payload in documents the RAG layer will retrieve. Detection:
-        flag retrieved chunks containing imperative phrases addressed to the
-        model, and isolate untrusted tool output from the instruction channel.
+        REL-07 Multi-AZ Deployment: run at least two instances of every tier
+        in separate availability zones behind a load balancer, and put the
+        database in a Multi-AZ configuration with automatic failover. Runbook:
+        when a zone is reported unhealthy, drain its targets, confirm the
+        replica has taken the primary role, and let Auto Scaling backfill
+        capacity in the surviving zones.
         """,
         """
         A vector store keeps embeddings in a structure that supports fast
         nearest-neighbour search. Tulip ships in-memory, pgvector,
         OpenSearch, Qdrant, and Chroma stores behind one interface —
-        the same API whether the Index holds five ATLAS techniques or the
-        full matrix plus the OWASP LLM Top 10.
+        the same API whether the Index holds five Well-Architected
+        practices or the full framework plus every team runbook.
         """,
         """
-        AML.T0024 Exfiltration via AI Inference API: adversaries query an
-        inference endpoint to reconstruct parameters or extract memorized
-        training data. Detection: rate-limit per-principal inference volume and
-        alert on query patterns consistent with model-extraction sweeps.
+        REL-04 Auto Scaling: a scaling policy adds instances when a target
+        metric (average CPU, request count per target, or queue depth) stays
+        above its threshold for the configured period, and removes them when
+        it falls below. Runbook: if instances flap, widen the cooldown window
+        and switch from a simple step policy to target-tracking.
         """,
     ]
 
     for doc in knowledge_base:
         ids = await retriever.add_document(doc.strip())
-        print(f"  inserted technique note → {len(ids)} chunk(s)")
+        print(f"  inserted practice note → {len(ids)} chunk(s)")
 
-    print("\nQuerying: 'How do attackers smuggle instructions into a model?'")
-    result = await retriever.retrieve(
-        "How do attackers smuggle instructions into a model?", limit=2
-    )
+    print("\nQuerying: 'How do I keep a service up when a zone fails?'")
+    result = await retriever.retrieve("How do I keep a service up when a zone fails?", limit=2)
     for i, doc_result in enumerate(result.documents, 1):
         print(f"\n  result {i} (score={doc_result.score:.4f}):")
         print(f"  {doc_result.document.content[:200]}…")
 
     print("\nUsing retrieve_text() for the same Index on a different question:")
-    text = await retriever.retrieve_text("How is model extraction detected?", limit=2)
+    text = await retriever.retrieve_text("How does autoscaling decide to add capacity?", limit=2)
     print(f"\n{text[:300]}…")
 
 
 # =============================================================================
-# Step 4: Metadata-tagged retrieval — store ATLAS tactic/technique tags
-#         alongside the vector and use them to narrow results beyond
+# Step 4: Metadata-tagged retrieval — store Well-Architected pillar/practice
+#         tags alongside the vector and use them to narrow results beyond
 #         similarity alone.
 # =============================================================================
 
@@ -226,24 +227,24 @@ async def rag_with_metadata():
 
     documents = [
         (
-            "Crafted input overrides the system prompt to change the agent's goal.",
-            {"tactic": "ml-attack-staging", "technique": "AML.T0051"},
+            "Auto Scaling groups add instances when average CPU exceeds the target.",
+            {"pillar": "reliability", "practice": "REL-04"},
         ),
         (
-            "A jailbreak prompt elicits behaviour the model's controls forbid.",
-            {"tactic": "defense-evasion", "technique": "AML.T0054"},
+            "Run every tier across multiple availability zones with automatic failover.",
+            {"pillar": "reliability", "practice": "REL-07"},
         ),
         (
-            "Adversaries poison fine-tuning data to plant a trigger phrase.",
-            {"tactic": "resource-development", "technique": "AML.T0020"},
+            "Rightsize instances to measured utilization to stop paying for idle compute.",
+            {"pillar": "cost-optimization", "practice": "COST-03"},
         ),
         (
-            "Repeated targeted queries reconstruct model parameters over the API.",
-            {"tactic": "exfiltration", "technique": "AML.T0024"},
+            "Grant workloads least-privilege IAM and rotate long-lived credentials.",
+            {"pillar": "security", "practice": "SEC-02"},
         ),
         (
-            "A poisoned tool schema redirects the agent to attacker infrastructure.",
-            {"tactic": "ml-attack-staging", "technique": "AML.T0110"},
+            "Define all infrastructure in version-controlled templates for repeatability.",
+            {"pillar": "operational-excellence", "practice": "OPS-05"},
         ),
     ]
 
@@ -251,8 +252,8 @@ async def rag_with_metadata():
         await retriever.add_document(content, metadata=metadata)
         print(f"  inserted: {content[:40]}… {metadata}")
 
-    print("\nQuerying 'overriding the model's instructions'…")
-    result = await retriever.retrieve("overriding the model's instructions", limit=3)
+    print("\nQuerying 'scaling compute out when load increases'…")
+    result = await retriever.retrieve("scaling compute out when load increases", limit=3)
     for r in result.documents:
         print(f"  score={r.score:.4f}  {r.document.content[:60]}…")
         print(f"    metadata: {r.document.metadata}")
@@ -266,7 +267,7 @@ async def rag_with_metadata():
 async def main():
     missing = _missing_env()
     if missing:
-        print("\n--- Notebook 38: RAG basics (MITRE ATLAS Index) ---")
+        print("\n--- Notebook 38: RAG basics (Well-Architected Index) ---")
         print(
             "Required environment variables not set; skipping the live "
             "demo so this file still runs cleanly in CI.\n"

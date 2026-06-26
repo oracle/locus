@@ -1,15 +1,15 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
-"""Notebook 71: Routing SOC agent traffic through the LiteLLM AI Gateway.
+"""Notebook 71: Routing cloud-ops agent traffic through the LiteLLM AI Gateway.
 
 This notebook is the runnable companion to
 ``docs/how-to/litellm-gateway.md``. It does **not** add a new Tulip
 model class — it uses Tulip's existing :class:`OpenAIModel` pointed at
-a LiteLLM AI Gateway URL. For an always-on SOC fleet this is a security
-posture win, not just plumbing: the gateway fronts your upstream
-providers (OpenAI, Anthropic, and any other LiteLLM-supported backend),
-so triage agents never hold provider credentials and every model call
-crosses one auditable choke point.
+a LiteLLM AI Gateway URL. For an always-on cloud-operations fleet this
+is an operational win, not just plumbing: the gateway fronts your
+upstream providers (OpenAI, Anthropic, and any other LiteLLM-supported
+backend), so cloud-ops agents never hold provider credentials and every
+model call crosses one auditable choke point.
 
 Key concepts:
 
@@ -22,8 +22,8 @@ Key concepts:
   No new Tulip class is needed; the gateway is OpenAI-shaped by design.
 - The gateway holds the upstream provider credentials. Tulip only holds
   the gateway-issued virtual key, so provider API keys never land on
-  the SOC agent host at all — one less secret to leak when an agent
-  box is compromised.
+  the cloud-ops agent host at all — one less secret to leak when an
+  agent workload is compromised.
 
 Run it::
 
@@ -70,7 +70,7 @@ _OPTIONAL_ENV = ("LITELLM_GATEWAY_MODEL",)
 
 def _print_skip_banner(missing: list[str]) -> None:
     print("=" * 72)
-    print(" LiteLLM AI Gateway not configured — skipping the live SOC demo.")
+    print(" LiteLLM AI Gateway not configured — skipping the live cloud-ops demo.")
     print("=" * 72)
     print(
         f"\n Missing environment variables: {', '.join(missing)}\n\n"
@@ -140,16 +140,16 @@ def _print_gateway_health(url: str, key: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Part 2 — A SOC triage agent talking to the gateway via OpenAIModel
+# Part 2 — A cloud-ops agent talking to the gateway via OpenAIModel
 # ---------------------------------------------------------------------------
 
 
 async def _run_agent(url: str, key: str, model_alias: str) -> None:
-    """Build a Tulip triage agent pointed at the gateway and run basic prompts."""
+    """Build a Tulip cloud-ops agent pointed at the gateway and run basic prompts."""
     from tulip.agent import Agent
     from tulip.models.native.openai import OpenAIModel
 
-    print(f"=== Triage agent vs. {model_alias} (via gateway) ===\n")
+    print(f"=== Cloud-ops agent vs. {model_alias} (via gateway) ===\n")
 
     # The OPENAI-COMPATIBLE client. ``base_url`` is the gateway endpoint;
     # ``api_key`` is a gateway-issued virtual key. Tulip carries NO provider
@@ -160,11 +160,11 @@ async def _run_agent(url: str, key: str, model_alias: str) -> None:
         base_url=url,
     )
 
-    agent = Agent(model=model, system_prompt="You are a concise SOC triage assistant.")
+    agent = Agent(model=model, system_prompt="You are a concise cloud operations assistant.")
 
     prompts = [
-        "In incident response, what does IOC stand for? One sentence.",
-        "A user reports a phishing email. Name the first triage step. One sentence.",
+        "In cloud infrastructure, what does IaC stand for? One sentence.",
+        "An EC2 instance is failing its health checks. Name the first triage step. One sentence.",
     ]
     for prompt in prompts:
         print(f"  > {prompt}")
@@ -190,12 +190,14 @@ async def _run_streaming(url: str, key: str, model_alias: str) -> None:
     agent = Agent(model=model, system_prompt="Reply concisely.")
 
     print(
-        "  > List three common phishing red flags, comma-separated.\n  < ",
+        "  > List three common causes of a surprise cloud bill, comma-separated.\n  < ",
         end="",
         flush=True,
     )
     full: list[str] = []
-    async for ev in agent.run("List three common phishing red flags, comma-separated."):
+    async for ev in agent.run(
+        "List three common causes of a surprise cloud bill, comma-separated."
+    ):
         if isinstance(ev, ModelChunkEvent) and ev.content:
             print(ev.content, end="", flush=True)
             full.append(ev.content)
@@ -222,9 +224,9 @@ def main() -> None:
 
     print("=" * 72)
     print(" Done. The gateway handled provider auth, vendor adaptation, and any")
-    print(" configured fallback / cache / callbacks transparently. The SOC agent")
-    print(" saw only an OpenAI-shaped HTTP contract — and no upstream provider")
-    print(" key ever touched the agent host.")
+    print(" configured fallback / cache / callbacks transparently. The cloud-ops")
+    print(" agent saw only an OpenAI-shaped HTTP contract — and no upstream")
+    print(" provider key ever touched the agent host.")
     print("=" * 72)
 
 

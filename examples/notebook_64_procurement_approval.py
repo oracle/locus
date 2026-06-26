@@ -2,45 +2,44 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 
-"""Notebook 64: Security-tooling vendor evaluation with risk-tiered approval gates.
+"""Notebook 64: Customer-support concession approval with risk-tiered gates.
 
-Before a new security vendor — a threat-intel feed, a managed SIEM, an
-EDR/MDR with active response — is wired into the SOC, it has to clear a
-tier-based escalation chain. The more access it gets (raw telemetry, the
-ability to isolate a host or run code on an endpoint), the more approvals
-it takes: a compromised security vendor is a supply-chain compromise of
-the security stack itself — the SolarWinds / Kaseya shape, OWASP ASI04
-agentic supply chain::
+Before a support agent can grant a costly concession — a refund, a
+service credit, a goodwill gesture, a contract-level make-good — the
+request has to clear a tier-based escalation chain. The more it costs
+and the more precedent it sets, the more approvals it takes: a blanket
+"yes" to every angry customer drains margin and trains customers to
+escalate, so larger concessions climb the ladder::
 
-    Vendor intake (security questionnaire on file)
+    Ticket intake (case history on file)
        │
        ▼
-    Questionnaire analyst  (summarises the vendor's claimed security posture)
+    Ticket analyst  (summarises what the customer is asking for and why)
        │
        ▼
-    Posture analyst  (what telemetry/access the vendor gets + blast radius)
+    Impact analyst  (concession cost + precedent risk + churn downside)
        │
        ▼
-    Risk-tier router ── score < 25 ──> auto-approve (read-only, low blast radius)
-                     ── 25–49     ──> security-manager approval (interrupt)
-                     ── 50–74     ──> manager + GRC approval (two interrupts)
-                     ── >= 75     ──> manager + GRC + CISO approval (three interrupts)
+    Risk-tier router ── score < 25 ──> auto-approve (small credit, low cost)
+                     ── 25–49     ──> support-manager approval (interrupt)
+                     ── 50–74     ──> manager + billing approval (two interrupts)
+                     ── >= 75     ──> manager + billing + director approval (three interrupts)
        │
        ▼
-    Decision recorder  (emits structured VendorDecision)
+    Decision recorder  (emits structured ConcessionDecision)
 
 Each approval gate is a separate interrupt() so a reviewer can come back
-to it later. The terminal node is SCRIBE, the SOC's compliance reporter:
-it emits a typed VendorDecision Pydantic model that files into the
-security vendor-risk register without parsing. A security vendor widens
-the agentic supply chain (OWASP ASI04), so the posture step is where you
-weigh attestations (SOC 2, ISO 27001) against the telemetry the vendor
-ingests and the response actions it could take.
+to it later. The terminal node is SCRIBE, the support org's case
+recorder: it emits a typed ConcessionDecision Pydantic model that files
+into the concessions ledger without parsing. A large concession spends
+real money and sets a precedent other customers will cite, so the impact
+step is where you weigh the customer's standing and lifetime value
+against the cost of the make-good and the downside of a denial.
 
 - Risk-tier router is a plain conditional edge — no DSL, no policy file.
 - Each gate is its own node — easy to add a tier, easy to re-order,
   easy to swap a human gate for an automated rule.
-- output_schema=VendorDecision keeps SCRIBE's terminal artifact typed.
+- output_schema=ConcessionDecision keeps SCRIBE's terminal artifact typed.
 
 Run it
     # Default: the bundled mock model (set TULIP_MODEL_PROVIDER for a live provider)
@@ -49,7 +48,7 @@ Run it
     # Offline / no credentials:
     TULIP_MODEL_PROVIDER=mock python examples/notebook_64_procurement_approval.py
 
-    # Pin a strong-enough model for the structured VendorDecision schema:
+    # Pin a strong-enough model for the structured ConcessionDecision schema:
     TULIP_MODEL_ID=openai.gpt-4.1 python examples/notebook_64_procurement_approval.py
 """
 
@@ -70,15 +69,15 @@ from tulip.multiagent.graph import END, START, StateGraph
 # Data shape for the terminal artifact.
 
 
-class VendorDecision(BaseModel):
-    """Final structured artifact filed into the security vendor-risk register."""
+class ConcessionDecision(BaseModel):
+    """Final structured artifact filed into the customer-concessions ledger."""
 
     request_id: str
-    vendor: str
-    service: str
+    customer: str
+    concession: str
     risk_score: float
-    questionnaire_summary: str
-    posture_assessment: str
+    ticket_summary: str
+    impact_assessment: str
     approvals: list[str] = Field(description="ordered list of approver titles")
     approved_at: str
     status: str = Field(description="approved | denied")
@@ -88,18 +87,18 @@ class VendorDecision(BaseModel):
 
 
 PROMPTS = {
-    "questionnaire": (
-        "You are a SOC third-party-risk analyst. Given a security vendor's "
-        "questionnaire excerpt, write a two-sentence summary of the security "
-        "posture the vendor claims."
+    "ticket": (
+        "You are a customer-support triage analyst. Given a support ticket "
+        "excerpt, write a two-sentence summary of what the customer is asking "
+        "for and the reason they give."
     ),
-    "posture": (
-        "You are a security-vendor assessor. Given a security vendor and the "
-        "service it provides, write a one-paragraph assessment covering: what "
-        "security telemetry or endpoint access the vendor would receive, the "
-        "response actions it could take (e.g. host isolation, code execution), "
-        "the attestations you would expect (SOC 2, ISO 27001), and the "
-        "supply-chain blast radius if the vendor itself were compromised."
+    "impact": (
+        "You are a customer-support concession assessor. Given a customer and "
+        "the remedy they are requesting, write a one-paragraph assessment "
+        "covering: the cost of the concession to the business, the precedent "
+        "risk (will granting it set an expectation other customers will cite), "
+        "the customer's standing and lifetime value, and the downside if the "
+        "concession is denied (churn, escalation, public complaint)."
     ),
 }
 
@@ -107,7 +106,7 @@ PROMPTS = {
 def _make_agent(role: str, model: Any) -> Agent:
     return Agent(
         config=AgentConfig(
-            agent_id=f"vsr-{role}",
+            agent_id=f"concession-{role}",
             model=model,
             system_prompt=PROMPTS[role],
             max_iterations=2,
@@ -127,19 +126,21 @@ async def _run(agent: Agent, prompt: str) -> str:
 # Graph nodes.
 
 
-async def summarize_questionnaire(state: dict[str, Any]) -> dict[str, Any]:
-    agent = _make_agent("questionnaire", state["__model__"])
+async def summarize_ticket(state: dict[str, Any]) -> dict[str, Any]:
+    agent = _make_agent("ticket", state["__model__"])
     text = await _run(
         agent,
-        f"Vendor: {state['vendor']}\nQuestionnaire excerpt: {state['questionnaire']}",
+        f"Customer: {state['customer']}\nTicket excerpt: {state['ticket']}",
     )
-    return {"questionnaire_summary": text}
+    return {"ticket_summary": text}
 
 
-async def assess_posture(state: dict[str, Any]) -> dict[str, Any]:
-    agent = _make_agent("posture", state["__model__"])
-    text = await _run(agent, f"Vendor: {state['vendor']}\nService: {state['service']}")
-    return {"posture_assessment": text}
+async def assess_impact(state: dict[str, Any]) -> dict[str, Any]:
+    agent = _make_agent("impact", state["__model__"])
+    text = await _run(
+        agent, f"Customer: {state['customer']}\nRequested remedy: {state['concession']}"
+    )
+    return {"impact_assessment": text}
 
 
 def risk_tier_router(state: dict[str, Any]) -> str:
@@ -150,8 +151,8 @@ def risk_tier_router(state: dict[str, Any]) -> str:
     if score < 50:
         return "manager"
     if score < 75:
-        return "grc"
-    return "ciso"
+        return "billing"
+    return "director"
 
 
 async def approve_manager(state: dict[str, Any]) -> dict[str, Any]:
@@ -160,44 +161,45 @@ async def approve_manager(state: dict[str, Any]) -> dict[str, Any]:
             "type": "approval",
             "tier": "manager",
             "question": (
-                f"Security-manager approval needed at risk score "
+                f"Support-manager approval needed at risk score "
                 f"{state['risk_score']:.0f}/100 "
-                f"({state['vendor']} — {state['service']}). Approve?"
+                f"({state['customer']} — {state['concession']}). Approve?"
             ),
             "options": ["yes", "no"],
         }
     )
-    return _record_decision(state, "Security Manager", decision)
+    return _record_decision(state, "Support Manager", decision)
 
 
-async def approve_grc(state: dict[str, Any]) -> dict[str, Any]:
+async def approve_billing(state: dict[str, Any]) -> dict[str, Any]:
     decision = interrupt(
         {
             "type": "approval",
-            "tier": "grc",
+            "tier": "billing",
             "question": (
-                f"GRC approval needed at risk score {state['risk_score']:.0f}/100 "
-                f"({state['vendor']}). Approve?"
+                f"Billing approval needed at risk score {state['risk_score']:.0f}/100 "
+                f"({state['customer']}). Approve?"
             ),
             "options": ["yes", "no"],
         }
     )
-    return _record_decision(state, "GRC Lead", decision)
+    return _record_decision(state, "Billing Lead", decision)
 
 
-async def approve_ciso(state: dict[str, Any]) -> dict[str, Any]:
+async def approve_director(state: dict[str, Any]) -> dict[str, Any]:
     decision = interrupt(
         {
             "type": "approval",
-            "tier": "ciso",
+            "tier": "director",
             "question": (
-                f"CISO approval needed at risk score {state['risk_score']:.0f}/100 "
-                f"({state['vendor']}). Approve?"
+                f"Support-director approval needed at risk score "
+                f"{state['risk_score']:.0f}/100 "
+                f"({state['customer']}). Approve?"
             ),
             "options": ["yes", "no"],
         }
     )
-    return _record_decision(state, "CISO", decision)
+    return _record_decision(state, "Support Director", decision)
 
 
 def _record_decision(state: dict[str, Any], role: str, decision: str) -> dict[str, Any]:
@@ -214,29 +216,29 @@ def gate_after_manager(state: dict[str, Any]) -> str:
         return "record_decision"
     score = float(state.get("risk_score", 0.0))
     if score >= 50:
-        return "approve_grc"
+        return "approve_billing"
     return "record_decision"
 
 
-def gate_after_grc(state: dict[str, Any]) -> str:
+def gate_after_billing(state: dict[str, Any]) -> str:
     if state.get("status") == "denied":
         return "record_decision"
     score = float(state.get("risk_score", 0.0))
     if score >= 75:
-        return "approve_ciso"
+        return "approve_director"
     return "record_decision"
 
 
 async def auto_approve(state: dict[str, Any]) -> dict[str, Any]:
-    return {"approvals": ["AUTO (low risk tier)"], "status": "pending"}
+    return {"approvals": ["AUTO (low cost tier)"], "status": "pending"}
 
 
 async def record_decision(state: dict[str, Any]) -> dict[str, Any]:
-    """SCRIBE writes the record via Agent.output_schema=VendorDecision.
+    """SCRIBE writes the record via Agent.output_schema=ConcessionDecision.
 
     Routing through an Agent with output_schema means the artifact is a
     typed Pydantic instance — the workflow can POST it directly to the
-    vendor-risk register without parsing.
+    concessions ledger without parsing.
     """
     import asyncio as _asyncio
 
@@ -246,24 +248,25 @@ async def record_decision(state: dict[str, Any]) -> dict[str, Any]:
             agent_id="scribe-decision-recorder",
             model=state["__model__"],
             system_prompt=(
-                "You are a security vendor-risk officer producing a VendorDecision. "
-                "Use the supplied fields verbatim. Don't invent vendors or scores."
+                "You are a customer-support case officer producing a "
+                "ConcessionDecision. Use the supplied fields verbatim. Don't "
+                "invent customers or scores."
             ),
-            output_schema=VendorDecision,
+            output_schema=ConcessionDecision,
             max_iterations=2,
             max_tokens=300,
         )
     )
     prompt = (
         f"Request: {state.get('request_id')}\n"
-        f"Vendor: {state['vendor']}\n"
-        f"Service: {state['service']}\n"
+        f"Customer: {state['customer']}\n"
+        f"Concession: {state['concession']}\n"
         f"Risk score: {float(state['risk_score'])}\n"
         f"Status: {final_status}\n"
         f"Approvals: {state.get('approvals', [])}\n"
-        f"Questionnaire summary: {state.get('questionnaire_summary', '')[:200]}\n"
-        f"Posture assessment: {state.get('posture_assessment', '')[:200]}\n\n"
-        "Emit the VendorDecision."
+        f"Ticket summary: {state.get('ticket_summary', '')[:200]}\n"
+        f"Impact assessment: {state.get('impact_assessment', '')[:200]}\n\n"
+        "Emit the ConcessionDecision."
     )
     last_exc: BaseException | None = None
     result = None
@@ -281,51 +284,57 @@ async def record_decision(state: dict[str, Any]) -> dict[str, Any]:
     decision = result.parsed
     if decision is None:
         raise RuntimeError(
-            "Decision recorder returned no parsed VendorDecision. The configured "
-            "model could not honor the JSON schema. Use a stronger model "
-            "(e.g. openai.gpt-4o, openai.gpt-5, anthropic.claude-3-5-sonnet) "
+            "Decision recorder returned no parsed ConcessionDecision. The "
+            "configured model could not honor the JSON schema. Use a stronger "
+            "model (e.g. openai.gpt-4o, openai.gpt-5, anthropic.claude-3-5-sonnet) "
             f"for notebook 64. Raw output: {result.message!r}"
         )
-    return {"vendor_decision": decision}
+    return {"concession_decision": decision}
 
 
-# Build the vendor-review graph.
+# Build the concession-review graph.
 
 
 def build_review_graph() -> StateGraph:
-    g = StateGraph(name="vendor-security-review")
-    g.add_node("summarize_questionnaire", summarize_questionnaire)
-    g.add_node("assess_posture", assess_posture)
+    g = StateGraph(name="concession-approval-review")
+    g.add_node("summarize_ticket", summarize_ticket)
+    g.add_node("assess_impact", assess_impact)
     g.add_node("auto_approve", auto_approve)
     g.add_node("approve_manager", approve_manager)
-    g.add_node("approve_grc", approve_grc)
-    g.add_node("approve_ciso", approve_ciso)
+    g.add_node("approve_billing", approve_billing)
+    g.add_node("approve_director", approve_director)
     g.add_node("record_decision", record_decision)
 
-    g.add_edge(START, "summarize_questionnaire")
-    g.add_edge("summarize_questionnaire", "assess_posture")
+    g.add_edge(START, "summarize_ticket")
+    g.add_edge("summarize_ticket", "assess_impact")
     g.add_conditional_edges(
-        "assess_posture",
+        "assess_impact",
         risk_tier_router,
         targets={
             "auto": "auto_approve",
             "manager": "approve_manager",
-            "grc": "approve_manager",
-            "ciso": "approve_manager",
+            "billing": "approve_manager",
+            "director": "approve_manager",
         },
     )
     g.add_edge("auto_approve", "record_decision")
     g.add_conditional_edges(
         "approve_manager",
         gate_after_manager,
-        targets={"approve_grc": "approve_grc", "record_decision": "record_decision"},
+        targets={
+            "approve_billing": "approve_billing",
+            "record_decision": "record_decision",
+        },
     )
     g.add_conditional_edges(
-        "approve_grc",
-        gate_after_grc,
-        targets={"approve_ciso": "approve_ciso", "record_decision": "record_decision"},
+        "approve_billing",
+        gate_after_billing,
+        targets={
+            "approve_director": "approve_director",
+            "record_decision": "record_decision",
+        },
     )
-    g.add_edge("approve_ciso", "record_decision")
+    g.add_edge("approve_director", "record_decision")
     g.add_edge("record_decision", END)
     return g
 
@@ -333,19 +342,19 @@ def build_review_graph() -> StateGraph:
 # Driver.
 
 
-def _print_decision(d: VendorDecision | None) -> None:
-    print("\nVendor decision:")
+def _print_decision(d: ConcessionDecision | None) -> None:
+    print("\nConcession decision:")
     print("-" * 60)
     if d is None:
         print("(missing)")
         return
     print(f"  Request:        {d.request_id}")
     print(f"  Status:         {d.status}")
-    print(f"  Vendor:         {d.vendor}")
-    print(f"  Service:        {d.service}")
+    print(f"  Customer:       {d.customer}")
+    print(f"  Concession:     {d.concession}")
     print(f"  Risk score:     {d.risk_score:.0f}/100")
     print(f"  Approvals:      " + (" → ".join(d.approvals) if d.approvals else "(none)"))
-    print(f"  Questionnaire:  {d.questionnaire_summary[:120]}")
+    print(f"  Ticket:         {d.ticket_summary[:120]}")
 
 
 async def _drive(graph: StateGraph, initial: dict[str, Any], answers: list[str]) -> Any:
@@ -359,62 +368,65 @@ async def _drive(graph: StateGraph, initial: dict[str, Any], answers: list[str])
         print(f"  ⏸  [{payload.get('tier', '?')}] {payload.get('question')}")
         print(f"  ▶  Reviewer responds: {answer!r}")
         result = await graph.execute(
-            Command(resume=answer, update={**result.final_state, "__model__": initial["__model__"]})
+            Command(
+                resume=answer,
+                update={**result.final_state, "__model__": initial["__model__"]},
+            )
         )
     return result
 
 
 async def main() -> None:
-    print("Notebook 64: Security-tooling vendor evaluation with risk-tiered approval gates")
+    print("Notebook 64: Customer-support concession approval with risk-tiered gates")
     print("=" * 60)
 
     model = get_model()
     graph = build_review_graph()
 
-    # (request, vendor, service, risk score, questionnaire excerpt)
+    # (request, customer, concession, risk score, ticket excerpt)
     scenarios = [
         (
-            "VSR-1001",
-            "IntelStream",
-            "threat-intel enrichment feed (read-only IOC/hash lookups, no telemetry egress)",
+            "CS-1001",
+            "Dana R. (Starter plan)",
+            "$15 account credit for a late shipping notification",
             12.0,
-            "SOC 2 Type II on file; SSO enforced; queries leave the org, no logs ingested.",
+            "Polite first-time complaint; order arrived two days late; asks for a small credit.",
         ),
         (
-            "VSR-1002",
-            "PhishLab",
-            "phishing-analysis sandbox (ingests submitted suspicious emails + attachments)",
+            "CS-1002",
+            "Marco T. (Pro plan)",
+            "one-month subscription refund after a billing double-charge",
             38.0,
-            "SOC 2 Type I; MFA optional for analysts; submissions may carry employee PII.",
+            "Charged twice this cycle; wants the duplicate month refunded; otherwise happy customer.",
         ),
         (
-            "VSR-1003",
-            "PanOptic SIEM",
-            "managed SIEM ingesting all security logs (auth, EDR, netflow) into vendor cloud",
+            "CS-1003",
+            "Acme Studio (Team plan, 40 seats)",
+            "full annual refund plus a goodwill credit after repeated outages",
             62.0,
-            "ISO 27001 claimed, certificate expired; sub-processors undisclosed; full telemetry leaves the perimeter.",
+            "Three outages this quarter; threatening to switch; asking to unwind the annual contract.",
         ),
         (
-            "VSR-1004",
-            "SentinelMDR",
-            "managed EDR/MDR with active response (can isolate hosts + run remediation on endpoints)",
+            "CS-1004",
+            "Globex Corp (Enterprise, $480k ARR)",
+            "SLA-breach service credit and a contract make-good after a data-export failure",
             88.0,
-            "No current attestation; vendor breach disclosed in 2025; agent runs as SYSTEM on every host.",
+            "Missed an SLA-bound export during their fiscal close; legal CC'd; demanding a contract concession.",
         ),
     ]
 
-    for req_id, vendor, service, score, questionnaire in scenarios:
-        print(f"\n--- {req_id}: risk {score:.0f}/100 — {vendor} — {service} ---")
+    for req_id, customer, concession, score, ticket in scenarios:
+        print(f"\n--- {req_id}: risk {score:.0f}/100 — {customer} — {concession} ---")
         initial = {
             "request_id": req_id,
-            "vendor": vendor,
-            "service": service,
+            "customer": customer,
+            "concession": concession,
             "risk_score": score,
-            "questionnaire": questionnaire,
+            "ticket": ticket,
             "__model__": model,
         }
         result = await _drive(graph, initial, ["yes", "yes", "yes"])
-        _print_decision(result.final_state.get("vendor_decision"))
+        _print_decision(result.final_state.get("concession_decision"))
 
 
 if __name__ == "__main__":

@@ -1,12 +1,12 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 """
-Notebook 13: stream an investigation to a SOC dashboard with SSE.
+Notebook 13: stream a payment review to an ops dashboard with SSE.
 
-SSE is the simplest way to push live investigation updates from a
-Python backend to a SOC dashboard — one HTTP response, one event per
-line. Tulip ships two handlers that turn the agent event stream into
-SSE wire format: a buffered ``SSEHandler`` and a queue-based
+SSE is the simplest way to push live payment-review updates from a
+Python backend to a payments operations dashboard — one HTTP response,
+one event per line. Tulip ships two handlers that turn the agent event
+stream into SSE wire format: a buffered ``SSEHandler`` and a queue-based
 ``AsyncSSEHandler`` for true streaming.
 
 Key ideas:
@@ -48,7 +48,7 @@ from tulip.streaming.sse import (
 
 async def main():
     print("=" * 60)
-    print("Notebook 13: SOC Dashboard SSE Streaming")
+    print("Notebook 13: Payments Dashboard SSE Streaming")
     print("=" * 60)
 
     # =========================================================================
@@ -58,7 +58,7 @@ async def main():
 
     message = SSEMessage(
         event="thinking",
-        data='{"content": "Correlating alert SOC-1042 with sign-in history..."}',
+        data='{"content": "Reviewing payment PAY-1042 against velocity limits..."}',
         id="1",
     )
 
@@ -79,9 +79,9 @@ async def main():
     print("\n=== Part 2: Creating SSE Messages ===\n")
 
     messages = [
-        SSEMessage(event="start", data='{"investigation_id": "SOC-1042"}'),
-        SSEMessage(event="chunk", data="Sender domain registered"),
-        SSEMessage(event="chunk", data=" 3 days ago — suspicious."),
+        SSEMessage(event="start", data='{"payment_id": "PAY-1042"}'),
+        SSEMessage(event="chunk", data="Card issued in a different"),
+        SSEMessage(event="chunk", data=" country than billing — review."),
         SSEMessage(event="done", data='{"status": "complete"}'),
     ]
 
@@ -90,10 +90,10 @@ async def main():
         print(f"  [{msg.event}] {msg.data}")
 
     # Multi-line payloads are valid; format() emits one data: line per line.
-    # A brute-force detection rule (ATT&CK T1110).
+    # A simple decline rule for high-velocity card usage.
     multiline_msg = SSEMessage(
-        event="detection_rule",
-        data="rule: repeated_failed_logins\n  when: failed_logins > 5\n  then: page on-call",
+        event="decline_rule",
+        data="rule: rapid_repeat_charges\n  when: charges_per_minute > 5\n  then: hold for review",
     )
     print("\nMulti-line message format:")
     print(multiline_msg.format())
@@ -114,17 +114,17 @@ async def main():
     print(f"  Include ID: {handler.include_id}")
     print(f"  ID prefix: {handler.id_prefix}")
 
-    # Stand-in events; in a real app these come from the triage agent's
-    # agent.run(...).
+    # Stand-in events; in a real app these come from the payment-review
+    # agent's agent.run(...).
     events = [
-        ThinkEvent(iteration=1, reasoning="Triaging alert SOC-1042"),
+        ThinkEvent(iteration=1, reasoning="Reviewing payment PAY-1042"),
         ToolStartEvent(
-            tool_name="lookup_ip", tool_call_id="call_001", arguments={"ip": "198.51.100.7"}
+            tool_name="lookup_card", tool_call_id="call_001", arguments={"bin": "411111"}
         ),
         ToolCompleteEvent(
-            tool_name="lookup_ip",
+            tool_name="lookup_card",
             tool_call_id="call_001",
-            result="198.51.100.7: 2 abuse reports in the last 30 days",
+            result="BIN 411111: 3 chargebacks in the last 30 days",
         ),
     ]
 
@@ -152,7 +152,7 @@ async def main():
 
     # pop_messages drains and returns — get_messages copies and keeps.
     handler.clear()
-    await handler.on_event(ThinkEvent(iteration=1, reasoning="New pivot: check sender domain"))
+    await handler.on_event(ThinkEvent(iteration=1, reasoning="New check: verify billing address"))
     popped = handler.pop_messages()
     remaining = handler.get_messages()
     print(f"\nAfter pop: got {len(popped)}, remaining {len(remaining)}")
@@ -165,7 +165,7 @@ async def main():
     handler.clear()
 
     await handler.on_event(ThinkEvent(iteration=1, reasoning="Starting enrichment..."))
-    await handler.on_error(ValueError("Intel feed unavailable"))
+    await handler.on_error(ValueError("Processor gateway unavailable"))
 
     print(f"Has error: {handler.has_error}")
     print(f"Is complete: {handler.is_complete}")
@@ -179,18 +179,20 @@ async def main():
     print("\n=== Part 6: Async SSE Handler ===\n")
 
     # AsyncSSEHandler backs the stream with an asyncio.Queue, so producer
-    # and consumer run concurrently — the pattern a live SOC dashboard
-    # needs.
+    # and consumer run concurrently — the pattern a live payments
+    # dashboard needs.
     async_handler = AsyncSSEHandler(
         include_timestamp=True,
         include_id=True,
     )
 
     async def produce_events():
-        await async_handler.on_event(ThinkEvent(iteration=1, reasoning="Enriching indicators..."))
+        await async_handler.on_event(
+            ThinkEvent(iteration=1, reasoning="Scoring transaction risk...")
+        )
         await asyncio.sleep(0.1)
         await async_handler.on_event(
-            ToolStartEvent(tool_name="whois_domain", tool_call_id="call_002", arguments={})
+            ToolStartEvent(tool_name="check_velocity", tool_call_id="call_002", arguments={})
         )
         await asyncio.sleep(0.1)
         await async_handler.on_complete()
@@ -256,12 +258,12 @@ from tulip.streaming.sse import AsyncSSEHandler, create_sse_response_headers
 
 app = FastAPI()
 
-@app.get("/investigations/stream")
+@app.get("/payments/stream")
 async def stream_events():
     handler = AsyncSSEHandler()
 
     async def generate():
-        # Start the triage agent in the background
+        # Start the payment-review agent in the background
         task = asyncio.create_task(run_agent(handler))
 
         # Stream events to the dashboard
@@ -277,8 +279,8 @@ async def stream_events():
     )
 
 async def run_agent(handler):
-    # Your investigation logic
-    await handler.on_event(ThinkEvent(iteration=1, reasoning="Investigating..."))
+    # Your payment-review logic
+    await handler.on_event(ThinkEvent(iteration=1, reasoning="Reviewing..."))
     await handler.on_complete()
 """)
     print("-" * 40)
@@ -308,7 +310,7 @@ async def run_agent(handler):
         ("after_invocation", "After agent invocation"),
     ]
 
-    print("Event types a SOC dashboard can subscribe to:")
+    print("Event types a payments dashboard can subscribe to:")
     for event_type, description in supported_events:
         print(f"  {event_type}: {description}")
 
@@ -319,12 +321,12 @@ async def run_agent(handler):
 
     print("1. Always set proper SSE headers")
     print("2. Include event IDs so dashboards can reconnect with Last-Event-ID")
-    print("3. Send a 'done' event when the investigation terminates")
-    print("4. Send error events on failure — never leave the analyst's stream hanging")
+    print("3. Send a 'done' event when the payment review terminates")
+    print("4. Send error events on failure — never leave the reviewer's stream hanging")
     print("5. Use AsyncSSEHandler for real streaming, not the buffered one")
     print("6. Keep individual event payloads small (< 65KB)")
     print("7. Implement client-side reconnection")
-    print("8. Send periodic heartbeats during long-running scans")
+    print("8. Send periodic heartbeats during long-running batch settlements")
 
     heartbeat = SSEMessage(event="heartbeat", data='{"status": "alive"}')
     print(f"\nHeartbeat message:\n{heartbeat.format()}")

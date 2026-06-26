@@ -1,10 +1,10 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
-"""Notebook 57: Multi-modal phishing triage — lure pages, intel, image, speech.
+"""Notebook 57: Multi-modal dispute triage — order pages, ledger, image, speech.
 
-A reported phishing case is rarely just text. The analyst has a lure URL
-to fetch, a threat-intel feed to query, a screenshot of the lure page to
-reproduce for the awareness-training corpus, and a vishing voicemail to
+A chargeback case is rarely just text. The payments analyst has a merchant
+order URL to fetch, an internal transactions ledger to query, a receipt
+image to regenerate for the dispute packet, and a customer voicemail to
 transcribe. Set a provider on the Agent kwargs (web_search, web_fetch,
 image_generator, speech_provider) and Tulip auto-registers a matching
 @tool. The model calls it the same way it calls a hand-written tool —
@@ -12,9 +12,9 @@ you don't write the wrapper.
 
 - Four Protocols under tulip.providers: search, fetch, image, speech.
 - Live demo with HTTPXWebFetcher (no API key needed) — example.com
-  stands in for a reported suspicious lure URL.
+  stands in for a merchant's order-confirmation URL.
 - Bring-your-own: any duck-typed object that implements the protocol
-  method, e.g. an internal threat-intel search.
+  method, e.g. an internal transaction-ledger search.
 - Optional OpenAI-backed providers (image, speech, search-preview).
 
 Run it
@@ -74,7 +74,7 @@ def example_auto_register():
     agent = Agent(
         config=AgentConfig(
             model=get_model(),
-            system_prompt="Use web_fetch to retrieve reported URLs for analysis when asked.",
+            system_prompt="Use web_fetch to retrieve a merchant's order URL for dispute review when asked.",
             max_iterations=4,
             web_fetch=fetcher,
         )
@@ -92,8 +92,8 @@ def example_auto_register():
     print("`speak` and/or `transcribe` depending on `provider.capabilities`).")
 
 
-# Part 3: live demo — fetch the page behind a reported link through the
-# auto-registered tool. example.com stands in for the suspicious URL.
+# Part 3: live demo — fetch the order-confirmation page behind a disputed
+# charge through the auto-registered tool. example.com stands in for it.
 
 
 async def example_live_fetch():
@@ -114,7 +114,7 @@ async def example_live_fetch():
 
     # Calling tool.fn directly bypasses the model so we can verify wiring
     # without spending a round-trip on a trivial fetch. In a real triage
-    # run the model would call this with the URL from the phishing report.
+    # run the model would call this with the order URL from the dispute case.
     rendered = await tool.fn(url="https://example.com", max_chars=400)
     print("First 200 chars of the rendered tool output:")
     print(rendered[:200])
@@ -122,24 +122,24 @@ async def example_live_fetch():
 
 
 # Part 4: any duck-typed object implementing the protocol method works —
-# here, a stand-in for an internal threat-intel search service.
+# here, a stand-in for an internal transaction-ledger search service.
 
 
 def example_byo_backend():
-    """A toy threat-intel search provider — any duck-typed class works."""
-    print("\n=== Part 4: Bring your own intel backend ===\n")
+    """A toy transaction-ledger search provider — any duck-typed class works."""
+    print("\n=== Part 4: Bring your own ledger backend ===\n")
 
     from tulip.providers.types import SearchResult
 
-    class StaticIntelSearch:
-        """Hard-coded intel hits — swap for your real intel-platform client."""
+    class StaticLedgerSearch:
+        """Hard-coded ledger hits — swap for your real payments-ledger client."""
 
         async def search(self, query, *, max_results=5):
             return [
                 SearchResult(
-                    title=f"Intel hit {i + 1} for {query!r}",
-                    url=f"https://intel.example/advisories/{i}",
-                    snippet="advisory snippet (mock)",
+                    title=f"Transaction {i + 1} matching {query!r}",
+                    url=f"https://ledger.example/txns/{i}",
+                    snippet="settled charge, USD 49.00 (mock)",
                 )
                 for i in range(min(max_results, 3))
             ]
@@ -147,15 +147,15 @@ def example_byo_backend():
     agent = Agent(
         config=AgentConfig(
             model=get_model(),
-            system_prompt="Use web_search to query the intel feed when asked about an indicator.",
-            web_search=StaticIntelSearch(),
+            system_prompt="Use web_search to query the transaction ledger when asked about a charge.",
+            web_search=StaticLedgerSearch(),
         )
     )
     print(f"Registered tools: {sorted(agent._tool_registry.tools.keys())}")
     print()
     print("The model now has a `web_search(query, max_results)` tool that")
-    print("calls our StaticIntelSearch.search() under the hood. Swap it for")
-    print("your intel-platform client and the agent queries live feeds.")
+    print("calls our StaticLedgerSearch.search() under the hood. Swap it for")
+    print("your payments-ledger client and the agent queries live transactions.")
 
 
 # Part 5: OpenAI-backed providers (only if OPENAI_API_KEY is set).
@@ -196,9 +196,9 @@ def example_openai_providers():
     print()
     print("Set them on AgentConfig and the agent gets `generate_image`, ")
     print("`speak`, and `transcribe` tools without extra wiring — e.g.")
-    print("reproducing a reported lure screenshot for the awareness-training")
-    print("corpus, spoken advisories, and vishing-voicemail transcription")
-    print("in one phishing-triage agent.")
+    print("regenerating a receipt image for the dispute packet, spoken")
+    print("case summaries, and customer-voicemail transcription in one")
+    print("chargeback-triage agent.")
 
 
 if __name__ == "__main__":

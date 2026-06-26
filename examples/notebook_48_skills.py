@@ -1,14 +1,14 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
-"""Notebook 48: skills — a SOC analyst skill library with progressive disclosure.
+"""Notebook 48: skills — a payments-ops skill library with progressive disclosure.
 
 A Skill (the AgentSkills.io shape) bundles a name, a description, and
-a block of instructions — think of each one as a vetted analyst
-procedure: alert triage, secure code review, safe SQL against the
-SIEM. The ``SkillsPlugin`` exposes a catalog of skills to the agent
-and only injects the full instructions once the agent activates a
+a block of instructions — think of each one as a vetted operations
+procedure: dispute triage, refund-policy review, safe queries against
+the ledger. The ``SkillsPlugin`` exposes a catalog of skills to the
+agent and only injects the full instructions once the agent activates a
 specific one. Progressive disclosure keeps the system prompt small and
-the analyst agent focused on the procedure that matters right now.
+the payments agent focused on the procedure that matters right now.
 
 - ``Skill`` — built in code or loaded from a ``SKILL.md`` file with
   YAML front-matter.
@@ -33,7 +33,7 @@ Prerequisites:
   ``openai`` / ``anthropic`` / ``mock``.
 - Optional: an ``examples/skills/`` directory with one or more
   ``SKILL.md`` files for Part 2 to find (the bundled ones include
-  incident-triage and a security-minded code-review checklist).
+  dispute-triage and a refund-policy review checklist).
 """
 
 from pathlib import Path
@@ -54,29 +54,30 @@ def example_programmatic():
 
     model = get_model()
 
-    alert_triage = Skill(
-        name="alert-triage",
-        description="Use when triaging a SOC alert to decide true/false positive.",
+    dispute_triage = Skill(
+        name="dispute-triage",
+        description="Use when triaging a card dispute to decide valid/invalid chargeback.",
         instructions=(
-            "# Alert Triage Checklist\n"
-            "1. Check the source IP's reputation and history\n"
-            "2. Check whether the account behaviour matches its baseline\n"
-            "3. Classify as TRUE POSITIVE or FALSE POSITIVE with confidence\n"
+            "# Dispute Triage Checklist\n"
+            "1. Check the cardholder's dispute reason code and history\n"
+            "2. Check whether the transaction matches the account's spend baseline\n"
+            "3. Classify as VALID CHARGEBACK or INVALID CHARGEBACK with confidence\n"
             "4. Report findings as: FINDING: <description>"
         ),
     )
 
     agent = Agent(
         config=AgentConfig(
-            system_prompt="You are a SOC analyst. Use available skills.",
+            system_prompt="You are a payments operations analyst. Use available skills.",
             max_iterations=5,
             model=model,
-            skills=[alert_triage],
+            skills=[dispute_triage],
         )
     )
 
     result = agent.run_sync(
-        "Triage: 14 failed logins for 'admin' from 198.51.100.7 followed by a success at 03:14Z"
+        "Triage: $420 chargeback on card ending 4242 at merchant 'Acme', "
+        "cardholder claims 'item not received' but tracking shows delivered at 03:14Z"
     )
     print(f"Response: {result.message[:200]}...")
 
@@ -86,7 +87,7 @@ def example_programmatic():
 
 # =============================================================================
 # Part 2: Load every SKILL.md under a directory — the team's vetted
-#         procedure library (incident-triage, code-review, ioc-enrichment, siem-query, …).
+#         procedure library (dispute-triage, refund-policy, fraud-scoring, ledger-query, …).
 # =============================================================================
 
 
@@ -107,7 +108,7 @@ def example_filesystem():
     agent = Agent(model=get_model(max_tokens=80), system_prompt="Reply in one sentence.")
     t0 = _t.perf_counter()
     res = agent.run_sync(
-        "In one sentence, why should a SOC version its analyst procedures as "
+        "In one sentence, why should a payments team version its operations procedures as "
         "reviewable SKILL.md files instead of hard-coding prompts in source?"
     )
     dt = _t.perf_counter() - t0
@@ -127,11 +128,11 @@ def example_format():
 
     print("""
 ---
-name: ioc-enrichment
-description: Use when the user provides an indicator (hash, IP, domain) to enrich.
-allowed-tools: lookup_hash whois_domain
+name: bin-enrichment
+description: Use when the user provides a card indicator (BIN, PAN prefix, issuer) to enrich.
+allowed-tools: lookup_bin fetch_issuer
 metadata:
-  author: soc-team
+  author: payments-team
   version: "1.0"
 ---
 
@@ -154,8 +155,8 @@ Place additional files in:
     t0 = _t.perf_counter()
     res = agent.run_sync(
         "Write a one-paragraph SKILL.md description for a skill named "
-        "'log-forensics' that helps an agent reconstruct an attacker's "
-        "activity timeline from authentication logs."
+        "'ledger-forensics' that helps an agent reconstruct a transaction's "
+        "settlement timeline from authorization and clearing logs."
     )
     dt = _t.perf_counter() - t0
     print(

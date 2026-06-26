@@ -1,12 +1,13 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
-"""Notebook 36: reasoning patterns — a missed-detection postmortem.
+"""Notebook 36: reasoning patterns — a missed-redaction postmortem.
 
-A purple-team exercise dropped the EICAR test file on a workstation and
-no alert fired. The postmortem question is why the detection pipeline
-stayed silent: a stale EDR agent and a saturated alert queue amount to an
-unintended defense gap (the kind an adversary would exploit deliberately —
-MITRE ATT&CK T1562.001, Impair Defenses: Disable or Modify Tools). Each
+A privacy-team exercise seeded a synthetic PII canary (a fake SSN) into a
+data export and the redaction pipeline never flagged it. The postmortem
+question is why the redaction pipeline stayed silent: a stale PII
+classifier model and a saturated scan queue amount to an unintended
+privacy gap (the kind that ships personal data in the clear — a
+data-protection-by-design failure under GDPR Art. 25 / Art. 32). Each
 part exercises one piece of the Tulip reasoning toolkit against that
 postmortem with a live model and prints a
 ``[model call: X.XXs · prompt→completion tokens]`` banner.
@@ -16,7 +17,7 @@ postmortem is how a false root cause gets written into a runbook, so each
 claim is scored against tool evidence before it is allowed to stand.
 
 - ``@tool`` + ``Agent(tools=...)`` — let the agent call real Python
-  functions over the detection pipeline's logs and stats.
+  functions over the redaction pipeline's logs and stats.
 - ``Agent(reflexion=True)`` and ``Reflector`` — Reflexion is a
   self-critique loop; the agent looks at its own trajectory and
   decides whether it is making progress or stuck.
@@ -26,7 +27,7 @@ claim is scored against tool evidence before it is allowed to stand.
   decide whether to replan. Ungrounded claims in a postmortem are how
   false root causes get written into runbooks.
 - ``CausalChain`` / ``build_causal_chain`` — build and walk a graph of
-  cause/effect relationships from drop to missed alert.
+  cause/effect relationships from canary seed to shipped-in-the-clear PII.
 
 Run it:
     # The bundled mock model is the default; set TULIP_MODEL_PROVIDER for a live provider.
@@ -94,13 +95,13 @@ def _llm_call(prompt: str, *, system: str = "Reply in one sentence.", max_tokens
 
 
 class ClaimList(BaseModel):
-    """Three factual claims about the missed detection."""
+    """Three factual claims about the missed redaction."""
 
     claims: list[str] = Field(..., description="Three short factual claims.")
 
 
 class EventList(BaseModel):
-    """Causal-ordered list of events leading to the missed alert."""
+    """Causal-ordered list of events leading to the unredacted export."""
 
     events: list[str] = Field(..., description="Events in causal order.")
 
@@ -111,21 +112,21 @@ class EventList(BaseModel):
 
 
 @tool
-def read_detection_logs(file: str) -> str:
-    """Pull the last few lines of the detection pipeline's log."""
+def read_redaction_logs(dataset: str) -> str:
+    """Pull the last few lines of the redaction pipeline's log."""
     return (
-        "[14:02:01] INFO purple-team EICAR test file written on ws-0231\n"
-        "[14:02:14] WARN edr heartbeat stale on ws-0231 (last seen 46 min ago)\n"
-        "[14:02:18] ERROR alert pipeline dropped 3 events (queue full)"
+        "[14:02:01] INFO privacy-team synthetic PII canary seeded into export ds-0231\n"
+        "[14:02:14] WARN classifier heartbeat stale on ds-0231 (last seen 46 min ago)\n"
+        "[14:02:18] ERROR redaction pipeline dropped 3 records (scan queue full)"
     )
 
 
 @tool
-def query_siem(host: str) -> str:
-    """Query the SIEM for the host's detection-pipeline vital signs."""
+def query_dlp(dataset: str) -> str:
+    """Query the DLP console for the dataset's redaction-pipeline vital signs."""
     return (
-        f"host={host} edr_agent_version=4.2.1 latest_version=5.0.3 events_dropped=3 "
-        "alerts_fired=0 detection_latency_min=45 queue_depth_pct=98"
+        f"dataset={dataset} classifier_version=4.2.1 latest_version=5.0.3 records_skipped=3 "
+        "redactions_applied=0 scan_latency_min=45 queue_depth_pct=98"
     )
 
 
@@ -139,7 +140,7 @@ def main():
 
     check_structured_output_capable()
     print("=" * 60)
-    print("Notebook 36: reasoning patterns — missed-detection postmortem")
+    print("Notebook 36: reasoning patterns — missed-redaction postmortem")
     print("=" * 60)
 
     # =========================================================================
@@ -148,15 +149,15 @@ def main():
     print("\n=== Part 1: Reflexion on a real Agent run (Agent + tool) ===\n")
     postmortem_agent = Agent(
         model=get_model(max_tokens=300),
-        tools=[read_detection_logs],
+        tools=[read_redaction_logs],
         system_prompt=(
-            "You are a detection engineer running a missed-detection postmortem. "
-            "Use the read_detection_logs tool to investigate, then summarise "
+            "You are a privacy engineer running a missed-redaction postmortem. "
+            "Use the read_redaction_logs tool to investigate, then summarise "
             "what went wrong in one short sentence."
         ),
     )
     postmortem_result = postmortem_agent.run_sync(
-        "Investigate why no alert fired for the purple-team EICAR drop on ws-0231."
+        "Investigate why the synthetic PII canary in export ds-0231 was never redacted."
     )
     _banner(postmortem_result, "Part 1")
     print(f"Agent verdict: {postmortem_result.message[:200]}")
@@ -173,15 +174,15 @@ def main():
     # =========================================================================
     print("\n=== Part 2: Loop detection (model explains, SDK detects) ===\n")
     rationale = _llm_call(
-        "In one sentence, why does an autonomous security agent need to detect "
+        "In one sentence, why does an autonomous privacy agent need to detect "
         "when it's stuck calling the same tool over and over?",
-        system="Explain like a SOC lead.",
+        system="Explain like a data protection officer.",
     )
     print(f"AI rationale: {rationale}")
 
     loop_state = AgentState(
         agent_id="looping_agent",
-        tool_history=("search_siem",) * 4,
+        tool_history=("query_dlp",) * 4,
     )
     loop_reflection = reflector.reflect(loop_state)
     print(f"Assessment: {loop_reflection.assessment.value}")
@@ -196,7 +197,7 @@ def main():
     print(f"Quick assessment: {quick.assessment.value}")
     suggestion = _llm_call(
         f"An agent's reflexion module says it is '{quick.assessment.value}' "
-        "after one tool call. Suggest the detection engineer's next step in one sentence.",
+        "after one tool call. Suggest the privacy engineer's next step in one sentence.",
         max_tokens=80,
     )
     print(f"AI next step: {suggestion}")
@@ -210,13 +211,13 @@ def main():
 
     evidence_agent = Agent(
         model=get_model(max_tokens=200),
-        tools=[query_siem],
+        tools=[query_dlp],
         system_prompt=(
-            "You are a SOC analyst. Call query_siem for host ws-0231 and report "
+            "You are a privacy analyst. Call query_dlp for dataset ds-0231 and report "
             "back what it returned, verbatim, on a single line."
         ),
     )
-    evidence_result = evidence_agent.run_sync("Pull the detection stats for ws-0231 right now.")
+    evidence_result = evidence_agent.run_sync("Pull the redaction stats for ds-0231 right now.")
     _banner(evidence_result, "Part 4a")
     evidence_line = evidence_result.message
     evidence_pieces = [chunk.strip() for chunk in evidence_line.split() if "=" in chunk]
@@ -230,14 +231,14 @@ def main():
         model=get_model(max_tokens=200),
         output_schema=ClaimList,
         system_prompt=(
-            "You are a SOC analyst writing a missed-detection postmortem. Make "
-            "exactly three factual claims about the detection pipeline based on "
+            "You are a privacy analyst writing a missed-redaction postmortem. Make "
+            "exactly three factual claims about the redaction pipeline based on "
             "the stats provided."
         ),
     )
     claim_result = claim_agent.run_sync(
-        f"Stats from query_siem: {evidence_line}\n"
-        "Produce three factual claims about the detection-pipeline state."
+        f"Stats from query_dlp: {evidence_line}\n"
+        "Produce three factual claims about the redaction-pipeline state."
     )
     _banner(claim_result, "Part 4b")
 
@@ -273,14 +274,14 @@ def main():
         print(guidance)
         plan = _llm_call(
             f"The grounding evaluator gave this guidance:\n{guidance}\n"
-            "List two concrete tools the SOC analyst should call next, one per line.",
+            "List two concrete tools the privacy analyst should call next, one per line.",
             max_tokens=120,
         )
         print(f"\nAI replan plan:\n{plan}")
     else:
         observation = _llm_call(
             "All postmortem claims are sufficiently grounded. In one sentence, "
-            "what does the detection engineer do next?",
+            "what does the privacy engineer do next?",
             max_tokens=80,
         )
         print(f"AI says: {observation}")
@@ -293,13 +294,14 @@ def main():
         model=get_model(max_tokens=300),
         output_schema=EventList,
         system_prompt=(
-            "You are a detection engineer describing a missed-detection "
+            "You are a privacy engineer describing a missed-redaction "
             "timeline. Output exactly five events in causal order, no numbering."
         ),
     )
     event_result = event_agent.run_sync(
-        "Walk through how an outdated EDR agent plus a saturated event queue "
-        "leads to a missed alert. Output exactly five events in causal order."
+        "Walk through how an outdated PII classifier plus a saturated scan queue "
+        "leads to a missed redaction (PII shipped in the clear). Output exactly "
+        "five events in causal order."
     )
     _banner(event_result, "Part 6")
     parsed_events: EventList | None = event_result.parsed
@@ -366,7 +368,7 @@ def main():
             print(f"  Built-in hint: {c.resolution_hint}")
         ai_fix = _llm_call(
             f"A causal chain has this conflict: {c.description}. Suggest a "
-            "one-sentence resolution a detection engineer could apply.",
+            "one-sentence resolution a privacy engineer could apply.",
             max_tokens=80,
         )
         print(f"  AI resolution: {ai_fix}\n")
@@ -388,8 +390,8 @@ def main():
     print("\n=== Part 10: Full reasoning pipeline ===\n")
     pipeline_paragraph = _llm_call(
         "Walk through this reasoning pipeline as one short paragraph: "
-        "(1) the agent makes claims about a missed detection, "
-        "(2) the grounding evaluator checks each claim against SIEM evidence, "
+        "(1) the agent makes claims about a missed redaction, "
+        "(2) the grounding evaluator checks each claim against DLP evidence, "
         "(3) replan guidance fires if grounding is too low, "
         "(4) a causal chain is built from the timeline events, "
         "(5) reflexion monitors the agent for loops. "
@@ -405,15 +407,15 @@ def main():
     reflexive_agent = Agent(
         model=get_model(max_tokens=300),
         system_prompt=(
-            "You are a detection-engineering root-cause analyst. Reason step by "
+            "You are a privacy-engineering root-cause analyst. Reason step by "
             "step before giving a final one-paragraph conclusion."
         ),
         reflexion=True,
     )
     live = reflexive_agent.run_sync(
-        "A purple-team EICAR drop on ws-0231 produced no alert. The EDR agent "
-        "is two major versions behind and the alert queue sat at 98% capacity. "
-        "What's the most likely root cause?"
+        "A synthetic PII canary in export ds-0231 was shipped without redaction. "
+        "The PII classifier is two major versions behind and the scan queue sat "
+        "at 98% capacity. What's the most likely root cause?"
     )
     _banner(live, "Part 11")
     print(f"Conclusion: {live.message[:400]}")
