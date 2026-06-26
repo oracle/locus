@@ -3,8 +3,8 @@
 </p>
 
 <p align="center">
-  <strong>Tulip — the control layer for agents that <em>act</em>.</strong><br>
-  <em>Add policy gating, human approval, and a tamper-evident audit trail to the agent you already have — on any framework (LangChain, CrewAI, the OpenAI Agents SDK, …). Every risky action — move money, delete a resource, disable an account, isolate a host — runs only after it clears the gate. You can fool the model; you can't talk past the runtime. Proven first in security, where a wrong action is a breach.</em>
+  <strong>Tulip — an open-source agentic framework with control built in.</strong><br>
+  <em>Build agents the usual way — tools, memory, multi-agent, RAG — with a security and control layer native to the core. Every risky action (issue a refund, ship a deploy, change an account) runs only after it clears a policy you write, pauses for a human when the stakes are high, and lands on a tamper-evident audit trail. Already on another framework? Drop just the control layer into the agent you have — LangChain, CrewAI, the OpenAI Agents SDK. Proven first in security, where a wrong action is a breach.</em>
 </p>
 
 <p align="center">
@@ -43,9 +43,11 @@
 
 ## What is Tulip?
 
-**Tulip is the control layer for AI agents** — add it to the agent you already have,
-on any framework, and it decides whether each action is allowed to run, holds it for a
-human when the stakes warrant, and records the decision so you can prove what happened.
+**Tulip is an open-source agentic framework with a security and control layer built into
+the core.** Build agents the usual way — tools, memory, multi-agent orchestration, RAG —
+and every action they take is checked against rules you write before it runs, held for a
+human when the stakes warrant, and recorded so you can prove what happened. Already have an
+agent on another framework? Drop just the control layer in instead.
 
 Frontier models are smart. The one thing they **can't** do — no matter how smart —
 is *prove they won't take a catastrophic action.* That's the gap Tulip closes:
