@@ -278,5 +278,10 @@ examples/*.wav
 # scrub of docs/internal/** is REQUIRED before this repo goes public.
 docs/internal/
 
+# Internal market/positioning briefs + proposal examples — local-only, must
+# not ship public. NOTE: the brief remains in git HISTORY until a filter-repo
+# scrub of docs/market/** is run.
+docs/market/
+
 # Local credentials — never commit (home: ~/Projects/tuliplabs/secrets.env)
 secrets.env

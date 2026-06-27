@@ -6,6 +6,19 @@ onward — [Semantic Versioning](https://semver.org). See
 [`DEPRECATION.md`](DEPRECATION.md) for the deprecation and breaking-change
 policy.
 
+## [Unreleased]
+
+### Changed
+
+- **Positioning: Tulip leads as a first-class agentic framework — "the safest way to
+  build agentic AI."** The identity is framework-first and safety-led: control is native
+  to the core via three points — the **cognitive router** (PRISM) picks the runtime shape,
+  **GSAR** grounds every claim (or abstains), and the **admission gate** (`admit()`) admits
+  every risky action — packaged as safety. AI security is repositioned from the SDK's
+  identity to its **flagship proof domain**. README, the `tulipagents.ai` landing, package
+  description / keywords / classifiers, and `CONTRIBUTING` reflect the framework-first,
+  safety-led identity. No API changes.
+
 ## [1.1.0] - 2026-06-24
 
 ### Added

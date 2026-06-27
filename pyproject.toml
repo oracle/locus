@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "tulip-agents"
 version = "2.0.0"
-description = "The SDK for agents you can let act — every risky action policy-gated and human-approvable, every step a tamper-evident replayable event. Drop the gate + audit into any agent; proven first in security."
+description = "The safest way to build agentic AI — a full-stack, open-source agent SDK where control is native: a cognitive router picks the shape, GSAR grounds every claim, and an admission gate admits every risky action. Security is its flagship proof domain."
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
@@ -15,17 +15,24 @@ authors = [
 ]
 keywords = [
     "agents",
+    "agent-framework",
+    "agentic",
     "ai",
-    "cybersecurity",
-    "grounding",
-    "incident-response",
     "llm",
+    "multi-agent",
     "orchestration",
+    "cognitive-router",
+    "rag",
+    "grounding",
+    "gsar",
+    "safety",
     "pydantic",
     "react",
     "reflexion",
     "security",
+    "cybersecurity",
     "soc",
+    "incident-response",
     "threat-intelligence",
 ]
 classifiers = [
@@ -39,6 +46,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
     "Topic :: Security",
     "Typing :: Typed",
 ]

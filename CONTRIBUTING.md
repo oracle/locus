@@ -1,7 +1,8 @@
 # Contributing
 
-Tulip — the SDK for **agents you can let act** (every risky action policy-gated,
-human-approvable, and recorded in a tamper-evident trail) — is vendor-neutral,
+Tulip — **the safest way to build agentic AI**, a full-stack, open-source agent
+SDK where control is native (a cognitive router picks the shape, GSAR grounds
+every claim, an admission gate admits every risky action) — is vendor-neutral,
 production-tested, and open to everyone. The bar everywhere: *a result ships on
 evidence or it abstains; a side effect runs only gated and audited — never on
 best intentions.* New probes prove their success with an observable effect, and

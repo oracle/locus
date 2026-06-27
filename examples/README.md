@@ -1,9 +1,11 @@
-# tulip examples — the cybersecurity agent SDK
+# tulip examples — build agents with Tulip
 
-Every runnable file in this directory is a security workflow. The
-snippets below are the smallest possible shapes; the numbered
-`notebook_*.py` files build them out into SOC triage, IOC enrichment,
-phishing analysis, vulnerability research, and incident response.
+Every runnable file in this directory is a self-contained agent you can run.
+They span domains — payments, infrastructure, support, and data — plus a
+first-class **security** track (SOC triage, IOC enrichment, phishing analysis,
+vulnerability research, incident response), the flagship proof domain Tulip was
+hardened on. The snippets below are the smallest possible shapes; the numbered
+`notebook_*.py` files build them out.
 
 ## Quick Start
 
@@ -15,12 +17,12 @@ model = get_model("openai:gpt-4o")  # or "anthropic:claude-sonnet-4-6"
 
 agent = Agent(
     model=model,
-    system_prompt="You are a SOC triage analyst. Cite the evidence behind every verdict.",
+    system_prompt="You are a concise assistant. Cite the evidence behind every answer.",
 )
 
 # Synchronous
-result = agent.run_sync("Triage: outbound beaconing from 192.0.2.14 to a domain registered yesterday.")
-print(result.message)  # a one-paragraph verdict with the evidence that backs it
+result = agent.run_sync("Summarize the trade-offs of moving checkout to a queue.")
+print(result.text)  # a one-paragraph answer with the evidence that backs it
 ```
 
 A model is just a string: the prefix before the colon (`openai:`,
