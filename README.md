@@ -5,8 +5,8 @@
 <p align="center">
   <strong>Tulip — the safest way to build agentic AI.</strong><br>
   <em>An open-source, full-stack agent SDK. Build agents the usual way — tools, memory,
-  multi-agent, RAG — on a runtime where control is native: the cognitive router picks the
-  right shape for the task, GSAR grounds every claim (or makes the agent abstain), and the
+  multi-agent, RAG — on a runtime where control is native: the <a href="https://tulipagents.ai/concepts/router/">cognitive router</a> picks the
+  right shape for the task, <a href="https://tulipagents.ai/concepts/gsar/">GSAR</a> grounds every claim (or makes the agent abstain), and the
   admission gate lets a consequential action run only after it clears a policy you write —
   pausing for a human when the stakes are high and landing on a tamper-evident audit trail.
   Safe by construction, not by reminder.</em>
@@ -85,10 +85,10 @@ multi-agent shapes, streaming, and a typed event stream. What makes it *safe* is
 control isn't a guardrail you remember to add — it's wired through three points in the core:
 
 - **The router controls *which shape* runs.** Describe a task in plain language; the
-  **PRISM cognitive router** fills a typed `GoalFrame` and a **deterministic** picker
+  **[PRISM cognitive router](https://tulipagents.ai/concepts/router/)** fills a typed `GoalFrame` and a **deterministic** picker
   compiles it to the right runtime shape. The model classifies — it never authors the
   topology.
-- **GSAR controls *what gets asserted*.** Every claim is partitioned grounded / ungrounded
+- **[GSAR](https://tulipagents.ai/concepts/gsar/) controls *what gets asserted*.** Every claim is partitioned grounded / ungrounded
   / contradicted / unknown against typed evidence. Below threshold the agent regenerates,
   replans, or **abstains** — an ungrounded claim is a false result *by construction* and
   never ships.
