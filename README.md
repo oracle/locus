@@ -328,7 +328,7 @@ async def safe_refund(order_id: str, usd: float):
 Production payments now require a human, the attempt is recorded whether it ran or not, and
 your agent keeps working unchanged. The chain is short and every link is real:
 
-**action → policy → approval → admission → audit**
+`action → policy → approval → admission → audit`
 
 - **Policy + approval** — `approve()` weighs your `ControlPolicy` (blast radius,
   `require_human_for`, and — when you have it — a grounding/verification score) and returns
