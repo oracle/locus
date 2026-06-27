@@ -97,9 +97,9 @@ control isn't a guardrail you remember to add — it's wired through three point
   `admit()`: a policy check *outside the model*, held for a human when the stakes warrant,
   recorded on a tamper-evident trail either way.
 
-> **You can fool the model; you can't talk past the gate.** Jailbreak it, poison its
-> context, confuse its reasoning — a side-effecting call still can't run if your policy
-> says no. A wall, not a warning. See
+> **You can fool the model; you can't talk past the gate.** The admission check is real code,
+> outside the model — so even a jailbroken or misled agent can't fire a side-effecting call
+> your policy denies. Try it:
 > [`examples/can_you_make_it_go_rogue.py`](examples/can_you_make_it_go_rogue.py).
 
 Frontier models are brilliant, and getting more so. The one thing a model *structurally
@@ -123,17 +123,17 @@ model knows when to reach for it.
 from tulip import Agent, tool
 
 @tool
-def domain_reputation(domain: str) -> str:
-    """Return registrar age, category, and reputation for a domain."""
-    return intel_db.lookup(domain)
+def order_status(order_id: str) -> str:
+    """Look up the current status of a customer order."""
+    return orders.get(order_id)
 
 agent = Agent(
     model="openai:gpt-4o",
-    tools=[domain_reputation],
-    system_prompt="Cite the evidence behind every verdict.",
+    tools=[order_status],
+    system_prompt="You are a helpful support assistant. Be concise.",
 )
 
-print(agent.run_sync("Is login.example.net safe to allow?").text)
+print(agent.run_sync("Where's my order ord-4821?").text)
 ```
 
 For tools where a duplicate call would hurt — moving money, paging an on-call, filing a
@@ -433,13 +433,12 @@ pip install "tulip-agents[sdk]"           # everything
 
 ---
 
-## Flagship proof domain — AI security
+## Agent security
 
-Tulip earned its control layer in the hardest place to act on a machine's say-so: security.
-There, a hallucinated claim isn't an embarrassment — it's a false positive that burns an
-analyst's night, or a false negative that ships a breach. The same three control points that
-make *any* agent safe (router, grounding, admission) are most visibly worth it here, so the
-SDK ships a first-class AI-security track.
+Security is Tulip's flagship proof domain — the place where control matters most, so it's
+where the SDK is hardened hardest. The same three control points that make *any* agent safe
+(router, grounding, admission) are most visibly worth it here, so the SDK ships a first-class
+agent-security track.
 
 Point a `Target` at an AI system — a remote endpoint, an in-process `tulip.Agent`, or an A2A
 peer — and run the OWASP-ASI / MITRE-ATLAS suite. Every result is a grounded `Evidence` or an
