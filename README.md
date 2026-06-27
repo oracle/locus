@@ -226,10 +226,14 @@ action to an approval-gated agent — chosen by protocol selection, not by the m
 
 ---
 
-## Eight orchestration shapes
+## Every shape for building multi-agent workflows
 
-When one agent isn't enough, the SDK gives you seven in-process shapes plus cross-process
-A2A. Every pattern uses the same `Agent` class and the same event stream.
+When one agent isn't enough, Tulip ships **every orchestration shape as a first-class
+primitive** — so you can build any multi-agent workflow without leaving the framework:
+sequential pipeline, parallel fan-out, refinement loop, explicit state graph, orchestrator +
+specialists, swarm, handoff chain, and a cross-process A2A mesh. They all use the same
+`Agent` class and the same event stream — outgrow one pattern and the next is already here,
+no dropping to a lower-level library.
 
 | Pattern | When to use |
 |---|---|
