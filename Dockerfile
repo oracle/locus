@@ -1,77 +1,70 @@
-# Multi-stage Dockerfile for a tulip AgentServer deployment.
+# syntax=docker/dockerfile:1.7
+#
+# Multi-stage image for a tulip AgentServer deployment.
+#
+# Base: Amazon Linux 2023 (EKS / Graviton-arm64). A venv is built in the builder
+# and copied into a minimal runtime; non-root 10001, readOnlyRootFilesystem-safe.
 #
 # Build:
-#     docker build -t tulip-agent:latest .
-#
-# Run (with a model-provider API key and a bearer-token server key):
-#     docker run -p 8080:8080 \
-#       -e OPENAI_API_KEY=sk-... \
-#       -e TULIP_SERVER_API_KEY=secret \
-#       tulip-agent:latest
+#   docker build -t tulip-agent:latest .
+# Run (with a model-provider key and a bearer server key):
+#   docker run -p 8080:8080 -e OPENAI_API_KEY=sk-... -e TULIP_SERVER_API_KEY=secret \
+#     tulip-agent:latest
 #
 # The image is built around `tulip.server.AgentServer`. Replace
-# `your_app:server.app` in the CMD with the import path of your own
-# AgentServer instance.
+# `app:server.app` in the CMD with the import path of your own AgentServer.
 
-# -----------------------------------------------------------------------------
-# Stage 1 — builder. Resolves wheels for tulip[server,checkpoints,openai].
-# -----------------------------------------------------------------------------
-FROM python:3.12-slim AS builder
+ARG AL2023=public.ecr.aws/amazonlinux/amazonlinux:2023
+ARG PYTHON=python3.12
 
-ENV PIP_NO_CACHE_DIR=1 \
+# ─── builder ──────────────────────────────────────────────────────────
+FROM ${AL2023} AS builder
+ARG PYTHON
+ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PIP_NO_CACHE_DIR=1 \
+    PATH="/app/.venv/bin:$PATH"
 
-# Build deps only — gcc for native checkpointer drivers (psycopg, etc.).
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
+# gcc + libpq-devel for native checkpointer drivers (psycopg) on arm64.
+RUN dnf -y install --setopt=install_weak_deps=False \
+        ${PYTHON} ${PYTHON}-pip ${PYTHON}-devel gcc libpq-devel \
+    && dnf clean all && rm -rf /var/cache/dnf
 
-WORKDIR /build
+WORKDIR /app
+RUN ${PYTHON} -m venv /app/.venv
 
-# Copy minimal package metadata first to maximize layer caching.
 COPY pyproject.toml README.md LICENSE.txt ./
-COPY src/ ./src/
+COPY src ./src
 
-# Install tulip + the OpenAI provider + the AgentServer extras + the
-# checkpoint backends. Add ``[telemetry,rag,anthropic]`` to taste.
-RUN pip install --user --no-cache-dir ".[openai,server,checkpoints]"
+# tulip + the OpenAI provider + AgentServer + checkpoint backends.
+# Add [telemetry,rag,anthropic] to taste.
+RUN --mount=type=cache,target=/root/.cache/pip pip install ".[openai,server,checkpoints]"
 
-# -----------------------------------------------------------------------------
-# Stage 2 — runtime. Slim image; non-root user.
-# -----------------------------------------------------------------------------
-FROM python:3.12-slim AS runtime
-
+# ─── runtime ──────────────────────────────────────────────────────────
+FROM ${AL2023} AS runtime
+ARG PYTHON
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PATH=/home/tulip/.local/bin:$PATH
+    PATH="/app/.venv/bin:$PATH"
 
-# Runtime deps only (libpq for asyncpg). curl is used by HEALTHCHECK.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq5 \
-    curl \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+# libpq for asyncpg/psycopg at runtime; ca-certificates for outbound TLS.
+RUN dnf -y install --setopt=install_weak_deps=False \
+        ${PYTHON} libpq ca-certificates shadow-utils \
+    && groupadd -g 10001 tulip \
+    && useradd -u 10001 -g 10001 -M -s /sbin/nologin tulip \
+    && dnf -y remove shadow-utils \
+    && dnf clean all && rm -rf /var/cache/dnf
 
-# Non-root user.
-RUN useradd --create-home --shell /bin/bash --uid 10001 tulip
-USER tulip
-WORKDIR /home/tulip
+WORKDIR /app
+COPY --from=builder --chown=10001:10001 /app/.venv /app/.venv
 
-# Copy the wheels installed in stage 1.
-COPY --from=builder --chown=tulip:tulip /root/.local /home/tulip/.local
-
-# Default port — override with `-p` or in your orchestrator's manifest.
+USER 10001
 EXPOSE 8080
 
-# Liveness check — the AgentServer's /health endpoint always returns
-# 200 unless the process is dead. Override with a readiness probe at
-# the orchestrator layer if you want richer signals.
+# Liveness — the AgentServer /health endpoint returns 200 unless the process
+# is dead. Use a stdlib probe so the image needs no curl.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl --fail --silent http://localhost:8080/health || exit 1
+  CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health').read()"]
 
-# Replace ``your_app:server.app`` with the import path of your own
-# AgentServer instance. The placeholder example below assumes a module
-# called ``app.py`` at /home/tulip/app.py exposing a ``server`` symbol.
+# Replace `app:server.app` with the import path of your own AgentServer instance.
 CMD ["uvicorn", "app:server.app", "--host", "0.0.0.0", "--port", "8080"]
