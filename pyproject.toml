@@ -256,11 +256,16 @@ format = "ruff format src tests examples"
 format-check = "ruff format --check src tests examples"
 typecheck = "mypy src/tulip"
 # CI gate: every check the project enforces, in one command. A clean run
-# of `hatch run check` is what `_lint.yml` runs.
+# of `hatch run check` is what `_lint.yml` runs. The trailing ``test-cov``
+# runs the deterministic unit suite under coverage and FAILS the whole
+# command when unit line+branch coverage drops below ``fail_under`` (95%)
+# in ``[tool.coverage.report]`` — so the org-wide ≥95% gate is enforced
+# locally and in CI by a bare ``hatch run check``.
 check = [
     "format-check",
     "lint",
     "typecheck",
+    "test-cov",
 ]
 all = [
     "format",
@@ -695,7 +700,7 @@ exclude_lines = [
     "class .*\\bProtocol\\):",
     "@overload",
 ]
-fail_under = 90
+fail_under = 95
 show_missing = true
 
 # Note: ``[dependency-groups]`` (PEP 735) was previously used here but
