@@ -1,12 +1,8 @@
 # Contributing
 
-Tulip — **the safest way to build agentic AI**, a full-stack, open-source agent
-SDK where control is native (a cognitive router picks the shape, GSAR grounds
-every claim, an admission gate admits every risky action) — is vendor-neutral,
-production-tested, and open to everyone. The bar everywhere: *a result ships on
-evidence or it abstains; a side effect runs only gated and audited — never on
-best intentions.* New probes prove their success with an observable effect, and
-new actions go through `admit()`.
+Tulip is open to everyone. The bar everywhere: *a result ships on evidence or
+it abstains; a side effect runs only gated and audited.* New probes prove their
+success with an observable effect, and new actions go through `admit()`.
 
 This document covers how to set up a development environment, the
 review and sign-off process, the coding standards we hold the codebase
@@ -17,7 +13,7 @@ Quick links for the most common drops:
 
 - **Adding a notebook?** Jump to [Notebook authoring](#notebook-authoring).
 - **Touching the README?** Jump to [README updates](#readme-updates).
-- **Adding a model provider?** Jump to [Notebook authoring](#notebook-authoring) for the multi-model demo conventions, then [Coding Standards](#coding-standards) for the `BaseModel` interface.
+- **Adding a model provider?** Jump to [Notebook authoring](#notebook-authoring) for the multi-model demo conventions, then [Coding Standards](#coding-standards) for the `ModelProtocol` interface.
 - **Verifying against real OpenAI / Anthropic?** Jump to [Workbench end-to-end sweeps](#workbench-end-to-end-sweeps).
 
 ## Table of Contents
@@ -135,7 +131,7 @@ then take the next free number at the end of that range:
 | Production | 51–56 |
 | Cognitive router & observability | 57–61 |
 | Real-world workflows | 62–66 |
-| Server & full pipelines | 67–68 |
+| Server & full pipelines | 67–69 |
 
 `NOTEBOOK_CATEGORIES` in the workbench's `backend/runner.py`
 ([tuliplabs-ai/workbench](https://github.com/tuliplabs-ai/workbench))

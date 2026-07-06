@@ -1,30 +1,20 @@
 # Deprecation policy
 
-Tulip is pre-1.0. This file explains how breaking changes and
-deprecations work today, and how they will work after 1.0.
+Tulip follows [Semantic Versioning](https://semver.org) (since 1.0,
+tagged 2026-06-09). This file explains how breaking changes and
+deprecations work.
 
-## Current state (0.x)
+## Semantic Versioning
 
-Every 0.x release can make breaking changes. When we do, the breaking
-change is:
-
-- **Called out in [`CHANGELOG.md`](CHANGELOG.md)** under the version
-  that ships it, in a `### Removed` or `### Changed` section, with a
+- **Major** version bumps can remove deprecated API. Breaking changes
+  are called out in [`CHANGELOG.md`](CHANGELOG.md) under the version
+  that ships them, in a `### Removed` or `### Changed` section, with a
   one-line migration note.
-- **Announced via `TulipDeprecationWarning`** for at least one minor
-  release before we remove the old API, whenever the old and new
-  surfaces can co-exist. For sweeping changes (e.g. the raw-backend →
-  native-checkpointer migration), the migration may happen in a
-  single release with the upgrade path documented in CHANGELOG.
-
-Consumers should pin `tulip>=0.1,<0.2` until we tag 1.0, and read the
-CHANGELOG before bumping.
-
-## From 1.0 onward (Semantic Versioning)
-
-- **Major** version bumps can remove deprecated API.
 - **Minor** version bumps can add deprecations but not remove API.
 - **Patch** version bumps are bug fixes only.
+
+Consumers should pin a major (`tulip-agents>=2,<3`) and read the
+CHANGELOG before bumping across majors.
 
 A deprecated API will:
 
