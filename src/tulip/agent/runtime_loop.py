@@ -874,6 +874,14 @@ class AgentRuntimeMixin:
                                 self._interrupt_prompt = prompt
                                 self._interrupt_thread_id = thread_id
                                 self._interrupt_metadata = metadata
+                                # Checkpoint BEFORE yielding: a consumer that
+                                # stops iterating on the interrupt (an HTTP
+                                # layer parking the run) never resumes this
+                                # generator, so the finally-side save would
+                                # only run at GC — too late if the process
+                                # dies while paused.
+                                if self.config.checkpointer and thread_id:
+                                    await self.config.checkpointer.save(state, thread_id)
                                 yield InterruptEvent(
                                     question=interrupt_data.get("question", ""),
                                     options=interrupt_data.get("options"),
@@ -1246,6 +1254,12 @@ class AgentRuntimeMixin:
                             self._interrupt_prompt = prompt
                             self._interrupt_thread_id = thread_id
                             self._interrupt_metadata = metadata
+                            # Checkpoint BEFORE yielding — same rationale as
+                            # the run loop's interrupt site: a consumer that
+                            # parks on the interrupt never drives this
+                            # generator to its finally.
+                            if self.config.checkpointer and thread_id:
+                                await self.config.checkpointer.save(state, thread_id)
                             payload = e.value.payload if hasattr(e, "value") else {}
                             question = (
                                 payload.get("question", str(payload))

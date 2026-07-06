@@ -372,6 +372,30 @@ async def test_resume_rehydrates_from_checkpoint_in_fresh_process() -> None:
     )
 
 
+async def test_interrupt_checkpoints_before_yield_when_consumer_parks() -> None:
+    """The pause-time state persists even if the consumer stops at the interrupt.
+
+    An HTTP layer parks the run the moment it sees the InterruptEvent and never
+    drives the generator further — its finally (the final checkpoint) would only
+    run at GC. The interrupt site must save BEFORE yielding.
+    """
+    store: dict[str, AgentState] = {}
+    agent = Agent(
+        model=_ScriptedModel([_tc("needs_input", {})]),
+        tools=[needs_input],
+        checkpointer=_DictCheckpointer(store),
+        max_iterations=10,
+        reflexion=False,
+        grounding=False,
+    )
+    gen = agent.run("start", thread_id="t-parked")
+    async for ev in gen:
+        if isinstance(ev, InterruptEvent):
+            break  # park: stop consuming, like the gateway's SSE layer does
+    assert "t-parked" in store  # persisted before the yield, not in finally
+    await gen.aclose()
+
+
 async def test_resume_from_state_saves_final_checkpoint() -> None:
     """A resumed run re-persists its state — durability survives resume."""
     store: dict[str, AgentState] = {}
