@@ -4,12 +4,10 @@
 
 <p align="center">
   <strong>Tulip — the safest way to build agentic AI.</strong><br>
-  <em>An open-source, full-stack agent SDK. Build agents the usual way — tools, memory,
-  multi-agent, RAG — on a runtime where control is native: the <a href="https://tulipagents.ai/concepts/router/">cognitive router</a> picks the
-  right shape for the task, <a href="https://tulipagents.ai/concepts/gsar/">GSAR</a> grounds every claim (or makes the agent abstain), and the
-  admission gate lets a consequential action run only after it clears a policy you write —
-  pausing for a human when the stakes are high and landing on a tamper-evident audit trail.
-  Safe by construction, not by reminder.</em>
+  <em>An open-source, full-stack agent SDK — tools, memory, multi-agent, RAG — on a runtime
+  where control is native: the <a href="https://tulipagents.ai/concepts/router/">cognitive router</a> picks the shape,
+  <a href="https://tulipagents.ai/concepts/gsar/">GSAR</a> grounds every claim or the agent abstains, and the admission gate runs a
+  consequential action only if your policy allows. Safe by construction, not by reminder.</em>
 </p>
 
 <p align="center">
@@ -32,13 +30,6 @@
   <a href="https://tulipagents.ai/concepts/security/">Admission gate</a> ·
   <a href="https://tulipagents.ai/notebooks/">Notebooks</a> ·
   <a href="https://tulipagents.ai/workbench/">Workbench</a>
-</p>
-
-<p align="center">
-  <strong>Try every Tulip pattern in your browser →</strong>
-  <a href="https://tulipagents.ai/workbench/"><strong>Workbench guide</strong></a><br>
-  <em>A browser playground for every pattern — run it on localhost in three terminals, or in
-  a single Docker container. Bring your own OpenAI / Anthropic key.</em>
 </p>
 
 ---
@@ -66,8 +57,8 @@ print(agent.run_sync("Cheapest flight from Lisbon to Berlin next Friday?").text)
 ```
 
 Behind the scenes the agent alternates reasoning with tool calls until it can answer.
-Construction, the model call, retries, and the reply all live behind that one `Agent` class
-— point `model=` at `"openai:gpt-4o"` and nothing else moves.
+The model call, retries, and tool dispatch all live behind that one `Agent` class —
+point `model=` at `"openai:gpt-4o"` and nothing else moves.
 
 ```bash
 pip install "tulip-agents[anthropic]"     # or [openai], or [sdk] for everything
@@ -79,7 +70,7 @@ No mandatory cloud account to start — a bundled `MockModel` lets every noteboo
 
 ## What is Tulip?
 
-**Tulip is a complete, open-source agentic framework — and the safest one to build on.**
+**Tulip is a full-stack, open-source agentic framework — the safest way to build agentic AI.**
 You get everything you'd expect: one `Agent` class, tools, durable memory, RAG, eight
 multi-agent shapes, streaming, and a typed event stream. What makes it *safe* is that
 control isn't a guardrail you remember to add — it's wired through three points in the core:
@@ -89,7 +80,7 @@ control isn't a guardrail you remember to add — it's wired through three point
   compiles it to the right runtime shape. The model classifies — it never authors the
   topology.
 - **[GSAR](https://tulipagents.ai/concepts/gsar/) controls *what gets asserted*.** Every claim is partitioned grounded / ungrounded
-  / contradicted / unknown against typed evidence. Below threshold the agent regenerates,
+  / contradicted / complementary against typed evidence. Below threshold the agent regenerates,
   replans, or **abstains** — an ungrounded claim is a false result *by construction* and
   never ships.
 - **The admission gate controls *what actions fire*.** A consequential action — issue a
@@ -102,9 +93,9 @@ control isn't a guardrail you remember to add — it's wired through three point
 > your policy denies. Try it:
 > [`examples/can_you_make_it_go_rogue.py`](examples/can_you_make_it_go_rogue.py).
 
-Frontier models are brilliant, and getting more so. The one thing a model *structurally
-cannot do* — no matter how smart — is **prove it won't take a catastrophic action.** That's
-not an intelligence problem; it's a control problem, and control is the layer Tulip owns.
+No matter how capable a model gets, it *structurally* cannot **prove it won't take a
+catastrophic action.** That's not an intelligence problem; it's a control problem, and
+control is the layer Tulip owns.
 
 ## See it in 60 seconds
 
@@ -112,7 +103,7 @@ not an intelligence problem; it's a control problem, and control is the layer Tu
 |-----|---------------|
 | [`examples/notebook_06_basic_agent.py`](examples/notebook_06_basic_agent.py) | Your first agent — one `Agent`, one tool, the run loop. |
 | [`examples/notebook_58_cognitive_router.py`](examples/notebook_58_cognitive_router.py) | One natural-language task → the router compiles the right shape. |
-| [`examples/can_you_make_it_go_rogue.py`](examples/can_you_make_it_go_rogue.py) | Jailbreak an agent with live prod tools — the admission gate blocks the action anyway. 🏆 breaches: 0. |
+| [`examples/can_you_make_it_go_rogue.py`](examples/can_you_make_it_go_rogue.py) | Jailbreak an agent with live prod tools — the admission gate blocks the action anyway. |
 
 ## Add a tool
 
@@ -226,14 +217,12 @@ action to an approval-gated agent — chosen by protocol selection, not by the m
 
 ---
 
-## Every shape for building multi-agent workflows
+## Multi-agent workflows
 
 When one agent isn't enough, Tulip ships **every orchestration shape as a first-class
-primitive** — so you can build any multi-agent workflow without leaving the framework:
-sequential pipeline, parallel fan-out, refinement loop, explicit state graph, orchestrator +
-specialists, swarm, handoff chain, and a cross-process A2A mesh. They all use the same
-`Agent` class and the same event stream — outgrow one pattern and the next is already here,
-no dropping to a lower-level library.
+primitive**: sequential pipeline, parallel fan-out, refinement loop, explicit state graph,
+orchestrator + specialists, swarm, handoff chain, and a cross-process A2A mesh. All of them
+use the same `Agent` class and the same event stream.
 
 | Pattern | When to use |
 |---|---|
@@ -267,7 +256,7 @@ print(result.text)
 
 An agent that *acts* must not assert what it can't back up. Tulip's GSAR layer
 ([paper](https://arxiv.org/abs/2604.23366)) partitions every claim — **grounded / ungrounded
-/ contradicted / unknown** — against typed evidence, where tool output outranks inference
+/ contradicted / complementary** — against typed evidence, where tool output outranks inference
 and inference outranks domain priors. Below threshold the run **regenerates, replans, or
 abstains**. There is no public constructor that emits a grounded result without a score, so
 an ungrounded claim is unshippable *by construction* — not filtered after the fact.
@@ -354,7 +343,7 @@ checkpointer means the decision survives a restart and the run resumes where it 
 | **[🧭 Cognitive router](https://tulipagents.ai/concepts/router/)** | Describe a task → eight named protocols → the right primitive compiled automatically. The LLM fills a typed schema; routing is deterministic. |
 | **[🤝 Multi-agent](https://tulipagents.ai/concepts/multi-agent/)** | Seven native patterns + cross-process A2A. One `Agent` class. One event stream. |
 | **[🛡 Admission gate](https://tulipagents.ai/concepts/security/)** | `admit()` / `approve()` run a consequential action only if your `ControlPolicy` allows — else hold for a human or deny, recorded either way. |
-| **[🧠 GSAR grounding](https://tulipagents.ai/concepts/gsar/)** | Claims partitioned grounded / ungrounded / contradicted / unknown; below threshold the agent regenerates, replans, or abstains. `arXiv:2604.23366`. |
+| **[🧠 GSAR grounding](https://tulipagents.ai/concepts/gsar/)** | Claims partitioned grounded / ungrounded / contradicted / complementary; below threshold the agent regenerates, replans, or abstains. `arXiv:2604.23366`. |
 | **[🔬 DeepAgent](https://tulipagents.ai/concepts/deepagent/)** | `create_deepagent` (single agent, per-turn grounding) and `create_research_workflow` (StateGraph with post-hoc grounding eval + two-level recovery). |
 | **[📡 Observability](https://tulipagents.ai/concepts/observability/)** | Opt-in `EventBus` — one `run_context()` streams 40+ canonical events from every layer, no external broker. `TelemetryHook` for OpenTelemetry/OTLP. |
 | **[🛡 Idempotent tools](https://tulipagents.ai/concepts/idempotency/)** | `@tool(idempotent=True)` — dedupes on `(name, args)`. The model can't double-charge, double-book, or double-page. |
@@ -380,11 +369,6 @@ around it.
 <p align="center">
   <img src="docs/img/tulip-stack.svg" alt="The SDK stack — the PRISM cognitive router compiles natural-language tasks into one of 8 orchestration shapes, each of which runs the agent loop (Think → Execute → Reflect → Terminate), powered by foundations (Models, Memory, RAG, Observability, Tools/MCP/Skills)" width="100%">
 </p>
-
-- **PRISM cognitive router** — an LLM classifier reads the task and fills a typed `GoalFrame` (intent · domain · complexity · risk); the `CognitiveCompiler` emits the matching runtime shape. The model classifies, never authors topology.
-- **Eight orchestration shapes** — `SequentialPipeline`, `ParallelPipeline`, `LoopAgent`, `StateGraph`, `Orchestrator + Specialists`, `Swarm`, `Handoff Chain`, and cross-process `A2A Mesh`. One `Agent` class composes them all; one event stream covers them all.
-- **The agent loop** — **Think → Execute → Reflect → Terminate** with one immutable state flowing through. `@tool(idempotent=True)` dedupes Execute on `(name, args)`; Reflect runs Reflexion + Grounding + Causal on cadence or on error; Terminate is composable algebra (`MaxIterations(10) | ToolCalled("submit") & ConfidenceMet(0.9)`).
-- **Foundations** — Models (OpenAI · Anthropic · any OpenAI-compatible gateway), Memory (8 checkpoint backends, long-term store), RAG (5 vector stores, multimodal, rerank), Observability (40+ typed events, EventBus, OpenTelemetry), Tools / MCP / Skills.
 
 Every node at every layer emits a write-protected typed event — the same stream powers SSE,
 telemetry hooks, and your own `async for event in agent.run(…)` consumer.
@@ -439,10 +423,8 @@ pip install "tulip-agents[sdk]"           # everything
 
 ## Agent security
 
-Security is Tulip's flagship proof domain — the place where control matters most, so it's
-where the SDK is hardened hardest. The same three control points that make *any* agent safe
-(router, grounding, admission) are most visibly worth it here, so the SDK ships a first-class
-agent-security track.
+Security is the domain where Tulip's three control points pay off most visibly, so the SDK
+ships a first-class agent-security track.
 
 Point a `Target` at an AI system — a remote endpoint, an in-process `tulip.Agent`, or an A2A
 peer — and run the OWASP-ASI / MITRE-ATLAS suite. Every result is a grounded `Evidence` or an
@@ -521,7 +503,7 @@ provider.
 
 ```bash
 git clone https://github.com/tuliplabs-ai/sdk-python.git
-cd tulip-agents && pip install -e .
+cd sdk-python && pip install -e .
 
 python examples/notebook_06_basic_agent.py           # your first agent
 python examples/notebook_58_cognitive_router.py      # the cognitive router
@@ -637,7 +619,7 @@ The documentation site and the browser workbench live in sibling repos:
 
 ```bash
 git clone https://github.com/tuliplabs-ai/sdk-python.git
-cd tulip-agents && pip install -e ".[dev,sdk]"
+cd sdk-python && pip install -e ".[dev,sdk]"
 hatch run check        # ruff + mypy
 hatch run test         # unit tests across Python 3.11–3.14
 pre-commit install

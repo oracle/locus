@@ -13,11 +13,23 @@ policy.
 - **Positioning: Tulip leads as a first-class agentic framework — "the safest way to
   build agentic AI."** The identity is framework-first and safety-led: control is native
   to the core via three points — the **cognitive router** (PRISM) picks the runtime shape,
-  **GSAR** grounds every claim (or abstains), and the **admission gate** (`admit()`) admits
+  **GSAR** grounds every claim (or abstains), and the **admission gate** (`admit()`) gates
   every risky action — packaged as safety. AI security is repositioned from the SDK's
   identity to its **flagship proof domain**. README, the `tulipagents.ai` landing, package
   description / keywords / classifiers, and `CONTRIBUTING` reflect the framework-first,
   safety-led identity. No API changes.
+
+## [2.0.0] - 2026-06-25
+
+### Changed
+
+- **Breaking: the domain-neutral control core moves to `tulip.control`.** The new
+  namespace owns `admit()` / `Action` / policy / audit / `governed_agent`;
+  `tulip.security` keeps the security domain and no longer re-exports control.
+  Renames, with no deprecation shims: `SecurityPolicy` → `ControlPolicy`,
+  `Finding` → `Evidence`, `Verdict` → `VerificationResult`,
+  `secure_agent` → `governed_agent`, `SecurityProfile` → `GovernanceProfile`.
+  Update imports to `from tulip.control import Action, admit, ControlPolicy, AuditTrail`.
 
 ## [1.1.0] - 2026-06-24
 
