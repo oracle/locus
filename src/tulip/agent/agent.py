@@ -482,6 +482,8 @@ class Agent(AgentRuntimeMixin, BaseModel):
     async def resume(
         self,
         response: str,
+        *,
+        thread_id: str | None = None,
     ) -> AsyncIterator[TulipEvent]:
         """
         Resume agent execution after an interrupt.
@@ -489,8 +491,15 @@ class Agent(AgentRuntimeMixin, BaseModel):
         When a tool calls ask_user() and the agent yields an InterruptEvent,
         call this method with the user's response to continue execution.
 
+        Without an in-memory interrupt (a fresh process — the pod that paused
+        is gone), pass ``thread_id``: the interrupted state is reloaded from
+        the configured checkpointer, so a durably-checkpointed run resumes
+        anywhere, not just in the process that paused it.
+
         Args:
             response: The user's response to the interrupt question
+            thread_id: Checkpoint thread to rehydrate from when this Agent
+                instance holds no in-memory interrupt (requires a checkpointer)
 
         Yields:
             TulipEvent instances for the remaining execution
@@ -502,27 +511,38 @@ class Agent(AgentRuntimeMixin, BaseModel):
             ...         async for event in agent.resume(answer):
             ...             handle(event)
         """
-        if self._interrupt_state is None:
-            raise RuntimeError("No interrupt to resume from. Call run() first.")
+        if self._interrupt_state is not None:
+            state = self._interrupt_state
+            self._interrupt_state = None
+            # Re-run — we pass the original prompt; the state already has the
+            # full history
+            prompt = self._interrupt_prompt or ""
+            thread_id = self._interrupt_thread_id
+            metadata = self._interrupt_metadata
+            # Clear interrupt bookkeeping
+            self._interrupt_prompt = None
+            self._interrupt_thread_id = None
+            self._interrupt_metadata = None
+        else:
+            # Rehydrate: no in-memory interrupt, so reload the paused state
+            # from the checkpointer (the cross-process resume path).
+            if thread_id is None or self.config.checkpointer is None:
+                raise RuntimeError(
+                    "No interrupt to resume from. Call run() first, or pass "
+                    "thread_id with a configured checkpointer to rehydrate."
+                )
+            loaded = await self.config.checkpointer.load(thread_id)
+            if loaded is None:
+                raise RuntimeError(f"No checkpoint found for thread {thread_id!r} to resume from.")
+            state = loaded
+            prompt = ""
+            metadata = None
 
         # Add the user's response as a tool result for ask_user
-        state = self._interrupt_state
         state = state.with_message(Message.system(f"[User Response] {response}"))
 
         # Store for _create_initial_state to pick up
         self._last_run_state = state
-        self._interrupt_state = None
-
-        # Re-run — _create_initial_state will load from checkpoint/state
-        # We pass the original prompt; the state already has the full history
-        prompt = self._interrupt_prompt or ""
-        thread_id = self._interrupt_thread_id
-        metadata = self._interrupt_metadata
-
-        # Clear interrupt bookkeeping
-        self._interrupt_prompt = None
-        self._interrupt_thread_id = None
-        self._interrupt_metadata = None
 
         # Continue execution from the interrupted state
         async for event in self._run_from_state(state, prompt, thread_id, metadata):
