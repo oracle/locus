@@ -15,12 +15,15 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from tulip.agent import Agent
 from tulip.core.events import InterruptEvent, TerminateEvent, ToolCompleteEvent
 from tulip.core.interrupt import InterruptException, InterruptValue
 from tulip.core.messages import Message, ToolCall
 from tulip.core.state import AgentState
 from tulip.core.termination import MaxIterations
+from tulip.memory.checkpointer import BaseCheckpointer
 from tulip.models.base import ModelResponse
 from tulip.tools.decorator import tool
 from tulip.tools.executor import SequentialExecutor
@@ -295,3 +298,131 @@ async def test_interrupt_then_resume_round_trip() -> None:
     assert term.final_message == "resumed and finished"
     # resume() cleared the interrupt bookkeeping.
     assert agent._interrupt_state is None
+
+
+# ---------------------------------------------------------------------------
+# Cross-process resume — rehydrate the interrupt from a checkpointer
+# ---------------------------------------------------------------------------
+
+
+class _DictCheckpointer(BaseCheckpointer):
+    """Checkpointer over a shared dict — two Agent instances see one store."""
+
+    def __init__(self, store: dict[str, AgentState]) -> None:
+        self.store = store
+        self.saves = 0
+
+    async def save(
+        self,
+        state: AgentState,
+        thread_id: str,
+        checkpoint_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        self.saves += 1
+        self.store[thread_id] = state
+        return thread_id
+
+    async def load(self, thread_id: str, checkpoint_id: str | None = None) -> AgentState | None:
+        return self.store.get(thread_id)
+
+    async def list_checkpoints(self, thread_id: str, limit: int = 10) -> list[Any]:
+        return [thread_id] if thread_id in self.store else []
+
+
+async def test_resume_rehydrates_from_checkpoint_in_fresh_process() -> None:
+    """A run pauses in one Agent; a FRESH Agent resumes it via the checkpointer."""
+    store: dict[str, AgentState] = {}
+
+    first_agent = Agent(
+        model=_ScriptedModel([_tc("needs_input", {})]),
+        tools=[needs_input],
+        checkpointer=_DictCheckpointer(store),
+        max_iterations=10,
+        reflexion=False,
+        grounding=False,
+    )
+    first: list[Any] = []
+    async for ev in first_agent.run("start", thread_id="t-crosspod"):
+        first.append(ev)
+    assert any(isinstance(e, InterruptEvent) for e in first)
+    # The pause-time state was persisted (run()'s final checkpoint).
+    assert "t-crosspod" in store
+
+    # A fresh Agent — no in-memory interrupt, only the shared checkpointer.
+    second_agent = Agent(
+        model=_ScriptedModel([_text("resumed on a new pod")]),
+        tools=[needs_input],
+        checkpointer=_DictCheckpointer(store),
+        max_iterations=10,
+        reflexion=False,
+        grounding=False,
+    )
+    assert second_agent._interrupt_state is None
+    second: list[Any] = []
+    async for ev in second_agent.resume("approve", thread_id="t-crosspod"):
+        second.append(ev)
+    term = next(e for e in second if isinstance(e, TerminateEvent))
+    assert term.reason == "complete"
+    assert term.final_message == "resumed on a new pod"
+    # The rehydrated state carries the decision message for the model.
+    assert any(
+        "[User Response] approve" in (m.content or "")
+        for m in second_agent._last_run_state.messages
+    )
+
+
+async def test_resume_from_state_saves_final_checkpoint() -> None:
+    """A resumed run re-persists its state — durability survives resume."""
+    store: dict[str, AgentState] = {}
+    ckpt = _DictCheckpointer(store)
+    agent = Agent(
+        model=_ScriptedModel([_tc("needs_input", {}), _text("done")]),
+        tools=[needs_input],
+        checkpointer=ckpt,
+        max_iterations=10,
+        reflexion=False,
+        grounding=False,
+    )
+    async for _ in agent.run("start", thread_id="t-durable"):
+        pass
+    saves_at_pause = ckpt.saves
+    assert saves_at_pause >= 1
+
+    async for _ in agent.resume("go ahead"):
+        pass
+    # The in-memory resume path also checkpoints its final state.
+    assert ckpt.saves > saves_at_pause
+    final = store["t-durable"]
+    assert any("[User Response] go ahead" in (m.content or "") for m in final.messages)
+
+
+async def test_resume_without_interrupt_or_thread_id_raises() -> None:
+    agent = Agent(
+        model=_ScriptedModel([_text("x")]),
+        checkpointer=_DictCheckpointer({}),
+        reflexion=False,
+        grounding=False,
+    )
+    with pytest.raises(RuntimeError, match="No interrupt to resume from"):
+        async for _ in agent.resume("hello"):
+            pass  # pragma: no cover
+
+
+async def test_resume_without_checkpointer_raises_even_with_thread_id() -> None:
+    agent = Agent(model=_ScriptedModel([_text("x")]), reflexion=False, grounding=False)
+    with pytest.raises(RuntimeError, match="No interrupt to resume from"):
+        async for _ in agent.resume("hello", thread_id="t-missing"):
+            pass  # pragma: no cover
+
+
+async def test_resume_with_missing_checkpoint_raises() -> None:
+    agent = Agent(
+        model=_ScriptedModel([_text("x")]),
+        checkpointer=_DictCheckpointer({}),
+        reflexion=False,
+        grounding=False,
+    )
+    with pytest.raises(RuntimeError, match="No checkpoint found for thread 't-ghost'"):
+        async for _ in agent.resume("hello", thread_id="t-ghost"):
+            pass  # pragma: no cover

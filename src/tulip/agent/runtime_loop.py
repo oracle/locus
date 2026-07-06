@@ -1292,6 +1292,24 @@ class AgentRuntimeMixin:
         finally:
             self._last_run_state = state
 
+            # Final checkpoint — mirrors run(): a resumed run must stay as
+            # durable as the original one (a second pause, or completion,
+            # is persisted too — resume never downgrades durability).
+            if self.config.checkpointer and thread_id:
+                await self.config.checkpointer.save(state, thread_id)
+                from tulip.observability.emit import (  # noqa: PLC0415
+                    EV_CHECKPOINT_SAVED,
+                    emit,
+                )
+
+                await emit(
+                    EV_CHECKPOINT_SAVED,
+                    thread_id=thread_id,
+                    iteration=state.iteration,
+                    backend=type(self.config.checkpointer).__name__,
+                    trigger="final",
+                )
+
     async def _create_initial_state(
         self,
         prompt: str,
