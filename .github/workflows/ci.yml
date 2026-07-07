@@ -76,6 +76,23 @@ jobs:
           fi
           echo "All commits are signed off."
 
+  # Build the AgentServer deployment image on every PR — the Dockerfile was
+  # never exercised by CI before, so image breakage only surfaced at deploy
+  # time. Build only: no push, no registry login. A single linux/amd64 build
+  # (the runner's native arch, no QEMU) is enough as a gate even though
+  # deploys target arm64. Deliberately NOT in the ci-success needs yet —
+  # promote it into the aggregate gate once it has proven green on main.
+  docker:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: docker build (linux/amd64, no push)
+        run: docker build -t tulip-agents:ci .
+
   # Aggregate gate. Branch-protection should require this single status
   # check rather than each individual one — that lets us add / remove
   # jobs without retouching protection rules.
