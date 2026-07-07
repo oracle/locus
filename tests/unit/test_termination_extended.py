@@ -18,7 +18,7 @@ from __future__ import annotations
 import time
 
 from tulip.core.messages import Message
-from tulip.core.state import AgentState
+from tulip.core.state import AgentState, ToolExecution
 from tulip.core.termination import (
     ConfidenceMet,
     MaxIterations,
@@ -159,3 +159,44 @@ class TestNoToolCalls:
         cond = NoToolCalls()
         stop, _ = cond.check(_state())
         assert stop is False
+
+
+# ---------------------------------------------------------------------------
+# ToolCalled(require_success=True) — a rejected submit must not terminate
+# ---------------------------------------------------------------------------
+
+
+class TestToolCalledRequireSuccess:
+    @staticmethod
+    def _exec(error: str | None) -> ToolExecution:
+        return ToolExecution(tool_name="submit_tool", tool_call_id="c1", arguments={}, error=error)
+
+    def test_errored_call_does_not_terminate(self) -> None:
+        cond = ToolCalled("submit_tool", require_success=True)
+        state = _state().with_tool_execution(self._exec("claims rejected"))
+        stop, _ = cond.check(state)
+        assert stop is False
+
+    def test_successful_call_terminates(self) -> None:
+        cond = ToolCalled("submit_tool", require_success=True)
+        state = _state().with_tool_execution(self._exec(None))
+        stop, reason = cond.check(state)
+        assert stop is True
+        assert reason == "tool_called:submit_tool"
+
+    def test_rejection_then_success_terminates(self) -> None:
+        cond = ToolCalled("submit_tool", require_success=True)
+        state = (
+            _state()
+            .with_tool_execution(self._exec("rejected"))
+            .with_tool_execution(self._exec(None))
+        )
+        stop, _ = cond.check(state)
+        assert stop is True
+
+    def test_default_still_counts_errored_calls(self) -> None:
+        # Back-compat: without the flag, any call terminates (old semantics).
+        cond = ToolCalled("submit_tool")
+        state = _state().with_tool_execution(self._exec("boom"))
+        stop, _ = cond.check(state)
+        assert stop is True
