@@ -186,14 +186,24 @@ class TextMention(TerminationCondition):
 
 
 class ToolCalled(TerminationCondition):
-    """Stop when a specific tool is called."""
+    """Stop when a specific tool is called.
 
-    def __init__(self, tool_name: str) -> None:
+    With ``require_success=True``, only an execution that did NOT error
+    counts — a terminal tool can then *reject* a submission (by raising),
+    and the loop continues instead of terminating on the failed call.
+    That is how a verifying submit gate (one that checks the agent's
+    claims against recorded facts) stays enforceable.
+    """
+
+    def __init__(self, tool_name: str, *, require_success: bool = False) -> None:
         self._tool_name = tool_name
+        self._require_success = require_success
 
     def check(self, state: AgentState, **context: Any) -> tuple[bool, str | None]:
         for te in state.tool_executions:
             if te.tool_name == self._tool_name:
+                if self._require_success and te.error is not None:
+                    continue
                 return True, f"tool_called:{self._tool_name}"
         return False, None
 

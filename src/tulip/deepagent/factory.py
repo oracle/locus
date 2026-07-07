@@ -294,7 +294,10 @@ def create_deepagent(
     # ``max_tokens=`` it lands in **agent_kwargs and Agent() rejects
     # it loudly, which is the right failure shape — better than the
     # historical silent foot-gun.
-    base = ToolCalled(submit_tool) & ConfidenceMet(min_confidence)
+    # require_success: a submit tool that RAISES (a verifying gate rejecting
+    # fabricated claims) must not terminate the loop — the agent sees the
+    # rejection and keeps working.
+    base = ToolCalled(submit_tool, require_success=True) & ConfidenceMet(min_confidence)
     if total_token_budget is not None:
         termination = base | TokenLimit(total_token_budget) | MaxIterations(max_iterations)
     else:
@@ -381,6 +384,12 @@ def create_deepagent(
         kwargs["conversation_manager"] = conversation_manager
     if output_schema is not None:
         kwargs["output_schema"] = output_schema
+        # A typed terminal means the SUBMIT TOOL is the exit — in auto
+        # completion a chatty model's first no-tool-call turn would end the
+        # run and its message text would be parsed as the "result", bypassing
+        # the submit gate entirely (fabricated completions). Explicit mode
+        # makes the loop continue until the terminal (or a budget backstop).
+        kwargs["completion_mode"] = "explicit"
     if checkpointer is not None:
         kwargs["checkpointer"] = checkpointer
     # Forward per-completion output cap to the model. AgentConfig.max_tokens

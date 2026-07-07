@@ -1565,8 +1565,16 @@ class AgentRuntimeMixin:
         # the schema only lives in the system prompt (see
         # ``_create_initial_state``) and is parsed post-hoc.
         native_response_format: dict[str, Any] | None = None
-        if self.config.output_schema is not None and getattr(
-            self._model, "supports_structured_output", False
+        if (
+            self.config.output_schema is not None
+            # Constrained decoding fights tool calling: with a response_format
+            # attached, OpenAI-compatible providers (Together among them) emit
+            # schema JSON instead of tool_calls, so a tool-loop agent never
+            # calls a single tool. Only constrain completions that offer NO
+            # tools — the post-hoc coercion (_structure_output) re-prompts
+            # without tools and applies the strict format there.
+            and not tool_schemas
+            and getattr(self._model, "supports_structured_output", False)
         ):
             from tulip.core.structured import build_response_format
 
