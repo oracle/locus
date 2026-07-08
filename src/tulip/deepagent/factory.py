@@ -390,6 +390,17 @@ def create_deepagent(
         # the submit gate entirely (fabricated completions). Explicit mode
         # makes the loop continue until the terminal (or a budget backstop).
         kwargs["completion_mode"] = "explicit"
+        # …and the state machine's own name-match exits are disarmed. Explicit
+        # mode still terminates on any of AgentConfig.terminal_tools by NAME —
+        # no success check, no confidence gate — so a model calling the
+        # injected ``task_complete`` with a fabricated "success" would end the
+        # run around the verifying submit gate (observed live: the builder
+        # echoed a pending approval id as its "draft_id"). Naming the submit
+        # tool here would be just as unsafe — a REJECTED submit matches by
+        # name too. Empty set: the ONLY exits are the composable condition
+        # ``ToolCalled(submit_tool, require_success=True) & ConfidenceMet``
+        # and the hard iteration/budget backstops.
+        kwargs.setdefault("terminal_tools", set())
     if checkpointer is not None:
         kwargs["checkpointer"] = checkpointer
     # Forward per-completion output cap to the model. AgentConfig.max_tokens
