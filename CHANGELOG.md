@@ -8,6 +8,29 @@ policy.
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-07-08
+
+### Added
+
+- **Resume from checkpoint — cross-process interrupt rehydration.** `Agent.resume(response, thread_id=…)`
+  reloads the interrupted state from the configured checkpointer when the process that paused is gone,
+  so a durably-checkpointed run resumes anywhere (the gateway's cross-pod HITL path).
+- **Enforceable deepagent submit terminal.** The verifying submit gate rejects fabricated
+  submissions by raising, and `require_success=True` keeps the loop running instead of
+  terminating on a rejected claim.
+- Five runnable domain examples (payments, infra, support, data, cloud — nb83–87), embedded
+  by the docs site's notebook pages.
+
+### Fixed
+
+- **Typed-terminal deepagents exit only through the verifying submit.** In explicit mode the
+  state machine also terminated on any `terminal_tools` NAME match (`task_complete`, `done`, …) —
+  no success or confidence check — letting a model end the run around the submit gate with a
+  fabricated success. `create_deepagent` now empties the name-match set when `output_schema`
+  is configured; callers can override via `agent_kwargs`.
+- Checkpointing happens at the interrupt site, before yielding — a HELD run is durable the
+  moment it pauses.
+
 ### Changed
 
 - **Positioning: Tulip leads as a first-class agentic framework — "the safest way to
