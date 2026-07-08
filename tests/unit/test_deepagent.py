@@ -268,3 +268,94 @@ class TestProtocolTypes:
 
         assert not isinstance(_Bad(), KnowledgeProvider)
         assert isinstance(_Good(), KnowledgeProvider)
+
+
+class TestTypedTerminalBypass:
+    """A typed-terminal deepagent may exit ONLY through the verifying submit.
+
+    Regression for the live-model bypass: in explicit mode the state machine
+    terminates on any ``AgentConfig.terminal_tools`` NAME match — no success
+    check — so the injected ``task_complete`` let a model end the run around
+    the submit gate with a fabricated success (it echoed a pending approval id
+    as its "draft_id"). ``create_deepagent`` must disarm the name-match set.
+    """
+
+    def test_terminal_tools_emptied_with_typed_terminal(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _stub_env(monkeypatch)
+        agent = create_deepagent(
+            model="openai:gpt-4o-mini",
+            tools=[submit_research],
+            system_prompt="be helpful",
+            output_schema=_Echo,
+            reflexion=False,
+            grounding=False,
+            submit_tool="submit_research",
+        )
+        assert agent.config.terminal_tools == set()
+
+    def test_task_complete_does_not_terminate_typed_terminal(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The state machine must not stop on a task_complete name match.
+        from tulip.core.messages import Message, ToolCall
+        from tulip.core.state import AgentState
+
+        _stub_env(monkeypatch)
+        agent = create_deepagent(
+            model="openai:gpt-4o-mini",
+            tools=[submit_research],
+            system_prompt="be helpful",
+            output_schema=_Echo,
+            reflexion=False,
+            grounding=False,
+            submit_tool="submit_research",
+        )
+        state = AgentState(
+            agent_id="t",
+            max_iterations=10,
+            terminal_tools=frozenset(agent.config.terminal_tools),
+            completion_mode="explicit",
+        )
+        state = state.with_message(
+            Message.assistant(
+                "done!",
+                tool_calls=[
+                    ToolCall(id="c1", name="task_complete", arguments={"summary": "fabricated"})
+                ],
+            )
+        )
+        should_stop, reason = state.should_terminate
+        assert should_stop is False
+        assert reason is None
+
+    def test_caller_override_is_respected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # agent_kwargs stays the escape hatch for callers who want name exits.
+        _stub_env(monkeypatch)
+        agent = create_deepagent(
+            model="openai:gpt-4o-mini",
+            tools=[submit_research],
+            system_prompt="be helpful",
+            output_schema=_Echo,
+            reflexion=False,
+            grounding=False,
+            submit_tool="submit_research",
+            terminal_tools={"task_complete"},
+        )
+        assert agent.config.terminal_tools == {"task_complete"}
+
+    def test_untyped_deepagent_keeps_default_terminals(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Without a typed terminal there is no submit gate to protect —
+        # the default name exits stay.
+        _stub_env(monkeypatch)
+        agent = create_deepagent(
+            model="openai:gpt-4o-mini",
+            tools=[submit_research],
+            system_prompt="be helpful",
+            reflexion=False,
+            grounding=False,
+        )
+        assert "task_complete" in agent.config.terminal_tools
