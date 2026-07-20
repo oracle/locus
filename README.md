@@ -484,6 +484,24 @@ pip install "tulip-integrations[edr-crowdstrike]"   # + any per-vendor extra
 > client/server (`MCPClient`, `TulipMCPServer`). The community **`tulip-integrations`** package
 > is the vendor security adapters above.
 
+### Govern agents you already run
+
+You don't have to build on Tulip to be governed by it. The sibling package
+**[`tulip-frameworks`](https://github.com/tuliplabs-ai/tulip-frameworks)** wraps a tool from
+the framework you already use — **LangChain, LangGraph, CrewAI, the OpenAI Agents SDK,
+LlamaIndex, or Google ADK** — with the same `admit()` gate and hash-chained `AuditTrail`,
+in about three lines, no rebuild:
+
+```bash
+pip install "tulip-frameworks[langchain]"   # or [crewai] / [openai-agents] / [llama-index] / [adk] / [all]
+```
+
+The gate itself is a plain function of the core SDK, so agents outside Python can reach it
+over the wire through [`tulip-gateway`](https://github.com/tuliplabs-ai/tulip-gateway)'s
+`/v1/admit` with the TypeScript client
+([`tulip-frameworks-js`](https://github.com/tuliplabs-ai/tulip-frameworks-js)). See
+[the frameworks guide](https://tulipagents.ai/integrations/frameworks/).
+
 ---
 
 ## Built on Tulip

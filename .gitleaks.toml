@@ -1,7 +1,7 @@
 # gitleaks configuration for tulip-agents.
 #
 # Extends the default ruleset and allowlists the *illustrative* fake secrets
-# that necessarily live in an AI-security SDK: a scenario that demonstrates
+# that necessarily live in a control runtime with a security domain: a scenario that demonstrates
 # secret leakage, and a test fixture asserting on a fake key. The allowlist is
 # surgical — the leak-demo file by path, the test fixture by exact value — so a
 # real credential committed anywhere else is still caught.

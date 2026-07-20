@@ -15,8 +15,7 @@ That means:
     against a live provider.
 
 Environment Variables:
-    TULIP_MODEL_PROVIDER   - "mock" (default), "openai", "anthropic", or
-"openai" or "anthropic".
+    TULIP_MODEL_PROVIDER   - "mock" (default), "openai", or "anthropic".
     TULIP_MODEL_ID         - Model identifier (provider-specific)
 
     # OpenAI
@@ -39,7 +38,8 @@ Examples:
     export ANTHROPIC_API_KEY=sk-ant-...
     python examples/notebook_06_basic_agent.py
 
-    export TULIP_MODEL_ID=llama3.2
+    # Pick a specific model for the selected provider:
+    export TULIP_MODEL_ID=gpt-4o-mini
     python examples/notebook_06_basic_agent.py
 """
 

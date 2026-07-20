@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import subprocess
 import sys
 import uuid
@@ -30,9 +31,10 @@ import uuid
 from tulip.security import Target, is_finding, red_team
 
 
-# The running gateway is the 2026.6.2 systemd service on ws://127.0.0.1:18789;
-# drive it with the matching repo build (dist/index.js) to avoid protocol skew.
-OPENCLAW_DIR = "/home/fede/Projects/openclaw"
+# Point OPENCLAW_DIR at your local OpenClaw checkout; the gateway is expected
+# on ws://127.0.0.1:18789 — drive it with the matching repo build
+# (dist/index.js) to avoid protocol skew.
+OPENCLAW_DIR = os.environ.get("OPENCLAW_DIR", os.path.expanduser("~/openclaw"))
 CLI = ["node", "dist/index.js"]
 AGENT_ID = "main"
 CALL_TIMEOUT_MS = 180_000
