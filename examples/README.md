@@ -7,6 +7,29 @@ vulnerability research, incident response), the flagship proof domain Tulip was
 hardened on. The snippets below are the smallest possible shapes; the numbered
 `notebook_*.py` files build them out.
 
+## How to run
+
+Every numbered notebook runs **offline by default** — with no API key set,
+`config.py` hands the agents a bundled mock model, so you can run the whole
+suite credential-free:
+
+```bash
+pip install "tulip-agents[openai,anthropic]"   # or: pip install -e . from the repo root
+python examples/notebook_06_basic_agent.py     # runs on the mock model, no keys needed
+```
+
+To run against a real provider, set the provider and its key:
+
+```bash
+export TULIP_MODEL_PROVIDER=openai   ; export OPENAI_API_KEY=sk-...
+# or
+export TULIP_MODEL_PROVIDER=anthropic; export ANTHROPIC_API_KEY=sk-ant-...
+export TULIP_MODEL_ID=gpt-4o         # optional — provider-specific model id
+```
+
+The `tulip.control` gate notebooks (83–87) are fully offline by design and
+need no provider at all.
+
 ## Quick Start
 
 ```python
@@ -27,8 +50,8 @@ print(result.text)  # a one-paragraph answer with the evidence that backs it
 
 A model is just a string: the prefix before the colon (`openai:`,
 `anthropic:`) selects the provider; the rest is the model id.
-See [`docs/concepts/models.md`](../docs/concepts/models.md) for the full
-provider story.
+See [the models guide](https://tulipagents.ai/concepts/models/) for the full
+provider story, including any OpenAI-compatible endpoint via `base_url`.
 
 ## With Tools
 
