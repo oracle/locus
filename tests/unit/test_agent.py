@@ -705,6 +705,113 @@ class TestAgentRunSync:
 
 
 # =============================================================================
+# Agent Async Run (arun) Tests
+# =============================================================================
+
+
+class TestAgentArun:
+    """Tests for Agent.arun() — the async, thread-less equivalent of run_sync.
+
+    ``arun`` is the browser-safe (Pyodide/WASM) entry point: it drives the
+    same event loop as ``run_sync`` and builds the same ``AgentResult``, but
+    without spawning a thread or calling ``asyncio.run``. ``run_sync`` now
+    delegates to it, so these mirror the ``TestAgentRunSync`` cases in the
+    async world.
+    """
+
+    @pytest.mark.asyncio
+    async def test_arun_returns_result_with_final_message(self, mock_model, monkeypatch):
+        """await agent.arun(...) returns an AgentResult carrying the final message."""
+        monkeypatch.setattr("tulip.agent.agent.get_model", lambda m: mock_model)
+
+        mock_model.complete.return_value = ModelResponse(
+            message=Message.assistant("Hello from arun!"),
+            usage={"total_tokens": 50},
+        )
+
+        agent = Agent(model="openai:gpt-4o")
+
+        result = await agent.arun("hi")
+
+        assert isinstance(result, AgentResult)
+        assert result.success is True
+        assert result.stop_reason == "complete"
+        assert result.message == "Hello from arun!"
+
+    @pytest.mark.asyncio
+    async def test_arun_matches_run_sync(self, mock_model, monkeypatch):
+        """arun and run_sync produce equivalent results for the same input."""
+        monkeypatch.setattr("tulip.agent.agent.get_model", lambda m: mock_model)
+
+        mock_model.complete.return_value = ModelResponse(
+            message=Message.assistant("Same answer"),
+            usage={"total_tokens": 50},
+        )
+
+        agent = Agent(model="openai:gpt-4o")
+
+        async_result = await agent.arun("hi")
+        sync_result = agent.run_sync("hi")
+
+        assert async_result.message == sync_result.message == "Same answer"
+        assert async_result.stop_reason == sync_result.stop_reason
+        assert async_result.success == sync_result.success
+
+    @pytest.mark.asyncio
+    async def test_arun_records_metrics(self, mock_model, sample_tool, monkeypatch):
+        """arun surfaces ExecutionMetrics — iterations, tool_calls, tokens."""
+        monkeypatch.setattr("tulip.agent.agent.get_model", lambda m: mock_model)
+
+        tool_call = ToolCall(id="call_1", name="calculator", arguments={"expression": "2+2"})
+        first_response = ModelResponse(
+            message=Message.assistant(content="Calculating...", tool_calls=[tool_call]),
+            usage={"total_tokens": 50},
+        )
+        second_response = ModelResponse(
+            message=Message.assistant("The result is 4."),
+            usage={"total_tokens": 30},
+        )
+        mock_model.complete.side_effect = [first_response, second_response]
+
+        agent = Agent(model="openai:gpt-4o", tools=[sample_tool])
+
+        result = await agent.arun("What is 2+2?")
+
+        assert isinstance(result, AgentResult)
+        assert result.message == "The result is 4."
+        assert result.metrics.iterations >= 1
+        assert result.metrics.tool_calls == 1
+        assert result.metrics.tool_errors == 0
+
+    @pytest.mark.asyncio
+    async def test_arun_structured_output(self, mock_model, monkeypatch):
+        """arun runs the structured-output coercion path (output_schema set)."""
+        from pydantic import BaseModel
+
+        monkeypatch.setattr("tulip.agent.agent.get_model", lambda m: mock_model)
+
+        class Answer(BaseModel):
+            value: int
+
+        mock_model.complete.return_value = ModelResponse(
+            message=Message.assistant('{"value": 42}'),
+            usage={"total_tokens": 20},
+        )
+
+        agent = Agent(model="openai:gpt-4o", tools=[], output_schema=Answer)
+
+        result = await agent.arun("Give me the answer.")
+
+        assert result.parsed is not None
+        assert isinstance(result.parsed, Answer)
+        assert result.parsed.value == 42
+        assert result.parse_error is None
+        # message replaced with canonical JSON dump for downstream consumers.
+        assert result.message.startswith("{")
+        assert "value" in result.message
+
+
+# =============================================================================
 # Tool Loop Detection Tests
 # =============================================================================
 
