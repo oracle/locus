@@ -8,6 +8,15 @@ policy.
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-07-21
+
+### Added
+
+- **`AnthropicModel(default_headers=…)`** — extra HTTP headers are forwarded to the
+  Anthropic client. Enables calling the API directly from a browser (Pyodide/WASM):
+  pass `{"anthropic-dangerous-direct-browser-access": "true"}` to clear the CORS
+  preflight. Backward-compatible (default `None`).
+
 ## [2.1.0] - 2026-07-08
 
 ### Added
