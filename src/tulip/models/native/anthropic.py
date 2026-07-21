@@ -49,6 +49,15 @@ class AnthropicConfig(ModelConfig):
     top_p: float = 0.9
     api_key: str | None = Field(default=None, description="Anthropic API key")
     base_url: str | None = Field(default=None, description="Custom API base URL")
+    default_headers: dict[str, str] | None = Field(
+        default=None,
+        description=(
+            "Extra HTTP headers sent on every request. Needed to call the "
+            "API directly from a browser (Pyodide/WASM): pass "
+            "{'anthropic-dangerous-direct-browser-access': 'true'} so the "
+            "CORS preflight is accepted."
+        ),
+    )
     prompt_cache: bool = Field(
         default=False,
         description=(
@@ -107,6 +116,7 @@ class AnthropicModel(BaseModel):
         max_tokens: int = 4096,
         temperature: float = 0.7,
         prompt_cache: bool = False,
+        default_headers: dict[str, str] | None = None,
         **kwargs: Any,
     ) -> None:
         config = AnthropicConfig(
@@ -116,6 +126,7 @@ class AnthropicModel(BaseModel):
             max_tokens=max_tokens,
             temperature=temperature,
             prompt_cache=prompt_cache,
+            default_headers=default_headers,
             **kwargs,
         )
         super().__init__(config=config)
@@ -137,6 +148,7 @@ class AnthropicModel(BaseModel):
                 base_url=self.config.base_url,
                 max_retries=self.config.max_retries,
                 timeout=self.config.request_timeout,
+                default_headers=self.config.default_headers,
             )
         return self._client
 
