@@ -436,3 +436,16 @@ class TestStream:
         assert "tools" in captured
         # Just the done event
         assert events[-1].done is True
+
+
+def test_default_headers_passthrough_for_browser() -> None:
+    """default_headers reach the config + client (browser/Pyodide CORS use)."""
+    from tulip.models.native.anthropic import AnthropicModel
+
+    hdr = {"anthropic-dangerous-direct-browser-access": "true"}
+    m = AnthropicModel(model="claude-haiku-4-5", api_key="x", default_headers=hdr)
+    assert m.config.default_headers == hdr
+    # client is constructed with the headers (property builds AsyncAnthropic)
+    assert m.client is not None
+    # backward-compatible: default is None
+    assert AnthropicModel(model="claude-haiku-4-5", api_key="x").config.default_headers is None
