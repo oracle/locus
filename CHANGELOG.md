@@ -8,6 +8,16 @@ policy.
 
 ## [Unreleased]
 
+## [2.1.2] - 2026-07-21
+
+### Added
+
+- **`Agent.arun(prompt) -> AgentResult`** — the async, thread-free equivalent of
+  `run_sync` (same result-building logic; the caller owns the event loop). Enables
+  running agents where threads aren't available — notably in the browser
+  (Pyodide/WASM), so the workbench can run notebooks fully client-side. `run_sync`
+  now delegates to `arun`; `invoke()` is unchanged.
+
 ## [2.1.1] - 2026-07-21
 
 ### Added

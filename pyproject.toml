@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tulip-agents"
-version = "2.1.1"
+version = "2.1.2"
 description = "The safest way to build agentic AI — a full-stack, open-source agent SDK where control is native: a cognitive router picks the shape, GSAR grounds every claim, and every risky action must clear an admission gate. Proven first in the security domain."
 readme = "README.md"
 license = "Apache-2.0"
