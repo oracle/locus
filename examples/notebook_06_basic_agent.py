@@ -11,7 +11,7 @@ later notebooks.
 
 Key ideas:
 - An ``Agent`` pairs a model with a system prompt and optional tools.
-- ``agent.run_sync(prompt)`` returns a single ``AgentResult``.
+- ``await agent.arun(prompt)`` returns a single ``AgentResult``.
 - ``agent.run(prompt)`` is an async generator that yields events — the
   agent shows its work instead of handing you an opaque answer.
 - ``AgentResult`` carries the final message, success flag, stop reason,
@@ -47,7 +47,7 @@ from tulip.agent import Agent
 # =============================================================================
 
 
-def example_create_agent():
+async def example_create_agent():
     """Build Aria and run one tiny prompt to confirm the provider works."""
     print("=== Part 1: Creating an Agent ===\n")
 
@@ -64,7 +64,7 @@ def example_create_agent():
     import time as _t
 
     t0 = _t.perf_counter()
-    smoke = agent.run_sync("Say 'ready' in one word.")
+    smoke = await agent.arun("Say 'ready' in one word.")
     dt = _t.perf_counter() - t0
     print(
         f"  [provider call: {dt:.2f}s · "
@@ -77,13 +77,13 @@ def example_create_agent():
 
 
 # =============================================================================
-# Part 2: blocking call with run_sync
+# Part 2: awaited call with arun
 # =============================================================================
 
 
-def example_sync_run():
-    """Block until the agent finishes — the simplest possible call."""
-    print("=== Part 2: Synchronous Execution ===\n")
+async def example_sync_run():
+    """Await the agent until it finishes — the simplest possible call."""
+    print("=== Part 2: Awaited Execution ===\n")
 
     model = get_model(max_tokens=100)
 
@@ -93,7 +93,7 @@ def example_sync_run():
     )
 
     question = "What's a good way to explain recursion to a beginner?"
-    result = agent.run_sync(question)
+    result = await agent.arun(question)
 
     print(f"Prompt: {question}")
     print(f"Response: {result.message}")
@@ -140,7 +140,7 @@ async def example_async_run():
 # =============================================================================
 
 
-def example_agent_result():
+async def example_agent_result():
     """Print every notable field on AgentResult so you know what's available."""
     print("=== Part 4: Understanding Results ===\n")
 
@@ -151,7 +151,7 @@ def example_agent_result():
         system_prompt="You are Aria, a helpful assistant. One sentence answers only.",
     )
 
-    result = agent.run_sync("In one sentence, what is a good night's sleep worth?")
+    result = await agent.arun("In one sentence, what is a good night's sleep worth?")
 
     print("AgentResult fields:")
     print(f"  .message     = {result.message}")
@@ -171,7 +171,7 @@ def example_agent_result():
 # =============================================================================
 
 
-def example_multiple_prompts():
+async def example_multiple_prompts():
     """One agent, many questions. Each call is independent unless you opt in to memory."""
     print("=== Part 5: Multiple Questions ===\n")
 
@@ -191,7 +191,7 @@ def example_multiple_prompts():
     ]
 
     for prompt in prompts:
-        result = agent.run_sync(prompt)
+        result = await agent.arun(prompt)
         print(f"Q: {prompt}")
         print(f"A: {result.message}")
         print()
@@ -202,7 +202,7 @@ def example_multiple_prompts():
 # =============================================================================
 
 
-def main():
+async def main():
     """Run all notebook parts."""
     print("=" * 60)
     print("Notebook 06: Aria — Your First Agent")
@@ -212,11 +212,11 @@ def main():
     print_config()
     print()
 
-    example_create_agent()
-    example_sync_run()
-    asyncio.run(example_async_run())
-    example_agent_result()
-    example_multiple_prompts()
+    await example_create_agent()
+    await example_sync_run()
+    await example_async_run()
+    await example_agent_result()
+    await example_multiple_prompts()
 
     print("=" * 60)
     print("Next: Notebook 07 — Giving an Agent Tools")
@@ -224,4 +224,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

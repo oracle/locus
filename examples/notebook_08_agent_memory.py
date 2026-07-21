@@ -57,8 +57,8 @@ def _build_checkpointer(suffix: str = "default") -> MemoryCheckpointer:
 # =============================================================================
 
 
-def example_conversation_memory():
-    """Same thread_id across two run_sync calls — the agent recalls turn one."""
+async def example_conversation_memory():
+    """Same thread_id across two arun calls — the agent recalls turn one."""
     print("=== Part 1: Conversation memory ===\n")
 
     model = get_model(max_tokens=100)
@@ -72,7 +72,7 @@ def example_conversation_memory():
 
     thread_id = "chat_1"
 
-    result1 = agent.run_sync(
+    result1 = await agent.arun(
         "Hi! My name is Sam and I'm planning a trip to Japan next spring.",
         thread_id=thread_id,
     )
@@ -81,7 +81,7 @@ def example_conversation_memory():
 
     # Same thread_id — the agent loads the prior conversation state before
     # the next model call.
-    result2 = agent.run_sync("What's my name, and where am I going?", thread_id=thread_id)
+    result2 = await agent.arun("What's my name, and where am I going?", thread_id=thread_id)
     print("\nYou: What's my name, and where am I going?")
     print(f"Assistant: {result2.message}")
     print()
@@ -111,7 +111,7 @@ def get_notes() -> str:
     return f"You have {len(_NOTES)} note(s):\n{lines}"
 
 
-def example_checkpointing_with_tools():
+async def example_checkpointing_with_tools():
     """checkpoint_every_n_iterations=1 means a mid-loop interruption still recovers."""
     print("=== Part 2: Checkpoint after each iteration ===\n")
 
@@ -128,7 +128,7 @@ def example_checkpointing_with_tools():
 
     thread_id = "notes_session"
 
-    result1 = agent.run_sync(
+    result1 = await agent.arun(
         "Save a note: buy oat milk and coffee filters on the way home.",
         thread_id=thread_id,
     )
@@ -136,7 +136,7 @@ def example_checkpointing_with_tools():
     print(f"Assistant: {result1.message}")
     print(f"Tool calls: {result1.metrics.tool_calls}")
 
-    result2 = agent.run_sync("What notes do we have so far?", thread_id=thread_id)
+    result2 = await agent.arun("What notes do we have so far?", thread_id=thread_id)
     print("\nYou: What notes do we have so far?")
     print(f"Assistant: {result2.message}")
     print()
@@ -147,7 +147,7 @@ def example_checkpointing_with_tools():
 # =============================================================================
 
 
-def example_persistence_across_agents():
+async def example_persistence_across_agents():
     """Two Agent objects, one store. The second loads the first's state."""
     print("=== Part 3: Reattaching to the same store ===\n")
 
@@ -161,7 +161,7 @@ def example_persistence_across_agents():
 
     thread_id = "persistent_chat"
 
-    result1 = agent1.run_sync(
+    result1 = await agent1.arun(
         "Remember: my favorite color is teal.",
         thread_id=thread_id,
     )
@@ -177,7 +177,7 @@ def example_persistence_across_agents():
         checkpointer=_build_checkpointer("persist"),
     )
 
-    result2 = agent2.run_sync("What's my favorite color?", thread_id=thread_id)
+    result2 = await agent2.arun("What's my favorite color?", thread_id=thread_id)
     print("\n[New agent — same store]")
     print("You: What's my favorite color?")
     print(f"Assistant: {result2.message}")
@@ -189,7 +189,7 @@ def example_persistence_across_agents():
 # =============================================================================
 
 
-def example_multiple_threads():
+async def example_multiple_threads():
     """Two conversations, two thread_ids, one store — no cross-talk between them."""
     print("=== Part 4: Multiple conversations ===\n")
 
@@ -205,20 +205,20 @@ def example_multiple_threads():
     thread_travel = "chat_travel"
     thread_music = "chat_music"
 
-    agent.run_sync(
+    await agent.arun(
         "Let's talk about my upcoming hiking trip in the Alps.",
         thread_id=thread_travel,
     )
-    agent.run_sync(
+    await agent.arun(
         "I just started learning to play the guitar.",
         thread_id=thread_music,
     )
 
-    result_travel = agent.run_sync("What are we talking about?", thread_id=thread_travel)
+    result_travel = await agent.arun("What are we talking about?", thread_id=thread_travel)
     print("Thread 'chat_travel': What are we talking about?")
     print(f"Assistant: {result_travel.message}")
 
-    result_music = agent.run_sync("What are we talking about?", thread_id=thread_music)
+    result_music = await agent.arun("What are we talking about?", thread_id=thread_music)
     print("\nThread 'chat_music': What are we talking about?")
     print(f"Assistant: {result_music.message}")
     print()
@@ -271,11 +271,11 @@ async def example_inspect_checkpoint():
 
     thread_id = "inspect_chat"
 
-    agent.run_sync(
+    await agent.arun(
         "My name is Sam and I live in Portland.",
         thread_id=thread_id,
     )
-    agent.run_sync(
+    await agent.arun(
         "On weekends I like to go rock climbing.",
         thread_id=thread_id,
     )
@@ -307,7 +307,7 @@ async def example_inspect_checkpoint():
 # =============================================================================
 
 
-def main():
+async def main():
     """Run all notebook parts."""
     print("=" * 60)
     print("Notebook 08: Conversation Memory")
@@ -317,11 +317,11 @@ def main():
     print_config()
     print()
 
-    example_conversation_memory()
-    example_checkpointing_with_tools()
-    example_persistence_across_agents()
-    example_multiple_threads()
-    asyncio.run(example_inspect_checkpoint())
+    await example_conversation_memory()
+    await example_checkpointing_with_tools()
+    await example_persistence_across_agents()
+    await example_multiple_threads()
+    await example_inspect_checkpoint()
 
     print("=" * 60)
     print("Next: Notebook 11 — Streaming a Reply")
@@ -330,6 +330,6 @@ def main():
 
 if __name__ == "__main__":
     try:
-        main()
+        asyncio.run(main())
     except KeyboardInterrupt:
         sys.exit(130)

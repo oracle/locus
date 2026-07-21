@@ -218,6 +218,109 @@ class Agent(AgentRuntimeMixin, BaseModel):
         """Display name from the config (multi-agent label, logs, traces)."""
         return self.config.name
 
+    async def arun(
+        self,
+        prompt: str,
+        *,
+        thread_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> AgentResult:
+        """
+        Run the agent asynchronously and return a single ``AgentResult``.
+
+        This is the async, browser-safe equivalent of :meth:`run_sync`: it
+        drives the same event loop (``self.run(...)``), builds the same
+        ``AgentResult``, but without spawning a thread or calling
+        ``asyncio.run``. That makes it usable in environments where threads
+        are unavailable — notably Pyodide / WebAssembly (the Tulip workbench
+        runs notebooks in the browser), where ``run_sync`` cannot work.
+
+        Unlike ``run_sync`` it does NOT close the underlying model client or
+        checkpointer pool afterward — the caller owns the loop, so those
+        resources stay bound to it and can be reused across ``arun`` calls.
+
+        Args:
+            prompt: User prompt to process
+            thread_id: Optional thread ID for checkpointing
+            metadata: Additional metadata for tools
+
+        Returns:
+            AgentResult with final message and state
+        """
+        started_at = datetime.now(UTC)
+        stop_reason: StopReason = "complete"
+        final_message: str = ""
+        tool_errors = 0
+
+        callback = self.config.callback_handler
+
+        async for event in self.run(prompt, thread_id=thread_id, metadata=metadata):
+            # Fire callback if set
+            if callback is not None:
+                callback(event)
+
+            if isinstance(event, TerminateEvent):
+                stop_reason = _normalize_stop_reason(event.reason)
+                final_message = event.final_message or ""
+            elif isinstance(event, ToolCompleteEvent):
+                if event.error:
+                    tool_errors += 1
+
+        # Use actual final state from run() instead of reconstructing
+        state = self._last_run_state
+        if state is None:
+            state = await self._create_initial_state(prompt, thread_id, metadata)
+            if final_message:
+                state = state.with_message(Message.assistant(final_message))
+
+        # Structured-output coercion (no-op when output_schema is unset).
+        parsed_obj = None
+        parse_error_msg = None
+        structured_message = final_message
+        if self.config.output_schema is not None:
+            parsed_obj, parse_error_msg, state = await self._structure_output(
+                state, final_message or ""
+            )
+            if parsed_obj is not None:
+                # Replace ``message`` with the canonical JSON form so callers
+                # using ``result.message`` still see a schema-valid string.
+                structured_message = parsed_obj.model_dump_json()
+
+        # Run GSAR judgment when configured. Single-pass v1: judge
+        # the final answer, surface the result on AgentResult.
+        # Full Algorithm-1 outer loop (regenerate / replan) lives in
+        # tulip.reasoning.gsar_evaluator and can be wired
+        # explicitly when the caller wants the loop dynamics.
+        gsar_judgment, gsar_score_value, gsar_decision = await self._run_gsar_judgment(
+            state, structured_message or final_message
+        )
+
+        elapsed_ms = (datetime.now(UTC) - started_at).total_seconds() * 1000
+        metrics = ExecutionMetrics(
+            iterations=state.iteration,
+            tool_calls=len(state.tool_executions),
+            tool_errors=tool_errors,
+            total_tokens=state.total_tokens_used,
+            prompt_tokens=state.prompt_tokens_used,
+            completion_tokens=state.completion_tokens_used,
+            cache_creation_input_tokens=state.cache_creation_tokens_used,
+            cache_read_input_tokens=state.cache_read_tokens_used,
+            duration_ms=elapsed_ms,
+        )
+
+        return AgentResult.from_state(
+            state=state,
+            stop_reason=stop_reason,
+            metrics=metrics,
+            started_at=started_at,
+            parsed=parsed_obj,
+            parse_error=parse_error_msg,
+            message=structured_message,
+            gsar_judgment=gsar_judgment,
+            gsar_score=gsar_score_value,
+            gsar_decision=gsar_decision,
+        )
+
     def run_sync(
         self,
         prompt: str,
@@ -228,6 +331,12 @@ class Agent(AgentRuntimeMixin, BaseModel):
         """
         Run the agent synchronously.
 
+        Blocking wrapper around :meth:`arun`: it drives ``self.arun(...)`` on
+        a fresh event loop (or a worker thread when a loop is already
+        running) and closes the model / checkpointer clients bound to that
+        loop before returning. In thread-less environments (Pyodide / WASM)
+        this cannot work — call ``await self.arun(...)`` directly there.
+
         Args:
             prompt: User prompt to process
             thread_id: Optional thread ID for checkpointing
@@ -237,83 +346,8 @@ class Agent(AgentRuntimeMixin, BaseModel):
             AgentResult with final message and state
         """
 
-        async def _run() -> AgentResult:
-            started_at = datetime.now(UTC)
-            stop_reason: StopReason = "complete"
-            final_message: str = ""
-            tool_errors = 0
-
-            callback = self.config.callback_handler
-
-            async for event in self.run(prompt, thread_id=thread_id, metadata=metadata):
-                # Fire callback if set
-                if callback is not None:
-                    callback(event)
-
-                if isinstance(event, TerminateEvent):
-                    stop_reason = _normalize_stop_reason(event.reason)
-                    final_message = event.final_message or ""
-                elif isinstance(event, ToolCompleteEvent):
-                    if event.error:
-                        tool_errors += 1
-
-            # Use actual final state from run() instead of reconstructing
-            state = self._last_run_state
-            if state is None:
-                state = await self._create_initial_state(prompt, thread_id, metadata)
-                if final_message:
-                    state = state.with_message(Message.assistant(final_message))
-
-            # Structured-output coercion (no-op when output_schema is unset).
-            parsed_obj = None
-            parse_error_msg = None
-            structured_message = final_message
-            if self.config.output_schema is not None:
-                parsed_obj, parse_error_msg, state = await self._structure_output(
-                    state, final_message or ""
-                )
-                if parsed_obj is not None:
-                    # Replace ``message`` with the canonical JSON form so callers
-                    # using ``result.message`` still see a schema-valid string.
-                    structured_message = parsed_obj.model_dump_json()
-
-            # Run GSAR judgment when configured. Single-pass v1: judge
-            # the final answer, surface the result on AgentResult.
-            # Full Algorithm-1 outer loop (regenerate / replan) lives in
-            # tulip.reasoning.gsar_evaluator and can be wired
-            # explicitly when the caller wants the loop dynamics.
-            gsar_judgment, gsar_score_value, gsar_decision = await self._run_gsar_judgment(
-                state, structured_message or final_message
-            )
-
-            elapsed_ms = (datetime.now(UTC) - started_at).total_seconds() * 1000
-            metrics = ExecutionMetrics(
-                iterations=state.iteration,
-                tool_calls=len(state.tool_executions),
-                tool_errors=tool_errors,
-                total_tokens=state.total_tokens_used,
-                prompt_tokens=state.prompt_tokens_used,
-                completion_tokens=state.completion_tokens_used,
-                cache_creation_input_tokens=state.cache_creation_tokens_used,
-                cache_read_input_tokens=state.cache_read_tokens_used,
-                duration_ms=elapsed_ms,
-            )
-
-            return AgentResult.from_state(
-                state=state,
-                stop_reason=stop_reason,
-                metrics=metrics,
-                started_at=started_at,
-                parsed=parsed_obj,
-                parse_error=parse_error_msg,
-                message=structured_message,
-                gsar_judgment=gsar_judgment,
-                gsar_score=gsar_score_value,
-                gsar_decision=gsar_decision,
-            )
-
         async def _run_and_close_clients() -> AgentResult:
-            # Wrap _run() so any model-level httpx client is shut down
+            # Wrap ``self.arun`` so any model-level httpx client is shut down
             # *inside* this asyncio.run loop. Otherwise the client's
             # connections remain bound to the loop we're about to close;
             # when ``run_sync`` is called again, the next ``asyncio.run``
@@ -321,13 +355,13 @@ class Agent(AgentRuntimeMixin, BaseModel):
             # to ``aclose`` against the now-closed loop, raising
             # ``RuntimeError: Event loop is closed``.
             try:
-                return await _run()
+                return await self.arun(prompt, thread_id=thread_id, metadata=metadata)
             finally:
                 close = getattr(self.model, "close", None)
                 if close is not None:
                     try:
                         await close()
-                    except Exception:  # noqa: BLE001 — cleanup must never mask a real error from _run()
+                    except Exception:  # noqa: BLE001 — cleanup must never mask a real error from arun()
                         pass
 
                 # Same reasoning for the checkpointer's connection pool.
@@ -342,7 +376,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
                 if ckpt_close is not None:
                     try:
                         await ckpt_close()
-                    except Exception:  # noqa: BLE001 — cleanup must never mask _run() errors
+                    except Exception:  # noqa: BLE001 — cleanup must never mask arun() errors
                         pass
 
                 # Drain any background tasks the SDK spawned (httpx's TLS

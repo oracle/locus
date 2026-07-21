@@ -71,7 +71,7 @@ def word_count(text: str) -> int:
     return len(text.split())
 
 
-def example_simple_tools():
+async def example_simple_tools():
     """Show the tool metadata Tulip generates from a decorated function."""
     print("=== Part 1: Simple Tools ===\n")
 
@@ -89,7 +89,7 @@ def example_simple_tools():
         system_prompt="Reply in one short sentence.",
     )
     t0 = _t.perf_counter()
-    desc = agent.run_sync(
+    desc = await agent.arun(
         f"In one sentence, when would an assistant use a tool called '{get_weather.name}' "
         f"that {get_weather.description}?"
     )
@@ -107,7 +107,7 @@ def example_simple_tools():
 # =============================================================================
 
 
-def example_agent_with_tools():
+async def example_agent_with_tools():
     """Wire tools into an Agent and let the model decide when to call them."""
     print("=== Part 2: Agent Using Tools ===\n")
 
@@ -122,7 +122,7 @@ def example_agent_with_tools():
 
     print(f"Agent has {len(agent.tools)} tools registered")
 
-    result = agent.run_sync("What's the weather in Tokyo right now?")
+    result = await agent.arun("What's the weather in Tokyo right now?")
     print("\nQ: What's the weather in Tokyo right now?")
     print(f"A: {result.message}")
     print(f"Tool calls made: {result.metrics.tool_calls}")
@@ -159,7 +159,7 @@ def greet(name: str, formal: bool = False) -> str:
     return f"Hey {name}! Nice to meet you."
 
 
-def example_complex_tools():
+async def example_complex_tools():
     """Tools with default arguments and varied return types."""
     print("=== Part 3: Complex Tools ===\n")
 
@@ -179,7 +179,7 @@ def example_complex_tools():
     ]
 
     for prompt in prompts:
-        result = agent.run_sync(prompt)
+        result = await agent.arun(prompt)
         print(f"Q: {prompt}")
         print(f"A: {result.message}")
         print()
@@ -300,7 +300,7 @@ def get_book_details(book_id: int) -> dict:
     return details.get(book_id, {"error": f"Book {book_id} not found"})
 
 
-def example_structured_tools():
+async def example_structured_tools():
     """Tools can return dicts and lists — the model parses them on the next turn."""
     print("=== Part 5: Structured Data Tools ===\n")
 
@@ -312,7 +312,7 @@ def example_structured_tools():
         system_prompt="You are a helpful library assistant. Help people find books.",
     )
 
-    result = agent.run_sync("Find some fiction books, then tell me more about 'The Blue Kite'.")
+    result = await agent.arun("Find some fiction books, then tell me more about 'The Blue Kite'.")
     print("Q: Find some fiction books, then tell me more about 'The Blue Kite'.")
     print(f"A: {result.message}")
     print(f"\nTool calls made: {result.metrics.tool_calls}")
@@ -324,7 +324,7 @@ def example_structured_tools():
 # =============================================================================
 
 
-def main():
+async def main():
     """Run all notebook parts."""
     print("=" * 60)
     print("Notebook 07: Giving an Agent Tools")
@@ -334,11 +334,11 @@ def main():
     print_config()
     print()
 
-    example_simple_tools()
-    example_agent_with_tools()
-    example_complex_tools()
-    asyncio.run(example_tool_events())
-    example_structured_tools()
+    await example_simple_tools()
+    await example_agent_with_tools()
+    await example_complex_tools()
+    await example_tool_events()
+    await example_structured_tools()
 
     print("=" * 60)
     print("Next: Notebook 08 — Conversation Memory")
@@ -346,4 +346,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
