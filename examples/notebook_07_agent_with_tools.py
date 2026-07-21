@@ -1,14 +1,14 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 """
-Notebook 07: Deployment readiness with tools.
+Notebook 07: giving an agent tools.
 
-A model without tools can only guess about a release from what's already
-in its context — and guessed go/no-go calls are how bad deploys ship.
-Tools let the agent reach out — look up an image digest, pull a service's
-health record — and bring real evidence back into the conversation. Tulip
-runs this as a small ReAct loop: the model decides whether to call a tool,
-Tulip runs the tool, the result is fed back into the next model call.
+A model on its own can only answer from what's already in its context —
+it can't check today's weather or count the words in your draft. Tools
+let the agent reach out — look something up, run a small calculation —
+and bring a real answer back into the conversation. Tulip runs this as a
+small ReAct loop: the model decides whether to call a tool, Tulip runs
+the tool, the result is fed back into the next model call.
 
 Key ideas:
 - ``@tool`` turns a plain Python function into something the model can
@@ -16,13 +16,13 @@ Key ideas:
 - Pass tools to ``Agent(tools=[...])`` and the agent picks when to use
   them.
 - Each tool call shows up as a ``ToolStartEvent`` / ``ToolCompleteEvent``
-  pair in the event stream — an auditable record of every lookup.
+  pair in the event stream — a clear record of every lookup.
 - Tools can take typed arguments (including optional ones) and return
-  anything JSON-serialisable — strings, dicts, lists.
+  anything JSON-serialisable — strings, numbers, dicts, lists.
 
-The inventory here is fictional by design: example.com hostnames,
-placeholder image digests, and made-up service names. The degraded
-``payment-svc`` stands in for a release that should hold for review.
+The data here is made up on purpose: the weather table and the little
+library catalog are fixed sample values, so the notebook runs the same
+way every time.
 
 Run it:
     .venv/bin/python examples/notebook_07_agent_with_tools.py
@@ -50,40 +50,37 @@ from tulip.tools import tool
 # =============================================================================
 
 # A tool is a plain Python function decorated with @tool. The docstring
-# is what the model reads to decide when to call it. All inventory data
-# below is invented — placeholder digests and example.com hostnames.
+# is what the model reads to decide when to call it. The weather data
+# below is invented — a small fixed table of sample values.
 
 
 @tool
-def lookup_image(digest: str) -> str:
-    """Look up a container image digest in the build registry."""
+def get_weather(city: str) -> str:
+    """Look up the current weather for a city."""
     known = {
-        "sha256:aa11bb22": "api-gateway:v2.3.1 — built 2h ago, scan clean (0 critical CVEs)",
-        "sha256:dd44ee55": "payment-svc:v1.9.0 — built 6d ago, scan flagged 3 critical CVEs",
+        "paris": "Paris: 18°C, cloudy",
+        "tokyo": "Tokyo: 24°C, sunny",
+        "cairo": "Cairo: 33°C, clear and dry",
     }
-    return known.get(digest.lower(), f"Digest {digest} not present in the build registry")
+    return known.get(city.lower(), f"No weather data on file for {city}.")
 
 
 @tool
-def dns_record(hostname: str) -> str:
-    """Look up the DNS / deployment record for a service hostname."""
-    records = {
-        "canary.example.com": "points at canary pool, 5% traffic, deployed 12 minutes ago",
-        "payments.example.net": "points at blue pool, 100% traffic, last change 3 days ago",
-    }
-    return records.get(hostname.lower(), f"{hostname}: stable CNAME, last changed 2024")
+def word_count(text: str) -> int:
+    """Count the number of words in a piece of text."""
+    return len(text.split())
 
 
 def example_simple_tools():
     """Show the tool metadata Tulip generates from a decorated function."""
     print("=== Part 1: Simple Tools ===\n")
 
-    result = lookup_image("sha256:aa11bb22")
-    print(f"Direct call: lookup_image('sha256:aa11bb22') = {result}")
+    result = get_weather("Tokyo")
+    print(f"Direct call: get_weather('Tokyo') = {result}")
 
-    print(f"\nTool name: {lookup_image.name}")
-    print(f"Tool description: {lookup_image.description}")
-    print(f"Tool parameters: {lookup_image.parameters}")
+    print(f"\nTool name: {get_weather.name}")
+    print(f"Tool description: {get_weather.description}")
+    print(f"Tool parameters: {get_weather.parameters}")
 
     import time as _t
 
@@ -93,8 +90,8 @@ def example_simple_tools():
     )
     t0 = _t.perf_counter()
     desc = agent.run_sync(
-        f"In one sentence, when would an SRE agent use a tool called '{lookup_image.name}' "
-        f"that {lookup_image.description}?"
+        f"In one sentence, when would an assistant use a tool called '{get_weather.name}' "
+        f"that {get_weather.description}?"
     )
     dt = _t.perf_counter() - t0
     print(
@@ -106,7 +103,7 @@ def example_simple_tools():
 
 
 # =============================================================================
-# Part 2: hand tools to a release agent
+# Part 2: hand tools to an agent
 # =============================================================================
 
 
@@ -118,15 +115,15 @@ def example_agent_with_tools():
 
     agent = Agent(
         model=model,
-        tools=[lookup_image, dns_record],
-        system_prompt="You are a release-readiness assistant. Use the provided tools to look up "
-        "images and hosts before giving a go/no-go.",
+        tools=[get_weather, word_count],
+        system_prompt="You are a helpful assistant. Use the provided tools to look up "
+        "the weather or count words when the question calls for it.",
     )
 
     print(f"Agent has {len(agent.tools)} tools registered")
 
-    result = agent.run_sync("Is the image sha256:aa11bb22 safe to deploy?")
-    print("\nQ: Is the image sha256:aa11bb22 safe to deploy?")
+    result = agent.run_sync("What's the weather in Tokyo right now?")
+    print("\nQ: What's the weather in Tokyo right now?")
     print(f"A: {result.message}")
     print(f"Tool calls made: {result.metrics.tool_calls}")
     print()
@@ -139,29 +136,27 @@ def example_agent_with_tools():
 
 @tool
 def get_current_time() -> str:
-    """Get the current date and time, for deploy-log timestamps."""
+    """Get the current date and time."""
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 @tool
-def image_age(built_year: int) -> str:
-    """Calculate how stale a container image is given the year it was built."""
-    current_year = datetime.now().year
-    age = current_year - built_year
-    return f"An image built in {built_year} is {age} years old."
+def add(a: int, b: int) -> int:
+    """Add two whole numbers together."""
+    return a + b
 
 
 @tool
-def format_change_title(service: str, urgent: bool = False) -> str:
-    """Create a change-request title for a service being deployed.
+def greet(name: str, formal: bool = False) -> str:
+    """Write a short greeting for a person.
 
     Args:
-        service: The service the change is about
-        urgent: Whether to flag the change as urgent (default: False)
+        name: The person to greet
+        formal: Whether to use a formal tone (default: False)
     """
-    if urgent:
-        return f"[URGENT] Deploy: {service} — expedited rollout requested."
-    return f"Deploy: {service} — standard rollout."
+    if formal:
+        return f"Good day, {name}. It is a pleasure to meet you."
+    return f"Hey {name}! Nice to meet you."
 
 
 def example_complex_tools():
@@ -172,14 +167,15 @@ def example_complex_tools():
 
     agent = Agent(
         model=model,
-        tools=[get_current_time, image_age, format_change_title],
-        system_prompt="You are an SRE assistant with access to time and change-management tools.",
+        tools=[get_current_time, add, greet],
+        system_prompt="You are a helpful assistant with access to a clock, a calculator, "
+        "and a greeting tool.",
     )
 
     prompts = [
-        "What time is it right now? I need it for the deploy log.",
-        "How old is a container image built in 2019?",
-        "Give me an urgent change title for the service payment-svc",
+        "What time is it right now?",
+        "What is 23 plus 19?",
+        "Write a formal greeting for Dr. Chen.",
     ]
 
     for prompt in prompts:
@@ -195,23 +191,23 @@ def example_complex_tools():
 
 
 async def example_tool_events():
-    """Stream events to see the model plan, call a tool, and use its evidence."""
+    """Stream events to see the model plan, call a tool, and use its result."""
     print("=== Part 4: Tool Execution Events ===\n")
 
     model = get_model(max_tokens=200)
 
     agent = Agent(
         model=model,
-        tools=[lookup_image, dns_record],
-        system_prompt="Use tools to check a release. Always look up images and hosts "
-        "before answering.",
+        tools=[get_weather, word_count],
+        system_prompt="You are a helpful assistant. Use the tools to answer questions "
+        "about the weather or about how long a piece of text is.",
     )
 
-    print("Q: Check image sha256:aa11bb22 and host canary.example.com, then give a go/no-go.\n")
+    print("Q: What's the weather in Paris, and how many words are in 'the quick brown fox'?\n")
     print("Events:")
 
     async for event in agent.run(
-        "Check image sha256:aa11bb22 and host canary.example.com, then give a go/no-go."
+        "What's the weather in Paris, and how many words are in 'the quick brown fox'?"
     ):
         event_type = event.event_type
 
@@ -236,96 +232,72 @@ async def example_tool_events():
 
 
 @tool
-def search_services(query: str, max_results: int = 3) -> list[dict]:
-    """Search for services in the deployment inventory.
+def search_books(query: str, max_results: int = 3) -> list[dict]:
+    """Search a small library catalog by title or genre.
 
     Args:
-        query: Search query (matches service name or type)
+        query: Search query (matches book title or genre)
         max_results: Maximum number of results to return
     """
-    # In-memory inventory stands in for a service catalogue / CMDB. The
-    # search logic below is the part worth reading. All entries are fake.
-    services = [
-        {"id": 1, "name": "api-gateway", "type": "deployment", "status": "healthy"},
-        {
-            "id": 2,
-            "name": "payment-svc",
-            "type": "deployment",
-            "status": "degraded",
-        },
-        {"id": 3, "name": "nightly-backup", "type": "cronjob", "status": "healthy"},
-        {"id": 4, "name": "auth-svc", "type": "deployment", "status": "degraded"},
-        {"id": 5, "name": "redis-cache", "type": "statefulset", "status": "healthy"},
-        {"id": 6, "name": "image-resizer", "type": "deployment", "status": "down"},
-        {
-            "id": 7,
-            "name": "metrics-agent",
-            "type": "daemonset",
-            "status": "healthy",
-        },
-        {
-            "id": 8,
-            "name": "report-export",
-            "type": "cronjob",
-            "status": "degraded",
-        },
+    # In-memory catalog stands in for a real library database. The search
+    # logic below is the part worth reading. All entries are made up.
+    books = [
+        {"id": 1, "title": "The Blue Kite", "genre": "fiction", "available": True},
+        {"id": 2, "title": "Cooking at Home", "genre": "cookbook", "available": True},
+        {"id": 3, "title": "A Short History of Maps", "genre": "history", "available": False},
+        {"id": 4, "title": "The Quiet Garden", "genre": "fiction", "available": True},
+        {"id": 5, "title": "Stars and Seasons", "genre": "science", "available": True},
+        {"id": 6, "title": "Bread Every Day", "genre": "cookbook", "available": False},
     ]
 
-    # Case-insensitive match on name OR type.
+    # Case-insensitive match on title OR genre.
     q = query.lower()
-    matches = [s for s in services if q in s["name"].lower() or q in s["type"].lower()]
+    matches = [b for b in books if q in b["title"].lower() or q in b["genre"].lower()]
     return matches[:max_results]
 
 
 @tool
-def get_service_details(service_id: int) -> dict:
-    """Get detailed status about a specific service in the inventory."""
+def get_book_details(book_id: int) -> dict:
+    """Get detailed information about a specific book in the catalog."""
     details = {
         1: {
             "id": 1,
-            "name": "api-gateway",
-            "status": "healthy",
-            "notes": "3 replicas ready, p99 latency 80ms, last deploy 2h ago",
+            "title": "The Blue Kite",
+            "author": "M. Okafor",
+            "notes": "A quiet novel about a family and a summer that changes them.",
         },
         2: {
             "id": 2,
-            "name": "payment-svc",
-            "status": "degraded",
-            "notes": "1/3 replicas crash-looping, error rate 8%, deployed 6d ago",
+            "title": "Cooking at Home",
+            "author": "L. Romano",
+            "notes": "120 weeknight recipes, most under 30 minutes.",
         },
         3: {
             "id": 3,
-            "name": "nightly-backup",
-            "status": "healthy",
-            "notes": "last run succeeded, 4m12s, retention 30 days",
+            "title": "A Short History of Maps",
+            "author": "P. Anand",
+            "notes": "How people have drawn the world, from clay tablets to satellites.",
         },
         4: {
             "id": 4,
-            "name": "auth-svc",
-            "status": "degraded",
-            "notes": "elevated 401s after token-cache change",
+            "title": "The Quiet Garden",
+            "author": "S. Fields",
+            "notes": "Short stories set in one small town over forty years.",
         },
-        5: {"id": 5, "name": "redis-cache", "status": "healthy", "notes": "98% hit rate"},
+        5: {
+            "id": 5,
+            "title": "Stars and Seasons",
+            "author": "R. Vega",
+            "notes": "A friendly introduction to why the night sky changes.",
+        },
         6: {
             "id": 6,
-            "name": "image-resizer",
-            "status": "down",
-            "notes": "OOMKilled repeatedly, memory limit too low",
-        },
-        7: {
-            "id": 7,
-            "name": "metrics-agent",
-            "status": "healthy",
-            "notes": "running on all nodes, no drops",
-        },
-        8: {
-            "id": 8,
-            "name": "report-export",
-            "status": "degraded",
-            "notes": "last run timed out at 30m",
+            "title": "Bread Every Day",
+            "author": "T. Ito",
+            "notes": "A gentle guide to baking your own loaves.",
         },
     }
-    return details.get(service_id, {"error": f"Service {service_id} not found"})
+    return details.get(book_id, {"error": f"Book {book_id} not found"})
 
 
 def example_structured_tools():
@@ -336,12 +308,12 @@ def example_structured_tools():
 
     agent = Agent(
         model=model,
-        tools=[search_services, get_service_details],
-        system_prompt="You are an SRE assistant. Help engineers look up services.",
+        tools=[search_books, get_book_details],
+        system_prompt="You are a helpful library assistant. Help people find books.",
     )
 
-    result = agent.run_sync("Find deployment services, then tell me more about payment-svc")
-    print("Q: Find deployment services, then tell me more about payment-svc")
+    result = agent.run_sync("Find some fiction books, then tell me more about 'The Blue Kite'.")
+    print("Q: Find some fiction books, then tell me more about 'The Blue Kite'.")
     print(f"A: {result.message}")
     print(f"\nTool calls made: {result.metrics.tool_calls}")
     print()
@@ -355,7 +327,7 @@ def example_structured_tools():
 def main():
     """Run all notebook parts."""
     print("=" * 60)
-    print("Notebook 07: Deployment Readiness with Tools")
+    print("Notebook 07: Giving an Agent Tools")
     print("=" * 60)
     print()
 
@@ -369,7 +341,7 @@ def main():
     example_structured_tools()
 
     print("=" * 60)
-    print("Next: Notebook 08 — Investigation Memory")
+    print("Next: Notebook 08 — Conversation Memory")
     print("=" * 60)
 
 
