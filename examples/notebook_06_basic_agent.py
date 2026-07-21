@@ -1,27 +1,26 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 """
-Notebook 06: payments triage assistant — your first Tulip agent.
+Notebook 06: your first agent — build an agent, ask it a question, read the result.
 
-Build LEDGER, the payments team's tier-1 transaction-triage agent, ask
-it the question every fraud-ops analyst asks all day — "is this
-transaction worth holding?" — two different ways (blocking and
-streaming), and inspect what comes back. This is the smallest possible
-end-to-end Tulip example, and the first appearance of an agent that
-recurs across the later notebooks.
+Meet Aria, a friendly general-purpose assistant. Build her, ask her an
+everyday question two different ways (blocking and streaming), and look
+at what comes back. This is the smallest possible end-to-end Tulip
+example, and the first appearance of an agent that recurs across the
+later notebooks.
 
 Key ideas:
 - An ``Agent`` pairs a model with a system prompt and optional tools.
 - ``agent.run_sync(prompt)`` returns a single ``AgentResult``.
 - ``agent.run(prompt)`` is an async generator that yields events — the
-  agent shows its work instead of handing you an opaque verdict.
+  agent shows its work instead of handing you an opaque answer.
 - ``AgentResult`` carries the final message, success flag, stop reason,
   and per-run metrics.
-- The same agent can triage many transactions in a row.
+- The same agent can answer many questions in a row.
 
-The sample transactions map to common payments patterns — card testing
-(many small declines then a charge), an authorized recurring
-subscription, and a friendly-fraud chargeback.
+The sample questions are the kind anyone might ask a helpful assistant —
+explain a concept, do a quick calculation, summarize something in a
+sentence or two.
 
 Run it:
     .venv/bin/python examples/notebook_06_basic_agent.py
@@ -44,19 +43,19 @@ from tulip.agent import Agent
 
 
 # =============================================================================
-# Part 1: build LEDGER and call it once
+# Part 1: build Aria and call her once
 # =============================================================================
 
 
 def example_create_agent():
-    """Build LEDGER and run one tiny prompt to confirm the provider works."""
+    """Build Aria and run one tiny prompt to confirm the provider works."""
     print("=== Part 1: Creating an Agent ===\n")
 
     model = get_model(max_tokens=40)
 
     agent = Agent(
         model=model,
-        system_prompt="You are LEDGER, the payments team's tier-1 transaction-triage agent. Be concise.",
+        system_prompt="You are Aria, a friendly, helpful assistant. Be concise.",
     )
 
     print(f"Agent created with model: {type(model).__name__}")
@@ -83,21 +82,20 @@ def example_create_agent():
 
 
 def example_sync_run():
-    """Block until the agent finishes — simplest possible triage call."""
+    """Block until the agent finishes — the simplest possible call."""
     print("=== Part 2: Synchronous Execution ===\n")
 
     model = get_model(max_tokens=100)
 
     agent = Agent(
         model=model,
-        system_prompt="You are LEDGER, a payments triage agent. Keep responses under 20 words.",
+        system_prompt="You are Aria, a helpful assistant. Keep responses under 40 words.",
     )
 
-    # Several small declines then a charge — classic card-testing pattern.
-    txn = "Alert: 5 declined $1.00 auths then a $420 capture on card ****7788. Hold?"
-    result = agent.run_sync(txn)
+    question = "What's a good way to explain recursion to a beginner?"
+    result = agent.run_sync(question)
 
-    print(f"Prompt: {txn}")
+    print(f"Prompt: {question}")
     print(f"Response: {result.message}")
     print(f"Success: {result.success}")
     print(f"Stop reason: {result.stop_reason}")
@@ -110,22 +108,22 @@ def example_sync_run():
 
 
 async def example_async_run():
-    """Stream the agent's lifecycle events as it works the transaction."""
+    """Stream the agent's lifecycle events as it answers."""
     print("=== Part 3: Async Execution with Events ===\n")
 
     model = get_model(max_tokens=100)
 
     agent = Agent(
         model=model,
-        system_prompt="You are LEDGER, a payments triage agent. Be brief.",
+        system_prompt="You are Aria, a helpful assistant. Be brief.",
     )
 
-    print("Prompt: Name 3 signs that a declined-card alert is a false positive.")
+    print("Prompt: Summarize the water cycle in two sentences.")
     print("Events:")
 
     # agent.run(...) yields ThinkEvent, ToolStartEvent, ToolCompleteEvent,
     # TerminateEvent, etc., in order. Notebook 11 covers the full event set.
-    async for event in agent.run("Name 3 signs that a declined-card alert is a false positive."):
+    async for event in agent.run("Summarize the water cycle in two sentences."):
         print(f"  {event.event_type}: ", end="")
         if hasattr(event, "reasoning") and event.reasoning:
             print(f"{event.reasoning[:60]}...")
@@ -150,10 +148,10 @@ def example_agent_result():
 
     agent = Agent(
         model=model,
-        system_prompt="You are LEDGER, a payments analyst. One sentence answers only.",
+        system_prompt="You are Aria, a helpful assistant. One sentence answers only.",
     )
 
-    result = agent.run_sync("Is a recurring monthly charge from a known subscription suspicious?")
+    result = agent.run_sync("In one sentence, what is a good night's sleep worth?")
 
     print("AgentResult fields:")
     print(f"  .message     = {result.message}")
@@ -169,27 +167,27 @@ def example_agent_result():
 
 
 # =============================================================================
-# Part 5: reuse the same agent across transactions
+# Part 5: reuse the same agent across questions
 # =============================================================================
 
 
 def example_multiple_prompts():
-    """One agent, many transactions. Each call is independent unless you opt in to memory."""
-    print("=== Part 5: Multiple Transactions ===\n")
+    """One agent, many questions. Each call is independent unless you opt in to memory."""
+    print("=== Part 5: Multiple Questions ===\n")
 
     model = get_model(max_tokens=50)
 
     agent = Agent(
         model=model,
-        system_prompt="You are LEDGER, a payments triage agent. Reply in one line: hold or release.",
+        system_prompt="You are Aria, a helpful assistant. Reply in one short line.",
     )
 
-    # A card-testing burst, an authorized recurring subscription, and a
-    # friendly-fraud chargeback — the bread-and-butter of a tier-1 queue.
+    # A general-knowledge question, a quick calculation, and a tiny
+    # explanation — the kind of thing anyone might ask in a day.
     prompts = [
-        "Triage: 5 declined $1.00 auths then a $420 capture on card ****7788.",  # card testing
-        "Triage: $9.99 recurring charge from a customer's active subscription.",
-        "Triage: chargeback filed on a $180 order the customer already received.",
+        "What is the capital of Japan?",
+        "What is 15% of 240?",
+        "In one line, what does a compiler do?",
     ]
 
     for prompt in prompts:
@@ -207,7 +205,7 @@ def example_multiple_prompts():
 def main():
     """Run all notebook parts."""
     print("=" * 60)
-    print("Notebook 06: LEDGER — Payments Triage Assistant")
+    print("Notebook 06: Aria — Your First Agent")
     print("=" * 60)
     print()
 
@@ -221,7 +219,7 @@ def main():
     example_multiple_prompts()
 
     print("=" * 60)
-    print("Next: Notebook 07 — Transaction Enrichment with Tools")
+    print("Next: Notebook 07 — Giving an Agent Tools")
     print("=" * 60)
 
 

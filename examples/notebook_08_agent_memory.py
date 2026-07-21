@@ -1,96 +1,89 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 """
-Notebook 08: conversation memory — the Desk, backed by Redis.
+Notebook 08: conversation memory — remembering what you told it.
 
-Give a support copilot a checkpointer and every turn of the conversation
-is written to the Desk: the help desk's durable store of checkpointed
-ticket state. Restart the process, attach a fresh agent to the same
-connection, hand it the same ``thread_id``, and the conversation picks
-up where it left off — earlier messages, order numbers, and notes
-intact. This is the production memory story for Tulip.
+By default each call to an agent is independent — it forgets everything
+the moment it answers. Give an agent a checkpointer and that changes:
+every turn of the conversation is saved, so the next turn can pick up
+where the last one left off. Earlier messages, names, and notes stay
+intact.
+
+This notebook uses ``MemoryCheckpointer`` — a simple in-memory store — so
+it runs end-to-end with no setup. The exact same code works with a
+durable backend (Redis, Postgres, and others) when you want the memory
+to survive a restart; you just swap the checkpointer.
 
 Key ideas:
-- ``RedisBackend(...)`` opens a connection to Redis and stores agent
-  state under keys you scope.
-- ``thread_id`` keys conversations — one Redis can host many independent
-  customer tickets side by side without cross-contamination.
+- A ``checkpointer`` saves and restores agent state under keys you scope.
+- ``thread_id`` keys conversations — one store can hold many independent
+  conversations side by side without mixing them up.
 - ``checkpoint_every_n_iterations=1`` writes after every loop iteration,
-  so a crash mid-tool-call still resumes cleanly.
+  so even a mid-tool-call interruption resumes cleanly.
 - The saved state is rich: messages, tool history, iteration count,
-  Reflexion confidence — all loadable for ticket review.
+  Reflexion confidence — all loadable for review.
 
 Run it:
-    export REDIS_URL=redis://localhost:6379/0
-    python examples/notebook_08_agent_memory.py
+    .venv/bin/python examples/notebook_08_agent_memory.py
 
 The agent itself goes through whichever provider you configure via
 ``TULIP_MODEL_PROVIDER`` (``openai`` / ``anthropic``).
 Set ``TULIP_MODEL_PROVIDER=mock`` to bypass the model for offline runs.
-
-If REDIS_URL is missing the script prints a skip banner and
-exits cleanly — it never falls back to an in-memory checkpointer.
 """
 
 import asyncio
-import os
 import sys
 
 from config import get_model, print_config
 
 from tulip.agent import Agent
-from tulip.memory.backends import RedisBackend
+from tulip.memory.backends import MemoryCheckpointer
 from tulip.tools import tool
 
 
-_REQUIRED_ENV = ("REDIS_URL",)
+# One in-memory store per "suffix", cached so that two agents asking for
+# the same suffix share the same state (see Part 3). A durable backend
+# would share state through the external database instead.
+_STORES: dict[str, MemoryCheckpointer] = {}
 
 
-def _missing_env() -> list[str]:
-    return [name for name in _REQUIRED_ENV if not os.environ.get(name)]
-
-
-def _build_checkpointer(table_suffix: str = "default"):
-    """Build a Redis-backed checkpointer described by env vars."""
-    backend = RedisBackend(
-        url=os.environ["REDIS_URL"],
-        namespace=f"tulip_notebook_08_{table_suffix}",
-    )
-    return backend.as_checkpointer()
+def _build_checkpointer(suffix: str = "default") -> MemoryCheckpointer:
+    """Return a checkpointer for the given scope, reusing it if it exists."""
+    return _STORES.setdefault(suffix, MemoryCheckpointer())
 
 
 # =============================================================================
-# Part 1: a two-turn conversation that survives in Redis
+# Part 1: a two-turn conversation that remembers turn one
 # =============================================================================
 
 
 def example_conversation_memory():
-    """Same thread_id across two run_sync calls — the copilot recalls turn one."""
-    print("=== Part 1: Conversation memory (Redis) ===\n")
+    """Same thread_id across two run_sync calls — the agent recalls turn one."""
+    print("=== Part 1: Conversation memory ===\n")
 
     model = get_model(max_tokens=100)
-    checkpointer = _build_checkpointer("ticket")
+    checkpointer = _build_checkpointer("chat")
 
     agent = Agent(
         model=model,
-        system_prompt="You are a customer-support copilot. Remember details the customer shares.",
+        system_prompt="You are a friendly assistant. Remember details the person shares.",
         checkpointer=checkpointer,
     )
 
-    thread_id = "ticket_4042"
+    thread_id = "chat_1"
 
     result1 = agent.run_sync(
-        "Hi, my order #A-4042 hasn't arrived and tracking shows it stuck at the depot.",
+        "Hi! My name is Sam and I'm planning a trip to Japan next spring.",
         thread_id=thread_id,
     )
-    print("Customer: Hi, my order #A-4042 hasn't arrived and tracking shows it stuck at the depot.")
-    print(f"Copilot: {result1.message}")
+    print("You: Hi! My name is Sam and I'm planning a trip to Japan next spring.")
+    print(f"Assistant: {result1.message}")
 
-    # Same thread_id — the agent loads prior conversation state from Redis
-    # before the next model call.
-    result2 = agent.run_sync("Which order number are we talking about?", thread_id=thread_id)
-    print("\nCustomer: Which order number are we talking about?")
-    print(f"Copilot: {result2.message}")
+    # Same thread_id — the agent loads the prior conversation state before
+    # the next model call.
+    result2 = agent.run_sync("What's my name, and where am I going?", thread_id=thread_id)
+    print("\nYou: What's my name, and where am I going?")
+    print(f"Assistant: {result2.message}")
     print()
 
 
@@ -99,27 +92,27 @@ def example_conversation_memory():
 # =============================================================================
 
 
-_TICKET_NOTES: list[str] = []
+_NOTES: list[str] = []
 
 
 @tool
-def save_ticket_note(content: str) -> str:
-    """Save a support note for later reference."""
-    _TICKET_NOTES.append(content)
-    return f"Ticket note saved: {content}"
+def save_note(content: str) -> str:
+    """Save a note for later reference."""
+    _NOTES.append(content)
+    return f"Note saved: {content}"
 
 
 @tool
-def get_ticket_notes() -> str:
-    """Get all saved support notes."""
-    if not _TICKET_NOTES:
-        return "No ticket notes saved yet."
-    lines = "\n".join(f"- {n}" for n in _TICKET_NOTES)
-    return f"You have {len(_TICKET_NOTES)} ticket note(s):\n{lines}"
+def get_notes() -> str:
+    """Get all saved notes."""
+    if not _NOTES:
+        return "No notes saved yet."
+    lines = "\n".join(f"- {n}" for n in _NOTES)
+    return f"You have {len(_NOTES)} note(s):\n{lines}"
 
 
 def example_checkpointing_with_tools():
-    """checkpoint_every_n_iterations=1 means a mid-loop crash still recovers."""
+    """checkpoint_every_n_iterations=1 means a mid-loop interruption still recovers."""
     print("=== Part 2: Checkpoint after each iteration ===\n")
 
     model = get_model(max_tokens=150)
@@ -127,25 +120,25 @@ def example_checkpointing_with_tools():
 
     agent = Agent(
         model=model,
-        tools=[save_ticket_note, get_ticket_notes],
-        system_prompt="You are a support note-taking assistant.",
+        tools=[save_note, get_notes],
+        system_prompt="You are a helpful note-taking assistant.",
         checkpointer=checkpointer,
         checkpoint_every_n_iterations=1,
     )
 
-    thread_id = "ticket_notes_session"
+    thread_id = "notes_session"
 
     result1 = agent.run_sync(
-        "Save a ticket note: customer confirmed shipping address 12 Elm St is correct",
+        "Save a note: buy oat milk and coffee filters on the way home.",
         thread_id=thread_id,
     )
-    print("Customer: Save a ticket note: customer confirmed shipping address 12 Elm St is correct")
-    print(f"Copilot: {result1.message}")
+    print("You: Save a note: buy oat milk and coffee filters on the way home.")
+    print(f"Assistant: {result1.message}")
     print(f"Tool calls: {result1.metrics.tool_calls}")
 
-    result2 = agent.run_sync("What ticket notes do we have so far?", thread_id=thread_id)
-    print("\nCustomer: What ticket notes do we have so far?")
-    print(f"Copilot: {result2.message}")
+    result2 = agent.run_sync("What notes do we have so far?", thread_id=thread_id)
+    print("\nYou: What notes do we have so far?")
+    print(f"Assistant: {result2.message}")
     print()
 
 
@@ -154,50 +147,50 @@ def example_checkpointing_with_tools():
 # =============================================================================
 
 
-def example_persistence_across_processes():
-    """Two Agent objects, one Redis. The second loads the first's ticket state."""
-    print("=== Part 3: Cross-process persistence ===\n")
+def example_persistence_across_agents():
+    """Two Agent objects, one store. The second loads the first's state."""
+    print("=== Part 3: Reattaching to the same store ===\n")
 
     model = get_model(max_tokens=100)
 
     agent1 = Agent(
         model=model,
-        system_prompt="You are a customer-support copilot.",
+        system_prompt="You are a friendly assistant.",
         checkpointer=_build_checkpointer("persist"),
     )
 
-    thread_id = "persistent_ticket"
+    thread_id = "persistent_chat"
 
     result1 = agent1.run_sync(
-        "Remember: the support ticket for this conversation is CS-2026-042.",
+        "Remember: my favorite color is teal.",
         thread_id=thread_id,
     )
-    print("Customer: Remember: the support ticket for this conversation is CS-2026-042.")
-    print(f"Copilot: {result1.message}")
+    print("You: Remember: my favorite color is teal.")
+    print(f"Assistant: {result1.message}")
 
-    # Pretend the agent's shift ended and the process restarted. A *new*
-    # Agent + checkpointer object connects to the same Redis and reads
-    # back the ticket state.
+    # A *new* Agent object attaches to the same store and reads back the
+    # conversation. With a durable backend this could even be a different
+    # process after a restart — here they share one in-memory store.
     agent2 = Agent(
         model=model,
-        system_prompt="You are a customer-support copilot.",
+        system_prompt="You are a friendly assistant.",
         checkpointer=_build_checkpointer("persist"),
     )
 
-    result2 = agent2.run_sync("What was the support ticket number?", thread_id=thread_id)
-    print("\n[New process — same Redis]")
-    print("Customer: What was the support ticket number?")
-    print(f"Copilot: {result2.message}")
+    result2 = agent2.run_sync("What's my favorite color?", thread_id=thread_id)
+    print("\n[New agent — same store]")
+    print("You: What's my favorite color?")
+    print(f"Assistant: {result2.message}")
     print()
 
 
 # =============================================================================
-# Part 4: many conversations sharing one database
+# Part 4: many conversations sharing one store
 # =============================================================================
 
 
 def example_multiple_threads():
-    """Two tickets, two thread_ids, one Redis — no cross-talk between them."""
+    """Two conversations, two thread_ids, one store — no cross-talk between them."""
     print("=== Part 4: Multiple conversations ===\n")
 
     model = get_model(max_tokens=100)
@@ -205,29 +198,29 @@ def example_multiple_threads():
 
     agent = Agent(
         model=model,
-        system_prompt="You are a customer-support copilot.",
+        system_prompt="You are a friendly assistant.",
         checkpointer=checkpointer,
     )
 
-    thread_billing = "ticket_billing"
-    thread_shipping = "ticket_shipping"
+    thread_travel = "chat_travel"
+    thread_music = "chat_music"
 
     agent.run_sync(
-        "This ticket is about a double charge on invoice INV-7781.",
-        thread_id=thread_billing,
+        "Let's talk about my upcoming hiking trip in the Alps.",
+        thread_id=thread_travel,
     )
     agent.run_sync(
-        "This ticket is about a package marked delivered but never received.",
-        thread_id=thread_shipping,
+        "I just started learning to play the guitar.",
+        thread_id=thread_music,
     )
 
-    result_billing = agent.run_sync("What is this ticket about?", thread_id=thread_billing)
-    print("Thread 'ticket_billing': What is this ticket about?")
-    print(f"Copilot: {result_billing.message}")
+    result_travel = agent.run_sync("What are we talking about?", thread_id=thread_travel)
+    print("Thread 'chat_travel': What are we talking about?")
+    print(f"Assistant: {result_travel.message}")
 
-    result_shipping = agent.run_sync("What is this ticket about?", thread_id=thread_shipping)
-    print("\nThread 'ticket_shipping': What is this ticket about?")
-    print(f"Copilot: {result_shipping.message}")
+    result_music = agent.run_sync("What are we talking about?", thread_id=thread_music)
+    print("\nThread 'chat_music': What are we talking about?")
+    print(f"Assistant: {result_music.message}")
     print()
 
 
@@ -243,7 +236,7 @@ async def example_inspect_checkpoint():
     inspector gets a ``record_detail`` tool. After two turns that each
     fire a tool call, ``state.confidence`` should be > 0.
     """
-    print("=== Part 5: Inspecting a Redis-backed checkpoint ===\n")
+    print("=== Part 5: Inspecting a saved checkpoint ===\n")
 
     model = get_model(max_tokens=200)
     checkpointer = _build_checkpointer("inspect")
@@ -252,39 +245,38 @@ async def example_inspect_checkpoint():
 
     @tool
     def record_detail(detail: str, category: str = "") -> str:
-        """Persist a detail from the conversation so the ticket record keeps it.
+        """Persist a detail from the conversation so the record keeps it.
 
         Args:
-            detail: Short summary of what the customer reported.
-            category: An optional tag (e.g. order, billing, shipping, account).
+            detail: Short summary of what the person shared.
+            category: An optional tag (e.g. name, location, hobby, plan).
         """
         label = f"[{category}] {detail}" if category else detail
         _details.append(label)
         return f"Recorded detail #{len(_details)}: {label}"
 
     agent = Agent(
-        agent_id="ticket_inspector",
+        agent_id="chat_inspector",
         model=model,
         system_prompt=(
-            "You are a customer-support copilot. Whenever the customer reports "
-            "a fact about their issue (an order number, a charge, a delivery "
-            "status, etc.), call record_detail exactly once with a short "
-            "summary of that fact — and a category tag when one fits — then "
-            "reply naturally."
+            "You are a friendly assistant. Whenever the person shares a fact "
+            "about themselves (a name, a place, a hobby, a plan, etc.), call "
+            "record_detail exactly once with a short summary of that fact — "
+            "and a category tag when one fits — then reply naturally."
         ),
         tools=[record_detail],
         checkpointer=checkpointer,
         reflexion=True,
     )
 
-    thread_id = "inspect_ticket"
+    thread_id = "inspect_chat"
 
     agent.run_sync(
-        "Reported: order #A-4042 was charged twice on the same card.",
+        "My name is Sam and I live in Portland.",
         thread_id=thread_id,
     )
     agent.run_sync(
-        "Reported: the customer is on the premium support plan.",
+        "On weekends I like to go rock climbing.",
         thread_id=thread_id,
     )
 
@@ -315,40 +307,24 @@ async def example_inspect_checkpoint():
 # =============================================================================
 
 
-def _print_skip_banner(missing: list[str]) -> None:
-    print("\n--- Notebook 08: The Desk — Conversation Memory ---")
-    print(
-        "Required environment variables not set; skipping the live demo "
-        "so this file still runs cleanly in CI.\n"
-    )
-    for name in missing:
-        print(f"  - {name}")
-    print("\nStart a Redis instance, set REDIS_URL, and re-run.")
-
-
 def main():
     """Run all notebook parts."""
     print("=" * 60)
-    print("Notebook 08: The Desk — Conversation Memory on Redis")
+    print("Notebook 08: Conversation Memory")
     print("=" * 60)
     print()
-
-    missing = _missing_env()
-    if missing:
-        _print_skip_banner(missing)
-        return
 
     print_config()
     print()
 
     example_conversation_memory()
     example_checkpointing_with_tools()
-    example_persistence_across_processes()
+    example_persistence_across_agents()
     example_multiple_threads()
     asyncio.run(example_inspect_checkpoint())
 
     print("=" * 60)
-    print("Next: Notebook 11 — Streaming a Support Reply")
+    print("Next: Notebook 11 — Streaming a Reply")
     print("=" * 60)
 
 
