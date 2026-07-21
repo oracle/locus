@@ -37,13 +37,13 @@ from tulip.agent import Agent
 from tulip.models.registry import get_model, list_providers
 
 
-def _llm_call(
+async def _llm_call(
     prompt: str, *, system: str = "Reply in one short sentence.", max_tokens: int = 80
 ) -> str:
     """One model call with a timing/token banner — used by every part."""
     agent = Agent(model=get_configured_model(max_tokens=max_tokens), system_prompt=system)
     t0 = time.perf_counter()
-    res = agent.run_sync(prompt)
+    res = await agent.arun(prompt)
     dt = time.perf_counter() - t0
     print(
         f"  [model call: {dt:.2f}s · {res.metrics.prompt_tokens}→{res.metrics.completion_tokens} tokens]"
@@ -54,14 +54,14 @@ def _llm_call(
 # Part 1: list every provider the registry knows about.
 
 
-def example_providers():
+async def example_providers():
     """List available model providers."""
     print("=== Available providers ===\n")
 
     providers = list_providers()
     print(f"Registered providers: {providers}")
     print(
-        f"AI rationale: {_llm_call('In one sentence, why does a cloud platform team want a model registry instead of hard-coding one provider?')}"
+        f"AI rationale: {await _llm_call('In one sentence, why does a cloud platform team want a model registry instead of hard-coding one provider?')}"
     )
 
     print("\nUsage:")
@@ -75,11 +75,11 @@ def example_providers():
 # Part 2: instantiate each provider directly, without the registry.
 
 
-def example_direct():
+async def example_direct():
     """Use providers directly without the registry."""
     print("\n=== Direct provider usage ===\n")
     print(
-        f"AI rationale: {_llm_call('In one sentence, when would a cloud operations team instantiate a model class directly instead of via the registry?')}"
+        f"AI rationale: {await _llm_call('In one sentence, when would a cloud operations team instantiate a model class directly instead of via the registry?')}"
     )
 
     print("OpenAI (direct API, requires OPENAI_API_KEY):")
@@ -102,7 +102,7 @@ async def example_live_call() -> None:
     import time as _t
 
     t0 = _t.perf_counter()
-    result = agent.run_sync(
+    result = await agent.arun(
         "Name two reasons a cloud platform team routes every model through one Gateway "
         "rather than letting each agent call a provider directly."
     )
@@ -114,7 +114,11 @@ async def example_live_call() -> None:
     )
 
 
+async def main() -> None:
+    await example_providers()
+    await example_direct()
+    await example_live_call()
+
+
 if __name__ == "__main__":
-    example_providers()
-    example_direct()
-    asyncio.run(example_live_call())
+    asyncio.run(main())

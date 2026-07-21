@@ -168,7 +168,7 @@ async def _run_agent(url: str, key: str, model_alias: str) -> None:
     ]
     for prompt in prompts:
         print(f"  > {prompt}")
-        result = await asyncio.to_thread(agent.run_sync, prompt)
+        result = await agent.arun(prompt)
         print(f"  < {result.message.strip()}")
         print(f"    [{result.metrics.prompt_tokens}→{result.metrics.completion_tokens} tokens]")
         print()
@@ -209,7 +209,7 @@ async def _run_streaming(url: str, key: str, model_alias: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def main() -> None:
+async def main() -> None:
     url, key, model_alias = _check_prerequisites()
 
     print(
@@ -219,8 +219,8 @@ def main() -> None:
     )
 
     _print_gateway_health(url, key)
-    asyncio.run(_run_agent(url, key, model_alias))
-    asyncio.run(_run_streaming(url, key, model_alias))
+    await _run_agent(url, key, model_alias)
+    await _run_streaming(url, key, model_alias)
 
     print("=" * 72)
     print(" Done. The gateway handled provider auth, vendor adaptation, and any")
@@ -231,4 +231,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

@@ -68,7 +68,7 @@ async def part1_global_vs_per_run() -> None:
     async def dispatch(rid: str, prompt: str) -> None:
         async with run_context(rid):
             agent = Agent(model=get_model(), max_iterations=2)
-            await asyncio.to_thread(agent.run_sync, prompt)
+            await agent.arun(prompt)
             await bus.close_stream(rid)
 
     g_task = asyncio.create_task(telemetry_forwarder())

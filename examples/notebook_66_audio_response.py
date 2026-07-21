@@ -107,7 +107,7 @@ async def main() -> None:
         )
     )
     print(f"\n→ asking the agent: {PROMPT!r}")
-    result = agent.run_sync(PROMPT)
+    result = await agent.arun(PROMPT)
     reply = (result.message or "").strip()
     if not reply:
         msg = "Agent returned no text — check provider creds + max_tokens"

@@ -54,7 +54,7 @@ async def part1_no_telemetry() -> None:
     print("\n--- Part 1: no run_context — bus stays uninstantiated ---")
 
     agent = Agent(model=get_model(), max_iterations=2)
-    result = agent.run_sync(
+    result = await agent.arun(
         "In one sentence, summarize ticket CS-1042: customer says their order arrived damaged."
     )
     print("agent reply:", result.message[:120])
@@ -94,7 +94,7 @@ async def part2_subscribe() -> None:
         # The contextvar set by run_context() means the @_bus_bridge
         # decorator on Agent.run forwards every yielded TulipEvent to
         # the bus automatically — nothing the agent does goes unrecorded.
-        result = await asyncio.to_thread(agent.run_sync, "Reply with the single word: resolved")
+        result = await agent.arun("Reply with the single word: resolved")
         print("agent reply:", result.message[:120])
 
         await asyncio.wait_for(consumer_task, timeout=10.0)
@@ -120,7 +120,7 @@ async def part3_history_replay() -> None:
     async with run_context() as rid:
         bus = get_event_bus()
         # Run first; close the stream; subscribe second.
-        await asyncio.to_thread(agent.run_sync, "Reply: acknowledged")
+        await agent.arun("Reply: acknowledged")
         await bus.close_stream(rid)
 
         replayed: list[str] = []

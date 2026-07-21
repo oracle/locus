@@ -39,6 +39,8 @@ also work.
 Prerequisite: notebook 12.
 """
 
+import asyncio
+
 from config import get_model
 
 from tulip.agent import Agent, AgentConfig
@@ -51,7 +53,7 @@ from tulip.tools.decorator import tool
 # =============================================================================
 
 
-def example_cancel_tool():
+async def example_cancel_tool():
     """Set event.cancel to short-circuit a tool call and feed back a message."""
     print("=== Part 1: Cancel Tool via Hook ===\n")
 
@@ -100,7 +102,7 @@ def example_cancel_tool():
         )
     )
 
-    result = agent.run_sync("Delete the namespace payments-staging")
+    result = await agent.arun("Delete the namespace payments-staging")
     print(f"Response: {result.message[:150]}")
     for te in result.tool_executions:
         print(f"  Tool: {te.tool_name} → {te.result}")
@@ -111,7 +113,7 @@ def example_cancel_tool():
 # =============================================================================
 
 
-def example_write_protection():
+async def example_write_protection():
     """Probe a BeforeToolCallEvent directly — see what mutations are allowed."""
     print("\n=== Part 2: Write Protection ===\n")
 
@@ -138,7 +140,7 @@ def example_write_protection():
 
     agent = Agent(model=get_model(max_tokens=80), system_prompt="Reply in one short sentence.")
     t0 = _t.perf_counter()
-    res = agent.run_sync(
+    res = await agent.arun(
         "In one sentence, why does Tulip mark BeforeToolCallEvent.tool_name as "
         "read-only while letting hooks edit `arguments` and `cancel` — and why "
         "does that matter for an infrastructure change log?"
@@ -151,6 +153,11 @@ def example_write_protection():
     print(f"  AI rationale: {res.message.strip()}")
 
 
+async def main():
+    """Run all notebook parts."""
+    await example_cancel_tool()
+    await example_write_protection()
+
+
 if __name__ == "__main__":
-    example_cancel_tool()
-    example_write_protection()
+    asyncio.run(main())

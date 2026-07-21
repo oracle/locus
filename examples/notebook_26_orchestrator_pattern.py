@@ -64,7 +64,7 @@ from tulip.multiagent import (
 from tulip.tools.decorator import tool
 
 
-def _llm_call(
+async def _llm_call(
     prompt: str, *, system: str = "Reply in one short sentence.", max_tokens: int = 80
 ) -> str:
     """One model call with a timing/token banner — used for commentary."""
@@ -72,7 +72,7 @@ def _llm_call(
     # falls back to slot A when TULIP_MODEL_ID_B is unset.
     agent = Agent(model=get_model_b(max_tokens=max_tokens), system_prompt=system)
     t0 = time.perf_counter()
-    res = agent.run_sync(prompt)
+    res = await agent.arun(prompt)
     dt = time.perf_counter() - t0
     print(
         f"  [model call: {dt:.2f}s · {res.metrics.prompt_tokens}→{res.metrics.completion_tokens} tokens]"
@@ -153,9 +153,8 @@ When analyzing, look for processing without a lawful basis, stale retention, and
 
     print(f"Custom Specialist: {inventory_specialist.name}")
     print(f"  Tools: {[t.name for t in inventory_specialist.tools]}")
-    print(
-        f"AI commentary: {_llm_call('In one sentence, why is a custom Specialist with data-catalog tools better than a generic Agent for personal-data discovery?')}"
-    )
+    _ai_note = await _llm_call("In one sentence, why is a custom Specialist with data-catalog tools better than a generic Agent for personal-data discovery?")
+    print(f"AI commentary: {_ai_note}")
 
     # =========================================================================
     # Part 3: run one specialist on its own

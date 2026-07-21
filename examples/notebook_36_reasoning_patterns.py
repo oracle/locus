@@ -44,6 +44,7 @@ Prerequisites:
   helper exits cleanly under mock or Cohere R-series.
 """
 
+import asyncio
 import time
 
 from config import get_model
@@ -77,10 +78,12 @@ def _banner(result, label: str = "") -> None:
     )
 
 
-def _llm_call(prompt: str, *, system: str = "Reply in one sentence.", max_tokens: int = 80) -> str:
+async def _llm_call(
+    prompt: str, *, system: str = "Reply in one sentence.", max_tokens: int = 80
+) -> str:
     agent = Agent(model=get_model(max_tokens=max_tokens), system_prompt=system)
     t0 = time.perf_counter()
-    result = agent.run_sync(prompt)
+    result = await agent.arun(prompt)
     dt = time.perf_counter() - t0
     print(
         f"  [model call: {dt:.2f}s · "
@@ -135,7 +138,7 @@ def query_dlp(dataset: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def main():
+async def main():
     from config import check_structured_output_capable
 
     check_structured_output_capable()
@@ -156,7 +159,7 @@ def main():
             "what went wrong in one short sentence."
         ),
     )
-    postmortem_result = postmortem_agent.run_sync(
+    postmortem_result = await postmortem_agent.arun(
         "Investigate why the synthetic PII canary in export ds-0231 was never redacted."
     )
     _banner(postmortem_result, "Part 1")
@@ -173,7 +176,7 @@ def main():
     # Part 2: Loop detection — Reflector flags the same tool called repeatedly.
     # =========================================================================
     print("\n=== Part 2: Loop detection (model explains, SDK detects) ===\n")
-    rationale = _llm_call(
+    rationale = await _llm_call(
         "In one sentence, why does an autonomous privacy agent need to detect "
         "when it's stuck calling the same tool over and over?",
         system="Explain like a data protection officer.",
@@ -195,7 +198,7 @@ def main():
     print("\n=== Part 3: Quick progress evaluation ===\n")
     quick = evaluate_progress(state=postmortem_result.state, loop_threshold=3, success_weight=0.2)
     print(f"Quick assessment: {quick.assessment.value}")
-    suggestion = _llm_call(
+    suggestion = await _llm_call(
         f"An agent's reflexion module says it is '{quick.assessment.value}' "
         "after one tool call. Suggest the privacy engineer's next step in one sentence.",
         max_tokens=80,
@@ -217,7 +220,7 @@ def main():
             "back what it returned, verbatim, on a single line."
         ),
     )
-    evidence_result = evidence_agent.run_sync("Pull the redaction stats for ds-0231 right now.")
+    evidence_result = await evidence_agent.arun("Pull the redaction stats for ds-0231 right now.")
     _banner(evidence_result, "Part 4a")
     evidence_line = evidence_result.message
     evidence_pieces = [chunk.strip() for chunk in evidence_line.split() if "=" in chunk]
@@ -236,7 +239,7 @@ def main():
             "the stats provided."
         ),
     )
-    claim_result = claim_agent.run_sync(
+    claim_result = await claim_agent.arun(
         f"Stats from query_dlp: {evidence_line}\n"
         "Produce three factual claims about the redaction-pipeline state."
     )
@@ -272,14 +275,14 @@ def main():
     if evaluator.should_replan(grounding):
         guidance = evaluator.get_replan_guidance(grounding)
         print(guidance)
-        plan = _llm_call(
+        plan = await _llm_call(
             f"The grounding evaluator gave this guidance:\n{guidance}\n"
             "List two concrete tools the privacy analyst should call next, one per line.",
             max_tokens=120,
         )
         print(f"\nAI replan plan:\n{plan}")
     else:
-        observation = _llm_call(
+        observation = await _llm_call(
             "All postmortem claims are sufficiently grounded. In one sentence, "
             "what does the privacy engineer do next?",
             max_tokens=80,
@@ -298,7 +301,7 @@ def main():
             "timeline. Output exactly five events in causal order, no numbering."
         ),
     )
-    event_result = event_agent.run_sync(
+    event_result = await event_agent.arun(
         "Walk through how an outdated PII classifier plus a saturated scan queue "
         "leads to a missed redaction (PII shipped in the clear). Output exactly "
         "five events in causal order."
@@ -345,7 +348,7 @@ def main():
             for i, n in enumerate(path):
                 prefix = "  " * i + ("-> " if i > 0 else "")
                 print(f"{prefix}{n.label}")
-    walkthrough = _llm_call(
+    walkthrough = await _llm_call(
         f"Briefly summarise this causal path in one sentence: {' -> '.join(p.label for p in path)}",
         max_tokens=120,
     )
@@ -366,7 +369,7 @@ def main():
         print(f"  Description: {c.description}")
         if c.resolution_hint:
             print(f"  Built-in hint: {c.resolution_hint}")
-        ai_fix = _llm_call(
+        ai_fix = await _llm_call(
             f"A causal chain has this conflict: {c.description}. Suggest a "
             "one-sentence resolution a privacy engineer could apply.",
             max_tokens=80,
@@ -377,7 +380,7 @@ def main():
     # Part 9: Narrate the chain — the model writes a short summary.
     # =========================================================================
     print("\n=== Part 9: AI chain narration ===\n")
-    summary_text = _llm_call(
+    summary_text = await _llm_call(
         f"Summarise this causal chain in two short sentences: {' -> '.join(event_phrases)}",
         max_tokens=160,
     )
@@ -388,7 +391,7 @@ def main():
     #          → causal chain → reflexion.
     # =========================================================================
     print("\n=== Part 10: Full reasoning pipeline ===\n")
-    pipeline_paragraph = _llm_call(
+    pipeline_paragraph = await _llm_call(
         "Walk through this reasoning pipeline as one short paragraph: "
         "(1) the agent makes claims about a missed redaction, "
         "(2) the grounding evaluator checks each claim against DLP evidence, "
@@ -412,7 +415,7 @@ def main():
         ),
         reflexion=True,
     )
-    live = reflexive_agent.run_sync(
+    live = await reflexive_agent.arun(
         "A synthetic PII canary in export ds-0231 was shipped without redaction. "
         "The PII classifier is two major versions behind and the scan queue sat "
         "at 98% capacity. What's the most likely root cause?"
@@ -426,4 +429,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

@@ -26,6 +26,8 @@ Run it
     TULIP_MODEL_PROVIDER=mock python examples/notebook_51_guardrails_advanced.py
 """
 
+import asyncio
+
 from config import get_model
 
 from tulip.agent import Agent, AgentConfig
@@ -42,7 +44,7 @@ from tulip.hooks.builtin.guardrails import (
 # flows through.
 
 
-def example_pii_redaction():
+async def example_pii_redaction():
     """Automatically redact PII from incident-report output."""
     print("=== Part 1: PII redaction in agent output ===\n")
 
@@ -59,7 +61,7 @@ def example_pii_redaction():
         )
     )
 
-    result = agent.run_sync("Draft the contact section of the incident report.")
+    result = await agent.arun("Draft the contact section of the incident report.")
     print(f"Response: {result.message[:150]}")
     print(f"PII redacted: {'REDACTED_EMAIL' in result.message}")
 
@@ -70,7 +72,7 @@ def example_pii_redaction():
 # with defense but never lets offensive-tooling content reach the trace.
 
 
-def example_topic_policy():
+async def example_topic_policy():
     """Keep offensive-tooling content out of the trace by topic."""
     print("\n=== Part 2: Topic policy ===\n")
 
@@ -89,7 +91,7 @@ def example_topic_policy():
 
     agent = Agent(model=get_model(max_tokens=80), system_prompt="Reply in one sentence.")
     t0 = _t.perf_counter()
-    res = agent.run_sync(
+    res = await agent.arun(
         "In one sentence, why is keyword-based topic blocking insufficient on "
         "its own for keeping a security copilot defensive-only?"
     )
@@ -105,7 +107,7 @@ def example_topic_policy():
 # maintaining the keyword list yourself.
 
 
-def example_content_safety():
+async def example_content_safety():
     """Detect harmful content categories."""
     print("\n=== Part 3: Content safety ===\n")
 
@@ -120,7 +122,7 @@ def example_content_safety():
 
     agent = Agent(model=get_model(max_tokens=80), system_prompt="Reply in one sentence.")
     t0 = _t.perf_counter()
-    res = agent.run_sync(
+    res = await agent.arun(
         "In one sentence, name two harmful content categories a security copilot must refuse."
     )
     dt = _t.perf_counter() - t0
@@ -130,7 +132,11 @@ def example_content_safety():
     print(f"  AI guidance: {res.message.strip()}")
 
 
+async def main() -> None:
+    await example_pii_redaction()
+    await example_topic_policy()
+    await example_content_safety()
+
+
 if __name__ == "__main__":
-    example_pii_redaction()
-    example_topic_policy()
-    example_content_safety()
+    asyncio.run(main())

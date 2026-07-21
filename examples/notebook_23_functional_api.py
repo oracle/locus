@@ -32,13 +32,13 @@ from tulip.agent import Agent
 from tulip.multiagent.functional import entrypoint, task
 
 
-def _llm_call(
+async def _llm_call(
     prompt: str, *, system: str = "Reply in one short sentence.", max_tokens: int = 80
 ) -> str:
     """Run a one-shot Agent and print a timing/token banner. Used by every part."""
     agent = Agent(model=get_model(max_tokens=max_tokens), system_prompt=system)
     t0 = time.perf_counter()
-    res = agent.run_sync(prompt)
+    res = await agent.arun(prompt)
     dt = time.perf_counter() - t0
     print(
         f"  [model call: {dt:.2f}s · {res.metrics.prompt_tokens}→{res.metrics.completion_tokens} tokens]"
@@ -54,9 +54,8 @@ def _llm_call(
 async def example_basic():
     """Two @task functions wired together inside an @entrypoint."""
     print("=== Part 1: A two-task pipeline ===\n")
-    print(
-        f"AI rationale: {_llm_call('In one sentence, when is the Tulip functional API a better choice than StateGraph?')}"
-    )
+    _ai_note = await _llm_call("In one sentence, when is the Tulip functional API a better choice than StateGraph?")
+    print(f"AI rationale: {_ai_note}")
 
     @task
     async def fetch_transaction(txn_id: str) -> dict:
@@ -91,9 +90,8 @@ async def example_basic():
 async def example_retry():
     """retry_attempts on the decorator handles a flaky payment processor feed."""
     print("\n=== Part 2: @task(retry_attempts=3) ===\n")
-    print(
-        f"AI rationale: {_llm_call('In one sentence, why does @task(retry_attempts=3) belong on the task and not in caller code?')}"
-    )
+    _ai_note = await _llm_call("In one sentence, why does @task(retry_attempts=3) belong on the task and not in caller code?")
+    print(f"AI rationale: {_ai_note}")
 
     attempt = 0
 
@@ -122,9 +120,8 @@ async def example_retry():
 async def example_cache():
     """Same transaction id returns the cached score without re-running the lookup."""
     print("\n=== Part 3: @task(cache=True) ===\n")
-    print(
-        f"AI rationale: {_llm_call('In one sentence, when should you turn @task(cache=True) ON for a transaction-enrichment pipeline?')}"
-    )
+    _ai_note = await _llm_call("In one sentence, when should you turn @task(cache=True) ON for a transaction-enrichment pipeline?")
+    print(f"AI rationale: {_ai_note}")
 
     call_count = 0
 
@@ -163,7 +160,7 @@ async def example_with_llm():
             system_prompt="Answer in one factual sentence for a payments fraud analyst.",
         )
         t0 = _t.perf_counter()
-        result = agent.run_sync(prompt)
+        result = await agent.arun(prompt)
         dt = _t.perf_counter() - t0
         print(
             f"  [model call: {dt:.2f}s · {result.metrics.prompt_tokens}→{result.metrics.completion_tokens} tokens]"
@@ -179,8 +176,13 @@ async def example_with_llm():
     print(f"Assessment: {answer}")
 
 
+async def main():
+    """Run all notebook parts."""
+    await example_basic()
+    await example_retry()
+    await example_cache()
+    await example_with_llm()
+
+
 if __name__ == "__main__":
-    asyncio.run(example_basic())
-    asyncio.run(example_retry())
-    asyncio.run(example_cache())
-    asyncio.run(example_with_llm())
+    asyncio.run(main())

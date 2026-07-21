@@ -109,6 +109,12 @@ class GovernedAgent:
     def run_sync(self, prompt: str, **kwargs: Any) -> Any:
         return self.agent.run_sync(prompt, **kwargs)
 
+    async def arun(self, prompt: str, **kwargs: Any) -> Any:
+        """Async, thread-free twin of ``run_sync`` — delegates to the wrapped
+        agent's ``arun`` so a governed agent runs where threads aren't
+        available (e.g. the browser / Pyodide)."""
+        return await self.agent.arun(prompt, **kwargs)
+
 
 def governed_agent(
     model: Any = None,

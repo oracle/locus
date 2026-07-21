@@ -37,6 +37,7 @@ Run:
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -124,7 +125,7 @@ def _build_mock_evidence(alert: Alert) -> tuple[list[PostureFinding], SecurityCo
     In production this is where the SOC analyst agent runs:
       tools = security_toolset(siem=True, edr=True, threat_intel=True)
       agent = create_soc_analyst(model=get_model(), tools=tools)
-      response = agent.run_sync(f"Investigate alert: {alert.title}\n{alert.raw}")
+      response = await agent.arun(f"Investigate alert: {alert.title}\n{alert.raw}")
 
     For this offline demo we hand-craft the proposed findings and evidence
     that a real agent would produce from tool call results.
@@ -298,5 +299,9 @@ def triage_alerts(alerts: Sequence[Alert]) -> None:
     )
 
 
-if __name__ == "__main__":
+async def main() -> None:
     triage_alerts(_ALERTS)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

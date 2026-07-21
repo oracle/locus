@@ -174,13 +174,13 @@ async def judge_turn(state: dict[str, Any]) -> dict[str, Any]:
         f"[{t.side.upper()} r{t.round}] {t.text}" for t in state["transcript"]
     )
     prompt = f"Alert: {state['alert']}\n\nTranscript:\n{transcript_text}\n\nNow emit your Verdict."
-    # run_sync returns the parsed object. We're already inside an asyncio
-    # loop driving the graph, so hop the call onto a worker thread.
+    # arun returns the parsed object directly on the running loop — no
+    # worker-thread hop needed (browsers/WASM have no threads).
     last_exc: BaseException | None = None
     final = None
     for attempt in range(3):
         try:
-            final = await _asyncio.to_thread(agent.run_sync, prompt)
+            final = await agent.arun(prompt)
             break
         # Retry covers transient provider flakiness.
         except Exception as exc:  # noqa: BLE001

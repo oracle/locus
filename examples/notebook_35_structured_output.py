@@ -39,6 +39,7 @@ Prerequisites:
   or Cohere R-series.
 """
 
+import asyncio
 import json
 import time
 from enum import StrEnum
@@ -71,10 +72,12 @@ def _banner(result, label: str = "") -> None:
     )
 
 
-def _llm_call(prompt: str, *, system: str = "Reply in one sentence.", max_tokens: int = 100) -> str:
+async def _llm_call(
+    prompt: str, *, system: str = "Reply in one sentence.", max_tokens: int = 100
+) -> str:
     agent = Agent(model=get_model(max_tokens=max_tokens), system_prompt=system)
     t0 = time.perf_counter()
-    res = agent.run_sync(prompt)
+    res = await agent.arun(prompt)
     dt = time.perf_counter() - t0
     print(
         f"  [model call: {dt:.2f}s · "
@@ -163,7 +166,7 @@ class ConversationVerdict(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def main() -> None:
+async def main() -> None:
     from config import check_structured_output_capable
 
     check_structured_output_capable()
@@ -175,7 +178,7 @@ def main() -> None:
     # Part 1: extract_json — pull a JSON object out of a free-form reply
     # =========================================================================
     print("\n=== Part 1: Basic JSON Extraction ===\n")
-    raw = _llm_call(
+    raw = await _llm_call(
         "Output a single JSON object with value='order-100847' and type='order_id' "
         "inside a ```json fenced block. Nothing outside the fence.",
         system="Output only a fenced JSON block.",
@@ -191,7 +194,7 @@ def main() -> None:
     # Part 2: parse_structured — validate the JSON against a Pydantic schema
     # =========================================================================
     print("\n=== Part 2: Parsing into Pydantic Models ===\n")
-    raw = _llm_call(
+    raw = await _llm_call(
         "Output a single JSON object {value, type} for the customer contact point "
         "jane@example.com, type email. Inside a ```json block.",
         system="Output only the fenced JSON block. Nothing else.",
@@ -205,7 +208,7 @@ def main() -> None:
     # Part 3: Error handling — strict vs non-strict parsing on bad inputs
     # =========================================================================
     print("\n=== Part 3: Error Handling ===\n")
-    bad = _llm_call(
+    bad = await _llm_call(
         "Reply with the literal string: This is not JSON.",
         system="Reply only with the requested string.",
         max_tokens=40,
@@ -213,7 +216,7 @@ def main() -> None:
     bad_result = parse_structured(bad, ContactPoint, strict=False)
     print(f"  Invalid JSON - Success: {bad_result.success}  Error: {bad_result.error}")
 
-    missing_type = _llm_call(
+    missing_type = await _llm_call(
         "Output a JSON object with only the field value='+1-555-0142', "
         "NO type field. Inside ```json.",
         system="Output only the fenced JSON block.",
@@ -233,7 +236,7 @@ def main() -> None:
     schema_prompt = create_schema_prompt(Resolution)
     print(f"  schema_prompt (head): {schema_prompt[:160]}...")
     instructions = create_output_instructions(Resolution)
-    raw = _llm_call(
+    raw = await _llm_call(
         "Following these instructions, return a JSON for a resolved ticket where "
         "the agent issued a refund for a damaged `wireless-headset` order:\n" + instructions,
         system="Output only a fenced JSON block matching the schema.",
@@ -252,7 +255,7 @@ def main() -> None:
     # Part 5: Nested schemas — Customer contains AccountTier contains primitives
     # =========================================================================
     print("\n=== Part 5: Complex Nested Structures ===\n")
-    nested = _llm_call(
+    nested = await _llm_call(
         "Output a JSON for a customer Acme Co, lifetime_value 4800, tier "
         "(plan 'enterprise', region 'us-east', standing 'good'), "
         "products [seats, analytics]. Inside ```json.",
@@ -276,7 +279,7 @@ def main() -> None:
     # =========================================================================
     print("\n=== Part 6: ConversationVerdict ===\n")
     cv_instructions = create_output_instructions(ConversationVerdict)
-    raw = _llm_call(
+    raw = await _llm_call(
         "A live-chat transcript shows a customer whose subscription renewed at a "
         "higher price than expected; they are frustrated and asking to cancel "
         "unless it is fixed. 5 of the 6 expected signals were present in the "
@@ -302,7 +305,7 @@ def main() -> None:
         + create_output_instructions(ToolSelection)
         + "\nThink before selecting."
     )
-    pick = _llm_call(
+    pick = await _llm_call(
         "We need to check the shipping status of order 100847. Pick the right "
         "tool and reply with the JSON.",
         system=sys_prompt,
@@ -329,7 +332,7 @@ def main() -> None:
         ),
     )
     t0 = time.perf_counter()
-    live = live_agent.run_sync(
+    live = await live_agent.arun(
         "Triage: a customer reports the mobile app crashes on checkout, they were "
         "double-charged for one order, and the help center login link is broken. "
         "Top three issues."
@@ -356,4 +359,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

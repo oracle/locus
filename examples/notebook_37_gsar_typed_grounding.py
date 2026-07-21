@@ -91,13 +91,13 @@ from tulip.security import (
 )
 
 
-def _llm_call(
+async def _llm_call(
     prompt: str, *, system: str = "Reply in one short sentence.", max_tokens: int = 80
 ) -> str:
     """Fire one model call and print a timing/token banner."""
     agent = Agent(model=get_model(max_tokens=max_tokens), system_prompt=system)
     t0 = time.perf_counter()
-    res = agent.run_sync(prompt)
+    res = await agent.arun(prompt)
     dt = time.perf_counter() - t0
     print(
         f"  [model call: {dt:.2f}s · "
@@ -128,11 +128,11 @@ def _report(result) -> None:
 # =============================================================================
 
 
-def example_grounded_ships() -> None:
+async def example_grounded_ships() -> None:
     print("=== Part 1: A grounded finding ships ===\n")
     print(
         "AI rationale: "
-        + _llm_call(
+        + await _llm_call(
             "In one sentence, why should a security finding be withheld unless every "
             "claim in it traces back to evidence?"
         )
@@ -212,11 +212,11 @@ def example_grounded_ships() -> None:
 # =============================================================================
 
 
-def example_ungrounded_abstains() -> None:
+async def example_ungrounded_abstains() -> None:
     print("\n=== Part 2: An ungrounded finding abstains ===\n")
     print(
         "AI rationale: "
-        + _llm_call(
+        + await _llm_call(
             "In one sentence, why is 'the agent was probably prompt-injected' a false "
             "positive until you can point to the injected content in a tool output?"
         )
@@ -266,11 +266,11 @@ def example_ungrounded_abstains() -> None:
 # =============================================================================
 
 
-def example_contradiction_withholds() -> None:
+async def example_contradiction_withholds() -> None:
     print("\n=== Part 3: Contradicted evidence withholds the finding ===\n")
     print(
         "AI rationale: "
-        + _llm_call(
+        + await _llm_call(
             "In one sentence, why must a finding be withheld when one of its claims is "
             "directly contradicted by the evidence, even if other claims hold?"
         )
@@ -317,11 +317,11 @@ def example_contradiction_withholds() -> None:
 # =============================================================================
 
 
-def example_threshold_recalibration() -> None:
+async def example_threshold_recalibration() -> None:
     print("\n=== Part 4: Re-calibrating the proceed bar ===\n")
     print(
         "AI rationale: "
-        + _llm_call(
+        + await _llm_call(
             "In one sentence, why would a SOC that auto-files tickets raise the GSAR "
             "proceed threshold above the research default?"
         )
@@ -452,9 +452,13 @@ async def example_outer_loop() -> None:
 # =============================================================================
 
 
+async def main() -> None:
+    await example_grounded_ships()
+    await example_ungrounded_abstains()
+    await example_contradiction_withholds()
+    await example_threshold_recalibration()
+    await example_outer_loop()
+
+
 if __name__ == "__main__":
-    example_grounded_ships()
-    example_ungrounded_abstains()
-    example_contradiction_withholds()
-    example_threshold_recalibration()
-    asyncio.run(example_outer_loop())
+    asyncio.run(main())

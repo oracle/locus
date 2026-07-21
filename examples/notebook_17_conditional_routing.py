@@ -33,13 +33,13 @@ from tulip.agent import Agent
 from tulip.multiagent import END, START, StateGraph
 
 
-def _llm_call(
+async def _llm_call(
     prompt: str, *, system: str = "Reply in one short sentence.", max_tokens: int = 80
 ) -> str:
     """Run a one-shot Agent and print a timing/token banner. Used by every part."""
     agent = Agent(model=get_model(max_tokens=max_tokens), system_prompt=system)
     t0 = time.perf_counter()
-    res = agent.run_sync(prompt)
+    res = await agent.arun(prompt)
     dt = time.perf_counter() - t0
     print(
         f"  [model call: {dt:.2f}s · {res.metrics.prompt_tokens}→{res.metrics.completion_tokens} tokens]"
@@ -63,14 +63,14 @@ async def example_binary_routing():
         return {"confidence": confidence, "needs_human": confidence >= 80}
 
     async def escalate_path(inputs):
-        msg = _llm_call(
+        msg = await _llm_call(
             f"Write a one-line escalation note for a cloud monitoring alert with "
             f"{inputs.get('confidence')}% anomaly confidence that needs on-call SRE review.",
         )
         return {"disposition": msg}
 
     async def auto_close_path(inputs):
-        msg = _llm_call(
+        msg = await _llm_call(
             f"Write a one-line auto-resolve note for a cloud monitoring alert with only "
             f"{inputs.get('confidence')}% anomaly confidence, mentioning it stays on record.",
         )
@@ -116,21 +116,21 @@ async def example_multiway_routing():
         return {"severity": severity}
 
     async def handle_critical(inputs):
-        line = _llm_call(
+        line = await _llm_call(
             "In one short line, page the on-call SRE for a CRITICAL outage. SLA 15 min."
         )
         return {"response": line, "sla": "15 minutes"}
 
     async def handle_high(inputs):
-        line = _llm_call("In one short line, assign a HIGH alert to the platform team. SLA 1 hour.")
+        line = await _llm_call("In one short line, assign a HIGH alert to the platform team. SLA 1 hour.")
         return {"response": line, "sla": "1 hour"}
 
     async def handle_medium(inputs):
-        line = _llm_call("In one short line, queue a MEDIUM alert for triage. SLA 24 hours.")
+        line = await _llm_call("In one short line, queue a MEDIUM alert for triage. SLA 24 hours.")
         return {"response": line, "sla": "24 hours"}
 
     async def handle_low(inputs):
-        line = _llm_call("In one short line, batch a LOW alert for weekly review. SLA 1 week.")
+        line = await _llm_call("In one short line, batch a LOW alert for weekly review. SLA 1 week.")
         return {"response": line, "sla": "1 week"}
 
     graph.add_node("classify", classify_alert)
@@ -186,15 +186,15 @@ async def example_chained_conditions():
         return {"is_operator": role == "operator"}
 
     async def rollback_action(inputs):
-        line = _llm_call("In one line, log that an operator rolled back the affected service.")
+        line = await _llm_call("In one line, log that an operator rolled back the affected service.")
         return {"result": line}
 
     async def ticket_action(inputs):
-        line = _llm_call("In one line, log that a read-only viewer opened a remediation ticket.")
+        line = await _llm_call("In one line, log that a read-only viewer opened a remediation ticket.")
         return {"result": line}
 
     async def discard_alert(inputs):
-        line = _llm_call("In one line, log that an alert from an untrusted webhook was discarded.")
+        line = await _llm_call("In one line, log that an alert from an untrusted webhook was discarded.")
         return {"result": line}
 
     graph.add_node("source", validate_source)
@@ -243,19 +243,19 @@ async def example_default_route():
         return {"family": family}
 
     async def handle_compute(inputs):
-        line = _llm_call("In one short line, name the team that handles compute alerts.")
+        line = await _llm_call("In one short line, name the team that handles compute alerts.")
         return {"handler": line}
 
     async def handle_storage(inputs):
-        line = _llm_call("In one short line, name the team that handles storage alerts.")
+        line = await _llm_call("In one short line, name the team that handles storage alerts.")
         return {"handler": line}
 
     async def handle_network(inputs):
-        line = _llm_call("In one short line, name the team that handles network alerts.")
+        line = await _llm_call("In one short line, name the team that handles network alerts.")
         return {"handler": line}
 
     async def handle_other(inputs):
-        line = _llm_call("In one short line, name a generic on-call queue for unmatched alerts.")
+        line = await _llm_call("In one short line, name a generic on-call queue for unmatched alerts.")
         return {"handler": line}
 
     graph.add_node("categorize", categorize)
@@ -314,15 +314,15 @@ async def example_complex_routing():
         }
 
     async def page_oncall(inputs):
-        line = _llm_call("In one short line, confirm the on-call incident commander was paged.")
+        line = await _llm_call("In one short line, confirm the on-call incident commander was paged.")
         return {"routing": line, "response_window": "Immediate"}
 
     async def priority_queue(inputs):
-        line = _llm_call("In one short line, confirm the incident entered the priority queue.")
+        line = await _llm_call("In one short line, confirm the incident entered the priority queue.")
         return {"routing": line, "response_window": "4 hours"}
 
     async def standard_queue(inputs):
-        line = _llm_call("In one short line, confirm the incident entered the standard queue.")
+        line = await _llm_call("In one short line, confirm the incident entered the standard queue.")
         return {"routing": line, "response_window": "24 hours"}
 
     graph.add_node("evaluate", evaluate_incident)
@@ -392,7 +392,7 @@ async def example_llm_router():
             ),
         )
         t0 = _t.perf_counter()
-        result = agent.run_sync(alert)
+        result = await agent.arun(alert)
         dt = _t.perf_counter() - t0
         print(
             f"  [model call: {dt:.2f}s · {result.metrics.prompt_tokens}→{result.metrics.completion_tokens} tokens]"

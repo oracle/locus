@@ -217,7 +217,7 @@ Always cite the runbook text you relied on.""",
     for question in questions:
         print("\n" + "-" * 40)
         print(f"Responder: {question}")
-        result = agent.run_sync(question)
+        result = await agent.arun(question)
         print(f"Copilot: {result.message}")
 
 
@@ -296,7 +296,7 @@ Use tools as needed to answer questions accurately.""",
     for query in queries:
         print("\n" + "-" * 40)
         print(f"Responder: {query}")
-        result = agent.run_sync(query)
+        result = await agent.arun(query)
         print(f"Copilot: {result.message}")
 
 
