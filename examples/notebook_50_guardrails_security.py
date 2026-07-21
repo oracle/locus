@@ -66,7 +66,7 @@ from tulip.security import (
 # you can see the guardrail running against a real round-trip.
 
 
-def _llm_call(
+async def _llm_call(
     prompt: str,
     *,
     system: str = "Reply in one short sentence.",
@@ -79,7 +79,7 @@ def _llm_call(
         hooks=hooks,
     )
     t0 = time.perf_counter()
-    result = agent.run_sync(prompt)
+    result = await agent.arun(prompt)
     dt = time.perf_counter() - t0
     print(
         f"  [model call: {dt:.2f}s · "
@@ -109,7 +109,7 @@ async def main():
     print(f"  block_dangerous_tools: {sorted(config.block_dangerous_tools)[:5]}…")
     print(f"  max_prompt_length: {config.max_prompt_length:,}")
     print(f"  default_action: {config.default_action.value}")
-    summary = _llm_call(
+    summary = await _llm_call(
         "In one sentence, summarise what a security policy that blocks "
         "{eval, exec, system, shell, rm, delete, drop, truncate} protects "
         "a SOC triage agent against when its input includes attacker-"
@@ -128,7 +128,7 @@ async def main():
 
     guardrails = GuardrailsHook(config=config, on_violation=on_violation)
     print(f"  Hook: {guardrails.name}, priority={guardrails.priority}")
-    answer = _llm_call(
+    answer = await _llm_call(
         "What's a sensible account-lockout threshold for failed logins?",
         system="Reply in one short sentence.",
         hooks=[guardrails],
@@ -162,7 +162,7 @@ async def main():
         except ValueError as e:
             print(f"  '{text[:40]}…' -> BLOCKED: {e}")
 
-    pii_advice = _llm_call(
+    pii_advice = await _llm_call(
         "Give one concrete piece of advice for a SOC lead on what to do when "
         "an agent's investigation trace logs PII like emails or SSNs.",
         max_tokens=80,
@@ -263,7 +263,7 @@ async def main():
         else:
             print(f"  Withheld: {finding.reason}")
 
-    risk_summary = _llm_call(
+    risk_summary = await _llm_call(
         "List the top three classes of injected input a security agent should "
         "filter when it processes ticket text and tool output. Three short "
         "bullets.",
@@ -291,7 +291,7 @@ async def main():
             print(f"  {name} -> Allowed")
         except ValueError:
             print(f"  {name} -> BLOCKED")
-    rationale = _llm_call(
+    rationale = await _llm_call(
         "Why is it dangerous to expose `exec` or `shell` tools to a security "
         "agent that reads attacker-influenced alert text?",
         max_tokens=80,
@@ -314,7 +314,7 @@ async def main():
             print(f"  {name} -> Allowed")
         except ValueError:
             print(f"  {name} -> BLOCKED")
-    contrast = _llm_call(
+    contrast = await _llm_call(
         "In one sentence, compare allowlist vs denylist for tool access in a "
         "security agent — which is safer and why?",
         max_tokens=80,
@@ -337,7 +337,7 @@ async def main():
     print("\naction_overrides:")
     for rule, act in custom_config.action_overrides.items():
         print(f"  {rule} -> {act.value}")
-    explainer = _llm_call(
+    explainer = await _llm_call(
         "Briefly explain when a security agent platform should REDACT vs "
         "BLOCK vs WARN on policy violations. One sentence per action.",
         max_tokens=140,
@@ -354,13 +354,13 @@ async def main():
         max_input_length=10000,
         case_sensitive=False,
     )
-    benign = _llm_call(
+    benign = await _llm_call(
         "Suggest one good practice for handling developer credentials in CI.",
         hooks=[content_filter],
     )
     print(f"Filtered answer: {benign}")
     try:
-        _llm_call("What's my password?", hooks=[content_filter])
+        await _llm_call("What's my password?", hooks=[content_filter])
     except Exception as e:  # noqa: BLE001
         print(f"  (filter blocked the input as expected: {type(e).__name__})")
 
@@ -375,7 +375,7 @@ async def main():
     print("Registered hook providers:")
     for prov in registry.providers:
         print(f"  - {prov.name} (priority={prov.priority})")
-    stacked = _llm_call(
+    stacked = await _llm_call(
         "Name two ways an attacker could abuse a SOC agent that has "
         "unrestricted shell access. One bullet each.",
         hooks=[
@@ -421,7 +421,7 @@ async def main():
         f"dev blocks {len(dev.block_dangerous_tools)}; "
         f"prod default={prod.default_action.value}, dev default={dev.default_action.value}"
     )
-    suggestion = _llm_call(
+    suggestion = await _llm_call(
         "List one extra guardrail rule a SOC automation team should add on "
         "top of blocking shell tools. One short sentence.",
         max_tokens=80,
@@ -430,7 +430,7 @@ async def main():
 
     # Part 11: ask the model to write a guardrail cheat sheet.
     print("\n=== Part 11: Best practices ===\n")
-    best = _llm_call(
+    best = await _llm_call(
         "Write a six-line cheat sheet of best practices for guarding "
         "security agents that process untrusted alert and ticket text. "
         "Six bullets, terse.",
@@ -455,7 +455,9 @@ async def main():
         hooks=[safe_guardrails],
     )
     t0 = time.perf_counter()
-    safe_result = safe_agent.run_sync("How can I improve the security posture of a small SaaS app?")
+    safe_result = await safe_agent.arun(
+        "How can I improve the security posture of a small SaaS app?"
+    )
     dt = time.perf_counter() - t0
     print(
         f"  [model call: {dt:.2f}s · "

@@ -118,7 +118,7 @@ async def part2_token_meter() -> None:
 
     for prompt in prompts:
         agent = Agent(model=get_model(), max_iterations=2)
-        result = agent.run_sync(prompt)
+        result = await agent.arun(prompt)
         m = result.metrics
         running_prompt += m.prompt_tokens
         running_completion += m.completion_tokens

@@ -77,13 +77,13 @@ from tulip.reasoning.gsar import (
 from tulip.tools.decorator import tool
 
 
-def _llm_call(
+async def _llm_call(
     prompt: str, *, system: str = "Reply in one short sentence.", max_tokens: int = 80
 ) -> str:
     """One model call with a timing/token banner — used for commentary."""
     agent = Agent(model=get_model(max_tokens=max_tokens), system_prompt=system)
     t0 = time.perf_counter()
-    res = agent.run_sync(prompt)
+    res = await agent.arun(prompt)
     dt = time.perf_counter() - t0
     print(
         f"  [model call: {dt:.2f}s · {res.metrics.prompt_tokens}→{res.metrics.completion_tokens} tokens]"
@@ -251,9 +251,10 @@ When rightsizing:
     )
 
     print(f"Tools available: {[t.name for t in specialist.tools]}")
-    print(
-        f"AI commentary: {_llm_call('In one sentence, why does giving a Specialist domain-specific cloud tools dramatically narrow its failure surface?')}"
+    _ai_note = await _llm_call(
+        "In one sentence, why does giving a Specialist domain-specific cloud tools dramatically narrow its failure surface?"
     )
+    print(f"AI commentary: {_ai_note}")
 
     # =========================================================================
     # Part 3: encode a runbook as a Playbook
@@ -301,9 +302,10 @@ When rightsizing:
     print("\nPlaybook prompt:")
     print("-" * 40)
     print(playbook_prompt[:500] + "...")
-    print(
-        f"AI commentary: {_llm_call('In one sentence, when does attaching a fixed Playbook to a cloud Specialist matter most?')}"
+    _ai_note = await _llm_call(
+        "In one sentence, when does attaching a fixed Playbook to a cloud Specialist matter most?"
     )
+    print(f"AI commentary: {_ai_note}")
 
     # =========================================================================
     # Part 4: pick the right playbook from a pool
@@ -345,9 +347,10 @@ When rightsizing:
         if selected:
             print(f"Task: '{task[:40]}...'")
             print(f"  Selected playbook: {selected.name}")
-    print(
-        f"AI commentary: {_llm_call('In one sentence, why is automatic playbook selection by task description risky for cloud ops and how do you mitigate it?')}"
+    _ai_note = await _llm_call(
+        "In one sentence, why is automatic playbook selection by task description risky for cloud ops and how do you mitigate it?"
     )
+    print(f"AI commentary: {_ai_note}")
 
     # =========================================================================
     # Part 4b: ground the verdict — emit a recommendation only with evidence
@@ -526,9 +529,10 @@ When rightsizing:
     for response, description in responses:
         confidence = specialist._estimate_confidence(response)
         print(f"  '{response}' -> {confidence:.0%} ({description})")
-    print(
-        f"AI commentary: {_llm_call('In one sentence, why is keyword-based confidence estimation only a rough proxy for a rightsizing decision?')}"
+    _ai_note = await _llm_call(
+        "In one sentence, why is keyword-based confidence estimation only a rough proxy for a rightsizing decision?"
     )
+    print(f"AI commentary: {_ai_note}")
 
     # =========================================================================
     # Part 9: common specialist shapes
@@ -549,9 +553,10 @@ When rightsizing:
 
     print("Pattern 4: Pipeline Stage")
     print("  Drops into a larger FinOps workflow; structured output, context in/out.")
-    print(
-        f"AI suggestion: {_llm_call('Suggest one extra cloud Specialist pattern not in the four listed above. One short sentence.')}"
+    _ai_note = await _llm_call(
+        "Suggest one extra cloud Specialist pattern not in the four listed above. One short sentence."
     )
+    print(f"AI suggestion: {_ai_note}")
 
     # =========================================================================
     # Part 10: assemble a capacity-review team

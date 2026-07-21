@@ -29,6 +29,7 @@ Prerequisites:
   ``openai`` / ``anthropic`` / ``mock``.
 """
 
+import asyncio
 import threading
 import time
 
@@ -45,7 +46,7 @@ from tulip.tools.decorator import tool
 # =============================================================================
 
 
-def example_plugin():
+async def example_plugin():
     print("=== Part 1: Plugin System ===\n")
 
     model = get_model()
@@ -90,7 +91,7 @@ def example_plugin():
         )
     )
 
-    result = agent.run_sync(
+    result = await agent.arun(
         "Triage this alert: 'Monthly bill spiked — instance i-0badcafe in "
         "us-east-1 is the top line item'"
     )
@@ -103,7 +104,7 @@ def example_plugin():
 # =============================================================================
 
 
-def example_callback():
+async def example_callback():
     print("\n=== Part 2: Callback Handler ===\n")
 
     model = get_model()
@@ -118,7 +119,7 @@ def example_callback():
         )
     )
 
-    agent.run_sync("Is a 't3.nano' a sensible size for a production database?")
+    await agent.arun("Is a 't3.nano' a sensible size for a production database?")
     print(f"Events received: {events}")
 
 
@@ -127,7 +128,7 @@ def example_callback():
 # =============================================================================
 
 
-def example_cancel():
+async def example_cancel():
     print("\n=== Part 3: Cancel Signal ===\n")
 
     model = get_model(max_tokens=80)
@@ -141,7 +142,7 @@ def example_cancel():
         )
     )
     t0 = time.perf_counter()
-    live_result = live_agent.run_sync(
+    live_result = await live_agent.arun(
         "In one sentence, why does a cloud automation agent need a cancel signal?"
     )
     dt = time.perf_counter() - t0
@@ -160,11 +161,15 @@ def example_cancel():
         )
     )
     agent.cancel()
-    result = agent.run_sync("Terminate every instance in the fleet — this should be cancelled")
+    result = await agent.arun("Terminate every instance in the fleet — this should be cancelled")
     print(f"Stop reason: {result.stop_reason}")
 
 
+async def main() -> None:
+    await example_plugin()
+    await example_callback()
+    await example_cancel()
+
+
 if __name__ == "__main__":
-    example_plugin()
-    example_callback()
-    example_cancel()
+    asyncio.run(main())

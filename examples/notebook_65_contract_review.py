@@ -300,7 +300,7 @@ async def sign_off(state: dict[str, Any]) -> dict[str, Any]:
     result = None
     for attempt in range(3):
         try:
-            result = await _asyncio.to_thread(agent.run_sync, prompt)
+            result = await agent.arun(prompt)
             break
         except Exception as exc:  # noqa: BLE001 — retry transient provider flakiness
             last_exc = exc

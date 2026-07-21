@@ -36,6 +36,7 @@ Prerequisites:
   ``openai`` / ``anthropic`` / ``mock``.
 """
 
+import asyncio
 import time
 from datetime import UTC, datetime
 
@@ -52,12 +53,12 @@ from tulip.playbooks import (
 from tulip.tools import tool
 
 
-def _llm_call(
+async def _llm_call(
     prompt: str, *, system: str = "Reply in one short sentence.", max_tokens: int = 100
 ) -> str:
     agent = Agent(model=get_model(max_tokens=max_tokens), system_prompt=system)
     t0 = time.perf_counter()
-    res = agent.run_sync(prompt)
+    res = await agent.arun(prompt)
     dt = time.perf_counter() - t0
     print(
         f"  [model call: {dt:.2f}s · "
@@ -66,7 +67,7 @@ def _llm_call(
     return res.message.strip()
 
 
-def main():
+async def main():
     print("=" * 60)
     print("Notebook 46: playbooks")
     print("=" * 60)
@@ -105,7 +106,7 @@ def main():
         required=True,
     )
     print(f"  Step: {step1.id} ({len(step1.expected_tools)} expected tools)")
-    rationale = _llm_call(
+    rationale = await _llm_call(
         "In one sentence, why does a GDPR data-subject-access runbook benefit from "
         "having `expected_tools` declared per step?",
     )
@@ -127,7 +128,7 @@ def main():
         tags=["data-privacy", "gdpr", "dsar"],
     )
     print(f"  Playbook: {playbook.name} v{playbook.version} steps={len(playbook.steps)}")
-    described = _llm_call(
+    described = await _llm_call(
         f"Describe this playbook in two sentences: {playbook.description}. "
         f"Steps: {[s.id for s in playbook.steps]}.",
         max_tokens=160,
@@ -150,7 +151,7 @@ def main():
     )
     plan.current_step_index = 1
     print(f"  Progress: {plan.progress:.0%}  current_step={plan.current_step.id}")
-    next_step = _llm_call(
+    next_step = await _llm_call(
         f"The previous step '{plan.completed_steps[0]}' completed and verified the "
         f"subject's identity. The next step is "
         f"'{plan.current_step.id}'. Suggest one specific tool call for that step.",
@@ -165,7 +166,7 @@ def main():
     for status in StepStatus:
         print(f"  - {status.value}")
     print(f"  is_step_complete('verify_identity') = {plan.is_step_complete('verify_identity')}")
-    summary = _llm_call(
+    summary = await _llm_call(
         "In one sentence, when should a privacy analyst mark a DSAR runbook step "
         "as SKIPPED rather than FAILED?",
         max_tokens=80,
@@ -187,7 +188,7 @@ def main():
         required=True,
     )
     print(f"  Step: {validated_step.id}  validation={validated_step.validation}")
-    judge = _llm_call(
+    judge = await _llm_call(
         f"This step requires the result to contain {validated_step.validation['required_result_keywords']}. "
         "If the actual result is 'two contact records redacted, no third-party PII remains', does it satisfy the validation? Reply YES or NO with one-word reason.",
         max_tokens=40,
@@ -209,7 +210,7 @@ def main():
         },
     )
     print(f"  metadata: {step_with_meta.metadata}")
-    suggestion = _llm_call(
+    suggestion = await _llm_call(
         "Suggest one extra metadata field a production-grade GDPR data-subject-access "
         "playbook step should carry, with a one-line rationale.",
         max_tokens=80,
@@ -258,7 +259,7 @@ def main():
 
     prod_playbook = erasure_playbook("production", ["crm", "billing", "analytics"])
     print(f"  Generated: {prod_playbook.name}  steps={[s.id for s in prod_playbook.steps]}")
-    review = _llm_call(
+    review = await _llm_call(
         f"Review this generated right-to-erasure playbook: {[s.id for s in prod_playbook.steps]}. "
         "Spot one weakness in one short sentence.",
         max_tokens=100,
@@ -279,7 +280,7 @@ def main():
     demo_plan.current_step_index = 1
     bar = "#" * int(demo_plan.progress * 20) + "-" * (20 - int(demo_plan.progress * 20))
     print(f"  [{bar}] {demo_plan.progress:.0%}")
-    eta = _llm_call(
+    eta = await _llm_call(
         "A data-subject-access playbook has 4 steps. One is done, one is "
         "in progress, two are pending. Roughly how long should we expect the "
         "remaining work to take? Answer in one short sentence.",
@@ -291,7 +292,7 @@ def main():
     # Part 9: The model writes a short best-practices cheatsheet.
     # =========================================================================
     print("\n=== Part 9: Best Practices ===\n")
-    practices = _llm_call(
+    practices = await _llm_call(
         "Write five terse best-practice bullets for designing reliable Tulip "
         "data-privacy request playbooks. Five bullets only.",
         max_tokens=240,
@@ -349,7 +350,7 @@ def main():
         ),
     )
     t0 = time.perf_counter()
-    triage_result = triage_agent.run_sync("Triage request DSAR-7741.")
+    triage_result = await triage_agent.arun("Triage request DSAR-7741.")
     dt = time.perf_counter() - t0
     print(
         f"  [model call: {dt:.2f}s · "
@@ -364,4 +365,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

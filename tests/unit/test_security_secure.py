@@ -82,3 +82,19 @@ async def test_audit_hook_records_tool_calls() -> None:
     assert trail.records()[0].payload == {"tool": "scan_endpoint"}
     assert trail.records()[1].payload == {"tool": "scan_endpoint", "error": False}
     assert trail.verify()
+
+
+async def test_governed_agent_arun_delegates_to_inner() -> None:
+    """GovernedAgent.arun forwards to the wrapped agent's async arun
+    (thread-free path for browser/WASM)."""
+
+    class _FakeAgent:
+        async def arun(self, prompt: str, **kwargs: object) -> str:
+            return f"arun:{prompt}"
+
+        def run_sync(self, prompt: str, **kwargs: object) -> str:
+            return f"sync:{prompt}"
+
+    ga = GovernedAgent(agent=_FakeAgent(), audit_trail=AuditTrail(), profile=GovernanceProfile())
+    assert await ga.arun("hello") == "arun:hello"
+    assert ga.run_sync("hello") == "sync:hello"

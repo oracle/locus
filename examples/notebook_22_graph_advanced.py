@@ -43,13 +43,13 @@ from tulip.multiagent.graph import (
 from tulip.multiagent.visualize import draw_ascii, draw_mermaid
 
 
-def _llm_call(
+async def _llm_call(
     prompt: str, *, system: str = "Reply in one short sentence.", max_tokens: int = 80
 ) -> str:
     """Run a one-shot Agent and print a timing/token banner. Used by every part."""
     agent = Agent(model=get_model(max_tokens=max_tokens), system_prompt=system)
     t0 = time.perf_counter()
-    res = agent.run_sync(prompt)
+    res = await agent.arun(prompt)
     dt = time.perf_counter() - t0
     print(
         f"  [model call: {dt:.2f}s · {res.metrics.prompt_tokens}→{res.metrics.completion_tokens} tokens]"
@@ -65,9 +65,10 @@ def _llm_call(
 async def example_retry():
     """A throttled control plane fails twice, launches the instance on the third attempt."""
     print("=== Part 1: RetryPolicy ===\n")
-    print(
-        f"AI rationale: {_llm_call('In one sentence, why is exponential backoff with jitter the right retry default?')}"
+    _ai_note = await _llm_call(
+        "In one sentence, why is exponential backoff with jitter the right retry default?"
     )
+    print(f"AI rationale: {_ai_note}")
 
     attempt = 0
 
@@ -102,9 +103,10 @@ async def example_retry():
 async def example_cache():
     """Identical image lookups to the same node return the cached result for ttl_seconds."""
     print("\n=== Part 2: CachePolicy ===\n")
-    print(
-        f"AI rationale: {_llm_call('In one sentence, when does CachePolicy on a node beat memoising the function yourself?')}"
+    _ai_note = await _llm_call(
+        "In one sentence, when does CachePolicy on a node beat memoising the function yourself?"
     )
+    print(f"AI rationale: {_ai_note}")
 
     call_count = 0
 
@@ -137,9 +139,10 @@ async def example_cache():
 async def example_visualization():
     """draw_mermaid and draw_ascii print the provisioning workflow as a diagram."""
     print("\n=== Part 3: Diagrams ===\n")
-    print(
-        f"AI rationale: {_llm_call('In one sentence, why are Mermaid diagrams useful when reviewing a Tulip StateGraph?')}"
+    _ai_note = await _llm_call(
+        "In one sentence, why are Mermaid diagrams useful when reviewing a Tulip StateGraph?"
     )
+    print(f"AI rationale: {_ai_note}")
 
     graph = StateGraph(config=GraphConfig(parallel=False))
 
@@ -176,9 +179,10 @@ async def example_visualization():
 async def example_realtime_streaming():
     """Stream node updates while also pushing provisioning progress events."""
     print("\n=== Part 4: Live streaming with emit_custom ===\n")
-    print(
-        f"AI rationale: {_llm_call('In one sentence, why is streaming progress events better than polling for provisioning status?')}"
+    _ai_note = await _llm_call(
+        "In one sentence, why is streaming progress events better than polling for provisioning status?"
     )
+    print(f"AI rationale: {_ai_note}")
     from tulip.multiagent import StreamMode, emit_custom
 
     graph = StateGraph(config=GraphConfig(parallel=False))
@@ -217,7 +221,7 @@ async def example_retry_with_llm() -> None:
             system_prompt="Answer in one sentence for an on-call cloud engineer.",
         )
         t0 = _t.perf_counter()
-        result = agent.run_sync(inputs["question"])
+        result = await agent.arun(inputs["question"])
         dt = _t.perf_counter() - t0
         print(
             f"  [model call: {dt:.2f}s · {result.metrics.prompt_tokens}→{result.metrics.completion_tokens} tokens]"
@@ -244,9 +248,14 @@ async def example_retry_with_llm() -> None:
     print(f"Summary: {result.final_state.get('summary')}")
 
 
+async def main():
+    """Run all notebook parts."""
+    await example_retry()
+    await example_cache()
+    await example_visualization()
+    await example_realtime_streaming()
+    await example_retry_with_llm()
+
+
 if __name__ == "__main__":
-    asyncio.run(example_retry())
-    asyncio.run(example_cache())
-    asyncio.run(example_visualization())
-    asyncio.run(example_realtime_streaming())
-    asyncio.run(example_retry_with_llm())
+    asyncio.run(main())

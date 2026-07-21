@@ -35,6 +35,8 @@ The default provider is the mock model; set TULIP_MODEL_PROVIDER for a live one 
 also work.
 """
 
+import asyncio
+
 from config import get_model
 
 from tulip.agent import Agent, AgentConfig
@@ -53,7 +55,7 @@ from tulip.core.termination import (
 # =============================================================================
 
 
-def example_termination():
+async def example_termination():
     """Build OR / AND combinations of stop predicates and probe them by hand."""
     print("=== Part 1: Composable Termination ===\n")
 
@@ -94,7 +96,7 @@ def example_termination():
 
     agent = Agent(model=get_model(max_tokens=80), system_prompt="Reply in one short sentence.")
     t0 = _t.perf_counter()
-    res = agent.run_sync(
+    res = await agent.arun(
         "In one sentence, why should a customer-support agent compose stop "
         "conditions (MaxIterations | TextMention) instead of hard-coding a single "
         "stop check inside the Agent?"
@@ -112,7 +114,7 @@ def example_termination():
 # =============================================================================
 
 
-def example_output_key():
+async def example_output_key():
     """Set output_key='resolution' and the final message lands in state.metadata['resolution']."""
     print("\n=== Part 2: output_key ===\n")
 
@@ -127,7 +129,7 @@ def example_output_key():
         )
     )
 
-    result = agent.run_sync(
+    result = await agent.arun(
         "Disposition for a customer asking to reset a password they simply forgot?"
     )
     print(f"Response: {result.message}")
@@ -140,7 +142,7 @@ def example_output_key():
 # =============================================================================
 
 
-def example_dynamic_prompt():
+async def example_dynamic_prompt():
     """System prompt is a function of runtime context.metadata."""
     print("\n=== Part 3: Dynamic System Prompt ===\n")
 
@@ -160,20 +162,25 @@ def example_dynamic_prompt():
     )
 
     # Different metadata → different system prompt → different behaviour.
-    r1 = agent.run_sync(
+    r1 = await agent.arun(
         "Summarize: customer was double-charged $49.99 on their last invoice.",
         metadata={"role": "tier-1 support agent"},
     )
     print(f"Tier-1 agent: {r1.message}")
 
-    r2 = agent.run_sync(
+    r2 = await agent.arun(
         "What does 'chargeback' mean on a billing ticket?",
         metadata={"role": "billing specialist", "audience": "non-technical customers"},
     )
     print(f"Billing specialist (for customers): {r2.message[:100]}")
 
 
+async def main():
+    """Run all notebook parts."""
+    await example_termination()
+    await example_output_key()
+    await example_dynamic_prompt()
+
+
 if __name__ == "__main__":
-    example_termination()
-    example_output_key()
-    example_dynamic_prompt()
+    asyncio.run(main())

@@ -40,6 +40,8 @@ Prerequisites:
   ``openai`` / ``anthropic`` / ``mock``.
 """
 
+import asyncio
+
 from config import get_model
 
 from tulip.agent import Agent, AgentConfig
@@ -53,7 +55,7 @@ from tulip.tools.decorator import tool
 # =============================================================================
 
 
-def example_steering():
+async def example_steering():
     print("=== Steering: LLM-Powered Tool Approval ===\n")
 
     model = get_model()
@@ -89,7 +91,7 @@ def example_steering():
 
     # Should be INTERRUPTed — the policy forbids mutating actions.
     print("Attempt: Restart service checkout-api")
-    result = agent.run_sync("Restart service checkout-api")
+    result = await agent.arun("Restart service checkout-api")
     print(f"Response: {result.message[:150]}")
     print(f"\nSteering decisions:")
     for d in steering.decisions:
@@ -114,9 +116,13 @@ def example_steering():
             hooks=[steering2],
         )
     )
-    result2 = agent2.run_sync("Query the metrics backend for p99 latency on checkout-api")
+    result2 = await agent2.arun("Query the metrics backend for p99 latency on checkout-api")
     print(f"Response: {result2.message[:150]}")
 
 
+async def main() -> None:
+    await example_steering()
+
+
 if __name__ == "__main__":
-    example_steering()
+    asyncio.run(main())

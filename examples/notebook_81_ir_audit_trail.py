@@ -243,7 +243,7 @@ async def run_incident_response(incident: str) -> None:
     for step in runbook.steps:
         print(f"--- Phase: {step.id} ---")
         prompt = f"{incident}\n\nExecute phase: {step.id}\n{step.description}"
-        result = agent.run_sync(prompt)
+        result = await agent.agent.arun(prompt)
         text = result.text if hasattr(result, "text") else str(result)
         print(text[:400] + ("..." if len(text) > 400 else ""))
         trail.record(f"phase-{step.id}", {"output_preview": str(result)[:200]})
@@ -276,5 +276,9 @@ async def run_incident_response(incident: str) -> None:
     print(f"   Chain link  : last.prev_hash = {last['prev_hash'][:16]}...")
 
 
+async def main() -> None:
+    await run_incident_response(_INCIDENT_BRIEF)
+
+
 if __name__ == "__main__":
-    asyncio.run(run_incident_response(_INCIDENT_BRIEF))
+    asyncio.run(main())

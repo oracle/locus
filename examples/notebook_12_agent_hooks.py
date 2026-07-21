@@ -34,6 +34,7 @@ also work.
 Prerequisite: notebook 11.
 """
 
+import asyncio
 from datetime import datetime
 
 # Import shared config
@@ -79,7 +80,7 @@ def adjust_capacity(base: int, delta: int) -> int:
     return base + delta
 
 
-def example_simple_hook():
+async def example_simple_hook():
     """Wire an audit hook into an autoscaling agent and run one prompt."""
     print("=== Part 1: Understanding Hooks ===\n")
 
@@ -93,7 +94,7 @@ def example_simple_hook():
     )
 
     print("Running agent with audit-trail hook:\n")
-    result = agent.run_sync("Scale the service: base 5, delta 3")
+    result = await agent.arun("Scale the service: base 5, delta 3")
     print(f"\nResult: {result.message}")
     print()
 
@@ -134,7 +135,7 @@ class TimingHook(HookProvider):
         self.tool_times[event.tool_name] = (datetime.now().timestamp() * 1000) - start
 
 
-def example_timing_hook():
+async def example_timing_hook():
     """Use a hook to time the agent and its tool calls."""
     print("=== Part 2: Timing Hook ===\n")
 
@@ -147,7 +148,7 @@ def example_timing_hook():
         hooks=[TimingHook()],
     )
 
-    result = agent.run_sync("Scale the service: base 10, delta 20")
+    result = await agent.arun("Scale the service: base 10, delta 20")
     print(f"Result: {result.message}")
     print()
 
@@ -184,7 +185,7 @@ class ValidationHook(HookProvider):
                 event.arguments["delta"] = self.max_value
 
 
-def example_validation_hook():
+async def example_validation_hook():
     """Clamp arguments before the tool sees them."""
     print("=== Part 3: Validation Hook ===\n")
 
@@ -197,7 +198,7 @@ def example_validation_hook():
         hooks=[ValidationHook(max_value=100)],
     )
 
-    result = agent.run_sync("Scale the service: base 5000, delta 3000")
+    result = await agent.arun("Scale the service: base 5000, delta 3000")
     print(f"Result: {result.message}")
     print()
 
@@ -242,7 +243,7 @@ class AuditHook(HookProvider):
         return self.audit_log
 
 
-def example_multiple_hooks():
+async def example_multiple_hooks():
     """Two hooks on one agent — priority decides who runs first."""
     print("=== Part 4: Multiple Hooks ===\n")
 
@@ -259,7 +260,7 @@ def example_multiple_hooks():
         hooks=[timing, audit],
     )
 
-    result = agent.run_sync("Scale the service: base 7, delta 8")
+    result = await agent.arun("Scale the service: base 7, delta 8")
     print(f"Result: {result.message}")
 
     print("\nAudit Log:")
@@ -327,7 +328,7 @@ def analyze_manifest(text: str) -> str:
     )
 
 
-def example_guardrails_hook():
+async def example_guardrails_hook():
     """A guardrail hook spots a sensitive-data pattern and warns."""
     print("=== Part 5: Guardrails Hook ===\n")
 
@@ -344,7 +345,7 @@ def example_guardrails_hook():
 
     # The word "password" trips the guardrail — manifest text is untrusted
     # input and may carry secrets that must not flow onward.
-    result = agent.run_sync("Analyze this manifest: 'env: DB_PASSWORD=hunter2'")
+    result = await agent.arun("Analyze this manifest: 'env: DB_PASSWORD=hunter2'")
     print(f"Result: {result.message}")
 
     if guardrails.blocked_calls:
@@ -357,7 +358,7 @@ def example_guardrails_hook():
 # =============================================================================
 
 
-def main():
+async def main():
     """Run all notebook parts."""
     print("=" * 60)
     print("Notebook 12: Audit Hooks & Lifecycle")
@@ -367,11 +368,11 @@ def main():
     print_config()
     print()
 
-    example_simple_hook()
-    example_timing_hook()
-    example_validation_hook()
-    example_multiple_hooks()
-    example_guardrails_hook()
+    await example_simple_hook()
+    await example_timing_hook()
+    await example_validation_hook()
+    await example_multiple_hooks()
+    await example_guardrails_hook()
 
     print("=" * 60)
     print("Next: Notebook 13 — Cloud Ops Dashboard SSE Streaming")
@@ -379,4 +380,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

@@ -36,6 +36,7 @@ Prerequisites:
   dispute-triage and a refund-policy review checklist).
 """
 
+import asyncio
 from pathlib import Path
 
 from config import get_model
@@ -49,7 +50,7 @@ from tulip.skills import Skill
 # =============================================================================
 
 
-def example_programmatic():
+async def example_programmatic():
     print("=== Part 1: Programmatic Skills ===\n")
 
     model = get_model()
@@ -75,7 +76,7 @@ def example_programmatic():
         )
     )
 
-    result = agent.run_sync(
+    result = await agent.arun(
         "Triage: $420 chargeback on card ending 4242 at merchant 'Acme', "
         "cardholder claims 'item not received' but tracking shows delivered at 03:14Z"
     )
@@ -91,7 +92,7 @@ def example_programmatic():
 # =============================================================================
 
 
-def example_filesystem():
+async def example_filesystem():
     print("\n=== Part 2: Filesystem Skills ===\n")
 
     skills_dir = Path(__file__).parent / "skills"
@@ -107,7 +108,7 @@ def example_filesystem():
 
     agent = Agent(model=get_model(max_tokens=80), system_prompt="Reply in one sentence.")
     t0 = _t.perf_counter()
-    res = agent.run_sync(
+    res = await agent.arun(
         "In one sentence, why should a payments team version its operations procedures as "
         "reviewable SKILL.md files instead of hard-coding prompts in source?"
     )
@@ -123,7 +124,7 @@ def example_filesystem():
 # =============================================================================
 
 
-def example_format():
+async def example_format():
     print("\n=== Part 3: SKILL.md Format ===\n")
 
     print("""
@@ -153,7 +154,7 @@ Place additional files in:
 
     agent = Agent(model=get_model(max_tokens=120), system_prompt="Reply in one short paragraph.")
     t0 = _t.perf_counter()
-    res = agent.run_sync(
+    res = await agent.arun(
         "Write a one-paragraph SKILL.md description for a skill named "
         "'ledger-forensics' that helps an agent reconstruct a transaction's "
         "settlement timeline from authorization and clearing logs."
@@ -165,7 +166,11 @@ Place additional files in:
     print(f"  AI-authored sample description:\n  {res.message.strip()}")
 
 
+async def main() -> None:
+    await example_programmatic()
+    await example_filesystem()
+    await example_format()
+
+
 if __name__ == "__main__":
-    example_programmatic()
-    example_filesystem()
-    example_format()
+    asyncio.run(main())

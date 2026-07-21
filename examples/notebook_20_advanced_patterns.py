@@ -42,13 +42,13 @@ from tulip.memory import InMemoryStore
 from tulip.multiagent import END, START, StateGraph
 
 
-def _llm_call(
+async def _llm_call(
     prompt: str, *, system: str = "Reply in one short sentence.", max_tokens: int = 80
 ) -> str:
     """Run a one-shot Agent and print a timing/token banner. Used by every part."""
     agent = Agent(model=get_model(max_tokens=max_tokens), system_prompt=system)
     t0 = time.perf_counter()
-    res = agent.run_sync(prompt)
+    res = await agent.arun(prompt)
     dt = time.perf_counter() - t0
     print(
         f"  [model call: {dt:.2f}s · {res.metrics.prompt_tokens}→{res.metrics.completion_tokens} tokens]"
@@ -64,9 +64,10 @@ def _llm_call(
 async def example_command_routing():
     """A node that returns Command picks its own queue for the ticket."""
     print("=== Part 1: Command — state and routing in one return ===\n")
-    print(
-        f"AI rationale: {_llm_call('In one sentence, why is Tulip Command better than separate edges + state writes?')}"
+    _ai_note = await _llm_call(
+        "In one sentence, why is Tulip Command better than separate edges + state writes?"
     )
+    print(f"AI rationale: {_ai_note}")
 
     graph = StateGraph()
 
@@ -123,9 +124,8 @@ async def example_command_routing():
 async def example_goto_helpers():
     """goto() and end() are shorthand for the most common Command shapes."""
     print("=== Part 1b: goto() and end() ===\n")
-    print(
-        f"AI rationale: {_llm_call('In one sentence, when is goto() preferable to a Command literal?')}"
-    )
+    _ai_note = await _llm_call("In one sentence, when is goto() preferable to a Command literal?")
+    print(f"AI rationale: {_ai_note}")
 
     graph = StateGraph()
 
@@ -165,9 +165,10 @@ async def example_goto_helpers():
 async def example_scatter():
     """scatter("worker", items, key="x") runs `worker` once per ticket, in parallel."""
     print("=== Part 2: scatter() ===\n")
-    print(
-        f"AI rationale: {_llm_call('In one sentence, give a customer-support use-case for the scatter() fan-out helper.')}"
+    _ai_note = await _llm_call(
+        "In one sentence, give a customer-support use-case for the scatter() fan-out helper."
     )
+    print(f"AI rationale: {_ai_note}")
 
     graph = StateGraph()
 
@@ -213,9 +214,10 @@ async def example_broadcast():
     agent, so an uncertain automated decision never ships on its own.
     """
     print("=== Part 2b: broadcast() + confidence-gated triage ===\n")
-    print(
-        f"AI rationale: {_llm_call('In one sentence, when is broadcast() better than scatter() in a graph?')}"
+    _ai_note = await _llm_call(
+        "In one sentence, when is broadcast() better than scatter() in a graph?"
     )
+    print(f"AI rationale: {_ai_note}")
 
     graph = StateGraph()
 
@@ -325,9 +327,10 @@ async def example_broadcast():
 async def example_subgraph():
     """A complete StateGraph can be added as a node in another graph."""
     print("=== Part 3: Subgraph as a node ===\n")
-    print(
-        f"AI rationale: {_llm_call('In one sentence, when should you factor a piece of graph logic out as a subgraph?')}"
+    _ai_note = await _llm_call(
+        "In one sentence, when should you factor a piece of graph logic out as a subgraph?"
     )
+    print(f"AI rationale: {_ai_note}")
 
     validation_graph = StateGraph()
 
@@ -384,9 +387,10 @@ async def example_subgraph():
 async def example_store():
     """Graph state is per-run; Store persists across ticket runs (or threads)."""
     print("=== Part 4: Store — memory that outlives one graph run ===\n")
-    print(
-        f"AI rationale: {_llm_call('In one sentence, what kind of state belongs in InMemoryStore vs in graph state?')}"
+    _ai_note = await _llm_call(
+        "In one sentence, what kind of state belongs in InMemoryStore vs in graph state?"
     )
+    print(f"AI rationale: {_ai_note}")
 
     store = InMemoryStore()
     graph = StateGraph()
@@ -432,9 +436,10 @@ async def example_store():
 async def example_combined():
     """A ticket pipeline that uses Command, scatter, and Store together."""
     print("=== Part 5: All five primitives in one workflow ===\n")
-    print(
-        f"AI rationale: {_llm_call('In one sentence, why is combining Command + scatter + Store typical for a recurring support pipeline?')}"
+    _ai_note = await _llm_call(
+        "In one sentence, why is combining Command + scatter + Store typical for a recurring support pipeline?"
     )
+    print(f"AI rationale: {_ai_note}")
 
     store = InMemoryStore()
     graph = StateGraph()
@@ -520,7 +525,7 @@ async def example_command_with_llm():
             ),
         )
         t0 = _t.perf_counter()
-        result = agent.run_sync(update)
+        result = await agent.arun(update)
         dt = _t.perf_counter() - t0
         print(
             f"  [model call: {dt:.2f}s · {result.metrics.prompt_tokens}→{result.metrics.completion_tokens} tokens]"

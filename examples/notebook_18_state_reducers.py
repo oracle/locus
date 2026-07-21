@@ -43,13 +43,13 @@ from tulip.core.reducers import reducer
 from tulip.multiagent import END, START, StateGraph
 
 
-def _llm_call(
+async def _llm_call(
     prompt: str, *, system: str = "Reply in one short sentence.", max_tokens: int = 60
 ) -> str:
     """Run a one-shot Agent and print a timing/token banner. Used by every part."""
     agent = Agent(model=get_model(max_tokens=max_tokens), system_prompt=system)
     t0 = time.perf_counter()
-    res = agent.run_sync(prompt)
+    res = await agent.arun(prompt)
     dt = time.perf_counter() - t0
     print(
         f"  [model call: {dt:.2f}s · {res.metrics.prompt_tokens}→{res.metrics.completion_tokens} tokens]"
@@ -65,7 +65,7 @@ def _llm_call(
 async def example_without_reducers():
     """Without a reducer the last write wins — earlier signals are lost."""
     print("=== Part 1: Why reducers exist ===\n")
-    note = _llm_call(
+    note = await _llm_call(
         "In one sentence, explain why a payment screening graph that overwrites signals loses evidence."
     )
     print(f"AI note: {note}")
@@ -100,7 +100,7 @@ async def example_without_reducers():
 async def example_with_reducers():
     """Same graph, but `signals` is annotated with the append_list reducer."""
     print("=== Part 1b: Same graph, with append_list ===\n")
-    note = _llm_call(
+    note = await _llm_call(
         "In one sentence, explain what a reducer does in a payment authorization graph."
     )
     print(f"AI note: {note}")
@@ -142,7 +142,7 @@ async def example_with_reducers():
 async def example_builtin_reducers():
     """add_messages appends case-log turns, add_numbers sums numeric fields."""
     print("=== Part 2: Built-in reducers ===\n")
-    note = _llm_call(
+    note = await _llm_call(
         "In one sentence, when would you use add_messages vs add_numbers in a Tulip payment graph?"
     )
     print(f"AI note: {note}")
@@ -186,7 +186,7 @@ async def example_builtin_reducers():
 async def example_merge_dict():
     """merge_dict shallow-merges incoming keys into the existing dict."""
     print("=== Part 2b: merge_dict ===\n")
-    note = _llm_call("In one sentence, give a payments use-case for merge_dict.")
+    note = await _llm_call("In one sentence, give a payments use-case for merge_dict.")
     print(f"AI note: {note}")
 
     class GatewayConfigState(BaseModel):
@@ -226,7 +226,9 @@ async def example_merge_dict():
 async def example_custom_reducer():
     """The @reducer decorator wraps any (current, new) -> merged function."""
     print("=== Part 3: Custom reducers ===\n")
-    note = _llm_call("In one sentence, name two cases where a custom reducer beats append_list.")
+    note = await _llm_call(
+        "In one sentence, name two cases where a custom reducer beats append_list."
+    )
     print(f"AI note: {note}")
 
     @reducer
@@ -281,7 +283,7 @@ async def example_custom_reducer():
 async def example_last_value():
     """last_value spells out the default behaviour: take the latest write."""
     print("=== Part 4: last_value ===\n")
-    note = _llm_call(
+    note = await _llm_call(
         "In one sentence, what kind of authorization field fits the last_value reducer?"
     )
     print(f"AI note: {note}")
@@ -324,7 +326,7 @@ async def example_last_value():
 async def example_complex_state():
     """An authorization schema where each field merges differently."""
     print("=== Part 5: Mixing reducers on one schema ===\n")
-    note = _llm_call(
+    note = await _llm_call(
         "In one sentence, explain why combining append_list, add_numbers, and "
         "merge_dict reducers is useful when merging multi-check payment output."
     )
@@ -415,7 +417,7 @@ async def example_reducer_with_llm():
             system_prompt="You write punchy one-line payment-fraud case summaries.",
         )
         t0 = _t.perf_counter()
-        result = agent.run_sync("Summarize a case merging velocity, AVS, and 3-D Secure signals.")
+        result = await agent.arun("Summarize a case merging velocity, AVS, and 3-D Secure signals.")
         dt = _t.perf_counter() - t0
         print(
             f"  [model call (summary): {dt:.2f}s · {result.metrics.prompt_tokens}→{result.metrics.completion_tokens} tokens]"
@@ -428,7 +430,7 @@ async def example_reducer_with_llm():
             system_prompt="You write 6-word transaction-disposition recommendations.",
         )
         t0 = _t.perf_counter()
-        result = agent.run_sync("Recommendation for a multi-check suspected-fraud transaction.")
+        result = await agent.arun("Recommendation for a multi-check suspected-fraud transaction.")
         dt = _t.perf_counter() - t0
         print(
             f"  [model call (recommendation):  {dt:.2f}s · {result.metrics.prompt_tokens}→{result.metrics.completion_tokens} tokens]"

@@ -27,6 +27,8 @@ Run:
 
 from __future__ import annotations
 
+import asyncio
+
 from config import get_model
 
 from tulip.agent import Agent
@@ -34,7 +36,7 @@ from tulip.playbooks import PlaybookEnforcer
 from tulip.security import all_playbooks, phishing_triage, security_toolset
 
 
-def main() -> int:
+async def main() -> int:
     # 1. The bundled playbooks.
     print("== Bundled security playbooks ==")
     for pid, pb in all_playbooks().items():
@@ -57,7 +59,7 @@ def main() -> int:
         ),
         max_iterations=8,
     )
-    result = agent.run_sync(
+    result = await agent.arun(
         "A user reported a phishing email linking to login.phish.example.net. Triage it."
     )
     print(f"  agent result (truncated): {str(result.text)[:160]}")
@@ -83,4 +85,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(asyncio.run(main()))

@@ -172,7 +172,7 @@ async def part1_basic() -> None:
         max_iterations=12,
     )
 
-    result = agent.run_sync("Review the reliability posture of api-gateway.")
+    result = await agent.arun("Review the reliability posture of api-gateway.")
     print("protocol terminated:", result.stop_reason)
     if result.parsed:
         rpt: ServiceReport = result.parsed  # type: ignore[assignment]
@@ -210,7 +210,7 @@ async def part2_filesystem_and_todos() -> None:
         todo_state=todo_state,
     )
 
-    result = agent.run_sync("Review all three services in the deploy window.")
+    result = await agent.arun("Review all three services in the deploy window.")
     print("terminated:", result.stop_reason)
     print("todos after run:")
     for todo in todo_state.snapshot():
@@ -250,7 +250,7 @@ async def part3_subagents() -> None:
         subagents=[alert_analyst],
     )
 
-    result = agent.run_sync("Review api-gateway using the alert_analyst subagent.")
+    result = await agent.arun("Review api-gateway using the alert_analyst subagent.")
     print("terminated:", result.stop_reason)
     if result.parsed:
         rpt: ServiceReport = result.parsed  # type: ignore[assignment]
@@ -302,7 +302,7 @@ async def part4_observability() -> None:
 
     async with run_context() as rid:
         collector = asyncio.create_task(_collect(rid))
-        result = agent.run_sync("Review the payments-worker service.")
+        result = await agent.arun("Review the payments-worker service.")
         await asyncio.sleep(0.1)
         collector.cancel()
 
@@ -381,7 +381,7 @@ async def part5_datastores() -> None:
         max_iterations=4,
     )
 
-    result = agent.run_sync(
+    result = await agent.arun(
         "What do prior incident notes say about api-gateway? Cite the retrieved doc."
     )
     print("part 5 response:", (result.text or "")[:300])

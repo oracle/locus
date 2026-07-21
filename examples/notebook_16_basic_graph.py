@@ -33,13 +33,13 @@ from tulip.agent import Agent
 from tulip.multiagent import END, START, StateGraph
 
 
-def _llm_call(
+async def _llm_call(
     prompt: str, *, system: str = "Reply in one short sentence.", max_tokens: int = 80
 ) -> str:
     """Run a one-shot Agent and print a timing/token banner. Used by every part."""
     agent = Agent(model=get_model(max_tokens=max_tokens), system_prompt=system)
     t0 = time.perf_counter()
-    res = agent.run_sync(prompt)
+    res = await agent.arun(prompt)
     dt = time.perf_counter() - t0
     print(
         f"  [model call: {dt:.2f}s · {res.metrics.prompt_tokens}→{res.metrics.completion_tokens} tokens]"
@@ -60,7 +60,7 @@ async def example_first_graph():
 
     async def assess(inputs):
         subject = inputs.get("subject", "(no subject)")
-        ai_line = _llm_call(
+        ai_line = await _llm_call(
             f"Give a one-sentence first-pass privacy-request assessment of a message "
             f"with the subject '{subject}'.",
             system="You are a data-protection request-triage assistant.",
@@ -106,7 +106,7 @@ async def example_sequence():
 
     async def verdict(inputs):
         tc = inputs.get("token_count")
-        ai = _llm_call(
+        ai = await _llm_call(
             f"In one short sentence, give a triage verdict for a {tc}-token DSAR "
             f"that {'does' if inputs.get('mentions_special_category') else 'does not'} "
             "mention special-category personal data.",
@@ -161,7 +161,7 @@ async def example_state_flow():
     async def score(inputs):
         print(f"  Score receives:     {list(inputs.keys())}")
         combined = inputs.get("combined_exposure", 0)
-        ai = _llm_call(
+        ai = await _llm_call(
             f"Comment on a triage pipeline that raised a request's exposure score to {combined}.",
         )
         return {
@@ -203,7 +203,7 @@ async def example_parallel():
 
     async def classify_sensitivity(inputs):
         record = inputs.get("record", "")
-        label = _llm_call(
+        label = await _llm_call(
             f"Classify the sensitivity of the data in '{record}' as high, medium, or "
             "low. Reply with one word.",
             system="Output one of: high | medium | low. Nothing else.",
@@ -272,7 +272,9 @@ async def example_results():
 
     async def normalize(inputs):
         v = inputs.get("raw_score", 0)
-        comment = _llm_call(f"In one sentence, comment on normalizing a raw exposure score of {v}.")
+        comment = await _llm_call(
+            f"In one sentence, comment on normalizing a raw exposure score of {v}."
+        )
         return {"normalized": True, "exposure_score": v * 2, "comment": comment}
 
     graph.add_node("normalize", normalize)
@@ -310,7 +312,7 @@ async def example_streaming():
         # emit_custom — push an arbitrary payload onto the event stream
         # while the node is still running. Useful for long-running lookups.
         await emit_custom({"phase": "starting", "record_count": inputs.get("records", 0)})
-        ai = _llm_call(
+        ai = await _llm_call(
             f"In one sentence, narrate a discovery pass that grew the matched-record list "
             f"to {inputs.get('records', 0) * 2} entries.",
         )
@@ -318,7 +320,7 @@ async def example_streaming():
         return {"matched_records": inputs.get("records", 0) * 2, "ai": ai}
 
     async def report(inputs):
-        ai = _llm_call(
+        ai = await _llm_call(
             f"In one short sentence, narrate adding 10 redaction notes to "
             f"{inputs.get('matched_records', 0)} records in a DSAR response pack.",
         )
@@ -359,7 +361,9 @@ async def example_graph_with_llm():
             system_prompt="You write one-sentence factual summaries for DPO handover notes.",
         )
         t0 = _t.perf_counter()
-        result = agent.run_sync(f"Summarize the processing activity '{activity}' in one sentence.")
+        result = await agent.arun(
+            f"Summarize the processing activity '{activity}' in one sentence."
+        )
         dt = _t.perf_counter() - t0
         print(
             f"  [model call: {dt:.2f}s · {result.metrics.prompt_tokens}→{result.metrics.completion_tokens} tokens]"

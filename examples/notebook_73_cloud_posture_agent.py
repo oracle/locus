@@ -40,6 +40,7 @@ Prerequisites:
 
 from __future__ import annotations
 
+import asyncio
 import os
 
 from config import get_model
@@ -162,7 +163,7 @@ def _aws_available() -> bool:
         return False
 
 
-def part2_live_agent() -> None:
+async def part2_live_agent() -> None:
     print("\n--- Part 2: the live cloud-posture agent ---")
     controls = SecurityControls(min_gsar=0.6, min_confidence=0.6)
     analyst = create_soc_analyst(model=get_model(), controls=controls, max_iterations=14)
@@ -182,7 +183,7 @@ def part2_live_agent() -> None:
         return
 
     print("\nrunning the analyst against the live account (read-only)…")
-    result = analyst.run_sync(
+    result = await analyst.arun(
         "Review the account-level IAM posture: root access keys and root MFA. "
         "Start with iam GetAccountSummary, cite the exact API facts as evidence, "
         "then submit your report."
@@ -201,10 +202,10 @@ def part2_live_agent() -> None:
             print(f"  ABSTAIN  {grounded.reason[:80]}")
 
 
-def main() -> None:
+async def main() -> None:
     part1_grounding_offline()
-    part2_live_agent()
+    await part2_live_agent()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

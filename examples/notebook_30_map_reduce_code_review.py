@@ -135,10 +135,10 @@ async def split_tickets(state: dict[str, Any]) -> list[Send]:
 async def analyze_one(state: dict[str, Any]) -> dict[str, Any]:
     """One analyst Agent against one (ticket, lens).
 
-    Uses ``async for event in agent.run(...)`` instead of ``run_sync()``
-    so the 9 instances run truly in parallel inside the graph's
-    ``asyncio.gather`` — ``run_sync`` would serialise them on a shared
-    thread-pool worker.
+    Uses ``async for event in agent.run(...)`` instead of the blocking
+    sync path so the 9 instances run truly in parallel inside the graph's
+    ``asyncio.gather`` — a blocking sync call would serialise them on a
+    shared thread-pool worker.
     """
     from tulip.core.events import TerminateEvent
 
