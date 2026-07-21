@@ -350,7 +350,8 @@ async def rag_with_streaming():
             n = len(res.get("results", [])) if isinstance(res, dict) else len(str(res).splitlines())
             print(f"[Tool] Found {n} result(s)")
         elif isinstance(event, ThinkEvent):
-            print(f"[Agent] {event.reasoning[:100]}...")
+            reasoning = event.reasoning or ""
+            print(f"[Agent] {reasoning[:100]}...")
 
 
 # =============================================================================
