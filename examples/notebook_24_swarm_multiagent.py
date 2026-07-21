@@ -76,7 +76,9 @@ async def _llm_call(
 async def example_create_agents():
     """Create three specialist incident responders."""
     print("=== Part 1: Creating Swarm Agents ===\n")
-    _ai_note = await _llm_call("In one sentence, when is a swarm of small specialised responders a better fit than one generalist SRE agent?")
+    _ai_note = await _llm_call(
+        "In one sentence, when is a swarm of small specialised responders a better fit than one generalist SRE agent?"
+    )
     print(f"AI rationale: {_ai_note}")
 
     mitigation = create_swarm_agent(
@@ -113,7 +115,9 @@ async def example_create_agents():
 async def example_shared_context():
     """SharedContext — the blackboard responders use to leave notes for each other."""
     print("=== Part 2: Shared Context ===\n")
-    _ai_note = await _llm_call("In one sentence, why does an outage war room need a SharedContext for findings and blackboard notes?")
+    _ai_note = await _llm_call(
+        "In one sentence, why does an outage war room need a SharedContext for findings and blackboard notes?"
+    )
     print(f"AI rationale: {_ai_note}")
 
     context = SharedContext()
@@ -148,7 +152,9 @@ async def example_shared_context():
 async def example_task_queue():
     """Tasks are pulled in priority order — highest first."""
     print("=== Part 3: Task Queue ===\n")
-    _ai_note = await _llm_call("In one sentence, why is priority-queue task routing useful during a production incident?")
+    _ai_note = await _llm_call(
+        "In one sentence, why is priority-queue task routing useful during a production incident?"
+    )
     print(f"AI rationale: {_ai_note}")
 
     swarm = Swarm(name="Outage War Room")
@@ -174,7 +180,9 @@ async def example_task_queue():
 async def example_capability_matching():
     """How tasks are scored against agent capabilities."""
     print("=== Part 4: Capability-Based Assignment ===\n")
-    _ai_note = await _llm_call("In one sentence, why is capability-based agent selection better than random round-robin in an on-call team?")
+    _ai_note = await _llm_call(
+        "In one sentence, why is capability-based agent selection better than random round-robin in an on-call team?"
+    )
     print(f"AI rationale: {_ai_note}")
 
     diagnostics = create_swarm_agent(
@@ -339,7 +347,9 @@ async def example_full_swarm():
 async def example_swarm_patterns():
     """Three common swarm shapes: specialist team, redundant team, pipeline."""
     print("=== Part 7: Swarm Patterns ===\n")
-    _ai_note = await _llm_call("In one sentence, when is a Specialist Team swarm preferable to a Pipeline swarm for incident response?")
+    _ai_note = await _llm_call(
+        "In one sentence, when is a Specialist Team swarm preferable to a Pipeline swarm for incident response?"
+    )
     print(f"AI rationale: {_ai_note}")
 
     print("Pattern 1: Specialist Team")

@@ -64,7 +64,9 @@ async def _llm_call(
 async def example_command_routing():
     """A node that returns Command picks its own queue for the ticket."""
     print("=== Part 1: Command — state and routing in one return ===\n")
-    _ai_note = await _llm_call("In one sentence, why is Tulip Command better than separate edges + state writes?")
+    _ai_note = await _llm_call(
+        "In one sentence, why is Tulip Command better than separate edges + state writes?"
+    )
     print(f"AI rationale: {_ai_note}")
 
     graph = StateGraph()
@@ -163,7 +165,9 @@ async def example_goto_helpers():
 async def example_scatter():
     """scatter("worker", items, key="x") runs `worker` once per ticket, in parallel."""
     print("=== Part 2: scatter() ===\n")
-    _ai_note = await _llm_call("In one sentence, give a customer-support use-case for the scatter() fan-out helper.")
+    _ai_note = await _llm_call(
+        "In one sentence, give a customer-support use-case for the scatter() fan-out helper."
+    )
     print(f"AI rationale: {_ai_note}")
 
     graph = StateGraph()
@@ -210,7 +214,9 @@ async def example_broadcast():
     agent, so an uncertain automated decision never ships on its own.
     """
     print("=== Part 2b: broadcast() + confidence-gated triage ===\n")
-    _ai_note = await _llm_call("In one sentence, when is broadcast() better than scatter() in a graph?")
+    _ai_note = await _llm_call(
+        "In one sentence, when is broadcast() better than scatter() in a graph?"
+    )
     print(f"AI rationale: {_ai_note}")
 
     graph = StateGraph()
@@ -321,7 +327,9 @@ async def example_broadcast():
 async def example_subgraph():
     """A complete StateGraph can be added as a node in another graph."""
     print("=== Part 3: Subgraph as a node ===\n")
-    _ai_note = await _llm_call("In one sentence, when should you factor a piece of graph logic out as a subgraph?")
+    _ai_note = await _llm_call(
+        "In one sentence, when should you factor a piece of graph logic out as a subgraph?"
+    )
     print(f"AI rationale: {_ai_note}")
 
     validation_graph = StateGraph()
@@ -379,7 +387,9 @@ async def example_subgraph():
 async def example_store():
     """Graph state is per-run; Store persists across ticket runs (or threads)."""
     print("=== Part 4: Store — memory that outlives one graph run ===\n")
-    _ai_note = await _llm_call("In one sentence, what kind of state belongs in InMemoryStore vs in graph state?")
+    _ai_note = await _llm_call(
+        "In one sentence, what kind of state belongs in InMemoryStore vs in graph state?"
+    )
     print(f"AI rationale: {_ai_note}")
 
     store = InMemoryStore()
@@ -426,7 +436,9 @@ async def example_store():
 async def example_combined():
     """A ticket pipeline that uses Command, scatter, and Store together."""
     print("=== Part 5: All five primitives in one workflow ===\n")
-    _ai_note = await _llm_call("In one sentence, why is combining Command + scatter + Store typical for a recurring support pipeline?")
+    _ai_note = await _llm_call(
+        "In one sentence, why is combining Command + scatter + Store typical for a recurring support pipeline?"
+    )
     print(f"AI rationale: {_ai_note}")
 
     store = InMemoryStore()

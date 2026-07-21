@@ -251,7 +251,9 @@ When rightsizing:
     )
 
     print(f"Tools available: {[t.name for t in specialist.tools]}")
-    _ai_note = await _llm_call("In one sentence, why does giving a Specialist domain-specific cloud tools dramatically narrow its failure surface?")
+    _ai_note = await _llm_call(
+        "In one sentence, why does giving a Specialist domain-specific cloud tools dramatically narrow its failure surface?"
+    )
     print(f"AI commentary: {_ai_note}")
 
     # =========================================================================
@@ -300,7 +302,9 @@ When rightsizing:
     print("\nPlaybook prompt:")
     print("-" * 40)
     print(playbook_prompt[:500] + "...")
-    _ai_note = await _llm_call("In one sentence, when does attaching a fixed Playbook to a cloud Specialist matter most?")
+    _ai_note = await _llm_call(
+        "In one sentence, when does attaching a fixed Playbook to a cloud Specialist matter most?"
+    )
     print(f"AI commentary: {_ai_note}")
 
     # =========================================================================
@@ -343,7 +347,9 @@ When rightsizing:
         if selected:
             print(f"Task: '{task[:40]}...'")
             print(f"  Selected playbook: {selected.name}")
-    _ai_note = await _llm_call("In one sentence, why is automatic playbook selection by task description risky for cloud ops and how do you mitigate it?")
+    _ai_note = await _llm_call(
+        "In one sentence, why is automatic playbook selection by task description risky for cloud ops and how do you mitigate it?"
+    )
     print(f"AI commentary: {_ai_note}")
 
     # =========================================================================
@@ -523,7 +529,9 @@ When rightsizing:
     for response, description in responses:
         confidence = specialist._estimate_confidence(response)
         print(f"  '{response}' -> {confidence:.0%} ({description})")
-    _ai_note = await _llm_call("In one sentence, why is keyword-based confidence estimation only a rough proxy for a rightsizing decision?")
+    _ai_note = await _llm_call(
+        "In one sentence, why is keyword-based confidence estimation only a rough proxy for a rightsizing decision?"
+    )
     print(f"AI commentary: {_ai_note}")
 
     # =========================================================================
@@ -545,7 +553,9 @@ When rightsizing:
 
     print("Pattern 4: Pipeline Stage")
     print("  Drops into a larger FinOps workflow; structured output, context in/out.")
-    _ai_note = await _llm_call("Suggest one extra cloud Specialist pattern not in the four listed above. One short sentence.")
+    _ai_note = await _llm_call(
+        "Suggest one extra cloud Specialist pattern not in the four listed above. One short sentence."
+    )
     print(f"AI suggestion: {_ai_note}")
 
     # =========================================================================

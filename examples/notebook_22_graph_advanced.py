@@ -65,7 +65,9 @@ async def _llm_call(
 async def example_retry():
     """A throttled control plane fails twice, launches the instance on the third attempt."""
     print("=== Part 1: RetryPolicy ===\n")
-    _ai_note = await _llm_call("In one sentence, why is exponential backoff with jitter the right retry default?")
+    _ai_note = await _llm_call(
+        "In one sentence, why is exponential backoff with jitter the right retry default?"
+    )
     print(f"AI rationale: {_ai_note}")
 
     attempt = 0
@@ -101,7 +103,9 @@ async def example_retry():
 async def example_cache():
     """Identical image lookups to the same node return the cached result for ttl_seconds."""
     print("\n=== Part 2: CachePolicy ===\n")
-    _ai_note = await _llm_call("In one sentence, when does CachePolicy on a node beat memoising the function yourself?")
+    _ai_note = await _llm_call(
+        "In one sentence, when does CachePolicy on a node beat memoising the function yourself?"
+    )
     print(f"AI rationale: {_ai_note}")
 
     call_count = 0
@@ -135,7 +139,9 @@ async def example_cache():
 async def example_visualization():
     """draw_mermaid and draw_ascii print the provisioning workflow as a diagram."""
     print("\n=== Part 3: Diagrams ===\n")
-    _ai_note = await _llm_call("In one sentence, why are Mermaid diagrams useful when reviewing a Tulip StateGraph?")
+    _ai_note = await _llm_call(
+        "In one sentence, why are Mermaid diagrams useful when reviewing a Tulip StateGraph?"
+    )
     print(f"AI rationale: {_ai_note}")
 
     graph = StateGraph(config=GraphConfig(parallel=False))
@@ -173,7 +179,9 @@ async def example_visualization():
 async def example_realtime_streaming():
     """Stream node updates while also pushing provisioning progress events."""
     print("\n=== Part 4: Live streaming with emit_custom ===\n")
-    _ai_note = await _llm_call("In one sentence, why is streaming progress events better than polling for provisioning status?")
+    _ai_note = await _llm_call(
+        "In one sentence, why is streaming progress events better than polling for provisioning status?"
+    )
     print(f"AI rationale: {_ai_note}")
     from tulip.multiagent import StreamMode, emit_custom
 

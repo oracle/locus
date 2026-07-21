@@ -226,7 +226,9 @@ async def example_merge_dict():
 async def example_custom_reducer():
     """The @reducer decorator wraps any (current, new) -> merged function."""
     print("=== Part 3: Custom reducers ===\n")
-    note = await _llm_call("In one sentence, name two cases where a custom reducer beats append_list.")
+    note = await _llm_call(
+        "In one sentence, name two cases where a custom reducer beats append_list."
+    )
     print(f"AI note: {note}")
 
     @reducer

@@ -153,7 +153,9 @@ When analyzing, look for processing without a lawful basis, stale retention, and
 
     print(f"Custom Specialist: {inventory_specialist.name}")
     print(f"  Tools: {[t.name for t in inventory_specialist.tools]}")
-    _ai_note = await _llm_call("In one sentence, why is a custom Specialist with data-catalog tools better than a generic Agent for personal-data discovery?")
+    _ai_note = await _llm_call(
+        "In one sentence, why is a custom Specialist with data-catalog tools better than a generic Agent for personal-data discovery?"
+    )
     print(f"AI commentary: {_ai_note}")
 
     # =========================================================================

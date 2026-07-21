@@ -455,7 +455,9 @@ async def main():
         hooks=[safe_guardrails],
     )
     t0 = time.perf_counter()
-    safe_result = await safe_agent.arun("How can I improve the security posture of a small SaaS app?")
+    safe_result = await safe_agent.arun(
+        "How can I improve the security posture of a small SaaS app?"
+    )
     dt = time.perf_counter() - t0
     print(
         f"  [model call: {dt:.2f}s · "

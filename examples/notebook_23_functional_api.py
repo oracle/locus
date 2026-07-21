@@ -54,7 +54,9 @@ async def _llm_call(
 async def example_basic():
     """Two @task functions wired together inside an @entrypoint."""
     print("=== Part 1: A two-task pipeline ===\n")
-    _ai_note = await _llm_call("In one sentence, when is the Tulip functional API a better choice than StateGraph?")
+    _ai_note = await _llm_call(
+        "In one sentence, when is the Tulip functional API a better choice than StateGraph?"
+    )
     print(f"AI rationale: {_ai_note}")
 
     @task
@@ -90,7 +92,9 @@ async def example_basic():
 async def example_retry():
     """retry_attempts on the decorator handles a flaky payment processor feed."""
     print("\n=== Part 2: @task(retry_attempts=3) ===\n")
-    _ai_note = await _llm_call("In one sentence, why does @task(retry_attempts=3) belong on the task and not in caller code?")
+    _ai_note = await _llm_call(
+        "In one sentence, why does @task(retry_attempts=3) belong on the task and not in caller code?"
+    )
     print(f"AI rationale: {_ai_note}")
 
     attempt = 0
@@ -120,7 +124,9 @@ async def example_retry():
 async def example_cache():
     """Same transaction id returns the cached score without re-running the lookup."""
     print("\n=== Part 3: @task(cache=True) ===\n")
-    _ai_note = await _llm_call("In one sentence, when should you turn @task(cache=True) ON for a transaction-enrichment pipeline?")
+    _ai_note = await _llm_call(
+        "In one sentence, when should you turn @task(cache=True) ON for a transaction-enrichment pipeline?"
+    )
     print(f"AI rationale: {_ai_note}")
 
     call_count = 0

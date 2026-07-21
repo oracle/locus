@@ -272,7 +272,9 @@ async def example_results():
 
     async def normalize(inputs):
         v = inputs.get("raw_score", 0)
-        comment = await _llm_call(f"In one sentence, comment on normalizing a raw exposure score of {v}.")
+        comment = await _llm_call(
+            f"In one sentence, comment on normalizing a raw exposure score of {v}."
+        )
         return {"normalized": True, "exposure_score": v * 2, "comment": comment}
 
     graph.add_node("normalize", normalize)
@@ -359,7 +361,9 @@ async def example_graph_with_llm():
             system_prompt="You write one-sentence factual summaries for DPO handover notes.",
         )
         t0 = _t.perf_counter()
-        result = await agent.arun(f"Summarize the processing activity '{activity}' in one sentence.")
+        result = await agent.arun(
+            f"Summarize the processing activity '{activity}' in one sentence."
+        )
         dt = _t.perf_counter() - t0
         print(
             f"  [model call: {dt:.2f}s · {result.metrics.prompt_tokens}→{result.metrics.completion_tokens} tokens]"

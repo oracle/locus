@@ -122,7 +122,9 @@ async def example_multiway_routing():
         return {"response": line, "sla": "15 minutes"}
 
     async def handle_high(inputs):
-        line = await _llm_call("In one short line, assign a HIGH alert to the platform team. SLA 1 hour.")
+        line = await _llm_call(
+            "In one short line, assign a HIGH alert to the platform team. SLA 1 hour."
+        )
         return {"response": line, "sla": "1 hour"}
 
     async def handle_medium(inputs):
@@ -130,7 +132,9 @@ async def example_multiway_routing():
         return {"response": line, "sla": "24 hours"}
 
     async def handle_low(inputs):
-        line = await _llm_call("In one short line, batch a LOW alert for weekly review. SLA 1 week.")
+        line = await _llm_call(
+            "In one short line, batch a LOW alert for weekly review. SLA 1 week."
+        )
         return {"response": line, "sla": "1 week"}
 
     graph.add_node("classify", classify_alert)
@@ -186,15 +190,21 @@ async def example_chained_conditions():
         return {"is_operator": role == "operator"}
 
     async def rollback_action(inputs):
-        line = await _llm_call("In one line, log that an operator rolled back the affected service.")
+        line = await _llm_call(
+            "In one line, log that an operator rolled back the affected service."
+        )
         return {"result": line}
 
     async def ticket_action(inputs):
-        line = await _llm_call("In one line, log that a read-only viewer opened a remediation ticket.")
+        line = await _llm_call(
+            "In one line, log that a read-only viewer opened a remediation ticket."
+        )
         return {"result": line}
 
     async def discard_alert(inputs):
-        line = await _llm_call("In one line, log that an alert from an untrusted webhook was discarded.")
+        line = await _llm_call(
+            "In one line, log that an alert from an untrusted webhook was discarded."
+        )
         return {"result": line}
 
     graph.add_node("source", validate_source)
@@ -255,7 +265,9 @@ async def example_default_route():
         return {"handler": line}
 
     async def handle_other(inputs):
-        line = await _llm_call("In one short line, name a generic on-call queue for unmatched alerts.")
+        line = await _llm_call(
+            "In one short line, name a generic on-call queue for unmatched alerts."
+        )
         return {"handler": line}
 
     graph.add_node("categorize", categorize)
@@ -314,15 +326,21 @@ async def example_complex_routing():
         }
 
     async def page_oncall(inputs):
-        line = await _llm_call("In one short line, confirm the on-call incident commander was paged.")
+        line = await _llm_call(
+            "In one short line, confirm the on-call incident commander was paged."
+        )
         return {"routing": line, "response_window": "Immediate"}
 
     async def priority_queue(inputs):
-        line = await _llm_call("In one short line, confirm the incident entered the priority queue.")
+        line = await _llm_call(
+            "In one short line, confirm the incident entered the priority queue."
+        )
         return {"routing": line, "response_window": "4 hours"}
 
     async def standard_queue(inputs):
-        line = await _llm_call("In one short line, confirm the incident entered the standard queue.")
+        line = await _llm_call(
+            "In one short line, confirm the incident entered the standard queue."
+        )
         return {"routing": line, "response_window": "24 hours"}
 
     graph.add_node("evaluate", evaluate_incident)
