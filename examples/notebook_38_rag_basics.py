@@ -12,9 +12,10 @@ runbooks — not whatever the model half-remembers about ``REL`` or
 - **Embed** — turn text into vectors with ``OpenAIEmbeddings``
   (``text-embedding-3-small``, 1536 dims).
 - **Store** — persist the vectors in a vector store. This notebook uses
-  an in-memory ``QdrantVectorStore`` so it runs with no external
-  service; swap in ``QdrantVectorStore`` / ``PgVectorStore`` /
-  ``OpenSearchVectorStore`` for a durable backend.
+  the pure-Python ``InMemoryVectorStore`` so it runs anywhere with no
+  external service and no native dependencies (even in a browser); swap
+  in ``QdrantVectorStore`` / ``PgVectorStore`` / ``OpenSearchVectorStore``
+  for a durable backend.
 - **Search** — find the closest vectors by cosine distance.
 - **Generate** — feed the retrieved chunks to the LLM as grounded
   context. (This notebook focuses on steps 1–3; notebook 40 wires it
@@ -40,7 +41,7 @@ import math
 import os
 import sys
 
-from tulip.rag import OpenAIEmbeddings, QdrantVectorStore, RAGRetriever
+from tulip.rag import InMemoryVectorStore, OpenAIEmbeddings, RAGRetriever
 from tulip.rag.stores.base import Document
 
 
@@ -52,8 +53,8 @@ def _get_embedder() -> OpenAIEmbeddings:
     return OpenAIEmbeddings(model="text-embedding-3-small")
 
 
-def _get_store(dimension: int = 1536) -> QdrantVectorStore:
-    return QdrantVectorStore(location=":memory:", dimension=dimension)
+def _get_store(dimension: int = 1536) -> InMemoryVectorStore:
+    return InMemoryVectorStore(dimension=dimension)
 
 
 # =============================================================================
@@ -97,18 +98,18 @@ async def understand_embeddings():
 
 
 # =============================================================================
-# Step 2: QdrantVectorStore (in-memory) — store vectors, query by cosine distance.
+# Step 2: InMemoryVectorStore — store vectors, query by cosine distance.
 # =============================================================================
 
 
 async def using_vector_store():
     print("\n" + "=" * 60)
-    print("Step 2: QdrantVectorStore (in-memory, cosine)")
+    print("Step 2: InMemoryVectorStore (cosine)")
     print("=" * 60)
 
     embedder = _get_embedder()
     store = _get_store(dimension=embedder.config.dimension)
-    print(f"Created QdrantVectorStore dim={store.config.dimension}")
+    print(f"Created InMemoryVectorStore dim={store.config.dimension}")
 
     # AWS Well-Architected best-practice summaries — the operational
     # backbone the ops agent cites. Ids follow the pillar-prefixed form.

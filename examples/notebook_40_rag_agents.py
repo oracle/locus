@@ -24,9 +24,10 @@ alongside any other ``@tool`` you define.
 - Best-practice notes on chunk size, prompt design, and metadata
   filters for ops corpora.
 
-Backend: an in-memory ``QdrantVectorStore`` keeps the demo dependency-free. Swap
-``_make_store`` for any other Tulip vector store implementation
-(pgvector, OpenSearch, Qdrant, Chroma) for a durable backend.
+Backend: the pure-Python ``InMemoryVectorStore`` keeps the demo dependency-free
+and runnable anywhere (even in a browser). Swap ``_make_store`` for any other
+Tulip vector store implementation (pgvector, OpenSearch, Qdrant, Chroma) for a
+durable backend.
 
 Run it:
     export OPENAI_API_KEY=sk-...
@@ -43,7 +44,7 @@ import operator as _op
 import os
 import sys
 
-from tulip.rag import QdrantVectorStore
+from tulip.rag import InMemoryVectorStore
 from tulip.reasoning.gsar import Claim, Decision, EvidenceType, Partition, decide, gsar_score
 
 
@@ -51,9 +52,9 @@ def _missing_env() -> list[str]:
     return [name for name in ("OPENAI_API_KEY",) if not os.environ.get(name)]
 
 
-def _make_store(suffix: str, dim: int) -> QdrantVectorStore:
-    # One store per section so sections don't stomp on each other.
-    return QdrantVectorStore(location=":memory:", dimension=dim, distance_metric="cosine")
+def _make_store(suffix: str, dim: int) -> InMemoryVectorStore:
+    # A fresh store per section so sections don't stomp on each other.
+    return InMemoryVectorStore(dimension=dim, distance_metric="cosine")
 
 
 _SAFE_MATH_BIN_OPS = {
