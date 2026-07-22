@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [2.1.3] - 2026-07-22
+
 ### Security
 
 - Bump locked `mcp` to 1.28.1 (WebSocket Host/Origin validation), `setuptools`
@@ -15,6 +17,14 @@ policy.
 
 ### Fixed
 
+- **Composition pipelines run without threads.** `SequentialPipeline`,
+  `ParallelPipeline`, and `LoopAgent` drove their agents via `Agent.run_sync`
+  (a worker thread) from inside their async `run` methods. Threads are
+  unavailable under WASM/Pyodide, so the pipelines silently produced empty
+  results (an un-awaited coroutine → `IndexError`) in the browser workbench.
+  They now prefer the thread-free `arun` and fall back to `run_sync` only for
+  agent-likes that predate it — so the Composition notebook runs fully
+  client-side.
 - `__version__` now matches the released version (2.1.2); the bump was missed
   on the 2.1.1 and 2.1.2 releases.
 
