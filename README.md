@@ -93,10 +93,6 @@ control isn't a guardrail you remember to add — it's wired through three point
 > your policy denies. Try it:
 > [`examples/can_you_make_it_go_rogue.py`](examples/can_you_make_it_go_rogue.py).
 
-No matter how capable a model gets, it *structurally* cannot **prove it won't take a
-catastrophic action.** That's not an intelligence problem; it's a control problem, and
-control is the layer Tulip owns.
-
 ## See it in 60 seconds
 
 | Run | What it shows |
@@ -281,21 +277,16 @@ result = ground_finding(
 print(result.title if is_finding(result) else f"withheld: {result.reason}")
 ```
 
-Grounding is what makes an agent safe to let *act* anywhere claims drive consequences — it is
-sharpest in security (below), but the contract is domain-neutral.
-
 → [GSAR grounding](https://tulipagents.ai/concepts/gsar/)
 
 ---
 
 ## The admission gate — an action runs only if policy allows
 
-The moment an agent stops advising and starts **acting** — moving money, deleting a
-resource, disabling an account — a wrong step stops being a bad sentence and becomes a real
-consequence. A rule in the prompt is advisory by definition; a jailbreak, an injected
-document, or a confused chain talks the model past it. Tulip makes the rule **structural**:
-the side-effecting call runs only after it clears `admit()`, a gate the model has no way to
-reach around.
+The moment an agent stops advising and starts **acting**, a wrong step becomes a real
+consequence. A prompt rule is advisory — a jailbreak or an injected document talks the model
+past it. Tulip makes the rule **structural**: the side-effecting call runs only after it
+clears `admit()`, a gate the model has no way to reach around.
 
 ```python
 from tulip.control import Action, AuditTrail, ControlPolicy, admit, AdmissionError
@@ -314,20 +305,17 @@ async def safe_refund(order_id: str, usd: float):
         notify_oncall(e.decision)                       # the gate held it; the trail has it
 ```
 
-Production payments now require a human, the attempt is recorded whether it ran or not, and
-your agent keeps working unchanged. The chain is short and every link is real:
+Production payments now require a human, and the attempt is recorded either way:
 
 `action → policy → approval → admission → audit`
 
 - **Policy + approval** — `approve()` weighs your `ControlPolicy` (blast radius,
-  `require_human_for`, and — when you have it — a grounding/verification score) and returns
-  allow, hold, or deny.
+  `require_human_for`, verification score) and returns allow, hold, or deny.
 - **Admission** — `admit()` runs the action **only if** approval allows, recording the
-  decision to the `AuditTrail`; otherwise it raises `AdmissionError`. The model never touches
-  this step.
-- **Audit** — the trail is hash-chained, so `verify()` catches any edit after the fact. (It's
-  a keyless in-memory SHA-256 chain: tamper-evident, not notarized — add signing or an
-  external anchor before treating it as legally authoritative.)
+  decision to the `AuditTrail`; otherwise it raises `AdmissionError`.
+- **Audit** — the trail is hash-chained; `verify()` catches any edit. (A keyless SHA-256
+  chain: tamper-evident, not notarized — add signing before treating it as legally
+  authoritative.)
 
 Human approvals are durable: `require_human_for` pauses the run, and an `interrupt()` +
 checkpointer means the decision survives a restart and the run resumes where it left off.
@@ -421,72 +409,9 @@ pip install "tulip-agents[sdk]"           # everything
 
 ---
 
-## Agent security
+## Govern agents you already run
 
-Security is the domain where Tulip's three control points pay off most visibly, so the SDK
-ships a first-class agent-security track.
-
-Point a `Target` at an AI system — a remote endpoint, an in-process `tulip.Agent`, or an A2A
-peer — and run the OWASP-ASI / MITRE-ATLAS suite. Every result is a grounded `Evidence` or an
-explicit `Abstention`: a vulnerable target yields findings, a hardened one abstains across the
-board.
-
-```python
-from tulip.security import Target, red_team, assure, is_finding
-
-target = Target.endpoint("https://support-bot.example/chat")
-
-report = await red_team(target, suite="owasp-asi")   # attack → grounded findings
-for r in report:
-    print(r.title, r.taxonomy) if is_finding(r) else print("abstained:", r.reason)
-
-posture = await assure(target)                        # assess → grounded guardrail coverage
-```
-
-The agent doing the work is itself **governed by default** — grounded, guarded, risk-gated (a
-dangerous-tool denylist on by default; allowlist opt-in), and recorded in a tamper-evident
-audit trail:
-
-```python
-from tulip.control import governed_agent
-
-secured = governed_agent(model="openai:gpt-4o", tools=[...])
-assert secured.audit_trail.verify()   # the chain is intact — no record was altered
-```
-
-`Evidence` tags carry the standard catalogues — **MITRE ATLAS** (`AML.Txxxx`), **OWASP Top 10
-for LLM Applications (2025)**, and the **OWASP Top 10 for Agentic Applications (2026)** — so
-findings drop into a SIEM or a **NIST AI RMF** report without a translation layer. Start with
-[`notebook_37_gsar_typed_grounding.py`](examples/notebook_37_gsar_typed_grounding.py).
-
-### Vendor security integrations
-
-Core ships **offline reference adapters** for every security domain, so the SDK runs
-standalone with no credentials. The maintained, vendor-specific integrations live in a
-separate community package —
-**[`tulip-integrations`](https://github.com/tuliplabs-ai/tulip-integrations)** (import
-`tulip_integrations`) — which depends one-way on core (a core + community split).
-
-```bash
-pip install "tulip-integrations[edr-crowdstrike]"   # + any per-vendor extra
-```
-
-| Domain | Vendors |
-|---|---|
-| **SIEM** | Splunk (Elastic-compatible SPL endpoint) |
-| **EDR** | CrowdStrike Falcon |
-| **Identity** | Okta · Auth0 |
-| **Threat intel** | VirusTotal |
-| **Vuln / AI-SPM** | Wiz |
-| **Compute** | RunPod · Lambda (GPU fingerprint probe) |
-
-> **Not to be confused with `tulip.integrations`** (this repo) — that's the built-in **MCP**
-> client/server (`MCPClient`, `TulipMCPServer`). The community **`tulip-integrations`** package
-> is the vendor security adapters above.
-
-### Govern agents you already run
-
-You don't have to build on Tulip to be governed by it. The sibling package
+You don't have to build on Tulip to be governed by it.
 **[`tulip-frameworks`](https://github.com/tuliplabs-ai/tulip-frameworks)** wraps a tool from
 the framework you already use — **LangChain, LangGraph, CrewAI, the OpenAI Agents SDK,
 LlamaIndex, or Google ADK** — with the same `admit()` gate and hash-chained `AuditTrail`,
@@ -496,11 +421,42 @@ in about three lines, no rebuild:
 pip install "tulip-frameworks[langchain]"   # or [crewai] / [openai-agents] / [llama-index] / [adk] / [all]
 ```
 
-The gate itself is a plain function of the core SDK, so agents outside Python can reach it
-over the wire through [`tulip-gateway`](https://github.com/tuliplabs-ai/tulip-gateway)'s
-`/v1/admit` with the TypeScript client
-([`tulip-frameworks-js`](https://github.com/tuliplabs-ai/tulip-frameworks-js)). See
-[the frameworks guide](https://tulipagents.ai/integrations/frameworks/).
+Agents outside Python reach the same gate over the wire through
+[`tulip-gateway`](https://github.com/tuliplabs-ai/tulip-gateway)'s `/v1/admit` with the
+TypeScript client ([`tulip-frameworks-js`](https://github.com/tuliplabs-ai/tulip-frameworks-js)).
+See [the frameworks guide](https://tulipagents.ai/integrations/frameworks/).
+
+And `governed_agent()` gives any Tulip agent the full harness — grounded, guarded,
+risk-gated, audited — in one call:
+
+```python
+from tulip.control import governed_agent
+
+secured = governed_agent(model="openai:gpt-4o", tools=[...])
+assert secured.audit_trail.verify()   # the chain is intact — no record was altered
+```
+
+## Any domain, one contract
+
+The same contracts run wherever an agent acts — support, payments, infrastructure, data,
+security. One worked example: `tulip.security` applies the grounded-evidence contract to
+red-teaming AI systems — every result is a grounded `Evidence` (tagged with the standard
+catalogues: MITRE ATLAS, OWASP LLM / Agentic Top 10) or an explicit `Abstention`:
+
+```python
+from tulip.security import Target, red_team, is_finding
+
+report = await red_team(Target.endpoint("https://support-bot.example/chat"), suite="owasp-asi")
+for r in report:
+    print(r.title if is_finding(r) else f"abstained: {r.reason}")
+```
+
+Vendor-specific adapters (Splunk, CrowdStrike, Okta, Auth0, VirusTotal, Wiz, RunPod, Lambda)
+live in the community package
+**[`tulip-integrations`](https://github.com/tuliplabs-ai/tulip-integrations)**
+(`pip install "tulip-integrations[edr-crowdstrike]"`) — core ships offline reference
+adapters so the SDK runs standalone. Not to be confused with `tulip.integrations` (this
+repo), the built-in MCP client/server.
 
 ---
 
