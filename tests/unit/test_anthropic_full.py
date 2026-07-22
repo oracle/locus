@@ -31,7 +31,7 @@ import pytest
 pytest.importorskip("anthropic")
 
 from tulip.core.messages import Message, Role, ToolCall  # noqa: E402
-from tulip.models.native.anthropic import AnthropicModel  # noqa: E402
+from tulip.models.native.anthropic import AnthropicModel, _rejects_temperature  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -347,6 +347,37 @@ class TestComplete:
 # ---------------------------------------------------------------------------
 # stream()
 # ---------------------------------------------------------------------------
+
+
+class TestTemperatureOmission:
+    """Models that deprecate ``temperature`` must not receive the param.
+
+    Anthropic 400s (``temperature is deprecated for this model``) on Opus 4.7+
+    and the Claude 5 family — issue #29 hit this live on claude-sonnet-5.
+    """
+
+    def test_rejects_temperature_prefixes(self) -> None:
+        assert _rejects_temperature("claude-sonnet-5")
+        assert _rejects_temperature("claude-fable-5")
+        assert _rejects_temperature("claude-opus-4-8")
+        assert not _rejects_temperature("claude-sonnet-4-6")
+        assert not _rejects_temperature("claude-haiku-4-5-20251001")
+
+    @pytest.mark.asyncio
+    async def test_sonnet_5_omits_temperature(self) -> None:
+        m = AnthropicModel(model="claude-sonnet-5", api_key="sk-x")  # noqa: S106
+        client = _patch_client(m, _make_response(blocks=[_block(type="text", text="ok")]))
+        await m.complete([Message.user("hi")], temperature=0.7)
+        sent_params = client.messages.create.call_args.kwargs
+        assert "temperature" not in sent_params
+
+    @pytest.mark.asyncio
+    async def test_sonnet_4_6_still_sends_temperature(self) -> None:
+        m = AnthropicModel(model="claude-sonnet-4-6", api_key="sk-x")  # noqa: S106
+        client = _patch_client(m, _make_response(blocks=[_block(type="text", text="ok")]))
+        await m.complete([Message.user("hi")], temperature=0.3)
+        sent_params = client.messages.create.call_args.kwargs
+        assert sent_params["temperature"] == 0.3
 
 
 class TestStream:
