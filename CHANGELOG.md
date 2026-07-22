@@ -8,6 +8,16 @@ policy.
 
 ## [Unreleased]
 
+### Security
+
+- Bump locked `mcp` to 1.28.1 (WebSocket Host/Origin validation), `setuptools`
+  to 83.0.0, and `torch` to 2.13.0 — clears all open dependabot alerts.
+
+### Fixed
+
+- `__version__` now matches the released version (2.1.2); the bump was missed
+  on the 2.1.1 and 2.1.2 releases.
+
 ## [2.1.2] - 2026-07-21
 
 ### Added
