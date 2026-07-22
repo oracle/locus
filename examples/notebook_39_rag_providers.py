@@ -137,10 +137,19 @@ async def part3_swap_backend():
     print("=" * 60)
 
     embedder = _embedder("text-embedding-3-small")
-    store = QdrantVectorStore(
-        location=":memory:",
-        dimension=embedder.config.dimension,
-    )
+    try:
+        store = QdrantVectorStore(
+            location=":memory:",
+            dimension=embedder.config.dimension,
+        )
+    except ImportError:
+        # qdrant-client isn't installed here (e.g. a browser/WASM runtime or a
+        # slim install). The swap is a one-liner precisely because the API is
+        # identical to the InMemoryVectorStore shown above — install the extra
+        # to run it: pip install "tulip-agents[qdrant]".
+        print("  QdrantVectorStore needs the qdrant extra (pip install 'tulip-agents[qdrant]').")
+        print("  Same RAGRetriever/store API as InMemoryVectorStore above — nothing else changes.")
+        return
 
     for i, text in enumerate(CORPUS[:4]):
         emb = await embedder.embed(text)
