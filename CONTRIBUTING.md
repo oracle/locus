@@ -31,7 +31,7 @@ Quick links for the most common drops:
 
 ## Code of Conduct
 
-This project follows the [Contributor Covenant Code of Conduct](https://www.contributor-covenant.org/version/2/1/code_of_conduct/). By participating, you agree to uphold this code.
+This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md). By participating, you agree to uphold this code.
 
 ## Getting Started
 
@@ -70,7 +70,7 @@ We welcome:
 ```bash
 # Clone the repository
 git clone https://github.com/tuliplabs-ai/sdk-python.git
-cd tulip-agents
+cd sdk-python
 
 # Install Hatch if needed
 pip install hatch
@@ -230,10 +230,10 @@ git commit -s -m "docs(notebooks): add RAG with Qdrant example"
 3. **Run checks** before committing:
 
    ```bash
-   hatch run check          # ruff format-check + ruff lint + mypy strict (all-in-one)
+   hatch run check          # ruff format-check + ruff lint + mypy strict + unit tests with the 95% coverage gate
    hatch run format         # auto-format with ruff format
    hatch run test           # unit tests on the active Python
-   hatch run test-all       # unit tests across the 3.11 / 3.12 / 3.13 / 3.14 matrix
+   hatch run test-all       # full suite (unit + integration) on the active Python
    hatch run test-cov       # unit tests with coverage report
    hatch run test-integration  # integration tests (gated on credentials)
    ```
@@ -263,31 +263,8 @@ git commit -s -m "docs(notebooks): add RAG with Qdrant example"
    - Link to related issue
    - Test results
 
-3. **PR Template**:
-
-   ```markdown
-   ## Summary
-   Brief description of changes.
-
-   ## Related Issue
-   Fixes #123
-
-   ## Changes
-   - Added X
-   - Fixed Y
-   - Updated Z
-
-   ## Testing
-   - [ ] Unit tests pass
-   - [ ] Integration tests pass (if applicable)
-   - [ ] Manual testing performed
-
-   ## Checklist
-   - [ ] Code follows project style
-   - [ ] Tests added/updated
-   - [ ] Documentation updated
-   - [ ] Commits are signed off
-   ```
+3. **PR Template** — applied automatically from
+   [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md).
 
 4. **Review process**:
    - Maintainers will review within 1 week
@@ -509,8 +486,9 @@ Every release follows this checklist. Do not skip steps.
    path in the CHANGELOG entry.
 3. **Version bump.** Update `__version__` in `src/tulip/__init__.py`
    and the `version` field in `pyproject.toml`.
-4. **Run the full matrix.** `hatch run all` locally plus
-   `pytest tests/integration/ -v` with live services available.
+4. **Run the full suite.** `hatch run check` locally (plus
+   `hatch run test-integration` with live services available); CI runs
+   the 3.11–3.14 matrix on the release PR.
 5. **Tag.** `git tag -a v<version> -m 'Release v<version>'` and push
    the tag.
 6. **Publish.** Build the wheel (`hatch build`), verify the wheel
