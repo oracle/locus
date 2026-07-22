@@ -21,13 +21,18 @@ if TYPE_CHECKING:
 
 # Models that reject `temperature` with `invalid_request_error: temperature is
 # deprecated for this model`. Anthropic started doing this with Claude Opus 4.7
-# (and presumably extends to later reasoning-flavoured 4.x+ models). Match on
-# stable prefixes so we don't need to bump the list every time Anthropic
-# publishes a new minor version.
+# and it extends to the Claude 5 family (sonnet-5 confirmed live — issue #29).
+# Match on stable prefixes so we don't need to bump the list every time
+# Anthropic publishes a new minor version.
 _TEMPERATURE_DEPRECATED_PREFIXES: tuple[str, ...] = (
     "claude-opus-4-7",
     "claude-opus-4-8",
     "claude-opus-4-9",
+    "claude-sonnet-5",
+    "claude-opus-5",
+    "claude-haiku-5",
+    "claude-fable-5",
+    "claude-mythos-5",
 )
 
 

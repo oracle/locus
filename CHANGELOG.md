@@ -8,6 +8,14 @@ policy.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Claude 5 family models no longer 400 on `temperature`.** The
+  temperature-deprecation prefix list now covers `claude-sonnet-5`,
+  `claude-opus-5`, `claude-haiku-5`, `claude-fable-5`, and
+  `claude-mythos-5` (alongside Opus 4.7+), so the provider omits the
+  param for them. Verified live on `claude-sonnet-5`. (#29)
+
 ## [2.1.3] - 2026-07-22
 
 ### Security
