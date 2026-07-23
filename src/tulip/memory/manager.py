@@ -467,12 +467,22 @@ def _inject_memories_into_state(
 
 
 def _format_memory_block(memories: list[Memory]) -> str:
-    """Format a list of memories as a compact system-prompt block."""
+    """Format memories as a scrubbed, untrusted-tagged system-prompt block.
+
+    Recalled memory is a prompt-injection surface (a fact written in one run, or
+    by a poisoned document, could carry instructions into a later run), so the
+    block is passed through :func:`build_memory_context_block`: injected
+    system-note/fence markers are stripped and the recall is wrapped as
+    *informational background data, not instructions*. The model can use what it
+    remembers without obeying it.
+    """
+    from tulip.memory.scrubber import build_memory_context_block  # noqa: PLC0415
+
     lines = ["[Long-term Memory]"]
     for m in memories:
         label = m.type.value.upper()
         lines.append(f"{label} [{m.key}]: {m.content}")
-    return "\n".join(lines)
+    return build_memory_context_block("\n".join(lines))
 
 
 def _heuristic_extract(messages: list[Message]) -> list[Memory]:
