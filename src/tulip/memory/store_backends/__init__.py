@@ -12,3 +12,8 @@ deployments. Implement a custom store by subclassing ``BaseStore``.
 """
 
 __all__: list[str] = []
+
+from tulip.memory.store_backends.holographic import HolographicStore  # noqa: E402
+
+
+__all__ = ["HolographicStore"]
