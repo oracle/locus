@@ -72,12 +72,14 @@ async def test_put_get_delete_list(store: HolographicStore) -> None:
 
 
 @pytest.mark.asyncio
-async def test_semantic_recall_finds_the_related_fact(store: HolographicStore) -> None:
+async def test_associative_recall_matches_on_shared_tokens(store: HolographicStore) -> None:
+    # HRR is lexical/associative — it recalls on shared/related tokens, NOT on
+    # paraphrase meaning (that needs a real embedder; see PgMemory). A query that
+    # shares tokens with a fact recalls it robustly.
     ns = ("u", "fede")
     await store.put(ns, "fy", {"content": "the fiscal year starts in April"})
     await store.put(ns, "pet", {"content": "has a golden retriever named Argus"})
-    # a query with NO shared keyword still recalls the budget-year fact
-    top = await store.search(ns, "when does the budget cycle begin", limit=1)
+    top = await store.search(ns, "which month does the fiscal year start", limit=1)
     assert top[0].key == "fy"
     assert isinstance(top[0], StoreItem)
 
@@ -111,10 +113,11 @@ async def test_namespaces_are_isolated(store: HolographicStore) -> None:
     assert await store.list_keys(("acme",)) == ["secret"]
 
 
-def test_capabilities_report_semantic_when_numpy_present(store: HolographicStore) -> None:
+def test_capabilities_report_lexical_not_semantic(store: HolographicStore) -> None:
     caps = store.capabilities
     assert caps.search is True
-    assert caps.semantic_search is True
+    # HRR is lexical/associative — it must NOT claim semantic (paraphrase) recall.
+    assert caps.semantic_search is False
     assert caps.embedding_dimension == 512
 
 

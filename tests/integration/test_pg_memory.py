@@ -22,9 +22,10 @@ from tulip.memory.store_backends.postgresql import PgMemory
 
 
 try:
-    from tests.integration.conftest import skip_without_postgres
+    from tests.integration.conftest import skip_without_openai, skip_without_postgres
 except ImportError:  # pragma: no cover - conftest is always importable under pytest
     skip_without_postgres = pytest.mark.skipif(True, reason="conftest unavailable")
+    skip_without_openai = pytest.mark.skipif(True, reason="conftest unavailable")
 
 pytestmark = [pytest.mark.integration, skip_without_postgres]
 
@@ -91,15 +92,50 @@ async def test_put_get_delete_list_and_upsert(store: PgMemory) -> None:
     assert await store.get(ns, "fy") is None
 
 
-async def test_semantic_recall_over_pgvector(store: PgMemory) -> None:
-    """A keyword-free query recalls the related fact via HRR-encoded cosine ANN."""
+async def test_associative_recall_over_pgvector_hrr(store: PgMemory) -> None:
+    """The HRR fallback (no embedder) does lexical/associative cosine recall in
+    Postgres: a query sharing tokens with a fact recalls it. HRR is NOT semantic
+    — paraphrase matching is covered by the real-embedder test below."""
     ns = ("acme", "user", "fede")
     await store.put(ns, "fy", {"content": "the fiscal year starts in April"})
     await store.put(ns, "pet", {"content": "has a golden retriever named Argus"})
     await store.put(ns, "car", {"content": "drives an electric hatchback"})
 
-    top = await store.search(ns, "when does the budget cycle begin", limit=1)
-    assert top[0].key == "fy"  # recalled with zero shared keywords, in Postgres
+    top = await store.search(ns, "which month does the fiscal year start", limit=1)
+    assert top[0].key == "fy"  # matched on shared tokens, via pgvector cosine ANN
+
+
+@skip_without_openai
+async def test_true_semantic_recall_with_real_embedder() -> None:
+    """With a real embedder, recall matches *meaning* — paraphrases with zero
+    shared tokens land on the right fact (what HRR alone cannot do)."""
+    import asyncpg
+
+    from tulip.rag.embeddings.openai import OpenAIEmbeddings
+
+    table = "tulip_memories_sem_it"
+    admin = await asyncpg.connect(_admin_dsn())
+    await admin.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
+    await admin.close()
+
+    embedder = OpenAIEmbeddings(model="text-embedding-3-small")
+    store = PgMemory(_admin_dsn(), table=table, embedder=embedder)
+    try:
+        assert store.capabilities.semantic_search is True
+        ns = ("acme", "user", "fede")
+        await store.put(ns, "fy", {"content": "the company fiscal year starts in April"})
+        await store.put(ns, "stack", {"content": "the platform runs on AWS EKS with Aurora"})
+        await store.put(ns, "coffee", {"content": "prefers oat milk flat whites"})
+
+        # "accounting period" shares no token with "fiscal year" — semantics only.
+        top = await store.search(ns, "when does the accounting period begin", limit=1)
+        assert top[0].key == "fy"
+        assert (await store.search(ns, "what do they like to drink", limit=1))[0].key == "coffee"
+    finally:
+        await store.close()
+        admin = await asyncpg.connect(_admin_dsn())
+        await admin.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
+        await admin.close()
 
 
 async def test_search_without_query_returns_most_recent(store: PgMemory) -> None:
@@ -119,7 +155,7 @@ async def test_memory_persists_and_recalls_across_store_instances(store: PgMemor
 
     run2 = PgMemory(_admin_dsn(), table=_TABLE, dim=256)
     try:
-        top = await run2.search(ns, "when does the accounting period begin", limit=1)
+        top = await run2.search(ns, "when does the fiscal year start", limit=1)
         assert top[0].value == {"content": "the fiscal year starts in April"}
     finally:
         await run2.close()
