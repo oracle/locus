@@ -486,6 +486,9 @@ ignore = [
     "S608",    # SQL built from validated identifiers (regex-checked at init)
     "PYI063",  # PEP 570 positional-only — `__context` is Pydantic's spelling
 ]
+"tests/integration/test_pg_memory.py" = [
+    "S608",    # SQL built from a constant test table name, not user input
+]
 "src/tulip/agent/agent.py" = [
     "SLF001",  # Private attr access for internal state (_has_unverified_writes)
 ]
@@ -684,6 +687,8 @@ omit = [
     "src/tulip/rag/embeddings/openai.py",
     "src/tulip/memory/backends/opensearch.py",
     "src/tulip/memory/backends/oci_bucket.py",
+    # PgMemory needs a live Postgres+pgvector; covered by integration tests.
+    "src/tulip/memory/store_backends/postgresql.py",
 ]
 
 [tool.coverage.report]
