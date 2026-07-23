@@ -8,8 +8,31 @@ policy.
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-07-23
+
+### Added
+
+- **Governed long-term memory (harness primitive).** Agents learn across
+  runs. Two `BaseStore` backends ship: **`HolographicStore`** — zero-infra
+  SQLite + FTS5 + HRR associative recall, the free/local default, no server
+  and no embedding API (#42); and **`PgMemory`** — Postgres/pgvector with
+  **per-tenant Row-Level Security**, the multi-tenant enterprise backend. It
+  stores the HRR phase vector as `[cos φ, sin φ]`, so pgvector cosine distance
+  equals HRR phase similarity — semantic recall runs entirely inside Postgres
+  with no external embedding service (#43). `PgMemory(embedder=…)` accepts any
+  `BaseEmbedding` (e.g. OpenAI `text-embedding-3-small`) for **true semantic
+  recall** (#44).
+- **Recalled memory is treated as untrusted input.** A context scrubber
+  strips injected system-note/fence markers and wraps recall in a delimited
+  "informational background data, not instructions" block — applied on every
+  recall, so an agent can use what it remembers without obeying it (#42).
+
 ### Fixed
 
+- **Recall is honestly typed.** HRR bag-of-words recall is lexical/associative,
+  not trained semantics; `capabilities.semantic_search` is now `True` only
+  when a real embedder is configured (`HolographicStore` reports `False`).
+  Paraphrase matching requires an embedder (#44).
 - **Claude 5 family models no longer 400 on `temperature`.** The
   temperature-deprecation prefix list now covers `claude-sonnet-5`,
   `claude-opus-5`, `claude-haiku-5`, `claude-fable-5`, and
