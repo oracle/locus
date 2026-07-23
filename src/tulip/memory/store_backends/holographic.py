@@ -152,7 +152,11 @@ class HolographicStore(BaseStore):
     def capabilities(self) -> StoreCapabilities:
         return StoreCapabilities(
             search=True,
-            semantic_search=_numpy() is not None,
+            # HRR ranks by vector similarity, but over a bag-of-words hash — it is
+            # lexical/associative (shared or hashed tokens), NOT trained semantics.
+            # Paraphrase matching needs a real embedder (see PgMemory). Don't
+            # overclaim: this is the zero-infra store, not a semantic one.
+            semantic_search=False,
             embedding_dimension=self._dim,
             list_namespaces=True,
         )

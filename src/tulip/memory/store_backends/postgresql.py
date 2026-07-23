@@ -40,6 +40,8 @@ from tulip.memory.store_backends.holographic import _DEFAULT_DIM, _numpy, encode
 if TYPE_CHECKING:
     from asyncpg import Pool
 
+    from tulip.rag.embeddings.base import BaseEmbedding
+
 _NS_SEP = "\x1f"
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 #: The GUC that carries the active tenant to the RLS policy. `SET LOCAL` scopes it
@@ -76,6 +78,14 @@ class PgMemory(BaseStore):
     tuple scopes within a tenant (e.g. ``(tenant, "user", user_id)``). The schema,
     RLS policy, and HNSW index are created on first use, so it works against a
     bare Postgres locally and a managed Aurora cluster identically.
+
+    **Recall quality depends on the vector.** Pass an ``embedder`` (any
+    :class:`~tulip.rag.embeddings.base.BaseEmbedding`, e.g. brokered OpenAI
+    ``text-embedding-3-small``) for **true semantic recall** — the enterprise
+    default. Without one it falls back to the HRR ``[cos φ, sin φ]`` encoding,
+    which is **lexical/associative** (matches shared or hashed tokens), not
+    trained semantics — fine offline, but it will not match paraphrases the way
+    an embedding model does. Choose the embedder to match the value of recall.
     """
 
     def __init__(
@@ -84,12 +94,23 @@ class PgMemory(BaseStore):
         *,
         table: str = "tulip_memories",
         dim: int = _DEFAULT_DIM,
+        embedder: BaseEmbedding | None = None,
     ) -> None:
         self._dsn = dsn
         self._table = _validate_ident(table, "table")
         self._dim = dim
-        self._vdim = 2 * dim  # [cos, sin] doubles the dimensionality
+        self._embedder = embedder
+        # A real embedder fixes the column width; HRR [cos, sin] doubles `dim`.
+        self._vdim = embedder.dimension if embedder is not None else 2 * dim
         self._pool: Pool | None = None
+
+    async def _embed(self, content: str) -> str | None:
+        """The pgvector literal for ``content`` — real embedding if configured,
+        else the HRR ``[cos φ, sin φ]`` fallback (``None`` without numpy)."""
+        if self._embedder is not None:
+            result = await self._embedder.embed(content)
+            return "[" + ",".join(f"{x:.6f}" for x in result.embedding) + "]"
+        return _embed_literal(content, self._dim)
 
     async def _get_pool(self) -> Pool:
         if self._pool is None:
@@ -139,7 +160,9 @@ class PgMemory(BaseStore):
     def capabilities(self) -> StoreCapabilities:
         return StoreCapabilities(
             search=True,
-            semantic_search=_numpy() is not None,
+            # True *semantic* recall needs a real embedder; the HRR fallback is
+            # lexical/associative, so it does not claim semantic_search.
+            semantic_search=self._embedder is not None,
             embedding_dimension=self._vdim,
             list_namespaces=True,
         )
@@ -158,7 +181,7 @@ class PgMemory(BaseStore):
         tenant = self._tenant_of(namespace)
         ns = _NS_SEP.join(namespace)
         content = _content_for(value)
-        emb = _embed_literal(content, self._dim)
+        emb = await self._embed(content)
         pool = await self._get_pool()
         async with pool.acquire() as conn, conn.transaction():
             await self._scoped(conn, tenant)
@@ -241,7 +264,7 @@ class PgMemory(BaseStore):
                     limit,
                 )
             else:
-                qvec = _embed_literal(query, self._dim)
+                qvec = await self._embed(query)
                 if qvec is None:  # pragma: no cover - numpy-less fallback
                     rows = await conn.fetch(
                         f"SELECT {cols} FROM {self._table} "
