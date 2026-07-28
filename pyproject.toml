@@ -183,7 +183,12 @@ sdk = [
 dev = [
     "hatch>=1.12",
     "pre-commit>=3.8",
-    "ruff>=0.8",
+    # Kept in lockstep with .pre-commit-config.yaml (ruff-pre-commit v0.15.0).
+    # An open `>=` let CI float to 0.16, which formats Markdown code blocks and
+    # adds rules (ISC004, PLR0917) the tree has never been checked against — so
+    # a commit green on its PR went red on main with no source change. Bump this
+    # and the pre-commit rev together, in their own change.
+    "ruff>=0.15,<0.16",
     "mypy>=1.13",
     "pytest>=9.0.3",
     "pytest-asyncio>=0.24",
