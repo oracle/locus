@@ -58,15 +58,18 @@ provider story, including any OpenAI-compatible endpoint via `base_url`.
 ```python
 from tulip.tools import tool
 
+
 @tool
 def domain_reputation(domain: str) -> str:
     """Return registrar age, category, and reputation for a domain."""
     return f"{domain}: registered 2 days ago, category 'newly observed', reputation 'suspicious'"
 
+
 @tool
 def ioc_lookup(indicator: str) -> str:
     """Look up an IP / domain / hash against threat intelligence."""
     return f"{indicator}: 3 vendor detections, last seen in a phishing campaign"
+
 
 agent = Agent(
     model=model,
@@ -87,12 +90,14 @@ twice, even across retries.
 ```python
 import asyncio
 
+
 async def main():
     async for event in agent.run("Triage alert A-101: impossible-travel login from 198.51.100.7."):
         if event.event_type == "think":
             print(event.reasoning)
         elif event.event_type == "tool_complete":
             print(f"Tool {event.tool_name}: {event.result}")
+
 
 asyncio.run(main())
 ```
@@ -115,7 +120,9 @@ reporter = create_swarm_agent(
 )
 
 swarm = create_swarm(agents=[analyst, reporter], model=model)
-result = await swarm.execute("Investigate the impossible-travel alert and write the incident summary.")
+result = await swarm.execute(
+    "Investigate the impossible-travel alert and write the incident summary."
+)
 print(result.summary)
 ```
 
@@ -126,6 +133,9 @@ from tulip.hooks import LoggingHook, GuardrailsHook
 
 agent = Agent(
     model=model,
-    hooks=[LoggingHook(), GuardrailsHook()],  # audit trail + prompt-injection / secret-leak guardrails
+    hooks=[
+        LoggingHook(),
+        GuardrailsHook(),
+    ],  # audit trail + prompt-injection / secret-leak guardrails
 )
 ```
