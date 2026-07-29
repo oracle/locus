@@ -72,6 +72,18 @@ class BuilderContext(BaseModel):
             "unselectable when the policy gate runs."
         ),
     )
+    hooks: list[Any] = Field(
+        default_factory=list,
+        description=(
+            "Lifecycle hooks attached to EVERY agent a builder emits, including "
+            "the leaves inside a pipeline. This is how governance reaches a "
+            "routed run: a caller who gates tool calls does so by passing a hook "
+            "whose before-tool-call handler can cancel, and the agents that "
+            "actually make the tool calls here are constructed by the builder, "
+            "not by the caller. A builder that emits an agent without these "
+            "hooks emits an ungoverned agent — see ``_agent``."
+        ),
+    )
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -245,12 +257,29 @@ def _domain_skill_plugins(frame: GoalFrame, ctx: BuilderContext) -> list[Any]:
     return [SkillsPlugin(skills=matching)]
 
 
+def _agent(ctx: BuilderContext, **kwargs: Any) -> Any:
+    """Construct one agent for a builder — the single place hooks get attached.
+
+    Every builder goes through here rather than calling ``Agent(...)`` directly,
+    because the alternative was already wrong in practice. A caller governs a run
+    by passing a hook that can cancel a tool call, but the agents that make those
+    calls are built *here*, and each builder constructed its own — so a hook
+    reached the one shape the caller built by hand and none of the leaves inside a
+    pipeline or a fan-out. The dangerous shapes are exactly the ones with leaves.
+
+    Concentrating construction means a new builder inherits the wiring instead of
+    having to remember it, and forgetting is a diff you can see.
+    """
+    from tulip.agent.agent import Agent
+
+    hooks = [*ctx.hooks, *(kwargs.pop("hooks", None) or [])]
+    return Agent(model=ctx.model, hooks=hooks, **kwargs)
+
+
 def _build_direct_response(
     frame: GoalFrame, capabilities: list[Capability], ctx: BuilderContext
 ) -> Runnable:
     """Single-agent builder. Used for ANSWER / EXPLAIN / RESEARCH."""
-    from tulip.agent.agent import Agent
-
     tools = _resolve_tools(capabilities, ctx.capabilities)
     plugins = _domain_skill_plugins(frame, ctx)
     system_prompt = (
@@ -258,7 +287,7 @@ def _build_direct_response(
         f"{frame.domain} domain. Be concise and direct. "
         f"Success criteria: {frame.success_criteria or ['the user gets a useful answer']}."
     )
-    agent = Agent(model=ctx.model, tools=tools, system_prompt=system_prompt, plugins=plugins)
+    agent = _agent(ctx, tools=tools, system_prompt=system_prompt, plugins=plugins)
     return wrap_agent(agent, "direct_response", frame)
 
 
@@ -266,15 +295,14 @@ def _build_plan_execute_validate(
     frame: GoalFrame, capabilities: list[Capability], ctx: BuilderContext
 ) -> Runnable:
     """Three-stage SequentialPipeline: planner → executor → validator."""
-    from tulip.agent.agent import Agent
     from tulip.agent.composition import SequentialPipeline
 
     tools = _resolve_tools(capabilities, ctx.capabilities)
     plugins = _domain_skill_plugins(frame, ctx)
     success_str = "; ".join(frame.success_criteria) or "(none specified)"
 
-    planner = Agent(
-        model=ctx.model,
+    planner = _agent(
+        ctx,
         tools=[],
         system_prompt=(
             f"You are the planner stage for a {frame.primary_goal.value} task in "
@@ -283,8 +311,8 @@ def _build_plan_execute_validate(
         ),
         plugins=plugins,
     )
-    executor = Agent(
-        model=ctx.model,
+    executor = _agent(
+        ctx,
         tools=tools,
         system_prompt=(
             f"You are the executor stage. Carry out the plan above using available "
@@ -292,8 +320,8 @@ def _build_plan_execute_validate(
         ),
         plugins=plugins,
     )
-    validator = Agent(
-        model=ctx.model,
+    validator = _agent(
+        ctx,
         tools=[],
         system_prompt=(
             f"You are the validator stage. Compare the executor's output against the "
@@ -330,8 +358,8 @@ def _build_specialist_fanout(
             continue
         tool_obj = ctx.capabilities.resolve_tool(cap)
         agents.append(
-            Agent(
-                model=ctx.model,
+            _agent(
+                ctx,
                 tools=[tool_obj],
                 system_prompt=(
                     f"You are the {cap.id} specialist for the {cap.domain} "
@@ -364,14 +392,13 @@ def _build_debate(
     by a judge :class:`Agent` that reads the joined transcript and
     rules. Both stages get any domain-scoped skills attached.
     """
-    from tulip.agent.agent import Agent
     from tulip.agent.composition import ParallelPipeline
 
     tools = _resolve_tools(capabilities, ctx.capabilities)
     plugins = _domain_skill_plugins(frame, ctx)
 
-    pro = Agent(
-        model=ctx.model,
+    pro = _agent(
+        ctx,
         tools=tools,
         system_prompt=(
             "You are Debater A. Argue strongly *for* the proposition implied by "
@@ -380,8 +407,8 @@ def _build_debate(
         ),
         plugins=plugins,
     )
-    con = Agent(
-        model=ctx.model,
+    con = _agent(
+        ctx,
         tools=tools,
         system_prompt=(
             "You are Debater B. Argue strongly *against* the proposition implied "
@@ -390,8 +417,8 @@ def _build_debate(
         ),
         plugins=plugins,
     )
-    judge = Agent(
-        model=ctx.model,
+    judge = _agent(
+        ctx,
         tools=[],
         system_prompt=(
             "You are an impartial judge. Read both debater transcripts and pick "
@@ -413,14 +440,13 @@ def _build_codegen_test_validate(
     tools (typically a code-runner / test-runner), and the loop
     condition checks for ``PASS`` on the first output line.
     """
-    from tulip.agent.agent import Agent
     from tulip.agent.composition import LoopAgent
 
     tools = _resolve_tools(capabilities, ctx.capabilities)
     plugins = _domain_skill_plugins(frame, ctx)
 
-    coder = Agent(
-        model=ctx.model,
+    coder = _agent(
+        ctx,
         tools=tools,
         system_prompt=(
             "You are a code-generate-and-test loop. Each iteration:\n"
@@ -457,12 +483,11 @@ def _build_approval_gated_execution(
     ``approval_required=True`` on the frame, so the policy gate sees
     ``require_approval=True`` and wraps the runnable.
     """
-    from tulip.agent.agent import Agent
 
     tools = _resolve_tools(capabilities, ctx.capabilities)
     plugins = _domain_skill_plugins(frame, ctx)
-    agent = Agent(
-        model=ctx.model,
+    agent = _agent(
+        ctx,
         tools=tools,
         system_prompt=(
             f"You are executing a {frame.primary_goal.value} request in the "
@@ -521,8 +546,8 @@ def _build_handoff_chain(
             continue
         tool_obj = ctx.capabilities.resolve_tool(cap)
         agents.append(
-            Agent(
-                model=ctx.model,
+            _agent(
+                ctx,
                 tools=[tool_obj],
                 system_prompt=(
                     f"You are link {cap.id} in a handoff chain for the "
@@ -539,8 +564,8 @@ def _build_handoff_chain(
         # Without capabilities the chain has no real work — fall back to a
         # single tool-less agent so the runnable is still well-formed.
         agents.append(
-            Agent(
-                model=ctx.model,
+            _agent(
+                ctx,
                 tools=[],
                 system_prompt=(
                     f"You are a single-link handoff chain in the {frame.domain} "
