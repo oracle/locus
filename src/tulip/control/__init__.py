@@ -35,6 +35,13 @@ layer in :mod:`tulip.security`) are re-exported here for typing the optional
 evidence an admission decision can weigh.
 """
 
+from tulip.control.action import (
+    ActionSpec,
+    action_from_labels,
+    asset_from_args,
+    default_action,
+    resolve_action,
+)
 from tulip.security.admit import AdmissionError, admit
 from tulip.security.audit import AuditRecord, AuditTrail
 from tulip.security.findings import Evidence
@@ -56,6 +63,12 @@ from tulip.security.verify import VerificationResult, verify
 
 
 __all__ = [
+    # Deriving the Action a policy is weighed against
+    "ActionSpec",
+    "action_from_labels",
+    "asset_from_args",
+    "default_action",
+    "resolve_action",
     # Admission control — the runtime's enforcement point
     "admit",
     "AdmissionError",
