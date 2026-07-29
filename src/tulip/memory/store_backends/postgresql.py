@@ -28,13 +28,15 @@ Two properties make it the governed backend:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
+import warnings
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from tulip.memory.store import BaseStore, StoreCapabilities, StoreItem
-from tulip.memory.store_backends.holographic import _DEFAULT_DIM, _numpy, encode_text
+from tulip.memory.store_backends.holographic import _numpy, encode_text
 
 
 if TYPE_CHECKING:
@@ -48,6 +50,19 @@ _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 #: to the transaction, so a pooled connection never leaks one tenant's id to the
 #: next checkout.
 _TENANT_GUC = "tulip.tenant"
+
+#: pgvector's hard ceiling on the width of an indexable column: it refuses to
+#: build an HNSW (or IVFFlat) index over more than 2000 dimensions. Storage is
+#: fine up to 16000 — only the ANN index is capped.
+PGVECTOR_ANN_MAX_DIM = 2000
+
+#: PgMemory's default HRR ``dim``. Deliberately **not** the HolographicStore
+#: default (1024): the HRR encoding stores ``[cos φ, sin φ]``, so the pgvector
+#: column is ``2·dim`` wide and 1024 would ask for 2048 columns — over
+#: :data:`PGVECTOR_ANN_MAX_DIM`, which made ``CREATE INDEX … USING hnsw`` fail
+#: and left every default-constructed store unusable. 512 → 1024 columns, well
+#: inside the limit with room for pgvector's own headroom.
+_DEFAULT_PG_DIM = 512
 
 
 def _validate_ident(value: str, field: str) -> str:
@@ -86,6 +101,15 @@ class PgMemory(BaseStore):
     which is **lexical/associative** (matches shared or hashed tokens), not
     trained semantics — fine offline, but it will not match paraphrases the way
     an embedding model does. Choose the embedder to match the value of recall.
+
+    **Width and the ANN index.** Without an embedder the pgvector column is
+    ``2·dim`` wide (the ``[cos φ, sin φ]`` pair), and pgvector will not build an
+    HNSW index over more than :data:`PGVECTOR_ANN_MAX_DIM` dimensions. ``dim``
+    therefore defaults to 512 (a 1024-wide column) and a larger explicit ``dim``
+    is rejected at construction rather than at ``CREATE INDEX``. An *embedder*
+    wider than the limit is allowed — its width is the model's, not ours — but
+    the table is then created without an ANN index and the constructor emits a
+    ``RuntimeWarning`` saying so.
     """
 
     def __init__(
@@ -93,16 +117,49 @@ class PgMemory(BaseStore):
         dsn: str,
         *,
         table: str = "tulip_memories",
-        dim: int = _DEFAULT_DIM,
+        dim: int = _DEFAULT_PG_DIM,
         embedder: BaseEmbedding | None = None,
     ) -> None:
+        if dim < 1:
+            raise ValueError(f"dim must be >= 1, got {dim}")
         self._dsn = dsn
         self._table = _validate_ident(table, "table")
         self._dim = dim
         self._embedder = embedder
         # A real embedder fixes the column width; HRR [cos, sin] doubles `dim`.
         self._vdim = embedder.dimension if embedder is not None else 2 * dim
+        # Fail here, not thousands of lines into a run with a raw driver error:
+        # a `dim` we control that cannot carry an ANN index is a caller mistake.
+        if embedder is None and self._vdim > PGVECTOR_ANN_MAX_DIM:
+            raise ValueError(
+                f"PgMemory(dim={dim}) is not indexable: the HRR encoding stores "
+                f"[cos φ, sin φ], so the pgvector column would be 2·{dim} = "
+                f"{self._vdim} dimensions wide, over pgvector's "
+                f"{PGVECTOR_ANN_MAX_DIM}-dimension limit for an HNSW index "
+                f"(CREATE INDEX would raise ProgramLimitExceededError). Pass "
+                f"dim <= {PGVECTOR_ANN_MAX_DIM // 2} (the default is "
+                f"{_DEFAULT_PG_DIM}), or pass an embedder."
+            )
+        # An embedder's width is *not* ours to choose (text-embedding-3-large is
+        # 3072). Rather than reject a legitimate model we keep the column and skip
+        # the index — but say so loudly, because a silent sequential scan is
+        # exactly the failure this store had.
+        self._ann = self._vdim <= PGVECTOR_ANN_MAX_DIM
+        if not self._ann:
+            warnings.warn(
+                f"PgMemory: embedder dimension {self._vdim} exceeds pgvector's "
+                f"{PGVECTOR_ANN_MAX_DIM}-dimension limit for an HNSW index, so "
+                f"table {self._table!r} will be created WITHOUT an ANN index — "
+                f"every search is a sequential scan. Use an embedder with "
+                f"<= {PGVECTOR_ANN_MAX_DIM} dimensions (or a model that supports "
+                f"shortening its output) for indexed recall.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
         self._pool: Pool | None = None
+        # Serialises first use so two concurrent calls cannot each build a pool
+        # (and each run schema creation).
+        self._pool_lock = asyncio.Lock()
 
     async def _embed(self, content: str) -> str | None:
         """The pgvector literal for ``content`` — real embedding if configured,
@@ -113,16 +170,31 @@ class PgMemory(BaseStore):
         return _embed_literal(content, self._dim)
 
     async def _get_pool(self) -> Pool:
-        if self._pool is None:
-            import asyncpg  # noqa: PLC0415
+        """The connection pool, built (and its schema created) on first use.
 
-            self._pool = await asyncpg.create_pool(self._dsn, min_size=1, max_size=8)
-            await self._ensure_schema()
+        ``self._pool`` is published **only after** ``_ensure_schema`` succeeds.
+        Assigning it first would make a schema failure surface on the first call
+        and then vanish — every later call would find a pool, skip schema
+        creation, and run against a half-built table. A half-initialised store
+        must not present as a working one.
+        """
+        if self._pool is not None:
+            return self._pool
+        async with self._pool_lock:
+            if self._pool is None:
+                import asyncpg  # noqa: PLC0415
+
+                pool = await asyncpg.create_pool(self._dsn, min_size=1, max_size=8)
+                try:
+                    await self._ensure_schema(pool)
+                except BaseException:
+                    await pool.close()
+                    raise
+                self._pool = pool
         return self._pool
 
-    async def _ensure_schema(self) -> None:
-        assert self._pool is not None
-        async with self._pool.acquire() as conn:
+    async def _ensure_schema(self, pool: Pool) -> None:
+        async with pool.acquire() as conn:
             await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
             await conn.execute(
                 f"CREATE TABLE IF NOT EXISTS {self._table} ("
@@ -135,6 +207,7 @@ class PgMemory(BaseStore):
                 "version integer NOT NULL DEFAULT 1, "
                 "PRIMARY KEY (tenant, ns, key))"
             )
+            await self._check_existing_width(conn)
             # RLS — the hard tenant boundary. Enforced for every non-owner role;
             # FORCE also applies it to the table owner (belt for admin roles).
             await conn.execute(f"ALTER TABLE {self._table} ENABLE ROW LEVEL SECURITY")
@@ -145,10 +218,42 @@ class PgMemory(BaseStore):
                 f"USING (tenant = current_setting('{_TENANT_GUC}', true)) "
                 f"WITH CHECK (tenant = current_setting('{_TENANT_GUC}', true))"
             )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_{self._table}_ann "
-                f"ON {self._table} USING hnsw (embedding vector_cosine_ops)"
-            )
+            if self._ann:
+                await conn.execute(
+                    f"CREATE INDEX IF NOT EXISTS idx_{self._table}_ann "
+                    f"ON {self._table} USING hnsw (embedding vector_cosine_ops)"
+                )
+
+    async def _check_existing_width(self, conn: Any) -> None:
+        """Refuse to run against a table whose ``embedding`` column is a different width.
+
+        ``CREATE TABLE IF NOT EXISTS`` silently keeps a pre-existing table, so a
+        store configured for a different ``dim`` would only fail later, per
+        INSERT, with asyncpg's ``expected N dimensions, not M``. Detect it here
+        and name both widths and the remedy.
+        """
+        # For pgvector, ``atttypmod`` is the declared dimension verbatim
+        # (0/-1 when the column is unmodified, which cannot happen for us).
+        actual = await conn.fetchval(
+            "SELECT atttypmod FROM pg_attribute "
+            "WHERE attrelid = $1::regclass AND attname = 'embedding' AND NOT attisdropped",
+            self._table,
+        )
+        if actual is None or actual <= 0 or actual == self._vdim:
+            return
+        how = (
+            f"pass dim={actual // 2}"
+            if self._embedder is None and actual % 2 == 0
+            else "use the embedder it was written with"
+        )
+        raise RuntimeError(
+            f"PgMemory: table {self._table!r} already has embedding vector({actual}), "
+            f"but this store is configured for vector({self._vdim}) — every write "
+            f"would be rejected by Postgres. To read the existing rows, {how}; "
+            f"to adopt the new width, re-embed the table (ALTER TABLE "
+            f"{self._table} ALTER COLUMN embedding TYPE vector({self._vdim}) after "
+            f"clearing it) or write to a different table=."
+        )
 
     @staticmethod
     def _tenant_of(namespace: tuple[str, ...]) -> str:

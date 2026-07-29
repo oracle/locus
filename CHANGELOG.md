@@ -8,6 +8,25 @@ policy.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`PgMemory` could not create its own schema with default settings.** `dim`
+  defaulted to 1024 and the HRR `[cos φ, sin φ]` encoding doubles it, asking
+  pgvector for a 2048-dimension column — over the 2000-dimension ceiling for an
+  HNSW index, so `CREATE INDEX` raised `ProgramLimitExceededError` and no fact
+  was ever written. `dim` now defaults to **512** (a 1024-wide column), an
+  explicit `dim` whose doubled width cannot be indexed is rejected at
+  construction with both numbers named, and an *embedder* wider than the limit
+  is allowed but warns loudly that the table has no ANN index.
+- **`PgMemory` hid its own schema failures.** `_get_pool` assigned `self._pool`
+  before running `_ensure_schema`, so a schema error surfaced on the first call
+  only; every later call found a pool, skipped schema creation and ran against a
+  half-built table (sequential-scan recall, silently). The pool is now published
+  only after schema creation succeeds, and first use is serialised by a lock.
+- **`PgMemory` now detects a pre-existing table of a different vector width**
+  (`CREATE TABLE IF NOT EXISTS` kept it silently) and fails with the two widths
+  and the remedy instead of a per-INSERT `expected N dimensions, not M`.
+
 ## [2.2.0] - 2026-07-23
 
 ### Added

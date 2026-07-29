@@ -161,6 +161,92 @@ async def test_memory_persists_and_recalls_across_store_instances(store: PgMemor
         await run2.close()
 
 
+# ── the default constructor — what every real caller actually gets ────────────
+async def test_default_dim_store_creates_schema_and_recalls() -> None:
+    """``PgMemory(dsn)`` with **no explicit dim** must work on a stock pgvector.
+
+    This is the shape every real caller uses (tulip-gateway builds
+    ``PgMemory(dsn, embedder=…)``); the rest of this file pins ``dim=256`` and so
+    never exercised it. With the old default (1024 → a 2048-wide column) pgvector
+    refused the HNSW index — ``CREATE INDEX`` raised ``ProgramLimitExceededError``
+    and no fact was ever written.
+    """
+    import asyncpg
+
+    table = "tulip_memories_default_it"
+    admin = await asyncpg.connect(_admin_dsn())
+    await admin.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
+    await admin.close()
+
+    store = PgMemory(_admin_dsn(), table=table)  # ← no dim, no embedder
+    try:
+        ns = ("acme", "user", "fede")
+        await store.put(ns, "fy", {"content": "the fiscal year starts in April"})
+        await store.put(ns, "pet", {"content": "has a golden retriever named Argus"})
+
+        assert await store.get(ns, "fy") == {"content": "the fiscal year starts in April"}
+        top = await store.search(ns, "when does the fiscal year start", limit=1)
+        assert top[0].key == "fy"
+
+        # …and the ANN index really exists — the point of keeping the width down.
+        admin = await asyncpg.connect(_admin_dsn())
+        try:
+            idx = await admin.fetchval(
+                "SELECT indexdef FROM pg_indexes WHERE tablename=$1 AND indexname=$2",
+                table,
+                f"idx_{table}_ann",
+            )
+            width = await admin.fetchval(
+                "SELECT atttypmod FROM pg_attribute "
+                "WHERE attrelid=$1::regclass AND attname='embedding'",
+                table,
+            )
+        finally:
+            await admin.close()
+        assert idx is not None
+        assert "hnsw" in idx
+        assert width <= 2000
+    finally:
+        await store.close()
+        admin = await asyncpg.connect(_admin_dsn())
+        await admin.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
+        await admin.close()
+
+
+async def test_schema_failure_raises_on_every_call_not_just_the_first() -> None:
+    """A store that cannot build its schema must stay broken, loudly.
+
+    ``_get_pool`` used to publish ``self._pool`` *before* ``_ensure_schema``, so
+    only the first call raised; every later one found a pool, skipped schema
+    creation and ran against a half-built table. Here the schema step fails
+    deterministically (the table exists at another width) — both calls must raise.
+    """
+    import asyncpg
+
+    table = "tulip_memories_mismatch_it"
+    admin = await asyncpg.connect(_admin_dsn())
+    await admin.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
+    await admin.close()
+
+    written = PgMemory(_admin_dsn(), table=table, dim=64)
+    try:
+        await written.put(("acme", "u"), "k", "seeded at 128 columns")
+    finally:
+        await written.close()
+
+    wrong = PgMemory(_admin_dsn(), table=table, dim=128)  # 256 columns — mismatch
+    try:
+        for _ in range(2):  # the SECOND call is the regression
+            with pytest.raises(RuntimeError, match=r"vector\(128\).*vector\(256\)"):
+                await wrong.put(("acme", "u"), "k2", "never lands")
+            assert wrong._pool is None, "a store with no schema must not hold a pool"
+    finally:
+        await wrong.close()
+        admin = await asyncpg.connect(_admin_dsn())
+        await admin.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
+        await admin.close()
+
+
 # ── tenant isolation — the query layer ────────────────────────────────────────
 async def test_query_layer_tenant_isolation(store: PgMemory) -> None:
     """PgMemory's own API never returns another tenant's rows, even same key/ns."""

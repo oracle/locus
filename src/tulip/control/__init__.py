@@ -36,10 +36,13 @@ evidence an admission decision can weigh.
 """
 
 from tulip.control.action import (
+    UNDETERMINED_TAG,
     ActionSpec,
+    DerivedLabels,
     action_from_labels,
     asset_from_args,
     default_action,
+    derive_labels,
     resolve_action,
 )
 from tulip.security.admit import AdmissionError, admit
@@ -69,6 +72,10 @@ __all__ = [
     "asset_from_args",
     "default_action",
     "resolve_action",
+    # Argument-derived labels (declarative rules on a tool definition)
+    "DerivedLabels",
+    "derive_labels",
+    "UNDETERMINED_TAG",
     # Admission control — the runtime's enforcement point
     "admit",
     "AdmissionError",
