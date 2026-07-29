@@ -101,6 +101,14 @@ class CognitiveCompiler:
         for ``frame.domain`` (plus any globally-tagged skills). The
         agent loop's L1 / L2 / L3 progressive disclosure surfaces them
         at runtime.
+    hooks:
+        Optional lifecycle hooks attached to **every** agent a builder
+        emits, leaves included. This is the seam governance arrives
+        through: a caller gates tool calls with a hook that can cancel
+        one, and the agents that make the calls in a routed run are
+        constructed by the builder rather than by the caller. Without
+        this, only a hand-built single agent was ever gated and every
+        multi-agent shape ran ungoverned.
     on_approval:
         Optional async callback fired when the verdict requires
         approval. Defaults to denying — wire your workbench / CLI
@@ -125,6 +133,7 @@ class CognitiveCompiler:
         model: Any,
         skills: SkillIndex | None = None,
         a2a_endpoint: str | None = None,
+        hooks: list[Any] | None = None,
         on_approval: ApprovalCallback | None = None,
         protocol_picker: LLMProtocolPicker | None = None,
     ) -> None:
@@ -134,6 +143,7 @@ class CognitiveCompiler:
         self.model = model
         self.skills = skills
         self.a2a_endpoint = a2a_endpoint
+        self.hooks = list(hooks or [])
         self._on_approval: ApprovalCallback = on_approval or _default_deny
         self.protocol_picker = protocol_picker
 
@@ -143,6 +153,7 @@ class CognitiveCompiler:
             capabilities=self.capabilities,
             skills=self.skills,
             a2a_endpoint=self.a2a_endpoint,
+            hooks=self.hooks,
         )
 
     async def _pick_protocol(
