@@ -64,7 +64,7 @@ dependencies = [
     # ``httpx<1.0`` pin above already prevents installing ``httpx2``
     # (which is httpx 2.x), so the only sane cap here is starlette
     # itself. Lift together with the httpx cap.
-    "starlette<1.2",
+    "starlette<1.4",
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
     "typing-extensions>=4.0",
