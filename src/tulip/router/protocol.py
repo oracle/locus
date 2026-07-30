@@ -40,6 +40,16 @@ if TYPE_CHECKING:
     from tulip.router.capability import CapabilityIndex
 
 
+#: The synthetic capability that makes ``a2a_delegate`` selectable. The compiler
+#: adds it when a remote peer is configured, so "a peer exists" IS the opt-in and
+#: the ordinary ``requires_capabilities`` filter does the gating.
+#:
+#: Declared here rather than in the compiler because the protocol that requires it
+#: lives here, and a capability id agreed in two places is a capability id that
+#: drifts.
+A2A_PEER_CAPABILITY = "a2a_peer"
+
+
 class NoMatchingProtocolError(LookupError):
     """Raised by :meth:`ProtocolRegistry.select` when no protocol fits the frame."""
 
@@ -671,7 +681,13 @@ def builtin_protocols() -> list[Protocol]:
                 "Requires BuilderContext.a2a_endpoint to be set at compile time."
             ),
             handles=[TaskType.COORDINATE, TaskType.ESCALATE],
-            primary_for=[],  # opt-in only
+            # Canonical for COORDINATE, but only reachable at all when a peer is
+            # configured (see `requires_capabilities`). Delegating a coordination
+            # task is the reason someone configures a peer; if none is configured
+            # the protocol is filtered out entirely and COORDINATE falls to its
+            # local peer as before.
+            primary_for=[TaskType.COORDINATE],
+            requires_capabilities=[A2A_PEER_CAPABILITY],
             risk_max=Risk.MEDIUM,
             cost="medium",
             latency="high",
