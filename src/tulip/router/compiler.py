@@ -28,6 +28,7 @@ from tulip.router.goal_frame import GoalFrame
 from tulip.router.picker import LLMProtocolPicker
 from tulip.router.policy import PolicyDeniedError, PolicyGate, PolicyVerdict
 from tulip.router.protocol import (
+    A2A_PEER_CAPABILITY,
     BuilderContext,
     NoMatchingProtocolError,
     Protocol,
@@ -203,6 +204,20 @@ class CognitiveCompiler:
         cognitive dispatch.
         """
         available = {c.id for c in self.capabilities.all()}
+        # A configured remote peer IS the opt-in for `a2a_delegate`, expressed as a
+        # synthetic capability so the ordinary `requires_capabilities` filter does
+        # the work.
+        #
+        # Without this the shape was unreachable: it declared `primary_for=[]` to
+        # stay opt-in, but nothing supplied an opt-in, so across all 108
+        # goal x complexity x risk frames the ranker never returned it. One of eight
+        # advertised shapes could not be selected by anything.
+        #
+        # Gating on the endpoint is also the honest condition. `_build_a2a_delegate`
+        # raises without one, so a shape that could be chosen while unconfigured
+        # would trade "never selectable" for "selectable and then fails".
+        if self.a2a_endpoint:
+            available.add(A2A_PEER_CAPABILITY)
         candidates = self.protocols.filter_candidates(frame, available_capabilities=available)
         if not candidates:
             err = NoMatchingProtocolError(
