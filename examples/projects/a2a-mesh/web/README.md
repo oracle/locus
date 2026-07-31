@@ -1,9 +1,9 @@
 # a2a-mesh-web — console for the A2A security mesh
 
 A React + Vite + TypeScript front-end for the tulip
-[a2a-mesh](../README.md) backend. Discovers running A2A peers via their
-`AgentCard`, routes a query by capability tag, and renders the typed
-event stream from `POST /a2a/stream` in real time.
+[a2a-mesh](../README.md) backend. Discovers running A2A (Agent-to-Agent)
+peers via their `AgentCard`, routes a query by capability tag, and renders
+the typed event stream from `POST /a2a/stream` in real time.
 
 Styled in a clean console design language — global header with a thin
 red rule, sidebar workspace nav, white surface cards on a warm

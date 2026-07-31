@@ -1,11 +1,12 @@
 # tulip examples — build agents with Tulip
 
 Every runnable file in this directory is a self-contained agent you can run.
-They span domains — payments, infrastructure, support, and data — plus a
-first-class **security** track (SOC triage, IOC enrichment, phishing analysis,
-vulnerability research, incident response), the flagship proof domain Tulip was
-hardened on. The snippets below are the smallest possible shapes; the numbered
-`notebook_*.py` files build them out.
+They span the domains where agents act — support, payments, infrastructure,
+and data — and a **security** track (SOC triage, IOC — indicator of
+compromise — enrichment, phishing analysis, vulnerability research, incident
+response) sits alongside them as one fully worked domain. The snippets below
+are the smallest possible shapes; the numbered `notebook_*.py` files build
+them out.
 
 ## How to run
 
@@ -60,27 +61,27 @@ from tulip.tools import tool
 
 
 @tool
-def domain_reputation(domain: str) -> str:
-    """Return registrar age, category, and reputation for a domain."""
-    return f"{domain}: registered 2 days ago, category 'newly observed', reputation 'suspicious'"
+def lookup_order(order_id: str) -> str:
+    """Return status, items, and payment state for an order."""
+    return f"{order_id}: delivered 2026-07-12, 1 item ($49.00), payment settled"
 
 
 @tool
-def ioc_lookup(indicator: str) -> str:
-    """Look up an IP / domain / hash against threat intelligence."""
-    return f"{indicator}: 3 vendor detections, last seen in a phishing campaign"
+def issue_refund(order_id: str, amount: float) -> str:
+    """Refund an order — a consequential action worth gating in production."""
+    return f"refund of ${amount:.2f} queued for {order_id}"
 
 
 agent = Agent(
     model=model,
-    tools=[domain_reputation, ioc_lookup],
-    system_prompt="You are a SOC triage analyst. Use the tools, then cite what you found.",
+    tools=[lookup_order, issue_refund],
+    system_prompt="You are a support agent. Look the order up first, then cite what you found.",
 )
 
-result = agent.run_sync("Users got mail linking to login.phish.example.net — phishing or legit?")
+result = agent.run_sync("Customer says ord-4821 arrived broken — are they owed a refund?")
 ```
 
-For tools where a duplicate call would hurt — isolating a host, paging an
+For tools where a duplicate call would hurt — issuing a refund, paging an
 on-call, filing a ticket — declare `@tool(idempotent=True)`: the loop
 keys every invocation on `(name, args)` and refuses to fire the same one
 twice, even across retries.
@@ -92,7 +93,7 @@ import asyncio
 
 
 async def main():
-    async for event in agent.run("Triage alert A-101: impossible-travel login from 198.51.100.7."):
+    async for event in agent.run("Work out why order ord-4821 was charged twice."):
         if event.event_type == "think":
             print(event.reasoning)
         elif event.event_type == "tool_complete":
@@ -109,19 +110,19 @@ from tulip.multiagent import create_swarm, create_swarm_agent
 
 analyst = create_swarm_agent(
     name="Analyst",
-    capabilities=["enrich", "correlate"],
-    system_prompt="You enrich indicators and correlate them across alerts.",
+    capabilities=["lookup", "correlate"],
+    system_prompt="You pull order, payment, and shipping records and correlate them.",
 )
 
 reporter = create_swarm_agent(
     name="Reporter",
     capabilities=["write", "summarize"],
-    system_prompt="You write clear, evidence-backed incident summaries.",
+    system_prompt="You write clear, evidence-backed case summaries.",
 )
 
 swarm = create_swarm(agents=[analyst, reporter], model=model)
 result = await swarm.execute(
-    "Investigate the impossible-travel alert and write the incident summary."
+    "Work out why order ord-4821 was charged twice and write the case summary."
 )
 print(result.summary)
 ```
@@ -136,6 +137,6 @@ agent = Agent(
     hooks=[
         LoggingHook(),
         GuardrailsHook(),
-    ],  # audit trail + prompt-injection / secret-leak guardrails
+    ],  # audit trail + content guardrails (PII redaction, secret-egress blocks)
 )
 ```

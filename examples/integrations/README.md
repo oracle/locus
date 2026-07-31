@@ -1,8 +1,11 @@
 # Vendor integrations
 
-Worked integrations with the external systems an agentic-cybersecurity
-workflow actually touches. Each is a real client for a real vendor, written
-to the same convention so the cookbook stays runnable on a clean machine.
+Worked integrations with real external vendors. The current set grew out of
+the security examples — threat-intel IOC (indicator of compromise) lookups
+and SIEM (security information and event management) search — plus GPU
+compute dispatch and model-endpoint timing. Each is a real client for a real
+vendor, written to the same convention so the cookbook stays runnable on a
+clean machine.
 
 ## The bring-your-own-credentials convention
 
