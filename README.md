@@ -331,24 +331,65 @@ checkpointer means the decision survives a restart and the run resumes where it 
 
 ---
 
+## Govern agents you already run
+
+You don't have to build on Tulip to be governed by it.
+**[`tulip-frameworks`](https://github.com/tuliplabs-ai/tulip-frameworks)** wraps a tool from
+the framework you already use — **LangChain, LangGraph, CrewAI, the OpenAI Agents SDK,
+LlamaIndex, or Google ADK** — with the same `admit()` gate and hash-chained `AuditTrail`,
+in about three lines, no rebuild:
+
+```bash
+pip install "tulip-frameworks[langchain]"   # or [crewai] / [openai-agents] / [llama-index] / [adk] / [all]
+```
+
+Agents outside Python reach the same gate over the wire through
+[`tulip-gateway`](https://github.com/tuliplabs-ai/tulip-gateway)'s `/v1/admit` with the
+TypeScript client ([`tulip-frameworks-js`](https://github.com/tuliplabs-ai/tulip-frameworks-js)).
+See [the frameworks guide](https://tulipagents.ai/integrations/frameworks/).
+
+And `governed_agent()` gives any Tulip agent the full harness — grounded, guarded,
+risk-gated, audited — in one call:
+
+```python
+from tulip.control import governed_agent
+
+secured = governed_agent(model="openai:gpt-4o", tools=[...])
+assert secured.audit_trail.verify()   # the chain is intact — no record was altered
+```
+
+---
+
 ## What you get
+
+**Build** — the agent framework surface:
 
 | | |
 |---|---|
 | **[🧭 Cognitive router](https://tulipagents.ai/concepts/router/)** | Describe a task → eight named protocols → the right primitive compiled automatically. The LLM fills a typed schema; routing is deterministic. |
 | **[🤝 Multi-agent](https://tulipagents.ai/concepts/multi-agent/)** | Seven native patterns + cross-process A2A. One `Agent` class. One event stream. |
+| **[🔬 DeepAgent](https://tulipagents.ai/concepts/deepagent/)** | `create_deepagent` (single agent, per-turn grounding) and `create_research_workflow` (StateGraph with post-hoc grounding eval + two-level recovery). |
+| **[🪙 MCP](https://tulipagents.ai/concepts/mcp/)** | `MCPClient` consumes MCP (Model Context Protocol) servers. `TulipMCPServer` exposes the SDK's tools as MCP. |
+| **[🌐 Multi-modal](https://tulipagents.ai/concepts/multi-modal-providers/)** | `Agent(web_search=…, web_fetch=…, image_generator=…, speech_provider=…)` auto-registers tools. |
+
+**Control** — the runtime that clears actions:
+
+| | |
+|---|---|
 | **[⚖️ Admission gate](https://tulipagents.ai/concepts/security/)** | `admit()` / `approve()` run a consequential action only if your `ControlPolicy` allows — else hold for a human or deny, recorded either way. |
 | **[🧠 GSAR grounding](https://tulipagents.ai/concepts/gsar/)** | Claims partitioned grounded / ungrounded / contradicted / complementary; below threshold the agent regenerates, replans, or abstains. `arXiv:2604.23366`. |
-| **[🔬 DeepAgent](https://tulipagents.ai/concepts/deepagent/)** | `create_deepagent` (single agent, per-turn grounding) and `create_research_workflow` (StateGraph with post-hoc grounding eval + two-level recovery). |
-| **[📡 Observability](https://tulipagents.ai/concepts/observability/)** | Opt-in `EventBus` — one `run_context()` streams 40+ canonical events from every layer, no external broker. `TelemetryHook` for OpenTelemetry/OTLP. |
 | **[🔁 Idempotent tools](https://tulipagents.ai/concepts/idempotency/)** | `@tool(idempotent=True)` — dedupes on `(name, args)`. The model can't double-charge, double-book, or double-page. |
+| **[🪝 Hooks](https://tulipagents.ai/concepts/hooks/)** | Logging · OpenTelemetry · ModelRetry · Guardrails · Steering (LLM-as-judge). |
+
+**Run** — operate it in production:
+
+| | |
+|---|---|
+| **[📡 Observability](https://tulipagents.ai/concepts/observability/)** | Opt-in `EventBus` — one `run_context()` streams 40+ canonical events from every layer, no external broker. `TelemetryHook` for OpenTelemetry/OTLP. |
 | **[💾 Durable memory](https://tulipagents.ai/concepts/checkpointers/)** | 8 checkpoint backends — PostgreSQL · MySQL · Redis · OpenSearch · S3 / MinIO / R2 · in-memory · file · HTTP. |
 | **[🧠 Long-term memory](https://tulipagents.ai/concepts/memory-manager/)** | `Mem0MemoryManager` over [`mem0`](https://github.com/mem0ai/mem0). Portable path: `LLMMemoryManager` over any `BaseStore` (InMemory / Redis / Postgres / OpenSearch). |
 | **[🔎 RAG](https://tulipagents.ai/concepts/rag/)** | 5 vector stores — pgvector · Qdrant · Chroma · OpenSearch · in-memory. OpenAI + Cohere embeddings · local + Cohere rerankers · multimodal (PDF, image OCR, audio). |
 | **[📡 Streaming + Server](https://tulipagents.ai/concepts/server/)** | Typed events · SSE · `AgentServer` (FastAPI, single shared-key bearer auth, thread persistence). |
-| **[🪝 Hooks](https://tulipagents.ai/concepts/hooks/)** | Logging · OpenTelemetry · ModelRetry · Guardrails · Steering (LLM-as-judge). |
-| **[🪙 MCP](https://tulipagents.ai/concepts/mcp/)** | `MCPClient` consumes MCP (Model Context Protocol) servers. `TulipMCPServer` exposes the SDK's tools as MCP. |
-| **[🌐 Multi-modal](https://tulipagents.ai/concepts/multi-modal-providers/)** | `Agent(web_search=…, web_fetch=…, image_generator=…, speech_provider=…)` auto-registers tools. |
 | **[📊 Evaluation](https://tulipagents.ai/concepts/evaluation/)** | `EvalCase` / `EvalRunner` / `EvalReport` regression suites. |
 
 ---
@@ -415,33 +456,6 @@ pip install "tulip-agents[sdk]"           # everything
 → [Quickstart guide](https://tulipagents.ai/how-to/quickstart/)
 
 ---
-
-## Govern agents you already run
-
-You don't have to build on Tulip to be governed by it.
-**[`tulip-frameworks`](https://github.com/tuliplabs-ai/tulip-frameworks)** wraps a tool from
-the framework you already use — **LangChain, LangGraph, CrewAI, the OpenAI Agents SDK,
-LlamaIndex, or Google ADK** — with the same `admit()` gate and hash-chained `AuditTrail`,
-in about three lines, no rebuild:
-
-```bash
-pip install "tulip-frameworks[langchain]"   # or [crewai] / [openai-agents] / [llama-index] / [adk] / [all]
-```
-
-Agents outside Python reach the same gate over the wire through
-[`tulip-gateway`](https://github.com/tuliplabs-ai/tulip-gateway)'s `/v1/admit` with the
-TypeScript client ([`tulip-frameworks-js`](https://github.com/tuliplabs-ai/tulip-frameworks-js)).
-See [the frameworks guide](https://tulipagents.ai/integrations/frameworks/).
-
-And `governed_agent()` gives any Tulip agent the full harness — grounded, guarded,
-risk-gated, audited — in one call:
-
-```python
-from tulip.control import governed_agent
-
-secured = governed_agent(model="openai:gpt-4o", tools=[...])
-assert secured.audit_trail.verify()   # the chain is intact — no record was altered
-```
 
 ## Any domain, one contract
 
