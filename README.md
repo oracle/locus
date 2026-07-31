@@ -3,11 +3,14 @@
 </p>
 
 <p align="center">
-  <strong>Tulip — the safest way to build agentic AI.</strong><br>
-  <em>An open-source, full-stack agent SDK — tools, memory, multi-agent, RAG — on a runtime
-  where control is native: the <a href="https://tulipagents.ai/concepts/router/">cognitive router</a> picks the shape,
-  <a href="https://tulipagents.ai/concepts/gsar/">GSAR</a> grounds every claim or the agent abstains, and the admission gate runs a
-  consequential action only if your policy allows. Safe by construction, not by reminder.</em>
+  <strong>Tulip — an open-source agentic harness: agents that act, on a runtime where every
+  consequential action clears your policy, waits for a person when it matters, and lands on a
+  record you can prove.</strong><br>
+  <em>A full-stack agent SDK — tools, memory, multi-agent, RAG — on a runtime where control
+  is native. The <a href="https://tulipagents.ai/concepts/router/">cognitive router</a> picks the shape,
+  <a href="https://tulipagents.ai/concepts/gsar/">GSAR</a> (typed grounding — every claim must trace to evidence, or the agent
+  abstains) checks what gets asserted, and the admission gate runs a consequential action
+  only if your policy allows. Safe by construction, not by reminder.</em>
 </p>
 
 <p align="center">
@@ -70,13 +73,14 @@ No mandatory cloud account to start — a bundled `MockModel` lets every noteboo
 
 ## What is Tulip?
 
-**Tulip is a full-stack, open-source agentic framework — the safest way to build agentic AI.**
+**Tulip is a full-stack, open-source agentic harness — an SDK and runtime for agents that
+take real actions, where control lives in the runtime, not the prompt.**
 You get everything you'd expect: one `Agent` class, tools, durable memory, RAG, eight
-multi-agent shapes, streaming, and a typed event stream. What makes it *safe* is that
-control isn't a guardrail you remember to add — it's wired through three points in the core:
+multi-agent shapes, streaming, and a typed event stream. Control isn't a guardrail you
+remember to add — it's wired through three points in the core:
 
 - **The router controls *which shape* runs.** Describe a task in plain language; the
-  **[PRISM cognitive router](https://tulipagents.ai/concepts/router/)** fills a typed `GoalFrame` and a **deterministic** picker
+  **[cognitive router](https://tulipagents.ai/concepts/router/)** (PRISM, the router's classifier) fills a typed `GoalFrame` and a **deterministic** picker
   compiles it to the right runtime shape. The model classifies — it never authors the
   topology.
 - **[GSAR](https://tulipagents.ai/concepts/gsar/) controls *what gets asserted*.** Every claim is partitioned grounded / ungrounded
@@ -84,13 +88,13 @@ control isn't a guardrail you remember to add — it's wired through three point
   replans, or **abstains** — an ungrounded claim is a false result *by construction* and
   never ships.
 - **The admission gate controls *what actions fire*.** A consequential action — issue a
-  refund, ship a deploy, change an account, isolate a host — runs only after it clears
+  refund, ship a deploy, change an account, delete a customer record — runs only after it clears
   `admit()`: a policy check *outside the model*, held for a human when the stakes warrant,
   recorded on a tamper-evident trail either way.
 
-> **You can fool the model; you can't talk past the gate.** The admission check is real code,
-> outside the model — so even a jailbroken or misled agent can't fire a side-effecting call
-> your policy denies. Try it:
+> **A model can always be talked into something.** The admission check is real code outside
+> the model — so even a confused or misled agent cannot fire an action your policy denies.
+> Try it:
 > [`examples/can_you_make_it_go_rogue.py`](examples/can_you_make_it_go_rogue.py).
 
 ## See it in 60 seconds
@@ -99,7 +103,7 @@ control isn't a guardrail you remember to add — it's wired through three point
 |-----|---------------|
 | [`examples/notebook_06_basic_agent.py`](examples/notebook_06_basic_agent.py) | Your first agent — one `Agent`, one tool, the run loop. |
 | [`examples/notebook_58_cognitive_router.py`](examples/notebook_58_cognitive_router.py) | One natural-language task → the router compiles the right shape. |
-| [`examples/can_you_make_it_go_rogue.py`](examples/can_you_make_it_go_rogue.py) | Jailbreak an agent with live prod tools — the admission gate blocks the action anyway. |
+| [`examples/can_you_make_it_go_rogue.py`](examples/can_you_make_it_go_rogue.py) | Mislead an agent that holds live production tools — the gate still refuses the action. |
 
 ## Add a tool
 
@@ -207,7 +211,7 @@ action to an approval-gated agent — chosen by protocol selection, not by the m
 | `codegen_test_validate` | `LoopAgent` (stops on `PASS`) | `GENERATE_CODE` |
 | `approval_gated_execution` | `Agent` wrapped in approval interrupt | `ESCALATE`, `REMEDIATE` |
 | `handoff_chain` | `SequentialPipeline` of one-tool Agents | `COORDINATE` |
-| `a2a_delegate` | Cross-process A2A call (opt-in) | distributed meshes |
+| `a2a_delegate` | Cross-process agent-to-agent (A2A) call (opt-in) | distributed meshes |
 
 → [Cognitive router concept](https://tulipagents.ai/concepts/router/)
 
@@ -257,6 +261,9 @@ and inference outranks domain priors. Below threshold the run **regenerates, rep
 abstains**. There is no public constructor that emits a grounded result without a score, so
 an ungrounded claim is unshippable *by construction* — not filtered after the fact.
 
+Shown here through `tulip.security`, one domain application of the contract — the same
+partition types back any grounded result.
+
 ```python
 from tulip.reasoning.gsar import Claim, EvidenceType, Partition
 from tulip.security import ground_finding, Severity, is_finding
@@ -284,8 +291,8 @@ print(result.title if is_finding(result) else f"withheld: {result.reason}")
 ## The admission gate — an action runs only if policy allows
 
 The moment an agent stops advising and starts **acting**, a wrong step becomes a real
-consequence. A prompt rule is advisory — a jailbreak or an injected document talks the model
-past it. Tulip makes the rule **structural**: the side-effecting call runs only after it
+consequence. A prompt rule is advisory — a misleading input or an injected document can talk
+the model past it. Tulip makes the rule **structural**: the side-effecting call runs only after it
 clears `admit()`, a gate the model has no way to reach around.
 
 ```python
@@ -313,9 +320,9 @@ Production payments now require a human, and the attempt is recorded either way:
   `require_human_for`, verification score) and returns allow, hold, or deny.
 - **Admission** — `admit()` runs the action **only if** approval allows, recording the
   decision to the `AuditTrail`; otherwise it raises `AdmissionError`.
-- **Audit** — the trail is hash-chained; `verify()` catches any edit. (A keyless SHA-256
-  chain: tamper-evident, not notarized — add signing before treating it as legally
-  authoritative.)
+- **Audit** — every entry is linked to the one before it, so editing any record breaks
+  `verify()`. (A keyless SHA-256 chain: tamper-evident, not notarized — add signing before
+  treating it as legally authoritative.)
 
 Human approvals are durable: `require_human_for` pauses the run, and an `interrupt()` +
 checkpointer means the decision survives a restart and the run resumes where it left off.
@@ -330,17 +337,17 @@ checkpointer means the decision survives a restart and the run resumes where it 
 |---|---|
 | **[🧭 Cognitive router](https://tulipagents.ai/concepts/router/)** | Describe a task → eight named protocols → the right primitive compiled automatically. The LLM fills a typed schema; routing is deterministic. |
 | **[🤝 Multi-agent](https://tulipagents.ai/concepts/multi-agent/)** | Seven native patterns + cross-process A2A. One `Agent` class. One event stream. |
-| **[🛡 Admission gate](https://tulipagents.ai/concepts/security/)** | `admit()` / `approve()` run a consequential action only if your `ControlPolicy` allows — else hold for a human or deny, recorded either way. |
+| **[⚖️ Admission gate](https://tulipagents.ai/concepts/security/)** | `admit()` / `approve()` run a consequential action only if your `ControlPolicy` allows — else hold for a human or deny, recorded either way. |
 | **[🧠 GSAR grounding](https://tulipagents.ai/concepts/gsar/)** | Claims partitioned grounded / ungrounded / contradicted / complementary; below threshold the agent regenerates, replans, or abstains. `arXiv:2604.23366`. |
 | **[🔬 DeepAgent](https://tulipagents.ai/concepts/deepagent/)** | `create_deepagent` (single agent, per-turn grounding) and `create_research_workflow` (StateGraph with post-hoc grounding eval + two-level recovery). |
 | **[📡 Observability](https://tulipagents.ai/concepts/observability/)** | Opt-in `EventBus` — one `run_context()` streams 40+ canonical events from every layer, no external broker. `TelemetryHook` for OpenTelemetry/OTLP. |
-| **[🛡 Idempotent tools](https://tulipagents.ai/concepts/idempotency/)** | `@tool(idempotent=True)` — dedupes on `(name, args)`. The model can't double-charge, double-book, or double-page. |
+| **[🔁 Idempotent tools](https://tulipagents.ai/concepts/idempotency/)** | `@tool(idempotent=True)` — dedupes on `(name, args)`. The model can't double-charge, double-book, or double-page. |
 | **[💾 Durable memory](https://tulipagents.ai/concepts/checkpointers/)** | 8 checkpoint backends — PostgreSQL · MySQL · Redis · OpenSearch · S3 / MinIO / R2 · in-memory · file · HTTP. |
 | **[🧠 Long-term memory](https://tulipagents.ai/concepts/memory-manager/)** | `Mem0MemoryManager` over [`mem0`](https://github.com/mem0ai/mem0). Portable path: `LLMMemoryManager` over any `BaseStore` (InMemory / Redis / Postgres / OpenSearch). |
 | **[🔎 RAG](https://tulipagents.ai/concepts/rag/)** | 5 vector stores — pgvector · Qdrant · Chroma · OpenSearch · in-memory. OpenAI + Cohere embeddings · local + Cohere rerankers · multimodal (PDF, image OCR, audio). |
 | **[📡 Streaming + Server](https://tulipagents.ai/concepts/server/)** | Typed events · SSE · `AgentServer` (FastAPI, single shared-key bearer auth, thread persistence). |
 | **[🪝 Hooks](https://tulipagents.ai/concepts/hooks/)** | Logging · OpenTelemetry · ModelRetry · Guardrails · Steering (LLM-as-judge). |
-| **[🪙 MCP](https://tulipagents.ai/concepts/mcp/)** | `MCPClient` consumes MCP servers. `TulipMCPServer` exposes the SDK's tools as MCP. |
+| **[🪙 MCP](https://tulipagents.ai/concepts/mcp/)** | `MCPClient` consumes MCP (Model Context Protocol) servers. `TulipMCPServer` exposes the SDK's tools as MCP. |
 | **[🌐 Multi-modal](https://tulipagents.ai/concepts/multi-modal-providers/)** | `Agent(web_search=…, web_fetch=…, image_generator=…, speech_provider=…)` auto-registers tools. |
 | **[📊 Evaluation](https://tulipagents.ai/concepts/evaluation/)** | `EvalCase` / `EvalRunner` / `EvalReport` regression suites. |
 
@@ -438,10 +445,12 @@ assert secured.audit_trail.verify()   # the chain is intact — no record was al
 
 ## Any domain, one contract
 
-The same contracts run wherever an agent acts — support, payments, infrastructure, data,
-security. One worked example: `tulip.security` applies the grounded-evidence contract to
-red-teaming AI systems — every result is a grounded `Evidence` (tagged with the standard
-catalogues: MITRE ATLAS, OWASP LLM / Agentic Top 10) or an explicit `Abstention`:
+The same contracts run wherever an agent acts — a support desk approving concessions, a
+payments team settling disputes, an infra team gating deploys. One fully worked domain
+package ships today: `tulip.security` applies the grounded-evidence contract to red-teaming
+— systematically probing — AI systems: every result is a grounded `Evidence`, tagged
+against public weakness catalogues (MITRE ATLAS, OWASP LLM / Agentic Top 10), or an
+explicit `Abstention`:
 
 ```python
 from tulip.security import Target, red_team, is_finding
@@ -487,7 +496,7 @@ python examples/notebook_69_research_workflow.py     # full research pipeline
 | Track | What you learn |
 |---|---|
 | **Agent Foundations** | Agent, tools, memory, streaming, hooks, termination |
-| **Graphs & composition** | StateGraph, conditional routing, reducers, HITL, composition, functional API |
+| **Graphs & composition** | StateGraph, conditional routing, reducers, human-in-the-loop (HITL), composition, functional API |
 | **Multi-agent** | Swarm, handoff, orchestrator, A2A, DeepAgent, debate, emergent routing |
 | **Reasoning & structured** | Pydantic schemas, reasoning patterns, GSAR typed grounding |
 | **RAG** | Basics, vector stores, embeddings, rerankers, RAG agents |
