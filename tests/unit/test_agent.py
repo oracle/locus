@@ -523,6 +523,53 @@ class TestAgentRun:
         assert events[1].reason == "complete"
 
     @pytest.mark.asyncio
+    async def test_think_event_prefers_response_reasoning(self, mock_model, monkeypatch):
+        """Reasoning models: ThinkEvent.reasoning uses the CoT channel."""
+        monkeypatch.setattr("tulip.agent.agent.get_model", lambda m: mock_model)
+
+        mock_model.complete.return_value = ModelResponse(
+            message=Message.assistant("The answer is 42."),
+            usage={},
+            stop_reason="end_turn",
+            reasoning="Let me think step by step...",
+        )
+
+        agent = Agent(model="openai:qwen3.6-35b", tools=[])
+        events = []
+        async for event in agent.run("What is the answer?"):
+            events.append(event)
+
+        think = events[0]
+        assert isinstance(think, ThinkEvent)
+        assert think.reasoning == "Let me think step by step..."
+        assert isinstance(events[1], TerminateEvent)
+        assert events[1].final_message == "The answer is 42."
+
+    @pytest.mark.asyncio
+    async def test_think_event_falls_back_to_content_for_mock_reasoning(
+        self, mock_model, monkeypatch
+    ):
+        """MagicMock reasoning must not leak into ThinkEvent (Pydantic safety)."""
+        monkeypatch.setattr("tulip.agent.agent.get_model", lambda m: mock_model)
+
+        # A MagicMock leaked through ``complete`` (integration-style stubs)
+        # is truthy but not a str — the loop must fall back to content.
+        class _FakeResponse:
+            message = Message.assistant("plain answer")
+            usage = {}
+            stop_reason = "end_turn"
+            reasoning = MagicMock()
+
+        mock_model.complete.return_value = _FakeResponse()
+        agent = Agent(model="openai:gpt-4o", tools=[])
+        events = []
+        async for event in agent.run("Hi"):
+            events.append(event)
+
+        assert isinstance(events[0], ThinkEvent)
+        assert events[0].reasoning == "plain answer"
+
+    @pytest.mark.asyncio
     async def test_tool_execution(self, mock_model, sample_tool, monkeypatch):
         """Test execution with tool call."""
         monkeypatch.setattr("tulip.agent.agent.get_model", lambda m: mock_model)

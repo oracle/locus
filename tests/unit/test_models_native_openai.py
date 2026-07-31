@@ -55,9 +55,11 @@ class _MsgStub:
         *,
         content: str | None = "",
         tool_calls: list[_ToolCallStub] | None = None,
+        reasoning_content: str | None = None,
     ) -> None:
         self.content = content
         self.tool_calls = tool_calls or []
+        self.reasoning_content = reasoning_content
 
 
 class _Usage:
@@ -118,9 +120,11 @@ class _Delta:
         *,
         content: str | None = None,
         tool_calls: list[_ToolDelta] | None = None,
+        reasoning_content: str | None = None,
     ) -> None:
         self.content = content
         self.tool_calls = tool_calls
+        self.reasoning_content = reasoning_content
 
 
 class _ChunkChoice:
@@ -346,6 +350,44 @@ class TestParseResponse:
         assert out.message.content is None
         assert out.message.tool_calls == []
 
+    def test_parses_reasoning_content(self) -> None:
+        # Qwen/DeepSeek via vLLM put the CoT in ``reasoning_content``.
+        m = OpenAIModel()
+        resp = _Response(
+            choices=[
+                _Choice(
+                    message=_MsgStub(
+                        content="The answer is 42.",
+                        reasoning_content="Let me think step by step...",
+                    )
+                )
+            ],
+            usage=None,
+        )
+        out = m._parse_response(resp)
+        assert out.message.content == "The answer is 42."
+        assert out.reasoning == "Let me think step by step..."
+
+    def test_reasoning_none_when_absent(self) -> None:
+        m = OpenAIModel()
+        resp = _Response(choices=[_Choice(message=_MsgStub(content="plain"))])
+        out = m._parse_response(resp)
+        assert out.reasoning is None
+
+    def test_parses_reasoning_field_variant(self) -> None:
+        # Some vLLM builds name the CoT channel ``reasoning`` instead of
+        # ``reasoning_content`` — accept both.
+        class _Msg:
+            content = "Answer."
+            reasoning = "CoT via reasoning field."
+            tool_calls = []
+
+        m = OpenAIModel()
+        resp = _Response(choices=[_Choice(message=_Msg())])
+        out = m._parse_response(resp)
+        assert out.message.content == "Answer."
+        assert out.reasoning == "CoT via reasoning field."
+
 
 # ---------------------------------------------------------------------------
 # complete request shaping
@@ -558,6 +600,66 @@ class TestStream:
         m = _model_with(client)
         events = [ev async for ev in m.stream([Message.user("hi")])]
         assert any(ev.content == "ok" for ev in events)
+
+    @pytest.mark.asyncio
+    async def test_yields_reasoning_deltas(self) -> None:
+        # Qwen/DeepSeek via vLLM stream CoT in delta.reasoning_content.
+        chunks = [
+            _Chunk(choices=[_ChunkChoice(delta=_Delta(reasoning_content="Let me "))]),
+            _Chunk(choices=[_ChunkChoice(delta=_Delta(reasoning_content="think."))]),
+            _Chunk(choices=[_ChunkChoice(delta=_Delta(content="Final answer"))]),
+            _Chunk(choices=[_ChunkChoice(delta=_Delta(), finish_reason="stop")]),
+        ]
+        client = _client_with(stream_chunks=chunks)
+        m = _model_with(client)
+        events = [ev async for ev in m.stream([Message.user("hi")])]
+        reasoning = [ev.reasoning for ev in events if ev.reasoning]
+        assert reasoning == ["Let me ", "think."]
+        # Content stays in its own channel.
+        assert [ev.content for ev in events if ev.content] == ["Final answer"]
+
+    @pytest.mark.asyncio
+    async def test_reasoning_and_content_not_mixed(self) -> None:
+        # A reasoning chunk must never be mislabelled as content.
+        chunks = [
+            _Chunk(choices=[_ChunkChoice(delta=_Delta(reasoning_content="CoT"))]),
+            _Chunk(choices=[_ChunkChoice(delta=_Delta(), finish_reason="stop")]),
+        ]
+        client = _client_with(stream_chunks=chunks)
+        m = _model_with(client)
+        events = [ev async for ev in m.stream([Message.user("hi")])]
+        assert not any(ev.content == "CoT" for ev in events)
+        assert [ev.reasoning for ev in events if ev.reasoning] == ["CoT"]
+
+    @pytest.mark.asyncio
+    async def test_yields_reasoning_via_reasoning_field(self) -> None:
+        # vLLM builds that use ``delta.reasoning`` (not
+        # ``reasoning_content``) must surface the CoT the same way.
+        chunks = [
+            _Chunk(choices=[_ChunkChoice(delta=_Delta(reasoning_content="CoT via parser"))]),
+            _Chunk(choices=[_ChunkChoice(delta=_Delta(), finish_reason="stop")]),
+        ]
+        client = _client_with(stream_chunks=chunks)
+        m = _model_with(client)
+        events = [ev async for ev in m.stream([Message.user("hi")])]
+        assert [ev.reasoning for ev in events if ev.reasoning] == ["CoT via parser"]
+
+        # Same behaviour for the ``delta.reasoning`` variant.
+        class _ReasoningDelta(_Delta):
+            def __init__(self, reasoning: str) -> None:
+                self.content = None
+                self.tool_calls = None
+                self.reasoning_content = None
+                self.reasoning = reasoning
+
+        chunks = [
+            _Chunk(choices=[_ChunkChoice(delta=_ReasoningDelta("CoT via field"))]),
+            _Chunk(choices=[_ChunkChoice(delta=_Delta(), finish_reason="stop")]),
+        ]
+        client = _client_with(stream_chunks=chunks)
+        m = _model_with(client)
+        events = [ev async for ev in m.stream([Message.user("hi")])]
+        assert [ev.reasoning for ev in events if ev.reasoning] == ["CoT via field"]
 
 
 # ---------------------------------------------------------------------------

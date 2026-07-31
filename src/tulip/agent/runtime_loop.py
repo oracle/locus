@@ -390,10 +390,12 @@ class AgentRuntimeMixin:
                 if self.config.planning and state.iteration == 1 and response.message.content:
                     state = state.with_metadata("plan", response.message.content)
 
-                # Emit think event
+                # Emit think event. Reasoning models surface their CoT in
+                # ``response.reasoning`` (separate channel) — prefer it over
+                # the answer text in ``message.content``.
                 yield ThinkEvent(
                     iteration=state.iteration,
-                    reasoning=response.message.content,
+                    reasoning=self._reasoning_for(response),
                     tool_calls=list(response.message.tool_calls),
                 )
 
@@ -1209,7 +1211,7 @@ class AgentRuntimeMixin:
 
                 yield ThinkEvent(
                     iteration=state.iteration,
-                    reasoning=response.message.content,
+                    reasoning=self._reasoning_for(response),
                     tool_calls=list(response.message.tool_calls),
                 )
 
@@ -1397,6 +1399,22 @@ class AgentRuntimeMixin:
         # For run_sync, we need to reconstruct the final state
         state = await self._create_initial_state(prompt, thread_id, metadata)
         return state
+
+    @staticmethod
+    def _reasoning_for(response: Any) -> str | None:
+        """Pick the reasoning text to surface for a model response.
+
+        Reasoning models expose their chain of thought via
+        ``response.reasoning`` (a channel separate from the answer text).
+        Fall back to ``message.content`` for models that don't — and
+        guard with ``isinstance`` so MagicMock-heavy test stubs can't
+        leak a Mock into the Pydantic ``reasoning`` field.
+        """
+        candidate = response.reasoning
+        if isinstance(candidate, str) and candidate:
+            return candidate
+        content = response.message.content
+        return content if isinstance(content, str) else None
 
     @staticmethod
     def _validate_messages(messages: list[Message]) -> list[Message]:

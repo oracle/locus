@@ -68,6 +68,8 @@ class TestSeedLookups:
             ("o3", "openai", 200_000),
             ("claude-opus-4", "anthropic", 1_000_000),
             ("claude-haiku-4", "anthropic", 200_000),
+            ("qwen3.6-35b", "qwen", 262_000),
+            ("qwen3.6-35b-a3b", "qwen", 262_000),
         ],
     )
     def test_known_model(self, model_id: str, expected_family: str, expected_window: int) -> None:

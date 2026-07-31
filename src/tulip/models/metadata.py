@@ -270,3 +270,20 @@ _seed(
     input_price_per_mtok="0.80",
     output_price_per_mtok="4.00",
 )
+
+# Qwen (Alibaba) — open-weight reasoning models commonly served via
+# vLLM with ``--reasoning-parser qwen``. Context windows as published
+# for the Qwen3.5 / Qwen3.6 family (2026); pricing is None because
+# these are almost always self-hosted.
+_seed(
+    "qwen3.6-35b",
+    family="qwen",
+    context_length=262_000,
+    max_output_tokens=32_768,
+)
+_seed(
+    "qwen3.6-35b-a3b",
+    family="qwen",
+    context_length=262_000,
+    max_output_tokens=32_768,
+)

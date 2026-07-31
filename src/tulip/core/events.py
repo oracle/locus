@@ -120,6 +120,11 @@ class ModelChunkEvent(TulipEvent):
 
     event_type: Literal["model_chunk"] = "model_chunk"
     content: str | None = None
+    # Chain-of-thought delta from reasoning models (Qwen/DeepSeek via
+    # vLLM surface it as ``delta.reasoning_content``). Separate from
+    # ``content`` so streaming consumers can render CoT distinctly or
+    # accumulate it independently.
+    reasoning: str | None = None
     tool_calls: list[ToolCall] | None = None
     done: bool = False
 

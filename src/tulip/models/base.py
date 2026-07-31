@@ -81,6 +81,11 @@ class ModelResponse(BaseModel):
     # "resp_abc"}``) so the agent can thread it into the next
     # ``complete()`` call without resending the full history.
     provider_state: dict[str, Any] | None = None
+    # Chain-of-thought surfaced by reasoning models (OpenAI o-series,
+    # Qwen/DeepSeek via vLLM, Gemini thinking, etc.). Providers that
+    # ship reasoning in a channel separate from ``message.content`` set
+    # this; the agent loop prefers it for ``ThinkEvent.reasoning``.
+    reasoning: str | None = None
 
     @property
     def content(self) -> str | None:

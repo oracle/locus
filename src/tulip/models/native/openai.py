@@ -238,6 +238,22 @@ class OpenAIModel(BaseModel):
         msg = getattr(choice, "message", None)
 
         content = msg.content if msg is not None else None
+        # Reasoning models (Qwen/DeepSeek via vLLM, o-series, gpt-5)
+        # emit their chain of thought in a channel separate from
+        # ``content``. The exact field name varies by deployment:
+        # ``reasoning_content`` is the OpenAI-compatible / vLLM
+        # ``--reasoning-parser qwen`` convention, while some vLLM
+        # builds use ``reasoning``. Accept both so the CoT surfaces as
+        # ``ThinkEvent.reasoning`` regardless of server variant.
+        # The ``isinstance`` guard keeps MagicMock-heavy test stubs
+        # from leaking a Mock into the Pydantic ``reasoning`` field.
+        reasoning: str | None = None
+        if msg is not None:
+            for _field in ("reasoning_content", "reasoning"):
+                _candidate = getattr(msg, _field, None)
+                if isinstance(_candidate, str) and _candidate:
+                    reasoning = _candidate
+                    break
         tool_calls: list[ToolCall] = []
 
         if msg is not None and msg.tool_calls:
@@ -264,6 +280,7 @@ class OpenAIModel(BaseModel):
             message=message,
             usage=usage,
             stop_reason=choice.finish_reason,
+            reasoning=reasoning,
         )
 
     async def complete(
@@ -442,6 +459,24 @@ class OpenAIModel(BaseModel):
             # Handle content
             if delta is not None and delta.content:
                 yield ModelChunkEvent(content=delta.content)
+
+            # Handle reasoning (chain-of-thought) deltas. Qwen / DeepSeek
+            # served via vLLM stream their CoT in a channel separate from
+            # ``content`` — ``delta.reasoning_content`` with
+            # ``--reasoning-parser qwen``, ``delta.reasoning`` on some
+            # builds. Accept both, as its own event so consumers can
+            # render it distinctly or accumulate it independently.
+            # The ``isinstance`` guard keeps MagicMock-heavy test stubs
+            # from leaking a Mock into ``ModelChunkEvent.reasoning``.
+            reasoning_delta: str | None = None
+            if delta is not None:
+                for _field in ("reasoning_content", "reasoning"):
+                    _candidate = getattr(delta, _field, None)
+                    if isinstance(_candidate, str) and _candidate:
+                        reasoning_delta = _candidate
+                        break
+            if reasoning_delta:
+                yield ModelChunkEvent(reasoning=reasoning_delta)
 
             # Handle tool calls
             if delta is not None and delta.tool_calls:
