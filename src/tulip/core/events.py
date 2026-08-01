@@ -127,6 +127,13 @@ class ModelChunkEvent(TulipEvent):
     reasoning: str | None = None
     tool_calls: list[ToolCall] | None = None
     done: bool = False
+    # Set on the terminal chunk. ``usage`` arrives only if the caller asked
+    # for it (OpenAI: ``stream_options={"include_usage": True}``). Without
+    # these a streaming consumer cannot meter a turn, and cannot tell a
+    # natural stop from a ``length`` truncation — which on reasoning models
+    # surfaces as an empty reply rather than an error.
+    usage: dict[str, int] | None = None
+    stop_reason: str | None = None
 
 
 class ModelCompleteEvent(TulipEvent):

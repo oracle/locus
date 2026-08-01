@@ -114,9 +114,74 @@ async def example_live_call() -> None:
     )
 
 
+async def example_request_parameters() -> None:
+    """Configuring a model, and reaching the parts of the API that need it.
+
+    Two distinct places, and the difference matters:
+
+      model config  — fixed for the model's lifetime (temperature, top_p,
+                      penalties, extra_body)
+      model_kwargs  — per run, passed to ``agent.run(...)``; wins over the
+                      above, and is the only workable home for anything that
+                      changes between runs, ``tool_choice`` above all
+
+    Any Chat Completions parameter the caller passes is forwarded, so
+    ``tool_choice``, ``parallel_tool_calls``, ``logprobs``, ``n``,
+    ``stream_options`` and the rest are reachable without leaving the SDK.
+    """
+    print("\n=== Request parameters ===\n")
+
+    print("Model configuration (fixed for the model's lifetime):")
+    print(
+        """    model = get_model(
+        "openai:qwen3.6-35b",
+        base_url="http://localhost:8000/v1",
+        temperature=1.0,
+        top_p=0.95,
+        presence_penalty=1.5,
+    )"""
+    )
+
+    print("\nPer-run parameters (win over the above):")
+    print(
+        """    async for event in agent.run(
+        "Book a flight to Tokyo",
+        model_kwargs={
+            "tool_choice": {"type": "function", "function": {"name": "search_flights"}},
+            "logprobs": True,
+        },
+    ):
+        ...
+    # tool_choice applies to every iteration of that run, not just the first"""
+    )
+
+    print("\nSelf-hosted / OpenAI-compatible servers (vLLM, Ollama, LM Studio):")
+    print(
+        """    # Pass None to omit a parameter entirely, so the server's own
+    # generation_config.json applies. A value sent unasked overrides what
+    # the model publishes as its recommended sampling.
+    model = get_model("openai:qwen3.6-35b", base_url=..., temperature=None, top_p=None)
+
+    # extra_body carries fields outside the OpenAI schema
+    model_kwargs={"extra_body": {
+        "top_k": 20,
+        "repetition_penalty": 1.05,
+        "chat_template_kwargs": {"enable_thinking": False},
+    }}"""
+    )
+
+    print(
+        "\nNote: a server may reject a parameter depending on how it was\n"
+        "launched. vLLM with speculative decoding enabled returns\n"
+        "'The min_p and logit_bias sampling parameters are not yet supported\n"
+        "with speculative decoding' — a server constraint, not an SDK one.\n"
+    )
+
+
 async def main() -> None:
     await example_providers()
     await example_direct()
+    await example_request_parameters()
     await example_live_call()
 
 

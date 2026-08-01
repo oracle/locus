@@ -8,7 +8,68 @@ policy.
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-08-01
+
+### Added
+
+- **Token-level streaming from the agent loop.** `agent.run(..., stream_tokens=True)`
+  also yields `ModelChunkEvent` as the model produces them, so text and
+  chain-of-thought render while the turn is still running. Tool and termination
+  events are unchanged and the assembled response is identical to the
+  non-streaming one, so hooks, retries, grounding and termination behave the
+  same. Off by default — it changes which event types a consumer sees.
+  Previously a streaming chat UI had to abandon the loop and re-implement ReAct
+  over a raw provider client, losing admission, audit and the tool-loop guard
+  with it (#52).
+- **The full Chat Completions surface is reachable.** `complete()` / `stream()`
+  read six keys out of `**kwargs` and dropped the rest — of the 36 parameters
+  the API accepts, 23 were silently discarded, including `tool_choice`,
+  `parallel_tool_calls`, `stream_options`, `logprobs` and `reasoning_effort`.
+  Any Chat Completions parameter the caller passes is now forwarded; the
+  accepted set is introspected from the `openai` package's own request
+  TypedDicts, so a field OpenAI adds is forwardable on a dependency bump rather
+  than waiting on a hand-maintained list (#56).
+- **`extra_body` on the OpenAI provider** for fields outside the OpenAI schema —
+  vLLM's `chat_template_kwargs` (`enable_thinking`), `top_k`, `min_p`,
+  `repetition_penalty`. Per-call values merge over config, and it applies to
+  reasoning models too, which reject sampling parameters but still accept
+  provider extensions (#56).
+- **Per-run model parameters from `Agent`.** `run()`, `arun()` and `run_sync()`
+  take `model_kwargs`, forwarded to the model call and winning over agent
+  config. Model configuration is fixed for a model's lifetime, which is the
+  wrong shape for anything that must vary per run — `tool_choice` above all (#55).
+- **`ModelResponse.logprobs` and `ModelResponse.candidates`.** Both reached the
+  server already but had nowhere to land, so the tokens were paid for and
+  discarded; `n>1` is now usable and single-candidate callers see an empty
+  list (#53).
+- **`ModelChunkEvent.usage` and `.stop_reason`** on the terminal chunk, so a
+  streaming caller can meter a turn and tell a natural stop from a `length`
+  truncation — which on reasoning models otherwise surfaces as an empty reply
+  rather than an error (#54).
+
 ### Fixed
+
+- **Sampling the caller configured is no longer discarded.** The loop sent
+  `AgentConfig.temperature` (0.7) and `max_tokens` (4096) unconditionally, and
+  those land as *per-call* arguments that beat a provider's own config — so
+  `get_model("openai:…", temperature=1.0, max_tokens=8192)` was silently
+  ignored and every turn went out at 0.7 / 4096. Both now default to `None`
+  (defer to the model) and are sent only when explicitly set. Effective
+  defaults are unchanged, since `ModelConfig` also defaults to 0.7 / 4096.
+- **`temperature` / `top_p` of `None` are omitted from the request**, letting a
+  server's own defaults apply. Self-hosted models publish their recommended
+  sampling in `generation_config.json`, and a value sent unasked overrides it.
+- **Mid-run guidance no longer 400s on OpenAI-compatible servers.** The loop
+  injects grounding replans, repair prompts and iteration nudges as *system*
+  messages, and several chat templates accept a system message only in first
+  position — vLLM serving Qwen rejects the request outright with `System
+  message must be at the beginning`, killing a run partway through and only
+  when it happened to need guidance. Later system messages are now re-encoded
+  as marked user notes, preserving the text and its steering (#57).
+- **Anthropic streaming dropped every tool call.** `stream()` read only
+  `text_stream`, so `tool_use` blocks, usage and the stop reason never
+  surfaced — a streaming tool-using agent silently made no tool calls at all.
+  It now reads the assembled final message (#52).
 
 - **`PgMemory` could not create its own schema with default settings.** `dim`
   defaulted to 1024 and the HRR `[cos φ, sin φ]` encoding doubles it, asking
@@ -26,6 +87,15 @@ policy.
 - **`PgMemory` now detects a pre-existing table of a different vector width**
   (`CREATE TABLE IF NOT EXISTS` kept it silently) and fails with the two widths
   and the remedy instead of a per-INSERT `expected N dimensions, not M`.
+
+### Documentation
+
+- Notebook 11 gains a token-streaming example, and its header no longer implies
+  the default streams tokens.
+- Notebook 56 documents model configuration, per-run `model_kwargs`, and the
+  self-hosted sharp edges: omitting sampling with `None`, `extra_body`, and
+  server-side rejections such as vLLM refusing `min_p` / `logit_bias` under
+  speculative decoding (#56).
 
 ## [2.2.0] - 2026-07-23
 

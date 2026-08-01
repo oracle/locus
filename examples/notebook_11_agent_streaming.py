@@ -18,6 +18,11 @@ Key ideas:
 - ``TerminateEvent``: the loop ended; carries the final message, stop
   reason, and iteration count.
 - You filter the stream by ``isinstance(event, EventType)``.
+- ``agent.run(...)`` is **event-level** by default — the assistant's text
+  arrives when a step completes, not token by token. For token-level
+  output pass ``stream_tokens=True`` and also handle
+  ``ModelChunkEvent`` (Part 6); chain-of-thought arrives on its own
+  ``reasoning`` channel so a UI can render it separately.
 - ``StructuredStream`` (mentioned at the end) wraps the stream and
   yields partial Pydantic instances as JSON arrives.
 
@@ -45,6 +50,7 @@ from config import get_model, print_config
 
 from tulip.agent import Agent
 from tulip.core.events import (
+    ModelChunkEvent,
     TerminateEvent,
     ThinkEvent,
     ToolCompleteEvent,
@@ -81,6 +87,49 @@ def extract_pii(text: str) -> str:
     if not any(found.values()):
         return "No PII or sensitive-data cues found"
     return f"emails={found['emails']} phones={found['phones']} cues={found['cues']}"
+
+
+async def example_token_streaming():
+    """Render text as the model produces it, not after the turn finishes.
+
+    ``agent.run(...)`` is event-level by default: you learn what the agent
+    decided, one step at a time, but the assistant's text arrives in one piece
+    when the step completes. Pass ``stream_tokens=True`` and the loop also
+    yields ``ModelChunkEvent`` as the model emits them — which is what a chat
+    UI needs to show a reply landing word by word.
+
+    Tool and termination events are unchanged, so the ReAct loop, the tool-loop
+    guard and audit all still apply. This is the difference between building a
+    streaming UI *on* the harness and abandoning it for a raw client.
+    """
+    print("=== Part 6: Token-level streaming ===\n")
+
+    model = get_model(max_tokens=200)
+    agent = Agent(
+        model=model,
+        tools=[extract_pii],
+        system_prompt="You are a data-privacy analyst. Always run extract_pii on the record.",
+    )
+
+    record = "Subject record: contact jane.doe@example.com or 555-0142."
+    print("Streaming the reply as it is generated:\n")
+
+    reasoning_chars = 0
+    print("  ", end="", flush=True)
+    async for event in agent.run(f"Analyze this record: {record}", stream_tokens=True):
+        if isinstance(event, ModelChunkEvent):
+            # Chain-of-thought arrives on its own channel, so a UI can show it
+            # in a collapsed panel instead of mixing it into the answer.
+            if event.reasoning:
+                reasoning_chars += len(event.reasoning)
+            if event.content:
+                print(event.content, end="", flush=True)
+        elif isinstance(event, ToolStartEvent):
+            print(f"\n  [tool: {event.tool_name}]\n  ", end="", flush=True)
+        elif isinstance(event, TerminateEvent):
+            print(f"\n\n  stop reason: {event.reason}")
+
+    print(f"  chain-of-thought streamed separately: {reasoning_chars} chars\n")
 
 
 async def example_all_events():
@@ -397,6 +446,7 @@ def main():
     asyncio.run(example_event_filtering())
     asyncio.run(example_collect_metrics())
     asyncio.run(example_progress_tracking())
+    asyncio.run(example_token_streaming())
 
     # =========================================================================
     # See also: structured streaming

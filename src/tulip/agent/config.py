@@ -525,17 +525,25 @@ class AgentConfig(BaseModel):
     )
 
     # Model parameters
-    temperature: float = Field(
-        default=0.7,
+    temperature: float | None = Field(
+        default=None,
         ge=0.0,
         le=2.0,
-        description="Model temperature",
+        description=(
+            "Model temperature. ``None`` (the default) defers to the model's "
+            "own configuration — an agent-level value is forwarded as a "
+            "per-call override and would otherwise silently beat whatever "
+            "get_model(...) was given."
+        ),
     )
 
-    max_tokens: int = Field(
-        default=4096,
+    max_tokens: int | None = Field(
+        default=None,
         ge=1,
-        description="Max tokens per completion",
+        description=(
+            "Max tokens per completion. ``None`` (the default) defers to the "
+            "model's own configuration, for the same reason as temperature."
+        ),
     )
 
     # Metadata

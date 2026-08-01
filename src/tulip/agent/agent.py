@@ -224,6 +224,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
         *,
         thread_id: str | None = None,
         metadata: dict[str, Any] | None = None,
+        model_kwargs: dict[str, Any] | None = None,
     ) -> AgentResult:
         """
         Run the agent asynchronously and return a single ``AgentResult``.
@@ -254,7 +255,14 @@ class Agent(AgentRuntimeMixin, BaseModel):
 
         callback = self.config.callback_handler
 
-        async for event in self.run(prompt, thread_id=thread_id, metadata=metadata):
+        # Only forward ``model_kwargs`` when the caller supplied it, so an
+        # existing subclass or test double that overrides ``run`` with the
+        # previous signature keeps working.
+        run_kwargs: dict[str, Any] = {"thread_id": thread_id, "metadata": metadata}
+        if model_kwargs is not None:
+            run_kwargs["model_kwargs"] = model_kwargs
+
+        async for event in self.run(prompt, **run_kwargs):
             # Fire callback if set
             if callback is not None:
                 callback(event)
@@ -327,6 +335,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
         *,
         thread_id: str | None = None,
         metadata: dict[str, Any] | None = None,
+        model_kwargs: dict[str, Any] | None = None,
     ) -> AgentResult:
         """
         Run the agent synchronously.
@@ -355,7 +364,9 @@ class Agent(AgentRuntimeMixin, BaseModel):
             # to ``aclose`` against the now-closed loop, raising
             # ``RuntimeError: Event loop is closed``.
             try:
-                return await self.arun(prompt, thread_id=thread_id, metadata=metadata)
+                return await self.arun(
+                    prompt, thread_id=thread_id, metadata=metadata, model_kwargs=model_kwargs
+                )
             finally:
                 close = getattr(self.model, "close", None)
                 if close is not None:

@@ -737,3 +737,423 @@ class TestStreamRequestShaping:
         async for _ in m.stream([Message.user("hi")], tools=[{"name": "search", "parameters": {}}]):
             pass
         assert client.chat.completions.create.call_args.kwargs["tools"][0]["type"] == "function"
+
+
+# ---------------------------------------------------------------------------
+# Sampling params: None means "let the server decide"
+# ---------------------------------------------------------------------------
+
+
+class TestSamplingOmission:
+    """Self-hosted models publish sampling defaults in ``generation_config.json``.
+    Sending ours unasked overrides the model's own recommendation, so ``None``
+    must leave the parameter out of the request entirely."""
+
+    @pytest.mark.asyncio
+    async def test_none_temperature_is_omitted(self) -> None:
+        client = _client_with()
+        m = _model_with(client, temperature=None)
+        await m.complete([Message.user("hi")])
+        args = client.chat.completions.create.call_args.kwargs
+        assert "temperature" not in args
+        assert args["top_p"] == 0.9  # unset params still send their default
+
+    @pytest.mark.asyncio
+    async def test_none_top_p_is_omitted(self) -> None:
+        client = _client_with()
+        m = _model_with(client, top_p=None)
+        await m.complete([Message.user("hi")])
+        args = client.chat.completions.create.call_args.kwargs
+        assert "top_p" not in args
+        assert args["temperature"] == 0.7
+
+    @pytest.mark.asyncio
+    async def test_both_omitted_leaves_server_defaults(self) -> None:
+        client = _client_with()
+        m = _model_with(client, temperature=None, top_p=None)
+        await m.complete([Message.user("hi")])
+        args = client.chat.completions.create.call_args.kwargs
+        assert "temperature" not in args
+        assert "top_p" not in args
+
+    @pytest.mark.asyncio
+    async def test_defaults_are_unchanged(self) -> None:
+        """Existing callers must see identical behaviour."""
+        client = _client_with()
+        m = _model_with(client)
+        await m.complete([Message.user("hi")])
+        args = client.chat.completions.create.call_args.kwargs
+        assert args["temperature"] == 0.7
+        assert args["top_p"] == 0.9
+
+    @pytest.mark.asyncio
+    async def test_per_call_override_wins(self) -> None:
+        client = _client_with()
+        m = _model_with(client, temperature=0.7)
+        await m.complete([Message.user("hi")], temperature=None)
+        assert "temperature" not in client.chat.completions.create.call_args.kwargs
+
+    @pytest.mark.asyncio
+    async def test_stream_omits_none_sampling(self) -> None:
+        client = _client_with(
+            stream_chunks=[_Chunk(choices=[_ChunkChoice(delta=_Delta(), finish_reason="stop")])]
+        )
+        m = _model_with(client, temperature=None, top_p=None)
+        async for _ in m.stream([Message.user("hi")]):
+            pass
+        args = client.chat.completions.create.call_args.kwargs
+        assert "temperature" not in args
+        assert "top_p" not in args
+
+
+# ---------------------------------------------------------------------------
+# extra_body: provider-specific request fields
+# ---------------------------------------------------------------------------
+
+
+class TestExtraBody:
+    """OpenAI-compatible servers accept fields the OpenAI schema has no slot
+    for — vLLM's ``chat_template_kwargs``, ``top_k``, ``min_p``. Without a
+    passthrough they are unreachable through the SDK."""
+
+    @pytest.mark.asyncio
+    async def test_config_extra_body_is_forwarded(self) -> None:
+        client = _client_with()
+        m = _model_with(client, extra_body={"chat_template_kwargs": {"enable_thinking": False}})
+        await m.complete([Message.user("hi")])
+        args = client.chat.completions.create.call_args.kwargs
+        assert args["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
+
+    @pytest.mark.asyncio
+    async def test_absent_by_default(self) -> None:
+        client = _client_with()
+        m = _model_with(client)
+        await m.complete([Message.user("hi")])
+        assert "extra_body" not in client.chat.completions.create.call_args.kwargs
+
+    @pytest.mark.asyncio
+    async def test_per_call_merges_over_config(self) -> None:
+        client = _client_with()
+        m = _model_with(client, extra_body={"top_k": 20, "min_p": 0.0})
+        await m.complete([Message.user("hi")], extra_body={"min_p": 0.05})
+        body = client.chat.completions.create.call_args.kwargs["extra_body"]
+        assert body == {"top_k": 20, "min_p": 0.05}
+
+    @pytest.mark.asyncio
+    async def test_forwarded_for_reasoning_models_too(self) -> None:
+        """o-series reject sampling params but still accept provider extensions."""
+        client = _client_with()
+        m = _model_with(client, model="o1-mini", extra_body={"top_k": 20})
+        await m.complete([Message.user("hi")])
+        args = client.chat.completions.create.call_args.kwargs
+        assert args["extra_body"] == {"top_k": 20}
+        assert "temperature" not in args
+
+    @pytest.mark.asyncio
+    async def test_stream_forwards_extra_body(self) -> None:
+        client = _client_with(
+            stream_chunks=[_Chunk(choices=[_ChunkChoice(delta=_Delta(), finish_reason="stop")])]
+        )
+        m = _model_with(client, extra_body={"chat_template_kwargs": {"enable_thinking": False}})
+        async for _ in m.stream([Message.user("hi")]):
+            pass
+        args = client.chat.completions.create.call_args.kwargs
+        assert args["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
+
+
+# ---------------------------------------------------------------------------
+# Full Chat Completions surface: don't clog what the server supports
+# ---------------------------------------------------------------------------
+
+
+class TestParameterPassthrough:
+    """The provider previously read six keys out of **kwargs and dropped the
+    rest, so most of the API was unreachable and callers had to leave the SDK
+    to get at it."""
+
+    @pytest.mark.asyncio
+    async def test_tool_choice_reaches_the_server(self) -> None:
+        client = _client_with()
+        m = _model_with(client)
+        await m.complete(
+            [Message.user("hi")],
+            tools=[{"name": "search", "parameters": {}}],
+            tool_choice={"type": "function", "function": {"name": "search"}},
+        )
+        args = client.chat.completions.create.call_args.kwargs
+        assert args["tool_choice"] == {"type": "function", "function": {"name": "search"}}
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("name", "value"),
+        [
+            ("parallel_tool_calls", False),
+            ("logprobs", True),
+            ("top_logprobs", 5),
+            ("n", 3),
+            ("user", "u-1"),
+            ("logit_bias", {"123": -100}),
+            ("reasoning_effort", "high"),
+            ("service_tier", "auto"),
+            ("metadata", {"run": "abc"}),
+            ("store", True),
+        ],
+    )
+    async def test_documented_params_are_forwarded(self, name: str, value: Any) -> None:
+        client = _client_with()
+        m = _model_with(client)
+        await m.complete([Message.user("hi")], **{name: value})
+        assert client.chat.completions.create.call_args.kwargs[name] == value
+
+    @pytest.mark.asyncio
+    async def test_unknown_keys_are_not_forwarded(self) -> None:
+        """A non-OpenAI key must not reach the API — that belongs in extra_body."""
+        client = _client_with()
+        m = _model_with(client)
+        await m.complete([Message.user("hi")], not_a_real_openai_param=1)
+        assert "not_a_real_openai_param" not in client.chat.completions.create.call_args.kwargs
+
+    @pytest.mark.asyncio
+    async def test_provider_owned_params_are_not_overridden(self) -> None:
+        client = _client_with()
+        m = _model_with(client, model="gpt-4o")
+        await m.complete([Message.user("hi")], model="sneaky", stream=True, max_tokens=99)
+        args = client.chat.completions.create.call_args.kwargs
+        assert args["model"] == "gpt-4o", "provider owns the model name"
+        assert args.get("stream") is not True, "complete() must not be flipped to streaming"
+        # max_tokens keeps the family-aware path, not a second passthrough copy
+        assert args["max_tokens"] == 99
+
+    @pytest.mark.asyncio
+    async def test_stream_options_forwarded_when_streaming(self) -> None:
+        client = _client_with(
+            stream_chunks=[_Chunk(choices=[_ChunkChoice(delta=_Delta(), finish_reason="stop")])]
+        )
+        m = _model_with(client)
+        async for _ in m.stream([Message.user("hi")], stream_options={"include_usage": True}):
+            pass
+        args = client.chat.completions.create.call_args.kwargs
+        assert args["stream_options"] == {"include_usage": True}
+        assert args["stream"] is True
+
+    def test_param_set_is_read_from_the_openai_package(self) -> None:
+        """Hand-maintained lists go stale; this one must track the dependency."""
+        from tulip.models.native.openai import _OPENAI_PARAMS
+
+        for expected in ("tool_choice", "parallel_tool_calls", "logprobs", "n", "seed"):
+            assert expected in _OPENAI_PARAMS
+
+
+# ---------------------------------------------------------------------------
+# ModelResponse carries logprobs and extra candidates (#53)
+# ---------------------------------------------------------------------------
+
+
+class _UsageChunk:
+    """Trailing chunk carrying usage and no choices (stream_options)."""
+
+    def __init__(self, prompt: int, completion: int) -> None:
+        self.choices: list[Any] = []
+        self.usage = _Usage(prompt, completion)
+
+
+class TestResponseExtras:
+    @pytest.mark.asyncio
+    async def test_extra_candidates_are_kept(self) -> None:
+        """n>1 is paid for; the extra choices must not be discarded."""
+        client = _client_with(
+            response=_Response(
+                choices=[
+                    _Choice(message=_MsgStub(content="first")),
+                    _Choice(message=_MsgStub(content="second")),
+                    _Choice(message=_MsgStub(content="third")),
+                ]
+            )
+        )
+        m = _model_with(client)
+        resp = await m.complete([Message.user("hi")], n=3)
+        assert resp.message.content == "first"
+        assert [c.content for c in resp.candidates] == ["second", "third"]
+
+    @pytest.mark.asyncio
+    async def test_single_choice_leaves_candidates_empty(self) -> None:
+        client = _client_with()
+        m = _model_with(client)
+        resp = await m.complete([Message.user("hi")])
+        assert resp.candidates == []
+
+    @pytest.mark.asyncio
+    async def test_logprobs_are_passed_through(self) -> None:
+        client = _client_with()
+        client.chat.completions.create.return_value.choices[0].logprobs = {"content": [1, 2]}
+        m = _model_with(client)
+        resp = await m.complete([Message.user("hi")], logprobs=True)
+        assert resp.logprobs == {"content": [1, 2]}
+
+
+# ---------------------------------------------------------------------------
+# Streaming exposes usage and stop_reason (#54)
+# ---------------------------------------------------------------------------
+
+
+class TestStreamTermination:
+    @pytest.mark.asyncio
+    async def test_usage_chunk_is_not_dropped(self) -> None:
+        """The usage chunk carries no choices — it must survive the guard."""
+        client = _client_with(
+            stream_chunks=[
+                _Chunk(choices=[_ChunkChoice(delta=_Delta(content="hi"), finish_reason=None)]),
+                _Chunk(choices=[_ChunkChoice(delta=_Delta(), finish_reason="stop")]),
+                _UsageChunk(11, 5),
+            ]
+        )
+        m = _model_with(client)
+        events = [ev async for ev in m.stream([Message.user("hi")])]
+
+        final = events[-1]
+        assert final.done is True
+        assert final.usage == {"prompt_tokens": 11, "completion_tokens": 5}
+        assert final.stop_reason == "stop"
+
+    @pytest.mark.asyncio
+    async def test_length_truncation_is_reported(self) -> None:
+        client = _client_with(
+            stream_chunks=[_Chunk(choices=[_ChunkChoice(delta=_Delta(), finish_reason="length")])]
+        )
+        m = _model_with(client)
+        events = [ev async for ev in m.stream([Message.user("hi")])]
+        assert events[-1].stop_reason == "length"
+
+    @pytest.mark.asyncio
+    async def test_done_is_emitted_exactly_once(self) -> None:
+        client = _client_with(
+            stream_chunks=[
+                _Chunk(choices=[_ChunkChoice(delta=_Delta(content="a"), finish_reason=None)]),
+                _Chunk(choices=[_ChunkChoice(delta=_Delta(), finish_reason="stop")]),
+                _UsageChunk(1, 1),
+            ]
+        )
+        m = _model_with(client)
+        events = [ev async for ev in m.stream([Message.user("hi")])]
+        assert sum(1 for e in events if e.done) == 1
+
+
+# ---------------------------------------------------------------------------
+# Mid-run system messages must stay portable
+# ---------------------------------------------------------------------------
+
+
+class TestSystemMessagePosition:
+    """The loop injects guidance as system messages mid-run; vLLM serving Qwen
+    rejects those outright with 'System message must be at the beginning'."""
+
+    @pytest.mark.asyncio
+    async def test_leading_system_message_is_untouched(self) -> None:
+        client = _client_with()
+        m = _model_with(client)
+        await m.complete([Message.system("you are helpful"), Message.user("hi")])
+        sent = client.chat.completions.create.call_args.kwargs["messages"]
+        assert sent[0]["role"] == "system"
+        assert sent[0]["content"] == "you are helpful"
+
+    @pytest.mark.asyncio
+    async def test_later_system_message_becomes_a_user_note(self) -> None:
+        client = _client_with()
+        m = _model_with(client)
+        await m.complete(
+            [
+                Message.system("you are helpful"),
+                Message.user("hi"),
+                Message.system("[Grounding Check Failed] try again"),
+            ]
+        )
+        sent = client.chat.completions.create.call_args.kwargs["messages"]
+        assert [x["role"] for x in sent] == ["system", "user", "user"]
+        # the guidance survives, just re-encoded
+        assert "[Grounding Check Failed] try again" in sent[-1]["content"]
+        assert sent[-1]["content"].startswith("[System guidance]")
+
+    @pytest.mark.asyncio
+    async def test_stream_applies_the_same_normalisation(self) -> None:
+        client = _client_with(
+            stream_chunks=[_Chunk(choices=[_ChunkChoice(delta=_Delta(), finish_reason="stop")])]
+        )
+        m = _model_with(client)
+        async for _ in m.stream([Message.user("hi"), Message.system("mid-run guidance")]):
+            pass
+        sent = client.chat.completions.create.call_args.kwargs["messages"]
+        assert all(x["role"] != "system" for x in sent[1:])
+
+
+class TestResponseExtrasEdgeCases:
+    """Edge cases in candidate parsing and the param-set fallback."""
+
+    @pytest.mark.asyncio
+    async def test_candidate_without_message_is_skipped(self) -> None:
+        """A provider can return a filtered/empty choice with no message."""
+        client = _client_with(
+            response=_Response(
+                choices=[
+                    _Choice(message=_MsgStub(content="first")),
+                    _Choice(message=None),
+                    _Choice(message=_MsgStub(content="third")),
+                ]
+            )
+        )
+        m = _model_with(client)
+        resp = await m.complete([Message.user("hi")], n=3)
+        assert [c.content for c in resp.candidates] == ["third"]
+
+    @pytest.mark.asyncio
+    async def test_candidate_tool_calls_are_decoded(self) -> None:
+        client = _client_with(
+            response=_Response(
+                choices=[
+                    _Choice(message=_MsgStub(content="first")),
+                    _Choice(
+                        message=_MsgStub(
+                            content=None,
+                            tool_calls=[
+                                _ToolCallStub(call_id="c1", name="search", arguments='{"q":"x"}')
+                            ],
+                        )
+                    ),
+                ]
+            )
+        )
+        m = _model_with(client)
+        resp = await m.complete([Message.user("hi")], n=2)
+        assert len(resp.candidates) == 1
+        call = resp.candidates[0].tool_calls[0]
+        assert (call.name, call.arguments) == ("search", {"q": "x"})
+
+    @pytest.mark.asyncio
+    async def test_candidate_non_string_content_becomes_none(self) -> None:
+        """Mock-heavy stubs (and some providers) hand back non-str content."""
+        client = _client_with(
+            response=_Response(
+                choices=[
+                    _Choice(message=_MsgStub(content="first")),
+                    _Choice(message=_MsgStub(content=object())),  # type: ignore[arg-type]
+                ]
+            )
+        )
+        m = _model_with(client)
+        resp = await m.complete([Message.user("hi")], n=2)
+        assert resp.candidates[0].content is None
+
+    def test_param_names_fall_back_when_introspection_fails(self, monkeypatch) -> None:
+        """A stale hand-list would block passthrough entirely; the fallback
+        keeps the long-stable parameters reachable."""
+        import typing as _typing
+
+        import tulip.models.native.openai as mod
+
+        def boom(*_a, **_k):
+            raise AttributeError("openai moved its request types")
+
+        monkeypatch.setattr(_typing, "get_type_hints", boom)
+
+        names = mod._openai_param_names()
+        assert "tool_choice" in names
+        assert names == mod._FALLBACK_OPENAI_PARAMS
