@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-08-01
+
 ### Added
 
 - **Sandboxed tool execution.** `@tool(sandbox=True)` ships the function's
