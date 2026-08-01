@@ -132,6 +132,11 @@ EV_HOOK_MODEL_RETRY = "agent.model.retry"
 EV_HOOK_STEERING_APPLIED = "agent.steering.applied"
 EV_HOOK_GUARDRAIL_TRIGGERED = "agent.guardrail.triggered"
 
+# --- Sandboxed tool execution ---
+EV_TOOL_SANDBOX_STARTED = "tool.sandbox.started"
+EV_TOOL_SANDBOX_COMPLETED = "tool.sandbox.completed"
+EV_TOOL_SANDBOX_DENIED = "tool.sandbox.denied"
+
 
 async def emit(event_type: str, /, **data: Any) -> None:
     """Publish a :class:`StreamEvent` if a run_id is in the current

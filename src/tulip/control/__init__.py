@@ -49,6 +49,7 @@ from tulip.security.admit import AdmissionError, admit
 from tulip.security.audit import AuditRecord, AuditTrail
 from tulip.security.findings import Evidence
 from tulip.security.policy import (
+    SANDBOXED_TAG,
     Action,
     ApprovalDecision,
     ApprovalOutcome,
@@ -85,6 +86,7 @@ __all__ = [
     "approve",
     "ApprovalDecision",
     "ApprovalOutcome",
+    "SANDBOXED_TAG",
     # Tamper-evident audit
     "AuditTrail",
     "AuditRecord",

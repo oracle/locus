@@ -619,6 +619,9 @@ module = [
     "pypdf.*",
     "PyPDF2.*",
     "pdf2image.*",
+    # Optional sandbox providers (``tulip.tools.sandbox`` lazy-imports the
+    # factory when a non-built-in provider name is requested).
+    "tulip_sandbox.*",
 ]
 ignore_missing_imports = true
 

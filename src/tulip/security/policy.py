@@ -36,6 +36,11 @@ class ApprovalOutcome:
 # Strength ordering — the strongest triggered outcome wins.
 _ORDER = {ApprovalOutcome.ALLOW: 0, ApprovalOutcome.REQUIRE_HUMAN: 1, ApprovalOutcome.DENY: 2}
 
+# The tag an action carries when its execution is sandboxed. Actions whose
+# labels intersect ``ControlPolicy.require_sandbox_for`` are denied unless
+# this tag is present.
+SANDBOXED_TAG = "sandboxed"
+
 
 @dataclass(frozen=True)
 class ControlPolicy:
@@ -48,6 +53,10 @@ class ControlPolicy:
       need a human (default: anything in ``production``).
     - ``deny_for``: labels that are hard-denied outright.
     - ``min_severity``: don't act on findings below this band.
+    - ``require_sandbox_for``: labels whose actions must execute in a sandbox —
+      an action matching one of these is denied unless it carries the
+      :data:`SANDBOXED_TAG` tag. Enforced at the agent loop's tool seam by
+      :class:`~tulip.tools.sandbox.SandboxEnforcerHook`.
     """
 
     require_verification_score: float = 0.8
@@ -55,6 +64,7 @@ class ControlPolicy:
     require_human_for: frozenset[str] = field(default_factory=lambda: frozenset({"production"}))
     deny_for: frozenset[str] = field(default_factory=frozenset)
     min_severity: Severity = Severity.LOW
+    require_sandbox_for: frozenset[str] = field(default_factory=frozenset)
 
 
 @dataclass(frozen=True)
@@ -117,6 +127,16 @@ def approve(
     if denied:
         triggered.append((ApprovalOutcome.DENY, f"labels {sorted(denied)} are denied by policy"))
 
+    unsandboxed = labels & policy.require_sandbox_for
+    if unsandboxed and SANDBOXED_TAG not in labels:
+        triggered.append(
+            (
+                ApprovalOutcome.DENY,
+                f"labels {sorted(unsandboxed)} require sandboxed execution "
+                f"(the action carries no {SANDBOXED_TAG!r} tag)",
+            )
+        )
+
     if finding is not None and not severity_at_least(finding.severity, policy.min_severity):
         triggered.append(
             (
@@ -171,6 +191,7 @@ def approve(
 
 
 __all__ = [
+    "SANDBOXED_TAG",
     "Action",
     "ApprovalDecision",
     "ApprovalOutcome",

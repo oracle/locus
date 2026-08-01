@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from tulip.control import (
+    SANDBOXED_TAG,
     Action,
     ApprovalOutcome,
     ControlPolicy,
@@ -119,3 +120,35 @@ def test_strongest_outcome_wins_and_all_checks_recorded() -> None:
     )
     assert d.outcome == ApprovalOutcome.DENY
     assert len(d.checks) >= 2  # multiple rules fired
+
+
+def test_require_sandbox_for_denies_unsandboxed_action() -> None:
+    d = approve(
+        Action(name="run_snippet", environment="staging", tags=frozenset({"code-exec"})),
+        policy=ControlPolicy(require_sandbox_for=frozenset({"code-exec"})),
+        verdict=_verdict(0.95),
+    )
+    assert d.outcome == ApprovalOutcome.DENY
+    assert "require sandboxed execution" in d.reason
+
+
+def test_require_sandbox_for_passes_when_action_is_sandboxed() -> None:
+    d = approve(
+        Action(
+            name="run_snippet",
+            environment="staging",
+            tags=frozenset({"code-exec", SANDBOXED_TAG}),
+        ),
+        policy=ControlPolicy(require_sandbox_for=frozenset({"code-exec"})),
+        verdict=_verdict(0.95),
+    )
+    assert d.outcome == ApprovalOutcome.ALLOW
+
+
+def test_require_sandbox_for_ignores_unmatched_labels() -> None:
+    d = approve(
+        Action(name="lookup", environment="staging", tags=frozenset({"read-only"})),
+        policy=ControlPolicy(require_sandbox_for=frozenset({"code-exec"})),
+        verdict=_verdict(0.95),
+    )
+    assert d.outcome == ApprovalOutcome.ALLOW

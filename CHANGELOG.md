@@ -8,6 +8,28 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **Sandboxed tool execution.** `@tool(sandbox=True)` ships the function's
+  source into an isolated box and runs it there — the host process never
+  executes the body, and direct `tool(...)` calls are sandboxed too, so
+  there is no bypass. The zero-infra default is the new
+  `tulip.tools.sandbox.SubprocessSandbox` (fresh working directory,
+  `python -I`, environment scrubbed to `PATH`/`LANG` plus what the manifest
+  explicitly grants, per-call timeout). Stronger boundaries plug in through
+  the structural `ToolSandbox` protocol: `TULIP_SANDBOX=docker` (or a
+  provider name / object / `SandboxSpec`) resolves Docker, Firecracker,
+  SSH and Lambda providers from the optional `tulip-sandbox` package by
+  duck typing — neither package imports the other. Runs emit
+  `tool.sandbox.started` / `tool.sandbox.completed` on the event bus (#7).
+- **Policy-required sandboxing.** `ControlPolicy.require_sandbox_for` names
+  the labels whose actions must execute in a sandbox: `approve()` denies a
+  matching action that doesn't carry the new `SANDBOXED_TAG` tag, and the
+  new `SandboxEnforcerHook` enforces the same rule at the agent loop's
+  `on_before_tool_call` seam — an un-sandboxed call to a tool labelled
+  (via the new `@tool(labels={...})`) with a required label is cancelled
+  before it runs, and `tool.sandbox.denied` is emitted (#7).
+
 ## [2.3.0] - 2026-08-01
 
 ### Added
