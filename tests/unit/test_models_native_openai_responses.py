@@ -252,7 +252,7 @@ class TestApiSelection:
 
     def test_invalid_api_value_rejected(self) -> None:
         with pytest.raises(ValidationError):
-            OpenAIModel(model="gpt-4o", api="respones")
+            OpenAIModel(model="gpt-4o", api="grpc")
 
     @pytest.mark.asyncio
     async def test_stream_auto_selects_responses(self) -> None:
@@ -1101,7 +1101,7 @@ class TestStreamResponses:
     @pytest.mark.asyncio
     async def test_incomplete_terminal_maps_to_length(self) -> None:
         events = [
-            _Obj(type="response.output_text.delta", delta="truncat"),
+            _Obj(type="response.output_text.delta", delta="cut off mid-"),
             _Obj(
                 type="response.incomplete",
                 response=_resp(status="incomplete", incomplete_reason="max_output_tokens"),
