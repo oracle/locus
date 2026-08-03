@@ -8,6 +8,33 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **The OpenAI provider speaks the Responses API.** `OpenAIModel` gains an
+  `api` setting — `"chat_completions"`, `"responses"`, or `"auto"` (the
+  default), which routes the model families only `/v1/responses` serves
+  (gpt-5.6-*) there and keeps everything else on chat-completions. GPT-5.6
+  rejects function tools on chat-completions whenever reasoning is active
+  ("Function tools with reasoning_effort are not supported … use
+  /v1/responses or set reasoning_effort to 'none'"), so the family could
+  previously call tools only with reasoning disabled — defeating its
+  purpose. Auto-selection never fires for a custom `base_url`:
+  OpenAI-compatible gateways (Together, vLLM, LiteLLM) serve
+  chat-completions, not `/v1/responses`. Both `complete()` and `stream()`
+  are covered; chat-completions spellings translate so callers don't care
+  which transport is active (`max_tokens` → `max_output_tokens`,
+  `reasoning_effort` → `reasoning.effort`, `response_format` →
+  `text.format`, chat-shaped `tool_choice` flattened), and usage + stop
+  reasons land in the chat vocabulary (`stop` / `tool_calls` / `length`).
+  Reasoning stays on: no effort is ever defaulted. The transport stays
+  stateless (`store=False`) — raw output items (reasoning items with their
+  `encrypted_content`, function calls) ride along in the assistant
+  `Message.metadata` and are replayed verbatim next turn, which is what
+  reasoning models require to continue a tool-calling turn without
+  server-side storage. Dropped for lack of a Responses equivalent: `seed`,
+  `stop` sequences, penalties; streamed turns reconstruct history without
+  reasoning items (#60).
+
 ## [2.4.0] - 2026-08-01
 
 ### Added

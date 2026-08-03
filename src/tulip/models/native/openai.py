@@ -8,12 +8,12 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import AsyncIterator
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field
 
 from tulip.core.events import ModelChunkEvent
-from tulip.core.messages import Message, ToolCall
+from tulip.core.messages import Message, Role, ToolCall
 from tulip.models.base import ModelConfig, ModelResponse
 
 
@@ -47,6 +47,19 @@ def _decode_tool_arguments(raw: str | None) -> dict[str, Any]:
         if isinstance(second, dict):
             return second
     return {}
+
+
+def _strip_model_namespace(name: str) -> str:
+    """Drop a leading purely-alphabetic namespace segment.
+
+    Namespaced model ids (``openai.gpt-5``, ``vendor.model-…``) are treated
+    the same as native OpenAI names. Native ids start with a token containing
+    digits/hyphens (``gpt-5``, ``o1-…``) so the strip is a no-op for them.
+    """
+    head, sep, rest = name.partition(".")
+    if sep and head.isalpha():
+        return rest
+    return name
 
 
 #: Long-stable Chat Completions fields, used only if introspecting the
@@ -124,6 +137,142 @@ _RESERVED_PARAMS = frozenset(
 _OPENAI_PARAMS = _openai_param_names()
 
 
+#: Long-stable Responses API fields, used only if introspecting the
+#: ``openai`` package fails.
+_FALLBACK_RESPONSES_PARAMS = frozenset(
+    {
+        "background",
+        "include",
+        "instructions",
+        "max_tool_calls",
+        "metadata",
+        "parallel_tool_calls",
+        "previous_response_id",
+        "prompt_cache_key",
+        "reasoning",
+        "safety_identifier",
+        "service_tier",
+        "store",
+        "stream_options",
+        "text",
+        "tool_choice",
+        "top_logprobs",
+        "truncation",
+        "user",
+    }
+)
+
+
+def _responses_param_names() -> frozenset[str]:
+    """Every field the Responses API accepts, per the ``openai`` package.
+
+    Mirrors :func:`_openai_param_names`: read from the SDK's own request
+    TypedDicts rather than hand-listed, so a parameter OpenAI adds is
+    forwardable the day the dependency is bumped.
+    """
+    try:
+        import typing
+
+        from openai.types.responses import response_create_params as _params
+
+        names: set[str] = set()
+        for cls_name in (
+            "ResponseCreateParamsBase",
+            "ResponseCreateParamsNonStreaming",
+            "ResponseCreateParamsStreaming",
+        ):
+            cls = getattr(_params, cls_name, None)
+            if cls is not None:
+                names |= set(typing.get_type_hints(cls).keys())
+        if names:
+            return frozenset(names)
+    except (ImportError, AttributeError, TypeError, NameError):  # pragma: no cover
+        logger.debug("could not introspect openai responses request params", exc_info=True)
+    # Introspection failed (openai moved its request types). Fall back to the
+    # long-stable parameters rather than returning nothing, which would
+    # silently block every passthrough instead of just the newest fields.
+    return _FALLBACK_RESPONSES_PARAMS
+
+
+#: Parameters the Responses request builder owns or translates from their
+#: chat-completions names. Everything else in ``_RESPONSES_PARAMS`` is
+#: forwarded verbatim from the caller.
+_RESPONSES_RESERVED_PARAMS = frozenset(
+    {
+        "model",
+        "input",
+        "messages",
+        "stream",
+        "tools",
+        "max_tokens",
+        "max_completion_tokens",
+        "max_output_tokens",
+        "temperature",
+        "top_p",
+        "frequency_penalty",
+        "presence_penalty",
+        "reasoning_effort",
+        "response_format",
+    }
+)
+
+_RESPONSES_PARAMS = _responses_param_names()
+
+#: Model families served only by the Responses API. GPT-5.6 rejects function
+#: tools on chat-completions whenever reasoning is active — the API 400s with
+#: "Function tools with reasoning_effort are not supported … use /v1/responses
+#: or set reasoning_effort to 'none'" — and disabling reasoning defeats the
+#: family's purpose, so ``api="auto"`` routes these to ``/v1/responses``.
+_RESPONSES_ONLY_PREFIXES = ("gpt-5.6",)
+
+#: ``Message.metadata`` key under which the Responses path stashes the raw
+#: output items of an assistant turn (reasoning items with their
+#: ``encrypted_content``, function_call items, message items — in order).
+#: On the next turn ``_convert_messages_responses`` replays them verbatim,
+#: which is the documented stateless (``store=False``) pattern: reasoning
+#: models require the reasoning item that preceded a function call to come
+#: back with it, and a reconstruction from ``Message`` fields alone cannot
+#: supply that.
+RESPONSES_ITEMS_METADATA_KEY = "openai_responses_items"
+
+
+def _dump_output_item(item: Any) -> dict[str, Any] | None:
+    """Serialise a Responses output item for verbatim replay next turn.
+
+    The openai SDK's output items are Pydantic models; ``model_dump`` with
+    ``exclude_none`` yields exactly the wire shape the API accepts back as
+    input. Returns ``None`` for anything that can't be dumped — the item is
+    then simply not replayed rather than poisoning the next request.
+    """
+    dump = getattr(item, "model_dump", None)
+    if not callable(dump):
+        return None
+    try:
+        dumped = dump(mode="json", exclude_none=True)
+    except (TypeError, ValueError):
+        logger.debug("could not serialise responses output item", exc_info=True)
+        return None
+    return dumped if isinstance(dumped, dict) else None
+
+
+def _text_format_from_response_format(response_format: dict[str, Any]) -> dict[str, Any]:
+    """Translate a chat-completions ``response_format`` to a Responses ``text`` param.
+
+    Chat nests the schema under ``json_schema``; the Responses API flattens
+    it into ``text.format``. ``json_object`` / ``text`` formats carry over
+    unchanged.
+    """
+    if response_format.get("type") == "json_schema":
+        inner = response_format.get("json_schema")
+        if isinstance(inner, dict):
+            fmt: dict[str, Any] = {"type": "json_schema"}
+            for key in ("name", "schema", "strict", "description"):
+                if key in inner:
+                    fmt[key] = inner[key]
+            return {"format": fmt}
+    return {"format": dict(response_format)}
+
+
 class OpenAIConfig(ModelConfig):
     """Configuration for OpenAI models."""
 
@@ -138,6 +287,18 @@ class OpenAIConfig(ModelConfig):
     api_key: str | None = Field(default=None, description="OpenAI API key")
     base_url: str | None = Field(default=None, description="Custom API base URL")
     organization: str | None = Field(default=None, description="OpenAI organization ID")
+    api: Literal["auto", "responses", "chat_completions"] = Field(
+        default="auto",
+        description=(
+            "Which OpenAI wire API to speak. 'chat_completions' is the classic "
+            "/v1/chat/completions path, 'responses' is /v1/responses. 'auto' "
+            "(the default) picks chat-completions except for model families "
+            "that require the Responses API (gpt-5.6-*) — and only against "
+            "api.openai.com itself: a custom base_url points at an "
+            "OpenAI-compatible gateway (Together, vLLM, LiteLLM) that does "
+            "not serve /v1/responses."
+        ),
+    )
 
     # Production-safety knobs — keep a resilient posture so a
     # transient 429 / 503 / connection drop doesn't immediately kill the
@@ -177,7 +338,11 @@ class OpenAIModel(BaseModel):
     """
     OpenAI model provider.
 
-    Supports GPT-4o, GPT-4, o1, o3 models with streaming and tool calling.
+    Supports GPT-4o, GPT-4, o1, o3, gpt-5.x models with streaming and tool
+    calling. Speaks both OpenAI wire APIs: chat-completions (the default)
+    and the Responses API, selected via ``api=`` on the config or
+    automatically for model families that require it (gpt-5.6-*, which
+    reject function tools on chat-completions whenever reasoning is on).
 
     Example:
         >>> model = OpenAIModel(model="gpt-4o")
@@ -214,21 +379,33 @@ class OpenAIModel(BaseModel):
             request_kwargs["presence_penalty"] = pres
 
     def _apply_passthrough(
-        self, request_kwargs: dict[str, Any], call_kwargs: dict[str, Any]
+        self,
+        request_kwargs: dict[str, Any],
+        call_kwargs: dict[str, Any],
+        *,
+        allowed: frozenset[str] | None = None,
+        reserved: frozenset[str] | None = None,
     ) -> None:
-        """Forward any other Chat Completions parameter the caller supplied.
+        """Forward any other API parameter the caller supplied.
 
         Without this the provider silently swallows most of the API: an agent
         that needs ``tool_choice`` to force a tool, ``parallel_tool_calls`` to
         serialise them, ``stream_options`` for usage during streaming, or
         ``logprobs`` for confidence has no route to the server and has to drop
-        out of the SDK to a raw client. Anything not in the OpenAI schema is
-        ignored here — it belongs in ``extra_body``.
+        out of the SDK to a raw client. Anything not in the target API's
+        schema is ignored here — it belongs in ``extra_body``.
+
+        Defaults target Chat Completions; the Responses path passes its own
+        ``allowed`` / ``reserved`` sets.
         """
+        if allowed is None:
+            allowed = _OPENAI_PARAMS
+        if reserved is None:
+            reserved = _RESERVED_PARAMS
         for name, value in call_kwargs.items():
-            if name in _RESERVED_PARAMS or name == "extra_body":
+            if name in reserved or name == "extra_body":
                 continue
-            if name in _OPENAI_PARAMS and name not in request_kwargs:
+            if name in allowed and name not in request_kwargs:
                 request_kwargs[name] = value
 
     def _apply_extra_body(
@@ -380,10 +557,7 @@ class OpenAIModel(BaseModel):
         with a token containing digits/hyphens (``gpt-5``, ``o1-…``) so
         the namespace strip is a no-op for them.
         """
-        name = model.lower()
-        head, sep, rest = name.partition(".")
-        if sep and head.isalpha():
-            name = rest
+        name = _strip_model_namespace(model.lower())
         return any(name.startswith(prefix) for prefix in ("o1", "o3", "gpt-5"))
 
     @staticmethod
@@ -397,11 +571,39 @@ class OpenAIModel(BaseModel):
         of building the request body, even though they still use plain
         ``max_tokens``.
         """
-        name = model.lower()
-        head, sep, rest = name.partition(".")
-        if sep and head.isalpha():
-            name = rest
-        return "search-preview" in name
+        return "search-preview" in _strip_model_namespace(model.lower())
+
+    @staticmethod
+    def _requires_responses_api(model: str) -> bool:
+        """Whether the model family is served only by the Responses API.
+
+        The GPT-5.6 family (sol / terra / luna) rejects function tools on
+        chat-completions whenever reasoning is active: the API 400s with
+        "Function tools with reasoning_effort are not supported … To use
+        function tools, use /v1/responses or set reasoning_effort to
+        'none'". Setting effort to none defeats the family's purpose, so
+        these models route to ``/v1/responses`` under ``api="auto"``.
+        Tolerates a leading purely-alphabetic namespace segment like the
+        other family detectors.
+        """
+        name = _strip_model_namespace(model.lower())
+        return name.startswith(_RESPONSES_ONLY_PREFIXES)
+
+    def _use_responses_api(self) -> bool:
+        """Whether this instance's requests go to ``/v1/responses``.
+
+        Explicit config wins in both directions. ``auto`` selects the
+        Responses API only for families that require it AND only against
+        api.openai.com itself — a custom ``base_url`` points at an
+        OpenAI-compatible gateway (Together, vLLM, LiteLLM) that serves
+        chat-completions but not ``/v1/responses``, so auto-selection
+        must never fire there.
+        """
+        if self.config.api == "responses":
+            return True
+        if self.config.api == "chat_completions":
+            return False
+        return self.config.base_url is None and self._requires_responses_api(self.config.model)
 
     def _parse_response(self, response: Any) -> ModelResponse:
         """Parse OpenAI response to ModelResponse.
@@ -485,6 +687,446 @@ class OpenAIModel(BaseModel):
             candidates=candidates,
         )
 
+    # ------------------------------------------------------------------
+    # Responses API (/v1/responses)
+    # ------------------------------------------------------------------
+
+    def _convert_tools_responses(
+        self, tools: list[dict[str, Any]] | None
+    ) -> list[dict[str, Any]] | None:
+        """Convert tool schemas to the Responses API's flattened shape.
+
+        Chat-completions nests function tools under a ``function`` key; the
+        Responses API flattens ``name`` / ``description`` / ``parameters`` to
+        the top level. Bare Tulip schemas (no ``type``) flatten directly;
+        built-in tools (``web_search`` etc.) and already-flattened entries
+        pass through unchanged.
+        """
+        if not tools:
+            return None
+
+        converted: list[dict[str, Any]] = []
+        for tool in tools:
+            tool_type = tool.get("type")
+            function = tool.get("function")
+            if tool_type == "function" and isinstance(function, dict):
+                flattened: dict[str, Any] = {"type": "function"}
+                for key in ("name", "description", "parameters", "strict"):
+                    if key in function:
+                        flattened[key] = function[key]
+                converted.append(flattened)
+            elif tool_type is None:
+                converted.append({"type": "function", **tool})
+            else:
+                converted.append(tool)
+        return converted
+
+    def _convert_messages_responses(self, messages: list[Message]) -> list[dict[str, Any]]:
+        """Convert Tulip messages to Responses API input items.
+
+        An assistant turn that the Responses path itself produced carries its
+        raw output items in ``metadata[RESPONSES_ITEMS_METADATA_KEY]`` —
+        those are replayed verbatim (reasoning items with their
+        ``encrypted_content``, function_call items, message items, in
+        order), which is what reasoning models require to continue a
+        tool-calling turn statelessly. Assistant turns without that
+        annotation (hand-built history, streamed turns) are reconstructed
+        from ``content`` / ``tool_calls``; the reconstructed function_call
+        items deliberately omit item ``id``s so the server does not try to
+        pair them with reasoning items it never received.
+
+        A system message after the first position is re-encoded as a user
+        note, exactly like the chat-completions path (see
+        :meth:`_convert_messages`), so mid-run guidance behaves the same on
+        both transports.
+        """
+        items: list[dict[str, Any]] = []
+
+        for index, msg in enumerate(messages):
+            if msg.role == Role.ASSISTANT:
+                raw_items = msg.metadata.get(RESPONSES_ITEMS_METADATA_KEY)
+                if isinstance(raw_items, list):
+                    replay = [item for item in raw_items if isinstance(item, dict)]
+                    if replay:
+                        items.extend(replay)
+                        continue
+                if msg.content:
+                    items.append({"role": "assistant", "content": msg.content})
+                for tc in msg.tool_calls:
+                    items.append(
+                        {
+                            "type": "function_call",
+                            "call_id": tc.id,
+                            "name": tc.name,
+                            "arguments": json.dumps(tc.arguments),
+                        }
+                    )
+            elif msg.role == Role.TOOL:
+                items.append(
+                    {
+                        "type": "function_call_output",
+                        "call_id": msg.tool_call_id or "",
+                        "output": msg.content or "",
+                    }
+                )
+            elif msg.role == Role.SYSTEM and index > 0:
+                items.append(
+                    {
+                        "role": "user",
+                        "content": f"[System guidance] {msg.content or ''}",
+                    }
+                )
+            else:
+                items.append({"role": msg.role.value, "content": msg.content or ""})
+
+        return items
+
+    def _build_responses_request(
+        self,
+        messages: list[Message],
+        tools: list[dict[str, Any]] | None,
+        call_kwargs: dict[str, Any],
+        *,
+        stream: bool,
+    ) -> dict[str, Any]:
+        """Build a ``/v1/responses`` request mirroring the chat request shaping.
+
+        Chat-completions names are translated to their Responses equivalents
+        so callers (and the agent loop) don't need to know which transport is
+        active:
+
+        - ``max_tokens`` / ``max_completion_tokens`` → ``max_output_tokens``
+        - ``reasoning_effort`` → ``reasoning={"effort": …}`` (merged under an
+          explicit ``reasoning`` dict, which wins on conflict)
+        - ``response_format`` → ``text={"format": …}`` (json_schema flattened)
+        - chat-shaped ``tool_choice={"type": "function", "function": {…}}``
+          → the flattened Responses shape
+
+        Reasoning stays on: no effort is ever defaulted, so the server's own
+        default applies unless the caller asks for something else.
+
+        ``store`` defaults to ``False`` — the transport stays stateless like
+        chat-completions and nothing persists server-side. For reasoning
+        families, ``include=["reasoning.encrypted_content"]`` is then
+        requested so reasoning items can be replayed verbatim on the next
+        turn (see :meth:`_convert_messages_responses`).
+
+        Dropped, with no Responses equivalent: ``seed``, ``stop`` /
+        ``stop_sequences``, ``frequency_penalty`` / ``presence_penalty``.
+        """
+        request_kwargs: dict[str, Any] = {
+            "model": self.config.model,
+            "input": self._convert_messages_responses(messages),
+        }
+        if stream:
+            request_kwargs["stream"] = True
+
+        max_tokens_value = call_kwargs.get("max_tokens")
+        if max_tokens_value is None:
+            max_tokens_value = call_kwargs.get("max_completion_tokens")
+        if max_tokens_value is None:
+            max_tokens_value = self.config.max_tokens
+        request_kwargs["max_output_tokens"] = max_tokens_value
+
+        reasoning_family = self._uses_max_completion_tokens(self.config.model)
+        if not reasoning_family and not self._rejects_sampling_params(self.config.model):
+            # Reasoning families reject sampling controls on /v1/responses
+            # just as they do on chat-completions. Penalties are chat-only —
+            # the Responses API has no such fields — so only temperature /
+            # top_p apply here.
+            temperature = call_kwargs.get("temperature", self.config.temperature)
+            if temperature is not None:
+                request_kwargs["temperature"] = temperature
+            top_p = call_kwargs.get("top_p", self.config.top_p)
+            if top_p is not None:
+                request_kwargs["top_p"] = top_p
+
+        responses_tools = self._convert_tools_responses(tools)
+        if responses_tools:
+            request_kwargs["tools"] = responses_tools
+
+        # Reasoning controls. ``reasoning`` (Responses-native dict) wins;
+        # ``reasoning_effort`` (the chat-completions name) merges in so a
+        # caller can keep using one spelling across both transports.
+        reasoning = call_kwargs.get("reasoning")
+        effort = call_kwargs.get("reasoning_effort")
+        if isinstance(reasoning, dict):
+            merged_reasoning = dict(reasoning)
+            if effort is not None:
+                merged_reasoning.setdefault("effort", effort)
+            request_kwargs["reasoning"] = merged_reasoning
+        elif reasoning is not None:
+            request_kwargs["reasoning"] = reasoning
+        elif effort is not None:
+            request_kwargs["reasoning"] = {"effort": effort}
+
+        # Chat-shaped forced tool choice → flattened Responses shape. Other
+        # shapes ("auto" / "required" / already-flattened dicts) flow through
+        # the passthrough below unchanged.
+        tool_choice = call_kwargs.get("tool_choice")
+        if (
+            isinstance(tool_choice, dict)
+            and tool_choice.get("type") == "function"
+            and isinstance(tool_choice.get("function"), dict)
+        ):
+            request_kwargs["tool_choice"] = {
+                "type": "function",
+                "name": tool_choice["function"].get("name"),
+            }
+
+        # Structured output: translate ``response_format`` unless the caller
+        # supplied a Responses-native ``text`` param themselves.
+        response_format = call_kwargs.get("response_format")
+        if response_format is not None and "text" not in call_kwargs:
+            request_kwargs["text"] = _text_format_from_response_format(response_format)
+
+        store = call_kwargs.get("store", False)
+        request_kwargs["store"] = store
+        if store is False and reasoning_family and "include" not in call_kwargs:
+            request_kwargs["include"] = ["reasoning.encrypted_content"]
+
+        self._apply_passthrough(
+            request_kwargs,
+            call_kwargs,
+            allowed=_RESPONSES_PARAMS,
+            reserved=_RESPONSES_RESERVED_PARAMS,
+        )
+        self._apply_extra_body(request_kwargs, call_kwargs)
+
+        return request_kwargs
+
+    @staticmethod
+    def _responses_usage(response: Any) -> dict[str, int]:
+        """Map Responses usage onto the chat-completions key names.
+
+        ``input_tokens`` / ``output_tokens`` land as ``prompt_tokens`` /
+        ``completion_tokens`` so metering code sees one shape regardless of
+        transport. ``output_tokens`` already includes reasoning tokens —
+        which is what the caller is billed for.
+        """
+        usage_obj = getattr(response, "usage", None)
+        if usage_obj is None:
+            return {}
+        input_tokens = getattr(usage_obj, "input_tokens", None)
+        output_tokens = getattr(usage_obj, "output_tokens", None)
+        if isinstance(input_tokens, int) and isinstance(output_tokens, int):
+            return {"prompt_tokens": input_tokens, "completion_tokens": output_tokens}
+        return {}
+
+    @staticmethod
+    def _responses_stop_reason(response: Any, *, has_tool_calls: bool) -> str | None:
+        """Map Responses ``status`` onto chat-completions finish reasons.
+
+        The agent loop's termination logic keys on the chat vocabulary
+        (``stop`` / ``tool_calls`` / ``length`` / ``content_filter``), so the
+        Responses status is translated rather than passed through: a
+        completed turn with function calls is ``tool_calls``, an incomplete
+        turn that hit ``max_output_tokens`` is ``length``. Unrecognised
+        statuses (``failed``, ``cancelled``) surface as themselves.
+        """
+        status = getattr(response, "status", None)
+        if status == "completed":
+            return "tool_calls" if has_tool_calls else "stop"
+        if status == "incomplete":
+            details = getattr(response, "incomplete_details", None)
+            reason = getattr(details, "reason", None)
+            if reason == "max_output_tokens":
+                return "length"
+            return reason if isinstance(reason, str) else "incomplete"
+        return status if isinstance(status, str) else None
+
+    def _parse_responses_result(self, response: Any) -> ModelResponse:
+        """Parse a Responses API result to ModelResponse.
+
+        Output items map onto the SDK types as follows:
+
+        - ``message`` items: ``output_text`` parts join into
+          ``message.content`` (``refusal`` parts stand in when there is no
+          text, so a refusal is visible rather than an empty reply);
+        - ``function_call`` items: one :class:`ToolCall` each, with
+          ``call_id`` as the tool-call id so tool results round-trip;
+        - ``reasoning`` items: summary / reasoning texts join into
+          ``ModelResponse.reasoning``.
+
+        The raw output items are additionally stashed in the assistant
+        message's ``metadata`` (see :data:`RESPONSES_ITEMS_METADATA_KEY`)
+        whenever the turn contains more than plain text, so the next turn
+        can replay them verbatim.
+        """
+        text_parts: list[str] = []
+        refusal_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        tool_calls: list[ToolCall] = []
+        raw_items: list[dict[str, Any]] = []
+        needs_replay = False
+
+        for item in getattr(response, "output", None) or []:
+            item_type = getattr(item, "type", None)
+            if item_type == "message":
+                for part in getattr(item, "content", None) or []:
+                    part_type = getattr(part, "type", None)
+                    if part_type == "output_text":
+                        text = getattr(part, "text", None)
+                        if isinstance(text, str) and text:
+                            text_parts.append(text)
+                    elif part_type == "refusal":
+                        refusal = getattr(part, "refusal", None)
+                        if isinstance(refusal, str) and refusal:
+                            refusal_parts.append(refusal)
+            else:
+                needs_replay = True
+                if item_type == "function_call":
+                    tool_calls.append(
+                        ToolCall(
+                            id=getattr(item, "call_id", None) or "",
+                            name=getattr(item, "name", None) or "",
+                            arguments=_decode_tool_arguments(getattr(item, "arguments", None)),
+                        )
+                    )
+                elif item_type == "reasoning":
+                    # Reasoning summaries (and, on models that expose it,
+                    # raw reasoning text) surface as the chain of thought.
+                    for block in (getattr(item, "summary", None) or []) + (
+                        getattr(item, "content", None) or []
+                    ):
+                        text = getattr(block, "text", None)
+                        if isinstance(text, str) and text:
+                            reasoning_parts.append(text)
+            dumped = _dump_output_item(item)
+            if dumped is not None:
+                raw_items.append(dumped)
+
+        content = "".join(text_parts) or "".join(refusal_parts) or None
+        message = Message(
+            role=Role.ASSISTANT,
+            content=content,
+            tool_calls=tool_calls,
+            metadata={RESPONSES_ITEMS_METADATA_KEY: raw_items}
+            if needs_replay and raw_items
+            else {},
+        )
+
+        return ModelResponse(
+            message=message,
+            usage=self._responses_usage(response),
+            stop_reason=self._responses_stop_reason(response, has_tool_calls=bool(tool_calls)),
+            reasoning="\n\n".join(reasoning_parts) or None,
+        )
+
+    async def _complete_responses(
+        self,
+        messages: list[Message],
+        tools: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> ModelResponse:
+        """Complete a request over the Responses API."""
+        request_kwargs = self._build_responses_request(messages, tools, kwargs, stream=False)
+        response = await self.client.responses.create(**request_kwargs)
+        return self._parse_responses_result(response)
+
+    async def _stream_responses(
+        self,
+        messages: list[Message],
+        tools: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[ModelChunkEvent]:
+        """Stream a response over the Responses API.
+
+        Emits the same :class:`ModelChunkEvent` sequence as the
+        chat-completions path: content deltas, reasoning deltas, one
+        tool-calls chunk once calls are complete, and a terminal ``done``
+        chunk carrying usage + stop reason. Usage needs no
+        ``stream_options`` opt-in here — the ``response.completed`` event
+        always carries it. Server-side tool events (web_search etc.) and
+        lifecycle events are ignored.
+        """
+        request_kwargs = self._build_responses_request(messages, tools, kwargs, stream=True)
+        stream = await self.client.responses.create(**request_kwargs)
+
+        # Function calls accumulate per output item id; argument deltas
+        # reference the item id, and the ``output_item.done`` payload is
+        # authoritative when present.
+        tool_calls_by_item: dict[str, dict[str, str]] = {}
+        final_usage: dict[str, int] | None = None
+        final_stop_reason: str | None = None
+
+        async for event in stream:
+            event_type = getattr(event, "type", None)
+
+            if event_type == "response.output_text.delta":
+                delta = getattr(event, "delta", None)
+                if isinstance(delta, str) and delta:
+                    yield ModelChunkEvent(content=delta)
+
+            elif event_type in (
+                "response.reasoning_summary_text.delta",
+                "response.reasoning_text.delta",
+            ):
+                delta = getattr(event, "delta", None)
+                if isinstance(delta, str) and delta:
+                    yield ModelChunkEvent(reasoning=delta)
+
+            elif event_type == "response.output_item.added":
+                item = getattr(event, "item", None)
+                if getattr(item, "type", None) == "function_call":
+                    item_id = getattr(item, "id", None) or f"item_{len(tool_calls_by_item)}"
+                    tool_calls_by_item[item_id] = {
+                        "id": getattr(item, "call_id", None) or "",
+                        "name": getattr(item, "name", None) or "",
+                        "arguments": getattr(item, "arguments", None) or "",
+                    }
+
+            elif event_type == "response.function_call_arguments.delta":
+                item_id = getattr(event, "item_id", None)
+                delta = getattr(event, "delta", None)
+                entry = tool_calls_by_item.get(item_id) if isinstance(item_id, str) else None
+                if entry is not None and isinstance(delta, str):
+                    entry["arguments"] += delta
+
+            elif event_type == "response.output_item.done":
+                item = getattr(event, "item", None)
+                if getattr(item, "type", None) == "function_call":
+                    item_id = getattr(item, "id", None)
+                    entry = tool_calls_by_item.get(item_id) if isinstance(item_id, str) else None
+                    if entry is not None:
+                        for source, target in (
+                            ("call_id", "id"),
+                            ("name", "name"),
+                            ("arguments", "arguments"),
+                        ):
+                            value = getattr(item, source, None)
+                            if isinstance(value, str) and value:
+                                entry[target] = value
+
+            elif event_type in (
+                "response.completed",
+                "response.incomplete",
+                "response.failed",
+            ):
+                response_obj = getattr(event, "response", None)
+                if response_obj is not None:
+                    final_usage = self._responses_usage(response_obj) or None
+                    final_stop_reason = self._responses_stop_reason(
+                        response_obj, has_tool_calls=bool(tool_calls_by_item)
+                    )
+            # Everything else (created / in_progress / content_part /
+            # server-side tool events) carries nothing the chunk stream
+            # needs — skip.
+
+        if tool_calls_by_item:
+            yield ModelChunkEvent(
+                tool_calls=[
+                    ToolCall(
+                        id=entry["id"],
+                        name=entry["name"],
+                        arguments=_decode_tool_arguments(entry["arguments"]),
+                    )
+                    for entry in tool_calls_by_item.values()
+                ]
+            )
+
+        yield ModelChunkEvent(done=True, usage=final_usage, stop_reason=final_stop_reason)
+
     async def complete(
         self,
         messages: list[Message],
@@ -502,6 +1144,9 @@ class OpenAIModel(BaseModel):
         Returns:
             Model response with message and metadata
         """
+        if self._use_responses_api():
+            return await self._complete_responses(messages, tools, **kwargs)
+
         openai_messages = self._convert_messages(messages)
         openai_tools = self._convert_tools(tools)
 
@@ -583,6 +1228,11 @@ class OpenAIModel(BaseModel):
         Yields:
             Streaming chunks with content and/or tool calls
         """
+        if self._use_responses_api():
+            async for event in self._stream_responses(messages, tools, **kwargs):
+                yield event
+            return
+
         openai_messages = self._convert_messages(messages)
         openai_tools = self._convert_tools(tools)
 
