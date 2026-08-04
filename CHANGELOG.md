@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-08-04
+
 ### Added
 
 - **The OpenAI provider speaks the Responses API.** `OpenAIModel` gains an
@@ -34,11 +36,6 @@ policy.
   server-side storage. Dropped for lack of a Responses equivalent: `seed`,
   `stop` sequences, penalties; streamed turns reconstruct history without
   reasoning items (#60).
-
-## [2.4.0] - 2026-08-01
-
-### Added
-
 - **Sandboxed tool execution.** `@tool(sandbox=True)` ships the function's
   source into an isolated box and runs it there — the host process never
   executes the body, and direct `tool(...)` calls are sandboxed too, so
