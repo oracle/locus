@@ -125,9 +125,39 @@ class TestFetchGuard:
         assert "hello world" in page.text
 
     @respx.mock
+    async def test_a_public_redirect_is_followed(self) -> None:
+        # A public → public redirect completes: the manual loop re-validates the
+        # hop, then fetches it.
+        respx.get(f"http://{_A_PUBLIC_IP}/").mock(
+            return_value=httpx.Response(302, headers={"location": "http://8.8.8.8/final"})
+        )
+        respx.get("http://8.8.8.8/final").mock(return_value=httpx.Response(200, text="landed"))
+        page = await HTTPXWebFetcher().fetch(f"http://{_A_PUBLIC_IP}/")
+        assert page.status == 200
+        assert "landed" in page.text
+
+    @respx.mock
+    async def test_a_redirect_without_a_location_stops(self) -> None:
+        # A redirect status with no Location header ends the loop, returning it.
+        respx.get(f"http://{_A_PUBLIC_IP}/").mock(return_value=httpx.Response(302))
+        page = await HTTPXWebFetcher().fetch(f"http://{_A_PUBLIC_IP}/")
+        assert page.status == 302
+
+    @respx.mock
     async def test_block_private_false_opts_out_of_the_guard(self) -> None:
         # The documented escape hatch for a trusted internal network.
         respx.get("http://10.0.0.5/").mock(return_value=httpx.Response(200, text="internal ok"))
         page = await HTTPXWebFetcher(block_private=False).fetch("http://10.0.0.5/")
         assert page.status == 200
         assert "internal ok" in page.text
+
+    @respx.mock
+    async def test_block_private_false_still_follows_redirects(self) -> None:
+        # With the guard off, a redirect hop is followed without re-validation.
+        respx.get("http://10.0.0.5/").mock(
+            return_value=httpx.Response(302, headers={"location": "http://10.0.0.6/x"})
+        )
+        respx.get("http://10.0.0.6/x").mock(return_value=httpx.Response(200, text="internal"))
+        page = await HTTPXWebFetcher(block_private=False).fetch("http://10.0.0.5/")
+        assert page.status == 200
+        assert "internal" in page.text
