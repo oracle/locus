@@ -300,6 +300,53 @@ async def test_interrupt_then_resume_round_trip() -> None:
     assert agent._interrupt_state is None
 
 
+async def test_second_ask_user_after_resume_re_pauses() -> None:
+    """A SECOND ``ask_user`` in a RESUMED run must pause again — the spine of a
+    multi-turn clarification thread (ask → answer → ask again → answer → done).
+
+    The resume loop only paused on ``InterruptException`` before; a marker-
+    returning tool (``ask_user``) called on resume folded its marker in as an
+    ordinary tool result and the run carried on. This asserts the second ask
+    re-pauses instead of finishing.
+    """
+    model = _ScriptedModel(
+        [
+            _tc("needs_input", {}, tc_id="q1"),  # ask #1  (first pass)
+            _tc("needs_input", {}, tc_id="q2"),  # ask #2  (after the first resume)
+            _text("all done"),  # only reached after the second answer
+        ]
+    )
+    agent = Agent(
+        model=model,
+        tools=[needs_input],
+        max_iterations=10,
+        reflexion=False,
+        grounding=False,
+    )
+
+    first: list[Any] = []
+    async for ev in agent.run("start"):
+        first.append(ev)
+    assert any(isinstance(e, InterruptEvent) for e in first)  # ask #1
+
+    # First answer → the model asks AGAIN. Must re-pause, not run to completion.
+    second: list[Any] = []
+    async for ev in agent.resume("first answer"):
+        second.append(ev)
+    assert any(isinstance(e, InterruptEvent) for e in second), "second ask_user did not re-pause"
+    assert not any(isinstance(e, TerminateEvent) for e in second), "run finished instead of asking"
+    assert agent._interrupt_state is not None  # parked for the next answer
+
+    # Second answer → the run actually finishes.
+    third: list[Any] = []
+    async for ev in agent.resume("second answer"):
+        third.append(ev)
+    term = next(e for e in third if isinstance(e, TerminateEvent))
+    assert term.reason == "complete"
+    assert term.final_message == "all done"
+    assert agent._interrupt_state is None
+
+
 # ---------------------------------------------------------------------------
 # Cross-process resume — rehydrate the interrupt from a checkpointer
 # ---------------------------------------------------------------------------
