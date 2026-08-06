@@ -124,10 +124,7 @@ class ApprovalDecision:
     @property
     def escalated_by_model(self) -> bool:
         """Whether a control model made this decision stricter than policy alone."""
-        return (
-            self.model_outcome is not None
-            and _ORDER[self.outcome] > _ORDER[self.policy_outcome]
-        )
+        return self.model_outcome is not None and _ORDER[self.outcome] > _ORDER[self.policy_outcome]
 
 
 def approve(
