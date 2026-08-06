@@ -1315,6 +1315,37 @@ class AgentRuntimeMixin:
                             duration_ms=(time.perf_counter() - start_time) * 1000,
                         )
 
+                    # Interrupt marker from a marker-returning tool (``ask_user``)
+                    # on the RESUME path. The first-pass loop catches this at the
+                    # ``'"__interrupt__": true'`` site above; this resume loop
+                    # otherwise only pauses on ``InterruptException`` — so a
+                    # SECOND clarification would fold in as an ordinary tool
+                    # result and the run would carry on instead of pausing.
+                    # Mirror the first-pass handling (pause BEFORE folding, same
+                    # dangling-call semantics) so ask → answer → ask-again works
+                    # for N turns, not just one.
+                    if result.content and '"__interrupt__": true' in result.content:
+                        import json as _json
+
+                        try:
+                            interrupt_data = _json.loads(result.content)
+                        except (ValueError, KeyError):
+                            interrupt_data = None
+                        if interrupt_data and interrupt_data.get("__interrupt__"):
+                            self._last_run_state = state
+                            self._interrupt_state = state
+                            self._interrupt_prompt = prompt
+                            self._interrupt_thread_id = thread_id
+                            self._interrupt_metadata = metadata
+                            if self.config.checkpointer and thread_id:
+                                await self.config.checkpointer.save(state, thread_id)
+                            yield InterruptEvent(
+                                question=interrupt_data.get("question", ""),
+                                options=interrupt_data.get("options"),
+                                interrupt_id=result.tool_call_id,
+                            )
+                            return
+
                     state = state.with_tool_execution(
                         ToolExecution(
                             tool_name=result.name,
