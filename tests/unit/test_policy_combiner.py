@@ -88,9 +88,7 @@ class TestSafety:
         assert _ORDER[decision.outcome] >= _ORDER[policy_outcome]
 
     @pytest.mark.parametrize("policy_outcome", _ALL)
-    def test_a_model_screaming_allow_cannot_open_a_closed_gate(
-        self, policy_outcome: str
-    ) -> None:
+    def test_a_model_screaming_allow_cannot_open_a_closed_gate(self, policy_outcome: str) -> None:
         """The adversarial case: a compromised model advising allow, always."""
         action, policy = _policy_for(policy_outcome)
         decision = approve(action, policy=policy, advisor=_Advisor(ApprovalOutcome.ALLOW))
@@ -185,9 +183,7 @@ class TestAuditability:
 
     def test_an_escalation_names_both_ends_of_it(self) -> None:
         action, policy = _policy_for(ApprovalOutcome.ALLOW)
-        decision = approve(
-            action, policy=policy, advisor=_Advisor(ApprovalOutcome.REQUIRE_HUMAN)
-        )
+        decision = approve(action, policy=policy, advisor=_Advisor(ApprovalOutcome.REQUIRE_HUMAN))
         line = next(c for c in decision.checks if "escalated" in c)
         assert ApprovalOutcome.ALLOW in line
         assert ApprovalOutcome.REQUIRE_HUMAN in line
