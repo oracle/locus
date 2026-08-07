@@ -25,7 +25,7 @@ This module ships:
 
 from __future__ import annotations
 
-from typing import Any, Protocol, cast, runtime_checkable
+from typing import Any, Literal, Protocol, cast, runtime_checkable
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -82,10 +82,11 @@ class JudgeOutput(BaseModel):
         description="Single-sentence judge explanation (the ε channel from §6).",
     )
 
-    decision_status: str = Field(
+    decision_status: Literal["resolved", "abstain"] = Field(
         default="resolved",
         description=(
-            "'resolved' or 'abstain'. The paper's a ∈ {resolved, abstain}. "
+            "The paper's a ∈ {resolved, abstain} (Appendix C: "
+            'decision_status : {"resolved", "abstain"}). '
             "Abstain triggers the same outer-loop branch as δ = replan."
         ),
     )
@@ -98,10 +99,10 @@ class JudgeOutput(BaseModel):
 
     @model_validator(mode="after")
     def _decision_status_value(self) -> JudgeOutput:
-        if self.decision_status not in ("resolved", "abstain"):
-            raise ValueError(
-                f"decision_status must be 'resolved' or 'abstain', got {self.decision_status!r}"
-            )
+        # decision_status's own type now rejects anything outside
+        # {"resolved", "abstain"} before this validator ever runs (Pydantic
+        # raises on construction) — this only needs to enforce the
+        # cross-field abstain_reason requirement the type alone can't.
         if self.decision_status == "abstain" and not self.abstain_reason:
             raise ValueError("abstain_reason is required when decision_status='abstain'")
         return self
