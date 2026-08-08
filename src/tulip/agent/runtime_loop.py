@@ -1263,6 +1263,47 @@ class AgentRuntimeMixin:
                     yield ToolStartEvent(
                         tool_name=tc.name, tool_call_id=tc.id, arguments=tc.arguments
                     )
+
+                    # The SAME hook seam the first-pass loop runs (playbook
+                    # trackers, sandbox enforcers, admit()-style gates riding
+                    # ``BeforeToolCallEvent.cancel``). Without it a RESUMED run
+                    # executed tools hook-blind: governance hooks silently
+                    # stopped firing the moment a run was answered — observed
+                    # as a playbook tracker reporting a step "skipped" while
+                    # the step's tool visibly ran in the same trace.
+                    tool_event = await self._run_before_tool_hooks(tc.name, tc.id, tc.arguments)
+                    if tool_event.cancel:
+                        cancel_msg = (
+                            tool_event.cancel
+                            if isinstance(tool_event.cancel, str)
+                            else "Cancelled by hook"
+                        )
+                        result = ToolResult(
+                            tool_call_id=tc.id,
+                            name=tc.name,
+                            content=cancel_msg,
+                            error=None,
+                            duration_ms=0.0,
+                        )
+                        state = state.with_tool_execution(
+                            ToolExecution(
+                                tool_name=result.name,
+                                tool_call_id=result.tool_call_id,
+                                arguments=tc.arguments,
+                                result=result.content,
+                            )
+                        )
+                        state = state.with_message(Message.tool(result))
+                        yield ToolCompleteEvent(
+                            tool_name=result.name,
+                            tool_call_id=result.tool_call_id,
+                            result=result.content,
+                            error=None,
+                            duration_ms=0.0,
+                        )
+                        continue
+                    modified_args = tool_event.arguments
+
                     start_time = time.perf_counter()
                     try:
                         ctx_factory = ToolContextFactory(
@@ -1273,7 +1314,7 @@ class AgentRuntimeMixin:
                             invocation_metadata=metadata or {},
                         )
                         [result] = await self._executor.execute(
-                            [tc],
+                            [tc.model_copy(update={"arguments": modified_args})],
                             self._tool_registry,
                             ctx_factory,
                         )
@@ -1346,11 +1387,41 @@ class AgentRuntimeMixin:
                             )
                             return
 
+                    after_tool_event = await self._run_after_tool_hooks(
+                        result.name,
+                        result.content if result.success else None,
+                        result.error,
+                        tool_call_id=result.tool_call_id,
+                        arguments=modified_args,
+                    )
+                    if after_tool_event.retry:
+                        try:
+                            retry_ctx_factory = ToolContextFactory(
+                                run_id=state.run_id,
+                                agent_id=state.agent_id,
+                                iteration=state.iteration,
+                                state=state,
+                                invocation_metadata=metadata or {},
+                            )
+                            [result] = await self._executor.execute(
+                                [tc.model_copy(update={"arguments": modified_args})],
+                                self._tool_registry,
+                                retry_ctx_factory,
+                            )
+                        except Exception as e:  # noqa: BLE001 — user tool bodies can raise anything; surface as ToolResult.error
+                            result = ToolResult(
+                                tool_call_id=tc.id,
+                                name=tc.name,
+                                content="",
+                                error=str(e),
+                                duration_ms=0.0,
+                            )
+
                     state = state.with_tool_execution(
                         ToolExecution(
                             tool_name=result.name,
                             tool_call_id=result.tool_call_id,
-                            arguments=tc.arguments,
+                            arguments=modified_args,
                             result=result.content if result.success else None,
                             error=result.error,
                             duration_ms=result.duration_ms,

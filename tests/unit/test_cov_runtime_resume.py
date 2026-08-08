@@ -468,6 +468,112 @@ async def test_resume_from_state_saves_final_checkpoint() -> None:
     assert any("[User Response] go ahead" in (m.content or "") for m in final.messages)
 
 
+@tool(name="ask_user")
+def ask_user(question: str, options: str = "") -> str:
+    """Ask the user and pause — returns the runtime's interrupt marker."""
+    import json
+
+    opts = [o.strip() for o in options.split(",") if o.strip()] if options else None
+    return json.dumps({"__interrupt__": True, "question": question, "options": opts})
+
+
+async def test_ask_answer_ask_again_parks_each_time_and_folds_tool_results() -> None:
+    """ask → answer → ask-again works for N turns, and each answer lands as the
+    dangling ask_user call's TOOL result (not a system note) — the rhythm that
+    keeps a live model asking through the tool instead of in its final text."""
+    agent = Agent(
+        model=_ScriptedModel(
+            [
+                _tc("ask_user", {"question": "Payment id?"}, tc_id="q1"),
+                _tc("ask_user", {"question": "And the reason?"}, tc_id="q2"),
+                _text("refund filed"),
+            ]
+        ),
+        tools=[ask_user],
+        max_iterations=10,
+        reflexion=False,
+        grounding=False,
+    )
+    first: list[Any] = []
+    async for ev in agent.run("refund please"):
+        first.append(ev)
+    assert any(isinstance(e, InterruptEvent) for e in first)
+
+    # First answer: the resumed loop must pause AGAIN on the second ask_user.
+    second: list[Any] = []
+    async for ev in agent.resume("pi_123"):
+        second.append(ev)
+    parked_again = [e for e in second if isinstance(e, InterruptEvent)]
+    assert len(parked_again) == 1
+    assert parked_again[0].question == "And the reason?"
+    assert not any(isinstance(e, TerminateEvent) for e in second)
+
+    # Second answer completes the run.
+    third: list[Any] = []
+    async for ev in agent.resume("damaged-goods"):
+        third.append(ev)
+    term = next(e for e in third if isinstance(e, TerminateEvent))
+    assert term.final_message == "refund filed"
+
+    # Both answers were folded as tool results of their OWN calls, and no
+    # "[User Response]" system note was injected for either.
+    msgs = agent._last_run_state.messages
+    folded = {m.tool_call_id: m.content for m in msgs if m.name == "ask_user" and m.content}
+    assert folded.get("q1") == "pi_123"
+    assert folded.get("q2") == "damaged-goods"
+    assert not any("[User Response]" in (m.content or "") for m in msgs)
+
+
+async def test_resumed_loop_fires_tool_hooks_and_honors_cancel() -> None:
+    """The resume loop runs the SAME before/after tool hook seam as run() —
+    a playbook tracker or admit()-style gate must not go blind after an
+    answer, and a hook cancel must stop the body from executing."""
+    from tulip.hooks.provider import AfterToolCallEvent, BeforeToolCallEvent, HookProvider
+
+    seen: dict[str, list[str]] = {"before": [], "after": []}
+
+    class _Gate(HookProvider):
+        @property
+        def priority(self) -> int:
+            return 100
+
+        async def on_before_tool_call(self, event: BeforeToolCallEvent) -> None:
+            seen["before"].append(event.tool_name)
+            if event.tool_name == "trivial" and len(seen["before"]) > 1:
+                event.cancel = "blocked on resume by the gate"
+
+        async def on_after_tool_call(self, event: AfterToolCallEvent) -> None:
+            seen["after"].append(event.tool_name)
+
+    agent = Agent(
+        model=_ScriptedModel(
+            [
+                _tc("ask_user", {"question": "go on?"}, tc_id="q1"),
+                _tc("trivial", {}, tc_id="t1"),
+                _text("finished"),
+            ]
+        ),
+        tools=[ask_user, trivial],
+        hooks=[_Gate()],
+        max_iterations=10,
+        reflexion=False,
+        grounding=False,
+    )
+    async for _ in agent.run("start"):
+        pass
+    resumed: list[Any] = []
+    async for ev in agent.resume("yes"):
+        resumed.append(ev)
+    # The hook saw the resumed call, and its cancel stood in for the body.
+    assert "trivial" in seen["before"]
+    complete = next(
+        e for e in resumed if isinstance(e, ToolCompleteEvent) and e.tool_name == "trivial"
+    )
+    assert complete.result == "blocked on resume by the gate"
+    term = next(e for e in resumed if isinstance(e, TerminateEvent))
+    assert term.final_message == "finished"
+
+
 async def test_resume_without_interrupt_or_thread_id_raises() -> None:
     agent = Agent(
         model=_ScriptedModel([_text("x")]),
