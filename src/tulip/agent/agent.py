@@ -21,7 +21,7 @@ from tulip.core.events import (
     ToolCompleteEvent,
     TulipEvent,
 )
-from tulip.core.messages import Message
+from tulip.core.messages import Message, Role, ToolResult
 from tulip.core.state import AgentState
 from tulip.models import get_model  # noqa: F401 — re-exported for test monkey-patches
 from tulip.tools.decorator import Tool
@@ -583,8 +583,32 @@ class Agent(AgentRuntimeMixin, BaseModel):
             prompt = ""
             metadata = None
 
-        # Add the user's response as a tool result for ask_user
-        state = state.with_message(Message.system(f"[User Response] {response}"))
+        # Fold the user's response as the TOOL RESULT of the dangling
+        # ask_user call. The pause leaves that call un-folded in state, and a
+        # bare system note in its place breaks the call→result rhythm the
+        # model is pattern-matching on — a model that needs to ask AGAIN then
+        # tends to put its follow-up question in plain text, which ends the
+        # run instead of pausing it. Answering the call keeps the exchange in
+        # the tool protocol, so ask → answer → ask-again holds for N turns.
+        answered = {
+            m.tool_call_id for m in state.messages if m.role == Role.TOOL and m.tool_call_id
+        }
+        dangling = None
+        for msg in reversed(state.messages):
+            if msg.role == Role.ASSISTANT and msg.tool_calls:
+                for tc in msg.tool_calls:
+                    if tc.name == "ask_user" and tc.id not in answered:
+                        dangling = tc
+                        break
+                break
+        if dangling is not None:
+            state = state.with_message(
+                Message.tool(
+                    ToolResult(tool_call_id=dangling.id, name=dangling.name, content=response)
+                )
+            )
+        else:
+            state = state.with_message(Message.system(f"[User Response] {response}"))
 
         # Store for _create_initial_state to pick up
         self._last_run_state = state
