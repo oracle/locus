@@ -574,6 +574,48 @@ async def test_resumed_loop_fires_tool_hooks_and_honors_cancel() -> None:
     assert term.final_message == "finished"
 
 
+async def test_interrupt_fields_survive_park_and_repark() -> None:
+    """A structured input request ({name,label,type} field specs) rides the
+    interrupt marker to the InterruptEvent — on the FIRST park and on an
+    ask-again park after resume — so a console can render a form."""
+    import json as _json
+
+    from tulip.tools.decorator import tool as _tool
+
+    @_tool(name="ask_form")
+    def ask_form(question: str) -> str:
+        """Ask with a structured field spec."""
+        return _json.dumps(
+            {
+                "__interrupt__": True,
+                "question": question,
+                "options": None,
+                "fields": [{"name": "payment_intent", "label": "Payment ID", "type": "text"}],
+            }
+        )
+
+    agent = Agent(
+        model=_ScriptedModel(
+            [
+                _tc("ask_form", {"question": "Details?"}, tc_id="f1"),
+                _tc("ask_form", {"question": "More?"}, tc_id="f2"),
+                _text("done"),
+            ]
+        ),
+        tools=[ask_form],
+        max_iterations=10,
+        reflexion=False,
+        grounding=False,
+    )
+    first = [ev async for ev in agent.run("go")]
+    park1 = next(e for e in first if isinstance(e, InterruptEvent))
+    assert park1.fields == [{"name": "payment_intent", "label": "Payment ID", "type": "text"}]
+    second = [ev async for ev in agent.resume("pi_1")]
+    park2 = next(e for e in second if isinstance(e, InterruptEvent))
+    assert park2.fields is not None
+    assert park2.fields[0]["name"] == "payment_intent"
+
+
 async def test_resume_without_interrupt_or_thread_id_raises() -> None:
     agent = Agent(
         model=_ScriptedModel([_text("x")]),
