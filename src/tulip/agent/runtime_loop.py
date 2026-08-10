@@ -916,6 +916,7 @@ class AgentRuntimeMixin:
                                 yield InterruptEvent(
                                     question=interrupt_data.get("question", ""),
                                     options=interrupt_data.get("options"),
+                                    fields=interrupt_data.get("fields"),
                                     interrupt_id=result.tool_call_id,
                                 )
                                 return  # Pause the generator
@@ -1340,9 +1341,11 @@ class AgentRuntimeMixin:
                                 else str(payload)
                             )
                             options = payload.get("options") if isinstance(payload, dict) else None
+                            fields = payload.get("fields") if isinstance(payload, dict) else None
                             yield InterruptEvent(
                                 question=question,
                                 options=options,
+                                fields=fields,
                                 interrupt_id=e.value.interrupt_id
                                 if hasattr(e, "value")
                                 else "unknown",
@@ -1383,6 +1386,7 @@ class AgentRuntimeMixin:
                             yield InterruptEvent(
                                 question=interrupt_data.get("question", ""),
                                 options=interrupt_data.get("options"),
+                                fields=interrupt_data.get("fields"),
                                 interrupt_id=result.tool_call_id,
                             )
                             return

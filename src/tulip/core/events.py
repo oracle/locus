@@ -106,6 +106,11 @@ class InterruptEvent(TulipEvent):
     event_type: Literal["interrupt"] = "interrupt"
     question: str
     options: list[str] | None = None
+    #: Structured input request: a list of {name, label, type, placeholder,
+    #: required} dicts. A question that needs SEVERAL answers ("payment id,
+    #: amount, reason") declares them here so a console can render a form
+    #: instead of a free-text box. None keeps the plain-question shape.
+    fields: list[dict[str, Any]] | None = None
     interrupt_id: str
     metadata: dict[str, Any] = Field(default_factory=dict)
 
