@@ -93,6 +93,10 @@ class TerminateEvent(TulipEvent):
     final_confidence: float
     total_tool_calls: int
     final_message: str | None = None  # Final assistant message content
+    # Cumulative token usage for the run segment that ended here, read off the
+    # AgentState counters (prompt/completion/total). None when the model
+    # reported no usage — consumers must treat absence as "unmetered", not 0.
+    usage: dict[str, int] | None = None
 
 
 class InterruptEvent(TulipEvent):

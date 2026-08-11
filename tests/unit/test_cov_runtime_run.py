@@ -459,3 +459,24 @@ async def test_output_key_persisted_to_state_metadata() -> None:
     state = agent._last_run_state
     assert state is not None
     assert state.metadata.get("result") == "the final answer"
+
+
+# ── usage on the terminal event (A4 metering) ────────────────────────────────
+def test_usage_of_reads_the_state_counters() -> None:
+    from tulip.agent.runtime_loop import _usage_of
+    from tulip.core.state import AgentState
+
+    state = AgentState(agent_name="a", goal="g").with_token_usage(100, 20)
+    assert _usage_of(state) == {
+        "prompt_tokens": 100,
+        "completion_tokens": 20,
+        "total_tokens": 120,
+    }
+
+
+def test_usage_of_is_none_when_nothing_was_metered() -> None:
+    from tulip.agent.runtime_loop import _usage_of
+    from tulip.core.state import AgentState
+
+    # absence means "unmetered", never zero cost
+    assert _usage_of(AgentState(agent_name="a", goal="g")) is None
