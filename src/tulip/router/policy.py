@@ -49,6 +49,13 @@ class PolicyGate:
     Defaults: ``max_risk=Risk.HIGH`` (nothing denied by default) and
     ``require_approval_above=Risk.MEDIUM`` (HIGH-risk frames need
     explicit approval).
+
+    ``denied_protocols`` names protocol ids the deployment refuses outright —
+    the control plane's answer to "never let this team's goals compile to an
+    ``a2a_delegate``". A frame that selects a denied shape is refused before it
+    runs, by declaration, whatever its risk. The set is authored centrally and
+    handed to the gate at construction, so it governs the *shape choice*, not
+    just the action inside it.
     """
 
     def __init__(
@@ -56,11 +63,26 @@ class PolicyGate:
         *,
         max_risk: Risk = Risk.HIGH,
         require_approval_above: Risk = Risk.MEDIUM,
+        denied_protocols: frozenset[str] | set[str] | None = None,
     ) -> None:
         self._max_risk = max_risk
         self._approval_above = require_approval_above
+        self._denied_protocols = frozenset(denied_protocols or ())
 
     def check(self, frame: GoalFrame, protocol: Protocol) -> PolicyVerdict:
+        # Declared shape ban — a protocol the deployment refuses is denied
+        # before any risk math, whatever the frame. This is the control
+        # plane's grip on the router's shape choice itself.
+        if protocol.id in self._denied_protocols:
+            return PolicyVerdict(
+                allow=False,
+                require_approval=False,
+                reason=(
+                    f"protocol {protocol.id!r} is denied by policy for this "
+                    "deployment (shape not permitted)."
+                ),
+            )
+
         # Hard ceiling — frame.risk above the gate's max_risk is denied.
         if frame.risk > self._max_risk:
             return PolicyVerdict(

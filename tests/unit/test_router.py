@@ -1058,3 +1058,32 @@ class TestLLMProtocolPickerInternals:
         custom = "You are a strict canonical-only picker."
         picker = LLMProtocolPicker(model=MagicMock(), system_prompt=custom)
         assert picker.system_prompt == custom
+
+
+class TestDeniedProtocols:
+    def _frame(self):
+        from tulip.router import Complexity, GoalFrame, Risk, TaskType
+
+        return GoalFrame(
+            primary_goal=TaskType.ANSWER,
+            domain="general",
+            complexity=Complexity.LOW,
+            risk=Risk.LOW,
+        )
+
+    def test_a_denied_protocol_is_refused_before_any_risk_math(self):
+        from tulip.router import PolicyGate
+
+        gate = PolicyGate(denied_protocols={"a2a_delegate"})
+        proto = next(p for p in builtin_protocols() if p.id == "a2a_delegate")
+        verdict = gate.check(self._frame(), proto)
+        assert verdict.allow is False
+        assert verdict.require_approval is False
+        assert "denied by policy" in verdict.reason
+
+    def test_an_undenied_protocol_still_passes(self):
+        from tulip.router import PolicyGate
+
+        gate = PolicyGate(denied_protocols={"a2a_delegate"})
+        proto = next(p for p in builtin_protocols() if p.id == "direct_response")
+        assert gate.check(self._frame(), proto).allow is True
