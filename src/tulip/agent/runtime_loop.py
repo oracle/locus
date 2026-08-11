@@ -51,6 +51,21 @@ from tulip.tools.executor import ToolContextFactory, ToolExecutor
 from tulip.tools.registry import ToolRegistry
 
 
+def _usage_of(state: AgentState) -> dict[str, int] | None:
+    """The run segment's cumulative token usage, off the state counters.
+
+    ``None`` when nothing was metered (a stub or a provider that reports no
+    usage) — consumers must read absence as "unmetered", never as zero cost.
+    """
+    if state.total_tokens_used <= 0:
+        return None
+    return {
+        "prompt_tokens": state.prompt_tokens_used,
+        "completion_tokens": state.completion_tokens_used,
+        "total_tokens": state.total_tokens_used,
+    }
+
+
 if TYPE_CHECKING:
     from tulip.agent.hook_orchestrator import HookOrchestrator
     from tulip.memory.conversation import ConversationManager
@@ -240,6 +255,7 @@ class AgentRuntimeMixin:
                             reason="time_budget",
                             iterations_used=state.iteration,
                             final_confidence=state.confidence,
+                            usage=_usage_of(state),
                             total_tool_calls=len(state.tool_executions),
                             final_message=_last_assistant_content,
                         )
@@ -251,6 +267,7 @@ class AgentRuntimeMixin:
                         reason="cancelled",
                         iterations_used=state.iteration,
                         final_confidence=state.confidence,
+                        usage=_usage_of(state),
                         total_tool_calls=_tool_calls_count,
                         final_message="Agent cancelled by external signal.",
                     )
@@ -270,6 +287,7 @@ class AgentRuntimeMixin:
                             reason=user_reason or "complete",
                             iterations_used=state.iteration,
                             final_confidence=state.confidence,
+                            usage=_usage_of(state),
                             total_tool_calls=len(state.tool_executions),
                             final_message=_last_assistant_content,
                         )
@@ -328,6 +346,7 @@ class AgentRuntimeMixin:
                             reason="max_iterations",
                             iterations_used=state.iteration,
                             final_confidence=state.confidence,
+                            usage=_usage_of(state),
                             total_tool_calls=len(state.tool_executions),
                             final_message=summary,
                         )
@@ -338,6 +357,7 @@ class AgentRuntimeMixin:
                         reason=stop_reason,
                         iterations_used=state.iteration,
                         final_confidence=state.confidence,
+                        usage=_usage_of(state),
                         total_tool_calls=len(state.tool_executions),
                         final_message=_last_assistant_content,
                     )
@@ -565,6 +585,7 @@ class AgentRuntimeMixin:
                         reason="complete",
                         iterations_used=state.iteration,
                         final_confidence=state.confidence,
+                        usage=_usage_of(state),
                         total_tool_calls=len(state.tool_executions),
                         final_message=final_content,
                     )
@@ -1105,6 +1126,7 @@ class AgentRuntimeMixin:
                 reason="error",
                 iterations_used=state.iteration,
                 final_confidence=state.confidence,
+                usage=_usage_of(state),
                 total_tool_calls=len(state.tool_executions),
             )
             raise
@@ -1192,6 +1214,7 @@ class AgentRuntimeMixin:
                             reason="time_budget",
                             iterations_used=state.iteration,
                             final_confidence=state.confidence,
+                            usage=_usage_of(state),
                             total_tool_calls=len(state.tool_executions),
                             final_message=_last_assistant_content,
                         )
@@ -1208,6 +1231,7 @@ class AgentRuntimeMixin:
                             reason=user_reason or "complete",
                             iterations_used=state.iteration,
                             final_confidence=state.confidence,
+                            usage=_usage_of(state),
                             total_tool_calls=len(state.tool_executions),
                             final_message=_last_assistant_content,
                         )
@@ -1219,6 +1243,7 @@ class AgentRuntimeMixin:
                         reason=stop_reason,
                         iterations_used=state.iteration,
                         final_confidence=state.confidence,
+                        usage=_usage_of(state),
                         total_tool_calls=len(state.tool_executions),
                         final_message=_last_assistant_content,
                     )
@@ -1251,6 +1276,7 @@ class AgentRuntimeMixin:
                         reason="complete",
                         iterations_used=state.iteration,
                         final_confidence=state.confidence,
+                        usage=_usage_of(state),
                         total_tool_calls=len(state.tool_executions),
                         final_message=response.message.content,
                     )
