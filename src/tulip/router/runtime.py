@@ -89,7 +89,12 @@ class Router:
             self._on_frame(parsed)
         return parsed
 
-    async def dispatch(self, user_input: str, run_id: str | None = None) -> RunnableResult:
+    async def dispatch(
+        self,
+        user_input: str,
+        run_id: str | None = None,
+        frame: GoalFrame | None = None,
+    ) -> RunnableResult:
         """Extract a frame, compile a runnable, execute it.
 
         ``run_id`` scopes every emitted :class:`StreamEvent` to one
@@ -98,6 +103,15 @@ class Router:
         Slack thread, etc.) should pass one in. The id is also
         attached to the :class:`RunnableResult` raw payload so
         downstream callers can correlate without re-parsing the bus.
+
+        ``frame`` pins a pre-extracted :class:`GoalFrame` and skips the
+        extractor entirely. This is the resume seam: a governed dispatch
+        that parked on a hold must replay under the SAME frame a human's
+        approval was granted against — a live extractor re-reading the
+        goal can frame it differently, select a different protocol, and
+        re-hold what was already approved, forever. The pinned frame
+        still flows through ``on_frame`` and the event bus, so consumers
+        see an identical stream either way.
         """
         rid = run_id or str(uuid4())
         # Pin the run_id on the current asyncio context so any
@@ -106,7 +120,12 @@ class Router:
         # threading the id through every signature.
         token = set_run_id(rid)
         try:
-            frame = await self.extract(user_input, run_id=rid)
+            if frame is None:
+                frame = await self.extract(user_input, run_id=rid)
+            else:
+                await emit_frame_extracted(rid, frame)
+                if self._on_frame is not None:
+                    self._on_frame(frame)
             runnable = await self.compiler.compile(frame, run_id=rid)
             protocol_id = getattr(runnable, "protocol_id", "?")
             inner = getattr(runnable, "inner", None)

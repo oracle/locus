@@ -44,6 +44,12 @@ def _frame_payload(frame: GoalFrame) -> dict[str, Any]:
         "complexity": frame.complexity.value,
         "risk": frame.risk.value,
         "approval_required": frame.approval_required,
+        # The requires_* switches steer compilation — carried so a persisted
+        # frame can be re-pinned on resume with full fidelity, not defaults.
+        "requires_tools": frame.requires_tools,
+        "requires_memory": frame.requires_memory,
+        "requires_code_generation": frame.requires_code_generation,
+        "requires_multi_agent": frame.requires_multi_agent,
         "required_capabilities": list(frame.required_capabilities),
         "success_criteria": list(frame.success_criteria),
     }
