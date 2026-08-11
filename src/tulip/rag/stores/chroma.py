@@ -12,6 +12,14 @@ Chroma's embedded client is synchronous, so each call is dispatched to a
 threadpool via :func:`asyncio.to_thread` to keep the store awaitable
 alongside the async embedder / retriever.
 
+.. warning::
+    If you point ``host``/``port`` at a **self-hosted Chroma server**, be
+    aware of CVE-2026-45829 (GHSA-f4j7-r4q5-qw2c): a pre-authentication
+    code-injection in the Chroma server's collections endpoint, with no
+    patched release at the time of writing. This store only ever acts as a
+    client — the embedded/ephemeral modes never run that server code — but a
+    server you operate must not be reachable by untrusted callers.
+
 Usage::
 
     from tulip.rag.stores import ChromaVectorStore
