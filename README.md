@@ -27,10 +27,21 @@
 </p>
 
 <p align="center">
-  <a href="https://tulipagents.ai/why-tulip/">Why Tulip</a> ·
+  <strong>Build</strong>
+  <a href="https://tulipagents.ai/concepts/agent/">Agents</a> ·
+  <a href="https://tulipagents.ai/concepts/tools/">Tools</a> ·
+  <a href="https://tulipagents.ai/concepts/multi-agent/">Multi-agent</a> ·
+  <a href="https://tulipagents.ai/concepts/checkpointers/">Memory</a> ·
+  <a href="https://tulipagents.ai/concepts/rag/">RAG</a>
+  <br>
+  <strong>Control</strong>
   <a href="https://tulipagents.ai/concepts/router/">Cognitive router</a> ·
   <a href="https://tulipagents.ai/concepts/gsar/">GSAR grounding</a> ·
-  <a href="https://tulipagents.ai/concepts/security/">Admission gate</a> ·
+  <a href="https://tulipagents.ai/concepts/security/">Admission gate</a>
+  <br>
+  <strong>Start</strong>
+  <a href="https://tulipagents.ai/why-tulip/">Why Tulip</a> ·
+  <a href="https://tulipagents.ai/capabilities/">Capabilities</a> ·
   <a href="https://tulipagents.ai/notebooks/">Notebooks</a> ·
   <a href="https://tulipagents.ai/workbench/">Workbench</a>
 </p>

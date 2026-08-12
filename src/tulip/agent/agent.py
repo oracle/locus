@@ -164,7 +164,27 @@ class Agent(AgentRuntimeMixin, BaseModel):
             checkpointer: Checkpointer for state persistence
             hooks: Lifecycle hooks
             config: Full AgentConfig (overrides other params)
-            **kwargs: Additional config options
+            **kwargs: Any other :class:`~tulip.agent.config.AgentConfig`
+                field, forwarded verbatim. 36 options are reachable only
+                this way and are therefore invisible to ``help(Agent)``,
+                to editor autocomplete, and to ``inspect.signature(Agent)``
+                -- Pydantic's metaclass builds ``__signature__`` from the
+                explicit parameters above and drops the ``**kwargs``. They
+                are real, supported, and documented; they just cannot be
+                discovered by introspection. The ones most often reached
+                for:
+
+                ``termination``, ``output_schema`` (+ ``output_schema_strict``,
+                ``output_schema_retries``), ``memory_manager``, ``skills``,
+                ``playbook``, ``planning``, ``auxiliary_model``, ``gsar``,
+                ``require_verification``, ``plugins``, ``temperature``,
+                ``max_tokens``, ``token_budget``, ``time_budget_seconds``,
+                ``max_concurrency``, ``tool_execution``, ``tool_result_store``,
+                ``web_search``, ``web_fetch``, ``image_generator``,
+                ``speech_provider``, ``name``, ``agent_id``, ``metadata``.
+
+                See :class:`~tulip.agent.config.AgentConfig` for the full
+                set and the type of each.
         """
         # Build config from params or use provided
         if config is not None:
