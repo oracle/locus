@@ -1708,10 +1708,83 @@ class TestMalformedToolCallRecovery:
         assert term_events[0].reason == "complete"
         assert "42" in term_events[0].final_message
 
+    # =============================================================================
+    # Auto Conversation Manager Tests
+    # =============================================================================
 
-# =============================================================================
-# Auto Conversation Manager Tests
-# =============================================================================
+    # --- JSON-shaped tool calls ------------------------------------------
+    # What small self-hosted models emit (Ollama, the Hermes/Qwen tool
+    # templates) whenever the server does not lift it into a structured
+    # `tool_calls` field. Found by running a real qwen2.5-coder:7b against
+    # the rogue demo: it tried to isolate production, the call was never
+    # parsed, so it was never dispatched, never weighed by the admission
+    # gate, and never reached the audit trail -- and the run reported the
+    # model as having "declined". Nothing executed, which is fail-safe, but
+    # an attempted dangerous action that leaves no record is a governance
+    # gap, not a cosmetic one.
+
+    def test_parse_json_tool_call(self, mock_model):
+        """The exact shape a real Ollama-served qwen emitted."""
+        agent = self._make_agent_with_tools(mock_model)
+        result = agent._parse_text_tool_calls(
+            '{\n  "name": "search_web",\n  "arguments": {"query": "python"}\n}'
+        )
+        assert len(result) == 1
+        assert result[0].name == "search_web"
+        assert result[0].arguments == {"query": "python"}
+
+    def test_parse_json_tool_call_in_a_fence(self, mock_model):
+        agent = self._make_agent_with_tools(mock_model)
+        result = agent._parse_text_tool_calls(
+            'Sure:\n```json\n{"name": "search_web", "arguments": {"query": "x"}}\n```'
+        )
+        assert [c.name for c in result] == ["search_web"]
+
+    def test_parse_json_with_arguments_as_a_string(self, mock_model):
+        """Several servers double-encode the arguments object."""
+        agent = self._make_agent_with_tools(mock_model)
+        result = agent._parse_text_tool_calls(
+            '{"name": "search_web", "arguments": "{\\"query\\": \\"y\\"}"}'
+        )
+        assert result[0].arguments == {"query": "y"}
+
+    def test_parse_json_with_no_arguments(self, mock_model):
+        agent = self._make_agent_with_tools(mock_model)
+        result = agent._parse_text_tool_calls('{"name": "search_web"}')
+        assert [(c.name, c.arguments) for c in result] == [("search_web", {})]
+
+    def test_parse_json_nested_arguments_are_not_truncated(self, mock_model):
+        """Brace balancing, not a regex -- a nested object must survive."""
+        agent = self._make_agent_with_tools(mock_model)
+        result = agent._parse_text_tool_calls(
+            '{"name": "search_web", "arguments": {"query": "a", "opts": {"deep": true}}}'
+        )
+        assert result[0].arguments["opts"] == {"deep": True}
+
+    def test_parse_json_ignores_unknown_tools(self, mock_model):
+        """Name must resolve against the registry, or it is not a call."""
+        agent = self._make_agent_with_tools(mock_model)
+        assert agent._parse_text_tool_calls('{"name": "drop_tables", "arguments": {}}') == []
+
+    def test_parse_json_ignores_unrelated_objects(self, mock_model):
+        agent = self._make_agent_with_tools(mock_model)
+        assert agent._parse_text_tool_calls('{"status": "ok", "count": 3}') == []
+
+    def test_same_call_in_both_shapes_is_not_duplicated(self, mock_model):
+        """A model that prints both must not fire the tool twice."""
+        agent = self._make_agent_with_tools(mock_model)
+        result = agent._parse_text_tool_calls(
+            '{"name": "search_web", "arguments": {"query": "z"}} or search_web(query="z")'
+        )
+        assert len(result) == 1
+
+    def test_json_and_call_syntax_both_still_parse(self, mock_model):
+        """Adding the JSON shape must not cost the original one."""
+        agent = self._make_agent_with_tools(mock_model)
+        result = agent._parse_text_tool_calls(
+            '{"name": "search_web", "arguments": {"query": "a"}}\nget_weather(city="Lisbon")'
+        )
+        assert sorted(c.name for c in result) == ["get_weather", "search_web"]
 
 
 class TestAutoConversationManager:

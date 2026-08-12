@@ -1639,12 +1639,26 @@ class AgentRuntimeMixin:
     def _parse_text_tool_calls(self, text: str) -> list[ToolCall]:
         """Parse tool calls from model text output (text fallback).
 
-        Some models output tool calls as text like ``search(query="test")``
-        instead of structured function calls. This parses them by matching
-        against the registered tool registry.
+        Some models output tool calls as text instead of structured function
+        calls. Two shapes are recognised, both validated against the
+        registered tool registry:
+
+        - call syntax -- ``search(query="test")``
+        - JSON -- ``{"name": "search", "arguments": {"query": "test"}}``,
+          optionally inside a ``json`` fence, and optionally a list of them
+
+        The JSON shape is what small self-hosted models emit most often
+        (Ollama, the Hermes/Qwen tool templates) whenever the server does
+        not lift it into a structured ``tool_calls`` field. Missing it does
+        not just lose the call -- an attempted action that is never parsed
+        is never dispatched, so it is never weighed by the admission gate
+        and never reaches the audit trail. Nothing runs, which is
+        fail-safe, but "the model tried to wipe production" then looks
+        identical to "the model declined", and only one of those is true.
 
         Returns parsed ToolCall list, or empty list if no matches found.
         """
+        import json
         import re
 
         if not text or not self._tool_registry:
@@ -1664,6 +1678,50 @@ class AgentRuntimeMixin:
         )
 
         parsed: list[ToolCall] = []
+        seen: set[str] = set()
+
+        # JSON shape first: a name/arguments object, bare or fenced, one or
+        # many. Scanned by balancing braces rather than by regex so a nested
+        # ``arguments`` object does not truncate the match.
+        for start in (i for i, ch in enumerate(text) if ch == "{"):
+            depth = 0
+            for end in range(start, len(text)):
+                if text[end] == "{":
+                    depth += 1
+                elif text[end] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        break
+            else:
+                continue
+            try:
+                obj = json.loads(text[start : end + 1])
+            except ValueError:
+                continue
+            if not isinstance(obj, dict):
+                continue
+            raw_name = obj.get("name") or obj.get("tool") or obj.get("function")
+            if not isinstance(raw_name, str):
+                continue
+            real = tool_lookup.get(raw_name.lower().replace("_", "").replace("-", ""))
+            if not real:
+                continue
+            raw_args = obj.get("arguments")
+            if raw_args is None:
+                raw_args = obj.get("parameters")
+            if isinstance(raw_args, str):
+                try:
+                    raw_args = json.loads(raw_args)
+                except ValueError:
+                    raw_args = {}
+            if not isinstance(raw_args, dict):
+                raw_args = {}
+            key = f"{real}:{sorted(raw_args.items()) if raw_args else ''}"
+            if key in seen:
+                continue
+            seen.add(key)
+            parsed.append(ToolCall(name=real, arguments=raw_args))
+
         for match in pattern.finditer(text):
             func_name = match.group(1)
             args_str = match.group(2)
@@ -1694,6 +1752,10 @@ class AgentRuntimeMixin:
                 # Drop any argument not declared in the tool's schema
                 args = {k: v for k, v in args.items() if k in valid_params}
 
+            key = f"{real_name}:{sorted(args.items()) if args else ''}"
+            if key in seen:
+                continue
+            seen.add(key)
             parsed.append(ToolCall(name=real_name, arguments=args))
 
         return parsed

@@ -209,20 +209,42 @@ class CompromisedModel(BaseModel):
 MODE_LOCAL, MODE_FRONTIER, MODE_COMPROMISED = "local", "frontier", "compromised"
 
 
+def discover_model(url: str) -> str:
+    """First model the endpoint serves, so the demo works against vLLM,
+    Ollama, LM Studio or llama.cpp without the reader naming it."""
+    import json
+    import urllib.request
+
+    endpoint = f"{url.rstrip('/')}/v1/models"
+    if not endpoint.startswith(("http://", "https://")):
+        return ""  # only http(s); never file: or a custom scheme
+    try:
+        with urllib.request.urlopen(endpoint, timeout=8) as r:  # noqa: S310
+            served = json.load(r).get("data") or []
+        return str(served[0]["id"]) if served else ""
+    except Exception:  # noqa: BLE001 - discovery is best effort
+        return ""
+
+
 def pick_mode() -> tuple[str, str]:
     """The mode to run in, and a one-line description of the model."""
     url = os.environ.get("TULIP_MODEL_URL") or os.environ.get("TULIP_ADVISORY_URL")
     if url:
-        return MODE_LOCAL, f"{os.environ.get('TULIP_MODEL_NAME', DEFAULT_LOCAL_MODEL)} @ {url}"
+        name = os.environ.get("TULIP_MODEL_NAME") or discover_model(url) or "(unknown)"
+        return MODE_LOCAL, f"{name} @ {url}"
     if os.environ.get("ANTHROPIC_API_KEY"):
         return MODE_FRONTIER, os.environ.get("TULIP_FRONTIER_MODEL", DEFAULT_FRONTIER_MODEL)
     return MODE_COMPROMISED, "CompromisedModel (offline, owned by construction)"
 
 
-#: Tulip's own small admission model. Any OpenAI-chat-compatible server
-#: works -- vLLM, Ollama, LM Studio, llama.cpp, or a hosted OpenAI-shaped
-#: API -- so a reader can point this at whatever they already run.
-DEFAULT_LOCAL_MODEL = "clusiana-admit-v4"
+#: Deliberately NOT clusiana-admit-v4. Clusiana-Admit is the *gate's*
+#: model -- an admission classifier that answers allow / require_human /
+#: deny -- so it belongs on `advisory=`, not in the agent slot, and its
+#: vLLM deployment is not even started with tool-calling enabled. What
+#: this slot needs is an agent worth jailbreaking. Left unset so the
+#: served model is discovered from the endpoint instead of pinned to
+#: whatever the author happened to be running.
+DEFAULT_LOCAL_MODEL = ""
 
 #: Overridable so the demo does not rot against a pinned model name, and
 #: so a reader can raise the difficulty (opus) or lower it (haiku).
@@ -233,7 +255,7 @@ def build_agent(mode: str) -> Agent:
     if mode == MODE_LOCAL:
         url = os.environ.get("TULIP_MODEL_URL") or os.environ["TULIP_ADVISORY_URL"]
         model: Any = OpenAIModel(
-            model=os.environ.get("TULIP_MODEL_NAME", DEFAULT_LOCAL_MODEL),
+            model=os.environ.get("TULIP_MODEL_NAME") or discover_model(url) or DEFAULT_LOCAL_MODEL,
             base_url=f"{url.rstrip('/')}/v1",
             # Self-hosted servers ignore the key but the client requires one.
             api_key=os.environ.get("TULIP_MODEL_API_KEY", "unused"),
