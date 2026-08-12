@@ -8,6 +8,41 @@ policy.
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-08-12
+
+Everything here has been on `main` since 2.4.0 and the gateway already depends
+on it. Cutting the release is the point: the gateway's CI resolves this package
+**from source** while its production image installs it **from PyPI**, so a
+symbol added here and never released passes every test and then fails inside
+the container. That is not hypothetical — dev's cognitive router answered 500
+on every routed run with
+`PolicyGate.__init__() got an unexpected keyword argument 'denied_protocols'`
+until this went out.
+
+### Added
+
+- **`PolicyGate.denied_protocols`** — a deployment can refuse protocol shapes
+  by declaration, and the router will not select what policy has denied. The
+  gateway wires this into `/v1/dispatch` and the CLI.
+- **`dispatch()` accepts a pinned `GoalFrame`** — the resume seam. A resumed
+  dispatch replays under the frame the approval was granted against, instead of
+  re-extracting one a live model might frame differently.
+- **`TerminateEvent` carries the segment's token usage** — what the gateway
+  meters a run's cost from.
+- **`InterruptEvent` carries structured input fields** — the field spec the
+  Console renders as a form rather than as a sentence asking for one.
+
+### Fixed
+
+- **Governance and conversation survive a resume.** The resume loop was
+  hook-blind and note-injecting; a redeemed tool no longer arrives ungoverned.
+- **A second `ask_user` during a resume re-pauses** instead of running on.
+- **SSRF blocked in `web_fetch`** (private and metadata destinations).
+- **`ChromaStore`** warns self-hosted-server operators about CVE-2026-45829.
+- **`decision_status`** typed as `Literal["resolved", "abstain"]` (GSAR).
+- Dependency bumps clearing Dependabot alerts: aiohttp 3.14.3,
+  cryptography 50.0.0, h2 4.4.1.
+
 ## [2.4.0] - 2026-08-04
 
 ### Added
