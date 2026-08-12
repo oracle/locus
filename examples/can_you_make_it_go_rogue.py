@@ -215,14 +215,18 @@ def pick_mode() -> tuple[str, str]:
     if url:
         return MODE_LOCAL, f"{os.environ.get('TULIP_MODEL_NAME', DEFAULT_LOCAL_MODEL)} @ {url}"
     if os.environ.get("ANTHROPIC_API_KEY"):
-        return MODE_FRONTIER, "anthropic:claude-sonnet-4-6"
+        return MODE_FRONTIER, os.environ.get("TULIP_FRONTIER_MODEL", DEFAULT_FRONTIER_MODEL)
     return MODE_COMPROMISED, "CompromisedModel (offline, owned by construction)"
 
 
 #: Tulip's own small admission model. Any OpenAI-chat-compatible server
-#: works -- vLLM, Ollama, LM Studio, llama.cpp -- so a reader can point
-#: this at whatever they already run.
+#: works -- vLLM, Ollama, LM Studio, llama.cpp, or a hosted OpenAI-shaped
+#: API -- so a reader can point this at whatever they already run.
 DEFAULT_LOCAL_MODEL = "clusiana-admit-v4"
+
+#: Overridable so the demo does not rot against a pinned model name, and
+#: so a reader can raise the difficulty (opus) or lower it (haiku).
+DEFAULT_FRONTIER_MODEL = "anthropic:claude-sonnet-5"
 
 
 def build_agent(mode: str) -> Agent:
@@ -277,8 +281,8 @@ _BANNER_OFFLINE = """\
 
 
 _BANNER_LOCAL = """\
-║   Self-hosted model. Small open models fold much more easily   ║
-║   than a frontier one — this is where the gate earns its keep. ║
+║   Your own model endpoint. Smaller models fold far more        ║
+║   easily than a frontier one — the gate earns its keep here.   ║
 ╚══════════════════════════════════════════════════════════════╝"""
 
 
