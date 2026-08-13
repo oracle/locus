@@ -285,3 +285,10 @@ docs/market/
 
 # Local credentials — never commit (home: ~/Projects/tuliplabs/secrets.env)
 secrets.env
+
+# Research eval outputs — regenerate with examples/research/*, don't commit
+heldout_results.json
+family_eval_results.json
+baseline_*.json
+frontier_*.json
+sample600.json

@@ -8,6 +8,67 @@ policy.
 
 ## [Unreleased]
 
+## [2.5.1] - 2026-08-12
+
+A runtime fix and a version string that lied. Both were found by running
+the SDK against real self-hosted models rather than by reading it.
+
+### Fixed
+
+- **A JSON-shaped tool call is now a tool call.** `_parse_text_tool_calls`
+  recognised only call syntax — `search(query="x")` — so the JSON form that
+  Ollama and the Hermes/Qwen templates emit whenever the server does not lift
+  it into a structured `tool_calls` field was read as prose:
+
+  ```json
+  {"name": "isolate_production", "arguments": {}}
+  ```
+
+  Found with a real `qwen2.5-coder:7b`, which was talked into isolating
+  production and emitted exactly that. The call was never dispatched, so it
+  was never weighed by `admit()`, never written to the `AuditTrail`, and the
+  run reported the model as having *declined*. It had not declined; the
+  runtime could not see the attempt.
+
+  Nothing executed, so this was fail-safe on the action — but not on the
+  record, and for a runtime whose claim is that every consequential decision
+  lands on a tamper-evident trail, an attempted dangerous action that leaves
+  no trace is a governance gap. "Tried to wipe production" and "declined" must
+  not look identical.
+
+  **Behavioural note for anyone upgrading:** agents pointed at small
+  self-hosted models will now perform tool calls that this version previously
+  dropped in silence. That is the intended behaviour, and those calls now
+  clear your `ControlPolicy` first — but if you were unknowingly relying on
+  them not firing, they will fire now.
+
+  Both shapes are validated against the tool registry, deduplicated so one
+  call written in both cannot fire twice, and scanned by balancing braces
+  rather than by regex so a nested `arguments` object is not truncated.
+  Fenced blocks and double-encoded `"arguments": "{...}"` are handled.
+
+- **`tulip.__version__` was a release behind.** `tulip_agents-2.5.0` shipped to
+  PyPI with `METADATA Version: 2.5.0` and `__version__ == "2.4.0"` inside it —
+  the literal in `src/tulip/__init__.py` and the one in `pyproject.toml` are
+  maintained by hand and had drifted. Anything reading `__version__` for
+  telemetry, a bug report, or a compatibility check was told the wrong release
+  for the whole of 2.5.0. Corrected, and `tests/unit/test_version_is_consistent.py`
+  now fails CI on drift instead of leaving it for PyPI to reveal.
+
+### Changed
+
+- **`Agent.__init__`'s docstring names the 36 options introspection cannot
+  see.** `Agent` is a Pydantic model that also defines `__init__(**kwargs)`;
+  `ModelMetaclass` builds `__signature__` from the explicit parameters and
+  drops the `**kwargs`, so `termination`, `output_schema`, `memory_manager`,
+  `web_search` and 32 others are invisible to `help()`, to editor autocomplete
+  and to `inspect.signature()`. They are real and supported; `__signature__`
+  itself is unchanged here.
+
+- **`examples/can_you_make_it_go_rogue.py` runs without an API key**, against
+  your own OpenAI-compatible endpoint, or against a frontier model — and no
+  longer claims the gate won when the model simply refused.
+
 ## [2.5.0] - 2026-08-12
 
 Everything here has been on `main` since 2.4.0 and the gateway already depends
