@@ -31,6 +31,21 @@ export TULIP_MODEL_ID=gpt-4o         # optional — provider-specific model id
 The `tulip.control` gate notebooks (83–87) are fully offline by design and
 need no provider at all.
 
+### Governing an agent you did not build on Tulip
+
+`notebook_88_framework_interop.py` builds a real LangChain agent, runs it
+through LangGraph's own ReAct loop, and watches a $4,000,000 refund execute —
+then wraps that one tool and runs the identical agent again, where the money
+does not move. It needs the per-framework bridges, which live outside this SDK
+so that installing Tulip never pulls in a competitor's package:
+
+```bash
+pip install "tulip-frameworks[langchain,langgraph,crewai]"
+python examples/notebook_88_framework_interop.py
+```
+
+Without them the file still runs, reports which bridge is missing, and exits 0.
+
 ## Quick Start
 
 ```python
