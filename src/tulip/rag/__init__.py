@@ -59,12 +59,26 @@ Example with agent:
 
 from typing import Any
 
+# Ingestion — the entrance to the pipeline
+from tulip.rag.chunkers import (
+    DEFAULT_SEPARATORS,
+    MARKDOWN_SEPARATORS,
+    recursive_chunks,
+)
+
 # Embeddings
 from tulip.rag.embeddings.base import (
     BaseEmbedding,
     EmbeddingConfig,
     EmbeddingProvider,
     EmbeddingResult,
+)
+from tulip.rag.loaders import (
+    load_directory,
+    load_html,
+    load_markdown,
+    load_pdf,
+    load_text,
 )
 
 # Multimodal
@@ -93,6 +107,15 @@ from tulip.rag.tools import RAGToolkit, create_rag_context_tool, create_rag_tool
 
 
 __all__ = [
+    # Ingestion — loaders and chunkers
+    "DEFAULT_SEPARATORS",
+    "MARKDOWN_SEPARATORS",
+    "load_directory",
+    "load_html",
+    "load_markdown",
+    "load_pdf",
+    "load_text",
+    "recursive_chunks",
     # Embeddings - Base
     "BaseEmbedding",
     "EmbeddingConfig",
