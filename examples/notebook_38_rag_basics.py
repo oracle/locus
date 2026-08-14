@@ -41,6 +41,8 @@ import math
 import os
 import sys
 
+from config import get_embedder
+
 from tulip.rag import InMemoryVectorStore, OpenAIEmbeddings, RAGRetriever
 from tulip.rag.stores.base import Document
 
@@ -50,7 +52,9 @@ def _missing_env() -> list[str]:
 
 
 def _get_embedder() -> OpenAIEmbeddings:
-    return OpenAIEmbeddings(model="text-embedding-3-small")
+    # id comes from TULIP_EMBEDDING_MODEL so this runs against a
+    # self-hosted embedding endpoint too, not only api.openai.com
+    return get_embedder()
 
 
 def _get_store(dimension: int = 1536) -> InMemoryVectorStore:

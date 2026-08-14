@@ -330,6 +330,32 @@ def _get_anthropic_model(**kwargs: Any) -> Any:
     )
 
 
+def get_embedder(**kwargs: Any) -> Any:
+    """Return the embedding model for the RAG notebooks.
+
+    Mirrors :func:`get_model`: the id comes from ``TULIP_EMBEDDING_MODEL`` so
+    the notebooks can be pointed at a self-hosted embedding endpoint (vLLM,
+    Ollama, LM Studio, TEI) instead of only api.openai.com. Provider
+    credentials and ``OPENAI_BASE_URL`` are read by the client as usual.
+    """
+    from tulip.rag import OpenAIEmbeddings
+
+    model_id = kwargs.pop("model", None) or os.environ.get(
+        "TULIP_EMBEDDING_MODEL", "text-embedding-3-small"
+    )
+    return OpenAIEmbeddings(model=model_id, **kwargs)
+
+
+def get_embedding_dimension(default: int = 1536) -> int:
+    """Vector width of the configured embedder.
+
+    Stores need this up front, and it is not 1536 for every model — bge-small
+    is 384, text-embedding-3-large is 3072. ``TULIP_EMBEDDING_DIM`` keeps the
+    store and the embedder in agreement when either is swapped.
+    """
+    return int(os.environ.get("TULIP_EMBEDDING_DIM", default))
+
+
 def print_config():
     """Print current configuration for debugging."""
     provider = os.environ.get("TULIP_MODEL_PROVIDER", "").lower() or "mock"
