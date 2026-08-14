@@ -261,3 +261,89 @@ def test_verdict_defaults_are_safe() -> None:
     """An unset verdict must not read as a pass."""
     assert Verdict(passed=False).score == 0.0
     assert Verdict(passed=False).unparseable is False
+
+
+# --------------------------------------------------------------------------
+# The async path must apply every structural check the sync path does.
+# They share _structural_checks precisely so the two cannot grade the same
+# case differently; these pin that down.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_arun_applies_every_structural_check() -> None:
+    agent = _agent([tool_call("lookup_order", order_id="o1"), text("The order is refundable.")])
+    case = EvalCase(
+        name="all_checks",
+        prompt="is o1 refundable?",
+        expected_tools=["lookup_order"],
+        expected_output_contains=["refundable"],
+        expected_output_not_contains=["error"],
+        max_iterations=10,
+        max_duration_ms=60_000,
+    )
+    result = (await EvalRunner(agent=agent, concurrency=1).arun([case])).results[0]
+
+    assert result.checks["tool_called:lookup_order"] is True
+    assert result.checks["output_contains:refundable"] is True
+    assert result.checks["output_not_contains:error"] is True
+    assert result.checks["within_iteration_budget"] is True
+    assert result.checks["within_duration_budget"] is True
+    assert result.passed
+
+
+@pytest.mark.asyncio
+async def test_arun_reports_a_failing_structural_check() -> None:
+    agent = _agent([text("nothing useful")])
+    case = EvalCase(
+        name="misses",
+        prompt="p",
+        expected_tools=["lookup_order"],
+        expected_output_contains=["refundable"],
+        max_iterations=0,
+    )
+    result = (await EvalRunner(agent=agent, concurrency=1).arun([case])).results[0]
+
+    assert not result.passed
+    assert result.checks["tool_called:lookup_order"] is False
+    assert result.checks["output_contains:refundable"] is False
+    assert result.checks["within_iteration_budget"] is False
+
+
+@pytest.mark.asyncio
+async def test_a_crashing_agent_becomes_a_failed_case_not_a_crashed_run() -> None:
+    """One broken case must not take the rest of the suite with it."""
+
+    class _Exploding:
+        async def arun(self, *a: Any, **k: Any) -> Any:
+            raise RuntimeError("agent exploded")
+
+    report = await EvalRunner(agent=_Exploding(), concurrency=1).arun(
+        [EvalCase(name="boom", prompt="p")]
+    )
+    result = report.results[0]
+
+    assert not result.passed
+    assert result.score == 0.0
+    assert result.error is not None
+    assert "exploded" in result.error
+    assert report.failed == 1
+
+
+@pytest.mark.asyncio
+async def test_a_failing_case_appears_in_the_summary() -> None:
+    class _Exploding:
+        async def arun(self, *a: Any, **k: Any) -> Any:
+            raise RuntimeError("agent exploded")
+
+    report = await EvalRunner(agent=_Exploding(), concurrency=1).arun(
+        [EvalCase(name="boom", prompt="p")]
+    )
+    assert "exploded" in report.summary()
+
+
+def test_the_sync_path_checks_the_duration_budget() -> None:
+    """An impossible budget must fail rather than being ignored."""
+    agent = _agent([text("done")])
+    report = EvalRunner(agent=agent).run([EvalCase(name="slow", prompt="p", max_duration_ms=0.0)])
+    assert report.results[0].checks["within_duration_budget"] is False
