@@ -258,6 +258,10 @@ features = ["dev", "server", "mcp", "openai", "anthropic", "rag", "s3", "mem0"]
 # Integration tests need credentials / live services and are run via
 # `test-integration` or `test-all` when those are available.
 test = "pytest {args:tests/unit}"
+# Check every Python snippet in README.md / examples/README.md against the
+# installed SDK. Also runs as a unit test, so CI gates it either way; this
+# is the fast local loop when editing docs.
+snippets = "python scripts/check_doc_snippets.py {args}"
 test-integration = "pytest {args:tests/integration}"
 test-all = "pytest {args:tests}"
 test-cov = "pytest --cov=src/tulip --cov-report=term-missing --cov-report=html --cov-report=json {args:tests/unit}"

@@ -241,11 +241,19 @@ Each shape is also a first-class primitive you can use directly — `SequentialP
 `ParallelPipeline`, `LoopAgent`, `Orchestrator`, `Swarm`, `Handoff`, `StateGraph`, `A2A`.
 
 ```python
+import asyncio
+
 from tulip.agent import Agent, SequentialPipeline
 
-result = await SequentialPipeline(agents=[draft, check, finalize]).run(
-    "Summarize the trade-offs of moving the checkout service to a queue."
-)
+
+async def main():
+    result = await SequentialPipeline(agents=[draft, check, finalize]).run(
+        "Summarize the trade-offs of moving the checkout service to a queue."
+    )
+    print(result.final_output)
+
+
+asyncio.run(main())
 ```
 
 → [Cognitive router](https://tulipagents.ai/concepts/router/) ·
@@ -309,9 +317,19 @@ is a grounded `Evidence` tagged against public weakness catalogues (MITRE ATLAS,
 Agentic Top 10), or an explicit `Abstention`.
 
 ```python
+import asyncio
+
 from tulip.security import Target, red_team, is_finding
 
-report = await red_team(Target.endpoint("https://support-bot.example/chat"), suite="owasp-asi")
+
+async def main():
+    report = await red_team(
+        Target.endpoint("https://support-bot.example/chat"), suite="owasp-asi"
+    )
+    print([f for f in report.findings if is_finding(f)])
+
+
+asyncio.run(main())
 ```
 
 Vendor-specific adapters (Splunk, CrowdStrike, Okta, Auth0, VirusTotal, Wiz, RunPod, Lambda) live

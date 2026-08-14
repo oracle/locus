@@ -106,6 +106,8 @@ asyncio.run(main())
 ## Multi-Agent (Swarm)
 
 ```python
+import asyncio
+
 from tulip.multiagent import create_swarm, create_swarm_agent
 
 analyst = create_swarm_agent(
@@ -121,10 +123,16 @@ reporter = create_swarm_agent(
 )
 
 swarm = create_swarm(agents=[analyst, reporter], model=model)
-result = await swarm.execute(
-    "Work out why order ord-4821 was charged twice and write the case summary."
-)
-print(result.summary)
+
+
+async def main():
+    result = await swarm.execute(
+        "Work out why order ord-4821 was charged twice and write the case summary."
+    )
+    print(result.summary)
+
+
+asyncio.run(main())
 ```
 
 ## With Hooks
