@@ -31,7 +31,7 @@ claim is scored against tool evidence before it is allowed to stand.
 
 Run it:
     # The bundled mock model is the default; set TULIP_MODEL_PROVIDER for a live provider.
-    TULIP_MODEL_ID=openai.gpt-4.1 python examples/notebook_36_reasoning_patterns.py
+    TULIP_MODEL_PROVIDER=openai TULIP_MODEL_ID=gpt-4o python examples/notebook_36_reasoning_patterns.py
 
     # Offline:
     TULIP_MODEL_PROVIDER=mock python examples/notebook_36_reasoning_patterns.py
@@ -41,7 +41,7 @@ Prerequisites:
   ``openai`` / ``anthropic`` / ``mock``.
 - A model that supports constrained JSON decoding for the
   ``output_schema=`` parts. The ``check_structured_output_capable()``
-  helper exits cleanly under mock or Cohere R-series.
+  helper exits cleanly under mock.
 """
 
 import asyncio

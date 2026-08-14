@@ -21,7 +21,9 @@ Run it:
 
 The default provider is the bundled mock model; set TULIP_MODEL_PROVIDER for a live provider.
 Set TULIP_MODEL_PROVIDER=mock for offline runs. Pick a live provider with
-TULIP_MODEL_ID=openai.gpt-4.1 (or meta.llama-3.3-70b-instruct, etc.).
+TULIP_MODEL_PROVIDER=openai TULIP_MODEL_ID=gpt-4o
+(or TULIP_MODEL_PROVIDER=anthropic, or any OpenAI-compatible
+provider: ollama, vllm, groq, together, openrouter, ...).
 """
 
 import asyncio

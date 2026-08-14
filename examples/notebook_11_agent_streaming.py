@@ -34,7 +34,7 @@ Run it:
     .venv/bin/python examples/notebook_11_agent_streaming.py
 
 The default provider is the mock model; set TULIP_MODEL_PROVIDER for a live one (e.g.
-``openai.gpt-4.1`` or ``meta.llama-3.3-70b-instruct``). For an offline
+``openai`` or ``anthropic``). For an offline
 run set ``TULIP_MODEL_PROVIDER=mock``; OpenAI, Anthropic
 work too.
 

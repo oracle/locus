@@ -31,7 +31,7 @@ Run it
     TULIP_MODEL_PROVIDER=mock python examples/notebook_50_guardrails_security.py
 
     # Pin a specific model:
-    TULIP_MODEL_ID=openai.gpt-4.1 python examples/notebook_50_guardrails_security.py
+    TULIP_MODEL_PROVIDER=openai TULIP_MODEL_ID=gpt-4o python examples/notebook_50_guardrails_security.py
 """
 
 import asyncio
