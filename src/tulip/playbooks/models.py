@@ -80,6 +80,17 @@ class PlaybookStep(BaseModel):
         default_factory=dict,
         description="Optional validation criteria for step completion",
     )
+    uses: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Skills this step is carried out with, by name. The step inherits "
+            "their required_probes, and — while it is the current step — their "
+            "allowed_tools bound what may be called. This is the level a "
+            "procedure should be written at: an operations lead says 'establish "
+            "the blast radius', not 'call query_metrics'. `expected_tools` "
+            "remains the low-level escape hatch."
+        ),
+    )
     required_probes: list[RequiredProbe] = Field(
         default_factory=list,
         description=(

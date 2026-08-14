@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
@@ -74,6 +75,48 @@ class PlaybookEnforcer(BaseModel):
     )
 
     _violations: list[EnforcementViolation] = PrivateAttr(default_factory=list)
+    #: name -> Skill, for steps that name capabilities via `uses`. Empty means
+    #: a `uses` reference resolves to nothing and is therefore inert — never an
+    #: error, because a playbook may legitimately be enforced in a process that
+    #: does not carry the skill bodies.
+    _skills: dict[str, Any] = PrivateAttr(default_factory=dict)
+
+    def _used_skills(self, step: PlaybookStep) -> list[Any]:
+        return [self._skills[name] for name in step.uses if name in self._skills]
+
+    def effective_probes(self, step: PlaybookStep) -> list[Any]:
+        """The step's own probes plus those of every skill it is carried out with.
+
+        De-duplicated by name, step-declared first: a step may sharpen a skill's
+        generic probe for its own context, and the more specific declaration is
+        the one an author expects to win.
+        """
+        seen: dict[str, Any] = {}
+        for probe in step.required_probes:
+            seen.setdefault(probe.name, probe)
+        for skill in self._used_skills(step):
+            for probe in getattr(skill, "required_probes", ()) or ():
+                seen.setdefault(probe.name, probe)
+        return list(seen.values())
+
+    def allowed_tools_for(self, step: PlaybookStep) -> set[str] | None:
+        """What this step may call, or None when it does not constrain calls.
+
+        THE reason `uses` had to exist before a skill's `allowed_tools` could
+        mean anything: a skill is prose folded into a system prompt, so on its
+        own there is no moment at which its allow-list applies. A step supplies
+        that moment. Outside a step that names it, a skill still constrains
+        nothing — which is honest, and is why this returns None rather than an
+        empty set when nothing is declared.
+        """
+        allowed: set[str] = set()
+        declared = False
+        for skill in self._used_skills(step):
+            tools = getattr(skill, "allowed_tools", None)
+            if tools:
+                declared = True
+                allowed.update(str(tool) for tool in tools)
+        return allowed if declared else None
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -83,6 +126,7 @@ class PlaybookEnforcer(BaseModel):
         playbook: Playbook,
         block_violations: bool = True,
         record_violations: bool = True,
+        skills: Mapping[str, Any] | None = None,
     ) -> PlaybookEnforcer:
         """Create an enforcer from a playbook.
 
@@ -90,16 +134,23 @@ class PlaybookEnforcer(BaseModel):
             playbook: The playbook to enforce
             block_violations: Whether to block violating tool calls
             record_violations: Whether to record violations
+            skills: name -> Skill, for steps that name capabilities via `uses`.
+                Omitted, those references resolve to nothing and constrain
+                nothing — a playbook may legitimately be enforced somewhere the
+                skill bodies are not loaded, and failing there would make the
+                enforcer refuse to run rather than enforce less.
 
         Returns:
             Configured PlaybookEnforcer
         """
         plan = PlaybookPlan(playbook=playbook)
-        return cls(
+        enforcer = cls(
             plan=plan,
             block_violations=block_violations,
             record_violations=record_violations,
         )
+        enforcer._skills = dict(skills or {})
+        return enforcer
 
     @property
     def violations(self) -> list[EnforcementViolation]:
@@ -155,6 +206,32 @@ class PlaybookEnforcer(BaseModel):
                     hints=["Playbook execution is complete"],
                 )
             return EnforcementResult(allowed=True)
+
+        # A skill's allow-list, enforced — inside the step that names it.
+        # Until `uses` existed there was no moment at which this could apply,
+        # so `allowed_tools` was parsed, printed into the prompt as a sentence,
+        # and gated by nothing. A step supplies the scope.
+        skill_allowed = self.allowed_tools_for(step)
+        if skill_allowed is not None and tool_name not in skill_allowed:
+            if self.plan.playbook.allow_extra_tools:
+                return EnforcementResult(allowed=True, current_step=step)
+            violation = self._maybe_record_violation(
+                violation_type="tool_outside_skill",
+                step_id=step.id,
+                tool_name=tool_name,
+                message=(
+                    f"{tool_name!r} is not among the tools the skill(s) "
+                    f"{', '.join(step.uses)} allow for step {step.id!r}: "
+                    f"{', '.join(sorted(skill_allowed))}"
+                ),
+                blocked=self.block_violations,
+            )
+            return EnforcementResult(
+                allowed=not self.block_violations,
+                violation=violation,
+                current_step=step,
+                hints=list(step.hints),
+            )
 
         # Check if tool is in expected tools
         if step.expected_tools and tool_name not in step.expected_tools:
@@ -279,10 +356,10 @@ class PlaybookEnforcer(BaseModel):
         result: Any,
     ) -> None:
         """Mark any of the step's probes this call satisfied. Idempotent."""
-        if not step.required_probes:
+        if not self.effective_probes(step):
             return
         haystack = self._haystack(tool_name, arguments, result)
-        for probe in step.required_probes:
+        for probe in self.effective_probes(step):
             if probe.name in step_exec.matched_probes:
                 continue
             if probe.match.lower() in haystack:
@@ -315,7 +392,9 @@ class PlaybookEnforcer(BaseModel):
         # reaches the same trace an out-of-shape call does — the point is that
         # "the procedure was followed" stops meaning "the right tools were
         # called" and starts meaning "the required evidence exists".
-        unmatched = step_exec.unmatched_probes(step)
+        probes = self.effective_probes(step)
+        matched = set(step_exec.matched_probes)
+        unmatched = [probe.name for probe in probes if probe.name not in matched]
         if unmatched and self.record_violations:
             self._violations.append(
                 EnforcementViolation(
@@ -324,7 +403,7 @@ class PlaybookEnforcer(BaseModel):
                     message=(
                         f"step {step.id!r} completed without the evidence it requires: "
                         f"{', '.join(unmatched)} "
-                        f"({len(step_exec.matched_probes)}/{len(step.required_probes)} matched)"
+                        f"({len(matched & {p.name for p in probes})}/{len(probes)} matched)"
                     ),
                 )
             )

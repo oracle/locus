@@ -30,6 +30,8 @@ from typing import Any
 
 import yaml  # type: ignore[import-untyped]  # PyYAML ships no inline types
 
+from tulip.playbooks.models import RequiredProbe
+
 
 # AgentSkills.io name validation: kebab-case, 1-64 chars, no consecutive hyphens
 _SKILL_NAME_PATTERN = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
@@ -119,6 +121,12 @@ class Skill:
     instructions: str = ""
     path: Path | None = None
     allowed_tools: list[str] | None = None
+    #: Evidence the work described by this skill must gather. Declared HERE
+    #: rather than on the step because the skill is what knows its own
+    #: instrumentation — a step says "establish the blast radius", the skill
+    #: knows that means querying the error count and the pool. A playbook step
+    #: that `uses` this skill inherits them.
+    required_probes: list[RequiredProbe] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
     license: str | None = None
     compatibility: str | None = None
