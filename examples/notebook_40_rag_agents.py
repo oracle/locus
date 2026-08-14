@@ -504,9 +504,9 @@ RESPONSE FORMAT:
 def get_embedder():
     """Pick an embedder from whichever credentials are present."""
     if os.environ.get("OPENAI_API_KEY"):
-        from tulip.rag.embeddings import OpenAIEmbeddings
+        from config import get_embedder
 
-        return OpenAIEmbeddings(model="text-embedding-3-small")
+        return get_embedder()
 
     if os.environ.get("COHERE_API_KEY"):
         from tulip.rag.embeddings import CohereEmbeddings

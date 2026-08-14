@@ -26,7 +26,7 @@ to the structured execution mechanics — every section prints
 
 Run it:
     # The bundled mock model is the default; set TULIP_MODEL_PROVIDER for a live provider.
-    TULIP_MODEL_ID=openai.gpt-4.1 python examples/notebook_46_playbooks.py
+    TULIP_MODEL_PROVIDER=openai TULIP_MODEL_ID=gpt-4o python examples/notebook_46_playbooks.py
 
     # Offline:
     TULIP_MODEL_PROVIDER=mock python examples/notebook_46_playbooks.py

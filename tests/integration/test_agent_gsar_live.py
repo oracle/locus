@@ -18,6 +18,8 @@ agent and the judge).
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from tests.integration.conftest import skip_without_openai
@@ -39,9 +41,13 @@ async def test_agent_gsar_grounded_answer_proceeds() -> None:
             return "host=db-prod-1 cpu_pct=97.2 measured_at=14:02:01 alert_id=A-9912 severity=high"
         return f"host={host} cpu_pct=unknown"
 
-    judge_model = OpenAIModel(model="gpt-4o-mini", max_tokens=2048)
+    judge_model = OpenAIModel(
+        model=os.environ.get("TULIP_OPENAI_TEST_MODEL", "gpt-4o-mini"), max_tokens=2048
+    )
     agent = Agent(
-        model=OpenAIModel(model="gpt-4o-mini", max_tokens=512),
+        model=OpenAIModel(
+            model=os.environ.get("TULIP_OPENAI_TEST_MODEL", "gpt-4o-mini"), max_tokens=512
+        ),
         tools=[lookup_cpu_metric],
         system_prompt=(
             "You are a diagnostic agent. When asked about CPU on a host, "
@@ -72,11 +78,15 @@ async def test_agent_gsar_ungrounded_answer_does_not_proceed() -> None:
     from tulip.models.native.openai import OpenAIModel
     from tulip.reasoning.gsar_judge import StructuredOutputGSARJudge
 
-    judge_model = OpenAIModel(model="gpt-4o-mini", max_tokens=2048)
+    judge_model = OpenAIModel(
+        model=os.environ.get("TULIP_OPENAI_TEST_MODEL", "gpt-4o-mini"), max_tokens=2048
+    )
     # Agent has no tools — any specific factual claim it makes is
     # un-evidenced. We force it to invent something the judge can flag.
     agent = Agent(
-        model=OpenAIModel(model="gpt-4o-mini", max_tokens=512),
+        model=OpenAIModel(
+            model=os.environ.get("TULIP_OPENAI_TEST_MODEL", "gpt-4o-mini"), max_tokens=512
+        ),
         system_prompt=(
             "You are a diagnostic agent. Answer with very specific numbers, "
             "host names, and timestamps even when you don't have evidence. "

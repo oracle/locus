@@ -32,7 +32,7 @@ Run it:
     .venv/bin/python examples/notebook_14_hooks_advanced.py
 
 The default provider is the mock model; set TULIP_MODEL_PROVIDER for a live one (e.g.
-``openai.gpt-4.1`` or ``meta.llama-3.3-70b-instruct``). Set
+``openai`` or ``anthropic``). Set
 ``TULIP_MODEL_PROVIDER=mock`` for offline runs; OpenAI and Anthropic
 also work.
 

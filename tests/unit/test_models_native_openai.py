@@ -28,7 +28,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from tulip.core.messages import Message
+from tulip.core.messages import Message, ToolCall, ToolResult
 from tulip.models.native.openai import OpenAIModel, _decode_tool_arguments
 
 
@@ -1083,6 +1083,90 @@ class TestSystemMessagePosition:
             pass
         sent = client.chat.completions.create.call_args.kwargs["messages"]
         assert all(x["role"] != "system" for x in sent[1:])
+
+
+# ---------------------------------------------------------------------------
+# Every request must carry a user turn
+# ---------------------------------------------------------------------------
+
+
+class TestUserTurnIsAlwaysPresent:
+    """Qwen-family chat templates scan backwards for a user message that is not
+    a ``<tool_response>`` wrapper and raise ``No user query found in messages.``
+    when there is none. Sub-calls built from ``system + assistant + tool`` (judge,
+    summary, auxiliary passes) otherwise 400 on a self-hosted Qwen while working
+    fine against api.openai.com."""
+
+    ANCHOR = "[Continue] Continue from the conversation above."
+
+    @pytest.mark.asyncio
+    async def test_system_assistant_tool_gets_a_user_turn(self) -> None:
+        client = _client_with()
+        m = _model_with(client)
+        await m.complete(
+            [
+                Message.system("you are helpful"),
+                Message.assistant(
+                    "", tool_calls=[ToolCall(id="c1", name="read_file", arguments={"path": "a.py"})]
+                ),
+                Message.tool(ToolResult(tool_call_id="c1", name="read_file", content="contents")),
+            ]
+        )
+        sent = client.chat.completions.create.call_args.kwargs["messages"]
+        assert [x["role"] for x in sent] == ["system", "user", "assistant", "tool"]
+        # the system prompt keeps first position — the sibling template rule
+        assert sent[0]["content"] == "you are helpful"
+        assert sent[1]["content"] == self.ANCHOR
+
+    @pytest.mark.asyncio
+    async def test_a_real_user_turn_is_not_duplicated(self) -> None:
+        client = _client_with()
+        m = _model_with(client)
+        await m.complete([Message.system("you are helpful"), Message.user("hi")])
+        sent = client.chat.completions.create.call_args.kwargs["messages"]
+        assert [x["role"] for x in sent] == ["system", "user"]
+        assert sent[1]["content"] == "hi"
+
+    @pytest.mark.asyncio
+    async def test_tool_response_wrapper_does_not_count_as_the_query(self) -> None:
+        """The template ignores such a message, so the guard must too."""
+        client = _client_with()
+        m = _model_with(client)
+        await m.complete(
+            [
+                Message.system("you are helpful"),
+                Message.user("<tool_response>file listed</tool_response>"),
+            ]
+        )
+        sent = client.chat.completions.create.call_args.kwargs["messages"]
+        assert [x["role"] for x in sent] == ["system", "user", "user"]
+        assert sent[1]["content"] == self.ANCHOR
+
+    @pytest.mark.asyncio
+    async def test_anchor_goes_first_when_there_is_no_system_message(self) -> None:
+        client = _client_with()
+        m = _model_with(client)
+        await m.complete([Message.assistant("hi")])
+        sent = client.chat.completions.create.call_args.kwargs["messages"]
+        assert [x["role"] for x in sent] == ["user", "assistant"]
+
+    @pytest.mark.asyncio
+    async def test_empty_message_list_is_left_alone(self) -> None:
+        client = _client_with()
+        m = _model_with(client)
+        await m.complete([])
+        assert client.chat.completions.create.call_args.kwargs["messages"] == []
+
+    @pytest.mark.asyncio
+    async def test_stream_applies_the_same_guard(self) -> None:
+        client = _client_with(
+            stream_chunks=[_Chunk(choices=[_ChunkChoice(delta=_Delta(), finish_reason="stop")])]
+        )
+        m = _model_with(client)
+        async for _ in m.stream([Message.system("s"), Message.assistant("hi")]):
+            pass
+        sent = client.chat.completions.create.call_args.kwargs["messages"]
+        assert any(x["role"] == "user" for x in sent)
 
 
 class TestResponseExtrasEdgeCases:

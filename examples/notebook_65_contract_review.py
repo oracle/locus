@@ -55,7 +55,7 @@ Run it
     TULIP_MODEL_PROVIDER=mock python examples/notebook_65_contract_review.py
 
     # Pin a strong-enough model for the structured ContractDecision schema:
-    TULIP_MODEL_ID=openai.gpt-4.1 python examples/notebook_65_contract_review.py
+    TULIP_MODEL_PROVIDER=openai TULIP_MODEL_ID=gpt-4o python examples/notebook_65_contract_review.py
 """
 
 from __future__ import annotations

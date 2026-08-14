@@ -20,8 +20,7 @@ single-pass triage agent tends to skip.
 - If the configured model can't honor the schema, the judge node raises
   rather than fabricating a verdict from raw text.
 - A ``check_structured_output_capable()`` guard at the top short-
-  circuits the notebook when the model can't produce JSON (mock,
-  Cohere R-series).
+  circuits the notebook when the model can't produce JSON (the bundled mock).
 
 Run it:
     .venv/bin/python examples/notebook_32_debate_with_judge.py

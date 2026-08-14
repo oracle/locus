@@ -12,7 +12,6 @@ Works with any MCP-compliant server or client.
 
 from __future__ import annotations
 
-import asyncio
 import inspect
 import json
 import re
@@ -699,22 +698,44 @@ class MCPClient(BaseModel):
         await self.close()
 
     def to_tulip_tools(self, tools: list[dict[str, Any]]) -> list[Tool]:
-        """Convert MCP tools to Tulip tools."""
+        """Convert MCP tool schemas into Tulip tools bound to this client.
+
+        Args:
+            tools: Schemas as returned by :meth:`list_tools`.
+
+        Returns:
+            One :class:`~tulip.tools.decorator.Tool` per schema, each calling
+            back through this client.
+        """
         tulip_tools = []
         for mcp_tool in tools:
-            # Create a closure to capture the tool name
-            tool_name = mcp_tool["name"]
 
-            async def make_func(name: str = tool_name) -> Callable:
+            def make_func(name: str = mcp_tool["name"]) -> Callable[..., Any]:
+                """Build the coroutine that calls one MCP tool.
+
+                The default argument binds ``name`` per iteration; a bare
+                closure over the loop variable would give every tool the last
+                name in the list.
+
+                Deliberately a plain ``def``. This was an ``async def``
+                unwrapped with
+                ``asyncio.get_event_loop().run_until_complete(...)``, which
+                raises ``RuntimeError: This event loop is already running``
+                inside any running loop — and a running loop is the only way
+                to reach here, since ``await client.connect()`` comes first.
+                Building a closure never needed the event loop at all.
+                """
+
                 async def func(**kwargs: Any) -> str:
                     return await self.call_tool(name, kwargs)
 
+                func.__name__ = name
                 return func
 
             tulip_tool = mcp_tool_to_tulip(
                 name=mcp_tool["name"],
                 description=mcp_tool.get("description", ""),
-                func=asyncio.get_event_loop().run_until_complete(make_func()),
+                func=make_func(),
                 parameters=mcp_tool.get("inputSchema"),
             )
             tulip_tools.append(tulip_tool)

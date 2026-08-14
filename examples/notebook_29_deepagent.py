@@ -48,7 +48,7 @@ from __future__ import annotations
 
 import asyncio
 
-from config import get_model
+from config import get_embedder, get_model
 from pydantic import BaseModel, Field
 
 from tulip.deepagent import (
@@ -340,13 +340,23 @@ async def part5_datastores() -> None:
 
     from tulip.rag import OpenAIEmbeddings, QdrantVectorStore, RAGRetriever
 
-    embedder = OpenAIEmbeddings(model="text-embedding-3-small")
+    embedder = get_embedder()
     probe = await embedder.embed_query("probe")
-    store = QdrantVectorStore(
-        dimension=len(probe.embedding),
-        location=":memory:",
-        distance_metric="cosine",
-    )
+    try:
+        store = QdrantVectorStore(
+            dimension=len(probe.embedding),
+            location=":memory:",
+            distance_metric="cosine",
+        )
+    except ImportError:
+        # qdrant-client is an optional extra, and `pip install -e .` (the
+        # install these notebooks document) does not pull it. Say so and skip
+        # rather than ending the notebook on a traceback.
+        print(
+            "\n[incident_notes_datastore] skipped — this part needs the qdrant "
+            'extra: pip install "tulip-agents[qdrant]"'
+        )
+        return
     retriever = RAGRetriever(embedder=embedder, store=store)
     await retriever.add_documents(
         [

@@ -29,6 +29,8 @@ import os
 import sys
 from pathlib import Path
 
+from config import get_model
+
 from tulip.agent import Agent, ReflexionConfig
 from tulip.core.events import (
     InterruptEvent,
@@ -110,24 +112,15 @@ def run_command(command: str, working_dir: str) -> str:
 # =============================================================================
 
 
-def get_model():
-    """Build model from environment variables.
+def _build_model():
+    """Model for the review agent.
 
-    Picks OpenAI or Anthropic from whichever API key is present. See
-    ``docs/concepts/models.md``.
+    Delegates to the shared ``examples/config.py`` helper so the id comes from
+    TULIP_MODEL_ID like every other example. This file used to hardcode
+    gpt-4o-mini, which meant that against any self-hosted or gateway endpoint
+    the run died on a 404 and printed only "Done: error".
     """
-    if os.getenv("OPENAI_API_KEY"):
-        from tulip.models import OpenAIModel
-
-        return OpenAIModel(model="gpt-4o-mini", max_tokens=4096)
-
-    if os.getenv("ANTHROPIC_API_KEY"):
-        from tulip.models.native.anthropic import AnthropicModel
-
-        return AnthropicModel(model="claude-sonnet-4-6", max_tokens=4096)
-
-    print("Error: Set OPENAI_API_KEY or ANTHROPIC_API_KEY")
-    sys.exit(1)
+    return get_model()
 
 
 async def main():
@@ -140,7 +133,7 @@ async def main():
         )
         sys.exit(1)
 
-    model = get_model()
+    model = _build_model()
 
     agent = Agent(
         model=model,
@@ -255,6 +248,14 @@ async def main():
             print(f"  {e} Done: {event.reason}")
             print(f"     Iterations: {event.iterations_used}")
             print(f"     Tool calls: {event.total_tool_calls}")
+            # TerminateEvent carries no cause, so reason="error" is all the
+            # event stream can tell us — a 404 on the model id looks identical
+            # to a broken agent. Point the reader at the usual culprit.
+            if event.reason == "error":
+                print(
+                    "     (the event stream carries no cause; check the model "
+                    "id and endpoint — TULIP_MODEL_ID / OPENAI_BASE_URL)"
+                )
             if event.final_message:
                 print(f"\n  Final report:")
                 for line in event.final_message.split("\n")[:10]:

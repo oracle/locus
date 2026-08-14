@@ -15,9 +15,13 @@ from tulip.evaluation.framework import (
     EvalResult,
     EvalRunner,
 )
+from tulip.evaluation.judge import LLMJudge, Verdict, check_trajectory
 
 
 __all__ = [
+    "LLMJudge",
+    "Verdict",
+    "check_trajectory",
     "EvalCase",
     "EvalReport",
     "EvalResult",

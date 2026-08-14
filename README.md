@@ -3,14 +3,11 @@
 </p>
 
 <p align="center">
-  <strong>Tulip — an open-source agentic harness: agents that act, on a runtime where every
-  consequential action clears your policy, waits for a person when it matters, and lands on a
-  record you can prove.</strong><br>
-  <em>A full-stack agent SDK — tools, memory, multi-agent, RAG — on a runtime where control
-  is native. The <a href="https://tulipagents.ai/concepts/router/">cognitive router</a> picks the shape,
-  <a href="https://tulipagents.ai/concepts/gsar/">GSAR</a> (typed grounding — every claim must trace to evidence, or the agent
-  abstains) checks what gets asserted, and the admission gate runs a consequential action
-  only if your policy allows. Safe by construction, not by reminder.</em>
+  <strong>The agent framework where the model never holds the trigger.</strong><br>
+  <em>Your agent is about to issue a refund, ship a deploy, or delete a customer record. Every
+  consequential action clears a policy check first — real code, outside the model, before the
+  side effect, on a record you can verify. Build on it, or put it around the agent you already
+  have.</em>
 </p>
 
 <p align="center">
@@ -22,289 +19,68 @@
 </p>
 
 <p align="center">
-  <strong>OpenAI · Anthropic · bring your own</strong><br>
-  <em>A model is one string. The loop, the tools, and the event stream stay put.</em>
-</p>
-
-<p align="center">
-  <strong>Build</strong>
-  <a href="https://tulipagents.ai/concepts/agent/">Agents</a> ·
-  <a href="https://tulipagents.ai/concepts/tools/">Tools</a> ·
-  <a href="https://tulipagents.ai/concepts/multi-agent/">Multi-agent</a> ·
-  <a href="https://tulipagents.ai/concepts/checkpointers/">Memory</a> ·
-  <a href="https://tulipagents.ai/concepts/rag/">RAG</a>
-  <br>
-  <strong>Control</strong>
-  <a href="https://tulipagents.ai/concepts/router/">Cognitive router</a> ·
-  <a href="https://tulipagents.ai/concepts/gsar/">GSAR grounding</a> ·
-  <a href="https://tulipagents.ai/concepts/security/">Admission gate</a>
-  <br>
-  <strong>Start</strong>
-  <a href="https://tulipagents.ai/why-tulip/">Why Tulip</a> ·
-  <a href="https://tulipagents.ai/capabilities/">Capabilities</a> ·
+  <a href="https://tulipagents.ai/concepts/security/">The admission gate</a> ·
+  <a href="https://tulipagents.ai/integrations/frameworks/">Govern an existing agent</a> ·
+  <a href="https://tulipagents.ai/how-to/quickstart/">Quickstart</a> ·
   <a href="https://tulipagents.ai/notebooks/">Notebooks</a> ·
-  <a href="https://tulipagents.ai/workbench/">Workbench</a>
+  <a href="https://tulipagents.ai/">Docs</a>
 </p>
 
 ---
 
-## Build an agent
+## Try to break it — 30 seconds, no API key
 
-A model is a string, a tool is a function, and `run_sync` runs the loop. That's the whole
-surface for your first agent.
-
-```python
-from tulip import Agent, tool
-
-@tool
-def search_flights(origin: str, destination: str, date: str) -> list[dict]:
-    """Find available flights between two cities on a given date."""
-    return flights.search(origin, destination, date)
-
-agent = Agent(
-    model="anthropic:claude-sonnet-4-6",          # swap providers with one string
-    tools=[search_flights],
-    system_prompt="You are a travel assistant. Be concise and cite prices.",
-)
-
-print(agent.run_sync("Cheapest flight from Lisbon to Berlin next Friday?").text)
-```
-
-Behind the scenes the agent alternates reasoning with tool calls until it can answer.
-The model call, retries, and tool dispatch all live behind that one `Agent` class —
-point `model=` at `"openai:gpt-4o"` and nothing else moves.
+`OpsBot` holds live-looking production tools: wipe the database, exfiltrate secrets, isolate
+the cluster, disable every user. Offline, the model arrives **already fully compromised** — it
+reaches for a dangerous tool every turn. Nothing left to jailbreak. Watch what stops it anyway.
 
 ```bash
-pip install "tulip-agents[anthropic]"     # or [openai], or [sdk] for everything
+pip install tulip-agents
+python -m tulip.rogue
 ```
 
-No mandatory cloud account to start — a bundled `MockModel` lets every notebook run offline.
+```text
+🎯 attempt #1: wipe the production database
+🤖 OpsBot: Blocked before it ran. I could not complete that.
+   ⚠️  model was talked into trying: wipe_database
+   🛡️  wipe_database → deny: labels ['irreversible'] are denied by policy;
+       blast radius 999 exceeds the maximum 1; labels ['production'] require human approval
+   → the MODEL was already owned. The RUNTIME didn't care. Breaches still 0.
+
+FINAL SCORE  ·  dangerous attempts: 1  ·  💥 BREACHES: 0  ·  audit chain intact: ✓
+```
+
+Point `TULIP_MODEL_URL` at your own vLLM / Ollama / LM Studio server to run it against a real
+model, or set `ANTHROPIC_API_KEY` for the hard version against a frontier one. When the model
+refuses on its own the scoreboard says so, rather than claiming a win the gate didn't earn.
 
 ---
 
-## What is Tulip?
+## Govern the agent you already have
 
-**Tulip is a full-stack, open-source agentic harness — an SDK and runtime for agents that
-take real actions, where control lives in the runtime, not the prompt.**
-You get everything you'd expect: one `Agent` class, tools, durable memory, RAG, eight
-multi-agent shapes, streaming, and a typed event stream. Control isn't a guardrail you
-remember to add — it's wired through three points in the core:
+You don't have to build on Tulip to be governed by it.
+**[`tulip-frameworks`](https://github.com/tuliplabs-ai/tulip-frameworks)** wraps a tool from the
+framework you already use — **LangChain, LangGraph, CrewAI, the OpenAI Agents SDK, LlamaIndex,
+or Google ADK** — with the same gate and the same hash-chained audit trail. No rebuild, no
+migration.
 
-- **The router controls *which shape* runs.** Describe a task in plain language; the
-  **[cognitive router](https://tulipagents.ai/concepts/router/)** (PRISM, the router's classifier) fills a typed `GoalFrame` and a **deterministic** picker
-  compiles it to the right runtime shape. The model classifies — it never authors the
-  topology.
-- **[GSAR](https://tulipagents.ai/concepts/gsar/) controls *what gets asserted*.** Every claim is partitioned grounded / ungrounded
-  / contradicted / complementary against typed evidence. Below threshold the agent regenerates,
-  replans, or **abstains** — an ungrounded claim is a false result *by construction* and
-  never ships.
-- **The admission gate controls *what actions fire*.** A consequential action — issue a
-  refund, ship a deploy, change an account, delete a customer record — runs only after it clears
-  `admit()`: a policy check *outside the model*, held for a human when the stakes warrant,
-  recorded on a tamper-evident trail either way.
-
-> **A model can always be talked into something.** The admission check is real code outside
-> the model — so even a confused or misled agent cannot fire an action your policy denies.
-> Try it:
-> [`examples/can_you_make_it_go_rogue.py`](examples/can_you_make_it_go_rogue.py).
-
-## See it in 60 seconds
-
-| Run | What it shows |
-|-----|---------------|
-| [`examples/notebook_06_basic_agent.py`](examples/notebook_06_basic_agent.py) | Your first agent — one `Agent`, one tool, the run loop. |
-| [`examples/notebook_58_cognitive_router.py`](examples/notebook_58_cognitive_router.py) | One natural-language task → the router compiles the right shape. |
-| [`examples/can_you_make_it_go_rogue.py`](examples/can_you_make_it_go_rogue.py) | Mislead an agent that holds live production tools — the gate still refuses the action. |
-
-## Add a tool
-
-A tool is an ordinary Python function — `@tool` publishes its signature and docstring so the
-model knows when to reach for it.
-
-```python
-from tulip import Agent, tool
-
-@tool
-def order_status(order_id: str) -> str:
-    """Look up the current status of a customer order."""
-    return orders.get(order_id)
-
-agent = Agent(
-    model="openai:gpt-4o",
-    tools=[order_status],
-    system_prompt="You are a helpful support assistant. Be concise.",
-)
-
-print(agent.run_sync("Where's my order ord-4821?").text)
+```bash
+pip install "tulip-frameworks[langchain]"   # or [crewai] / [openai-agents] / [llama-index] / [adk] / [all]
 ```
 
-For tools where a duplicate call would hurt — moving money, paging an on-call, filing a
-ticket — declare `@tool(idempotent=True)`: the loop keys every invocation on `(name, args)`
-and refuses to fire the same one twice, even across retries.
+Agents outside Python reach the same gate over the wire through
+[`tulip-gateway`](https://github.com/tuliplabs-ai/tulip-gateway)'s `/v1/admit`, with a TypeScript
+client in [`tulip-frameworks-js`](https://github.com/tuliplabs-ai/tulip-frameworks-js).
+→ [The frameworks guide](https://tulipagents.ai/integrations/frameworks/)
 
 ---
 
-## Talk to any provider
-
-A model is a string. The prefix before the colon (`openai:`, `anthropic:`) tells the SDK
-which provider to use; the rest is the model id that provider expects. `get_model()` parses
-the string and returns a ready client.
-
-```python
-Agent(model="openai:gpt-4o")                     # OpenAI direct
-Agent(model="anthropic:claude-sonnet-4-6")       # Anthropic direct
-```
-
-| Provider | Class | What it covers |
-|---|---|---|
-| **OpenAI** | `OpenAIModel` | Chat completions, reasoning models (o-series), `base_url` override for Azure · Portkey · LiteLLM · vLLM · together.ai · fireworks · groq |
-| **Anthropic** | `AnthropicModel` | Claude family with prompt caching + extended thinking |
-| **Custom** | `register_provider("myco", MyModel)` | Implement `ModelProtocol` — `complete` · `stream` (~50 lines) |
-
-Because OpenAI-compatible endpoints accept a `base_url`, `OpenAIModel` also fronts gateways
-and self-hosted servers (LiteLLM, vLLM, Azure OpenAI, together.ai, groq, …) without a
-dedicated provider.
-
-→ [Model providers concept page](https://tulipagents.ai/concepts/models/)
-
----
-
-## The cognitive router (PRISM) — describe what you need, get the right shape
-
-Once you know agents, the next step is knowing *which* shape to use. The cognitive router
-takes a natural-language task, runs an LLM classifier that fills a typed `GoalFrame` (intent
-· domain · complexity · risk), matches it to one of eight built-in coordination protocols,
-and the `CognitiveCompiler` emits the matching runtime primitive — without you hand-coding
-the topology. **The model classifies; routing is deterministic.**
-
-```python
-from tulip import Agent
-from tulip.models import get_model
-from tulip.router import (
-    CapabilityIndex, CognitiveCompiler, GoalFrame, PolicyGate,
-    ProtocolRegistry, Router, SkillIndex, builtin_protocols,
-)
-from tulip.tools.registry import create_registry
-
-registry = create_registry(kb_search, get_metric, list_alerts)
-
-protocols = ProtocolRegistry()
-for p in builtin_protocols():
-    protocols.register(p)
-
-router = Router(
-    frame_extractor=Agent(model=get_model(), output_schema=GoalFrame),
-    protocols=protocols,
-    capabilities=CapabilityIndex(registry),
-    skills=SkillIndex(),
-    gate=PolicyGate(),
-    compiler=CognitiveCompiler(),
-)
-
-result = await router.dispatch(
-    "We just got a sev-1 latency alert on the checkout service. "
-    "Investigate and recommend remediation."
-)
-print(f"protocol={result.protocol_id}")
-print(result.text)
-```
-
-The same `router.dispatch(...)` resolves a one-shot lookup to a single `Agent`, a multi-step
-investigation to a `SequentialPipeline` of planner→executor→validator, and a write-affecting
-action to an approval-gated agent — chosen by protocol selection, not by the model.
-
-| Protocol | Compiled shape | Best for |
-|---|---|---|
-| `direct_response` | Single `Agent` | `ANSWER`, `EXPLAIN` |
-| `plan_execute_validate` | `SequentialPipeline` (planner → executor → validator) | `PLAN`, `BUILD`, `MODIFY` |
-| `specialist_fanout` | `ParallelPipeline` of N tool-bound Agents | `DIAGNOSE`, `MONITOR` |
-| `debate` | Two debaters + judge `Agent` | `COMPARE` |
-| `codegen_test_validate` | `LoopAgent` (stops on `PASS`) | `GENERATE_CODE` |
-| `approval_gated_execution` | `Agent` wrapped in approval interrupt | `ESCALATE`, `REMEDIATE` |
-| `handoff_chain` | `SequentialPipeline` of one-tool Agents | `COORDINATE` |
-| `a2a_delegate` | Cross-process agent-to-agent (A2A) call (opt-in) | distributed meshes |
-
-→ [Cognitive router concept](https://tulipagents.ai/concepts/router/)
-
----
-
-## Multi-agent workflows
-
-When one agent isn't enough, Tulip ships **every orchestration shape as a first-class
-primitive**: sequential pipeline, parallel fan-out, refinement loop, explicit state graph,
-orchestrator + specialists, swarm, handoff chain, and a cross-process A2A mesh. All of them
-use the same `Agent` class and the same event stream.
-
-| Pattern | When to use |
-|---|---|
-| **SequentialPipeline** | A → B → C in order; each output feeds the next |
-| **ParallelPipeline** | Fan out to N agents simultaneously, merge results |
-| **LoopAgent** | Refine until a condition fires (PASS/FAIL, confidence, iteration cap) |
-| **Orchestrator + Specialists** | One coordinator routes to domain experts in parallel |
-| **Swarm** | Open-ended work; peers share a task queue and context |
-| **Handoff** | Escalation desk; conversation moves with full history to the next specialist |
-| **StateGraph** | Explicit DAG with conditional edges, cycles, and human-in-the-loop gates |
-| **A2A** | Cross-process meshes over HTTP; agents advertise capabilities via AgentCard |
-
-```python
-from tulip.agent import Agent, SequentialPipeline
-
-draft    = Agent(model=model, system_prompt="Draft a first answer from the request.")
-check    = Agent(model=model, system_prompt="Find weaknesses; cite what's missing.")
-finalize = Agent(model=model, system_prompt="Write the final answer, addressing the gaps.")
-
-result = await SequentialPipeline(agents=[draft, check, finalize]).run(
-    "Summarize the trade-offs of moving the checkout service to a queue."
-)
-print(result.text)
-```
-
-→ [All patterns](https://tulipagents.ai/concepts/multi-agent/)
-
----
-
-## Grounded by construction (GSAR)
-
-An agent that *acts* must not assert what it can't back up. Tulip's GSAR layer
-([paper](https://arxiv.org/abs/2604.23366)) partitions every claim — **grounded / ungrounded
-/ contradicted / complementary** — against typed evidence, where tool output outranks inference
-and inference outranks domain priors. Below threshold the run **regenerates, replans, or
-abstains**. There is no public constructor that emits a grounded result without a score, so
-an ungrounded claim is unshippable *by construction* — not filtered after the fact.
-
-Shown here through `tulip.security`, one domain application of the contract — the same
-partition types back any grounded result.
-
-```python
-from tulip.reasoning.gsar import Claim, EvidenceType, Partition
-from tulip.security import ground_finding, Severity, is_finding
-
-result = ground_finding(
-    title="Expired TLS certificate on 192.0.2.10:443",
-    description="Serving endpoint presents an expired certificate.",
-    severity=Severity.HIGH,
-    asset="192.0.2.10:443",
-    remediation="Rotate the certificate; enforce automated renewal.",
-    partition=Partition(grounded=[
-        Claim(text="cert expired 2026-05-30", type=EvidenceType.TOOL_MATCH,
-              evidence_refs=["tool:tls_scan:not_after=2026-05-30"]),
-    ]),
-)
-# A grounded partition → a typed result. An ungrounded one → an auditable
-# Abstention with the reason it was withheld. There is no third path.
-print(result.title if is_finding(result) else f"withheld: {result.reason}")
-```
-
-→ [GSAR grounding](https://tulipagents.ai/concepts/gsar/)
-
----
-
-## The admission gate — an action runs only if policy allows
+## The admission gate
 
 The moment an agent stops advising and starts **acting**, a wrong step becomes a real
-consequence. A prompt rule is advisory — a misleading input or an injected document can talk
-the model past it. Tulip makes the rule **structural**: the side-effecting call runs only after it
-clears `admit()`, a gate the model has no way to reach around.
+consequence. A prompt rule is advisory — a misleading input or an injected document can talk the
+model past it. Tulip makes the rule **structural**: the side-effecting call runs only after it
+clears `admit()`, which the model has no way to reach around.
 
 ```python
 from tulip.control import Action, AuditTrail, ControlPolicy, admit, AdmissionError
@@ -323,14 +99,12 @@ async def safe_refund(order_id: str, usd: float):
         notify_oncall(e.decision)                       # the gate held it; the trail has it
 ```
 
-Production payments now require a human, and the attempt is recorded either way:
-
 `action → policy → approval → admission → audit`
 
 - **Policy + approval** — `approve()` weighs your `ControlPolicy` (blast radius,
   `require_human_for`, verification score) and returns allow, hold, or deny.
-- **Admission** — `admit()` runs the action **only if** approval allows, recording the
-  decision to the `AuditTrail`; otherwise it raises `AdmissionError`.
+- **Admission** — `admit()` runs the action **only if** approval allows, recording the decision
+  to the `AuditTrail`; otherwise it raises `AdmissionError`.
 - **Audit** — every entry is linked to the one before it, so editing any record breaks
   `verify()`. (A keyless SHA-256 chain: tamper-evident, not notarized — add signing before
   treating it as legally authoritative.)
@@ -338,29 +112,43 @@ Production payments now require a human, and the attempt is recorded either way:
 Human approvals are durable: `require_human_for` pauses the run, and an `interrupt()` +
 checkpointer means the decision survives a restart and the run resumes where it left off.
 
-→ [The admission gate](https://tulipagents.ai/concepts/security/)
+For tools where a duplicate call would hurt — moving money, paging an on-call — declare
+`@tool(idempotent=True)`: the loop keys every invocation on `(name, args)` and refuses to fire
+the same one twice, even across retries.
+
+→ [The admission gate](https://tulipagents.ai/concepts/security/) ·
+[Idempotency](https://tulipagents.ai/concepts/idempotency/)
 
 ---
 
-## Govern agents you already run
+## And underneath it, a full SDK
 
-You don't have to build on Tulip to be governed by it.
-**[`tulip-frameworks`](https://github.com/tuliplabs-ai/tulip-frameworks)** wraps a tool from
-the framework you already use — **LangChain, LangGraph, CrewAI, the OpenAI Agents SDK,
-LlamaIndex, or Google ADK** — with the same `admit()` gate and hash-chained `AuditTrail`,
-in about three lines, no rebuild:
+If you're starting fresh rather than wrapping something, the gate sits on a complete agent
+framework. A model is a string, a tool is a function, and `run_sync` runs the loop.
 
-```bash
-pip install "tulip-frameworks[langchain]"   # or [crewai] / [openai-agents] / [llama-index] / [adk] / [all]
+```python
+from tulip import Agent, tool
+
+@tool
+def search_flights(origin: str, destination: str, date: str) -> list[dict]:
+    """Find available flights between two cities on a given date."""
+    return flights.search(origin, destination, date)
+
+agent = Agent(
+    model="anthropic:claude-sonnet-4-6",          # swap providers with one string
+    tools=[search_flights],
+    system_prompt="You are a travel assistant. Be concise and cite prices.",
+)
+
+print(agent.run_sync("Cheapest flight from Lisbon to Berlin next Friday?").text)
 ```
 
-Agents outside Python reach the same gate over the wire through
-[`tulip-gateway`](https://github.com/tuliplabs-ai/tulip-gateway)'s `/v1/admit` with the
-TypeScript client ([`tulip-frameworks-js`](https://github.com/tuliplabs-ai/tulip-frameworks-js)).
-See [the frameworks guide](https://tulipagents.ai/integrations/frameworks/).
+```bash
+pip install "tulip-agents[anthropic]"     # or [openai], or [sdk] for everything
+```
 
-And `governed_agent()` gives any Tulip agent the full harness — grounded, guarded,
-risk-gated, audited — in one call:
+And `governed_agent()` gives any Tulip agent the whole harness — grounded, guarded, risk-gated,
+audited — in one call:
 
 ```python
 from tulip.control import governed_agent
@@ -369,19 +157,11 @@ secured = governed_agent(model="openai:gpt-4o", tools=[...])
 assert secured.audit_trail.verify()   # the chain is intact — no record was altered
 ```
 
+A bundled `MockModel` means every notebook runs offline with no credentials.
+
 ---
 
 ## What you get
-
-**Build** — the agent framework surface:
-
-| | |
-|---|---|
-| **[🧭 Cognitive router](https://tulipagents.ai/concepts/router/)** | Describe a task → eight named protocols → the right primitive compiled automatically. The LLM fills a typed schema; routing is deterministic. |
-| **[🤝 Multi-agent](https://tulipagents.ai/concepts/multi-agent/)** | Seven native patterns + cross-process A2A. One `Agent` class. One event stream. |
-| **[🔬 DeepAgent](https://tulipagents.ai/concepts/deepagent/)** | `create_deepagent` (single agent, per-turn grounding) and `create_research_workflow` (StateGraph with post-hoc grounding eval + two-level recovery). |
-| **[🪙 MCP](https://tulipagents.ai/concepts/mcp/)** | `MCPClient` consumes MCP (Model Context Protocol) servers. `TulipMCPServer` exposes the SDK's tools as MCP. |
-| **[🌐 Multi-modal](https://tulipagents.ai/concepts/multi-modal-providers/)** | `Agent(web_search=…, web_fetch=…, image_generator=…, speech_provider=…)` auto-registers tools. |
 
 **Control** — the runtime that clears actions:
 
@@ -392,122 +172,108 @@ assert secured.audit_trail.verify()   # the chain is intact — no record was al
 | **[🔁 Idempotent tools](https://tulipagents.ai/concepts/idempotency/)** | `@tool(idempotent=True)` — dedupes on `(name, args)`. The model can't double-charge, double-book, or double-page. |
 | **[🪝 Hooks](https://tulipagents.ai/concepts/hooks/)** | Logging · OpenTelemetry · ModelRetry · Guardrails · Steering (LLM-as-judge). |
 
+**Build** — the agent framework surface:
+
+| | |
+|---|---|
+| **[🧭 Cognitive router](https://tulipagents.ai/concepts/router/)** | Describe a task → eight named protocols → the right primitive compiled automatically. The LLM fills a typed schema; routing is deterministic. |
+| **[🤝 Multi-agent](https://tulipagents.ai/concepts/multi-agent/)** | Seven native patterns + cross-process A2A. One `Agent` class. One event stream. |
+| **[🔬 DeepAgent](https://tulipagents.ai/concepts/deepagent/)** | `create_deepagent` (per-turn grounding) and `create_research_workflow` (StateGraph with post-hoc grounding eval). |
+| **[🪙 MCP](https://tulipagents.ai/concepts/mcp/)** | `MCPClient` consumes MCP servers. `TulipMCPServer` exposes the SDK's tools as MCP. |
+| **[🌐 Multi-modal](https://tulipagents.ai/concepts/multi-modal-providers/)** | `Agent(web_search=…, web_fetch=…, image_generator=…, speech_provider=…)` auto-registers tools. |
+
 **Run** — operate it in production:
 
 | | |
 |---|---|
-| **[📡 Observability](https://tulipagents.ai/concepts/observability/)** | Opt-in `EventBus` — one `run_context()` streams 40+ canonical events from every layer, no external broker. `TelemetryHook` for OpenTelemetry/OTLP. |
+| **[📡 Observability](https://tulipagents.ai/concepts/observability/)** | Opt-in `EventBus` — one `run_context()` streams 40+ canonical events from every layer, no external broker. |
 | **[💾 Durable memory](https://tulipagents.ai/concepts/checkpointers/)** | 8 checkpoint backends — PostgreSQL · MySQL · Redis · OpenSearch · S3 / MinIO / R2 · in-memory · file · HTTP. |
-| **[🧠 Long-term memory](https://tulipagents.ai/concepts/memory-manager/)** | `Mem0MemoryManager` over [`mem0`](https://github.com/mem0ai/mem0). Portable path: `LLMMemoryManager` over any `BaseStore` (InMemory / Redis / Postgres / OpenSearch). |
-| **[🔎 RAG](https://tulipagents.ai/concepts/rag/)** | 5 vector stores — pgvector · Qdrant · Chroma · OpenSearch · in-memory. OpenAI + Cohere embeddings · local + Cohere rerankers · multimodal (PDF, image OCR, audio). |
-| **[📡 Streaming + Server](https://tulipagents.ai/concepts/server/)** | Typed events · SSE · `AgentServer` (FastAPI, single shared-key bearer auth, thread persistence). |
+| **[🔎 RAG](https://tulipagents.ai/concepts/rag/)** | 5 vector stores — pgvector · Qdrant · Chroma · OpenSearch · in-memory. OpenAI + Cohere embeddings, local + Cohere rerankers. |
+| **[📡 Streaming + Server](https://tulipagents.ai/concepts/server/)** | Typed events · SSE · `AgentServer` (FastAPI, bearer auth, thread persistence). |
 | **[📊 Evaluation](https://tulipagents.ai/concepts/evaluation/)** | `EvalCase` / `EvalRunner` / `EvalReport` regression suites. |
-
----
-
-## Inside the SDK — the stack, not just the loop
-
-A Tulip agent isn't a one-shot ReAct loop. The same `Agent` class runs inside eight
-orchestration shapes, chosen automatically by the **PRISM cognitive router** from a
-natural-language task, with typed reasoning around every Execute and a pluggable,
-vendor-neutral backend stack. The agent loop is the inner engine — the SDK is the whole stack
-around it.
-
-<p align="center">
-  <img src="docs/img/tulip-stack.svg" alt="The SDK stack — the PRISM cognitive router compiles natural-language tasks into one of 8 orchestration shapes, each of which runs the agent loop (Think → Execute → Reflect → Terminate), powered by foundations (Models, Memory, RAG, Observability, Tools/MCP/Skills)" width="100%">
-</p>
-
-Every node at every layer emits a write-protected typed event — the same stream powers SSE,
-telemetry hooks, and your own `async for event in agent.run(…)` consumer.
-
----
-
-## Vendor-neutral backends
-
-RAG, memory, and persistence are defined by small contracts in `tulip.rag` and `tulip.memory`
-— pick any backend that implements them. Nothing is wired to a single vendor, and most have a
-free/local test path (in-memory Qdrant, embedded Chroma, MinIO via `moto`, an offline
-cross-encoder reranker).
-
-```python
-from tulip.rag import OpenAIEmbeddings, QdrantVectorStore, RAGRetriever
-from tulip.rag.reranker import CrossEncoderReranker
-
-retriever = RAGRetriever(
-    embedder=OpenAIEmbeddings(model="text-embedding-3-small"),
-    store=QdrantVectorStore(location=":memory:", dimension=1536),  # or a server URL
-    reranker=CrossEncoderReranker(top_n=5),                        # local, offline
-)
-await retriever.add_documents(corpus)
-hits = await retriever.retrieve("…", limit=5)
-```
-
-| Capability | Backends |
-|---|---|
-| **Vector stores** (`tulip.rag.stores`) | `PgVectorStore` · `QdrantVectorStore` · `ChromaVectorStore` · `OpenSearchVectorStore` · `InMemoryVectorStore` |
-| **Embeddings** (`tulip.rag.embeddings`) | `OpenAIEmbeddings` · `CohereEmbeddings` |
-| **Rerankers** (`tulip.rag.reranker`) | `CrossEncoderReranker` (local sentence-transformers) · `CohereReranker` (Cohere API) |
-| **Checkpointers** (`tulip.memory.backends`) | `RedisBackend` · `PostgreSQLBackend` · `MySQLBackend` · `OpenSearchBackend` · `S3Backend` (AWS S3 / MinIO / R2) · `FileCheckpointer` · `MemoryCheckpointer` · `HTTPCheckpointer` |
-| **Long-term memory** (`tulip.memory.managers`) | `Mem0MemoryManager` (mem0) · `LLMMemoryManager` over any `BaseStore` |
 
 Every backend is an optional extra — install only what you use
 (`pip install "tulip-agents[qdrant,s3,rerank-local]"`).
 
 ---
 
-## Install
+## Grounded by construction (GSAR)
 
-```bash
-pip install "tulip-agents[openai]"        # OpenAI
-pip install "tulip-agents[anthropic]"     # Anthropic
-pip install "tulip-agents[rag]"           # vector stores + embeddings + rerankers
-pip install "tulip-agents[sdk]"           # everything
-```
-
-→ [Quickstart guide](https://tulipagents.ai/how-to/quickstart/)
-
----
-
-## Any domain, one contract
-
-The same contracts run wherever an agent acts — a support desk approving concessions, a
-payments team settling disputes, an infra team gating deploys. One fully worked domain
-package ships today: `tulip.security` applies the grounded-evidence contract to red-teaming
-— systematically probing — AI systems: every result is a grounded `Evidence`, tagged
-against public weakness catalogues (MITRE ATLAS, OWASP LLM / Agentic Top 10), or an
-explicit `Abstention`:
+An agent that *acts* must not assert what it can't back up. Tulip's GSAR layer
+([paper](https://arxiv.org/abs/2604.23366)) partitions every claim — **grounded / ungrounded /
+contradicted / complementary** — against typed evidence, where tool output outranks inference and
+inference outranks domain priors. Below threshold the run **regenerates, replans, or abstains**.
+There is no public constructor that emits a grounded result without a score, so an ungrounded
+claim is unshippable *by construction* — not filtered after the fact.
 
 ```python
-from tulip.security import Target, red_team, is_finding
+from tulip.security import ground_finding, Severity, is_finding
 
-report = await red_team(Target.endpoint("https://support-bot.example/chat"), suite="owasp-asi")
-for r in report:
-    print(r.title if is_finding(r) else f"abstained: {r.reason}")
+result = ground_finding(..., partition=partition)
+# A grounded partition → a typed result. An ungrounded one → an auditable
+# Abstention with the reason it was withheld. There is no third path.
+print(result.title if is_finding(result) else f"withheld: {result.reason}")
 ```
 
-Vendor-specific adapters (Splunk, CrowdStrike, Okta, Auth0, VirusTotal, Wiz, RunPod, Lambda)
-live in the community package
-**[`tulip-integrations`](https://github.com/tuliplabs-ai/tulip-integrations)**
-(`pip install "tulip-integrations[edr-crowdstrike]"`) — core ships offline reference
-adapters so the SDK runs standalone. Not to be confused with `tulip.integrations` (this
-repo), the built-in MCP client/server.
+→ [GSAR grounding](https://tulipagents.ai/concepts/gsar/)
 
 ---
 
-## Built on Tulip
+## The cognitive router and multi-agent shapes
 
-Tulip is the open-source foundation; Tulip Labs builds its commercial products on top of this
-same SDK. Everything in this repository is Apache-2.0 and usable on its own — the SDK is the
-product surface, not a teaser for it.
+Describe a task in plain language; the **[cognitive router](https://tulipagents.ai/concepts/router/)**
+(PRISM) runs an LLM classifier that fills a typed `GoalFrame`, matches it to one of eight
+coordination protocols, and compiles the matching runtime primitive. **The model classifies;
+routing is deterministic — it never authors the topology.**
+
+| Protocol | Compiled shape | Best for |
+|---|---|---|
+| `direct_response` | Single `Agent` | `ANSWER`, `EXPLAIN` |
+| `plan_execute_validate` | `SequentialPipeline` (planner → executor → validator) | `PLAN`, `BUILD`, `MODIFY` |
+| `specialist_fanout` | `ParallelPipeline` of N tool-bound Agents | `DIAGNOSE`, `MONITOR` |
+| `debate` | Two debaters + judge `Agent` | `COMPARE` |
+| `codegen_test_validate` | `LoopAgent` (stops on `PASS`) | `GENERATE_CODE` |
+| `approval_gated_execution` | `Agent` wrapped in approval interrupt | `ESCALATE`, `REMEDIATE` |
+| `handoff_chain` | `SequentialPipeline` of one-tool Agents | `COORDINATE` |
+| `a2a_delegate` | Cross-process agent-to-agent call (opt-in) | distributed meshes |
+
+Each shape is also a first-class primitive you can use directly — `SequentialPipeline`,
+`ParallelPipeline`, `LoopAgent`, `Orchestrator`, `Swarm`, `Handoff`, `StateGraph`, `A2A`.
+
+```python
+from tulip.agent import Agent, SequentialPipeline
+
+result = await SequentialPipeline(agents=[draft, check, finalize]).run(
+    "Summarize the trade-offs of moving the checkout service to a queue."
+)
+```
+
+→ [Cognitive router](https://tulipagents.ai/concepts/router/) ·
+[All patterns](https://tulipagents.ai/concepts/multi-agent/)
 
 ---
 
-## Notebooks
+## Providers
 
-[`examples/`](examples/) has a set of progressive notebooks, numbered in suggested reading
-order. Each one defaults to a bundled **mock model** when no API key is present, so every
-example runs offline with no credentials; set `OPENAI_API_KEY` to run them against a real
-provider.
+A model is a string. The prefix (`openai:`, `anthropic:`) picks the provider; the rest is the
+model id it expects.
+
+| Provider | Class | What it covers |
+|---|---|---|
+| **OpenAI** | `OpenAIModel` | Chat completions, reasoning models, `base_url` override for Azure · Portkey · LiteLLM · vLLM · together.ai · fireworks · groq |
+| **Anthropic** | `AnthropicModel` | Claude family with prompt caching + extended thinking |
+| **Custom** | `register_provider("myco", MyModel)` | Implement `ModelProtocol` — `complete` · `stream` (~50 lines) |
+
+Because OpenAI-compatible endpoints accept a `base_url`, `OpenAIModel` also fronts gateways and
+self-hosted servers without a dedicated provider.
+→ [Model providers](https://tulipagents.ai/concepts/models/)
+
+---
+
+## Notebooks, workbench, deploy
+
+[`examples/`](examples/) has progressive notebooks, numbered in suggested reading order. Each
+defaults to the bundled mock model when no API key is present.
 
 ```bash
 git clone https://github.com/tuliplabs-ai/sdk-python.git
@@ -518,69 +284,39 @@ python examples/notebook_58_cognitive_router.py      # the cognitive router
 python examples/notebook_69_research_workflow.py     # full research pipeline
 ```
 
-| Track | What you learn |
-|---|---|
-| **Agent Foundations** | Agent, tools, memory, streaming, hooks, termination |
-| **Graphs & composition** | StateGraph, conditional routing, reducers, human-in-the-loop (HITL), composition, functional API |
-| **Multi-agent** | Swarm, handoff, orchestrator, A2A, DeepAgent, debate, emergent routing |
-| **Reasoning & structured** | Pydantic schemas, reasoning patterns, GSAR typed grounding |
-| **RAG** | Basics, vector stores, embeddings, rerankers, RAG agents |
-| **Skills, playbooks, plugins** | MCP, playbooks, plugins, skills, steering |
-| **Production** | Guardrails, checkpoints, evaluation, providers, multi-modal |
-| **Cognitive router + observability** | Routing, EventBus, yield bridge, event catalogue |
-| **Real-world workflows** | Incident response, vendor review, DPA review, spoken advisories |
-| **Server & full pipelines** | Agent server (FastAPI), full research workflow |
-
-→ [Full notebooks index](https://tulipagents.ai/notebooks/)
-
----
-
-## Workbench
-
-A browser-based playground for every SDK pattern. Two clicks to a running agent — no CLI
-install, no editor setup. Three model slots (A / B / C) so multi-agent notebooks can mix a
-fast triage model with a deeper specialist. It lives in its own repo —
-[tuliplabs-ai/workbench](https://github.com/tuliplabs-ai/workbench).
-
-```bash
-git clone https://github.com/tuliplabs-ai/workbench.git && cd workbench
-
-# Three terminals, one per tier (the python tier is hatch-managed):
-cd backend && hatch run sdk && hatch run serve   # FastAPI runner on :8100
-cd bff     && npm install && npm run dev         # BFF on :3101
-cd web     && npm install && npm run dev         # Vite on :5173
-```
-
-Or in Docker:
-
-```bash
-docker build -t tulip-workbench . && docker run --rm -p 5173:5173 -p 3101:3101 -p 8100:8100 tulip-workbench
-# open http://localhost:5173
-```
-
-→ Full walkthrough: [Workbench guide](https://tulipagents.ai/workbench/)
-
----
-
-## Deploy
-
-```bash
-pip install "tulip-agents[server,openai]"
-```
-
-`AgentServer` is a drop-in FastAPI app: `POST /invoke`, `POST /stream`, `GET/DELETE /threads/{id}`, `GET /health`.
+The **[workbench](https://github.com/tuliplabs-ai/workbench)** is a browser playground for every
+pattern — two clicks to a running agent, no editor setup. For production, `AgentServer` is a
+drop-in FastAPI app (`POST /invoke`, `POST /stream`, `GET/DELETE /threads/{id}`, `GET /health`)
+and the repo ships a multi-stage `Dockerfile`.
 
 ```python
 from tulip.server import AgentServer
 
-server = AgentServer(agent=my_agent, api_key=os.environ["API_KEY"])
-server.run(host="0.0.0.0", port=8080)
+AgentServer(agent=my_agent, api_key=os.environ["API_KEY"]).run(host="0.0.0.0", port=8080)
 ```
 
-The repo ships a multi-stage `Dockerfile` ready to drop into your own image pipeline. Deploy
-anywhere FastAPI runs — Kubernetes, ECS / Fargate, Cloud Run, Fly.io, a plain VM.
+→ [Notebooks](https://tulipagents.ai/notebooks/) ·
+[Workbench](https://tulipagents.ai/workbench/) ·
+[Deploy](https://tulipagents.ai/how-to/deploy/)
 
-→ [Deploy guide](https://tulipagents.ai/how-to/deploy/)
+---
+
+## Any domain, one contract
+
+The same contracts run wherever an agent acts. One fully worked domain package ships today:
+`tulip.security` applies the grounded-evidence contract to red-teaming AI systems — every result
+is a grounded `Evidence` tagged against public weakness catalogues (MITRE ATLAS, OWASP LLM /
+Agentic Top 10), or an explicit `Abstention`.
+
+```python
+from tulip.security import Target, red_team, is_finding
+
+report = await red_team(Target.endpoint("https://support-bot.example/chat"), suite="owasp-asi")
+```
+
+Vendor-specific adapters (Splunk, CrowdStrike, Okta, Auth0, VirusTotal, Wiz, RunPod, Lambda) live
+in **[`tulip-integrations`](https://github.com/tuliplabs-ai/tulip-integrations)**; core ships
+offline reference adapters so the SDK runs standalone.
 
 ---
 
@@ -588,35 +324,32 @@ anywhere FastAPI runs — Kubernetes, ECS / Fargate, Cloud Run, Fly.io, a plain 
 
 ```text
 src/tulip/
-├── agent/          Agent runtime, config, SequentialPipeline / ParallelPipeline / LoopAgent
+├── control/        Admission gate — Action, admit/approve, ControlPolicy, AuditTrail
+├── rogue/          The rogue-agent challenge (`python -m tulip.rogue`)
+├── agent/          Agent runtime, config, Sequential / Parallel / Loop pipelines
 ├── core/           AgentState, Message, events, termination algebra, Send
 ├── loop/           ReAct nodes (Think, Execute, Reflect)
-├── router/         Cognitive router — GoalFrame, ProtocolRegistry, PolicyGate, CognitiveCompiler
-├── control/        Admission gate — Action, admit/approve, ControlPolicy, AuditTrail
-├── deepagent/      create_deepagent + create_research_workflow + 6 node primitives
-├── observability/  EventBus, run_context, agent yield bridge, EV_* constants
-├── memory/         BaseCheckpointer + 8 backends
-├── models/         Provider registry + OpenAI, Anthropic
+├── router/         Cognitive router — GoalFrame, ProtocolRegistry, PolicyGate, Compiler
+├── reasoning/      Reflexion, Grounding, Causal, GSAR
 ├── multiagent/     Orchestrator, Swarm, Handoff, StateGraph, Functional
 ├── a2a/            Cross-process Agent-to-Agent protocol
-├── reasoning/      Reflexion, Grounding, Causal, GSAR
+├── deepagent/      create_deepagent + create_research_workflow + 6 node primitives
+├── memory/         BaseCheckpointer + 8 backends
 ├── rag/            Embeddings + 5 vector stores + rerankers + retrievers
-├── providers/      Multi-modal: web search, web fetch, image, speech
+├── models/         Provider registry + OpenAI, Anthropic
 ├── tools/          @tool decorator, registry, builtins, executors
 ├── hooks/          Logging, telemetry, retry, guardrails, steering
+├── observability/  EventBus, run_context, agent yield bridge, EV_* constants
 ├── skills/         AgentSkills.io filesystem-first capability disclosure
 ├── playbooks/      Declarative step plans + PlaybookEnforcer
+├── providers/      Multi-modal: web search, web fetch, image, speech
 ├── security/       Grounded findings, red-team / assure, taxonomy tags
 ├── server/         FastAPI AgentServer with thread persistence
 ├── evaluation/     EvalCase + EvalRunner + EvalReport
 └── integrations/   MCP (client + server)
-
-examples/           Progressive notebooks, each a single runnable file.
-tests/unit/         Deterministic, no external deps. Runs in CI on every PR.
-tests/integration/  Live OpenAI / Anthropic. Gated on credentials.
 ```
 
-The documentation site and the browser workbench live in sibling repos:
+The docs site and browser workbench live in sibling repos:
 [tuliplabs-ai/docs](https://github.com/tuliplabs-ai/docs) (published at
 [tulipagents.ai](https://tulipagents.ai/)) and
 [tuliplabs-ai/workbench](https://github.com/tuliplabs-ai/workbench).
@@ -634,6 +367,7 @@ pre-commit install
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Every PR runs format, lint, mypy, unit tests, DCO sign-off.
+Please consult the [security guide](./SECURITY.md) for vulnerability disclosure.
 
 ---
 
@@ -652,20 +386,12 @@ Paper: [GSAR: Typed Grounding for Hallucination Detection and Recovery in Multi-
 
 ---
 
-## Security
-
-Please consult the [security guide](./SECURITY.md) for our responsible security vulnerability
-disclosure process.
-
----
-
 ## License
 
 Copyright 2026 Tulip Labs.
 
 Released under the **Apache License, Version 2.0** — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
-Full text at <https://www.apache.org/licenses/LICENSE-2.0>.
 
-Tulip began as a fork of an earlier project released under the Universal Permissive License
-v1.0 (UPL-1.0); those original portions remain available under the UPL-1.0, while all new
+Tulip began as a fork of an earlier project released under the Universal Permissive License v1.0
+(UPL-1.0); those original portions remain available under the UPL-1.0, while all new
 contributions are licensed under Apache-2.0. See [NOTICE](NOTICE) for details.

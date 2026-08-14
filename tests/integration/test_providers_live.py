@@ -84,7 +84,9 @@ async def test_openai_search_preview_returns_results() -> None:
     from tulip.models.native.openai import OpenAIModel
     from tulip.providers.web_search import OpenAISearchPreviewProvider
 
-    model = OpenAIModel(model="gpt-4o-search-preview", max_tokens=1024)
+    model = OpenAIModel(
+        model=os.environ.get("TULIP_OPENAI_SEARCH_MODEL", "gpt-4o-search-preview"), max_tokens=1024
+    )
     provider = OpenAISearchPreviewProvider(model)
     hits = await provider.search("OpenAI generative AI service", max_results=3)
     assert len(hits) >= 1
@@ -166,7 +168,9 @@ async def test_agent_uses_auto_registered_web_fetch() -> None:
     from tulip.providers.web_fetch import HTTPXWebFetcher
 
     agent = Agent(
-        model=OpenAIModel(model="gpt-4o-mini", max_tokens=512),
+        model=OpenAIModel(
+            model=os.environ.get("TULIP_OPENAI_TEST_MODEL", "gpt-4o-mini"), max_tokens=512
+        ),
         web_fetch=HTTPXWebFetcher(timeout_seconds=10.0),
         max_iterations=4,
         system_prompt=(

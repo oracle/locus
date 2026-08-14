@@ -4,6 +4,7 @@
 """Integrations with external frameworks."""
 
 from tulip.integrations.fastmcp import (
+    MCPClient,
     TulipMCPServer,
     create_mcp_server,
     mcp_tool_to_tulip,
@@ -11,6 +12,9 @@ from tulip.integrations.fastmcp import (
 
 
 __all__ = [
+    # Consume MCP servers.
+    "MCPClient",
+    # Expose Tulip's own tools and agent as an MCP server.
     "TulipMCPServer",
     "create_mcp_server",
     "mcp_tool_to_tulip",

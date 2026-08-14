@@ -45,7 +45,7 @@ import sys
 from config import get_model
 
 from tulip.agent import Agent, AgentConfig
-from tulip.memory.backends import RedisBackend
+from tulip.memory.backends import RedisBackend, StorageBackendAdapter
 from tulip.server import AgentServer
 
 
@@ -57,11 +57,15 @@ def _missing_env() -> list[str]:
 
 
 def _build_checkpointer():
+    # The key namespace is ``prefix``; RedisBackend takes **kwargs, so a wrong
+    # name is swallowed silently and every notebook shares one keyspace.
     backend = RedisBackend(
         url=os.environ["REDIS_URL"],
-        namespace="tulip_notebook_68",
+        prefix="tulip_notebook_68:",
     )
-    return backend.as_checkpointer()
+    # A backend is raw key/value storage; StorageBackendAdapter is what gives it
+    # the Checkpointer contract the agent loop expects.
+    return StorageBackendAdapter(backend)
 
 
 _TRIAGE_PROMPT = (

@@ -28,7 +28,7 @@ Run it:
     .venv/bin/python examples/notebook_07_agent_with_tools.py
 
 The default provider is the mock model; set TULIP_MODEL_PROVIDER for a live one (e.g.
-``openai.gpt-4.1`` or ``meta.llama-3.3-70b-instruct``). Drop in
+``openai`` or ``anthropic``). Drop in
 ``TULIP_MODEL_PROVIDER=mock`` for an offline run. Tool-calling also
 works against OpenAI, Anthropic.
 

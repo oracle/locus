@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from typing import Any
 
@@ -208,13 +209,25 @@ class PlaybookEnforcer(BaseModel):
             current_step=step,
         )
 
-    def record_tool_call(self, tool_name: str) -> None:
-        """Record that a tool was called.
+    def record_tool_call(
+        self,
+        tool_name: str,
+        *,
+        arguments: Any = None,
+        result: Any = None,
+    ) -> None:
+        """Record that a tool was called, and what it looked at.
 
-        Updates the step execution tracking.
+        `arguments` and `result` are what the step's ``required_probes`` are
+        matched against. They are optional so every existing caller keeps
+        working — a caller that passes neither simply gathers no evidence, and
+        a step with probes will report them unmatched, which is the honest
+        answer rather than a silent pass.
 
         Args:
             tool_name: Name of the tool that was called
+            arguments: The call's arguments, searched for probe matches
+            result: The call's result, searched for probe matches
         """
         step = self.current_step
         if step is None:
@@ -233,6 +246,47 @@ class PlaybookEnforcer(BaseModel):
         step_exec.tool_calls.append(tool_name)
         step_exec.tool_call_count += 1
         self.plan.total_tool_calls += 1
+        self._match_probes(step, step_exec, tool_name, arguments, result)
+
+    @staticmethod
+    def _haystack(tool_name: str, arguments: Any, result: Any) -> str:
+        """Everything about one call a probe may be found in, lowercased.
+
+        The tool NAME is included deliberately: a probe may reasonably name the
+        instrument rather than the target ("run the disk check"), and excluding
+        it would force every such probe to be written against argument text
+        that the author cannot see.
+        """
+        parts = [tool_name]
+        for value in (arguments, result):
+            if value is None:
+                continue
+            if isinstance(value, str):
+                parts.append(value)
+            else:
+                try:
+                    parts.append(json.dumps(value, default=str))
+                except (TypeError, ValueError):  # pragma: no cover — defensive
+                    parts.append(str(value))
+        return " ".join(parts).lower()
+
+    def _match_probes(
+        self,
+        step: PlaybookStep,
+        step_exec: StepExecution,
+        tool_name: str,
+        arguments: Any,
+        result: Any,
+    ) -> None:
+        """Mark any of the step's probes this call satisfied. Idempotent."""
+        if not step.required_probes:
+            return
+        haystack = self._haystack(tool_name, arguments, result)
+        for probe in step.required_probes:
+            if probe.name in step_exec.matched_probes:
+                continue
+            if probe.match.lower() in haystack:
+                step_exec.matched_probes.append(probe.name)
 
     def complete_current_step(self, result: str | None = None) -> bool:
         """Mark the current step as complete and advance.
@@ -256,6 +310,36 @@ class PlaybookEnforcer(BaseModel):
             )
 
         step_exec = self.plan.step_executions[step.id]
+        # Evidence first: a step that gathered less than it declared does not
+        # get to close quietly. Recorded as a violation like any other, so it
+        # reaches the same trace an out-of-shape call does — the point is that
+        # "the procedure was followed" stops meaning "the right tools were
+        # called" and starts meaning "the required evidence exists".
+        unmatched = step_exec.unmatched_probes(step)
+        if unmatched and self.record_violations:
+            self._violations.append(
+                EnforcementViolation(
+                    violation_type="evidence_incomplete",
+                    step_id=step.id,
+                    message=(
+                        f"step {step.id!r} completed without the evidence it requires: "
+                        f"{', '.join(unmatched)} "
+                        f"({len(step_exec.matched_probes)}/{len(step.required_probes)} matched)"
+                    ),
+                )
+            )
+        floor = step.min_tool_calls
+        if floor is not None and step_exec.tool_call_count < floor and self.record_violations:
+            self._violations.append(
+                EnforcementViolation(
+                    violation_type="insufficient_effort",
+                    step_id=step.id,
+                    message=(
+                        f"step {step.id!r} completed after {step_exec.tool_call_count} tool "
+                        f"call(s); it declares a floor of {floor}"
+                    ),
+                )
+            )
         step_exec.status = StepStatus.COMPLETED
         step_exec.completed_at = datetime.now(UTC)
         step_exec.result = result

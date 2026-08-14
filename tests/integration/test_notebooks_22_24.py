@@ -40,7 +40,9 @@ def get_model():
     if os.environ.get("OPENAI_API_KEY"):
         from tulip.models.native.openai import OpenAIModel
 
-        return OpenAIModel(model="gpt-4o-mini", max_tokens=256)
+        return OpenAIModel(
+            model=os.environ.get("TULIP_OPENAI_TEST_MODEL", "gpt-4o-mini"), max_tokens=256
+        )
 
     return None
 

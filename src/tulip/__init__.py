@@ -2,10 +2,15 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-Tulip - A zero-LangChain agentic SDK.
+Tulip - the agent framework where the model never holds the trigger.
 
-Built-in Reflexion, Grounding Evaluation, and production-grade orchestration.
-100% Pydantic. No magic.
+Every consequential action clears a policy check first: real code, outside the
+model, before the side effect, on a record you can verify. Around that gate sits
+a full SDK - tools, memory, RAG, eight multi-agent shapes, typed events.
+
+Try it in thirty seconds, with no API key::
+
+    python -m tulip.rogue
 
 Usage:
     from tulip import Agent, tool

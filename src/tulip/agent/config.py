@@ -162,6 +162,17 @@ class AgentConfig(BaseModel):
         description="List of tools available to the agent",
     )
 
+    # MCP servers whose tools join the registry on the first run. Held as
+    # ``MCPClient`` instances rather than URLs because connecting is async
+    # while ``Agent.__init__`` is not: the agent connects (if it must),
+    # lists, and attaches once, from inside the first ``run()``.
+    mcp_servers: list[Any] = Field(
+        default_factory=list,
+        description="MCPClient instances whose tools are attached on the first "
+        "run. Every tool the server advertises becomes an ordinary Tulip tool, "
+        "so it is gated, hooked, and idempotency-checked like any other.",
+    )
+
     # System prompt — string or callable(context) -> str for dynamic prompts
     system_prompt: Any = Field(
         default="You are a helpful AI assistant.",

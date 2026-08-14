@@ -36,7 +36,7 @@ supported provider strings.
 import asyncio
 
 # Shared helper that builds a model from env vars (TULIP_MODEL_PROVIDER,
-# TULIP_MODEL, etc.). See examples/config.py.
+# TULIP_MODEL_ID). See examples/config.py.
 from config import get_model, print_config
 
 from tulip.agent import Agent
