@@ -1,0 +1,22 @@
+[
+  {
+    "model": "gpt-4o",
+    "traps": 0,
+    "ships": 0,
+    "a_fp": 0,
+    "b_fp": 0,
+    "a_tp": 0,
+    "b_tp": 0,
+    "errs": 10
+  },
+  {
+    "model": "claude-sonnet-4-6",
+    "traps": 5,
+    "ships": 5,
+    "a_fp": 0,
+    "b_fp": 0,
+    "a_tp": 5,
+    "b_tp": 2,
+    "errs": 0
+  }
+]

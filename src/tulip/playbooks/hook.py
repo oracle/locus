@@ -129,11 +129,22 @@ class PlaybookEnforcerHook(HookProvider):
         # ``on_before_tool_call``.
         if event.error:
             # Failed calls don't advance the step (the model will likely
-            # retry); they're still recorded for the violation log.
-            self._enforcer.record_tool_call(event.tool_name)
+            # retry); they're still recorded for the violation log. The
+            # ARGUMENTS still count as evidence-seeking — the agent did look —
+            # but the result does not, because there isn't one.
+            self._enforcer.record_tool_call(
+                event.tool_name, arguments=getattr(event, "arguments", None)
+            )
             return
 
-        self._enforcer.record_tool_call(event.tool_name)
+        # Arguments AND result, because a step's `required_probes` may be
+        # satisfied by either: what was asked for, or what came back. A tool
+        # asked a general question can answer a specific one.
+        self._enforcer.record_tool_call(
+            event.tool_name,
+            arguments=getattr(event, "arguments", None),
+            result=getattr(event, "result", None),
+        )
 
         step = self._enforcer.current_step
         if step is None:
