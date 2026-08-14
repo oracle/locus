@@ -327,15 +327,27 @@ class PlaybookEnforcer(BaseModel):
 
     @staticmethod
     def _haystack(tool_name: str, arguments: Any, result: Any) -> str:
-        """Everything about one call a probe may be found in, lowercased.
+        """What the agent ASKED FOR, lowercased. Deliberately not the answer.
 
-        The tool NAME is included deliberately: a probe may reasonably name the
-        instrument rather than the target ("run the disk check"), and excluding
-        it would force every such probe to be written against argument text
-        that the author cannot see.
+        Matching the result would let a probe be satisfied by data the agent
+        happened to receive rather than evidence it went and got — a tool asked
+        something else entirely can mention the string in passing, and the step
+        would score as covered. The claim being made is "the agent gathered the
+        required evidence", and seeking is the part the agent is responsible
+        for; receiving is partly luck.
+
+        optic matches against the executed query strings for the same reason
+        (`extract_query_strings` → `evaluate_probe_coverage`). `result` is
+        accepted and ignored so callers need not change.
+
+        The tool NAME is included: a probe may reasonably name the instrument
+        rather than the target ("run the disk check"), and excluding it would
+        force every such probe to be written against argument text the author
+        cannot see.
         """
+        del result  # see above — deliberately not evidence
         parts = [tool_name]
-        for value in (arguments, result):
+        for value in (arguments,):
             if value is None:
                 continue
             if isinstance(value, str):

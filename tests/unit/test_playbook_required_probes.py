@@ -82,11 +82,20 @@ def test_the_evidence_is_named_so_it_can_be_gone_and_got() -> None:
     ]
 
 
-def test_the_result_counts_as_evidence_too_not_only_the_request() -> None:
-    """Some tools are asked a general question and answer a specific one."""
+def test_a_probe_is_not_satisfied_by_what_merely_came_back() -> None:
+    """Seeking is the agent's responsibility; receiving is partly luck.
+
+    A tool asked something else entirely can mention the string in passing. If
+    that counted, "the agent gathered the required evidence" would be satisfied
+    by coincidence — which is the claim this whole mechanism exists to make
+    honestly. optic matches executed queries for the same reason.
+    """
     e = _enforcer()
     e.record_tool_call("run_diagnostic", arguments={"target": "db1"}, result="shared_pool_free=12M")
 
+    assert e.plan.step_executions["investigate"].matched_probes == []
+
+    e.record_tool_call("run_diagnostic", arguments={"metric": "shared_pool_free"})
     assert e.plan.step_executions["investigate"].matched_probes == ["shared_pool"]
 
 
