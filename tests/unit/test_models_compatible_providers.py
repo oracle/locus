@@ -25,6 +25,8 @@ These tests guard the parts that are easy to get wrong:
 
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 from tulip.models.providers import (
@@ -174,3 +176,60 @@ def test_tulip_base_url_env_name_is_shell_safe() -> None:
     """``openai-compatible`` must not produce a variable with a dash in it."""
     spec = CompatibleProvider(prefix="openai-compatible", base_url=None, env_key="X", label="X")
     assert spec.tulip_base_url_env == "TULIP_OPENAI_COMPATIBLE_BASE_URL"
+
+
+# --------------------------------------------------------------------------
+# Registration degrades gracefully when an optional dependency is absent.
+# Each provider block is wrapped in try/except ImportError precisely so that
+# `pip install tulip-agents` with no extras still imports; these tests
+# exercise those branches instead of leaving them as untested prose.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("blocked", "absent_prefix", "still_present"),
+    [
+        ("tulip.models.native.openai", "openai", "anthropic"),
+        ("tulip.models.native.anthropic", "anthropic", "openai"),
+    ],
+)
+def test_a_missing_provider_dep_does_not_break_registration(
+    monkeypatch: pytest.MonkeyPatch,
+    blocked: str,
+    absent_prefix: str,
+    still_present: str,
+) -> None:
+    """One uninstalled provider must not take the registry down with it."""
+    from tulip.models import registry
+
+    monkeypatch.setattr(registry, "_PROVIDERS", {})
+    # ``None`` in sys.modules makes ``import`` raise ImportError, which is
+    # what an uninstalled extra looks like from inside the try block.
+    monkeypatch.setitem(sys.modules, blocked, None)
+
+    registry._register_defaults()
+
+    assert absent_prefix not in registry._PROVIDERS
+    assert still_present in registry._PROVIDERS
+
+
+def test_missing_compatible_table_does_not_break_registration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The native providers survive even if the compatible table is gone."""
+    from tulip.models import registry
+
+    monkeypatch.setattr(registry, "_PROVIDERS", {})
+    monkeypatch.setitem(sys.modules, "tulip.models.providers", None)
+
+    registry._register_defaults()
+
+    assert {"openai", "anthropic"} <= set(registry._PROVIDERS)
+    assert "groq" not in registry._PROVIDERS
+
+
+def test_registry_is_restored_after_the_degradation_tests() -> None:
+    """Guard against the monkeypatched registry leaking into other tests."""
+    from tulip.models.registry import list_providers
+
+    assert len(list_providers()) >= 18
