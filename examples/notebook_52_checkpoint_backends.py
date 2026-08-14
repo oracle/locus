@@ -7,8 +7,9 @@ shift handoffs, and redeploys. Tulip persists that conversation state
 in a durable store — the team's system of record for checkpointed case
 state. The checkpointer contract is backend-agnostic; this notebook
 drives it against ``S3Backend`` — S3 / MinIO / Cloudflare R2 via boto3 —
-a durable store with the full capability set (list_threads, search,
-vacuum) over a single bucket, so case state outlives any one process.
+a durable store over a single bucket, so case state outlives any one
+process. Object storage has no index, so it reports ``search=False``;
+the notebook branches on the capability descriptor rather than assuming.
 Notebook 08 covers the checkpointer contract itself. Portable SQL
 deployments can use PostgreSQL or MySQL through the same adapter shape;
 key/value deployments can use Redis.
@@ -17,7 +18,7 @@ key/value deployments can use Redis.
 - Inspect the reported capabilities.
 - Walk open cases with list_threads / list_checkpoints.
 - Vacuum checkpoints past the conversation-retention window.
-- Full-text search across stored support cases.
+- Branch on the capability descriptor for search.
 
 Run it
     # Requires an S3-compatible endpoint (e.g. MinIO) + a bucket:
@@ -84,7 +85,10 @@ async def main() -> None:
     # Part 1: round-trip a day-one support case through the
     # Checkpointer contract. Tomorrow's shift loads exactly this state.
     print("\n=== Part 1: Save / load via S3Backend ===\n")
-    cp = backend.as_checkpointer()
+    # S3Backend already implements BaseCheckpointer, so it is the checkpointer.
+    # (RedisBackend and the SQL backends are storage only and need
+    # StorageBackendAdapter — see notebook 68.)
+    cp = backend
 
     state = AgentState(agent_id="support_agent")
     state = state.with_message(
@@ -138,10 +142,19 @@ async def main() -> None:
     print(f"vacuum(older_than_days=30) removed {removed} stale object(s).")
 
     # Part 5: full-text search across every stored case — find which
-    # support case mentioned a given topic.
+    # support case mentioned a given topic. This is exactly what the
+    # capability descriptor above is for: S3 reports search=False, so
+    # generic code branches on it instead of calling and catching.
     print("\n=== Part 5: Search across support cases ===\n")
-    hits = await backend.search("refund")
-    print(f"search('refund') returned {len(hits)} case id(s): {hits[:5]}")
+    if caps.search:
+        hits = await backend.search("refund")
+        print(f"search('refund') returned {len(hits)} case id(s): {hits[:5]}")
+    else:
+        print(
+            "This backend reports search=False, so the call is skipped.\n"
+            "Object storage has no index to query — use a backend that\n"
+            "reports search=True (OpenSearch) when you need it."
+        )
 
     print("\nDone — every checkpoint above survives restarts in object storage.")
 
