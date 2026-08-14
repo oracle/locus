@@ -65,27 +65,48 @@ class SlidingWindowManager(ConversationManager):
     """
     Sliding window conversation manager - keeps last N messages.
 
-    Preserves the system message (if present) and the last N messages
-    from the conversation. This is a simple and effective strategy
-    for managing conversation length.
+    Preserves the system message (if present) and the last N messages from the
+    conversation. This is a simple and effective strategy for managing
+    conversation length.
+
+    When the window would retain **no user turn at all**, the opening request is
+    re-attached. That case is an agent loop — assistant/tool all the way down —
+    where the first user message is the task, and losing it leaves the model
+    working from a role description and a wall of tool output with no statement
+    of what it was asked to do. It reads as drift rather than as an error, and
+    on Qwen-family chat templates it fails outright with ``No user query found
+    in messages.``. Twenty tool round-trips reach the default window, so this is
+    the ordinary case for a tool-using agent, not an edge one.
+
+    A chat is left alone: while any user turn survives in the window, the newest
+    ones are the live context and the first is not privileged.
 
     Args:
         window_size: Maximum number of messages to keep (excluding system message)
         preserve_system: Whether to preserve the system message at the start
+        preserve_first_user: Whether to re-attach the opening user turn when the
+            window would otherwise contain none
     """
 
-    def __init__(self, window_size: int = 20, preserve_system: bool = True):
+    def __init__(
+        self,
+        window_size: int = 20,
+        preserve_system: bool = True,
+        preserve_first_user: bool = True,
+    ):
         if window_size < 1:
             raise ValueError("window_size must be at least 1")
         self.window_size = window_size
         self.preserve_system = preserve_system
+        self.preserve_first_user = preserve_first_user
 
     def apply(self, messages: list[Message]) -> list[Message]:
         """
         Apply sliding window to messages.
 
-        Keeps the system message (if preserve_system is True) and
-        the last window_size messages.
+        Keeps the system message (if preserve_system is True) and the last
+        window_size messages, re-attaching the opening user turn when the window
+        would otherwise retain none (see the class docstring).
         """
         if not messages:
             return []
@@ -104,7 +125,46 @@ class SlidingWindowManager(ConversationManager):
         # Keep only the last window_size messages
         before_count = len(non_system_messages)
         if before_count > self.window_size:
+            anchor: Message | None = None
+            if self.preserve_first_user:
+                anchor = next(
+                    (m for m in non_system_messages if m.role == Role.USER),
+                    None,
+                )
+
             non_system_messages = non_system_messages[-self.window_size :]
+
+            # The cut lands at a fixed offset, not a turn boundary, so it can
+            # fall between an assistant's tool_calls and the tool messages
+            # answering them. Those results are orphans the provider will
+            # reject, so drop them here rather than leaving the agent loop to
+            # strip them later.
+            def _drop_leading_orphans(window: list[Message]) -> list[Message]:
+                kept = {tc.id for m in window if m.role == Role.ASSISTANT for tc in m.tool_calls}
+                start = 0
+                while (
+                    start < len(window)
+                    and window[start].role == Role.TOOL
+                    and window[start].tool_call_id not in kept
+                ):
+                    start += 1
+                return window[start:]
+
+            non_system_messages = _drop_leading_orphans(non_system_messages)
+
+            # Re-attach the opening request only when the window kept no user
+            # turn at all. In a chat the newest user turns are the live context
+            # and the first one is not privileged; it is an agent loop —
+            # assistant/tool all the way down — that ends up with no user turn
+            # and therefore no statement of the task.
+            #
+            # Trimming orphans usually frees the slot; if it didn't, drop one
+            # more turn from the front and re-normalise, since that drop can
+            # itself orphan the results that followed it.
+            if anchor is not None and not any(m.role == Role.USER for m in non_system_messages):
+                if len(non_system_messages) >= self.window_size:
+                    non_system_messages = _drop_leading_orphans(non_system_messages[1:])
+                non_system_messages.insert(0, anchor)
             from tulip.observability.emit import (  # noqa: PLC0415
                 EV_MEMORY_CONVERSATION_PRUNED,
                 emit_sync,
@@ -114,7 +174,9 @@ class SlidingWindowManager(ConversationManager):
                 EV_MEMORY_CONVERSATION_PRUNED,
                 strategy="sliding_window",
                 window_size=self.window_size,
-                removed_count=before_count - self.window_size,
+                # Count what actually went, not what the raw slice implies:
+                # orphan trimming and the re-attached anchor both move this.
+                removed_count=before_count - len(non_system_messages),
             )
 
         result.extend(non_system_messages)
