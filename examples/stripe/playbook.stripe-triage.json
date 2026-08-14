@@ -1,0 +1,93 @@
+{
+  "id": "stripe-triage",
+  "title": "Stripe money-movement triage",
+  "summary": "Find the method, establish the facts across payments, billing, disputes and balance, then let a person authorise any movement of money. Stripe exposes its whole API behind two generic tools, so the procedure — not the tool name — is what bounds this.",
+  "version": "1.0.0",
+  "mode": "diagnosis",
+  "step_groups": [
+    {
+      "id": "orient",
+      "title": "Find the right method before calling anything.",
+      "goal": "Stripe's read and write tools accept any path. Establish the method from the API index rather than from memory, because a plausible wrong path returns a plausible wrong answer.",
+      "steps": [
+        {
+          "id": "discover",
+          "title": "Locate the API method.",
+          "goal": "Search the Stripe API for the resource this request is about and read the chosen method's parameters.",
+          "required": true,
+          "priority": "high",
+          "min_tool_calls": 1,
+          "max_tool_calls": 6,
+          "guidance": { "skill_refs": ["stripe-api-discovery"] }
+        }
+      ]
+    },
+    {
+      "id": "establish",
+      "title": "Establish the facts, across every surface that bears on them.",
+      "goal": "What was paid, what it was billed for, whether it is disputed, and whether the balance can absorb a reversal.",
+      "steps": [
+        {
+          "id": "payments",
+          "title": "Read the charge and its existing refunds.",
+          "goal": "Establish the charge, its payment intent and any refund already issued against it.",
+          "required": true,
+          "priority": "critical",
+          "min_tool_calls": 2,
+          "max_tool_calls": 12,
+          "guidance": { "skill_refs": ["stripe-payments-read"] }
+        },
+        {
+          "id": "billing",
+          "title": "Read the invoice and subscription behind it.",
+          "goal": "Establish what the customer was billed for and whether the charge is part of a recurring arrangement.",
+          "required": false,
+          "priority": "medium",
+          "min_tool_calls": 1,
+          "max_tool_calls": 14,
+          "guidance": { "skill_refs": ["stripe-billing-read"] }
+        },
+        {
+          "id": "disputes",
+          "title": "Read the dispute and the customer's history.",
+          "goal": "Establish the reason code, the evidence deadline and whether this customer has disputed before.",
+          "required": false,
+          "priority": "high",
+          "min_tool_calls": 2,
+          "max_tool_calls": 10,
+          "guidance": { "skill_refs": ["stripe-disputes-read"] }
+        },
+        {
+          "id": "balance",
+          "title": "Check the account can absorb it.",
+          "goal": "Establish the available balance before recommending money out of it.",
+          "required": true,
+          "priority": "high",
+          "min_tool_calls": 1,
+          "max_tool_calls": 8,
+          "guidance": { "skill_refs": ["stripe-balance-read"] }
+        }
+      ]
+    },
+    {
+      "id": "act",
+      "title": "Move money only on a person's decision.",
+      "goal": "Issue exactly the refund a person approved, for the charge established above.",
+      "steps": [
+        {
+          "id": "refund",
+          "title": "Issue the approved refund.",
+          "goal": "One call, bound to the charge and amount a person saw and approved.",
+          "required": false,
+          "priority": "critical",
+          "min_tool_calls": 1,
+          "max_tool_calls": 1,
+          "guidance": { "skill_refs": ["stripe-money-movement"] }
+        }
+      ]
+    }
+  ],
+  "completion": {
+    "conclusion_requirements": { "all_applicable_required_steps_resolved": true }
+  }
+}
