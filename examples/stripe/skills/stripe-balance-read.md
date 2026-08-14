@@ -9,6 +9,9 @@ allowed-tools:
 min-tool-calls: 1
 max-tool-calls: 8
 required_probes:
+  - name: balance_transactions
+    match: "/v1/balance_transactions"
+    description: What actually moved, as opposed to what the balance now reads.
   - name: balance_read
     match: "/v1/balance"
     description: The available balance, before promising money out of it.

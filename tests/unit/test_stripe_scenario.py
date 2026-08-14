@@ -142,3 +142,75 @@ def test_no_read_skill_can_write_anything() -> None:
         and any("write" in t or t == "create_refund" for t in (skill.allowed_tools or []))
     }
     assert not offenders, f"read skills carrying write capability: {offenders}"
+
+
+#: The resource families Stripe documents as reachable through its MCP server
+#: (docs.stripe.com/mcp, "Supported API methods"). Kept here rather than derived
+#: because the point is to notice when Stripe's surface moves and ours does not.
+DOCUMENTED_FAMILIES = (
+    "/v1/customers",
+    "/v1/charges",
+    "/v1/refunds",
+    "/v1/payment_intents",
+    "/v1/checkout/sessions",
+    "/v1/invoices",
+    "/v1/invoiceitems",
+    "/v1/subscriptions",
+    "/v1/subscription_schedules",
+    "/v1/coupons",
+    "/v1/promotion_codes",
+    "/v1/products",
+    "/v1/prices",
+    "/v1/payment_links",
+    "/v1/disputes",
+    "/v1/webhook_endpoints",
+    "/v1/billing_portal",
+    "/v1/balance",
+    "/v1/balance_transactions",
+    "/v1/tax",
+    "/v1/payouts",
+    "/v1/issuing",
+    "/v2/core/accounts",
+    "/v2/money_management",
+)
+
+
+def test_the_pack_covers_stripes_documented_surface() -> None:
+    """Every family Stripe exposes has a skill that knows about it.
+
+    Not a claim that every method is exercised — a claim that no documented
+    resource family is somewhere an agent could wander with no procedure
+    written for it. `stripe_api_read` will happily fetch any of these whether
+    or not anyone thought about it.
+    """
+    corpus = "\n".join(
+        f"{skill.name} {skill.description} {skill.instructions} "
+        + " ".join(probe.match for probe in skill.required_probes)
+        for skill in _skills().values()
+    ).lower()
+
+    missing = [family for family in DOCUMENTED_FAMILIES if family.lower() not in corpus]
+    assert not missing, (
+        f"Stripe resource families no skill mentions: {missing}. Either add the "
+        f"skill or drop the family from DOCUMENTED_FAMILIES with a reason."
+    )
+
+
+def test_write_capability_stays_rare_and_named() -> None:
+    """Three skills may write. That number should move only on purpose.
+
+    Stripe's `stripe_api_write` reaches its entire API, so every skill holding
+    it is a place the whole write surface is one path away.
+    """
+    writers = sorted(
+        name
+        for name, skill in _skills().items()
+        if any(
+            tool in ("stripe_api_write", "create_refund") for tool in (skill.allowed_tools or [])
+        )
+    )
+    assert writers == [
+        "stripe-invoices-write",
+        "stripe-money-movement",
+        "stripe-subscriptions-write",
+    ], f"the set of write-capable skills changed: {writers}"

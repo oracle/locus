@@ -12,6 +12,9 @@ required_probes:
   - name: invoice_read
     match: "/v1/invoices"
     description: The invoice behind the charge.
+  - name: invoice_items
+    match: "/v1/invoiceitems"
+    description: The line items, where a wrong-amount claim is actually settled.
   - name: subscription_context
     match: "/v1/subscriptions"
     description: Whether this is recurring, which changes what a refund means.
