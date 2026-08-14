@@ -22,6 +22,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+#: Chat templates treat a user message that is *only* a tool-response wrapper as
+#: part of a multi-step tool exchange rather than as the user's query.
+_TOOL_RESPONSE_OPEN = "<tool_response>"
+_TOOL_RESPONSE_CLOSE = "</tool_response>"
+
 
 def _decode_tool_arguments(raw: str | None) -> dict[str, Any]:
     """Decode the ``tc.function.arguments`` payload into a dict.
@@ -511,6 +516,15 @@ class OpenAIModel(BaseModel):
 
         The text is preserved and clearly marked, so steering still works
         while the request stays portable.
+
+        A request carrying no plain user turn gets one synthesised. The same
+        family of chat templates walks the history backwards looking for a
+        user message that is not itself a ``<tool_response>`` wrapper, and
+        raises ``No user query found in messages.`` when there is none —
+        Qwen3's template does this at the top of the render. Sub-calls that
+        legitimately omit the user turn (judge/summary/auxiliary passes built
+        from ``system + assistant + tool``) therefore 400 on a self-hosted
+        Qwen even though the same list is fine on api.openai.com.
         """
         openai_messages: list[dict[str, Any]] = []
 
@@ -523,7 +537,40 @@ class OpenAIModel(BaseModel):
                 }
             openai_messages.append(entry)
 
-        return openai_messages
+        return self._ensure_user_turn(openai_messages)
+
+    @classmethod
+    def _is_plain_user_turn(cls, entry: dict[str, Any]) -> bool:
+        """True when ``entry`` is a user message a chat template counts as the query."""
+        if entry.get("role") != "user":
+            return False
+        content = entry.get("content")
+        if not isinstance(content, str):
+            # Multi-part (image/audio) content is never a tool-response wrapper.
+            return content is not None
+        stripped = content.strip()
+        if not stripped:
+            return False
+        return not (
+            stripped.startswith(_TOOL_RESPONSE_OPEN) and stripped.endswith(_TOOL_RESPONSE_CLOSE)
+        )
+
+    @classmethod
+    def _ensure_user_turn(cls, entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Guarantee at least one plain user turn, anchoring templates that need one.
+
+        Inserted after a leading system message so the system prompt keeps first
+        position — the sibling rule in the same templates.
+        """
+        if not entries or any(cls._is_plain_user_turn(e) for e in entries):
+            return entries
+
+        anchor = {
+            "role": "user",
+            "content": "[Continue] Continue from the conversation above.",
+        }
+        at = 1 if entries[0].get("role") == "system" else 0
+        return [*entries[:at], anchor, *entries[at:]]
 
     def _convert_tools(self, tools: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
         """Ensure tools are in OpenAI format."""

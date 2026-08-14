@@ -468,7 +468,10 @@ class TestOpenAIModelToolMessage:
 
         messages = model._convert_messages([tool_msg])
 
-        assert len(messages) == 1
-        assert messages[0]["role"] == "tool"
-        assert messages[0]["tool_call_id"] == "call_123"
-        assert messages[0]["content"] == "Search results here"
+        # A tool-only list carries no user turn, so the portability guard
+        # prepends one (Qwen templates raise 'No user query found in messages.'
+        # otherwise). The tool entry itself must convert unchanged.
+        tool_entries = [m for m in messages if m["role"] == "tool"]
+        assert len(tool_entries) == 1
+        assert tool_entries[0]["tool_call_id"] == "call_123"
+        assert tool_entries[0]["content"] == "Search results here"
