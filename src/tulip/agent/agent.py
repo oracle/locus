@@ -135,6 +135,9 @@ class Agent(AgentRuntimeMixin, BaseModel):
     _interrupt_metadata: dict[str, Any] | None = PrivateAttr(default=None)
     _cancel_signal: threading.Event | None = PrivateAttr(default=None)
     _initialized: bool = PrivateAttr(default=False)
+    # MCP tools are attached from the first run() (connecting is async);
+    # this keeps that a one-time step rather than a per-run round trip.
+    _mcp_attached: bool = PrivateAttr(default=False)
 
     def __init__(
         self,

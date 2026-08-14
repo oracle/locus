@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import logging
 import threading
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -145,6 +146,9 @@ def _normalize_stop_reason(raw: str | None) -> StopReason:
     return "complete"
 
 
+logger = logging.getLogger(__name__)
+
+
 class AgentRuntimeMixin:
     """Mixin holding the ReAct loop body and reasoning helpers.
 
@@ -186,6 +190,50 @@ class AgentRuntimeMixin:
 
         def _initialize(self) -> None: ...
 
+        def add_tools(self, tools: list[Any]) -> None: ...
+
+    async def _attach_mcp_tools(self) -> None:
+        """Attach the tools of every configured MCP server, once.
+
+        ``AgentConfig.mcp_servers`` holds clients rather than URLs because
+        connecting is async and ``Agent.__init__`` is not. This runs from the
+        first ``run()``, where there is a loop to await on, and is a no-op on
+        every later call.
+
+        A server that cannot be reached does not take the whole run down: the
+        failure is logged and the agent proceeds with the tools it does have.
+        The alternative — refusing to answer at all because an optional tool
+        source is down — is the worse default for something wired in as an
+        enhancement.
+        """
+        servers = getattr(self.config, "mcp_servers", None)
+        if not servers or getattr(self, "_mcp_attached", False):
+            return
+        self._mcp_attached = True
+
+        for client in servers:
+            name = type(client).__name__
+            try:
+                if not getattr(client, "_connected", True):
+                    await client.connect()
+                schemas = await client.list_tools()
+                tools = client.to_tulip_tools(schemas)
+            except Exception:  # noqa: BLE001 - see below
+                # Intentionally broad: a server can fail as a connection
+                # error, a protocol error, a timeout, or a malformed
+                # schema, and none of those should decide whether the
+                # agent answers at all.
+                logger.warning("MCP server %s unavailable; skipping", name, exc_info=True)
+                continue
+            if tools:
+                self.add_tools(tools)
+                logger.info(
+                    "attached %d tool(s) from MCP server %s: %s",
+                    len(tools),
+                    name,
+                    ", ".join(t.name for t in tools),
+                )
+
     @_bus_bridge
     async def run(
         self,
@@ -218,6 +266,7 @@ class AgentRuntimeMixin:
             TulipEvent instances for each step
         """
         self._initialize()
+        await self._attach_mcp_tools()
 
         # Create initial state
         state = await self._create_initial_state(prompt, thread_id, metadata)
