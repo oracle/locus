@@ -48,7 +48,7 @@ def test_evidence_is_matched_from_what_the_call_looked_at() -> None:
 
     execution = e.plan.step_executions["investigate"]
     assert execution.matched_probes == ["error_count"]
-    assert execution.probe_coverage(e.plan.playbook.steps[0]) == 0.5
+    assert execution.probe_coverage(e.effective_probes(e.plan.playbook.steps[0])) == 0.5
 
 
 def test_a_step_that_gathered_everything_is_fully_covered() -> None:
@@ -57,8 +57,8 @@ def test_a_step_that_gathered_everything_is_fully_covered() -> None:
     e.record_tool_call("query_metrics", arguments={"expr": "min(shared_pool_free)"})
 
     step = e.plan.playbook.steps[0]
-    assert e.plan.step_executions["investigate"].probe_coverage(step) == 1.0
-    assert e.plan.adherence_score() == 1.0
+    assert e.plan.step_executions["investigate"].probe_coverage(e.effective_probes(step)) == 1.0
+    assert e.adherence_score() == 1.0
 
 
 def test_closing_a_step_with_evidence_missing_is_a_violation() -> None:
@@ -77,9 +77,9 @@ def test_the_evidence_is_named_so_it_can_be_gone_and_got() -> None:
     e = _enforcer()
     e.record_tool_call("query_metrics", arguments={"expr": "min(shared_pool_free)"})
 
-    assert e.plan.step_executions["investigate"].unmatched_probes(e.plan.playbook.steps[0]) == [
-        "error_count"
-    ]
+    assert e.plan.step_executions["investigate"].unmatched_probes(
+        e.effective_probes(e.plan.playbook.steps[0])
+    ) == ["error_count"]
 
 
 def test_a_probe_is_not_satisfied_by_what_merely_came_back() -> None:
@@ -113,7 +113,7 @@ def test_a_step_declaring_no_probes_is_covered_by_definition() -> None:
     e.record_tool_call("anything")
     e.complete_current_step()
 
-    assert e.plan.adherence_score() == 1.0
+    assert e.adherence_score() == 1.0
     assert not [v for v in e.violations if v.violation_type == "evidence_incomplete"]
 
 

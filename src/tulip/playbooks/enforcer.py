@@ -99,6 +99,30 @@ class PlaybookEnforcer(BaseModel):
                 seen.setdefault(probe.name, probe)
         return list(seen.values())
 
+    def adherence_score(self) -> float:
+        """How much of the declared evidence this run gathered, 0..1.
+
+        Lives HERE, not on the plan, because the evidence a step owes is its own
+        probes plus those of every skill it `uses`, and only the enforcer holds
+        the skills. The plan-level version counted step-declared probes alone
+        and reported 1.00 for a run whose violations said 1 of 3 matched.
+
+        Averaged over steps REACHED, not the whole playbook: a run still in
+        flight should not read as non-compliant for being unfinished, and a run
+        that stopped early is already reported by `unresolved_required_steps`.
+
+        Treat it as a floor, not a grade — see
+        ASSESSMENT-required-probes-critique.md. The violation list is the
+        artefact worth showing a person.
+        """
+        steps = {step.id: step for step in self.plan.playbook.steps}
+        covered = [
+            execution.probe_coverage(self.effective_probes(steps[step_id]))
+            for step_id, execution in self.plan.step_executions.items()
+            if step_id in steps
+        ]
+        return sum(covered) / len(covered) if covered else 1.0
+
     def allowed_tools_for(self, step: PlaybookStep) -> set[str] | None:
         """What this step may call, or None when it does not constrain calls.
 
@@ -406,7 +430,7 @@ class PlaybookEnforcer(BaseModel):
         # called" and starts meaning "the required evidence exists".
         probes = self.effective_probes(step)
         matched = set(step_exec.matched_probes)
-        unmatched = [probe.name for probe in probes if probe.name not in matched]
+        unmatched = step_exec.unmatched_probes(probes)
         if unmatched and self.record_violations:
             self._violations.append(
                 EnforcementViolation(

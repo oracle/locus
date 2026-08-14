@@ -196,22 +196,29 @@ class StepExecution(BaseModel):
         description="Names of this step's required probes that its evidence satisfied.",
     )
 
-    def probe_coverage(self, step: PlaybookStep) -> float:
-        """matched / required, and 1.0 when the step declared no probes.
+    def probe_coverage(self, probes: list[RequiredProbe]) -> float:
+        """matched / required, and 1.0 when nothing was required.
+
+        Takes the probes rather than the step: the authoritative set is a step's
+        OWN probes plus those of every skill it `uses`, and only the enforcer
+        can resolve skills. Reading them off the step here produced a run that
+        reported 1.00 adherence while a violation on the same step said 1 of 3
+        matched — two answers to one question, found by running a real scenario
+        rather than a fixture.
 
         A step that asked for nothing is fully covered by definition — the
         alternative is that every legacy playbook reports zero adherence, which
         would make the number worthless on the day it shipped.
         """
-        required = {probe.name for probe in step.required_probes}
+        required = {probe.name for probe in probes}
         if not required:
             return 1.0
         return len(required & set(self.matched_probes)) / len(required)
 
-    def unmatched_probes(self, step: PlaybookStep) -> list[str]:
+    def unmatched_probes(self, probes: list[RequiredProbe]) -> list[str]:
         """What this step was told to look at and did not — in declared order."""
         matched = set(self.matched_probes)
-        return [probe.name for probe in step.required_probes if probe.name not in matched]
+        return [probe.name for probe in probes if probe.name not in matched]
 
 
 class PlaybookPlan(BaseModel):
@@ -281,22 +288,6 @@ class PlaybookPlan(BaseModel):
         """Check if a step is complete."""
         se = self.step_executions.get(step_id)
         return se is not None and se.status == StepStatus.COMPLETED
-
-    def adherence_score(self) -> float:
-        """How much of the declared evidence this run actually gathered, 0..1.
-
-        Averaged over steps that were REACHED, not over the whole playbook: a
-        run still in flight should not read as non-compliant merely for being
-        unfinished, and a run that stopped early is already reported as having
-        unresolved required steps.
-        """
-        steps = {step.id: step for step in self.playbook.steps}
-        covered = [
-            execution.probe_coverage(steps[step_id])
-            for step_id, execution in self.step_executions.items()
-            if step_id in steps
-        ]
-        return sum(covered) / len(covered) if covered else 1.0
 
     def unresolved_required_steps(self) -> list[str]:
         """Required steps that never completed — the conclusion contract.

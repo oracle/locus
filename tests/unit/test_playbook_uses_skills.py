@@ -114,5 +114,24 @@ def test_a_fully_evidenced_step_scores_one() -> None:
     e.record_tool_call("query_metrics", arguments={"expr": "shared_pool_free"})
     e.complete_current_step()
 
-    assert e.plan.adherence_score() == 1.0
+    assert e.adherence_score() == 1.0
     assert not [v for v in e.violations if v.violation_type == "evidence_incomplete"]
+
+
+def test_adherence_counts_the_evidence_a_skill_required() -> None:
+    """The bug this file's scenario found: two answers to one question.
+
+    `adherence_score` used to live on the plan, which cannot resolve skills, so
+    it counted a step's OWN probes only. A step whose evidence comes entirely
+    from its skill declares none of its own — and the run reported 1.00
+    adherence while a violation on the same step said 1 of 3 matched.
+
+    Found by running the Stripe scenario, not by a fixture written to pass.
+    """
+    e = _enforcer()
+    e.record_tool_call("query_metrics", arguments={"expr": "ora_04031_error_count"})
+    e.complete_current_step()
+
+    assert e.adherence_score() == 0.5
+    violation = next(v for v in e.violations if v.violation_type == "evidence_incomplete")
+    assert "1/2 matched" in violation.message
