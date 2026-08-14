@@ -168,3 +168,84 @@ async def test_aget_state_never_silently_returns_none_on_misuse() -> None:
     for call in (_graph().aget_state("t"), _graph(_Checkpointer(None)).aget_state()):
         with pytest.raises(ValueError):
             await call
+
+
+# --------------------------------------------------------------------------
+# #95 — the bundled MockModel returned prose with no tool_calls, so every
+# tool-centric example printed "Tool calls made: 0". It is the shared fixture
+# for all 74 numbered examples, so it is worth guarding here.
+# --------------------------------------------------------------------------
+
+
+def _mock_model() -> Any:
+    """Import ``examples/config.py``, which is outside the package."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "_examples_config", REPO_ROOT / "examples" / "config.py"
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.MockModel()
+
+
+_WEATHER_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "get_weather",
+        "description": "Look up the weather.",
+        "parameters": {
+            "type": "object",
+            "properties": {"city": {"type": "string"}},
+            "required": ["city"],
+        },
+    },
+}
+
+
+@pytest.mark.asyncio
+async def test_mock_model_emits_a_tool_call_when_tools_are_bound() -> None:
+    from tulip.core.messages import Message
+
+    resp = await _mock_model().complete(
+        [Message.user("What is the weather in Paris?")], tools=[_WEATHER_TOOL]
+    )
+    assert resp.tool_calls, "the mock must call a bound tool, or examples show nothing"
+    assert resp.tool_calls[0].name == "get_weather"
+
+
+@pytest.mark.asyncio
+async def test_mock_model_synthesises_schema_valid_arguments() -> None:
+    from tulip.core.messages import Message
+
+    resp = await _mock_model().complete(
+        [Message.user("What is the weather in Paris?")], tools=[_WEATHER_TOOL]
+    )
+    args = resp.tool_calls[0].arguments
+    assert set(args) == {"city"}  # required only; defaults keep their meaning
+    assert args["city"] == "Paris"  # read from the prompt, so traces stay legible
+
+
+@pytest.mark.asyncio
+async def test_mock_model_answers_in_prose_once_a_tool_has_replied() -> None:
+    """Without this the mock would loop until the iteration cap."""
+    from tulip.core.messages import Message, ToolResult
+
+    messages = [
+        Message.user("What is the weather in Paris?"),
+        Message.tool(ToolResult(tool_call_id="1", name="get_weather", content="18C")),
+    ]
+    resp = await _mock_model().complete(messages, tools=[_WEATHER_TOOL])
+    assert not resp.tool_calls
+    assert resp.content
+
+
+@pytest.mark.asyncio
+async def test_mock_model_returns_prose_when_no_tools_are_bound() -> None:
+    from tulip.core.messages import Message
+
+    resp = await _mock_model().complete([Message.user("Hello there")], tools=None)
+    assert not resp.tool_calls
+    assert resp.content

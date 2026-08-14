@@ -44,6 +44,7 @@ Examples:
 """
 
 import os
+import re
 import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -84,42 +85,125 @@ class MockModel(BaseModel):
         tools: list[dict[str, Any]] | None = None,
         **kwargs: Any,
     ) -> ModelResponse:
-        """Return a mock response based on the last message."""
-        last_msg = messages[-1].content or "" if messages else ""
-        response = self._get_response(last_msg.lower(), tools)
+        """Return a mock response, calling a tool when one is bound.
+
+        A mock that only ever returns prose makes every tool-centric example
+        print ``Tool calls made: 0``, which is the opposite of what those
+        notebooks exist to show. So on the first turn of a tool-bound run this
+        emits a real ``ToolCall`` with arguments synthesised from the tool's
+        own JSON schema; once a result comes back it answers in prose, which
+        also terminates the loop.
+        """
+        if tools and not self._has_tool_result(messages):
+            # Original case, not lowered: argument synthesis reads proper nouns
+            # out of the prompt so the printed trace says "Paris", not "sample".
+            call = self._synth_tool_call(self._last_user_text(messages), tools)
+            if call is not None:
+                return ModelResponse(
+                    message=Message.assistant(content=None, tool_calls=[call]),
+                    usage={"prompt_tokens": 10, "completion_tokens": 20},
+                    stop_reason="tool_calls",
+                )
+
+        response = self._get_response(self._last_user_text(messages).lower(), tools)
         return ModelResponse(
             message=Message.assistant(content=response),
             usage={"prompt_tokens": 10, "completion_tokens": 20},
             stop_reason="end_turn",
         )
 
+    @staticmethod
+    def _last_user_text(messages: list[Message]) -> str:
+        """The most recent user turn, or the last message if there is none."""
+        for msg in reversed(messages):
+            if getattr(msg.role, "value", msg.role) == "user":
+                return msg.content or ""
+        return (messages[-1].content or "") if messages else ""
+
+    @staticmethod
+    def _has_tool_result(messages: list[Message]) -> bool:
+        """Whether a tool has already answered in this run.
+
+        Without this the mock would call the same tool every turn and only
+        stop at the iteration cap.
+        """
+        return any(getattr(m.role, "value", m.role) == "tool" for m in messages)
+
+    def _synth_tool_call(self, prompt: str, tools: list[dict[str, Any]]) -> Any:
+        """Build a ToolCall for the tool that best matches the prompt.
+
+        Preference goes to a tool whose name shares a word with the prompt —
+        ``get_weather`` for "what's the weather in Tokyo" — so the chosen tool
+        reads as a deliberate decision rather than a coin toss. Falls back to
+        the first bound tool, because demonstrating the mechanism matters more
+        than picking correctly.
+        """
+        from tulip.core.messages import ToolCall  # local: keeps import cost off the top
+
+        specs = [self._tool_spec(t) for t in tools]
+        specs = [s for s in specs if s.get("name")]
+        if not specs:
+            return None
+
+        words = {w for w in re.split(r"\W+", prompt.lower()) if len(w) > 2}
+        best = next(
+            (
+                s
+                for s in specs
+                if words & {w for w in re.split(r"\W+", s["name"].lower()) if len(w) > 2}
+            ),
+            specs[0],
+        )
+        return ToolCall(name=best["name"], arguments=self._synth_arguments(best, prompt))
+
+    @staticmethod
+    def _tool_spec(tool: dict[str, Any]) -> dict[str, Any]:
+        """Normalise the two shapes a tool payload arrives in.
+
+        OpenAI nests under ``function``; Anthropic-style payloads are flat.
+        """
+        inner = tool.get("function")
+        return inner if isinstance(inner, dict) else tool
+
+    @staticmethod
+    def _synth_arguments(spec: dict[str, Any], prompt: str) -> dict[str, Any]:
+        """Fill the tool's required parameters with schema-valid values.
+
+        Only required parameters are supplied, so defaults keep their meaning.
+        String arguments reuse the prompt's last capitalised word when there is
+        one — "Weather in Tokyo?" yields ``{"city": "Tokyo"}``, which makes the
+        printed trace legible instead of full of placeholders.
+        """
+        schema = spec.get("parameters") or spec.get("input_schema") or {}
+        props = schema.get("properties") or {}
+        required = schema.get("required") or []
+
+        proper_nouns = re.findall(r"\b[A-Z][a-z]{2,}\b", prompt)
+        sample_text = proper_nouns[-1] if proper_nouns else "sample"
+
+        defaults: dict[str, Any] = {
+            "string": sample_text,
+            "integer": 1,
+            "number": 1.0,
+            "boolean": True,
+            "array": [],
+            "object": {},
+        }
+        args: dict[str, Any] = {}
+        for name in required:
+            prop = props.get(name) or {}
+            if enum := prop.get("enum"):
+                args[name] = enum[0]
+            else:
+                args[name] = defaults.get(prop.get("type", "string"), sample_text)
+        return args
+
     def _get_response(self, prompt: str, tools: list[dict[str, Any]] | None) -> str:
         """Get appropriate response based on prompt content."""
-        # Check for tool calls — fire when a tool-bound prompt looks like a
-        # SOC task the agent would reach for a tool to answer.
-        tool_hints = (
-            "triage",
-            "alert",
-            "domain",
-            "ioc",
-            "lookup",
-            "enrich",
-            "phishing",
-            "reputation",
-            "scan",
-        )
-        if tools and any(hint in prompt for hint in tool_hints):
-            return self._get_tool_response(prompt, tools)
-
-        # Match keywords to responses
         for keyword, response in self._responses.items():
             if keyword in prompt:
                 return response
         return self._responses["default"]
-
-    def _get_tool_response(self, prompt: str, tools: list[dict[str, Any]]) -> str:
-        """Simulate tool usage response."""
-        return "I'll use the available tools to help with that."
 
     async def stream(
         self,
