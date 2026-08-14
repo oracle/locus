@@ -21,6 +21,8 @@ Skipped automatically when the key isn't set.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from tests.integration.conftest import skip_without_openai
@@ -35,7 +37,9 @@ async def test_gsar_grounded_report_proceeds() -> None:
     from tulip.reasoning.gsar_judge import JudgeOutput, StructuredOutputGSARJudge
 
     judge = StructuredOutputGSARJudge(
-        model=OpenAIModel(model="gpt-4o-mini", max_tokens=2048),
+        model=OpenAIModel(
+            model=os.environ.get("TULIP_OPENAI_TEST_MODEL", "gpt-4o-mini"), max_tokens=2048
+        ),
     )
 
     report = (
@@ -84,7 +88,9 @@ async def test_gsar_ungrounded_report_does_not_proceed_first_iteration() -> None
     from tulip.reasoning.gsar_judge import JudgeOutput, StructuredOutputGSARJudge
 
     judge = StructuredOutputGSARJudge(
-        model=OpenAIModel(model="gpt-4o-mini", max_tokens=2048),
+        model=OpenAIModel(
+            model=os.environ.get("TULIP_OPENAI_TEST_MODEL", "gpt-4o-mini"), max_tokens=2048
+        ),
     )
 
     # Report makes specific factual claims that the evidence does not
@@ -146,7 +152,9 @@ async def test_gsar_judge_emits_partition_with_evidence_types() -> None:
     from tulip.reasoning.gsar_judge import StructuredOutputGSARJudge
 
     judge = StructuredOutputGSARJudge(
-        model=OpenAIModel(model="gpt-4o-mini", max_tokens=2048),
+        model=OpenAIModel(
+            model=os.environ.get("TULIP_OPENAI_TEST_MODEL", "gpt-4o-mini"), max_tokens=2048
+        ),
     )
 
     out = await judge.judge(
@@ -206,7 +214,9 @@ async def test_gsar_recovery_then_proceed_live_cycle() -> None:
     from tulip.reasoning.gsar_judge import JudgeOutput, StructuredOutputGSARJudge
 
     judge = StructuredOutputGSARJudge(
-        model=OpenAIModel(model="gpt-4o-mini", max_tokens=2048),
+        model=OpenAIModel(
+            model=os.environ.get("TULIP_OPENAI_TEST_MODEL", "gpt-4o-mini"), max_tokens=2048
+        ),
     )
 
     # Mix grounded + a directly-contradicted claim. The contradicted
@@ -301,7 +311,9 @@ async def test_gsar_replan_then_proceed_live_cycle() -> None:
     from tulip.reasoning.gsar_judge import JudgeOutput, StructuredOutputGSARJudge
 
     judge = StructuredOutputGSARJudge(
-        model=OpenAIModel(model="gpt-4o-mini", max_tokens=2048),
+        model=OpenAIModel(
+            model=os.environ.get("TULIP_OPENAI_TEST_MODEL", "gpt-4o-mini"), max_tokens=2048
+        ),
     )
 
     # Specific factual claims with literally no evidence corpus on the
@@ -377,7 +389,9 @@ async def test_gsar_budget_exhaustion_sets_degraded_live() -> None:
     from tulip.reasoning.gsar_judge import JudgeOutput, StructuredOutputGSARJudge
 
     judge = StructuredOutputGSARJudge(
-        model=OpenAIModel(model="gpt-4o-mini", max_tokens=2048),
+        model=OpenAIModel(
+            model=os.environ.get("TULIP_OPENAI_TEST_MODEL", "gpt-4o-mini"), max_tokens=2048
+        ),
     )
 
     # Specific factual claims, no supporting evidence at all. Judge
@@ -431,7 +445,9 @@ async def test_gsar_rho_zero_inflation_visible_live() -> None:
     from tulip.reasoning.gsar_judge import StructuredOutputGSARJudge
 
     judge = StructuredOutputGSARJudge(
-        model=OpenAIModel(model="gpt-4o-mini", max_tokens=2048),
+        model=OpenAIModel(
+            model=os.environ.get("TULIP_OPENAI_TEST_MODEL", "gpt-4o-mini"), max_tokens=2048
+        ),
     )
 
     # Mixed report: most claims grounded, but one factually wrong claim
@@ -509,10 +525,14 @@ async def test_gsar_cross_judge_score_directional_agreement() -> None:
     from tulip.reasoning.gsar_judge import StructuredOutputGSARJudge
 
     j_mini = StructuredOutputGSARJudge(
-        model=OpenAIModel(model="gpt-4o-mini", max_tokens=2048),
+        model=OpenAIModel(
+            model=os.environ.get("TULIP_OPENAI_TEST_MODEL", "gpt-4o-mini"), max_tokens=2048
+        ),
     )
     j_full = StructuredOutputGSARJudge(
-        model=OpenAIModel(model="gpt-4o", max_tokens=2048),
+        model=OpenAIModel(
+            model=os.environ.get("TULIP_OPENAI_TEST_MODEL_STRONG", "gpt-4o"), max_tokens=2048
+        ),
     )
 
     grounded = {
