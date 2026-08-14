@@ -94,6 +94,19 @@ def _register_defaults() -> None:
     except ImportError:
         pass
 
+    # OpenAI-compatible endpoints — Ollama, vLLM, LM Studio, llama.cpp,
+    # LiteLLM, Groq, Together, OpenRouter, DeepSeek, Mistral, xAI, Fireworks,
+    # Cerebras, Perplexity, NVIDIA NIM, plus a generic ``openai-compatible``
+    # escape hatch. Each is OpenAIModel pointed at a different base_url, so
+    # none of them adds a client dependency; the routing table lives in
+    # tulip.models.providers.
+    try:
+        from tulip.models.providers import register_compatible_providers
+
+        register_compatible_providers()
+    except ImportError:
+        pass
+
 
 # Register on import
 _register_defaults()
