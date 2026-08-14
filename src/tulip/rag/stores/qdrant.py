@@ -32,6 +32,24 @@ from tulip.rag.stores.base import (
 )
 
 
+_MISSING_QDRANT = 'qdrant-client is not installed. Install with: pip install "tulip-agents[qdrant]"'
+
+
+def _require_qdrant() -> Any:
+    """Return ``qdrant_client.models``, or explain how to install it.
+
+    Every call site here imports lazily so the extra stays optional. Without a
+    single guarded accessor the bare imports raised a plain
+    ``ModuleNotFoundError`` from inside the library, which told the caller
+    nothing about the extra.
+    """
+    try:
+        from qdrant_client import models  # noqa: PLC0415
+    except ImportError as e:  # pragma: no cover - depends on install shape
+        raise ImportError(_MISSING_QDRANT) from e
+    return models
+
+
 # Deterministic namespace so a given ``Document.id`` always maps to the
 # same Qdrant point id (Qdrant ids must be unsigned ints or UUIDs).
 _QDRANT_NAMESPACE = uuid.UUID("6f9619ff-8b86-d011-b42d-00cf4fc964ff")
@@ -79,6 +97,13 @@ class QdrantVectorStore(BaseVectorStore):
         api_key: str | None = None,
         _client: Any = None,
     ) -> None:
+        # Fail here rather than several awaits later. Construction used to
+        # succeed without qdrant-client installed and only blow up inside
+        # add_batch, so the traceback pointed at the library instead of at the
+        # line the caller wrote — and a guard wrapped around the constructor
+        # (which is where callers put one) never fired.
+        if _client is None:
+            _require_qdrant()
         self._dimension = dimension
         self._collection = collection_name
         self._distance_metric = distance_metric
@@ -105,9 +130,7 @@ class QdrantVectorStore(BaseVectorStore):
         try:
             from qdrant_client import AsyncQdrantClient  # noqa: PLC0415
         except ImportError as e:
-            raise ImportError(
-                'qdrant-client is not installed. Install with: pip install "tulip-agents[qdrant]"'
-            ) from e
+            raise ImportError(_MISSING_QDRANT) from e
         if self._url is not None:
             self._client = AsyncQdrantClient(url=self._url, api_key=self._api_key)
         else:
@@ -117,7 +140,7 @@ class QdrantVectorStore(BaseVectorStore):
     async def _ensure_collection(self) -> None:
         if self._ensured:
             return
-        from qdrant_client import models  # noqa: PLC0415
+        models = _require_qdrant()
 
         client = self._get_client()
         if not await client.collection_exists(self._collection):
@@ -138,7 +161,7 @@ class QdrantVectorStore(BaseVectorStore):
     async def add_batch(self, documents: list[Document]) -> list[str]:
         if not documents:
             return []
-        from qdrant_client import models  # noqa: PLC0415
+        models = _require_qdrant()
 
         await self._ensure_collection()
         client = self._get_client()
@@ -190,7 +213,7 @@ class QdrantVectorStore(BaseVectorStore):
         existing = await self.get(doc_id)
         if existing is None:
             return False
-        from qdrant_client import models  # noqa: PLC0415
+        models = _require_qdrant()
 
         client = self._get_client()
         await client.delete(
@@ -202,7 +225,7 @@ class QdrantVectorStore(BaseVectorStore):
     def _build_filter(self, metadata_filter: dict[str, Any] | None) -> Any:
         if not metadata_filter:
             return None
-        from qdrant_client import models  # noqa: PLC0415
+        models = _require_qdrant()
 
         return models.Filter(
             must=[
