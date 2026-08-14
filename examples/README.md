@@ -130,7 +130,7 @@ print(result.summary)
 ## With Hooks
 
 ```python
-from tulip.hooks import LoggingHook, GuardrailsHook
+from tulip.hooks.builtin import LoggingHook, GuardrailsHook
 
 agent = Agent(
     model=model,

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "tulip-agents"
 version = "2.5.1"
-description = "The safest way to build agentic AI — a full-stack, open-source agent SDK where control is native: a cognitive router picks the shape, GSAR grounds every claim, and every risky action must clear an admission gate. Proven first in the security domain."
+description = "An admission gate for agents that act — every consequential action clears your policy, waits for a human when it matters, and lands on a tamper-evident audit trail. Wraps the agent you already have, or the full SDK underneath it."
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
@@ -13,7 +13,20 @@ requires-python = ">=3.11"
 authors = [
     { name = "Tulip Labs" },
 ]
+# Ordered by the job a searcher is actually trying to do. The gate terms come
+# first on purpose: people arrive looking for "how do I stop my agent doing X
+# in production", not for another agent framework.
 keywords = [
+    "human-in-the-loop",
+    "hitl",
+    "agent-approvals",
+    "tool-approval",
+    "tool-authorization",
+    "guardrails",
+    "audit-trail",
+    "policy-engine",
+    "ai-safety",
+    "agent-security",
     "agents",
     "agent-framework",
     "agentic",
@@ -56,15 +69,6 @@ dependencies = [
     # re-export, which ``BearerAuth`` (and other auth helpers) subclass.
     # Lift the cap after porting those to the 1.0 auth API.
     "httpx>=0.27,<1.0",
-    # Capped at <1.2: starlette 1.2.0 (2026-05-28) makes its TestClient
-    # require ``httpx2`` instead of ``httpx``; collection-time imports
-    # in ``tests/unit/test_a2a_protocol.py`` and
-    # ``tests/unit/test_server_app_full.py`` raise
-    # ``StarletteDeprecationWarning`` → ``ModuleNotFoundError``. The
-    # ``httpx<1.0`` pin above already prevents installing ``httpx2``
-    # (which is httpx 2.x), so the only sane cap here is starlette
-    # itself. Lift together with the httpx cap.
-    "starlette<1.4",
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
     "typing-extensions>=4.0",
@@ -200,6 +204,15 @@ dev = [
     # rather than in ``[dependency-groups].dev`` so a plain
     # ``pip install -e ".[dev]"`` (used by CI and contributors) covers
     # the entire test surface.
+    # Capped at <1.4: starlette 1.2.0 (2026-05-28) makes its TestClient
+    # require ``httpx2`` instead of ``httpx``, so collection-time imports in
+    # ``tests/unit/test_a2a_protocol.py`` and ``test_server_app_full.py``
+    # raise ``StarletteDeprecationWarning`` → ``ModuleNotFoundError``. The
+    # ``httpx<1.0`` core pin already prevents installing ``httpx2``, so the
+    # only sane cap is starlette itself. Lift together with the httpx cap.
+    # Test-only: nothing under ``src/`` imports starlette, and the ``server``
+    # extra gets it transitively via fastapi.
+    "starlette<1.4",
     "fastmcp>=3.2.0",     # MCP server tests in tests/unit/test_fastmcp.py
     "pyyaml>=6.0.3",      # Playbook YAML loader tests
     "redis>=7.1.0",       # Redis checkpointer tests
@@ -417,6 +430,11 @@ ignore = [
 # The grounding benchmark is a `python -m tulip.security.grounding_eval` CLI —
 # printing its report is the point.
 "src/tulip/security/grounding_eval.py" = ["T201"]
+# Same for the rogue challenge (`python -m tulip.rogue`): it is a terminal
+# demo whose whole output — banner, per-attempt verdict, scoreboard, audit
+# dump — is printed. It ships inside the package so it runs from an install
+# rather than a clone.
+"src/tulip/rogue/*.py" = ["T201"]
 "examples/checkpointer_examples.py" = ["ALL"]
 "examples/config.py" = ["F821", "RET503"]
 "examples/notebook_11_swarm_multiagent.py" = ["F821"]

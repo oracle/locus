@@ -1581,9 +1581,58 @@ class StateGraph(BaseModel):
         ``docs/concepts/multi-agent/graph.md``."""
         return self.draw_mermaid(direction=direction)
 
-    async def aget_state(self, config: Any = None) -> None:
-        """LangGraph-compatible stub — tulip uses checkpointer.load directly."""
-        return
+    async def aget_state(self, config: Any = None) -> dict[str, Any] | None:
+        """Load the checkpointed graph state for a thread.
+
+        Named for LangGraph parity, since ``StateGraph`` mirrors that API and
+        ported code calls this to inspect a paused run. It previously returned
+        ``None`` unconditionally, which is the worst available failure mode: a
+        caller reading the snapshot got a silent empty answer instead of an
+        error, far from the cause.
+
+        Args:
+            config: Where to find the thread. Accepts a LangGraph-style
+                ``{"configurable": {"thread_id": ...}}``, a bare
+                ``{"thread_id": ...}``, a plain thread-id string, or ``None``
+                to use the thread configured on the graph.
+
+        Returns:
+            The saved graph state, or ``None`` when the thread has no
+            checkpoint yet.
+
+        Raises:
+            ValueError: If no checkpointer is configured, or no thread id can
+                be resolved — both are caller mistakes worth surfacing loudly.
+        """
+        thread_id: str | None = None
+        if isinstance(config, str):
+            thread_id = config
+        elif isinstance(config, dict):
+            configurable = config.get("configurable")
+            source = configurable if isinstance(configurable, dict) else config
+            raw = source.get("thread_id")
+            thread_id = str(raw) if raw is not None else None
+        thread_id = thread_id or self.config.thread_id
+
+        if self.config.checkpointer is None:
+            raise ValueError(
+                "aget_state() needs a checkpointer. Pass one to compile(): "
+                "graph.compile(checkpointer=memory_checkpointer())."
+            )
+        if not thread_id:
+            raise ValueError(
+                "aget_state() needs a thread id. Pass "
+                "config={'configurable': {'thread_id': 'abc'}}, or set "
+                "thread_id on the graph config."
+            )
+
+        saved = await self.config.checkpointer.load(thread_id)
+        if not saved:
+            return None
+        # Checkpoints pack the graph's own dict under ``graph_state``; the rest
+        # of the record is agent-shaped and not meaningful to a graph caller.
+        state = saved.metadata.get("graph_state")
+        return state if isinstance(state, dict) else None
 
     def compile(
         self,
