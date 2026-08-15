@@ -82,6 +82,12 @@ def mock_hook():
     hook.on_after_tool_call = AsyncMock(side_effect=lambda event: None)
     hook.on_before_model_call = AsyncMock(side_effect=lambda event: None)
     hook.on_after_model_call = AsyncMock(side_effect=lambda event: None)
+    # All eight documented callbacks. The iteration pair used never to fire, so
+    # this double modelled the six that did — and a MagicMock answers hasattr
+    # for everything, so once they started firing the dispatcher got a
+    # MagicMock where it awaited a coroutine.
+    hook.on_iteration_start = AsyncMock(side_effect=lambda iteration, state: None)
+    hook.on_iteration_end = AsyncMock(side_effect=lambda iteration, state: None)
     hook.priority = 100
     return hook
 

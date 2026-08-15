@@ -321,7 +321,17 @@ class AgentRuntimeMixin:
 
         try:
             # Main ReAct loop
+            _open_iteration: int | None = None
             while True:
+                # Iteration boundary. The previous iteration is closed here
+                # rather than at each exit: this loop has seven ways out, and a
+                # hook contract that depends on remembering all of them is one
+                # that breaks the next time an eighth is added.
+                if _open_iteration is not None:
+                    await self._run_iteration_end_hooks(_open_iteration, state)
+                await self._run_iteration_start_hooks(state.iteration, state)
+                _open_iteration = state.iteration
+
                 # Check time budget
                 if self.config.time_budget_seconds is not None:
                     elapsed = (datetime.now(UTC) - started_at).total_seconds()
@@ -1194,6 +1204,10 @@ class AgentRuntimeMixin:
                         trigger="every_n_iterations",
                     )
 
+            # The loop is done; close whichever iteration it left open.
+            if _open_iteration is not None:
+                await self._run_iteration_end_hooks(_open_iteration, state)
+
         except Exception as e:
             # Emit error termination
             state = state.with_error(str(e))
@@ -1280,8 +1294,18 @@ class AgentRuntimeMixin:
             self.config.termination.reset()
 
         try:
+            _open_iteration: int | None = None
             while True:
                 # Same loop as run() — check termination, get response, execute tools
+                # Iteration boundary. The previous iteration is closed here
+                # rather than at each exit: this loop has four ways out, and a
+                # hook contract that depends on remembering all of them is one
+                # that breaks the next time an eighth is added.
+                if _open_iteration is not None:
+                    await self._run_iteration_end_hooks(_open_iteration, state)
+                await self._run_iteration_start_hooks(state.iteration, state)
+                _open_iteration = state.iteration
+
                 if self.config.time_budget_seconds is not None:
                     elapsed = (datetime.now(UTC) - started_at).total_seconds()
                     if elapsed >= self.config.time_budget_seconds:
@@ -1541,6 +1565,10 @@ class AgentRuntimeMixin:
                         error=result.error,
                         duration_ms=result.duration_ms,
                     )
+
+            # The loop is done; close whichever iteration it left open.
+            if _open_iteration is not None:
+                await self._run_iteration_end_hooks(_open_iteration, state)
 
         finally:
             self._last_run_state = state
@@ -2398,6 +2426,12 @@ class AgentRuntimeMixin:
             "Agent._hook_orchestrator accessed before initialize_agent() ran"
         )
         return self._hook_orchestrator
+
+    async def _run_iteration_start_hooks(self, iteration: int, state: AgentState) -> None:
+        await self._orch().run_iteration_start(iteration, state)
+
+    async def _run_iteration_end_hooks(self, iteration: int, state: AgentState) -> None:
+        await self._orch().run_iteration_end(iteration, state)
 
     async def _run_before_invocation_hooks(
         self,

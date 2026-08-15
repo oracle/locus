@@ -74,6 +74,22 @@ class HookOrchestrator:
             if hasattr(hook, "on_after_invocation"):
                 await hook.on_after_invocation(state, success)
 
+    async def run_iteration_start(self, iteration: int, state: AgentState) -> None:
+        """Dispatch ``on_iteration_start`` to every hook in order."""
+        for hook in self._hooks:
+            if hasattr(hook, "on_iteration_start"):
+                await hook.on_iteration_start(iteration, state)
+
+    async def run_iteration_end(self, iteration: int, state: AgentState) -> None:
+        """Dispatch ``on_iteration_end`` in reverse order.
+
+        Reverse, to pair symmetrically with ``run_iteration_start`` the way
+        the invocation hooks already do.
+        """
+        for hook in reversed(self._hooks):
+            if hasattr(hook, "on_iteration_end"):
+                await hook.on_iteration_end(iteration, state)
+
     async def run_before_model(
         self,
         messages: list[Any],
