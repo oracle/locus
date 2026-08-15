@@ -6,12 +6,11 @@ Notebook 24: Outage war room — mitigation, diagnostics, and comms agents in a 
 A swarm is a pool of agents that pull tasks from a shared queue based on
 declared capabilities. No commander decides who does what — each task
 finds the responder whose tags fit best, and the swarm runs them in
-parallel where it can. Here the swarm is the response side of the PILOT
-incident-response function (the named on-call commander built in
-Notebook 26): mitigation, diagnostics, and comms agents claiming work off
-the same board during a production outage.
+parallel where it can. Here the swarm *is* PILOT, the outage war room:
+mitigation, diagnostics, and comms agents claiming work off the same board
+during a production outage.
 
-Contrast this with Notebook 26: there, PILOT routes work centrally and
+Contrast this with Notebook 26: there, STEWARD routes work centrally and
 can be audited at the routing step. A swarm trades that for emergent
 parallelism — useful, but worth noting that a self-organizing agent pool
 is also where agentic failure modes concentrate: a mis-tagged or buggy

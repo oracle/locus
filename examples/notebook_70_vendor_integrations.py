@@ -34,7 +34,7 @@ Set the matching credential to swap any offline sample for the live API.
 
 Prerequisites:
 - Notebook 07 (Agent with tools).
-- Notebook 27 (CURATOR) — grounds the data inventory the scan feeds.
+- Notebook 27 (RIGHTSIZER) — grounds the data inventory the scan feeds.
 """
 
 import asyncio

@@ -3,7 +3,7 @@
 """
 Notebook 27: RIGHTSIZER — the cloud-rightsizing specialist.
 
-Notebook 26 introduced the Specialist as the worker MARSHAL hands tasks
+Notebook 26 introduced the Specialist as the worker STEWARD hands tasks
 to. This notebook dives into the Specialist itself, using RIGHTSIZER —
 the platform team's cloud cost-and-capacity specialist — as the running
 case: how to narrow a model's failure surface with a focused system
@@ -46,7 +46,7 @@ The default provider is the bundled mock model. Set TULIP_MODEL_PROVIDER=openai
 
 Prerequisites:
 - Notebook 06 (Agent basics).
-- Notebook 26 (Orchestrator) — Specialists are the workers MARSHAL routes to.
+- Notebook 26 (Orchestrator) — Specialists are the workers STEWARD routes to.
 """
 
 import asyncio
