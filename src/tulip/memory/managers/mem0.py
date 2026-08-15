@@ -86,6 +86,31 @@ class Mem0MemoryManager(BaseMemoryManager):
             scope["run_id"] = self.run_id
         return scope
 
+    async def _scoped_read(self, method: Any, *args: Any, **kwargs: Any) -> Any:
+        """Call a mem0 read with the scope this manager owns.
+
+        mem0 moved the entity identifiers behind ``filters=`` and now *rejects*
+        them as top-level kwargs rather than ignoring them::
+
+            ValueError: Top-level entity parameters frozenset({'user_id'}) are
+            not supported in search(). Use filters={'user_id': '...'} instead.
+
+        Older releases only accept the top-level form, so try the current shape
+        first and fall back. Writes are unaffected — ``add()`` still takes the
+        identifiers directly — which is why this only ever broke reads.
+        """
+        scope = self._scope()
+        if not scope:
+            return await method(*args, **kwargs)
+        try:
+            return await method(*args, filters=scope, **kwargs)
+        except (TypeError, ValueError) as exc:
+            # Older mem0: no ``filters`` parameter at all. Anything else is a
+            # real error and must not be swallowed.
+            if "filters" not in str(exc) and "unexpected keyword" not in str(exc):
+                raise
+            return await method(*args, **scope, **kwargs)
+
     def _get_client(self) -> Any:
         if self._client_override is not None:
             return self._client_override
@@ -132,13 +157,12 @@ class Mem0MemoryManager(BaseMemoryManager):
     async def retrieve(self, limit: int = 20) -> list[Memory]:
         """Retrieve in-scope memories from mem0 for injection."""
         client = self._get_client()
-        scope = self._scope()
         top = min(limit, self.retrieve_limit)
 
         if self.search_query:
-            response = await client.search(self.search_query, limit=top, **scope)
+            response = await self._scoped_read(client.search, self.search_query, limit=top)
         else:
-            response = await client.get_all(limit=top, **scope)
+            response = await self._scoped_read(client.get_all, limit=top)
 
         memories: list[Memory] = []
         for row in self._result_rows(response)[:top]:
