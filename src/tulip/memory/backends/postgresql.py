@@ -35,6 +35,12 @@ def _validate_sql_identifier(value: str, field_name: str) -> str:
 
 class PostgreSQLConfig(BaseModel):
     """Configuration for PostgreSQL backend."""
+    # Reject unknown keys rather than absorbing them. The backends take
+    # **kwargs and splat them in here, so a misspelled or wrong-named
+    # parameter used to vanish silently — notebook 68 passed namespace=
+    # instead of prefix= and every run quietly shared one keyspace.
+    model_config = {"extra": "forbid"}
+
 
     host: str = "localhost"
     port: int = 5432
