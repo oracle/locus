@@ -28,6 +28,24 @@ from tulip.tools.watcher import (
 )
 
 
+def _wait_until(predicate, what: str, timeout: float = 10.0, interval: float = 0.05) -> None:
+    """Block until ``predicate()`` holds, or fail saying what never happened.
+
+    The watcher runs on its own thread, so every assertion about it races a
+    poll loop. The previous form gave the watcher 2s and then asserted
+    regardless of whether the wait had succeeded — so on a loaded runner it
+    produced a confusing value comparison instead of "the watcher never
+    reloaded". A longer deadline costs nothing when the reload is prompt: the
+    loop returns the moment it lands.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if predicate():
+            return
+        time.sleep(interval)
+    raise AssertionError(f"timed out after {timeout:g}s waiting for {what}")
+
+
 # A reusable tool source shared by most tests.
 _TOOL_SOURCE = """
 from tulip.tools.decorator import tool
@@ -181,11 +199,7 @@ class TestToolWatcherDevReload:
         try:
             # Drop a new file in after start — the poll loop must pick it up.
             _write_tool_file(tmp_path, "echo_tool.py")
-            for _ in range(40):
-                if "echo" in registry.tools:
-                    break
-                time.sleep(0.05)
-            assert "echo" in registry.tools
+            _wait_until(lambda: "echo" in registry.tools, "the new file to be picked up")
         finally:
             watcher.stop()
 
@@ -202,11 +216,7 @@ class TestToolWatcherDevReload:
             path.write_text(new_source)
             future_mtime = time.time() + 1
             os.utime(path, (future_mtime, future_mtime))
-            for _ in range(40):
-                if "echo_v2" in registry.tools:
-                    break
-                time.sleep(0.05)
-            assert "echo_v2" in registry.tools
+            _wait_until(lambda: "echo_v2" in registry.tools, "the renamed tool to appear")
         finally:
             watcher.stop()
 
@@ -218,11 +228,10 @@ class TestToolWatcherDevReload:
         try:
             assert str(path) in watcher._file_mtimes
             path.unlink()
-            for _ in range(40):
-                if str(path) not in watcher._file_mtimes:
-                    break
-                time.sleep(0.05)
-            assert str(path) not in watcher._file_mtimes
+            _wait_until(
+                lambda: str(path) not in watcher._file_mtimes,
+                "the deleted file to leave the mtime map",
+            )
         finally:
             watcher.stop()
 
@@ -234,11 +243,7 @@ class TestToolWatcherDevReload:
         watcher.start()
         try:
             _write_tool_file(tmp_path, "echo_tool.py")
-            for _ in range(40):
-                if seen:
-                    break
-                time.sleep(0.05)
-            assert seen, "callback was never invoked"
+            _wait_until(lambda: bool(seen), "the on-change callback to fire")
             assert seen[0][0].name == "echo_tool.py"
         finally:
             watcher.stop()
@@ -274,10 +279,10 @@ class TestToolWatcherDevReload:
             path.write_text(new_source)
             future_mtime = time.time() + 1
             os.utime(path, (future_mtime, future_mtime))
-            for _ in range(40):
-                if registry.tools["echo"] is not initial_tool:
-                    break
-                time.sleep(0.05)
+            _wait_until(
+                lambda: registry.tools["echo"] is not initial_tool,
+                "the watcher to reload the changed file",
+            )
             assert registry.tools["echo"].description == "Updated description."
         finally:
             watcher.stop()
