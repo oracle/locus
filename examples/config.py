@@ -67,9 +67,39 @@ class MockModel(BaseModel):
     max_tokens: int = 100
     temperature: float = 0.7
 
-    # Simulated responses — security-flavoured so the offline output reads
-    # like the real thing. Keyed on words that show up in SOC/IR prompts.
+    # Simulated responses, keyed on words that show up in the notebooks'
+    # prompts. First match wins, so the specific keys come before the generic
+    # ones — a payments chargeback and a phishing alert are both "triage", and
+    # answering either with the other's verdict is how an offline run stops
+    # reading like the real thing and starts reading like a broken example.
     _responses: dict[str, str] = {
+        # Payments triage (notebook 06). Three distinct patterns, because a
+        # queue where every transaction gets the same verdict teaches nothing.
+        "declines": (
+            "Consistent with card testing: a run of small declines from one BIN "
+            "across unrelated merchants, then an authorization. Block the BIN "
+            "and review the merchants it touched."
+        ),
+        "never disputed": (
+            "Looks like an established recurring subscription — same amount, "
+            "same merchant, nine months, no disputes. No action; leave it alone."
+        ),
+        "chargeback": (
+            "Possible friendly fraud: delivery was signed for at the billing "
+            "address and the account has prior undisputed orders there. Gather "
+            "the delivery signature and order history, then represent."
+        ),
+        # Deployment readiness (notebook 07). Keyed on the go/no-go language
+        # the release-engineer prompts use.
+        "pre-deploy": (
+            "No-go on search: the image is unsigned and only 2 of 5 replicas "
+            "are healthy with the health check failing. Fix both before shipping."
+        ),
+        "deploy": (
+            "Go on checkout: the image is signed and current, and all 6 replicas are healthy."
+        ),
+        "go/no-go": ("No-go: the readiness report lists blockers that have to clear first."),
+        # Security triage (the SOC/IR notebooks).
         "default": "This is a mock response for testing purposes.",
         "triage": "Escalate: the indicators line up with an active phishing campaign.",
         "phishing": "Classic phishing markers (lookalike domain, urgent lure) — treat as malicious.",

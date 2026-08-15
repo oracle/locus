@@ -1,39 +1,46 @@
 # Copyright 2026 Tulip Labs
 # SPDX-License-Identifier: Apache-2.0
 """
-Notebook 06: your first agent — build an agent, ask it a question, read the result.
+Notebook 06: your first agent — build LEDGER, send it a transaction, read the result.
 
-Meet Aria, a friendly general-purpose assistant. Build her, ask her an
-everyday question two different ways (blocking and streaming), and look
-at what comes back. This is the smallest possible end-to-end Tulip
-example, and the first appearance of an agent that recurs across the
-later notebooks.
+LEDGER is a tier-1 transaction-triage agent for a payments team. A
+transaction arrives, LEDGER says what it looks like and what a human
+should do about it. That is the whole job, and it is enough to show every
+part of an ``Agent`` without a single tool, memory, or multi-agent hop.
+
+Triage is the example rather than trivia because the shape is what
+matters: a short structured input, a judgement, and a recommended action.
+Swap payments for alerts, tickets, or log lines and nothing about the
+code changes.
 
 Key ideas:
 - An ``Agent`` pairs a model with a system prompt and optional tools.
-- ``await agent.arun(prompt)`` returns a single ``AgentResult``.
-- ``agent.run(prompt)`` is an async generator that yields events — the
-  agent shows its work instead of handing you an opaque answer.
+- ``agent.run_sync(prompt)`` returns one ``AgentResult`` — the blocking
+  call, for scripts and notebooks.
+- ``agent.run(prompt)`` is an async generator yielding events as they
+  happen — the agent shows its work instead of handing back an opaque
+  answer.
 - ``AgentResult`` carries the final message, success flag, stop reason,
   and per-run metrics.
-- The same agent can answer many questions in a row.
+- The same agent triages many transactions in a row.
 
-The sample questions are the kind anyone might ask a helpful assistant —
-explain a concept, do a quick calculation, summarize something in a
-sentence or two.
+The sample transactions map to patterns a payments team actually sees:
+card testing (a run of small declines, then one that authorizes), an
+authorized recurring subscription, and a friendly-fraud chargeback. The
+data is fictional throughout — invented merchant names, placeholder card
+BINs, and made-up transaction ids.
 
 Run it:
     .venv/bin/python examples/notebook_06_basic_agent.py
 
-The default provider is the bundled mock model. Set TULIP_MODEL_PROVIDER=openai (or anthropic)
-and the agent talks to a live model (e.g.
-``openai:gpt-4o`` or ``anthropic:claude-sonnet-4-6``). Without a
-config — or for offline runs — set ``TULIP_MODEL_PROVIDER=mock`` to use
-the bundled deterministic model. OpenAI, Anthropic are also
-supported provider strings.
+The default provider is the bundled deterministic mock model, so this
+runs offline with no credentials. Set ``TULIP_MODEL_PROVIDER=openai`` (or
+``anthropic``) and the matching key to send the same prompts to a live
+model.
 """
 
 import asyncio
+import textwrap
 
 # Shared helper that builds a model from env vars (TULIP_MODEL_PROVIDER,
 # TULIP_MODEL_ID). See examples/config.py.
@@ -42,95 +49,133 @@ from config import get_model, print_config
 from tulip.agent import Agent
 
 
+# The one instruction every part of this notebook shares. Kept in one place
+# because changing how LEDGER is briefed is the single highest-leverage edit
+# in the file, and it should not have to be made five times.
+LEDGER_BRIEF = (
+    "You are LEDGER, a tier-1 transaction triage agent for a payments team. "
+    "For each transaction, say in one or two sentences what pattern it looks "
+    "like and what a human should do next. Be specific and be brief. Never "
+    "state a certainty you do not have — say 'possible' or 'consistent with' "
+    "when the evidence is suggestive rather than conclusive."
+)
+
+# --- The fictional transactions ------------------------------------------
+# Written as short field dumps rather than prose so the model sees the same
+# shape a real triage queue would hand it.
+
+CARD_TESTING = textwrap.dedent("""\
+    txn_id: txn_8841
+    merchant: Northwind Coffee (online)
+    amount: 1.00 USD (authorized)
+    card_bin: 411111
+    preceding_24h: 47 declines from the same BIN across 12 merchants,
+                   amounts 0.50-2.00 USD
+    """)
+
+RECURRING_SUBSCRIPTION = textwrap.dedent("""\
+    txn_id: txn_8842
+    merchant: Cirrus Backup Co
+    amount: 12.00 USD (authorized)
+    card_bin: 552200
+    history: same amount, same merchant, on the 14th of each of the last
+             9 months, never disputed
+    """)
+
+FRIENDLY_FRAUD = textwrap.dedent("""\
+    txn_id: txn_8843
+    merchant: Harbourline Outfitters
+    amount: 289.40 USD (settled 62 days ago)
+    card_bin: 401288
+    event: chargeback filed, reason code 10.4 "other fraud - card absent"
+    delivery: signed for at the billing address; account has 3 prior
+              undisputed orders to the same address
+    """)
+
+
 # =============================================================================
-# Part 1: build Aria and call her once
+# Part 1: build LEDGER
 # =============================================================================
 
 
-async def example_create_agent():
-    """Build Aria and run one tiny prompt to confirm the provider works."""
+def example_create_agent() -> Agent:
+    """Build LEDGER and run one tiny prompt to confirm the provider works."""
     print("=== Part 1: Creating an Agent ===\n")
 
     model = get_model(max_tokens=40)
-
-    agent = Agent(
-        model=model,
-        system_prompt="You are Aria, a friendly, helpful assistant. Be concise.",
-    )
+    agent = Agent(model=model, system_prompt=LEDGER_BRIEF)
 
     print(f"Agent created with model: {type(model).__name__}")
-    print(f"System prompt: {agent.system_prompt[:50]}...")
+    print(f"System prompt: {agent.system_prompt[:60]}...")
 
     import time as _t
 
-    t0 = _t.perf_counter()
-    smoke = await agent.arun("Say 'ready' in one word.")
-    dt = _t.perf_counter() - t0
+    started = _t.perf_counter()
+    smoke = agent.run_sync("Reply with the single word: ready.")
+    elapsed = _t.perf_counter() - started
     print(
-        f"  [provider call: {dt:.2f}s · "
+        f"  [provider call: {elapsed:.2f}s · "
         f"{smoke.metrics.prompt_tokens}→{smoke.metrics.completion_tokens} tokens]"
     )
-    print(f"  Smoke reply: {smoke.message.strip()}")
+    print(f"  Smoke reply: {(smoke.message or '').strip()}")
     print()
 
     return agent
 
 
 # =============================================================================
-# Part 2: awaited call with arun
+# Part 2: the blocking call — run_sync
 # =============================================================================
 
 
-async def example_sync_run():
-    """Await the agent until it finishes — the simplest possible call."""
-    print("=== Part 2: Awaited Execution ===\n")
+def example_run_sync() -> None:
+    """``run_sync`` waits for the whole run and hands back one result.
 
-    model = get_model(max_tokens=100)
+    This is the call to reach for in a script, a notebook, or a test. It is
+    also the one that makes an agent feel like a function, which is most of
+    why it is worth showing first.
+    """
+    print("=== Part 2: Blocking Execution (run_sync) ===\n")
 
-    agent = Agent(
-        model=model,
-        system_prompt="You are Aria, a helpful assistant. Keep responses under 40 words.",
-    )
+    agent = Agent(model=get_model(max_tokens=120), system_prompt=LEDGER_BRIEF)
 
-    question = "What's a good way to explain recursion to a beginner?"
-    result = await agent.arun(question)
+    result = agent.run_sync(f"Triage this transaction:\n\n{CARD_TESTING}")
 
-    print(f"Prompt: {question}")
-    print(f"Response: {result.message}")
+    print("Transaction: txn_8841 (Northwind Coffee, $1.00)")
+    print(f"LEDGER: {result.message}")
     print(f"Success: {result.success}")
     print(f"Stop reason: {result.stop_reason}")
     print()
 
 
 # =============================================================================
-# Part 3: async call with streaming events
+# Part 3: the streaming call — run
 # =============================================================================
 
 
-async def example_async_run():
-    """Stream the agent's lifecycle events as it answers."""
-    print("=== Part 3: Async Execution with Events ===\n")
+async def example_run_streaming() -> None:
+    """``run`` yields events as the agent works.
 
-    model = get_model(max_tokens=100)
+    Same agent, same kind of input, different shape of answer: instead of
+    one result at the end, you see each step as it happens. That is what a
+    UI needs, and what you want when a run is long enough that silence is
+    indistinguishable from a hang.
+    """
+    print("=== Part 3: Streaming Execution (run) ===\n")
 
-    agent = Agent(
-        model=model,
-        system_prompt="You are Aria, a helpful assistant. Be brief.",
-    )
+    agent = Agent(model=get_model(max_tokens=120), system_prompt=LEDGER_BRIEF)
 
-    print("Prompt: Summarize the water cycle in two sentences.")
+    print("Transaction: txn_8843 (Harbourline Outfitters, $289.40 chargeback)")
     print("Events:")
 
-    # agent.run(...) yields ThinkEvent, ToolStartEvent, ToolCompleteEvent,
-    # TerminateEvent, etc., in order. Notebook 11 covers the full event set.
-    async for event in agent.run("Summarize the water cycle in two sentences."):
-        print(f"  {event.event_type}: ", end="")
-        if hasattr(event, "reasoning") and event.reasoning:
-            print(f"{event.reasoning[:60]}...")
-        elif hasattr(event, "final_message") and event.final_message:
-            print(f"Final: {event.final_message[:60]}...")
+    # run(...) yields ThinkEvent, ToolStartEvent, ToolCompleteEvent,
+    # TerminateEvent and friends, in order. Notebook 11 covers the full set.
+    async for event in agent.run(f"Triage this transaction:\n\n{FRIENDLY_FRAUD}"):
+        detail = getattr(event, "reasoning", None) or getattr(event, "final_message", None)
+        if detail:
+            print(f"  {event.event_type}: {detail.strip()[:70]}")
         else:
-            print(f"{event}")
+            print(f"  {event.event_type}")
 
     print()
 
@@ -140,18 +185,13 @@ async def example_async_run():
 # =============================================================================
 
 
-async def example_agent_result():
+def example_agent_result() -> None:
     """Print every notable field on AgentResult so you know what's available."""
     print("=== Part 4: Understanding Results ===\n")
 
-    model = get_model(max_tokens=50)
+    agent = Agent(model=get_model(max_tokens=80), system_prompt=LEDGER_BRIEF)
 
-    agent = Agent(
-        model=model,
-        system_prompt="You are Aria, a helpful assistant. One sentence answers only.",
-    )
-
-    result = await agent.arun("In one sentence, what is a good night's sleep worth?")
+    result = agent.run_sync(f"Triage this transaction:\n\n{RECURRING_SUBSCRIPTION}")
 
     print("AgentResult fields:")
     print(f"  .message     = {result.message}")
@@ -167,33 +207,32 @@ async def example_agent_result():
 
 
 # =============================================================================
-# Part 5: reuse the same agent across questions
+# Part 5: one agent, a queue of transactions
 # =============================================================================
 
 
-async def example_multiple_prompts():
-    """One agent, many questions. Each call is independent unless you opt in to memory."""
-    print("=== Part 5: Multiple Questions ===\n")
+def example_a_triage_queue() -> None:
+    """One agent, three transactions.
 
-    model = get_model(max_tokens=50)
+    Each call is independent: LEDGER does not remember txn_8841 while
+    looking at txn_8842. That is the default on purpose — carrying context
+    between unrelated transactions is how one flagged card starts colouring
+    the judgement on the next. Notebook 08 adds memory when you want it.
+    """
+    print("=== Part 5: A Triage Queue ===\n")
 
-    agent = Agent(
-        model=model,
-        system_prompt="You are Aria, a helpful assistant. Reply in one short line.",
-    )
+    agent = Agent(model=get_model(max_tokens=80), system_prompt=LEDGER_BRIEF)
 
-    # A general-knowledge question, a quick calculation, and a tiny
-    # explanation — the kind of thing anyone might ask in a day.
-    prompts = [
-        "What is the capital of Japan?",
-        "What is 15% of 240?",
-        "In one line, what does a compiler do?",
+    queue = [
+        ("txn_8841 — card testing", CARD_TESTING),
+        ("txn_8842 — recurring subscription", RECURRING_SUBSCRIPTION),
+        ("txn_8843 — chargeback", FRIENDLY_FRAUD),
     ]
 
-    for prompt in prompts:
-        result = await agent.arun(prompt)
-        print(f"Q: {prompt}")
-        print(f"A: {result.message}")
+    for label, transaction in queue:
+        result = agent.run_sync(f"Triage this transaction:\n\n{transaction}")
+        print(f"▸ {label}")
+        print(f"  {result.message}")
         print()
 
 
@@ -202,21 +241,21 @@ async def example_multiple_prompts():
 # =============================================================================
 
 
-async def main():
+async def main() -> None:
     """Run all notebook parts."""
     print("=" * 60)
-    print("Notebook 06: Aria — Your First Agent")
+    print("Notebook 06: LEDGER — Your First Agent")
     print("=" * 60)
     print()
 
     print_config()
     print()
 
-    await example_create_agent()
-    await example_sync_run()
-    await example_async_run()
-    await example_agent_result()
-    await example_multiple_prompts()
+    example_create_agent()
+    example_run_sync()
+    await example_run_streaming()
+    example_agent_result()
+    example_a_triage_queue()
 
     print("=" * 60)
     print("Next: Notebook 07 — Giving an Agent Tools")
