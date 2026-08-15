@@ -6,6 +6,14 @@
 from unittest.mock import AsyncMock
 
 import pytest
+from pydantic import ValidationError
+
+from tulip.memory.backends import (
+    MySQLBackend,
+    OpenSearchBackend,
+    PostgreSQLBackend,
+    RedisBackend,
+)
 
 
 class TestRedisBackend:
@@ -204,3 +212,43 @@ class TestPostgreSQLBackend:
 
         config = PostgreSQLConfig(dsn="postgresql://user:pass@host:5432/db")
         assert config.dsn == "postgresql://user:pass@host:5432/db"
+
+
+# ---------------------------------------------------------------------------
+# Unknown constructor kwargs.
+# ---------------------------------------------------------------------------
+
+
+class TestUnknownKwargsAreRejected:
+    """The backends take **kwargs and splat them into their config, so a
+    wrong-named parameter used to vanish without a word.
+
+    notebook_68 passed ``namespace=`` where the field is ``prefix=``. Nothing
+    complained, the namespace silently did not apply, and every run shared one
+    Redis keyspace — the kind of defect that surfaces as mysterious
+    cross-contamination rather than as an error.
+    """
+
+    @pytest.mark.parametrize(
+        ("factory", "kwargs"),
+        [
+            (RedisBackend, {"url": "redis://localhost:6379"}),
+            (PostgreSQLBackend, {}),
+            (MySQLBackend, {}),
+            (OpenSearchBackend, {}),
+        ],
+    )
+    def test_a_misspelled_parameter_raises(self, factory, kwargs) -> None:
+        with pytest.raises(ValidationError):
+            factory(**kwargs, bogus_param_xyz="swallowed")
+
+    def test_the_notebook_68_mistake_is_now_caught(self) -> None:
+        """``namespace`` is not the field; ``prefix`` is."""
+        with pytest.raises(ValidationError):
+            RedisBackend(url="redis://localhost:6379", namespace="not-the-field")
+
+    def test_documented_parameters_still_work(self) -> None:
+        backend = RedisBackend(url="redis://localhost:6379", prefix="ok:", db=3)
+
+        assert backend.config.prefix == "ok:"
+        assert backend.config.db == 3

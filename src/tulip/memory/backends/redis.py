@@ -19,6 +19,12 @@ if TYPE_CHECKING:
 class RedisConfig(BaseModel):
     """Configuration for Redis backend."""
 
+    # Reject unknown keys rather than absorbing them. The backends take
+    # **kwargs and splat them in here, so a misspelled or wrong-named
+    # parameter used to vanish silently — notebook 68 passed namespace=
+    # instead of prefix= and every run quietly shared one keyspace.
+    model_config = {"extra": "forbid"}
+
     url: str = "redis://localhost:6379"
     prefix: str = "tulip:checkpoint:"
     ttl_seconds: int | None = None  # None = no expiry
