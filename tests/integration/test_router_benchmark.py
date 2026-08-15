@@ -65,7 +65,28 @@ from tulip.tools.decorator import tool
 from tulip.tools.registry import create_registry
 
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_model]
+# Opt-in, and marked slow. This file is a benchmark, not a regression test:
+# each of its two tests sweeps the whole 42-prompt corpus through three
+# ablations, so a single run is ~126+ model calls. Against a frontier endpoint
+# that is merely slow; against a self-hosted one it dominates the suite and
+# looks like a hang — the run stops advancing at this file with nothing to
+# indicate why.
+#
+# The docstring above asks that every PR touching ``tulip.router`` re-run it,
+# which stays true: set RUN_ROUTER_BENCHMARK=1. Same shape as
+# RUN_A2A_INTEGRATION and TULIP_MYSQL_INTEGRATION elsewhere in this suite.
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.requires_model,
+    pytest.mark.slow,
+    pytest.mark.skipif(
+        os.environ.get("RUN_ROUTER_BENCHMARK") != "1",
+        reason=(
+            "set RUN_ROUTER_BENCHMARK=1 to run the routing-accuracy benchmark "
+            "(~126+ model calls per test)"
+        ),
+    ),
+]
 
 
 # Override at runtime to compare providers — e.g.
