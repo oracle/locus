@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, Field
 
 from tulip.core.events import ModelChunkEvent
+from tulip.core.loop_bound import loop_bound
 from tulip.core.messages import Message, Role, ToolCall
 from tulip.models.base import ModelConfig, ModelResponse
 
@@ -145,17 +146,20 @@ class AnthropicModel(BaseModel):
         kill the agent loop on the first try. Retries use exponential
         backoff inside the anthropic SDK.
         """
-        if self._client is None:
-            import anthropic
 
-            self._client = anthropic.AsyncAnthropic(
+        def build() -> anthropic.AsyncAnthropic:
+            import anthropic  # noqa: PLC0415
+
+            return anthropic.AsyncAnthropic(
                 api_key=self.config.api_key,
                 base_url=self.config.base_url,
                 max_retries=self.config.max_retries,
                 timeout=self.config.request_timeout,
                 default_headers=self.config.default_headers,
             )
-        return self._client
+
+        # Bound to the loop that built it — see tulip.core.loop_bound.
+        return loop_bound(self, "_client", build)
 
     async def close(self) -> None:
         """Close the underlying httpx client.

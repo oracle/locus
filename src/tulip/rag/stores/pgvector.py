@@ -17,6 +17,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, SecretStr
 
+from tulip.core.loop_bound import loop_bound_async
 from tulip.rag.stores.base import (
     BaseVectorStore,
     Document,
@@ -194,15 +195,15 @@ class PgVectorStore(BaseModel, BaseVectorStore):
 
     async def _get_pool(self) -> asyncpg.Pool:
         """Get or create connection pool."""
-        if self._pool is None:
+
+        async def build() -> asyncpg.Pool:
             try:
-                import asyncpg
+                import asyncpg  # noqa: PLC0415
             except ImportError as e:
                 raise ImportError(
                     "PgVectorStore requires 'asyncpg'. Install with: pip install asyncpg"
                 ) from e
 
-            # Build DSN if not provided
             dsn = self.pgvector_config.dsn
             if dsn is None:
                 dsn = (
@@ -212,13 +213,14 @@ class PgVectorStore(BaseModel, BaseVectorStore):
                     f"{self.pgvector_config.database}"
                 )
 
-            self._pool = await asyncpg.create_pool(
+            return await asyncpg.create_pool(
                 dsn,
                 min_size=self.pgvector_config.min_pool_size,
                 max_size=self.pgvector_config.max_pool_size,
             )
 
-        return self._pool
+        # Bound to the loop that opened it — see tulip.core.loop_bound.
+        return await loop_bound_async(self, "_pool", build)
 
     async def _ensure_table(self) -> None:
         """Create table and index if not exists."""

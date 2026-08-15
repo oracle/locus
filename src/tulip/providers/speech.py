@@ -14,6 +14,8 @@ from typing import Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field
 
+from tulip.core.loop_bound import loop_bound
+
 
 class SynthesizedAudio(BaseModel):
     """Output of ``speak(text)`` — the audio bytes + their content type."""
@@ -104,14 +106,14 @@ class OpenAISpeechProvider:
         self._client: Any = None
 
     def _get_client(self) -> Any:
-        if self._client is None:
-            import openai
 
-            self._client = openai.AsyncOpenAI(
-                api_key=self._api_key,
-                base_url=self._base_url,
-            )
-        return self._client
+        def build() -> Any:
+            import openai  # noqa: PLC0415
+
+            return openai.AsyncOpenAI(api_key=self._api_key, base_url=self._base_url)
+
+        # Bound to the loop that built it — see tulip.core.loop_bound.
+        return loop_bound(self, "_client", build)
 
     async def speak(
         self,

@@ -35,6 +35,7 @@ import warnings
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from tulip.core.loop_bound import loop_bound_async
 from tulip.memory.store import BaseStore, StoreCapabilities, StoreItem
 from tulip.memory.store_backends.holographic import _numpy, encode_text
 
@@ -178,20 +179,23 @@ class PgMemory(BaseStore):
         creation, and run against a half-built table. A half-initialised store
         must not present as a working one.
         """
-        if self._pool is not None:
-            return self._pool
-        async with self._pool_lock:
-            if self._pool is None:
-                import asyncpg  # noqa: PLC0415
 
-                pool = await asyncpg.create_pool(self._dsn, min_size=1, max_size=8)
-                try:
-                    await self._ensure_schema(pool)
-                except BaseException:
-                    await pool.close()
-                    raise
-                self._pool = pool
-        return self._pool
+        async def build() -> Pool:
+            import asyncpg  # noqa: PLC0415
+
+            pool = await asyncpg.create_pool(self._dsn, min_size=1, max_size=8)
+            try:
+                await self._ensure_schema(pool)
+            except BaseException:
+                await pool.close()
+                raise
+            return pool
+
+        # The lock still guards concurrent first use within one loop; the
+        # loop key handles the case the lock cannot see, which is a second
+        # loop inheriting a pool whose sockets belong to the first.
+        async with self._pool_lock:
+            return await loop_bound_async(self, "_pool", build)
 
     async def _ensure_schema(self, pool: Pool) -> None:
         async with pool.acquire() as conn:

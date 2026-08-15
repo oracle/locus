@@ -15,6 +15,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from tulip.core.loop_bound import loop_bound
 from tulip.rag.stores.base import (
     BaseVectorStore,
     Document,
@@ -119,23 +120,25 @@ class OpenSearchVectorStore(BaseModel, BaseVectorStore):
 
     async def _get_client(self) -> AsyncOpenSearch:
         """Get or create OpenSearch client."""
-        if self._client is None:
+
+        def build() -> AsyncOpenSearch:
             try:
-                from opensearchpy._async.client import AsyncOpenSearch
+                from opensearchpy._async.client import AsyncOpenSearch  # noqa: PLC0415
             except ImportError as e:
                 raise ImportError(
                     "OpenSearchVectorStore requires 'opensearch-py[async]'. "
                     "Install with: pip install opensearch-py aiohttp"
                 ) from e
 
-            self._client = AsyncOpenSearch(
+            return AsyncOpenSearch(
                 hosts=self.os_config.hosts,
                 http_auth=self.os_config.http_auth,
                 use_ssl=self.os_config.use_ssl,
                 verify_certs=self.os_config.verify_certs,
             )
 
-        return self._client
+        # Bound to the loop that built it — see tulip.core.loop_bound.
+        return loop_bound(self, "_client", build)
 
     async def _ensure_index(self) -> None:
         """Create index if not exists."""

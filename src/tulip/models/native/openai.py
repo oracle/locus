@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel, Field
 
 from tulip.core.events import ModelChunkEvent
+from tulip.core.loop_bound import loop_bound
 from tulip.core.messages import Message, Role, ToolCall
 from tulip.models.base import ModelConfig, ModelResponse
 
@@ -432,6 +433,7 @@ class OpenAIModel(BaseModel):
             request_kwargs["extra_body"] = merged
 
     _client: openai.AsyncOpenAI | None = None
+    _client_loop: Any = None
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -475,18 +477,26 @@ class OpenAIModel(BaseModel):
         (429, 5xx, network resets) don't kill the agent loop on first
         try. The openai SDK retries with exponential backoff between
         attempts.
-        """
-        if self._client is None:
-            import openai
 
-            self._client = openai.AsyncOpenAI(
+        Bound to the event loop that built it: ``AsyncOpenAI`` wraps an
+        ``httpx`` pool, so a client cached across two loops fails on the second
+        with ``APIConnectionError: Connection error`` — which reads as a
+        provider outage and sends you to check your key and their status page.
+        See :func:`~tulip.core.loop_bound.loop_bound`.
+        """
+
+        def build() -> openai.AsyncOpenAI:
+            import openai  # noqa: PLC0415
+
+            return openai.AsyncOpenAI(
                 api_key=self.config.api_key,
                 base_url=self.config.base_url,
                 organization=self.config.organization,
                 max_retries=self.config.max_retries,
                 timeout=self.config.request_timeout,
             )
-        return self._client
+
+        return loop_bound(self, "_client", build)
 
     async def close(self) -> None:
         """Close the OpenAI client and release resources."""

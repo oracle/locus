@@ -15,6 +15,8 @@ from urllib.parse import parse_qsl, unquote, urlparse
 
 from pydantic import BaseModel, Field, SecretStr
 
+from tulip.core.loop_bound import loop_bound_async
+
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -326,10 +328,14 @@ class MySQLBackend(BaseModel):
 
     async def _get_pool(self) -> _MySQLConnectionPool:
         """Get or create the connection pool."""
-        if self._pool is None:
-            self._pool = _MySQLConnectionPool(self.config)
-            await self._pool.initialize()
-        return self._pool
+
+        async def build() -> _MySQLConnectionPool:
+            pool = _MySQLConnectionPool(self.config)
+            await pool.initialize()
+            return pool
+
+        # Bound to the loop that opened it — see tulip.core.loop_bound.
+        return await loop_bound_async(self, "_pool", build)
 
     @property
     def _quoted_table_name(self) -> str:

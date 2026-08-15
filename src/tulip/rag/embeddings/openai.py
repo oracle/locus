@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
+from tulip.core.loop_bound import loop_bound
 from tulip.rag.embeddings.base import (
     BaseEmbedding,
     EmbeddingCapabilities,
@@ -123,19 +124,22 @@ class OpenAIEmbeddings(BaseEmbedding):
 
     def _get_client(self) -> AsyncOpenAI:
         """Get or create OpenAI client."""
-        if self._client is None:
+
+        def build() -> AsyncOpenAI:
             try:
-                from openai import AsyncOpenAI
+                from openai import AsyncOpenAI  # noqa: PLC0415
             except ImportError as e:
                 raise ImportError(
                     "OpenAI package not installed. Install with: pip install openai"
                 ) from e
 
-            self._client = AsyncOpenAI(
+            return AsyncOpenAI(
                 api_key=self._config_model.api_key,
                 base_url=self._config_model.base_url,
             )
-        return self._client
+
+        # Bound to the loop that built it — see tulip.core.loop_bound.
+        return loop_bound(self, "_client", build)
 
     async def embed(self, text: str) -> EmbeddingResult:
         """Embed a single text.
