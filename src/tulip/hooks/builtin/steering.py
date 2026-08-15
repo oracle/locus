@@ -93,16 +93,44 @@ class SteeringContext:
 class SteeringHook(HookProvider):
     """LLM-powered steering for real-time agent guidance.
 
-    Evaluates each tool call before execution using a separate LLM.
-    The steering model decides whether to proceed, guide (cancel with
-    feedback), or interrupt (pause for human).
+    Evaluates each tool call before execution using a separate LLM. The
+    steering model decides whether to proceed, guide (cancel with feedback),
+    or interrupt (pause for human).
+
+    .. warning::
+
+       ``policy`` is **advisory and can fail open.** It is a second model
+       asked to judge the first, so a judge that does not intervene is
+       indistinguishable from one that approved. Measured against a
+       self-hosted Qwen3.6-35B with ``policy="Never allow delete or
+       destructive operations."``: the judge did not intervene, and the agent
+       reported *"the `users` table has been successfully deleted."*
+
+       Under the same model and the same prompt, a tool whose body calls
+       :func:`~tulip.control.admit` held — the model still called the
+       destructive tool, admission refused it, the side effect never ran, and
+       the refusal landed on a chain that verifies.
+
+       Use this to *steer* an agent, not to stop it. For an action that must
+       not happen, put the decision in code the model cannot argue with:
+
+           from tulip.control import ControlPolicy, gate_tool
+
+           agent = Agent(model=model, tools=[gate_tool(drop_table, policy=ControlPolicy())])
+
+    The two arguments below are not equally strong, and the difference is
+    worth knowing before you rely on either.
 
     Args:
         model: LLM for steering decisions (can be smaller/cheaper than main model).
-        policy: Natural language policy the agent must follow.
+        policy: Natural language policy the agent must follow. **Advisory** —
+            enforced by the judge model, and subject to the failure above.
         evaluate_tools: If True, evaluate tool calls before execution.
         evaluate_responses: If True, evaluate model responses after generation.
-        interrupt_tools: Tools that always require human approval.
+        interrupt_tools: Tools that always require human approval. **Structural**
+            — a set-membership check that never consults the judge, so unlike
+            ``policy`` it cannot fail open. Prefer it whenever the rule can be
+            expressed as "this named tool, always".
     """
 
     def __init__(
