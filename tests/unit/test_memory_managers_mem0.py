@@ -7,6 +7,8 @@ Uses an injected fake async client (``client=``) so the tests run with no
 ``mem0ai`` dependency and no LLM / network access.
 """
 
+import pytest
+
 from tulip.core.messages import Message
 from tulip.memory.manager import Memory, MemoryType
 from tulip.memory.managers.mem0 import Mem0MemoryManager
@@ -98,3 +100,112 @@ async def test_save_explicit_memories():
     await mgr.save([Memory(type=MemoryType.REFERENCE, key="k", content="a fact")])
 
     assert client.added[0][0] == "a fact"
+
+
+# ---------------------------------------------------------------------------
+# Scope handling across mem0 versions.
+#
+# The fake above accepts **kwargs, so it matches whatever the manager sends.
+# Real mem0 does not: current releases moved the entity identifiers behind
+# ``filters=`` and *raise* when they arrive top-level, which is how the manager
+# came to be broken against a real install while these tests stayed green.
+# These two fakes model each real contract instead.
+# ---------------------------------------------------------------------------
+
+
+_ENTITY_KEYS = {"user_id", "agent_id", "run_id"}
+
+
+class _StrictMem0Client:
+    """Current mem0: entity ids must arrive via ``filters=``."""
+
+    def __init__(self, rows=None):
+        self._rows = rows or [{"id": "m1", "memory": "postgres"}]
+        self.seen_filters = None
+
+    @staticmethod
+    def _reject_top_level(kwargs):
+        bad = _ENTITY_KEYS & set(kwargs)
+        if bad:
+            raise ValueError(
+                f"Top-level entity parameters {frozenset(bad)} are not supported. "
+                "Use filters={'user_id': '...'} instead."
+            )
+
+    async def get_all(self, *, filters=None, **kwargs):
+        self._reject_top_level(kwargs)
+        self.seen_filters = filters
+        return {"results": self._rows}
+
+    async def search(self, query, *, filters=None, **kwargs):  # noqa: ARG002
+        self._reject_top_level(kwargs)
+        self.seen_filters = filters
+        return {"results": self._rows}
+
+
+class _LegacyMem0Client:
+    """Older mem0: no ``filters`` parameter at all."""
+
+    def __init__(self, rows=None):
+        self._rows = rows or [{"id": "m1", "memory": "postgres"}]
+        self.seen_scope = None
+
+    async def get_all(self, **kwargs):
+        if "filters" in kwargs:
+            raise TypeError("get_all() got an unexpected keyword argument 'filters'")
+        self.seen_scope = {k: v for k, v in kwargs.items() if k in _ENTITY_KEYS}
+        return {"results": self._rows}
+
+    async def search(self, query, **kwargs):  # noqa: ARG002
+        if "filters" in kwargs:
+            raise TypeError("search() got an unexpected keyword argument 'filters'")
+        self.seen_scope = {k: v for k, v in kwargs.items() if k in _ENTITY_KEYS}
+        return {"results": self._rows}
+
+
+@pytest.mark.asyncio
+async def test_get_all_scopes_through_filters_on_current_mem0():
+    client = _StrictMem0Client()
+    mgr = Mem0MemoryManager(client=client, user_id="alice")
+
+    out = await mgr.retrieve(limit=5)
+
+    assert len(out) == 1
+    assert client.seen_filters == {"user_id": "alice"}
+
+
+@pytest.mark.asyncio
+async def test_search_scopes_through_filters_on_current_mem0():
+    client = _StrictMem0Client()
+    mgr = Mem0MemoryManager(client=client, user_id="alice", search_query="prefs")
+
+    out = await mgr.retrieve(limit=5)
+
+    assert len(out) == 1
+    assert client.seen_filters == {"user_id": "alice"}
+
+
+@pytest.mark.asyncio
+async def test_falls_back_to_top_level_scope_on_older_mem0():
+    """A release without ``filters`` must still be driven correctly."""
+    client = _LegacyMem0Client()
+    mgr = Mem0MemoryManager(client=client, user_id="alice", agent_id="bot")
+
+    out = await mgr.retrieve(limit=5)
+
+    assert len(out) == 1
+    assert client.seen_scope == {"user_id": "alice", "agent_id": "bot"}
+
+
+@pytest.mark.asyncio
+async def test_an_unrelated_error_is_not_swallowed_by_the_fallback():
+    """The fallback must only catch the filters-shape mismatch."""
+
+    class _Broken:
+        async def get_all(self, **kwargs):
+            raise ValueError("vector store unreachable")
+
+    mgr = Mem0MemoryManager(client=_Broken(), user_id="alice")
+
+    with pytest.raises(ValueError, match="vector store unreachable"):
+        await mgr.retrieve(limit=5)
