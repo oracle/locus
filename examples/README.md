@@ -8,6 +8,18 @@ response) sits alongside them as one fully worked domain. The snippets below
 are the smallest possible shapes; the numbered `notebook_*.py` files build
 them out.
 
+**A note on the numbers.** They are stable identifiers, not a sequence. The
+series runs `06-09 · 11-40 · 45-52 · 55-88`, and the gaps are not missing
+files — those numbers never existed. Numbers are never reused or reassigned,
+so a link, a bookmark, or a cross-reference from another notebook keeps
+pointing at the same example forever; renumbering to close the gaps would
+break every one of them to fix an appearance.
+
+Nor do the numbers carry difficulty or order: 83 is one of the easiest files
+here, and the gate notebooks (83-87) need no credentials at all. Read in
+whatever order the [documentation](https://tulipagents.ai/notebooks/) puts in
+front of you — it is ordered by what builds on what.
+
 ## How to run
 
 Every numbered notebook runs **offline by default** — with no API key set,
