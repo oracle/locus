@@ -19,6 +19,20 @@ class TulipEvent(BaseModel):
     event_type: str
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
+    #: Which agent produced this event, from ``AgentConfig.name`` (falling back
+    #: to ``agent_id``). Stamped once as the event leaves the loop, so a caller
+    #: consuming a merged stream can tell the researcher's tool call from the
+    #: writer's without threading identity through every call site.
+    #:
+    #: ``None`` when the agent was never named — attribution is worth having
+    #: and not worth inventing, and a positional label like ``"agent-3"`` would
+    #: be stable only until someone reorders the list.
+    #:
+    #: The innermost agent wins: a nested run's events arrive already stamped
+    #: and are never relabelled by the orchestrator around them, which is the
+    #: whole point of attributing output to the specialist that produced it.
+    agent_name: str | None = None
+
     model_config = {"frozen": True}
 
 

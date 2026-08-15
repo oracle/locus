@@ -87,6 +87,18 @@ def _bus_bridge(
     through to the caller, so the bridge cannot break agent execution.
     """
 
+    def _agent_label(agent: Any) -> str | None:
+        """The name to attribute this agent's events to, or ``None``.
+
+        ``name`` is the display label a multi-agent composer sets; ``agent_id``
+        is the fallback because an unnamed agent with an explicit id is still
+        identifiable, and an id in a trace beats no attribution at all.
+        """
+        config = getattr(agent, "config", None)
+        if config is None:
+            return None
+        return getattr(config, "name", None) or getattr(config, "agent_id", None)
+
     @functools.wraps(fn)
     async def wrapper(*args: Any, **kwargs: Any) -> AsyncIterator[TulipEvent]:
         # Local import — no cost when telemetry is unused.
@@ -94,7 +106,21 @@ def _bus_bridge(
             bridge_tulip_event,
         )
 
-        async for event in fn(*args, **kwargs):
+        # Every event this agent produces passes through here exactly once, so
+        # it is the one place attribution can be stamped without threading a
+        # name through 31 yield sites and 20 event classes — and the one place
+        # that cannot be forgotten when a 21st is added.
+        agent_name = _agent_label(args[0] if args else None)
+
+        async for raw in fn(*args, **kwargs):
+            # Only stamp what is unattributed. A nested agent's events arrive
+            # already labelled, and relabelling them with the orchestrator's
+            # name would destroy exactly the attribution this exists to give.
+            event = (
+                raw.model_copy(update={"agent_name": agent_name})
+                if agent_name is not None and raw.agent_name is None
+                else raw
+            )
             try:
                 await bridge_tulip_event(event)
             except Exception:  # noqa: BLE001 — telemetry never breaks the loop
