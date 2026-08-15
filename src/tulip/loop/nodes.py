@@ -110,26 +110,10 @@ class ThinkNode(Node):
         return NodeResult(state=new_state, events=[event])
 
 
-def _find_matching_execution(
-    state: AgentState, tool_name: str, arguments: dict
-) -> ToolExecution | None:
-    """Return a prior ToolExecution on ``state`` matching the given tool
-    and arguments, or None if no match exists.
-
-    Used by ExecuteNode to dedupe calls for tools marked ``idempotent=True``.
-    Argument equality is a structural dict comparison, so a model legitimately
-    re-calling a tool with different args (e.g. a new date) will not hit the
-    cache.
-    """
-    for prior in reversed(state.tool_executions):
-        if prior.tool_name != tool_name:
-            continue
-        try:
-            if dict(prior.arguments) == arguments:
-                return prior
-        except (TypeError, ValueError):
-            continue
-    return None
+# Kept as a re-export so anything importing this private name still works
+# while `tulip.loop` is deprecated. The implementation moved to
+# `tulip.tools.executor`, which the supported runtime uses.
+from tulip.tools.executor import find_matching_execution as _find_matching_execution  # noqa: E402
 
 
 class ExecuteNode(Node):

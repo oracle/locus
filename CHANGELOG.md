@@ -8,6 +8,39 @@ policy.
 
 ## [Unreleased]
 
+### Deprecated
+
+- **`tulip.loop` is deprecated and will be removed in 3.0.0.** It is a second
+  ReAct implementation, parallel to the one the supported `Agent` runs, and
+  `Agent` has never used it — the only reference from the production runtime
+  was one private helper, `_find_matching_execution`, now moved to
+  `tulip.tools.executor.find_matching_execution`.
+
+  Two implementations of the same idea is worse than either alone: they drift,
+  and a bug fixed in one stays live in the other. Nothing in `tulip.loop` is a
+  capability `Agent` lacks.
+
+  Every name still imports and works until 3.0.0, and each access emits
+  `TulipDeprecationWarning`. To find them in your own code:
+
+  ```
+  python -W error::DeprecationWarning -m pytest
+  ```
+
+  | Instead of | Use |
+  |---|---|
+  | `ReActLoop`, `create_react_loop` | `tulip.agent.Agent` |
+  | `ReActLoopConfig` | `tulip.agent.AgentConfig` |
+  | `LoopRunner` | `await agent.arun(prompt)` |
+  | `BatchRunner` | `tulip.evaluation.EvalRunner` |
+  | `StreamingCollector` | `async for event in agent.run(prompt)` |
+  | `ConditionalRouter` | `StateGraph` conditional edges, or `tulip.router` |
+  | `ThinkNode` / `ExecuteNode` / `ReflectNode` | internal to `Agent`; hook them with `tulip.hooks` |
+
+  This is also the first use of `TulipDeprecationWarning`. The policy in
+  `DEPRECATION.md` had been documented in two files and never exercised, so
+  until now nothing proved a deprecation would actually reach a consumer.
+
 ## [2.5.1] - 2026-08-12
 
 A runtime fix and a version string that lied. Both were found by running

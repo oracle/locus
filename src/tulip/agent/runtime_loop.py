@@ -2066,9 +2066,9 @@ class AgentRuntimeMixin:
             return None
 
         # Late import to avoid circularity (loop.nodes -> agent.agent).
-        from tulip.loop.nodes import _find_matching_execution
+        from tulip.tools.executor import find_matching_execution
 
-        prior = _find_matching_execution(state, tool_name, dict(arguments))
+        prior = find_matching_execution(state, tool_name, dict(arguments))
         if prior is None:
             return None
         return ToolResult(

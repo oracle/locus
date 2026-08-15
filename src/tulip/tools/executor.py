@@ -18,6 +18,33 @@ from tulip.core.messages import ToolCall, ToolResult
 from tulip.tools.context import ToolContext
 
 
+def find_matching_execution(state: Any, tool_name: str, arguments: dict[str, Any]) -> Any | None:
+    """Return a prior ``ToolExecution`` on ``state`` matching this call, or None.
+
+    Backs ``idempotent=True``: a tool that declares itself idempotent is not
+    run twice for the same arguments within a run. Argument equality is a
+    structural dict comparison, so a model legitimately re-calling a tool with
+    different arguments — a new date, a different order id — misses the cache
+    and runs, which is the behaviour you want.
+
+    Lives here rather than in ``tulip.loop.nodes``, where it was, because the
+    agent runtime needs it and ``tulip.loop`` is deprecated. A supported
+    runtime reaching into a package scheduled for removal is a removal that
+    cannot happen.
+    """
+    for prior in reversed(state.tool_executions):
+        if prior.tool_name != tool_name:
+            continue
+        try:
+            if dict(prior.arguments) == arguments:
+                return prior
+        except (TypeError, ValueError):
+            # Arguments that will not compare structurally cannot be shown
+            # equal, so this is a miss rather than an error.
+            continue
+    return None
+
+
 # Patterns that may leak sensitive info in error messages.
 # Full-replacement patterns: the match is replaced entirely with "[REDACTED]".
 _SENSITIVE_PATTERNS = [
