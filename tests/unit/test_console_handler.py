@@ -332,8 +332,12 @@ class TestConsoleHandler:
 
     @pytest.mark.asyncio
     async def test_handle_think_event_hidden(self, output):
-        """Test handling think event when reasoning is hidden."""
+        """``show_reasoning=False`` must actually withhold the reasoning.
+
+        This took a capture buffer and never read it, so it asserted only that
+        the call did not raise — which it would not have, whatever it printed.
+        """
         handler = ConsoleHandler(output=output, use_color=False, show_reasoning=False)
-        event = ThinkEvent(iteration=1, reasoning="Thinking about the task")
-        await handler.on_event(event)
-        # Should not display reasoning when show_reasoning is False
+        await handler.on_event(ThinkEvent(iteration=1, reasoning="Thinking about the task"))
+
+        assert "Thinking about the task" not in output.getvalue()

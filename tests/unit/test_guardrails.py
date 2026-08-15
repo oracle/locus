@@ -452,22 +452,80 @@ class TestGuardrailsEdgeCases:
 
     @pytest.mark.asyncio
     async def test_violations_stored_in_metadata(self):
-        """Test that violations are stored in state metadata."""
-        config = GuardrailConfig(
-            action_overrides={"sql_injection": GuardrailAction.WARN},  # Don't block, just log
+        """A violation that is warned rather than blocked still gets recorded.
+
+        This test asserted nothing for a long time, and could not have: the
+        override named ``sql_injection`` where a violation carries
+        ``blocked_sql_injection``, so nothing was downgraded — and the prompt
+        (``SELECT * FROM users WHERE id = 1``) matches no pattern, so there
+        was no violation to record either. Its own comment said "may or may
+        not be depending on content".
+        """
+        hook = GuardrailsHook(
+            GuardrailConfig(
+                action_overrides={
+                    "blocked_sql_injection": GuardrailAction.WARN,
+                    "blocked_command_injection": GuardrailAction.WARN,
+                }
+            )
         )
-        hook = GuardrailsHook(config)
 
         mock_state = MagicMock()
         mock_state.with_metadata = MagicMock(return_value=mock_state)
 
-        # Trigger SQL injection detection (logged, not blocked)
-        prompt = "SELECT * FROM users WHERE id = 1"
+        await hook.on_before_invocation("'; DROP TABLE users; --", mock_state)
 
-        await hook.on_before_invocation(prompt, mock_state)
+        mock_state.with_metadata.assert_called_once()
+        key, recorded = mock_state.with_metadata.call_args.args
+        assert key == "guardrail_violations"
+        # Both fire: the payload is SQL *and* carries a shell-ish `;`. Asserting
+        # the set rather than one name keeps this honest about what the
+        # patterns actually do.
+        assert {v["rule_name"] for v in recorded} == {
+            "blocked_sql_injection",
+            "blocked_command_injection",
+        }
+        assert {v["action"] for v in recorded} == {"warn"}
+        assert {v["location"] for v in recorded} == {"input"}
 
-        # State should have been updated with metadata
-        # Check if with_metadata was called (may or may not be depending on content)
+    @pytest.mark.asyncio
+    async def test_a_blocked_violation_never_reaches_metadata(self):
+        """Blocking raises, so there is no state to annotate — and a test that
+        only ever saw the warn path would not notice the difference."""
+        hook = GuardrailsHook(GuardrailConfig())
+
+        mock_state = MagicMock()
+        mock_state.with_metadata = MagicMock(return_value=mock_state)
+
+        with pytest.raises(ValueError, match="blocked by guardrails"):
+            await hook.on_before_invocation("'; DROP TABLE users; --", mock_state)
+
+        mock_state.with_metadata.assert_not_called()
+
+    def test_an_override_that_no_rule_consults_is_refused(self):
+        """The trap this test itself fell into.
+
+        A violation from ``blocked_content_patterns["sql_injection"]`` is named
+        ``blocked_sql_injection``. Overriding the bare name did nothing, and
+        said nothing.
+        """
+        with pytest.raises(ValueError, match="did you mean 'blocked_sql_injection'"):
+            GuardrailConfig(action_overrides={"sql_injection": GuardrailAction.WARN})
+
+    def test_a_pii_override_is_matched_under_its_prefix_too(self):
+        with pytest.raises(ValueError, match="did you mean 'pii_email'"):
+            GuardrailConfig(action_overrides={"email": GuardrailAction.WARN})
+
+    def test_a_valid_override_is_accepted(self):
+        """The guard must not reject the keys that do work."""
+        config = GuardrailConfig(
+            action_overrides={
+                "blocked_sql_injection": GuardrailAction.WARN,
+                "max_prompt_length": GuardrailAction.WARN,
+            }
+        )
+
+        assert config.action_overrides["max_prompt_length"] is GuardrailAction.WARN
 
     @pytest.mark.asyncio
     async def test_tool_arguments_blocked(self):

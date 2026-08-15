@@ -126,8 +126,49 @@ class GuardrailConfig:
 
     default_action: GuardrailAction = GuardrailAction.BLOCK
 
-    # Action overrides per pattern type
+    # Action overrides, keyed by the rule name a violation actually carries.
+    #
+    # Those names are prefixed: a pattern configured under
+    # ``blocked_content_patterns["sql_injection"]`` raises a violation named
+    # ``blocked_sql_injection``, and one under ``pii_patterns["email"]`` raises
+    # ``pii_email``. Overriding the bare name does nothing at all, which is a
+    # trap worth naming — the project's own test fell into it and passed for
+    # months, because a lookup miss just falls through to ``default_action``.
+    # :meth:`__post_init__` refuses an override that could never be consulted.
     action_overrides: dict[str, GuardrailAction] = field(default_factory=dict)
+
+    def rule_names(self) -> set[str]:
+        """Every rule name a violation from this config can carry."""
+        return (
+            {"blocked_tool", "tool_not_allowed", "max_prompt_length", "max_tool_result_length"}
+            | {f"blocked_{name}" for name in self.blocked_content_patterns}
+            | {f"pii_{name}" for name in self.pii_patterns}
+        )
+
+    def __post_init__(self) -> None:
+        """Reject an override no rule will ever consult.
+
+        Silently ignoring it is the worst available outcome: you believe you
+        downgraded a rule to WARN, the rule stays at BLOCK, and nothing says
+        so until it blocks something in production.
+        """
+        known = self.rule_names()
+        unknown = sorted(set(self.action_overrides) - known)
+        if not unknown:
+            return
+
+        hints = []
+        for key in unknown:
+            near = next(
+                (c for c in (f"blocked_{key}", f"pii_{key}") if c in known),
+                None,
+            )
+            hints.append(f"{key!r}" + (f" (did you mean {near!r}?)" if near else ""))
+        msg = (
+            f"action_overrides names {len(unknown)} rule(s) that no violation "
+            f"can carry: {', '.join(hints)}. Valid names: {', '.join(sorted(known))}."
+        )
+        raise ValueError(msg)
 
 
 class GuardrailsHook(HookProvider):
