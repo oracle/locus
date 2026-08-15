@@ -17,6 +17,7 @@ from tulip.agent.config import AgentConfig, GroundingConfig, ReflexionConfig
 from tulip.agent.result import AgentResult, ExecutionMetrics, StopReason
 from tulip.agent.runtime_loop import AgentRuntimeMixin
 from tulip.core.events import (
+    GroundingEvent,
     TerminateEvent,
     ToolCompleteEvent,
     TulipEvent,
@@ -285,6 +286,9 @@ class Agent(AgentRuntimeMixin, BaseModel):
         if model_kwargs is not None:
             run_kwargs["model_kwargs"] = model_kwargs
 
+        grounding_score: float | None = None
+        ungrounded_claims: list[str] = []
+
         async for event in self.run(prompt, **run_kwargs):
             # Fire callback if set
             if callback is not None:
@@ -296,6 +300,14 @@ class Agent(AgentRuntimeMixin, BaseModel):
             elif isinstance(event, ToolCompleteEvent):
                 if event.error:
                     tool_errors += 1
+            elif isinstance(event, GroundingEvent):
+                # The grounding loop already ran and emitted its verdict; it
+                # simply never reached the result. Keep the last one: with
+                # `max_replans` the answer is re-grounded after each replan,
+                # and the score that describes the answer being returned is
+                # the final one.
+                grounding_score = event.score
+                ungrounded_claims = list(event.ungrounded_claims)
 
         # Use actual final state from run() instead of reconstructing
         state = self._last_run_state
@@ -347,6 +359,8 @@ class Agent(AgentRuntimeMixin, BaseModel):
             parsed=parsed_obj,
             parse_error=parse_error_msg,
             message=structured_message,
+            grounding_score=grounding_score,
+            ungrounded_claims=ungrounded_claims,
             gsar_judgment=gsar_judgment,
             gsar_score=gsar_score_value,
             gsar_decision=gsar_decision,
