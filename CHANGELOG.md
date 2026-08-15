@@ -8,6 +8,11 @@ policy.
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-08-15
+
+One deprecation, one retrieval bug, and the two most-read examples finally
+matching their own documentation.
+
 ### Deprecated
 
 - **`tulip.loop` is deprecated and will be removed in 3.0.0.** It is a second
@@ -40,6 +45,152 @@ policy.
   This is also the first use of `TulipDeprecationWarning`. The policy in
   `DEPRECATION.md` had been documented in two files and never exercised, so
   until now nothing proved a deprecation would actually reach a consumer.
+
+### Fixed
+
+- **`Mem0Manager` retrieved nothing.** Reads went out unscoped, so a lookup
+  that should have been narrowed to the thread returned the wrong rows or
+  none. Scoped through filters now.
+
+- **Notebooks 06 and 07 are what their pages say they are.** The pages
+  described LEDGER, a transaction-triage agent, and a deployment-readiness
+  check. The code was a general-purpose assistant answering "What is the
+  capital of Japan?" and a weather lookup. `grep -rl LEDGER examples/*.py`
+  found nothing. These are the first two examples a new reader opens, and the
+  drift was concentrated exactly there. The pages were right, so the code
+  moved.
+
+- **Four cross-references pointed readers at agents that do not exist.**
+  `notebook_27` called notebook 26's orchestrator MARSHAL (it is STEWARD),
+  `notebook_70` called notebook 27 CURATOR (it is RIGHTSIZER), and CURATOR
+  appears nowhere in the repo. A reader who followed one arrived somewhere
+  else with no way to tell which end was wrong.
+
+- **The bundled mock answered every triage prompt identically**, so three
+  transactions with three different right answers each got the same wrong one.
+
+### Documentation
+
+- `examples/README.md` explains the numbering: the numbers are stable
+  identifiers, never reused, carrying no ordering. The gaps are not missing
+  files — 10, 41-44 and 53-54 never existed. Renumbering to close them would
+  break every published URL and every in-prose cross-reference to fix an
+  appearance.
+
+## [2.6.0] - 2026-08-15
+
+The release that came out of a full audit of the SDK against its own
+documentation. The framework was not weak; the first hour with it was broken.
+Every defect found was in hand-written prose or fixture code, never in
+generated reference, and they had one root cause: nothing ran the
+documentation.
+
+### Added
+
+- **A step can say what it must find out.** `RequiredProbe` declares evidence
+  a playbook step has to gather before it can honestly be called done.
+  `expected_tools` asks "was the right tool called?"; this asks "was the right
+  thing *looked at*?" — a different question, and the one an auditor actually
+  has, since an agent can call the correct tool against the wrong target and
+  satisfy the first while failing the second. A step names a capability with
+  `uses`, and the skill supplies both the tools and the probes.
+
+- **Eighteen model providers, up from two.** `openai:` and `anthropic:` are
+  native; `ollama:` · `vllm:` · `lmstudio:` · `llamacpp:` · `litellm:` ·
+  `groq:` · `together:` · `openrouter:` · `deepseek:` · `mistral:` · `xai:` ·
+  `fireworks:` · `cerebras:` · `perplexity:` · `nvidia:` arrive with their
+  base URL and key convention filled in, plus `openai-compatible:` for
+  anything else. Before this, anyone on a self-hosted or gateway endpoint had
+  to build the model object by hand.
+
+- **`tulip.testing`** — `ScriptedModel`, `FunctionModel`, `text()`,
+  `tool_call()`. The repo contained thirteen private `_ScriptedModel` classes,
+  which is the shape of a missing feature. Includes a recording surface
+  (`received_messages`, `offered_tools`, `call_count`, `last_prompt`) so a
+  test can assert what the agent *sent*, not only what it returned.
+
+- **`model_kwargs` on `AgentConfig`**, forwarded to `get_model()` when `model`
+  is a string. `AgentConfig` sets `extra="forbid"`, so provider configuration
+  could not travel with the documented one-string form — which made
+  `openai-compatible:` reachable only through an environment variable, since
+  that prefix *requires* a `base_url`.
+
+- **`agent_name` on every event.** The docs asserted this and it did not
+  exist. A caller merging two agents' streams had no way to tell the
+  researcher's tool call from the writer's. A nested agent's events are never
+  relabelled by the orchestrator around them.
+
+- **Evals run against a `StateGraph`** via `as_eval_target()`. The docs showed
+  `EvalRunner(agent=graph)`; every case errored. `expected_tools` and
+  `expected_tool_sequence` now match on node ids, which is what a graph
+  regression suite is actually for.
+
+- **An LLM judge that exists.** `tulip.evaluation` advertised "LLM-as-judge
+  scoring" and shipped 250 lines of boolean checks. `LLMJudge` grades against
+  a written rubric and returns a typed `Verdict`; `check_trajectory` asserts
+  tool *order*, which `expected_tools` could never express. The judge never
+  retries for a pass, and raises rather than scoring zero when it cannot be
+  reached — a "failure" that means the judge was down is worse than no eval.
+
+- **RAG has an entrance.** `load_text`, `load_markdown`, `load_html`,
+  `load_pdf`, `load_directory` and `recursive_chunks`. The vector stores and
+  rerankers were real; the pipeline was blocked at its front door.
+
+- **MCP is wired in.** `mcp_servers` on `AgentConfig`, and a helper that works
+  in an async context — `to_tulip_tools()` called `run_until_complete()` from
+  a sync method and raised inside a running loop.
+
+- A **chat loop** example, and a **framework-interop** example that builds a
+  real LangChain tool, drives it through LangGraph's own ReAct loop, watches a
+  $4,000,000 refund execute, then wraps that one tool and runs the identical
+  agent again.
+
+### Fixed
+
+- **Backend clients were cached across event loops.** `redis.asyncio` binds a
+  connection pool to the loop that created it, so the second loop inherited a
+  dead pool and failed with `Event loop is closed`. Not exotic: FastAPI's
+  `TestClient` runs each request through its own portal, and any code calling
+  `asyncio.run()` twice hits it. Fixed for Redis, OpenSearch and PostgreSQL.
+
+- **`EvalRunner.run()` ignored `expected_tool_sequence`.** The sync path was a
+  hand-copied second implementation that had drifted, so a case asserting the
+  wrong tool order came back green. An ordering assertion silently never
+  evaluated is worse than no assertion, because the report says it was
+  checked.
+
+- **The sliding window dropped the task.** When a window retained no user turn
+  at all — an agent loop, assistant/tool all the way down — the opening
+  request went with it, leaving the model working from a role description and
+  a wall of tool output. On Qwen-family templates it fails outright.
+
+- **OpenAI-compatible endpoints always get a user turn**, which several
+  servers require and which a system-prompt-only request did not send.
+
+- **Adherence counted the wrong probes** and reported 1.00 while failing.
+
+- **The bundled mock could never call a tool**, so every tool-centric example
+  printed `Tool calls made: 0` — including the notebook whose page says this
+  is what turns an LLM into an agent.
+
+- **Nineteen pages gave a "live model" command that silently ran the mock**,
+  because `get_model()` read only `TULIP_MODEL_PROVIDER`.
+
+- Six documented claims the code did not back, and a further four found on a
+  second pass.
+
+### Changed
+
+- **CI runs the documentation.** Every Python block in `README.md` and
+  `examples/README.md` is checked against the installed SDK — it must compile,
+  every `from tulip... import X` must resolve, and keyword arguments must
+  exist on the callable. Compile rather than parse, because `ast.parse`
+  *accepts* top-level `await` and only `compile()` rejects it — which is
+  exactly how a quickstart shipped raising `SyntaxError`.
+
+- Fourteen test definitions across four files were dead: Python keeps the last
+  binding, so a class defined twice in one module silently discards the
+  earlier one. A guard now fails on same-module shadowing.
 
 ## [2.5.1] - 2026-08-12
 
