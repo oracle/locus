@@ -79,12 +79,12 @@ def _parse_dsn(dsn: str) -> dict[str, Any]:
 
 class MySQLConfig(BaseModel):
     """Configuration for the MySQL backend."""
+
     # Reject unknown keys rather than absorbing them. The backends take
     # **kwargs and splat them in here, so a misspelled or wrong-named
     # parameter used to vanish silently — notebook 68 passed namespace=
     # instead of prefix= and every run quietly shared one keyspace.
     model_config = {"extra": "forbid"}
-
 
     host: str = "localhost"
     port: int = 3306
