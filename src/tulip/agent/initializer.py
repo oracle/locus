@@ -51,7 +51,17 @@ def initialize_agent(agent: Agent) -> None:
 
     # --- Model -------------------------------------------------------------
     if isinstance(agent.config.model, str):
-        agent._model = get_model(agent.config.model)
+        agent._model = get_model(agent.config.model, **agent.config.model_kwargs)
+    elif agent.config.model_kwargs:
+        # An already-built model carries its own configuration, so these
+        # would do nothing at all. Silently dropping them is the worst
+        # outcome: the agent runs against the wrong endpoint and looks fine.
+        raise ValueError(
+            "model_kwargs applies only when `model` is a provider string; "
+            f"got a {type(agent.config.model).__name__} instance together with "
+            f"{sorted(agent.config.model_kwargs)}. Pass those to get_model() "
+            "when building the model instead."
+        )
     else:
         agent._model = agent.config.model
 

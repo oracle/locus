@@ -263,18 +263,35 @@ asyncio.run(main())
 
 ## Providers
 
-A model is a string. The prefix (`openai:`, `anthropic:`) picks the provider; the rest is the
-model id it expects.
+A model is a string. The prefix picks the provider; the rest is the model id it expects.
 
-| Provider | Class | What it covers |
-|---|---|---|
-| **OpenAI** | `OpenAIModel` | Chat completions, reasoning models, `base_url` override for Azure · Portkey · LiteLLM · vLLM · together.ai · fireworks · groq |
-| **Anthropic** | `AnthropicModel` | Claude family with prompt caching + extended thinking |
-| **Custom** | `register_provider("myco", MyModel)` | Implement `ModelProtocol` — `complete` · `stream` (~50 lines) |
+**18 prefixes ship built in.** `openai:` and `anthropic:` are native; the rest are
+OpenAI-compatible endpoints with their base URL and key convention already filled in —
+`ollama:` · `vllm:` · `lmstudio:` · `llamacpp:` · `litellm:` · `groq:` · `together:` ·
+`openrouter:` · `deepseek:` · `mistral:` · `xai:` · `fireworks:` · `cerebras:` ·
+`perplexity:` · `nvidia:`, plus `openai-compatible:` for anything else.
 
-Because OpenAI-compatible endpoints accept a `base_url`, `OpenAIModel` also fronts gateways and
-self-hosted servers without a dedicated provider.
-→ [Model providers](https://tulipagents.ai/concepts/models/)
+```python
+Agent(model="ollama:llama3.2")                      # localhost:11434, no key needed
+Agent(model="groq:llama-3.3-70b-versatile")         # GROQ_API_KEY from the environment
+Agent(model="anthropic:claude-sonnet-5")
+```
+
+Configuration that is not in the environment travels in `model_kwargs` — a per-agent key, or
+a host that is not the default:
+
+```python
+Agent(
+    model="openai-compatible:qwen3.6-35b",
+    model_kwargs={"base_url": "http://gpu-1:8000/v1", "api_key": "unused"},
+)
+```
+
+Anything else implements `ModelProtocol` — `complete` · `stream`, ~50 lines — and registers
+with `register_provider("myco", MyModel)`.
+
+→ [Model providers](https://tulipagents.ai/concepts/models/) ·
+[OpenAI-compatible endpoints](https://tulipagents.ai/concepts/providers/openai-compatible/)
 
 ---
 

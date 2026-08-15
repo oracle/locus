@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class ReflexionConfig(BaseModel):
@@ -131,6 +131,35 @@ class AgentConfig(BaseModel):
     model: str | Any = Field(
         ...,
         description="Model string ('openai:gpt-4o' or 'anthropic:claude-sonnet-4-6') or ModelProtocol instance",
+    )
+
+    # Provider configuration that has to travel with the string form.
+    #
+    # ``extra="forbid"`` above is deliberate — it turns a misspelled field
+    # into an error instead of a silently ignored setting — but it also
+    # means a provider kwarg cannot ride along with ``model=``:
+    #
+    #   Agent(model="openai-compatible:my-model", base_url="https://host/v1")
+    #   → ValidationError: base_url  Extra inputs are not permitted
+    #
+    # So the one-string convenience used to evaporate exactly when the
+    # configuration was least standard. ``openai-compatible:`` *requires* a
+    # ``base_url``, which left it usable only through the environment; the
+    # same applied to pointing ``vllm:`` or ``ollama:`` at another host, or
+    # passing a per-agent key.
+    model_kwargs: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Provider keyword arguments forwarded to ``get_model()`` when "
+            "``model`` is a string — ``base_url``, ``api_key``, "
+            "``temperature``, or anything else the provider accepts. "
+            "Ignored for a ModelProtocol instance, which is already "
+            "configured; passing both is an error rather than a silent "
+            "no-op. Applies to ``model`` only: ``auxiliary_model`` and "
+            "``grounding.model`` are usually on a different provider, so "
+            "give those a pre-built model from ``get_model()`` when they "
+            "need their own configuration."
+        ),
     )
 
     # Auxiliary (cheap/fast) model for summarization, classification,
@@ -562,6 +591,33 @@ class AgentConfig(BaseModel):
         default_factory=dict,
         description="Custom metadata passed to tools",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def point_unknown_fields_at_model_kwargs(cls, data: Any) -> Any:
+        """Say where provider configuration goes, instead of only that it cannot go here.
+
+        ``extra="forbid"`` catches typos, which is worth keeping, but on its
+        own it answers the wrong question. A reader who writes the documented
+        one-string form and adds the ``base_url`` that provider *requires*
+        gets ``Extra inputs are not permitted`` and no hint that the setting
+        is supported at all, one field over. That is how a supported path
+        reads as a missing feature.
+        """
+        if not isinstance(data, dict):
+            return data
+        unknown = sorted(set(data) - set(cls.model_fields))
+        if unknown:
+            raise ValueError(
+                f"{unknown} {'is' if len(unknown) == 1 else 'are'} not "
+                f"{'a ' if len(unknown) == 1 else ''}field"
+                f"{'' if len(unknown) == 1 else 's'} of AgentConfig. If this is "
+                "provider configuration for a string model, pass it as "
+                "model_kwargs={...} — e.g. "
+                'Agent(model="openai-compatible:my-model", '
+                'model_kwargs={"base_url": "https://host/v1"}).'
+            )
+        return data
 
     @field_validator("model", mode="before")
     @classmethod
