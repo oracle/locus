@@ -30,6 +30,8 @@ from typing import Any
 
 import yaml  # type: ignore[import-untyped]  # PyYAML ships no inline types
 
+from tulip.playbooks.models import RequiredProbe
+
 
 # AgentSkills.io name validation: kebab-case, 1-64 chars, no consecutive hyphens
 _SKILL_NAME_PATTERN = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
@@ -119,6 +121,17 @@ class Skill:
     instructions: str = ""
     path: Path | None = None
     allowed_tools: list[str] | None = None
+    #: Evidence the work described by this skill must gather. Declared HERE
+    #: rather than on the step because the skill is what knows its own
+    #: instrumentation — a step says "establish the blast radius", the skill
+    #: knows that means querying the error count and the pool. A playbook step
+    #: that `uses` this skill inherits them.
+    required_probes: list[RequiredProbe] = field(default_factory=list)
+    #: Effort bounds for the work this skill describes. A step that `uses` it
+    #: inherits them when it declares none of its own — the skill knows how much
+    #: looking its own job takes better than a procedure written above it does.
+    min_tool_calls: int | None = None
+    max_tool_calls: int | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     license: str | None = None
     compatibility: str | None = None
@@ -190,10 +203,46 @@ class Skill:
         elif isinstance(allowed_tools_raw, list):
             allowed_tools = [str(t) for t in allowed_tools_raw]
 
+        # `required-probes` in optic's shape: a list of {name, match} mappings.
+        # Malformed entries are DROPPED rather than raising — a skill is a
+        # document an operations person edits, and refusing to load the whole
+        # thing because one probe lost its `match` would take the instructions
+        # away too. A dropped probe is one fewer obligation; a failed load is no
+        # procedure at all.
+        probes: list[RequiredProbe] = []
+        # Both spellings, because optic's own files mix them: `allowed-tools`
+        # is hyphenated and `required_probes` is not. Accepting one would
+        # silently drop every probe in the corpus this was ported from.
+        declared = frontmatter.get("required_probes") or frontmatter.get("required-probes") or ()
+        for entry in declared:
+            if not isinstance(entry, dict):
+                continue
+            probe_name = str(entry.get("name", "") or "").strip()
+            probe_match = str(entry.get("match", "") or "").strip()
+            if not probe_name or not probe_match:
+                continue
+            probes.append(
+                RequiredProbe(
+                    name=probe_name,
+                    match=probe_match,
+                    description=str(entry.get("description", "") or ""),
+                )
+            )
+
+        def _bound(*keys: str) -> int | None:
+            for key in keys:
+                value = frontmatter.get(key)
+                if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                    return value
+            return None
+
         return cls(
             name=name,
             description=description,
             instructions=body,
+            required_probes=probes,
+            min_tool_calls=_bound("min-tool-calls", "min_tool_calls"),
+            max_tool_calls=_bound("max-tool-calls", "max_tool_calls"),
             path=path,
             allowed_tools=allowed_tools,
             metadata=frontmatter.get("metadata", {}),

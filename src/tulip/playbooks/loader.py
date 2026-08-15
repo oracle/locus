@@ -77,6 +77,7 @@ class PlaybookLoader:
         Raises:
             PlaybookLoadError: If data is invalid
         """
+        data = _flatten_step_groups(data)
         errors = self._validate_structure(data)
         if errors:
             raise PlaybookLoadError(
@@ -233,6 +234,98 @@ class PlaybookLoader:
 
 
 # Convenience function
+
+
+def _flatten_step_groups(data: dict[str, Any]) -> dict[str, Any]:
+    """Accept the grouped playbook shape as well as the flat one.
+
+    optic writes procedures as ``step_groups`` — an ordered list of groups, each
+    with its own goal, each holding ordered steps — and names the capability a
+    step is carried out with under ``guidance.skill_refs``. That grouping is how
+    a real runbook reads: "establish the blast radius" is a phase containing
+    several checks, not a single step.
+
+    The enforcer tracks one flat ordered sequence, so groups are flattened in
+    order. Nothing is invented: a group's title/goal is folded into the first
+    step's description so the phase it belonged to survives into the record and
+    the prompt, and step ids are qualified with the group id where they would
+    otherwise collide across groups.
+
+    A dict that already has ``steps`` is returned untouched, so this is additive
+    and no existing playbook changes meaning.
+    """
+    groups = data.get("step_groups")
+    if "steps" in data or not isinstance(groups, list):
+        return data
+
+    steps: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        group_id = str(group.get("id", "") or "")
+        heading = str(group.get("goal") or group.get("title") or "").strip()
+        for index, step in enumerate(group.get("steps") or []):
+            if not isinstance(step, dict):
+                continue
+            flat = dict(step)
+            step_id = str(flat.get("id", "") or "")
+            if not step_id or step_id in seen:
+                step_id = f"{group_id}.{step_id}" if group_id else f"step-{len(steps)}"
+            seen.add(step_id)
+            flat["id"] = step_id
+
+            # `goal` is the step's real instruction; `title` is a label. Prefer
+            # the goal, fall back to the title, and keep the group's heading in
+            # front of the first step so the phase is not lost.
+            description = str(flat.pop("goal", "") or "").strip()
+            title = str(flat.pop("title", "") or "").strip()
+            body = description or title or str(flat.get("description", "") or "")
+            if index == 0 and heading and heading not in body:
+                body = f"{heading}\n\n{body}".strip()
+            flat["description"] = body
+
+            guidance = flat.pop("guidance", None)
+            if isinstance(guidance, dict):
+                refs = guidance.get("skill_refs") or []
+                if isinstance(refs, list):
+                    flat.setdefault("uses", [str(ref) for ref in refs if ref])
+
+            # Fields the grouped shape carries that the flat model does not
+            # model as first-class; kept rather than dropped so nothing an
+            # author wrote disappears silently.
+            for extra in ("priority", "product", "service_type"):
+                if extra in flat:
+                    flat.setdefault("metadata", {})[extra] = flat.pop(extra)
+
+            steps.append(flat)
+
+    out = {key: value for key, value in data.items() if key != "step_groups"}
+    out["steps"] = steps
+    # optic titles a playbook and summarises it; this model names and describes
+    # one. Same fields, different words — map rather than make an author rename
+    # a corpus.
+    out.setdefault("name", data.get("title") or data.get("playbook_id") or data.get("id", ""))
+    if "description" not in out and data.get("summary"):
+        out["description"] = data["summary"]
+    # Kept, not modelled: `completion.conclusion_requirements`, `decision_policy`,
+    # `mode`, `product`, `service_type`. They travel in metadata so nothing an
+    # author wrote is lost, and so the day they ARE modelled the data is already
+    # there. `completion` in particular is close to `unresolved_required_steps()`.
+    carried = {
+        key: data[key]
+        for key in ("completion", "decision_policy", "mode", "product", "service_type")
+        if key in data
+    }
+    if carried:
+        metadata = dict(out.get("metadata") or {})
+        metadata.update(carried)
+        out["metadata"] = metadata
+    for key in carried:
+        out.pop(key, None)
+    return out
+
+
 def load_playbook(source: str | Path | dict[str, Any]) -> Playbook:
     """Load a playbook from various sources.
 
