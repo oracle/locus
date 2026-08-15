@@ -198,6 +198,21 @@ class TestSlidingWindowAnchorsTheTask:
         result = manager.apply(self._tool_heavy(20))
         assert not any(m.role.value == "user" for m in result)
 
+    def test_the_default_configuration_trims_a_plain_chat(self):
+        """Every default on, no system turn — the shape most callers get.
+
+        Kept from a duplicate of this class that used to live in
+        ``test_memory.py``. Deleting the duplicate outright would have quietly
+        dropped the only case exercising ``preserve_system`` at its default
+        while no system message is present.
+        """
+        manager = SlidingWindowManager(window_size=3)
+        messages = [Message.user(f"Message {i}") for i in range(10)]
+
+        result = manager.apply(messages)
+
+        assert [m.content for m in result] == ["Message 7", "Message 8", "Message 9"]
+
     def test_a_chat_keeps_its_newest_user_turns(self):
         """In a chat the first user turn is not privileged — only an agent loop
         (assistant/tool all the way down) ends up with no user turn at all."""

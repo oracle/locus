@@ -294,25 +294,6 @@ class TestImageProcessor:
         assert result.raw_content == png_data
 
 
-class TestPDFProcessor:
-    """Tests for PDFProcessor."""
-
-    @pytest.fixture
-    def processor(self):
-        """Create PDF processor."""
-        from tulip.rag.multimodal import PDFProcessor
-
-        return PDFProcessor(use_ocr_fallback=False)
-
-    def test_supports_pdf(self, processor):
-        """Test supports PDF content type."""
-        assert processor.supports(ContentType.PDF) is True
-
-    def test_does_not_support_text(self, processor):
-        """Test does not support TEXT."""
-        assert processor.supports(ContentType.TEXT) is False
-
-
 class TestAudioProcessor:
     """Tests for AudioProcessor."""
 

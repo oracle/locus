@@ -147,72 +147,6 @@ class TestNode:
         assert result.output.payload == {"question": "Continue?"}
 
 
-class TestEdge:
-    """Tests for Edge class."""
-
-    def test_default_apply(self):
-        """Test default edge behavior."""
-        edge = Edge(source_id="node1", target_id="node2")
-        result = edge.apply({"x": 1, "y": 2})
-        assert result == {"node1": {"x": 1, "y": 2}}
-
-    def test_key_mapping(self):
-        """Test edge with key mapping."""
-        edge = Edge(
-            source_id="node1",
-            target_id="node2",
-            key_mapping={"output": "input", "result": "data"},
-        )
-        result = edge.apply({"output": "value1", "result": "value2", "other": "ignored"})
-        assert result == {"input": "value1", "data": "value2"}
-
-    def test_transform(self):
-        """Test edge with transform function."""
-        edge = Edge(
-            source_id="node1",
-            target_id="node2",
-            transform=lambda x: {"transformed": x["value"] * 2},
-        )
-        result = edge.apply({"value": 5})
-        assert result == {"node1": {"transformed": 10}}
-
-
-class TestConditionalEdge:
-    """Tests for ConditionalEdge class."""
-
-    def test_single_target(self):
-        """Test conditional edge with single target."""
-        edge = ConditionalEdge(
-            source_id="router",
-            router=lambda s: s.get("type", "default"),
-            targets={"error": "error_handler", "success": "success_handler"},
-        )
-        result = edge.resolve_target({"type": "error"})
-        assert result == ["error_handler"]
-
-    def test_multiple_targets(self):
-        """Test conditional edge with multiple targets."""
-        edge = ConditionalEdge(
-            source_id="router",
-            router=lambda s: ["process", "validate"],
-            targets={"process": "processor", "validate": "validator"},
-        )
-        result = edge.resolve_target({})
-        assert result == ["processor", "validator"]
-
-    def test_default_target(self):
-        """Test conditional edge falls back to default."""
-        edge = ConditionalEdge(
-            source_id="router",
-            router=lambda s: "unknown",
-            targets={},
-            default_target="fallback",
-        )
-        # When router returns unmapped value and no direct match, use default_target
-        result = edge.resolve_target({})
-        assert result == ["fallback"]
-
-
 class TestStateGraph:
     """Tests for StateGraph class."""
 
@@ -543,6 +477,24 @@ class TestEdge:
         )
         result = edge.apply({"input_value": 42})
         assert result == {"output_value": 42}
+
+    def test_key_mapping_drops_unmapped_keys(self):
+        """Only the mapped keys travel; anything else is left behind.
+
+        Recovered from a second ``TestEdge`` in this file that Python had been
+        silently shadowing since it was added — the surviving mapping test
+        passes a single key, so nothing else asserted that an unmapped one
+        does not leak through to the target node.
+        """
+        edge = Edge(
+            source_id="node1",
+            target_id="node2",
+            key_mapping={"output": "input", "result": "data"},
+        )
+
+        result = edge.apply({"output": "value1", "result": "value2", "other": "ignored"})
+
+        assert result == {"input": "value1", "data": "value2"}
 
     def test_edge_apply_key_mapping_with_non_dict(self):
         """Test edge apply key mapping when source output is not a dict."""

@@ -18,7 +18,6 @@ from tulip.memory import (
     DeltaCheckpointer,
     InMemoryDeltaStorage,
     NullManager,
-    SlidingWindowManager,
     SummarizingManager,
 )
 from tulip.memory.backends import FileCheckpointer, HTTPCheckpointer, MemoryCheckpointer
@@ -65,75 +64,14 @@ class TestNullManager:
         assert result == messages
 
 
-class TestSlidingWindowManager:
-    """Tests for SlidingWindowManager."""
-
-    def test_keeps_last_n_messages(self):
-        """SlidingWindowManager keeps only last N messages."""
-        manager = SlidingWindowManager(window_size=3)
-        messages = [Message.user(f"Message {i}") for i in range(10)]
-
-        result = manager.apply(messages)
-
-        assert len(result) == 3
-        assert result[0].content == "Message 7"
-        assert result[1].content == "Message 8"
-        assert result[2].content == "Message 9"
-
-    def test_preserves_system_message(self):
-        """SlidingWindowManager preserves system message."""
-        manager = SlidingWindowManager(window_size=2, preserve_system=True)
-        messages = [
-            Message.system("System prompt"),
-            Message.user("Message 1"),
-            Message.user("Message 2"),
-            Message.user("Message 3"),
-        ]
-
-        result = manager.apply(messages)
-
-        assert len(result) == 3  # system + 2 recent
-        assert result[0].role == Role.SYSTEM
-        assert result[1].content == "Message 2"
-        assert result[2].content == "Message 3"
-
-    def test_no_preserve_system(self):
-        """SlidingWindowManager can exclude system message."""
-        manager = SlidingWindowManager(window_size=2, preserve_system=False)
-        messages = [
-            Message.system("System prompt"),
-            Message.user("Message 1"),
-            Message.user("Message 2"),
-            Message.user("Message 3"),
-        ]
-
-        result = manager.apply(messages)
-
-        assert len(result) == 2
-        assert result[0].content == "Message 2"
-        assert result[1].content == "Message 3"
-
-    def test_fewer_than_window_size(self):
-        """SlidingWindowManager handles fewer messages than window."""
-        manager = SlidingWindowManager(window_size=10)
-        messages = [Message.user("Hello"), Message.user("World")]
-
-        result = manager.apply(messages)
-
-        assert len(result) == 2
-
-    def test_invalid_window_size(self):
-        """SlidingWindowManager rejects invalid window size."""
-        with pytest.raises(ValueError, match="window_size must be at least 1"):
-            SlidingWindowManager(window_size=0)
-
-    def test_empty_messages(self):
-        """SlidingWindowManager handles empty list."""
-        manager = SlidingWindowManager(window_size=5)
-
-        result = manager.apply([])
-
-        assert result == []
+# ``TestSlidingWindowManager`` used to live here as well, duplicating the suite
+# in ``test_conversation.py``. The duplicate is gone: it covered a strict subset
+# and had already drifted — the commit that added ``preserve_first_user``
+# updated only the other file, so the two copies disagreed about what the class
+# does while both stayed green. A failure reported as
+# ``TestSlidingWindowManager::test_preserves_system_message`` did not say which
+# file it came from, which is exactly the confusion that made #116 look like
+# flakiness. ``tests/unit/test_conversation.py`` is the single home now.
 
 
 class TestSummarizingManager:
