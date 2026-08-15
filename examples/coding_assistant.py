@@ -126,12 +126,17 @@ def _build_model():
 async def main():
     task = " ".join(sys.argv[1:]) if len(sys.argv) > 1 else None
     if not task:
+        # Exit 0, not 1. Every other example runs bare, and notebooks 52 and 68
+        # already set the convention: print what is missing and leave cleanly so
+        # a "run every example" pass stays green. A required argument is not a
+        # failure of the example.
         print('Usage: python examples/coding_assistant.py "<review task>"')
         print(
             "Example: python examples/coding_assistant.py "
             '"Audit /tmp/myapp for SQL injection and hard-coded secrets, then fix them"'
         )
-        sys.exit(1)
+        print("\nNo task given, so there is nothing to review — exiting cleanly.")
+        sys.exit(0)
 
     model = _build_model()
 
