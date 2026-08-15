@@ -232,7 +232,6 @@ class EvalRunner:
             agent_result = self.agent.run_sync(case.prompt)
 
             output = agent_result.message or ""
-            output_lower = output.lower()
             iterations = agent_result.iterations
 
             # Collect tool names from execution
@@ -240,29 +239,19 @@ class EvalRunner:
 
             duration_ms = (time.perf_counter() - start_time) * 1000
 
-            # Check: expected tools
-            if case.expected_tools:
-                for tool_name in case.expected_tools:
-                    key = f"tool_called:{tool_name}"
-                    checks[key] = tool_name in tools_called
-
-            # Check: output contains expected strings
-            for expected in case.expected_output_contains:
-                key = f"output_contains:{expected}"
-                checks[key] = expected.lower() in output_lower
-
-            # Check: output does NOT contain excluded strings
-            for excluded in case.expected_output_not_contains:
-                key = f"output_not_contains:{excluded}"
-                checks[key] = excluded.lower() not in output_lower
-
-            # Check: iteration budget
-            if case.max_iterations is not None:
-                checks["within_iteration_budget"] = iterations <= case.max_iterations
-
-            # Check: duration budget
-            if case.max_duration_ms is not None:
-                checks["within_duration_budget"] = duration_ms <= case.max_duration_ms
+            # Shared with the async path on purpose. This used to be a
+            # hand-copied second implementation that had drifted: it omitted
+            # `expected_tool_sequence` entirely, so `run()` accepted a case
+            # asserting the wrong tool order and reported it green. An
+            # ordering assertion that is silently never evaluated is worse
+            # than no assertion, because the suite says it was checked.
+            checks = self._structural_checks(
+                case,
+                output=output,
+                tools_called=tools_called,
+                iterations=iterations,
+                duration_ms=duration_ms,
+            )
 
             # Calculate score
             all_passed = all(checks.values()) if checks else True

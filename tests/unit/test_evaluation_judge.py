@@ -11,6 +11,7 @@ and the ordering assertion that ``expected_tools`` could never express.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import pytest
@@ -340,6 +341,52 @@ async def test_a_failing_case_appears_in_the_summary() -> None:
         [EvalCase(name="boom", prompt="p")]
     )
     assert "exploded" in report.summary()
+
+
+def test_the_sync_path_checks_the_tool_sequence() -> None:
+    """``run()`` used to ignore ``expected_tool_sequence`` entirely.
+
+    It hand-copied the async path's checks and the copy had drifted, so a case
+    asserting the wrong tool order came back green. An ordering assertion that
+    is silently never evaluated is worse than no assertion, because the report
+    says it was checked. Both paths share ``_structural_checks`` now.
+    """
+    agent = _agent(
+        [
+            tool_call("issue_refund", order_id="o1"),
+            tool_call("lookup_order", order_id="o1"),
+            text("Done."),
+        ]
+    )
+    case = EvalCase(
+        name="wrong_order",
+        prompt="refund o1",
+        expected_tool_sequence=["lookup_order", "issue_refund"],
+    )
+
+    report = EvalRunner(agent=agent).run([case])
+
+    assert report.results[0].checks["tool_sequence"] is False
+    assert not report.results[0].passed
+
+
+def test_the_sync_and_async_paths_grade_a_case_identically() -> None:
+    """The reason they share one implementation."""
+    case = EvalCase(
+        name="same",
+        prompt="is o1 refundable?",
+        expected_tools=["lookup_order"],
+        expected_output_contains=["refundable"],
+        expected_tool_sequence=["lookup_order"],
+    )
+    turns = [tool_call("lookup_order", order_id="o1"), text("The order is refundable.")]
+
+    sync = EvalRunner(agent=_agent(list(turns))).run([case]).results[0]
+    async_ = asyncio.run(EvalRunner(agent=_agent(list(turns)), concurrency=1).arun([case])).results[
+        0
+    ]
+
+    assert sync.checks == async_.checks
 
 
 def test_the_sync_path_checks_the_duration_budget() -> None:

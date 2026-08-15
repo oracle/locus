@@ -7,6 +7,8 @@ Provides systematic testing of agent quality:
 - Define test cases with expected behaviors
 - Run agents against test suites
 - Score results and generate reports
+- Grade free-form answers against a rubric with :class:`LLMJudge`
+- Run the same suite against a ``StateGraph`` via :func:`as_eval_target`
 """
 
 from tulip.evaluation.framework import (
@@ -15,10 +17,12 @@ from tulip.evaluation.framework import (
     EvalResult,
     EvalRunner,
 )
+from tulip.evaluation.graph import GraphEvalTarget, as_eval_target
 from tulip.evaluation.judge import LLMJudge, Verdict, check_trajectory
 
 
 __all__ = [
+    "GraphEvalTarget",
     "LLMJudge",
     "Verdict",
     "check_trajectory",
@@ -26,4 +30,5 @@ __all__ = [
     "EvalReport",
     "EvalResult",
     "EvalRunner",
+    "as_eval_target",
 ]
