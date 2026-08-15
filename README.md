@@ -99,6 +99,24 @@ async def safe_refund(order_id: str, usd: float):
         notify_oncall(e.decision)                       # the gate held it; the trail has it
 ```
 
+On a tool your own agent calls, `gate_tool` does the same thing in one line —
+the returned tool keeps the original's name, description and schema, so the
+model cannot tell the difference and nothing else in the agent changes:
+
+```python
+from tulip.control import ControlPolicy, gate_tool
+
+agent = Agent(model=model, tools=[
+    lookup_order,                                     # read-only, ungated
+    gate_tool(issue_refund, policy=ControlPolicy()),  # gated
+])
+```
+
+Refused calls come back to the model as a readable refusal naming the outcome
+and the reason, so the agent explains the hold instead of the run ending in a
+traceback. It is the same shape the `tulip-frameworks` bridges return, so a
+policy reads the same whether the agent is Tulip-native or wrapped.
+
 `action → policy → approval → admission → audit`
 
 - **Policy + approval** — `approve()` weighs your `ControlPolicy` (blast radius,
