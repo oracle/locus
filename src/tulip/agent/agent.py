@@ -16,8 +16,10 @@ from pydantic import BaseModel, Field, PrivateAttr
 from tulip.agent.config import AgentConfig, GroundingConfig, ReflexionConfig
 from tulip.agent.result import AgentResult, ExecutionMetrics, StopReason
 from tulip.agent.runtime_loop import AgentRuntimeMixin
+from tulip.core.errors import GSARValidationError
 from tulip.core.events import (
     GroundingEvent,
+    ReflectEvent,
     TerminateEvent,
     ToolCompleteEvent,
     TulipEvent,
@@ -288,6 +290,12 @@ class Agent(AgentRuntimeMixin, BaseModel):
 
         grounding_score: float | None = None
         ungrounded_claims: list[str] = []
+        # The runtime already counts these -- ``_reflexion_evals`` and
+        # ``_grounding_evals`` -- but they are locals in a generator, so the
+        # numbers never left. Counting the events it yields gets the same
+        # figures without threading state through the loop.
+        reflexion_evaluations = 0
+        grounding_evaluations = 0
 
         async for event in self.run(prompt, **run_kwargs):
             # Fire callback if set
@@ -300,7 +308,10 @@ class Agent(AgentRuntimeMixin, BaseModel):
             elif isinstance(event, ToolCompleteEvent):
                 if event.error:
                     tool_errors += 1
+            elif isinstance(event, ReflectEvent):
+                reflexion_evaluations += 1
             elif isinstance(event, GroundingEvent):
+                grounding_evaluations += 1
                 # The grounding loop already ran and emitted its verdict; it
                 # simply never reached the result. Keep the last one: with
                 # `max_replans` the answer is re-grounded after each replan,
@@ -338,6 +349,23 @@ class Agent(AgentRuntimeMixin, BaseModel):
             state, structured_message or final_message
         )
 
+        # ``fail_on_low_score`` was documented as raising GSARValidationError
+        # and never read, so an agent configured to refuse un-grounded output
+        # shipped it silently -- the one outcome the setting exists to prevent.
+        if (
+            self.config.gsar is not None
+            and self.config.gsar.fail_on_low_score
+            and gsar_decision is not None
+            and gsar_decision != "proceed"
+        ):
+            raise GSARValidationError(
+                f"GSAR judgment returned {gsar_decision!r}"
+                + (f" (score {gsar_score_value:.2f})" if gsar_score_value is not None else "")
+                + "; fail_on_low_score is set.",
+                decision=gsar_decision,
+                score=gsar_score_value,
+            )
+
         elapsed_ms = (datetime.now(UTC) - started_at).total_seconds() * 1000
         metrics = ExecutionMetrics(
             iterations=state.iteration,
@@ -349,6 +377,8 @@ class Agent(AgentRuntimeMixin, BaseModel):
             cache_creation_input_tokens=state.cache_creation_tokens_used,
             cache_read_input_tokens=state.cache_read_tokens_used,
             duration_ms=elapsed_ms,
+            reflexion_evaluations=reflexion_evaluations,
+            grounding_evaluations=grounding_evaluations,
         )
 
         return AgentResult.from_state(

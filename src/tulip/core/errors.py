@@ -185,12 +185,41 @@ class ConfigError(TulipError):
     kind = "config_error"
 
 
+class GSARValidationError(TulipError):
+    """A GSAR judgment did not clear the bar, and the caller asked to stop.
+
+    Raised only when ``GSARConfig.fail_on_low_score`` is set. The default is
+    off: a judgment is information, and most callers want to inspect it and
+    decide. Turning it on is for a pipeline that must not ship an un-grounded
+    summary at all — where returning the answer alongside a warning is the
+    failure mode, because something downstream will use the answer.
+
+    The decision and score that caused it are attached, so a handler does not
+    have to re-derive why it stopped.
+    """
+
+    kind = "gsar_validation_error"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        decision: str | None = None,
+        score: float | None = None,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(message, cause=cause)
+        self.decision = decision
+        self.score = score
+
+
 __all__ = [
     "CheckpointError",
     "CheckpointNotFoundError",
     "CheckpointSerializationError",
     "ConfigError",
     "EmbeddingError",
+    "GSARValidationError",
     "TulipError",
     "ModelAuthError",
     "ModelError",
