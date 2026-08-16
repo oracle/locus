@@ -123,9 +123,21 @@ def gate_tool(
     from tulip.tools.decorator import Tool  # noqa: PLC0415 — avoids a cycle
 
     inner = tool.fn
+    # A sandboxed tool must keep running in its sandbox. `Tool.execute` returns
+    # early for `sandbox is not None` and never reaches `fn`, so the two cannot
+    # simply be stacked: carrying the sandbox onto the wrapper would skip the
+    # gate, and dropping it -- as the first version of this did -- silently
+    # moves the body back onto the host. Both fail quietly, which for a
+    # security feature is the worst available outcome.
+    #
+    # They compose in one order only: gate first, then hand the admitted call
+    # to the ORIGINAL tool, whose own `execute` still does the sandboxing.
+    sandboxed = tool.sandbox is not None
 
     async def gated(**kwargs: Any) -> Any:
         async def perform() -> Any:
+            if sandboxed:
+                return await tool.execute(**kwargs)
             result = inner(**kwargs)
             return await result if inspect.isawaitable(result) else result
 
@@ -143,11 +155,9 @@ def gate_tool(
                 raise
             return _refusal(error)
 
-    # Carried over deliberately: the model is shown the same tool, and a
-    # policy matching on `labels` must still see them. `sandbox` is not
-    # carried — the gate wraps the call, and sandboxing is about where the
-    # body runs, so a sandboxed tool keeps its own execution path by staying
-    # unwrapped rather than being silently double-handled.
+    # `sandbox` is deliberately not set on the wrapper: it would short-circuit
+    # `execute` and skip the gate. The sandbox is not lost — `perform` above
+    # delegates to the original tool, which still has it.
     return Tool(
         name=tool.name,
         description=tool.description,

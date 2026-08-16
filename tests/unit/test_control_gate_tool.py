@@ -226,3 +226,87 @@ def test_the_original_tool_is_left_ungated() -> None:
     _run([issue_refund], 4_000_000.0)
 
     assert PAID == [("ord-4821", 4_000_000.0)]
+
+
+# --------------------------------------------------------------------------
+# Sandboxed tools — adding one control must not remove another
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_gating_a_sandboxed_tool_keeps_the_sandbox() -> None:
+    """The first version of ``gate_tool`` silently moved the body to the host.
+
+    ``Tool.execute`` returns early when ``sandbox`` is set and never reaches
+    ``fn``, so the two cannot be stacked: carrying the sandbox onto the wrapper
+    skips the gate, and dropping it un-sandboxes the tool. Both fail quietly.
+    They compose in one order — gate, then the original tool's sandboxed
+    execution.
+    """
+    from unittest.mock import AsyncMock, patch
+
+    from tulip.tools.decorator import Tool
+    from tulip.tools.sandbox import SandboxSpec
+
+    ran_on_host: list[str] = []
+
+    @tool
+    def run_code(src: str) -> str:
+        """Run code."""
+        ran_on_host.append(src)
+        return "RAN ON HOST"
+
+    run_code.sandbox = SandboxSpec(provider="subprocess")
+    gated = gate_tool(run_code, policy=_policy())
+
+    with patch.object(
+        Tool, "_execute_sandboxed", new=AsyncMock(return_value="RAN IN SANDBOX")
+    ) as sb:
+        result = await gated.execute(src="print(1)")
+
+    assert result == "RAN IN SANDBOX"
+    assert sb.await_count == 1
+    assert ran_on_host == [], "the tool body escaped its sandbox onto the host"
+
+
+@pytest.mark.asyncio
+async def test_a_refused_sandboxed_tool_never_reaches_the_sandbox() -> None:
+    """Refusal has to come before execution, sandboxed or not — otherwise the
+    side effect happens and only the *report* of it is gated."""
+    from unittest.mock import AsyncMock, patch
+
+    from tulip.tools.decorator import Tool
+    from tulip.tools.sandbox import SandboxSpec
+
+    @tool
+    def run_code(src: str) -> str:
+        """Run code."""
+        return "RAN"
+
+    run_code.sandbox = SandboxSpec(provider="subprocess")
+    gated = gate_tool(
+        run_code,
+        policy=ControlPolicy(require_verification_score=0.0, deny_for=frozenset({"run_code"})),
+        action=lambda name, kwargs: Action(name=name, asset="x", tags=frozenset({"run_code"})),
+    )
+
+    with patch.object(Tool, "_execute_sandboxed", new=AsyncMock(return_value="RAN")) as sb:
+        payload = json.loads(await gated.execute(src="print(1)"))
+
+    assert payload["outcome"] == "deny"
+    assert sb.await_count == 0
+
+
+def test_the_wrapper_does_not_carry_the_sandbox_field() -> None:
+    """Setting it on the wrapper would short-circuit ``execute`` and skip the
+    gate entirely — a gated tool that is not gated."""
+    from tulip.tools.sandbox import SandboxSpec
+
+    @tool
+    def run_code(src: str) -> str:
+        """Run code."""
+        return "RAN"
+
+    run_code.sandbox = SandboxSpec(provider="subprocess")
+
+    assert gate_tool(run_code, policy=_policy()).sandbox is None
