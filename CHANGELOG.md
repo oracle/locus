@@ -8,6 +8,33 @@ policy.
 
 ## [Unreleased]
 
+## [2.9.0] - 2026-08-16
+
+One gap closed in `gate_tool`, found by checking a claim rather than repeating it.
+
+### Added
+
+- **`ApprovalBridge`, and `approval=` on `gate_tool`.** A held action now carries
+  an `approval_id` the agent can poll and a `next` telling it how, while a human
+  decides on a channel the agent cannot reach.
+
+  Without it a hold told the model `"held_for_approval"` and stopped there — true,
+  and not actionable, which leaves the agent apologising to a user about a refund
+  that may already have been approved.
+
+  This was found by verifying a claim made in 2.8.0's own notes: that
+  `gate_tool`'s refusal matches what the `tulip-frameworks` bridges return. The
+  five core keys did match. The bridges send two more on a hold, and those were
+  missing.
+
+  `ApprovalBridge` is a structural `Protocol` with no import-time dependency, as
+  the bridges' is — so one broker object satisfies both and neither package has to
+  import the other. A **denial** deliberately gets no id: it is final, and offering
+  one would invite the agent to wait for a decision that is not coming.
+
+  Both parameters are keyword-only with defaults; nothing that worked in 2.8.0
+  changes shape.
+
 ## [2.8.0] - 2026-08-16
 
 A release about controls that were not controlling anything. Six settings and
