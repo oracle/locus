@@ -660,13 +660,25 @@ class Agent(AgentRuntimeMixin, BaseModel):
         answered = {
             m.tool_call_id for m in state.messages if m.role == Role.TOOL and m.tool_call_id
         }
+        # ANY unanswered call, not just ``ask_user``. The rhythm argument above
+        # is name-independent: an approval hold suspends on the governed call
+        # itself (``refund_customer``), so restricting the search to ask_user
+        # sent every approval resume down the system-note path — and produced
+        # exactly the failure the comment predicts. The model returns an empty
+        # turn, the loop reads that as "finished", and an APPROVED action is
+        # silently never performed while the run reports success. See
+        # FINDING-an-approved-action-can-silently-not-happen.md.
+        #
+        # ask_user still wins when both are present, so the established path is
+        # bit-for-bit unchanged and only the previously-broken case moves.
         dangling = None
         for msg in reversed(state.messages):
             if msg.role == Role.ASSISTANT and msg.tool_calls:
-                for tc in msg.tool_calls:
-                    if tc.name == "ask_user" and tc.id not in answered:
-                        dangling = tc
-                        break
+                unanswered = [tc for tc in msg.tool_calls if tc.id not in answered]
+                dangling = next(
+                    (tc for tc in unanswered if tc.name == "ask_user"),
+                    unanswered[0] if unanswered else None,
+                )
                 break
         if dangling is not None:
             state = state.with_message(

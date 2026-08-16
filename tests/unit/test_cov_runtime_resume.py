@@ -20,7 +20,7 @@ import pytest
 from tulip.agent import Agent
 from tulip.core.events import InterruptEvent, TerminateEvent, ToolCompleteEvent
 from tulip.core.interrupt import InterruptException, InterruptValue
-from tulip.core.messages import Message, ToolCall
+from tulip.core.messages import Message, Role, ToolCall
 from tulip.core.state import AgentState
 from tulip.core.termination import MaxIterations
 from tulip.memory.checkpointer import BaseCheckpointer
@@ -412,10 +412,22 @@ async def test_resume_rehydrates_from_checkpoint_in_fresh_process() -> None:
     term = next(e for e in second if isinstance(e, TerminateEvent))
     assert term.reason == "complete"
     assert term.final_message == "resumed on a new pod"
-    # The rehydrated state carries the decision message for the model.
+    # The rehydrated state carries the decision for the model — as the TOOL
+    # RESULT of the call it decides, not as a system note beside it.
+    #
+    # This assertion used to expect "[User Response] approve". That was the
+    # system-note fallback, which fired here because the fold was restricted to
+    # calls named `ask_user` and this one is `needs_input`. Note what this test
+    # actually covers: a cross-pod resume carrying an APPROVAL. The fallback
+    # breaks the call->result rhythm, and a model that does not recover from the
+    # break silently never performs the approved action while the run reports
+    # success. The assertion followed the bug; it now follows the fix.
+    msgs = second_agent._last_run_state.messages
     assert any(
-        "[User Response] approve" in (m.content or "")
-        for m in second_agent._last_run_state.messages
+        m.role == Role.TOOL and "approve" in str(m.content or "") for m in msgs
+    ), "the decision should arrive as the dangling call's tool result"
+    assert not any(
+        m.role == Role.SYSTEM and "[User Response]" in str(m.content or "") for m in msgs
     )
 
 
@@ -465,7 +477,15 @@ async def test_resume_from_state_saves_final_checkpoint() -> None:
     # The in-memory resume path also checkpoints its final state.
     assert ckpt.saves > saves_at_pause
     final = store["t-durable"]
-    assert any("[User Response] go ahead" in (m.content or "") for m in final.messages)
+    # Folded as the dangling call's tool result rather than a system note —
+    # see the cross-pod case above for why the fallback is the wrong channel.
+    assert any(
+        m.role == Role.TOOL and "go ahead" in str(m.content or "") for m in final.messages
+    )
+    assert not any(
+        m.role == Role.SYSTEM and "[User Response]" in str(m.content or "")
+        for m in final.messages
+    )
 
 
 @tool(name="ask_user")
@@ -645,3 +665,57 @@ async def test_resume_with_missing_checkpoint_raises() -> None:
     with pytest.raises(RuntimeError, match="No checkpoint found for thread 't-ghost'"):
         async for _ in agent.resume("hello", thread_id="t-ghost"):
             pass  # pragma: no cover
+
+
+async def test_resume_answers_a_dangling_non_ask_user_call_as_its_tool_result() -> None:
+    """A human's reply must arrive as the TOOL RESULT of whatever call is
+    dangling — not only when that call happens to be named ``ask_user``.
+
+    The fold exists because a bare system note breaks the call->result rhythm
+    the model is pattern-matching on. That reasoning is name-independent, but
+    the search was restricted to ``ask_user``, so an APPROVAL hold — which
+    suspends on the governed call itself — always took the system-note path.
+    Observed consequence: on resume the model returns an empty turn, the loop
+    reads that as "finished", and an action a human approved is never performed
+    while the run reports success.
+
+    Asserted on the conversation the model is handed, because that is the thing
+    the behaviour depends on; whether a given model recovers from a broken
+    rhythm varies by model and is not a property this repo can test.
+    """
+    model = _ScriptedModel([_tc("needs_input", {}), _text("done")])
+    agent = Agent(
+        model=model, tools=[needs_input], max_iterations=10, reflexion=False, grounding=False
+    )
+
+    async for _ in agent.run("start"):
+        pass
+
+    seen: list[Message] = []
+    original = model.complete
+
+    async def _capture(messages: list[Message], *a: Any, **k: Any) -> ModelResponse:
+        seen.clear()
+        seen.extend(messages)
+        return await original(messages, *a, **k)
+
+    model.complete = _capture  # type: ignore[method-assign]
+    async for _ in agent.resume("APPROVED — issue the call again to perform it"):
+        pass
+
+    call = next(
+        tc for m in seen if m.role == Role.ASSISTANT for tc in (m.tool_calls or [])
+    )
+    assert call.name == "needs_input"
+
+    results = [m for m in seen if m.role == Role.TOOL and m.tool_call_id == call.id]
+    assert results, (
+        "the dangling call was left unanswered and the reply went in as a bare "
+        "system note — the rhythm break this fold exists to prevent"
+    )
+    assert "APPROVED" in str(results[-1].content)
+    assert not [
+        m
+        for m in seen
+        if m.role == Role.SYSTEM and "[User Response]" in str(m.content or "")
+    ], "the system-note fallback should not fire when a dangling call exists"
