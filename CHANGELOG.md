@@ -8,6 +8,111 @@ policy.
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-08-16
+
+A release about controls that were not controlling anything. Six settings and
+one whole feature were documented, shipped, and did nothing — and the pattern
+in every case is the same: the work is done, and the result never reaches the
+caller.
+
+### Added
+
+- **`gate_tool` — put the admission gate in front of a tool, in one line.**
+
+  ```python
+  agent = Agent(model=model, tools=[
+      lookup_order,                                     # read-only, ungated
+      gate_tool(issue_refund, policy=ControlPolicy()),  # gated
+  ])
+  ```
+
+  `tulip-frameworks` has shipped `gate_langchain_tool` and its siblings for a
+  while, so a LangChain user could put `admit()` in front of a tool trivially
+  while a Tulip user hand-wrote the try/except — on the one feature the project
+  is built around. Everything needed was already in core: `tulip.control.action`
+  was promoted there in 2.3.0 "so the SDK, the gateway, the registry and these
+  bridges share one derivation instead of four", and only the bridges used it.
+
+  The returned tool keeps the original's name, description and parameter
+  schema, so the model cannot tell the difference — the gate is not something
+  it can be talked around. A refusal comes back as a readable result rather
+  than an exception, in the same shape the bridges return, so a policy reads
+  the same either way. `on_refusal="raise"` is there for a caller that would
+  rather stop.
+
+  Gating a **sandboxed** tool composes rather than replacing it: the gate
+  decides, then the original tool runs in its own sandbox. A refusal never
+  reaches the sandbox at all.
+
+- **`GSARValidationError`**, which `GSARConfig.fail_on_low_score` had been
+  documented as raising since it was written. See below.
+
+### Fixed
+
+- **Ten async clients outlived the event loop that built them.** `httpx` binds
+  a connection pool to the loop running when the client is created, and
+  `openai` and `anthropic` are `httpx`. Cached on `self`, they worked exactly
+  once per process:
+
+  ```
+  loop 1: OK    loop 2: APIConnectionError: Connection error.    loop 3: OK
+  ```
+
+  Two things made it expensive. The message reads as a provider outage, so the
+  first hour goes to the key, the network and a status page. And it *recovers*
+  on the third loop, because the failed request evicts the dead connection — so
+  it presents as an intermittent network blip. Two `asyncio.run()` calls, a
+  notebook cell run twice, or FastAPI's `TestClient` all reach it.
+
+  Fixed across `models/native/openai`, `models/native/anthropic`,
+  `rag/embeddings/openai`, `providers/image`, `providers/speech`,
+  `memory/backends/http`, `memory/backends/mysql`,
+  `memory/store_backends/postgresql`, `rag/stores/opensearch` and
+  `rag/stores/pgvector`, and factored into `tulip.core.loop_bound` — the
+  pattern had already been hand-written three times with three different cache
+  keys. A guard now fails on a lazily-cached client with no loop key.
+
+- **`on_iteration_start` and `on_iteration_end` never fired.** `HookProvider`
+  documents eight callbacks; six worked. The dispatch machinery existed and
+  nothing called it. A hook that never fires is worse than one that does not
+  exist: you write it, attach it, see no error, and conclude the run never
+  reached that phase.
+
+- **`AgentResult.grounding_score` and `.ungrounded_claims` were always `None`
+  and `[]`.** The grounding loop ran — it can trigger replans — and emitted its
+  verdict; nothing carried it to the result. (Note: grounding only runs when the
+  agent used a tool, since evidence comes from tool results.)
+
+- **`ExecutionMetrics.reflexion_evaluations` and `.grounding_evaluations` were
+  always `0`.** The runtime counts both; they were locals in a generator.
+
+- **`GSARConfig.fail_on_low_score` did nothing.** It was documented as raising
+  `GSARValidationError`, and that exception existed only inside the sentence
+  promising it. An agent explicitly configured to refuse un-grounded output
+  shipped it silently — the one outcome the setting exists to prevent.
+
+- **`GuardrailConfig.action_overrides` failed silently on a wrong key.** Rule
+  names are prefixed: a pattern under `blocked_content_patterns["sql_injection"]`
+  raises `blocked_sql_injection`. Overriding the bare name was a lookup miss
+  that fell through to `default_action` without a word — you believed you
+  downgraded a rule to WARN, it stayed at BLOCK. The project's own test fell
+  into it. An override no rule can consult is now refused, and names the one you
+  probably meant.
+
+- **The memory backends accepted unknown constructor kwargs.** `notebook_68`
+  passed `namespace=` where the field is `prefix=`; nothing complained, the
+  namespace did not apply, and every run shared one Redis keyspace.
+
+### Changed
+
+- **`SteeringHook` now says which of its two controls can fail open.** Measured
+  against a self-hosted Qwen3.6-35B: with `policy="Never allow delete or
+  destructive operations."` the judge did not intervene and the agent reported
+  deleting the table, while a tool calling `admit()` held under the same model
+  and prompt. `policy` is advisory and enforced by a judge; `interrupt_tools`
+  is a set-membership check that never consults the judge and cannot fail open.
+  The docstring documented them identically.
+
 ## [2.7.0] - 2026-08-15
 
 One deprecation, one retrieval bug, and the two most-read examples finally
