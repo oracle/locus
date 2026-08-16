@@ -41,7 +41,8 @@ from __future__ import annotations
 
 import inspect
 import json
-from typing import TYPE_CHECKING, Any, Literal
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 from tulip.control.action import ActionSpec, resolve_action
 from tulip.security.admit import AdmissionError, admit
@@ -55,7 +56,30 @@ if TYPE_CHECKING:
     from tulip.tools.decorator import Tool
 
 
-__all__ = ["gate_tool"]
+__all__ = ["ApprovalBridge", "gate_tool"]
+
+
+@runtime_checkable
+class ApprovalBridge(Protocol):
+    """Submit a held action for out-of-band approval, and check its state.
+
+    A structural Protocol, deliberately: it has no import-time dependency on
+    anything, so the same object satisfies this and ``tulip-frameworks``'s
+    bridge of the same name. A gateway approval broker matches it in shape.
+
+    Without one, a held action tells the model it was held and stops there —
+    true, and not actionable. With one, the refusal carries an id the agent
+    can poll while a human decides on a channel the agent cannot reach.
+    """
+
+    def submit(self, principal: str, tool: str, args: Mapping[str, Any]) -> str:
+        """Record a pending approval; return an id the agent can poll."""
+        ...
+
+    def state(self, approval_id: str) -> str | None:
+        """Current state for an id — ``"pending"`` / ``"approved"`` / ``"denied"``."""
+        ...
+
 
 #: What the model is handed when the gate refuses. Deliberately identical to
 #: what the ``tulip-frameworks`` bridges return, so the same policy reads the
@@ -63,17 +87,31 @@ __all__ = ["gate_tool"]
 _REFUSAL_KEYS = ("status", "outcome", "action", "asset", "reason")
 
 
-def _refusal(error: AdmissionError) -> str:
-    decision = error.decision
-    return json.dumps(
-        {
-            "status": "denied" if decision.outcome == "deny" else "held_for_approval",
-            "outcome": decision.outcome,
-            "action": decision.action.name,
-            "asset": decision.action.asset,
-            "reason": decision.reason,
-        }
+def _refusal(
+    error: AdmissionError,
+    *,
+    approval: ApprovalBridge | None = None,
+    principal: str = "agent",
+    kwargs: Mapping[str, Any] | None = None,
+) -> str:
+    denied = error.decision.outcome == "deny"
+    payload: dict[str, Any] = {
+        "status": "denied" if denied else "held_for_approval",
+        "outcome": error.decision.outcome,
+        "action": error.decision.action.name,
+        "asset": error.decision.action.asset,
+        "reason": error.decision.reason,
+    }
+    # A denial is final — there is nothing to poll, and offering an id would
+    # invite the agent to wait for a decision that will never come.
+    if denied or approval is None:
+        return json.dumps(payload)
+
+    payload["approval_id"] = approval.submit(
+        principal, error.decision.action.name, dict(kwargs or {})
     )
+    payload["next"] = "call approval_status(approval_id) once a human decides"
+    return json.dumps(payload)
 
 
 def gate_tool(
@@ -85,6 +123,8 @@ def gate_tool(
     finding: Evidence | None = None,
     verdict: VerificationResult | None = None,
     on_refusal: Literal["return", "raise"] = "return",
+    approval: ApprovalBridge | None = None,
+    principal: str = "agent",
 ) -> Tool:
     """Return a copy of ``tool`` whose call goes through :func:`admit` first.
 
@@ -105,6 +145,13 @@ def gate_tool(
             requires one.
         verdict: A verification result, when the policy sets
             ``require_verification_score``.
+        approval: Where to submit an action held for a human. Without one, a
+            hold tells the model it was held and stops there — true, and not
+            actionable. With one, the refusal carries an ``approval_id`` the
+            agent can poll. A denial never gets an id: it is final, and
+            offering one would invite the agent to wait for a decision that is
+            not coming.
+        principal: Who the held action is attributed to on the approval.
         on_refusal: ``"return"`` hands the model a JSON refusal naming the
             outcome and the reason, so it can explain itself to the user and
             the run continues. ``"raise"`` re-raises
@@ -153,7 +200,7 @@ def gate_tool(
         except AdmissionError as error:
             if on_refusal == "raise":
                 raise
-            return _refusal(error)
+            return _refusal(error, approval=approval, principal=principal, kwargs=kwargs)
 
     # `sandbox` is deliberately not set on the wrapper: it would short-circuit
     # `execute` and skip the gate. The sandbox is not lost — `perform` above

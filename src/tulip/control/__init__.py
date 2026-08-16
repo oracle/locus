@@ -45,7 +45,7 @@ from tulip.control.action import (
     derive_labels,
     resolve_action,
 )
-from tulip.control.gate import gate_tool
+from tulip.control.gate import ApprovalBridge, gate_tool
 from tulip.security.admit import AdmissionError, admit
 from tulip.security.audit import AuditRecord, AuditTrail
 from tulip.security.findings import Evidence
@@ -73,6 +73,7 @@ __all__ = [
     "action_from_labels",
     "asset_from_args",
     "default_action",
+    "ApprovalBridge",
     "gate_tool",
     "resolve_action",
     # Argument-derived labels (declarative rules on a tool definition)

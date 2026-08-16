@@ -156,7 +156,10 @@ def test_the_refusal_shape_matches_the_framework_bridges() -> None:
 
     payload = json.loads(_run([gated], 4_000_000.0).tool_executions[0].result)
 
-    assert set(payload) == {"status", "outcome", "action", "asset", "reason"}
+    # The five the bridges always send. Asserting equality here was too tight:
+    # it pinned the shape at a moment when `approval_id` and `next` were
+    # missing, so the test defended the gap instead of the contract.
+    assert {"status", "outcome", "action", "asset", "reason"} <= set(payload)
     assert payload["status"] == "held_for_approval"
 
 
@@ -310,3 +313,91 @@ def test_the_wrapper_does_not_carry_the_sandbox_field() -> None:
     run_code.sandbox = SandboxSpec(provider="subprocess")
 
     assert gate_tool(run_code, policy=_policy()).sandbox is None
+
+
+# --------------------------------------------------------------------------
+# Out-of-band approval — a hold the agent can do something about
+# --------------------------------------------------------------------------
+
+
+class _Broker:
+    """Duck-typed, to prove the Protocol is structural."""
+
+    def __init__(self) -> None:
+        self.submitted: list[tuple[str, str, dict]] = []
+
+    def submit(self, principal: str, tool_name: str, args: dict) -> str:
+        self.submitted.append((principal, tool_name, dict(args)))
+        return "appr-77"
+
+    def state(self, approval_id: str) -> str:
+        return "pending"
+
+
+def _hold_policy() -> ControlPolicy:
+    return ControlPolicy(
+        require_verification_score=0.0, require_human_for=frozenset({"production"})
+    )
+
+
+def _production(name: str, kwargs: dict) -> Action:
+    return Action(name=name, asset=str(kwargs.get("order_id", "")), environment="production")
+
+
+def test_a_plain_object_satisfies_the_bridge_protocol() -> None:
+    """Structural on purpose: the same object satisfies this and the one in
+    ``tulip-frameworks``, without either package importing the other."""
+    from tulip.control import ApprovalBridge
+
+    assert isinstance(_Broker(), ApprovalBridge)
+
+
+@pytest.mark.asyncio
+async def test_a_held_action_carries_an_id_the_agent_can_poll() -> None:
+    """Without this a hold says "held" and stops — true, and not actionable."""
+    broker = _Broker()
+    gated = gate_tool(
+        issue_refund,
+        policy=_hold_policy(),
+        action=_production,
+        approval=broker,
+        principal="svc-a",
+    )
+
+    payload = json.loads(await gated.execute(order_id="o1", amount_usd=4_000_000.0))
+
+    assert payload["approval_id"] == "appr-77"
+    assert "approval_status" in payload["next"]
+    assert broker.submitted == [
+        ("svc-a", "issue_refund", {"order_id": "o1", "amount_usd": 4_000_000.0})
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_denial_gets_no_approval_id() -> None:
+    """A denial is final. An id would invite the agent to wait for a decision
+    that is never coming."""
+    broker = _Broker()
+    gated = gate_tool(
+        issue_refund,
+        policy=ControlPolicy(require_verification_score=0.0, deny_for=frozenset({"irreversible"})),
+        action=lambda name, kwargs: Action(name=name, asset="o2", tags=frozenset({"irreversible"})),
+        approval=broker,
+    )
+
+    payload = json.loads(await gated.execute(order_id="o2", amount_usd=4_000_000.0))
+
+    assert payload["status"] == "denied"
+    assert "approval_id" not in payload
+    assert broker.submitted == []
+
+
+@pytest.mark.asyncio
+async def test_without_a_bridge_the_hold_is_unchanged() -> None:
+    """The parameter is additive; nothing that worked before changes shape."""
+    gated = gate_tool(issue_refund, policy=_hold_policy(), action=_production)
+
+    payload = json.loads(await gated.execute(order_id="o3", amount_usd=4_000_000.0))
+
+    assert payload["status"] == "held_for_approval"
+    assert "approval_id" not in payload
