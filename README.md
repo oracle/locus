@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tuliplabs-ai/sdk-python/main/docs/img/tuliplabs-logo.png" alt="tuliplabs" width="320">
+  <img src="https://raw.githubusercontent.com/tuliplabs-ai/tulip-agents/main/docs/img/tuliplabs-logo.png" alt="tuliplabs" width="320">
 </p>
 
 <p align="center">
@@ -69,7 +69,7 @@ pip install "tulip-frameworks[langchain]"   # or [crewai] / [openai-agents] / [l
 ```
 
 Agents outside Python reach the same gate over the wire through
-[`tulip-gateway`](https://github.com/tuliplabs-ai/tulip-gateway)'s `/v1/admit`, with a TypeScript
+[`tulip-gateway`](https://tulipagents.ai/integrations/frameworks/)'s `/v1/admit`, with a TypeScript
 client in [`tulip-frameworks-js`](https://github.com/tuliplabs-ai/tulip-frameworks-js).
 → [The frameworks guide](https://tulipagents.ai/integrations/frameworks/)
 
@@ -319,16 +319,16 @@ with `register_provider("myco", MyModel)`.
 defaults to the bundled mock model when no API key is present.
 
 ```bash
-git clone https://github.com/tuliplabs-ai/sdk-python.git
-cd sdk-python && pip install -e .
+git clone https://github.com/tuliplabs-ai/tulip-agents.git
+cd tulip-agents && pip install -e .
 
 python examples/notebook_06_basic_agent.py           # your first agent
 python examples/notebook_58_cognitive_router.py      # the cognitive router
 python examples/notebook_69_research_workflow.py     # full research pipeline
 ```
 
-The **[workbench](https://github.com/tuliplabs-ai/workbench)** is a browser playground for every
-pattern — two clicks to a running agent, no editor setup. For production, `AgentServer` is a
+The **workbench** is a browser playground for every pattern — two clicks to a running
+agent, no editor setup. For production, `AgentServer` is a
 drop-in FastAPI app (`POST /invoke`, `POST /stream`, `GET/DELETE /threads/{id}`, `GET /health`)
 and the repo ships a multi-stage `Dockerfile`.
 
@@ -402,18 +402,17 @@ src/tulip/
 └── integrations/   MCP (client + server)
 ```
 
-The docs site and browser workbench live in sibling repos:
-[tuliplabs-ai/docs](https://github.com/tuliplabs-ai/docs) (published at
-[tulipagents.ai](https://tulipagents.ai/)) and
-[tuliplabs-ai/workbench](https://github.com/tuliplabs-ai/workbench).
+The docs site lives in a sibling repo:
+[tuliplabs-ai/docs](https://github.com/tuliplabs-ai/docs), published at
+[tulipagents.ai](https://tulipagents.ai/).
 
 ---
 
 ## Contributing
 
 ```bash
-git clone https://github.com/tuliplabs-ai/sdk-python.git
-cd sdk-python && pip install -e ".[dev,sdk]"
+git clone https://github.com/tuliplabs-ai/tulip-agents.git
+cd tulip-agents && pip install -e ".[dev,sdk]"
 hatch run check        # ruff + mypy
 hatch run test         # unit tests across Python 3.11–3.14
 pre-commit install
