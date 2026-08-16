@@ -178,3 +178,29 @@ async def test_stream_yields_chunks_then_done() -> None:
 
     assert "".join(c.content or "" for c in chunks) == "hello world"
     assert chunks[-1].done is True
+
+
+@pytest.mark.asyncio
+async def test_streamed_doubles_carry_their_tool_calls() -> None:
+    """A streaming double must stream the tool calls, not just the prose.
+
+    The agent loop rebuilds a turn from chunk events alone. A double that
+    streams only content produces a turn with NO tool calls — and because that
+    is a legal turn, nothing raises: the agent simply does not act, and a test
+    written to prove it acts passes having exercised nothing. That is the
+    failure this asserts against, and it is the reason the assertion is on the
+    CHUNKS rather than on the agent's behaviour.
+    """
+    from tulip.testing import FunctionModel, ScriptedModel, tool_call
+
+    for model in (
+        ScriptedModel([tool_call("issue_refund", order_id="ord-1")]),
+        FunctionModel(lambda messages, tools: tool_call("issue_refund", order_id="ord-1")),
+    ):
+        chunks = [c async for c in model.stream([], [])]
+        streamed = [tc for c in chunks for tc in (getattr(c, "tool_calls", None) or [])]
+        assert [tc.name for tc in streamed] == ["issue_refund"], (
+            f"{type(model).__name__}.stream() dropped the tool call; the agent "
+            "would make no call at all and nothing would report it"
+        )
+        assert chunks[-1].done is True

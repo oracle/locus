@@ -145,12 +145,26 @@ class _RecordingModel:
 
         Implemented rather than raising, so a streaming agent can be tested
         with the same double as a non-streaming one.
+
+        **Tool calls ride in a chunk of their own.** The agent loop rebuilds the
+        turn from these events alone, so a stream carrying only text yields a
+        turn with no tool calls — and this class is most often used to test
+        exactly the behaviour that needs them. It failed silently in the worst
+        possible way: the double claimed to return what ``complete`` returns,
+        the agent made no tool call, no error was raised, and the test passed
+        having exercised nothing. ``stop_reason`` is carried for the same
+        reason — the loop reads it to decide whether the turn ended.
         """
         response = await self.complete(messages, tools, **kwargs)  # type: ignore[attr-defined]
         content = response.content or ""
         for start in range(0, len(content), 12):
             yield ModelChunkEvent(content=content[start : start + 12])
-        yield ModelChunkEvent(done=True, usage=response.usage)
+        tool_calls = getattr(response.message, "tool_calls", None)
+        if tool_calls:
+            yield ModelChunkEvent(tool_calls=list(tool_calls))
+        yield ModelChunkEvent(
+            done=True, usage=response.usage, stop_reason=getattr(response, "stop_reason", None)
+        )
 
 
 def _tool_name(schema: dict[str, Any]) -> str:
