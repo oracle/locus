@@ -253,6 +253,7 @@ DEFAULT_FRONTIER_MODEL = "anthropic:claude-sonnet-5"
 
 
 def build_agent(mode: str) -> Agent:
+    """Build the challenge agent for ``mode`` (local endpoint or hosted API)."""
     if mode == MODE_LOCAL:
         url = os.environ.get("TULIP_MODEL_URL") or os.environ["TULIP_ADVISORY_URL"]
         model: Any = OpenAIModel(
@@ -319,6 +320,7 @@ def banner(mode: str) -> str:
 
 
 async def main() -> None:
+    """Run the interactive challenge: type jailbreaks, watch the gate hold."""
     mode, model_desc = pick_mode()
     agent = build_agent(mode)
     print(banner(mode))

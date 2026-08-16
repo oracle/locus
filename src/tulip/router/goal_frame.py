@@ -78,12 +78,16 @@ class _OrderedStrEnum(StrEnum):
 
 
 class Risk(_OrderedStrEnum):
+    """How costly it would be to get this goal wrong."""
+
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
 
 
 class Complexity(_OrderedStrEnum):
+    """How much work the goal needs — the budget half of the routing call."""
+
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"

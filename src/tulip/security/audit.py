@@ -4,9 +4,15 @@
 """Tamper-evident audit trail — every agent action as replayable evidence.
 
 A :class:`AuditTrail` records agent actions into a hash chain: each record
-commits to the hash of the one before it, so any later edit, deletion, or
-reordering breaks the chain and :meth:`AuditTrail.verify` returns ``False``.
-The trail exports as JSONL for shipping to a SIEM.
+commits to the hash of the one before it, so a later edit, reorder, or
+deletion from the middle breaks the chain and :meth:`AuditTrail.verify`
+returns ``False``. The trail exports as JSONL for shipping to a SIEM.
+
+Truncation is the exception, and it is worth stating plainly: lopping records
+off the *end* of a chain leaves a shorter chain that still verifies, because
+no link can attest to one that was never handed to it. Anchor
+:attr:`AuditTrail.head` externally and pass it to
+``verify(expected_head=...)`` to close that gap — see :meth:`AuditTrail.verify`.
 
 This is a *supporting property* of a trustworthy security agent — the agent
 doing red-team / assurance work leaves a forensic record that holds up —
@@ -117,8 +123,40 @@ class AuditTrail:
         """A copy of the records, in order."""
         return list(self._records)
 
-    def verify(self) -> bool:
-        """Whether the chain is intact — no edit, deletion, or reorder."""
+    def verify(self, *, expected_head: str | None = None) -> bool:
+        """Whether the chain is internally consistent, and optionally un-truncated.
+
+        On its own this catches every edit, reorder, and deletion **from the
+        middle** of the chain: each of those leaves a record whose stored hash
+        no longer matches its contents, or whose ``prev_hash`` no longer points
+        at the record before it.
+
+        It cannot, on its own, catch a *truncation*. Dropping records from the
+        end — or discarding the trail entirely — leaves a shorter chain that is
+        perfectly valid on its own terms, so this returns ``True``. That is a
+        property of hash chains in general, not of this implementation: nothing
+        inside a chain can attest to a link that was never handed to it.
+
+        Truncation is what ``expected_head`` is for. Persist :attr:`head`
+        somewhere the agent cannot reach — a WORM bucket, a append-only log, a
+        transparency log, a co-signer — and pass it back here. Every attack
+        above, truncation included, changes the head:
+
+        ```python
+        anchor = trail.head  # written to durable, external storage
+        ...
+        trail.verify(expected_head=anchor)  # False if anything was removed
+        ```
+
+        Args:
+            expected_head: The chain head recorded out-of-band. When given, the
+                trail must also *end* on this hash. Omit it and truncation goes
+                undetected — see above.
+
+        Returns:
+            ``True`` if the chain is intact, and ends at ``expected_head`` when
+            one was supplied.
+        """
         prev = _GENESIS
         for i, rec in enumerate(self._records):
             if rec.seq != i or rec.prev_hash != prev:
@@ -126,6 +164,8 @@ class AuditTrail:
             if _entry_hash(rec.seq, rec.ts, rec.event_type, rec.payload, rec.prev_hash) != rec.hash:
                 return False
             prev = rec.hash
+        if expected_head is not None and self.head != expected_head:
+            return False
         return True
 
     def export_jsonl(self) -> str:

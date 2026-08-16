@@ -41,7 +41,7 @@ from __future__ import annotations
 
 import inspect
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 from tulip.control.action import ActionSpec, resolve_action
@@ -51,7 +51,7 @@ from tulip.security.admit import AdmissionError, admit
 if TYPE_CHECKING:
     from tulip.security.audit import AuditTrail
     from tulip.security.findings import Evidence
-    from tulip.security.policy import ControlPolicy
+    from tulip.security.policy import ApprovalDecision, ControlPolicy
     from tulip.security.verify import VerificationResult
     from tulip.tools.decorator import Tool
 
@@ -87,12 +87,32 @@ class ApprovalBridge(Protocol):
 _REFUSAL_KEYS = ("status", "outcome", "action", "asset", "reason")
 
 
+def _reason_for(
+    error: AdmissionError,
+    reason: str | Callable[[ApprovalDecision], str] | None,
+) -> str:
+    """The refusal sentence: the caller's if they gave one, else the policy's.
+
+    The policy's own reason is a join of the checks that fired -- "blast radius
+    3 exceeds the maximum 1", "labels ['large_refund'] are denied by policy".
+    That is the right level of detail for the audit trail and for a developer
+    reading a log. It is control-plane vocabulary, and a model handed it will
+    repeat it verbatim to whoever is on the other end. ``refusal_reason`` is
+    how an integrator says what the *user* should hear instead; the policy
+    detail is still written to the trail either way.
+    """
+    if reason is None:
+        return error.decision.reason
+    return reason(error.decision) if callable(reason) else reason
+
+
 def _refusal(
     error: AdmissionError,
     *,
     approval: ApprovalBridge | None = None,
     principal: str = "agent",
     kwargs: Mapping[str, Any] | None = None,
+    reason: str | Callable[[ApprovalDecision], str] | None = None,
 ) -> str:
     denied = error.decision.outcome == "deny"
     payload: dict[str, Any] = {
@@ -100,7 +120,7 @@ def _refusal(
         "outcome": error.decision.outcome,
         "action": error.decision.action.name,
         "asset": error.decision.action.asset,
-        "reason": error.decision.reason,
+        "reason": _reason_for(error, reason),
     }
     # A denial is final — there is nothing to poll, and offering an id would
     # invite the agent to wait for a decision that will never come.
@@ -125,6 +145,7 @@ def gate_tool(
     on_refusal: Literal["return", "raise"] = "return",
     approval: ApprovalBridge | None = None,
     principal: str = "agent",
+    refusal_reason: str | Callable[[ApprovalDecision], str] | None = None,
 ) -> Tool:
     """Return a copy of ``tool`` whose call goes through :func:`admit` first.
 
@@ -156,6 +177,13 @@ def gate_tool(
             outcome and the reason, so it can explain itself to the user and
             the run continues. ``"raise"`` re-raises
             :class:`AdmissionError` for a caller that would rather stop.
+        refusal_reason: What the model is told when an action is refused. By
+            default it is the policy's own reason, which names the checks that
+            fired — accurate, and written in control-plane vocabulary the model
+            will repeat verbatim to the end user ("blast radius 3 exceeds the
+            maximum 1"). Pass a string, or ``(decision) -> str`` to vary by
+            outcome, to say what the user should hear instead. The full policy
+            reason is recorded on the audit trail regardless.
 
     Returns:
         A new :class:`~tulip.tools.decorator.Tool`. Name, description and
@@ -200,7 +228,13 @@ def gate_tool(
         except AdmissionError as error:
             if on_refusal == "raise":
                 raise
-            return _refusal(error, approval=approval, principal=principal, kwargs=kwargs)
+            return _refusal(
+                error,
+                approval=approval,
+                principal=principal,
+                kwargs=kwargs,
+                reason=refusal_reason,
+            )
 
     # `sandbox` is deliberately not set on the wrapper: it would short-circuit
     # `execute` and skip the gate. The sandbox is not lost — `perform` above

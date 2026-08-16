@@ -215,6 +215,7 @@ def v1_message_to_legacy(message: A2AV1Message) -> Message:
 
 
 def legacy_message_to_v1(message: Message) -> A2AV1Message:
+    """Convert a legacy A2A ``Message`` to its v1 equivalent."""
     return A2AV1Message(
         role=_legacy_role_to_v1(message.role),
         parts=[legacy_part_to_v1(part) for part in message.parts],
@@ -296,6 +297,11 @@ def v1_task_to_legacy_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def task_result_to_legacy_payload(result: dict[str, Any]) -> dict[str, Any]:
+    """Normalise a task result to the legacy payload shape.
+
+    Accepts either wire format: a v1 task (whose ``state`` is prefixed
+    ``TASK_STATE_``) is downconverted, and a payload already in legacy shape
+    is returned untouched, so a caller need not know which peer it drew."""
     payload = result.get("task", result)
     state = payload.get("status", {}).get("state") if isinstance(payload, dict) else None
     if isinstance(state, str) and not state.startswith("TASK_STATE_"):
@@ -304,6 +310,7 @@ def task_result_to_legacy_payload(result: dict[str, Any]) -> dict[str, Any]:
 
 
 def v1_stream_response_to_legacy_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Convert one v1 streaming response frame to the legacy payload shape."""
     stream = A2AV1StreamResponse.model_validate(payload)
     if stream.task is not None:
         return v1_task_to_legacy_payload(stream.task.model_dump(exclude_none=True))

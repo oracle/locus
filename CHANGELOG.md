@@ -8,6 +8,62 @@ policy.
 
 ## [Unreleased]
 
+## [2.10.0] - 2026-08-16
+
+Findings from a measured comparison against AWS Strands 1.52.0 — both SDKs
+installed side by side, every capability probed by import, and the same governed
+refund run through each. Two of the findings were ours.
+
+### Fixed
+
+- **`AuditTrail.verify()` promised more than a hash chain can deliver.** Its
+  docstring read *"no edit, deletion, or reorder"*. Edits, reorders, and
+  deletions from the **middle** are all caught. Truncation is not: drop records
+  off the end — or discard the trail entirely — and what remains is a valid
+  shorter chain that returns `True`.
+
+  This is a property of hash chains generally, not of this implementation:
+  nothing inside a chain can attest to a link that was never handed to it. The
+  cryptography was never wrong; the sentence was, in the project's flagship
+  security feature. Both the method and module docstrings now state the
+  boundary exactly, and `tests/unit/test_audit_truncation.py` pins all four
+  attacks — including the one that is *supposed* to go undetected, so the
+  docstring cannot quietly drift back.
+
+- **Seven public symbols had no docstring** — three `a2a.protocol_v1`
+  converters, two `rogue.challenge` entry points, and `router.goal_frame`'s
+  `Risk` and `Complexity`. Every public export in the SDK now carries one.
+
+### Added
+
+- **`verify(expected_head=...)`** closes the truncation gap for callers who want
+  it closed. Persist `trail.head` somewhere the agent cannot reach and pass it
+  back; every attack — truncation included — moves the head:
+
+  ```python
+  anchor = trail.head                    # to a WORM bucket, or a co-signer
+  ...
+  trail.verify(expected_head=anchor)     # False if anything was removed
+  ```
+
+- **`refusal_reason` on `gate_tool`** — what the *user* hears when an action is
+  refused. The default is still the policy's own reason, which names the checks
+  that fired. That is right for an audit record and wrong for a customer: run
+  against a live model, it produced *"the blast radius (3) exceeds the maximum
+  1"* and *"classified as a large_refund"* in a customer-facing sentence. Pass a
+  string, or `(decision) -> str` to vary by outcome. The full policy reason is
+  still what goes to the trail.
+
+### Not done
+
+- **Suspending a run on a hold** — `on_refusal="interrupt"` — was built and then
+  pulled. The gate can raise the pause, and the runtime does suspend and
+  checkpoint. But on resume the loop folds the human's answer in as the *result*
+  of the held tool call, and nothing re-invokes the gate to actually perform the
+  action. The agent can then tell the user a refund was issued when nothing ran.
+  A silent false success is worse than no feature, so this needs the agent loop
+  to carry the approval through a resume, not a new parameter on `gate_tool`.
+
 ## [2.9.0] - 2026-08-16
 
 One gap closed in `gate_tool`, found by checking a claim rather than repeating it.
