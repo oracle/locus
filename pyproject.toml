@@ -221,10 +221,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/tuliplabs-ai/sdk-python"
+Homepage = "https://github.com/tuliplabs-ai/tulip-agents"
 Documentation = "https://tulipagents.ai/"
-Repository = "https://github.com/tuliplabs-ai/sdk-python"
-Issues = "https://github.com/tuliplabs-ai/sdk-python/issues"
+Repository = "https://github.com/tuliplabs-ai/tulip-agents"
+Issues = "https://github.com/tuliplabs-ai/tulip-agents/issues"
 
 # =============================================================================
 # Hatch Configuration

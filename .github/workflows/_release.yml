@@ -77,7 +77,7 @@ jobs:
 
       # pypa/gh-action-pypi-publish@v1.14.2 — Trusted Publishing (OIDC).
       # Requires a "pending/trusted publisher" registered on test.pypi.org:
-      #   repo=tuliplabs-ai/sdk-python, workflow=_release.yml, environment=testpypi
+      #   repo=tuliplabs-ai/tulip-agents, workflow=_release.yml, environment=testpypi
       # continue-on-error so a TestPyPI hiccup never blocks the prod publish;
       # skip-existing tolerates re-runs over an already-uploaded version.
       - name: Publish to TestPyPI
@@ -145,7 +145,7 @@ jobs:
 
       # pypa/gh-action-pypi-publish@v1.14.2 — Trusted Publishing (OIDC).
       # Requires a "pending/trusted publisher" on pypi.org:
-      #   repo=tuliplabs-ai/sdk-python, workflow=_release.yml, environment=pypi
+      #   repo=tuliplabs-ai/tulip-agents, workflow=_release.yml, environment=pypi
       #
       # Moved off v1.14.0 on 2026-08-12: `requires = ["hatchling"]` is unpinned,
       # so the build machine picked up a hatchling that emits

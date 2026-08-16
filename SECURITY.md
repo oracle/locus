@@ -6,7 +6,7 @@ If you believe you have found a security vulnerability in Tulip, please report i
 
 **Please do not report security vulnerabilities through public GitHub issues.**
 
-Instead, use [GitHub private vulnerability reporting](https://github.com/tuliplabs-ai/sdk-python/security/advisories/new) on this repository, including:
+Instead, use [GitHub private vulnerability reporting](https://github.com/tuliplabs-ai/tulip-agents/security/advisories/new) on this repository, including:
 
 - A description of the vulnerability
 - Steps to reproduce the issue

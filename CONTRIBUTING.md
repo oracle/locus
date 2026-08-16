@@ -69,8 +69,8 @@ We welcome:
 
 ```bash
 # Clone the repository
-git clone https://github.com/tuliplabs-ai/sdk-python.git
-cd sdk-python
+git clone https://github.com/tuliplabs-ai/tulip-agents.git
+cd tulip-agents
 
 # Install Hatch if needed
 pip install hatch
@@ -502,7 +502,7 @@ and how `TulipDeprecationWarning` works.
 
 ## Questions?
 
-- Open a [GitHub Discussion](https://github.com/tuliplabs-ai/sdk-python/discussions)
-- Check existing [Issues](https://github.com/tuliplabs-ai/sdk-python/issues)
+- Open a [GitHub Discussion](https://github.com/tuliplabs-ai/tulip-agents/discussions)
+- Check existing [Issues](https://github.com/tuliplabs-ai/tulip-agents/issues)
 
 Thank you for contributing to the SDK!
