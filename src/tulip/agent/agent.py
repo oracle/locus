@@ -666,8 +666,10 @@ class Agent(AgentRuntimeMixin, BaseModel):
         # sent every approval resume down the system-note path — and produced
         # exactly the failure the comment predicts. The model returns an empty
         # turn, the loop reads that as "finished", and an APPROVED action is
-        # silently never performed while the run reports success. See
-        # FINDING-an-approved-action-can-silently-not-happen.md.
+        # silently never performed while the run reports success — the worst
+        # available failure for a governance feature, because the transcript
+        # shows an approval and an untroubled reply, and nothing anywhere
+        # records that the action did not happen.
         #
         # ask_user still wins when both are present, so the established path is
         # bit-for-bit unchanged and only the previously-broken case moves.
