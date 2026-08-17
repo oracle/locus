@@ -267,6 +267,9 @@ test = "pytest {args:tests/unit}"
 # installed SDK. Also runs as a unit test, so CI gates it either way; this
 # is the fast local loop when editing docs.
 snippets = "python scripts/check_doc_snippets.py {args}"
+# The version is asserted in four documents no tool keeps in agreement.
+# Run this before tagging — CI runs it too, in the lint job.
+release-check = "python scripts/check_release_consistency.py {args}"
 test-integration = "pytest {args:tests/integration}"
 test-all = "pytest {args:tests}"
 test-cov = "pytest --cov=src/tulip --cov-report=term-missing --cov-report=html --cov-report=json {args:tests/unit}"
