@@ -8,6 +8,34 @@ policy.
 
 ## [Unreleased]
 
+## [2.11.1] - 2026-08-17
+
+### Fixed
+
+- **An approved action could silently not happen.** `Agent.resume()` searched
+  the transcript for a dangling **`ask_user`** call specifically. An approval
+  hold suspends on the *governed call itself* — `refund_customer`, not
+  `ask_user` — so every approval resume fell through to the system-note path
+  instead. The model then returned an empty turn, the loop read that as
+  "finished", and the approved action was never performed while the run
+  reported success.
+
+  That is the worst available failure for a governance feature: the transcript
+  shows an approval and an untroubled reply, and nothing anywhere records that
+  the action did not happen. `resume()` now folds the reply into any unanswered
+  call, with `ask_user` still winning when both are present, so the established
+  path is unchanged and only the broken case moves.
+
+- **The test doubles dropped every tool call when streamed.**
+  `_RecordingModel.stream()` emitted text chunks and a done event, but never
+  the tool calls — and the agent loop rebuilds the turn from those events
+  alone. A streaming test using the double exercised nothing, raised nothing,
+  and passed. `stop_reason` is carried for the same reason: the loop reads it
+  to decide whether the turn ended.
+
+- **A comment pointed at a file that is not in the repository.** The substance
+  now lives in the comment instead.
+
 ## [2.11.0] - 2026-08-16
 
 ### Added
