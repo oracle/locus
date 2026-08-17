@@ -51,6 +51,8 @@ from tulip.models.base import ModelResponse
 
 
 __all__ = [
+    "AgentTestClient",
+    "AgentTrace",
     "FunctionModel",
     "ScriptedModel",
     "text",
@@ -240,3 +242,178 @@ class FunctionModel(_RecordingModel):
         self._record(messages, tools)
         result = self._handler(list(messages), list(tools or []))
         return text(result) if isinstance(result, str) else result
+
+
+# ---------------------------------------------------------------------------
+# Trace assertions
+#
+# The doubles above answer "what did the model see?". These answer the other
+# half — "what did the agent do?" — because that is the half a regression
+# usually breaks, and asserting it by hand means reaching through
+# ``result.tool_executions`` and rebuilding the same three comprehensions in
+# every test file.
+# ---------------------------------------------------------------------------
+
+
+class AgentTrace:
+    """One run, with the questions a test actually asks made cheap.
+
+    Every assertion here reports what happened rather than only that
+    something did not, because ``assert False`` tells you nothing at 3am::
+
+        AssertionError: expected tool 'refund' to be called, but the agent
+        called: ['lookup_order', 'check_balance']
+
+    Attributes are plain data — assert on them directly when no helper fits.
+    """
+
+    def __init__(self, result: Any, model: Any) -> None:
+        #: The :class:`~tulip.core.results.AgentResult` the run returned.
+        self.result = result
+        #: The double the agent ran against, for input-side assertions.
+        self.model = model
+
+    # -- data ------------------------------------------------------------
+
+    @property
+    def message(self) -> str:
+        """The agent's final answer."""
+        return str(getattr(self.result, "message", "") or "")
+
+    @property
+    def tool_calls(self) -> list[tuple[str, dict[str, Any]]]:
+        """``(name, arguments)`` for each tool the agent actually ran, in order."""
+        return [(e.tool_name, dict(e.arguments or {})) for e in self._executions]
+
+    @property
+    def tool_names(self) -> list[str]:
+        """Just the names, in call order — the common case."""
+        return [name for name, _ in self.tool_calls]
+
+    @property
+    def model_calls(self) -> int:
+        """How many times the agent went back to the model."""
+        return int(getattr(self.model, "call_count", 0))
+
+    @property
+    def failed_tools(self) -> list[tuple[str, str]]:
+        """``(name, error)`` for tools that raised."""
+        return [(e.tool_name, str(e.error)) for e in self._executions if e.error]
+
+    @property
+    def _executions(self) -> list[Any]:
+        return list(getattr(self.result, "tool_executions", ()) or ())
+
+    # -- assertions ------------------------------------------------------
+
+    def assert_tool_called(self, name: str, **expected: Any) -> AgentTrace:
+        """The agent ran ``name``, optionally with these argument values.
+
+        Only the arguments you name are compared, so a test can pin the one
+        that matters without restating the whole call.
+        """
+        matches = [args for called, args in self.tool_calls if called == name]
+        if not matches:
+            raise AssertionError(
+                f"expected tool {name!r} to be called, but the agent called: "
+                f"{self.tool_names or 'no tools at all'}"
+            )
+        if not expected:
+            return self
+        for args in matches:
+            if all(args.get(k) == v for k, v in expected.items()):
+                return self
+        raise AssertionError(
+            f"tool {name!r} was called, but never with {expected!r}.\n  actual call(s): {matches!r}"
+        )
+
+    def assert_tool_not_called(self, name: str) -> AgentTrace:
+        """The agent never ran ``name`` — the assertion a gate test needs."""
+        if name in self.tool_names:
+            raise AssertionError(
+                f"expected tool {name!r} NOT to be called, but it ran. "
+                f"Full call order: {self.tool_names}"
+            )
+        return self
+
+    def assert_tools_called(self, *names: str) -> AgentTrace:
+        """Exactly these tools ran, in exactly this order."""
+        if self.tool_names != list(names):
+            raise AssertionError(
+                f"tool call order mismatch.\n"
+                f"  expected: {list(names)}\n"
+                f"  actual  : {self.tool_names}"
+            )
+        return self
+
+    def assert_model_calls(self, count: int) -> AgentTrace:
+        """The agent took exactly ``count`` turns with the model.
+
+        Guards the loop against silently growing an extra round trip, which
+        costs money on every run and shows up nowhere else.
+        """
+        if self.model_calls != count:
+            raise AssertionError(
+                f"expected {count} model call(s), got {self.model_calls}. "
+                f"Tools run: {self.tool_names}"
+            )
+        return self
+
+    def assert_tool_offered(self, name: str) -> AgentTrace:
+        """``name`` was advertised to the model on the first turn.
+
+        A tool the model was never shown cannot be called, and that failure
+        otherwise looks identical to a model that chose not to call it.
+        """
+        offered = list(getattr(self.model, "offered_tools", []) or [])
+        first = offered[0] if offered else []
+        if name not in first:
+            raise AssertionError(
+                f"tool {name!r} was never offered to the model. Offered on the "
+                f"first turn: {first or 'none'}"
+            )
+        return self
+
+    def assert_succeeded(self) -> AgentTrace:
+        """The run finished without an error and without a failing tool."""
+        error = getattr(self.result, "error", None)
+        if error:
+            raise AssertionError(f"agent run failed: {error}")
+        if self.failed_tools:
+            raise AssertionError(f"tools raised during the run: {self.failed_tools}")
+        return self
+
+
+class AgentTestClient:
+    """Run an agent and get a :class:`AgentTrace` back.
+
+    A thin wrapper, deliberately: it owns no configuration and changes no
+    behaviour, so what a test exercises is the same object production runs::
+
+        from tulip.testing import AgentTestClient, ScriptedModel, text, tool_call
+
+        model = ScriptedModel([tool_call("add", a=2, b=2), text("4")])
+        client = AgentTestClient(Agent(model=model, tools=[add]))
+
+        trace = client.run("what is 2 plus 2?")
+        trace.assert_tool_called("add", a=2, b=2).assert_model_calls(2)
+        assert trace.message == "4"
+
+    Assertions chain, so a single expression can state the whole expectation.
+    """
+
+    def __init__(self, agent: Any) -> None:
+        self.agent = agent
+
+    @property
+    def model(self) -> Any:
+        """The double the agent was built with."""
+        return getattr(self.agent, "_model", None) or getattr(self.agent, "model", None)
+
+    def run(self, prompt: str, **kwargs: Any) -> AgentTrace:
+        """Run to completion and return the trace. Blocking."""
+        return AgentTrace(self.agent.run_sync(prompt, **kwargs), self.model)
+
+    async def arun(self, prompt: str, **kwargs: Any) -> AgentTrace:
+        """Async counterpart of :meth:`run`."""
+        return AgentTrace(await self.agent.arun(prompt, **kwargs), self.model)

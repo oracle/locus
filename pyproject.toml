@@ -439,6 +439,10 @@ ignore = [
 # dump — is printed. It ships inside the package so it runs from an install
 # rather than a clone.
 "src/tulip/rogue/*.py" = ["T201"]
+# The overhead benchmark is a CLI whose entire output is the report it
+# prints, and it shells out to `sys.executable` to time a cold import — the
+# only way to measure a cost that is paid once per process.
+"benchmarks/*.py" = ["T201", "S603"]
 "examples/checkpointer_examples.py" = ["ALL"]
 "examples/config.py" = ["F821", "RET503"]
 "examples/notebook_11_swarm_multiagent.py" = ["F821"]

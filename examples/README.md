@@ -20,6 +20,20 @@ here, and the gate notebooks (83-87) need no credentials at all. Read in
 whatever order the [documentation](https://tulipagents.ai/notebooks/) puts in
 front of you — it is ordered by what builds on what.
 
+## Start here
+
+[`hello.py`](hello.py) is the API and nothing else — a model, a tool, one
+call, twelve lines:
+
+```bash
+export OPENAI_API_KEY=...        # or point TULIP_MODEL at any provider
+python examples/hello.py
+```
+
+The numbered notebooks below each teach one idea against a worked scenario,
+which makes them longer than the API they demonstrate. That is deliberate, and
+it is the wrong first thing to read.
+
 ## How to run
 
 Every numbered notebook runs **offline by default** — with no API key set,
