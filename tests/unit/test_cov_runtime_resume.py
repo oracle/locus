@@ -423,9 +423,9 @@ async def test_resume_rehydrates_from_checkpoint_in_fresh_process() -> None:
     # break silently never performs the approved action while the run reports
     # success. The assertion followed the bug; it now follows the fix.
     msgs = second_agent._last_run_state.messages
-    assert any(
-        m.role == Role.TOOL and "approve" in str(m.content or "") for m in msgs
-    ), "the decision should arrive as the dangling call's tool result"
+    assert any(m.role == Role.TOOL and "approve" in str(m.content or "") for m in msgs), (
+        "the decision should arrive as the dangling call's tool result"
+    )
     assert not any(
         m.role == Role.SYSTEM and "[User Response]" in str(m.content or "") for m in msgs
     )
@@ -479,12 +479,9 @@ async def test_resume_from_state_saves_final_checkpoint() -> None:
     final = store["t-durable"]
     # Folded as the dangling call's tool result rather than a system note —
     # see the cross-pod case above for why the fallback is the wrong channel.
-    assert any(
-        m.role == Role.TOOL and "go ahead" in str(m.content or "") for m in final.messages
-    )
+    assert any(m.role == Role.TOOL and "go ahead" in str(m.content or "") for m in final.messages)
     assert not any(
-        m.role == Role.SYSTEM and "[User Response]" in str(m.content or "")
-        for m in final.messages
+        m.role == Role.SYSTEM and "[User Response]" in str(m.content or "") for m in final.messages
     )
 
 
@@ -703,9 +700,7 @@ async def test_resume_answers_a_dangling_non_ask_user_call_as_its_tool_result() 
     async for _ in agent.resume("APPROVED — issue the call again to perform it"):
         pass
 
-    call = next(
-        tc for m in seen if m.role == Role.ASSISTANT for tc in (m.tool_calls or [])
-    )
+    call = next(tc for m in seen if m.role == Role.ASSISTANT for tc in (m.tool_calls or []))
     assert call.name == "needs_input"
 
     results = [m for m in seen if m.role == Role.TOOL and m.tool_call_id == call.id]
@@ -715,7 +710,5 @@ async def test_resume_answers_a_dangling_non_ask_user_call_as_its_tool_result() 
     )
     assert "APPROVED" in str(results[-1].content)
     assert not [
-        m
-        for m in seen
-        if m.role == Role.SYSTEM and "[User Response]" in str(m.content or "")
+        m for m in seen if m.role == Role.SYSTEM and "[User Response]" in str(m.content or "")
     ], "the system-note fallback should not fire when a dangling call exists"
