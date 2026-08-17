@@ -26,8 +26,9 @@ from tulip.observability.router_events import (
     emit_runnable_failed,
 )
 from tulip.router.compiler import CognitiveCompiler
+from tulip.router.explain import RoutingExplanation
 from tulip.router.goal_frame import GoalFrame
-from tulip.router.runnable import RunnableResult
+from tulip.router.runnable import Runnable, RunnableResult
 
 
 if TYPE_CHECKING:
@@ -88,6 +89,49 @@ class Router:
         if self._on_frame is not None:
             self._on_frame(parsed)
         return parsed
+
+    async def explain(
+        self,
+        user_input: str,
+        frame: GoalFrame | None = None,
+    ) -> RoutingExplanation:
+        """Say what the router would choose, and why. Nothing is executed.
+
+        One model call, for the frame — pass ``frame`` to spend none at all.
+        Selection, ranking and the policy check are pure functions of the
+        frame and the registry, so everything after extraction is free and
+        deterministic.
+
+        Returns the evidence the compiler computes and discards: every
+        protocol that was ruled out and which of the three gates stopped it,
+        the survivors in rank order with the terms that ordered them, and the
+        policy verdict.
+
+            >>> e = await router.explain("Delete every record older than 7 years")
+            >>> e.selected_protocol
+            'approval_gated_execution'
+            >>> e.requires_approval
+            True
+
+        This is the read-only sibling of :meth:`dispatch`; use
+        :meth:`compile` when you want the topology that would be built.
+        """
+        goal_frame = frame if frame is not None else await self.extract(user_input)
+        return self.compiler.explain(goal_frame, goal=user_input)
+
+    async def compile(
+        self,
+        user_input: str,
+        frame: GoalFrame | None = None,
+    ) -> Runnable:
+        """Build the topology without running it.
+
+        The compiler has always separated building from executing; this is
+        the front door for it, so a caller does not have to reach through
+        ``router.compiler`` and construct a frame by hand.
+        """
+        goal_frame = frame if frame is not None else await self.extract(user_input)
+        return await self.compiler.compile(goal_frame)
 
     async def dispatch(
         self,

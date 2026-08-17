@@ -24,6 +24,12 @@ from tulip.observability.router_events import (
     emit_runnable_compiled,
 )
 from tulip.router.capability import CapabilityIndex
+from tulip.router.explain import (
+    Method,
+    RoutingExplanation,
+    rank_candidates,
+    rejection_for,
+)
 from tulip.router.goal_frame import GoalFrame
 from tulip.router.picker import LLMProtocolPicker
 from tulip.router.policy import PolicyDeniedError, PolicyGate, PolicyVerdict
@@ -194,6 +200,62 @@ class CognitiveCompiler:
                 await emit_picker_fallback(run_id, frame, f"{type(exc).__name__}: {exc}")
             picked = min(candidates, key=lambda p: _rank_key(p, frame))
             return picked, "rule_based_fallback", None
+
+    def available_capabilities(self, frame: GoalFrame | None = None) -> set[str]:
+        """Capability ids the gates will see, including the synthetic a2a peer.
+
+        Factored out of :meth:`compile` so :meth:`explain` reports exactly the
+        set the real selection uses — a second copy of this rule would drift.
+        """
+        available = {c.id for c in self.capabilities.all()}
+        if self.a2a_endpoint:
+            available.add(A2A_PEER_CAPABILITY)
+        return available
+
+    def explain(self, frame: GoalFrame, *, goal: str = "") -> RoutingExplanation:
+        """Report the selection the rule-based ranker would make, and why.
+
+        Deterministic and free: no model call, no execution. An opt-in
+        :class:`LLMProtocolPicker` is deliberately **not** consulted — it
+        would cost a call and could pick differently on a second run, so the
+        explanation would stop describing a repeatable decision. When a picker
+        is configured, ``method`` reports what the ladder in
+        :meth:`_pick_protocol` would do, and the ranking shown is the
+        fallback the picker is choosing among.
+        """
+        available = self.available_capabilities(frame)
+        candidates = self.protocols.filter_candidates(frame, available_capabilities=available)
+
+        rejected = tuple(
+            r
+            for r in (rejection_for(p, frame, available) for p in self.protocols.all())
+            if r is not None
+        )
+
+        selected: str | None = None
+        method: Method | None = None
+        verdict = None
+        if candidates:
+            picked = min(candidates, key=lambda p: _rank_key(p, frame))
+            selected = picked.id
+            if self.protocol_picker is None:
+                method = "rule_based"
+            elif len(candidates) == 1:
+                method = "single_candidate"
+            else:
+                method = "llm_picked"
+            verdict = self.policy.check(frame, picked)
+
+        return RoutingExplanation(
+            goal=goal,
+            goal_frame=frame,
+            selected_protocol=selected,
+            method=method,
+            candidates=rank_candidates(candidates, frame, selected),
+            rejected=rejected,
+            available_capabilities=tuple(sorted(available)),
+            policy=verdict,
+        )
 
     async def compile(self, frame: GoalFrame, run_id: str | None = None) -> Runnable:
         """Pick a protocol, run the gate, build the runnable.
