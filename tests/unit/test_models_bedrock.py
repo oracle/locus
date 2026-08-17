@@ -406,3 +406,119 @@ def test_json_round_trip_of_streamed_arguments() -> None:
     blob = json.dumps(payload)
     fragments = [blob[i : i + 3] for i in range(0, len(blob), 3)]
     assert _loads_or_empty("".join(fragments)) == payload
+
+
+# ------------------------------------------------------------------ lifecycle
+
+
+def test_supports_structured_output_is_false() -> None:
+    """Converse has no response_format, and toolChoice support varies by model.
+
+    Claiming it would give a structured-output path that works on Claude and
+    fails silently on Llama; the loop's prompted-JSON fallback works on all of
+    them.
+    """
+    assert _model().supports_structured_output is False
+
+
+def test_a_profile_is_passed_to_the_session(monkeypatch) -> None:
+    """Named profiles are how most AWS shops separate accounts."""
+    captured = {}
+
+    class FakeSession:
+        def __init__(self, **kw):
+            captured.update(kw)
+
+        def client(self, name, **kw):
+            return object()
+
+    import boto3
+
+    monkeypatch.setattr(boto3, "Session", FakeSession)
+    BedrockModel(model=MODEL_ID, profile="prod-readonly").client
+    assert captured["profile_name"] == "prod-readonly"
+
+
+def test_a_session_token_is_forwarded(monkeypatch) -> None:
+    """Temporary STS credentials need all three parts or the call is unsigned."""
+    captured = {}
+
+    class FakeSession:
+        def __init__(self, **kw):
+            captured.update(kw)
+
+        def client(self, name, **kw):
+            return object()
+
+    import boto3
+
+    monkeypatch.setattr(boto3, "Session", FakeSession)
+    BedrockModel(
+        model=MODEL_ID,
+        aws_access_key_id="ak",
+        aws_secret_access_key="sk",  # noqa: S106 — fake creds
+        aws_session_token="st",  # noqa: S106 — fake creds
+    ).client
+    assert captured["aws_session_token"] == "st"
+
+
+async def test_close_releases_the_client() -> None:
+    model = _model()
+    assert model.client is not None
+    await model.close()
+    assert model._client is None
+    # Idempotent: closing twice must not raise.
+    await model.close()
+
+
+async def test_async_context_manager_closes() -> None:
+    model = _model()
+    async with model as entered:
+        assert entered is model
+        assert entered.client is not None
+    assert model._client is None
+
+
+async def test_a_consumer_that_stops_early_does_not_strand_the_reader(monkeypatch) -> None:
+    """Breaking out of the loop must still let the reader thread finish.
+
+    Otherwise it sits blocked on a full queue and the HTTP connection is held
+    until it times out.
+    """
+    model = _model()
+    monkeypatch.setattr(
+        type(model.client),
+        "converse_stream",
+        lambda self, **kw: {"stream": iter(_stream_events())},
+        raising=False,
+    )
+    stream = model.stream([Message.user("hi")], tools=TOOLS)
+    async for event in stream:
+        if event.content:
+            break  # abandon the stream mid-flight
+    await stream.aclose()
+
+
+async def test_a_tool_with_no_arguments_streams_cleanly(monkeypatch) -> None:
+    """Zero input deltas means an empty buffer, which is not valid JSON."""
+    events = [
+        {
+            "contentBlockStart": {
+                "start": {"toolUse": {"toolUseId": "tu-1", "name": "ping"}},
+                "contentBlockIndex": 0,
+            }
+        },
+        {"contentBlockStop": {"contentBlockIndex": 0}},
+        {"messageStop": {"stopReason": "tool_use"}},
+    ]
+    model = _model()
+    monkeypatch.setattr(
+        type(model.client),
+        "converse_stream",
+        lambda self, **kw: {"stream": iter(events)},
+        raising=False,
+    )
+    calls = [
+        c for ev in [e async for e in model.stream([Message.user("hi")])] if (c := ev.tool_calls)
+    ]
+    assert calls[0][0].arguments == {}
