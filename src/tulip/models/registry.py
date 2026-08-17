@@ -94,6 +94,35 @@ def _register_defaults() -> None:
     except ImportError:
         pass
 
+    # Azure OpenAI — OpenAI's models, but deployment-named URLs, an
+    # ``api-key`` header and a required ``api-version``, so it cannot ride
+    # the OpenAI-compatible table either. Same ``openai`` dependency as the
+    # OpenAI provider; no new package.
+    try:
+        from tulip.models.native.azure import AzureOpenAIModel
+
+        register_provider(
+            "azure",
+            lambda m, **kw: cast("ModelProtocol", AzureOpenAIModel(model=m, **kw)),
+        )
+    except ImportError:
+        pass
+
+    # Amazon Bedrock — its own wire protocol, so it cannot ride the
+    # OpenAI-compatible table below. One Converse-API client covers every
+    # model on the service. boto3 is an optional extra and is imported
+    # lazily inside the model, so this registration costs nothing to
+    # anyone who never names a ``bedrock:`` model.
+    try:
+        from tulip.models.native.bedrock import BedrockModel
+
+        register_provider(
+            "bedrock",
+            lambda m, **kw: cast("ModelProtocol", BedrockModel(model=m, **kw)),
+        )
+    except ImportError:
+        pass
+
     # OpenAI-compatible endpoints — Ollama, vLLM, LM Studio, llama.cpp,
     # LiteLLM, Groq, Together, OpenRouter, DeepSeek, Mistral, xAI, Fireworks,
     # Cerebras, Perplexity, NVIDIA NIM, plus a generic ``openai-compatible``

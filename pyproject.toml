@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tulip-agents"
-version = "2.10.0"
+version = "2.11.0"
 description = "The agent framework where the model never holds the trigger — every consequential action clears your policy first, waits for a human when it matters, and lands on a record you can verify. Build on it, or put it around the agent you already have."
 readme = "README.md"
 license = "Apache-2.0"
@@ -115,6 +115,11 @@ s3 = ["boto3>=1.34"]
 # AWS cloud-posture tools (src/tulip/security/aws.py) — boto3 + its botocore
 # service models are the spec that drives use_aws / describe_aws.
 aws = ["boto3>=1.34"]
+
+# Amazon Bedrock models (src/tulip/models/native/bedrock.py). Same single
+# dependency as the other AWS extras: credentials come from boto3's standard
+# chain, so there is nothing else to install or configure.
+bedrock = ["boto3>=1.34"]
 
 # Security domain layer (src/tulip/security/) — one install for the vertical.
 # The intel / SIEM / EDR / fingerprint adapters run their live paths on the

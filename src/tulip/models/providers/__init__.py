@@ -207,6 +207,19 @@ COMPATIBLE_PROVIDERS: tuple[CompatibleProvider, ...] = (
         env_key="NVIDIA_API_KEY",
         label="NVIDIA NIM",
     ),
+    # Google's own OpenAI-compatible surface, not a third-party proxy: Google
+    # publishes and maintains this endpoint alongside the native Gemini API. It
+    # covers chat, tools and streaming, which is the whole surface Tulip drives,
+    # so a routing-table row buys native-quality access with no new dependency
+    # and no second client to keep current. Reach for `google-genai` only if
+    # something outside that surface is needed (context caching, Files API).
+    CompatibleProvider(
+        prefix="gemini",
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+        env_key="GEMINI_API_KEY",
+        label="Google Gemini",
+        env_base_url="GEMINI_BASE_URL",
+    ),
     # --- escape hatch --------------------------------------------------
     CompatibleProvider(
         prefix="openai-compatible",
@@ -270,6 +283,8 @@ def provider_table() -> str:
         "|---|---|---|---|",
         "| `openai` | OpenAI | (default) | `OPENAI_API_KEY` |",
         "| `anthropic` | Anthropic | (default) | `ANTHROPIC_API_KEY` |",
+        "| `bedrock` | Amazon Bedrock | (AWS region) | _(boto3 credential chain)_ |",
+        "| `azure` | Azure OpenAI | `AZURE_OPENAI_ENDPOINT` | `AZURE_OPENAI_API_KEY` |",
     ]
     for spec in COMPATIBLE_PROVIDERS:
         endpoint = f"`{spec.base_url}`" if spec.base_url else "_(supply `base_url`)_"

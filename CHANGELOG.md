@@ -8,6 +8,62 @@ policy.
 
 ## [Unreleased]
 
+## [2.11.0] - 2026-08-16
+
+### Added
+
+- **Amazon Bedrock, via the Converse API** (`bedrock:` prefix). The one provider
+  gap that mattered: sixteen prefixes already reached endpoints speaking the
+  OpenAI wire protocol, and Bedrock speaks its own, so an AWS shop had to stand
+  up a LiteLLM gateway to talk to a service it already had credentials for.
+
+  ```python
+  Agent(config=AgentConfig(model="bedrock:us.amazon.nova-lite-v1:0"))
+  Agent(config=AgentConfig(model="bedrock:us.meta.llama3-3-70b-instruct-v1:0"))
+  ```
+
+  Converse rather than `invoke_model`, so one code path covers every model on
+  the service instead of a request body per vendor. Streaming, tool use, system
+  prompts, Bedrock guardrails and prompt-cache token counts all go through it.
+  Credentials are boto3's standard chain — environment, profile, SSO, instance
+  role, IRSA — because that is what an AWS account already has configured.
+
+  `boto3` is an optional extra (`pip install "tulip-agents[bedrock]"`) imported
+  lazily, so the four-package core install is unchanged.
+
+- **Azure OpenAI** (`azure:` prefix). OpenAI's models, but not at OpenAI's
+  address and not with OpenAI's auth: the URL names a *deployment* rather than
+  a model, credentials go in an `api-key` header, and every request needs an
+  `api-version`. That is why it could not be one more row in the compatible
+  table. It is `OpenAIModel` with `AsyncAzureOpenAI` behind it, so message
+  conversion, tool calls, streaming and structured output are inherited rather
+  than reimplemented — no second code path to drift. Entra ID tokens work in
+  place of a key, which is how most Azure shops authenticate in production.
+  Reuses the existing `openai` extra; no new dependency.
+
+- **Google Gemini** (`gemini:` prefix), through Google's own OpenAI-compatible
+  endpoint — first-party, not a proxy. It covers chat, tools and streaming,
+  which is the entire surface Tulip drives, so this is a routing-table row
+  rather than a second client to keep current.
+
+  Together these close the `Bedrock / Gemini / Azure` row that the capability
+  matrix marked *not offered*, and take the registry from **18 prefixes to 21**.
+
+### Fixed
+
+- **Assistant turns no longer mix text and tool-use blocks.** Converse rejects
+  the combination on some model families and accepts it on others:
+
+  ```
+  ValidationException: messages.N.content: Conversation blocks and tool use
+  blocks cannot be provided in the same turn.
+  ```
+
+  Found by running the same conversation against a second vendor — it passed on
+  Amazon's models and 400'd on Meta's. The tool calls are kept and the model's
+  own preamble is dropped from the replayed history, which costs nothing the
+  next turn needs, since the tool result that follows carries the content.
+
 ## [2.10.0] - 2026-08-16
 
 Findings from a measured comparison against AWS Strands 1.52.0 — both SDKs
