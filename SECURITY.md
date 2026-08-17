@@ -17,11 +17,20 @@ We will acknowledge receipt of your vulnerability report and send you regular up
 
 ## Supported Versions
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 2.1.x   | :white_check_mark: |
-| 2.0.x   | :white_check_mark: |
-| < 2.0   | :x:                |
+Security fixes land on the **latest released minor of the current major**.
+Older minors are not backported — upgrade within the major instead, which
+[`DEPRECATION.md`](DEPRECATION.md) guarantees is non-breaking.
+
+| Version                       | Supported          |
+| ----------------------------- | ------------------ |
+| Latest `2.x` minor            | :white_check_mark: |
+| Earlier `2.x` minors          | :x: — upgrade to the latest `2.x` |
+| `< 2.0`                       | :x:                |
+
+Pin a major, as in `tulip-agents>=2,<3`, and take the newest minor within it.
+Minors ship often, so an enumerated list of supported minors would be stale
+faster than it could be maintained; this table is written to stay correct
+without edits.
 
 ## Security Best Practices
 
