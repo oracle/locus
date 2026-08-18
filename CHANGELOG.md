@@ -8,6 +8,38 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **First-class subagents: `run_subagent` / `Agent.run_subagent`.** A tool
+  body (or a harness) can now spawn an isolated child loop — fresh
+  conversation, its own system prompt, an *explicit* tool allowlist, never
+  the parent's toolset by inheritance — and get back a `SubagentResult`
+  with the child's final text, usage, iterations, and stop reason.
+
+  What makes it first-class rather than "construct an `Agent` in a tool
+  body yourself" is the plumbing a hand-rolled child silently lacks:
+
+  - *Usage rolls up.* The child's token counters fold into the calling
+    run's `AgentState`, so the parent's `token_budget` and its
+    `TerminateEvent.usage` keep counting delegated spend as spend.
+  - *Cancellation propagates.* `parent.cancel()` stops running children —
+    and a child winding down never un-cancels the parent (the loop clears
+    its signal in `finally`; a naively shared event would have handed
+    that clear to the parent).
+  - *Events are observable.* Every child event reaches the `on_event`
+    callback and the SSE bus, stamped with the child's `agent_name`, so a
+    front end can render nested activity instead of a silent gap.
+  - *Not a gate bypass.* A `gate_tool`-wrapped tool carries its gate with
+    it into any allowlist, a process-global harness policy is consulted
+    from inside tool bodies regardless of which loop calls them, and
+    per-agent `HookProvider` policies attach to the child via `hooks=`.
+
+  Parallel children compose with plain `asyncio.gather`; children spawned
+  by parallel tool calls are already capped by the parent executor's
+  `max_concurrency`. The deepagent `task_tool` now rides on this primitive
+  instead of its own hand-rolled child loop, so deepagent subagents gain
+  the rollup, the cancellation linkage, and the event attribution for free.
+
 ## [2.13.0] - 2026-09-06
 
 ### Added

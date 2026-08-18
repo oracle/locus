@@ -34,7 +34,10 @@ from tulip.tools.registry import ToolRegistry
 
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from tulip.agent.hook_orchestrator import HookOrchestrator
+    from tulip.agent.subagent import SubagentResult
     from tulip.memory.conversation import ConversationManager
     from tulip.reasoning.grounding import GroundingEvaluator
     from tulip.reasoning.reflexion import Reflector
@@ -546,6 +549,66 @@ class Agent(AgentRuntimeMixin, BaseModel):
     def is_cancelled(self) -> bool:
         """Check if cancellation has been requested."""
         return self._cancel_signal is not None and self._cancel_signal.is_set()
+
+    async def run_subagent(
+        self,
+        prompt: str,
+        *,
+        tools: list[Tool] | None = None,
+        system_prompt: str = "You are a focused subagent. Complete the delegated task.",
+        model: str | Any | None = None,
+        name: str = "subagent",
+        max_iterations: int = 10,
+        hooks: list[Any] | None = None,
+        on_event: Callable[[TulipEvent], Awaitable[None] | None] | None = None,
+        **agent_kwargs: Any,
+    ) -> SubagentResult:
+        """Run an isolated child agent and return its :class:`SubagentResult`.
+
+        Thin binding of :func:`tulip.agent.subagent.run_subagent` to this
+        agent: the child defaults to this agent's model, and this agent's
+        :meth:`cancel` stops the child — whether the call comes from one of
+        this agent's tool bodies mid-run or from a harness between runs.
+
+        Isolation is the point: the child gets a fresh conversation, its own
+        system prompt, and ONLY the tools in ``tools`` — never this agent's
+        toolset by inheritance. When called from a tool body during a run,
+        the child's token usage folds into this run's counters, so
+        ``token_budget`` and ``TerminateEvent.usage`` keep counting
+        delegated spend. See :mod:`tulip.agent.subagent` for the full
+        contract and a harness-side ``task``-tool example.
+
+        Args:
+            prompt: The delegated task.
+            tools: Explicit tool allowlist for the child (default: none).
+            system_prompt: The child's system prompt.
+            model: Child model override; defaults to this agent's model.
+            name: Attribution label stamped on the child's events.
+            max_iterations: The child's iteration cap.
+            hooks: Lifecycle hooks for the child (policy attaches here).
+            on_event: Callback receiving every child event (sync or async).
+            **agent_kwargs: Further ``AgentConfig`` fields for the child.
+
+        Returns:
+            SubagentResult with the child's text, usage, iterations, and
+            stop reason.
+        """
+        from tulip.agent.subagent import run_subagent
+
+        if self._cancel_signal is None:
+            self._cancel_signal = threading.Event()
+        return await run_subagent(
+            prompt,
+            model=model if model is not None else self.model,
+            tools=tools,
+            system_prompt=system_prompt,
+            name=name,
+            max_iterations=max_iterations,
+            hooks=hooks,
+            on_event=on_event,
+            cancel_signal=self._cancel_signal,
+            **agent_kwargs,
+        )
 
     def as_tool(
         self,
