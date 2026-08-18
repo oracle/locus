@@ -438,6 +438,16 @@ class OpenAIConfig(ModelConfig):
     presence_penalty: float = 0.0
     seed: int | None = None
     stop_sequences: list[str] = Field(default_factory=list)
+    stream_usage: bool = Field(
+        default=True,
+        description=(
+            "Ask a chat-completions stream for its usage chunk "
+            "(``stream_options={'include_usage': True}``). Without it OpenAI "
+            "sends no usage on a stream, so a streamed run cannot be metered "
+            "or held to ``max_cost_usd``. Set False only for an "
+            "OpenAI-compatible server that rejects the field."
+        ),
+    )
     extra_body: dict[str, Any] | None = Field(
         default=None,
         description=(
@@ -1488,6 +1498,17 @@ class OpenAIModel(BaseModel):
 
         self._apply_passthrough(request_kwargs, kwargs)
         self._apply_extra_body(request_kwargs, kwargs)
+
+        # Chat Completions reports usage on a stream only when asked via
+        # ``stream_options`` — without it the trailing usage chunk never
+        # arrives, the terminal ModelChunkEvent carries ``usage=None``, and
+        # the agent loop's token counters stay at zero for the whole run,
+        # so ``TerminateEvent.usage`` is None under ``stream_tokens=True``.
+        # complete() gets usage unconditionally; streaming must ask for it
+        # to stay meterable. ``setdefault`` after passthrough — a caller
+        # who sent their own ``stream_options`` keeps it verbatim.
+        if self.config.stream_usage:
+            request_kwargs.setdefault("stream_options", {"include_usage": True})
 
         # Track tool calls during streaming
         current_tool_calls: dict[int, dict[str, Any]] = {}

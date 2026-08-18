@@ -103,11 +103,21 @@ async def test_streamed_text_matches_the_final_message() -> None:
 
 @pytest.mark.asyncio
 async def test_usage_survives_the_streaming_path() -> None:
-    """Metering must not depend on which path the loop took."""
+    """Metering must not depend on which path the loop took.
+
+    The provider's terminal chunk carries the turn's usage; the loop must
+    fold it into the state counters so ``TerminateEvent.usage`` reports the
+    same numbers a non-streamed run would — not None.
+    """
     model = _StreamingModel()
     events = [ev async for ev in _agent(model).run("hi", stream_tokens=True)]
     terminate = next(e for e in events if isinstance(e, TerminateEvent))
     assert terminate.reason == "complete"
+    assert terminate.usage == {
+        "prompt_tokens": 1,
+        "completion_tokens": 3,
+        "total_tokens": 4,
+    }
 
 
 @pytest.mark.asyncio
