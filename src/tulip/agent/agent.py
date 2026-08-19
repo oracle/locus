@@ -596,6 +596,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
         response: str,
         *,
         thread_id: str | None = None,
+        perform_dangling: bool = False,
     ) -> AsyncIterator[TulipEvent]:
         """
         Resume agent execution after an interrupt.
@@ -608,10 +609,27 @@ class Agent(AgentRuntimeMixin, BaseModel):
         the configured checkpointer, so a durably-checkpointed run resumes
         anywhere, not just in the process that paused it.
 
+        ``perform_dangling`` closes the gap the 2.11.1 fold left open for
+        approval holds. The fold answers the dangling call with the human's
+        verdict TEXT — the model reads "approve" as the call's result and,
+        reasonably, never re-issues a call that already returned, so nothing
+        ever performs the action (measured live; see
+        FINDING-an-approved-action-can-silently-not-happen.md for the first
+        half of this story). With ``perform_dangling=True`` and a dangling
+        call that is not ``ask_user``, the runtime RE-INVOKES that call —
+        same tool, same arguments, through the normal executor — and folds
+        the REAL result instead. A gated tool decides for itself under the
+        caller's primed decision: approve executes, deny refuses, and either
+        way the model sees what actually happened. ``ask_user`` and the
+        no-dangling-call case are untouched, so answers behave exactly as
+        before regardless of the flag.
+
         Args:
             response: The user's response to the interrupt question
             thread_id: Checkpoint thread to rehydrate from when this Agent
                 instance holds no in-memory interrupt (requires a checkpointer)
+            perform_dangling: Re-invoke a dangling non-``ask_user`` call and
+                fold its real result, instead of folding ``response`` as text
 
         Yields:
             TulipEvent instances for the remaining execution
@@ -683,11 +701,42 @@ class Agent(AgentRuntimeMixin, BaseModel):
                 )
                 break
         if dangling is not None:
-            state = state.with_message(
-                Message.tool(
-                    ToolResult(tool_call_id=dangling.id, name=dangling.name, content=response)
+            folded: ToolResult | None = None
+            if perform_dangling and dangling.name != "ask_user":
+                # Re-invoke the held call itself — same tool, same arguments,
+                # through the normal executor so error handling and result
+                # stringification are exactly the loop's. A gated wrapper
+                # decides under the primed decision (approve executes, deny
+                # refuses); the fold then carries the REAL outcome, which is
+                # the only thing that makes an approval actually happen. If
+                # the tool is no longer registered, fall back to the text
+                # fold rather than inventing a result.
+                self._initialize()
+                if self._tool_registry.get(dangling.name) is not None:
+                    from tulip.core.messages import ToolCall as _ToolCall
+
+                    [invoked] = await self._executor.execute(
+                        [
+                            _ToolCall(
+                                id=dangling.id,
+                                name=dangling.name,
+                                arguments=dict(dangling.arguments or {}),
+                            )
+                        ],
+                        self._tool_registry,
+                    )
+                    folded = ToolResult(
+                        tool_call_id=dangling.id,
+                        name=dangling.name,
+                        content=invoked.content,
+                        error=invoked.error,
+                        duration_ms=invoked.duration_ms,
+                    )
+            if folded is None:
+                folded = ToolResult(
+                    tool_call_id=dangling.id, name=dangling.name, content=response
                 )
-            )
+            state = state.with_message(Message.tool(folded))
         else:
             state = state.with_message(Message.system(f"[User Response] {response}"))
 
