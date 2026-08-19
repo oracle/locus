@@ -733,9 +733,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
                         duration_ms=invoked.duration_ms,
                     )
             if folded is None:
-                folded = ToolResult(
-                    tool_call_id=dangling.id, name=dangling.name, content=response
-                )
+                folded = ToolResult(tool_call_id=dangling.id, name=dangling.name, content=response)
             state = state.with_message(Message.tool(folded))
         else:
             state = state.with_message(Message.system(f"[User Response] {response}"))

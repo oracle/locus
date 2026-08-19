@@ -770,7 +770,8 @@ async def test_perform_dangling_reinvokes_the_held_call_and_folds_its_real_resul
     )
     call = next(tc for m in seen if m.role == Role.ASSISTANT for tc in (m.tool_calls or []))
     results = [m for m in seen if m.role == Role.TOOL and m.tool_call_id == call.id]
-    assert results and "refunded 10" in str(results[-1].content), (
+    assert results, "the dangling call was left unanswered"
+    assert "refunded 10" in str(results[-1].content), (
         "the fold must carry the REAL result, not the verdict text"
     )
 
@@ -806,4 +807,5 @@ async def test_perform_dangling_falls_back_to_the_text_fold_when_the_tool_is_gon
 
     call = next(tc for m in seen if m.role == Role.ASSISTANT for tc in (m.tool_calls or []))
     results = [m for m in seen if m.role == Role.TOOL and m.tool_call_id == call.id]
-    assert results and "approve" in str(results[-1].content)
+    assert results, "the dangling call was left unanswered"
+    assert "approve" in str(results[-1].content)
