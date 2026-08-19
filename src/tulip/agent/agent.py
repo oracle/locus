@@ -732,6 +732,19 @@ class Agent(AgentRuntimeMixin, BaseModel):
                         error=invoked.error,
                         duration_ms=invoked.duration_ms,
                     )
+                    # This execution happens BEFORE the loop starts streaming,
+                    # so without this the call is invisible: a consumer sees
+                    # the run resume and finish with no record of the action
+                    # it performed. Emit the same event the loop would have,
+                    # so a trace, an audit sink, and a UI all see the approved
+                    # action exactly as they see any other tool call.
+                    yield ToolCompleteEvent(
+                        tool_name=folded.name,
+                        tool_call_id=folded.tool_call_id,
+                        result=folded.content,
+                        error=folded.error,
+                        duration_ms=folded.duration_ms or 0.0,
+                    )
             if folded is None:
                 folded = ToolResult(tool_call_id=dangling.id, name=dangling.name, content=response)
             state = state.with_message(Message.tool(folded))

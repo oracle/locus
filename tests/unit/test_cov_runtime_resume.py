@@ -762,12 +762,18 @@ async def test_perform_dangling_reinvokes_the_held_call_and_folds_its_real_resul
         return await original(messages, *a, **k)
 
     model.complete = _capture  # type: ignore[method-assign]
-    async for _ in agent.resume("approve", perform_dangling=True):
-        pass
+    events = [ev async for ev in agent.resume("approve", perform_dangling=True)]
 
     assert calls == [{"amount": 10, "order_id": "4471"}], (
         "the approved call must execute exactly once, with the original arguments"
     )
+    performed = [e for e in events if getattr(e, "event_type", "") == "tool_complete"]
+    assert performed, (
+        "the performed call must be visible in the event stream — it happens "
+        "before the loop starts, so without an explicit event a consumer sees "
+        "a run that resumed and finished having recorded no action"
+    )
+    assert "refunded 10" in str(performed[0].result)
     call = next(tc for m in seen if m.role == Role.ASSISTANT for tc in (m.tool_calls or []))
     results = [m for m in seen if m.role == Role.TOOL and m.tool_call_id == call.id]
     assert results, "the dangling call was left unanswered"

@@ -8,6 +8,17 @@ policy.
 
 ## [Unreleased]
 
+## [2.12.1] - 2026-08-18
+
+### Fixed
+
+- **A performed dangling call is now visible.** `perform_dangling` executed
+  the held call before the loop began streaming, so nothing downstream saw
+  it: a consumer watched a run resume and finish having recorded no action,
+  while the action had in fact happened. `resume()` now yields the same
+  `ToolCompleteEvent` the loop would have, so traces, audit sinks and UIs
+  see an approved action exactly as they see any other tool call.
+
 ## [2.12.0] - 2026-08-18
 
 ### Added
