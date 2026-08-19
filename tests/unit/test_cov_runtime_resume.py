@@ -712,3 +712,100 @@ async def test_resume_answers_a_dangling_non_ask_user_call_as_its_tool_result() 
     assert not [
         m for m in seen if m.role == Role.SYSTEM and "[User Response]" in str(m.content or "")
     ], "the system-note fallback should not fire when a dangling call exists"
+
+
+@pytest.mark.asyncio
+async def test_perform_dangling_reinvokes_the_held_call_and_folds_its_real_result() -> None:
+    """``perform_dangling=True`` closes the half the fold left open.
+
+    Folding the verdict TEXT tells the model its call already returned
+    "approve" — so a live model, reasonably, never re-issues it and nothing
+    performs the action (measured; the gateway's #109). With the flag, resume
+    re-invokes the dangling call itself — same tool, same arguments, normal
+    executor — so a gated wrapper decides under the caller's primed decision
+    and the fold carries what ACTUALLY happened, exactly once.
+    """
+    calls: list[dict[str, Any]] = []
+    primed: dict[str, str] = {}
+
+    @tool
+    def refund_customer(amount: float, order_id: str) -> str:
+        """Gated like the gateway wraps it: hold first, act only when primed."""
+        import json
+
+        if "refund_customer" not in primed:
+            return json.dumps({"__interrupt__": True, "question": "approve refund?"})
+        calls.append({"amount": amount, "order_id": order_id})
+        return f"refunded {amount} on order {order_id}"
+
+    model = _ScriptedModel(
+        [_tc("refund_customer", {"amount": 10, "order_id": "4471"}), _text("done")]
+    )
+    agent = Agent(
+        model=model,
+        tools=[refund_customer],
+        max_iterations=10,
+        reflexion=False,
+        grounding=False,
+    )
+    async for _ in agent.run("refund order 4471"):
+        pass
+    assert calls == [], "the hold must not execute anything"
+
+    primed["refund_customer"] = "approve"
+    seen: list[Message] = []
+    original = model.complete
+
+    async def _capture(messages: list[Message], *a: Any, **k: Any) -> ModelResponse:
+        seen.clear()
+        seen.extend(messages)
+        return await original(messages, *a, **k)
+
+    model.complete = _capture  # type: ignore[method-assign]
+    async for _ in agent.resume("approve", perform_dangling=True):
+        pass
+
+    assert calls == [{"amount": 10, "order_id": "4471"}], (
+        "the approved call must execute exactly once, with the original arguments"
+    )
+    call = next(tc for m in seen if m.role == Role.ASSISTANT for tc in (m.tool_calls or []))
+    results = [m for m in seen if m.role == Role.TOOL and m.tool_call_id == call.id]
+    assert results, "the dangling call was left unanswered"
+    assert "refunded 10" in str(results[-1].content), (
+        "the fold must carry the REAL result, not the verdict text"
+    )
+
+
+@pytest.mark.asyncio
+async def test_perform_dangling_falls_back_to_the_text_fold_when_the_tool_is_gone() -> None:
+    """If the dangling call's tool is no longer registered, the flag must not
+    invent a result — the reply folds as text, exactly as without the flag.
+    (The flag is caller-asserted: pass it only when the dangling call is a
+    gated ACTION to perform. Question-style tools keep the plain fold.)"""
+    model = _ScriptedModel([_tc("needs_input", {}), _text("done")])
+    agent = Agent(
+        model=model, tools=[needs_input], max_iterations=10, reflexion=False, grounding=False
+    )
+    async for _ in agent.run("start"):
+        pass
+
+    # Simulate the tool vanishing between park and resume (a re-deploy that
+    # dropped it): resume must degrade to the text fold, not crash or fake.
+    agent.tools.unregister("needs_input")
+
+    seen: list[Message] = []
+    original = model.complete
+
+    async def _capture(messages: list[Message], *a: Any, **k: Any) -> ModelResponse:
+        seen.clear()
+        seen.extend(messages)
+        return await original(messages, *a, **k)
+
+    model.complete = _capture  # type: ignore[method-assign]
+    async for _ in agent.resume("approve", perform_dangling=True):
+        pass
+
+    call = next(tc for m in seen if m.role == Role.ASSISTANT for tc in (m.tool_calls or []))
+    results = [m for m in seen if m.role == Role.TOOL and m.tool_call_id == call.id]
+    assert results, "the dangling call was left unanswered"
+    assert "approve" in str(results[-1].content)

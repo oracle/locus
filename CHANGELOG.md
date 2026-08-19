@@ -8,6 +8,27 @@ policy.
 
 ## [Unreleased]
 
+## [2.12.0] - 2026-08-18
+
+### Added
+
+- **`Agent.resume(…, perform_dangling=True)` — the approval actually happens.**
+  2.11.1's fold fixed the conversational rhythm but left the semantic half
+  open: folding the verdict *text* tells the model its held call already
+  returned `"approve"`, so a live model — reasonably — never re-issues it,
+  and nothing ever performs the action (measured live through a governed
+  gateway; the run reports success). With the new flag, `resume()`
+  **re-invokes the dangling call itself** — same tool, same arguments,
+  through the normal executor — and folds the *real* result. A gated wrapper
+  decides under the caller's primed decision: approve executes exactly once,
+  deny refuses, and the model sees what actually happened. `ask_user` and
+  the no-dangling-call path are byte-for-byte unchanged, and the flag
+  defaults to off, so every existing caller keeps 2.11.1 behavior. The flag
+  is caller-asserted: pass it only when the dangling call is a gated
+  *action* to perform — a question-style tool keeps the plain text fold. If
+  the tool is no longer registered at resume, the reply folds as text
+  rather than inventing a result.
+
 ## [2.11.1] - 2026-08-17
 
 ### Fixed
