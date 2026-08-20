@@ -8,6 +8,36 @@ policy.
 
 ## [Unreleased]
 
+## [2.12.2] - 2026-08-20
+
+### Fixed
+
+- **A missing `asyncpg` now fails where it can be understood.** `PgMemory`
+  imports the driver lazily inside its pool builder, so an environment
+  without it raised a bare `ModuleNotFoundError` from deep inside a
+  coroutine on first *use* — long after the mistake, naming no package and
+  no extra. Found in a deployment where durable memory had been silently
+  dead: every save failed, and the agent, reading past the error field,
+  answered "Got it." The constructor now checks for the driver and says what
+  to install, alongside the `dim` checks that were already there.
+
+- **A tool called with the wrong arguments explains itself.** A model that
+  omitted a required argument got `search() missing 1 required positional
+  argument: 'title'` — a Python signature error, accurate and useless to the
+  caller that has to recover from it. `Tool.execute` now binds before
+  calling and raises a message naming the tool and the missing parameters,
+  telling the caller to ask for a value rather than guess. A `TypeError`
+  raised *inside* a tool keeps its own message, so a real defect is never
+  disguised as a bad call.
+
+### Documentation
+
+- **`run_sync` says that it does not remember.** Prior turns are reloaded
+  only with a configured checkpointer *and* a `thread_id`; without them each
+  call starts from an empty conversation. That is the right default for a
+  shared agent and a surprise to anyone who expected it to follow along, so
+  the docstring now states it plainly.
+
 ## [2.12.1] - 2026-08-18
 
 ### Fixed

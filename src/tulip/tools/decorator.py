@@ -106,6 +106,30 @@ class Tool(BaseModel):
             ctx_param = next(name for name in sig.parameters if name in ("ctx", "context"))
             kwargs[ctx_param] = ctx
 
+        # Bind before calling, so a caller mistake is distinguishable from a
+        # bug inside the tool. Both raise TypeError, but only one is worth
+        # telling a model about — and "search() missing 1 required positional
+        # argument: 'title'" is a Python signature error, not an instruction it
+        # can act on. Naming the tool and the missing parameters is.
+        try:
+            sig.bind(**kwargs)
+        except TypeError as exc:
+            missing = [
+                name
+                for name, param in sig.parameters.items()
+                if param.default is inspect.Parameter.empty
+                and param.kind
+                not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+                and name not in kwargs
+                and name not in ("ctx", "context")
+            ]
+            detail = f"missing required argument(s): {', '.join(missing)}" if missing else str(exc)
+            raise TypeError(
+                f"{self.name} was called with the wrong arguments — {detail}. "
+                f"Call {self.name} again with every required argument filled in; "
+                f"if a value is unknown, ask for it rather than guessing."
+            ) from exc
+
         # Execute function
         if asyncio.iscoroutinefunction(self.fn):
             result = await self.fn(**kwargs)

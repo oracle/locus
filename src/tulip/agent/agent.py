@@ -266,9 +266,17 @@ class Agent(AgentRuntimeMixin, BaseModel):
         checkpointer pool afterward — the caller owns the loop, so those
         resources stay bound to it and can be reused across ``arun`` calls.
 
+        **Each call starts from an empty conversation** unless you give it
+        somewhere to remember: prior turns are reloaded only when the agent has
+        a ``checkpointer`` configured *and* you pass ``thread_id``. Calling
+        ``run_sync(prompt)`` in a loop therefore produces independent turns,
+        not a conversation — which is the right default for a shared agent, and
+        a surprise if you expected it to follow along.
+
         Args:
             prompt: User prompt to process
-            thread_id: Optional thread ID for checkpointing
+            thread_id: Conversation to continue. Required (with a configured
+                checkpointer) for this run to see earlier turns.
             metadata: Additional metadata for tools
 
         Returns:

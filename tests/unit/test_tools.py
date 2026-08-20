@@ -370,3 +370,61 @@ class TestSchema:
         assert "required" in params["required"]
         assert "optional" not in params["required"]
         assert params["properties"]["optional"]["default"] == 10
+
+
+class TestToolArgumentErrors:
+    """A model that omits a required argument gets told what to do about it.
+
+    ``search() missing 1 required positional argument: 'title'`` is a Python
+    signature error: accurate, and useless to the caller that has to recover
+    from it. The tool's own name and the missing parameters are actionable.
+    """
+
+    @pytest.mark.asyncio
+    async def test_missing_required_argument_names_the_tool_and_the_gap(self):
+        @tool
+        def search(title: str, year: str = "") -> dict:
+            """Search for a film."""
+            return {"title": title}
+
+        with pytest.raises(TypeError) as excinfo:
+            await search.execute()
+        message = str(excinfo.value)
+        assert "search" in message
+        assert "missing required argument(s): title" in message
+        assert "ask for it rather than guessing" in message
+
+    @pytest.mark.asyncio
+    async def test_an_unexpected_argument_is_also_explained(self):
+        @tool
+        def search(title: str) -> dict:
+            """Search for a film."""
+            return {"title": title}
+
+        with pytest.raises(TypeError) as excinfo:
+            await search.execute(title="Heat", bogus=1)
+        assert "search was called with the wrong arguments" in str(excinfo.value)
+
+    @pytest.mark.asyncio
+    async def test_a_correct_call_is_untouched(self):
+        @tool
+        def search(title: str, year: str = "") -> dict:
+            """Search for a film."""
+            return {"title": title, "year": year}
+
+        assert "Heat" in await search.execute(title="Heat")
+
+    @pytest.mark.asyncio
+    async def test_a_typeerror_from_inside_the_tool_is_not_disguised(self):
+        """Only *binding* failures are reframed — a bug in the body must keep
+        its own message, or a real defect gets reported as a bad call."""
+
+        @tool
+        def broken(title: str) -> dict:
+            """Raises from its own body."""
+            raise TypeError("something inside the tool is wrong")
+
+        with pytest.raises(TypeError) as excinfo:
+            await broken.execute(title="Heat")
+        assert "something inside the tool is wrong" in str(excinfo.value)
+        assert "wrong arguments" not in str(excinfo.value)

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tulip-agents"
-version = "2.12.1"
+version = "2.12.2"
 description = "The agent framework where the model never holds the trigger — every consequential action clears your policy first, waits for a human when it matters, and lands on a record you can verify. Build on it, or put it around the agent you already have."
 readme = "README.md"
 license = "Apache-2.0"

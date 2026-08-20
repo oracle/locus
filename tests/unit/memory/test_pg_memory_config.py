@@ -72,3 +72,33 @@ def test_embedder_within_the_limit_keeps_the_index_and_warns_nothing() -> None:
         store = PgMemory(_DSN, embedder=_FakeEmbedder(1536))  # type: ignore[arg-type]
     assert store._ann is True
     assert store.capabilities.semantic_search is True
+
+
+class TestDriverIsCheckedAtConstruction:
+    """asyncpg is optional, and it is imported lazily inside the pool builder.
+
+    Before this check, a missing driver surfaced as a bare
+    ``ModuleNotFoundError`` raised from inside a coroutine on first *use* —
+    long after the mistake, with nothing saying which package to install.
+    Construction is where a caller mistake belongs.
+    """
+
+    def test_a_missing_driver_fails_at_construction_with_the_fix(self, monkeypatch):
+        import importlib.util as _util
+
+        real = _util.find_spec
+
+        def _no_asyncpg(name, *a, **k):
+            return None if name == "asyncpg" else real(name, *a, **k)
+
+        monkeypatch.setattr(_util, "find_spec", _no_asyncpg)
+        with pytest.raises(ImportError) as excinfo:
+            PgMemory(_DSN)
+        message = str(excinfo.value)
+        assert "asyncpg" in message
+        assert "tulip-agents[postgresql]" in message, "say which extra installs it"
+
+    def test_construction_succeeds_when_the_driver_is_present(self):
+        # No connection is made at construction, so this only proves the check
+        # does not reject a correctly installed environment.
+        assert PgMemory(_DSN) is not None

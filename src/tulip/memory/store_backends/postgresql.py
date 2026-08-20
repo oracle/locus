@@ -29,6 +29,7 @@ Two properties make it the governed backend:
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import json
 import re
 import warnings
@@ -123,6 +124,19 @@ class PgMemory(BaseStore):
     ) -> None:
         if dim < 1:
             raise ValueError(f"dim must be >= 1, got {dim}")
+        # asyncpg is an optional dependency imported lazily inside the pool
+        # builder, so a missing package used to surface as a bare
+        # ModuleNotFoundError from deep inside a coroutine on first *use* —
+        # long after the mistake, and far from anything that explains it. Same
+        # reasoning as the dim check below: a caller mistake belongs at
+        # construction, in words that say what to install.
+        if importlib.util.find_spec("asyncpg") is None:
+            raise ImportError(
+                "PgMemory needs the asyncpg driver, which ships as an optional "
+                "dependency. Install it with:\n\n"
+                "    pip install 'tulip-agents[postgresql]'\n\n"
+                "(or `pip install asyncpg` if you manage dependencies yourself)."
+            )
         self._dsn = dsn
         self._table = _validate_ident(table, "table")
         self._dim = dim
