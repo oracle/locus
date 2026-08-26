@@ -1341,8 +1341,15 @@ class OpenAIModel(BaseModel):
 
         final_usage: dict[str, int] | None = None
         final_stop_reason: str | None = None
+        # The SERVED model, off the stream itself. Behind a router this can
+        # differ from the requested name (a fallback answers while the
+        # primary restarts), and it is what ModelChunkEvent.model carries.
+        served_model: str | None = None
 
         async for chunk in stream:
+            chunk_model = getattr(chunk, "model", None)
+            if isinstance(chunk_model, str) and chunk_model:
+                served_model = chunk_model
             # When the caller asks for usage (``stream_options``), it arrives on
             # a trailing chunk that carries no choices — so this has to be read
             # before the empty-choices guard below, which would otherwise drop
@@ -1374,7 +1381,7 @@ class OpenAIModel(BaseModel):
 
             # Handle content
             if delta is not None and delta.content:
-                yield ModelChunkEvent(content=delta.content)
+                yield ModelChunkEvent(content=delta.content, model=served_model)
 
             # Handle reasoning (chain-of-thought) deltas. Qwen / DeepSeek
             # served via vLLM stream their CoT in a channel separate from
@@ -1392,7 +1399,7 @@ class OpenAIModel(BaseModel):
                         reasoning_delta = _candidate
                         break
             if reasoning_delta:
-                yield ModelChunkEvent(reasoning=reasoning_delta)
+                yield ModelChunkEvent(reasoning=reasoning_delta, model=served_model)
 
             # Handle tool calls
             if delta is not None and delta.tool_calls:
@@ -1432,7 +1439,7 @@ class OpenAIModel(BaseModel):
                                 arguments=arguments,
                             )
                         )
-                    yield ModelChunkEvent(tool_calls=tool_calls)
+                    yield ModelChunkEvent(tool_calls=tool_calls, model=served_model)
 
                 if isinstance(choice.finish_reason, str):
                     final_stop_reason = choice.finish_reason
@@ -1440,4 +1447,6 @@ class OpenAIModel(BaseModel):
         # Emitted after the loop rather than at ``finish_reason``: the usage
         # chunk arrives *after* the choice that carries the finish reason, so
         # closing early would report a turn we cannot yet meter.
-        yield ModelChunkEvent(done=True, usage=final_usage, stop_reason=final_stop_reason)
+        yield ModelChunkEvent(
+            done=True, usage=final_usage, stop_reason=final_stop_reason, model=served_model
+        )

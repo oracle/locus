@@ -67,6 +67,32 @@ def _usage_of(state: AgentState) -> dict[str, int] | None:
     }
 
 
+def _apply_hook_result(result: ToolResult, after_tool_event: Any) -> ToolResult:
+    """Fold an after-hook's ``event.result`` replacement into the ToolResult.
+
+    Hooks receive ``content if success else None``; a different value left in
+    ``event.result`` is a replacement, as `AfterToolCallEvent` documents. A
+    non-string replacement is serialized the way ``Tool.execute`` serializes
+    tool returns, so a hook can hand back a dict without caring about the
+    wire form.
+    """
+    original = result.content if result.success else None
+    replacement = after_tool_event.result
+    if replacement is None or replacement == original:
+        return result
+    if not isinstance(replacement, str):
+        import json  # noqa: PLC0415
+
+        replacement = json.dumps(replacement, default=str)
+    return ToolResult(
+        tool_call_id=result.tool_call_id,
+        name=result.name,
+        content=replacement,
+        error=result.error,
+        duration_ms=result.duration_ms,
+    )
+
+
 if TYPE_CHECKING:
     from tulip.agent.hook_orchestrator import HookOrchestrator
     from tulip.memory.conversation import ConversationManager
@@ -1058,36 +1084,18 @@ class AgentRuntimeMixin:
                                 duration_ms=result.duration_ms,
                             )
 
-                    tool_results.append(result)
-
-                    execution = ToolExecution(
-                        tool_name=result.name,
-                        tool_call_id=result.tool_call_id,
-                        arguments=modified_args,
-                        result=result.content if result.success else None,
-                        error=result.error,
-                        duration_ms=result.duration_ms,
-                    )
-                    state = state.with_tool_execution(execution)
-                    reasoning_step_tools.append(execution)
-
-                    if result.error:
-                        _tool_errors_count += 1
-
-                    # Skip the per-slot ToolCompleteEvent yield in
-                    # completion mode — Phase 2 already streamed it the
-                    # moment this tool finished. Sequential mode (default)
-                    # still emits here so consumers see events in
-                    # tool_call order.
-                    if self.config.tool_event_order == "sequential":
-                        yield ToolCompleteEvent(
-                            tool_name=result.name,
-                            tool_call_id=result.tool_call_id,
-                            result=result.content if result.success else None,
-                            error=result.error,
-                            duration_ms=result.duration_ms,
-                        )
-
+                    # After-hooks run BEFORE the result is folded into state
+                    # or emitted, so ``event.result`` replacement actually
+                    # lands where the docs promise it does: in the message
+                    # the model reads, in ``state.tool_executions``, and in
+                    # the ToolCompleteEvent a consumer sees. (Previously the
+                    # hook ran last: only ``retry`` had any effect, a
+                    # replaced result was silently discarded, and a retried
+                    # result never reached the model because ``tool_results``
+                    # already held the original.) In completion mode Phase 2
+                    # has already streamed the event, so there the event
+                    # carries the pre-hook result; state and messages still
+                    # get the hook's version.
                     after_tool_event = await self._run_after_tool_hooks(
                         result.name,
                         result.content if result.success else None,
@@ -1118,6 +1126,38 @@ class AgentRuntimeMixin:
                                 error=str(e),
                                 duration_ms=0.0,
                             )
+                    else:
+                        result = _apply_hook_result(result, after_tool_event)
+
+                    tool_results.append(result)
+
+                    execution = ToolExecution(
+                        tool_name=result.name,
+                        tool_call_id=result.tool_call_id,
+                        arguments=modified_args,
+                        result=result.content if result.success else None,
+                        error=result.error,
+                        duration_ms=result.duration_ms,
+                    )
+                    state = state.with_tool_execution(execution)
+                    reasoning_step_tools.append(execution)
+
+                    if result.error:
+                        _tool_errors_count += 1
+
+                    # Skip the per-slot ToolCompleteEvent yield in
+                    # completion mode — Phase 2 already streamed it the
+                    # moment this tool finished. Sequential mode (default)
+                    # still emits here so consumers see events in
+                    # tool_call order, carrying the post-hook result.
+                    if self.config.tool_event_order == "sequential":
+                        yield ToolCompleteEvent(
+                            tool_name=result.name,
+                            tool_call_id=result.tool_call_id,
+                            result=result.content if result.success else None,
+                            error=result.error,
+                            duration_ms=result.duration_ms,
+                        )
 
                     if result.name in self.config.verify_tools:
                         self._has_unverified_writes = True
@@ -1545,6 +1585,8 @@ class AgentRuntimeMixin:
                                 error=str(e),
                                 duration_ms=0.0,
                             )
+                    else:
+                        result = _apply_hook_result(result, after_tool_event)
 
                     state = state.with_tool_execution(
                         ToolExecution(
