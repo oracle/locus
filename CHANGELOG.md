@@ -8,6 +8,42 @@ policy.
 
 ## [Unreleased]
 
+## [2.12.3] - 2026-08-27
+
+### Fixed
+
+- **A hook's replaced tool result is actually used.** `AfterToolCallEvent`
+  documents `event.result` as writable — "set event.result to replace the
+  tool result" — but the run loop folded the ORIGINAL result into state,
+  the model's tool message, and the `ToolCompleteEvent` before the hook
+  ever ran: only `retry` had any effect, and a replacement was silently
+  discarded. Found by a host that slims bulky tool payloads for the model
+  in an after-hook and could not understand why the model kept reading the
+  raw form. The after-hook now runs BEFORE the fold, its replacement lands
+  everywhere the docs promise (a dict replacement is serialized the way
+  tool returns are), and — the same inversion — a `retry`'s re-executed
+  result now reaches the model instead of the pre-retry one. In
+  `tool_event_order="completion"` mode the early-streamed event still
+  carries the pre-hook result; state and messages get the hook's version.
+
+- **A failing tool is no longer invisible to the model.** `ToolResult.error`
+  never crossed the wire: `Message.tool` copied only `content`, which is
+  empty when a tool raises, so the model saw a blank tool result — it
+  retried, or worse, answered as if the call had succeeded, and only event
+  consumers ever learned why it failed. An error with no content now
+  becomes `Error: <message>` in the tool message; a tool that wrote
+  something before failing keeps its own words.
+
+### Added
+
+- **`ModelChunkEvent.model` — who is actually answering.** Behind a router
+  the served model is not the requested one: a fallback can take the turn
+  while the primary restarts, and the stream is the only place the truth
+  appears. The chat-completions provider now reads `chunk.model` off the
+  wire and stamps it on every chunk event, so a streaming UI can announce
+  the model the reader is talking to — and notice when it changes
+  mid-conversation. Best-effort: `None` when the transport does not say.
+
 ## [2.12.2] - 2026-08-20
 
 ### Fixed

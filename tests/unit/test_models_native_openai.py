@@ -139,8 +139,10 @@ class _ChunkChoice:
 
 
 class _Chunk:
-    def __init__(self, choices: list[_ChunkChoice]) -> None:
+    def __init__(self, choices: list[_ChunkChoice], model: str | None = None) -> None:
         self.choices = choices
+        if model is not None:
+            self.model = model
 
 
 def _stream(chunks: list[_Chunk]) -> AsyncIterator[_Chunk]:
@@ -513,6 +515,40 @@ class TestStream:
         contents = [ev.content for ev in events if ev.content]
         assert contents == ["Hello ", "world"]
         assert any(ev.done for ev in events)
+
+    @pytest.mark.asyncio
+    async def test_served_model_rides_on_every_chunk(self) -> None:
+        """``ModelChunkEvent.model`` names who actually answered.
+
+        Behind a router the served model is not the requested one — a
+        fallback can answer while the primary restarts — and the stream is
+        the only place the truth appears (``chunk.model``). A UI announcing
+        "who am I talking to" reads it off the events.
+        """
+        chunks = [
+            _Chunk(choices=[_ChunkChoice(delta=_Delta(content="Hi"))], model="qwen3.6-35b"),
+            _Chunk(
+                choices=[_ChunkChoice(delta=_Delta(), finish_reason="stop")],
+                model="qwen3.6-35b",
+            ),
+        ]
+        client = _client_with(stream_chunks=chunks)
+        m = _model_with(client)
+        events = [ev async for ev in m.stream([Message.user("hi")])]
+        assert [ev.model for ev in events if ev.content] == ["qwen3.6-35b"]
+        done = next(ev for ev in events if ev.done)
+        assert done.model == "qwen3.6-35b"
+
+    @pytest.mark.asyncio
+    async def test_chunks_without_a_model_name_leave_it_none(self) -> None:
+        chunks = [
+            _Chunk(choices=[_ChunkChoice(delta=_Delta(content="Hi"))]),
+            _Chunk(choices=[_ChunkChoice(delta=_Delta(), finish_reason="stop")]),
+        ]
+        client = _client_with(stream_chunks=chunks)
+        m = _model_with(client)
+        events = [ev async for ev in m.stream([Message.user("hi")])]
+        assert all(ev.model is None for ev in events)
 
     @pytest.mark.asyncio
     async def test_accumulates_tool_call_deltas(self) -> None:

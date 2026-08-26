@@ -123,10 +123,20 @@ class Message(BaseModel):
 
     @classmethod
     def tool(cls, result: ToolResult) -> Message:
-        """Create a tool result message."""
+        """Create a tool result message.
+
+        A failed result carries its error INTO the content: ``error`` lives
+        only on ``ToolResult`` and never crosses the wire, so without this a
+        raising tool showed the model an empty string — the model retried
+        or, worse, answered as if the call had succeeded, and only event
+        consumers ever learned why it failed.
+        """
+        content = result.content
+        if result.error and not content:
+            content = f"Error: {result.error}"
         return cls(
             role=Role.TOOL,
-            content=result.content,
+            content=content,
             tool_call_id=result.tool_call_id,
             name=result.name,
         )

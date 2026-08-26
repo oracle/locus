@@ -143,6 +143,13 @@ class ModelChunkEvent(TulipEvent):
 
     event_type: Literal["model_chunk"] = "model_chunk"
     content: str | None = None
+    # The model that is actually answering, as the provider names it in the
+    # stream (OpenAI-compat: ``chunk.model``). Behind a router this is not a
+    # constant — a fallback model can serve the turn while the primary
+    # restarts — and a UI announcing "who am I talking to" needs the served
+    # name, not the requested one. Best-effort: None when the transport does
+    # not say.
+    model: str | None = None
     # Chain-of-thought delta from reasoning models (Qwen/DeepSeek via
     # vLLM surface it as ``delta.reasoning_content``). Separate from
     # ``content`` so streaming consumers can render CoT distinctly or
