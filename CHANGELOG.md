@@ -8,6 +8,41 @@ policy.
 
 ## [Unreleased]
 
+## [2.12.5] - 2026-09-06
+
+### Fixed
+
+- **`PgVectorStore` no longer silently discards its configuration.** (#171)
+  A ready-made `PgVectorConfig` passed under any keyword was accepted and
+  thrown away — the store ran on `postgres@localhost:5432/postgres` while
+  every declared DSN, table name and pool size went nowhere, discovered
+  only when a real ingest connected to the wrong database. Three changes,
+  each turning silence into an error: `PgVectorConfig` now forbids unknown
+  fields (a typo'd keyword raises instead of vanishing); the store accepts
+  the object explicitly as `config=` and refuses the ambiguous mix of
+  config-plus-individual-settings (a config under the wrong keyword raises
+  with a pointer to `config=`); and a store given NO connection settings
+  raises instead of falling back to `postgres@localhost` — inside a
+  container that fallback is a connection refused, and on a host with a
+  listening Postgres it writes a tenant's vectors into whatever database
+  happens to be there. Local dev says `host="localhost"` explicitly.
+
+### Added
+
+- **Assistant text answers to its first-guess name.** (#165) Streaming
+  callers found the assistant's prose on `ThinkEvent.reasoning` — which
+  reads like chain-of-thought you would deliberately not show — and the
+  final answer on `TerminateEvent.final_message`, easy to skim past on an
+  event that reads like a lifecycle signal. Both now also answer to
+  `.content`, the name every first guess reaches for, and the docstrings
+  say which text arrives where.
+
+- **`ModelChunkEvent` says why it is not firing.** (#164) The event fires
+  only with `stream_tokens=True`; without the flag a consumer got no
+  chunks, no error, and no pointer. The class docstring — where an IDE
+  lands — now leads with the flag and names where batched text arrives
+  instead.
+
 ## [2.12.4] - 2026-09-06
 
 ### Fixed

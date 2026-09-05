@@ -50,6 +50,11 @@ def _validate_sql_identifier(value: str, field_name: str) -> str:
 class PgVectorConfig(BaseModel):
     """Configuration for PostgreSQL pgvector Store."""
 
+    # A typo'd or renamed keyword must raise, not vanish: a config that
+    # silently ignores what it was handed once sent every declared DSN,
+    # table name and pool size to the default localhost store (#171).
+    model_config = {"extra": "forbid"}
+
     # Connection options
     dsn: str | None = Field(
         default=None,
@@ -155,28 +160,73 @@ class PgVectorStore(BaseModel, BaseVectorStore):
     def __init__(
         self,
         dsn: str | None = None,
-        host: str = "localhost",
-        port: int = 5432,
-        database: str = "postgres",
-        user: str = "postgres",
-        password: str | SecretStr = "",
-        table_name: str = "tulip_vectors",
-        dimension: int = 1536,
-        distance_metric: str = "cosine",
+        host: str | None = None,
+        port: int | None = None,
+        database: str | None = None,
+        user: str | None = None,
+        password: str | SecretStr | None = None,
+        table_name: str | None = None,
+        dimension: int | None = None,
+        distance_metric: str | None = None,
+        config: PgVectorConfig | None = None,
         **kwargs: Any,
     ) -> None:
-        pgvector_config = PgVectorConfig(
-            dsn=dsn,
-            host=host,
-            port=port,
-            database=database,
-            user=user,
-            password=SecretStr(password) if isinstance(password, str) else password,
-            table_name=table_name,
-            dimension=dimension,
-            distance_metric=distance_metric,
-            **kwargs,
-        )
+        # A ready-made PgVectorConfig used to be accepted under any keyword
+        # and silently discarded — the store ran on postgres@localhost while
+        # the caller's DSN, table and pool settings went nowhere (#171).
+        # Accept it explicitly, and refuse the ambiguous mix.
+        for key, value in kwargs.items():
+            if isinstance(value, PgVectorConfig):
+                raise TypeError(
+                    f"Pass the PgVectorConfig as config=..., not {key}=... — "
+                    "an unknown keyword is not applied."
+                )
+        if config is not None:
+            named = {
+                "dsn": dsn,
+                "host": host,
+                "port": port,
+                "database": database,
+                "user": user,
+                "password": password,
+                "table_name": table_name,
+                "dimension": dimension,
+                "distance_metric": distance_metric,
+            }
+            conflicts = sorted(k for k, v in named.items() if v is not None)
+            if conflicts or kwargs:
+                raise ValueError(
+                    "Pass either config= or individual settings, not both "
+                    f"(also given: {conflicts + sorted(kwargs)})."
+                )
+            pgvector_config = config
+        else:
+            if all(
+                v is None for v in (dsn, host, port, database, user, password)
+            ) and not any(
+                k in kwargs for k in ("dsn", "host", "port", "database", "user", "password")
+            ):
+                raise ValueError(
+                    "PgVectorStore was given no connection settings. It no longer "
+                    "falls back to postgres@localhost:5432/postgres — inside a "
+                    "container that is a connection refused, and on a host with a "
+                    "listening Postgres it writes vectors into whatever database "
+                    "happens to be there. Pass dsn=... (or host/database/user), or "
+                    "a full config=PgVectorConfig(...); for a local default, say "
+                    'host="localhost" explicitly.'
+                )
+            pgvector_config = PgVectorConfig(
+                dsn=dsn,
+                host=host if host is not None else "localhost",
+                port=port if port is not None else 5432,
+                database=database if database is not None else "postgres",
+                user=user if user is not None else "postgres",
+                password=SecretStr(password) if isinstance(password, str) else password or SecretStr(""),
+                table_name=table_name if table_name is not None else "tulip_vectors",
+                dimension=dimension if dimension is not None else 1536,
+                distance_metric=distance_metric if distance_metric is not None else "cosine",
+                **kwargs,
+            )
         super().__init__(pgvector_config=pgvector_config)
 
     @property
