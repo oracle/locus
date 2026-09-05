@@ -163,3 +163,51 @@ class TestAgentWiring:
 
         assert "run_code" in Agent(model=_Stub(), tools=[lookup_price], code_mode=True).tools
         assert "run_code" not in Agent(model=_Stub(), tools=[lookup_price]).tools
+
+
+class TestLooseAddressing:
+    """Models address tools loosely; the host meets them (#176)."""
+
+    @pytest.mark.asyncio
+    async def test_positional_arguments_map_by_schema_order(self) -> None:
+        run_code = _code_tool([lookup_price])
+        out = json.loads(await run_code.execute(code="result = tools.call('lookup_price', 'abc')"))
+        assert out["result"] == "'30.00'"
+
+    @pytest.mark.asyncio
+    async def test_functions_prefix_is_stripped(self) -> None:
+        run_code = _code_tool([lookup_price])
+        out = json.loads(
+            await run_code.execute(code="result = tools.call('functions.lookup_price', sku='ab')")
+        )
+        assert out["result"] == "'20.00'"
+
+    @pytest.mark.asyncio
+    async def test_too_many_positional_arguments_is_an_error(self) -> None:
+        run_code = _code_tool([lookup_price])
+        out = json.loads(await run_code.execute(code="tools.call('lookup_price', 'a', 'b', 'c')"))
+        assert "at most 1 argument" in out["error"]
+
+
+class TestRpcRobustness:
+    @pytest.mark.asyncio
+    async def test_garbage_on_the_rpc_channel_is_ignored(self) -> None:
+        """A library printing to the real fd must not kill the run."""
+        run_code = _code_tool([lookup_price])
+        out = json.loads(
+            await run_code.execute(
+                code=(
+                    "import sys\n"
+                    "sys.__stdout__.write('not json\\n'); sys.__stdout__.flush()\n"
+                    'sys.__stdout__.write(\'{"rpc": "noise"}\\n\'); sys.__stdout__.flush()\n'
+                    "result = tools.call('lookup_price', sku='ab')"
+                )
+            )
+        )
+        assert out["result"] == "'20.00'"
+
+    @pytest.mark.asyncio
+    async def test_program_dying_without_done_frame_is_reported(self) -> None:
+        run_code = _code_tool([lookup_price])
+        out = json.loads(await run_code.execute(code="import os\nos._exit(0)"))
+        assert "without a done frame" in out["error"]

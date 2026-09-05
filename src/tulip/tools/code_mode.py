@@ -110,7 +110,8 @@ def create_code_tool(
     async def _serve(
         proc: asyncio.subprocess.Process, call_seq: list[dict[str, Any]]
     ) -> dict[str, Any]:
-        assert proc.stdout is not None and proc.stdin is not None
+        assert proc.stdout is not None
+        assert proc.stdin is not None
         while True:
             line = await proc.stdout.readline()
             if not line:
