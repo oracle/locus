@@ -8,6 +8,41 @@ policy.
 
 ## [Unreleased]
 
+## [2.12.4] - 2026-09-06
+
+### Fixed
+
+- **The approved call clears the hook seam like any other.** (#172)
+  `resume(perform_dangling=True)` re-invoked the held call through the bare
+  executor, so `on_before_tool_call` / `on_after_tool_call` never fired for
+  the single most consequential call in a governed run — the one a human
+  approved. Measured live: a playbook recorded a required step as *skipped*
+  on a run that demonstrably performed it — an audit trace under-reporting a
+  privileged action, the one direction this machinery may never err in. The
+  performed call now runs through the same hook orchestration as the loop's:
+  a before-hook veto is honoured (a second veto is legitimate — a policy
+  hook entitled to block the call in the loop is entitled to block it on
+  resume), hook-modified arguments are used, and an after-hook's result
+  replacement lands in the fold the model reads. The call also now emits
+  `ToolStartEvent` before its `ToolCompleteEvent`, so a stream consumer
+  finally sees the ARGUMENTS the approved call ran with.
+
+- **HTTP MCP connects against both mcp signatures.** The `mcp` package
+  renamed `streamablehttp_client` → `streamable_http_client` and changed
+  its signature (a ready `http_client` replaces the
+  `auth`/`httpx_client_factory` pair), so a fresh install broke HTTP
+  transport at import time — surfaced as CI's mypy and the SSRF-guard test
+  failing on the import, not the guard. `MCPClient._connect_http` now
+  branches on what the installed version offers; either way the client
+  carries the configured auth, TLS-verify and redirect settings.
+
+- **`PlaybookStep.uses` resolves on the auto-installed path.** (#172,
+  adjacent) `PlaybookEnforcerHook` never passed `skills=` to
+  `PlaybookEnforcer.from_playbook`, so on the SDK's own
+  `Agent(playbook=...)` path every `uses:` reference resolved to nothing
+  and constrained nothing — silently. The hook now accepts `skills` and the
+  initializer hands it `config.skills`, which was sitting right there.
+
 ## [2.12.3] - 2026-08-27
 
 ### Fixed

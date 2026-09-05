@@ -136,7 +136,16 @@ def initialize_agent(agent: Agent) -> None:
     if agent.config.playbook is not None:
         from tulip.playbooks.hook import PlaybookEnforcerHook
 
-        agent._hooks.append(PlaybookEnforcerHook(agent.config.playbook))
+        # Hand the enforcer the agent's skills so ``PlaybookStep.uses``
+        # resolves to real capabilities — without this, ``uses`` references
+        # resolved to nothing and constrained nothing on the auto-installed
+        # path, silently (#172, adjacent gap).
+        agent._hooks.append(
+            PlaybookEnforcerHook(
+                agent.config.playbook,
+                skills={s.name: s for s in agent.config.skills} if agent.config.skills else None,
+            )
+        )
 
     # --- Memory manager ---------------------------------------------------
     if agent.config.memory_manager is not None:

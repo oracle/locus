@@ -526,8 +526,8 @@ class MCPClient(BaseModel):
             msg = "_connect_http called without base_url"
             raise RuntimeError(msg)
         try:
+            from mcp.client import streamable_http as _streamable_http
             from mcp.client.session import ClientSession
-            from mcp.client.streamable_http import streamablehttp_client
         except ImportError as e:
             raise ImportError(
                 "mcp package required for HTTP transport. Install with: pip install mcp"
@@ -579,11 +579,28 @@ class MCPClient(BaseModel):
                 follow_redirects=True,
             )
 
-        self._client_context = streamablehttp_client(
-            self.base_url,
-            auth=auth,
-            httpx_client_factory=_httpx_factory,
-        )
+        # mcp renamed ``streamablehttp_client`` → ``streamable_http_client``
+        # and changed its signature (a ready ``http_client`` replaces the
+        # ``auth``/``httpx_client_factory`` pair). Branch on what the installed
+        # version offers so both the pinned floor and the latest work; either
+        # way the client carries our auth, TLS-verify and redirect settings.
+        _legacy_client = getattr(_streamable_http, "streamablehttp_client", None)
+        if _legacy_client is not None:
+            self._client_context = _legacy_client(
+                self.base_url,
+                auth=auth,
+                httpx_client_factory=_httpx_factory,
+            )
+        else:
+            # ``getattr`` on purpose: the renamed API is typed against the
+            # httpx fork mcp vendors (httpx2), which duck-types with the
+            # client our factory builds — a static call here would pin us to
+            # whichever fork the installed mcp declares.
+            _new_client = getattr(_streamable_http, "streamable_http_client")  # noqa: B009
+            self._client_context = _new_client(
+                self.base_url,
+                http_client=_httpx_factory(auth=auth),
+            )
         read_stream, write_stream, _ = await self._client_context.__aenter__()
 
         self._session = ClientSession(read_stream, write_stream)

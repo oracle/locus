@@ -130,6 +130,17 @@ policy reads the same whether the agent is Tulip-native or wrapped.
 Human approvals are durable: `require_human_for` pauses the run, and an `interrupt()` +
 checkpointer means the decision survives a restart and the run resumes where it left off.
 
+**Measured, not asserted.** Running the integration suite against a weaker judge
+model (Qwen3.6-35B) produced the contrast by accident: `SteeringHook` — the SDK's
+own LLM-as-judge guardrail — failed open and the agent reported a table deleted,
+while in the same session, under the same model, a tool body behind `admit()`
+held: the model *did* call the destructive tool, admission refused it, the side
+effect never ran, and the refusal landed on a chain that still verifies. Nobody
+designed the experiment — a weaker judge is simply the condition under which an
+advisory control degrades, and degradation under a weaker model is precisely the
+risk a structural control exists to remove. (Recorded in
+[#145](https://github.com/tuliplabs-ai/tulip-agents/issues/145).)
+
 For tools where a duplicate call would hurt — moving money, paging an on-call — declare
 `@tool(idempotent=True)`: the loop keys every invocation on `(name, args)` and refuses to fire
 the same one twice, even across retries.

@@ -22,6 +22,7 @@ from tulip.core.events import (
     ReflectEvent,
     TerminateEvent,
     ToolCompleteEvent,
+    ToolStartEvent,
     TulipEvent,
 )
 from tulip.core.messages import Message, Role, ToolResult
@@ -721,25 +722,71 @@ class Agent(AgentRuntimeMixin, BaseModel):
                 # fold rather than inventing a result.
                 self._initialize()
                 if self._tool_registry.get(dangling.name) is not None:
+                    from tulip.agent.runtime_loop import _apply_hook_result
                     from tulip.core.messages import ToolCall as _ToolCall
 
-                    [invoked] = await self._executor.execute(
-                        [
-                            _ToolCall(
-                                id=dangling.id,
-                                name=dangling.name,
-                                arguments=dict(dangling.arguments or {}),
-                            )
-                        ],
-                        self._tool_registry,
-                    )
-                    folded = ToolResult(
+                    arguments = dict(dangling.arguments or {})
+                    # The same start event the loop emits, so the performed
+                    # call arrives as a start/complete pair — and the start
+                    # carries the ARGUMENTS, which ToolCompleteEvent does not,
+                    # so a consumer compensating on this path can finally see
+                    # what the approved call ran with.
+                    yield ToolStartEvent(
+                        tool_name=dangling.name,
                         tool_call_id=dangling.id,
-                        name=dangling.name,
-                        content=invoked.content,
-                        error=invoked.error,
-                        duration_ms=invoked.duration_ms,
+                        arguments=arguments,
                     )
+                    # The SAME hook seam the loop runs around every tool call
+                    # (#172). This is the single most consequential call in a
+                    # governed run — the one a human approved — and executing
+                    # it through the bare executor made it invisible to every
+                    # hook: playbook trackers recorded the step as skipped,
+                    # audit sinks riding the hook seam never saw it. A
+                    # before-hook that cancels is a legitimate second veto and
+                    # is honoured here exactly as the loop honours it.
+                    before_event = await self._orch().run_before_tool(
+                        dangling.name, dangling.id, arguments
+                    )
+                    if before_event.cancel:
+                        cancel_msg = (
+                            before_event.cancel
+                            if isinstance(before_event.cancel, str)
+                            else "Cancelled by hook"
+                        )
+                        folded = ToolResult(
+                            tool_call_id=dangling.id,
+                            name=dangling.name,
+                            content=cancel_msg,
+                            error=None,
+                            duration_ms=0.0,
+                        )
+                    else:
+                        arguments = before_event.arguments
+                        [invoked] = await self._executor.execute(
+                            [
+                                _ToolCall(
+                                    id=dangling.id,
+                                    name=dangling.name,
+                                    arguments=arguments,
+                                )
+                            ],
+                            self._tool_registry,
+                        )
+                        folded = ToolResult(
+                            tool_call_id=dangling.id,
+                            name=dangling.name,
+                            content=invoked.content,
+                            error=invoked.error,
+                            duration_ms=invoked.duration_ms,
+                        )
+                        after_event = await self._orch().run_after_tool(
+                            folded.name,
+                            folded.content if folded.success else None,
+                            folded.error,
+                            tool_call_id=folded.tool_call_id,
+                            arguments=arguments,
+                        )
+                        folded = _apply_hook_result(folded, after_event)
                     # This execution happens BEFORE the loop starts streaming,
                     # so without this the call is invisible: a consumer sees
                     # the run resume and finish with no record of the action

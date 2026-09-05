@@ -815,3 +815,191 @@ async def test_perform_dangling_falls_back_to_the_text_fold_when_the_tool_is_gon
     results = [m for m in seen if m.role == Role.TOOL and m.tool_call_id == call.id]
     assert results, "the dangling call was left unanswered"
     assert "approve" in str(results[-1].content)
+
+
+# ---------------------------------------------------------------------------
+# #172 — the performed dangling call must run through the tool-hook seam
+# ---------------------------------------------------------------------------
+
+
+class _RecordingHook:
+    """Minimal hook that records the tool-hook seam."""
+
+    def __init__(self) -> None:
+        self.before: list[tuple[str, str, dict[str, Any]]] = []
+        self.after: list[tuple[str, Any, str | None]] = []
+
+    async def on_before_tool_call(self, event: Any) -> None:
+        self.before.append((event.tool_name, event.tool_call_id, dict(event.arguments)))
+
+    async def on_after_tool_call(self, event: Any) -> None:
+        self.after.append((event.tool_name, event.result, event.error))
+
+
+@pytest.mark.asyncio
+async def test_perform_dangling_dispatches_tool_hooks_around_the_performed_call() -> None:
+    """The approved call is the single most consequential call in a governed
+    run — it must be visible to every hook exactly as a loop-executed call is
+    (#172: playbook trackers recorded the step as 'skipped' on a run that
+    demonstrably performed it)."""
+    import json
+
+    primed: dict[str, str] = {}
+
+    @tool
+    def issue_refund(amount: float) -> str:
+        """Gated action: hold first, act when primed."""
+        if "issue_refund" not in primed:
+            return json.dumps({"__interrupt__": True, "question": "approve?"})
+        return f"refunded {amount}"
+
+    hook = _RecordingHook()
+    model = _ScriptedModel([_tc("issue_refund", {"amount": 25}), _text("done")])
+    agent = Agent(
+        model=model,
+        tools=[issue_refund],
+        hooks=[hook],
+        max_iterations=10,
+        reflexion=False,
+        grounding=False,
+    )
+    async for _ in agent.run("refund"):
+        pass
+    hook.before.clear()
+    hook.after.clear()
+
+    primed["issue_refund"] = "approve"
+    events = [ev async for ev in agent.resume("approve", perform_dangling=True)]
+
+    performed_before = [b for b in hook.before if b[0] == "issue_refund"]
+    assert performed_before, "on_before_tool_call never fired for the performed call"
+    assert performed_before[0][2] == {"amount": 25}, "hooks must see the original arguments"
+    performed_after = [a for a in hook.after if a[0] == "issue_refund"]
+    assert performed_after, "on_after_tool_call never fired for the performed call"
+    assert "refunded 25" in str(performed_after[0][1])
+
+    starts = [
+        e
+        for e in events
+        if getattr(e, "event_type", "") == "tool_start" and e.tool_name == "issue_refund"
+    ]
+    assert starts, "the performed call must emit ToolStartEvent (it carries the arguments)"
+    assert starts[0].arguments == {"amount": 25}
+
+
+@pytest.mark.asyncio
+async def test_perform_dangling_honours_a_before_hook_veto() -> None:
+    """A before-hook that cancels is a legitimate second veto: a policy hook
+    entitled to block the call in the loop is entitled to block it on the
+    resume path too. The effect must not run; the fold carries the veto."""
+    import json
+
+    calls: list[float] = []
+    primed: dict[str, str] = {}
+
+    @tool
+    def gated_refund(amount: float) -> str:
+        """Hold first, act when primed."""
+        if "go" not in primed:
+            return json.dumps({"__interrupt__": True, "question": "approve?"})
+        calls.append(amount)
+        return f"refunded {amount}"
+
+    class _ArmableVeto:
+        armed = False
+
+        async def on_before_tool_call(self, event: Any) -> None:
+            if self.armed and event.tool_name == "gated_refund":
+                event.cancel = "blocked by policy on resume"
+
+    veto = _ArmableVeto()
+    model = _ScriptedModel([_tc("gated_refund", {"amount": 9}), _text("done")])
+    agent = Agent(
+        model=model,
+        tools=[gated_refund],
+        hooks=[veto],
+        max_iterations=10,
+        reflexion=False,
+        grounding=False,
+    )
+    async for _ in agent.run("refund"):
+        pass
+    primed["go"] = "approve"
+    veto.armed = True
+
+    seen: list[Message] = []
+    original = model.complete
+
+    async def _capture(messages: list[Message], *a: Any, **k: Any) -> ModelResponse:
+        seen.clear()
+        seen.extend(messages)
+        return await original(messages, *a, **k)
+
+    model.complete = _capture  # type: ignore[method-assign]
+    events = [ev async for ev in agent.resume("approve", perform_dangling=True)]
+
+    assert calls == [], "a hook veto on the resume path must prevent execution"
+    completes = [e for e in events if getattr(e, "event_type", "") == "tool_complete"]
+    assert completes
+    assert "blocked by policy on resume" in str(completes[0].result)
+    call = next(tc for m in seen if m.role == Role.ASSISTANT for tc in (m.tool_calls or []))
+    results = [m for m in seen if m.role == Role.TOOL and m.tool_call_id == call.id]
+    assert results
+    assert "blocked by policy on resume" in str(results[-1].content), (
+        "the fold must carry the veto, not a fabricated success"
+    )
+
+
+@pytest.mark.asyncio
+async def test_perform_dangling_applies_after_hook_result_replacement() -> None:
+    """An after-hook replacement applies on the resume path exactly as in the
+    loop — a redaction hook must not be bypassable by the approval detour."""
+    import json
+
+    primed: dict[str, str] = {}
+
+    @tool
+    def export_data(table: str) -> str:
+        """Hold first, act when primed."""
+        if "go" not in primed:
+            return json.dumps({"__interrupt__": True, "question": "approve?"})
+        return "ssn=123-45-6789"
+
+    class _RedactHook:
+        async def on_after_tool_call(self, event: Any) -> None:
+            if event.result and "ssn=" in str(event.result):
+                event.result = "[REDACTED]"
+
+    model = _ScriptedModel([_tc("export_data", {"table": "users"}), _text("done")])
+    agent = Agent(
+        model=model,
+        tools=[export_data],
+        hooks=[_RedactHook()],
+        max_iterations=10,
+        reflexion=False,
+        grounding=False,
+    )
+    async for _ in agent.run("export"):
+        pass
+    primed["go"] = "approve"
+
+    seen: list[Message] = []
+    original = model.complete
+
+    async def _capture(messages: list[Message], *a: Any, **k: Any) -> ModelResponse:
+        seen.clear()
+        seen.extend(messages)
+        return await original(messages, *a, **k)
+
+    model.complete = _capture  # type: ignore[method-assign]
+    events = [ev async for ev in agent.resume("approve", perform_dangling=True)]
+
+    completes = [e for e in events if getattr(e, "event_type", "") == "tool_complete"]
+    assert completes
+    assert completes[0].result == "[REDACTED]"
+    call = next(tc for m in seen if m.role == Role.ASSISTANT for tc in (m.tool_calls or []))
+    results = [m for m in seen if m.role == Role.TOOL and m.tool_call_id == call.id]
+    assert results
+    assert str(results[-1].content) == "[REDACTED]", (
+        "the fold the model sees must carry the hook-replaced result"
+    )
