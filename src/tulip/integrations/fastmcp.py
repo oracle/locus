@@ -592,7 +592,12 @@ class MCPClient(BaseModel):
                 httpx_client_factory=_httpx_factory,
             )
         else:
-            self._client_context = _streamable_http.streamable_http_client(
+            # ``getattr`` on purpose: the renamed API is typed against the
+            # httpx fork mcp vendors (httpx2), which duck-types with the
+            # client our factory builds — a static call here would pin us to
+            # whichever fork the installed mcp declares.
+            _new_client = getattr(_streamable_http, "streamable_http_client")  # noqa: B009
+            self._client_context = _new_client(
                 self.base_url,
                 http_client=_httpx_factory(auth=auth),
             )
