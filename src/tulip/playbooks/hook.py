@@ -21,7 +21,8 @@ hadn't been built.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any
 
 from tulip.hooks.provider import HookPriority, HookProvider
 from tulip.playbooks.enforcer import PlaybookEnforcer
@@ -75,12 +76,14 @@ class PlaybookEnforcerHook(HookProvider):
         *,
         block_violations: bool = True,
         record_violations: bool = True,
+        skills: Mapping[str, Any] | None = None,
         priority: int = HookPriority.SECURITY_DEFAULT,
     ) -> None:
         self._enforcer = PlaybookEnforcer.from_playbook(
             playbook,
             block_violations=block_violations,
             record_violations=record_violations,
+            skills=skills,
         )
         self._priority = priority
 
