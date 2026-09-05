@@ -42,12 +42,29 @@ class TulipEvent(BaseModel):
 
 
 class ThinkEvent(TulipEvent):
-    """Agent produced reasoning and/or tool calls."""
+    """Agent produced reasoning and/or tool calls.
+
+    ``reasoning`` carries the assistant's ordinary prose for the turn — the
+    text you show a user — not hidden chain-of-thought. It is the streaming
+    path's answer to "where is the assistant's text?" (#165): interim text
+    arrives here, the final answer on ``TerminateEvent.final_message``, and
+    token-by-token deltas on ``ModelChunkEvent`` (opt-in via
+    ``stream_tokens=True``).
+    """
 
     event_type: Literal["think"] = "think"
     iteration: int
     reasoning: str | None = None
     tool_calls: list[ToolCall] = Field(default_factory=list)
+
+    @property
+    def content(self) -> str | None:
+        """The assistant's text for this turn — alias for ``reasoning``.
+
+        ``content`` is the first guess from outside; ``reasoning`` reads like
+        chain-of-thought but is actually the visible prose. Both names work.
+        """
+        return self.reasoning
 
 
 class ToolStartEvent(TulipEvent):
@@ -97,7 +114,12 @@ class GroundingEvent(TulipEvent):
 
 
 class TerminateEvent(TulipEvent):
-    """Agent execution terminated."""
+    """Agent execution terminated.
+
+    Not just a lifecycle signal: ``final_message`` is the payload — the
+    agent's final answer on the streaming path, the counterpart of
+    ``AgentResult.message`` (#165). Also readable as ``.content``.
+    """
 
     event_type: Literal["terminate"] = "terminate"
     reason: (
@@ -111,6 +133,11 @@ class TerminateEvent(TulipEvent):
     # AgentState counters (prompt/completion/total). None when the model
     # reported no usage — consumers must treat absence as "unmetered", not 0.
     usage: dict[str, int] | None = None
+
+    @property
+    def content(self) -> str | None:
+        """The agent's final answer — alias for ``final_message``."""
+        return self.final_message
 
 
 class InterruptEvent(TulipEvent):
@@ -139,7 +166,14 @@ class InterruptEvent(TulipEvent):
 
 
 class ModelChunkEvent(TulipEvent):
-    """Streaming chunk from model."""
+    """Streaming chunk from model.
+
+    **Fires only with** ``agent.run(prompt, stream_tokens=True)`` — without
+    the flag no chunk events arrive and nothing says why (#164). Assistant
+    text still arrives without it, batched per turn: interim prose on
+    ``ThinkEvent.reasoning``/``.content``, the final answer on
+    ``TerminateEvent.final_message``/``.content``.
+    """
 
     event_type: Literal["model_chunk"] = "model_chunk"
     content: str | None = None

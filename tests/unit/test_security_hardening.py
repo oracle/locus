@@ -83,7 +83,7 @@ class TestPgVectorMetadataFilterInjection:
     def store(self):
         from tulip.rag.stores.pgvector import PgVectorStore
 
-        instance = PgVectorStore(table_name="docs", dimension=4)
+        instance = PgVectorStore(host="localhost", table_name="docs", dimension=4)
 
         class _FakePool:
             def acquire(self):  # pragma: no cover — should never be reached
