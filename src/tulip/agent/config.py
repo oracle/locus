@@ -322,6 +322,18 @@ class AgentConfig(BaseModel):
         description="How to execute multiple tool calls",
     )
 
+    code_mode: bool = Field(
+        default=False,
+        description=(
+            "Register the run_code tool: the model writes a Python program "
+            "that calls the agent's other tools via tools.call(...) without "
+            "round-tripping each result through the conversation. Every "
+            "in-program call still clears the hook seam and any gate_tool "
+            "wrapper — deferral of the transcript, never of the policy. "
+            "See tulip.tools.code_mode (#176)."
+        ),
+    )
+
     max_concurrency: int = Field(
         default=10,
         ge=1,

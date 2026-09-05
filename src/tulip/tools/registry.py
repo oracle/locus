@@ -22,6 +22,12 @@ class ToolRegistry(BaseModel):
 
     tools: dict[str, Tool] = Field(default_factory=dict)
 
+    activated: set[str] = Field(default_factory=set)
+    """Names of deferred tools whose schemas have been surfaced to the model
+    (via ``tool_search`` or :meth:`activate`). Deferral is visibility only:
+    an unactivated deferred tool is still registered, still executable, and
+    still gated — it just costs no context until the model asks for it."""
+
     model_config = {"arbitrary_types_allowed": True}
 
     def register(self, tool: Tool) -> None:
@@ -58,8 +64,59 @@ class ToolRegistry(BaseModel):
         return list(self.tools.keys())
 
     def to_openai_schemas(self) -> list[dict[str, Any]]:
-        """Get all tools as OpenAI-compatible schemas."""
-        return [tool.to_openai_schema() for tool in self.tools.values()]
+        """Schemas for the tools the model may currently see.
+
+        Eager tools always; deferred tools only once activated. This is the
+        single choke point the run loop reads, so deferral needs no loop
+        changes — an unactivated deferred tool simply never reaches the
+        request payload (#177).
+        """
+        return [
+            tool.to_openai_schema()
+            for tool in self.tools.values()
+            if not tool.deferred or tool.name in self.activated
+        ]
+
+    def deferred_pending(self) -> list[Tool]:
+        """Deferred tools whose schemas the model has not been shown yet."""
+        return [t for t in self.tools.values() if t.deferred and t.name not in self.activated]
+
+    def activate(self, name: str) -> Tool:
+        """Surface a deferred tool's schema to subsequent model calls.
+
+        Activation changes visibility and nothing else — gating, labels and
+        sandbox requirements ride on the Tool object and were in force the
+        whole time. Raises ``KeyError`` for an unknown name; activating an
+        eager or already-active tool is a no-op.
+        """
+        tool = self.get_or_raise(name)
+        self.activated.add(name)
+        return tool
+
+    def search(self, query: str, *, limit: int = 5) -> list[Tool]:
+        """Rank deferred, not-yet-activated tools against a keyword query.
+
+        Deliberately boring lexical scoring (token overlap on name and
+        description, substring bonus): deterministic, offline, and cheap —
+        the model supplies the intelligence; this just narrows the catalog.
+        """
+        terms = [t for t in query.lower().split() if t]
+        if not terms:
+            return []
+        scored: list[tuple[float, str, Tool]] = []
+        for candidate in self.deferred_pending():
+            haystack = f"{candidate.name} {candidate.description}".lower()
+            name_l = candidate.name.lower()
+            score = 0.0
+            for term in terms:
+                if term in name_l:
+                    score += 3.0
+                elif term in haystack:
+                    score += 1.0
+            if score > 0:
+                scored.append((score, candidate.name, candidate))
+        scored.sort(key=lambda item: (-item[0], item[1]))
+        return [t for _, _, t in scored[:limit]]
 
     def __contains__(self, name: str) -> bool:
         """Check if a tool is registered."""

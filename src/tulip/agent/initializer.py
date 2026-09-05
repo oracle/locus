@@ -147,6 +147,31 @@ def initialize_agent(agent: Agent) -> None:
             )
         )
 
+    # --- Deferred tools → tool_search --------------------------------------
+    # Runs after every registration path above (config tools, plugins,
+    # skills, providers) so the catalog sees them all. Deferral is
+    # visibility only; see tulip.tools.tool_search (#177).
+    if any(t.deferred for t in agent._tool_registry) and "tool_search" not in (
+        agent._tool_registry
+    ):
+        from tulip.tools.tool_search import create_tool_search_tool
+
+        agent._tool_registry.register(create_tool_search_tool(agent._tool_registry))
+
+    # --- Code mode → run_code ----------------------------------------------
+    # After every registration path so in-program calls can reach them all.
+    # The tool is bound to this agent's registry AND hook orchestrator: the
+    # whole point is that an in-sandbox call clears the same seam a
+    # loop-issued call does (#176).
+    if agent.config.code_mode and "run_code" not in agent._tool_registry:
+        from tulip.agent.hook_orchestrator import HookOrchestrator
+        from tulip.tools.code_mode import create_code_tool
+
+        agent._hook_orchestrator = agent._hook_orchestrator or HookOrchestrator(agent._hooks)
+        agent._tool_registry.register(
+            create_code_tool(agent._tool_registry, agent._hook_orchestrator)
+        )
+
     # --- Memory manager ---------------------------------------------------
     if agent.config.memory_manager is not None:
         agent._memory_manager = agent.config.memory_manager
