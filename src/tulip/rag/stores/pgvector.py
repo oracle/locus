@@ -201,9 +201,7 @@ class PgVectorStore(BaseModel, BaseVectorStore):
                 )
             pgvector_config = config
         else:
-            if all(
-                v is None for v in (dsn, host, port, database, user, password)
-            ) and not any(
+            if all(v is None for v in (dsn, host, port, database, user, password)) and not any(
                 k in kwargs for k in ("dsn", "host", "port", "database", "user", "password")
             ):
                 raise ValueError(
@@ -221,7 +219,9 @@ class PgVectorStore(BaseModel, BaseVectorStore):
                 port=port if port is not None else 5432,
                 database=database if database is not None else "postgres",
                 user=user if user is not None else "postgres",
-                password=SecretStr(password) if isinstance(password, str) else password or SecretStr(""),
+                password=SecretStr(password)
+                if isinstance(password, str)
+                else password or SecretStr(""),
                 table_name=table_name if table_name is not None else "tulip_vectors",
                 dimension=dimension if dimension is not None else 1536,
                 distance_metric=distance_metric if distance_metric is not None else "cosine",
