@@ -27,6 +27,15 @@ policy.
   `ToolStartEvent` before its `ToolCompleteEvent`, so a stream consumer
   finally sees the ARGUMENTS the approved call ran with.
 
+- **HTTP MCP connects against both mcp signatures.** The `mcp` package
+  renamed `streamablehttp_client` → `streamable_http_client` and changed
+  its signature (a ready `http_client` replaces the
+  `auth`/`httpx_client_factory` pair), so a fresh install broke HTTP
+  transport at import time — surfaced as CI's mypy and the SSRF-guard test
+  failing on the import, not the guard. `MCPClient._connect_http` now
+  branches on what the installed version offers; either way the client
+  carries the configured auth, TLS-verify and redirect settings.
+
 - **`PlaybookStep.uses` resolves on the auto-installed path.** (#172,
   adjacent) `PlaybookEnforcerHook` never passed `skills=` to
   `PlaybookEnforcer.from_playbook`, so on the SDK's own
