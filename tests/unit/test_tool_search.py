@@ -73,6 +73,25 @@ class TestSearch:
         assert result["matches"] == []
         assert "2 unloaded" in result["note"]
 
+    def test_blank_query_matches_nothing(self) -> None:
+        reg = create_registry(issue_refund, dns_lookup)
+        assert reg.search("") == []
+        assert reg.search("   ") == []
+
+    def test_description_only_term_still_matches(self) -> None:
+        # "resolve" appears in dns_lookup's description but not its name.
+        reg = create_registry(issue_refund, dns_lookup)
+        assert [t.name for t in reg.search("resolve")] == ["dns_lookup"]
+
+    def test_name_match_outranks_description_match(self) -> None:
+        # "lookup" is in dns_lookup's name; "moves" only in issue_refund's
+        # description — the name hit must rank first.
+        reg = create_registry(issue_refund, dns_lookup)
+        assert [t.name for t in reg.search("lookup moves")] == [
+            "dns_lookup",
+            "issue_refund",
+        ]
+
     def test_activated_tools_leave_the_catalog(self) -> None:
         reg = create_registry(issue_refund, dns_lookup)
         reg.activate("dns_lookup")
