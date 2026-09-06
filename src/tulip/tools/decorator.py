@@ -73,6 +73,14 @@ class Tool(BaseModel):
     inside its body, JSON-serializable arguments and return value, and no
     ``ctx``/``context`` parameter. See :mod:`tulip.tools.sandbox`."""
 
+    deferred: bool = False
+    """When True, the tool's schema is NOT sent to the model until it is
+    activated — the model reaches it through the ``tool_search`` builtin
+    (auto-registered when any deferred tool exists). Deferral is a context
+    economy: only visibility changes. The tool is registered, gated, and
+    policy-matched exactly as an eager tool; activating it adds its schema
+    to the next model call, nothing more (#177)."""
+
     model_config = {"arbitrary_types_allowed": True}
 
     @property
@@ -246,6 +254,7 @@ def tool(
     idempotent: bool = False,
     labels: Iterable[str] | None = None,
     sandbox: SandboxSpec | ToolSandbox | str | bool | None = None,
+    deferred: bool = False,
 ) -> Callable[[Callable[P, R]], Tool]: ...
 
 
@@ -257,6 +266,7 @@ def tool(
     idempotent: bool = False,
     labels: Iterable[str] | None = None,
     sandbox: SandboxSpec | ToolSandbox | str | bool | None = None,
+    deferred: bool = False,
 ) -> Tool | Callable[[Callable[P, R]], Tool]:
     """
     Decorator to create a tool from a function.
@@ -324,6 +334,7 @@ def tool(
             idempotent=idempotent,
             labels=frozenset(labels or ()),
             sandbox=spec,
+            deferred=deferred,
         )
 
     if fn is not None:

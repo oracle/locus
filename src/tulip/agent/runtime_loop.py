@@ -1690,6 +1690,13 @@ class AgentRuntimeMixin:
                 f"{create_schema_prompt(self.config.output_schema)}"
             )
 
+        # Deferred tools exist only if the model knows to look: a tool it was
+        # never told about is indistinguishable from one that does not exist,
+        # so the catalog note rides the system prompt (#177).
+        from tulip.tools.tool_search import deferred_catalog_note
+
+        prompt_str += deferred_catalog_note(self._tool_registry)
+
         state = state.with_message(Message.system(prompt_str))
         state = state.with_message(Message.user(prompt))
 

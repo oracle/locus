@@ -8,6 +8,43 @@ policy.
 
 ## [Unreleased]
 
+## [2.13.0] - 2026-09-06
+
+### Added
+
+- **Code mode: programmatic tool calling that still clears the gate.**
+  (#176) `Agent(code_mode=True)` registers `run_code`: the model writes a
+  Python program that calls the agent's other tools via `tools.call(...)`
+  in a loop, without round-tripping each result through the conversation —
+  the execution-model change the field converged on this year, with its
+  measured 38–64% token reductions. Every other implementation forks the
+  paths: in-sandbox calls bypass the framework's hooks and guardrails.
+  Ours refuses the fork. The program runs in an isolated `python -I`
+  interpreter with no tool implementations inside; each `tools.call` is an
+  RPC to the host, and the host routes it through the exact seam a
+  loop-issued call takes — before-hooks (a cancel or an `AdmissionError`
+  reaches the program as a catchable `ToolRefused`, never as the effect),
+  hook-modified arguments, the registered Tool itself (a `gate_tool`
+  wrapper and its `admit()` still stand in front of the side effect, and
+  the refusal lands on the audit chain), then after-hooks (result
+  replacement is what the program reads). Verified live: a program totaled
+  five prices in one call and attempted a charge; the gate refused it, the
+  effect never ran, and the trail verifies with the refusal recorded.
+
+- **Deferred tools + `tool_search`: schemas on demand.** (#177) Tool
+  definitions dominate the window on tool-heavy agents (the field measured
+  ~85% token reduction from on-demand loading). `@tool(deferred=True)`
+  keeps a tool's schema out of every model call until the model asks: a
+  `tool_search` builtin (auto-registered when any deferred tool exists,
+  announced by one system-prompt line) matches keywords against the
+  catalog and surfaces the winners to the next turn. Deferral is
+  **visibility only** — a deferred tool is registered, gated, labelled and
+  sandbox-checked from the moment of construction, activation cannot widen
+  authority, and the search call itself goes through the ordinary tool
+  seam, so an audit sees what the model went looking for. Verified live:
+  the model searched "currency conversion", loaded the deferred converter,
+  and used it.
+
 ## [2.12.5] - 2026-09-06
 
 ### Fixed
