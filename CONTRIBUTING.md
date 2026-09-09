@@ -133,10 +133,9 @@ then take the next free number at the end of that range:
 | Real-world workflows | 62–66 |
 | Server & full pipelines | 67–69 |
 
-`NOTEBOOK_CATEGORIES` in the workbench's `backend/runner.py`
-([tuliplabs-ai/workbench](https://github.com/tuliplabs-ai/workbench))
-is the source of truth — open a companion PR there when you add a
-notebook so the workbench sidebar groups the new entry correctly.
+Notebook categories are mirrored in the workbench, an internal
+maintainer tool. Note the intended category in your PR description and a
+maintainer will keep the workbench sidebar in step.
 
 ### File requirements
 
@@ -405,14 +404,15 @@ class TestAgent:
 
 ### Workbench end-to-end sweeps
 
-The workbench
-([tuliplabs-ai/workbench](https://github.com/tuliplabs-ai/workbench))
-ships Playwright specs that drive every non-stdin notebook through the
-UI against a single provider. Check it out next to this repo, point its
-backend at your SDK checkout, and sweep:
+> **Maintainers only.** The workbench is an internal repository; these
+> steps need access to it. Outside contributors can skip this section —
+> CI runs the equivalent sweep on your PR.
+
+The workbench ships Playwright specs that drive every non-stdin notebook
+through the UI against a single provider. With it cloned next to this
+repo, point its backend at your SDK checkout and sweep:
 
 ```bash
-git clone https://github.com/tuliplabs-ai/workbench.git ../workbench
 cd ../workbench
 
 # Bring up the three tiers (terminal 1–3); the backend runs your local
