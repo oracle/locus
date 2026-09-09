@@ -205,7 +205,7 @@ A bundled `MockModel` means every notebook runs offline with no credentials.
 
 | | |
 |---|---|
-| **[🧭 Cognitive router](https://tulipagents.ai/concepts/multi-agent/#the-eight-shapes)** | Describe a task → eight named protocols → the right primitive compiled automatically. The LLM fills a typed schema; routing is deterministic. |
+| **[🧭 Cognitive router](https://tulipagents.ai/concepts/router/)** | Describe a task → eight named protocols → the right primitive compiled automatically. The LLM fills a typed schema; routing is deterministic. |
 | **[🤝 Multi-agent](https://tulipagents.ai/concepts/multi-agent/)** | Seven native patterns + cross-process A2A. One `Agent` class. One event stream. |
 | **[🔬 DeepAgent](https://tulipagents.ai/concepts/deepagent/)** | `create_deepagent` (per-turn grounding) and `create_research_workflow` (StateGraph with post-hoc grounding eval). |
 | **[🪙 MCP](https://tulipagents.ai/concepts/mcp/)** | `MCPClient` consumes MCP servers. `TulipMCPServer` exposes the SDK's tools as MCP. |
@@ -250,7 +250,7 @@ print(result.title if is_finding(result) else f"withheld: {result.reason}")
 
 ## The cognitive router and multi-agent shapes
 
-Describe a task in plain language; the **[cognitive router](https://tulipagents.ai/concepts/multi-agent/#the-eight-shapes)**
+Describe a task in plain language; the **[cognitive router](https://tulipagents.ai/concepts/router/)**
 (PRISM) runs an LLM classifier that fills a typed `GoalFrame`, matches it to one of eight
 coordination protocols, and compiles the matching runtime primitive. **The model classifies;
 routing is deterministic — it never authors the topology.**
@@ -285,7 +285,7 @@ async def main():
 asyncio.run(main())
 ```
 
-→ [Cognitive router](https://tulipagents.ai/concepts/multi-agent/#the-eight-shapes) ·
+→ [Cognitive router](https://tulipagents.ai/concepts/router/) ·
 [All patterns](https://tulipagents.ai/concepts/multi-agent/)
 
 ---
