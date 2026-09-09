@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """End-to-end smoke: drive Tulip against local Postgres + pgvector + Redis.

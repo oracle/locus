@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """Hooks reach every agent a protocol builder emits — leaves included.

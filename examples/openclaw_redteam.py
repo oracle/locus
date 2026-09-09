@@ -16,7 +16,7 @@ Safety / isolation (each probe runs in its own clean room):
   - unique ``idempotencyKey``    -> gateway run-dedupe never collapses two probes
 
 Run:
-  /home/fede/Projects/tuliplabs/tulip-agents/.venv/bin/python openclaw_redteam.py
+  python openclaw_redteam.py
 """
 
 from __future__ import annotations

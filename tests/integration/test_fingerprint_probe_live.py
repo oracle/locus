@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """Live inference-fingerprint probe against a real GPU-served endpoint.

@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """Tamper-evident audit trail — every agent action as replayable evidence.

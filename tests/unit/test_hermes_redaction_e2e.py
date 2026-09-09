@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """Integration test for redaction (A.1) wired through the tool executor.

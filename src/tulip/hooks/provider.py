@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """Hook provider protocol and base class for Tulip lifecycle hooks.

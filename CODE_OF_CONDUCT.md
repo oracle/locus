@@ -56,8 +56,9 @@ an individual is officially representing the community in public spaces.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the maintainers privately through GitHub
-([@tuliplabs-ai](https://github.com/tuliplabs-ai)). All complaints will be
+reported to the maintainers privately through GitHub, by opening a
+[security advisory](https://github.com/tuliplabs-ai/tulip-agents/security/advisories/new).
+All complaints will be
 reviewed and investigated promptly and fairly.
 
 All community leaders are obligated to respect the privacy and security of the

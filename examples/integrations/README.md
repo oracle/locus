@@ -68,7 +68,7 @@ explicitly; you never get one by accident.
 
 **RunPod — pod + container image.** `runpod_probe(endpoint)` uses the RunPod
 SDK to create a GPU pod from a **container image** (`RUNPOD_PROBE_IMAGE`,
-default `tuliplabs/timing-probe:latest`), waits for the pod's output, parses
+default `<your-registry>/timing-probe:latest`), waits for the pod's output, parses
 the feature vector out of it, and terminates the pod in a `finally`. The
 probe *is* the image — you build and publish it. Credential: `RUNPOD_API_KEY`.
 

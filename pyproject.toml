@@ -11,7 +11,7 @@ license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.11"
 authors = [
-    { name = "Tulip Labs" },
+    { name = "The Tulip Authors" },
 ]
 # Ordered by the job a searcher is actually trying to do. The gate terms come
 # first on purpose: people arrive looking for "how do I stop my agent doing X

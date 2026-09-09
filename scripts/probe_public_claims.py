@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
-"""Probe the public claims on tuliplabs.ai / tulipagents.ai against the code.
+"""Probe the public claims on tulipagents.ai against the code.
 
 Every check maps to a concrete, verbatim claim made on the marketing or docs
 pages. Offline-only: uses the bundled MockModel, no credentials, no cost. Run:
@@ -226,7 +226,7 @@ def main() -> None:
 
     # ── report ───────────────────────────────────────────────────────────────
     print("\n" + "=" * 80)
-    print("PUBLIC-CLAIM PROBE  —  tuliplabs.ai / tulipagents.ai  vs  the code")
+    print("PUBLIC-CLAIM PROBE  —  tulipagents.ai  vs  the code")
     print("=" * 80)
     width = max(len(c) for c, _, _ in results)
     for claim, status, detail in results:

@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """End-to-end test: ``on_after_tool_call`` receives ``tool_call_id`` + ``arguments``.

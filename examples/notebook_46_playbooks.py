@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 """Notebook 46: playbooks — a GDPR data-subject-access runbook the agent must follow.
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """Notebook 79: SOC alert triage with SIEM-grounded verdicts.

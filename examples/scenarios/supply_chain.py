@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 """Supply-chain trust: untrusted tools, MCP servers, and model artifacts.
 
@@ -23,7 +23,7 @@ from __future__ import annotations
 
 # Trusted publishers and pinned model digests — the allowlist the agent
 # checks before mounting anything. In production this is signed metadata.
-_TRUSTED_PUBLISHERS = frozenset({"tuliplabs", "first-party"})
+_TRUSTED_PUBLISHERS = frozenset({"acme-security", "first-party"})
 _PINNED_MODELS = {
     "clusiana-3b-v1": "sha256:9f86d0...",  # the digest you trained and signed
 }
@@ -44,7 +44,7 @@ def main() -> None:
 
     print("MCP tools / plugins (publisher allowlist):")
     candidates = [
-        ("indicator_pivot", "tuliplabs"),  # first-party, trusted
+        ("indicator_pivot", "acme-security"),  # first-party, trusted
         ("free-osint-scraper", "anon-marketplace"),  # unknown publisher
         ("totally_safe_shell", "anon-marketplace"),  # poisoned tool
     ]

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """Notebook 58: Cognitive router — risk-gated routing for infra/devops requests.

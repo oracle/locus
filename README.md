@@ -1,8 +1,4 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tuliplabs-ai/tulip-agents/main/docs/img/tuliplabs-logo.png" alt="tuliplabs" width="320">
-</p>
-
-<p align="center">
   <strong>The agent framework where the model never holds the trigger.</strong><br>
   <em>Your agent is about to issue a refund, ship a deploy, or delete a customer record. Every
   consequential action clears a policy check first — real code, outside the model, before the
@@ -465,7 +461,7 @@ Paper: [GSAR: Typed Grounding for Hallucination Detection and Recovery in Multi-
 
 ## License
 
-Copyright 2026 Tulip Labs.
+Copyright 2026 The Tulip Authors.
 
 Released under the **Apache License, Version 2.0** — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
 

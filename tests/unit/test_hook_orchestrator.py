@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """Contract tests for :class:`tulip.agent.hook_orchestrator.HookOrchestrator`.

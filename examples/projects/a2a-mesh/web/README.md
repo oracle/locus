@@ -49,7 +49,7 @@ talks to both peers without CORS drama.
 | `src/App.tsx` | Single-page console — discovery + form + reply panel |
 | `src/api.ts` | Wrappers around `GET /agent-card`, `POST /a2a/invoke`, SSE stream |
 | `src/types.ts` | `AgentCard`, `Peer`, `StreamedEvent` |
-| `src/styles/tulip.css` | tuliplabs palette + console layout primitives |
+| `src/styles/tulip.css` | tulip palette + console layout primitives |
 | `vite.config.ts` | Dev-server proxies to the two A2A services |
 
 ## Why a separate webapp?
