@@ -283,7 +283,7 @@ docs/internal/
 # scrub of docs/market/** is run.
 docs/market/
 
-# Local credentials — never commit (home: ~/Projects/tuliplabs/secrets.env)
+# Local credentials — never commit (kept outside the repo)
 secrets.env
 
 # Research eval outputs — regenerate with examples/research/*, don't commit

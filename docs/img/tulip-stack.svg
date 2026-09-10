@@ -4,7 +4,7 @@
      shape-rendering="geometricPrecision"
      preserveAspectRatio="xMidYMid meet">
 
-  <!-- ===== tuliplabs palette =====
+  <!-- ===== tulip palette =====
        accent1 #E2570E  deep teal     — Router · Think
        accent3 #D6336C  tulip pink    — Execute · agent-loop frame
        accent5 #F4A6C2  sage teal     — Reflect · orchestration shapes
@@ -29,7 +29,7 @@
       <path d="M 0,0 L 12,6 L 0,12 z" fill="#9D174D"/>
     </marker>
 
-    <!-- tuliplabs wordmark -->
+    <!-- tulip mark -->
     <symbol id="tulip-mark" viewBox="0 0 100 100">
       <path d="M50 86 C 30 78 17 58 19 34 C 34 42 47 60 50 86 Z" fill="#ED2F7E"/>
       <path d="M50 86 C 70 78 83 58 81 34 C 66 42 53 60 50 86 Z" fill="#ED2F7E"/>
@@ -42,7 +42,7 @@
     </symbol>
   </defs>
 
-  <!-- tuliplabs mark — top-left -->
+  <!-- tulip mark — top-left -->
   <use href="#tulip-mark" x="20" y="8" width="34" height="34"/>
 
   <!-- ============ LAYER 1: COGNITIVE ROUTER ============ -->
