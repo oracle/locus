@@ -304,7 +304,7 @@ def get_model_b(**kwargs: Any) -> Any:
     """Secondary model slot — typically a cheaper/faster variant for
     triage, routing, or color commentary in multi-agent notebooks.
 
-    Reads ``TULIP_MODEL_ID_B`` (set by the workbench's "Model B" slot).
+    Reads ``TULIP_MODEL_ID_B`` (the secondary model slot).
     Falls back to ``TULIP_MODEL_ID`` (= slot A) when unset, so notebooks
     that call ``get_model_b()`` still work in plain CLI runs where only
     one model is configured.

@@ -119,8 +119,8 @@ class TestCompileEventSequence:
         assert verdict.data["allow"] is True
         assert verdict.data["require_approval"] is False
 
-        # Runnable compiled identifies the adapter type — drives the
-        # workbench's "this protocol compiled to {AgentRunnable}" badge.
+        # Runnable compiled identifies the adapter type — drives a UI's
+        # "this protocol compiled to {AgentRunnable}" badge.
         compiled = next(e for e in received if e.event_type == "router.runnable.compiled")
         assert compiled.data["protocol_id"] == "direct_response"
         assert compiled.data["runnable_type"] == "AgentRunnable"
@@ -167,7 +167,7 @@ class TestCompileEventSequence:
 
 
 class TestEventDataShape:
-    """The wire format must match what SSE consumers (workbench,
+    """The wire format must match what SSE consumers (browser renderers,
     third-party monitors) expect to parse."""
 
     async def test_protocol_selected_carries_metadata(self):

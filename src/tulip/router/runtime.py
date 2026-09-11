@@ -52,7 +52,7 @@ class Router:
         policy, and model.
     on_frame:
         Optional callback fired right after a frame is extracted. Useful
-        for telemetry / workbench display.
+        for telemetry / UI display.
     """
 
     def __init__(

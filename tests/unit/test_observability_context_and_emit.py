@@ -99,7 +99,7 @@ class TestConcurrentDispatches:
         different ``current_run_id`` values, even when ``asyncio.gather``
         interleaves them.
 
-        This is the property that lets the workbench dispatch many runs
+        This is the property that lets a host dispatch many runs
         on one event loop without cross-talk.
         """
         seen: dict[str, list[str | None]] = {"a": [], "b": []}

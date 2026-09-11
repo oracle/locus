@@ -334,7 +334,7 @@ with `register_provider("myco", MyModel)`.
 
 ---
 
-## Notebooks, workbench, deploy
+## Notebooks and deploy
 
 [`examples/`](examples/) has progressive notebooks, numbered in suggested reading order. Each
 defaults to the bundled mock model when no API key is present.
@@ -348,9 +348,7 @@ python examples/notebook_58_cognitive_router.py      # the cognitive router
 python examples/notebook_69_research_workflow.py     # full research pipeline
 ```
 
-The **workbench** is a browser playground for every pattern — two clicks to a running
-agent, no editor setup. For production, `AgentServer` is a
-drop-in FastAPI app (`POST /invoke`, `POST /stream`, `GET/DELETE /threads/{id}`, `GET /health`)
+For production, `AgentServer` is a drop-in FastAPI app (`POST /invoke`, `POST /stream`, `GET/DELETE /threads/{id}`, `GET /health`)
 and the repo ships a multi-stage `Dockerfile`.
 
 ```python
@@ -360,7 +358,6 @@ AgentServer(agent=my_agent, api_key=os.environ["API_KEY"]).run(host="0.0.0.0", p
 ```
 
 → [Notebooks](https://tulipagents.ai/notebooks/) ·
-[Workbench](https://tulipagents.ai/workbench/) ·
 [Deploy](https://tulipagents.ai/how-to/deploy/)
 
 ---

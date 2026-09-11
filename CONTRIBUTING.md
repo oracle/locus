@@ -6,15 +6,13 @@ success with an observable effect, and new actions go through `admit()`.
 
 This document covers how to set up a development environment, the
 review and sign-off process, the coding standards we hold the codebase
-to, and how to verify your change against the workbench end-to-end
-before opening a pull request.
+to, and how to verify your change before opening a pull request.
 
 Quick links for the most common drops:
 
 - **Adding a notebook?** Jump to [Notebook authoring](#notebook-authoring).
 - **Touching the README?** Jump to [README updates](#readme-updates).
 - **Adding a model provider?** Jump to [Notebook authoring](#notebook-authoring) for the multi-model demo conventions, then [Coding Standards](#coding-standards) for the `ModelProtocol` interface.
-- **Verifying against real OpenAI / Anthropic?** Jump to [Workbench end-to-end sweeps](#workbench-end-to-end-sweeps).
 
 ## Table of Contents
 
@@ -111,7 +109,7 @@ export POSTGRES_DB="tulip"
 ## Notebook authoring
 
 `examples/notebook_NN_*.py` is the primary teaching surface — every
-notebook is also a workbench-runnable demo, a docs page, an
+notebook is also a docs page, an
 integration-test target, and a regression target for the matrix CI.
 Treat them as production code, not throwaways.
 
@@ -133,42 +131,35 @@ then take the next free number at the end of that range:
 | Real-world workflows | 62–66 |
 | Server & full pipelines | 67–69 |
 
-Notebook categories are mirrored in the workbench, an internal
-maintainer tool. Note the intended category in your PR description and a
-maintainer will keep the workbench sidebar in step.
-
 ### File requirements
 
 1. **Naming**: `examples/notebook_NN_short_topic.py` — two-digit
    number, snake_case slug.
-2. **Header docstring**: first line is the title the workbench
-   sidebar will show. Strip the leading `Notebook NN:` prefix if you
-   include one — the runner cleans it. Follow with one short
+2. **Header docstring**: first line is the title. Strip the leading `Notebook NN:` prefix
+   if you include one — the runner cleans it. Follow with one short
    paragraph explaining what the reader gets.
 3. **Multi-model demos**: if the notebook fits as a multi-model
    demonstration (orchestrator, handoff, debate, supervisor-critic),
    use `get_model_b()` and `get_model_c()` for the lighter roles —
-   each falls back to slot A when the workbench's "Model B / C"
-   dropdowns are empty, so plain CLI runs stay correct.
+   each falls back to slot A when `TULIP_MODEL_ID_B` / `TULIP_MODEL_ID_C`
+   are unset, so plain CLI runs stay correct.
 4. **Graceful skip**: if the notebook needs credentials the harness
    may not have (OPENAI_API_KEY, COHERE_API_KEY, etc.), check the env
    vars at the top of `main()` and print a skip banner with a one-line
    wiring snippet instead of crashing. The CI runs every notebook —
    nothing is allowed to traceback on a missing optional env.
 5. **`tulip.core.interrupt()`**: notebooks that call `interrupt()`
-   for human approval (Notebooks 24, 38, 62, 63, 64 today) get a
-   `needs_stdin: true` badge in the workbench. Add the notebook
-   number to `NOTEBOOK_NEEDS_STDIN` in the workbench repo's
-   `backend/runner.py` when you add another one.
+   for human approval (Notebooks 24, 38, 62, 63, 64 today) need a
+   terminal; say so in the header docstring so nobody runs them
+   unattended.
 6. **Docs page**: the docs repo
    ([tuliplabs-ai/docs](https://github.com/tuliplabs-ai/docs)) carries
    one page per `examples/notebook_*.py` — run its
    `scripts/gen_notebook_pages.py` against your SDK checkout to
    scaffold the new page, edit the prose, and open a companion PR.
-7. **Real-provider check**: run it through the workbench against the
-   provider your audience cares about before opening the PR — the
-   Playwright sweeps catch regressions, but a manual click-through
-   catches the unloved corner cases (prompt phrasing, output
+7. **Real-provider check**: run it against the provider your audience
+   cares about before opening the PR — CI catches regressions, but a
+   manual run catches the unloved corner cases (prompt phrasing, output
    readability).
 
 ## Making Changes
@@ -402,40 +393,6 @@ class TestAgent:
 - `tests/integration/` - Integration tests (require services)
 - Markers: `@pytest.mark.requires_oci`, `@pytest.mark.requires_redis`, etc.
 
-### Workbench end-to-end sweeps
-
-> **Maintainers only.** The workbench is an internal repository; these
-> steps need access to it. Outside contributors can skip this section —
-> CI runs the equivalent sweep on your PR.
-
-The workbench ships Playwright specs that drive every non-stdin notebook
-through the UI against a single provider. With it cloned next to this
-repo, point its backend at your SDK checkout and sweep:
-
-```bash
-cd ../workbench
-
-# Bring up the three tiers (terminal 1–3); the backend runs your local
-# SDK and cookbook instead of the published package. The backend env is
-# hatch-managed — `sdk-local` installs ../../tulip-agents editable.
-( cd backend && hatch run sdk-local && \
-  TULIP_WORKBENCH_NOTEBOOKS=../../tulip-agents/examples hatch run serve )
-( cd bff && npm install && npm run dev )    # terminal 2 — :3101
-( cd web && npm install && npm run dev )    # terminal 3 — :5173
-( cd e2e && npm install && npx playwright install chromium )
-
-# Run a sweep against your provider of choice (terminal 4).
-ANTHROPIC_API_KEY=sk-ant-... \
-  npx --prefix e2e playwright test tests/all-anthropic.spec.ts --workers=3
-
-OPENAI_API_KEY=sk-... \
-  npx --prefix e2e playwright test tests/all-openai.spec.ts --workers=3
-```
-
-The sweeps honour the per-slot model env vars (slot A / B / C) so you
-can validate multi-model notebooks end-to-end. Headless by default;
-pass `--headed` to watch the run.
-
 ## Documentation
 
 ### Code Documentation
@@ -449,8 +406,7 @@ pass `--headed` to watch the run.
 
 See [Notebook authoring](#notebook-authoring) above for the full
 authoring guide — numbering, naming, multi-model demo conventions,
-graceful-skip checklist, and how to wire a new notebook into the
-workbench sidebar.
+and the graceful-skip checklist.
 
 ### README updates
 
@@ -466,8 +422,7 @@ For significant features, update:
   table in sync with `tulip.rag.stores`, `tulip.rag.reranker`, and
   `tulip.memory.backends`. Bump when you add a new backend.
 - **`README.md` notebook track table** — the ranges must match
-  `NOTEBOOK_CATEGORIES` in the workbench repo's `backend/runner.py`
-  and the docs repo's `docs/notebooks/index.md`.
+  the docs repo's `docs/notebooks/index.md`.
 - **`README.md` Quick Start examples** — only when the feature changes
   the *five-things-that-make-tulip-different* shape.
 - **`README.md` Repo layout** — only when a new top-level module lands.

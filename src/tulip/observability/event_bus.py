@@ -11,8 +11,8 @@ the production-grade backpressure-warning machinery, which we don't
 need at v1 scale.
 
 The tulip hook system (:class:`tulip.hooks.HookProvider`) and the
-router both publish through here. The workbench's SSE endpoint at
-``/api/events/{run_id}`` is the HTTP wrapper around
+router both publish through here. An SSE endpoint such as
+``/api/events/{run_id}`` is the natural HTTP wrapper around
 :meth:`EventBus.subscribe`.
 """
 

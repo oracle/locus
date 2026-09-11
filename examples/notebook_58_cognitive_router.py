@@ -65,8 +65,7 @@ from tulip.tools.registry import create_registry
 
 
 # Per-protocol-id description of the runtime shape the builder emits.
-# Kept identical to the workbench Protocols tab so the notebook doesn't
-# drift from the UI.
+# One description per protocol id, so the printed shape matches the builder.
 RUNTIME_SHAPES: dict[str, str] = {
     "direct_response": "Agent (single call)",
     "plan_execute_validate": "SequentialPipeline of 3 Agents (planner → executor → validator)",

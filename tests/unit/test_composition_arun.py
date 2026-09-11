@@ -5,7 +5,7 @@
 
 Pipelines are async, so they must not depend on threads to run their agents —
 ``Agent.run_sync`` spins up a worker thread, which is unavailable under WASM /
-Pyodide (the browser workbench). These tests pin that pipelines prefer the
+Pyodide (in-browser runs). These tests pin that pipelines prefer the
 thread-free ``arun`` when the agent exposes it, and still fall back to
 ``run_sync`` for older agent-likes that don't.
 """

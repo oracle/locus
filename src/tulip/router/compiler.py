@@ -62,7 +62,7 @@ class _ApprovalRunnable(BaseModel):
 
     Used when the policy gate verdict is ``require_approval=True``. The
     follow-up ``approval_gated_execution`` protocol replaces this with a
-    StateGraph + ``interrupt()`` node so the workbench's interrupt UI
+    StateGraph + ``interrupt()`` node so an interrupt UI
     drives the approval; for now the callback is the simplest contract
     that works for the three v1 protocols (none of which are graphs).
     """
@@ -118,7 +118,7 @@ class CognitiveCompiler:
         multi-agent shape ran ungoverned.
     on_approval:
         Optional async callback fired when the verdict requires
-        approval. Defaults to denying — wire your workbench / CLI
+        approval. Defaults to denying — wire your UI / CLI
         approval flow here.
     protocol_picker:
         Optional :class:`LLMProtocolPicker`. When present, the compiler
@@ -261,7 +261,7 @@ class CognitiveCompiler:
         """Pick a protocol, run the gate, build the runnable.
 
         ``run_id`` (when provided) scopes every emitted
-        :class:`StreamEvent` so the workbench's SSE consumer can
+        :class:`StreamEvent` so an SSE consumer can
         correlate selection / verdict / compile events with one
         cognitive dispatch.
         """

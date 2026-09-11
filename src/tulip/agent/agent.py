@@ -260,8 +260,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
         drives the same event loop (``self.run(...)``), builds the same
         ``AgentResult``, but without spawning a thread or calling
         ``asyncio.run``. That makes it usable in environments where threads
-        are unavailable — notably Pyodide / WebAssembly (the Tulip workbench
-        runs notebooks in the browser), where ``run_sync`` cannot work.
+        are unavailable — notably Pyodide / WebAssembly, where ``run_sync`` cannot work.
 
         Unlike ``run_sync`` it does NOT close the underlying model client or
         checkpointer pool afterward — the caller owns the loop, so those

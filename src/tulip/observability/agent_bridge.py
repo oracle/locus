@@ -6,7 +6,7 @@
 The agent's ``run()`` async generator yields typed :class:`TulipEvent`
 objects (``ThinkEvent``, ``ToolStartEvent``, ``ReflectEvent``, etc.).
 Without this bridge, only the immediate ``async for`` consumer sees
-them — the SSE workbench sees nothing of the agent's inner work.
+them — an SSE consumer sees nothing of the agent's inner work.
 
 We tap the iterator with a single ``bridge_tulip_event()`` call that
 maps each event type to the canonical ``EV_AGENT_*`` constants and
@@ -64,7 +64,7 @@ async def bridge_tulip_event(event: TulipEvent) -> None:
     ``emit()`` checks the contextvar first).
 
     Each branch carries the same fields as the source ``TulipEvent``,
-    plus tags useful for the workbench renderer to pick a swimlane:
+    plus tags useful for a renderer to pick a swimlane:
 
     * ``ThinkEvent`` → ``agent.think`` with reasoning preview + tool
       call count.

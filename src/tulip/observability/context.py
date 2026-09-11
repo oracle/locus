@@ -38,8 +38,9 @@ from uuid import uuid4
 # absence-of-correlation-id state immediately. ``contextvars.copy_context``
 # in the asyncio event loop preserves the value across ``await`` and
 # ``asyncio.gather``; ``asyncio.to_thread`` also propagates it on
-# Python 3.7+. Subprocess boundaries do NOT — the workbench's bootstrap
-# stamps ``TULIP_WORKBENCH_RUN_ID`` into the environment for that case.
+# Python 3.7+. Subprocess boundaries do NOT — a host that runs notebooks
+# in subprocesses passes the run id through the environment and calls
+# :func:`set_run_id` on the other side.
 _run_id_var: ContextVar[str | None] = ContextVar("tulip_run_id", default=None)
 
 
@@ -81,9 +82,8 @@ def current_run_id() -> str | None:
 def set_run_id(run_id: str | None) -> object:
     """Set the run_id on the current context, returning the reset token.
 
-    Lower-level than :func:`run_context` — exposed so the workbench
-    bootstrap can pin the contextvar from an env variable inside the
-    notebook subprocess. Most code should use the context manager.
+    Lower-level than :func:`run_context` — exposed so a host can pin the
+    contextvar from an env variable inside a subprocess. Most code should use the context manager.
     """
     return _run_id_var.set(run_id)
 
