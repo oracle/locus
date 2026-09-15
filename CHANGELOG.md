@@ -19,6 +19,16 @@ policy.
   `tulip serve AGENT` runs the HTTP server. `AGENT` is `module:attr` or
   `file.py:attr`, an agent or a function returning one. Standard library only.
 
+- **An approval is bound to its policy and context, and can approve an edited
+  call.** (#6) `ControlPolicy(version=...)` and `gate_tool(approval_context=...)`
+  (a mapping, or a function of the tool and its arguments: a thread, a tenant, a
+  case) are part of the approval id, so a decision made under one policy version
+  or in one context is never redeemed in another; with neither set, ids are
+  unchanged. `decide(..., arguments={...})` approves the call with edited values
+  (same keys): the gate runs the edited call, weighs it against the policy again
+  (an edit into a denied action is refused), and records `approval-edited` with
+  both argument sets. Approvers in a quorum must approve the same arguments.
+
 - **A spend budget that stops the call that would cross it.** (#11)
   `Agent(max_cost_usd=...)` prices every model call from model metadata and
   stops with `stop_reason="cost_budget"`. It checks *before* each call, against

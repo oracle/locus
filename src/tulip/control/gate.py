@@ -132,6 +132,22 @@ def _refusal(
     return json.dumps(payload)
 
 
+def _approval_context(
+    policy: ControlPolicy,
+    extra: Mapping[str, str] | Callable[[str, dict[str, Any]], Mapping[str, str]] | None,
+    tool_name: str,
+    kwargs: Mapping[str, Any],
+) -> dict[str, str]:
+    """The context an approval is bound to: the policy version plus the caller's."""
+    context: dict[str, str] = {}
+    if policy.version:
+        context["policy_version"] = policy.version
+    if extra is not None:
+        values = extra(tool_name, dict(kwargs)) if callable(extra) else extra
+        context.update({str(key): str(value) for key, value in values.items()})
+    return context
+
+
 def gate_tool(
     tool: Tool,
     *,
@@ -144,6 +160,9 @@ def gate_tool(
     approval: ApprovalBridge | None = None,
     principal: str = "agent",
     refusal_reason: str | Callable[[ApprovalDecision], str] | None = None,
+    approval_context: (
+        Mapping[str, str] | Callable[[str, dict[str, Any]], Mapping[str, str]] | None
+    ) = None,
 ) -> Tool:
     """Return a copy of ``tool`` whose call goes through :func:`admit` first.
 
@@ -171,6 +190,11 @@ def gate_tool(
             offering one would invite the agent to wait for a decision that is
             not coming.
         principal: Who the held action is attributed to on the approval.
+        approval_context: What an approval is bound to besides the call itself,
+            as a mapping or ``(tool_name, arguments) -> mapping``: a thread, a
+            tenant, a case id. It is part of the approval id, as is
+            ``policy.version`` when set, so a decision made in one context or
+            under one policy version is never redeemed in another.
         on_refusal: ``"return"`` hands the model a JSON refusal naming the
             outcome and the reason, so it can explain itself to the user and
             the run continues. ``"raise"`` re-raises
@@ -224,16 +248,18 @@ def gate_tool(
         error: AdmissionError,
         resolved: Any,
         kwargs: dict[str, Any],
-        perform: Callable[[], Awaitable[Any]],
+        perform_with: Callable[[dict[str, Any]], Awaitable[Any]],
     ) -> Any:
         """A ``require_human`` hold in interrupt mode: pause, or act on a decision."""
         store = cast("ApprovalStore", approval)
+        context = _approval_context(policy, approval_context, tool.name, kwargs)
         approval_id = store.submit(
             principal,
             tool.name,
             kwargs,
             reason=error.decision.reason,
             labels=sorted(resolved.labels()),
+            context=context,
         )
         record = store.get(approval_id)
         where = {"approval_id": approval_id, "action": resolved.name, "asset": resolved.asset}
@@ -250,22 +276,44 @@ def gate_tool(
                     },
                 )
             if record.status == "approved":
+                edited = record.approved_arguments
+                run_kwargs = dict(edited) if edited is not None else kwargs
+                run_action = (
+                    resolve_action(action, tool.name, run_kwargs)
+                    if edited is not None
+                    else resolved
+                )
+                if edited is not None and trail is not None:
+                    trail.record(
+                        "approval-edited",
+                        {
+                            **where,
+                            "requested_arguments": dict(kwargs),
+                            "approved_arguments": edited,
+                        },
+                    )
 
                 async def perform_once() -> Any:
                     # Consumed before the side effect: a crash mid-call leaves
                     # the approval spent, never a second execution on replay.
                     store.consume(approval_id)
-                    return await perform()
+                    return await perform_with(run_kwargs)
 
-                return await admit(
-                    resolved,
-                    perform_once,
-                    policy=policy,
-                    finding=finding,
-                    verdict=verdict,
-                    trail=trail,
-                    approved_by=record.decided_by,
-                )
+                try:
+                    # An edited call is weighed again: an approver cannot edit
+                    # an action into one the policy denies.
+                    return await admit(
+                        run_action,
+                        perform_once,
+                        policy=policy,
+                        finding=finding,
+                        verdict=verdict,
+                        trail=trail,
+                        approved_by=record.decided_by,
+                    )
+                except AdmissionError as denial:
+                    store.consume(approval_id)
+                    return _refusal(denial, reason=refusal_reason)
             store.consume(approval_id)
             return json.dumps(
                 {
@@ -291,17 +339,21 @@ def gate_tool(
                     "reason": error.decision.reason,
                     "arguments": dict(kwargs),
                     "approvers": record.approvers if record is not None else [],
+                    "context": context,
                 },
             },
             default=str,
         )
 
+    async def perform_with(call_kwargs: dict[str, Any]) -> Any:
+        if sandboxed:
+            return await tool.execute(**call_kwargs)
+        result = inner(**call_kwargs)
+        return await result if inspect.isawaitable(result) else result
+
     async def gated(**kwargs: Any) -> Any:
         async def perform() -> Any:
-            if sandboxed:
-                return await tool.execute(**kwargs)
-            result = inner(**kwargs)
-            return await result if inspect.isawaitable(result) else result
+            return await perform_with(kwargs)
 
         resolved = resolve_action(action, tool.name, kwargs)
         try:
@@ -317,7 +369,7 @@ def gate_tool(
             if on_refusal == "raise":
                 raise
             if on_refusal == "interrupt" and error.decision.outcome != ApprovalOutcome.DENY:
-                return await hold(error, resolved, kwargs, perform)
+                return await hold(error, resolved, kwargs, perform_with)
             return _refusal(
                 error,
                 approval=approval,
