@@ -669,6 +669,8 @@ module = [
     "pypdf.*",
     "PyPDF2.*",
     "pdf2image.*",
+    # Browser tools (``tulip.tools.browser``) import Playwright lazily.
+    "playwright.*",
 ]
 ignore_missing_imports = true
 
