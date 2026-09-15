@@ -8,6 +8,17 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **Spend as a policy input, across runs.** (#28) `Action.cost_usd` says what an
+  action spends. `ControlPolicy(require_human_over_usd=...)` needs a person above
+  a per-action cost, and `ControlPolicy(spend_limit_usd=...)` denies an action
+  that would take its scope's cumulative spend past the limit, which no approval
+  overrides. `InMemorySpendLedger` and `FileSpendLedger` keep spend per scope;
+  `admit(..., ledger=, spend_scope=)` and `gate_tool(..., ledger=, spend_scope=)`
+  read it before deciding and record the cost only after the action ran. A held
+  action is weighed against the limit again when its approval is redeemed.
+
 ## [2.14.0] - 2026-09-15
 
 ### Added

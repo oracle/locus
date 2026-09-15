@@ -57,6 +57,7 @@ from tulip.control.approvals import (
     call_digest,
 )
 from tulip.control.gate import ApprovalBridge, gate_tool
+from tulip.control.spend import FileSpendLedger, InMemorySpendLedger, SpendLedger
 from tulip.security.admit import AdmissionError, admit
 from tulip.security.audit import (
     AuditRecord,
@@ -92,6 +93,10 @@ __all__ = [
     "default_action",
     "ApprovalBridge",
     "gate_tool",
+    # Cumulative spend per scope, for the policy's spend limits
+    "FileSpendLedger",
+    "InMemorySpendLedger",
+    "SpendLedger",
     # Held calls that wait for a person, across a restart
     "ApprovalRecord",
     "ApprovalStore",

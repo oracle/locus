@@ -49,6 +49,7 @@ from tulip.security.policy import ApprovalOutcome
 
 
 if TYPE_CHECKING:
+    from tulip.control.spend import SpendLedger
     from tulip.security.audit import AuditTrail
     from tulip.security.findings import Evidence
     from tulip.security.policy import ApprovalDecision, ControlPolicy
@@ -132,6 +133,15 @@ def _refusal(
     return json.dumps(payload)
 
 
+def _scope_for(
+    spend_scope: str | Callable[[str, dict[str, Any]], str],
+    tool_name: str,
+    kwargs: Mapping[str, Any],
+) -> str:
+    """The spend scope for one call."""
+    return spend_scope(tool_name, dict(kwargs)) if callable(spend_scope) else spend_scope
+
+
 def _approval_context(
     policy: ControlPolicy,
     extra: Mapping[str, str] | Callable[[str, dict[str, Any]], Mapping[str, str]] | None,
@@ -163,6 +173,8 @@ def gate_tool(
     approval_context: (
         Mapping[str, str] | Callable[[str, dict[str, Any]], Mapping[str, str]] | None
     ) = None,
+    ledger: SpendLedger | None = None,
+    spend_scope: str | Callable[[str, dict[str, Any]], str] = "default",
 ) -> Tool:
     """Return a copy of ``tool`` whose call goes through :func:`admit` first.
 
@@ -195,6 +207,11 @@ def gate_tool(
             tenant, a case id. It is part of the approval id, as is
             ``policy.version`` when set, so a decision made in one context or
             under one policy version is never redeemed in another.
+        ledger: A spend ledger. The gate reads the scope's cumulative spend
+            before each decision, for ``policy.spend_limit_usd``, and records
+            ``action.cost_usd`` after the call runs.
+        spend_scope: The scope spend counts against, as a string or
+            ``(tool_name, arguments) -> str``: a customer, a tenant, a month.
         on_refusal: ``"return"`` hands the model a JSON refusal naming the
             outcome and the reason, so it can explain itself to the user and
             the run continues. ``"raise"`` re-raises
@@ -310,6 +327,8 @@ def gate_tool(
                         verdict=verdict,
                         trail=trail,
                         approved_by=record.decided_by,
+                        ledger=ledger,
+                        spend_scope=_scope_for(spend_scope, tool.name, run_kwargs),
                     )
                 except AdmissionError as denial:
                     store.consume(approval_id)
@@ -364,6 +383,8 @@ def gate_tool(
                 finding=finding,
                 verdict=verdict,
                 trail=trail,
+                ledger=ledger,
+                spend_scope=_scope_for(spend_scope, tool.name, kwargs),
             )
         except AdmissionError as error:
             if on_refusal == "raise":

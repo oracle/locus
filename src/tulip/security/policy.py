@@ -60,6 +60,11 @@ class ControlPolicy:
       :class:`~tulip.tools.sandbox.SandboxEnforcerHook`.
     - ``version``: a label for this policy. When set it is bound into approval
       ids, so a decision made under one version is never redeemed under another.
+    - ``require_human_over_usd``: an action whose ``cost_usd`` is above this needs a
+      human.
+    - ``spend_limit_usd``: an action that would take its scope's cumulative spend
+      past this is denied — no approval overrides it. The caller supplies what the
+      scope has spent (``spent_usd``), typically from a spend ledger.
     """
 
     require_verification_score: float = 0.8
@@ -69,6 +74,8 @@ class ControlPolicy:
     min_severity: Severity = Severity.LOW
     require_sandbox_for: frozenset[str] = field(default_factory=frozenset)
     version: str = ""
+    require_human_over_usd: float | None = None
+    spend_limit_usd: float | None = None
 
 
 @dataclass(frozen=True)
@@ -81,6 +88,8 @@ class Action:
     environment: str = "unknown"
     kind: str = ""
     tags: frozenset[str] = field(default_factory=frozenset)
+    #: What performing the action spends, in USD; weighed by the spend limits.
+    cost_usd: float = 0.0
 
     def labels(self) -> set[str]:
         """The environment / kind / tags as one label set for policy matching."""
@@ -137,6 +146,7 @@ def approve(
     finding: Evidence | None = None,
     verdict: VerificationResult | None = None,
     advisor: ControlAdvisor | None = None,
+    spent_usd: float = 0.0,
 ) -> ApprovalDecision:
     """Decide whether ``action`` may proceed: allow / require_human / deny.
 
@@ -150,6 +160,8 @@ def approve(
         finding: The evidence the action responds to (optional).
         verdict: The :func:`~tulip.security.verify.verify` result (optional, but
             auto-allow needs one that clears the policy bar).
+        spent_usd: What the action's scope has already spent, for
+            ``policy.spend_limit_usd``.
         advisor: An optional trained control model. It may only raise the
             decision toward caution — see :func:`_combine`. Omitting it, or
             passing one that fails, yields exactly the decision policy alone
@@ -203,6 +215,27 @@ def approve(
             (
                 ApprovalOutcome.REQUIRE_HUMAN,
                 f"blast radius {action.blast_radius} exceeds the maximum {policy.max_blast_radius}",
+            )
+        )
+
+    if (
+        policy.require_human_over_usd is not None
+        and action.cost_usd > policy.require_human_over_usd
+    ):
+        triggered.append(
+            (
+                ApprovalOutcome.REQUIRE_HUMAN,
+                f"cost ${action.cost_usd:,.2f} exceeds the per-action limit "
+                f"${policy.require_human_over_usd:,.2f}",
+            )
+        )
+
+    if policy.spend_limit_usd is not None and spent_usd + action.cost_usd > policy.spend_limit_usd:
+        triggered.append(
+            (
+                ApprovalOutcome.DENY,
+                f"spend ${spent_usd:,.2f} + ${action.cost_usd:,.2f} would exceed the spend "
+                f"limit ${policy.spend_limit_usd:,.2f}",
             )
         )
 

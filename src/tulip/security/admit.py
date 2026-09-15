@@ -32,7 +32,7 @@ appended to the audit trail, so there is **no un-recorded path to a side effect*
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from tulip.security.audit import AuditTrail
 from tulip.security.findings import Evidence
@@ -44,6 +44,10 @@ from tulip.security.policy import (
     approve,
 )
 from tulip.security.verify import VerificationResult
+
+
+if TYPE_CHECKING:
+    from tulip.control.spend import SpendLedger
 
 
 T = TypeVar("T")
@@ -72,6 +76,8 @@ async def admit(
     verdict: VerificationResult | None = None,
     trail: AuditTrail | None = None,
     approved_by: str | None = None,
+    ledger: SpendLedger | None = None,
+    spend_scope: str = "default",
 ) -> T:
     """Run ``perform`` only if ``action`` clears the trust chain; else reject.
 
@@ -94,6 +100,9 @@ async def admit(
         approved_by: Who approved a ``require_human`` hold. With it, the held action
             runs and the approver is recorded on the trail. A ``deny`` still raises:
             no person approves past a denial.
+        ledger: Where ``spend_scope``'s cumulative spend is read before the
+            decision and ``action.cost_usd`` recorded after ``perform`` succeeds.
+        spend_scope: The scope the spend counts against: a customer, a tenant.
 
     Returns:
         Whatever ``perform`` returns.
@@ -102,7 +111,8 @@ async def admit(
         AdmissionError: if the action is not admitted (deny, or require_human
             without ``approved_by``).
     """
-    decision = approve(action, policy=policy, finding=finding, verdict=verdict)
+    spent = ledger.spent(spend_scope) if ledger is not None else 0.0
+    decision = approve(action, policy=policy, finding=finding, verdict=verdict, spent_usd=spent)
     human = approved_by is not None and decision.outcome == ApprovalOutcome.REQUIRE_HUMAN
     if trail is not None:
         entry: dict[str, Any] = {
@@ -111,12 +121,20 @@ async def admit(
             "outcome": decision.outcome,
             "reason": decision.reason,
         }
+        if ledger is not None:
+            entry.update(
+                {"cost_usd": action.cost_usd, "spent_usd": spent, "spend_scope": spend_scope}
+            )
         if human:
             entry["approved_by"] = approved_by
         trail.record("action-admission", entry)
     if not (decision.allowed or human):
         raise AdmissionError(decision)
-    return await perform()
+    result = await perform()
+    if ledger is not None and action.cost_usd:
+        # Only after it ran: a refused or failed action spends nothing.
+        ledger.record(spend_scope, action.cost_usd, action=action.name)
+    return result
 
 
 __all__ = ["AdmissionError", "admit"]
