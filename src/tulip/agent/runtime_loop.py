@@ -223,6 +223,7 @@ class AgentRuntimeMixin:
         _hooks: list[Any]
         _hook_orchestrator: HookOrchestrator | None
         _conversation_manager: ConversationManager | None
+        _model_prices: tuple[float, float] | None
         _memory_manager: BaseMemoryManager | None
         _reflector: Reflector | None
         _grounding_evaluator: GroundingEvaluator | None
@@ -516,6 +517,17 @@ class AgentRuntimeMixin:
                 # model call runs as a task and its chunks are drained here, so
                 # they surface while the model is still producing rather than
                 # after it finishes.
+                if state.would_exceed_cost_budget(self.config.max_tokens or 4096):
+                    yield TerminateEvent(
+                        reason="cost_budget",
+                        iterations_used=state.iteration,
+                        final_confidence=state.confidence,
+                        usage=_usage_of(state),
+                        total_tool_calls=len(state.tool_executions),
+                        final_message=_last_assistant_content,
+                    )
+                    break
+
                 if stream_tokens:
                     chunk_queue: asyncio.Queue[Any] = asyncio.Queue()
                     model_task = asyncio.create_task(
@@ -1390,6 +1402,17 @@ class AgentRuntimeMixin:
                     break
 
                 state = state.next_iteration()
+                if state.would_exceed_cost_budget(self.config.max_tokens or 4096):
+                    yield TerminateEvent(
+                        reason="cost_budget",
+                        iterations_used=state.iteration,
+                        final_confidence=state.confidence,
+                        usage=_usage_of(state),
+                        total_tool_calls=len(state.tool_executions),
+                        final_message=_last_assistant_content,
+                    )
+                    break
+
                 response, state = await self._get_model_response(state, model_kwargs)
                 prompt_toks = response.usage.get("prompt_tokens", 0)
                 completion_toks = response.usage.get("completion_tokens", 0)
@@ -1635,6 +1658,15 @@ class AgentRuntimeMixin:
                     trigger="final",
                 )
 
+    def _spend_fields(self) -> dict[str, Any]:
+        """The state fields that price a run and cap its spend."""
+        prices = self._model_prices
+        return {
+            "cost_budget_usd": self.config.max_cost_usd,
+            "input_price_per_mtok": prices[0] if prices else None,
+            "output_price_per_mtok": prices[1] if prices else None,
+        }
+
     async def _create_initial_state(
         self,
         prompt: str,
@@ -1658,7 +1690,9 @@ class AgentRuntimeMixin:
                     backend=type(self.config.checkpointer).__name__,
                 )
                 # Add new user message and continue
-                resumed: AgentState = existing.with_message(Message.user(prompt))
+                resumed: AgentState = existing.with_message(Message.user(prompt)).model_copy(
+                    update=self._spend_fields()
+                )
                 return resumed
 
         # Create fresh state
@@ -1671,6 +1705,7 @@ class AgentRuntimeMixin:
             tool_loop_threshold=self.config.tool_loop_threshold,
             terminal_tools=frozenset(self.config.terminal_tools),
             token_budget=self.config.token_budget,
+            **self._spend_fields(),
             completion_mode=self.config.completion_mode,
             metadata=metadata or {},
         )

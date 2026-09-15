@@ -10,6 +10,16 @@ policy.
 
 ### Added
 
+- **A spend budget that stops the call that would cross it.** (#11)
+  `Agent(max_cost_usd=...)` prices every model call from model metadata and
+  stops with `stop_reason="cost_budget"`. It checks *before* each call, against
+  that call's worst case (the conversation as input plus `max_tokens` of
+  output), so one large turn cannot run past the budget; `token_budget` only
+  stops the run after the fact. `AgentResult.metrics.cost_usd` reports the
+  spend, `None` when the model is unpriced. A budget on a model with no prices
+  raises `ValueError` when the agent is built: register prices with
+  `register_metadata`.
+
 - **Who may approve a held call is decided in the SDK.** (#7) Pass
   `authority=ApprovalAuthority(...)` to `InMemoryApprovals` or `FileApprovals`
   and every decision is checked when it is made. `ApproverRule` names approvers

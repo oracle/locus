@@ -113,6 +113,12 @@ class AgentState(BaseModel):
     cache_creation_tokens_used: int = 0
     cache_read_tokens_used: int = 0
     token_budget: int | None = None
+    # Spend tracking. Prices come from model metadata (USD per million tokens);
+    # ``None`` means unknown, and an unknown price leaves ``cost_usd_used`` at 0.
+    input_price_per_mtok: float | None = None
+    output_price_per_mtok: float | None = None
+    cost_usd_used: float = 0.0
+    cost_budget_usd: float | None = None
 
     # Completion mode
     completion_mode: str = "auto"  # "auto" or "explicit"
@@ -275,6 +281,8 @@ class AgentState(BaseModel):
                     self.cache_creation_tokens_used + cache_creation_tokens
                 ),
                 "cache_read_tokens_used": self.cache_read_tokens_used + cache_read_tokens,
+                "cost_usd_used": self.cost_usd_used
+                + (self.cost_of(prompt_tokens, completion_tokens) or 0.0),
                 "updated_at": datetime.now(UTC),
             }
         )
@@ -282,6 +290,43 @@ class AgentState(BaseModel):
     # =========================================================================
     # Queries
     # =========================================================================
+
+    @property
+    def priced(self) -> bool:
+        """Whether both prices are known, so spend can be measured."""
+        return self.input_price_per_mtok is not None and self.output_price_per_mtok is not None
+
+    def cost_of(self, prompt_tokens: int, completion_tokens: int) -> float | None:
+        """USD for a call of this size, or ``None`` when the prices are unknown.
+
+        Cache-read and cache-write tokens are priced as ordinary input, which
+        overstates a cached call rather than understating it.
+        """
+        if self.input_price_per_mtok is None or self.output_price_per_mtok is None:
+            return None
+        return (
+            prompt_tokens * self.input_price_per_mtok
+            + completion_tokens * self.output_price_per_mtok
+        ) / 1_000_000
+
+    def would_exceed_cost_budget(self, max_output_tokens: int) -> bool:
+        """Whether the next call could cross the spend budget, at its worst case.
+
+        The worst case is the current conversation as input (a char/4 estimate)
+        plus ``max_output_tokens`` of output. Checked *before* the call, which is
+        what stops one large turn: a check after the call only stops the next one.
+        """
+        if self.cost_budget_usd is None:
+            return False
+        prompt_estimate = (
+            sum(
+                len(m.content or "") + sum(len(str(tc.arguments or "")) for tc in m.tool_calls)
+                for m in self.messages
+            )
+            // 4
+        )
+        worst = self.cost_of(prompt_estimate, max_output_tokens)
+        return worst is not None and self.cost_usd_used + worst > self.cost_budget_usd
 
     @property
     def has_tool_loop(self) -> bool:
@@ -349,6 +394,9 @@ class AgentState(BaseModel):
 
         if self.token_budget and self.total_tokens_used >= self.token_budget:
             return True, "token_budget"
+
+        if self.cost_budget_usd is not None and self.cost_usd_used >= self.cost_budget_usd:
+            return True, "cost_budget"
 
         # Terminal tool always stops (both modes)
         if self.called_terminal_tool:
