@@ -18,6 +18,15 @@ policy.
   `http`/`https` URLs on the listed hosts; a click that navigates elsewhere resets
   the page and fails. Playwright is the new `browser` extra.
 
+- **Durable agent runs on Temporal.** (#15) `tulip.durable.temporal` runs a
+  registered agent as a Temporal workflow: the agent works in activity segments
+  (the first run, then a resume after each decision) and the workflow waits on a
+  `decide` signal between them, for as long as a person takes and across worker
+  restarts; a `pending` query shows what it waits on. `create_worker`,
+  `start_agent_run` and `signal_decided` wire it up. The agent's checkpointer and
+  approval store stay the source of truth. Segments run once, since replaying a
+  half-finished segment could repeat tool calls. New `temporal` extra.
+
 - **Spend as a policy input, across runs.** (#28) `Action.cost_usd` says what an
   action spends. `ControlPolicy(require_human_over_usd=...)` needs a person above
   a per-action cost, and `ControlPolicy(spend_limit_usd=...)` denies an action

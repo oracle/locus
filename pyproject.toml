@@ -137,6 +137,9 @@ browser = ["playwright>=1.45"]
 # need nothing.
 audit = ["cryptography>=42"]
 
+# Durable agent runs on Temporal (src/tulip/durable/temporal.py).
+temporal = ["temporalio>=1.7"]
+
 # Mem0 agent-memory manager (src/tulip/memory/managers/mem0.py) — the
 # portable, self-hostable long-term memory backend.
 mem0 = ["mem0ai>=0.1"]
@@ -233,6 +236,7 @@ dev = [
     "sqlalchemy>=2.0.46", # PostgreSQL checkpointer schema tests
     "moto>=5.0",          # mock S3 for tests/unit/test_memory_backends_s3.py
     "cryptography>=42",   # signed audit trail tests in tests/unit/test_signed_audit.py
+    "temporalio>=1.7",    # durable run tests in tests/unit/test_temporal_durable.py
 ]
 
 [project.scripts]
