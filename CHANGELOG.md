@@ -10,6 +10,16 @@ policy.
 
 ### Added
 
+- **Realtime voice sessions whose tool calls go through the gate.** (#18)
+  `tulip.voice.realtime.RealtimeSession` runs a speech-to-speech conversation
+  over any socket with `send`/`recv`: it declares the tools, forwards microphone
+  audio and text, and yields audio, transcripts, `ToolRan`, `ActionHeld`,
+  `ResponseDone` and `SessionError`. A tool the model calls by voice runs the
+  same `Tool` as in text, so a held action is not performed: the model is told it
+  is pending and the application gets `ActionHeld` with the approval id.
+  Unknown tools, malformed arguments and tool failures go back to the model.
+  `connect_openai_realtime(...)` opens OpenAI's Realtime API.
+
 - **Browser tools, gated like any other tool.** (#16) `browser_toolset(session)`
   returns `browser_open` and `browser_read` (labels `browser-read`),
   `browser_click` and `browser_type` (`browser-write`), and, with
