@@ -4,8 +4,8 @@
 """Threat-intel IOC enrichment — a VirusTotal/GreyNoise-shaped reference adapter.
 
 Reference template — offline-by-default; the live path's shape and field names
-are illustrative and unverified. For maintained, proven vendor adapters see the
-``tulip-integrations`` package.
+are illustrative and unverified. A production adapter is one you write against
+:class:`~tulip.security.adapter.SecurityAdapter`.
 
 Looking up the reputation and context of an indicator (file hash, IP,
 domain) is the first move of SOC triage. With ``VT_API_KEY`` set,

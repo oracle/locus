@@ -4,10 +4,9 @@
 """The public contract a security integration implements.
 
 This is the langchain-core-style boundary: `tulip` (core) defines the
-**contract** and the helper toolkit; vendor integrations live in a separate
-distribution (`tulip-integrations`), depend on this core, and implement
-:class:`SecurityAdapter`. Core never imports the integrations package — the
-dependency is one-way.
+**contract** and the helper toolkit; a vendor integration lives in its own
+distribution, depends on this core, and implements :class:`SecurityAdapter`.
+Core never imports an integration — the dependency is one-way.
 
 A :class:`SecurityAdapter` is a named, vendored bundle of agent-ready
 :class:`~tulip.tools.decorator.Tool` objects. Every tool an integration ships

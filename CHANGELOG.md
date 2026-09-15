@@ -37,6 +37,13 @@ policy.
 
 ### Removed
 
+- **References to `tulip-integrations`, which is not published.** (#10) Docstrings in
+  `tulip.security` (package, `adapter`, `context`, `edr`, `intel`, `siem`, `testing`,
+  `fingerprint`) and `examples/integrations/` pointed readers at it for live
+  vendor adapters and the GPU-probe lifecycle. They now say those are
+  integrations you write against the same contract. The stray, generated
+  `ablation_report.json` is no longer tracked.
+
 - **The SDK stands alone: no more `tulip-frameworks` or `tulip-gateway`.**
   (#4) The README no longer sends readers to install either package or to
   reach the gate over `/v1/admit`, and

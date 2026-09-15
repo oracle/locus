@@ -23,9 +23,7 @@ reasoning doesn't change between the offline demo and a live deployment.
 |---|---|---|---|---|
 | `threat_intel.py` | VirusTotal / GreyNoise | `VT_API_KEY` | sample IOC reputation | ⚠ written to VT v3 shape, **untested live** |
 | `siem_query.py` | Splunk / Elastic | `SIEM_URL`, `SIEM_TOKEN` | sample events | ⚠ illustrative endpoint, **untested live** |
-| `gpu_probe_dispatch.py` | offline reference only — the two live GPU clouds are **split** below | — | deterministic feature vector | reference dispatch; live lifecycle lives in `tulip-integrations` |
-| ↳ RunPod (`tulip_integrations.compute.runpod`) | RunPod GPU pod | `RUNPOD_API_KEY` (+ `RUNPOD_PROBE_IMAGE`) | deterministic feature vector | ⚠ pod lifecycle real, needs a probe **image** you supply — **untested live** |
-| ↳ Lambda Cloud (`tulip_integrations.compute.lambda_cloud`) | Lambda Cloud GPU instance | `LAMBDA_API_KEY` (+ `LAMBDA_REGION`, `LAMBDA_PROBE_RESULT_URL`) | deterministic feature vector | ⚠ launch/poll lifecycle real, needs a result **sink** you supply — **untested live** |
+| `gpu_probe_dispatch.py` | offline reference only | — | deterministic feature vector | reference dispatch only |
 | `remote_timing.py` | any OpenAI-compatible endpoint | `OPENAI_API_KEY` | deterministic feature vector | ✓ **verified live** vs OpenAI gpt-4o-mini (measurement real; classifier still mock) |
 
 **Honesty note:** only the offline sample paths and the timing math are
@@ -57,14 +55,9 @@ emits:
 {"ttft_ms_p50": 38.2, "itl_ms_mean": 11.4, "itl_cv": 0.07, "tps_mean": 87.6}
 ```
 
-RunPod and Lambda are **two different GPU clouds with two different
-result-collection mechanisms**, so they are two separate modules in
-`tulip-integrations` (`tulip_integrations.compute.runpod` and
-`…compute.lambda_cloud`), behind two separate install extras
-(`tulip-integrations[compute-runpod]` and `[compute-lambda]`). Core (this
-SDK) ships only `dispatch_timing_probe_reference()` — the credential-free
-*offline* dispatch that returns the sample vector. You pick a provider
-explicitly; you never get one by accident.
+Core (this SDK) ships only `dispatch_timing_probe_reference()` — the
+credential-free *offline* dispatch that returns the sample vector. Provisioning
+a probe on a real GPU cloud is an integration you write.
 
 **RunPod — pod + container image.** `runpod_probe(endpoint)` uses the RunPod
 SDK to create a GPU pod from a **container image** (`RUNPOD_PROBE_IMAGE`,
