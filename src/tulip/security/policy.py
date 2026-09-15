@@ -58,6 +58,8 @@ class ControlPolicy:
       an action matching one of these is denied unless it carries the
       :data:`SANDBOXED_TAG` tag. Enforced at the agent loop's tool seam by
       :class:`~tulip.tools.sandbox.SandboxEnforcerHook`.
+    - ``version``: a label for this policy. When set it is bound into approval
+      ids, so a decision made under one version is never redeemed under another.
     """
 
     require_verification_score: float = 0.8
@@ -66,6 +68,7 @@ class ControlPolicy:
     deny_for: frozenset[str] = field(default_factory=frozenset)
     min_severity: Severity = Severity.LOW
     require_sandbox_for: frozenset[str] = field(default_factory=frozenset)
+    version: str = ""
 
 
 @dataclass(frozen=True)

@@ -96,18 +96,23 @@ Verdict = Literal["approved", "denied"]
 _LIVE: frozenset[str] = frozenset({"pending", "approved", "denied"})
 
 
-def call_digest(principal: str, tool: str, arguments: Mapping[str, Any]) -> str:
+def call_digest(
+    principal: str,
+    tool: str,
+    arguments: Mapping[str, Any],
+    context: Mapping[str, str] | None = None,
+) -> str:
     """SHA-256 over the canonical form of one call.
 
-    Key order does not matter; any change to a value, the tool or the principal
-    does.
+    Key order does not matter; any change to a value, the tool, the principal
+    or the context does. ``context`` binds the call to where it was made, such
+    as a policy version or a thread. An empty context hashes exactly like no
+    context, so records written before contexts existed still match.
     """
-    canonical = json.dumps(
-        {"principal": principal, "tool": tool, "arguments": dict(arguments)},
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    )
+    body: dict[str, Any] = {"principal": principal, "tool": tool, "arguments": dict(arguments)}
+    if context:
+        body["context"] = dict(context)
+    canonical = json.dumps(body, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
@@ -144,6 +149,10 @@ class ApprovalRecord:
     approvals: list[dict[str, Any]] = field(default_factory=list)
     #: Decisions refused by the authority: ``by``, ``at``, ``verdict``, ``reason``.
     rejections: list[dict[str, Any]] = field(default_factory=list)
+    #: What the call was bound to (a policy version, a thread); part of the digest.
+    context: dict[str, str] = field(default_factory=dict)
+    #: The arguments the approvers approved, when they edited the call.
+    approved_arguments: dict[str, Any] | None = None
 
     @property
     def approvers(self) -> list[str]:
@@ -309,6 +318,7 @@ class ApprovalStore(Protocol):
         *,
         reason: str = "",
         labels: Iterable[str] = (),
+        context: Mapping[str, str] | None = None,
     ) -> str:
         """Record a held call, or return the live record for the same call."""
         ...
@@ -321,7 +331,14 @@ class ApprovalStore(Protocol):
         """The full record, or ``None`` for an unknown id."""
         ...
 
-    def decide(self, approval_id: str, verdict: Verdict, *, by: str) -> ApprovalRecord:
+    def decide(
+        self,
+        approval_id: str,
+        verdict: Verdict,
+        *,
+        by: str,
+        arguments: Mapping[str, Any] | None = None,
+    ) -> ApprovalRecord:
         """Approve or deny a pending record, naming who decided."""
         ...
 
@@ -355,8 +372,9 @@ class _Approvals:
         *,
         reason: str = "",
         labels: Iterable[str] = (),
+        context: Mapping[str, str] | None = None,
     ) -> str:
-        digest = call_digest(principal, tool, args)
+        digest = call_digest(principal, tool, args, context)
         with self._lock:
             records = self._load()
             same_call = [r for r in records.values() if r.digest == digest]
@@ -372,6 +390,7 @@ class _Approvals:
                 arguments=dict(args),
                 reason=reason,
                 labels=sorted(set(labels)),
+                context=dict(context or {}),
             )
             self._save(records)
             return approval_id
@@ -384,7 +403,14 @@ class _Approvals:
         with self._lock:
             return self._load().get(approval_id)
 
-    def decide(self, approval_id: str, verdict: Verdict, *, by: str) -> ApprovalRecord:
+    def decide(
+        self,
+        approval_id: str,
+        verdict: Verdict,
+        *,
+        by: str,
+        arguments: Mapping[str, Any] | None = None,
+    ) -> ApprovalRecord:
         if verdict not in ("approved", "denied"):
             raise ValueError(f"verdict must be 'approved' or 'denied', not {verdict!r}")
         if not by:
@@ -396,7 +422,16 @@ class _Approvals:
                 raise KeyError(approval_id)
             if record.status != "pending":
                 raise ValueError(f"approval {approval_id} is already {record.status}")
-            record = self._decided(records, record, verdict, by)
+            if arguments is not None:
+                if verdict != "approved":
+                    raise ValueError("only an approval can edit the call's arguments")
+                if set(arguments) != set(record.arguments):
+                    raise ValueError(
+                        f"an edit keeps the call's arguments {sorted(record.arguments)}; "
+                        f"got {sorted(arguments)}"
+                    )
+            edited = dict(arguments) if arguments is not None else None
+            record = self._decided(records, record, verdict, by, edited)
             records[approval_id] = record
             self._save(records)
             return record
@@ -407,9 +442,12 @@ class _Approvals:
         record: ApprovalRecord,
         verdict: Verdict,
         by: str,
+        edited: dict[str, Any] | None = None,
     ) -> ApprovalRecord:
         now = _now()
         entry: dict[str, Any] = {"by": by, "at": now, "verdict": verdict}
+        if edited is not None:
+            entry["arguments"] = edited
         if self.authority is None:
             return replace(
                 record,
@@ -418,6 +456,7 @@ class _Approvals:
                 decided_by=by,
                 decided_at=now,
                 approvals=[*record.approvals, entry],
+                approved_arguments=edited,
             )
 
         try:
@@ -441,6 +480,12 @@ class _Approvals:
             )
         if by in record.approvers:
             raise ValueError(f"{by} has already approved {record.approval_id}")
+        earlier = [a.get("arguments") for a in record.approvals if a.get("verdict") == "approved"]
+        if any(previous != edited for previous in earlier):
+            raise ValueError(
+                "approvers must approve the same arguments; this approval differs "
+                "from an earlier one"
+            )
         approvals = [*record.approvals, entry]
         if not self.authority.satisfied(record, approvals):
             return replace(record, approvals=approvals)
@@ -451,6 +496,7 @@ class _Approvals:
             verdict="approved",
             decided_by=", ".join(approved.approvers),
             decided_at=now,
+            approved_arguments=edited,
         )
 
     def consume(self, approval_id: str) -> ApprovalRecord:
