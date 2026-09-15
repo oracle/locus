@@ -143,6 +143,9 @@ temporal = ["temporalio>=1.7"]
 # Gemini Live realtime voice sessions (src/tulip/voice/gemini.py).
 gemini = ["google-genai>=1.30"]
 
+# Durable agent runs on DBOS (src/tulip/durable/dbos.py).
+dbos = ["dbos>=2.0"]
+
 # Mem0 agent-memory manager (src/tulip/memory/managers/mem0.py) — the
 # portable, self-hostable long-term memory backend.
 mem0 = ["mem0ai>=0.1"]
@@ -240,6 +243,7 @@ dev = [
     "moto>=5.0",          # mock S3 for tests/unit/test_memory_backends_s3.py
     "cryptography>=42",   # signed audit trail tests in tests/unit/test_signed_audit.py
     "temporalio>=1.7",    # durable run tests in tests/unit/test_temporal_durable.py
+    "dbos>=2.0",          # durable run tests in tests/unit/test_dbos_durable.py
 ]
 
 [project.scripts]

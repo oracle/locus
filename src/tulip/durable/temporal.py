@@ -34,14 +34,14 @@ the workflow; the checkpoint shows where it stopped.
 
 from __future__ import annotations
 
-import json
+from dataclasses import asdict
 from typing import TYPE_CHECKING, Any
 
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 from temporalio.worker import Worker
 
-from tulip.core.events import InterruptEvent, TerminateEvent
+from tulip.durable.segments import SegmentError, run_agent_segment
 from tulip.durable.temporal_workflow import (
     RUN_SEGMENT,
     AgentRequest,
@@ -63,51 +63,22 @@ if TYPE_CHECKING:
 _AGENTS: dict[str, Callable[[], Agent]] = {}
 
 
-def _json_safe(value: dict[str, Any]) -> dict[str, Any]:
-    safe: dict[str, Any] = json.loads(json.dumps(value, default=str))
-    return safe
-
-
 @activity.defn(name=RUN_SEGMENT)
 async def run_segment(segment: Segment) -> SegmentResult:
     """Run or resume a registered agent until it finishes or pauses."""
-    factory = _AGENTS.get(segment.agent)
-    if factory is None:
-        raise ApplicationError(
-            f"no agent registered as {segment.agent!r} on this worker", non_retryable=True
+    try:
+        outcome = await run_agent_segment(
+            _AGENTS,
+            segment.agent,
+            thread_id=segment.thread_id,
+            kind=segment.kind,
+            prompt=segment.prompt,
+            answer=segment.answer,
+            perform=segment.perform,
         )
-    agent = factory()
-    if agent.config.checkpointer is None:
-        raise ApplicationError(
-            f"agent {segment.agent!r} needs a checkpointer shared by every worker",
-            non_retryable=True,
-        )
-    if segment.kind == "run":
-        events = agent.run(segment.prompt, thread_id=segment.thread_id)
-    else:
-        events = agent.resume(
-            segment.answer, thread_id=segment.thread_id, perform_dangling=segment.perform
-        )
-
-    paused: InterruptEvent | None = None
-    final: TerminateEvent | None = None
-    async for event in events:
-        if isinstance(event, InterruptEvent):
-            paused = event
-        elif isinstance(event, TerminateEvent):
-            final = event
-    if paused is not None:
-        return SegmentResult(
-            status="paused",
-            question=paused.question,
-            approval_id=paused.metadata.get("approval_id"),
-            metadata=_json_safe(dict(paused.metadata)),
-        )
-    return SegmentResult(
-        status="done",
-        final_message=final.final_message if final else None,
-        stop_reason=final.reason if final else None,
-    )
+    except SegmentError as exc:
+        raise ApplicationError(str(exc), non_retryable=True) from exc
+    return SegmentResult(**asdict(outcome))
 
 
 def create_worker(
