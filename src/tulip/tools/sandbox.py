@@ -8,9 +8,10 @@ environment and executes it there; the host process never runs the body. The
 zero-infra default is :class:`SubprocessSandbox` — a fresh working directory,
 ``python -I``, and a scrubbed environment (``PATH``/``LANG`` plus whatever the
 manifest explicitly grants) per call. Stronger boundaries plug in through the
-same structural :class:`ToolSandbox` protocol: any provider from the
-``tulip-sandbox`` package (Docker, Firecracker, SSH, Lambda) satisfies it
-unchanged, without either package importing the other.
+same structural :class:`ToolSandbox` protocol: :class:`DockerSandbox` ships here
+(no network, read-only root, no capabilities, resource limits), and any other
+package can register a provider under the ``tulip.sandbox_providers``
+entry-point group.
 
 The subprocess tier is process + environment isolation only — it is NOT a
 network or filesystem boundary. Escalate the provider (``TULIP_SANDBOX=docker``,
@@ -34,13 +35,15 @@ from __future__ import annotations
 import inspect
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 import textwrap
 import time
+import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field
 
@@ -56,8 +59,8 @@ if TYPE_CHECKING:
     from tulip.tools.decorator import Tool
 
 
-# Same marker the tulip-sandbox package prints, so results round-trip through
-# either implementation of the run_tool protocol.
+# Printed by the in-box loader; the host recovers the tool's return value from
+# the last line that starts with it.
 TOOL_RESULT_MARKER = "__TULIP_TOOL_RESULT__"
 
 _ARGS_FILE = "_tool_args.json"
@@ -67,6 +70,12 @@ _ARGS_FILE = "_tool_args.json"
 _BASE_ENV = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"}
 
 _LOCAL_PROVIDER_NAMES = frozenset({"subprocess", "local"})
+
+#: Where other packages register sandbox providers by name.
+PROVIDER_ENTRY_POINT_GROUP = "tulip.sandbox_providers"
+
+_DOCKER_WORKDIR = "/work"
+_PROGRAM_FILE = "_program.py"
 
 _STDERR_TAIL = 500
 
@@ -86,11 +95,7 @@ class SandboxExecutionError(Exception):
 
 
 class SandboxManifest(BaseModel):
-    """What the box receives — nothing else reaches it.
-
-    Duck-compatible with ``tulip_sandbox.Manifest`` (same field names), so it
-    can be handed to any provider from that package unchanged.
-    """
+    """What the box receives — nothing else reaches it."""
 
     files: dict[str, str] = Field(default_factory=dict)
     """Relative path → content, seeded into the box's working directory."""
@@ -106,7 +111,7 @@ class SandboxManifest(BaseModel):
 
 
 class SandboxResult(BaseModel):
-    """Outcome of one sandboxed run (same shape as ``tulip_sandbox.RunResult``)."""
+    """Outcome of one sandboxed run."""
 
     ok: bool
     stdout: str = ""
@@ -121,9 +126,8 @@ class SandboxResult(BaseModel):
 class ToolSandbox(Protocol):
     """Structural contract for a sandbox provider — the ``run_tool`` verb.
 
-    Providers from the ``tulip-sandbox`` package satisfy this protocol without
-    either package importing the other; a custom provider only needs the one
-    method. ``isinstance`` checks method presence (``runtime_checkable``), not
+    A custom provider only needs the one method, and registers under the
+    ``tulip.sandbox_providers`` entry-point group to be selectable by name. ``isinstance`` checks method presence (``runtime_checkable``), not
     signatures.
     """
 
@@ -147,8 +151,8 @@ class SandboxSpec(BaseModel):
 
     ``provider`` may be ``None`` (resolve the default: ``$TULIP_SANDBOX``,
     falling back to the built-in subprocess box), a provider *name*
-    (``"subprocess"``/``"local"`` are built in; other names resolve through
-    the optional ``tulip-sandbox`` package), or a ready provider object
+    (``"subprocess"``/``"local"`` and ``"docker"`` are built in; other names
+    resolve through the ``tulip.sandbox_providers`` entry-point group), or a ready provider object
     satisfying :class:`ToolSandbox`.
     """
 
@@ -186,8 +190,9 @@ def normalize_sandbox(sandbox: Any) -> SandboxSpec | None:
 def resolve_sandbox(spec: SandboxSpec) -> ToolSandbox:
     """Resolve a spec to a live provider.
 
-    Names other than the built-in ``subprocess``/``local`` are delegated to
-    the ``tulip-sandbox`` package's factory when it is installed.
+    ``subprocess``/``local`` and ``docker`` are built in. Any other name is
+    looked up in the ``tulip.sandbox_providers`` entry-point group, and an
+    unknown name raises rather than falling back to a weaker box.
     """
     provider = spec.provider
     if provider is None:
@@ -196,17 +201,38 @@ def resolve_sandbox(spec: SandboxSpec) -> ToolSandbox:
         name = provider.lower()
         if name in _LOCAL_PROVIDER_NAMES:
             return SubprocessSandbox()
-        try:
-            from tulip_sandbox import build_provider  # noqa: PLC0415
-        except ImportError as exc:
-            raise SandboxError(
-                f"sandbox provider {provider!r} needs the tulip-sandbox package "
-                "(only 'subprocess' is built in)"
-            ) from exc
-        return cast("ToolSandbox", build_provider(name))
+        if name == "docker":
+            return DockerSandbox()
+        return _provider_from_entry_points(name)
     if isinstance(provider, ToolSandbox):
         return provider
     raise SandboxError(f"not a sandbox provider: {provider!r} (needs a run_tool method)")
+
+
+def _provider_from_entry_points(name: str) -> ToolSandbox:
+    """Build the provider registered as ``name`` under the entry-point group.
+
+    The registered object may be a provider class (instantiated with no
+    arguments), a zero-argument factory, or a ready provider instance.
+    """
+    from importlib.metadata import entry_points  # noqa: PLC0415
+
+    for entry in entry_points(group=PROVIDER_ENTRY_POINT_GROUP):
+        if entry.name.lower() != name:
+            continue
+        target = entry.load()
+        built = target() if inspect.isclass(target) or not hasattr(target, "run_tool") else target
+        if not isinstance(built, ToolSandbox):
+            raise SandboxError(
+                f"entry point {entry.value!r} for sandbox provider {name!r} did not "
+                "produce an object with a run_tool method"
+            )
+        return built
+    raise SandboxError(
+        f"unknown sandbox provider {name!r}: 'subprocess', 'local' and 'docker' are "
+        f"built in; others register under the {PROVIDER_ENTRY_POINT_GROUP!r} "
+        "entry-point group"
+    )
 
 
 def provider_label(spec: SandboxSpec) -> str:
@@ -430,11 +456,176 @@ class SubprocessSandbox:
         timeout: float = 30.0,
     ) -> SandboxResult:
         """Run ``func(**args)`` defined in ``code``; recover its return value."""
-        base = manifest if manifest is not None else SandboxManifest()
-        m = base.model_copy(deep=True)
-        m.files[_ARGS_FILE] = json.dumps(args or {})
-        result = self.run_code(_tool_wrapper(code, func), manifest=m, timeout=timeout)
-        return result.model_copy(update={"value": _extract_value(result.stdout)})
+        return _run_tool_with(self.run_code, code, func, args, manifest, timeout)
+
+
+def _run_tool_with(
+    run_code: Callable[..., SandboxResult],
+    code: str,
+    func: str,
+    args: dict[str, Any] | None,
+    manifest: Any | None,
+    timeout: float,
+) -> SandboxResult:
+    """Seed the arguments, run the loader around ``func``, recover its value."""
+    base = manifest if manifest is not None else SandboxManifest()
+    m = base.model_copy(deep=True)
+    m.files[_ARGS_FILE] = json.dumps(args or {})
+    result = run_code(_tool_wrapper(code, func), manifest=m, timeout=timeout)
+    return result.model_copy(update={"value": _extract_value(result.stdout)})
+
+
+def _host_user() -> str | None:
+    """``uid:gid`` of the calling process, so the box can use the bind mount."""
+    if not hasattr(os, "getuid"):  # pragma: no cover - non-POSIX hosts
+        return None
+    return f"{os.getuid()}:{os.getgid()}"
+
+
+class DockerSandbox:
+    """A fresh container per call: a network and filesystem boundary.
+
+    The tool's code runs as ``python -I`` in a new container of ``image`` with
+    the workspace bind-mounted at ``/work``, the only writable path besides a
+    small ``/tmp`` tmpfs. By default the container has no network, a read-only
+    root filesystem, no Linux capabilities, cannot gain privileges, runs as the
+    calling user's uid/gid, and is capped on memory, CPU and process count. It
+    is removed when the call ends, and killed first if the call times out.
+
+    Only ``LANG`` and what the manifest grants reach the environment. Needs the
+    ``docker`` CLI and a reachable daemon, and no Python dependency. Pull the
+    image beforehand: a pull inside the call counts against ``timeout``.
+
+    Args:
+        image: Container image with ``python`` on its ``PATH``.
+        docker: The Docker CLI to invoke.
+        network: Give the container a network. Required for ``manifest.deps``.
+        memory: Memory limit, in Docker's notation.
+        cpus: CPU limit.
+        pids_limit: Maximum processes inside the container.
+        user: ``uid:gid`` to run as; defaults to the calling user.
+    """
+
+    def __init__(
+        self,
+        image: str = "python:3.12-slim",
+        *,
+        docker: str = "docker",
+        network: bool = False,
+        memory: str = "512m",
+        cpus: float = 1.0,
+        pids_limit: int = 256,
+        user: str | None = None,
+    ) -> None:
+        self.image = image
+        self.docker = docker
+        self.network = network
+        self.memory = memory
+        self.cpus = cpus
+        self.pids_limit = pids_limit
+        self.user = user if user is not None else _host_user()
+
+    def _argv(self, docker: str, root: Path, name: str, env: dict[str, str]) -> list[str]:
+        argv = [
+            docker,
+            "run",
+            "--rm",
+            "--name",
+            name,
+            "--network",
+            "bridge" if self.network else "none",
+            "--read-only",
+            "--tmpfs",
+            "/tmp:rw,noexec,nosuid,size=64m",  # noqa: S108 — a tmpfs inside the container, not a host path
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--memory",
+            self.memory,
+            "--cpus",
+            str(self.cpus),
+            "--pids-limit",
+            str(self.pids_limit),
+            "--mount",
+            f"type=bind,source={root},target={_DOCKER_WORKDIR}",
+            "--workdir",
+            _DOCKER_WORKDIR,
+        ]
+        if self.user:
+            argv += ["--user", self.user]
+        for key, value in env.items():
+            argv += ["--env", f"{key}={value}"]
+        return [*argv, self.image, "python", "-I", f"{_DOCKER_WORKDIR}/{_PROGRAM_FILE}"]
+
+    def run_code(
+        self,
+        code: str,
+        *,
+        manifest: Any | None = None,
+        timeout: float = 30.0,
+    ) -> SandboxResult:
+        """Run a program in a fresh container; never raises for in-box failures."""
+        m = manifest if manifest is not None else SandboxManifest()
+        if m.deps and not self.network:
+            raise SandboxError(
+                "manifest deps need DockerSandbox(network=True): pip cannot reach "
+                "an index from a container with no network"
+            )
+        docker = shutil.which(self.docker)
+        if docker is None:
+            raise SandboxError(f"the Docker sandbox needs the {self.docker!r} CLI on PATH")
+        name = f"tulip-sandbox-{uuid.uuid4().hex[:12]}"
+        started = time.perf_counter()
+        with tempfile.TemporaryDirectory(prefix="tulip-docker-") as tmp:
+            root = Path(m.workspace) if m.workspace else Path(tmp)
+            root.mkdir(parents=True, exist_ok=True)
+            _seed_files(root, dict(m.files))
+            (root / _PROGRAM_FILE).write_text(_compose_code(code, list(m.deps)), encoding="utf-8")
+            env = {"LANG": _BASE_ENV["LANG"], **m.env}
+            argv = self._argv(docker, root.resolve(), name, env)
+            try:
+                proc = subprocess.run(  # noqa: S603 — running tool code in a locked-down container is this class's purpose
+                    argv,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired as exc:
+                subprocess.run(  # noqa: S603 — kill the container the timed-out call left running
+                    [docker, "kill", name],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                return SandboxResult(
+                    ok=False,
+                    stdout=_as_text(exc.stdout),
+                    stderr=_as_text(exc.stderr),
+                    exit_code=124,
+                    timed_out=True,
+                    duration_ms=(time.perf_counter() - started) * 1000,
+                )
+        return SandboxResult(
+            ok=proc.returncode == 0,
+            stdout=proc.stdout,
+            stderr=proc.stderr,
+            exit_code=proc.returncode,
+            duration_ms=(time.perf_counter() - started) * 1000,
+        )
+
+    def run_tool(
+        self,
+        code: str,
+        func: str,
+        args: dict[str, Any] | None = None,
+        *,
+        manifest: Any | None = None,
+        timeout: float = 30.0,
+    ) -> SandboxResult:
+        """Run ``func(**args)`` defined in ``code``; recover its return value."""
+        return _run_tool_with(self.run_code, code, func, args, manifest, timeout)
 
 
 class SandboxEnforcerHook(HookProvider):
