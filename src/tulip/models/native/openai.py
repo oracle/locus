@@ -14,6 +14,14 @@ from pydantic import BaseModel, Field
 
 from tulip.core.events import ModelChunkEvent
 from tulip.core.loop_bound import loop_bound
+from tulip.core.media import (
+    EARLIER_IMAGE_OMITTED,
+    has_images,
+    images,
+    recent_image_positions,
+    split_content,
+    strip_images,
+)
 from tulip.core.messages import Message, Role, ToolCall
 from tulip.models.base import ModelConfig, ModelResponse
 
@@ -27,6 +35,108 @@ logger = logging.getLogger(__name__)
 #: part of a multi-step tool exchange rather than as the user's query.
 _TOOL_RESPONSE_OPEN = "<tool_response>"
 _TOOL_RESPONSE_CLOSE = "</tool_response>"
+
+
+#: The tool a Responses ``computer_call`` is routed to (see :mod:`tulip.tools.computer`).
+COMPUTER_TOOL_NAME = "computer"
+
+#: Argument carrying a ``computer_call`` item's id, so a turn rebuilt without its
+#: raw output items can still replay the call.
+COMPUTER_ITEM_ID_ARG = "openai_item_id"
+
+#: A 1x1 transparent PNG: the screenshot sent back for a computer call that did
+#: not run (refused, held or failed), with the reason alongside as text.
+_BLANK_PNG_URL = (
+    "data:image/png;base64,"
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+)
+
+
+def _computer_call_arguments(item: dict[str, Any]) -> dict[str, Any]:
+    """The tool arguments for a dumped ``computer_call`` item."""
+    arguments: dict[str, Any] = {}
+    for key in ("action", "actions"):
+        if item.get(key) is not None:
+            arguments[key] = item[key]
+    if item.get("pending_safety_checks"):
+        arguments["pending_safety_checks"] = item["pending_safety_checks"]
+    if item.get("id"):
+        arguments[COMPUTER_ITEM_ID_ARG] = item["id"]
+    return arguments
+
+
+def _computer_calls(messages: list[Message]) -> dict[str, list[dict[str, Any]]]:
+    """Call id -> pending safety checks, for every computer call in ``messages``."""
+    calls: dict[str, list[dict[str, Any]]] = {}
+    for msg in messages:
+        if msg.role != Role.ASSISTANT:
+            continue
+        raw_items = msg.metadata.get(RESPONSES_ITEMS_METADATA_KEY)
+        for item in raw_items if isinstance(raw_items, list) else []:
+            if isinstance(item, dict) and item.get("type") == "computer_call":
+                calls[str(item.get("call_id") or "")] = list(
+                    item.get("pending_safety_checks") or []
+                )
+        for tc in msg.tool_calls:
+            if _is_computer_tool_call(tc):
+                calls.setdefault(tc.id, list(tc.arguments.get("pending_safety_checks") or []))
+    return calls
+
+
+def _is_computer_tool_call(tc: ToolCall) -> bool:
+    return tc.name == COMPUTER_TOOL_NAME and COMPUTER_ITEM_ID_ARG in tc.arguments
+
+
+def _tool_output_items(
+    msg: Message,
+    computer_calls: dict[str, list[dict[str, Any]]],
+    *,
+    send_images: bool,
+) -> list[dict[str, Any]]:
+    """Responses input items for one tool result.
+
+    A computer call's result is a ``computer_call_output`` carrying the latest
+    screenshot; its pending safety checks are acknowledged only when the result
+    has a screenshot, which is to say the action ran. Any text in the result
+    follows as a user note. Other tools send a ``function_call_output``, with
+    image parts when the result embeds images.
+    """
+    call_id = msg.tool_call_id or ""
+    content = msg.content or ""
+    text = "\n".join(part for part in split_content(content) if isinstance(part, str)).strip()
+    if call_id in computer_calls:
+        shots = images(content)
+        output: dict[str, Any] = {
+            "type": "computer_call_output",
+            "call_id": call_id,
+            "output": {
+                "type": "computer_screenshot",
+                "image_url": shots[-1].data_url if shots and send_images else _BLANK_PNG_URL,
+            },
+        }
+        if shots and computer_calls[call_id]:
+            output["acknowledged_safety_checks"] = computer_calls[call_id]
+        result = [output]
+        if text:
+            result.append({"role": "user", "content": f"[computer result] {text}"})
+        return result
+    if not has_images(content):
+        return [{"type": "function_call_output", "call_id": call_id, "output": content}]
+    if not send_images:
+        return [
+            {
+                "type": "function_call_output",
+                "call_id": call_id,
+                "output": strip_images(content, EARLIER_IMAGE_OMITTED),
+            }
+        ]
+    parts: list[dict[str, Any]] = [
+        {"type": "input_text", "text": part}
+        if isinstance(part, str)
+        else {"type": "input_image", "image_url": part.data_url}
+        for part in split_content(content)
+    ]
+    return [{"type": "function_call_output", "call_id": call_id, "output": parts}]
 
 
 def _decode_tool_arguments(raw: str | None) -> dict[str, Any]:
@@ -540,6 +650,8 @@ class OpenAIModel(BaseModel):
 
         for index, msg in enumerate(messages):
             entry = msg.to_openai_format()
+            if msg.role == Role.TOOL and has_images(msg.content):
+                entry["content"] = strip_images(msg.content or "")
             if index > 0 and entry.get("role") == "system":
                 entry = {
                     "role": "user",
@@ -599,7 +711,7 @@ class OpenAIModel(BaseModel):
                     }
                 )
             else:
-                openai_tools.append(tool)
+                openai_tools.append({k: v for k, v in tool.items() if k != "native"})
 
         return openai_tools
 
@@ -763,7 +875,12 @@ class OpenAIModel(BaseModel):
             return None
 
         converted: list[dict[str, Any]] = []
-        for tool in tools:
+        for original in tools:
+            native = (original.get("native") or {}).get("openai_responses")
+            if isinstance(native, dict):
+                converted.append({k: v for k, v in native.items() if not k.startswith("_")})
+                continue
+            tool = {k: v for k, v in original.items() if k != "native"}
             tool_type = tool.get("type")
             function = tool.get("function")
             if tool_type == "function" and isinstance(function, dict):
@@ -798,6 +915,10 @@ class OpenAIModel(BaseModel):
         both transports.
         """
         items: list[dict[str, Any]] = []
+        computer_calls = _computer_calls(messages)
+        with_images = recent_image_positions(
+            [m.content if m.role == Role.TOOL else None for m in messages]
+        )
 
         for index, msg in enumerate(messages):
             if msg.role == Role.ASSISTANT:
@@ -810,6 +931,20 @@ class OpenAIModel(BaseModel):
                 if msg.content:
                     items.append({"role": "assistant", "content": msg.content})
                 for tc in msg.tool_calls:
+                    if _is_computer_tool_call(tc):
+                        call: dict[str, Any] = {
+                            "type": "computer_call",
+                            "id": tc.arguments[COMPUTER_ITEM_ID_ARG],
+                            "call_id": tc.id,
+                            "status": "completed",
+                            "pending_safety_checks": tc.arguments.get("pending_safety_checks")
+                            or [],
+                        }
+                        for key in ("action", "actions"):
+                            if key in tc.arguments:
+                                call[key] = tc.arguments[key]
+                        items.append(call)
+                        continue
                     items.append(
                         {
                             "type": "function_call",
@@ -819,12 +954,8 @@ class OpenAIModel(BaseModel):
                         }
                     )
             elif msg.role == Role.TOOL:
-                items.append(
-                    {
-                        "type": "function_call_output",
-                        "call_id": msg.tool_call_id or "",
-                        "output": msg.content or "",
-                    }
+                items.extend(
+                    _tool_output_items(msg, computer_calls, send_images=index in with_images)
                 )
             elif msg.role == Role.SYSTEM and index > 0:
                 items.append(
@@ -949,6 +1080,14 @@ class OpenAIModel(BaseModel):
             reserved=_RESPONSES_RESERVED_PARAMS,
         )
         self._apply_extra_body(request_kwargs, call_kwargs)
+        # A native tool can need a request option too (``computer_use_preview``
+        # needs ``truncation="auto"``); an explicit caller value wins.
+        for tool in tools or []:
+            native = (tool.get("native") or {}).get("openai_responses")
+            extra = native.get("_request") if isinstance(native, dict) else None
+            if isinstance(extra, dict):
+                for key, value in extra.items():
+                    request_kwargs.setdefault(key, value)
 
         return request_kwargs
 
@@ -1038,6 +1177,15 @@ class OpenAIModel(BaseModel):
                             id=getattr(item, "call_id", None) or "",
                             name=getattr(item, "name", None) or "",
                             arguments=_decode_tool_arguments(getattr(item, "arguments", None)),
+                        )
+                    )
+                elif item_type == "computer_call":
+                    dumped_call = _dump_output_item(item) or {}
+                    tool_calls.append(
+                        ToolCall(
+                            id=str(dumped_call.get("call_id") or ""),
+                            name=COMPUTER_TOOL_NAME,
+                            arguments=_computer_call_arguments(dumped_call),
                         )
                     )
                 elif item_type == "reasoning":
@@ -1142,7 +1290,14 @@ class OpenAIModel(BaseModel):
 
             elif event_type == "response.output_item.done":
                 item = getattr(event, "item", None)
-                if getattr(item, "type", None) == "function_call":
+                if getattr(item, "type", None) == "computer_call":
+                    dumped_call = _dump_output_item(item) or {}
+                    tool_calls_by_item[str(dumped_call.get("id") or len(tool_calls_by_item))] = {
+                        "id": str(dumped_call.get("call_id") or ""),
+                        "name": COMPUTER_TOOL_NAME,
+                        "arguments": json.dumps(_computer_call_arguments(dumped_call)),
+                    }
+                elif getattr(item, "type", None) == "function_call":
                     item_id = getattr(item, "id", None)
                     entry = tool_calls_by_item.get(item_id) if isinstance(item_id, str) else None
                     if entry is not None:

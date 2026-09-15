@@ -81,6 +81,14 @@ class Tool(BaseModel):
     policy-matched exactly as an eager tool; activating it adds its schema
     to the next model call, nothing more (#177)."""
 
+    native: dict[str, dict[str, Any]] = {}
+    """Provider-native definitions of this tool, keyed by adapter
+    (``"anthropic"``, ``"openai_responses"``). An adapter that finds its key
+    sends that definition instead of the function schema; the others keep
+    using :attr:`parameters`. Keys starting with ``_`` are directives to the
+    adapter (a beta header, a request option) and are never sent as part of
+    the tool. See :mod:`tulip.tools.computer`."""
+
     model_config = {"arbitrary_types_allowed": True}
 
     @property
@@ -200,8 +208,12 @@ class Tool(BaseModel):
         return str(result)
 
     def to_openai_schema(self) -> dict[str, Any]:
-        """Get OpenAI-compatible tool schema."""
-        return {
+        """Get OpenAI-compatible tool schema.
+
+        A tool with :attr:`native` definitions carries them under a top-level
+        ``native`` key for the adapters that understand it.
+        """
+        schema: dict[str, Any] = {
             "type": "function",
             "function": {
                 "name": self.name,
@@ -209,6 +221,9 @@ class Tool(BaseModel):
                 "parameters": self.parameters,
             },
         }
+        if self.native:
+            schema["native"] = self.native
+        return schema
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         """Direct invocation of the tool.

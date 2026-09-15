@@ -12,6 +12,13 @@ from pydantic import BaseModel, Field
 
 from tulip.core.events import ModelChunkEvent
 from tulip.core.loop_bound import loop_bound
+from tulip.core.media import (
+    EARLIER_IMAGE_OMITTED,
+    has_images,
+    recent_image_positions,
+    split_content,
+    strip_images,
+)
 from tulip.core.messages import Message, Role, ToolCall
 from tulip.models.base import ModelConfig, ModelResponse
 
@@ -35,6 +42,31 @@ _TEMPERATURE_DEPRECATED_PREFIXES: tuple[str, ...] = (
     "claude-fable-5",
     "claude-mythos-5",
 )
+
+
+def _tool_result_content(content: str | None, *, send_images: bool) -> str | list[dict[str, Any]]:
+    """A tool result as Anthropic ``tool_result`` content: text, or text and image blocks.
+
+    Screenshots embedded with :func:`tulip.core.media.encode_image` become image
+    blocks; only the latest few are sent, older ones become a placeholder.
+    """
+    text = content or ""
+    if not has_images(text):
+        return text
+    if not send_images:
+        return strip_images(text, EARLIER_IMAGE_OMITTED)
+    blocks: list[dict[str, Any]] = []
+    for part in split_content(text):
+        if isinstance(part, str):
+            blocks.append({"type": "text", "text": part})
+        else:
+            blocks.append(
+                {
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": part.media_type, "data": part.data},
+                }
+            )
+    return blocks
 
 
 def _rejects_temperature(model_id: str) -> bool:
@@ -190,8 +222,11 @@ class AnthropicModel(BaseModel):
         """
         system_prompt: str | None = None
         anthropic_messages: list[dict[str, Any]] = []
+        with_images = recent_image_positions(
+            [m.content if m.role == Role.TOOL else None for m in messages]
+        )
 
-        for msg in messages:
+        for index, msg in enumerate(messages):
             if msg.role == Role.SYSTEM:
                 system_prompt = msg.content
                 continue
@@ -221,7 +256,9 @@ class AnthropicModel(BaseModel):
                             {
                                 "type": "tool_result",
                                 "tool_use_id": msg.tool_call_id or "",
-                                "content": str(msg.content or ""),
+                                "content": _tool_result_content(
+                                    msg.content, send_images=index in with_images
+                                ),
                             }
                         ],
                     }
@@ -249,6 +286,10 @@ class AnthropicModel(BaseModel):
 
         anthropic_tools = []
         for tool in tools:
+            native = (tool.get("native") or {}).get("anthropic")
+            if isinstance(native, dict):
+                anthropic_tools.append({k: v for k, v in native.items() if not k.startswith("_")})
+                continue
             func = tool.get("function", tool)
             anthropic_tools.append(
                 {
@@ -258,6 +299,17 @@ class AnthropicModel(BaseModel):
                 }
             )
         return anthropic_tools
+
+    @staticmethod
+    def _native_betas(tools: list[dict[str, Any]] | None) -> dict[str, str]:
+        """The ``anthropic-beta`` header the native tools in ``tools`` need, if any."""
+        betas: list[str] = []
+        for tool in tools or []:
+            native = (tool.get("native") or {}).get("anthropic")
+            beta = native.get("_beta") if isinstance(native, dict) else None
+            if isinstance(beta, str) and beta not in betas:
+                betas.append(beta)
+        return {"anthropic-beta": ",".join(betas)} if betas else {}
 
     _STRUCTURED_TOOL_NAME = "respond_with_schema"
 
@@ -366,6 +418,10 @@ class AnthropicModel(BaseModel):
                 ]
             params["tools"] = anthropic_tools
 
+        beta_headers = self._native_betas(tools)
+        if beta_headers:
+            params["extra_headers"] = beta_headers
+
         response = await self.client.messages.create(**params)
 
         # Parse response
@@ -434,6 +490,9 @@ class AnthropicModel(BaseModel):
             params["system"] = system_prompt
         if anthropic_tools:
             params["tools"] = anthropic_tools
+        beta_headers = self._native_betas(tools)
+        if beta_headers:
+            params["extra_headers"] = beta_headers
 
         async with self.client.messages.stream(**params) as stream:
             async for text in stream.text_stream:

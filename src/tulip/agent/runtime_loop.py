@@ -45,6 +45,7 @@ from tulip.core.events import (
     ToolStartEvent,
     TulipEvent,
 )
+from tulip.core.media import strip_images, text_length
 from tulip.core.messages import Message, Role, ToolCall, ToolResult
 from tulip.core.state import AgentState, ReasoningStep, ToolExecution
 from tulip.models.base import ModelResponse
@@ -1076,7 +1077,7 @@ class AgentRuntimeMixin:
                     if (
                         self.config.max_tool_result_length > 0
                         and result.content
-                        and len(result.content) > self.config.max_tool_result_length
+                        and text_length(result.content) > self.config.max_tool_result_length
                     ):
                         if self.config.tool_result_store is not None:
                             result = self.config.tool_result_store.maybe_offload(
@@ -1085,12 +1086,15 @@ class AgentRuntimeMixin:
                                 iteration=state.iteration,
                             )
                         else:
-                            original_len = len(result.content)
+                            # Cutting through an embedded image would leave
+                            # corrupt base64, so images go before the cut.
+                            text = strip_images(result.content)
+                            original_len = len(text)
                             result = ToolResult(
                                 tool_call_id=result.tool_call_id,
                                 name=result.name,
                                 content=(
-                                    result.content[: self.config.max_tool_result_length]
+                                    text[: self.config.max_tool_result_length]
                                     + f"\n[OUTPUT TRUNCATED — original: {original_len} chars]"
                                 ),
                                 error=result.error,
