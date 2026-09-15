@@ -228,7 +228,13 @@ def gate_tool(
     ) -> Any:
         """A ``require_human`` hold in interrupt mode: pause, or act on a decision."""
         store = cast("ApprovalStore", approval)
-        approval_id = store.submit(principal, tool.name, kwargs, reason=error.decision.reason)
+        approval_id = store.submit(
+            principal,
+            tool.name,
+            kwargs,
+            reason=error.decision.reason,
+            labels=sorted(resolved.labels()),
+        )
         record = store.get(approval_id)
         where = {"approval_id": approval_id, "action": resolved.name, "asset": resolved.asset}
 
@@ -236,7 +242,12 @@ def gate_tool(
             if trail is not None:
                 trail.record(
                     "approval-decision",
-                    {**where, "verdict": record.status, "decided_by": record.decided_by},
+                    {
+                        **where,
+                        "verdict": record.status,
+                        "decided_by": record.decided_by,
+                        "approvers": record.approvers,
+                    },
                 )
             if record.status == "approved":
 
@@ -279,6 +290,7 @@ def gate_tool(
                     "principal": principal,
                     "reason": error.decision.reason,
                     "arguments": dict(kwargs),
+                    "approvers": record.approvers if record is not None else [],
                 },
             },
             default=str,
