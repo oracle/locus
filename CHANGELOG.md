@@ -8,6 +8,27 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **Computer use on each provider's native tool, gated like any other tool.** (#41)
+  `computer_tool(session)` is one `Tool` named `computer` that drives a
+  `BrowserSession` page by screenshot, pointer and keyboard. Anthropic sees
+  Claude's native `computer_20251124` tool (the beta header is sent for you),
+  OpenAI's Responses API sees its native `computer` tool (or
+  `computer_use_preview`), and other adapters see an equivalent function schema.
+  Each result carries a fresh screenshot. `computer_action` labels a call
+  `computer-read` or `computer-write`, and `computer-safety-check` when OpenAI
+  flagged it; a flagged call is refused unless `on_safety_check="proceed"`, and
+  its checks are acknowledged only when the action ran. The page is checked
+  against `allowed_domains` after every action that can navigate.
+- **Images in tool results.** `tulip.core.media.encode_image` embeds an image in a
+  tool result string, so it survives checkpoints and durable engines unchanged.
+  Anthropic and the Responses API receive real image parts, only the three most
+  recent image results are sent as images, other adapters see a placeholder,
+  and `max_tool_result_length` and the token estimates count text, not base64.
+- `Tool.native` holds provider-native tool definitions that an adapter sends in
+  place of the function schema.
+
 ## [2.15.0] - 2026-09-15
 
 ### Added

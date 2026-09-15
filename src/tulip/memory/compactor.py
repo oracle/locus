@@ -47,6 +47,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
+from tulip.core.media import estimate_tokens
 from tulip.memory.conversation import ConversationManager
 
 
@@ -63,11 +64,10 @@ __all__ = ["LLMCompactor"]
 #: Default char/4 heuristic — matches the fallback in
 #: ``tulip.core.state.AgentState._estimate_total_tokens``.
 def _char_count_tokens(msg: Message) -> int:
-    content = msg.content or ""
     tool_calls_chars = 0
     for call in msg.tool_calls or ():
         tool_calls_chars += len(call.name or "") + len(str(call.arguments or ""))
-    return (len(content) + tool_calls_chars) // 4
+    return estimate_tokens(msg.content) + tool_calls_chars // 4
 
 
 # ---------------------------------------------------------------------------

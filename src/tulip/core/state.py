@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from tulip.core.media import estimate_tokens
 from tulip.core.messages import Message, ToolCall
 
 
@@ -318,12 +319,10 @@ class AgentState(BaseModel):
         """
         if self.cost_budget_usd is None:
             return False
-        prompt_estimate = (
-            sum(
-                len(m.content or "") + sum(len(str(tc.arguments or "")) for tc in m.tool_calls)
-                for m in self.messages
-            )
-            // 4
+        prompt_estimate = sum(
+            estimate_tokens(m.content)
+            + sum(len(str(tc.arguments or "")) for tc in m.tool_calls) // 4
+            for m in self.messages
         )
         worst = self.cost_of(prompt_estimate, max_output_tokens)
         return worst is not None and self.cost_usd_used + worst > self.cost_budget_usd
@@ -433,12 +432,11 @@ class AgentState(BaseModel):
         """Total tokens used. Returns real count if tracked, else char/4 estimate."""
         if self.total_tokens_used > 0:
             return self.total_tokens_used
-        # Fallback: rough estimate at 4 chars per token
-        total_chars = sum(
-            len(m.content or "") + sum(len(str(tc.arguments)) for tc in m.tool_calls)
+        # Fallback: rough estimate at 4 chars per token, images counted as images
+        return sum(
+            estimate_tokens(m.content) + sum(len(str(tc.arguments)) for tc in m.tool_calls) // 4
             for m in self.messages
         )
-        return total_chars // 4
 
     def to_checkpoint(self) -> dict[str, Any]:
         """Serialize state for checkpointing."""
