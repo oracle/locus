@@ -133,3 +133,38 @@ def test_a_line_that_is_not_a_record_fails() -> None:
     trail, signer = _signed()
 
     assert not verify_jsonl(trail.export_jsonl() + '\n{"not": "a record"}', keys=_keys(signer))
+
+
+def _ec_private_pem() -> tuple[bytes, bytes]:
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    private = key.private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
+    )
+    public = key.public_key().public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+    return private, public
+
+
+def test_a_signer_refuses_a_key_that_is_not_ed25519() -> None:
+    private, _ = _ec_private_pem()
+
+    with pytest.raises(TypeError, match="Ed25519"):
+        Ed25519Signer.from_pem(private)
+
+
+def test_a_trusted_key_that_is_not_ed25519_fails_verification() -> None:
+    trail, signer = _signed()
+    _, ec_public = _ec_private_pem()
+
+    assert not trail.verify(keys={signer.key_id: ec_public})
+
+
+def test_blank_lines_in_an_export_are_ignored() -> None:
+    trail, signer = _signed()
+    spaced = "\n\n".join(trail.export_jsonl().splitlines()) + "\n\n"
+
+    assert verify_jsonl(spaced, keys=_keys(signer), expected_head=trail.head)
