@@ -224,6 +224,16 @@ class AgentConfig(BaseModel):
         description="Maximum total tokens before stopping (None = unlimited)",
     )
 
+    max_cost_usd: float | None = Field(
+        default=None,
+        gt=0.0,
+        description=(
+            "Maximum spend in USD before stopping (None = unlimited). Checked before "
+            "each model call against that call's worst case, and again after it. Needs "
+            "the model's prices in model metadata; an unpriced model refuses a budget."
+        ),
+    )
+
     time_budget_seconds: float | None = Field(
         default=None,
         gt=0.0,

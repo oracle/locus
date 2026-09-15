@@ -35,6 +35,9 @@ class ExecutionMetrics(BaseModel):
     # on the response usage. Zero on other providers.
     cache_creation_input_tokens: int = 0
     cache_read_input_tokens: int = 0
+    #: What the run cost in USD, from the model's prices in model metadata.
+    #: ``None`` when the prices are unknown: unpriced, never free.
+    cost_usd: float | None = None
 
     model_config = {"frozen": True}
 
@@ -64,6 +67,7 @@ StopReason = Literal[
     "no_tools",  # No tool calls in response
     "grounding_failed",  # Grounding check failed
     "token_budget",  # Token budget exhausted
+    "cost_budget",  # Spend budget exhausted
     "time_budget",  # Time budget exhausted
     "interrupted",  # Agent paused for user input
     "error",  # Execution error

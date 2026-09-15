@@ -186,6 +186,19 @@ def initialize_agent(agent: Agent) -> None:
         else getattr(getattr(agent._model, "config", None), "model", None)
     )
     meta = metadata_for(model_id) if isinstance(model_id, str) else None
+    if (
+        meta is not None
+        and meta.input_price_per_mtok is not None
+        and meta.output_price_per_mtok is not None
+    ):
+        agent._model_prices = (float(meta.input_price_per_mtok), float(meta.output_price_per_mtok))
+    if agent.config.max_cost_usd is not None and agent._model_prices is None:
+        # Fail closed: a budget that cannot measure spend would never stop anything.
+        raise ValueError(
+            f"max_cost_usd needs prices for model {model_id!r}. Register them with "
+            "tulip.models.metadata.register_metadata(ModelMetadata(..., "
+            "input_price_per_mtok=..., output_price_per_mtok=...))."
+        )
     if agent.config.conversation_manager is not None:
         agent._conversation_manager = agent.config.conversation_manager
     elif meta is not None:

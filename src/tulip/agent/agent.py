@@ -50,6 +50,7 @@ _VALID_STOP_REASONS: frozenset[str] = frozenset(
         "no_tools",
         "grounding_failed",
         "token_budget",
+        "cost_budget",
         "time_budget",
         "interrupted",
         "error",
@@ -126,6 +127,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
     _hooks: list[Any] = PrivateAttr(default_factory=list)
     _hook_orchestrator: HookOrchestrator | None = PrivateAttr(default=None)
     _conversation_manager: ConversationManager | None = PrivateAttr(default=None)
+    _model_prices: tuple[float, float] | None = PrivateAttr(default=None)
     _memory_manager: Any = PrivateAttr(default=None)  # BaseMemoryManager | None
     _reflector: Reflector | None = PrivateAttr(default=None)
     _grounding_evaluator: GroundingEvaluator | None = PrivateAttr(default=None)
@@ -384,6 +386,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
             completion_tokens=state.completion_tokens_used,
             cache_creation_input_tokens=state.cache_creation_tokens_used,
             cache_read_input_tokens=state.cache_read_tokens_used,
+            cost_usd=state.cost_usd_used if state.priced else None,
             duration_ms=elapsed_ms,
             reflexion_evaluations=reflexion_evaluations,
             grounding_evaluations=grounding_evaluations,
