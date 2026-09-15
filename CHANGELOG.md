@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [2.14.0] - 2026-09-15
+
 ### Added
 
 - **A `tulip` command.** (#14) `tulip run AGENT PROMPT --thread ID` streams a run
@@ -98,6 +100,14 @@ policy.
   `ApprovalRecord`, `call_digest`, and `admit(..., approved_by=...)`.
 
 ### Changed
+
+- **Sandbox provider names resolve through entry points.** (#13) A name other
+  than `subprocess`, `local` or `docker` is looked up in the
+  `tulip.sandbox_providers` entry-point group instead of being handed to
+  `tulip_sandbox.build_provider`. `tulip-sandbox` was never published to PyPI,
+  so for anyone installing from PyPI an unknown name raises `SandboxError` as
+  before, and `docker` now works. A private provider package keeps working by
+  registering its providers under that group.
 
 - **Context management counts tokens by default.** (#9) When model metadata
   knows the context window, an agent with no `conversation_manager` now gets
