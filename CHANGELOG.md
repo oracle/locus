@@ -30,6 +30,16 @@ policy.
   untouched. Uses only the core checkpointer methods, so it works on every
   backend.
 
+- **A sandbox that is an actual boundary, in the open SDK.** (#13)
+  `@tool(sandbox="docker")` (or `TULIP_SANDBOX=docker`, or a `DockerSandbox(...)`
+  object) runs each call in a fresh container: no network by default, read-only
+  root filesystem, every Linux capability dropped, no privilege escalation, the
+  caller's uid/gid, and memory, CPU and process limits. Only `LANG` and what the
+  manifest grants reach the environment; a timed-out container is killed.
+  Needs the `docker` CLI, no Python dependency. Other providers register by name
+  under the `tulip.sandbox_providers` entry-point group; an unknown name raises
+  instead of falling back to a weaker box.
+
 - **Who may approve a held call is decided in the SDK.** (#7) Pass
   `authority=ApprovalAuthority(...)` to `InMemoryApprovals` or `FileApprovals`
   and every decision is checked when it is made. `ApproverRule` names approvers
