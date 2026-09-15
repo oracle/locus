@@ -29,6 +29,15 @@ policy.
 - `Tool.native` holds provider-native tool definitions that an adapter sends in
   place of the function schema.
 
+- **Gemini Live realtime voice.** (#42) `connect_gemini_live(model=..., tools=...)`
+  opens a Gemini Live session as a `RealtimeSession`, so the same gated tools,
+  `ActionHeld` events and transcripts work on Gemini as on OpenAI's Realtime
+  API. `GeminiLiveConnection` translates between the session's events and
+  Gemini Live (audio in and out, both transcripts, tool calls and responses,
+  turn ends, and the server's go-away notice). Instructions, tools and voice are
+  set when the session opens (`gemini_live_config`). Install with
+  `pip install "tulip-agents[gemini]"`.
+
 ## [2.15.0] - 2026-09-15
 
 ### Added

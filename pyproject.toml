@@ -140,6 +140,9 @@ audit = ["cryptography>=42"]
 # Durable agent runs on Temporal (src/tulip/durable/temporal.py).
 temporal = ["temporalio>=1.7"]
 
+# Gemini Live realtime voice sessions (src/tulip/voice/gemini.py).
+gemini = ["google-genai>=1.30"]
+
 # Mem0 agent-memory manager (src/tulip/memory/managers/mem0.py) — the
 # portable, self-hostable long-term memory backend.
 mem0 = ["mem0ai>=0.1"]
@@ -675,6 +678,8 @@ module = [
     "pdf2image.*",
     # Browser tools (``tulip.tools.browser``) import Playwright lazily.
     "playwright.*",
+    "google.genai",
+    "google.genai.*",
 ]
 ignore_missing_imports = true
 
