@@ -38,6 +38,16 @@ policy.
   set when the session opens (`gemini_live_config`). Install with
   `pip install "tulip-agents[gemini]"`.
 
+- **Durable agent runs on DBOS.** (#43) `tulip.durable.dbos` runs an agent as a
+  DBOS workflow in your own process, with its state in Postgres (or SQLite for
+  development). As on Temporal, the agent runs in segments and a held approval
+  is a wait of any length: `start_agent_run`, `pending_decision`,
+  `signal_decided`. A process that restarts picks up waiting runs, and a segment
+  that was cut off halfway is never run again (`InterruptedSegmentError`), since its
+  tool calls may already have happened. Install with
+  `pip install "tulip-agents[dbos]"`. The engine-neutral segment runner is
+  `tulip.durable.segments`.
+
 ## [2.15.0] - 2026-09-15
 
 ### Added
