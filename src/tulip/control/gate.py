@@ -3,12 +3,10 @@
 
 """Put the admission gate around a Tulip tool.
 
-`tulip-frameworks` has shipped `gate_langchain_tool`, `gate_crewai_tool` and
-their siblings for a while: wrap one tool, and from then on the model's
-decision to call it goes through :func:`~tulip.control.admit` before anything
-happens. One line, no rebuild.
+Wrap one tool, and from then on the model's decision to call it goes through
+:func:`~tulip.control.admit` before anything happens. One line, no rebuild.
 
-Building on Tulip itself, you hand-wrote it::
+Without it, you hand-write the same thing around every tool::
 
     async def safe_refund(order_id: str, usd: float):
         try:
@@ -20,18 +18,18 @@ Building on Tulip itself, you hand-wrote it::
         except AdmissionError as e:
             notify_oncall(e.decision)
 
-That is the README's own example, and it is correct — but it means a LangChain
-user got better ergonomics from Tulip than a Tulip user did, on the one
-feature the project is built around. Everything needed was already here:
-:mod:`tulip.control.action` was promoted into core in 2.3.0 precisely so the
-SDK and the bridges could share one derivation. Only the bridges ever used it.
+That is correct, but every copy has to build the action the same way.
+``gate_tool`` derives it once, through :mod:`tulip.control.action`::
 
     from tulip.control import ControlPolicy, gate_tool
 
-    agent = Agent(model=model, tools=[
-        lookup_order,                                    # read-only, ungated
-        gate_tool(issue_refund, policy=ControlPolicy()), # gated
-    ])
+    agent = Agent(
+        model=model,
+        tools=[
+            lookup_order,  # read-only, ungated
+            gate_tool(issue_refund, policy=ControlPolicy()),  # gated
+        ],
+    )
 
 The returned tool keeps the original's name, description and parameter schema,
 so the model sees no difference and nothing else in the agent changes.
@@ -64,8 +62,7 @@ class ApprovalBridge(Protocol):
     """Submit a held action for out-of-band approval, and check its state.
 
     A structural Protocol, deliberately: it has no import-time dependency on
-    anything, so the same object satisfies this and ``tulip-frameworks``'s
-    bridge of the same name. A gateway approval broker matches it in shape.
+    anything, so any approval queue with these two methods satisfies it.
 
     Without one, a held action tells the model it was held and stops there —
     true, and not actionable. With one, the refusal carries an id the agent
@@ -81,9 +78,8 @@ class ApprovalBridge(Protocol):
         ...
 
 
-#: What the model is handed when the gate refuses. Deliberately identical to
-#: what the ``tulip-frameworks`` bridges return, so the same policy reads the
-#: same way whether the agent is built on Tulip or wrapped from LangChain.
+#: What the model is handed when the gate refuses. A public contract: callers
+#: and tests read these keys, so keys are only ever added, never renamed.
 _REFUSAL_KEYS = ("status", "outcome", "action", "asset", "reason")
 
 

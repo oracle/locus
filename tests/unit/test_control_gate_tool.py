@@ -1,13 +1,10 @@
 # Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Gating a Tulip tool, which until now only non-Tulip agents could do.
+"""Gating a Tulip tool.
 
-`tulip-frameworks` has shipped `gate_langchain_tool` and its siblings for a
-while: wrap one tool and the model's decision goes through `admit()` before
-anything happens. Building on Tulip itself, you hand-wrote the try/except —
-so a LangChain user got better ergonomics from Tulip than a Tulip user did, on
-the one feature the project is built around.
+Wrap one tool and the model's decision goes through `admit()` before anything
+happens, instead of a hand-written try/except around every tool.
 
 The tests that matter are the ones a governance feature is worthless without:
 the side effect really does not happen, the model cannot tell it is gated, and
@@ -345,8 +342,8 @@ def _production(name: str, kwargs: dict) -> Action:
 
 
 def test_a_plain_object_satisfies_the_bridge_protocol() -> None:
-    """Structural on purpose: the same object satisfies this and the one in
-    ``tulip-frameworks``, without either package importing the other."""
+    """Structural on purpose: any object with ``submit`` and ``state`` is a
+    bridge, with no import of this package."""
     from tulip.control import ApprovalBridge
 
     assert isinstance(_Broker(), ApprovalBridge)

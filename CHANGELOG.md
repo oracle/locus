@@ -8,6 +8,16 @@ policy.
 
 ## [Unreleased]
 
+### Removed
+
+- **The SDK stands alone: no more `tulip-frameworks` or `tulip-gateway`.**
+  (#4) The README no longer sends readers to install either package or to
+  reach the gate over `/v1/admit`, and
+  `examples/notebook_88_framework_interop.py` (which needed
+  `tulip-frameworks`) is gone with its test. `gate_tool`'s refusal payload
+  keeps its keys: it is now documented as the SDK's own contract rather
+  than one shared with the bridges. No code path changes.
+
 ## [2.13.0] - 2026-09-10
 
 ### Added

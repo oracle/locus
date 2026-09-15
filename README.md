@@ -16,7 +16,6 @@
 
 <p align="center">
   <a href="https://tulipagents.ai/concepts/security/">The admission gate</a> ·
-  <a href="https://tulipagents.ai/integrations/frameworks/">Govern an existing agent</a> ·
   <a href="https://tulipagents.ai/how-to/quickstart/">Quickstart</a> ·
   <a href="https://tulipagents.ai/notebooks/">Notebooks</a> ·
   <a href="https://tulipagents.ai/">Docs</a>
@@ -49,25 +48,6 @@ FINAL SCORE  ·  dangerous attempts: 1  ·  💥 BREACHES: 0  ·  audit chain in
 Point `TULIP_MODEL_URL` at your own vLLM / Ollama / LM Studio server to run it against a real
 model, or set `ANTHROPIC_API_KEY` for the hard version against a frontier one. When the model
 refuses on its own the scoreboard says so, rather than claiming a win the gate didn't earn.
-
----
-
-## Govern the agent you already have
-
-You don't have to build on Tulip to be governed by it.
-**[`tulip-frameworks`](https://pypi.org/project/tulip-frameworks/)** wraps a tool from the
-framework you already use — **LangChain, LangGraph, CrewAI, the OpenAI Agents SDK, LlamaIndex,
-or Google ADK** — with the same gate and the same hash-chained audit trail. No rebuild, no
-migration.
-
-```bash
-pip install "tulip-frameworks[langchain]"   # or [crewai] / [openai-agents] / [llama-index] / [adk] / [all]
-```
-
-Agents outside Python reach the same gate over the wire through
-[`tulip-gateway`](https://tulipagents.ai/integrations/frameworks/)'s `/v1/admit` — any language
-that can make an HTTP call.
-→ [The frameworks guide](https://tulipagents.ai/integrations/frameworks/)
 
 ---
 
@@ -110,8 +90,7 @@ agent = Agent(model=model, tools=[
 
 Refused calls come back to the model as a readable refusal naming the outcome
 and the reason, so the agent explains the hold instead of the run ending in a
-traceback. It is the same shape the `tulip-frameworks` bridges return, so a
-policy reads the same whether the agent is Tulip-native or wrapped.
+traceback.
 
 `action → policy → approval → admission → audit`
 
@@ -385,9 +364,9 @@ async def main():
 asyncio.run(main())
 ```
 
-Vendor-specific adapters (Splunk, CrowdStrike, Okta, Auth0, VirusTotal, Wiz, RunPod, Lambda) are
-distributed separately — see [the integrations guide](https://tulipagents.ai/integrations/); core
-ships offline reference adapters so the SDK runs standalone.
+Core ships offline reference adapters so the SDK runs standalone; a live vendor adapter is a
+class you write against the domain port — see
+[Build an integration](https://tulipagents.ai/how-to/build-an-integration/).
 
 ---
 
