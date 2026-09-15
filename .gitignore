@@ -292,3 +292,6 @@ family_eval_results.json
 baseline_*.json
 frontier_*.json
 sample600.json
+
+# Output of examples/grounding_ablation.py
+ablation_report.json

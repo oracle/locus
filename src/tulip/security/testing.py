@@ -3,7 +3,7 @@
 
 """Conformance kit for security integrations — the ``langchain-tests`` analog.
 
-An integration in `tulip-integrations` (or any third-party package) imports
+An integration in any package imports
 these assertions in its own test suite to prove its adapter satisfies the
 :class:`~tulip.security.adapter.SecurityAdapter` contract and the toolkit
 conventions (JSON-returning tools, grounded-or-abstain findings). Keeping the
@@ -16,16 +16,16 @@ Example (in an integration's test)::
         assert_adapter_conformance,
         assert_tool_returns_json,
     )
-    from tulip_integrations.siem.splunk import splunk_adapter
+    from acme_tulip.siem import acme_adapter
 
 
     def test_conforms():
-        assert_adapter_conformance(splunk_adapter())
+        assert_adapter_conformance(acme_adapter())
 
 
     @pytest.mark.asyncio
     async def test_tool_json():
-        (tool,) = splunk_adapter().tools()
+        (tool,) = acme_adapter().tools()
         await assert_tool_returns_json(tool, query="failed login")
 """
 

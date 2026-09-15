@@ -4,8 +4,8 @@
 """EDR host telemetry + containment — a CrowdStrike/Defender-shaped reference adapter.
 
 Reference template — offline-by-default; the live path's shape and field names
-are illustrative and unverified. For maintained, proven vendor adapters see the
-``tulip-integrations`` package.
+are illustrative and unverified. A production adapter is one you write against
+:class:`~tulip.security.adapter.SecurityAdapter`.
 
 After triage points at a host, the next moves are forensic (what happened on
 it) and, if confirmed, containment (cut it off). With ``EDR_URL`` +

@@ -12,9 +12,8 @@ inference engine in the cadence, and the hardware shifts the whole profile.
   ``OPENAI_API_KEY`` (+ optional ``TIMING_BASE_URL`` for any
   OpenAI-compatible endpoint); deterministic offline sample otherwise.
 - :func:`dispatch_timing_probe_reference` — *reference* (offline) GPU-probe
-  dispatch. The real RunPod / Lambda lifecycle lives in ``tulip-integrations``
-  (compute) as ``dispatch_timing_probe`` — the names differ so the offline
-  reference is never mistaken for the live probe.
+  dispatch. Provisioning on a real GPU cloud is an integration you write; the
+  name says *reference* so the offline sample is never mistaken for a live probe.
 - :func:`default_classifier` — a deterministic heuristic mapping a feature
   vector to a :class:`~tulip.security.FingerprintVerdict`. **Placeholder**
   for a trained classifier (the Clusiana research program); honest about it.
@@ -27,11 +26,9 @@ reveal (inventory verification) — the same measurement an attacker uses for
 model-extraction recon (MITRE ATLAS AML.T0040 / AML.T0024).
 
 The remote-API timing measurement is real (confirmed against ``gpt-4o-mini``);
-the classifier remains a heuristic placeholder. The co-located GPU-cloud probe
-is split by provider in ``tulip-integrations.compute`` — ``runpod`` (pod +
-container image, extra ``compute-runpod``) and ``lambda_cloud`` (instance +
-result sink, extra ``compute-lambda``) — and core ships only the offline
-reference dispatch.
+the classifier remains a heuristic placeholder. Core ships only the offline
+reference for the co-located GPU-cloud probe; the provision → probe → tear-down
+lifecycle on a specific cloud is an integration you write.
 """
 
 from __future__ import annotations
@@ -163,12 +160,8 @@ def dispatch_timing_probe_reference(endpoint: str, provider: str = "runpod") -> 
     """Reference (offline) co-located GPU-probe dispatch — returns the sample vector.
 
     The credential-free remote-API measurement is :func:`measure_endpoint_timing`.
-    The *real* GPU-cloud lifecycle (provision -> probe -> tear down) lives in the
-    ``tulip-integrations`` package as two separate provider modules — RunPod
-    (``tulip_integrations.compute.runpod.runpod_probe``, extra ``compute-runpod``)
-    and Lambda Cloud (``tulip_integrations.compute.lambda_cloud.lambda_probe``,
-    extra ``compute-lambda``); ``compute.dispatch_timing_probe(endpoint, provider=…)``
-    routes between them. Core ships no vendor GPU code.
+    The *real* GPU-cloud lifecycle (provision -> probe -> tear down) is an
+    integration you write for your cloud. Core ships no vendor GPU code.
     """
     return dict(_SAMPLE_FEATURES)
 

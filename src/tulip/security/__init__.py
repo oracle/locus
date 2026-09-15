@@ -14,9 +14,9 @@ This package is the **core** (langchain-core style): the grounding
 contracts, the :class:`~tulip.security.adapter.SecurityAdapter` protocol +
 helper toolkit, the conformance kit (:mod:`tulip.security.testing`), and a
 set of **bundled reference/offline adapters** (intel / SIEM / EDR / scanner /
-fingerprint) so the SDK runs standalone with no credentials. Maintained,
-vendor-specific integration templates live in the separate, one-way-dependent
-``tulip-integrations`` package and are passed in via ``security_toolset(extra=…)``.
+fingerprint) so the SDK runs standalone with no credentials. A live vendor
+adapter is one you write in your own package against the same contract, and
+pass in via ``security_toolset(extra=…)``.
 
 Example usage:
 
@@ -196,9 +196,9 @@ def security_toolset(
     ``extra`` merges tools from **external integrations** you imported
     explicitly (the LangChain model — no auto-discovery), e.g.::
 
-        from tulip_integrations.siem.splunk import splunk_siem_tool
+        from acme_tulip.siem import acme_siem_tool  # your own package
 
-        tools = security_toolset(siem=False, extra=[splunk_siem_tool])
+        tools = security_toolset(siem=False, extra=[acme_siem_tool])
 
     Hand the result to ``Agent(tools=...)`` or ``create_soc_analyst(tools=...)``.
     """

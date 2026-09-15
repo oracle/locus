@@ -16,9 +16,9 @@ code: one handle exposing security **domains** —
 
 Each domain is a small Protocol (a *port*); the default provider is the bundled
 offline reference adapter, so `SecurityContext()` works with **zero config**.
-Swap in a real vendor by injecting a provider — `SecurityContext(logs=SplunkLogs())`
-— which lives in the one-way-dependent ``tulip-integrations`` package. Core never
-imports a vendor; you wire them explicitly.
+Swap in a real vendor by injecting a provider you write in your own package —
+`SecurityContext(logs=AcmeLogs())`. Core never imports a vendor; you wire them
+explicitly.
 """
 
 from __future__ import annotations
@@ -244,9 +244,9 @@ class SecurityContext:
 
     Inject a vendor provider per domain to go live::
 
-        from tulip_integrations.siem.splunk import SplunkLogs
+        from acme_tulip.siem import AcmeLogs  # your own package
 
-        ctx = SecurityContext(logs=SplunkLogs())
+        ctx = SecurityContext(logs=AcmeLogs())
     """
 
     logs: LogSource = field(default_factory=_RefLogs)
