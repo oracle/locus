@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [2.15.0] - 2026-09-15
+
 ### Added
 
 - **Realtime voice sessions whose tool calls go through the gate.** (#18)
@@ -56,6 +58,14 @@ policy.
   reducers (a paused graph resumes from the edited state), and
   `afork(config, checkpoint_id, new_thread_id=...)` starts a new thread from any
   step without touching the parent.
+
+### Changed
+
+- **Graphs with a checkpointer save a checkpoint after every step.** (#30) A
+  `StateGraph` with a checkpointer and a thread id used to save only when a node
+  paused; it now also saves after each completed step, so a finished run has a
+  history. Pausing and resuming are unchanged. Set
+  `GraphConfig(checkpoint_every_step=False)` to keep the old behaviour.
 
 ## [2.14.0] - 2026-09-15
 
