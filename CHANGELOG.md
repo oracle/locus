@@ -10,6 +10,14 @@ policy.
 
 ### Added
 
+- **Browser tools, gated like any other tool.** (#16) `browser_toolset(session)`
+  returns `browser_open` and `browser_read` (labels `browser-read`),
+  `browser_click` and `browser_type` (`browser-write`), and, with
+  `allow_submit=True`, `browser_submit` (`browser-submit`), so a policy can hold a
+  form submission for a person. `BrowserSession(allowed_domains=...)` opens only
+  `http`/`https` URLs on the listed hosts; a click that navigates elsewhere resets
+  the page and fails. Playwright is the new `browser` extra.
+
 - **Spend as a policy input, across runs.** (#28) `Action.cost_usd` says what an
   action spends. `ControlPolicy(require_human_over_usd=...)` needs a person above
   a per-action cost, and `ControlPolicy(spend_limit_usd=...)` denies an action
