@@ -23,11 +23,17 @@ policy.
   call holds again. New: `ApprovalStore`, `InMemoryApprovals`, `FileApprovals`,
   `ApprovalRecord`, `call_digest`, and `admit(..., approved_by=...)`.
 
-### Fixed
+### Changed
 
-- **The README said a hold paused the run and survived a restart; it did not.**
-  (#5) A hold returned a refusal the model read, and the run carried on. The
-  sentence now describes the `on_refusal="interrupt"` path above.
+- **Context management counts tokens by default.** (#9) When model metadata
+  knows the context window, an agent with no `conversation_manager` now gets
+  `LLMCompactor(context_length=...)` with no summariser: stale tool output is
+  pruned and a token-budgeted tail kept, with no extra model calls. Before, the
+  default was a 40-message window, so a run with large tool outputs could still
+  exceed the window and fail late. When the window is unknown the message
+  window stays, and it is now installed at any `max_iterations` (it used to be
+  skipped at 10 or fewer). `conversation_manager=NullManager()` turns
+  management off.
 
 ### Removed
 
@@ -38,6 +44,18 @@ policy.
   `tulip-frameworks`) is gone with its test. `gate_tool`'s refusal payload
   keeps its keys: it is now documented as the SDK's own contract rather
   than one shared with the bridges. No code path changes.
+
+### Fixed
+
+- **The README said a hold paused the run and survived a restart; it did not.**
+  (#5) A hold returned a refusal the model read, and the run carried on. The
+  sentence now describes the `on_refusal="interrupt"` path above.
+
+- **`LLMCompactor` could send a conversation a provider rejects.** (#9) Its
+  head/tail cut could separate an assistant's tool calls from their results.
+  The cut is now repaired: orphaned results and unanswered calls are dropped
+  (a paused run's final held call is kept), and the opening user turn is
+  re-attached when none survived.
 
 ## [2.13.0] - 2026-09-10
 

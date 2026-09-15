@@ -234,7 +234,7 @@ class LLMCompactor(ConversationManager):
         result.append(summary_msg)
         result.extend(head)
         result.extend(tail)
-        return result
+        return _repair_boundaries(result, messages)
 
     def __repr__(self) -> str:
         return (
@@ -321,7 +321,52 @@ class LLMCompactor(ConversationManager):
         if overlap:
             tail = tail[overlap:]
         out.extend(tail)
-        return out
+        return _repair_boundaries(out, messages)
+
+
+def _repair_boundaries(kept: list[Message], original: list[Message]) -> list[Message]:
+    """Make a cut conversation one a provider will accept.
+
+    A head/tail cut lands on a message count or a token budget, not a turn
+    boundary, so it can separate an assistant's ``tool_calls`` from the tool
+    messages answering them, and a provider rejects either half on its own.
+    Tool results whose call was cut are dropped, and so is an assistant call
+    whose results were cut, unless it is the last message: a paused run's
+    held call legitimately has no result yet. Dropping one can orphan the
+    other, so this repeats until nothing changes. When no user turn survives,
+    the opening request is re-attached after the system messages, as
+    :class:`~tulip.memory.conversation.SlidingWindowManager` does.
+    """
+    from tulip.core.messages import Role
+
+    repaired = list(kept)
+    while True:
+        calls = {tc.id for m in repaired if m.role == Role.ASSISTANT for tc in m.tool_calls}
+        answered = {m.tool_call_id for m in repaired if m.role == Role.TOOL and m.tool_call_id}
+        last = len(repaired) - 1
+        survivors = [
+            m
+            for i, m in enumerate(repaired)
+            if not (m.role == Role.TOOL and m.tool_call_id not in calls)
+            and not (
+                m.role == Role.ASSISTANT
+                and m.tool_calls
+                and i != last
+                and any(tc.id not in answered for tc in m.tool_calls)
+            )
+        ]
+        if len(survivors) == len(repaired):
+            break
+        repaired = survivors
+
+    if not any(m.role == Role.USER for m in repaired):
+        opening = next((m for m in original if m.role == Role.USER), None)
+        if opening is not None:
+            at = 0
+            while at < len(repaired) and repaired[at].role == Role.SYSTEM:
+                at += 1
+            repaired.insert(at, opening)
+    return repaired
 
 
 def _is_async(fn: object) -> bool:
