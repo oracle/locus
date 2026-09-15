@@ -231,6 +231,9 @@ dev = [
     "cryptography>=42",   # signed audit trail tests in tests/unit/test_signed_audit.py
 ]
 
+[project.scripts]
+tulip = "tulip.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/tuliplabs-ai/tulip-agents"
 Documentation = "https://tulipagents.ai/"
@@ -518,6 +521,9 @@ ignore = [
     "T201",    # print — runner scripts are CLI tools that print to stdout
     "S603",    # subprocess call — runner intentionally execs notebooks
     "BLE001",  # blind except — runner reports failures generically
+]
+"src/tulip/cli.py" = [
+    "T201",    # print — the tulip command's output is its interface
 ]
 "src/tulip/memory/backends/**/*.py" = [
     "S608",    # SQL built from validated identifiers (regex-checked at init)

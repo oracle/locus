@@ -10,6 +10,15 @@ policy.
 
 ### Added
 
+- **A `tulip` command.** (#14) `tulip run AGENT PROMPT --thread ID` streams a run
+  and exits 3 when it pauses, printing the approval id; `tulip approvals --store
+  FILE list | show | approve | reject --by NAME` decides held calls, checked
+  against an `--authority` when given; `tulip resume AGENT --thread ID --answer
+  ... --perform` continues and performs the decided call; `tulip audit verify
+  FILE --key KEY_ID=PEM --head HASH` checks an export from public keys alone;
+  `tulip serve AGENT` runs the HTTP server. `AGENT` is `module:attr` or
+  `file.py:attr`, an agent or a function returning one. Standard library only.
+
 - **A spend budget that stops the call that would cross it.** (#11)
   `Agent(max_cost_usd=...)` prices every model call from model metadata and
   stops with `stop_reason="cost_budget"`. It checks *before* each call, against
