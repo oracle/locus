@@ -19,6 +19,17 @@ policy.
   read it before deciding and record the cost only after the action ran. A held
   action is weighed against the limit again when its approval is redeemed.
 
+- **Checkpoint history on graphs.** (#30) With a checkpointer and a thread id,
+  `StateGraph` now saves a checkpoint after every completed step
+  (`GraphConfig(checkpoint_every_step=False)` turns this off); it used to save
+  only when a node paused, so a finished run left nothing to inspect.
+  `aget_state_history(config)` lists `(checkpoint_id, graph_state)` newest first,
+  `aget_state(config, checkpoint_id=...)` reads any of them,
+  `aupdate_state(config, values)` writes a new checkpoint through the graph's
+  reducers (a paused graph resumes from the edited state), and
+  `afork(config, checkpoint_id, new_thread_id=...)` starts a new thread from any
+  step without touching the parent.
+
 ## [2.14.0] - 2026-09-15
 
 ### Added

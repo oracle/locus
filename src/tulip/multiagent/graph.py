@@ -551,6 +551,8 @@ class GraphConfig(BaseModel):
     # Checkpointing
     checkpointer: Any | None = None  # BaseCheckpointer
     thread_id: str | None = None
+    # Save a checkpoint after every completed step, so a thread has a history.
+    checkpoint_every_step: bool = True
 
     # Store for cross-thread memory
     store: Any | None = None  # BaseStore
@@ -633,6 +635,17 @@ async def _emit_node_events(
             )
         )
     # CUSTOM is reserved for user-emitted data; nothing automatic to forward.
+
+
+async def _load_checkpoint(checkpointer: Any, thread_id: str, checkpoint_id: str | None) -> Any:
+    """Load a checkpoint, passing ``checkpoint_id`` only when there is one.
+
+    Duck-typed checkpointers that implement ``load(thread_id)`` alone keep
+    working for the latest checkpoint.
+    """
+    if checkpoint_id is None:
+        return await checkpointer.load(thread_id)
+    return await checkpointer.load(thread_id, checkpoint_id)
 
 
 # =============================================================================
@@ -1321,6 +1334,22 @@ class StateGraph(BaseModel):
                         iterations=iterations,
                     )
 
+            if cfg.checkpoint_every_step and cfg.checkpointer and cfg.thread_id:
+                from tulip.core.state import AgentState  # noqa: PLC0415
+
+                await cfg.checkpointer.save(
+                    state=AgentState(
+                        metadata={
+                            "graph_state": dict(state),
+                            "step": iterations,
+                            "completed_nodes": [n for n in current_nodes if n != END],
+                            "next_nodes": list(dict.fromkeys(next_nodes)),
+                        }
+                    ),
+                    thread_id=cfg.thread_id,
+                    metadata={"source": "step", "step": iterations},
+                )
+
             # Check if we've reached END
             if END in current_nodes or END in next_nodes:
                 break
@@ -1581,7 +1610,9 @@ class StateGraph(BaseModel):
         ``docs/concepts/multi-agent/graph.md``."""
         return self.draw_mermaid(direction=direction)
 
-    async def aget_state(self, config: Any = None) -> dict[str, Any] | None:
+    async def aget_state(
+        self, config: Any = None, checkpoint_id: str | None = None
+    ) -> dict[str, Any] | None:
         """Load the checkpointed graph state for a thread.
 
         Named for LangGraph parity, since ``StateGraph`` mirrors that API and
@@ -1595,6 +1626,8 @@ class StateGraph(BaseModel):
                 ``{"configurable": {"thread_id": ...}}``, a bare
                 ``{"thread_id": ...}``, a plain thread-id string, or ``None``
                 to use the thread configured on the graph.
+            checkpoint_id: A specific checkpoint from :meth:`aget_state_history`;
+                the latest when omitted.
 
         Returns:
             The saved graph state, or ``None`` when the thread has no
@@ -1604,6 +1637,18 @@ class StateGraph(BaseModel):
             ValueError: If no checkpointer is configured, or no thread id can
                 be resolved — both are caller mistakes worth surfacing loudly.
         """
+        thread_id = self._thread_for(config, "aget_state()")
+
+        saved = await _load_checkpoint(self.config.checkpointer, thread_id, checkpoint_id)
+        if not saved:
+            return None
+        # Checkpoints pack the graph's own dict under ``graph_state``; the rest
+        # of the record is agent-shaped and not meaningful to a graph caller.
+        state = saved.metadata.get("graph_state")
+        return state if isinstance(state, dict) else None
+
+    def _thread_for(self, config: Any, caller: str) -> str:
+        """The thread ``config`` names, checking a checkpointer is configured."""
         thread_id: str | None = None
         if isinstance(config, str):
             thread_id = config
@@ -1616,23 +1661,101 @@ class StateGraph(BaseModel):
 
         if self.config.checkpointer is None:
             raise ValueError(
-                "aget_state() needs a checkpointer. Pass one to compile(): "
+                f"{caller} needs a checkpointer. Pass one to compile(): "
                 "graph.compile(checkpointer=memory_checkpointer())."
             )
         if not thread_id:
             raise ValueError(
-                "aget_state() needs a thread id. Pass "
+                f"{caller} needs a thread id. Pass "
                 "config={'configurable': {'thread_id': 'abc'}}, or set "
                 "thread_id on the graph config."
             )
+        return thread_id
 
-        saved = await self.config.checkpointer.load(thread_id)
-        if not saved:
-            return None
-        # Checkpoints pack the graph's own dict under ``graph_state``; the rest
-        # of the record is agent-shaped and not meaningful to a graph caller.
-        state = saved.metadata.get("graph_state")
-        return state if isinstance(state, dict) else None
+    async def aget_state_history(
+        self, config: Any = None, limit: int = 10
+    ) -> list[tuple[str, dict[str, Any]]]:
+        """``(checkpoint_id, graph_state)`` for the thread, newest first.
+
+        With ``checkpoint_every_step`` (the default) there is one checkpoint per
+        completed step, plus one for each pause and each :meth:`aupdate_state`.
+        """
+        thread_id = self._thread_for(config, "aget_state_history()")
+        checkpointer: Any = self.config.checkpointer
+        history: list[tuple[str, dict[str, Any]]] = []
+        for checkpoint_id in await checkpointer.list_checkpoints(thread_id, limit=limit):
+            saved = await _load_checkpoint(checkpointer, thread_id, checkpoint_id)
+            state = saved.metadata.get("graph_state") if saved else None
+            if isinstance(state, dict):
+                history.append((checkpoint_id, state))
+        return history
+
+    async def aupdate_state(
+        self,
+        config: Any = None,
+        values: dict[str, Any] | None = None,
+        *,
+        checkpoint_id: str | None = None,
+    ) -> str:
+        """Write a new checkpoint: the given one (or the latest) with ``values`` applied.
+
+        Values go through the graph's reducers. The source checkpoint is never
+        modified. A paused graph keeps its pause, so ``execute(Command(resume=...))``
+        continues from the edited state.
+
+        Returns:
+            The new checkpoint's id.
+
+        Raises:
+            LookupError: No such thread or checkpoint.
+        """
+        from tulip.core.state import AgentState  # noqa: PLC0415
+
+        thread_id = self._thread_for(config, "aupdate_state()")
+        checkpointer: Any = self.config.checkpointer
+        saved = await _load_checkpoint(checkpointer, thread_id, checkpoint_id)
+        if saved is None or not isinstance(saved.metadata.get("graph_state"), dict):
+            where = f"checkpoint {checkpoint_id!r} of " if checkpoint_id else ""
+            raise LookupError(f"no graph state in {where}thread {thread_id!r}")
+        state = self._apply_state_update(dict(saved.metadata["graph_state"]), dict(values or {}))
+        new_id = await checkpointer.save(
+            state=AgentState(metadata={**saved.metadata, "graph_state": state}),
+            thread_id=thread_id,
+            metadata={"source": "update_state", "parent_checkpoint_id": checkpoint_id},
+        )
+        return str(new_id)
+
+    async def afork(
+        self,
+        config: Any = None,
+        checkpoint_id: str | None = None,
+        *,
+        new_thread_id: str | None = None,
+    ) -> str:
+        """Start a new thread from the given checkpoint (or the latest).
+
+        Running on the new thread never changes the parent.
+
+        Returns:
+            The new thread's id.
+        """
+        from tulip.core.state import AgentState  # noqa: PLC0415
+
+        thread_id = self._thread_for(config, "afork()")
+        checkpointer: Any = self.config.checkpointer
+        saved = await _load_checkpoint(checkpointer, thread_id, checkpoint_id)
+        if saved is None:
+            where = f"checkpoint {checkpoint_id!r} of " if checkpoint_id else ""
+            raise LookupError(f"no {where}thread {thread_id!r}")
+        forked = new_thread_id or f"{thread_id}-fork-{uuid4().hex[:8]}"
+        if forked == thread_id:
+            raise ValueError("a fork needs a thread id different from its parent")
+        await checkpointer.save(
+            state=AgentState(metadata=dict(saved.metadata)),
+            thread_id=forked,
+            metadata={"forked_from": thread_id, "parent_checkpoint_id": checkpoint_id},
+        )
+        return forked
 
     def compile(
         self,
