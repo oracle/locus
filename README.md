@@ -102,8 +102,10 @@ traceback.
   `verify()`. (A keyless SHA-256 chain: tamper-evident, not notarized — add signing before
   treating it as legally authoritative.)
 
-Human approvals are durable: `require_human_for` pauses the run, and an `interrupt()` +
-checkpointer means the decision survives a restart and the run resumes where it left off.
+Human approvals can survive a restart: with `gate_tool(..., on_refusal="interrupt",
+approval=FileApprovals(path))` a hold pauses the run, a checkpointer keeps the conversation,
+and once a named person decides, `agent.resume(..., perform_dangling=True)` runs the approved
+call exactly once, with the arguments that were approved.
 
 **Measured, not asserted.** Running the integration suite against a weaker judge
 model (Qwen3.6-35B) produced the contrast by accident: `SteeringHook` — the SDK's

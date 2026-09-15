@@ -1050,6 +1050,7 @@ class AgentRuntimeMixin:
                                     options=interrupt_data.get("options"),
                                     fields=interrupt_data.get("fields"),
                                     interrupt_id=result.tool_call_id,
+                                    metadata=interrupt_data.get("metadata") or {},
                                 )
                                 return  # Pause the generator
                         except (ValueError, KeyError):
@@ -1553,6 +1554,7 @@ class AgentRuntimeMixin:
                                 options=interrupt_data.get("options"),
                                 fields=interrupt_data.get("fields"),
                                 interrupt_id=result.tool_call_id,
+                                metadata=interrupt_data.get("metadata") or {},
                             )
                             return
 
