@@ -165,8 +165,8 @@ async def test_memory_persists_and_recalls_across_store_instances(store: PgMemor
 async def test_default_dim_store_creates_schema_and_recalls() -> None:
     """``PgMemory(dsn)`` with **no explicit dim** must work on a stock pgvector.
 
-    This is the shape every real caller uses (tulip-gateway builds
-    ``PgMemory(dsn, embedder=…)``); the rest of this file pins ``dim=256`` and so
+    This is the shape every real caller uses (``PgMemory(dsn, embedder=…)``);
+    the rest of this file pins ``dim=256`` and so
     never exercised it. With the old default (1024 → a 2048-wide column) pgvector
     refused the HNSW index — ``CREATE INDEX`` raised ``ProgramLimitExceededError``
     and no fact was ever written.

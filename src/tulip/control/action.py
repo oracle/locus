@@ -28,8 +28,7 @@ evaluated against the call's arguments, that add tags or raise the blast radius
 (see :func:`derive_labels`). The rules are data, never code: comparisons only,
 no ``eval``, no callables, so a tool cannot talk its own labels down.
 
-Originally written for ``tulip-frameworks``; promoted here so the SDK, the
-gateway and the registry share one implementation rather than three.
+One implementation, so every gated tool derives its action the same way.
 """
 
 from __future__ import annotations

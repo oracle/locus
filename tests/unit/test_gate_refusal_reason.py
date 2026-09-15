@@ -107,7 +107,7 @@ async def test_an_allowed_call_is_untouched() -> None:
 
 
 async def test_refusal_keys_are_still_the_shared_shape() -> None:
-    """The payload contract is shared with the tulip-frameworks bridges."""
+    """The refusal payload is a public contract; none of its keys go missing."""
     from tulip.control.gate import _REFUSAL_KEYS
 
     payload = json.loads(await _gate(refusal_reason="nope").fn(order_id="ord-1", amount_usd=900))
