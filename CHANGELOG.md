@@ -10,6 +10,20 @@ policy.
 
 ### Added
 
+- **Who may approve a held call is decided in the SDK.** (#7) Pass
+  `authority=ApprovalAuthority(...)` to `InMemoryApprovals` or `FileApprovals`
+  and every decision is checked when it is made. `ApproverRule` names approvers
+  or roles (resolved by `roles_of`) for actions carrying given labels, with a
+  `quorum` of distinct approvers; an action matching several rules needs each
+  rule's quorum, and one authorised denial ends it. The principal that requested
+  an action cannot approve it, directly or through a delegation it granted,
+  unless every matching rule sets `allow_self_approval`. `Delegation` lends an
+  approver's authority to someone else until a deadline. A decision without
+  authority raises `ApprovalAuthorityError` and stays on the record as a
+  rejection; an action no rule covers cannot be approved by anyone. Records now
+  carry `labels`, `approvals` and `rejections`, and the audit trail names every
+  approver.
+
 - **A hold can pause the run and wait for a named person, across a restart.**
   (#5) `gate_tool(..., on_refusal="interrupt", approval=store)` turns a
   `require_human` hold into a pause: the agent yields an `InterruptEvent` whose

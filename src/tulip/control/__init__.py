@@ -46,8 +46,12 @@ from tulip.control.action import (
     resolve_action,
 )
 from tulip.control.approvals import (
+    ApprovalAuthority,
+    ApprovalAuthorityError,
     ApprovalRecord,
     ApprovalStore,
+    ApproverRule,
+    Delegation,
     FileApprovals,
     InMemoryApprovals,
     call_digest,
@@ -86,6 +90,11 @@ __all__ = [
     "ApprovalRecord",
     "ApprovalStore",
     "FileApprovals",
+    # Who may decide a held call
+    "ApprovalAuthority",
+    "ApprovalAuthorityError",
+    "ApproverRule",
+    "Delegation",
     "InMemoryApprovals",
     "call_digest",
     "resolve_action",

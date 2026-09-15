@@ -38,6 +38,37 @@ the canonical JSON of the arguments, so a call with different arguments is a
 different approval and waits for its own decision. An approval is used once:
 the gate consumes it immediately before the side effect, so a repeated call
 holds again instead of riding an old yes.
+
+**Who may decide.** Without an :class:`ApprovalAuthority`, any named principal
+can decide. With one, a decision is checked against it at decision time::
+
+    authority = ApprovalAuthority(
+        rules=(
+            ApproverRule(
+                labels=frozenset({"payment"}), roles=frozenset({"finance"})
+            ),
+            ApproverRule(
+                labels=frozenset({"production"}),
+                approvers=frozenset({"olga"}),
+                quorum=2,
+            ),
+        ),
+        roles_of=directory.roles_for,
+        delegations=(
+            Delegation(
+                grantor="olga", grantee="dan", expires_at="2026-10-01T00:00:00Z"
+            ),
+        ),
+    )
+    store = FileApprovals("approvals.json", authority=authority)
+
+Every rule whose labels the held action carries must reach its quorum of
+distinct authorised approvers before the call is approved; one authorised
+denial ends it. The principal that requested the action cannot approve it,
+directly or through a delegation it granted, unless every matching rule says
+``allow_self_approval``. A decision by someone without authority raises
+:class:`ApprovalAuthorityError` and is kept on the record. An action no rule
+covers cannot be approved by anyone: the authority fails closed.
 """
 
 from __future__ import annotations
@@ -50,11 +81,11 @@ import threading
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, Protocol, runtime_checkable
 
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Iterable, Mapping
 
 
 Status = Literal["pending", "approved", "denied", "consumed"]
@@ -84,6 +115,10 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _utcnow() -> datetime:
+    return datetime.now(UTC)
+
+
 @dataclass(frozen=True)
 class ApprovalRecord:
     """One held call and what became of it."""
@@ -99,8 +134,163 @@ class ApprovalRecord:
     reason: str = ""
     created_at: str = field(default_factory=_now)
     verdict: Verdict | None = None
+    #: Who decided. With a quorum, every approver, comma-separated.
     decided_by: str | None = None
     decided_at: str | None = None
+    #: The held action's labels (environment, kind, tags); what approver rules match.
+    labels: list[str] = field(default_factory=list)
+    #: Each accepted decision: ``by``, ``at``, ``verdict``, and with an authority
+    #: the ``basis`` it was accepted on and the rule positions it counted toward.
+    approvals: list[dict[str, Any]] = field(default_factory=list)
+    #: Decisions refused by the authority: ``by``, ``at``, ``verdict``, ``reason``.
+    rejections: list[dict[str, Any]] = field(default_factory=list)
+
+    @property
+    def approvers(self) -> list[str]:
+        """Distinct principals whose approval was accepted, in order."""
+        seen: list[str] = []
+        for entry in self.approvals:
+            if entry.get("verdict") == "approved" and entry["by"] not in seen:
+                seen.append(entry["by"])
+        return seen
+
+
+@dataclass(frozen=True)
+class ApproverRule:
+    """Who may decide actions that carry some labels.
+
+    Args:
+        labels: Labels this rule governs. Empty matches every action.
+        approvers: Principals allowed to decide, by name.
+        roles: Roles allowed to decide, resolved per principal by
+            :attr:`ApprovalAuthority.roles_of`.
+        quorum: Distinct authorised approvals needed.
+        allow_self_approval: Whether the principal that requested the action may
+            approve it. Off by default: separation of duties.
+    """
+
+    labels: frozenset[str] = frozenset()
+    approvers: frozenset[str] = frozenset()
+    roles: frozenset[str] = frozenset()
+    quorum: int = 1
+    allow_self_approval: bool = False
+
+    def __post_init__(self) -> None:
+        if self.quorum < 1:
+            raise ValueError("quorum must be at least 1")
+        if not (self.approvers or self.roles):
+            raise ValueError("an approver rule names approvers or roles")
+
+    def matches(self, labels: frozenset[str]) -> bool:
+        """Whether this rule governs an action carrying ``labels``."""
+        return not self.labels or bool(self.labels & labels)
+
+
+@dataclass(frozen=True)
+class Delegation:
+    """An approver lends their authority to someone else until a deadline.
+
+    Args:
+        grantor: The principal whose authority is lent.
+        grantee: The principal who may use it.
+        expires_at: ISO-8601 deadline; a naive timestamp is read as UTC.
+        labels: Limit the delegation to actions carrying these labels. Empty
+            lends everything the grantor may decide.
+    """
+
+    grantor: str
+    grantee: str
+    expires_at: str
+    labels: frozenset[str] = frozenset()
+
+    def active(self, now: datetime) -> bool:
+        """Whether the deadline is still in the future."""
+        deadline = datetime.fromisoformat(self.expires_at)
+        if deadline.tzinfo is None:
+            deadline = deadline.replace(tzinfo=UTC)
+        return now < deadline
+
+
+class ApprovalAuthorityError(PermissionError):
+    """A decision was refused because the decider lacks authority for it."""
+
+
+class _Basis(NamedTuple):
+    rules: frozenset[int]
+    label: str
+
+
+@dataclass(frozen=True)
+class ApprovalAuthority:
+    """Approver rules, delegations, and how to look up a principal's roles.
+
+    Rules are evaluated by position, so keep their order stable for records
+    that are still pending.
+    """
+
+    rules: tuple[ApproverRule, ...]
+    delegations: tuple[Delegation, ...] = ()
+    roles_of: Callable[[str], Iterable[str]] | None = None
+    clock: Callable[[], datetime] = _utcnow
+
+    def matching(self, labels: Iterable[str]) -> dict[int, ApproverRule]:
+        """The rules governing an action carrying ``labels``, by position."""
+        wanted = frozenset(labels)
+        return {i: rule for i, rule in enumerate(self.rules) if rule.matches(wanted)}
+
+    def _holds(self, rule: ApproverRule, principal: str) -> bool:
+        if principal in rule.approvers:
+            return True
+        if rule.roles and self.roles_of is not None:
+            return bool(rule.roles & frozenset(self.roles_of(principal)))
+        return False
+
+    def check(self, record: ApprovalRecord, by: str) -> _Basis:
+        """Which matching rules ``by`` may decide under, and on what basis.
+
+        Raises:
+            ApprovalAuthorityError: No rule covers the action, ``by`` requested
+                it, or ``by`` holds none of the matching rules, directly or by an
+                active delegation.
+        """
+        labels = frozenset(record.labels)
+        rules = self.matching(labels)
+        if not rules:
+            raise ApprovalAuthorityError(
+                f"no approver rule covers labels {sorted(labels)}; nobody may decide it"
+            )
+        self_allowed = all(rule.allow_self_approval for rule in rules.values())
+        if by == record.principal and not self_allowed:
+            raise ApprovalAuthorityError(f"{by} requested this action and may not decide it")
+
+        direct = frozenset(i for i, rule in rules.items() if self._holds(rule, by))
+        if direct:
+            return _Basis(direct, by)
+
+        now = self.clock()
+        for grant in self.delegations:
+            if grant.grantee != by or not grant.active(now):
+                continue
+            if grant.labels and not (grant.labels & labels):
+                continue
+            if grant.grantor == record.principal and not self_allowed:
+                continue
+            lent = frozenset(i for i, rule in rules.items() if self._holds(rule, grant.grantor))
+            if lent:
+                return _Basis(lent, f"delegated by {grant.grantor}")
+        raise ApprovalAuthorityError(f"{by} may not decide {record.tool} (labels {sorted(labels)})")
+
+    def satisfied(self, record: ApprovalRecord, approvals: list[dict[str, Any]]) -> bool:
+        """Whether every matching rule has its quorum of distinct approvers."""
+        for i, rule in self.matching(record.labels).items():
+            approvers = {
+                a["by"]
+                for a in approvals
+                if a.get("verdict") == "approved" and i in a.get("rules", ())
+            }
+            if len(approvers) < rule.quorum:
+                return False
+        return True
 
 
 @runtime_checkable
@@ -112,7 +302,13 @@ class ApprovalStore(Protocol):
     """
 
     def submit(
-        self, principal: str, tool: str, args: Mapping[str, Any], *, reason: str = ""
+        self,
+        principal: str,
+        tool: str,
+        args: Mapping[str, Any],
+        *,
+        reason: str = "",
+        labels: Iterable[str] = (),
     ) -> str:
         """Record a held call, or return the live record for the same call."""
         ...
@@ -141,8 +337,9 @@ class ApprovalStore(Protocol):
 class _Approvals:
     """The state machine, over a load/save pair a subclass provides."""
 
-    def __init__(self) -> None:
+    def __init__(self, authority: ApprovalAuthority | None = None) -> None:
         self._lock = threading.Lock()
+        self.authority = authority
 
     def _load(self) -> dict[str, ApprovalRecord]:
         raise NotImplementedError
@@ -151,7 +348,13 @@ class _Approvals:
         raise NotImplementedError
 
     def submit(
-        self, principal: str, tool: str, args: Mapping[str, Any], *, reason: str = ""
+        self,
+        principal: str,
+        tool: str,
+        args: Mapping[str, Any],
+        *,
+        reason: str = "",
+        labels: Iterable[str] = (),
     ) -> str:
         digest = call_digest(principal, tool, args)
         with self._lock:
@@ -168,6 +371,7 @@ class _Approvals:
                 tool=tool,
                 arguments=dict(args),
                 reason=reason,
+                labels=sorted(set(labels)),
             )
             self._save(records)
             return approval_id
@@ -192,12 +396,62 @@ class _Approvals:
                 raise KeyError(approval_id)
             if record.status != "pending":
                 raise ValueError(f"approval {approval_id} is already {record.status}")
-            record = replace(
-                record, status=verdict, verdict=verdict, decided_by=by, decided_at=_now()
-            )
+            record = self._decided(records, record, verdict, by)
             records[approval_id] = record
             self._save(records)
             return record
+
+    def _decided(
+        self,
+        records: dict[str, ApprovalRecord],
+        record: ApprovalRecord,
+        verdict: Verdict,
+        by: str,
+    ) -> ApprovalRecord:
+        now = _now()
+        entry: dict[str, Any] = {"by": by, "at": now, "verdict": verdict}
+        if self.authority is None:
+            return replace(
+                record,
+                status=verdict,
+                verdict=verdict,
+                decided_by=by,
+                decided_at=now,
+                approvals=[*record.approvals, entry],
+            )
+
+        try:
+            basis = self.authority.check(record, by)
+        except ApprovalAuthorityError as error:
+            records[record.approval_id] = replace(
+                record, rejections=[*record.rejections, {**entry, "reason": str(error)}]
+            )
+            self._save(records)
+            raise
+
+        entry.update({"basis": basis.label, "rules": sorted(basis.rules)})
+        if verdict == "denied":
+            return replace(
+                record,
+                status="denied",
+                verdict="denied",
+                decided_by=by,
+                decided_at=now,
+                approvals=[*record.approvals, entry],
+            )
+        if by in record.approvers:
+            raise ValueError(f"{by} has already approved {record.approval_id}")
+        approvals = [*record.approvals, entry]
+        if not self.authority.satisfied(record, approvals):
+            return replace(record, approvals=approvals)
+        approved = replace(record, approvals=approvals)
+        return replace(
+            approved,
+            status="approved",
+            verdict="approved",
+            decided_by=", ".join(approved.approvers),
+            decided_at=now,
+        )
 
     def consume(self, approval_id: str) -> ApprovalRecord:
         with self._lock:
@@ -221,8 +475,8 @@ class _Approvals:
 class InMemoryApprovals(_Approvals):
     """An approval store in this process only. Gone on restart; for tests and demos."""
 
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, authority: ApprovalAuthority | None = None) -> None:
+        super().__init__(authority)
         self._records: dict[str, ApprovalRecord] = {}
 
     def _load(self) -> dict[str, ApprovalRecord]:
@@ -242,8 +496,8 @@ class FileApprovals(_Approvals):
     for many.
     """
 
-    def __init__(self, path: str | Path) -> None:
-        super().__init__()
+    def __init__(self, path: str | Path, authority: ApprovalAuthority | None = None) -> None:
+        super().__init__(authority)
         self.path = Path(path)
 
     def _load(self) -> dict[str, ApprovalRecord]:
@@ -275,8 +529,12 @@ class FileApprovals(_Approvals):
 
 
 __all__ = [
+    "ApprovalAuthority",
+    "ApprovalAuthorityError",
     "ApprovalRecord",
     "ApprovalStore",
+    "ApproverRule",
+    "Delegation",
     "FileApprovals",
     "InMemoryApprovals",
     "Status",
