@@ -177,9 +177,27 @@ def initialize_agent(agent: Agent) -> None:
         agent._memory_manager = agent.config.memory_manager
 
     # --- Conversation manager ---------------------------------------------
+    from tulip.models.metadata import metadata_for
+
+    configured = agent.config.model
+    model_id = (
+        configured
+        if isinstance(configured, str)
+        else getattr(getattr(agent._model, "config", None), "model", None)
+    )
+    meta = metadata_for(model_id) if isinstance(model_id, str) else None
     if agent.config.conversation_manager is not None:
         agent._conversation_manager = agent.config.conversation_manager
-    elif agent.config.max_iterations > 10:
+    elif meta is not None:
+        # The window is known, so count tokens. No summariser, so no extra
+        # model calls: stale tool output is pruned and a token-budgeted tail
+        # kept, which is what stops one large tool result ending the run.
+        from tulip.memory.compactor import LLMCompactor
+
+        agent._conversation_manager = LLMCompactor(context_length=meta.context_length)
+    else:
+        # Unknown window: a message window, at any iteration count. A short
+        # run can still overflow on one large tool output.
         from tulip.memory.conversation import SlidingWindowManager
 
         window = max(20, agent.config.max_iterations * 2)

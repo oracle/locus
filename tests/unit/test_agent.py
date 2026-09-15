@@ -1797,7 +1797,7 @@ class TestAutoConversationManager:
     """Tests for automatic conversation manager creation."""
 
     def test_auto_created_for_default_config(self, mock_model):
-        """SlidingWindowManager auto-created when max_iterations > 10."""
+        """SlidingWindowManager when the model's context length is unknown."""
         agent = Agent(model=mock_model, tools=[])
         assert agent._conversation_manager is not None
         from tulip.memory.conversation import SlidingWindowManager
@@ -1814,10 +1814,13 @@ class TestAutoConversationManager:
         assert isinstance(agent._conversation_manager, SlidingWindowManager)
         assert agent._conversation_manager.window_size == 200  # max(20, 100*2)
 
-    def test_not_created_for_small_iterations(self, mock_model):
-        """No auto-manager when max_iterations <= 10."""
+    def test_created_for_small_iterations_too(self, mock_model):
+        """A short run can still overflow the window on one large tool output."""
         agent = Agent(model=mock_model, tools=[], max_iterations=5)
-        assert agent._conversation_manager is None
+        from tulip.memory.conversation import SlidingWindowManager
+
+        assert isinstance(agent._conversation_manager, SlidingWindowManager)
+        assert agent._conversation_manager.window_size == 20  # max(20, 5*2)
 
     def test_explicit_manager_used(self, mock_model):
         """Explicit conversation_manager overrides auto-creation."""
