@@ -815,6 +815,99 @@ class Agent(AgentRuntimeMixin, BaseModel):
         async for event in self._run_from_state(state, prompt, thread_id, metadata):
             yield event
 
+    # =========================================================================
+    # Checkpoint history: read, edit and fork a thread
+    # =========================================================================
+
+    def _require_checkpointer(self) -> Any:
+        checkpointer = self.config.checkpointer
+        if checkpointer is None:
+            raise RuntimeError("checkpoint history needs a checkpointer on the agent")
+        return checkpointer
+
+    async def get_state(self, thread_id: str, checkpoint_id: str | None = None) -> AgentState:
+        """The thread's state at ``checkpoint_id``, or its latest.
+
+        Raises:
+            RuntimeError: The agent has no checkpointer.
+            LookupError: No such thread or checkpoint.
+        """
+        state = await self._require_checkpointer().load(thread_id, checkpoint_id)
+        if state is None:
+            where = f"checkpoint {checkpoint_id!r} of " if checkpoint_id else ""
+            raise LookupError(f"no {where}thread {thread_id!r}")
+        loaded: AgentState = state
+        return loaded
+
+    async def get_state_history(
+        self, thread_id: str, limit: int = 10
+    ) -> list[tuple[str, AgentState]]:
+        """``(checkpoint_id, state)`` pairs for the thread, newest first."""
+        checkpointer = self._require_checkpointer()
+        history: list[tuple[str, AgentState]] = []
+        for checkpoint_id in await checkpointer.list_checkpoints(thread_id, limit=limit):
+            state = await checkpointer.load(thread_id, checkpoint_id)
+            if state is not None:
+                history.append((checkpoint_id, state))
+        return history
+
+    async def update_state(
+        self,
+        thread_id: str,
+        *,
+        messages: list[Message] | None = None,
+        metadata: dict[str, Any] | None = None,
+        checkpoint_id: str | None = None,
+    ) -> str:
+        """Write a new checkpoint: the given one (or the latest) plus these changes.
+
+        The source checkpoint is never modified, so history stays intact and
+        the edit can itself be inspected or forked. The next ``run`` or
+        ``resume`` on the thread continues from the new checkpoint.
+
+        Returns:
+            The new checkpoint's id.
+        """
+        state = await self.get_state(thread_id, checkpoint_id)
+        for message in messages or []:
+            state = state.with_message(message)
+        for key, value in (metadata or {}).items():
+            state = state.with_metadata(key, value)
+        new_id: str = await self._require_checkpointer().save(
+            state,
+            thread_id,
+            metadata={"source": "update_state", "parent_checkpoint_id": checkpoint_id},
+        )
+        return new_id
+
+    async def fork(
+        self,
+        thread_id: str,
+        checkpoint_id: str | None = None,
+        *,
+        new_thread_id: str | None = None,
+    ) -> str:
+        """Start a new thread from the given checkpoint (or the latest).
+
+        The new thread carries the conversation up to that point and nothing
+        after it; running on it never changes the parent thread.
+
+        Returns:
+            The new thread's id.
+        """
+        from uuid import uuid4  # noqa: PLC0415
+
+        state = await self.get_state(thread_id, checkpoint_id)
+        forked = new_thread_id or f"{thread_id}-fork-{uuid4().hex[:8]}"
+        if forked == thread_id:
+            raise ValueError("a fork needs a thread id different from its parent")
+        await self._require_checkpointer().save(
+            state,
+            forked,
+            metadata={"forked_from": thread_id, "parent_checkpoint_id": checkpoint_id},
+        )
+        return forked
+
     @property
     def model(self) -> Any:
         """Get the model instance."""
