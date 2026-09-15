@@ -128,6 +128,11 @@ bedrock = ["boto3>=1.34"]
 # triage loop works on core deps alone (offline samples need nothing).
 security = ["boto3>=1.34"]
 
+# Signed audit trails (src/tulip/security/audit.py) — Ed25519 signatures over
+# each record so an export verifies from public keys alone. Unsigned trails
+# need nothing.
+audit = ["cryptography>=42"]
+
 # Mem0 agent-memory manager (src/tulip/memory/managers/mem0.py) — the
 # portable, self-hostable long-term memory backend.
 mem0 = ["mem0ai>=0.1"]
@@ -223,6 +228,7 @@ dev = [
     "redis>=7.1.0",       # Redis checkpointer tests
     "sqlalchemy>=2.0.46", # PostgreSQL checkpointer schema tests
     "moto>=5.0",          # mock S3 for tests/unit/test_memory_backends_s3.py
+    "cryptography>=42",   # signed audit trail tests in tests/unit/test_signed_audit.py
 ]
 
 [project.urls]

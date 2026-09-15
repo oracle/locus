@@ -58,7 +58,13 @@ from tulip.control.approvals import (
 )
 from tulip.control.gate import ApprovalBridge, gate_tool
 from tulip.security.admit import AdmissionError, admit
-from tulip.security.audit import AuditRecord, AuditTrail
+from tulip.security.audit import (
+    AuditRecord,
+    AuditSigner,
+    AuditTrail,
+    Ed25519Signer,
+    verify_jsonl,
+)
 from tulip.security.findings import Evidence
 from tulip.security.policy import (
     SANDBOXED_TAG,
@@ -115,6 +121,9 @@ __all__ = [
     # Tamper-evident audit
     "AuditTrail",
     "AuditRecord",
+    "AuditSigner",
+    "Ed25519Signer",
+    "verify_jsonl",
     "AuditHook",
     # Governed-by-default agent wrapper
     "GovernedAgent",
