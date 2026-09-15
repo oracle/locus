@@ -20,6 +20,16 @@ policy.
   raises `ValueError` when the agent is built: register prices with
   `register_metadata`.
 
+- **Read, edit and fork a thread from its checkpoints.** (#12) With a
+  checkpointer, `Agent.get_state(thread_id, checkpoint_id=None)` and
+  `get_state_history(thread_id, limit=10)` read any saved state, newest first.
+  `update_state(thread_id, messages=..., metadata=..., checkpoint_id=...)` writes
+  a *new* checkpoint from an old one plus the changes, never rewriting history,
+  and the next run continues from it. `fork(thread_id, checkpoint_id, new_thread_id=...)`
+  starts a new thread from any checkpoint; running on it leaves the parent
+  untouched. Uses only the core checkpointer methods, so it works on every
+  backend.
+
 - **Who may approve a held call is decided in the SDK.** (#7) Pass
   `authority=ApprovalAuthority(...)` to `InMemoryApprovals` or `FileApprovals`
   and every decision is checked when it is made. `ApproverRule` names approvers
