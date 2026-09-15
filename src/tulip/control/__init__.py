@@ -45,6 +45,13 @@ from tulip.control.action import (
     derive_labels,
     resolve_action,
 )
+from tulip.control.approvals import (
+    ApprovalRecord,
+    ApprovalStore,
+    FileApprovals,
+    InMemoryApprovals,
+    call_digest,
+)
 from tulip.control.gate import ApprovalBridge, gate_tool
 from tulip.security.admit import AdmissionError, admit
 from tulip.security.audit import AuditRecord, AuditTrail
@@ -75,6 +82,12 @@ __all__ = [
     "default_action",
     "ApprovalBridge",
     "gate_tool",
+    # Held calls that wait for a person, across a restart
+    "ApprovalRecord",
+    "ApprovalStore",
+    "FileApprovals",
+    "InMemoryApprovals",
+    "call_digest",
     "resolve_action",
     # Argument-derived labels (declarative rules on a tool definition)
     "DerivedLabels",

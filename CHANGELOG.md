@@ -8,6 +8,27 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **A hold can pause the run and wait for a named person, across a restart.**
+  (#5) `gate_tool(..., on_refusal="interrupt", approval=store)` turns a
+  `require_human` hold into a pause: the agent yields an `InterruptEvent` whose
+  `metadata` carries the `approval_id`, the checkpointer keeps the
+  conversation, and the store keeps the pending approval. `store.decide(id,
+  "approved" | "denied", by=...)` records who decided; `agent.resume(...,
+  perform_dangling=True)` re-issues the held call, which runs exactly once on
+  approval and returns a refusal on denial. Approval ids are a digest of the
+  principal, tool and arguments, so different arguments need their own
+  approval, and an approval is consumed before the side effect, so a repeated
+  call holds again. New: `ApprovalStore`, `InMemoryApprovals`, `FileApprovals`,
+  `ApprovalRecord`, `call_digest`, and `admit(..., approved_by=...)`.
+
+### Fixed
+
+- **The README said a hold paused the run and survived a restart; it did not.**
+  (#5) A hold returned a refusal the model read, and the run carried on. The
+  sentence now describes the `on_refusal="interrupt"` path above.
+
 ### Removed
 
 - **The SDK stands alone: no more `tulip-frameworks` or `tulip-gateway`.**

@@ -39,11 +39,13 @@ from __future__ import annotations
 
 import inspect
 import json
-from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
+from collections.abc import Awaitable, Callable, Mapping
+from typing import TYPE_CHECKING, Any, Literal, Protocol, cast, runtime_checkable
 
 from tulip.control.action import ActionSpec, resolve_action
+from tulip.control.approvals import ApprovalStore
 from tulip.security.admit import AdmissionError, admit
+from tulip.security.policy import ApprovalOutcome
 
 
 if TYPE_CHECKING:
@@ -138,7 +140,7 @@ def gate_tool(
     trail: AuditTrail | None = None,
     finding: Evidence | None = None,
     verdict: VerificationResult | None = None,
-    on_refusal: Literal["return", "raise"] = "return",
+    on_refusal: Literal["return", "raise", "interrupt"] = "return",
     approval: ApprovalBridge | None = None,
     principal: str = "agent",
     refusal_reason: str | Callable[[ApprovalDecision], str] | None = None,
@@ -173,6 +175,13 @@ def gate_tool(
             outcome and the reason, so it can explain itself to the user and
             the run continues. ``"raise"`` re-raises
             :class:`AdmissionError` for a caller that would rather stop.
+            ``"interrupt"`` pauses the run on a ``require_human`` hold: the call
+            returns the runtime's interrupt marker, the agent yields an
+            ``InterruptEvent`` whose ``metadata`` carries the ``approval_id``, and
+            ``agent.resume(..., perform_dangling=True)`` re-issues the call once a
+            person has decided on ``approval`` (which must be an
+            :class:`~tulip.control.ApprovalStore`). Approved runs the call exactly
+            once; denied returns a refusal. A policy ``deny`` never pauses.
         refusal_reason: What the model is told when an action is refused. By
             default it is the policy's own reason, which names the checks that
             fired — accurate, and written in control-plane vocabulary the model
@@ -193,6 +202,12 @@ def gate_tool(
     """
     from tulip.tools.decorator import Tool  # noqa: PLC0415 — avoids a cycle
 
+    if on_refusal == "interrupt" and not isinstance(approval, ApprovalStore):
+        raise TypeError(
+            'on_refusal="interrupt" needs approval= an ApprovalStore (InMemoryApprovals, '
+            "FileApprovals, or your own): a paused run has to find its decision somewhere"
+        )
+
     inner = tool.fn
     # A sandboxed tool must keep running in its sandbox. `Tool.execute` returns
     # early for `sandbox is not None` and never reaches `fn`, so the two cannot
@@ -205,6 +220,70 @@ def gate_tool(
     # to the ORIGINAL tool, whose own `execute` still does the sandboxing.
     sandboxed = tool.sandbox is not None
 
+    async def hold(
+        error: AdmissionError,
+        resolved: Any,
+        kwargs: dict[str, Any],
+        perform: Callable[[], Awaitable[Any]],
+    ) -> Any:
+        """A ``require_human`` hold in interrupt mode: pause, or act on a decision."""
+        store = cast("ApprovalStore", approval)
+        approval_id = store.submit(principal, tool.name, kwargs, reason=error.decision.reason)
+        record = store.get(approval_id)
+        where = {"approval_id": approval_id, "action": resolved.name, "asset": resolved.asset}
+
+        if record is not None and record.status in ("approved", "denied"):
+            if trail is not None:
+                trail.record(
+                    "approval-decision",
+                    {**where, "verdict": record.status, "decided_by": record.decided_by},
+                )
+            if record.status == "approved":
+
+                async def perform_once() -> Any:
+                    # Consumed before the side effect: a crash mid-call leaves
+                    # the approval spent, never a second execution on replay.
+                    store.consume(approval_id)
+                    return await perform()
+
+                return await admit(
+                    resolved,
+                    perform_once,
+                    policy=policy,
+                    finding=finding,
+                    verdict=verdict,
+                    trail=trail,
+                    approved_by=record.decided_by,
+                )
+            store.consume(approval_id)
+            return json.dumps(
+                {
+                    "status": "denied",
+                    "outcome": error.decision.outcome,
+                    "action": resolved.name,
+                    "asset": resolved.asset,
+                    "reason": f"denied by {record.decided_by}",
+                    "approval_id": approval_id,
+                }
+            )
+
+        if trail is not None:
+            trail.record("approval-requested", {**where, "principal": principal})
+        return json.dumps(
+            {
+                "__interrupt__": True,
+                "question": f"Approve {resolved.name} on {resolved.asset}? "
+                + _reason_for(error, refusal_reason),
+                "metadata": {
+                    **where,
+                    "principal": principal,
+                    "reason": error.decision.reason,
+                    "arguments": dict(kwargs),
+                },
+            },
+            default=str,
+        )
+
     async def gated(**kwargs: Any) -> Any:
         async def perform() -> Any:
             if sandboxed:
@@ -212,9 +291,10 @@ def gate_tool(
             result = inner(**kwargs)
             return await result if inspect.isawaitable(result) else result
 
+        resolved = resolve_action(action, tool.name, kwargs)
         try:
             return await admit(
-                resolve_action(action, tool.name, kwargs),
+                resolved,
                 perform,
                 policy=policy,
                 finding=finding,
@@ -224,6 +304,8 @@ def gate_tool(
         except AdmissionError as error:
             if on_refusal == "raise":
                 raise
+            if on_refusal == "interrupt" and error.decision.outcome != ApprovalOutcome.DENY:
+                return await hold(error, resolved, kwargs, perform)
             return _refusal(
                 error,
                 approval=approval,

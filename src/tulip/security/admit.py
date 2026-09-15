@@ -32,11 +32,17 @@ appended to the audit trail, so there is **no un-recorded path to a side effect*
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from tulip.security.audit import AuditTrail
 from tulip.security.findings import Evidence
-from tulip.security.policy import Action, ApprovalDecision, ControlPolicy, approve
+from tulip.security.policy import (
+    Action,
+    ApprovalDecision,
+    ApprovalOutcome,
+    ControlPolicy,
+    approve,
+)
 from tulip.security.verify import VerificationResult
 
 
@@ -65,6 +71,7 @@ async def admit(
     finding: Evidence | None = None,
     verdict: VerificationResult | None = None,
     trail: AuditTrail | None = None,
+    approved_by: str | None = None,
 ) -> T:
     """Run ``perform`` only if ``action`` clears the trust chain; else reject.
 
@@ -84,25 +91,30 @@ async def admit(
         finding: The evidence the action responds to.
         verdict: The :func:`~tulip.security.verify.verify` result.
         trail: An :class:`~tulip.security.audit.AuditTrail` to record the decision on.
+        approved_by: Who approved a ``require_human`` hold. With it, the held action
+            runs and the approver is recorded on the trail. A ``deny`` still raises:
+            no person approves past a denial.
 
     Returns:
         Whatever ``perform`` returns.
 
     Raises:
-        AdmissionError: if the action is not admitted (require_human or deny).
+        AdmissionError: if the action is not admitted (deny, or require_human
+            without ``approved_by``).
     """
     decision = approve(action, policy=policy, finding=finding, verdict=verdict)
+    human = approved_by is not None and decision.outcome == ApprovalOutcome.REQUIRE_HUMAN
     if trail is not None:
-        trail.record(
-            "action-admission",
-            {
-                "action": action.name,
-                "asset": action.asset,
-                "outcome": decision.outcome,
-                "reason": decision.reason,
-            },
-        )
-    if not decision.allowed:
+        entry: dict[str, Any] = {
+            "action": action.name,
+            "asset": action.asset,
+            "outcome": decision.outcome,
+            "reason": decision.reason,
+        }
+        if human:
+            entry["approved_by"] = approved_by
+        trail.record("action-admission", entry)
+    if not (decision.allowed or human):
         raise AdmissionError(decision)
     return await perform()
 
