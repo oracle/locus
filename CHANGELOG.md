@@ -24,6 +24,17 @@ policy.
   carry `labels`, `approvals` and `rejections`, and the audit trail names every
   approver.
 
+- **An audit trail someone outside the runtime can verify.** (#8)
+  `AuditTrail(signer=Ed25519Signer.from_pem(...))` signs every record's hash
+  with Ed25519 and names the key. `verify(keys={key_id: public_pem})` and
+  `verify_jsonl(exported, keys=..., expected_head=...)` check an export with
+  only the public keys, and reject a modified, deleted or reordered record, a
+  truncation past the anchored head, and a chain rebuilt around an edit and
+  re-signed with an untrusted key, which a keyless chain cannot catch.
+  `use_signer` rotates keys; a verifier given both public keys accepts the
+  whole trail. Signing needs the new `audit` extra; an unsigned trail exports
+  exactly as before.
+
 - **A hold can pause the run and wait for a named person, across a restart.**
   (#5) `gate_tool(..., on_refusal="interrupt", approval=store)` turns a
   `require_human` hold into a pause: the agent yields an `InterruptEvent` whose
