@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [2.16.0] - 2026-09-16
+
 ### Added
 
 - **Computer use on each provider's native tool, gated like any other tool.** (#41)
