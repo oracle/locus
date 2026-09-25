@@ -255,6 +255,7 @@ class ToolContextFactory(BaseModel):
     iteration: int = 0
     state: Any = None
     invocation_metadata: dict[str, Any] = Field(default_factory=dict)
+    ephemeral_metadata: dict[str, Any] = Field(default_factory=dict, exclude=True, repr=False)
 
     def create(self, tool_call: ToolCall, tool_name: str) -> ToolContext:
         """Create a context for a tool call."""
@@ -266,6 +267,7 @@ class ToolContextFactory(BaseModel):
             iteration=self.iteration,
             state=self.state,
             invocation_metadata=self.invocation_metadata,
+            ephemeral_metadata=self.ephemeral_metadata,
         )
 
 

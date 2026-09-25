@@ -6,8 +6,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import threading
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -21,7 +22,7 @@ from tulip.agent.run_context import (
     ResultSlot,
     RunContext,
 )
-from tulip.agent.runtime_loop import AgentRuntimeMixin
+from tulip.agent.runtime_loop import AgentRuntimeMixin, _invocation_arguments
 from tulip.core.errors import ApprovalPendingError, GSARValidationError
 from tulip.core.events import (
     GroundingEvent,
@@ -104,6 +105,22 @@ def _interrupt_payload(content: str | None) -> dict[str, Any] | None:
     if isinstance(data, dict) and data.get("__interrupt__"):
         return data
     return None
+
+
+@contextlib.asynccontextmanager
+async def _closing(stream: Any) -> AsyncIterator[Any]:
+    """``contextlib.aclosing`` that tolerates a stream with no ``aclose``.
+
+    ``run`` may be overridden by something that returns a plain async
+    iterator; a real generator is closed on exit so an early exit (an
+    exception, a cancelled ``arun``) finalizes the run immediately.
+    """
+    try:
+        yield stream
+    finally:
+        aclose = getattr(stream, "aclose", None)
+        if aclose is not None:
+            await aclose()
 
 
 class Agent(AgentRuntimeMixin, BaseModel):
@@ -343,28 +360,29 @@ class Agent(AgentRuntimeMixin, BaseModel):
         slot = ResultSlot(owner=self)
         slot_token = ARUN_RESULT_SLOT.set(slot)
         try:
-            async for event in self.run(prompt, **run_kwargs):
-                # Fire callback if set
-                if callback is not None:
-                    callback(event)
+            async with _closing(self.run(prompt, **run_kwargs)) as events:
+                async for event in events:
+                    # Fire callback if set
+                    if callback is not None:
+                        callback(event)
 
-                if isinstance(event, TerminateEvent):
-                    stop_reason = _normalize_stop_reason(event.reason)
-                    final_message = event.final_message or ""
-                elif isinstance(event, ToolCompleteEvent):
-                    if event.error:
-                        tool_errors += 1
-                elif isinstance(event, ReflectEvent):
-                    reflexion_evaluations += 1
-                elif isinstance(event, GroundingEvent):
-                    grounding_evaluations += 1
-                    # The grounding loop already ran and emitted its verdict;
-                    # it simply never reached the result. Keep the last one:
-                    # with `max_replans` the answer is re-grounded after each
-                    # replan, and the score that describes the answer being
-                    # returned is the final one.
-                    grounding_score = event.score
-                    ungrounded_claims = list(event.ungrounded_claims)
+                    if isinstance(event, TerminateEvent):
+                        stop_reason = _normalize_stop_reason(event.reason)
+                        final_message = event.final_message or ""
+                    elif isinstance(event, ToolCompleteEvent):
+                        if event.error:
+                            tool_errors += 1
+                    elif isinstance(event, ReflectEvent):
+                        reflexion_evaluations += 1
+                    elif isinstance(event, GroundingEvent):
+                        grounding_evaluations += 1
+                        # The grounding loop already ran and emitted its verdict;
+                        # it simply never reached the result. Keep the last one:
+                        # with `max_replans` the answer is re-grounded after each
+                        # replan, and the score that describes the answer being
+                        # returned is the final one.
+                        grounding_score = event.score
+                        ungrounded_claims = list(event.ungrounded_claims)
         finally:
             ARUN_RESULT_SLOT.reset(slot_token)
 
@@ -713,7 +731,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
         thread_id: str | None = None,
         perform_dangling: bool = False,
         metadata: dict[str, Any] | None = None,
-    ) -> AsyncIterator[TulipEvent]:
+    ) -> AsyncGenerator[TulipEvent, None]:
         """
         Resume agent execution after an interrupt.
 
@@ -756,7 +774,10 @@ class Agent(AgentRuntimeMixin, BaseModel):
             metadata: Invocation metadata for the resumed segment (what tools
                 see as ``ctx.invocation_metadata`` and hooks as
                 ``event.run.metadata``). Defaults to the paused run's metadata
-                (in memory) or the thread's checkpointed metadata.
+                (in memory) or the thread's checkpointed metadata. Ephemeral
+                keys (``mcp_headers``) are never checkpointed: an in-process
+                resume reuses the paused run's, a cross-process resume that
+                needs them passes them here again.
 
         Raises:
             ApprovalPendingError: ``perform_dangling=True`` and the held call
@@ -782,7 +803,10 @@ class Agent(AgentRuntimeMixin, BaseModel):
             # The prompt of the paused run; the state already has the history.
             prompt = pending.prompt
             thread_id = pending.thread_id
-            run_metadata = metadata if metadata is not None else pending.metadata
+            if metadata is not None:
+                run_metadata, ephemeral = self._split_run_metadata(metadata)
+            else:
+                run_metadata, ephemeral = pending.metadata, dict(pending.ephemeral)
         else:
             # Rehydrate: no in-memory interrupt for this thread, so reload the
             # paused state from the checkpointer (the cross-process path).
@@ -796,7 +820,11 @@ class Agent(AgentRuntimeMixin, BaseModel):
                 raise RuntimeError(f"No checkpoint found for thread {thread_id!r} to resume from.")
             state = loaded
             prompt = ""
-            run_metadata = metadata if metadata is not None else dict(loaded.metadata)
+            # A checkpoint never holds ephemeral metadata (``mcp_headers``):
+            # a cross-process resume that needs it passes ``metadata=``.
+            run_metadata, ephemeral = self._split_run_metadata(
+                metadata if metadata is not None else dict(loaded.metadata)
+            )
             # Checkpoints never carry the (ephemeral) memory block, so the
             # rest of this turn gets it re-injected, as the in-memory path has.
             # (A fresh process has not initialised the agent yet.)
@@ -806,7 +834,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
 
         # This resumed segment is a run of its own: cancellable by thread,
         # visible to hooks as ``event.run``, isolated from concurrent runs.
-        rc = self._begin_run(state, prompt, thread_id, run_metadata)
+        rc = self._begin_run(state, prompt, thread_id, run_metadata, ephemeral=ephemeral)
         try:
             folded_events: list[TulipEvent] = []
             state = await self._fold_resume_response(
@@ -819,8 +847,11 @@ class Agent(AgentRuntimeMixin, BaseModel):
             yield folded_event
 
         # Continue execution from the interrupted state
-        async for event in self._run_from_state(state, prompt, thread_id, run_metadata, _run=rc):
-            yield event
+        async with contextlib.aclosing(
+            self._run_from_state(state, prompt, thread_id, run_metadata, _run=rc)
+        ) as segment:
+            async for event in segment:
+                yield event
 
     def _take_interrupt(self, thread_id: str | None) -> PendingInterrupt | None:
         """Pop the in-memory interrupt ``resume`` should continue, if any.
@@ -953,7 +984,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
                                 _ToolCall(
                                     id=dangling.id,
                                     name=dangling.name,
-                                    arguments=arguments,
+                                    arguments=_invocation_arguments(before_event),
                                 )
                             ],
                             self._tool_registry,
@@ -963,6 +994,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
                                 iteration=state.iteration,
                                 state=state,
                                 invocation_metadata=rc.metadata or {},
+                                ephemeral_metadata=rc.ephemeral,
                             ),
                         )
                         still_held = _interrupt_payload(invoked.content)
@@ -978,6 +1010,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
                                 prompt=rc.prompt,
                                 thread_id=rc.thread_id,
                                 metadata=rc.metadata,
+                                ephemeral=rc.ephemeral,
                             )
                             raise ApprovalPendingError(
                                 f"{dangling.name!r} on thread {rc.thread_id!r} is still "

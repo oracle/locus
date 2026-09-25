@@ -45,6 +45,9 @@ class ProtectedEvent:
 
     _writable: set[str] = set()
 
+    #: Fields whose values never appear in ``repr()`` (only their keys do).
+    _redacted: frozenset[str] = frozenset()
+
     #: The run this event belongs to; bound by the runtime, ``None`` when the
     #: event was constructed by hand (tests, custom dispatchers).
     _run_ctx: Any = None
@@ -104,6 +107,10 @@ class ProtectedEvent:
 
     def __repr__(self) -> str:
         attrs = {k: v for k, v in self.__dict__.items() if not k.startswith("_")}
+        for name in self._redacted:
+            value = attrs.get(name)
+            if isinstance(value, dict):
+                attrs[name] = dict.fromkeys(value, "***")
         pairs = ", ".join(f"{k}={v!r}" for k, v in attrs.items())
         return f"{type(self).__name__}({pairs})"
 
@@ -176,7 +183,14 @@ class BeforeToolCallEvent(ProtectedEvent):
     """Event fired before each tool execution.
 
     Writable fields:
-        arguments: Modify tool arguments.
+        arguments: Modify tool arguments. Modified arguments are what the
+            run records: they are checkpointed with the call
+            (``state.tool_executions``) and passed to ``on_after_tool_call``.
+        secret_arguments: Extra arguments merged over ``arguments`` for the
+            tool invocation ONLY — never checkpointed, never written to the
+            conversation or the event stream, never shown to after-hooks. Use
+            it for anything that must reach the tool but must not be
+            persisted: a confirmation token, a per-user credential.
         cancel: Set True (or a string reason) to skip this tool call.
 
     Read-only fields:
@@ -187,13 +201,17 @@ class BeforeToolCallEvent(ProtectedEvent):
         async def on_before_tool_call(self, event):
             if event.tool_name == "delete_file":
                 event.cancel = "Blocked by security policy"
+            if event.tool_name == "book":
+                event.secret_arguments = {"confirm_token": mint_token(event.run)}
     """
 
-    _writable = {"arguments", "cancel"}
+    _writable = {"arguments", "secret_arguments", "cancel"}
+    _redacted = frozenset({"secret_arguments"})
 
     tool_name: str
     tool_call_id: str
     arguments: dict[str, Any]
+    secret_arguments: dict[str, Any]
     cancel: bool | str
 
     def __init__(
@@ -207,6 +225,7 @@ class BeforeToolCallEvent(ProtectedEvent):
         self._init("tool_name", tool_name)
         self._init("tool_call_id", tool_call_id)
         self._init("arguments", arguments)
+        self._init("secret_arguments", {})
         self._init("cancel", False)
         self._bind_run(run)
 

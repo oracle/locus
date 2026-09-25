@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import sys
 
 from mcp.server.fastmcp import Context, FastMCP
@@ -93,6 +94,14 @@ def build_server(port: int) -> FastMCP:
             f"user={headers.get('x-user-id', '<none>')} "
             f"tenant={headers.get('x-tenant', '<none>')}"
         )
+
+    @mcp.tool()
+    def auth_digest(ctx: Context) -> str:  # type: ignore[type-arg]
+        """A digest of the Authorization header — proves which token arrived
+        without echoing it into the tool result (and so into state)."""
+        request = ctx.request_context.request
+        auth = request.headers.get("authorization", "") if request is not None else ""
+        return hashlib.sha256(auth.encode()).hexdigest()[:16]
 
     return mcp
 

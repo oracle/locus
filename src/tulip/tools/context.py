@@ -42,6 +42,15 @@ class ToolContext(BaseModel):
         description="Metadata passed at invocation time",
     )
 
+    # Run metadata that is never persisted (``mcp_headers``: per-run MCP
+    # credentials). Excluded from ``repr`` and serialization.
+    ephemeral_metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        exclude=True,
+        repr=False,
+        description="Per-run metadata carried in memory only (e.g. mcp_headers)",
+    )
+
     # Tool-specific config
     tool_config: dict[str, Any] = Field(
         default_factory=dict,
@@ -49,8 +58,10 @@ class ToolContext(BaseModel):
     )
 
     def get_metadata(self, key: str, default: Any = None) -> Any:
-        """Get a metadata value."""
-        return self.invocation_metadata.get(key, default)
+        """Get a metadata value (ephemeral metadata included)."""
+        if key in self.invocation_metadata:
+            return self.invocation_metadata[key]
+        return self.ephemeral_metadata.get(key, default)
 
     def get_config(self, key: str, default: Any = None) -> Any:
         """Get a tool config value."""

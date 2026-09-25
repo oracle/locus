@@ -21,6 +21,7 @@ from __future__ import annotations
 import contextvars
 import copy
 import threading
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -54,6 +55,40 @@ ARUN_RESULT_SLOT: contextvars.ContextVar[ResultSlot | None] = contextvars.Contex
 )
 
 
+#: Run-metadata keys that are carried for the run but never persisted.
+#: ``mcp_headers`` holds per-run MCP request headers — typically the end
+#: user's bearer token — so it must never reach the checkpoint, the event
+#: stream or anything else that outlives the run.
+EPHEMERAL_METADATA_KEYS: frozenset[str] = frozenset({"mcp_headers"})
+
+
+def split_ephemeral_metadata(
+    metadata: Mapping[str, Any] | None,
+    extra_keys: Iterable[str] = (),
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    """Split run metadata into what may be persisted and what may not.
+
+    Returns ``(persisted, ephemeral)``. ``persisted`` is a new dict without
+    the ephemeral keys (``None`` when ``metadata`` was ``None``); the caller's
+    mapping is never mutated. ``ephemeral`` holds the removed entries, which
+    live only on the run's in-memory context (:class:`RunContext`).
+    """
+    if metadata is None:
+        return None, {}
+    keys = EPHEMERAL_METADATA_KEYS.union(extra_keys)
+    persisted = {k: v for k, v in metadata.items() if k not in keys}
+    ephemeral = {k: v for k, v in metadata.items() if k in keys}
+    return persisted, ephemeral
+
+
+def scrub_ephemeral_metadata(
+    metadata: Mapping[str, Any], extra_keys: Iterable[str] = ()
+) -> dict[str, Any]:
+    """``metadata`` without its ephemeral keys (see :func:`split_ephemeral_metadata`)."""
+    persisted, _ = split_ephemeral_metadata(metadata, extra_keys)
+    return persisted or {}
+
+
 @dataclass
 class PendingInterrupt:
     """A run paused on an interrupt, parked in memory under its thread id."""
@@ -62,6 +97,9 @@ class PendingInterrupt:
     prompt: str
     thread_id: str | None
     metadata: dict[str, Any] | None
+    #: The paused run's ephemeral metadata (see :data:`EPHEMERAL_METADATA_KEYS`),
+    #: kept in memory only so an in-process resume still has it.
+    ephemeral: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
 def _copy_termination(
@@ -89,9 +127,14 @@ class RunContext:
 
     info: RunInfo
     prompt: str
-    #: The metadata object as the caller passed it (tools receive this).
+    #: The run's metadata without its ephemeral keys (tools receive this as
+    #: ``ctx.invocation_metadata``; it is what the state carries).
     metadata: dict[str, Any] | None
     termination: TerminationCondition | None = None
+    #: Metadata the run carries but never persists — ``mcp_headers`` and the
+    #: like (see :data:`EPHEMERAL_METADATA_KEYS`). In memory only; tools see
+    #: it as ``ctx.ephemeral_metadata``.
+    ephemeral: dict[str, Any] = field(default_factory=dict, repr=False)
     cancel: threading.Event = field(default_factory=threading.Event)
     has_unverified_writes: bool = False
     result_slot: ResultSlot | None = None
@@ -107,6 +150,7 @@ class RunContext:
         metadata: dict[str, Any] | None,
         agent_name: str | None,
         termination: TerminationCondition | None,
+        ephemeral: dict[str, Any] | None = None,
     ) -> RunContext:
         run_termination = _copy_termination(termination)
         if run_termination is not None:
@@ -121,6 +165,7 @@ class RunContext:
             prompt=prompt,
             metadata=metadata,
             termination=run_termination,
+            ephemeral=dict(ephemeral or {}),
         )
 
     @property

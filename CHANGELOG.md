@@ -13,6 +13,33 @@ products built on one shared `Agent` instance.
 
 ### Fixed
 
+- **Per-run MCP headers are never persisted (security).** The documented
+  `agent.run(..., metadata={"mcp_headers": {"Authorization": "Bearer …"}})`
+  path wrote the bearer token into the run state, so every checkpoint (and
+  `AgentResult.state`, the server's pending-interrupt view, hook-visible
+  `run.metadata`) carried it. Ephemeral metadata keys — `mcp_headers` and any
+  custom `MCPClient.metadata_headers_key` — are now split off at run start and
+  carried on the run's in-memory context only: MCP clients (and tools, via
+  `ctx.ephemeral_metadata`) still receive them, while state, checkpoints,
+  events and hook `run.metadata` never do. A new turn on a checkpoint written
+  by an earlier release drops the stale key on its next save. An in-process
+  `resume()` reuses the paused run's headers; a cross-process resume passes
+  `metadata={"mcp_headers": …}` again.
+- **An unreachable MCP server is a typed tool error when a session opens.**
+  Opening a per-identity session (or re-opening the default one) to a server
+  that is down raised the transport's `httpx.ConnectError`; it now raises
+  `MCPConnectionError`, as a connection lost mid-request already did.
+- **Closing `Agent.run()` closes the run.** `aclose()` on the generator (or an
+  early exit from `contextlib.aclosing(agent.run(...))`) left the inner run
+  suspended until garbage collection, so its `finally` — run bookkeeping, the
+  final checkpoint — ran late or never. The run is now closed before
+  `aclose()` returns; `arun()` and `resume()` close theirs on early exit too.
+- **MCP per-identity sessions no longer pile up.** Sessions were keyed by the
+  full headers with no idle expiry, so a fresh JWT per turn opened a new
+  session every turn and left the old ones open until `max_sessions` evicted
+  them. See `session_key` / `session_idle_ttl` under Added; a session reused
+  under a key always sends the request's current headers.
+
 - **The long-term memory block is never checkpointed.** A memory manager's
   injected `[Long-term Memory]` block was saved into the thread's checkpoint
   (and the run's result state) with the rest of the messages. It is now
@@ -98,6 +125,19 @@ products built on one shared `Agent` instance.
   under Added.
 
 ### Added
+
+- **`MCPClient(session_key=..., session_idle_ttl=...)`.** `session_key(rctx,
+  headers)` chooses the per-identity session — e.g. the verified principal of
+  a JWT — so rotating tokens for one user share one session (which sends the
+  latest token). `session_idle_ttl` (default 300 s, `None` disables) closes
+  sessions idle that long, from a background sweep. `max_sessions` now closes
+  the least recently used *idle* session first. Opens and closes are logged at
+  INFO and counted in `MCPClient.session_stats` (`opened`, `closed`, `live`).
+- **`BeforeToolCallEvent.secret_arguments`.** Arguments a hook merges into the
+  tool invocation only: the tool receives them, but they never reach
+  `state.tool_executions`, checkpoints, messages, events or
+  `on_after_tool_call` (and are redacted from the event's `repr`). For a
+  confirmation token or credential a hook injects that must not be persisted.
 
 - **Background memory extraction.** `LLMMemoryManager(extract_mode="background")`
   runs extraction as a tracked task after the turn's final event, so a chat no
@@ -191,6 +231,14 @@ products built on one shared `Agent` instance.
   `namespace_prefix` constructor is unchanged.
 
 ### Changed
+
+- `Agent.run()` and `Agent.resume()` are annotated as
+  `AsyncGenerator[TulipEvent, None]` (was `AsyncIterator`), so
+  `contextlib.aclosing(agent.run(...))` type-checks without a cast.
+- Hook `event.run.metadata` and `ctx.invocation_metadata` no longer contain
+  `mcp_headers` (or a client's custom `metadata_headers_key`); read them from
+  `ctx.ephemeral_metadata` / `ctx.get_metadata("mcp_headers")` in a tool, or
+  from `MCPRequestContext.metadata` in a `headers_provider`.
 
 - A checkpoint written by this release holds no memory block, and one
   written by an earlier release loses its block on the next save. Code that
