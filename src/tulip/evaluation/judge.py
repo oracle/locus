@@ -44,6 +44,7 @@ from tulip.core.messages import Message
 
 
 __all__ = [
+    "JudgeUnavailableError",
     "LLMJudge",
     "Verdict",
     "check_trajectory",
@@ -71,6 +72,17 @@ Reply with only a JSON object, no prose and no code fence:
 #: preamble often enough that requiring a bare object would fail on answers
 #: that are otherwise perfectly good.
 _JSON = re.compile(r"\{.*\}", re.DOTALL)
+
+
+class JudgeUnavailableError(RuntimeError):
+    """The judge model could not be called, so nothing was graded.
+
+    A ``RuntimeError`` subclass, so code written against the original
+    contract keeps catching it. :meth:`EvalRunner.arun
+    <tulip.evaluation.EvalRunner.arun>` lets it propagate rather than
+    recording a failed case: "the judge was down" is not a finding about
+    the agent.
+    """
 
 
 class Verdict(BaseModel):
@@ -115,7 +127,8 @@ class LLMJudge:
         """Grade ``output`` against ``rubric``.
 
         Raises:
-            RuntimeError: If the model call fails. An eval that reports
+            JudgeUnavailableError: If the model call fails (a
+                ``RuntimeError`` subclass). An eval that reports
                 failure when the judge was simply unreachable is worse than
                 one that stops and says so.
         """
@@ -125,7 +138,7 @@ class LLMJudge:
                 [Message.user(request)], max_tokens=self.max_tokens
             )
         except Exception as exc:
-            raise RuntimeError(f"LLM judge could not be reached: {exc}") from exc
+            raise JudgeUnavailableError(f"LLM judge could not be reached: {exc}") from exc
 
         return self._parse(response.content or "")
 
@@ -212,9 +225,16 @@ def check_trajectory(
             return True, "trajectory matches exactly"
         return False, f"expected exactly {expected}, got {actual}"
 
-    remaining = iter(actual)
-    for step in expected:
-        if not any(call == step for call in remaining):
-            missing = expected[expected.index(step) :]
+    # Walk ``actual`` once, remembering *which* expected step we are on.
+    # Recovering it with ``expected.index(step)`` finds the step's first
+    # occurrence, so with a repeated step the report named the wrong tail:
+    # (["a", "b"], ["a", "b", "a"]) said all of ['a', 'b', 'a'] were missing.
+    cursor = 0
+    for position, step in enumerate(expected):
+        while cursor < len(actual) and actual[cursor] != step:
+            cursor += 1
+        if cursor == len(actual):
+            missing = expected[position:]
             return False, (f"expected {expected} in order; {missing} did not follow, got {actual}")
+        cursor += 1
     return True, "trajectory contains the expected order"
