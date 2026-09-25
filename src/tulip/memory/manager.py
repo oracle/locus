@@ -128,7 +128,9 @@ ExtractFn = Callable[
 #: ``(run) -> namespace prefix`` for :class:`LLMMemoryManager`. ``run`` is a
 #: :class:`~tulip.core.events.RunInfo` built from the run's state: ``run_id``,
 #: ``metadata`` (the run's persisted metadata) and ``agent_name`` (the agent
-#: id). ``None`` uses the manager's ``namespace_prefix``.
+#: id). ``None`` means NO memory for that run — no recall, no injection, no
+#: extraction — never the manager's shared ``namespace_prefix``; return that
+#: prefix explicitly to opt a run into it.
 NamespaceResolver = Callable[["RunInfo"], "tuple[str, ...] | None"]
 
 #: ``(manager, prefix)`` a scoped manager call is running under.
@@ -468,9 +470,11 @@ class LLMMemoryManager(BaseMemoryManager):
             ``agent.run(..., metadata=)`` passed). Lets one manager serve
             every user: its ``max_concurrent_extractions`` bound and
             :meth:`drain` then cover all of them. ``None`` from the resolver
-            uses ``namespace_prefix``. If the resolver raises, that run
-            neither reads nor writes memories (it never falls back to a
-            shared namespace).
+            means NO memory for that run (e.g. an anonymous visitor): it
+            neither reads nor writes memories — it never falls back to the
+            shared ``namespace_prefix``, which would pool every such run
+            together. Return ``namespace_prefix`` explicitly to opt a run
+            into it. A resolver that raises is treated the same way.
 
     Example::
 
@@ -541,7 +545,11 @@ class LLMMemoryManager(BaseMemoryManager):
             _ACTIVE_NAMESPACE.reset(token)
 
     def _resolve_namespace(self, state: AgentState) -> tuple[str, ...] | None:
-        """This run's prefix; ``None`` means the resolver failed (fail closed)."""
+        """This run's prefix; ``None`` means no memory for this run.
+
+        That is the case when the resolver returns ``None`` or raises: both
+        fail closed, never into the shared ``namespace_prefix``.
+        """
         if self.namespace_resolver is None:
             return tuple(self.namespace_prefix)
         from tulip.core.events import RunInfo  # noqa: PLC0415
@@ -562,7 +570,7 @@ class LLMMemoryManager(BaseMemoryManager):
             )
             return None
         if resolved is None:
-            return tuple(self.namespace_prefix)
+            return None
         return tuple(resolved)
 
     async def on_session_start(self, state: AgentState) -> AgentState:
