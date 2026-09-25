@@ -123,6 +123,23 @@ products built on one shared `Agent` instance.
   with its own background-extraction semaphore (no global bound) and its own
   queue that `Agent.drain_memory()` did not drain. See `namespace_resolver`
   under Added.
+- **`MCPClient` works on mcp 2.x.** `tulip[mcp]` accepts `mcp>=1.0`, so a
+  fresh install resolves mcp 2.x, whose models renamed `isError`,
+  `structuredContent`, `inputSchema`, `outputSchema` and `mimeType` to
+  snake_case. The client read the camelCase attributes only, so on mcp 2.x a
+  server's `isError=True` result reached the model as a success, structured
+  content and output schemas were dropped, and every MCP tool was attached
+  with an empty parameter schema. Fields are now read under either spelling.
+- **The MCP client's real-server tests run in CI again.** The loopback server
+  behind `tests/unit/test_mcp_fidelity.py` and
+  `test_mcp_secrets_and_sessions.py` imported `mcp.server.fastmcp`, which
+  mcp 2.x removed, so once CI's `pip install` resolved mcp 2.x both modules
+  skipped — which is how the defect above shipped unnoticed. The server
+  now builds on `MCPServer` (mcp 2.x) or `FastMCP` (mcp 1.x); the full-deps CI
+  jobs set `TULIP_REQUIRE_MCP_SERVER_TESTS=1` so a missing dependency fails
+  instead of skipping; and the 3.13 test job re-runs the MCP client suites
+  against mcp 1.x, so both supported majors are exercised against a real
+  server.
 
 ### Added
 

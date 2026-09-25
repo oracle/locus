@@ -3,7 +3,8 @@
 
 """MCP client fidelity and resilience, against a real MCP server on loopback.
 
-Every test here talks to an actual ``mcp`` FastMCP server over streamable HTTP
+Every test here talks to an actual ``mcp`` server (``MCPServer`` on mcp 2.x,
+``FastMCP`` on 1.x) over streamable HTTP
 on 127.0.0.1 — no mocks of the SDK — because the defects these pin down lived
 in the interaction with the real transport:
 
@@ -32,9 +33,10 @@ from typing import Any
 
 import pytest
 
+from tests._mcp_deps import require_server_deps
 
-pytest.importorskip("mcp.server.fastmcp")
-uvicorn = pytest.importorskip("uvicorn")
+
+uvicorn = require_server_deps()
 
 from tests._mcp_loopback_server import PNG_1PX, build_server  # noqa: E402
 from tulip.agent import Agent  # noqa: E402

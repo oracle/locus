@@ -1,7 +1,11 @@
 # Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""A FastMCP server for the MCP client tests (``unit/test_mcp_fidelity.py``).
+"""A real MCP server for the MCP client tests (``unit/test_mcp_fidelity.py``).
+
+Runs on whichever ``mcp`` major is installed — ``MCPServer`` on mcp 2.x,
+``FastMCP`` on mcp 1.x — since ``tulip[mcp]`` accepts both (``mcp>=1.0``), so
+the client is exercised against the same SDK a user would get.
 
 Imported by the tests to serve on a thread, and run as a script
 (``python _mcp_loopback_server.py <port>``) when a test needs a server it can
@@ -15,11 +19,21 @@ import asyncio
 import base64
 import hashlib
 import sys
+from typing import Any
 
-from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import CallToolResult, ImageContent, TextContent
 from pydantic import BaseModel
 
+
+try:  # mcp >= 2: FastMCP was renamed MCPServer; host/port moved to run/app.
+    from mcp.server.mcpserver import Context, MCPServer
+
+    MCP_V2 = True
+except ImportError:  # mcp 1.x
+    from mcp.server.fastmcp import Context  # type: ignore[no-redef]
+    from mcp.server.fastmcp import FastMCP as MCPServer  # type: ignore[no-redef]
+
+    MCP_V2 = False
 
 PNG_1PX = base64.b64encode(
     bytes.fromhex(
@@ -35,8 +49,10 @@ class Hotel(BaseModel):
     price: float
 
 
-def build_server(port: int) -> FastMCP:
-    mcp = FastMCP("fidelity", host="127.0.0.1", port=port)
+def build_server(port: int) -> Any:
+    mcp: Any = (
+        MCPServer("fidelity") if MCP_V2 else MCPServer("fidelity", host="127.0.0.1", port=port)
+    )
 
     @mcp.tool()
     def search_hotels(city: str) -> list[Hotel]:
@@ -106,5 +122,14 @@ def build_server(port: int) -> FastMCP:
     return mcp
 
 
+def serve(port: int) -> None:
+    """Serve streamable HTTP on ``127.0.0.1:<port>`` until killed."""
+    server = build_server(port)
+    if MCP_V2:
+        server.run(transport="streamable-http", host="127.0.0.1", port=port)
+    else:
+        server.run(transport="streamable-http")
+
+
 if __name__ == "__main__":
-    build_server(int(sys.argv[1])).run(transport="streamable-http")
+    serve(int(sys.argv[1]))

@@ -558,6 +558,24 @@ class MCPToolResult:
         )
 
 
+_MISSING = object()
+
+
+def _mcp_field(obj: Any, camel: str, snake: str, *, default: Any = None) -> Any:
+    """Read a field off an ``mcp`` SDK model on either major version.
+
+    ``tulip[mcp]`` accepts ``mcp>=1.0``. mcp 1.x models expose the wire names
+    as attributes (``isError``, ``structuredContent``, ``inputSchema``,
+    ``mimeType``); mcp 2.x renamed them to snake_case (``is_error``, ...) and
+    keeps the camelCase spelling only as a validation/serialisation alias, so
+    ``getattr(result, "isError")`` silently misses on 2.x.
+    """
+    value = getattr(obj, camel, _MISSING)
+    if value is _MISSING:
+        value = getattr(obj, snake, default)
+    return value
+
+
 def _dump_block(item: Any) -> dict[str, Any] | None:
     """A content block as a JSON-mode dict, or None for a non-model value."""
     dump = getattr(item, "model_dump", None)
@@ -586,7 +604,7 @@ def _block_text(item: Any, *, embed_images: bool) -> str | None:
     if isinstance(text, str):
         return text
     kind = getattr(item, "type", None)
-    mime = getattr(item, "mimeType", None)
+    mime = _mcp_field(item, "mimeType", "mime_type")
     mime = mime if isinstance(mime, str) and mime else None
     if kind == "image":
         if embed_images:
@@ -599,7 +617,7 @@ def _block_text(item: Any, *, embed_images: bool) -> str | None:
         inner = getattr(resource, "text", None)
         if isinstance(inner, str):
             return inner
-        inner_mime = getattr(resource, "mimeType", None) or "binary"
+        inner_mime = _mcp_field(resource, "mimeType", "mime_type") or "binary"
         return f"[resource: {getattr(resource, 'uri', '')} ({inner_mime})]"
     if kind == "resource_link":
         return f"[resource link: {getattr(item, 'name', '')} {getattr(item, 'uri', '')}]"
@@ -622,9 +640,9 @@ def _convert_call_result(raw: Any, *, embed_images: bool = True) -> MCPToolResul
         if rendered is not None:
             parts.append(rendered)
 
-    structured = getattr(raw, "structuredContent", None)
+    structured = _mcp_field(raw, "structuredContent", "structured_content")
     structured = structured if isinstance(structured, dict) else None
-    is_error = getattr(raw, "isError", False) is True
+    is_error = _mcp_field(raw, "isError", "is_error", default=False) is True
     meta = getattr(raw, "meta", None)
     meta = meta if isinstance(meta, dict) else None
 
@@ -1599,9 +1617,9 @@ class MCPClient(BaseModel):
             schema: dict[str, Any] = {
                 "name": mcp_tool.name,
                 "description": mcp_tool.description or "",
-                "inputSchema": mcp_tool.inputSchema if hasattr(mcp_tool, "inputSchema") else {},
+                "inputSchema": _mcp_field(mcp_tool, "inputSchema", "input_schema", default={}),
             }
-            output_schema = getattr(mcp_tool, "outputSchema", None)
+            output_schema = _mcp_field(mcp_tool, "outputSchema", "output_schema")
             if isinstance(output_schema, dict):
                 schema["outputSchema"] = output_schema
             title = getattr(mcp_tool, "title", None)

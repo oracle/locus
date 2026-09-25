@@ -22,9 +22,10 @@ from typing import Any
 
 import pytest
 
+from tests._mcp_deps import require_server_deps
 
-pytest.importorskip("mcp.server.fastmcp")
-pytest.importorskip("uvicorn")
+
+require_server_deps()
 
 from tests.unit.test_mcp_fidelity import (  # noqa: E402
     _free_port,

@@ -10,6 +10,14 @@ jobs:
   build:
     name: "test #${{ matrix.python-version }}"
     runs-on: ubuntu-latest
+    env:
+      # Full-deps job: the MCP loopback-server suites (test_mcp_fidelity.py,
+      # test_mcp_secrets_and_sessions.py) must RUN (real MCP
+      # server on loopback), not skip. With this set a missing mcp/uvicorn
+      # fails collection instead of skipping the module — which is how the
+      # MCP client's real-server tests went silently unrun once pip started
+      # resolving mcp 2.x (no ``mcp.server.fastmcp``).
+      TULIP_REQUIRE_MCP_SERVER_TESTS: "1"
     strategy:
       fail-fast: false
       matrix:
@@ -79,6 +87,24 @@ jobs:
             coverage.xml
             coverage.json
           retention-days: 14
+
+      # ``tulip[mcp]`` accepts ``mcp>=1.0``; the install above resolves the
+      # newest major (2.x). Re-run the MCP client suites against mcp 1.x too
+      # so both majors a user can install stay exercised against a real
+      # server. fastmcp 4 requires mcp 2, hence the paired cap.
+      - name: MCP client against mcp 1.x
+        if: matrix.python-version == '3.13'
+        run: |
+          pip install "mcp>=1.0,<2" "fastmcp>=3.2.0,<4"
+          python -c "import importlib.metadata as m; v = m.version('mcp'); print('mcp', v); assert v.startswith('1.')"
+          pytest -p no:cacheprovider \
+            tests/unit/test_mcp_fidelity.py \
+            tests/unit/test_mcp_secrets_and_sessions.py \
+            tests/unit/test_mcp_client_internals.py \
+            tests/unit/test_integrations_fastmcp.py \
+            tests/unit/test_integrations_fastmcp_full.py \
+            tests/unit/test_fastmcp.py \
+            tests/unit/test_fastmcp_extended.py
 
       - name: Ensure tests did not create stray files
         run: |
