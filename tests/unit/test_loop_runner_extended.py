@@ -291,3 +291,105 @@ class TestCreateRunner:
         )
         assert isinstance(runner, LoopRunner)
         assert runner.timeout == 30.0
+
+
+# ---------------------------------------------------------------------------
+# Timeout must only ever interrupt the loop, never the consumer
+# ---------------------------------------------------------------------------
+
+
+def _term(reason: str = "complete") -> TerminateEvent:
+    return TerminateEvent(
+        reason=reason, iterations_used=0, final_confidence=1.0, total_tool_calls=0
+    )
+
+
+class _ScriptLoop(ReActLoop):
+    """Yields a fixed list of events and records whether it was closed."""
+
+    def __init__(self, events: list[LoopEvent]) -> None:
+        super().__init__(model=MagicMock(), registry=MagicMock())
+        # ReActLoop is a pydantic model; keep test bookkeeping off its fields.
+        object.__setattr__(self, "_track", {"script": events, "closed": False})
+
+    @property
+    def closed(self) -> bool:
+        return bool(self._track["closed"])
+
+    async def run(self, *a: Any, **kw: Any) -> AsyncIterator[LoopEvent]:
+        try:
+            for ev in self._track["script"]:
+                yield ev
+        finally:
+            self._track["closed"] = True
+
+
+class TestTimeoutScope:
+    @pytest.mark.asyncio
+    async def test_slow_consumer_is_not_cancelled_by_the_loop_timeout(self) -> None:
+        # The timer used to stay armed across ``yield``: a consumer still busy
+        # with the terminate event when the deadline passed had its own
+        # ``await`` cancelled with a bare CancelledError.
+        runner = LoopRunner(loop=_ScriptLoop([_term(), _term("extra")]), timeout=0.05)
+        seen: list[str] = []
+        async for ev in runner.run("hi"):
+            assert isinstance(ev, TerminateEvent)
+            seen.append(ev.reason)
+            await asyncio.sleep(0.2)  # outlives the deadline
+        assert seen == ["complete"]
+
+    @pytest.mark.asyncio
+    async def test_inner_loop_is_closed_when_run_stops_on_terminate(self) -> None:
+        loop = _ScriptLoop([_term(), _term("never consumed")])
+        runner = LoopRunner(loop=loop, timeout=5.0)
+        async for _ev in runner.run("hi"):
+            # Checked while ``run`` is still suspended at its yield: the
+            # inner generator is still open here...
+            assert loop.closed is False
+        # ...and closed deterministically once ``run`` breaks, not at GC.
+        assert loop.closed is True
+
+    @pytest.mark.asyncio
+    async def test_loop_ending_without_terminate_under_timeout(self) -> None:
+        think = ThinkEvent(iteration=1, reasoning="r")
+        loop = _ScriptLoop([think])
+        runner = LoopRunner(loop=loop, timeout=5.0)
+        events = [ev async for ev in runner.run("hi")]
+        assert events == [think]
+        assert loop.closed is True
+
+    @pytest.mark.asyncio
+    async def test_loop_ending_without_terminate_no_timeout(self) -> None:
+        think = ThinkEvent(iteration=1, reasoning="r")
+        loop = _ScriptLoop([think])
+        runner = LoopRunner(loop=loop)
+        events = [ev async for ev in runner.run("hi")]
+        assert events == [think]
+        assert loop.closed is True
+
+    @pytest.mark.asyncio
+    async def test_plain_async_iterator_without_aclose(self) -> None:
+        # ``ReActLoop.run`` is typed as an AsyncIterator, not a generator; an
+        # override returning one without ``aclose`` must still work.
+        class _Iter:
+            def __init__(self) -> None:
+                self._items = [_term()]
+
+            def __aiter__(self) -> _Iter:
+                return self
+
+            async def __anext__(self) -> LoopEvent:
+                if not self._items:
+                    raise StopAsyncIteration
+                return self._items.pop(0)
+
+        class _IterLoop(ReActLoop):
+            def __init__(self) -> None:
+                super().__init__(model=MagicMock(), registry=MagicMock())
+
+            def run(self, *a: Any, **kw: Any) -> AsyncIterator[LoopEvent]:  # type: ignore[override]
+                return _Iter()
+
+        runner = LoopRunner(loop=_IterLoop(), timeout=5.0)
+        events = [ev async for ev in runner.run("hi")]
+        assert [e.reason for e in events if isinstance(e, TerminateEvent)] == ["complete"]

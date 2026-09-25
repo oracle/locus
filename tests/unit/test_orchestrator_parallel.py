@@ -15,13 +15,70 @@ isolation so one failure can't drop the whole batch.
 from __future__ import annotations
 
 import asyncio
-import time
 from typing import Any
 
 import pytest
 
 from tulip.multiagent.orchestrator import Orchestrator, RoutingDecision
 from tulip.multiagent.specialist import Specialist, SpecialistResult
+
+
+class _Overlap:
+    """Tracks how many ``execute`` bodies run at once, across all specialists.
+
+    Parallelism is asserted structurally instead of by wall-clock (a loaded CI
+    runner makes any millisecond threshold flaky): with ``parties`` set, each
+    body parks until that many are in flight together — reachable only when
+    they really run concurrently — and times out with a clear message
+    otherwise.
+    """
+
+    parties = 0
+    arrived = 0
+    in_flight = 0
+    peak = 0
+    broken = False
+    gate: asyncio.Event | None = None
+
+    @classmethod
+    def reset(cls, parties: int = 0) -> None:
+        cls.parties = parties
+        cls.arrived = cls.in_flight = cls.peak = 0
+        cls.broken = False
+        cls.gate = asyncio.Event() if parties else None
+
+    @classmethod
+    async def enter(cls) -> None:
+        cls.in_flight += 1
+        cls.peak = max(cls.peak, cls.in_flight)
+        if cls.gate is None:
+            # No barrier: just yield so an overlapping sibling would get in.
+            for _ in range(5):
+                await asyncio.sleep(0)
+            return
+        if cls.broken:
+            raise RuntimeError("barrier broken by an earlier timeout")
+        cls.arrived += 1
+        if cls.arrived >= cls.parties:
+            cls.gate.set()
+        try:
+            await asyncio.wait_for(cls.gate.wait(), 10.0)
+        except TimeoutError:
+            cls.broken = True
+            raise RuntimeError(
+                f"only {cls.arrived}/{cls.parties} specialists ever ran together"
+            ) from None
+
+    @classmethod
+    def leave(cls) -> None:
+        cls.in_flight -= 1
+
+
+@pytest.fixture(autouse=True)
+def _reset_overlap() -> Any:
+    _Overlap.reset()
+    yield
+    _Overlap.reset()
 
 
 class _SleepingSpec(Specialist):
@@ -36,7 +93,11 @@ class _SleepingSpec(Specialist):
     async def execute(
         self, *, task: str, context: dict[str, Any] | None = None
     ) -> SpecialistResult:
-        await asyncio.sleep(self.sleep_ms / 1000.0)
+        await _Overlap.enter()
+        try:
+            await asyncio.sleep(self.sleep_ms / 1000.0)
+        finally:
+            _Overlap.leave()
         self._calls += 1
         if self.fail_with:
             msg = self.fail_with
@@ -61,7 +122,7 @@ def _orch(specs: list[Specialist], *, max_parallel: int = 5) -> Orchestrator:
 
 @pytest.mark.asyncio
 async def test_specialists_run_in_parallel() -> None:
-    # Three specialists each sleep 50ms; serial would take ≥150ms, parallel ≤100ms.
+    # All three must be in flight at once for the barrier to open.
     a = _SleepingSpec(
         id="a", name="A", specialist_type="alpha", description="d", system_prompt="d", sleep_ms=50
     )
@@ -77,17 +138,15 @@ async def test_specialists_run_in_parallel() -> None:
         sleep_ms=50,
     )
     o = _orch([a, b, c], max_parallel=3)
+    _Overlap.reset(parties=3)
 
-    t0 = time.perf_counter()
     results = await o._invoke_specialists(
         "task", RoutingDecision(decision_type="invoke", specialists=["a", "b", "c"])
     )
-    elapsed_ms = (time.perf_counter() - t0) * 1000
 
     assert set(results) == {"a", "b", "c"}
-    assert all(r.output for r in results.values())
-    # Parallel target: ~50ms. Serial would be 150ms. Buffer for CI noise.
-    assert elapsed_ms < 130, f"parallel run took {elapsed_ms:.0f}ms — looks serial"
+    assert all(r.output for r in results.values()), results
+    assert _Overlap.peak == 3
 
 
 @pytest.mark.asyncio
@@ -101,13 +160,11 @@ async def test_max_parallel_one_is_serial() -> None:
         id="b", name="B", specialist_type="beta", description="d", system_prompt="d", sleep_ms=40
     )
     o = _orch([a, b], max_parallel=1)
-    t0 = time.perf_counter()
-    await o._invoke_specialists(
+    results = await o._invoke_specialists(
         "task", RoutingDecision(decision_type="invoke", specialists=["a", "b"])
     )
-    elapsed_ms = (time.perf_counter() - t0) * 1000
-    # Serialised: ~80ms. Parallel would be ~40ms.
-    assert elapsed_ms >= 70, f"max_parallel=1 ran in {elapsed_ms:.0f}ms — looks parallel"
+    assert all(r.output for r in results.values()), results
+    assert _Overlap.peak == 1, f"{_Overlap.peak} specialists overlapped with max_parallel=1"
 
 
 @pytest.mark.asyncio

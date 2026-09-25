@@ -6,7 +6,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Callable
+import contextlib
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field, PrivateAttr
@@ -19,6 +20,10 @@ from tulip.loop.react import ReActLoop, ReActLoopConfig
 if TYPE_CHECKING:
     from tulip.core.protocols import ModelProtocol
     from tulip.tools.registry import ToolRegistry
+
+
+async def _no_aclose() -> None:
+    """Stand-in ``aclose`` for a loop that returns a plain async iterator."""
 
 
 class LoopRunner(BaseModel):
@@ -73,18 +78,24 @@ class LoopRunner(BaseModel):
 
         while True:
             try:
-                async for event in self._run_with_timeout(prompt, initial_state, **state_kwargs):
-                    self._events.append(event)
+                # ``aclosing``: the ``break`` on the terminate event must
+                # finalize the inner generator now, in this task — not
+                # whenever the garbage collector gets to it.
+                async with contextlib.aclosing(
+                    self._run_with_timeout(prompt, initial_state, **state_kwargs)
+                ) as events:
+                    async for event in events:
+                        self._events.append(event)
 
-                    # Call event callback
-                    if self.on_event:
-                        self.on_event(event)
+                        # Call event callback
+                        if self.on_event:
+                            self.on_event(event)
 
-                    yield event
+                        yield event
 
-                    # Track final state from terminate event
-                    if isinstance(event, TerminateEvent):
-                        break
+                        # Track final state from terminate event
+                        if isinstance(event, TerminateEvent):
+                            break
 
                 # Success - exit retry loop
                 break
@@ -112,23 +123,43 @@ class LoopRunner(BaseModel):
         prompt: str,
         initial_state: AgentState | None,
         **state_kwargs: Any,
-    ) -> AsyncIterator[LoopEvent]:
-        """Run the loop with optional timeout."""
-        if self.timeout is None:
-            async for event in self.loop.run(prompt, initial_state, **state_kwargs):
+    ) -> AsyncGenerator[LoopEvent, None]:
+        """Run the loop with optional timeout.
+
+        The timeout is a deadline for the whole run, but it is only *enforced
+        while the loop itself is executing* — never across a ``yield``. The
+        previous form held one ``asyncio.timeout`` open around the ``async
+        for`` and its ``yield``; the timer belongs to the consumer's task, so
+        when it fired while the consumer was busy with an event (or after the
+        consumer had stopped iterating on the terminate event, leaving this
+        generator suspended) it cancelled the *consumer's* unrelated await
+        with a bare ``CancelledError``.
+        """
+        events = self.loop.run(prompt, initial_state, **state_kwargs)
+        # ``timeout_at(None)`` never fires, so one loop serves both cases.
+        deadline = (
+            None if self.timeout is None else asyncio.get_running_loop().time() + self.timeout
+        )
+        try:
+            while True:
+                try:
+                    async with asyncio.timeout_at(deadline):
+                        event = await anext(events)
+                except StopAsyncIteration:
+                    return
+                except TimeoutError:
+                    break
                 yield event
-        else:
-            try:
-                async with asyncio.timeout(self.timeout):
-                    async for event in self.loop.run(prompt, initial_state, **state_kwargs):
-                        yield event
-            except TimeoutError:
-                yield TerminateEvent(
-                    reason="timeout",
-                    iterations_used=0,
-                    final_confidence=0.0,
-                    total_tool_calls=0,
-                )
+            yield TerminateEvent(
+                reason="timeout",
+                iterations_used=0,
+                final_confidence=0.0,
+                total_tool_calls=0,
+            )
+        finally:
+            # ``run`` is typed as an ``AsyncIterator``; close it when it is a
+            # generator so an abandoned loop does not linger until GC.
+            await getattr(events, "aclose", _no_aclose)()
 
     async def run_to_completion(
         self,
