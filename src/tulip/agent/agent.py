@@ -169,6 +169,11 @@ class Agent(AgentRuntimeMixin, BaseModel):
     # MCP tools are attached from the first run() (connecting is async);
     # this keeps that a one-time step rather than a per-run round trip.
     _mcp_attached: bool = PrivateAttr(default=False)
+    # Per-server attach bookkeeping: ids of attached clients, and when a
+    # failed one may be retried (a server down at the first run attaches on
+    # a later run instead of never).
+    _mcp_attached_ids: set[int] = PrivateAttr(default_factory=set)
+    _mcp_retry_at: dict[int, float] = PrivateAttr(default_factory=dict)
 
     def __init__(
         self,

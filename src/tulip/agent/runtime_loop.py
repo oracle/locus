@@ -23,6 +23,8 @@ moved methods.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import contextvars
 import functools
 import logging
 import threading
@@ -43,6 +45,7 @@ from tulip.core.events import (
     TerminateEvent,
     ThinkEvent,
     ToolCompleteEvent,
+    ToolProgressEvent,
     ToolStartEvent,
     TulipEvent,
 )
@@ -50,6 +53,7 @@ from tulip.core.media import strip_images, text_length
 from tulip.core.messages import Message, Role, ToolCall, ToolResult
 from tulip.core.state import AgentState, ReasoningStep, ToolExecution
 from tulip.models.base import ModelResponse
+from tulip.tools.context import _progress_sink
 from tulip.tools.executor import ToolContextFactory, ToolExecutor
 from tulip.tools.registry import ToolRegistry
 
@@ -86,13 +90,100 @@ def _apply_hook_result(result: ToolResult, after_tool_event: Any) -> ToolResult:
         import json  # noqa: PLC0415
 
         replacement = json.dumps(replacement, default=str)
-    return ToolResult(
-        tool_call_id=result.tool_call_id,
-        name=result.name,
-        content=replacement,
-        error=result.error,
-        duration_ms=result.duration_ms,
-    )
+    return result.model_copy(update={"content": replacement})
+
+
+def _complete_event(tool_result: ToolResult, /, **overrides: Any) -> ToolCompleteEvent:
+    """The ``ToolCompleteEvent`` for a result, structured extras included."""
+    fields: dict[str, Any] = {
+        "tool_name": tool_result.name,
+        "tool_call_id": tool_result.tool_call_id,
+        "result": tool_result.content if tool_result.success else None,
+        "error": tool_result.error,
+        "duration_ms": tool_result.duration_ms,
+        "structured_content": tool_result.structured_content,
+        "content_blocks": tool_result.content_blocks,
+    }
+    fields.update(overrides)
+    return ToolCompleteEvent(**fields)
+
+
+_EXHAUSTED: Any = object()
+
+
+async def _interleave_progress(
+    stream: AsyncIterator[tuple[int, ToolResult]],
+    sink: asyncio.Queue[ToolProgressEvent],
+) -> AsyncIterator[tuple[int, ToolResult] | ToolProgressEvent]:
+    """Merge an executor's result stream with progress reported meanwhile.
+
+    The loop is otherwise parked on the executor for the whole batch, so
+    progress a tool reports would reach the consumer only after the tool had
+    finished — which is no progress at all. Each pull from ``stream`` runs as
+    its own task, raced against the progress queue. A tool's progress is
+    always yielded before its result. Closing this generator cancels the
+    pending pull (and with it the executor's in-flight tools) and closes
+    ``stream``.
+    """
+    loop = asyncio.get_running_loop()
+
+    def _deliver(event: ToolProgressEvent) -> None:
+        # Sync tools report from a worker thread; the queue is loop-bound.
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+        if running is loop:
+            sink.put_nowait(event)
+        else:
+            loop.call_soon_threadsafe(sink.put_nowait, event)
+
+    # One context for every pull: the executor generator must see the same
+    # context variables on each step, and they must include the sink.
+    context = contextvars.copy_context()
+    context.run(_progress_sink.set, _deliver)
+    iterator = stream.__aiter__()
+    pull: asyncio.Future[Any] | None = None
+    getter: asyncio.Future[Any] | None = None
+    try:
+        while True:
+            if pull is None:
+                pull = loop.create_task(_anext_or_stop(iterator), context=context)
+            if getter is None:
+                getter = asyncio.ensure_future(sink.get())
+            await asyncio.wait({pull, getter}, return_when=asyncio.FIRST_COMPLETED)
+            if getter.done():
+                event = getter.result()
+                getter = None
+                yield event
+                continue
+            item = pull.result()
+            pull = None
+            # Progress queued in the same tick as the result still comes first.
+            while not sink.empty():
+                yield sink.get_nowait()
+            if item is _EXHAUSTED:
+                break
+            yield item
+        while not sink.empty():
+            yield sink.get_nowait()
+    finally:
+        for pending in (pull, getter):
+            if pending is not None and not pending.done():
+                pending.cancel()
+                await asyncio.gather(pending, return_exceptions=True)
+        aclose = getattr(iterator, "aclose", None)
+        if aclose is not None:
+            await aclose()
+
+
+async def _anext_or_stop(iterator: AsyncIterator[Any]) -> Any:
+    """``anext`` that returns a sentinel at exhaustion (a Task cannot raise
+    ``StopAsyncIteration`` cleanly)."""
+    try:
+        return await iterator.__anext__()
+    except StopAsyncIteration:
+        return _EXHAUSTED
 
 
 if TYPE_CHECKING:
@@ -237,6 +328,9 @@ class AgentRuntimeMixin:
         _runs_lock: threading.Lock
         _cancel_signal: threading.Event | None
         _initialized: bool
+        _mcp_attached: bool
+        _mcp_attached_ids: set[int]
+        _mcp_retry_at: dict[int, float]
 
         @property
         def is_cancelled(self) -> bool: ...
@@ -295,39 +389,74 @@ class AgentRuntimeMixin:
             metadata=rc.metadata,
         )
 
-    async def _attach_mcp_tools(self) -> None:
-        """Attach the tools of every configured MCP server, once.
+    def _emits_progress(self, calls: list[ToolCall]) -> bool:
+        """Whether any tool in the batch streams progress (``emits_progress``)."""
+        for call in calls:
+            tool_obj = self._tool_registry.get(call.name)
+            if getattr(tool_obj, "emits_progress", False) is True:
+                return True
+        return False
+
+    async def _attach_mcp_tools(self, metadata: dict[str, Any] | None = None) -> None:
+        """Attach the tools of every configured MCP server.
 
         ``AgentConfig.mcp_servers`` holds clients rather than URLs because
-        connecting is async and ``Agent.__init__`` is not. This runs from the
-        first ``run()``, where there is a loop to await on, and is a no-op on
-        every later call.
+        connecting is async and ``Agent.__init__`` is not. This runs from
+        ``run()``, where there is a loop to await on. A server attaches once;
+        later runs skip it.
 
         A server that cannot be reached does not take the whole run down: the
         failure is logged and the agent proceeds with the tools it does have.
         The alternative — refusing to answer at all because an optional tool
         source is down — is the worse default for something wired in as an
-        enhancement.
+        enhancement. The server is retried on a later run, at most every
+        ``client.reconnect_interval`` seconds (default 30), so a server that
+        was down for the first run is not lost for the agent's lifetime.
+
+        ``metadata`` is the run's metadata, which a client's per-run headers
+        (``MCPClient.headers_provider``) may need for the ``tools/list``.
         """
         servers = getattr(self.config, "mcp_servers", None)
         if not servers or getattr(self, "_mcp_attached", False):
             return
-        self._mcp_attached = True
+        attached: set[int] = self._mcp_attached_ids
+        retry_at: dict[int, float] = self._mcp_retry_at
+        now = time.monotonic()
 
         for client in servers:
-            name = type(client).__name__
+            key = id(client)
+            if key in attached or now < retry_at.get(key, 0.0):
+                continue
+            name = getattr(client, "label", None) or type(client).__name__
             try:
-                if not getattr(client, "_connected", True):
-                    await client.connect()
-                schemas = await client.list_tools()
-                tools = client.to_tulip_tools(schemas)
+                loader = getattr(client, "load_tools", None)
+                if callable(loader):
+                    tools = await loader(metadata=metadata)
+                else:
+                    if not getattr(client, "_connected", True):
+                        await client.connect()
+                    schemas = await client.list_tools()
+                    tools = client.to_tulip_tools(schemas)
+            except asyncio.CancelledError:
+                # A transport's anyio cancel scope can leak a CancelledError
+                # that is not a cancellation of this run. Only a pending
+                # cancel request on *this* task means the run is cancelled.
+                task = asyncio.current_task()
+                if task is not None and task.cancelling() > 0:
+                    raise
+                logger.warning("MCP server %s unavailable (connection cancelled); skipping", name)
+                retry_at[key] = now + float(getattr(client, "reconnect_interval", 30.0))
+                continue
             except Exception:  # noqa: BLE001 - see below
                 # Intentionally broad: a server can fail as a connection
                 # error, a protocol error, a timeout, or a malformed
                 # schema, and none of those should decide whether the
                 # agent answers at all.
                 logger.warning("MCP server %s unavailable; skipping", name, exc_info=True)
+                retry_at[key] = now + float(getattr(client, "reconnect_interval", 30.0))
                 continue
+            attached.add(key)
+            retry_at.pop(key, None)
             if tools:
                 self.add_tools(tools)
                 logger.info(
@@ -336,6 +465,7 @@ class AgentRuntimeMixin:
                     name,
                     ", ".join(t.name for t in tools),
                 )
+        self._mcp_attached = all(id(client) in attached for client in servers)
 
     @_bus_bridge
     async def run(
@@ -369,7 +499,7 @@ class AgentRuntimeMixin:
             TulipEvent instances for each step
         """
         self._initialize()
-        await self._attach_mcp_tools()
+        await self._attach_mcp_tools(metadata)
 
         # Claim the enclosing ``arun``'s result slot before any await that
         # could let a nested run of this agent start in the same context.
@@ -965,12 +1095,25 @@ class AgentRuntimeMixin:
                     )
                     batch_start = time.perf_counter()
                     interrupted_slot_idx: int | None = None
+                    results_stream = self._executor.execute_streaming(
+                        to_execute_calls,
+                        self._tool_registry,
+                        ctx_factory,
+                    )
+                    # Tools that report progress (every MCP tool) need the
+                    # stream merged with their progress, or it would arrive
+                    # only once they had finished.
+                    merged: AsyncIterator[tuple[int, ToolResult] | ToolProgressEvent] = (
+                        _interleave_progress(results_stream, asyncio.Queue())
+                        if self._emits_progress(to_execute_calls)
+                        else results_stream
+                    )
                     try:
-                        async for input_idx, batched_result in self._executor.execute_streaming(
-                            to_execute_calls,
-                            self._tool_registry,
-                            ctx_factory,
-                        ):
+                        async for item in merged:
+                            if isinstance(item, ToolProgressEvent):
+                                yield item
+                                continue
+                            input_idx, batched_result = item
                             slot_idx = to_execute_indices[input_idx]
                             slots[slot_idx]["result"] = batched_result
 
@@ -979,15 +1122,7 @@ class AgentRuntimeMixin:
                                 # tool finishes. Phase 3 will skip its own
                                 # ToolCompleteEvent emission for execute-kind
                                 # slots when in completion mode.
-                                yield ToolCompleteEvent(
-                                    tool_name=batched_result.name,
-                                    tool_call_id=batched_result.tool_call_id,
-                                    result=(
-                                        batched_result.content if batched_result.success else None
-                                    ),
-                                    error=batched_result.error,
-                                    duration_ms=batched_result.duration_ms,
-                                )
+                                yield _complete_event(batched_result)
 
                             # Interrupt detection — break to trigger the
                             # executor's cancellation of in-flight siblings.
@@ -1011,6 +1146,13 @@ class AgentRuntimeMixin:
                                     error=str(e),
                                     duration_ms=batch_duration,
                                 )
+                    finally:
+                        if merged is not results_stream:
+                            # Cancels a pull still in flight after an
+                            # interrupt ``break`` — the in-flight siblings
+                            # with it — and closes the executor stream.
+                            with contextlib.suppress(Exception):
+                                await merged.aclose()  # type: ignore[attr-defined]
 
                     # Synthesize "cancelled by sibling interrupt" results
                     # for slots whose tasks were cancelled (the interrupt
@@ -1079,12 +1221,12 @@ class AgentRuntimeMixin:
                         # for this call's id.
                         ref_slot = slots[slot["ref_slot"]]
                         ref_result: ToolResult = ref_slot["result"]
-                        result = ToolResult(
-                            tool_call_id=tool_call.id,
-                            name=tool_call.name,
-                            content=ref_result.content,
-                            error=ref_result.error,
-                            duration_ms=0.0,
+                        result = ref_result.model_copy(
+                            update={
+                                "tool_call_id": tool_call.id,
+                                "name": tool_call.name,
+                                "duration_ms": 0.0,
+                            }
                         )
                         batch_cache_execution = ToolExecution(
                             tool_name=result.name,
@@ -1098,13 +1240,7 @@ class AgentRuntimeMixin:
                         tool_results.append(result)
                         state = state.with_tool_execution(batch_cache_execution)
                         reasoning_step_tools.append(batch_cache_execution)
-                        yield ToolCompleteEvent(
-                            tool_name=result.name,
-                            tool_call_id=result.tool_call_id,
-                            result=result.content,
-                            error=result.error,
-                            duration_ms=0.0,
-                        )
+                        yield _complete_event(result, result=result.content, duration_ms=0.0)
                         continue
 
                     # Interrupt marker from ``ask_user``. Sibling calls in
@@ -1160,15 +1296,13 @@ class AgentRuntimeMixin:
                             # corrupt base64, so images go before the cut.
                             text = strip_images(result.content)
                             original_len = len(text)
-                            result = ToolResult(
-                                tool_call_id=result.tool_call_id,
-                                name=result.name,
-                                content=(
-                                    text[: self.config.max_tool_result_length]
-                                    + f"\n[OUTPUT TRUNCATED — original: {original_len} chars]"
-                                ),
-                                error=result.error,
-                                duration_ms=result.duration_ms,
+                            result = result.model_copy(
+                                update={
+                                    "content": (
+                                        text[: self.config.max_tool_result_length]
+                                        + f"\n[OUTPUT TRUNCATED — original: {original_len} chars]"
+                                    )
+                                }
                             )
 
                     # After-hooks run BEFORE the result is folded into state
@@ -1240,13 +1374,7 @@ class AgentRuntimeMixin:
                     # still emits here so consumers see events in
                     # tool_call order, carrying the post-hook result.
                     if self.config.tool_event_order == "sequential":
-                        yield ToolCompleteEvent(
-                            tool_name=result.name,
-                            tool_call_id=result.tool_call_id,
-                            result=result.content if result.success else None,
-                            error=result.error,
-                            duration_ms=result.duration_ms,
-                        )
+                        yield _complete_event(result)
                     # UI-only events the after-hook emitted, right behind the
                     # call they describe. Never folded into state/messages.
                     for custom in hook_events:
