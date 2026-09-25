@@ -47,6 +47,7 @@ unchanged.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from collections.abc import AsyncIterator, Callable
 from typing import TYPE_CHECKING, Any
@@ -136,7 +137,7 @@ class CredentialPoolModel:
             self.last_credential = cred
             try:
                 return await model.complete(messages, tools, **kwargs)  # type: ignore[no-any-return]
-            except BaseException as exc:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 — classified; non-rotating errors re-raise
                 last_exc = exc
                 decision = classify(exc)
                 if not decision.should_rotate_credential:
@@ -153,13 +154,16 @@ class CredentialPoolModel:
         tools: list[dict[str, Any]] | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[Any]:
-        """Stream from the active credential's model, rotating only on the
-        opening exception.
+        """Stream from the active credential's model, rotating on failures
+        that happen before the first chunk.
 
-        Mid-stream errors propagate to the caller because a partial
-        stream cannot safely be retried on a different credential —
-        the model has already started emitting tokens that the agent
-        may have surfaced to the user.
+        An async-generator ``stream()`` raises nothing when called — its
+        errors (a 429 on the opening request included) surface on the first
+        iteration — so rotation is decided there: a rotatable error before
+        any chunk has been yielded moves on to the next credential. After the
+        first chunk, errors propagate: the agent may already have shown the
+        user those tokens, and splicing another credential's reply onto them
+        would produce text no single call wrote.
         """
         last_exc: BaseException | None = None
         for _ in range(self._max_attempts):
@@ -167,20 +171,27 @@ class CredentialPoolModel:
             model = self._get_model(cred)
             self.attempts += 1
             self.last_credential = cred
+            yielded = False
+            iterator: Any = None
             try:
-                stream = model.stream(messages, tools, **kwargs)
-            except BaseException as exc:  # noqa: BLE001
+                iterator = model.stream(messages, tools, **kwargs).__aiter__()
+                async for chunk in iterator:
+                    yielded = True
+                    yield chunk
+                return
+            except Exception as exc:  # noqa: BLE001 — classified; non-rotating errors re-raise
+                if yielded:
+                    raise
                 last_exc = exc
                 decision = classify(exc)
                 if not decision.should_rotate_credential:
                     raise
                 self._mark_bad(cred, exc)
-                continue
-            # Got past the opening — yield through. If the underlying
-            # iterator raises mid-stream, that propagates.
-            async for chunk in stream:
-                yield chunk
-            return
+            finally:
+                aclose = getattr(iterator, "aclose", None)
+                if aclose is not None:
+                    with contextlib.suppress(Exception):
+                        await aclose()
         assert last_exc is not None
         raise last_exc
 

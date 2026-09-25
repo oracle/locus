@@ -15,7 +15,8 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, Field, PrivateAttr
 
 from tulip.core.messages import ToolCall, ToolResult
-from tulip.tools.context import ToolContext
+from tulip.tools.context import ToolContext, bind_tool_context
+from tulip.tools.output import ToolOutput
 
 
 def find_matching_execution(state: Any, tool_name: str, arguments: dict[str, Any]) -> Any | None:
@@ -184,6 +185,55 @@ def _sanitize_error(error: str) -> str:
     return redact_sensitive_text(first_line)
 
 
+def tool_result_from_output(tool_call: ToolCall, output: Any, duration_ms: float) -> ToolResult:
+    """Build the :class:`ToolResult` for a value a tool returned.
+
+    A :class:`~tulip.tools.output.ToolOutput` keeps its structured content and
+    content blocks; one flagged ``is_error`` becomes the call's error, so the
+    model is told the call failed (``Message.tool`` renders ``Error: …``) and
+    ``ToolCompleteEvent.error`` is set — a tool that *returns* a failure is
+    reported exactly like one that raises.
+    """
+    if isinstance(output, ToolOutput):
+        text = output.text
+        if output.is_error:
+            return ToolResult(
+                tool_call_id=tool_call.id,
+                name=tool_call.name,
+                content="",
+                error=text or "The tool reported an error without a message.",
+                duration_ms=duration_ms,
+                structured_content=output.structured_content,
+                content_blocks=output.content_blocks,
+            )
+        return ToolResult(
+            tool_call_id=tool_call.id,
+            name=tool_call.name,
+            content=text,
+            duration_ms=duration_ms,
+            structured_content=output.structured_content,
+            content_blocks=output.content_blocks,
+        )
+    return ToolResult(
+        tool_call_id=tool_call.id,
+        name=tool_call.name,
+        content=output,
+        duration_ms=duration_ms,
+    )
+
+
+def _bound_context(
+    tool_call: ToolCall, ctx_factory: ToolContextFactory | None
+) -> tuple[ToolContext | None, ToolContext]:
+    """The ``ctx`` to inject (None without a factory) and the one to bind."""
+    if ctx_factory:
+        ctx = ctx_factory.create(tool_call, tool_call.name)
+        return ctx, ctx
+    return None, ToolContext(
+        tool_call_id=tool_call.id, tool_name=tool_call.name, run_id="", iteration=0
+    )
+
+
 if TYPE_CHECKING:
     from tulip.tools.registry import ToolRegistry
 
@@ -336,22 +386,17 @@ class SequentialExecutor(ToolExecutor):
                     error=f"Unknown tool: {tool_call.name}",
                 )
 
-            # Create context if factory provided
-            ctx = None
-            if ctx_factory:
-                ctx = ctx_factory.create(tool_call, tool_call.name)
+            # Create context if factory provided; bind it either way so code
+            # the tool calls (an MCP client) can see which call it serves.
+            ctx, bound = _bound_context(tool_call, ctx_factory)
 
             # Execute
-            result = await tool.execute(ctx=ctx, **tool_call.arguments)
+            with bind_tool_context(bound):
+                result = await tool.execute(ctx=ctx, **tool_call.arguments)
 
             duration = (time.perf_counter() - start) * 1000
 
-            return ToolResult(
-                tool_call_id=tool_call.id,
-                name=tool_call.name,
-                content=result,
-                duration_ms=duration,
-            )
+            return tool_result_from_output(tool_call, result, duration)
 
         except Exception as e:  # noqa: BLE001
             duration = (time.perf_counter() - start) * 1000
@@ -475,20 +520,14 @@ class ConcurrentExecutor(ToolExecutor):
                     error=f"Unknown tool: {tool_call.name}",
                 )
 
-            ctx = None
-            if ctx_factory:
-                ctx = ctx_factory.create(tool_call, tool_call.name)
+            ctx, bound = _bound_context(tool_call, ctx_factory)
 
-            result = await tool.execute(ctx=ctx, **tool_call.arguments)
+            with bind_tool_context(bound):
+                result = await tool.execute(ctx=ctx, **tool_call.arguments)
 
             duration = (time.perf_counter() - start) * 1000
 
-            return ToolResult(
-                tool_call_id=tool_call.id,
-                name=tool_call.name,
-                content=result,
-                duration_ms=duration,
-            )
+            return tool_result_from_output(tool_call, result, duration)
 
         except Exception as e:  # noqa: BLE001
             duration = (time.perf_counter() - start) * 1000

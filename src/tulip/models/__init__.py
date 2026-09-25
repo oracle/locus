@@ -18,6 +18,14 @@ Usage:
     # String factory — "provider:model"
     from tulip.models import get_model
     model = get_model("anthropic:claude-sonnet-4-6")
+
+Provider failover — ``FallbackChain`` (see :mod:`tulip.models.fallback`)::
+
+    from tulip.models import FallbackChain
+
+    model = FallbackChain(
+        [get_model("anthropic:claude-sonnet-4-6"), get_model("openai:gpt-4o")]
+    )
 """
 
 from tulip.models.base import (
@@ -42,6 +50,9 @@ __all__ = [
     "get_model",
     "list_providers",
     "register_provider",
+    # Failover (lazy imports)
+    "CircuitBreaker",
+    "FallbackChain",
     # Native providers (lazy imports)
     "OpenAIModel",
     "OpenAIConfig",
@@ -52,6 +63,11 @@ __all__ = [
 
 def __getattr__(name: str) -> object:
     """Lazy import providers to avoid requiring all dependencies."""
+    if name in ("FallbackChain", "CircuitBreaker"):
+        from tulip.models import fallback
+
+        return getattr(fallback, name)
+
     if name in ("OpenAIModel", "OpenAIConfig"):
         from tulip.models.native.openai import OpenAIConfig, OpenAIModel
 

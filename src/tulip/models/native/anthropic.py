@@ -78,6 +78,25 @@ def _rejects_temperature(model_id: str) -> bool:
     return any(model_id.startswith(p) for p in _TEMPERATURE_DEPRECATED_PREFIXES)
 
 
+def _usage_dict(usage: Any) -> dict[str, int]:
+    """Token usage in Tulip's keys, prompt-cache counters included.
+
+    Anthropic reports the cache counters only when prompt caching is in play;
+    surfacing them lets ``AgentResult.metrics`` show cache hits and savings.
+    """
+    out = {
+        "prompt_tokens": usage.input_tokens,
+        "completion_tokens": usage.output_tokens,
+    }
+    cache_creation = getattr(usage, "cache_creation_input_tokens", None)
+    cache_read = getattr(usage, "cache_read_input_tokens", None)
+    if isinstance(cache_creation, int):
+        out["cache_creation_input_tokens"] = cache_creation
+    if isinstance(cache_read, int):
+        out["cache_read_input_tokens"] = cache_read
+    return out
+
+
 class AnthropicConfig(ModelConfig):
     """Configuration for Anthropic models."""
 
@@ -335,24 +354,20 @@ class AnthropicModel(BaseModel):
             "input_schema": schema or {"type": "object", "properties": {}},
         }
 
-    async def complete(
+    def _request_params(
         self,
         messages: list[Message],
-        tools: list[dict[str, Any]] | None = None,
-        **kwargs: Any,
-    ) -> ModelResponse:
-        """Complete a chat request.
+        tools: list[dict[str, Any]] | None,
+        kwargs: dict[str, Any],
+    ) -> tuple[dict[str, Any], bool]:
+        """The Messages API request for a call, and whether it is structured.
 
-        Recognises an OpenAI-style ``response_format={"type": "json_schema", ...}``
-        kwarg and translates it into Anthropic's tool-use mechanism: a synthetic
-        ``respond_with_schema`` tool is appended to the call and ``tool_choice``
-        is pinned to it. The tool arguments are then surfaced as the message
-        content (canonical JSON) so callers can parse them with
-        :func:`tulip.core.structured.parse_structured` exactly as they would
-        with native ``response_format`` providers.
+        Shared by :meth:`complete` and :meth:`stream` so the two cannot
+        drift: ``stream()`` used to build its own, and silently dropped
+        ``temperature``, prompt caching (system prompt and tool catalog) and
+        ``response_format`` — a streaming agent paid full price for every
+        cached turn and ran at the server's default temperature.
         """
-        import json as _json
-
         system_prompt, anthropic_messages = self._convert_messages(messages)
         anthropic_tools = self._convert_tools(tools) or []
 
@@ -422,6 +437,27 @@ class AnthropicModel(BaseModel):
         if beta_headers:
             params["extra_headers"] = beta_headers
 
+        return params, structured_mode
+
+    async def complete(
+        self,
+        messages: list[Message],
+        tools: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> ModelResponse:
+        """Complete a chat request.
+
+        Recognises an OpenAI-style ``response_format={"type": "json_schema", ...}``
+        kwarg and translates it into Anthropic's tool-use mechanism: a synthetic
+        ``respond_with_schema`` tool is appended to the call and ``tool_choice``
+        is pinned to it. The tool arguments are then surfaced as the message
+        content (canonical JSON) so callers can parse them with
+        :func:`tulip.core.structured.parse_structured` exactly as they would
+        with native ``response_format`` providers.
+        """
+        import json as _json
+
+        params, structured_mode = self._request_params(messages, tools, kwargs)
         response = await self.client.messages.create(**params)
 
         # Parse response
@@ -449,21 +485,7 @@ class AnthropicModel(BaseModel):
         if structured_mode and structured_payload is not None:
             content = _json.dumps(structured_payload)
 
-        usage: dict[str, int] = {}
-        if response.usage:
-            usage = {
-                "prompt_tokens": response.usage.input_tokens,
-                "completion_tokens": response.usage.output_tokens,
-            }
-            # Anthropic returns these only when prompt caching is in play.
-            # Surface them on usage so AgentResult.metrics can show
-            # cache hits/misses and cost-saved estimates.
-            cache_creation = getattr(response.usage, "cache_creation_input_tokens", None)
-            cache_read = getattr(response.usage, "cache_read_input_tokens", None)
-            if cache_creation is not None:
-                usage["cache_creation_input_tokens"] = cache_creation
-            if cache_read is not None:
-                usage["cache_read_input_tokens"] = cache_read
+        usage: dict[str, int] = _usage_dict(response.usage) if response.usage else {}
 
         return ModelResponse(
             message=Message.assistant(content=content, tool_calls=tool_calls),
@@ -477,22 +499,15 @@ class AnthropicModel(BaseModel):
         tools: list[dict[str, Any]] | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[ModelChunkEvent]:
-        """Stream a chat response."""
-        system_prompt, anthropic_messages = self._convert_messages(messages)
-        anthropic_tools = self._convert_tools(tools)
+        """Stream a chat response.
 
-        params: dict[str, Any] = {
-            "model": self.config.model,
-            "messages": anthropic_messages,
-            "max_tokens": kwargs.get("max_tokens") or self.config.max_tokens,
-        }
-        if system_prompt:
-            params["system"] = system_prompt
-        if anthropic_tools:
-            params["tools"] = anthropic_tools
-        beta_headers = self._native_betas(tools)
-        if beta_headers:
-            params["extra_headers"] = beta_headers
+        Sends the same request :meth:`complete` does — temperature, prompt
+        caching, native-tool betas and ``response_format`` included — and
+        reports the same usage, cache counters included.
+        """
+        import json as _json
+
+        params, structured_mode = self._request_params(messages, tools, kwargs)
 
         async with self.client.messages.stream(**params) as stream:
             async for text in stream.text_stream:
@@ -512,11 +527,18 @@ class AnthropicModel(BaseModel):
             if getattr(block, "type", None) != "tool_use":
                 continue
             block_input = getattr(block, "input", None)
+            arguments = block_input if isinstance(block_input, dict) else {}
+            name = str(getattr(block, "name", "") or "")
+            if structured_mode and name == self._STRUCTURED_TOOL_NAME:
+                # Same contract as complete(): the schema tool's arguments
+                # are the answer, delivered as content.
+                yield ModelChunkEvent(content=_json.dumps(arguments))
+                continue
             tool_calls.append(
                 ToolCall(
                     id=str(getattr(block, "id", "") or ""),
-                    name=str(getattr(block, "name", "") or ""),
-                    arguments=block_input if isinstance(block_input, dict) else {},
+                    name=name,
+                    arguments=arguments,
                 )
             )
         if tool_calls:
@@ -524,9 +546,6 @@ class AnthropicModel(BaseModel):
 
         usage: dict[str, int] | None = None
         if final.usage is not None:
-            usage = {
-                "prompt_tokens": final.usage.input_tokens,
-                "completion_tokens": final.usage.output_tokens,
-            }
+            usage = _usage_dict(final.usage)
 
         yield ModelChunkEvent(done=True, usage=usage, stop_reason=final.stop_reason)

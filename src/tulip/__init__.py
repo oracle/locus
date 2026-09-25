@@ -40,6 +40,7 @@ from tulip.core.events import (
     TerminateEvent,
     ThinkEvent,
     ToolCompleteEvent,
+    ToolProgressEvent,
     ToolStartEvent,
     TulipEvent,
 )
@@ -207,6 +208,7 @@ __all__ = [
     "ToolCall",
     "ToolCompleteEvent",
     "ToolContext",
+    "ToolProgressEvent",
     "ToolStartEvent",
     "__version__",
     "create_handoff_agent",

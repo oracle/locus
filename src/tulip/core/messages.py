@@ -61,6 +61,18 @@ class ToolResult(BaseModel):
     content: str = Field(..., description="String result from the tool")
     error: str | None = Field(default=None, description="Error message if tool failed")
     duration_ms: float | None = Field(default=None, description="Execution time in milliseconds")
+    structured_content: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Machine-readable output returned alongside the text (e.g. MCP "
+            "structuredContent). Never sent to the model; surfaced on "
+            "ToolCompleteEvent."
+        ),
+    )
+    content_blocks: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Non-text content blocks (images, resources) in the tool protocol's shape.",
+    )
 
     @property
     def success(self) -> bool:

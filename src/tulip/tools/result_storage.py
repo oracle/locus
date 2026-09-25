@@ -123,8 +123,6 @@ class ToolResultStore:
         content replaced by ``{marker} — {len} chars, key={key}`` and
         a preview of the first ``preview_chars``.
         """
-        from tulip.core.messages import ToolResult
-
         content = result.content or ""
         if len(content) <= self.threshold_chars:
             return result
@@ -137,13 +135,7 @@ class ToolResultStore:
             f"{REFERENCE_MARKER} — {len(content)} chars, key={key}\n"
             f"First {self.preview_chars} chars follow:\n{preview}"
         )
-        return ToolResult(
-            tool_call_id=result.tool_call_id,
-            name=result.name,
-            content=replacement,
-            error=result.error,
-            duration_ms=result.duration_ms,
-        )
+        return result.model_copy(update={"content": replacement})
 
     def load(self, key: str) -> str | None:
         """Recover the full content for a previously-offloaded result."""

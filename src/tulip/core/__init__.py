@@ -43,6 +43,7 @@ from tulip.core.events import (
     TerminateEvent,
     ThinkEvent,
     ToolCompleteEvent,
+    ToolProgressEvent,
     ToolStartEvent,
     TulipEvent,
 )
@@ -106,6 +107,7 @@ __all__ = [
     "TerminateEvent",
     "ThinkEvent",
     "ToolCompleteEvent",
+    "ToolProgressEvent",
     "ToolStartEvent",
     # Config
     "TulipSettings",

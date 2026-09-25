@@ -169,6 +169,11 @@ class Agent(AgentRuntimeMixin, BaseModel):
     # MCP tools are attached from the first run() (connecting is async);
     # this keeps that a one-time step rather than a per-run round trip.
     _mcp_attached: bool = PrivateAttr(default=False)
+    # Per-server attach bookkeeping: ids of attached clients, and when a
+    # failed one may be retried (a server down at the first run attaches on
+    # a later run instead of never).
+    _mcp_attached_ids: set[int] = PrivateAttr(default_factory=set)
+    _mcp_retry_at: dict[int, float] = PrivateAttr(default_factory=dict)
 
     def __init__(
         self,
@@ -872,7 +877,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
                 # fold rather than inventing a result.
                 self._initialize()
                 if self._tool_registry.get(dangling.name) is not None:
-                    from tulip.agent.runtime_loop import _apply_hook_result
+                    from tulip.agent.runtime_loop import _apply_hook_result, _complete_event
                     from tulip.core.messages import ToolCall as _ToolCall
                     from tulip.tools.executor import ToolContextFactory
 
@@ -955,12 +960,10 @@ class Agent(AgentRuntimeMixin, BaseModel):
                                 question=str(still_held.get("question", "")),
                                 metadata=still_held.get("metadata") or {},
                             )
-                        folded = ToolResult(
-                            tool_call_id=dangling.id,
-                            name=dangling.name,
-                            content=invoked.content,
-                            error=invoked.error,
-                            duration_ms=invoked.duration_ms,
+                        # Keep the structured result: the approved call is the
+                        # one a UI most needs to render (the confirmed booking).
+                        folded = invoked.model_copy(
+                            update={"tool_call_id": dangling.id, "name": dangling.name}
                         )
                         after_event = await self._orch().run_after_tool(
                             folded.name,
@@ -978,11 +981,9 @@ class Agent(AgentRuntimeMixin, BaseModel):
                     # so a trace, an audit sink, and a UI all see the approved
                     # action exactly as they see any other tool call.
                     out_events.append(
-                        ToolCompleteEvent(
-                            tool_name=folded.name,
-                            tool_call_id=folded.tool_call_id,
+                        _complete_event(
+                            folded,
                             result=folded.content,
-                            error=folded.error,
                             duration_ms=folded.duration_ms or 0.0,
                         )
                     )

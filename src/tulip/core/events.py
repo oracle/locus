@@ -88,11 +88,40 @@ class ToolCompleteEvent(TulipEvent):
     result: str | None = None
     error: str | None = None
     duration_ms: float | None = None
+    #: Machine-readable output the tool returned alongside its text — an MCP
+    #: server's ``structuredContent``, or ``ToolOutput.structured_content``
+    #: from a local tool. The model reads ``result``; a UI that renders a
+    #: widget from the data reads this. Present on failures too, so an error
+    #: payload is not lost. ``None`` when the tool returned plain text.
+    structured_content: dict[str, Any] | None = None
+    #: Non-text content the tool returned (images, audio, embedded
+    #: resources, resource links), each a JSON-mode dict in the tool
+    #: protocol's own shape (for MCP: ``{"type": "image", "data": ...,
+    #: "mimeType": ...}``). ``None`` when there was none.
+    content_blocks: list[dict[str, Any]] | None = None
 
     @property
     def success(self) -> bool:
         """Whether the tool execution succeeded."""
         return self.error is None
+
+
+class ToolProgressEvent(TulipEvent):
+    """A running tool reported progress.
+
+    Emitted between the tool's :class:`ToolStartEvent` and its
+    :class:`ToolCompleteEvent` — for an MCP tool, once per
+    ``notifications/progress`` the server sends. Only tools that declare
+    ``emits_progress=True`` (every MCP tool does) are streamed live; a tool
+    calls :func:`tulip.tools.context.report_progress` to send one.
+    """
+
+    event_type: Literal["tool_progress"] = "tool_progress"
+    tool_name: str
+    tool_call_id: str
+    progress: float
+    total: float | None = None
+    message: str | None = None
 
 
 class ReflectEvent(TulipEvent):
@@ -394,7 +423,13 @@ class AfterToolCallEvent(HookEvent):
 # =============================================================================
 
 LoopEvent = (
-    ThinkEvent | ToolStartEvent | ToolCompleteEvent | ReflectEvent | GroundingEvent | TerminateEvent
+    ThinkEvent
+    | ToolStartEvent
+    | ToolProgressEvent
+    | ToolCompleteEvent
+    | ReflectEvent
+    | GroundingEvent
+    | TerminateEvent
 )
 AgentEvent = LoopEvent | SpecialistStartEvent | SpecialistCompleteEvent | OrchestratorDecisionEvent
 AllEvents = (
