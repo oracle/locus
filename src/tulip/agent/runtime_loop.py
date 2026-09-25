@@ -29,7 +29,7 @@ import functools
 import logging
 import threading
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -37,7 +37,13 @@ from pydantic import BaseModel
 
 from tulip.agent.config import AgentConfig
 from tulip.agent.result import StopReason
-from tulip.agent.run_context import PendingInterrupt, RunContext, claim_result_slot
+from tulip.agent.run_context import (
+    PendingInterrupt,
+    RunContext,
+    claim_result_slot,
+    scrub_ephemeral_metadata,
+    split_ephemeral_metadata,
+)
 from tulip.core.events import (
     GroundingEvent,
     InterruptEvent,
@@ -106,6 +112,21 @@ def _complete_event(tool_result: ToolResult, /, **overrides: Any) -> ToolComplet
     }
     fields.update(overrides)
     return ToolCompleteEvent(**fields)
+
+
+def _invocation_arguments(tool_event: Any) -> dict[str, Any]:
+    """The arguments a tool is invoked with after the before-hooks ran.
+
+    ``event.arguments`` (what the run records) with the hooks'
+    ``event.secret_arguments`` merged over them. The secret part is used for
+    the invocation only: every persisted or emitted record of the call keeps
+    ``event.arguments``.
+    """
+    arguments: dict[str, Any] = tool_event.arguments
+    secret = getattr(tool_event, "secret_arguments", None)
+    if not secret:
+        return arguments
+    return {**arguments, **secret}
 
 
 _EXHAUSTED: Any = object()
@@ -195,8 +216,8 @@ if TYPE_CHECKING:
 
 
 def _bus_bridge(
-    fn: Callable[..., AsyncIterator[TulipEvent]],
-) -> Callable[..., AsyncIterator[TulipEvent]]:
+    fn: Callable[..., AsyncGenerator[TulipEvent, None]],
+) -> Callable[..., AsyncGenerator[TulipEvent, None]]:
     """Decorate an ``async def run(...)`` style generator so each yielded
     :class:`TulipEvent` is also published on the SSE bus.
 
@@ -219,7 +240,7 @@ def _bus_bridge(
         return getattr(config, "name", None) or getattr(config, "agent_id", None)
 
     @functools.wraps(fn)
-    async def wrapper(*args: Any, **kwargs: Any) -> AsyncIterator[TulipEvent]:
+    async def wrapper(*args: Any, **kwargs: Any) -> AsyncGenerator[TulipEvent, None]:
         # Local import — no cost when telemetry is unused.
         from tulip.observability.agent_bridge import (  # noqa: PLC0415
             bridge_tulip_event,
@@ -231,20 +252,27 @@ def _bus_bridge(
         # that cannot be forgotten when a 21st is added.
         agent_name = _agent_label(args[0] if args else None)
 
-        async for raw in fn(*args, **kwargs):
-            # Only stamp what is unattributed. A nested agent's events arrive
-            # already labelled, and relabelling them with the orchestrator's
-            # name would destroy exactly the attribution this exists to give.
-            event = (
-                raw.model_copy(update={"agent_name": agent_name})
-                if agent_name is not None and raw.agent_name is None
-                else raw
-            )
-            try:
-                await bridge_tulip_event(event)
-            except Exception:  # noqa: BLE001 — telemetry never breaks the loop
-                pass
-            yield event
+        # ``aclosing``: when the consumer closes this generator (``aclose()``,
+        # ``break`` inside ``contextlib.aclosing``), the run it drives is
+        # closed right here — its ``finally`` (run bookkeeping, the final
+        # checkpoint) runs before ``aclose()`` returns instead of whenever
+        # the garbage collector finalizes the orphaned inner generator.
+        async with contextlib.aclosing(fn(*args, **kwargs)) as inner:
+            async for raw in inner:
+                # Only stamp what is unattributed. A nested agent's events
+                # arrive already labelled, and relabelling them with the
+                # orchestrator's name would destroy exactly the attribution
+                # this exists to give.
+                event = (
+                    raw.model_copy(update={"agent_name": agent_name})
+                    if agent_name is not None and raw.agent_name is None
+                    else raw
+                )
+                try:
+                    await bridge_tulip_event(event)
+                except Exception:  # noqa: BLE001 — telemetry never breaks the loop
+                    pass
+                yield event
 
     return wrapper
 
@@ -300,7 +328,13 @@ def _durable(state: AgentState) -> AgentState:
     """
     from tulip.memory.manager import without_memory_blocks  # noqa: PLC0415
 
-    return without_memory_blocks(state)
+    state = without_memory_blocks(state)
+    # Ephemeral run metadata (``mcp_headers``: a bearer token) never reaches a
+    # checkpoint, whatever put it on the state.
+    scrubbed = scrub_ephemeral_metadata(state.metadata)
+    if len(scrubbed) != len(state.metadata):
+        state = state.model_copy(update={"metadata": scrubbed})
+    return state
 
 
 logger = logging.getLogger(__name__)
@@ -361,8 +395,15 @@ class AgentRuntimeMixin:
         prompt: str,
         thread_id: str | None,
         metadata: dict[str, Any] | None,
+        *,
+        ephemeral: dict[str, Any] | None = None,
     ) -> RunContext:
-        """Create and register the context that owns one run."""
+        """Create and register the context that owns one run.
+
+        ``metadata`` may still carry ephemeral keys (direct callers); they are
+        moved to ``rc.ephemeral`` and merged with ``ephemeral``.
+        """
+        metadata, found = self._split_run_metadata(metadata)
         rc = RunContext.create(
             run_id=state.run_id,
             thread_id=thread_id,
@@ -370,10 +411,32 @@ class AgentRuntimeMixin:
             metadata=metadata,
             agent_name=self.config.name or self.config.agent_id,
             termination=self.config.termination,
+            ephemeral={**found, **(ephemeral or {})},
         )
         with self._runs_lock:
             self._active_runs[id(rc)] = rc
         return rc
+
+    def _ephemeral_metadata_keys(self) -> frozenset[str]:
+        """Run-metadata keys never persisted: ``mcp_headers`` and any custom
+        ``metadata_headers_key`` a configured MCP client reads."""
+        keys: set[str] = set()
+        for client in getattr(self.config, "mcp_servers", None) or ():
+            key = getattr(client, "metadata_headers_key", None)
+            if isinstance(key, str) and key:
+                keys.add(key)
+        return frozenset(keys)
+
+    def _split_run_metadata(
+        self, metadata: dict[str, Any] | None
+    ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+        """``(persisted, ephemeral)`` halves of a run's metadata.
+
+        The ephemeral half (per-run MCP headers — a bearer token) lives on the
+        run's in-memory context only: never on the state, so never in a
+        checkpoint, an event, hook-visible ``run.metadata`` or a result.
+        """
+        return split_ephemeral_metadata(metadata, self._ephemeral_metadata_keys())
 
     def _end_run(self, rc: RunContext, state: AgentState) -> None:
         """Publish a run's final state and unregister it (idempotent)."""
@@ -400,6 +463,7 @@ class AgentRuntimeMixin:
             prompt=rc.prompt,
             thread_id=rc.thread_id,
             metadata=rc.metadata,
+            ephemeral=rc.ephemeral,
         )
 
     def _emits_progress(self, calls: list[ToolCall]) -> bool:
@@ -489,7 +553,7 @@ class AgentRuntimeMixin:
         metadata: dict[str, Any] | None = None,
         model_kwargs: dict[str, Any] | None = None,
         stream_tokens: bool = False,
-    ) -> AsyncIterator[TulipEvent]:
+    ) -> AsyncGenerator[TulipEvent, None]:
         """
         Run the agent with streaming events.
 
@@ -512,7 +576,14 @@ class AgentRuntimeMixin:
             TulipEvent instances for each step
         """
         self._initialize()
+        # Attaching may list tools with the per-run MCP headers, so it sees
+        # the full metadata; nothing it is given is persisted.
         await self._attach_mcp_tools(metadata)
+
+        # From here on the run's metadata is split: per-run secrets
+        # (``mcp_headers``) ride on the in-memory run context only, never on
+        # the state — and so never in a checkpoint, an event or a result.
+        metadata, ephemeral = self._split_run_metadata(metadata)
 
         # Claim the enclosing ``arun``'s result slot before any await that
         # could let a nested run of this agent start in the same context.
@@ -531,7 +602,7 @@ class AgentRuntimeMixin:
 
         # Everything that belongs to THIS run lives on ``rc``, never on the
         # agent: one Agent instance serves concurrent runs.
-        rc = self._begin_run(state, prompt, thread_id, metadata)
+        rc = self._begin_run(state, prompt, thread_id, metadata, ephemeral=ephemeral)
         rc.result_slot = result_slot
 
         # Track metrics
@@ -1014,6 +1085,10 @@ class AgentRuntimeMixin:
                         continue
 
                     modified_args = tool_event.arguments
+                    # What the tool is called with. ``modified_args`` is what
+                    # is recorded (state, checkpoint, after-hooks); hook
+                    # ``secret_arguments`` ride only on the invocation.
+                    invoke_args = _invocation_arguments(tool_event)
 
                     # Idempotent dedup: if the tool declared idempotent=True
                     # and a prior call in this run used the same arguments,
@@ -1072,15 +1147,14 @@ class AgentRuntimeMixin:
                         {
                             "tool_call": tool_call,
                             "arguments": modified_args,
+                            "invoke_arguments": invoke_args,
                             "kind": "execute",
                             "result": None,
                             "execution": None,
                         }
                     )
                     to_execute_indices.append(len(slots) - 1)
-                    to_execute_calls.append(
-                        tool_call.model_copy(update={"arguments": modified_args})
-                    )
+                    to_execute_calls.append(tool_call.model_copy(update={"arguments": invoke_args}))
 
                 # Phase 2 — stream the survivors through the executor.
                 # Constructed after Phase 1 so ``state`` already reflects
@@ -1105,6 +1179,7 @@ class AgentRuntimeMixin:
                         iteration=state.iteration,
                         state=state,
                         invocation_metadata=metadata or {},
+                        ephemeral_metadata=rc.ephemeral,
                     )
                     batch_start = time.perf_counter()
                     interrupted_slot_idx: int | None = None
@@ -1337,9 +1412,16 @@ class AgentRuntimeMixin:
                                 iteration=state.iteration,
                                 state=state,
                                 invocation_metadata=metadata or {},
+                                ephemeral_metadata=rc.ephemeral,
                             )
                             [result] = await self._executor.execute(
-                                [tool_call.model_copy(update={"arguments": modified_args})],
+                                [
+                                    tool_call.model_copy(
+                                        update={
+                                            "arguments": slot.get("invoke_arguments", modified_args)
+                                        }
+                                    )
+                                ],
                                 self._tool_registry,
                                 retry_ctx_factory,
                             )
@@ -1535,7 +1617,7 @@ class AgentRuntimeMixin:
         metadata: dict[str, Any] | None,
         model_kwargs: dict[str, Any] | None = None,
         _run: RunContext | None = None,
-    ) -> AsyncIterator[TulipEvent]:
+    ) -> AsyncGenerator[TulipEvent, None]:
         """Continue execution from a given state (used for resume).
 
         A resumed segment continues the SAME turn: iteration, budgets and the
@@ -1545,6 +1627,8 @@ class AgentRuntimeMixin:
         """
         self._initialize()
         rc = _run if _run is not None else self._begin_run(state, prompt, thread_id, metadata)
+        # Tools get the persisted half; ephemeral keys ride on ``rc``.
+        metadata, _ = self._split_run_metadata(metadata)
 
         started_at = datetime.now(UTC)
         _total_tokens = 0
@@ -1725,6 +1809,7 @@ class AgentRuntimeMixin:
                         )
                         continue
                     modified_args = tool_event.arguments
+                    invoke_args = _invocation_arguments(tool_event)
 
                     start_time = time.perf_counter()
                     try:
@@ -1734,8 +1819,9 @@ class AgentRuntimeMixin:
                             iteration=state.iteration,
                             state=state,
                             invocation_metadata=metadata or {},
+                            ephemeral_metadata=rc.ephemeral,
                         )
-                        call = tc.model_copy(update={"arguments": modified_args})
+                        call = tc.model_copy(update={"arguments": invoke_args})
                         if self._emits_progress([call]):
                             # Same as the main loop: merge the tool's progress
                             # into the stream so a resumed turn reports it live.
@@ -1839,9 +1925,10 @@ class AgentRuntimeMixin:
                                 iteration=state.iteration,
                                 state=state,
                                 invocation_metadata=metadata or {},
+                                ephemeral_metadata=rc.ephemeral,
                             )
                             [result] = await self._executor.execute(
-                                [tc.model_copy(update={"arguments": modified_args})],
+                                [tc.model_copy(update={"arguments": invoke_args})],
                                 self._tool_registry,
                                 retry_ctx_factory,
                             )
@@ -1933,6 +2020,10 @@ class AgentRuntimeMixin:
         counted earlier turns, and the first turn's metadata and system prompt
         were frozen for the life of the thread.
         """
+        # Defense in depth: whoever calls this, ephemeral keys never land on
+        # the state (``run()`` has already split them off).
+        metadata, _ = self._split_run_metadata(metadata)
+
         # Try to load from checkpoint
         if self.config.checkpointer and thread_id:
             existing = await self.config.checkpointer.load(thread_id)
@@ -1980,7 +2071,11 @@ class AgentRuntimeMixin:
         metadata: dict[str, Any] | None,
     ) -> AgentState:
         """Start a new turn on a loaded thread (see ``_create_initial_state``)."""
-        merged_metadata = {**existing.metadata, **(metadata or {})}
+        # Scrubbed again: a checkpoint written before ephemeral metadata was
+        # split off may still carry a token; this turn does not re-persist it.
+        merged_metadata = scrub_ephemeral_metadata(
+            {**existing.metadata, **(metadata or {})}, self._ephemeral_metadata_keys()
+        )
         state = self._fresh_turn_state(merged_metadata).model_copy(
             update={"provider_state": existing.provider_state}
         )

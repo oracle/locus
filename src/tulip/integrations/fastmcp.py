@@ -27,8 +27,9 @@ import inspect
 import json
 import logging
 import re
+import time
 from collections import OrderedDict
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Hashable, Mapping
 from contextlib import AsyncExitStack
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -501,7 +502,7 @@ class MCPRequestContext:
         tool_call_id: The model's tool-call id, when serving a tool call.
     """
 
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(default_factory=dict, repr=False)
     run_id: str | None = None
     tool_name: str | None = None
     tool_call_id: str | None = None
@@ -512,6 +513,11 @@ HeadersProvider = Callable[
     [MCPRequestContext],
     Mapping[str, str] | None | Awaitable[Mapping[str, str] | None],
 ]
+
+#: ``(MCPRequestContext, resolved per-run headers) -> key`` — which
+#: per-identity MCP session serves a request. ``None`` falls back to keying by
+#: the full headers.
+SessionKey = Callable[[MCPRequestContext, Mapping[str, str]], Hashable | None]
 
 
 @dataclass(frozen=True)
@@ -714,12 +720,20 @@ class _SessionHandle:
     from their own tasks, which the SDK supports.
     """
 
-    def __init__(self, label: str) -> None:
+    def __init__(self, label: str, headers: dict[str, str] | None = None) -> None:
         self.label = label
         self.session: Any = None
         self.transport: Any = None
         self.task: asyncio.Task[None] | None = None
         self._stop: asyncio.Event | None = None
+        #: Per-identity headers, applied to every HTTP request this session
+        #: sends. Mutable: a session keyed by principal picks up a rotated
+        #: token on its next request instead of opening a new session.
+        self.headers: dict[str, str] = dict(headers or {})
+        #: ``time.monotonic()`` of the last request start/finish.
+        self.last_used: float = time.monotonic()
+        #: Requests currently using this session (idle eviction skips it).
+        self.in_flight: int = 0
 
     @property
     def alive(self) -> bool:
@@ -869,6 +883,26 @@ async def _await_while_alive(
     raise MCPConnectionError(msg)
 
 
+class _TypedConnectErrors:
+    """Turn a failure to reach the server while OPENING a session into
+    :class:`MCPConnectionError` — the typed error a failure mid-request
+    already is — so an agent run gets a tool error it can report, not the
+    transport's own exception (``httpx.ConnectError`` and friends)."""
+
+    def __init__(self, label: str) -> None:
+        self.label = label
+
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(self, exc_type: Any, exc: BaseException | None, tb: Any) -> None:
+        if exc is None or isinstance(exc, MCPConnectionError) or not isinstance(exc, Exception):
+            return
+        if _is_connection_loss(exc):
+            msg = f"MCP server {self.label} is unreachable: {type(_unwrap(exc)).__name__}: {exc}"
+            raise MCPConnectionError(msg) from exc
+
+
 class MCPClient(BaseModel):
     """
     Client for connecting to external MCP servers.
@@ -900,9 +934,17 @@ class MCPClient(BaseModel):
     order: :attr:`headers`, :attr:`access_token`, the run metadata key
     :attr:`metadata_headers_key` (``agent.run(..., metadata={"mcp_headers":
     {"Authorization": "Bearer <user token>"}})``) and :attr:`headers_provider`.
-    Requests whose per-run headers differ go over separate MCP sessions
-    (bounded by :attr:`max_sessions`, least-recently-used evicted), because an
-    MCP session is stateful and must never be shared between identities.
+    Requests whose per-run headers differ go over separate MCP sessions,
+    because an MCP session is stateful and must never be shared between
+    identities. :attr:`session_key` keys them by principal instead (a rotated
+    token then reuses the principal's session, which sends the new token);
+    :attr:`session_idle_ttl` closes idle ones and :attr:`max_sessions` caps
+    them (least recently used idle session closed first).
+    :attr:`session_stats` counts opens and closes.
+
+    Per-run headers from run metadata are *ephemeral*: the agent carries them
+    on the run's in-memory context and never writes them into its state, so a
+    bearer token never reaches a checkpoint, an event or a result.
 
     **Resilience.** Each session runs in a task of its own, so a server that
     dies takes down only its session: the call in flight fails with
@@ -965,7 +1007,9 @@ class MCPClient(BaseModel):
         default="mcp_headers",
         description=(
             "Run-metadata key holding per-run headers: "
-            "agent.run(..., metadata={'mcp_headers': {...}}). None disables."
+            "agent.run(..., metadata={'mcp_headers': {...}}). The agent treats "
+            "this key as ephemeral: never persisted in state, checkpoints or "
+            "events. None disables."
         ),
     )
     allowed_tools: list[str] | None = Field(
@@ -983,7 +1027,31 @@ class MCPClient(BaseModel):
         default=None, description="Read timeout (seconds) for one tools/call; None = SDK default."
     )
     max_sessions: int = Field(
-        default=16, ge=1, description="Per-identity sessions kept open (LRU)."
+        default=16,
+        ge=1,
+        description=(
+            "Per-identity sessions kept open; opening one more closes the "
+            "least recently used idle one."
+        ),
+    )
+    session_key: SessionKey | None = Field(
+        default=None,
+        description=(
+            "(MCPRequestContext, headers) -> key choosing the per-identity "
+            "session for a request, e.g. the verified principal of a JWT. "
+            "Requests with the same key share one session, which always sends "
+            "the latest headers (a rotated token does not open a new session). "
+            "Must identify the principal: two users must never map to one key. "
+            "None (default) or a None result keys by the full headers."
+        ),
+    )
+    session_idle_ttl: float | None = Field(
+        default=300.0,
+        gt=0,
+        description=(
+            "Close a per-identity session unused for this many seconds. "
+            "None keeps sessions until evicted by max_sessions or close()."
+        ),
     )
     reconnect_interval: float = Field(
         default=30.0,
@@ -1017,12 +1085,13 @@ class MCPClient(BaseModel):
     _process: Any = None
     _runner: _SessionHandle | None = None
     _ever_connected: bool = False
-    _identity_sessions: OrderedDict[tuple[tuple[str, str], ...], _SessionHandle] = PrivateAttr(
+    _identity_sessions: OrderedDict[Hashable, _SessionHandle] = PrivateAttr(
         default_factory=OrderedDict
     )
-    _identity_locks: dict[tuple[tuple[str, str], ...], asyncio.Lock] = PrivateAttr(
-        default_factory=dict
-    )
+    _identity_locks: dict[Hashable, asyncio.Lock] = PrivateAttr(default_factory=dict)
+    _sweeper: asyncio.Task[None] | None = PrivateAttr(default=None)
+    _opened_sessions: int = PrivateAttr(default=0)
+    _closed_sessions: int = PrivateAttr(default=0)
     _schemas: dict[str, dict[str, Any]] = PrivateAttr(default_factory=dict)
 
     model_config = {"arbitrary_types_allowed": True}
@@ -1094,6 +1163,9 @@ class MCPClient(BaseModel):
 
         request_headers = {**self.headers, **(extra_headers or {})}
         has_authorization = any(k.lower() == "authorization" for k in request_headers)
+        handle = _SessionHandle(self.label, dict(extra_headers or {}))
+        static_headers = dict(self.headers)
+        opened_with = set(extra_headers or {})
 
         # Set up auth if token provided. A per-request Authorization header
         # (headers / headers_provider / run metadata) wins over the static
@@ -1121,6 +1193,19 @@ class MCPClient(BaseModel):
 
         verify_ssl = self.verify_ssl
 
+        async def _current_headers(request: httpx.Request) -> None:
+            # The session's CURRENT per-identity headers win over whatever
+            # the transport stamped at open time: a rotated token is sent as
+            # soon as it is known, never the one the session opened with.
+            live = handle.headers
+            for name in opened_with - set(live):
+                if name in static_headers:
+                    request.headers[name] = static_headers[name]
+                elif name in request.headers:
+                    del request.headers[name]
+            for name, value in live.items():
+                request.headers[name] = value
+
         def _httpx_factory(
             headers: dict[str, str] | None = None,
             timeout: httpx.Timeout | None = None,
@@ -1132,6 +1217,7 @@ class MCPClient(BaseModel):
                 auth=auth,
                 verify=verify_ssl,
                 follow_redirects=True,
+                event_hooks={"request": [_current_headers]} if extra_headers else None,
             )
 
         # mcp renamed ``streamablehttp_client`` → ``streamable_http_client``
@@ -1159,7 +1245,6 @@ class MCPClient(BaseModel):
                 http_client=_httpx_factory(auth=auth),
             )
 
-        handle = _SessionHandle(self.label)
         await handle.start(client_context, ClientSession, self.connect_timeout)
         if install:
             self._install(handle)
@@ -1218,7 +1303,8 @@ class MCPClient(BaseModel):
         else:
             for key, candidate in list(self._identity_sessions.items()):
                 if candidate is handle:
-                    del self._identity_sessions[key]
+                    await self._close_identity(key, "connection lost", grace=1.0)
+                    return
         if handle is not None:
             await handle.close(grace=1.0)
 
@@ -1227,10 +1313,12 @@ class MCPClient(BaseModel):
         self._connected = False
         self._ever_connected = False
 
-        identity = list(self._identity_sessions.values())
-        self._identity_sessions.clear()
-        for handle in identity:
-            await handle.close()
+        sweeper, self._sweeper = self._sweeper, None
+        if sweeper is not None and not sweeper.done() and sweeper is not asyncio.current_task():
+            sweeper.cancel()
+            await asyncio.gather(sweeper, return_exceptions=True)
+        for key in list(self._identity_sessions):
+            await self._close_identity(key, "client closed")
 
         runner = self._runner
         if runner is not None:
@@ -1278,8 +1366,15 @@ class MCPClient(BaseModel):
         """The context a headers provider sees for a request made now."""
         ctx = current_tool_context()
         if ctx is not None and tool_name is not None:
+            # Per-run headers travel as the run's ephemeral metadata (never
+            # persisted); providers see them merged back into ``metadata``.
+            ephemeral = getattr(ctx, "ephemeral_metadata", None)
             return MCPRequestContext(
-                metadata=ctx.invocation_metadata,
+                metadata=(
+                    {**ctx.invocation_metadata, **ephemeral}
+                    if ephemeral
+                    else ctx.invocation_metadata
+                ),
                 run_id=ctx.run_id or None,
                 tool_name=tool_name,
                 tool_call_id=ctx.tool_call_id,
@@ -1304,10 +1399,14 @@ class MCPClient(BaseModel):
         return resolved
 
     async def _session_for(self, rctx: MCPRequestContext) -> tuple[Any, _SessionHandle | None]:
-        """The session to use for a request — per identity when headers vary."""
+        """The session to use for a request — per identity when headers vary.
+
+        A server that cannot be reached raises :class:`MCPConnectionError`,
+        like a connection lost mid-request, never the transport's own error.
+        """
         dynamic = await self._dynamic_headers(rctx)
         if dynamic:
-            return await self._identity_session(dynamic)
+            return await self._identity_session(dynamic, rctx)
 
         if self._runner is not None and not self._runner.alive:
             await self._discard(self._runner)
@@ -1315,31 +1414,129 @@ class MCPClient(BaseModel):
             if not self._ever_connected:
                 raise RuntimeError("Not connected. Call connect() first.")
             # The server went away since the last call; try it again.
-            await self.connect()
+            async with self._typed_connect_errors():
+                await self.connect()
         return self._session, self._runner
 
-    async def _identity_session(self, dynamic: dict[str, str]) -> tuple[Any, _SessionHandle]:
-        key = tuple(sorted(dynamic.items()))
+    def _typed_connect_errors(self) -> _TypedConnectErrors:
+        return _TypedConnectErrors(self.label)
+
+    async def _session_key(self, rctx: MCPRequestContext, dynamic: dict[str, str]) -> Hashable:
+        if self.session_key is not None:
+            custom: Any = self.session_key(rctx, dynamic)
+            if inspect.isawaitable(custom):
+                custom = await custom
+            if custom is not None:
+                return ("key", custom)
+        return ("headers", tuple(sorted(dynamic.items())))
+
+    async def _identity_session(
+        self, dynamic: dict[str, str], rctx: MCPRequestContext | None = None
+    ) -> tuple[Any, _SessionHandle]:
+        key = await self._session_key(rctx or MCPRequestContext(), dynamic)
+        await self._evict_idle()
         lock = self._identity_locks.setdefault(key, asyncio.Lock())
         async with lock:
             handle = self._identity_sessions.get(key)
             if handle is not None and handle.alive:
+                if handle.headers != dynamic:
+                    # Same session key, new headers (a rotated token): the
+                    # session sends these from its next request on.
+                    handle.headers.clear()
+                    handle.headers.update(dynamic)
+                handle.last_used = time.monotonic()
                 self._identity_sessions.move_to_end(key)
                 return handle.session, handle
             if handle is not None:
-                await self._discard(handle)
-            handle = await self._connect_http(dynamic, install=False)
+                await self._close_identity(key, "connection lost", grace=1.0)
+            async with self._typed_connect_errors():
+                handle = await self._connect_http(dynamic, install=False)
+            self._identity_locks.setdefault(key, lock)
             self._identity_sessions[key] = handle
-            while len(self._identity_sessions) > self.max_sessions:
-                old_key, old = self._identity_sessions.popitem(last=False)
-                self._identity_locks.pop(old_key, None)
-                await old.close()
+            self._opened_sessions += 1
+            logger.info(
+                "MCP session opened on %s (live=%d, opened=%d, closed=%d)",
+                self.label,
+                len(self._identity_sessions),
+                self._opened_sessions,
+                self._closed_sessions,
+            )
+            await self._enforce_max_sessions(keep=key)
+            self._ensure_sweeper()
             return handle.session, handle
+
+    async def _close_identity(self, key: Hashable, reason: str, *, grace: float = 5.0) -> None:
+        """Forget and close one per-identity session, counting it."""
+        handle = self._identity_sessions.pop(key, None)
+        lock = self._identity_locks.get(key)
+        if lock is not None and not lock.locked():
+            del self._identity_locks[key]
+        if handle is None:
+            return
+        self._closed_sessions += 1
+        logger.info(
+            "MCP session closed on %s: %s (live=%d, opened=%d, closed=%d)",
+            self.label,
+            reason,
+            len(self._identity_sessions),
+            self._opened_sessions,
+            self._closed_sessions,
+        )
+        await handle.close(grace=grace)
+
+    async def _enforce_max_sessions(self, *, keep: Hashable) -> None:
+        """Close least-recently-used sessions beyond :attr:`max_sessions`,
+        preferring ones with no request in flight."""
+        while len(self._identity_sessions) > self.max_sessions:
+            candidates = [k for k in self._identity_sessions if k != keep]
+            idle = [k for k in candidates if self._identity_sessions[k].in_flight == 0]
+            victim = (idle or candidates)[0]
+            await self._close_identity(victim, "max_sessions reached")
+
+    async def _evict_idle(self) -> None:
+        """Close per-identity sessions idle longer than :attr:`session_idle_ttl`."""
+        ttl = self.session_idle_ttl
+        if ttl is None:
+            return
+        now = time.monotonic()
+        for key, handle in list(self._identity_sessions.items()):
+            if handle.in_flight == 0 and now - handle.last_used >= ttl:
+                await self._close_identity(key, f"idle for {ttl:g}s")
+            elif not handle.alive and handle.in_flight == 0:
+                await self._close_identity(key, "connection lost", grace=1.0)
+
+    def _ensure_sweeper(self) -> None:
+        """Run the idle sweep in the background while sessions are open, so
+        an idle session is closed even when no further request arrives."""
+        if self.session_idle_ttl is None:
+            return
+        sweeper = self._sweeper
+        loop = asyncio.get_running_loop()
+        if sweeper is not None and not sweeper.done() and sweeper.get_loop() is loop:
+            return
+        self._sweeper = loop.create_task(self._sweep(), name=f"mcp-session-sweeper:{self.label}")
+
+    async def _sweep(self) -> None:
+        while self._identity_sessions and self.session_idle_ttl is not None:
+            await asyncio.sleep(max(self.session_idle_ttl / 2, 0.05))
+            await self._evict_idle()
+
+    @property
+    def session_stats(self) -> dict[str, int]:
+        """Per-identity session accounting: ``opened`` and ``closed`` since
+        construction, and ``live`` now. Plain ints, ready for a metrics gauge."""
+        return {
+            "opened": self._opened_sessions,
+            "closed": self._closed_sessions,
+            "live": len(self._identity_sessions),
+        }
 
     async def _guarded(
         self, handle: _SessionHandle | None, awaitable: Awaitable[Any], what: str
     ) -> Any:
         """Run one request; a dropped connection becomes :class:`MCPConnectionError`."""
+        if handle is not None:
+            handle.in_flight += 1
         try:
             return await _await_while_alive(
                 handle, awaitable, liveness_interval=self.liveness_interval
@@ -1359,6 +1556,10 @@ class MCPClient(BaseModel):
                 msg = f"MCP connection to {self.label} was lost during {what}: {exc}"
                 raise MCPConnectionError(msg) from exc
             raise
+        finally:
+            if handle is not None:
+                handle.in_flight -= 1
+                handle.last_used = time.monotonic()
 
     # ------------------------------------------------------------------
     # Tool filtering
