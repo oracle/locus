@@ -40,6 +40,26 @@ products built on one shared `Agent` instance.
   receives a `ToolContext` carrying the run's invocation metadata (it received
   none).
 
+- **An MCP server that is down no longer kills the run.** The transport was
+  entered in the run's own task, so a refused connection cancelled the run with
+  `CancelledError`, and closing it anywhere else logged "Attempted to exit
+  cancel scope in a different task" at shutdown. Each MCP session now runs in a
+  task of its own: a server down at attach is logged and skipped and retried on
+  a later run (`MCPClient.reconnect_interval`), a server that dies mid-call
+  fails that call with `MCPConnectionError` — an ordinary tool error; the run
+  continues — and the next call reconnects. A request whose server died while
+  streaming its response (which the SDK leaves pending forever) is detected by
+  a liveness ping (`liveness_interval`). A genuine cancellation of the run
+  still propagates.
+- **`CredentialPoolModel` rotates on the streaming path.** `stream()` only
+  guarded the call that creates the generator, which never raises, so a 429 on
+  the opening request was never rotated. It now rotates on any rotatable error
+  before the first chunk and re-raises after it.
+- **`AnthropicModel.stream()` sends what `complete()` sends.** It dropped
+  `temperature`, prompt caching (system prompt and tool catalog
+  `cache_control`) and `response_format`, and its usage lacked the
+  `cache_creation_input_tokens` / `cache_read_input_tokens` counters.
+
 ### Added
 
 - `ApprovalPendingError` (`tulip`, `tulip.core`, `tulip.core.errors`), with
@@ -67,38 +87,6 @@ products built on one shared `Agent` instance.
   overrides client `metadata` on `/invoke`, `/stream` and `/resume`;
   `decision_handler(request, principal, thread_id, decision)` records a
   `/resume` decision (e.g. in an approval store); `stream_tokens=True`.
-
-### Changed
-
-- **New-turn semantics on a checkpointed thread.** Kept: messages and provider
-  continuation state. Started afresh per turn: `run_id`, `iteration`,
-  `tool_executions`, `reasoning_steps`, `confidence`, `tool_history`, `errors`,
-  and the token/cost counters (so `token_budget`, `max_cost_usd` and
-  `AgentResult.metrics` are per turn; the checkpoint no longer accumulates
-  thread-lifetime token totals — sum per-turn results if you need them).
-  The new run's `metadata` is merged over the thread's (new keys win) and the
-  leading system message is re-evaluated from `system_prompt`. Resume after an
-  interrupt is unchanged: it continues the same turn.
-- `AgentState.last_tool_calls` (and so `called_terminal_tool`) only looks at
-  the current turn — it stops at the most recent user message.
-- `resume()` without `thread_id` raises `RuntimeError` when more than one run
-  is paused in memory, instead of resuming the most recent one.
-- A new `run()` on a thread discards that thread's in-memory interrupt (the
-  new turn's checkpoint is the thread's state from then on).
-- `Agent.is_cancelled` reports only a pending cancel-all.
-- `AgentServer /stream` streams token deltas as `{"type": "model_chunk", ...}`
-  by default (`stream_tokens=False` restores the old stream). Events other than
-  `think` / `tool_start` / `tool_complete` / `done` are sent as their
-  `model_dump(mode="json")` fields under `type` — an interrupt is a JSON object
-  (`question`, `interrupt_id`, `metadata`, …) instead of a Python repr string
-  under `data`. `tool_start` / `tool_complete` also carry `tool_call_id`.
-- Private: `Agent._interrupt_state` is a read-only view, the
-  `_interrupt_prompt` / `_interrupt_thread_id` / `_interrupt_metadata` /
-  `_has_unverified_writes` attributes are gone, and `_last_run_state` is no
-  longer read by the runtime (with concurrent runs it is whichever finished
-  last — use `AgentResult.state`).
-
-### Added
 
 - **MCP results keep more than their text.** A tool from `MCPClient` now
   returns the server's `structuredContent` on `ToolCompleteEvent.structured_content`
@@ -142,27 +130,35 @@ products built on one shared `Agent` instance.
   round trip, streamed text and a streamed tool call — so every fallback tier
   can be verified before it takes traffic.
 
-### Fixed
+### Changed
 
-- **An MCP server that is down no longer kills the run.** The transport was
-  entered in the run's own task, so a refused connection cancelled the run with
-  `CancelledError`, and closing it anywhere else logged "Attempted to exit
-  cancel scope in a different task" at shutdown. Each MCP session now runs in a
-  task of its own: a server down at attach is logged and skipped and retried on
-  a later run (`MCPClient.reconnect_interval`), a server that dies mid-call
-  fails that call with `MCPConnectionError` — an ordinary tool error; the run
-  continues — and the next call reconnects. A request whose server died while
-  streaming its response (which the SDK leaves pending forever) is detected by
-  a liveness ping (`liveness_interval`). A genuine cancellation of the run
-  still propagates.
-- **`CredentialPoolModel` rotates on the streaming path.** `stream()` only
-  guarded the call that creates the generator, which never raises, so a 429 on
-  the opening request was never rotated. It now rotates on any rotatable error
-  before the first chunk and re-raises after it.
-- **`AnthropicModel.stream()` sends what `complete()` sends.** It dropped
-  `temperature`, prompt caching (system prompt and tool catalog
-  `cache_control`) and `response_format`, and its usage lacked the
-  `cache_creation_input_tokens` / `cache_read_input_tokens` counters.
+- **New-turn semantics on a checkpointed thread.** Kept: messages and provider
+  continuation state. Started afresh per turn: `run_id`, `iteration`,
+  `tool_executions`, `reasoning_steps`, `confidence`, `tool_history`, `errors`,
+  and the token/cost counters (so `token_budget`, `max_cost_usd` and
+  `AgentResult.metrics` are per turn; the checkpoint no longer accumulates
+  thread-lifetime token totals — sum per-turn results if you need them).
+  The new run's `metadata` is merged over the thread's (new keys win) and the
+  leading system message is re-evaluated from `system_prompt`. Resume after an
+  interrupt is unchanged: it continues the same turn.
+- `AgentState.last_tool_calls` (and so `called_terminal_tool`) only looks at
+  the current turn — it stops at the most recent user message.
+- `resume()` without `thread_id` raises `RuntimeError` when more than one run
+  is paused in memory, instead of resuming the most recent one.
+- A new `run()` on a thread discards that thread's in-memory interrupt (the
+  new turn's checkpoint is the thread's state from then on).
+- `Agent.is_cancelled` reports only a pending cancel-all.
+- `AgentServer /stream` streams token deltas as `{"type": "model_chunk", ...}`
+  by default (`stream_tokens=False` restores the old stream). Events other than
+  `think` / `tool_start` / `tool_complete` / `done` are sent as their
+  `model_dump(mode="json")` fields under `type` — an interrupt is a JSON object
+  (`question`, `interrupt_id`, `metadata`, …) instead of a Python repr string
+  under `data`. `tool_start` / `tool_complete` also carry `tool_call_id`.
+- Private: `Agent._interrupt_state` is a read-only view, the
+  `_interrupt_prompt` / `_interrupt_thread_id` / `_interrupt_metadata` /
+  `_has_unverified_writes` attributes are gone, and `_last_run_state` is no
+  longer read by the runtime (with concurrent runs it is whichever finished
+  last — use `AgentResult.state`).
 
 ## [2.16.0] - 2026-09-16
 
