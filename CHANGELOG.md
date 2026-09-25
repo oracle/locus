@@ -13,6 +13,12 @@ products built on one shared `Agent` instance.
 
 ### Fixed
 
+- **A memory `namespace_resolver` returning `None` no longer pools users
+  (privacy).** `LLMMemoryManager(namespace_resolver=...)` treated `None` as
+  "use the fixed `namespace_prefix`", so every run the resolver declined — e.g.
+  each anonymous visitor — wrote to and recalled from ONE shared namespace,
+  leaking one user's memories into another's prompt. `None` now means no
+  memory for that run: no recall, no injection, no extraction. See Changed.
 - **Per-run MCP headers are never persisted (security).** The documented
   `agent.run(..., metadata={"mcp_headers": {"Authorization": "Bearer …"}})`
   path wrote the bearer token into the run state, so every checkpoint (and
@@ -232,6 +238,11 @@ products built on one shared `Agent` instance.
 
 ### Changed
 
+- `LLMMemoryManager`: a `namespace_resolver` returning `None` now skips memory
+  for that run (like a resolver that raises) instead of falling back to
+  `namespace_prefix`. To keep the old behaviour, return the prefix explicitly
+  (`lambda run: ... or ("tulip_memory",)`). Managers built without a resolver
+  are unchanged: they still use the fixed `namespace_prefix`.
 - `Agent.run()` and `Agent.resume()` are annotated as
   `AsyncGenerator[TulipEvent, None]` (was `AsyncIterator`), so
   `contextlib.aclosing(agent.run(...))` type-checks without a cast.

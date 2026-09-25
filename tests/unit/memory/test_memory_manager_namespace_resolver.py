@@ -115,12 +115,90 @@ async def test_scoped_block_reads_and_writes_under_its_namespace() -> None:
     assert await store.get(("users", "ana", "user"), "k") is not None
 
 
-async def test_a_resolver_returning_none_uses_the_default_prefix() -> None:
+class _RecordingStore(InMemoryStore):
+    """Counts every write and read the manager makes."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.writes: list[tuple[tuple[str, ...], str]] = []
+        self.reads: list[tuple[str, ...]] = []
+
+    async def put(self, namespace: tuple[str, ...], key: str, value: Any, **kw: Any) -> None:
+        self.writes.append((tuple(namespace), key))
+        await super().put(namespace, key, value, **kw)
+
+    async def get(self, namespace: tuple[str, ...], key: str) -> Any:
+        self.reads.append(tuple(namespace))
+        return await super().get(namespace, key)
+
+    async def put_batch(self, items: Any, *args: Any, **kw: Any) -> Any:
+        self.writes.extend((tuple(ns), key) for ns, key, *_ in items)
+        return await super().put_batch(items, *args, **kw)
+
+    async def get_item(self, namespace: tuple[str, ...], *args: Any, **kw: Any) -> Any:
+        self.reads.append(tuple(namespace))
+        return await super().get_item(namespace, *args, **kw)
+
+    async def search(self, namespace: tuple[str, ...], *args: Any, **kw: Any) -> Any:
+        self.reads.append(tuple(namespace))
+        return await super().search(namespace, *args, **kw)
+
+    async def list_keys(self, namespace: tuple[str, ...], *args: Any, **kw: Any) -> Any:
+        self.reads.append(tuple(namespace))
+        return await super().list_keys(namespace, *args, **kw)
+
+
+async def test_a_resolver_returning_none_means_no_memory_for_that_run() -> None:
+    """``None`` must never pool different users into the shared default prefix.
+
+    Two anonymous visitors (distinct run metadata, resolver returns ``None``)
+    used to both write to and recall from ``("tulip_memory", ...)``.
+    """
+    store = _RecordingStore()
+    # A memory already sitting in the default namespace must not be recalled.
+    await InMemoryStore.put(
+        store, ("tulip_memory", "user"), "shared", {"content": "someone else's", "metadata": {}}
+    )
+    extracted: list[int] = []
+
+    async def extractor(messages: list[Message]) -> list[Memory]:
+        extracted.append(1)
+        said = next(m.content for m in messages if m.role == Role.USER)
+        return [Memory(type=MemoryType.USER, key="said", content=f"User said {said}")]
+
+    manager = LLMMemoryManager(
+        store=store, extract_fn=extractor, namespace_resolver=lambda run: None
+    )
+    model = _Model()
+    agent = Agent(model=model, memory_manager=manager, reflexion=False, grounding=False)
+    await agent.arun("I am visitor A", metadata={"visitor": "a"})
+    await agent.arun("I am visitor B", metadata={"visitor": "b"})
+
+    assert store.writes == []
+    assert store.reads == []
+    assert extracted == []
+    assert all(_memory_block(call) == "" for call in model.calls)
+
+
+async def test_a_resolver_returning_a_tuple_scopes_the_run() -> None:
     store = InMemoryStore()
     manager = LLMMemoryManager(
         store=store,
         extract_fn=lambda _m: _one("x"),
-        namespace_resolver=lambda run: None,
+        namespace_resolver=lambda run: ("visitors", run.metadata["visitor"]),
+    )
+    agent = Agent(model=_Model(), memory_manager=manager, reflexion=False, grounding=False)
+    await agent.arun("hi", metadata={"visitor": "a"})
+    assert await store.get(("visitors", "a", "user"), "x") is not None
+    assert await store.list_keys(("tulip_memory", "user")) == []
+
+
+async def test_a_resolver_can_opt_into_the_shared_prefix_explicitly() -> None:
+    store = InMemoryStore()
+    manager = LLMMemoryManager(
+        store=store,
+        extract_fn=lambda _m: _one("x"),
+        namespace_resolver=lambda run: ("tulip_memory",),
     )
     agent = Agent(model=_Model(), memory_manager=manager, reflexion=False, grounding=False)
     await agent.arun("hi")
