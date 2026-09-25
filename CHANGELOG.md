@@ -46,6 +46,27 @@ products built on one shared `Agent` instance.
 - The approved call performed by `resume(..., perform_dangling=True)` now
   receives a `ToolContext` carrying the run's invocation metadata (it received
   none).
+- **Evaluation: a case that checks nothing no longer passes.** An `EvalCase`
+  with no expectations and no rubric passed with score 1.0 and zero checks. It
+  now fails with the single check `has_expectations: False` (score 0.0). A
+  rubric case run through the synchronous `EvalRunner.run()` (which cannot call
+  a judge) fails with `rubric:requires_arun` instead of ignoring the rubric.
+- **Evaluation: an unreachable judge stops `EvalRunner.arun()`.** It was
+  caught and recorded as an ordinary failed case, contradicting
+  `LLMJudge.score`'s contract that an unusable judge raises. It now propagates
+  as `JudgeUnavailableError` and the cases still in flight are cancelled.
+- **Evaluation: a failed case can no longer score 1.0.** A judged score
+  replaced the case score even when structural checks failed
+  (`passed=False, score=1.0`), inflating `avg_score`. See *Changed* for the
+  combination rule.
+- **Evaluation: `max_duration_ms` is a real timeout.** It was only compared
+  after the run returned, so a hung agent hung the whole suite. The run is now
+  cancelled at the budget (`arun`) or abandoned on a daemon thread (`run`,
+  since a synchronous call cannot be interrupted) and the case is reported
+  `timed_out`. The post-hoc `within_duration_budget` check is kept.
+- `check_trajectory` names the steps that are actually missing when a step
+  repeats: `(["a", "b"], ["a", "b", "a"])` reported `['a', 'b', 'a'] did not
+  follow` instead of `['a']`.
 
 - **An MCP server that is down no longer kills the run.** The transport was
   entered in the run's own task, so a refused connection cancelled the run with
@@ -179,6 +200,15 @@ products built on one shared `Agent` instance.
   `_has_unverified_writes` attributes are gone, and `_last_run_state` is no
   longer read by the runtime (with concurrent runs it is whichever finished
   last — use `AgentResult.state`).
+- **Evaluation score rule.** A case's `score` is the fraction of its checks
+  that passed; a judged case reports `min(judge score, that fraction)` — the
+  judge's number when every check passed, never above the fraction otherwise.
+  So `passed=False` always implies `score < 1.0`.
+- `LLMJudge.score` raises `JudgeUnavailableError` (a `RuntimeError` subclass,
+  exported from `tulip.evaluation`) when the model call fails.
+- `EvalResult.timed_out` and `EvalReport.timed_out` are new; a timed-out case
+  has score 0.0, `within_duration_budget: False`, and shows as `[TIMEOUT]` in
+  `EvalReport.summary()`.
 
 ## [2.16.0] - 2026-09-16
 

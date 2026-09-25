@@ -18,7 +18,14 @@ import pytest
 
 from tulip.agent import Agent
 from tulip.core.messages import Message
-from tulip.evaluation import EvalCase, EvalRunner, LLMJudge, Verdict, check_trajectory
+from tulip.evaluation import (
+    EvalCase,
+    EvalRunner,
+    JudgeUnavailableError,
+    LLMJudge,
+    Verdict,
+    check_trajectory,
+)
 from tulip.models.base import ModelResponse
 from tulip.testing import ScriptedModel, text, tool_call
 from tulip.tools.decorator import tool
@@ -174,7 +181,7 @@ async def test_malformed_json_fails_closed() -> None:
 @pytest.mark.asyncio
 async def test_an_unreachable_judge_raises_rather_than_scoring_zero() -> None:
     """A "failure" that means the judge was down is worse than no eval."""
-    with pytest.raises(RuntimeError, match="could not be reached"):
+    with pytest.raises(JudgeUnavailableError, match="could not be reached"):
         await LLMJudge(_DeadModel("")).score(prompt="p", output="o", rubric="r")
 
 
@@ -249,10 +256,12 @@ async def test_an_unparseable_verdict_is_labelled_distinctly() -> None:
 
 @pytest.mark.asyncio
 async def test_arun_reports_every_case() -> None:
-    agents = [_agent([text("one")]), _agent([text("two")])]
+    replies = ["one", "two"]
     reports = [
-        await EvalRunner(agent=a, concurrency=1).arun([EvalCase(name=f"c{i}", prompt="p")])
-        for i, a in enumerate(agents)
+        await EvalRunner(agent=_agent([text(reply)]), concurrency=1).arun(
+            [EvalCase(name=f"c{i}", prompt="p", expected_output_contains=[reply])]
+        )
+        for i, reply in enumerate(replies)
     ]
     assert [r.total_cases for r in reports] == [1, 1]
     assert all(r.passed == 1 for r in reports)
