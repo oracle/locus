@@ -363,8 +363,16 @@ class AgentState(BaseModel):
 
     @property
     def last_tool_calls(self) -> list[ToolCall]:
-        """Get tool calls from the last assistant message."""
+        """Get tool calls from the last assistant message of the current turn.
+
+        The scan stops at the most recent user message: calls made before it
+        belong to an earlier turn, and treating them as "last" made a new turn
+        on a thread whose previous turn ended with a terminal tool stop
+        immediately with ``terminal_tool`` before the model saw the message.
+        """
         for msg in reversed(self.messages):
+            if msg.role.value == "user":
+                return []
             if msg.role.value == "assistant" and msg.tool_calls:
                 return list(msg.tool_calls)
         return []

@@ -31,10 +31,12 @@ Usage:
 """
 
 from tulip.core.config import TulipSettings
-from tulip.core.errors import TulipError
+from tulip.core.errors import ApprovalPendingError, TulipError
 from tulip.core.events import (
+    CustomEvent,
     GroundingEvent,
     ReflectEvent,
+    RunInfo,
     TerminateEvent,
     ThinkEvent,
     ToolCompleteEvent,
@@ -167,6 +169,9 @@ def __getattr__(name: str) -> object:
 __version__ = "2.16.0"
 __all__ = [
     "Agent",
+    "ApprovalPendingError",
+    "CustomEvent",
+    "RunInfo",
     "AgentConfig",
     "AgentResult",
     "AgentState",

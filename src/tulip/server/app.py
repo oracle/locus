@@ -5,7 +5,8 @@
 
 Exposes a Tulip Agent as HTTP endpoints:
 - POST   /invoke         — synchronous invocation, returns final result
-- POST   /stream         — SSE streaming of agent events
+- POST   /stream         — SSE streaming of agent events (token deltas included)
+- POST   /resume         — continue a paused thread (SSE), strictly by thread id
 - GET    /threads/{tid}  — load a thread's persisted state (requires checkpointer)
 - DELETE /threads/{tid}  — drop a thread's persisted state (requires checkpointer)
 - GET    /health         — health check
@@ -29,17 +30,26 @@ local development or when an upstream proxy handles auth).
 from __future__ import annotations
 
 import hmac
+import inspect
 import ipaddress
 import json
 import logging
 import os
 import time
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from typing import Any
 
 from pydantic import BaseModel, Field
 
+
+# Route signatures are resolved by FastAPI against this module's globals
+# (``from __future__ import annotations`` makes them strings), so ``Request``
+# must be importable here — without making fastapi a hard dependency.
+try:
+    from starlette.requests import Request
+except ImportError:  # pragma: no cover — server extra not installed
+    Request = Any  # type: ignore[misc,assignment]
 
 _logger = logging.getLogger(__name__)
 
@@ -76,6 +86,102 @@ class InvokeRequest(BaseModel):
     prompt: str
     thread_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ResumeRequest(BaseModel):
+    """Request body for /resume: continue ONE paused thread.
+
+    ``thread_id`` is required — a resume is never matched to "whichever run is
+    paused". ``response`` answers an ``ask_user`` question. ``decision`` is an
+    opaque payload handed to the server's ``decision_handler`` (typically
+    ``{"approval_id": ..., "verdict": "approved", "arguments": {...}}``) so the
+    host can record an approval before the held call is re-invoked.
+    """
+
+    thread_id: str
+    response: str = ""
+    decision: dict[str, Any] | None = None
+    #: Re-invoke the held (gated) call so an approval actually performs it.
+    #: ``ask_user`` pauses are unaffected and fold ``response`` as before.
+    perform_dangling: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+#: ``metadata_resolver(request, principal) -> trusted metadata``. Whatever it
+#: returns is merged OVER the client's ``metadata``, so a client can never
+#: spoof a key the server vouches for (the user id a tool bills, say).
+MetadataResolver = Callable[[Any, str], "Mapping[str, Any] | Awaitable[Mapping[str, Any]]"]
+
+#: ``decision_handler(request, principal, thread_id, decision)`` records a
+#: client-supplied decision (e.g. in an approval store) before /resume
+#: continues the thread. It MUST authorise the decision against the caller —
+#: the thread is already principal-scoped, the approval id inside the payload
+#: is not.
+DecisionHandler = Callable[[Any, str, str, dict[str, Any]], "Awaitable[None] | None"]
+
+
+def _event_payload(event: Any, *, scoped_thread_id: str | None, thread_id: str | None) -> Any:
+    """JSON-ready SSE payload for one event.
+
+    The four historical shapes (``think``, ``tool_start``, ``tool_complete``,
+    ``done``) are kept key-for-key so existing clients do not break; every
+    other event is its full ``model_dump(mode="json")`` under ``type`` —
+    never a Python ``repr``, which is what interrupts used to be sent as.
+    """
+    from tulip.core.events import (
+        TerminateEvent,
+        ThinkEvent,
+        ToolCompleteEvent,
+        ToolStartEvent,
+    )
+
+    data: dict[str, Any]
+    if isinstance(event, ThinkEvent):
+        data = {"type": "think", "content": event.reasoning or ""}
+    elif isinstance(event, ToolStartEvent):
+        data = {
+            "type": "tool_start",
+            "tool": event.tool_name,
+            "tool_call_id": event.tool_call_id,
+            # arguments are echoed back to the client exactly as the model
+            # produced them; if your deployment considers tool args
+            # sensitive, wrap the agent to redact.
+            "arguments": event.arguments,
+        }
+    elif isinstance(event, ToolCompleteEvent):
+        data = {
+            "type": "tool_complete",
+            "tool": event.tool_name,
+            "tool_call_id": event.tool_call_id,
+            "result": event.result,
+            "error": event.error,
+        }
+    elif isinstance(event, TerminateEvent):
+        data = {
+            "type": "done",
+            "message": event.final_message or "",
+            "reason": event.reason,
+        }
+    else:
+        dump = getattr(event, "model_dump", None)
+        body: dict[str, Any] = dump(mode="json") if callable(dump) else {"data": str(event)}
+        event_type = body.pop("event_type", None) or getattr(event, "event_type", "event")
+        body.pop("timestamp", None)
+        # Never leak the principal-scoped storage key; clients know their
+        # thread by the id they sent.
+        if scoped_thread_id is not None and body.get("thread_id") == scoped_thread_id:
+            body["thread_id"] = thread_id
+        data = {"type": event_type, **body}
+    return data
+
+
+def _accepts_kwarg(fn: Any, name: str) -> bool:
+    """Whether ``fn`` can be called with keyword ``name``."""
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+    return name in params or any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
 
 
 class InvokeResponse(BaseModel):
@@ -126,8 +232,29 @@ class AgentServer:
         description: str = "HTTP API for a Tulip AI Agent",
         api_key: str | None = None,
         allow_unauthenticated: bool = False,
+        *,
+        stream_tokens: bool = True,
+        metadata_resolver: MetadataResolver | None = None,
+        decision_handler: DecisionHandler | None = None,
     ) -> None:
+        """Wrap ``agent``.
+
+        Args:
+            stream_tokens: Stream model token deltas on ``/stream`` and
+                ``/resume`` (as ``{"type": "model_chunk", ...}`` events) when
+                the agent supports it.
+            metadata_resolver: Server-side source of trusted run metadata,
+                called per request with ``(request, principal)``. Its keys
+                override the client's ``metadata`` so a client cannot spoof
+                them. Without it, client metadata is passed through as before.
+            decision_handler: Records the ``decision`` payload of a
+                ``/resume`` request (see :data:`DecisionHandler`). Without it,
+                ``/resume`` rejects requests that carry a decision.
+        """
         self.agent = agent
+        self._stream_tokens = stream_tokens
+        self._metadata_resolver = metadata_resolver
+        self._decision_handler = decision_handler
         self._title = title
         self._description = description
         # Prefer the explicit arg; fall back to the environment so that
@@ -242,6 +369,58 @@ class AgentServer:
 
             auth_dep = Depends(_anon)
 
+        resolver = self._metadata_resolver
+        decision_handler = self._decision_handler
+        want_tokens = self._stream_tokens
+
+        async def resolve_metadata(
+            http_request: Request, principal: str, client: dict[str, Any]
+        ) -> dict[str, Any]:
+            """Client metadata with the server's trusted keys laid over it."""
+            if resolver is None:
+                return dict(client)
+            trusted = resolver(http_request, principal)
+            if inspect.isawaitable(trusted):
+                trusted = await trusted
+            return {**client, **dict(trusted or {})}
+
+        def sse(payload: Any) -> str:
+            return f"data: {json.dumps(payload, default=str)}\n\n"
+
+        def error_frame() -> str:
+            correlation_id = uuid.uuid4().hex
+            _logger.exception("agent stream error (correlation_id=%s)", correlation_id)
+            # Emit a generic error event so unauthenticated peers don't get
+            # str(exc) (CWE-209). Details live in logs keyed to the id.
+            return sse(
+                {
+                    "type": "error",
+                    "error": "internal error",
+                    "correlation_id": correlation_id,
+                }
+            )
+
+        async def sse_stream(
+            events: AsyncIterator[Any],
+            *,
+            scoped_id: str | None,
+            thread_id: str | None,
+            first: list[Any] | None = None,
+        ) -> AsyncIterator[str]:
+            try:
+                for event in first or []:
+                    yield sse(
+                        _event_payload(event, scoped_thread_id=scoped_id, thread_id=thread_id)
+                    )
+                async for event in events:
+                    yield sse(
+                        _event_payload(event, scoped_thread_id=scoped_id, thread_id=thread_id)
+                    )
+            except Exception:  # noqa: BLE001 — all agent errors get sanitized
+                yield error_frame()
+            finally:
+                yield "data: [DONE]\n\n"
+
         @app.get("/health")
         async def health() -> dict[str, str]:
             return {"status": "ok"}
@@ -249,6 +428,7 @@ class AgentServer:
         @app.post("/invoke", response_model=InvokeResponse)
         async def invoke(
             request: InvokeRequest,
+            http_request: Request,
             principal: str = auth_dep,
         ) -> InvokeResponse:
             # Native async path: iterating agent.run() on the event loop
@@ -261,11 +441,12 @@ class AgentServer:
             tool_calls = 0
             stop_reason = "complete"
 
+            metadata = await resolve_metadata(http_request, principal, request.metadata)
             t0 = time.perf_counter()
             async for event in agent.run(
                 request.prompt,
                 thread_id=scope_thread(principal, request.thread_id),
-                metadata=request.metadata,
+                metadata=metadata,
             ):
                 if isinstance(event, TerminateEvent):
                     final = event.final_message or final
@@ -287,80 +468,112 @@ class AgentServer:
         @app.post("/stream")
         async def stream(
             request: InvokeRequest,
+            http_request: Request,
             principal: str = auth_dep,
         ) -> StreamingResponse:
-            from tulip.core.events import (
-                TerminateEvent,
-                ThinkEvent,
-                ToolCompleteEvent,
-                ToolStartEvent,
-            )
-
             scoped_id = scope_thread(principal, request.thread_id)
+            metadata = await resolve_metadata(http_request, principal, request.metadata)
+            run_kwargs: dict[str, Any] = {"thread_id": scoped_id, "metadata": metadata}
+            # Token deltas: only for runnables that take the flag (a
+            # GraphRunnable, say, does not).
+            if want_tokens and _accepts_kwarg(agent.run, "stream_tokens"):
+                run_kwargs["stream_tokens"] = True
 
             async def event_generator() -> AsyncIterator[str]:
-                correlation_id: str | None = None
                 try:
-                    async for event in agent.run(
-                        request.prompt,
-                        thread_id=scoped_id,
-                        metadata=request.metadata,
-                    ):
-                        # Each branch builds a JSON-serialisable payload.
-                        # Mixed value types (str, dict, list, None) so the
-                        # dict is annotated as ``dict[str, Any]``.
-                        data: dict[str, Any]
-                        if isinstance(event, ThinkEvent):
-                            data = {"type": "think", "content": event.reasoning or ""}
-                        elif isinstance(event, ToolStartEvent):
-                            data = {
-                                "type": "tool_start",
-                                "tool": event.tool_name,
-                                # arguments are echoed back to the client
-                                # exactly as the model produced them; if
-                                # your deployment considers tool args
-                                # sensitive, wrap the agent to redact.
-                                "arguments": event.arguments,
-                            }
-                        elif isinstance(event, ToolCompleteEvent):
-                            data = {
-                                "type": "tool_complete",
-                                "tool": event.tool_name,
-                                "result": event.result,
-                                "error": event.error,
-                            }
-                        elif isinstance(event, TerminateEvent):
-                            data = {
-                                "type": "done",
-                                "message": event.final_message or "",
-                                "reason": event.reason,
-                            }
-                        else:
-                            data = {"type": event.event_type, "data": str(event)}
-
-                        yield f"data: {json.dumps(data)}\n\n"
-                except Exception:  # noqa: BLE001 — all agent errors get sanitized
-                    correlation_id = uuid.uuid4().hex
-                    _logger.exception("agent stream error (correlation_id=%s)", correlation_id)
-                    # Emit a generic error event so unauthenticated peers
-                    # don't get str(exc) (CWE-209). Details live in logs
-                    # keyed to ``correlation_id``.
-                    yield (
-                        "data: "
-                        + json.dumps(
-                            {
-                                "type": "error",
-                                "error": "internal error",
-                                "correlation_id": correlation_id,
-                            }
-                        )
-                        + "\n\n"
-                    )
-                finally:
+                    events = agent.run(request.prompt, **run_kwargs)
+                except Exception:  # noqa: BLE001 — sanitized like any stream error
+                    yield error_frame()
                     yield "data: [DONE]\n\n"
+                    return
+                async for frame in sse_stream(
+                    events, scoped_id=scoped_id, thread_id=request.thread_id
+                ):
+                    yield frame
 
             return StreamingResponse(
                 event_generator(),
+                media_type="text/event-stream",
+            )
+
+        @app.post("/resume", response_model=None)
+        async def resume(
+            request: ResumeRequest,
+            http_request: Request,
+            principal: str = auth_dep,
+        ) -> Any:
+            """Continue a paused thread, strictly by ``thread_id`` (SSE).
+
+            409 when the held approval is still undecided (the thread stays
+            paused), 404 when the caller has no paused thread by that id.
+            """
+            from fastapi import HTTPException
+            from fastapi.responses import JSONResponse
+
+            from tulip.core.errors import ApprovalPendingError
+
+            resume_fn = getattr(agent, "resume", None)
+            if resume_fn is None:
+                raise HTTPException(status_code=404, detail="This agent cannot be resumed")
+
+            scoped_id = scope_thread(principal, request.thread_id)
+            if request.decision is not None:
+                if decision_handler is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="This server does not accept decisions on /resume",
+                    )
+                recorded = decision_handler(
+                    http_request, principal, request.thread_id, dict(request.decision)
+                )
+                if inspect.isawaitable(recorded):
+                    await recorded
+
+            metadata: dict[str, Any] | None = None
+            if request.metadata or resolver is not None:
+                metadata = await resolve_metadata(http_request, principal, request.metadata)
+            resume_kwargs: dict[str, Any] = {
+                "thread_id": scoped_id,
+                "perform_dangling": request.perform_dangling,
+            }
+            if metadata is not None:
+                resume_kwargs["metadata"] = metadata
+
+            events = resume_fn(request.response, **resume_kwargs)
+            # Pull the first event before answering, so "nothing to resume" and
+            # "still pending" become real HTTP statuses instead of an error
+            # frame inside a 200 stream.
+            first: list[Any] = []
+            try:
+                first.append(await events.__anext__())
+            except StopAsyncIteration:
+                pass
+            except ApprovalPendingError as pending:
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "type": "approval_pending",
+                        "thread_id": request.thread_id,
+                        "interrupt_id": pending.interrupt_id,
+                        "question": pending.question,
+                        "metadata": json.loads(json.dumps(pending.metadata, default=str)),
+                    },
+                )
+            except RuntimeError as missing:
+                if "resume" in str(missing) or "No checkpoint" in str(missing):
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"No paused run for thread {request.thread_id!r}",
+                    ) from None
+                raise
+
+            return StreamingResponse(
+                sse_stream(
+                    events,
+                    scoped_id=scoped_id,
+                    thread_id=request.thread_id,
+                    first=first,
+                ),
                 media_type="text/event-stream",
             )
 
