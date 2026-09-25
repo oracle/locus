@@ -95,6 +95,10 @@ class ModelResponse(BaseModel):
     # (``n>1``). ``message`` remains the first choice, so single-candidate
     # callers are unaffected; these are the rest, in the order returned.
     candidates: list[Message] = Field(default_factory=list)
+    # Annotations from whatever produced this response on the client side —
+    # never sent to the model. ``FallbackChain`` records the tier that served
+    # the call under ``"fallback"`` (``{"tier", "model", "attempts"}``).
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     @property
     def content(self) -> str | None:

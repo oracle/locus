@@ -87,6 +87,15 @@ products built on one shared `Agent` instance.
   `temperature`, prompt caching (system prompt and tool catalog
   `cache_control`) and `response_format`, and its usage lacked the
   `cache_creation_input_tokens` / `cache_read_input_tokens` counters.
+- **`FallbackChain` reports which tier served each call.** `last_tier` was
+  one attribute shared by every call on the chain, so under concurrency it
+  described whichever call finished last, and nothing told a caller which tier
+  answered *its* call. See `ServedTier` under Added.
+- **One `LLMMemoryManager` can serve every user.** Its namespace was fixed at
+  construction, so scoping memories per user meant a manager per user — each
+  with its own background-extraction semaphore (no global bound) and its own
+  queue that `Agent.drain_memory()` did not drain. See `namespace_resolver`
+  under Added.
 
 ### Added
 
@@ -166,6 +175,20 @@ products built on one shared `Agent` instance.
   agent loop relies on — text, a schema-conformant tool call, a tool-result
   round trip, streamed text and a streamed tool call — so every fallback tier
   can be verified before it takes traffic.
+- **`ServedTier` / `served_tier()` (`tulip.models.fallback`).** Each
+  `FallbackChain` call reports the tier that served it: `complete()` returns
+  the response annotated with `response.metadata["fallback"]`
+  (`{"tier", "model", "attempts"}`), and `complete()` and `stream()` publish a
+  `ServedTier` to the calling context, read with `served_tier()`.
+  `ModelResponse` gains a client-side `metadata` dict (never sent to a model).
+- **`LLMMemoryManager(namespace_resolver=...)`.** `(run: RunInfo) -> prefix`
+  resolves the namespace per run from its metadata
+  (`lambda run: ("users", run.metadata["user_id"])`), so one shared manager
+  keeps users apart while `max_concurrent_extractions` bounds all of them and
+  one `drain()` flushes all of them. A resolver that raises skips memory for
+  that run rather than fall back to a shared namespace. `manager.scoped(prefix)`
+  scopes direct `retrieve` / `save` calls the same way; the fixed
+  `namespace_prefix` constructor is unchanged.
 
 ### Changed
 
@@ -209,6 +232,9 @@ products built on one shared `Agent` instance.
 - `EvalResult.timed_out` and `EvalReport.timed_out` are new; a timed-out case
   has score 0.0, `within_duration_budget: False`, and shows as `[TIMEOUT]` in
   `EvalReport.summary()`.
+- `FallbackChain.last_tier` is deprecated (`TulipDeprecationWarning`): it is
+  racy across concurrent calls. Use `response.metadata["fallback"]` or
+  `served_tier()`.
 
 ## [2.16.0] - 2026-09-16
 
