@@ -1194,24 +1194,13 @@ class AgentRuntimeMixin:
                         tool_results.append(result)
                         state = state.with_tool_execution(slot["execution"])
                         reasoning_step_tools.append(slot["execution"])
-                        yield ToolCompleteEvent(
-                            tool_name=result.name,
-                            tool_call_id=result.tool_call_id,
-                            result=result.content,
-                            duration_ms=0.0,
-                        )
+                        yield _complete_event(result, result=result.content, duration_ms=0.0)
                         continue
                     if kind == "cache":
                         tool_results.append(result)
                         state = state.with_tool_execution(slot["execution"])
                         reasoning_step_tools.append(slot["execution"])
-                        yield ToolCompleteEvent(
-                            tool_name=result.name,
-                            tool_call_id=result.tool_call_id,
-                            result=result.content,
-                            error=result.error,
-                            duration_ms=result.duration_ms,
-                        )
+                        yield _complete_event(result, result=result.content)
                         continue
                     if kind == "batch_cache_ref":
                         # Same-args duplicate of an earlier slot in this same
@@ -1718,12 +1707,8 @@ class AgentRuntimeMixin:
                             )
                         )
                         state = state.with_message(Message.tool(result))
-                        yield ToolCompleteEvent(
-                            tool_name=result.name,
-                            tool_call_id=result.tool_call_id,
-                            result=result.content,
-                            error=None,
-                            duration_ms=0.0,
+                        yield _complete_event(
+                            result, result=result.content, error=None, duration_ms=0.0
                         )
                         continue
                     modified_args = tool_event.arguments
@@ -1737,11 +1722,28 @@ class AgentRuntimeMixin:
                             state=state,
                             invocation_metadata=metadata or {},
                         )
-                        [result] = await self._executor.execute(
-                            [tc.model_copy(update={"arguments": modified_args})],
-                            self._tool_registry,
-                            ctx_factory,
-                        )
+                        call = tc.model_copy(update={"arguments": modified_args})
+                        if self._emits_progress([call]):
+                            # Same as the main loop: merge the tool's progress
+                            # into the stream so a resumed turn reports it live.
+                            streamed: ToolResult | None = None
+                            async for item in _interleave_progress(
+                                self._executor.execute_streaming(
+                                    [call], self._tool_registry, ctx_factory
+                                ),
+                                asyncio.Queue(),
+                            ):
+                                if isinstance(item, ToolProgressEvent):
+                                    yield item
+                                else:
+                                    streamed = item[1]
+                            if streamed is None:  # pragma: no cover - executor contract
+                                raise RuntimeError(f"executor returned no result for {call.name}")
+                            result = streamed
+                        else:
+                            [result] = await self._executor.execute(
+                                [call], self._tool_registry, ctx_factory
+                            )
                     except Exception as e:  # noqa: BLE001 — catches tool errors and InterruptException; branched below
                         from tulip.core.interrupt import InterruptException
 
@@ -1853,13 +1855,7 @@ class AgentRuntimeMixin:
                     )
                     state = state.with_message(Message.tool(result))
 
-                    yield ToolCompleteEvent(
-                        tool_name=result.name,
-                        tool_call_id=result.tool_call_id,
-                        result=result.content if result.success else None,
-                        error=result.error,
-                        duration_ms=result.duration_ms,
-                    )
+                    yield _complete_event(result)
                     for custom in hook_events:
                         yield custom
 
