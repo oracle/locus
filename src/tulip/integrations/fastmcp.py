@@ -8,19 +8,39 @@ Provides both:
 2. Client: Connect to external MCP servers (via mcp SDK)
 
 Works with any MCP-compliant server or client.
+
+The client keeps what an MCP server returns, not only its text: see
+:class:`MCPToolResult` (``structuredContent``, ``isError``, images and
+resources), per-request identity (:class:`MCPRequestContext`,
+``MCPClient.headers_provider``), tool allowlisting
+(``MCPClient.allowed_tools`` / ``tool_filter``), progress notifications
+(surfaced as :class:`~tulip.core.events.ToolProgressEvent`) and
+:class:`MCPConnectionError` for a server that is down or drops mid-call.
 """
 
 from __future__ import annotations
 
+import asyncio
+import base64
+import binascii
 import inspect
 import json
+import logging
 import re
-from collections.abc import Callable
+from collections import OrderedDict
+from collections.abc import Awaitable, Callable, Mapping
+from contextlib import AsyncExitStack
+from contextvars import ContextVar
+from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, create_model
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, create_model
 
+from tulip.core.media import encode_image
+from tulip.tools.context import current_tool_context, progress_reporter
 from tulip.tools.decorator import Tool, tool
+from tulip.tools.output import ToolOutput
 
 
 if TYPE_CHECKING:
@@ -28,6 +48,8 @@ if TYPE_CHECKING:
 
     from tulip.agent.agent import Agent
 
+
+logger = logging.getLogger(__name__)
 
 # =============================================================================
 # Schema utilities - Convert JSON Schema to Pydantic models
@@ -122,6 +144,9 @@ def mcp_tool_to_tulip(
     description: str,
     func: Callable[..., Any],
     parameters: dict[str, Any] | None = None,
+    *,
+    output_schema: dict[str, Any] | None = None,
+    emits_progress: bool = False,
 ) -> Tool:
     """
     Convert an MCP-style tool to a Tulip Tool.
@@ -141,6 +166,10 @@ def mcp_tool_to_tulip(
         description: Tool description
         func: The async function to call
         parameters: JSON Schema for parameters
+        output_schema: The tool's declared ``outputSchema``, kept on
+            :attr:`Tool.output_schema`.
+        emits_progress: Stream progress the tool reports as live
+            ``ToolProgressEvent`` s (see :attr:`Tool.emits_progress`).
 
     Returns:
         Tulip Tool instance
@@ -164,6 +193,8 @@ def mcp_tool_to_tulip(
             parameters=parameters,
             fn=_invoke,
             idempotent=False,
+            output_schema=output_schema if isinstance(output_schema, dict) else None,
+            emits_progress=emits_progress,
         )
 
     # Fallback: derive the schema from the wrapper signature.
@@ -173,6 +204,8 @@ def mcp_tool_to_tulip(
     async def wrapper(**kwargs: Any) -> str:
         return await _invoke(**kwargs)
 
+    wrapper.emits_progress = emits_progress
+    wrapper.output_schema = output_schema if isinstance(output_schema, dict) else None
     return wrapper
 
 
@@ -442,6 +475,400 @@ def create_mcp_server(
 # =============================================================================
 
 
+class MCPConnectionError(ConnectionError):
+    """The MCP server could not be reached, or the connection dropped.
+
+    Raised instead of the transport's own exceptions — including the
+    ``CancelledError`` an anyio cancel scope leaks when a streamable-HTTP
+    connection dies — so a dead server surfaces as an ordinary tool error
+    and never as a cancellation of the agent run that happened to call it.
+    """
+
+
+class MCPToolNotAllowedError(PermissionError):
+    """A call named a tool the client's ``allowed_tools`` / ``tool_filter`` excludes."""
+
+
+@dataclass(frozen=True)
+class MCPRequestContext:
+    """What a :attr:`MCPClient.headers_provider` knows about a request.
+
+    Attributes:
+        metadata: The agent run's ``metadata`` (``agent.run(..., metadata=)``)
+            — the natural place for the end user's identity or token.
+        run_id: The agent run id, when the request serves a tool call.
+        tool_name: The MCP tool being called; ``None`` for ``tools/list``.
+        tool_call_id: The model's tool-call id, when serving a tool call.
+    """
+
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+    run_id: str | None = None
+    tool_name: str | None = None
+    tool_call_id: str | None = None
+
+
+#: ``(MCPRequestContext) -> headers`` — sync or async; ``None``/``{}`` adds none.
+HeadersProvider = Callable[
+    [MCPRequestContext],
+    Mapping[str, str] | None | Awaitable[Mapping[str, str] | None],
+]
+
+
+@dataclass(frozen=True)
+class MCPToolResult:
+    """Everything an MCP ``tools/call`` returned, not just its text.
+
+    Attributes:
+        text: The model-facing text: text blocks joined by newlines, embedded
+            text resources inlined, images embedded as Tulip image segments
+            (see :mod:`tulip.core.media`) and other blocks as short
+            ``[audio: …]`` / ``[resource: …]`` markers so nothing vanishes
+            silently. Falls back to the JSON of ``structured_content`` when
+            the server sent no content blocks.
+        is_error: The server's ``isError`` flag — the tool ran and failed.
+        structured_content: The server's ``structuredContent``, if any.
+        content: Every content block as a JSON-mode dict in MCP's shape.
+        meta: The result's ``_meta``, if any.
+    """
+
+    text: str
+    is_error: bool = False
+    structured_content: dict[str, Any] | None = None
+    content: list[dict[str, Any]] = field(default_factory=list)
+    meta: dict[str, Any] | None = None
+
+    def to_tool_output(self) -> ToolOutput:
+        """This result as a :class:`~tulip.tools.output.ToolOutput`.
+
+        Text blocks are already in the string; the rest travel as
+        ``content_blocks``.
+        """
+        blocks = [block for block in self.content if block.get("type") != "text"]
+        return ToolOutput(
+            self.text,
+            structured_content=self.structured_content,
+            content_blocks=blocks or None,
+            is_error=self.is_error,
+        )
+
+
+def _dump_block(item: Any) -> dict[str, Any] | None:
+    """A content block as a JSON-mode dict, or None for a non-model value."""
+    dump = getattr(item, "model_dump", None)
+    if not callable(dump):
+        return None
+    try:
+        dumped = dump(mode="json", by_alias=True, exclude_none=True)
+    except Exception:  # noqa: BLE001 — a malformed block must not fail the call
+        return None
+    return dumped if isinstance(dumped, dict) else None
+
+
+def _image_segment(data: Any, mime_type: str) -> str:
+    """An MCP image block as a Tulip image segment, or a marker if unusable."""
+    if isinstance(data, str) and data:
+        try:
+            return encode_image(base64.b64decode(data, validate=True), mime_type)
+        except (binascii.Error, ValueError):
+            pass
+    return f"[image: {mime_type}]"
+
+
+def _block_text(item: Any, *, embed_images: bool) -> str | None:
+    """The model-facing text for one content block."""
+    text = getattr(item, "text", None)
+    if isinstance(text, str):
+        return text
+    kind = getattr(item, "type", None)
+    mime = getattr(item, "mimeType", None)
+    mime = mime if isinstance(mime, str) and mime else None
+    if kind == "image":
+        if embed_images:
+            return _image_segment(getattr(item, "data", None), mime or "image/png")
+        return f"[image: {mime or 'image'}]"
+    if kind == "audio":
+        return f"[audio: {mime or 'audio'}]"
+    if kind == "resource":
+        resource = getattr(item, "resource", None)
+        inner = getattr(resource, "text", None)
+        if isinstance(inner, str):
+            return inner
+        inner_mime = getattr(resource, "mimeType", None) or "binary"
+        return f"[resource: {getattr(resource, 'uri', '')} ({inner_mime})]"
+    if kind == "resource_link":
+        return f"[resource link: {getattr(item, 'name', '')} {getattr(item, 'uri', '')}]"
+    return None
+
+
+def _convert_call_result(raw: Any, *, embed_images: bool = True) -> MCPToolResult:
+    """Translate an MCP ``CallToolResult`` into an :class:`MCPToolResult`."""
+    items = getattr(raw, "content", None)
+    if items is None:
+        return MCPToolResult(text=str(raw))
+
+    parts: list[str] = []
+    blocks: list[dict[str, Any]] = []
+    for item in items or []:
+        block = _dump_block(item)
+        if block is not None:
+            blocks.append(block)
+        rendered = _block_text(item, embed_images=embed_images)
+        if rendered is not None:
+            parts.append(rendered)
+
+    structured = getattr(raw, "structuredContent", None)
+    structured = structured if isinstance(structured, dict) else None
+    is_error = getattr(raw, "isError", False) is True
+    meta = getattr(raw, "meta", None)
+    meta = meta if isinstance(meta, dict) else None
+
+    if parts:
+        text = "\n".join(parts)
+    elif structured is not None:
+        # The spec asks servers to mirror structured content as text; not all
+        # do, and a model shown an empty result reads it as "nothing found".
+        text = json.dumps(structured, default=str)
+    else:
+        text = ""
+    return MCPToolResult(
+        text=text,
+        is_error=is_error,
+        structured_content=structured,
+        content=blocks,
+        meta=meta,
+    )
+
+
+def _accepts_kwarg(fn: Any, name: str) -> bool:
+    """Whether ``fn`` takes keyword ``name`` — older mcp releases lack some."""
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+    return name in params or any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+
+
+def _being_cancelled() -> bool:
+    """Whether the *current task* has a pending cancellation request.
+
+    Distinguishes a genuine cancellation of the agent run (propagate it) from
+    a ``CancelledError`` an anyio cancel scope leaks out of a dying transport
+    (convert it into :class:`MCPConnectionError`).
+    """
+    task = asyncio.current_task()
+    return task is not None and task.cancelling() > 0
+
+
+#: ``McpError`` code the SDK uses when the connection closed under a request.
+_MCP_CONNECTION_CLOSED = -32000
+
+#: Exception type names that only arise when the transport itself is gone —
+#: anyio memory streams closed under the session, httpx transport failures.
+_CONNECTION_LOSS_TYPES = frozenset(
+    {
+        "BrokenResourceError",
+        "ClosedResourceError",
+        "EndOfStream",
+        "ConnectError",
+        "ReadError",
+        "WriteError",
+        "RemoteProtocolError",
+        "ConnectTimeout",
+    }
+)
+
+
+def _is_connection_loss(exc: BaseException) -> bool:
+    """Whether ``exc`` means the connection is gone (not a tool/protocol error)."""
+    exc = _unwrap(exc)
+    if type(exc).__name__ in _CONNECTION_LOSS_TYPES or isinstance(exc, ConnectionError):
+        return True
+    error = getattr(exc, "error", None)
+    return getattr(error, "code", None) == _MCP_CONNECTION_CLOSED
+
+
+def _unwrap(exc: BaseException) -> BaseException:
+    """The single leaf of a one-member exception group, else ``exc``."""
+    while isinstance(exc, BaseExceptionGroup) and len(exc.exceptions) == 1:
+        exc = exc.exceptions[0]
+    return exc
+
+
+#: Run metadata for requests made outside a tool call (``tools/list`` while
+#: attaching), so a :class:`HeadersProvider` sees the same metadata there.
+_request_metadata: ContextVar[Mapping[str, Any] | None] = ContextVar(
+    "tulip_mcp_request_metadata", default=None
+)
+
+
+class _SessionHandle:
+    """One MCP session, owned by a dedicated task.
+
+    The transport (``streamablehttp_client`` / ``stdio_client``) and
+    ``ClientSession`` are anyio context managers with task groups inside.
+    Entering them in the caller's task — as this client used to — binds their
+    cancel scopes to that task: a transport failure then cancels *the agent
+    run*, and closing from any other task (or at GC) fails with "Attempted to
+    exit cancel scope in a different task". Here one runner task enters them,
+    parks until asked to stop, and exits them itself; callers use the session
+    from their own tasks, which the SDK supports.
+    """
+
+    def __init__(self, label: str) -> None:
+        self.label = label
+        self.session: Any = None
+        self.transport: Any = None
+        self.task: asyncio.Task[None] | None = None
+        self._stop: asyncio.Event | None = None
+
+    @property
+    def alive(self) -> bool:
+        """Whether the runner — and so the connection — is still up."""
+        return self.task is not None and not self.task.done()
+
+    async def start(
+        self,
+        transport: Any,
+        session_factory: Callable[[Any, Any], Any],
+        connect_timeout: float | None,
+    ) -> Any:
+        """Open the connection and return the initialized session."""
+        loop = asyncio.get_running_loop()
+        ready: asyncio.Future[Any] = loop.create_future()
+        self._stop = asyncio.Event()
+        self.transport = transport
+        self.task = loop.create_task(
+            self._run(transport, session_factory, ready), name=f"mcp-session:{self.label}"
+        )
+        try:
+            self.session = await asyncio.wait_for(asyncio.shield(ready), connect_timeout)
+        except TimeoutError as exc:
+            await self._abort(ready)
+            msg = f"timed out after {connect_timeout}s connecting to MCP server {self.label}"
+            raise MCPConnectionError(msg) from exc
+        except BaseException:
+            await self._abort(ready)
+            raise
+        return self.session
+
+    async def _abort(self, ready: asyncio.Future[Any]) -> None:
+        if not ready.done():
+            ready.cancel()
+        await self.close(grace=1.0)
+
+    async def _run(
+        self,
+        transport: Any,
+        session_factory: Callable[[Any, Any], Any],
+        ready: asyncio.Future[Any],
+    ) -> None:
+        try:
+            async with AsyncExitStack() as stack:
+                streams = await stack.enter_async_context(transport)
+                session = await stack.enter_async_context(session_factory(streams[0], streams[1]))
+                await session.initialize()
+                if not ready.done():
+                    ready.set_result(session)
+                assert self._stop is not None
+                await self._stop.wait()
+        except asyncio.CancelledError:
+            # Our own close()/loop shutdown, or the transport's task group
+            # cancelling its host after a connection failure. Either way the
+            # session is finished; callers learn it from ``alive``.
+            if not ready.done():
+                ready.set_exception(
+                    MCPConnectionError(
+                        f"MCP server {self.label} is unreachable or closed the "
+                        "connection during setup"
+                    )
+                )
+            raise
+        except Exception as exc:  # noqa: BLE001 — every transport failure ends the session
+            leaf = _unwrap(exc)
+            if not ready.done():
+                ready.set_exception(leaf)
+            else:
+                logger.warning(
+                    "MCP session %s ended: %s: %s", self.label, type(leaf).__name__, leaf
+                )
+        finally:
+            if not ready.done():
+                ready.set_exception(
+                    MCPConnectionError(
+                        f"MCP server {self.label} closed the connection during setup"
+                    )
+                )
+
+    async def close(self, grace: float = 5.0) -> None:
+        """Ask the runner to exit its contexts; cancel it if it will not
+        within ``grace`` seconds."""
+        task = self.task
+        if task is None or task.done():
+            return
+        if self._stop is not None:
+            self._stop.set()
+        done, _ = await asyncio.wait({task}, timeout=grace)
+        if not done:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+
+async def _await_while_alive(
+    handle: _SessionHandle | None,
+    awaitable: Awaitable[Any],
+    *,
+    liveness_interval: float | None = None,
+) -> Any:
+    """Await ``awaitable``, failing fast if the connection is gone.
+
+    Two ways a request can otherwise wait out its whole read timeout — by
+    default, forever — for a response that will never come:
+
+    * the session's runner dies (the transport's task group failed);
+    * the server dies *while streaming this request's response*. The SDK's
+      streamable-HTTP transport logs the broken stream and returns, leaving
+      the request pending with no error.
+
+    The first is watched directly. For the second, a request pending longer
+    than ``liveness_interval`` pings the server each interval; a ping that
+    fails means the connection is gone. A ping that merely times out (a busy
+    server) is not treated as a failure.
+    """
+    if handle is None or handle.task is None:
+        return await awaitable
+    call = asyncio.ensure_future(awaitable)
+    try:
+        while True:
+            done, _ = await asyncio.wait(
+                {call, handle.task},
+                timeout=liveness_interval,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if call in done:
+                return call.result()
+            if handle.task in done:
+                break
+            ping = getattr(handle.session, "send_ping", None)
+            if ping is None:
+                continue
+            try:
+                await asyncio.wait_for(ping(), timeout=liveness_interval)
+            except TimeoutError:
+                continue
+            except Exception:  # noqa: BLE001 — any failure to ping is a lost connection
+                if call.done():
+                    return call.result()
+                break
+    except BaseException:
+        call.cancel()
+        await asyncio.gather(call, return_exceptions=True)
+        raise
+    call.cancel()
+    await asyncio.gather(call, return_exceptions=True)
+    msg = f"MCP server {handle.label} closed the connection"
+    raise MCPConnectionError(msg)
+
+
 class MCPClient(BaseModel):
     """
     Client for connecting to external MCP servers.
@@ -461,6 +888,26 @@ class MCPClient(BaseModel):
         >>> client = MCPClient(base_url="https://mcp.example.com")
         >>> await client.connect()
         >>> ...
+
+    **Rich results.** :meth:`call_tool` returns the text, as it always has.
+    :meth:`call_tool_result` returns an :class:`MCPToolResult` with the
+    server's ``structuredContent``, ``isError`` and every content block; the
+    tools :meth:`to_tulip_tools` builds use it, so an agent's
+    ``ToolCompleteEvent`` carries ``structured_content`` and ``error``
+    while the model still reads the text.
+
+    **One client, many users.** Headers are resolved per request from, in
+    order: :attr:`headers`, :attr:`access_token`, the run metadata key
+    :attr:`metadata_headers_key` (``agent.run(..., metadata={"mcp_headers":
+    {"Authorization": "Bearer <user token>"}})``) and :attr:`headers_provider`.
+    Requests whose per-run headers differ go over separate MCP sessions
+    (bounded by :attr:`max_sessions`, least-recently-used evicted), because an
+    MCP session is stateful and must never be shared between identities.
+
+    **Resilience.** Each session runs in a task of its own, so a server that
+    dies takes down only its session: the call in flight fails with
+    :class:`MCPConnectionError` (a tool error to the agent, never a
+    cancellation of the run) and the next call reconnects.
     """
 
     # Stdio transport
@@ -499,15 +946,106 @@ class MCPClient(BaseModel):
         ),
     )
 
+    name: str | None = Field(
+        default=None, description="Label for logs and errors; defaults to the URL/command."
+    )
+    headers: dict[str, str] = Field(
+        default_factory=dict,
+        description="Custom HTTP headers sent on every request (HTTP transport).",
+    )
+    headers_provider: HeadersProvider | None = Field(
+        default=None,
+        description=(
+            "Called per request with an MCPRequestContext (run metadata, tool "
+            "name, call id); returns extra headers — e.g. the end user's "
+            "bearer token. Sync or async. HTTP transport only."
+        ),
+    )
+    metadata_headers_key: str | None = Field(
+        default="mcp_headers",
+        description=(
+            "Run-metadata key holding per-run headers: "
+            "agent.run(..., metadata={'mcp_headers': {...}}). None disables."
+        ),
+    )
+    allowed_tools: list[str] | None = Field(
+        default=None,
+        description="Only these tool names are listed, attached and callable.",
+    )
+    tool_filter: Callable[[dict[str, Any]], bool] | None = Field(
+        default=None,
+        description="Predicate over a tool schema dict; False hides and blocks the tool.",
+    )
+    connect_timeout: float | None = Field(
+        default=30.0, description="Seconds to wait for connect + initialize; None waits forever."
+    )
+    call_timeout: float | None = Field(
+        default=None, description="Read timeout (seconds) for one tools/call; None = SDK default."
+    )
+    max_sessions: int = Field(
+        default=16, ge=1, description="Per-identity sessions kept open (LRU)."
+    )
+    reconnect_interval: float = Field(
+        default=30.0,
+        ge=0,
+        description=(
+            "An agent retries attaching this server's tools at most this often "
+            "(seconds) after a failed attach."
+        ),
+    )
+    liveness_interval: float | None = Field(
+        default=15.0,
+        gt=0,
+        description=(
+            "While a request has been pending this long, ping the server every "
+            "interval; a failed ping fails the request with MCPConnectionError "
+            "instead of leaving it waiting on a server that died mid-response. "
+            "None disables."
+        ),
+    )
+    embed_images: bool = Field(
+        default=True,
+        description=(
+            "Embed image content in the tool result as Tulip image segments, "
+            "so multimodal adapters show the model the image."
+        ),
+    )
+
     _session: Any = None
     _client_context: Any = None
     _connected: bool = False
     _process: Any = None
+    _runner: _SessionHandle | None = None
+    _ever_connected: bool = False
+    _identity_sessions: OrderedDict[tuple[tuple[str, str], ...], _SessionHandle] = PrivateAttr(
+        default_factory=OrderedDict
+    )
+    _identity_locks: dict[tuple[tuple[str, str], ...], asyncio.Lock] = PrivateAttr(
+        default_factory=dict
+    )
+    _schemas: dict[str, dict[str, Any]] = PrivateAttr(default_factory=dict)
 
     model_config = {"arbitrary_types_allowed": True}
 
+    # ------------------------------------------------------------------
+    # Connection lifecycle
+    # ------------------------------------------------------------------
+
+    @property
+    def label(self) -> str:
+        """How this server is named in logs and errors."""
+        if self.name:
+            return self.name
+        if self.base_url:
+            return self.base_url
+        if self.server_command:
+            return self.server_command[0]
+        return type(self).__name__
+
     async def connect(self) -> None:
         """Connect to the MCP server."""
+        if self._runner is not None and not self._runner.alive:
+            await self._discard(self._runner)  # the last connection died
         if self._connected:
             return
 
@@ -519,9 +1057,21 @@ class MCPClient(BaseModel):
             raise ValueError("Must provide either base_url or server_command")
 
         self._connected = True
+        self._ever_connected = True
 
-    async def _connect_http(self) -> None:
-        """Connect via HTTP/SSE transport."""
+    async def _connect_http(
+        self,
+        extra_headers: Mapping[str, str] | None = None,
+        *,
+        install: bool = True,
+    ) -> _SessionHandle:
+        """Connect via HTTP/SSE transport.
+
+        Args:
+            extra_headers: Per-identity headers layered over :attr:`headers`.
+            install: Make this the default session (``connect()``); False
+                opens a per-identity session and leaves the default alone.
+        """
         if self.base_url is None:
             msg = "_connect_http called without base_url"
             raise RuntimeError(msg)
@@ -542,9 +1092,14 @@ class MCPClient(BaseModel):
 
             validate_url(self.base_url, allow_private=self.allow_private_url)
 
-        # Set up auth if token provided
+        request_headers = {**self.headers, **(extra_headers or {})}
+        has_authorization = any(k.lower() == "authorization" for k in request_headers)
+
+        # Set up auth if token provided. A per-request Authorization header
+        # (headers / headers_provider / run metadata) wins over the static
+        # token — BearerAuth would otherwise overwrite it on the wire.
         auth = None
-        if self.access_token:
+        if self.access_token and not has_authorization:
             import httpx
 
             class BearerAuth(httpx.Auth):
@@ -572,7 +1127,7 @@ class MCPClient(BaseModel):
             auth: httpx.Auth | None = None,
         ) -> httpx.AsyncClient:
             return httpx.AsyncClient(
-                headers=headers,
+                headers={**request_headers, **(headers or {})},
                 timeout=timeout if timeout is not None else httpx.Timeout(30.0),
                 auth=auth,
                 verify=verify_ssl,
@@ -586,28 +1141,31 @@ class MCPClient(BaseModel):
         # way the client carries our auth, TLS-verify and redirect settings.
         _legacy_client = getattr(_streamable_http, "streamablehttp_client", None)
         if _legacy_client is not None:
-            self._client_context = _legacy_client(
-                self.base_url,
-                auth=auth,
-                httpx_client_factory=_httpx_factory,
-            )
+            legacy_kwargs: dict[str, Any] = {
+                "auth": auth,
+                "httpx_client_factory": _httpx_factory,
+            }
+            if request_headers:
+                legacy_kwargs["headers"] = request_headers
+            client_context = _legacy_client(self.base_url, **legacy_kwargs)
         else:
             # ``getattr`` on purpose: the renamed API is typed against the
             # httpx fork mcp vendors (httpx2), which duck-types with the
             # client our factory builds — a static call here would pin us to
             # whichever fork the installed mcp declares.
             _new_client = getattr(_streamable_http, "streamable_http_client")  # noqa: B009
-            self._client_context = _new_client(
+            client_context = _new_client(
                 self.base_url,
                 http_client=_httpx_factory(auth=auth),
             )
-        read_stream, write_stream, _ = await self._client_context.__aenter__()
 
-        self._session = ClientSession(read_stream, write_stream)
-        await self._session.__aenter__()
-        await self._session.initialize()
+        handle = _SessionHandle(self.label)
+        await handle.start(client_context, ClientSession, self.connect_timeout)
+        if install:
+            self._install(handle)
+        return handle
 
-    async def _connect_stdio(self) -> None:
+    async def _connect_stdio(self) -> _SessionHandle:
         """Connect via stdio transport."""
         try:
             from mcp.client.session import ClientSession
@@ -639,53 +1197,51 @@ class MCPClient(BaseModel):
             args=cmd_args,
         )
 
-        self._client_context = stdio_client(server_params)
-        read_stream, write_stream = await self._client_context.__aenter__()
+        handle = _SessionHandle(self.label)
+        await handle.start(stdio_client(server_params), ClientSession, self.connect_timeout)
+        self._install(handle)
+        return handle
 
-        self._session = ClientSession(read_stream, write_stream)
-        await self._session.__aenter__()
-        await self._session.initialize()
+    def _install(self, handle: _SessionHandle) -> None:
+        """Make ``handle`` the default session."""
+        self._runner = handle
+        self._session = handle.session
+        self._client_context = handle.transport
 
-    async def list_tools(self) -> list[dict[str, Any]]:
-        """List available tools from the MCP server."""
-        if not self._session:
-            raise RuntimeError("Not connected. Call connect() first.")
-
-        result = await self._session.list_tools()
-
-        # Convert MCP Tool objects to dicts
-        tools = []
-        for mcp_tool in result.tools:
-            tools.append(
-                {
-                    "name": mcp_tool.name,
-                    "description": mcp_tool.description or "",
-                    "inputSchema": mcp_tool.inputSchema if hasattr(mcp_tool, "inputSchema") else {},
-                }
-            )
-        return tools
-
-    async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
-        """Call a tool on the MCP server."""
-        if not self._session:
-            raise RuntimeError("Not connected. Call connect() first.")
-
-        result = await self._session.call_tool(name=name, arguments=arguments)
-
-        # Extract text from result content
-        if hasattr(result, "content"):
-            texts = []
-            for item in result.content:
-                if hasattr(item, "text"):
-                    texts.append(item.text)
-            return "\n".join(texts) if texts else str(result)
-
-        return str(result)
+    async def _discard(self, handle: _SessionHandle | None) -> None:
+        """Forget a dead session so the next request reconnects."""
+        if handle is None or handle is self._runner:
+            self._runner = None
+            self._session = None
+            self._client_context = None
+            self._connected = False
+        else:
+            for key, candidate in list(self._identity_sessions.items()):
+                if candidate is handle:
+                    del self._identity_sessions[key]
+        if handle is not None:
+            await handle.close(grace=1.0)
 
     async def close(self) -> None:
-        """Close the connection."""
+        """Close the connection — the default session and every per-identity one."""
         self._connected = False
+        self._ever_connected = False
 
+        identity = list(self._identity_sessions.values())
+        self._identity_sessions.clear()
+        for handle in identity:
+            await handle.close()
+
+        runner = self._runner
+        if runner is not None:
+            self._runner = None
+            await runner.close()
+            self._session = None
+            self._client_context = None
+            return
+
+        # No runner: state was installed directly (tests, subclasses). Exit
+        # the contexts in place, as before.
         if self._session:
             try:
                 await self._session.__aexit__(None, None, None)
@@ -714,18 +1270,256 @@ class MCPClient(BaseModel):
         """Async context manager exit."""
         await self.close()
 
+    # ------------------------------------------------------------------
+    # Per-request identity
+    # ------------------------------------------------------------------
+
+    def _request_context(self, tool_name: str | None) -> MCPRequestContext:
+        """The context a headers provider sees for a request made now."""
+        ctx = current_tool_context()
+        if ctx is not None and tool_name is not None:
+            return MCPRequestContext(
+                metadata=ctx.invocation_metadata,
+                run_id=ctx.run_id or None,
+                tool_name=tool_name,
+                tool_call_id=ctx.tool_call_id,
+            )
+        return MCPRequestContext(metadata=_request_metadata.get() or {}, tool_name=tool_name)
+
+    async def _dynamic_headers(self, rctx: MCPRequestContext) -> dict[str, str]:
+        """Per-request headers from run metadata and the headers provider."""
+        if not self.base_url:
+            return {}
+        resolved: dict[str, str] = {}
+        if self.metadata_headers_key:
+            from_metadata = rctx.metadata.get(self.metadata_headers_key)
+            if isinstance(from_metadata, Mapping):
+                resolved.update({str(k): str(v) for k, v in from_metadata.items()})
+        if self.headers_provider is not None:
+            provided = self.headers_provider(rctx)
+            if inspect.isawaitable(provided):
+                provided = await provided
+            if provided:
+                resolved.update({str(k): str(v) for k, v in provided.items()})
+        return resolved
+
+    async def _session_for(self, rctx: MCPRequestContext) -> tuple[Any, _SessionHandle | None]:
+        """The session to use for a request — per identity when headers vary."""
+        dynamic = await self._dynamic_headers(rctx)
+        if dynamic:
+            return await self._identity_session(dynamic)
+
+        if self._runner is not None and not self._runner.alive:
+            await self._discard(self._runner)
+        if self._session is None:
+            if not self._ever_connected:
+                raise RuntimeError("Not connected. Call connect() first.")
+            # The server went away since the last call; try it again.
+            await self.connect()
+        return self._session, self._runner
+
+    async def _identity_session(self, dynamic: dict[str, str]) -> tuple[Any, _SessionHandle]:
+        key = tuple(sorted(dynamic.items()))
+        lock = self._identity_locks.setdefault(key, asyncio.Lock())
+        async with lock:
+            handle = self._identity_sessions.get(key)
+            if handle is not None and handle.alive:
+                self._identity_sessions.move_to_end(key)
+                return handle.session, handle
+            if handle is not None:
+                await self._discard(handle)
+            handle = await self._connect_http(dynamic, install=False)
+            self._identity_sessions[key] = handle
+            while len(self._identity_sessions) > self.max_sessions:
+                old_key, old = self._identity_sessions.popitem(last=False)
+                self._identity_locks.pop(old_key, None)
+                await old.close()
+            return handle.session, handle
+
+    async def _guarded(
+        self, handle: _SessionHandle | None, awaitable: Awaitable[Any], what: str
+    ) -> Any:
+        """Run one request; a dropped connection becomes :class:`MCPConnectionError`."""
+        try:
+            return await _await_while_alive(
+                handle, awaitable, liveness_interval=self.liveness_interval
+            )
+        except asyncio.CancelledError:
+            if _being_cancelled():
+                raise  # the caller really is being cancelled
+            await self._discard(handle)
+            msg = f"MCP connection to {self.label} was lost during {what}"
+            raise MCPConnectionError(msg) from None
+        except MCPConnectionError:
+            await self._discard(handle)
+            raise
+        except Exception as exc:
+            if _is_connection_loss(exc) or (handle is not None and not handle.alive):
+                await self._discard(handle)
+                msg = f"MCP connection to {self.label} was lost during {what}: {exc}"
+                raise MCPConnectionError(msg) from exc
+            raise
+
+    # ------------------------------------------------------------------
+    # Tool filtering
+    # ------------------------------------------------------------------
+
+    def _is_allowed(self, schema: Mapping[str, Any]) -> bool:
+        name = schema.get("name")
+        if self.allowed_tools is not None and name not in self.allowed_tools:
+            return False
+        return self.tool_filter is None or bool(self.tool_filter(dict(schema)))
+
+    def _ensure_allowed(self, name: str) -> None:
+        if self.allowed_tools is None and self.tool_filter is None:
+            return
+        if not self._is_allowed(self._schemas.get(name, {"name": name})):
+            msg = f"MCP tool {name!r} is not allowed on {self.label}"
+            raise MCPToolNotAllowedError(msg)
+
+    # ------------------------------------------------------------------
+    # Protocol calls
+    # ------------------------------------------------------------------
+
+    async def list_tools(self) -> list[dict[str, Any]]:
+        """List available tools from the MCP server.
+
+        Tools excluded by :attr:`allowed_tools` / :attr:`tool_filter` are
+        left out. Each dict carries ``name``, ``description`` and
+        ``inputSchema``, plus ``outputSchema``, ``title`` and
+        ``annotations`` when the server declares them.
+        """
+        session, handle = await self._session_for(self._request_context(None))
+        result = await self._guarded(handle, session.list_tools(), "tools/list")
+
+        # Convert MCP Tool objects to dicts
+        tools = []
+        for mcp_tool in result.tools:
+            schema: dict[str, Any] = {
+                "name": mcp_tool.name,
+                "description": mcp_tool.description or "",
+                "inputSchema": mcp_tool.inputSchema if hasattr(mcp_tool, "inputSchema") else {},
+            }
+            output_schema = getattr(mcp_tool, "outputSchema", None)
+            if isinstance(output_schema, dict):
+                schema["outputSchema"] = output_schema
+            title = getattr(mcp_tool, "title", None)
+            if isinstance(title, str) and title:
+                schema["title"] = title
+            annotations = _dump_block(getattr(mcp_tool, "annotations", None))
+            if annotations:
+                schema["annotations"] = annotations
+            if not self._is_allowed(schema):
+                continue
+            self._schemas[schema["name"]] = schema
+            tools.append(schema)
+        return tools
+
+    async def call_tool_result(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+        *,
+        progress_callback: Callable[[float, float | None, str | None], Any] | None = None,
+    ) -> MCPToolResult:
+        """Call a tool and return everything the server sent back.
+
+        Args:
+            name: Tool name.
+            arguments: Tool arguments.
+            progress_callback: Called ``(progress, total, message)`` for each
+                progress notification (may be sync or async). Defaults to the
+                running agent's progress stream when called from a tool.
+
+        Raises:
+            MCPToolNotAllowedError: ``name`` is excluded by the allowlist/filter.
+            MCPConnectionError: The server could not be reached or dropped the
+                connection mid-call (the next call reconnects).
+        """
+        self._ensure_allowed(name)
+        session, handle = await self._session_for(self._request_context(name))
+
+        call = session.call_tool
+        kwargs: dict[str, Any] = {}
+        if self.call_timeout is not None and _accepts_kwarg(call, "read_timeout_seconds"):
+            kwargs["read_timeout_seconds"] = timedelta(seconds=self.call_timeout)
+
+        on_progress: Callable[[float, float | None, str | None], Any] | None = progress_callback
+        if on_progress is None:
+            on_progress = progress_reporter()
+        if on_progress is not None and _accepts_kwarg(call, "progress_callback"):
+            report = on_progress
+
+            async def _progress(
+                progress: float, total: float | None, message: str | None = None
+            ) -> None:
+                try:
+                    outcome = report(progress, total, message)
+                    if inspect.isawaitable(outcome):
+                        await outcome
+                except Exception:  # noqa: BLE001 — a bad observer must not fail the call
+                    logger.debug("MCP progress callback failed", exc_info=True)
+
+            kwargs["progress_callback"] = _progress
+
+        raw = await self._guarded(
+            handle, call(name=name, arguments=arguments, **kwargs), f"tools/call {name}"
+        )
+        return _convert_call_result(raw, embed_images=self.embed_images)
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+        """Call a tool on the MCP server and return its text.
+
+        Kept for compatibility; :meth:`call_tool_result` also returns
+        ``structuredContent``, ``isError`` and non-text content.
+        """
+        return (await self.call_tool_result(name, arguments)).text
+
+    # ------------------------------------------------------------------
+    # Agent integration
+    # ------------------------------------------------------------------
+
+    async def load_tools(self, metadata: Mapping[str, Any] | None = None) -> list[Tool]:
+        """Connect if needed, list the tools and convert them — what an agent
+        does on attach.
+
+        Args:
+            metadata: The run metadata, visible to per-run headers
+                (:attr:`metadata_headers_key`, :attr:`headers_provider`) for
+                the ``tools/list`` request.
+        """
+        token = _request_metadata.set(dict(metadata or {}))
+        try:
+            if not self._connected:
+                dynamic = await self._dynamic_headers(self._request_context(None))
+                if not dynamic:
+                    # Per-identity requests open their own sessions; the
+                    # shared default one is only needed without them.
+                    await self.connect()
+            schemas = await self.list_tools()
+            return self.to_tulip_tools(schemas)
+        finally:
+            _request_metadata.reset(token)
+
     def to_tulip_tools(self, tools: list[dict[str, Any]]) -> list[Tool]:
         """Convert MCP tool schemas into Tulip tools bound to this client.
+
+        Each tool returns a :class:`~tulip.tools.output.ToolOutput`: the
+        model reads the text; ``structuredContent``, ``isError`` and non-text
+        blocks reach the agent's ``ToolCompleteEvent``. Progress
+        notifications stream as ``ToolProgressEvent`` s.
 
         Args:
             tools: Schemas as returned by :meth:`list_tools`.
 
         Returns:
-            One :class:`~tulip.tools.decorator.Tool` per schema, each calling
-            back through this client.
+            One :class:`~tulip.tools.decorator.Tool` per allowed schema, each
+            calling back through this client.
         """
         tulip_tools = []
         for mcp_tool in tools:
+            if not self._is_allowed(mcp_tool):
+                continue
 
             def make_func(name: str = mcp_tool["name"]) -> Callable[..., Any]:
                 """Build the coroutine that calls one MCP tool.
@@ -744,7 +1538,12 @@ class MCPClient(BaseModel):
                 """
 
                 async def func(**kwargs: Any) -> str:
-                    return await self.call_tool(name, kwargs)
+                    # A subclass (or patch) that overrides ``call_tool`` keeps
+                    # its routing; everyone else gets the rich result.
+                    if getattr(type(self), "call_tool", None) is not _BASE_CALL_TOOL:
+                        return await self.call_tool(name, kwargs)
+                    result = await self.call_tool_result(name, kwargs)
+                    return result.to_tool_output()
 
                 func.__name__ = name
                 return func
@@ -754,7 +1553,12 @@ class MCPClient(BaseModel):
                 description=mcp_tool.get("description", ""),
                 func=make_func(),
                 parameters=mcp_tool.get("inputSchema"),
+                output_schema=mcp_tool.get("outputSchema"),
+                emits_progress=True,
             )
             tulip_tools.append(tulip_tool)
 
         return tulip_tools
+
+
+_BASE_CALL_TOOL = MCPClient.call_tool
