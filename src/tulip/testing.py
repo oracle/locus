@@ -51,10 +51,13 @@ from tulip.models.base import ModelResponse
 
 
 __all__ = [
+    "CONFORMANCE_TOOL",
     "AgentTestClient",
     "AgentTrace",
+    "ConformanceReport",
     "FunctionModel",
     "ScriptedModel",
+    "check_model_conformance",
     "text",
     "tool_call",
 ]
@@ -431,3 +434,236 @@ class AgentTestClient:
     async def arun(self, prompt: str, **kwargs: Any) -> AgentTrace:
         """Async counterpart of :meth:`run`."""
         return AgentTrace(await self.agent.arun(prompt, **kwargs), self.model)
+
+
+# ---------------------------------------------------------------------------
+# Model conformance
+#
+# A fallback chain is only as good as its worst tier: a backup provider that
+# streams text but drops tool calls, or returns arguments that ignore the
+# schema, fails over into a broken agent. ``check_model_conformance`` runs the
+# handful of behaviours the agent loop depends on against any ModelProtocol,
+# so each tier can be verified before it is trusted with traffic.
+# ---------------------------------------------------------------------------
+
+#: The tool the conformance check offers. Small and unambiguous on purpose.
+CONFORMANCE_TOOL: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "get_weather",
+        "description": "Get the current weather for a city.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "city": {"type": "string", "description": "City name, e.g. Lisbon"},
+                "unit": {"type": "string", "enum": ["celsius", "fahrenheit"]},
+            },
+            "required": ["city"],
+        },
+    },
+}
+
+_JSON_TYPES: dict[str, type | tuple[type, ...]] = {
+    "string": str,
+    "number": (int, float),
+    "integer": int,
+    "boolean": bool,
+    "object": dict,
+    "array": list,
+}
+
+
+def _schema_errors(arguments: Any, schema: dict[str, Any]) -> list[str]:
+    """Shallow JSON-Schema check: object, required keys, property types, enums."""
+    if not isinstance(arguments, dict):
+        return [f"arguments are {type(arguments).__name__}, not an object"]
+    errors = [
+        f"missing required {key!r}" for key in schema.get("required", []) if key not in arguments
+    ]
+    properties = schema.get("properties", {})
+    for key, value in arguments.items():
+        spec = properties.get(key)
+        if spec is None:
+            errors.append(f"unexpected argument {key!r}")
+            continue
+        expected = _JSON_TYPES.get(str(spec.get("type")))
+        if expected is not None and not isinstance(value, expected):
+            errors.append(f"{key!r} should be {spec.get('type')}, got {type(value).__name__}")
+        if "enum" in spec and value not in spec["enum"]:
+            errors.append(f"{key!r}={value!r} not in {spec['enum']}")
+    return errors
+
+
+class ConformanceReport:
+    """Outcome of :func:`check_model_conformance`: one ``(check, ok, detail)`` per check."""
+
+    def __init__(self) -> None:
+        self.checks: list[tuple[str, bool, str]] = []
+
+    def add(self, name: str, *, ok: bool, detail: str = "") -> None:
+        """Record one check's outcome."""
+        self.checks.append((name, ok, detail))
+
+    @property
+    def ok(self) -> bool:
+        """Whether every check passed."""
+        return all(ok for _, ok, _ in self.checks)
+
+    @property
+    def failures(self) -> list[str]:
+        """``"check: detail"`` for each failed check."""
+        return [f"{name}: {detail}" for name, ok, detail in self.checks if not ok]
+
+    def __repr__(self) -> str:
+        passed = sum(1 for _, ok, _ in self.checks if ok)
+        return f"ConformanceReport({passed}/{len(self.checks)} passed)"
+
+
+async def check_model_conformance(
+    model: Any,
+    *,
+    raise_on_failure: bool = True,
+    **model_kwargs: Any,
+) -> ConformanceReport:
+    """Check that ``model`` does what Tulip's agent loop relies on.
+
+    Runs five checks, each a real call to the model:
+
+    ``complete_text``
+        A plain turn returns non-empty text.
+    ``complete_tool_call``
+        Offered :data:`CONFORMANCE_TOOL` and asked for the weather, the model
+        calls it, with an id and arguments that satisfy the tool's schema.
+    ``tool_result_round_trip``
+        Given the tool's result, the model answers in text.
+    ``stream_text``
+        ``stream()`` yields :class:`~tulip.core.events.ModelChunkEvent` s whose
+        content assembles into non-empty text.
+    ``stream_tool_call``
+        A streamed tool-calling turn delivers the tool call in a chunk — the
+        loop rebuilds the turn from chunks alone, so a stream that carries only
+        text silently loses every tool call.
+
+    Meant for each tier of a :class:`~tulip.models.fallback.FallbackChain`
+    (with real credentials, in an integration test or a deploy smoke)::
+
+        for tier in chain.tiers:
+            await check_model_conformance(tier.model)
+
+    Args:
+        model: Any ``ModelProtocol`` implementation.
+        raise_on_failure: Raise ``AssertionError`` listing the failures
+            (default); False returns the report either way.
+        **model_kwargs: Forwarded to every call (``max_tokens``, …).
+
+    Returns:
+        The :class:`ConformanceReport`.
+    """
+    report = ConformanceReport()
+    schema = CONFORMANCE_TOOL["function"]["parameters"]
+    system = Message.system(
+        "You are a terse assistant. Use tools when they are offered and relevant."
+    )
+    ask_weather = Message.user("What is the weather in Lisbon right now? Use the get_weather tool.")
+
+    async def _check(name: str, coro: Any) -> Any:
+        try:
+            return await coro
+        except Exception as exc:  # noqa: BLE001 — every failure becomes a report line
+            report.add(name, ok=False, detail=f"raised {type(exc).__name__}: {exc}"[:300])
+            return None
+
+    # 1. Plain completion.
+    response = await _check(
+        "complete_text",
+        model.complete([system, Message.user("Reply with exactly the word: pong")], **model_kwargs),
+    )
+    if response is not None:
+        content = getattr(response, "content", None)
+        report.add(
+            "complete_text",
+            ok=isinstance(content, str) and bool(content.strip()),
+            detail=f"content={content!r}"[:200],
+        )
+
+    # 2. Tool call, schema-conformant.
+    call: ToolCall | None = None
+    response = await _check(
+        "complete_tool_call",
+        model.complete([system, ask_weather], [CONFORMANCE_TOOL], **model_kwargs),
+    )
+    if response is not None:
+        calls = list(getattr(response.message, "tool_calls", None) or [])
+        match = [c for c in calls if c.name == "get_weather"]
+        if not match:
+            report.add(
+                "complete_tool_call",
+                ok=False,
+                detail=f"no get_weather call; got {[c.name for c in calls]}",
+            )
+        else:
+            call = match[0]
+            problems = _schema_errors(call.arguments, schema)
+            if not call.id:
+                problems.append("tool call has no id")
+            report.add("complete_tool_call", ok=not problems, detail="; ".join(problems) or "ok")
+
+    # 3. Tool result round trip.
+    if call is not None:
+        from tulip.core.messages import ToolResult  # noqa: PLC0415
+
+        history = [
+            system,
+            ask_weather,
+            Message.assistant(content=None, tool_calls=[call]),
+            Message.tool(
+                ToolResult(tool_call_id=call.id, name=call.name, content="18C, light rain")
+            ),
+        ]
+        response = await _check(
+            "tool_result_round_trip",
+            model.complete(history, [CONFORMANCE_TOOL], **model_kwargs),
+        )
+        if response is not None:
+            content = getattr(response, "content", None)
+            report.add(
+                "tool_result_round_trip",
+                ok=isinstance(content, str) and bool(content.strip()),
+                detail=f"content={content!r}"[:200],
+            )
+    else:
+        report.add("tool_result_round_trip", ok=False, detail="skipped: no tool call to answer")
+
+    # 4 + 5. Streaming.
+    async def _collect(messages: list[Message], tools: list[dict[str, Any]] | None) -> list[Any]:
+        return [chunk async for chunk in model.stream(messages, tools, **model_kwargs)]
+
+    chunks = await _check(
+        "stream_text", _collect([system, Message.user("Reply with exactly the word: pong")], None)
+    )
+    if chunks is not None:
+        wrong = [type(c).__name__ for c in chunks if not isinstance(c, ModelChunkEvent)]
+        text_out = "".join(c.content or "" for c in chunks if isinstance(c, ModelChunkEvent))
+        report.add(
+            "stream_text",
+            ok=not wrong and bool(text_out.strip()),
+            detail=f"non-chunk items {wrong}" if wrong else f"text={text_out!r}"[:200],
+        )
+
+    chunks = await _check("stream_tool_call", _collect([system, ask_weather], [CONFORMANCE_TOOL]))
+    if chunks is not None:
+        streamed = [
+            tc for c in chunks if isinstance(c, ModelChunkEvent) for tc in (c.tool_calls or [])
+        ]
+        match = [tc for tc in streamed if tc.name == "get_weather"]
+        problems = (
+            _schema_errors(match[0].arguments, schema)
+            if match
+            else ["no get_weather call in any chunk"]
+        )
+        report.add("stream_tool_call", ok=not problems, detail="; ".join(problems) or "ok")
+
+    if raise_on_failure and not report.ok:
+        failures = "\n  ".join(report.failures)
+        raise AssertionError(f"{type(model).__name__} failed model conformance:\n  {failures}")
+    return report

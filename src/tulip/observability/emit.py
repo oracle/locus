@@ -132,6 +132,10 @@ EV_HOOK_MODEL_RETRY = "agent.model.retry"
 EV_HOOK_STEERING_APPLIED = "agent.steering.applied"
 EV_HOOK_GUARDRAIL_TRIGGERED = "agent.guardrail.triggered"
 
+# --- Model failover (tulip.models.fallback) ---
+EV_MODEL_FALLBACK = "model.fallback"
+EV_MODEL_BREAKER = "model.fallback.breaker"
+
 # --- Sandboxed tool execution ---
 EV_TOOL_SANDBOX_STARTED = "tool.sandbox.started"
 EV_TOOL_SANDBOX_COMPLETED = "tool.sandbox.completed"

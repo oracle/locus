@@ -98,6 +98,72 @@ products built on one shared `Agent` instance.
   longer read by the runtime (with concurrent runs it is whichever finished
   last — use `AgentResult.state`).
 
+### Added
+
+- **MCP results keep more than their text.** A tool from `MCPClient` now
+  returns the server's `structuredContent` on `ToolCompleteEvent.structured_content`
+  (the model still reads the text), turns `isError` into the call's error
+  (`ToolCompleteEvent.error` is set and the model sees `Error: …`), embeds image
+  content as Tulip image segments and passes every non-text block through on
+  `ToolCompleteEvent.content_blocks`. `list_tools()` includes `outputSchema`,
+  `title` and `annotations`, and `Tool.output_schema` keeps the schema.
+  `MCPClient.call_tool_result()` returns all of it as an `MCPToolResult`;
+  `call_tool()` still returns the text.
+- **Tool progress on the event stream.** `ToolProgressEvent(tool_call_id,
+  tool_name, progress, total, message)` arrives live between a call's start and
+  completion. MCP `notifications/progress` are surfaced automatically; any tool
+  declared `@tool(emits_progress=True)` can send them with
+  `tulip.tools.report_progress()`.
+- **`ToolOutput`**, a `str` that also carries `structured_content`,
+  `content_blocks` and `is_error`, so any tool can return data for the
+  application alongside text for the model.
+- **One MCP client, many users.** `MCPClient(headers=…)` sends custom headers;
+  per-run headers come from run metadata (`agent.run(..., metadata={"mcp_headers":
+  {"Authorization": "Bearer <user token>"}})`) or from a `headers_provider`
+  called per request with an `MCPRequestContext` (run metadata, tool name, call
+  id). Each distinct identity gets its own MCP session (`max_sessions`, LRU), so
+  sessions are never shared between users.
+- **MCP tool allowlists.** `MCPClient(allowed_tools=[…])` and
+  `tool_filter=predicate` decide which tools are listed, attached and callable
+  (`MCPToolNotAllowedError` otherwise).
+- **`FallbackChain`** (`tulip.models.fallback`): a `ModelProtocol` over an
+  ordered list of models. Provider failures (429, 5xx, 529/overloaded, timeouts,
+  dropped connections, auth/billing, unknown model) move the call to the next
+  tier; request errors (context overflow, a 400 no provider would accept) are
+  raised at once. Streaming fails over only before the first chunk and never
+  splices two providers into one reply; `first_chunk_timeout` and
+  `complete_timeout` bound a slow tier. Each tier has a `CircuitBreaker`
+  (failures within a window open it for a cooldown, then one half-open probe).
+  Tier switches and breaker transitions go to an `on_event` callback, the
+  telemetry bus (`model.fallback`, `model.fallback.breaker`) and
+  `FallbackChain.metrics`.
+- **`tulip.testing.check_model_conformance(model)`** checks the behaviours the
+  agent loop relies on — text, a schema-conformant tool call, a tool-result
+  round trip, streamed text and a streamed tool call — so every fallback tier
+  can be verified before it takes traffic.
+
+### Fixed
+
+- **An MCP server that is down no longer kills the run.** The transport was
+  entered in the run's own task, so a refused connection cancelled the run with
+  `CancelledError`, and closing it anywhere else logged "Attempted to exit
+  cancel scope in a different task" at shutdown. Each MCP session now runs in a
+  task of its own: a server down at attach is logged and skipped and retried on
+  a later run (`MCPClient.reconnect_interval`), a server that dies mid-call
+  fails that call with `MCPConnectionError` — an ordinary tool error; the run
+  continues — and the next call reconnects. A request whose server died while
+  streaming its response (which the SDK leaves pending forever) is detected by
+  a liveness ping (`liveness_interval`). A genuine cancellation of the run
+  still propagates.
+- **`CredentialPoolModel` rotates on the streaming path.** `stream()` only
+  guarded the call that creates the generator, which never raises, so a 429 on
+  the opening request was never rotated. It now rotates on any rotatable error
+  before the first chunk and re-raises after it.
+- **`AnthropicModel.stream()` sends what `complete()` sends.** It dropped
+  `temperature`, prompt caching (system prompt and tool catalog
+  `cache_control`) and `response_format`, and its usage lacked the
+  `cache_creation_input_tokens` / `cache_read_input_tokens` counters.
+
 ## [2.16.0] - 2026-09-16
 
 ### Added
