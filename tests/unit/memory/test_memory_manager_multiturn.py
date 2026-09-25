@@ -115,7 +115,8 @@ async def test_memory_block_does_not_pile_up_on_checkpointed_thread() -> None:
     assert [len(_memory_blocks(call)) for call in model.calls] == [1, 1, 1, 1, 1]
     saved = await checkpointer.load("thread-1")
     assert saved is not None
-    assert len(_memory_blocks(list(saved.messages))) == 1
+    # The block is ephemeral: it never reaches the checkpoint at all.
+    assert len(_memory_blocks(list(saved.messages))) == 0
     # The block stays right after the primary system prompt.
     assert model.calls[-1][0].content == "You are helpful."
     assert model.calls[-1][1].metadata.get(MEMORY_BLOCK_METADATA_KEY) is True

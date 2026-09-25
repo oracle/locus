@@ -291,6 +291,18 @@ def _normalize_stop_reason(raw: str | None) -> StopReason:
     return "complete"
 
 
+def _durable(state: AgentState) -> AgentState:
+    """The form of ``state`` that outlives the turn: checkpoints, the result.
+
+    A memory manager's injected block is ephemeral — it is in ``state`` so
+    every model call of the turn sees it, and is dropped here so it is never
+    persisted (the next turn injects a fresh one).
+    """
+    from tulip.memory.manager import without_memory_blocks  # noqa: PLC0415
+
+    return without_memory_blocks(state)
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -365,6 +377,7 @@ class AgentRuntimeMixin:
 
     def _end_run(self, rc: RunContext, state: AgentState) -> None:
         """Publish a run's final state and unregister it (idempotent)."""
+        state = _durable(state)
         if rc.result_slot is not None:
             rc.result_slot.state = state
         # Kept for back-compat and single-run debugging only: with concurrent
@@ -1252,7 +1265,7 @@ class AgentRuntimeMixin:
                                 # only run at GC — too late if the process
                                 # dies while paused.
                                 if self.config.checkpointer and thread_id:
-                                    await self.config.checkpointer.save(state, thread_id)
+                                    await self.config.checkpointer.save(_durable(state), thread_id)
                                 yield InterruptEvent(
                                     question=interrupt_data.get("question", ""),
                                     options=interrupt_data.get("options"),
@@ -1438,7 +1451,7 @@ class AgentRuntimeMixin:
                 ):
                     _cp_thread = thread_id or state.run_id
                     await self.config.checkpointer.save(
-                        state,
+                        _durable(state),
                         _cp_thread,
                     )
                     from tulip.observability.emit import (  # noqa: PLC0415
@@ -1499,7 +1512,7 @@ class AgentRuntimeMixin:
 
             # Final checkpoint
             if self.config.checkpointer and thread_id:
-                await self.config.checkpointer.save(state, thread_id)
+                await self.config.checkpointer.save(_durable(state), thread_id)
                 from tulip.observability.emit import (  # noqa: PLC0415
                     EV_CHECKPOINT_SAVED,
                     emit,
@@ -1754,7 +1767,7 @@ class AgentRuntimeMixin:
                             # parks on the interrupt never drives this
                             # generator to its finally.
                             if self.config.checkpointer and thread_id:
-                                await self.config.checkpointer.save(state, thread_id)
+                                await self.config.checkpointer.save(_durable(state), thread_id)
                             payload = e.value.payload if hasattr(e, "value") else {}
                             question = (
                                 payload.get("question", str(payload))
@@ -1799,7 +1812,7 @@ class AgentRuntimeMixin:
                         if interrupt_data and interrupt_data.get("__interrupt__"):
                             self._park_interrupt(rc, state)
                             if self.config.checkpointer and thread_id:
-                                await self.config.checkpointer.save(state, thread_id)
+                                await self.config.checkpointer.save(_durable(state), thread_id)
                             yield InterruptEvent(
                                 question=interrupt_data.get("question", ""),
                                 options=interrupt_data.get("options"),
@@ -1872,7 +1885,7 @@ class AgentRuntimeMixin:
             # durable as the original one (a second pause, or completion,
             # is persisted too — resume never downgrades durability).
             if self.config.checkpointer and thread_id:
-                await self.config.checkpointer.save(state, thread_id)
+                await self.config.checkpointer.save(_durable(state), thread_id)
                 from tulip.observability.emit import (  # noqa: PLC0415
                     EV_CHECKPOINT_SAVED,
                     emit,
