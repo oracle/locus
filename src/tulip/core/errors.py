@@ -233,3 +233,45 @@ __all__ = [
     "ValidationError",
     "VectorStoreError",
 ]
+
+
+# =============================================================================
+# Human-in-the-loop
+# =============================================================================
+
+
+class ApprovalPendingError(TulipError):
+    """``Agent.resume()`` was called before the held action was decided.
+
+    Raised when ``resume(..., perform_dangling=True)`` re-invokes a gated call
+    and the gate interrupts again — the approval is still pending. The thread
+    is left paused exactly as it was: nothing is folded into the conversation
+    and no checkpoint is written, so a later ``resume`` (once the decision is
+    recorded) performs the action normally.
+
+    Attributes:
+        thread_id: The thread that is still paused (``None`` for a run that
+            was started without one).
+        interrupt_id: The id of the held tool call.
+        question: The question the gate is still asking.
+        metadata: The gate's interrupt metadata (``approval_id`` and friends),
+            identical in shape to ``InterruptEvent.metadata``.
+    """
+
+    kind = "approval_pending"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        thread_id: str | None = None,
+        interrupt_id: str = "",
+        question: str = "",
+        metadata: dict[str, Any] | None = None,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(message, cause=cause)
+        self.thread_id = thread_id
+        self.interrupt_id = interrupt_id
+        self.question = question
+        self.metadata: dict[str, Any] = dict(metadata or {})

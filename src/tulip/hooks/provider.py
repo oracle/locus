@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 
 if TYPE_CHECKING:
+    from tulip.core.events import CustomEvent, RunInfo
     from tulip.core.state import AgentState
 
 
@@ -43,6 +44,47 @@ class ProtectedEvent:
     """
 
     _writable: set[str] = set()
+
+    #: The run this event belongs to; bound by the runtime, ``None`` when the
+    #: event was constructed by hand (tests, custom dispatchers).
+    _run_ctx: Any = None
+
+    @property
+    def run(self) -> RunInfo | None:
+        """Read-only identity of the run this hook fired in.
+
+        ``run.thread_id``, ``run.run_id`` and ``run.metadata`` (the run's
+        invocation metadata, read-only) let a hook on a shared agent tell
+        concurrent users apart without globals or context variables.
+        ``None`` when the event was not dispatched by a running agent.
+        """
+        ctx = self._run_ctx
+        info: RunInfo | None = ctx.info if ctx is not None else None
+        return info
+
+    def emit(self, event: CustomEvent) -> None:
+        """Send a UI-only :class:`~tulip.core.events.CustomEvent` to the run's stream.
+
+        The event is yielded from ``Agent.run()`` right after this hook
+        returns. It never reaches the model, the conversation, or the
+        checkpoint — use it for widgets and progress, and ``event.result`` for
+        what the model should read.
+
+        Raises:
+            RuntimeError: The event is not bound to a run.
+            TypeError: ``event`` is not a ``CustomEvent``.
+        """
+        ctx = self._run_ctx
+        if ctx is None:
+            raise RuntimeError(
+                f"{type(self).__name__}.emit() needs a running agent; this event "
+                "was not dispatched by one"
+            )
+        ctx.emit(event, tool_call_id=getattr(self, "tool_call_id", None) or None)
+
+    def _bind_run(self, run: Any) -> None:
+        """Attach the runtime's per-run context (internal)."""
+        object.__setattr__(self, "_run_ctx", run)
 
     def _init(self, name: str, value: Any) -> None:
         """Set a field during __init__ (bypasses protection)."""
@@ -95,9 +137,10 @@ class BeforeModelCallEvent(ProtectedEvent):
     messages: list[Any]
     tools: list[Any] | None
 
-    def __init__(self, messages: list[Any], tools: list[Any] | None) -> None:
+    def __init__(self, messages: list[Any], tools: list[Any] | None, *, run: Any = None) -> None:
         self._init("messages", messages)
         self._init("tools", tools)
+        self._bind_run(run)
 
 
 class AfterModelCallEvent(ProtectedEvent):
@@ -122,10 +165,11 @@ class AfterModelCallEvent(ProtectedEvent):
     messages: list[Any]
     retry: bool
 
-    def __init__(self, response: Any, messages: list[Any]) -> None:
+    def __init__(self, response: Any, messages: list[Any], *, run: Any = None) -> None:
         self._init("response", response)
         self._init("messages", messages)
         self._init("retry", False)
+        self._bind_run(run)
 
 
 class BeforeToolCallEvent(ProtectedEvent):
@@ -152,11 +196,19 @@ class BeforeToolCallEvent(ProtectedEvent):
     arguments: dict[str, Any]
     cancel: bool | str
 
-    def __init__(self, tool_name: str, tool_call_id: str, arguments: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        tool_name: str,
+        tool_call_id: str,
+        arguments: dict[str, Any],
+        *,
+        run: Any = None,
+    ) -> None:
         self._init("tool_name", tool_name)
         self._init("tool_call_id", tool_call_id)
         self._init("arguments", arguments)
         self._init("cancel", False)
+        self._bind_run(run)
 
 
 class AfterToolCallEvent(ProtectedEvent):
@@ -203,6 +255,7 @@ class AfterToolCallEvent(ProtectedEvent):
         *,
         tool_call_id: str = "",
         arguments: dict[str, Any] | None = None,
+        run: Any = None,
     ) -> None:
         self._init("tool_name", tool_name)
         self._init("tool_call_id", tool_call_id)
@@ -210,6 +263,7 @@ class AfterToolCallEvent(ProtectedEvent):
         self._init("result", result)
         self._init("error", error)
         self._init("retry", False)
+        self._bind_run(run)
 
 
 class HookPriority:

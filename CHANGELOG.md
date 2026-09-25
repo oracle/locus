@@ -8,6 +8,96 @@ policy.
 
 ## [Unreleased]
 
+Targets 2.17.0. Hardening for multi-user, multi-turn, human-approval chat
+products built on one shared `Agent` instance.
+
+### Fixed
+
+- **Concurrent runs on one Agent no longer share per-run state.** `arun` read
+  the final state off the agent after its awaits, so under `asyncio.gather`
+  run B returned run A's state and tool executions. Per-run state (final
+  state, cancel signal, termination-condition clock, unverified-writes flag,
+  hook-emitted events) now lives on a per-run context owned by that run; one
+  Agent is safe for concurrent runs on different threads.
+- **`resume()` is keyed strictly by `thread_id` (security).** It preferred the
+  agent's most recent in-memory interrupt over the thread it was given:
+  `resume(thread_id="A")` performed thread B's held booking with B's
+  arguments. Paused runs are now held per thread and a resume only ever
+  continues the thread it names (from memory, or rehydrated from the
+  checkpointer).
+- **Resuming before an approval is decided no longer folds the raw
+  `__interrupt__` JSON as the tool result.** `resume(..., perform_dangling=True)`
+  raises `ApprovalPendingError` instead and leaves the thread paused — nothing
+  is folded, yielded or checkpointed.
+- **A new message on a checkpointed thread starts a new turn.** The loaded
+  state used to be continued verbatim: the iteration counter climbed across
+  turns (with `max_iterations=3`, every turn from the third ended
+  `max_iterations`), tool-loop detection and `@tool(idempotent=True)` reuse
+  spanned turns, a terminal tool in one turn ended the next before the model
+  ran, and the first turn's metadata and callable `system_prompt` were frozen
+  for the life of the thread. See *Changed* for the exact semantics.
+- The approved call performed by `resume(..., perform_dangling=True)` now
+  receives a `ToolContext` carrying the run's invocation metadata (it received
+  none).
+
+### Added
+
+- `ApprovalPendingError` (`tulip`, `tulip.core`, `tulip.core.errors`), with
+  `thread_id`, `interrupt_id`, `question` and the gate's `metadata`.
+- `Agent.cancel(thread_id=...)` cancels only the in-flight run(s) on that
+  thread; `cancel()` keeps its meaning (cancel everything, or the next run if
+  none is running) and now returns how many runs it signalled.
+- `Agent.resume(..., metadata=...)` sets the resumed segment's invocation
+  metadata; `Agent.pending_interrupts()` lists the threads paused in memory.
+- **Run context on hook events.** Every hook event has a read-only
+  `event.run` (`tulip.RunInfo`: `run_id`, `thread_id`, read-only `metadata`,
+  `agent_name`), so a hook on a shared agent can tell users apart without
+  context variables.
+- **UI-only side channel from hooks.** `event.emit(CustomEvent(name=..., data=...))`
+  on a tool or model hook event yields a `tulip.CustomEvent` from
+  `Agent.run()` right after the hook (after the matching `ToolCompleteEvent`
+  for `on_after_tool_call`). It never reaches the model, the conversation or
+  the checkpoint, and is stamped with the run's `run_id`, `thread_id` and the
+  tool call id.
+- **`AgentServer`**: `POST /resume {thread_id, response?, decision?,
+  perform_dangling=true, metadata?}` continues one paused thread (SSE) —
+  `409` with the pending interrupt when the approval is undecided, `404` when
+  the caller has no such paused thread. New constructor options:
+  `metadata_resolver(request, principal)` supplies trusted metadata that
+  overrides client `metadata` on `/invoke`, `/stream` and `/resume`;
+  `decision_handler(request, principal, thread_id, decision)` records a
+  `/resume` decision (e.g. in an approval store); `stream_tokens=True`.
+
+### Changed
+
+- **New-turn semantics on a checkpointed thread.** Kept: messages and provider
+  continuation state. Started afresh per turn: `run_id`, `iteration`,
+  `tool_executions`, `reasoning_steps`, `confidence`, `tool_history`, `errors`,
+  and the token/cost counters (so `token_budget`, `max_cost_usd` and
+  `AgentResult.metrics` are per turn; the checkpoint no longer accumulates
+  thread-lifetime token totals — sum per-turn results if you need them).
+  The new run's `metadata` is merged over the thread's (new keys win) and the
+  leading system message is re-evaluated from `system_prompt`. Resume after an
+  interrupt is unchanged: it continues the same turn.
+- `AgentState.last_tool_calls` (and so `called_terminal_tool`) only looks at
+  the current turn — it stops at the most recent user message.
+- `resume()` without `thread_id` raises `RuntimeError` when more than one run
+  is paused in memory, instead of resuming the most recent one.
+- A new `run()` on a thread discards that thread's in-memory interrupt (the
+  new turn's checkpoint is the thread's state from then on).
+- `Agent.is_cancelled` reports only a pending cancel-all.
+- `AgentServer /stream` streams token deltas as `{"type": "model_chunk", ...}`
+  by default (`stream_tokens=False` restores the old stream). Events other than
+  `think` / `tool_start` / `tool_complete` / `done` are sent as their
+  `model_dump(mode="json")` fields under `type` — an interrupt is a JSON object
+  (`question`, `interrupt_id`, `metadata`, …) instead of a Python repr string
+  under `data`. `tool_start` / `tool_complete` also carry `tool_call_id`.
+- Private: `Agent._interrupt_state` is a read-only view, the
+  `_interrupt_prompt` / `_interrupt_thread_id` / `_interrupt_metadata` /
+  `_has_unverified_writes` attributes are gone, and `_last_run_state` is no
+  longer read by the runtime (with concurrent runs it is whichever finished
+  last — use `AgentResult.state`).
+
 ## [2.16.0] - 2026-09-16
 
 ### Added

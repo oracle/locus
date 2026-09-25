@@ -16,6 +16,7 @@ from tulip.core.command import (
 )
 from tulip.core.config import TulipSettings
 from tulip.core.errors import (
+    ApprovalPendingError,
     CheckpointError,
     CheckpointNotFoundError,
     CheckpointSerializationError,
@@ -35,6 +36,7 @@ from tulip.core.errors import (
     VectorStoreError,
 )
 from tulip.core.events import (
+    CustomEvent,
     GroundingEvent,
     ModelChunkEvent,
     ReflectEvent,
@@ -96,6 +98,7 @@ __all__ = [
     "ModelProtocol",
     "ToolProtocol",
     # Events
+    "CustomEvent",
     "GroundingEvent",
     "TulipEvent",
     "ModelChunkEvent",
@@ -107,6 +110,7 @@ __all__ = [
     # Config
     "TulipSettings",
     # Errors
+    "ApprovalPendingError",
     "CheckpointError",
     "CheckpointNotFoundError",
     "CheckpointSerializationError",

@@ -94,6 +94,8 @@ class HookOrchestrator:
         self,
         messages: list[Any],
         tools: list[dict[str, Any]] | None,
+        *,
+        run: Any = None,
     ) -> list[Any]:
         """Dispatch ``on_before_model_call``; returns possibly-modified messages.
 
@@ -102,7 +104,7 @@ class HookOrchestrator:
         """
         from tulip.hooks.provider import BeforeModelCallEvent
 
-        event = BeforeModelCallEvent(messages=messages, tools=tools)
+        event = BeforeModelCallEvent(messages=messages, tools=tools, run=run)
         for hook in self._hooks:
             if hasattr(hook, "on_before_model_call"):
                 await hook.on_before_model_call(event)
@@ -113,6 +115,8 @@ class HookOrchestrator:
         self,
         response: Any,
         messages: list[Any],
+        *,
+        run: Any = None,
     ) -> Any:
         """Dispatch ``on_after_model_call`` in reverse order.
 
@@ -121,7 +125,7 @@ class HookOrchestrator:
         """
         from tulip.hooks.provider import AfterModelCallEvent
 
-        event = AfterModelCallEvent(response=response, messages=messages)
+        event = AfterModelCallEvent(response=response, messages=messages, run=run)
         for hook in reversed(self._hooks):
             if hasattr(hook, "on_after_model_call"):
                 await hook.on_after_model_call(event)
@@ -132,6 +136,8 @@ class HookOrchestrator:
         tool_name: str,
         tool_call_id: str,
         arguments: dict[str, Any],
+        *,
+        run: Any = None,
     ) -> Any:
         """Dispatch ``on_before_tool_call``; returns the event.
 
@@ -144,6 +150,7 @@ class HookOrchestrator:
             tool_name=tool_name,
             tool_call_id=tool_call_id,
             arguments=arguments,
+            run=run,
         )
         for hook in self._hooks:
             if hasattr(hook, "on_before_tool_call"):
@@ -158,6 +165,7 @@ class HookOrchestrator:
         *,
         tool_call_id: str = "",
         arguments: dict[str, Any] | None = None,
+        run: Any = None,
     ) -> Any:
         """Dispatch ``on_after_tool_call`` in reverse order; returns the event.
 
@@ -175,6 +183,7 @@ class HookOrchestrator:
             error=error,
             tool_call_id=tool_call_id,
             arguments=arguments,
+            run=run,
         )
         for hook in reversed(self._hooks):
             if hasattr(hook, "on_after_tool_call"):

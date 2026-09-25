@@ -16,7 +16,7 @@ behaviour where ``_initialize()`` was called from both ``__init__`` and
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from tulip.tools.decorator import Tool
 from tulip.tools.executor import ConcurrentExecutor, SequentialExecutor
@@ -255,12 +255,23 @@ def initialize_agent(agent: Agent) -> None:
     agent._initialized = True
 
 
+def _run_for(agent: Agent, run_id: str | None) -> Any:
+    """The in-flight run context with ``run_id``, if any."""
+    if run_id is None:
+        return None
+    with agent._runs_lock:
+        for rc in agent._active_runs.values():
+            if rc.run_id == run_id:
+                return rc
+    return None
+
+
 def register_builtin_tools(agent: Agent) -> None:
     """Register the explicit-completion-mode built-ins on the agent.
 
     Adds ``task_complete`` and ``ask_user`` to the agent's tool registry.
     The closures capture the agent so ``task_complete`` can consult
-    ``require_verification`` / ``_has_unverified_writes`` and ``ask_user``
+    ``require_verification`` / the run's unverified-writes flag and ``ask_user``
     can emit the special ``__interrupt__`` marker the runtime loop
     recognises.
     """
@@ -278,10 +289,14 @@ def register_builtin_tools(agent: Agent) -> None:
             "Provide a summary of what was accomplished."
         ),
     )
-    def task_complete(summary: str, status: str = "success") -> str:
+    def task_complete(summary: str, status: str = "success", ctx: Any = None) -> str:
         """Signal task completion with a summary."""
-        if agent_ref.config.require_verification and agent_ref._has_unverified_writes:
-            agent_ref._has_unverified_writes = False  # Reset so it doesn't loop.
+        # The unverified-writes flag belongs to the run that called us (found
+        # by ``ctx.run_id``), not to the agent: a concurrent run's write must
+        # not block this run's completion, nor its verification unblock ours.
+        run = _run_for(agent_ref, getattr(ctx, "run_id", None))
+        if agent_ref.config.require_verification and run is not None and run.has_unverified_writes:
+            run.has_unverified_writes = False  # Reset so it doesn't loop.
             return (
                 "BLOCKED: You have unverified changes. "
                 "You wrote files but haven't run tests or verification commands yet. "

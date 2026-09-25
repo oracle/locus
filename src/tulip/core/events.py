@@ -5,7 +5,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from types import MappingProxyType
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -158,6 +161,74 @@ class InterruptEvent(TulipEvent):
     fields: list[dict[str, Any]] | None = None
     interrupt_id: str
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class CustomEvent(TulipEvent):
+    """An application-defined event emitted from a hook for the UI only.
+
+    A hook that wants to tell the client something the model must not see
+    (render a hotel carousel, show a progress chip) calls
+    ``event.emit(CustomEvent(name="hotel_list", data={...}))`` on the hook
+    event it was handed. The runtime yields it from ``Agent.run()`` right
+    after the hook returns, in order with the surrounding tool events. It is
+    never added to ``state.messages``, never shown to the model, and never
+    checkpointed — it exists only on the event stream.
+    """
+
+    event_type: Literal["custom"] = "custom"
+    #: Application-chosen discriminator (``"hotel_list"``, ``"progress"``).
+    name: str
+    #: JSON-serialisable payload. Kept a plain dict so every transport
+    #: (SSE, websockets, A2A) can ship it with ``model_dump(mode="json")``.
+    data: dict[str, Any] = Field(default_factory=dict)
+    #: Filled by the runtime from the hook event's run context, so a consumer
+    #: multiplexing several runs can route the event without bookkeeping.
+    run_id: str | None = None
+    thread_id: str | None = None
+    #: The tool call the emitting hook was handling, when there was one.
+    tool_call_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RunInfo:
+    """Read-only identity of the run a hook is observing.
+
+    Attached to every hook event as ``event.run`` (``None`` only when a hook
+    event is constructed outside a run, e.g. in a unit test). A single Agent
+    instance serves many concurrent runs; this is how a hook tells them apart
+    without reaching for globals or context variables.
+
+    Attributes:
+        run_id: ``AgentState.run_id`` of the run (a new id per user turn;
+            a resumed run keeps the id of the turn it continues).
+        thread_id: The conversation the run belongs to (``None`` when the
+            caller passed none).
+        metadata: The run's invocation metadata, exactly what tools see as
+            ``ctx.invocation_metadata``. A read-only mapping.
+        agent_name: ``AgentConfig.name`` (or ``agent_id``), when set.
+    """
+
+    run_id: str
+    thread_id: str | None = None
+    metadata: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
+    agent_name: str | None = None
+
+    @classmethod
+    def build(
+        cls,
+        *,
+        run_id: str,
+        thread_id: str | None,
+        metadata: Mapping[str, Any] | None,
+        agent_name: str | None = None,
+    ) -> RunInfo:
+        """Construct with ``metadata`` frozen into a read-only snapshot."""
+        return cls(
+            run_id=run_id,
+            thread_id=thread_id,
+            metadata=MappingProxyType(dict(metadata or {})),
+            agent_name=agent_name,
+        )
 
 
 # =============================================================================

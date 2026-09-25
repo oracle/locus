@@ -35,6 +35,7 @@ from pydantic import BaseModel
 
 from tulip.agent.config import AgentConfig
 from tulip.agent.result import StopReason
+from tulip.agent.run_context import PendingInterrupt, RunContext, claim_result_slot
 from tulip.core.events import (
     GroundingEvent,
     InterruptEvent,
@@ -231,11 +232,9 @@ class AgentRuntimeMixin:
         _grounding_model: Any
         _auxiliary_model: Any
         _last_run_state: AgentState | None
-        _interrupt_state: AgentState | None
-        _interrupt_prompt: str | None
-        _has_unverified_writes: bool
-        _interrupt_thread_id: str | None
-        _interrupt_metadata: dict[str, Any] | None
+        _interrupts: dict[str | None, PendingInterrupt]
+        _active_runs: dict[int, RunContext]
+        _runs_lock: threading.Lock
         _cancel_signal: threading.Event | None
         _initialized: bool
 
@@ -245,6 +244,56 @@ class AgentRuntimeMixin:
         def _initialize(self) -> None: ...
 
         def add_tools(self, tools: list[Any]) -> None: ...
+
+    # =========================================================================
+    # Per-run bookkeeping
+    # =========================================================================
+
+    def _begin_run(
+        self,
+        state: AgentState,
+        prompt: str,
+        thread_id: str | None,
+        metadata: dict[str, Any] | None,
+    ) -> RunContext:
+        """Create and register the context that owns one run."""
+        rc = RunContext.create(
+            run_id=state.run_id,
+            thread_id=thread_id,
+            prompt=prompt,
+            metadata=metadata,
+            agent_name=self.config.name or self.config.agent_id,
+            termination=self.config.termination,
+        )
+        with self._runs_lock:
+            self._active_runs[id(rc)] = rc
+        return rc
+
+    def _end_run(self, rc: RunContext, state: AgentState) -> None:
+        """Publish a run's final state and unregister it (idempotent)."""
+        if rc.result_slot is not None:
+            rc.result_slot.state = state
+        # Kept for back-compat and single-run debugging only: with concurrent
+        # runs this is whichever finished last. ``arun`` never reads it.
+        self._last_run_state = state
+        with self._runs_lock:
+            self._active_runs.pop(id(rc), None)
+
+    def _run_cancelled(self, rc: RunContext) -> bool:
+        """This run was cancelled — by thread, or by a cancel-all."""
+        if rc.cancel.is_set():
+            return True
+        legacy = self._cancel_signal
+        return legacy is not None and legacy.is_set()
+
+    def _park_interrupt(self, rc: RunContext, state: AgentState) -> None:
+        """Hold a paused run in memory, keyed strictly by its thread id."""
+        self._interrupts[rc.thread_id] = PendingInterrupt(
+            state=state,
+            prompt=rc.prompt,
+            thread_id=rc.thread_id,
+            metadata=rc.metadata,
+        )
 
     async def _attach_mcp_tools(self) -> None:
         """Attach the tools of every configured MCP server, once.
@@ -322,8 +371,25 @@ class AgentRuntimeMixin:
         self._initialize()
         await self._attach_mcp_tools()
 
+        # Claim the enclosing ``arun``'s result slot before any await that
+        # could let a nested run of this agent start in the same context.
+        result_slot = claim_result_slot(self)
+
+        # A new user message on a thread supersedes whatever interrupt was
+        # parked for it in memory: the checkpoint this run writes is the
+        # thread's truth from now on, and resume() must not revive the stale
+        # in-memory state over it. (Thread-less runs share one slot and keep
+        # the pre-2.17 behaviour: only a new pause replaces it.)
+        if thread_id is not None:
+            self._interrupts.pop(thread_id, None)
+
         # Create initial state
         state = await self._create_initial_state(prompt, thread_id, metadata)
+
+        # Everything that belongs to THIS run lives on ``rc``, never on the
+        # agent: one Agent instance serves concurrent runs.
+        rc = self._begin_run(state, prompt, thread_id, metadata)
+        rc.result_slot = result_slot
 
         # Track metrics
         started_at = datetime.now(UTC)
@@ -335,17 +401,21 @@ class AgentRuntimeMixin:
         _last_assistant_content: str | None = None
         _last_no_tool_calls = False
 
-        # Reset any user-supplied composable termination condition so
-        # time-windowed checks (TimeLimit) start their clock at run start.
-        if self.config.termination is not None:
-            self.config.termination.reset()
+        # The composable termination condition was copied and reset for this
+        # run by ``_begin_run``: TimeLimit's clock starts now, and no other
+        # in-flight run's clock is touched.
+        termination = rc.termination
 
-        # Run hooks: before_invocation
-        state = await self._run_before_invocation_hooks(prompt, state)
+        try:
+            # Run hooks: before_invocation
+            state = await self._run_before_invocation_hooks(prompt, state)
 
-        # Inject long-term memories into the system prompt.
-        if self._memory_manager is not None:
-            state = await self._memory_manager.on_session_start(state)
+            # Inject long-term memories into the system prompt.
+            if self._memory_manager is not None:
+                state = await self._memory_manager.on_session_start(state)
+        except BaseException:
+            self._end_run(rc, state)
+            raise
 
         try:
             # Main ReAct loop
@@ -374,8 +444,8 @@ class AgentRuntimeMixin:
                         )
                         break
 
-                # Check external cancellation
-                if self.is_cancelled:
+                # Check external cancellation (this run, or cancel-all)
+                if self._run_cancelled(rc):
                     yield TerminateEvent(
                         reason="cancelled",
                         iterations_used=state.iteration,
@@ -389,8 +459,8 @@ class AgentRuntimeMixin:
                 # User-supplied composable termination condition runs first
                 # so MaxIterations(...) | TextMention("DONE") and friends
                 # actually fire before the hard-coded fallbacks.
-                if self.config.termination is not None:
-                    user_stop, user_reason = self.config.termination.check(
+                if termination is not None:
+                    user_stop, user_reason = termination.check(
                         state,
                         last_message=_last_assistant_content or "",
                         no_tool_calls=_last_no_tool_calls,
@@ -532,7 +602,7 @@ class AgentRuntimeMixin:
                 if stream_tokens:
                     chunk_queue: asyncio.Queue[Any] = asyncio.Queue()
                     model_task = asyncio.create_task(
-                        self._get_model_response(state, model_kwargs, chunk_queue)
+                        self._get_model_response(state, model_kwargs, chunk_queue, run=rc)
                     )
                     while not model_task.done() or not chunk_queue.empty():
                         try:
@@ -542,7 +612,9 @@ class AgentRuntimeMixin:
                         yield chunk
                     response, state = await model_task
                 else:
-                    response, state = await self._get_model_response(state, model_kwargs)
+                    response, state = await self._get_model_response(state, model_kwargs, run=rc)
+                for custom in rc.drain():
+                    yield custom
                 prompt_toks = response.usage.get("prompt_tokens", 0)
                 completion_toks = response.usage.get("completion_tokens", 0)
                 cache_creation_toks = response.usage.get("cache_creation_input_tokens", 0)
@@ -760,8 +832,10 @@ class AgentRuntimeMixin:
                     )
 
                     tool_event = await self._run_before_tool_hooks(
-                        tool_call.name, tool_call.id, tool_call.arguments
+                        tool_call.name, tool_call.id, tool_call.arguments, run=rc
                     )
+                    for custom in rc.drain():
+                        yield custom
 
                     if tool_event.cancel:
                         cancel_msg = (
@@ -1045,11 +1119,7 @@ class AgentRuntimeMixin:
                         try:
                             interrupt_data = _json.loads(result.content)
                             if interrupt_data.get("__interrupt__"):
-                                self._last_run_state = state
-                                self._interrupt_state = state
-                                self._interrupt_prompt = prompt
-                                self._interrupt_thread_id = thread_id
-                                self._interrupt_metadata = metadata
+                                self._park_interrupt(rc, state)
                                 # Checkpoint BEFORE yielding: a consumer that
                                 # stops iterating on the interrupt (an HTTP
                                 # layer parking the run) never resumes this
@@ -1119,7 +1189,9 @@ class AgentRuntimeMixin:
                         result.error,
                         tool_call_id=result.tool_call_id,
                         arguments=modified_args,
+                        run=rc,
                     )
+                    hook_events = rc.drain()
 
                     if after_tool_event.retry:
                         try:
@@ -1175,11 +1247,15 @@ class AgentRuntimeMixin:
                             error=result.error,
                             duration_ms=result.duration_ms,
                         )
+                    # UI-only events the after-hook emitted, right behind the
+                    # call they describe. Never folded into state/messages.
+                    for custom in hook_events:
+                        yield custom
 
                     if result.name in self.config.verify_tools:
-                        self._has_unverified_writes = True
+                        rc.has_unverified_writes = True
                     if result.name in self.config.verification_tools:
-                        self._has_unverified_writes = False
+                        rc.has_unverified_writes = False
 
                 # Add tool results to messages
                 for result in tool_results:
@@ -1278,7 +1354,7 @@ class AgentRuntimeMixin:
             raise
 
         finally:
-            # Clear cancel signal
+            # Consume a pending cancel-all so it does not leak into the next run
             if self._cancel_signal is not None:
                 self._cancel_signal.clear()
 
@@ -1292,8 +1368,9 @@ class AgentRuntimeMixin:
                 if final_msg:
                     state = state.with_metadata(self.config.output_key, final_msg)
 
-            # Store final state for run_sync access
-            self._last_run_state = state
+            # Hand the final state to THIS run's arun (never read back off
+            # the shared agent), then release the run's bookkeeping.
+            self._end_run(rc, state)
 
             # Run hooks: after_invocation
             _duration_ms = (datetime.now(UTC) - started_at).total_seconds() * 1000  # noqa: F841
@@ -1327,9 +1404,17 @@ class AgentRuntimeMixin:
         thread_id: str | None,
         metadata: dict[str, Any] | None,
         model_kwargs: dict[str, Any] | None = None,
+        _run: RunContext | None = None,
     ) -> AsyncIterator[TulipEvent]:
-        """Continue execution from a given state (used for resume)."""
+        """Continue execution from a given state (used for resume).
+
+        A resumed segment continues the SAME turn: iteration, budgets and the
+        tool-loop window carry on from the paused state. ``_run`` is the run
+        context ``resume()`` already registered; without one (direct callers)
+        a fresh one is created for this segment.
+        """
         self._initialize()
+        rc = _run if _run is not None else self._begin_run(state, prompt, thread_id, metadata)
 
         started_at = datetime.now(UTC)
         _total_tokens = 0
@@ -1346,9 +1431,9 @@ class AgentRuntimeMixin:
                 _last_assistant_content = msg.content
                 break
 
-        # Reset user-supplied composable termination state; resume = fresh clock.
-        if self.config.termination is not None:
-            self.config.termination.reset()
+        # The run's own copy of the termination condition, reset at
+        # ``_begin_run``: resume = fresh clock, for this run only.
+        termination = rc.termination
 
         try:
             _open_iteration: int | None = None
@@ -1376,8 +1461,19 @@ class AgentRuntimeMixin:
                         )
                         break
 
-                if self.config.termination is not None:
-                    user_stop, user_reason = self.config.termination.check(
+                if self._run_cancelled(rc):
+                    yield TerminateEvent(
+                        reason="cancelled",
+                        iterations_used=state.iteration,
+                        final_confidence=state.confidence,
+                        usage=_usage_of(state),
+                        total_tool_calls=len(state.tool_executions),
+                        final_message="Agent cancelled by external signal.",
+                    )
+                    break
+
+                if termination is not None:
+                    user_stop, user_reason = termination.check(
                         state,
                         last_message=_last_assistant_content or "",
                         no_tool_calls=_last_no_tool_calls,
@@ -1417,7 +1513,9 @@ class AgentRuntimeMixin:
                     )
                     break
 
-                response, state = await self._get_model_response(state, model_kwargs)
+                response, state = await self._get_model_response(state, model_kwargs, run=rc)
+                for custom in rc.drain():
+                    yield custom
                 prompt_toks = response.usage.get("prompt_tokens", 0)
                 completion_toks = response.usage.get("completion_tokens", 0)
                 cache_creation_toks = response.usage.get("cache_creation_input_tokens", 0)
@@ -1465,7 +1563,11 @@ class AgentRuntimeMixin:
                     # stopped firing the moment a run was answered — observed
                     # as a playbook tracker reporting a step "skipped" while
                     # the step's tool visibly ran in the same trace.
-                    tool_event = await self._run_before_tool_hooks(tc.name, tc.id, tc.arguments)
+                    tool_event = await self._run_before_tool_hooks(
+                        tc.name, tc.id, tc.arguments, run=rc
+                    )
+                    for custom in rc.drain():
+                        yield custom
                     if tool_event.cancel:
                         cancel_msg = (
                             tool_event.cancel
@@ -1516,11 +1618,7 @@ class AgentRuntimeMixin:
                         from tulip.core.interrupt import InterruptException
 
                         if isinstance(e, InterruptException):
-                            self._last_run_state = state
-                            self._interrupt_state = state
-                            self._interrupt_prompt = prompt
-                            self._interrupt_thread_id = thread_id
-                            self._interrupt_metadata = metadata
+                            self._park_interrupt(rc, state)
                             # Checkpoint BEFORE yielding — same rationale as
                             # the run loop's interrupt site: a consumer that
                             # parks on the interrupt never drives this
@@ -1569,11 +1667,7 @@ class AgentRuntimeMixin:
                         except (ValueError, KeyError):
                             interrupt_data = None
                         if interrupt_data and interrupt_data.get("__interrupt__"):
-                            self._last_run_state = state
-                            self._interrupt_state = state
-                            self._interrupt_prompt = prompt
-                            self._interrupt_thread_id = thread_id
-                            self._interrupt_metadata = metadata
+                            self._park_interrupt(rc, state)
                             if self.config.checkpointer and thread_id:
                                 await self.config.checkpointer.save(state, thread_id)
                             yield InterruptEvent(
@@ -1591,7 +1685,9 @@ class AgentRuntimeMixin:
                         result.error,
                         tool_call_id=result.tool_call_id,
                         arguments=modified_args,
+                        run=rc,
                     )
+                    hook_events = rc.drain()
                     if after_tool_event.retry:
                         try:
                             retry_ctx_factory = ToolContextFactory(
@@ -1636,13 +1732,17 @@ class AgentRuntimeMixin:
                         error=result.error,
                         duration_ms=result.duration_ms,
                     )
+                    for custom in hook_events:
+                        yield custom
 
             # The loop is done; close whichever iteration it left open.
             if _open_iteration is not None:
                 await self._run_iteration_end_hooks(_open_iteration, state)
 
         finally:
-            self._last_run_state = state
+            if self._cancel_signal is not None:
+                self._cancel_signal.clear()
+            self._end_run(rc, state)
 
             # Final checkpoint — mirrors run(): a resumed run must stay as
             # durable as the original one (a second pause, or completion,
@@ -1677,7 +1777,25 @@ class AgentRuntimeMixin:
         thread_id: str | None,
         metadata: dict[str, Any] | None,
     ) -> AgentState:
-        """Create initial agent state."""
+        """Create the state a new run (a new user turn) starts from.
+
+        With a checkpointed thread this is a NEW TURN on an existing
+        conversation, which is not the same thing as resuming a paused one
+        (``resume()`` → ``_run_from_state`` continues the paused turn as-is).
+        A new turn keeps the conversation — messages and provider continuation
+        state — and starts everything that is per-turn afresh: the iteration
+        counter and budgets, the tool-loop window, confidence, the turn's tool
+        executions (which also scope ``@tool(idempotent=True)`` reuse), and a
+        new ``run_id``. The new run's ``metadata`` is applied (merged over the
+        thread's, new keys winning) and a callable ``system_prompt`` is
+        re-evaluated against it.
+
+        Before 2.17 the loaded state was continued verbatim: the iteration
+        counter kept climbing across turns (``max_iterations=3`` ended every
+        turn from the third on with ``max_iterations``), tool-loop detection
+        counted earlier turns, and the first turn's metadata and system prompt
+        were frozen for the life of the thread.
+        """
         # Try to load from checkpoint
         if self.config.checkpointer and thread_id:
             existing = await self.config.checkpointer.load(thread_id)
@@ -1693,14 +1811,18 @@ class AgentRuntimeMixin:
                     iteration=existing.iteration,
                     backend=type(self.config.checkpointer).__name__,
                 )
-                # Add new user message and continue
-                resumed: AgentState = existing.with_message(Message.user(prompt)).model_copy(
-                    update=self._spend_fields()
-                )
-                return resumed
+                return self._new_turn_state(existing, prompt, metadata)
 
         # Create fresh state
-        state = AgentState(
+        state = self._fresh_turn_state(metadata or {})
+        state = state.with_message(Message.system(self._resolve_system_prompt(prompt, metadata)))
+        state = state.with_message(Message.user(prompt))
+
+        return state
+
+    def _fresh_turn_state(self, metadata: dict[str, Any]) -> AgentState:
+        """An empty state carrying this agent's per-turn limits."""
+        return AgentState(
             agent_id=self.config.agent_id,
             max_iterations=self.config.max_iterations,
             confidence_threshold=(
@@ -1711,10 +1833,34 @@ class AgentRuntimeMixin:
             token_budget=self.config.token_budget,
             **self._spend_fields(),
             completion_mode=self.config.completion_mode,
-            metadata=metadata or {},
+            metadata=metadata,
         )
 
-        # Resolve system prompt (string or callable)
+    def _new_turn_state(
+        self,
+        existing: AgentState,
+        prompt: str,
+        metadata: dict[str, Any] | None,
+    ) -> AgentState:
+        """Start a new turn on a loaded thread (see ``_create_initial_state``)."""
+        merged_metadata = {**existing.metadata, **(metadata or {})}
+        state = self._fresh_turn_state(merged_metadata).model_copy(
+            update={"provider_state": existing.provider_state}
+        )
+        messages = list(existing.messages)
+        # Re-evaluate the system prompt for this turn: a callable prompt sees
+        # the new metadata, and a changed static prompt takes effect. Only the
+        # leading system message is the agent's prompt; anything else (memory
+        # blocks, runtime notes) is conversation and is kept as-is.
+        system_prompt = self._resolve_system_prompt(prompt, merged_metadata)
+        if messages and messages[0].role == Role.SYSTEM:
+            messages[0] = Message.system(system_prompt)
+        messages.append(Message.user(prompt))
+        new_turn: AgentState = state.model_copy(update={"messages": tuple(messages)})
+        return new_turn
+
+    def _resolve_system_prompt(self, prompt: str, metadata: dict[str, Any] | None) -> str:
+        """The system prompt text for a turn (callable prompts evaluated)."""
         prompt_value = self.config.system_prompt
         if callable(prompt_value):
             prompt_value = prompt_value({"prompt": prompt, "metadata": metadata or {}})
@@ -1737,11 +1883,7 @@ class AgentRuntimeMixin:
         from tulip.tools.tool_search import deferred_catalog_note
 
         prompt_str += deferred_catalog_note(self._tool_registry)
-
-        state = state.with_message(Message.system(prompt_str))
-        state = state.with_message(Message.user(prompt))
-
-        return state
+        return prompt_str
 
     async def _get_final_state(
         self,
@@ -2000,6 +2142,7 @@ class AgentRuntimeMixin:
         state: AgentState,
         model_kwargs: dict[str, Any] | None = None,
         chunk_queue: asyncio.Queue[Any] | None = None,
+        run: RunContext | None = None,
     ) -> tuple[ModelResponse, AgentState]:
         """Get a response from the model.
 
@@ -2040,7 +2183,7 @@ class AgentRuntimeMixin:
         tool_schemas = self._tool_registry.to_openai_schemas()
 
         # Pre-model hooks: allow hooks to modify messages before model call
-        messages = await self._run_before_model_hooks(messages, tool_schemas or None)
+        messages = await self._run_before_model_hooks(messages, tool_schemas or None, run=run)
 
         # When ``output_schema`` is set AND the provider ships native
         # structured output (OpenAI's ``response_format`` shape), pass
@@ -2103,7 +2246,7 @@ class AgentRuntimeMixin:
                 response = await self._model.complete(**complete_kwargs)
 
             # Post-model hooks: event.retry = True to re-call
-            after_event = await self._run_after_model_hooks(response, messages)
+            after_event = await self._run_after_model_hooks(response, messages, run=run)
 
             if after_event.retry:
                 continue  # Retry model call
@@ -2541,26 +2684,33 @@ class AgentRuntimeMixin:
         self,
         messages: list[Any],
         tools: list[dict[str, Any]] | None,
+        *,
+        run: RunContext | None = None,
     ) -> list[Any]:
-        return await self._orch().run_before_model(messages, tools)
+        return await self._orch().run_before_model(messages, tools, run=run)
 
     async def _run_after_model_hooks(
         self,
         response: Any,
         messages: list[Any],
+        *,
+        run: RunContext | None = None,
     ) -> Any:
-        return await self._orch().run_after_model(response, messages)
+        return await self._orch().run_after_model(response, messages, run=run)
 
     async def _run_before_tool_hooks(
         self,
         tool_name: str,
         tool_call_id: str,
         arguments: dict[str, Any],
+        *,
+        run: RunContext | None = None,
     ) -> Any:
         return await self._orch().run_before_tool(
             tool_name,
             tool_call_id,
             arguments,
+            run=run,
         )
 
     async def _run_after_tool_hooks(
@@ -2571,6 +2721,7 @@ class AgentRuntimeMixin:
         *,
         tool_call_id: str = "",
         arguments: dict[str, Any] | None = None,
+        run: RunContext | None = None,
     ) -> Any:
         return await self._orch().run_after_tool(
             tool_name,
@@ -2578,6 +2729,7 @@ class AgentRuntimeMixin:
             error,
             tool_call_id=tool_call_id,
             arguments=arguments,
+            run=run,
         )
 
     # Properties for easy access
