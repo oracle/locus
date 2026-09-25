@@ -495,3 +495,31 @@ def test_to_tulip_tools_respects_the_allowlist() -> None:
     )
     assert [t.name for t in tools] == ["keep"]
     assert tools[0].emits_progress is True
+
+
+class TestMcpFieldAcrossSdkMajors:
+    """mcp 1.x models expose ``isError``; mcp 2.x renamed it ``is_error``."""
+
+    def test_v1_camel_case_attributes(self) -> None:
+        raw = SimpleNamespace(
+            content=[SimpleNamespace(type="text", text="boom")],
+            isError=True,
+            structuredContent={"code": "X"},
+        )
+        result = fastmcp._convert_call_result(raw)
+        assert result.is_error is True
+        assert result.structured_content == {"code": "X"}
+
+    def test_v2_snake_case_attributes(self) -> None:
+        raw = SimpleNamespace(
+            content=[SimpleNamespace(type="image", data="", mime_type="image/gif")],
+            is_error=True,
+            structured_content={"code": "Y"},
+        )
+        result = fastmcp._convert_call_result(raw, embed_images=False)
+        assert result.is_error is True
+        assert result.structured_content == {"code": "Y"}
+        assert result.text == "[image: image/gif]"
+
+    def test_missing_on_both_uses_default(self) -> None:
+        assert fastmcp._mcp_field(object(), "inputSchema", "input_schema", default={}) == {}
