@@ -24,6 +24,16 @@ Scope memories per user or tenant by setting a richer prefix::
 
     LLMMemoryManager(store=my_store, namespace_prefix=("tenants", tenant_id))
 
+or — for ONE manager shared by every user of a server, with one global bound
+on background extractions and one :meth:`~BaseMemoryManager.drain` — resolve
+the prefix per run from its metadata::
+
+    LLMMemoryManager(
+        store=my_store,
+        namespace_resolver=lambda run: ("users", run.metadata["user_id"]),
+    )
+    agent.run(prompt, metadata={"user_id": user_id})
+
 Memory types
 ------------
 ``user``
@@ -75,13 +85,16 @@ import asyncio
 import hashlib
 import logging
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable, Coroutine
+from collections.abc import Awaitable, Callable, Coroutine, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal
 
 
 if TYPE_CHECKING:
+    from tulip.core.events import RunInfo
     from tulip.core.messages import Message
     from tulip.core.state import AgentState
     from tulip.memory.store import BaseStore, StoreItem
@@ -110,6 +123,18 @@ ExtractFn = Callable[
     [list["Message"]],
     Coroutine[Any, Any, list["Memory"]],
 ]
+
+
+#: ``(run) -> namespace prefix`` for :class:`LLMMemoryManager`. ``run`` is a
+#: :class:`~tulip.core.events.RunInfo` built from the run's state: ``run_id``,
+#: ``metadata`` (the run's persisted metadata) and ``agent_name`` (the agent
+#: id). ``None`` uses the manager's ``namespace_prefix``.
+NamespaceResolver = Callable[["RunInfo"], "tuple[str, ...] | None"]
+
+#: ``(manager, prefix)`` a scoped manager call is running under.
+_ACTIVE_NAMESPACE: ContextVar[tuple[object, tuple[str, ...]] | None] = ContextVar(
+    "tulip_memory_namespace", default=None
+)
 
 
 class MemoryType(StrEnum):
@@ -438,6 +463,14 @@ class LLMMemoryManager(BaseMemoryManager):
             stops. ``Agent.run_sync`` drains for you.
         max_concurrent_extractions: Background extractions allowed to run at
             once. Jobs of one namespace always run one at a time, in order.
+        namespace_resolver: ``(run: RunInfo) -> prefix`` choosing the
+            namespace prefix PER RUN, from ``run.metadata`` (what
+            ``agent.run(..., metadata=)`` passed). Lets one manager serve
+            every user: its ``max_concurrent_extractions`` bound and
+            :meth:`drain` then cover all of them. ``None`` from the resolver
+            uses ``namespace_prefix``. If the resolver raises, that run
+            neither reads nor writes memories (it never falls back to a
+            shared namespace).
 
     Example::
 
@@ -463,6 +496,7 @@ class LLMMemoryManager(BaseMemoryManager):
         retrieve_limit: int = 20,
         extract_mode: ExtractMode = "inline",
         max_concurrent_extractions: int = 4,
+        namespace_resolver: NamespaceResolver | None = None,
     ) -> None:
         if extract_mode not in ("inline", "background"):
             raise ValueError(f"extract_mode must be 'inline' or 'background', got {extract_mode!r}")
@@ -475,10 +509,89 @@ class LLMMemoryManager(BaseMemoryManager):
         self.namespace_prefix = namespace_prefix
         self.max_memories = max_memories
         self.retrieve_limit = retrieve_limit
+        self.namespace_resolver = namespace_resolver
+
+    # ------------------------------------------------------------------
+    # Namespace scoping
+    # ------------------------------------------------------------------
+
+    @property
+    def active_namespace(self) -> tuple[str, ...]:
+        """The prefix the current call reads and writes under: the one a
+        :meth:`scoped` block (or the run's resolver) set, else
+        ``namespace_prefix``."""
+        active = _ACTIVE_NAMESPACE.get()
+        if active is not None and active[0] is self:
+            return active[1]
+        return tuple(self.namespace_prefix)
+
+    @contextmanager
+    def scoped(self, namespace_prefix: tuple[str, ...]) -> Iterator[None]:
+        """Run :meth:`retrieve` / :meth:`save` / :meth:`extract` calls — and
+        background jobs scheduled — inside the block under
+        ``namespace_prefix``.
+
+        Context-local: concurrent tasks each keep their own scope. The agent
+        runtime does this for you when ``namespace_resolver`` is set.
+        """
+        token = _ACTIVE_NAMESPACE.set((self, tuple(namespace_prefix)))
+        try:
+            yield
+        finally:
+            _ACTIVE_NAMESPACE.reset(token)
+
+    def _resolve_namespace(self, state: AgentState) -> tuple[str, ...] | None:
+        """This run's prefix; ``None`` means the resolver failed (fail closed)."""
+        if self.namespace_resolver is None:
+            return tuple(self.namespace_prefix)
+        from tulip.core.events import RunInfo  # noqa: PLC0415
+
+        run = RunInfo.build(
+            run_id=state.run_id,
+            thread_id=None,
+            metadata=state.metadata,
+            agent_name=state.agent_id,
+        )
+        try:
+            resolved = self.namespace_resolver(run)
+        except Exception:  # noqa: BLE001 — a bad resolver must not cost the turn
+            logger.warning(
+                "memory namespace_resolver failed; skipping memory for run %s",
+                state.run_id,
+                exc_info=True,
+            )
+            return None
+        if resolved is None:
+            return tuple(self.namespace_prefix)
+        return tuple(resolved)
+
+    async def on_session_start(self, state: AgentState) -> AgentState:
+        """Inject this run's memories, read from the run's namespace."""
+        namespace = self._resolve_namespace(state)
+        if namespace is None:
+            return _strip_memory_blocks(state)
+        with self.scoped(namespace):
+            return await super().on_session_start(state)
+
+    async def on_session_end(self, state: AgentState) -> None:
+        """Extract and save this run's memories into the run's namespace.
+
+        A background job is created inside the scope, so it inherits it; it
+        shares this manager's one semaphore and one :meth:`drain` with every
+        other namespace's jobs.
+        """
+        namespace = self._resolve_namespace(state)
+        if namespace is None:
+            return
+        with self.scoped(namespace):
+            await super().on_session_end(state)
+
+    def _extraction_order_key(self) -> tuple[str, ...]:
+        return self.active_namespace
 
     def _ns(self, memory_type: MemoryType) -> tuple[str, ...]:
         """Build the store namespace for a memory type."""
-        return (*self.namespace_prefix, memory_type.value)
+        return (*self.active_namespace, memory_type.value)
 
     async def extract(self, messages: list[Message]) -> list[Memory]:
         """Extract memories from a message list.
@@ -634,6 +747,7 @@ class LLMMemoryManager(BaseMemoryManager):
             f"LLMMemoryManager("
             f"store={type(self.store).__name__}, "
             f"namespace_prefix={self.namespace_prefix!r}, "
+            f"namespace_resolver={'set' if self.namespace_resolver else None}, "
             f"retrieve_limit={self.retrieve_limit}, "
             f"extract_mode={self.extract_mode!r})"
         )

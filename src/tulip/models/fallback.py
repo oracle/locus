@@ -48,6 +48,20 @@ ways: a :class:`FallbackEvent` to the ``on_event`` callback, an event on the
 Tulip telemetry bus (:data:`~tulip.observability.emit.EV_MODEL_FALLBACK`,
 :data:`~tulip.observability.emit.EV_MODEL_BREAKER`) when a run context is
 active, and counters on :attr:`FallbackChain.metrics`.
+
+**Which tier served a call.** One chain serves concurrent calls, so a single
+"last tier" attribute cannot say which tier answered *this* call. Each call
+reports its own :class:`ServedTier`: ``complete()`` attaches it to the
+response (``response.metadata["fallback"]``) and both ``complete()`` and
+``stream()`` publish it to the calling context, read with
+:func:`served_tier`::
+
+    response = await chain.complete(messages)
+    response.metadata["fallback"]["tier"]  # 1 → the backup answered
+
+    async for chunk in chain.stream(messages):
+        ...
+    served_tier()  # ServedTier(index=1, model="gpt-4o", attempts=2)
 """
 
 from __future__ import annotations
@@ -56,12 +70,15 @@ import asyncio
 import contextlib
 import logging
 import time
+import warnings
 from collections import deque
 from collections.abc import AsyncIterator, Callable, Iterator, Sequence
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
+from tulip.core.warnings import TulipDeprecationWarning
 from tulip.models.failover import FailoverDecision, FailoverReason, classify
 from tulip.observability.emit import EV_MODEL_BREAKER, EV_MODEL_FALLBACK, emit
 
@@ -81,6 +98,8 @@ __all__ = [
     "FallbackChain",
     "FallbackEvent",
     "FallbackExhaustedError",
+    "ServedTier",
+    "served_tier",
 ]
 
 
@@ -229,6 +248,45 @@ class FallbackEvent:
     previous_state: str | None = None
 
 
+@dataclass(frozen=True)
+class ServedTier:
+    """The tier of a :class:`FallbackChain` that served one call.
+
+    Attributes:
+        index: The tier's position in the chain (0 = primary).
+        model: The tier's name.
+        attempts: Tiers tried for this call, the serving one included
+            (1 = the first tier tried answered).
+    """
+
+    index: int
+    model: str
+    attempts: int
+
+    @property
+    def fell_back(self) -> bool:
+        """Whether a tier other than the primary served the call."""
+        return self.index != 0
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"tier": self.index, "model": self.model, "attempts": self.attempts}
+
+
+#: The tier that served the latest FallbackChain call in this context.
+_SERVED_TIER: ContextVar[ServedTier | None] = ContextVar("tulip_fallback_served_tier", default=None)
+
+
+def served_tier() -> ServedTier | None:
+    """The tier that served the most recent :class:`FallbackChain` call made
+    in the current context (task), or ``None``.
+
+    Context-local, so concurrent calls on one shared chain each read their
+    own answer — unlike the deprecated :attr:`FallbackChain.last_tier`. Read
+    it in the task that awaited ``complete()`` or iterated ``stream()``.
+    """
+    return _SERVED_TIER.get()
+
+
 class FallbackExhaustedError(RuntimeError):
     """Every tier of a :class:`FallbackChain` failed.
 
@@ -319,7 +377,7 @@ class FallbackChain:
                 clock=clock,
             )
             self.tiers.append(_Tier(index=index, name=tier_name, model=model, breaker=breaker))
-        self.last_tier: int | None = None
+        self._last_tier: int | None = None
         self._pending: list[FallbackEvent] = []
 
     # ------------------------------------------------------------------
@@ -331,6 +389,24 @@ class FallbackChain:
         """The primary tier's config, so code that reads ``model.config``
         (pricing, context window, provider hints) keeps working."""
         return getattr(self.tiers[0].model, "config", None)
+
+    @property
+    def last_tier(self) -> int | None:
+        """Deprecated: the tier that served the chain's most recent call.
+
+        Shared by every call on the chain, so with concurrent calls it is
+        whichever call finished last — not the one you just awaited. Use the
+        per-call :class:`ServedTier` instead (``response.metadata["fallback"]``
+        or :func:`served_tier`).
+        """
+        warnings.warn(
+            "FallbackChain.last_tier is shared across concurrent calls and may "
+            "describe another call; use response.metadata['fallback'] or "
+            "tulip.models.fallback.served_tier() instead.",
+            TulipDeprecationWarning,
+            stacklevel=2,
+        )
+        return self._last_tier
 
     @property
     def metrics(self) -> dict[str, dict[str, Any]]:
@@ -351,8 +427,10 @@ class FallbackChain:
     ) -> ModelResponse:
         """Complete on the first healthy tier that answers."""
         errors: list[tuple[str, BaseException]] = []
+        attempts = 0
         for tier in self._candidates():
             tier.counters["attempts"] += 1
+            attempts += 1
             try:
                 if self.complete_timeout is not None:
                     async with asyncio.timeout(self.complete_timeout):
@@ -367,8 +445,8 @@ class FallbackChain:
             except BaseException:
                 tier.breaker.release()  # cancelled: no verdict on the tier
                 raise
-            await self._served(tier)
-            return response  # type: ignore[no-any-return]
+            served = await self._served(tier, attempts)
+            return _with_served(response, served)
         await self._exhausted(errors)
         raise FallbackExhaustedError(errors) from errors[-1][1]
 
@@ -383,8 +461,10 @@ class FallbackChain:
         Fails over only before a tier's first chunk; see the module docs.
         """
         errors: list[tuple[str, BaseException]] = []
+        attempts = 0
         for tier in self._candidates():
             tier.counters["attempts"] += 1
+            attempts += 1
             source = tier.model.stream(messages, tools, **kwargs)
             iterator = source.__aiter__()
             try:
@@ -394,7 +474,7 @@ class FallbackChain:
                 else:
                     first = await iterator.__anext__()
             except StopAsyncIteration:
-                await self._served(tier)
+                await self._served(tier, attempts)
                 return
             except Exception as exc:  # noqa: BLE001 — classified below; non-fallback errors re-raise
                 await _aclose(iterator)
@@ -407,7 +487,7 @@ class FallbackChain:
                 await _aclose(iterator)
                 raise
 
-            await self._served(tier)
+            await self._served(tier, attempts)
             try:
                 yield first
                 async for chunk in iterator:
@@ -495,13 +575,16 @@ class FallbackChain:
                 return tier.index
         return None
 
-    async def _served(self, tier: _Tier) -> None:
+    async def _served(self, tier: _Tier, attempts: int) -> ServedTier:
         tier.breaker.record_success()
         tier.counters["served"] += 1
-        self.last_tier = tier.index
+        self._last_tier = tier.index
+        served = ServedTier(index=tier.index, model=tier.name, attempts=attempts)
+        _SERVED_TIER.set(served)
         if tier.index != 0:
             self._record(FallbackEvent(kind="served", tier=tier.index, model=tier.name))
         await self._flush()
+        return served
 
     async def _exhausted(self, errors: list[tuple[str, BaseException]]) -> None:
         last_name, last_exc = errors[-1]
@@ -561,6 +644,22 @@ class FallbackChain:
                 state=event.state,
                 previous_state=event.previous_state,
             )
+
+
+def _with_served(response: Any, served: ServedTier) -> ModelResponse:
+    """``response`` annotated with the tier that served it.
+
+    A copy, never the tier's own object (a model may hand back a shared or
+    cached response). A response without ``metadata`` (a duck-typed model)
+    is returned as-is; :func:`served_tier` still reports the tier.
+    """
+    metadata = getattr(response, "metadata", None)
+    copy = getattr(response, "model_copy", None)
+    if not isinstance(metadata, dict) or copy is None:
+        return cast("ModelResponse", response)
+    return cast(
+        "ModelResponse", copy(update={"metadata": {**metadata, "fallback": served.as_dict()}})
+    )
 
 
 async def _aclose(iterator: Any) -> None:
