@@ -13,6 +13,13 @@ products built on one shared `Agent` instance.
 
 ### Fixed
 
+- **The long-term memory block is never checkpointed.** A memory manager's
+  injected `[Long-term Memory]` block was saved into the thread's checkpoint
+  (and the run's result state) with the rest of the messages. It is now
+  ephemeral: present for every model call of the turn, stripped before every
+  checkpoint save and from `AgentResult.state`, and never passed to the
+  extractor. A `resume()` rehydrated from a checkpoint re-injects a fresh block
+  for the rest of the turn.
 - **Concurrent runs on one Agent no longer share per-run state.** `arun` read
   the final state off the agent after its awaits, so under `asyncio.gather`
   run B returned run A's state and tool executions. Per-run state (final
@@ -42,6 +49,15 @@ products built on one shared `Agent` instance.
 
 ### Added
 
+- **Background memory extraction.** `LLMMemoryManager(extract_mode="background")`
+  runs extraction as a tracked task after the turn's final event, so a chat no
+  longer pays the extractor's latency before its stream closes. Jobs of one
+  namespace run in order (two turns of one user never race their writes),
+  `max_concurrent_extractions` (default 4) bounds how many run at once,
+  failures are logged and emitted as `memory.manager.extract_failed` (never
+  raised into a finished run), and `await manager.drain()` /
+  `await agent.drain_memory()` flush them at shutdown. `run_sync` drains
+  before closing its loop. The default stays `"inline"`.
 - `ApprovalPendingError` (`tulip`, `tulip.core`, `tulip.core.errors`), with
   `thread_id`, `interrupt_id`, `question` and the gate's `metadata`.
 - `Agent.cancel(thread_id=...)` cancels only the in-flight run(s) on that
@@ -70,6 +86,10 @@ products built on one shared `Agent` instance.
 
 ### Changed
 
+- A checkpoint written by this release holds no memory block, and one
+  written by an earlier release loses its block on the next save. Code that
+  read recalled memories back out of `AgentResult.state.messages` must read the
+  store (`manager.retrieve()`) instead.
 - **New-turn semantics on a checkpointed thread.** Kept: messages and provider
   continuation state. Started afresh per turn: `run_id`, `iteration`,
   `tool_executions`, `reasoning_steps`, `confidence`, `tool_history`, `errors`,

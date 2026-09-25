@@ -71,13 +71,14 @@ Quick start
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Coroutine
+from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 
 if TYPE_CHECKING:
@@ -98,6 +99,11 @@ MEMORY_BLOCK_METADATA_KEY = "tulip_memory_block"
 #: recognise blocks injected before the metadata tag existed (still sitting in
 #: checkpoints written by older releases) so they are cleaned up too.
 _MEMORY_BLOCK_HEADER = "[Long-term Memory]"
+
+#: How :meth:`BaseMemoryManager.on_session_end` runs extraction. ``"inline"``
+#: finishes it before the run ends; ``"background"`` schedules it as a tracked
+#: task and returns at once.
+ExtractMode = Literal["inline", "background"]
 
 # Callable type for user-supplied extraction functions.
 ExtractFn = Callable[
@@ -265,6 +271,13 @@ class BaseMemoryManager(ABC):
 
         return injected_state
 
+    #: ``"inline"`` (default) or ``"background"`` — see :meth:`on_session_end`.
+    #: A class attribute so managers written before the option existed keep
+    #: the inline behaviour without calling a base ``__init__``.
+    extract_mode: ExtractMode = "inline"
+    #: Background extractions allowed to run at once (across namespaces).
+    max_concurrent_extractions: int = 4
+
     async def on_session_end(self, state: AgentState) -> None:
         """Extract memories from the finished session and save them.
 
@@ -272,19 +285,39 @@ class BaseMemoryManager(ABC):
         invocation, after ``on_after_invocation`` hooks but before the
         final checkpoint.
 
+        With ``extract_mode="inline"`` (the default) extraction finishes before
+        this returns, so its latency is part of the run. With
+        ``extract_mode="background"`` it is scheduled as a tracked task and
+        this returns at once: the run ends — and a streaming consumer sees its
+        last event — without waiting for the extractor. Background jobs of one
+        namespace run in submission order (two turns of one user never race
+        their writes), at most :attr:`max_concurrent_extractions` run at once,
+        and :meth:`drain` waits for all of them (call it, or
+        ``Agent.drain_memory()``, at graceful shutdown and in tests).
+
         The injected memory block is removed before extraction, so recalled
         memories are not fed back to the extractor as if the user had just
         said them. A failing extractor or store is logged and reported as a
-        ``memory.manager.extract_failed`` event rather than raised: the call
-        sits in the run's ``finally`` block ahead of the final checkpoint, and
-        an auxiliary memory write must not cost the conversation its turn.
+        ``memory.manager.extract_failed`` event rather than raised, in either
+        mode: an auxiliary memory write must not cost the conversation its
+        turn (inline), and must never surface in a run that already finished
+        (background).
 
         Args:
             state: Final agent state with the complete message history.
         """
+        messages = list(_strip_memory_blocks(state).messages)
+        if self.extract_mode == "background":
+            self._background().submit(
+                self._extraction_order_key(), lambda: self._extract_and_save(messages)
+            )
+            return
+        await self._extract_and_save(messages)
+
+    async def _extract_and_save(self, messages: list[Message]) -> None:
+        """Run :meth:`extract` + :meth:`save`, reporting instead of raising."""
         from tulip.observability.emit import emit  # noqa: PLC0415
 
-        messages = list(_strip_memory_blocks(state).messages)
         try:
             memories = await self.extract(messages)
             if not memories:
@@ -296,6 +329,7 @@ class BaseMemoryManager(ABC):
                 "memory.manager.extract_failed",
                 error_type=type(exc).__name__,
                 error=str(exc),
+                mode=self.extract_mode,
             )
             return
 
@@ -305,6 +339,36 @@ class BaseMemoryManager(ABC):
             types=[m.type.value for m in memories],
             keys=[m.key for m in memories],
         )
+
+    def _extraction_order_key(self) -> tuple[str, ...]:
+        """Background jobs sharing this key run strictly one after another."""
+        prefix = getattr(self, "namespace_prefix", None)
+        return tuple(prefix) if prefix else ()
+
+    def _background(self) -> _BackgroundExtractions:
+        bg: _BackgroundExtractions | None = self.__dict__.get("_bg_extractions")
+        if bg is None:
+            bg = _BackgroundExtractions(self.max_concurrent_extractions)
+            self.__dict__["_bg_extractions"] = bg
+        return bg
+
+    @property
+    def pending_extractions(self) -> int:
+        """Background extractions scheduled or running, not yet finished."""
+        bg: _BackgroundExtractions | None = self.__dict__.get("_bg_extractions")
+        return 0 if bg is None else len(bg.tasks)
+
+    async def drain(self) -> None:
+        """Wait for every scheduled background extraction to finish.
+
+        Jobs submitted while draining are waited for too. Safe to call in
+        ``"inline"`` mode (returns at once). Errors inside jobs were already
+        logged and emitted; they are not raised here. Bound the wait with
+        ``asyncio.timeout(...)``: cancelling ``drain`` leaves the jobs running.
+        """
+        bg: _BackgroundExtractions | None = self.__dict__.get("_bg_extractions")
+        if bg is not None:
+            await bg.drain()
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}()"
@@ -366,6 +430,14 @@ class LLMMemoryManager(BaseMemoryManager):
         max_memories: Hard cap on the total number of memories kept per
             type.  Oldest entries are pruned when the limit is reached.
         retrieve_limit: Maximum memories returned by :meth:`retrieve`.
+        extract_mode: ``"inline"`` (default) runs extraction before the run
+            ends; ``"background"`` schedules it after the turn's final event
+            so a chat never waits for it — see
+            :meth:`BaseMemoryManager.on_session_end`. Background mode needs a
+            long-lived event loop (a server); call :meth:`drain` before it
+            stops. ``Agent.run_sync`` drains for you.
+        max_concurrent_extractions: Background extractions allowed to run at
+            once. Jobs of one namespace always run one at a time, in order.
 
     Example::
 
@@ -389,7 +461,15 @@ class LLMMemoryManager(BaseMemoryManager):
         namespace_prefix: tuple[str, ...] = ("tulip_memory",),
         max_memories: int = 50,
         retrieve_limit: int = 20,
+        extract_mode: ExtractMode = "inline",
+        max_concurrent_extractions: int = 4,
     ) -> None:
+        if extract_mode not in ("inline", "background"):
+            raise ValueError(f"extract_mode must be 'inline' or 'background', got {extract_mode!r}")
+        if max_concurrent_extractions < 1:
+            raise ValueError("max_concurrent_extractions must be at least 1")
+        self.extract_mode = extract_mode
+        self.max_concurrent_extractions = max_concurrent_extractions
         self.store = store
         self.extract_fn = extract_fn
         self.namespace_prefix = namespace_prefix
@@ -554,7 +634,8 @@ class LLMMemoryManager(BaseMemoryManager):
             f"LLMMemoryManager("
             f"store={type(self.store).__name__}, "
             f"namespace_prefix={self.namespace_prefix!r}, "
-            f"retrieve_limit={self.retrieve_limit})"
+            f"retrieve_limit={self.retrieve_limit}, "
+            f"extract_mode={self.extract_mode!r})"
         )
 
 
@@ -565,6 +646,67 @@ class LLMMemoryManager(BaseMemoryManager):
 
 #: Upper bound on keys scanned when pruning a memory type to ``max_memories``.
 _PRUNE_SCAN_LIMIT = 10_000
+
+
+class _BackgroundExtractions:
+    """Tracked background extraction jobs of one memory manager.
+
+    * every task is held until done (never garbage-collected mid-flight);
+    * a job waits for the previous job with the same key before it starts, so
+      one namespace's writes land in submission order;
+    * a semaphore bounds how many jobs run at once — taken only after the
+      predecessor finished, so a queued job never holds a slot while waiting;
+    * a job never raises: ``_extract_and_save`` reports its own failures, and
+      anything else is logged here.
+    """
+
+    def __init__(self, max_concurrent: int) -> None:
+        self._max_concurrent = max_concurrent
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._semaphore: asyncio.Semaphore | None = None
+        self._tails: dict[tuple[str, ...], asyncio.Task[None]] = {}
+        self.tasks: set[asyncio.Task[None]] = set()
+
+    def submit(self, key: tuple[str, ...], job: Callable[[], Awaitable[None]]) -> None:
+        loop = asyncio.get_running_loop()
+        if loop is not self._loop:
+            # A new event loop (``run_sync`` opens one per call): asyncio
+            # primitives and tasks of the old loop cannot be used from it.
+            self._loop = loop
+            self._semaphore = asyncio.Semaphore(self._max_concurrent)
+            self._tails = {}
+            self.tasks = set()
+        previous = self._tails.get(key)
+        task = loop.create_task(
+            self._run(previous, job), name=f"tulip-memory-extract:{'/'.join(key)}"
+        )
+        self._tails[key] = task
+        self.tasks.add(task)
+
+        def _done(t: asyncio.Task[None]) -> None:
+            self.tasks.discard(t)
+            if self._tails.get(key) is t:
+                del self._tails[key]
+
+        task.add_done_callback(_done)
+
+    async def _run(
+        self, previous: asyncio.Task[None] | None, job: Callable[[], Awaitable[None]]
+    ) -> None:
+        if previous is not None:
+            # The predecessor never raises; ``wait`` also shields this job
+            # from the predecessor being cancelled.
+            await asyncio.wait({previous})
+        assert self._semaphore is not None
+        async with self._semaphore:
+            try:
+                await job()
+            except Exception:  # noqa: BLE001 — a background job must never raise
+                logger.warning("background memory extraction failed", exc_info=True)
+
+    async def drain(self) -> None:
+        while self.tasks:
+            await asyncio.wait(set(self.tasks))
 
 
 def _is_memory_block(message: Message) -> bool:
@@ -578,6 +720,16 @@ def _is_memory_block(message: Message) -> bool:
     # Untagged blocks written by releases before the tag existed.
     content = message.content or ""
     return content.startswith("<memory-context>") and _MEMORY_BLOCK_HEADER in content
+
+
+def without_memory_blocks(state: AgentState) -> AgentState:
+    """``state`` minus any injected memory block — the form that is persisted.
+
+    The memory block is ephemeral: a manager injects it for the model calls of
+    one turn, and the runtime strips it before every checkpoint save, so a
+    checkpoint (and the run's result state) never carries recalled memory.
+    """
+    return _strip_memory_blocks(state)
 
 
 def _strip_memory_blocks(state: AgentState) -> AgentState:

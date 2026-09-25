@@ -441,6 +441,20 @@ class Agent(AgentRuntimeMixin, BaseModel):
             gsar_decision=gsar_decision,
         )
 
+    async def drain_memory(self) -> None:
+        """Wait for the memory manager's background extractions to finish.
+
+        With ``LLMMemoryManager(extract_mode="background")`` extraction runs
+        after a turn's final event; await this at graceful shutdown (and in
+        tests) so none is lost — bound it with ``asyncio.timeout(...)`` if
+        needed. A no-op without a memory manager or in ``"inline"`` mode.
+        :meth:`run_sync` calls it before returning.
+        """
+        manager = self._memory_manager or self.config.memory_manager
+        drain = getattr(manager, "drain", None)
+        if drain is not None:
+            await drain()
+
     def run_sync(
         self,
         prompt: str,
@@ -480,6 +494,13 @@ class Agent(AgentRuntimeMixin, BaseModel):
                     prompt, thread_id=thread_id, metadata=metadata, model_kwargs=model_kwargs
                 )
             finally:
+                # Background memory extraction is bound to this loop, which
+                # closes on return: finish it here rather than lose it.
+                try:
+                    await self.drain_memory()
+                except Exception:  # noqa: BLE001 — cleanup must never mask a real error from arun()
+                    pass
+
                 close = getattr(self.model, "close", None)
                 if close is not None:
                     try:
@@ -771,6 +792,12 @@ class Agent(AgentRuntimeMixin, BaseModel):
             state = loaded
             prompt = ""
             run_metadata = metadata if metadata is not None else dict(loaded.metadata)
+            # Checkpoints never carry the (ephemeral) memory block, so the
+            # rest of this turn gets it re-injected, as the in-memory path has.
+            # (A fresh process has not initialised the agent yet.)
+            memory_manager = self._memory_manager or self.config.memory_manager
+            if memory_manager is not None:
+                state = await memory_manager.on_session_start(state)
 
         # This resumed segment is a run of its own: cancellable by thread,
         # visible to hooks as ``event.run``, isolated from concurrent runs.
