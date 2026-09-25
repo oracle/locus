@@ -138,9 +138,11 @@ class TestGuardrailsReDoS:
         start = time.perf_counter()
         hook._check_blocked_content(evil, "input")
         elapsed_ms = (time.perf_counter() - start) * 1000
-        # Old pattern took >30s on this input. New pattern + 8 KiB scan cap
-        # must complete in well under a second even on slow hardware.
-        assert elapsed_ms < 500, f"regex took {elapsed_ms:.1f}ms — possible ReDoS"
+        # Old pattern took >30s on this input; the new pattern + 8 KiB scan
+        # cap takes milliseconds. The bound only has to separate those two
+        # regimes, so it is set far above anything a loaded CI runner (or
+        # ``pytest -n auto``) adds — a tight bound fails on scheduling noise.
+        assert elapsed_ms < 5_000, f"regex took {elapsed_ms:.1f}ms — possible ReDoS"
 
     def test_scan_limit_is_documented_bound(self):
         from tulip.hooks.builtin.guardrails import GuardrailsHook

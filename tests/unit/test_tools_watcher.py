@@ -20,6 +20,8 @@ import os
 import time
 from pathlib import Path
 
+import pytest
+
 from tulip.tools.registry import ToolRegistry
 from tulip.tools.watcher import (
     ToolWatcher,
@@ -258,10 +260,18 @@ class TestToolWatcherDevReload:
         watcher.start()
         try:
             _write_tool_file(tmp_path, "echo_tool.py")
-            # Wait long enough to ensure at least one poll cycle ran.
-            time.sleep(0.5)
-            # The watcher is still running; mtime got recorded.
-            assert any(k.endswith("echo_tool.py") for k in watcher._file_mtimes)
+            # A fixed sleep here raced the poll thread under ``pytest -n
+            # auto``; wait for the observable outcome instead.
+            _wait_until(
+                lambda: any(k.endswith("echo_tool.py") for k in watcher._file_mtimes),
+                "the watcher to record the new file despite the raising callback",
+            )
+            # Still alive after the callback raised: a later file is picked up.
+            _write_tool_file(tmp_path, "second.py")
+            _wait_until(
+                lambda: any(k.endswith("second.py") for k in watcher._file_mtimes),
+                "the watcher to keep polling after the callback raised",
+            )
         finally:
             watcher.stop()
 
@@ -286,6 +296,81 @@ class TestToolWatcherDevReload:
             assert registry.tools["echo"].description == "Updated description."
         finally:
             watcher.stop()
+
+
+# ---------------------------------------------------------------------------
+# Change detection that mtime alone gets wrong
+# ---------------------------------------------------------------------------
+
+
+class TestToolWatcherChangeSignature:
+    """Driven through ``_scan_directory`` / ``_check_for_changes`` directly, so
+    each case is one deterministic poll instead of a race with the thread."""
+
+    def test_content_written_within_the_same_mtime_tick_is_reloaded(self, tmp_path: Path) -> None:
+        # ``write_text`` creates/truncates the file and then writes it. A poll
+        # between the two steps records the empty file; on a coarse-clock
+        # filesystem the write that follows keeps the same mtime. Pinning
+        # the mtime reproduces that torn read deterministically.
+        registry = ToolRegistry()
+        path = tmp_path / "echo_tool.py"
+        path.write_text("")
+        watcher = ToolWatcher(tmp_path, registry=registry, dev_reload=True)
+        watcher._scan_directory()
+        assert registry.tools == {}
+
+        before = path.stat()
+        path.write_text(_TOOL_SOURCE)
+        os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+        watcher._check_for_changes()
+
+        assert "echo" in registry.tools
+
+    def test_file_restored_to_an_older_mtime_is_reloaded(self, tmp_path: Path) -> None:
+        # ``git checkout`` / ``cp -p`` / an editor restoring a backup can move
+        # the mtime backwards; that is still a change to pick up.
+        registry = ToolRegistry()
+        path = _write_tool_file(tmp_path, "t.py")
+        watcher = ToolWatcher(tmp_path, registry=registry, dev_reload=True)
+        watcher._scan_directory()
+        original = registry.tools["echo"]
+
+        # Same length, different description — only the mtime can tell.
+        path.write_text(_TOOL_SOURCE.replace("Echo back the input.", "Echo back the inpuT."))
+        past = time.time() - 3600
+        os.utime(path, (past, past))
+        watcher._check_for_changes()
+
+        assert registry.tools["echo"] is not original
+        assert registry.tools["echo"].description == "Echo back the inpuT."
+
+    def test_unchanged_file_is_not_reloaded(self, tmp_path: Path) -> None:
+        registry = ToolRegistry()
+        _write_tool_file(tmp_path, "t.py")
+        watcher = ToolWatcher(tmp_path, registry=registry, dev_reload=True)
+        watcher._scan_directory()
+        original = registry.tools["echo"]
+
+        watcher._check_for_changes()
+
+        assert registry.tools["echo"] is original
+
+    def test_file_vanishing_between_glob_and_stat_is_skipped(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import tulip.tools.watcher as watcher_module
+
+        path = _write_tool_file(tmp_path, "t.py")
+        watcher = ToolWatcher(tmp_path, dev_reload=True)
+        watcher._scan_directory()
+
+        def gone(_p: Path) -> tuple[int, int]:
+            raise FileNotFoundError(str(_p))
+
+        monkeypatch.setattr(watcher_module, "_signature", gone)
+        watcher._check_for_changes()  # Must not raise.
+
+        assert str(path) not in watcher._file_mtimes
 
 
 # ---------------------------------------------------------------------------

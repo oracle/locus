@@ -116,6 +116,21 @@ def load_tools_from_directory(directory: Path | str) -> list[Tool]:
     return tools
 
 
+def _signature(path: Path) -> tuple[int, int]:
+    """Change signature of a tool file: ``(st_mtime_ns, st_size)``.
+
+    Linux stamps mtimes from a coarse clock (one kernel tick, typically
+    1-4 ms), so a file that is created and then written — ``write_text``
+    opens with ``O_TRUNC`` before it writes — can keep the same mtime across
+    both steps. A poll that lands between them used to record the *empty*
+    file's mtime, load zero tools, and then never notice the content because
+    the mtime had not moved. Including the size catches that torn read (and
+    any same-tick edit that changes the length).
+    """
+    st = path.stat()
+    return (st.st_mtime_ns, st.st_size)
+
+
 class ToolWatcher:
     """Watch a directory for tool file changes and auto-reload.
 
@@ -176,7 +191,10 @@ class ToolWatcher:
         self._dev_reload = dev_reload
         self._running = False
         self._thread: threading.Thread | None = None
-        self._file_mtimes: dict[str, float] = {}
+        # file path -> (st_mtime_ns, st_size). The size is part of the
+        # signature because mtime alone misses a change made within the
+        # filesystem's timestamp granularity — see ``_signature``.
+        self._file_mtimes: dict[str, tuple[int, int]] = {}
         self._on_reload: list[Any] = []
 
     def on_reload(self, callback: Any) -> None:
@@ -239,7 +257,7 @@ class ToolWatcher:
         for py_file in self._directory.glob("*.py"):
             if py_file.name.startswith("_"):
                 continue
-            self._file_mtimes[str(py_file)] = py_file.stat().st_mtime
+            self._file_mtimes[str(py_file)] = _signature(py_file)
 
             # Load and register initial tools
             if self._registry is not None:
@@ -262,16 +280,21 @@ class ToolWatcher:
                 continue
 
             file_key = str(py_file)
+            try:
+                signature = _signature(py_file)
+            except FileNotFoundError:
+                continue  # Deleted between glob() and stat(); handled below.
             current_files.add(file_key)
-            mtime = py_file.stat().st_mtime
 
             if file_key not in self._file_mtimes:
                 # New file
-                self._file_mtimes[file_key] = mtime
+                self._file_mtimes[file_key] = signature
                 self._reload_file(py_file)
-            elif mtime > self._file_mtimes[file_key]:
-                # Modified file
-                self._file_mtimes[file_key] = mtime
+            elif signature != self._file_mtimes[file_key]:
+                # Modified file. Compared with ``!=``, not ``>``: a file put
+                # back to an older mtime (``git checkout``, ``cp -p``, an
+                # editor restoring a backup) is still a change.
+                self._file_mtimes[file_key] = signature
                 self._reload_file(py_file)
 
         # Check for deleted files

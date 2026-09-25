@@ -6,14 +6,15 @@
 Issue #210: the runtime loop used to feed ``ConcurrentExecutor`` one tool
 call at a time inside a ``for`` loop, so ``asyncio.gather`` never saw more
 than a singleton — concurrent was silently sequential. These tests pin the
-batched behavior end-to-end (wall-time, hook ordering, mixed cancel/cache
-paths, executor exceptions, ordering).
+batched behavior end-to-end (overlap, hook ordering, mixed cancel/cache
+paths, executor exceptions, ordering). Overlap and ordering are proven with
+barriers and events, never wall-clock thresholds.
 """
 
 from __future__ import annotations
 
 import asyncio
-import time
+import contextlib
 from typing import Any
 
 import pytest
@@ -63,27 +64,131 @@ def _assistant_with_tool_calls(calls: list[ToolCall]) -> ModelResponse:
     )
 
 
-async def _run_collect(agent: Agent, prompt: str) -> tuple[float, Any]:
-    """Drive ``agent.run`` to completion; return (wall_seconds, final_state)."""
-    t0 = time.perf_counter()
+async def _run_collect(agent: Agent, prompt: str) -> Any:
+    """Drive ``agent.run`` to completion; return the final state."""
     async for _ev in agent.run(prompt):
         pass
-    elapsed = time.perf_counter() - t0
-    return elapsed, agent._last_run_state
+    return agent._last_run_state
 
 
-# Sleep duration per slow tool call. Chosen large enough that the
-# concurrent-vs-sequential gap survives CI jitter, but short enough not to
-# slow the suite. Ten parallel sleeps of 100 ms ~= 100 ms; ten serial ones
-# ~= 1000 ms.
-_SLEEP_MS = 0.1
+# Parallelism is proven structurally, never by wall-clock: a threshold such as
+# "elapsed < serial floor / 2" fails on a loaded CI runner (PR #49 run
+# 36146751358 measured 0.541s against a 0.500s cut-off) and says nothing
+# about *why* it was slow. Instead every tool in a batch parks on a barrier
+# that only opens once all of them have started. Parallel execution opens it
+# at once; serial execution can never open it, and the first call times out
+# with an explicit message instead of the suite hanging.
+_BARRIER_TIMEOUT_S = 10.0
+
+
+class _Barrier:
+    """Opens once ``parties`` callers have arrived; records peak concurrency."""
+
+    def __init__(self, parties: int) -> None:
+        self.parties = parties
+        self.arrived = 0
+        self.in_flight = 0
+        self.peak_in_flight = 0
+        self.broken = False
+        self._open = asyncio.Event()
+
+    async def wait(self) -> None:
+        if self.broken:
+            # One caller already timed out; don't make every later call wait too.
+            raise AssertionError("barrier broken by an earlier timeout")
+        self.arrived += 1
+        self.in_flight += 1
+        self.peak_in_flight = max(self.peak_in_flight, self.in_flight)
+        try:
+            if self.arrived >= self.parties:
+                self._open.set()
+            try:
+                await asyncio.wait_for(self._open.wait(), _BARRIER_TIMEOUT_S)
+            except TimeoutError:
+                self.broken = True
+                raise AssertionError(
+                    f"only {self.arrived}/{self.parties} tool calls were ever in flight "
+                    "together — the batch ran serially"
+                ) from None
+        finally:
+            self.in_flight -= 1
+
+
+class _Gauge:
+    """Counts concurrently running bodies without making any of them wait."""
+
+    def __init__(self) -> None:
+        self.in_flight = 0
+        self.peak_in_flight = 0
+
+    async def hold(self) -> None:
+        self.in_flight += 1
+        self.peak_in_flight = max(self.peak_in_flight, self.in_flight)
+        try:
+            # Yield a few times so an overlapping sibling would get scheduled.
+            for _ in range(5):
+                await asyncio.sleep(0)
+        finally:
+            self.in_flight -= 1
+
+
+class _Sync:
+    """Per-test synchronisation object the module-level tools reach through."""
+
+    barrier: _Barrier | None = None
+    gauge: _Gauge | None = None
 
 
 @tool(name="slow")
 async def slow_tool(idx: int) -> str:
-    """Sleep ``_SLEEP_MS`` then echo the index."""
-    await asyncio.sleep(_SLEEP_MS)
+    """Wait on the current barrier (or gauge), then echo the index."""
+    if _Sync.barrier is not None:
+        await _Sync.barrier.wait()
+    elif _Sync.gauge is not None:
+        await _Sync.gauge.hold()
     return f"done {idx}"
+
+
+@pytest.fixture(autouse=True)
+def _reset_sync() -> Any:
+    _Sync.barrier = None
+    _Sync.gauge = None
+    yield
+    _Sync.barrier = None
+    _Sync.gauge = None
+
+
+class _Chain:
+    """Completion order made explicit: a tag finishes only after ``after`` did."""
+
+    done: dict[str, asyncio.Event] = {}
+
+    @classmethod
+    def event(cls, tag: str) -> asyncio.Event:
+        return cls.done.setdefault(tag, asyncio.Event())
+
+
+@tool(name="chained")
+async def chained_tool(tag: str, after: str = "") -> str:
+    """Finish only once the call tagged ``after`` has finished."""
+    if after:
+        try:
+            await asyncio.wait_for(_Chain.event(after).wait(), _BARRIER_TIMEOUT_S)
+        except TimeoutError:
+            raise AssertionError(f"{tag!r} waited for {after!r}, which never finished") from None
+    _Chain.event(tag).set()
+    return f"done {tag}"
+
+
+def _chain_call(call_id: str, tag: str, after: str = "") -> ToolCall:
+    return ToolCall(id=call_id, name="chained", arguments={"tag": tag, "after": after})
+
+
+@pytest.fixture(autouse=True)
+def _reset_chain() -> Any:
+    _Chain.done = {}
+    yield
+    _Chain.done = {}
 
 
 @pytest.mark.asyncio
@@ -91,10 +196,12 @@ async def test_concurrent_tool_calls_run_in_parallel() -> None:
     """tool_execution='concurrent' must batch a multi-tool-call response.
 
     Regression test for #210: previously the runtime loop iterated and
-    submitted each call separately, so wall time was N * _SLEEP_MS even
-    with ``concurrent`` + ``max_concurrency=10``.
+    submitted each call separately, so the calls never overlapped even
+    with ``concurrent`` + ``max_concurrency=10``. All ``n`` calls must be in
+    flight at the same time for the barrier to open.
     """
     n = 10
+    _Sync.barrier = _Barrier(n)
     response = _assistant_with_tool_calls(
         [ToolCall(id=f"c{i}", name="slow", arguments={"idx": i}) for i in range(n)]
     )
@@ -108,25 +215,19 @@ async def test_concurrent_tool_calls_run_in_parallel() -> None:
         max_iterations=5,
     )
 
-    elapsed, state = await _run_collect(agent, "do many slows")
+    state = await _run_collect(agent, "do many slows")
 
     executions = list(state.tool_executions)
-    assert len(executions) == n
+    assert [e.error for e in executions] == [None] * n
     assert {e.result for e in executions} == {f"done {i}" for i in range(n)}
-
-    # Sequential floor = n * _SLEEP_MS. The fix should land us close to
-    # _SLEEP_MS (one round of sleep), well under half the serial floor.
-    sequential_floor = n * _SLEEP_MS
-    assert elapsed < sequential_floor / 2, (
-        f"wall time {elapsed:.3f}s suggests serial execution "
-        f"(sequential floor {sequential_floor:.3f}s)"
-    )
+    assert _Sync.barrier.peak_in_flight == n
 
 
 @pytest.mark.asyncio
 async def test_sequential_mode_still_serial() -> None:
     """tool_execution='sequential' must keep its per-call serial semantics."""
     n = 5
+    _Sync.gauge = _Gauge()
     response = _assistant_with_tool_calls(
         [ToolCall(id=f"c{i}", name="slow", arguments={"idx": i}) for i in range(n)]
     )
@@ -139,12 +240,11 @@ async def test_sequential_mode_still_serial() -> None:
         max_iterations=5,
     )
 
-    elapsed, state = await _run_collect(agent, "do many slows serially")
+    state = await _run_collect(agent, "do many slows serially")
 
     assert len(list(state.tool_executions)) == n
-    # Sequential should take at least ~80% of the n * _SLEEP_MS floor.
-    assert elapsed >= 0.8 * n * _SLEEP_MS, (
-        f"sequential wall time {elapsed:.3f}s collapsed below the serial floor"
+    assert _Sync.gauge.peak_in_flight == 1, (
+        f"{_Sync.gauge.peak_in_flight} sequential tool bodies overlapped"
     )
 
 
@@ -153,31 +253,28 @@ async def test_results_preserve_tool_call_order() -> None:
     """Concurrent execution must preserve the model's tool_call order in the
     recorded executions, regardless of which task finishes first."""
 
-    @tool(name="vsleep")
-    async def vsleep(idx: int, ms: float) -> str:
-        await asyncio.sleep(ms / 1000.0)
-        return f"v{idx}"
-
+    # Completion order is c1, c2, c0 — the reverse of what order-by-finish
+    # would record for c0.
     calls = [
-        ToolCall(id="c0", name="vsleep", arguments={"idx": 0, "ms": 200}),
-        ToolCall(id="c1", name="vsleep", arguments={"idx": 1, "ms": 50}),
-        ToolCall(id="c2", name="vsleep", arguments={"idx": 2, "ms": 100}),
+        _chain_call("c0", "v0", after="v2"),
+        _chain_call("c1", "v1"),
+        _chain_call("c2", "v2", after="v1"),
     ]
     response = _assistant_with_tool_calls(calls)
 
     agent = Agent(
         model=_ScriptedModel([response]),
-        tools=[vsleep],
+        tools=[chained_tool],
         tool_execution="concurrent",
         max_concurrency=5,
         termination=MaxIterations(2),
         max_iterations=5,
     )
-    _elapsed, state = await _run_collect(agent, "ordered")
+    state = await _run_collect(agent, "ordered")
 
     executions = list(state.tool_executions)
-    # Order must match tool_call order, even though c1 finishes first wall-clock.
-    assert [e.result for e in executions] == ["v0", "v1", "v2"]
+    # Order must match tool_call order, even though c1 finishes first.
+    assert [e.result for e in executions] == ["done v0", "done v1", "done v2"]
     assert [e.tool_call_id for e in executions] == ["c0", "c1", "c2"]
 
 
@@ -249,7 +346,7 @@ async def test_cancel_via_before_hook_skips_executor_for_that_call() -> None:
         termination=MaxIterations(2),
         max_iterations=5,
     )
-    _elapsed, state = await _run_collect(agent, "mixed cancel")
+    state = await _run_collect(agent, "mixed cancel")
 
     executions = list(state.tool_executions)
     assert [e.tool_call_id for e in executions] == ["c0", "c1", "c2"]
@@ -286,7 +383,7 @@ async def test_idempotent_cache_short_circuits_in_concurrent_mode() -> None:
         termination=MaxIterations(3),
         max_iterations=5,
     )
-    _elapsed, state = await _run_collect(agent, "dedup")
+    state = await _run_collect(agent, "dedup")
 
     executions = list(state.tool_executions)
     assert [e.tool_call_id for e in executions] == ["c0", "c1", "c2", "c3"]
@@ -333,7 +430,7 @@ async def test_within_batch_idempotent_dedup_in_concurrent_mode() -> None:
         termination=MaxIterations(2),
         max_iterations=5,
     )
-    _elapsed, state = await _run_collect(agent, "within-batch dedup")
+    state = await _run_collect(agent, "within-batch dedup")
 
     executions = list(state.tool_executions)
     assert [e.tool_call_id for e in executions] == ["c0", "c1", "c2", "c3"]
@@ -368,7 +465,7 @@ async def test_executor_exception_isolated_to_one_call() -> None:
         termination=MaxIterations(2),
         max_iterations=5,
     )
-    _elapsed, state = await _run_collect(agent, "mixed errors")
+    state = await _run_collect(agent, "mixed errors")
 
     executions = list(state.tool_executions)
     assert [e.tool_call_id for e in executions] == ["c0", "c1", "c2"]
@@ -394,13 +491,6 @@ async def _run_collect_events(agent: Agent, prompt: str) -> tuple[list[Any], Any
     return events, agent._last_run_state
 
 
-@tool(name="vsleep_tag")
-async def vsleep_tag(tag: str, ms: float) -> str:
-    """Async sleep tool — used to construct deterministic completion-order tests."""
-    await asyncio.sleep(ms / 1000.0)
-    return f"done {tag}"
-
-
 @pytest.mark.asyncio
 async def test_completion_mode_streams_events_in_finish_order() -> None:
     """``tool_event_order='completion'`` surfaces ``ToolCompleteEvent``s in
@@ -411,13 +501,13 @@ async def test_completion_mode_streams_events_in_finish_order() -> None:
     from tulip.core.events import ToolCompleteEvent
 
     calls = [
-        ToolCall(id="c-slow", name="vsleep_tag", arguments={"tag": "slow", "ms": 200}),
-        ToolCall(id="c-fast", name="vsleep_tag", arguments={"tag": "fast", "ms": 20}),
-        ToolCall(id="c-med", name="vsleep_tag", arguments={"tag": "med", "ms": 100}),
+        _chain_call("c-slow", "slow", after="med"),
+        _chain_call("c-fast", "fast"),
+        _chain_call("c-med", "med", after="fast"),
     ]
     agent = Agent(
         model=_ScriptedModel([_assistant_with_tool_calls(calls)]),
-        tools=[vsleep_tag],
+        tools=[chained_tool],
         tool_execution="concurrent",
         max_concurrency=5,
         tool_event_order="completion",
@@ -445,12 +535,12 @@ async def test_sequential_mode_events_in_tool_call_order() -> None:
     from tulip.core.events import ToolCompleteEvent
 
     calls = [
-        ToolCall(id="c-slow", name="vsleep_tag", arguments={"tag": "slow", "ms": 100}),
-        ToolCall(id="c-fast", name="vsleep_tag", arguments={"tag": "fast", "ms": 20}),
+        _chain_call("c-slow", "slow", after="fast"),
+        _chain_call("c-fast", "fast"),
     ]
     agent = Agent(
         model=_ScriptedModel([_assistant_with_tool_calls(calls)]),
-        tools=[vsleep_tag],
+        tools=[chained_tool],
         tool_execution="concurrent",
         max_concurrency=5,
         # tool_event_order defaults to "sequential" — not passing it.
@@ -474,24 +564,32 @@ class _SiblingBodyCount:
 
     interrupt_calls = 0
     sibling_calls = 0
+    siblings_started = 0
+    all_siblings_started: asyncio.Event | None = None
 
 
 @tool(name="interrupting")
 async def interrupting_tool() -> str:
-    """Returns the ``__interrupt__`` marker the runtime loop watches for."""
+    """Returns the ``__interrupt__`` marker once both siblings are in flight."""
     import json as _json
 
     _SiblingBodyCount.interrupt_calls += 1
-    # Tiny wait so the executor's other tasks have a real chance to start
-    # before this one finishes and the break fires.
-    await asyncio.sleep(0.02)
+    assert _SiblingBodyCount.all_siblings_started is not None
+    # Interrupt only after the siblings are provably running, so the test
+    # exercises cancelling in-flight work rather than never-started work.
+    await asyncio.wait_for(_SiblingBodyCount.all_siblings_started.wait(), _BARRIER_TIMEOUT_S)
     return _json.dumps({"__interrupt__": True, "question": "?", "options": None})
 
 
 @tool(name="slow_sibling")
 async def slow_sibling_tool(idx: int) -> str:
-    """Slow tool — should be cancelled before its body actually runs."""
-    await asyncio.sleep(0.5)
+    """Blocks until cancelled; the increment below must never run."""
+    _SiblingBodyCount.siblings_started += 1
+    if _SiblingBodyCount.siblings_started == 2 and _SiblingBodyCount.all_siblings_started:
+        _SiblingBodyCount.all_siblings_started.set()
+    # Never set: only cancellation (or the timeout, on a regression) ends this.
+    with contextlib.suppress(TimeoutError):
+        await asyncio.wait_for(asyncio.Event().wait(), _BARRIER_TIMEOUT_S)
     _SiblingBodyCount.sibling_calls += 1
     return f"sibling-{idx}"
 
@@ -507,6 +605,8 @@ async def test_interrupt_cancels_in_flight_siblings() -> None:
     """
     _SiblingBodyCount.interrupt_calls = 0
     _SiblingBodyCount.sibling_calls = 0
+    _SiblingBodyCount.siblings_started = 0
+    _SiblingBodyCount.all_siblings_started = asyncio.Event()
 
     calls = [
         ToolCall(id="c0", name="interrupting", arguments={}),
@@ -524,6 +624,7 @@ async def test_interrupt_cancels_in_flight_siblings() -> None:
     await _run_collect(agent, "interrupt cancels siblings")
 
     assert _SiblingBodyCount.interrupt_calls == 1
+    assert _SiblingBodyCount.siblings_started == 2
     # The siblings were running (their sleep had started) but got cancelled
     # before completing — their body's increment must not have fired.
     assert _SiblingBodyCount.sibling_calls == 0, (
