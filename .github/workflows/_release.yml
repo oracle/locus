@@ -163,7 +163,10 @@ jobs:
       # The 2.5.0 release failed on this AFTER the tag was published, which is
       # the worst moment to find out. TestPyPI would have caught it first if
       # that step were not `continue-on-error` — it failed there too, silently.
+      # skip-existing: the two distributions upload independently, so a re-run
+      # after one of them failed must not trip over the one already published.
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33
         with:
           packages-dir: dist/
+          skip-existing: true
