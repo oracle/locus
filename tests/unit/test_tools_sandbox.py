@@ -17,9 +17,9 @@ from typing import Any
 import pytest
 
 from tulip.agent.hook_orchestrator import HookOrchestrator
+from tulip.control.policy import ControlPolicy
 from tulip.hooks.provider import BeforeToolCallEvent, HookPriority
 from tulip.observability import get_event_bus, reset_event_bus, run_context
-from tulip.security.policy import ControlPolicy
 from tulip.tools import tool
 from tulip.tools.sandbox import (
     SandboxEnforcerHook,

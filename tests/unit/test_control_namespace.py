@@ -3,10 +3,12 @@
 
 """The 2.0 control-runtime rename.
 
-``tulip.control`` is the canonical home for the domain-neutral control core;
-``tulip.security`` keeps the grounded-evidence / red-team / SOC domain. The old
-security-coded names (``ControlPolicy``, ``Evidence``, ``VerificationResult``,
-``governed_agent``, ``GovernanceProfile``) were removed outright (no shims).
+``tulip.control`` is the canonical home for the domain-neutral control core,
+including the grounding / verification layer. The security-domain tooling ships
+separately as ``tulip_security``; ``tulip.security`` is now only a compatibility
+shim over both (see test_security_shim.py). The old security-coded names
+(``SecurityPolicy``, ``Finding``, ``Verdict``, ``SecureAgent``, ``secure_agent``,
+``SecurityProfile``) were removed outright (no shims).
 """
 
 import pytest
@@ -79,7 +81,8 @@ def test_old_import_paths_raise() -> None:
         from tulip.security import ControlPolicy  # noqa: F401
 
 
-def test_security_keeps_its_domain() -> None:
+def test_security_path_still_resolves_its_old_names() -> None:
+    pytest.importorskip("tulip_security")
     import tulip.security as s
 
     for name in (
@@ -94,7 +97,7 @@ def test_security_keeps_its_domain() -> None:
         "security_toolset",
         "Target",
     ):
-        assert hasattr(s, name), f"tulip.security lost domain symbol {name!r}"
+        assert hasattr(s, name), f"tulip.security lost symbol {name!r}"
 
 
 def test_evidence_and_verification_are_shared_objects() -> None:

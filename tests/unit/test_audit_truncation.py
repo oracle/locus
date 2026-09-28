@@ -16,7 +16,7 @@ import dataclasses
 
 import pytest
 
-from tulip.security.audit import AuditRecord, AuditTrail, _entry_hash
+from tulip.control.audit import AuditRecord, AuditTrail, _entry_hash
 
 
 def _trail(n: int = 4) -> AuditTrail:

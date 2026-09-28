@@ -62,7 +62,7 @@ class Tool(BaseModel):
 
     labels: frozenset[str] = frozenset()
     """Policy-matching labels this tool declares (e.g. ``{"code-exec"}``).
-    Matched against :class:`~tulip.security.policy.ControlPolicy` label sets
+    Matched against :class:`~tulip.control.policy.ControlPolicy` label sets
     such as ``require_sandbox_for`` by governance hooks like
     :class:`~tulip.tools.sandbox.SandboxEnforcerHook`."""
 
@@ -337,7 +337,7 @@ def tool(
             duplicate side-effects when a model re-issues a tool call it
             has already made this turn.
         labels: Policy-matching labels the tool declares; matched against
-            :class:`~tulip.security.policy.ControlPolicy` label sets (e.g.
+            :class:`~tulip.control.policy.ControlPolicy` label sets (e.g.
             ``require_sandbox_for``).
         sandbox: Run the tool in an isolated box instead of the host
             process. ``True`` uses the default provider (``$TULIP_SANDBOX``

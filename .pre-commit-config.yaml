@@ -86,7 +86,7 @@ repos:
     - fastmcp>=3.2.0
     - mcp>=1.0
     pass_filenames: false
-    entry: mypy src/tulip
+    entry: mypy src/tulip packages/tulip-agents-security/src/tulip_security
 
   # ==========================================================================
   # Commit message linting

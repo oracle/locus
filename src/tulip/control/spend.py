@@ -3,8 +3,8 @@
 
 """Spend ledgers: what a scope has already spent, so policy can cap it.
 
-An :class:`~tulip.security.policy.Action` carries ``cost_usd``, what performing
-it will spend. :class:`~tulip.security.policy.ControlPolicy` can require a
+An :class:`~tulip.control.policy.Action` carries ``cost_usd``, what performing
+it will spend. :class:`~tulip.control.policy.ControlPolicy` can require a
 person above a per-action cost (``require_human_over_usd``) and deny once a
 scope's cumulative spend would cross a limit (``spend_limit_usd``). The ledger
 supplies the cumulative figure::

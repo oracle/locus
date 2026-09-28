@@ -1,0 +1,83 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tulip-agents-security"
+# Released in lockstep with tulip-agents: bump this, and the tulip-agents floor
+# below, together with the core version.
+version = "2.16.0"
+description = "Security-domain tooling for Tulip agents — AI red-team probes, SOC triage, threat-intel / SIEM / EDR / scanner / fingerprint / AWS posture adapters, and IR playbooks, all grounded through the tulip-agents control core."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+requires-python = ">=3.11"
+authors = [
+    { name = "The Tulip Authors" },
+]
+keywords = [
+    "security",
+    "cybersecurity",
+    "red-team",
+    "ai-red-teaming",
+    "soc",
+    "incident-response",
+    "threat-intelligence",
+    "siem",
+    "edr",
+    "owasp",
+    "mitre-atlas",
+    "agents",
+    "tulip",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Security",
+    "Typing :: Typed",
+]
+
+# The intel / SIEM / EDR / fingerprint adapters run their live paths on the
+# core httpx dependency and the scanner uses only the stdlib, so the full
+# read-only triage loop works on tulip-agents alone (offline samples need
+# nothing).
+dependencies = [
+    "tulip-agents>=2.16.0",
+]
+
+[project.optional-dependencies]
+# AWS cloud-posture tools (tulip_security.aws) — boto3 + its botocore service
+# models are the spec that drives use_aws / describe_aws.
+aws = ["boto3>=1.34"]
+
+[project.urls]
+Homepage = "https://github.com/tuliplabs-ai/tulip-agents"
+Documentation = "https://tulipagents.ai/"
+Repository = "https://github.com/tuliplabs-ai/tulip-agents"
+Issues = "https://github.com/tuliplabs-ai/tulip-agents/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tulip_security"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/tests",
+    "/examples",
+    "/README.md",
+    "/LICENSE",
+    "/NOTICE",
+]
+
+# Inside this repo, resolve tulip-agents from the workspace root rather than
+# PyPI (uv workspace; see [tool.uv.workspace] in the root pyproject.toml).
+[tool.uv.sources]
+tulip-agents = { workspace = true }

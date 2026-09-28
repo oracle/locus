@@ -186,7 +186,7 @@ async def test_agent_end_to_end_with_a_gated_tool() -> None:
     from tulip import Agent, AgentConfig
     from tulip.control import Action, ControlPolicy
     from tulip.control.gate import gate_tool
-    from tulip.security.verify import VerificationResult
+    from tulip.control.verification import VerificationResult
     from tulip.tools.decorator import tool
 
     ran: list[float] = []

@@ -19,7 +19,7 @@ import pytest
 
 from tulip.control import Action, AuditTrail, ControlPolicy
 from tulip.control.gate import gate_tool
-from tulip.security.verify import VerificationResult
+from tulip.control.verification import VerificationResult
 from tulip.tools.decorator import tool
 
 
