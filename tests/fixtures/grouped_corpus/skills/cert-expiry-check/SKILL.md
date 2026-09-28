@@ -8,4 +8,5 @@ required-probes:
 ---
 
 # Certificate expiry
+
 Query certificate expiry per endpoint and compare it with the renewal window.
