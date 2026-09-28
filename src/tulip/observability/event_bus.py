@@ -3,12 +3,9 @@
 
 """Singleton pub/sub event bus for tulip telemetry.
 
-A leaner adaptation of an optic-style ``EventBus`` (see
-``optic.observability.core.event_bus``). Same semantic surface
-— per-run channels + global subscribers, bounded queues, history
-replay for late connections, sentinel-based stream close — without
-the production-grade backpressure-warning machinery, which we don't
-need at v1 scale.
+Per-run channels + global subscribers, bounded queues, history
+replay for late connections, sentinel-based stream close. There is
+no backpressure-warning machinery; it is not needed at v1 scale.
 
 The tulip hook system (:class:`tulip.hooks.HookProvider`) and the
 router both publish through here. An SSE endpoint such as
@@ -31,8 +28,8 @@ from uuid import uuid4
 logger = logging.getLogger(__name__)
 
 
-# Bounded buffers — pinned for the v1 release. Optic ratchets these via
-# config; we'll add config when we have a real production deployment.
+# Bounded buffers — pinned for the v1 release. They become config when a
+# real production deployment needs to tune them.
 _DEFAULT_QUEUE_SIZE = 1024
 _DEFAULT_HISTORY_PER_RUN = 500
 _DEFAULT_MAX_RUNS_RETAINED = 200
@@ -345,7 +342,7 @@ class EventBus:
             self._closed_runs.discard(run_id)
 
 
-# Module-level singleton — matches optic's pattern.
+# Module-level singleton.
 _event_bus: EventBus | None = None
 
 

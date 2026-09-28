@@ -3,10 +3,13 @@ Copyright 2026 The Tulip Authors
 
 This product includes software developed by The Tulip Authors.
 
-Portions of this software were originally developed and released under the
-Universal Permissive License v1.0 (UPL-1.0). Those portions remain available
-under the terms of the UPL-1.0; all new contributions are licensed under the
-Apache License, Version 2.0.
+Releases of this project before 1.0.0 (the 0.x line) were published by The
+Tulip Authors under the Universal Permissive License v1.0 (UPL-1.0). The
+project was relicensed to the Apache License, Version 2.0 at 1.0.0. Code as it
+stood in those releases remains available under the UPL-1.0; all changes and
+additions since 1.0.0 are licensed under the Apache License, Version 2.0.
+LICENSES/ holds both license texts and the list of files that date from the
+UPL-1.0 releases.
 
 You may obtain a copy of the Apache License, Version 2.0 at:
 

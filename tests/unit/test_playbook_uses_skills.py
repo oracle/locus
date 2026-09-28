@@ -6,7 +6,7 @@ swap a vendor, move a capability behind an MCP server, and the procedure breaks.
 `uses` lets a step say "establish the blast radius" and let the skill decide
 what that means.
 
-This is optic's design (`guidance.skill_refs`), and the reason it had to wait
+In the grouped shape this is `guidance.skill_refs`, and the reason it had to wait
 for `required_probes`: enforcing a skill's `allowed_tools` needs a MOMENT at
 which it applies. A skill is prose folded into a system prompt — on its own
 there is no such moment. A step supplies one. Outside a step that names it, a
@@ -26,8 +26,8 @@ TRIAGE = Skill(
     instructions="Query the error count, then the pool.",
     allowed_tools=["query_metrics", "list_instances"],
     required_probes=[
-        RequiredProbe(name="error_count", match="ora_04031_error_count"),
-        RequiredProbe(name="pool", match="shared_pool_free"),
+        RequiredProbe(name="error_count", match="disk_full_error_count"),
+        RequiredProbe(name="pool", match="disk_free_bytes"),
     ],
 )
 
@@ -90,17 +90,17 @@ def test_an_unresolvable_skill_reference_is_inert_not_fatal() -> None:
 
 def test_the_step_may_sharpen_a_skills_probe_and_wins() -> None:
     """Same name, step-declared: the more specific author's intent survives."""
-    sharper = RequiredProbe(name="pool", match="shared_pool_free_percent")
+    sharper = RequiredProbe(name="pool", match="disk_free_bytes_percent")
     e = _enforcer(required_probes=[sharper])
     step = e.plan.playbook.steps[0]
 
     pool = next(p for p in e.effective_probes(step) if p.name == "pool")
-    assert pool.match == "shared_pool_free_percent"
+    assert pool.match == "disk_free_bytes_percent"
 
 
 def test_evidence_from_a_skills_probes_is_matched_and_scored() -> None:
     e = _enforcer()
-    e.record_tool_call("query_metrics", arguments={"expr": "sum(ora_04031_error_count)"})
+    e.record_tool_call("query_metrics", arguments={"expr": "sum(disk_full_error_count)"})
     e.complete_current_step()
 
     violation = next(v for v in e.violations if v.violation_type == "evidence_incomplete")
@@ -110,8 +110,8 @@ def test_evidence_from_a_skills_probes_is_matched_and_scored() -> None:
 
 def test_a_fully_evidenced_step_scores_one() -> None:
     e = _enforcer()
-    e.record_tool_call("query_metrics", arguments={"expr": "ora_04031_error_count"})
-    e.record_tool_call("query_metrics", arguments={"expr": "shared_pool_free"})
+    e.record_tool_call("query_metrics", arguments={"expr": "disk_full_error_count"})
+    e.record_tool_call("query_metrics", arguments={"expr": "disk_free_bytes"})
     e.complete_current_step()
 
     assert e.adherence_score() == 1.0
@@ -129,7 +129,7 @@ def test_adherence_counts_the_evidence_a_skill_required() -> None:
     Found by running the Stripe scenario, not by a fixture written to pass.
     """
     e = _enforcer()
-    e.record_tool_call("query_metrics", arguments={"expr": "ora_04031_error_count"})
+    e.record_tool_call("query_metrics", arguments={"expr": "disk_full_error_count"})
     e.complete_current_step()
 
     assert e.adherence_score() == 0.5

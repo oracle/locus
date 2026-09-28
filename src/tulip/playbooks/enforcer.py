@@ -360,9 +360,7 @@ class PlaybookEnforcer(BaseModel):
         required evidence", and seeking is the part the agent is responsible
         for; receiving is partly luck.
 
-        optic matches against the executed query strings for the same reason
-        (`extract_query_strings` → `evaluate_probe_coverage`). `result` is
-        accepted and ignored so callers need not change.
+        `result` is accepted and ignored so callers need not change.
 
         The tool NAME is included: a probe may reasonably name the instrument
         rather than the target ("run the disk check"), and excluding it would

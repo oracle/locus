@@ -239,7 +239,7 @@ class PlaybookLoader:
 def _flatten_step_groups(data: dict[str, Any]) -> dict[str, Any]:
     """Accept the grouped playbook shape as well as the flat one.
 
-    optic writes procedures as ``step_groups`` — an ordered list of groups, each
+    Runbooks are often written as ``step_groups`` — an ordered list of groups, each
     with its own goal, each holding ordered steps — and names the capability a
     step is carried out with under ``guidance.skill_refs``. That grouping is how
     a real runbook reads: "establish the blast radius" is a phase containing
@@ -302,9 +302,9 @@ def _flatten_step_groups(data: dict[str, Any]) -> dict[str, Any]:
 
     out = {key: value for key, value in data.items() if key != "step_groups"}
     out["steps"] = steps
-    # optic titles a playbook and summarises it; this model names and describes
-    # one. Same fields, different words — map rather than make an author rename
-    # a corpus.
+    # The grouped shape titles a playbook and summarises it; this model names
+    # and describes one. Same fields, different words — map rather than make an
+    # author rename their files.
     out.setdefault("name", data.get("title") or data.get("playbook_id") or data.get("id", ""))
     if "description" not in out and data.get("summary"):
         out["description"] = data["summary"]
