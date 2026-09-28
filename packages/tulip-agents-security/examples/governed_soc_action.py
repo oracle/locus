@@ -26,7 +26,7 @@ from tulip.control import (
     admit,
 )
 from tulip.reasoning.gsar import Partition
-from tulip.security import (
+from tulip_security import (
     Severity,
     ground_finding,
     is_finding,

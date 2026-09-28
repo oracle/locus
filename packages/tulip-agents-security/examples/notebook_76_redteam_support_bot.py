@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import asyncio
 
-from tulip.security import Target, is_finding, red_team
+from tulip_security import Target, is_finding, red_team
 
 
 _KB = {

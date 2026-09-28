@@ -8,7 +8,7 @@ the fluent output, acts on it. The danger is not a tool call — it's a
 *recommendation* with no evidence that a person rubber-stamps.
 
 Defense (built-in SDK primitive): route every assertion through
-tulip.security.ground_finding. A confident-but-ungrounded conclusion
+tulip.control.ground_finding. A confident-but-ungrounded conclusion
 ABSTAINS, so it never reaches the analyst as an actionable finding — the
 human is shown the abstention and its reason, not a false certainty. A
 conclusion backed by evidence ships with its grounding score.
@@ -20,7 +20,7 @@ Exploitation).
 from __future__ import annotations
 
 from tulip.reasoning.gsar import Claim, EvidenceType, Partition
-from tulip.security import Severity, ground_finding, is_finding
+from tulip_security import Severity, ground_finding, is_finding
 
 
 def main() -> None:

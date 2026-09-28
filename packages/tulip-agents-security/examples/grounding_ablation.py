@@ -22,7 +22,7 @@ import re
 import sys
 
 from tulip.reasoning.gsar import Partition
-from tulip.security import Severity, ground_finding, inference_claim, is_finding, tool_match
+from tulip_security import Severity, ground_finding, inference_claim, is_finding, tool_match
 
 
 # (id, context, label) — label "ship" = evidence truly supports; "trap" = abstain.

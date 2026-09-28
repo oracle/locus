@@ -10,7 +10,7 @@ streamed tokens alone leaks the fingerprint — no privileges, no exploit.
 Defense (built-in SDK primitives): measure your own endpoint
 (integrations.remote_timing — a real streaming probe, offline sample with
 no key), classify the feature vector, and ground the verdict with
-tulip.security.ground_fingerprint — a low-coverage probe abstains instead
+tulip.control.ground_fingerprint — a low-coverage probe abstains instead
 of asserting. Pair with rate limiting / unbounded-consumption caps to blunt
 high-volume extraction.
 
@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 
 from tulip.reasoning.gsar import Claim, EvidenceType, Partition
-from tulip.security import FingerprintVerdict, Severity, ground_fingerprint, is_finding
+from tulip_security import FingerprintVerdict, Severity, ground_fingerprint, is_finding
 
 
 # Make the sibling examples/integrations/ package importable when this gist

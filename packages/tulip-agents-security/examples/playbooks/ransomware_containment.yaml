@@ -1,4 +1,4 @@
-# Ransomware containment — mirror of tulip.security.ransomware_containment().
+# Ransomware containment — mirror of tulip_security.ransomware_containment().
 id: ransomware_containment
 name: Ransomware containment
 description: >-

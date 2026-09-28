@@ -4,7 +4,7 @@
 
 """Notebook 74: SOC playbooks over the first-class security toolset.
 
-The SDK ships curated IR/SOC playbooks (``tulip.security.phishing_triage``,
+The SDK ships curated IR/SOC playbooks (``tulip_security.phishing_triage``,
 ``nist_800_61_ir``, ``ransomware_containment``, ``cloud_posture_audit``) and
 the agent-ready security adapters they drive (``security_toolset()`` —
 IOC enrichment, SIEM search, EDR forensics, vuln/posture scanning, inference
@@ -33,7 +33,7 @@ from config import get_model
 
 from tulip.agent import Agent
 from tulip.playbooks import PlaybookEnforcer
-from tulip.security import all_playbooks, phishing_triage, security_toolset
+from tulip_security import all_playbooks, phishing_triage, security_toolset
 
 
 async def main() -> int:

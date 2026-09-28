@@ -28,7 +28,7 @@ import subprocess
 import sys
 import uuid
 
-from tulip.security import Target, is_finding, red_team
+from tulip_security import Target, is_finding, red_team
 
 
 # Point OPENCLAW_DIR at your local OpenClaw checkout; the gateway is expected

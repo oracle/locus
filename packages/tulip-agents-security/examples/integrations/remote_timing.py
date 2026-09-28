@@ -3,10 +3,10 @@
 
 """Back-compat shim — remote-API timing fingerprint graduated into the SDK.
 
-The measurement is now first-class in :mod:`tulip.security.fingerprint`.
+The measurement is now first-class in :mod:`tulip_security.fingerprint`.
 Importing from here still works; prefer::
 
-    from tulip.security import (
+    from tulip_security import (
         measure_endpoint_timing,
         FEATURE_KEYS,
         default_classifier,
@@ -15,7 +15,7 @@ Importing from here still works; prefer::
 
 from __future__ import annotations
 
-from tulip.security.fingerprint import (
+from tulip_security.fingerprint import (
     _SAMPLE_FEATURES,
     FEATURE_KEYS,
     default_classifier,

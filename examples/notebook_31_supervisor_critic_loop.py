@@ -12,7 +12,7 @@ The revise loop caps at two passes to bound runtime.
 The point of the notebook is the *last* step, not the loop: a report that
 reads well is not the same as a report that is grounded. Before anything
 ships, the reviewer runs the drafted finding through ``ground_finding`` —
-the GSAR grounding gate from ``tulip.security``. A finding is emitted only
+the GSAR grounding gate from ``tulip.control``. A finding is emitted only
 when its evidence partition clears the proceed threshold; otherwise the
 call returns an ``Abstention`` and nothing reaches the privacy queue. An
 unproven exposure claim is a false positive *by construction* and never ships.
@@ -59,10 +59,7 @@ from typing import Any
 from config import get_model
 
 from tulip.agent import Agent, AgentConfig
-from tulip.core.events import TerminateEvent
-from tulip.multiagent.graph import END, START, StateGraph
-from tulip.reasoning.gsar import Claim, EvidenceType, Partition
-from tulip.security import (
+from tulip.control import (
     AtlasTechnique,
     Indicator,
     IndicatorType,
@@ -71,6 +68,9 @@ from tulip.security import (
     ground_finding,
     is_finding,
 )
+from tulip.core.events import TerminateEvent
+from tulip.multiagent.graph import END, START, StateGraph
+from tulip.reasoning.gsar import Claim, EvidenceType, Partition
 
 
 # ---------------------------------------------------------------------------

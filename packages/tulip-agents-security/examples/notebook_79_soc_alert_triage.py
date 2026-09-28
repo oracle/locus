@@ -41,7 +41,8 @@ import asyncio
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from tulip.security import (
+from tulip.control.taxonomy import OwaspLLM
+from tulip_security import (
     PostureEvidence,
     PostureFinding,
     PostureReport,
@@ -51,7 +52,6 @@ from tulip.security import (
     ground_report,
     is_finding,
 )
-from tulip.security.taxonomy import OwaspLLM
 
 
 # ---------------------------------------------------------------------------

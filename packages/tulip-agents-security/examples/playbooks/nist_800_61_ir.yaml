@@ -1,4 +1,4 @@
-# Incident response (NIST SP 800-61) — mirror of tulip.security.nist_800_61_ir().
+# Incident response (NIST SP 800-61) — mirror of tulip_security.nist_800_61_ir().
 id: nist_800_61_ir
 name: Incident response (NIST 800-61)
 description: >-

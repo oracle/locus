@@ -1,4 +1,4 @@
-# Phishing triage — editable mirror of tulip.security.phishing_triage().
+# Phishing triage — editable mirror of tulip_security.phishing_triage().
 # Load with: from tulip.playbooks import load_playbook; load_playbook("phishing_triage.yaml")
 id: phishing_triage
 name: Phishing triage

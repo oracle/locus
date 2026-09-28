@@ -8,7 +8,7 @@ On a later run the agent retrieves it and acts on it. The poison has no
 real evidence behind it — it's an assertion smuggled in as a memory.
 
 Defense (built-in SDK primitive): findings are emitted through
-tulip.security.ground_finding, which only ships a Evidence when the
+tulip.control.ground_finding, which only ships a Evidence when the
 evidence partition clears the GSAR threshold. A poisoned claim with no
 corroborating evidence partitions as ungrounded and ABSTAINS — it never
 becomes an actioned finding. A corroborated claim ships.
@@ -21,7 +21,7 @@ ATLAS AML.T0020 (Poison Training Data).
 from __future__ import annotations
 
 from tulip.reasoning.gsar import Claim, EvidenceType, Partition
-from tulip.security import Severity, ground_finding, is_finding
+from tulip_security import Severity, ground_finding, is_finding
 
 
 def main() -> None:

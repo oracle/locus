@@ -8,7 +8,7 @@ into a confident, wholly-wrong action at the bottom. Multi-agent systems
 amplify a single bad inference.
 
 Defense (built-in SDK primitive): put a grounding gate between stages.
-Each stage's output must clear tulip.security.ground_finding before the
+Each stage's output must clear tulip.control.ground_finding before the
 next stage consumes it; an ungrounded intermediate ABSTAINS and the
 pipeline halts there instead of propagating the error downstream — a
 circuit-breaker built from evidence.
@@ -19,7 +19,7 @@ Taxonomy: OWASP ASI08 (Cascading Failures).
 from __future__ import annotations
 
 from tulip.reasoning.gsar import Claim, EvidenceType, Partition
-from tulip.security import Severity, ground_finding, is_finding
+from tulip_security import Severity, ground_finding, is_finding
 
 
 def stage_gate(name: str, partition: Partition) -> bool:

@@ -4,7 +4,7 @@ A threat-indexed catalog of AI-security scenarios. Each gist is small,
 standalone, and **runnable offline with no credentials** — it states one
 threat, shows an agent hitting it, and shows the Tulip defense stopping it.
 Together they map **every** item in the three catalogues Tulip encodes
-(`tulip.security.taxonomy`) to at least one runnable example.
+(`tulip.control.taxonomy`) to at least one runnable example.
 
 ```bash
 python examples/scenarios/run_all.py        # run every gist, assert all pass
@@ -62,7 +62,7 @@ Each gist's defense is one of three kinds:
 | AML.T0110 | AI Agent Tool Poisoning | `supply_chain.py` |
 | AML.T0048 | External Harms | `code_execution.py` |
 
-Every ID in `tulip.security.taxonomy` (`AtlasTechnique`, `OwaspLLM`,
+Every ID in `tulip.control.taxonomy` (`AtlasTechnique`, `OwaspLLM`,
 `OwaspASI`) appears above — coverage is complete and `run_all.py` keeps it
 runnable. `model_extraction.py` uses the real streaming timing probe in
 [`../integrations/remote_timing.py`](../integrations/remote_timing.py)

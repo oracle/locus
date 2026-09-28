@@ -1,4 +1,4 @@
-# Cloud posture audit — mirror of tulip.security.cloud_posture_audit().
+# Cloud posture audit — mirror of tulip_security.cloud_posture_audit().
 id: cloud_posture_audit
 name: Cloud posture audit
 description: >-

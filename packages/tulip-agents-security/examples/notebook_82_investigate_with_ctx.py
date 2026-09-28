@@ -21,7 +21,7 @@ from __future__ import annotations
 import asyncio
 
 from tulip.control import Action
-from tulip.security import SecurityContext, VerificationResult
+from tulip_security import SecurityContext, VerificationResult
 
 
 async def main() -> int:

@@ -2,15 +2,15 @@
 
 Every runnable file in this directory is a self-contained agent you can run.
 They span the domains where agents act — support, payments, infrastructure,
-and data — and a **security** track (SOC triage, IOC — indicator of
-compromise — enrichment, phishing analysis, vulnerability research, incident
-response) sits alongside them as one fully worked domain. The snippets below
-are the smallest possible shapes; the numbered `notebook_*.py` files build
-them out.
+and data. The snippets below are the smallest possible shapes; the numbered
+`notebook_*.py` files build them out. The security-domain notebooks (red-team,
+SOC triage, fingerprinting, threat scenarios) live with the opt-in
+[`tulip-agents-security`](../packages/tulip-agents-security/examples/) package.
 
 **A note on the numbers.** They are stable identifiers, not a sequence. The
-series runs `06-09 · 11-40 · 45-52 · 55-87`, and the gaps are not missing
-files — those numbers never existed. Numbers are never reused or reassigned,
+series runs `06-09 · 11-40 · 45-52 · 55-72 · 81 · 83-87`, and the gaps are
+not missing files — those numbers never existed, or (73-80, 82) belong to the
+security notebooks in `packages/tulip-agents-security/examples/`. Numbers are never reused or reassigned,
 so a link, a bookmark, or a cross-reference from another notebook keeps
 pointing at the same example forever; renumbering to close the gaps would
 break every one of them to fix an appearance.

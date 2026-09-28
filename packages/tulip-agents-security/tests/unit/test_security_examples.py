@@ -41,7 +41,6 @@ def _run(notebook: str) -> subprocess.CompletedProcess[str]:
         ("notebook_78_verify_findings.py", "SURVIVES"),
         ("notebook_79_soc_alert_triage.py", "Alert"),
         ("notebook_80_model_fingerprint.py", "fingerprint"),
-        ("notebook_81_ir_audit_trail.py", "Incident Response"),
         ("notebook_82_investigate_with_ctx.py", "logs.search"),
     ],
 )

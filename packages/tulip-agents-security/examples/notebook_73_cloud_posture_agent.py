@@ -45,7 +45,8 @@ import os
 
 from config import get_model
 
-from tulip.security import (
+from tulip.control.taxonomy import OwaspASI
+from tulip_security import (
     PostureEvidence,
     PostureFinding,
     PostureReport,
@@ -55,7 +56,6 @@ from tulip.security import (
     ground_report,
     is_finding,
 )
-from tulip.security.taxonomy import OwaspASI
 
 
 # =============================================================================

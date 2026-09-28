@@ -3,10 +3,10 @@
 
 """Back-compat shim — threat-intel IOC enrichment graduated into the SDK.
 
-This adapter is now first-class in :mod:`tulip.security.intel`. Importing
+This adapter is now first-class in :mod:`tulip_security.intel`. Importing
 from here still works; prefer::
 
-    from tulip.security import (
+    from tulip_security import (
         enrich_indicator,
         enrich_indicator_tool,
         enrich_to_finding,
@@ -15,7 +15,7 @@ from here still works; prefer::
 
 from __future__ import annotations
 
-from tulip.security.intel import (
+from tulip_security.intel import (
     classify_indicator,
     enrich_indicator,
     enrich_indicator_tool,

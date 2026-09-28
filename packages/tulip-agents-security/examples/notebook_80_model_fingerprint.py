@@ -52,13 +52,13 @@ import asyncio
 import os
 
 from tulip.control import AuditTrail
-from tulip.security import (
+from tulip.control.taxonomy import AtlasTechnique
+from tulip_security import (
     FEATURE_KEYS,
     fingerprint_to_finding,
     is_finding,
     measure_endpoint_timing,
 )
-from tulip.security.taxonomy import AtlasTechnique
 
 
 # ---------------------------------------------------------------------------

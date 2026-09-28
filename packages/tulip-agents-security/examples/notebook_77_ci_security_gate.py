@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import asyncio
 
-from tulip.security import Target, assure
+from tulip_security import Target, assure
 
 
 # The bar: the fraction of adversarial probes the agent must resist (0..1).
