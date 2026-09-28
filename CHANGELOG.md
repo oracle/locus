@@ -8,6 +8,43 @@ policy.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`max_cost_usd` works on DeepSeek V4, directly or through OpenRouter.** The
+  price table had no DeepSeek entry, so an `Agent(max_cost_usd=...)` on
+  `openrouter:deepseek/deepseek-v4-flash` (or `deepseek:deepseek-v4-flash`)
+  was refused at construction ("needs prices"). See Added.
+- **A `provider:` prefix no longer hides a model's metadata.** `metadata_for`
+  stripped only `openai:` / `anthropic:`, so `"openrouter:deepseek/..."`,
+  `"vllm:qwen3.6-35b"` and every other OpenAI-compatible routing prefix
+  missed the table, while the same model passed as a built `OpenAIModel`
+  (whose `config.model` carries no prefix) found it. Every prefix in
+  `tulip.models.providers.COMPATIBLE_PROVIDERS` is now stripped, so a string
+  id and the model object resolve to the same entry.
+
+### Added
+
+- **DeepSeek V4 metadata and prices.** OpenRouter slugs
+  `deepseek/deepseek-v4-flash`, `deepseek/deepseek-v4.1-flash`,
+  `deepseek/deepseek-v4-pro` (OpenRouter's listed prices, 2026-09-28) and
+  DeepSeek's own `deepseek-flash`, `deepseek-v4-flash`, `deepseek-v4-pro`
+  (peak rates, so a budget never under-counts). OpenRouter routes to hosts
+  whose prices differ; a cap that must never under-count should register
+  the ceiling it accepts.
+- **`tulip.models.metadata.model_id_of(model)`.** The slug a model object is
+  called with (`config.model`, else `model.model`), resolved through
+  proxies — a `FallbackChain`, or a caller's per-turn view that forwards
+  `__getattr__`. The agent uses it to find a model object's prices and
+  context window.
+
+### Changed
+
+- `metadata_for("<compatible-prefix>:<slug>")` now resolves `<slug>`: e.g.
+  `Agent(model="vllm:qwen3.6-35b")` picks up the seeded context window and
+  gets the token-counting `LLMCompactor` instead of the message-count
+  `SlidingWindowManager`, as `Agent(model=get_model("vllm:qwen3.6-35b"))`
+  already did.
+
 ## [2.17.0] - 2026-09-28
 
 Hardening for multi-user, multi-turn, human-approval chat

@@ -167,3 +167,116 @@ class TestKnownModels:
         assert names == sorted(names)
         assert "gpt-4o" in names
         assert "claude-opus-4" in names
+
+
+# ---------------------------------------------------------------------------
+# DeepSeek V4 seeds and routing prefixes.
+# ---------------------------------------------------------------------------
+
+
+class TestDeepSeekV4:
+    @pytest.mark.parametrize(
+        ("model_id", "inp", "out", "window"),
+        [
+            # OpenRouter's listed prices (GET /api/v1/models, 2026-09-28).
+            ("openrouter:deepseek/deepseek-v4-flash", "0.05152", "0.10304", 1_048_576),
+            ("deepseek/deepseek-v4-flash", "0.05152", "0.10304", 1_048_576),
+            ("openrouter:deepseek/deepseek-v4.1-flash", "0.30", "1.20", 1_048_576),
+            ("openrouter:deepseek/deepseek-v4-pro", "0.783", "1.566", 1_048_576),
+            # DeepSeek's own API, peak rates.
+            ("deepseek:deepseek-flash", "0.30", "1.20", 1_000_000),
+            ("deepseek:deepseek-v4-flash", "0.30", "1.20", 1_000_000),
+            ("deepseek-v4-pro", "1.32", "3.96", 1_000_000),
+        ],
+    )
+    def test_priced(self, model_id: str, inp: str, out: str, window: int) -> None:
+        md = metadata_for(model_id)
+        assert md is not None
+        assert md.family == "deepseek"
+        assert md.input_price_per_mtok == Decimal(inp)
+        assert md.output_price_per_mtok == Decimal(out)
+        assert md.context_length == window
+
+    def test_routes_price_separately(self) -> None:
+        # The OpenRouter slug and DeepSeek's own slug are different entries.
+        routed = metadata_for("openrouter:deepseek/deepseek-v4-flash")
+        direct = metadata_for("deepseek:deepseek-v4-flash")
+        assert routed is not None
+        assert direct is not None
+        assert routed.model_id != direct.model_id
+
+    def test_every_compatible_provider_prefix_is_stripped(self) -> None:
+        from tulip.models.metadata import _PROVIDER_PREFIXES
+        from tulip.models.providers import COMPATIBLE_PROVIDERS
+
+        missing = {p.prefix for p in COMPATIBLE_PROVIDERS} - _PROVIDER_PREFIXES
+        assert not missing, f"add {sorted(missing)} to _PROVIDER_PREFIXES"
+
+    def test_self_hosted_prefix_resolves_the_seed(self) -> None:
+        md = metadata_for("vllm:qwen3.6-35b")
+        assert md is not None
+        assert md.model_id == "qwen3.6-35b"
+
+
+# ---------------------------------------------------------------------------
+# model_id_of: model objects and proxies.
+# ---------------------------------------------------------------------------
+
+
+class _Config:
+    def __init__(self, model: str) -> None:
+        self.model = model
+
+
+class _Model:
+    def __init__(self, model: str) -> None:
+        self.config = _Config(model)
+
+
+class _ProxyView:
+    """A per-turn view that forwards attribute access to the model it wraps."""
+
+    def __init__(self, inner: object) -> None:
+        self.inner = inner
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self.inner, name)
+
+
+class TestModelIdOf:
+    def test_string_passes_through(self) -> None:
+        from tulip.models.metadata import model_id_of
+
+        assert model_id_of("openrouter:deepseek/deepseek-v4-flash") == (
+            "openrouter:deepseek/deepseek-v4-flash"
+        )
+
+    def test_config_model(self) -> None:
+        from tulip.models.metadata import model_id_of
+
+        assert model_id_of(_Model("gpt-4o")) == "gpt-4o"
+
+    def test_bare_model_attribute(self) -> None:
+        from types import SimpleNamespace
+
+        from tulip.models.metadata import model_id_of
+
+        assert model_id_of(SimpleNamespace(model="gpt-4o")) == "gpt-4o"
+
+    def test_proxy_over_fallback_chain_resolves_the_primary(self) -> None:
+        from tulip.models.fallback import FallbackChain
+        from tulip.models.metadata import model_id_of
+
+        chain = FallbackChain(
+            [_Model("deepseek/deepseek-v4-flash"), _Model("gpt-4o-mini")], names=["t1", "t2"]
+        )
+        view = _ProxyView(chain)
+        assert model_id_of(view) == "deepseek/deepseek-v4-flash"
+        md = metadata_for(model_id_of(view) or "")
+        assert md is not None
+        assert md.input_price_per_mtok == Decimal("0.05152")
+
+    def test_nothing_names_it(self) -> None:
+        from tulip.models.metadata import model_id_of
+
+        assert model_id_of(object()) is None

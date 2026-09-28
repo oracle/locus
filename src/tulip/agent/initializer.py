@@ -177,15 +177,11 @@ def initialize_agent(agent: Agent) -> None:
         agent._memory_manager = agent.config.memory_manager
 
     # --- Conversation manager ---------------------------------------------
-    from tulip.models.metadata import metadata_for
+    from tulip.models.metadata import metadata_for, model_id_of
 
     configured = agent.config.model
-    model_id = (
-        configured
-        if isinstance(configured, str)
-        else getattr(getattr(agent._model, "config", None), "model", None)
-    )
-    meta = metadata_for(model_id) if isinstance(model_id, str) else None
+    model_id = model_id_of(configured if isinstance(configured, str) else agent._model)
+    meta = metadata_for(model_id) if model_id is not None else None
     if (
         meta is not None
         and meta.input_price_per_mtok is not None
