@@ -9,7 +9,7 @@ Works on Tulip Findings and on finding-shaped mappings from any other framework.
 
 from __future__ import annotations
 
-from tulip.security import (
+from tulip.control import (
     Evidence,
     EvidenceQualitySkeptic,
     Refutation,
@@ -18,7 +18,7 @@ from tulip.security import (
     VerificationResult,
     verify,
 )
-from tulip.security.verify import FindingLike
+from tulip.control.verification import FindingLike
 
 
 def _strong_finding() -> Evidence:
@@ -130,7 +130,7 @@ class _ScriptedModel:
 async def test_adversarial_skeptic_refutes_overreach() -> None:
     import json
 
-    from tulip.security import AdversarialSkeptic
+    from tulip.control import AdversarialSkeptic
 
     review = json.dumps(
         {
@@ -156,7 +156,7 @@ async def test_adversarial_skeptic_refutes_overreach() -> None:
 async def test_adversarial_skeptic_can_clear_a_finding() -> None:
     import json
 
-    from tulip.security import AdversarialSkeptic
+    from tulip.control import AdversarialSkeptic
 
     review = json.dumps({"supported": True, "objections": [], "alternatives": []})
     verdict = await verify(
@@ -167,7 +167,7 @@ async def test_adversarial_skeptic_can_clear_a_finding() -> None:
 
 
 async def test_adversarial_skeptic_fails_safe_on_model_error() -> None:
-    from tulip.security import AdversarialSkeptic
+    from tulip.control import AdversarialSkeptic
 
     class _Boom:
         async def complete(self, *args, **kwargs):  # noqa: ANN002, ANN003, ANN201

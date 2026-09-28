@@ -19,8 +19,7 @@ from tulip.control import (
     ControlPolicy,
     admit,
 )
-from tulip.security import SecurityContext
-from tulip.security.verify import VerificationResult
+from tulip.control.verification import VerificationResult
 
 
 # A verdict strong enough to clear the default policy bar (0.8).
@@ -103,23 +102,3 @@ async def test_every_admission_is_recorded_admitted_or_not() -> None:
     assert len(records) == 2  # both the allowed and the rejected attempt
     assert all(r.event_type == "action-admission" for r in records)
     assert trail.verify()  # the chain is intact and tamper-evident
-
-
-async def test_security_context_actions_execute_enforces_the_gate() -> None:
-    ctx = SecurityContext()  # default actions provider, default policy
-
-    async def perform() -> str:
-        return "ran"
-
-    # Non-production, verified -> admitted.
-    assert (
-        await ctx.actions.execute(
-            Action(name="enrich", environment="staging"), perform, verdict=_STRONG
-        )
-        == "ran"
-    )
-    # Production -> held for a human, side effect blocked.
-    with pytest.raises(AdmissionError):
-        await ctx.actions.execute(
-            Action(name="disable_user", environment="production"), perform, verdict=_STRONG
-        )

@@ -43,17 +43,17 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING, Any, Literal, Protocol, cast, runtime_checkable
 
 from tulip.control.action import ActionSpec, resolve_action
+from tulip.control.admission import AdmissionError, admit
 from tulip.control.approvals import ApprovalStore
-from tulip.security.admit import AdmissionError, admit
-from tulip.security.policy import ApprovalOutcome
+from tulip.control.policy import ApprovalOutcome
 
 
 if TYPE_CHECKING:
+    from tulip.control.audit import AuditTrail
+    from tulip.control.findings import Evidence
+    from tulip.control.policy import ApprovalDecision, ControlPolicy
     from tulip.control.spend import SpendLedger
-    from tulip.security.audit import AuditTrail
-    from tulip.security.findings import Evidence
-    from tulip.security.policy import ApprovalDecision, ControlPolicy
-    from tulip.security.verify import VerificationResult
+    from tulip.control.verification import VerificationResult
     from tulip.tools.decorator import Tool
 
 

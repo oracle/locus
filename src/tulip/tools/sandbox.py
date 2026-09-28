@@ -22,10 +22,10 @@ whose imports live inside its body, taking JSON-serializable arguments and
 returning a JSON-serializable value. Closures, globals, and ``ToolContext``
 do not cross the boundary.
 
-Governance: :class:`~tulip.security.policy.ControlPolicy` can *require* the
+Governance: :class:`~tulip.control.policy.ControlPolicy` can *require* the
 sandbox — ``require_sandbox_for`` names the labels whose actions must carry
 the ``sandboxed`` tag or be denied by
-:func:`~tulip.security.policy.approve`, and :class:`SandboxEnforcerHook`
+:func:`~tulip.control.policy.approve`, and :class:`SandboxEnforcerHook`
 enforces the same rule at the agent loop's admission seam by cancelling an
 un-sandboxed call to a matching tool.
 """
@@ -54,8 +54,8 @@ from tulip.observability.emit import EV_TOOL_SANDBOX_DENIED, emit
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
+    from tulip.control.policy import ControlPolicy
     from tulip.hooks.provider import BeforeToolCallEvent
-    from tulip.security.policy import ControlPolicy
     from tulip.tools.decorator import Tool
 
 
@@ -631,13 +631,13 @@ class DockerSandbox:
 class SandboxEnforcerHook(HookProvider):
     """Cancel tool calls that policy requires sandboxed but aren't.
 
-    :class:`~tulip.security.policy.ControlPolicy.require_sandbox_for` names
+    :class:`~tulip.control.policy.ControlPolicy.require_sandbox_for` names
     the labels whose tools must run sandboxed. When the model calls a tool
     carrying one of those labels and the tool has no ``sandbox`` configured,
     the call is cancelled via ``event.cancel`` — the body never runs and the
     model sees the reason as the tool result. This is the loop-seam
     counterpart of the ``sandboxed``-tag rule in
-    :func:`~tulip.security.policy.approve`.
+    :func:`~tulip.control.policy.approve`.
 
     Args:
         policy: The governing policy; only ``require_sandbox_for`` is read.
@@ -648,7 +648,7 @@ class SandboxEnforcerHook(HookProvider):
 
     Example:
         from tulip import Agent
-        from tulip.security.policy import ControlPolicy
+        from tulip.control.policy import ControlPolicy
         from tulip.tools.sandbox import SandboxEnforcerHook
 
         policy = ControlPolicy(require_sandbox_for=frozenset({"code-exec"}))

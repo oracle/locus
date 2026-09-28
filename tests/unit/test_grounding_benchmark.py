@@ -10,8 +10,8 @@ thresholds — a guard against regressions in `gsar_score` / `decide` /
 
 from __future__ import annotations
 
+from tulip.reasoning.grounding_eval import GroundingBenchmark, bundled_cases, run_benchmark
 from tulip.reasoning.gsar import Decision, GSARThresholds, decide, gsar_score
-from tulip.security.grounding_eval import GroundingBenchmark, bundled_cases, run_benchmark
 
 
 def test_reference_thresholds_separate_cleanly() -> None:

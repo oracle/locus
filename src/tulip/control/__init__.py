@@ -11,10 +11,10 @@ and every decision lands on a tamper-evident :class:`AuditTrail`. The gate is
 code that runs *before* the action, not a rule in the prompt — so a model that is
 fooled still cannot act outside your policy.
 
-This is framework- and domain-agnostic. Security (SOC, EDR, identity) is the
-first proven domain — see :mod:`tulip.security` for the grounded findings,
-verification, red-team probes, and SOC tooling that build on this core — but the
-control runtime applies to any agent that takes real actions.
+This is framework- and domain-agnostic: the control runtime applies to any
+agent that takes real actions. Domain tooling built on this core ships as
+separate, opt-in distributions (the security-domain tooling is
+``tulip-agents-security``, imported as :mod:`tulip_security`).
 
     from tulip.control import Action, ControlPolicy, AuditTrail, admit, AdmissionError
 
@@ -30,9 +30,10 @@ control runtime applies to any agent that takes real actions.
     except AdmissionError as e:
         print(e.decision.outcome)   # -> "require_human"; the refund did NOT run
 
-``Evidence`` and ``VerificationResult`` (produced by the grounding/verification
-layer in :mod:`tulip.security`) are re-exported here for typing the optional
-evidence an admission decision can weigh.
+The grounding and verification layer an admission decision can weigh lives here
+too: :func:`ground_finding` ships a typed :class:`Evidence` only when its claims
+clear the GSAR threshold (otherwise an auditable :class:`Abstention`), and
+:func:`verify` challenges a finding before it drives an action.
 """
 
 from tulip.control.action import (
@@ -45,6 +46,7 @@ from tulip.control.action import (
     derive_labels,
     resolve_action,
 )
+from tulip.control.admission import AdmissionError, admit
 from tulip.control.approvals import (
     ApprovalAuthority,
     ApprovalAuthorityError,
@@ -56,18 +58,36 @@ from tulip.control.approvals import (
     InMemoryApprovals,
     call_digest,
 )
-from tulip.control.gate import ApprovalBridge, gate_tool
-from tulip.control.spend import FileSpendLedger, InMemorySpendLedger, SpendLedger
-from tulip.security.admit import AdmissionError, admit
-from tulip.security.audit import (
+from tulip.control.audit import (
     AuditRecord,
     AuditSigner,
     AuditTrail,
     Ed25519Signer,
     verify_jsonl,
 )
-from tulip.security.findings import Evidence
-from tulip.security.policy import (
+from tulip.control.findings import (
+    Confidence,
+    Evidence,
+    FingerprintClassifier,
+    FingerprintFinding,
+    FingerprintVerdict,
+    Indicator,
+)
+from tulip.control.gate import ApprovalBridge, gate_tool
+from tulip.control.governed import (
+    AuditHook,
+    GovernanceProfile,
+    GovernedAgent,
+    governed_agent,
+)
+from tulip.control.grounded import (
+    Abstention,
+    GroundedFinding,
+    ground_finding,
+    ground_fingerprint,
+    is_finding,
+)
+from tulip.control.policy import (
     SANDBOXED_TAG,
     Action,
     ApprovalDecision,
@@ -75,14 +95,25 @@ from tulip.security.policy import (
     ControlPolicy,
     approve,
 )
-from tulip.security.secure import (
-    AuditHook,
-    GovernanceProfile,
-    GovernedAgent,
-    governed_agent,
+from tulip.control.spend import FileSpendLedger, InMemorySpendLedger, SpendLedger
+from tulip.control.taxonomy import (
+    SEVERITY_ORDER,
+    AtlasTechnique,
+    IndicatorType,
+    OwaspASI,
+    OwaspLLM,
+    Severity,
+    TaxonomyTag,
+    severity_at_least,
 )
-from tulip.security.taxonomy import Severity
-from tulip.security.verify import VerificationResult, verify
+from tulip.control.verification import (
+    AdversarialSkeptic,
+    EvidenceQualitySkeptic,
+    Refutation,
+    Skeptic,
+    VerificationResult,
+    verify,
+)
 
 
 __all__ = [
@@ -134,9 +165,32 @@ __all__ = [
     "GovernedAgent",
     "governed_agent",
     "GovernanceProfile",
-    # Optional evidence/verification an admission can weigh (home: tulip.security)
+    # Grounded findings — ship only what the evidence supports
     "Evidence",
-    "VerificationResult",
+    "Indicator",
+    "Confidence",
+    "Abstention",
+    "GroundedFinding",
+    "ground_finding",
+    "ground_fingerprint",
+    "is_finding",
+    "FingerprintClassifier",
+    "FingerprintFinding",
+    "FingerprintVerdict",
+    # Verification — the independent challenge a finding must survive
     "verify",
+    "VerificationResult",
+    "Refutation",
+    "Skeptic",
+    "EvidenceQualitySkeptic",
+    "AdversarialSkeptic",
+    # Severity + taxonomy tags a finding carries
     "Severity",
+    "SEVERITY_ORDER",
+    "severity_at_least",
+    "IndicatorType",
+    "AtlasTechnique",
+    "OwaspLLM",
+    "OwaspASI",
+    "TaxonomyTag",
 ]

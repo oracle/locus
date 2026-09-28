@@ -10,7 +10,7 @@ import itertools
 import json
 from collections.abc import Callable
 
-from tulip.security.audit import AuditTrail
+from tulip.control.audit import AuditTrail
 
 
 def _fixed_clock() -> Callable[[], str]:

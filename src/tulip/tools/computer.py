@@ -44,8 +44,8 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any, Literal
 
+from tulip.control.policy import Action
 from tulip.core.media import encode_image
-from tulip.security.policy import Action
 from tulip.tools.decorator import Tool
 
 

@@ -213,7 +213,7 @@ There is no public constructor that emits a grounded result without a score, so 
 claim is unshippable *by construction* — not filtered after the fact.
 
 ```python
-from tulip.security import ground_finding, Severity, is_finding
+from tulip.control import ground_finding, Severity, is_finding
 
 result = ground_finding(..., partition=partition)
 # A grounded partition → a typed result. An ungrounded one → an auditable
@@ -345,30 +345,10 @@ AgentServer(agent=my_agent, api_key=os.environ["API_KEY"]).run(host="0.0.0.0", p
 
 ## Any domain, one contract
 
-The same contracts run wherever an agent acts. One fully worked domain package ships today:
-`tulip.security` applies the grounded-evidence contract to red-teaming AI systems — every result
-is a grounded `Evidence` tagged against public weakness catalogues (MITRE ATLAS, OWASP LLM /
-Agentic Top 10), or an explicit `Abstention`.
-
-```python
-import asyncio
-
-from tulip.security import Target, red_team, is_finding
-
-
-async def main():
-    report = await red_team(
-        Target.endpoint("https://support-bot.example/chat"), suite="owasp-asi"
-    )
-    print([f for f in report.findings if is_finding(f)])
-
-
-asyncio.run(main())
-```
-
-Core ships offline reference adapters so the SDK runs standalone; a live vendor adapter is a
-class you write against the domain port — see
-[Build an integration](https://tulipagents.ai/how-to/build-an-integration/).
+The same contracts run wherever an agent acts. Security-domain tooling built on them — AI
+red-teaming, SOC triage, and threat-intel / SIEM / EDR adapters — ships separately as the opt-in
+[`tulip-agents-security`](https://github.com/tuliplabs-ai/tulip-agents/tree/main/packages/tulip-agents-security) distribution
+(`pip install "tulip-agents[security]"`); the core runtime does not include it.
 
 ---
 
@@ -376,7 +356,7 @@ class you write against the domain port — see
 
 ```text
 src/tulip/
-├── control/        Admission gate — Action, admit/approve, ControlPolicy, AuditTrail
+├── control/        Admission gate, policy, audit trail, grounded findings, verification
 ├── rogue/          The rogue-agent challenge (`python -m tulip.rogue`)
 ├── agent/          Agent runtime, config, Sequential / Parallel / Loop pipelines
 ├── core/           AgentState, Message, events, termination algebra, Send
@@ -395,7 +375,6 @@ src/tulip/
 ├── skills/         AgentSkills.io filesystem-first capability disclosure
 ├── playbooks/      Declarative step plans + PlaybookEnforcer
 ├── providers/      Multi-modal: web search, web fetch, image, speech
-├── security/       Grounded findings, red-team / assure, taxonomy tags
 ├── server/         FastAPI AgentServer with thread persistence
 ├── evaluation/     EvalCase + EvalRunner + EvalReport
 └── integrations/   MCP (client + server)
