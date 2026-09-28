@@ -1,0 +1,32 @@
+{
+  "id": "disk-full",
+  "playbook_id": "pb.disk-full",
+  "title": "Disk-full investigation",
+  "summary": "Establish blast radius, then confirm which volume is filling.",
+  "mode": "diagnosis",
+  "step_groups": [
+    {
+      "id": "investigation",
+      "title": "Establish blast radius.",
+      "goal": "Determine which hosts are affected.",
+      "steps": [
+        {
+          "id": "errors",
+          "title": "Count the errors.",
+          "goal": "Read the disk-full error counts by host.",
+          "required": true,
+          "priority": "critical",
+          "guidance": {"skill_refs": ["disk-full-investigation"]}
+        }
+      ]
+    },
+    {
+      "id": "confirmation",
+      "title": "Confirm the volume.",
+      "goal": "Find the volume that is filling.",
+      "steps": [
+        {"id": "volumes", "goal": "Read free bytes per volume.", "required": false}
+      ]
+    }
+  ]
+}

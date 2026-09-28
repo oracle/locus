@@ -13,9 +13,7 @@ Two failure modes from the literature are what this closes:
 * **Premature Conclusion** — concluding while necessary steps are still missing
   (arXiv 2606.04874), which `min_tool_calls` puts a floor under.
 
-The design is optic's (`observai/optic`), where a skill declares
-`required_probes` and coverage is scored per step; see
-REVIEW-what-optic-has-that-tulip-lost.md.
+A skill declares `required_probes` and coverage is scored per step.
 """
 
 from __future__ import annotations
@@ -30,8 +28,8 @@ def _playbook(**step_kw: object) -> Playbook:
         "description": "Establish the blast radius.",
         "required": True,
         "required_probes": [
-            RequiredProbe(name="error_count", match="ora_04031_error_count"),
-            RequiredProbe(name="shared_pool", match="shared_pool_free"),
+            RequiredProbe(name="error_count", match="disk_full_error_count"),
+            RequiredProbe(name="disk_free", match="disk_free_bytes"),
         ],
     }
     base.update(step_kw)
@@ -44,7 +42,7 @@ def _enforcer(**step_kw: object) -> PlaybookEnforcer:
 
 def test_evidence_is_matched_from_what_the_call_looked_at() -> None:
     e = _enforcer()
-    e.record_tool_call("query_metrics", arguments={"expr": "sum(ora_04031_error_count)"})
+    e.record_tool_call("query_metrics", arguments={"expr": "sum(disk_full_error_count)"})
 
     execution = e.plan.step_executions["investigate"]
     assert execution.matched_probes == ["error_count"]
@@ -53,8 +51,8 @@ def test_evidence_is_matched_from_what_the_call_looked_at() -> None:
 
 def test_a_step_that_gathered_everything_is_fully_covered() -> None:
     e = _enforcer()
-    e.record_tool_call("query_metrics", arguments={"expr": "sum(ora_04031_error_count)"})
-    e.record_tool_call("query_metrics", arguments={"expr": "min(shared_pool_free)"})
+    e.record_tool_call("query_metrics", arguments={"expr": "sum(disk_full_error_count)"})
+    e.record_tool_call("query_metrics", arguments={"expr": "min(disk_free_bytes)"})
 
     step = e.plan.playbook.steps[0]
     assert e.plan.step_executions["investigate"].probe_coverage(e.effective_probes(step)) == 1.0
@@ -64,18 +62,18 @@ def test_a_step_that_gathered_everything_is_fully_covered() -> None:
 def test_closing_a_step_with_evidence_missing_is_a_violation() -> None:
     """The whole point: calling the right tool is not the same as doing the work."""
     e = _enforcer()
-    e.record_tool_call("query_metrics", arguments={"expr": "sum(ora_04031_error_count)"})
+    e.record_tool_call("query_metrics", arguments={"expr": "sum(disk_full_error_count)"})
     e.complete_current_step()
 
     violation = next(v for v in e.violations if v.violation_type == "evidence_incomplete")
-    assert "shared_pool" in violation.message
+    assert "disk_free" in violation.message
     assert "1/2 matched" in violation.message
 
 
 def test_the_evidence_is_named_so_it_can_be_gone_and_got() -> None:
     """Unmatched probes are reportable — which is what lets a run be steered back."""
     e = _enforcer()
-    e.record_tool_call("query_metrics", arguments={"expr": "min(shared_pool_free)"})
+    e.record_tool_call("query_metrics", arguments={"expr": "min(disk_free_bytes)"})
 
     assert e.plan.step_executions["investigate"].unmatched_probes(
         e.effective_probes(e.plan.playbook.steps[0])
@@ -88,21 +86,21 @@ def test_a_probe_is_not_satisfied_by_what_merely_came_back() -> None:
     A tool asked something else entirely can mention the string in passing. If
     that counted, "the agent gathered the required evidence" would be satisfied
     by coincidence — which is the claim this whole mechanism exists to make
-    honestly. optic matches executed queries for the same reason.
+    honestly.
     """
     e = _enforcer()
-    e.record_tool_call("run_diagnostic", arguments={"target": "db1"}, result="shared_pool_free=12M")
+    e.record_tool_call("run_diagnostic", arguments={"target": "db1"}, result="disk_free_bytes=12M")
 
     assert e.plan.step_executions["investigate"].matched_probes == []
 
-    e.record_tool_call("run_diagnostic", arguments={"metric": "shared_pool_free"})
-    assert e.plan.step_executions["investigate"].matched_probes == ["shared_pool"]
+    e.record_tool_call("run_diagnostic", arguments={"metric": "disk_free_bytes"})
+    assert e.plan.step_executions["investigate"].matched_probes == ["disk_free"]
 
 
 def test_a_probe_matches_once_however_often_it_is_seen() -> None:
     e = _enforcer()
     for _ in range(3):
-        e.record_tool_call("query_metrics", arguments={"expr": "ora_04031_error_count"})
+        e.record_tool_call("query_metrics", arguments={"expr": "disk_full_error_count"})
 
     assert e.plan.step_executions["investigate"].matched_probes == ["error_count"]
 
@@ -140,9 +138,7 @@ def test_a_required_step_never_reached_is_reported_unresolved() -> None:
     e = _enforcer()
     assert e.plan.unresolved_required_steps() == ["investigate"]
 
-    e.record_tool_call(
-        "query_metrics", arguments={"expr": "ora_04031_error_count shared_pool_free"}
-    )
+    e.record_tool_call("query_metrics", arguments={"expr": "disk_full_error_count disk_free_bytes"})
     e.complete_current_step()
     assert e.plan.unresolved_required_steps() == []
 
