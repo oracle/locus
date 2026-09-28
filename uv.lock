@@ -9,6 +9,12 @@ resolution-markers = [
     "python_full_version < '3.12'",
 ]
 
+[manifest]
+members = [
+    "tulip-agents",
+    "tulip-agents-security",
+]
+
 [[package]]
 name = "aiofile"
 version = "3.11.1"
@@ -5357,7 +5363,7 @@ sdk = [
     { name = "uvicorn", extra = ["standard"] },
 ]
 security = [
-    { name = "boto3" },
+    { name = "tulip-agents-security", extra = ["aws"] },
 ]
 server = [
     { name = "fastapi" },
@@ -5387,7 +5393,6 @@ requires-dist = [
     { name = "boto3", marker = "extra == 'checkpoints'", specifier = ">=1.34" },
     { name = "boto3", marker = "extra == 's3'", specifier = ">=1.34" },
     { name = "boto3", marker = "extra == 'sdk'", specifier = ">=1.34" },
-    { name = "boto3", marker = "extra == 'security'", specifier = ">=1.34" },
     { name = "chromadb", marker = "extra == 'chroma'", specifier = ">=0.5" },
     { name = "chromadb", marker = "extra == 'rag'", specifier = ">=0.5" },
     { name = "chromadb", marker = "extra == 'sdk'", specifier = ">=0.5" },
@@ -5455,11 +5460,32 @@ requires-dist = [
     { name = "starlette", marker = "extra == 'dev'", specifier = "<1.4" },
     { name = "temporalio", marker = "extra == 'dev'", specifier = ">=1.7" },
     { name = "temporalio", marker = "extra == 'temporal'", specifier = ">=1.7" },
+    { name = "tulip-agents-security", extras = ["aws"], marker = "extra == 'security'", editable = "packages/tulip-agents-security" },
     { name = "typing-extensions", specifier = ">=4.0" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'sdk'", specifier = ">=0.27" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'server'", specifier = ">=0.27" },
 ]
 provides-extras = ["openai", "anthropic", "llm", "telemetry", "mcp", "server", "redis", "postgresql", "mysql", "opensearch", "s3", "aws", "bedrock", "security", "browser", "audit", "temporal", "gemini", "dbos", "mem0", "checkpoints", "pgvector", "qdrant", "chroma", "cohere", "rerank-local", "rerank", "rag", "sdk", "dev"]
+
+[[package]]
+name = "tulip-agents-security"
+version = "2.16.0"
+source = { editable = "packages/tulip-agents-security" }
+dependencies = [
+    { name = "tulip-agents" },
+]
+
+[package.optional-dependencies]
+aws = [
+    { name = "boto3" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "boto3", marker = "extra == 'aws'", specifier = ">=1.34" },
+    { name = "tulip-agents", editable = "." },
+]
+provides-extras = ["aws"]
 
 [[package]]
 name = "typer"
