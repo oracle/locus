@@ -9,7 +9,9 @@ policy.
 ## [Unreleased]
 
 Targets 2.17.0. Hardening for multi-user, multi-turn, human-approval chat
-products built on one shared `Agent` instance.
+products built on one shared `Agent` instance. The core runtime also ships
+without the security-domain tooling, which is now a separate, opt-in
+distribution (see Changed).
 
 ### Fixed
 
@@ -255,6 +257,35 @@ products built on one shared `Agent` instance.
 
 ### Changed
 
+- **Security-domain tooling is a separate distribution, `tulip-agents-security`.**
+  The core `tulip-agents` wheel ships the control runtime only. The AI red-team
+  probes and job verbs (`red_team` / `assure` / `monitor`, `Target`), the
+  inference fingerprinting tools, the scanner, the threat-intel / SIEM / EDR /
+  AWS-posture adapters, `SecurityContext`, the SOC analyst factory, the IR
+  playbooks, the `SecurityAdapter` contract and its conformance kit moved to
+  `packages/tulip-agents-security/` in this repo and import as
+  `tulip_security`. Install with `pip install tulip-agents-security`;
+  `pip install "tulip-agents[security]"` still works and now installs it (with
+  boto3 for the AWS tools). Their notebooks (73-80, 82), the threat scenarios,
+  the vendor-integration gists and the playbook YAML moved with them, under
+  `packages/tulip-agents-security/examples/`.
+- **The grounding and verification layer lives in `tulip.control`.** `Evidence`,
+  `Indicator`, `Severity`, the taxonomy enums, `ground_finding` /
+  `ground_fingerprint` / `is_finding` / `Abstention`, and `verify` with its
+  skeptics now sit next to the admission gate that weighs them, in
+  `tulip.control` (modules `admission`, `audit`, `policy`, `governed`,
+  `findings`, `grounded`, `taxonomy`, `verification`). The grounding benchmark
+  is `python -m tulip.reasoning.grounding_eval`. The lazy top-level names
+  (`tulip.Evidence`, `tulip.ground_finding`, …) resolve from `tulip.control`.
+- **`tulip.security` is now a compatibility shim** (removal planned for 3.0).
+  Every name it exported still imports: the grounding / verification names
+  resolve from `tulip.control` and emit `TulipDeprecationWarning`; the domain
+  names resolve lazily from `tulip_security` when it is installed and raise an
+  `ImportError` naming `pip install tulip-agents-security` when it is not.
+  Submodule paths (`tulip.security.policy`, `tulip.security.redteam.probes`, …)
+  alias the same module objects, so `mock.patch` targets keep working.
+  Migrate with `from tulip.control import Evidence, Severity, ground_finding`
+  and `from tulip_security import Target, red_team`.
 - `LLMMemoryManager`: a `namespace_resolver` returning `None` now skips memory
   for that run (like a resolver that raises) instead of falling back to
   `namespace_prefix`. To keep the old behaviour, return the prefix explicitly
