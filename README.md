@@ -443,6 +443,7 @@ Copyright 2026 The Tulip Authors.
 
 Released under the **Apache License, Version 2.0** — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
-Tulip began as a fork of an earlier project released under the Universal Permissive License v1.0
-(UPL-1.0); those original portions remain available under the UPL-1.0, while all new
-contributions are licensed under Apache-2.0. See [NOTICE](NOTICE) for details.
+Releases before 1.0.0 were published under the Universal Permissive License v1.0 (UPL-1.0).
+The project was relicensed to Apache-2.0 at 1.0.0; code as it stood in those releases remains
+available under the UPL-1.0. [LICENSES/](LICENSES) holds both texts and the list of files that
+date from the UPL-1.0 releases.
