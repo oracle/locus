@@ -8,7 +8,9 @@ policy.
 
 ## [Unreleased]
 
-Targets 2.17.0. Hardening for multi-user, multi-turn, human-approval chat
+## [2.17.0] - 2026-09-28
+
+Hardening for multi-user, multi-turn, human-approval chat
 products built on one shared `Agent` instance. The core runtime also ships
 without the security-domain tooling, which is now a separate, opt-in
 distribution (see Changed).
