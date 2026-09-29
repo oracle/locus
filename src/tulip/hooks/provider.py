@@ -155,6 +155,10 @@ class AfterModelCallEvent(ProtectedEvent):
 
     Writable fields:
         retry: Set True to discard response and re-call the model.
+        retry_feedback: With ``retry``, text the re-call sees as an
+            automated user-role note after the messages that were sent — why
+            the response was discarded. Sent for that re-call only: it never enters the run's
+            state, a checkpoint or the result.
         response: Replace the model response.
 
     Read-only fields:
@@ -164,18 +168,21 @@ class AfterModelCallEvent(ProtectedEvent):
         async def on_after_model_call(self, event):
             if not event.response.message.content:
                 event.retry = True  # Empty response, retry
+                event.retry_feedback = "Your reply was empty. Answer the user."
     """
 
-    _writable = {"retry", "response"}
+    _writable = {"retry", "retry_feedback", "response"}
 
     response: Any
     messages: list[Any]
     retry: bool
+    retry_feedback: str | None
 
     def __init__(self, response: Any, messages: list[Any], *, run: Any = None) -> None:
         self._init("response", response)
         self._init("messages", messages)
         self._init("retry", False)
+        self._init("retry_feedback", None)
         self._bind_run(run)
 
 
