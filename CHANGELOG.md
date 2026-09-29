@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [2.18.1] - 2026-09-29
+
 ### Added
 
 - **`AgentConfig.final_answer_fallback`** — async `(draft, ctx, feedback) ->
