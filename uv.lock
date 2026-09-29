@@ -5227,7 +5227,7 @@ wheels = [
 
 [[package]]
 name = "tulip-agents"
-version = "2.17.0"
+version = "2.18.0"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
@@ -5469,7 +5469,7 @@ provides-extras = ["openai", "anthropic", "llm", "telemetry", "mcp", "server", "
 
 [[package]]
 name = "tulip-agents-security"
-version = "2.17.0"
+version = "2.18.0"
 source = { editable = "packages/tulip-agents-security" }
 dependencies = [
     { name = "tulip-agents" },

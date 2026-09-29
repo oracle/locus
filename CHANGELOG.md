@@ -8,6 +8,41 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **First-class subagents: `run_subagent` / `Agent.run_subagent`.** A tool
+  body (or a harness) can now spawn an isolated child loop — fresh
+  conversation, its own system prompt, an *explicit* tool allowlist, never
+  the parent's toolset by inheritance — and get back a `SubagentResult`
+  with the child's final text, usage, iterations, and stop reason.
+
+  What makes it first-class rather than "construct an `Agent` in a tool
+  body yourself" is the plumbing a hand-rolled child silently lacks:
+
+  - *Usage rolls up.* The child's token counters fold into the calling
+    run's `AgentState`, so the parent's `token_budget` and its
+    `TerminateEvent.usage` keep counting delegated spend as spend.
+  - *Cancellation propagates.* Cancelling the parent run — `cancel()` or
+    `cancel(thread_id=...)` — stops its running children,
+    and a child winding down never un-cancels the parent (the loop clears
+    its signal in `finally`; a naively shared event would have handed
+    that clear to the parent).
+  - *Events are observable.* Every child event reaches the `on_event`
+    callback and the SSE bus, stamped with the child's `agent_name`, so a
+    front end can render nested activity instead of a silent gap.
+  - *Not a gate bypass.* A `gate_tool`-wrapped tool carries its gate with
+    it into any allowlist, a process-global harness policy is consulted
+    from inside tool bodies regardless of which loop calls them, and
+    per-agent `HookProvider` policies attach to the child via `hooks=`.
+
+  Parallel children compose with plain `asyncio.gather`; children spawned
+  by parallel tool calls are already capped by the parent executor's
+  `max_concurrency`. The deepagent `task_tool` now rides on this primitive
+  instead of its own hand-rolled child loop, so deepagent subagents gain
+  the rollup, the cancellation linkage, and the event attribution for free.
+
+## [2.18.0] - 2026-09-29
+
 ### Fixed
 
 - **Streamed chat-completions runs report usage again.** With
@@ -80,37 +115,23 @@ policy.
   say why: the text is appended (as a user-role note marked automated) to the
   messages of the re-call only — never to the run's state. `retry` alone
   still re-calls blind, as before.
-
-- **First-class subagents: `run_subagent` / `Agent.run_subagent`.** A tool
-  body (or a harness) can now spawn an isolated child loop — fresh
-  conversation, its own system prompt, an *explicit* tool allowlist, never
-  the parent's toolset by inheritance — and get back a `SubagentResult`
-  with the child's final text, usage, iterations, and stop reason.
-
-  What makes it first-class rather than "construct an `Agent` in a tool
-  body yourself" is the plumbing a hand-rolled child silently lacks:
-
-  - *Usage rolls up.* The child's token counters fold into the calling
-    run's `AgentState`, so the parent's `token_budget` and its
-    `TerminateEvent.usage` keep counting delegated spend as spend.
-  - *Cancellation propagates.* Cancelling the parent run — `cancel()` or
-    `cancel(thread_id=...)` — stops its running children,
-    and a child winding down never un-cancels the parent (the loop clears
-    its signal in `finally`; a naively shared event would have handed
-    that clear to the parent).
-  - *Events are observable.* Every child event reaches the `on_event`
-    callback and the SSE bus, stamped with the child's `agent_name`, so a
-    front end can render nested activity instead of a silent gap.
-  - *Not a gate bypass.* A `gate_tool`-wrapped tool carries its gate with
-    it into any allowlist, a process-global harness policy is consulted
-    from inside tool bodies regardless of which loop calls them, and
-    per-agent `HookProvider` policies attach to the child via `hooks=`.
-
-  Parallel children compose with plain `asyncio.gather`; children spawned
-  by parallel tool calls are already capped by the parent executor's
-  `max_concurrency`. The deepagent `task_tool` now rides on this primitive
-  instead of its own hand-rolled child loop, so deepagent subagents gain
-  the rollup, the cancellation linkage, and the event attribution for free.
+- **Skills a host routes in code.** `SkillsPlugin(skills, active=[...])`
+  puts the named skills' instructions in front of every model call (a system
+  message after the system prompt, never written to the run state or a
+  checkpoint), without the model having to call the `skills` tool. With
+  `active` the catalog and the `skills` tool are off by default
+  (`catalog=True` keeps them). Unknown names raise.
+- **`allowed-tools` can be enforced.** `SkillsPlugin(...,
+  enforce_allowed_tools=True)` cancels any tool call outside the union of the
+  lists the active skills declare, before the tool runs, and tells the model
+  which tools it may use. Skills that declare no list add no tools; with no
+  declared list there is no limit. Off by default (advisory, as before).
+- **`SkillsPlugin(show_paths=False)`** keeps skill directories out of the
+  catalog, activation responses and resource listings — a server's file
+  layout is not something the model needs.
+- `SkillsPlugin.get_tools()` returns the `skills` tool when the catalog is on,
+  so the plugin works the same from `AgentConfig.plugins` as from
+  `AgentConfig.skills`.
 
 ### Changed
 
