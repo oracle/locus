@@ -153,7 +153,8 @@ class FinalAnswerVerificationEvent(TulipEvent):
     again with it (False once ``max_replans`` are spent — the draft is then
     returned as the answer anyway). ``error`` is set when the verifier raised;
     the draft is then accepted (the verifier fails open) and ``passed`` is
-    False. ``attempt`` is 0 for the first draft.
+    False. ``attempt`` is 0 for the first draft. ``replaced`` is True when
+    ``final_answer_fallback`` replaced a draft that failed its last attempt.
     """
 
     event_type: Literal["final_answer_verification"] = "final_answer_verification"
@@ -162,6 +163,9 @@ class FinalAnswerVerificationEvent(TulipEvent):
     replanning: bool = False
     feedback: str | None = None
     error: str | None = None
+    #: The draft failed with no replan left and ``final_answer_fallback``
+    #: replaced it: the run answers with the fallback text instead.
+    replaced: bool = False
 
 
 class TerminateEvent(TulipEvent):

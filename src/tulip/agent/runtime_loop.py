@@ -54,6 +54,7 @@ from tulip.core.events import (
     FinalAnswerVerificationEvent,
     GroundingEvent,
     InterruptEvent,
+    ModelChunkEvent,
     ReflectEvent,
     TerminateEvent,
     ThinkEvent,
@@ -1068,14 +1069,26 @@ class AgentRuntimeMixin:
                         verdict = await self._verify_final_answer(
                             final_content, state, rc, _verifier_attempts
                         )
-                        yield verdict
                         if verdict.replanning:
+                            yield verdict
                             _verifier_attempts += 1
                             _held_chunks = []  # the rejected draft is never shown
                             state = self._queue_verifier_replan(
                                 state, final_content, verdict.feedback or ""
                             )
                             continue
+                        replacement = await self._final_answer_fallback(
+                            verdict, final_content, state, rc
+                        )
+                        if replacement is not None:
+                            verdict = verdict.model_copy(update={"replaced": True})
+                        yield verdict
+                        if replacement is not None:
+                            state = self._replace_final_answer(state, final_content, replacement)
+                            final_content = replacement
+                            _held_chunks = []  # the failed draft is never shown
+                            if stream_tokens and _hold_tokens:
+                                yield ModelChunkEvent(content=replacement)
                     for held in _held_chunks:
                         yield held
                     _held_chunks = []
@@ -1859,24 +1872,31 @@ class AgentRuntimeMixin:
                 )
 
                 if not response.message.tool_calls and self.config.completion_mode != "explicit":
-                    if self.config.final_answer_verifier is not None and response.message.content:
+                    answer = response.message.content
+                    if self.config.final_answer_verifier is not None and answer:
                         verdict = await self._verify_final_answer(
-                            response.message.content, state, rc, _verifier_attempts
+                            answer, state, rc, _verifier_attempts
                         )
-                        yield verdict
                         if verdict.replanning:
+                            yield verdict
                             _verifier_attempts += 1
                             state = self._queue_verifier_replan(
-                                state, response.message.content, verdict.feedback or ""
+                                state, answer, verdict.feedback or ""
                             )
                             continue
+                        replacement = await self._final_answer_fallback(verdict, answer, state, rc)
+                        if replacement is not None:
+                            verdict = verdict.model_copy(update={"replaced": True})
+                            state = self._replace_final_answer(state, answer, replacement)
+                            answer = replacement
+                        yield verdict
                     yield TerminateEvent(
                         reason="complete",
                         iterations_used=state.iteration,
                         final_confidence=state.confidence,
                         usage=_usage_of(state),
                         total_tool_calls=len(state.tool_executions),
-                        final_message=response.message.content,
+                        final_message=answer,
                     )
                     break
 
@@ -2746,6 +2766,55 @@ class AgentRuntimeMixin:
             feedback=str(feedback),
             replanning=attempt < max_replans,
         )
+
+    async def _final_answer_fallback(
+        self,
+        verdict: FinalAnswerVerificationEvent,
+        draft: str,
+        state: AgentState,
+        rc: RunContext,
+    ) -> str | None:
+        """Text replacing a draft that failed with no replan left, or None.
+
+        Only for a real rejection (a verifier that raised fails open and is
+        not replaced). Never raises: a broken fallback keeps the draft.
+        """
+        fallback = self.config.final_answer_fallback
+        if fallback is None or verdict.passed or verdict.error is not None:
+            return None
+        ctx = FinalAnswerContext(
+            run=rc.info,
+            prompt=rc.prompt,
+            messages=tuple(state.messages),
+            tool_executions=tuple(state.tool_executions),
+            attempt=verdict.attempt,
+            max_replans=self.config.final_answer_verifier_max_replans,
+        )
+        try:
+            replacement = await fallback(draft, ctx, verdict.feedback or "")
+        except Exception:  # noqa: BLE001 — a broken fallback must not kill the turn
+            logger.warning("final_answer_fallback raised; keeping the draft", exc_info=True)
+            return None
+        return replacement or None
+
+    @staticmethod
+    def _replace_final_answer(state: AgentState, draft: str, replacement: str) -> AgentState:
+        """``state`` with ``replacement`` as the turn's final assistant message.
+
+        The failed draft is dropped: what is saved is what the user was shown.
+        """
+        messages = list(state.messages)
+        last = messages[-1] if messages else None
+        if (
+            last is not None
+            and last.role == Role.ASSISTANT
+            and not last.tool_calls
+            and (last.content or "") == draft
+        ):
+            messages[-1] = last.model_copy(update={"content": replacement})
+        else:
+            messages.append(Message.assistant(replacement))
+        return state.model_copy(update={"messages": tuple(messages)})
 
     @staticmethod
     def _queue_verifier_replan(state: AgentState, draft: str, feedback: str) -> AgentState:

@@ -10,6 +10,15 @@ policy.
 
 ### Added
 
+- **`AgentConfig.final_answer_fallback`** — async `(draft, ctx, feedback) ->
+  str | None`, called when the final-answer verifier rejects a draft and no
+  replan is left. Returned text replaces the draft as the run's answer, the
+  assistant message in state and checkpoints, and — with
+  `hold_final_answer_tokens` — the only content streamed, so a user never sees
+  an answer the verifier refused. `FinalAnswerVerificationEvent.replaced` says
+  it happened. `None`, or a fallback that raises, keeps the draft; a verifier
+  that raised (fail-open) is never replaced.
+
 - **First-class subagents: `run_subagent` / `Agent.run_subagent`.** A tool
   body (or a harness) can now spawn an isolated child loop — fresh
   conversation, its own system prompt, an *explicit* tool allowlist, never
