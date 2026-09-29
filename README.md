@@ -205,8 +205,9 @@ Every backend is an optional extra — install only what you use
 
 ## Grounded by construction (GSAR)
 
-An agent that *acts* must not assert what it can't back up. Tulip's GSAR layer
-([paper](https://arxiv.org/abs/2604.23366)) partitions every claim — **grounded / ungrounded /
+An agent that *acts* must not assert what it can't back up. Tulip's grounding layer implements
+GSAR, the method described in [Kamelhar, 2026](https://arxiv.org/abs/2604.23366), and partitions
+every claim — **grounded / ungrounded /
 contradicted / complementary** — against typed evidence, where tool output outranks inference and
 inference outranks domain priors. Below threshold the run **regenerates, replans, or abstains**.
 There is no public constructor that emits a grounded result without a score, so an ungrounded
@@ -401,12 +402,16 @@ Please consult the [security guide](./SECURITY.md) for vulnerability disclosure.
 
 ---
 
-## Citing GSAR
+## GSAR reference
 
-Paper: [GSAR: Typed Grounding for Hallucination Detection and Recovery in Multi-Agent LLMs](https://arxiv.org/abs/2604.23366) ([PDF](https://arxiv.org/pdf/2604.23366)), 2026.
+Tulip's GSAR layer is based on the method described in F. A. Kamelhar,
+[GSAR: Typed Grounding for Hallucination Detection and Recovery in Multi-Agent LLMs](https://arxiv.org/abs/2604.23366)
+([PDF](https://arxiv.org/pdf/2604.23366)), arXiv:2604.23366, 2026. The paper is separate from this
+project; if you use the method, cite it directly:
 
 ```bibtex
-@article{gsar2026,
+@article{kamelhar2026gsar,
+  author  = {Kamelhar, Federico A.},
   title   = {GSAR: Typed Grounding for Hallucination Detection and Recovery in Multi-Agent LLMs},
   journal = {arXiv preprint arXiv:2604.23366},
   year    = {2026},
