@@ -74,6 +74,6 @@ helm -n litellm upgrade --install gateway litellm/litellm \
 
 ## Full documentation
 
-See [`docs/how-to/litellm-gateway.md`](../../docs/how-to/litellm-gateway.md)
+See the [LiteLLM gateway guide](https://tulipagents.ai/how-to/litellm-gateway/)
 for when to choose this path over direct providers, the auth boundary
 diagram, and the notebook-run-via-gateway recipe.
