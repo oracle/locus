@@ -7,10 +7,17 @@ Implements the AgentSkills.io three-level content model:
 - L1: XML catalog injected into system prompt (names + descriptions)
 - L2: Full instructions returned when agent activates a skill
 - L3: Resource file listing for agent to read on demand
+
+A host that decides in code which skills a run needs (a router) passes them as
+``active``: their instructions are in the prompt from the first model call,
+with no catalog and no ``skills`` tool unless ``catalog=True``. With
+``enforce_allowed_tools=True`` the active skills' ``allowed-tools`` stop being
+advice: a call to any other tool is cancelled before it runs.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 from xml.sax.saxutils import escape
@@ -48,10 +55,18 @@ class SkillsPlugin(Plugin):
 
     name = "skills"
 
+    #: Name of the activation tool the model calls (``catalog=True``).
+    ACTIVATION_TOOL = "skills"
+
     def __init__(
         self,
         skills: list[Skill | str | Path],
         max_resource_files: int = 20,
+        *,
+        active: Iterable[str] = (),
+        catalog: bool | None = None,
+        enforce_allowed_tools: bool = False,
+        show_paths: bool = True,
     ) -> None:
         """Initialize with skill sources.
 
@@ -59,10 +74,29 @@ class SkillsPlugin(Plugin):
             skills: List of Skill instances, paths to skill directories,
                    or paths to parent directories containing skills.
             max_resource_files: Max resource files to list per skill.
+            active: Names of skills the host activates for the run up front.
+                Their full instructions are sent with every model call (as a
+                system message after the system prompt, never written to the
+                conversation state). Unknown names raise ``ValueError``.
+            catalog: Whether the model sees the L1 catalog and gets the
+                ``skills`` tool to activate more skills itself. Defaults to
+                True without ``active`` and False with it: a host that routes
+                skills in code usually does not want the model to route too.
+            enforce_allowed_tools: Make the active skills' ``allowed-tools``
+                a hard limit. A tool call outside the union of the lists the
+                active skills declare is cancelled before it runs, with a
+                reason the model reads. Skills that declare no list add no
+                tools; when no active skill declares one there is no limit.
+                The ``skills`` tool itself is always allowed.
+            show_paths: Include each skill's filesystem location in the
+                catalog and in activation responses. Set False for a server,
+                where paths reveal the deployment layout and help nobody.
         """
         self._skills: dict[str, Skill] = {}
         self._max_resource_files = max_resource_files
         self._activated: list[str] = []
+        self._show_paths = show_paths
+        self._enforce = enforce_allowed_tools
 
         for source in skills:
             if isinstance(source, Skill):
@@ -75,6 +109,16 @@ class SkillsPlugin(Plugin):
                 elif path.is_dir():
                     for skill in Skill.from_directory(path):
                         self._skills[skill.name] = skill
+
+        active_names = list(dict.fromkeys(active))
+        unknown = [n for n in active_names if n not in self._skills]
+        if unknown:
+            available = ", ".join(sorted(self._skills)) or "none"
+            msg = f"Unknown active skill(s): {', '.join(unknown)}. Available: {available}"
+            raise ValueError(msg)
+        self._active: tuple[str, ...] = tuple(active_names)
+        self._activated.extend(self._active)
+        self._catalog = (not self._active) if catalog is None else catalog
 
     def _generate_catalog_xml(self) -> str:
         """Generate XML catalog of available skills.
@@ -90,7 +134,7 @@ class SkillsPlugin(Plugin):
             lines.append("<skill>")
             lines.append(f"<name>{escape(skill.name)}</name>")
             lines.append(f"<description>{escape(skill.description)}</description>")
-            if skill.path:
+            if skill.path and self._show_paths:
                 lines.append(f"<location>{escape(str(skill.path / 'SKILL.md'))}</location>")
             lines.append("</skill>")
         lines.append("</available_skills>")
@@ -110,39 +154,102 @@ class SkillsPlugin(Plugin):
             meta.append(f"Allowed tools: {', '.join(skill.allowed_tools)}")
         if skill.compatibility:
             meta.append(f"Compatibility: {skill.compatibility}")
-        if skill.path:
+        if skill.path and self._show_paths:
             meta.append(f"Location: {skill.path}")
 
         if meta:
             parts.append("\n---\n" + "\n".join(meta))
 
-        # Resource listing (L3)
-        resources = skill.list_resources(max_files=self._max_resource_files)
+        # Resource listing (L3) — relative paths, but only useful to a model
+        # that can read the files, i.e. when paths are shown at all.
+        resources = (
+            skill.list_resources(max_files=self._max_resource_files) if self._show_paths else []
+        )
         if resources:
             parts.append("\n---\nResource files:\n" + "\n".join(f"- {r}" for r in resources))
 
         return "\n".join(parts)
 
+    def _active_instructions(self) -> str:
+        """The active skills' instructions, one section per skill."""
+        sections = []
+        for name in self._active:
+            skill = self._skills[name]
+            body = self._format_skill_response(skill).strip()
+            sections.append(f'<skill name="{escape(name)}">\n{body}\n</skill>')
+        return "\n\n".join(sections)
+
     @hook
     async def on_before_model_call(self, event: Any) -> None:
-        """Inject skills catalog XML into messages before model call."""
-        catalog = self._generate_catalog_xml()
-        if not catalog:
-            return
+        """Inject the active skills and/or the catalog before each model call.
 
+        Only the messages sent to the model change; the run's state (and so
+        every checkpoint) never holds them.
+        """
         from tulip.core.messages import Message
 
-        # Inject catalog as a system message at the beginning
-        catalog_msg = Message.system(
-            "The following skills are available. To activate a skill, "
-            "call the `skills` tool with the skill name.\n\n" + catalog
-        )
+        injected: list[Message] = []
+        if self._active:
+            injected.append(
+                Message.system(
+                    "Follow these skills for this conversation turn:\n\n"
+                    + self._active_instructions()
+                )
+            )
+        if self._catalog:
+            catalog = self._generate_catalog_xml()
+            if catalog:
+                injected.append(
+                    Message.system(
+                        "The following skills are available. To activate a skill, "
+                        "call the `skills` tool with the skill name.\n\n" + catalog
+                    )
+                )
+        if not injected:
+            return
 
         # Insert after the first system message (if any)
         messages = list(event.messages)
         insert_idx = 1 if messages and messages[0].role.value == "system" else 0
-        messages.insert(insert_idx, catalog_msg)
+        messages[insert_idx:insert_idx] = injected
         event.messages = messages
+
+    def allowed_tools(self) -> frozenset[str] | None:
+        """The tools the active skills allow, or None when nothing limits them.
+
+        The union of the ``allowed-tools`` lists the active skills declare;
+        None when no active skill declares one (or none is active). Also
+        whatever the model activated itself through the ``skills`` tool.
+        """
+        declared = [
+            self._skills[n].allowed_tools
+            for n in self._activated
+            if n in self._skills and self._skills[n].allowed_tools is not None
+        ]
+        if not declared:
+            return None
+        return frozenset(t for tools in declared for t in (tools or ()))
+
+    @hook
+    async def on_before_tool_call(self, event: Any) -> None:
+        """With ``enforce_allowed_tools``, cancel calls the skills do not allow."""
+        if not self._enforce or event.tool_name == self.ACTIVATION_TOOL:
+            return
+        allowed = self.allowed_tools()
+        if allowed is None or event.tool_name in allowed:
+            return
+        event.cancel = (
+            f"The tool {event.tool_name} is not available for this request. "
+            f"Use one of: {', '.join(sorted(allowed)) or 'no tools'}."
+        )
+
+    def get_tools(self) -> list[Any]:
+        """The ``skills`` activation tool when the catalog is on, else none.
+
+        (``AgentConfig.skills`` registers it itself; this is what lets a
+        configured plugin in ``AgentConfig.plugins`` work the same way.)
+        """
+        return [self.get_activation_tool()] if self._catalog else []
 
     def get_activation_tool(self) -> Any:
         """Create the skills activation tool.
@@ -153,7 +260,7 @@ class SkillsPlugin(Plugin):
         plugin = self
 
         @tool_decorator(
-            name="skills",
+            name=self.ACTIVATION_TOOL,
             description="Activate a skill to load its instructions. "
             "Call with the skill name from the available_skills catalog.",
         )
