@@ -80,6 +80,23 @@ policy.
   say why: the text is appended (as a user-role note marked automated) to the
   messages of the re-call only — never to the run's state. `retry` alone
   still re-calls blind, as before.
+- **Skills a host routes in code.** `SkillsPlugin(skills, active=[...])`
+  puts the named skills' instructions in front of every model call (a system
+  message after the system prompt, never written to the run state or a
+  checkpoint), without the model having to call the `skills` tool. With
+  `active` the catalog and the `skills` tool are off by default
+  (`catalog=True` keeps them). Unknown names raise.
+- **`allowed-tools` can be enforced.** `SkillsPlugin(...,
+  enforce_allowed_tools=True)` cancels any tool call outside the union of the
+  lists the active skills declare, before the tool runs, and tells the model
+  which tools it may use. Skills that declare no list add no tools; with no
+  declared list there is no limit. Off by default (advisory, as before).
+- **`SkillsPlugin(show_paths=False)`** keeps skill directories out of the
+  catalog, activation responses and resource listings — a server's file
+  layout is not something the model needs.
+- `SkillsPlugin.get_tools()` returns the `skills` tool when the catalog is on,
+  so the plugin works the same from `AgentConfig.plugins` as from
+  `AgentConfig.skills`.
 
 ### Changed
 
