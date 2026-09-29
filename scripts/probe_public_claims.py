@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
-"""Probe the public claims on tuliplabs.ai / tulipagents.ai against the code.
+"""Probe the public claims on tulipagents.ai against the code.
 
 Every check maps to a concrete, verbatim claim made on the marketing or docs
 pages. Offline-only: uses the bundled MockModel, no credentials, no cost. Run:
@@ -45,7 +45,7 @@ def main() -> None:
 
         from tulip.agent.agent import Agent
         from tulip.agent.result import AgentResult
-        from tulip.security import create_soc_analyst, ground_report, is_finding  # noqa: F401
+        from tulip_security import create_soc_analyst, ground_report, is_finding  # noqa: F401
 
         analyst = create_soc_analyst(model=get_model())
         result = analyst.run_sync("Audit this account's IAM posture.")
@@ -67,10 +67,8 @@ def main() -> None:
     # Abstention, never a Finding. (open-source.html: "an ungrounded finding is
     # a false positive by construction. There's no public path that builds one.")
     try:
-        from tulip.reasoning.gsar import Partition
-        from tulip.security import Abstention, ground_finding
-        from tulip.security._adapters import inference_claim
-        from tulip.security.taxonomy import Severity
+        from tulip.control import Abstention, Severity, ground_finding
+        from tulip.reasoning.gsar import Claim, EvidenceType, Partition
 
         out = ground_finding(
             title="suspicious IAM role",
@@ -79,7 +77,15 @@ def main() -> None:
             asset="arn:aws:iam::000000000000:role/x",
             remediation="review the trust policy",
             # only an ungrounded inference, no tool-backed evidence -> must abstain
-            partition=Partition(ungrounded=[inference_claim("looks risky", "model:guess")]),
+            partition=Partition(
+                ungrounded=[
+                    Claim(
+                        text="looks risky",
+                        type=EvidenceType.INFERENCE,
+                        evidence_refs=["model:guess"],
+                    )
+                ]
+            ),
         )
         ok = isinstance(out, Abstention)
         record(
@@ -147,7 +153,7 @@ def main() -> None:
     # ── CLAIM 5 — read-only cloud-posture auditor ("its tools admit only ─────
     # describe/list/get calls")
     try:
-        from tulip.security import cloud_posture_audit
+        from tulip_security import cloud_posture_audit
 
         tools = cloud_posture_audit()
         names = [getattr(t, "name", str(t)) for t in tools]
@@ -188,7 +194,7 @@ def main() -> None:
 
     # ── CLAIM 7 — "fingerprint AI infrastructure": timing measurement ────────
     try:
-        from tulip.security.fingerprint import FEATURE_KEYS, measure_endpoint_timing
+        from tulip_security.fingerprint import FEATURE_KEYS, measure_endpoint_timing
 
         feats = measure_endpoint_timing()  # offline sample without OPENAI_API_KEY
         have = set(feats) >= set(FEATURE_KEYS)
@@ -226,7 +232,7 @@ def main() -> None:
 
     # ── report ───────────────────────────────────────────────────────────────
     print("\n" + "=" * 80)
-    print("PUBLIC-CLAIM PROBE  —  tuliplabs.ai / tulipagents.ai  vs  the code")
+    print("PUBLIC-CLAIM PROBE  —  tulipagents.ai  vs  the code")
     print("=" * 80)
     width = max(len(c) for c, _, _ in results)
     for claim, status, detail in results:

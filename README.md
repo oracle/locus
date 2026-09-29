@@ -1,8 +1,4 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tuliplabs-ai/tulip-agents/main/docs/img/tuliplabs-logo.png" alt="tuliplabs" width="320">
-</p>
-
-<p align="center">
   <strong>The agent framework where the model never holds the trigger.</strong><br>
   <em>Your agent is about to issue a refund, ship a deploy, or delete a customer record. Every
   consequential action clears a policy check first — real code, outside the model, before the
@@ -20,7 +16,6 @@
 
 <p align="center">
   <a href="https://tulipagents.ai/concepts/security/">The admission gate</a> ·
-  <a href="https://tulipagents.ai/integrations/frameworks/">Govern an existing agent</a> ·
   <a href="https://tulipagents.ai/how-to/quickstart/">Quickstart</a> ·
   <a href="https://tulipagents.ai/notebooks/">Notebooks</a> ·
   <a href="https://tulipagents.ai/">Docs</a>
@@ -53,25 +48,6 @@ FINAL SCORE  ·  dangerous attempts: 1  ·  💥 BREACHES: 0  ·  audit chain in
 Point `TULIP_MODEL_URL` at your own vLLM / Ollama / LM Studio server to run it against a real
 model, or set `ANTHROPIC_API_KEY` for the hard version against a frontier one. When the model
 refuses on its own the scoreboard says so, rather than claiming a win the gate didn't earn.
-
----
-
-## Govern the agent you already have
-
-You don't have to build on Tulip to be governed by it.
-**[`tulip-frameworks`](https://github.com/tuliplabs-ai/tulip-frameworks)** wraps a tool from the
-framework you already use — **LangChain, LangGraph, CrewAI, the OpenAI Agents SDK, LlamaIndex,
-or Google ADK** — with the same gate and the same hash-chained audit trail. No rebuild, no
-migration.
-
-```bash
-pip install "tulip-frameworks[langchain]"   # or [crewai] / [openai-agents] / [llama-index] / [adk] / [all]
-```
-
-Agents outside Python reach the same gate over the wire through
-[`tulip-gateway`](https://tulipagents.ai/integrations/frameworks/)'s `/v1/admit`, with a TypeScript
-client in [`tulip-frameworks-js`](https://github.com/tuliplabs-ai/tulip-frameworks-js).
-→ [The frameworks guide](https://tulipagents.ai/integrations/frameworks/)
 
 ---
 
@@ -114,8 +90,7 @@ agent = Agent(model=model, tools=[
 
 Refused calls come back to the model as a readable refusal naming the outcome
 and the reason, so the agent explains the hold instead of the run ending in a
-traceback. It is the same shape the `tulip-frameworks` bridges return, so a
-policy reads the same whether the agent is Tulip-native or wrapped.
+traceback.
 
 `action → policy → approval → admission → audit`
 
@@ -127,8 +102,10 @@ policy reads the same whether the agent is Tulip-native or wrapped.
   `verify()`. (A keyless SHA-256 chain: tamper-evident, not notarized — add signing before
   treating it as legally authoritative.)
 
-Human approvals are durable: `require_human_for` pauses the run, and an `interrupt()` +
-checkpointer means the decision survives a restart and the run resumes where it left off.
+Human approvals can survive a restart: with `gate_tool(..., on_refusal="interrupt",
+approval=FileApprovals(path))` a hold pauses the run, a checkpointer keeps the conversation,
+and once a named person decides, `agent.resume(..., perform_dangling=True)` runs the approved
+call exactly once, with the arguments that were approved.
 
 **Measured, not asserted.** Running the integration suite against a weaker judge
 model (Qwen3.6-35B) produced the contrast by accident: `SteeringHook` — the SDK's
@@ -205,7 +182,7 @@ A bundled `MockModel` means every notebook runs offline with no credentials.
 
 | | |
 |---|---|
-| **[🧭 Cognitive router](https://tulipagents.ai/concepts/router/)** | Describe a task → eight named protocols → the right primitive compiled automatically. The LLM fills a typed schema; routing is deterministic. |
+| **[🧭 Cognitive router](https://tulipagents.ai/concepts/multi-agent/#the-eight-shapes)** | Describe a task → eight named protocols → the right primitive compiled automatically. The LLM fills a typed schema; routing is deterministic. |
 | **[🤝 Multi-agent](https://tulipagents.ai/concepts/multi-agent/)** | Seven native patterns + cross-process A2A. One `Agent` class. One event stream. |
 | **[🔬 DeepAgent](https://tulipagents.ai/concepts/deepagent/)** | `create_deepagent` (per-turn grounding) and `create_research_workflow` (StateGraph with post-hoc grounding eval). |
 | **[🪙 MCP](https://tulipagents.ai/concepts/mcp/)** | `MCPClient` consumes MCP servers. `TulipMCPServer` exposes the SDK's tools as MCP. |
@@ -236,7 +213,7 @@ There is no public constructor that emits a grounded result without a score, so 
 claim is unshippable *by construction* — not filtered after the fact.
 
 ```python
-from tulip.security import ground_finding, Severity, is_finding
+from tulip.control import ground_finding, Severity, is_finding
 
 result = ground_finding(..., partition=partition)
 # A grounded partition → a typed result. An ungrounded one → an auditable
@@ -250,7 +227,7 @@ print(result.title if is_finding(result) else f"withheld: {result.reason}")
 
 ## The cognitive router and multi-agent shapes
 
-Describe a task in plain language; the **[cognitive router](https://tulipagents.ai/concepts/router/)**
+Describe a task in plain language; the **[cognitive router](https://tulipagents.ai/concepts/multi-agent/#the-eight-shapes)**
 (PRISM) runs an LLM classifier that fills a typed `GoalFrame`, matches it to one of eight
 coordination protocols, and compiles the matching runtime primitive. **The model classifies;
 routing is deterministic — it never authors the topology.**
@@ -285,7 +262,7 @@ async def main():
 asyncio.run(main())
 ```
 
-→ [Cognitive router](https://tulipagents.ai/concepts/router/) ·
+→ [Cognitive router](https://tulipagents.ai/concepts/multi-agent/#the-eight-shapes) ·
 [All patterns](https://tulipagents.ai/concepts/multi-agent/)
 
 ---
@@ -338,7 +315,7 @@ with `register_provider("myco", MyModel)`.
 
 ---
 
-## Notebooks, workbench, deploy
+## Notebooks and deploy
 
 [`examples/`](examples/) has progressive notebooks, numbered in suggested reading order. Each
 defaults to the bundled mock model when no API key is present.
@@ -352,9 +329,7 @@ python examples/notebook_58_cognitive_router.py      # the cognitive router
 python examples/notebook_69_research_workflow.py     # full research pipeline
 ```
 
-The **workbench** is a browser playground for every pattern — two clicks to a running
-agent, no editor setup. For production, `AgentServer` is a
-drop-in FastAPI app (`POST /invoke`, `POST /stream`, `GET/DELETE /threads/{id}`, `GET /health`)
+For production, `AgentServer` is a drop-in FastAPI app (`POST /invoke`, `POST /stream`, `GET/DELETE /threads/{id}`, `GET /health`)
 and the repo ships a multi-stage `Dockerfile`.
 
 ```python
@@ -364,37 +339,16 @@ AgentServer(agent=my_agent, api_key=os.environ["API_KEY"]).run(host="0.0.0.0", p
 ```
 
 → [Notebooks](https://tulipagents.ai/notebooks/) ·
-[Workbench](https://tulipagents.ai/workbench/) ·
 [Deploy](https://tulipagents.ai/how-to/deploy/)
 
 ---
 
 ## Any domain, one contract
 
-The same contracts run wherever an agent acts. One fully worked domain package ships today:
-`tulip.security` applies the grounded-evidence contract to red-teaming AI systems — every result
-is a grounded `Evidence` tagged against public weakness catalogues (MITRE ATLAS, OWASP LLM /
-Agentic Top 10), or an explicit `Abstention`.
-
-```python
-import asyncio
-
-from tulip.security import Target, red_team, is_finding
-
-
-async def main():
-    report = await red_team(
-        Target.endpoint("https://support-bot.example/chat"), suite="owasp-asi"
-    )
-    print([f for f in report.findings if is_finding(f)])
-
-
-asyncio.run(main())
-```
-
-Vendor-specific adapters (Splunk, CrowdStrike, Okta, Auth0, VirusTotal, Wiz, RunPod, Lambda) live
-in **[`tulip-integrations`](https://github.com/tuliplabs-ai/tulip-integrations)**; core ships
-offline reference adapters so the SDK runs standalone.
+The same contracts run wherever an agent acts. Security-domain tooling built on them — AI
+red-teaming, SOC triage, and threat-intel / SIEM / EDR adapters — ships separately as the opt-in
+[`tulip-agents-security`](https://github.com/tuliplabs-ai/tulip-agents/tree/main/packages/tulip-agents-security) distribution
+(`pip install "tulip-agents[security]"`); the core runtime does not include it.
 
 ---
 
@@ -402,7 +356,7 @@ offline reference adapters so the SDK runs standalone.
 
 ```text
 src/tulip/
-├── control/        Admission gate — Action, admit/approve, ControlPolicy, AuditTrail
+├── control/        Admission gate, policy, audit trail, grounded findings, verification
 ├── rogue/          The rogue-agent challenge (`python -m tulip.rogue`)
 ├── agent/          Agent runtime, config, Sequential / Parallel / Loop pipelines
 ├── core/           AgentState, Message, events, termination algebra, Send
@@ -421,7 +375,6 @@ src/tulip/
 ├── skills/         AgentSkills.io filesystem-first capability disclosure
 ├── playbooks/      Declarative step plans + PlaybookEnforcer
 ├── providers/      Multi-modal: web search, web fetch, image, speech
-├── security/       Grounded findings, red-team / assure, taxonomy tags
 ├── server/         FastAPI AgentServer with thread persistence
 ├── evaluation/     EvalCase + EvalRunner + EvalReport
 └── integrations/   MCP (client + server)
@@ -465,10 +418,11 @@ Paper: [GSAR: Typed Grounding for Hallucination Detection and Recovery in Multi-
 
 ## License
 
-Copyright 2026 Tulip Labs.
+Copyright 2026 The Tulip Authors.
 
 Released under the **Apache License, Version 2.0** — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
-Tulip began as a fork of an earlier project released under the Universal Permissive License v1.0
-(UPL-1.0); those original portions remain available under the UPL-1.0, while all new
-contributions are licensed under Apache-2.0. See [NOTICE](NOTICE) for details.
+Releases before 1.0.0 were published under the Universal Permissive License v1.0 (UPL-1.0).
+The project was relicensed to Apache-2.0 at 1.0.0; code as it stood in those releases remains
+available under the UPL-1.0. [LICENSES/](LICENSES) holds both texts and the list of files that
+date from the UPL-1.0 releases.

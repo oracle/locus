@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """Core primitives for Tulip."""
@@ -16,6 +16,7 @@ from tulip.core.command import (
 )
 from tulip.core.config import TulipSettings
 from tulip.core.errors import (
+    ApprovalPendingError,
     CheckpointError,
     CheckpointNotFoundError,
     CheckpointSerializationError,
@@ -35,12 +36,15 @@ from tulip.core.errors import (
     VectorStoreError,
 )
 from tulip.core.events import (
+    CustomEvent,
+    FinalAnswerVerificationEvent,
     GroundingEvent,
     ModelChunkEvent,
     ReflectEvent,
     TerminateEvent,
     ThinkEvent,
     ToolCompleteEvent,
+    ToolProgressEvent,
     ToolStartEvent,
     TulipEvent,
 )
@@ -96,6 +100,8 @@ __all__ = [
     "ModelProtocol",
     "ToolProtocol",
     # Events
+    "CustomEvent",
+    "FinalAnswerVerificationEvent",
     "GroundingEvent",
     "TulipEvent",
     "ModelChunkEvent",
@@ -103,10 +109,12 @@ __all__ = [
     "TerminateEvent",
     "ThinkEvent",
     "ToolCompleteEvent",
+    "ToolProgressEvent",
     "ToolStartEvent",
     # Config
     "TulipSettings",
     # Errors
+    "ApprovalPendingError",
     "CheckpointError",
     "CheckpointNotFoundError",
     "CheckpointSerializationError",

@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """Tests for agent state."""
@@ -186,7 +186,7 @@ class TestAgentState:
         """
         state = AgentState(tool_loop_threshold=3)
 
-        for i, regex in enumerate(["fusion:database_.*", "fusion:db_.*", "fusion:dbnode_.*"]):
+        for i, regex in enumerate(["acme:database_.*", "acme:db_.*", "acme:dbnode_.*"]):
             step = ReasoningStep(
                 iteration=i + 1,
                 thought=f"Discovery batch {i}",

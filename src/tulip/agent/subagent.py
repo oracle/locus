@@ -71,21 +71,21 @@ __all__ = ["SubagentResult", "run_subagent"]
 
 
 class _LinkedCancelSignal(threading.Event):
-    """A child's cancel signal, linked to — but distinct from — the parent's.
+    """A child's cancel signal, linked to — but distinct from — its parents'.
 
-    Sharing the parent's :class:`threading.Event` outright would be wrong in
+    Sharing a parent's :class:`threading.Event` outright would be wrong in
     one direction: the run loop *clears* its signal in its ``finally``, so a
     child winding down would silently un-cancel the parent that cancelled it.
-    This subclass reads as set when either side is set, but ``clear()``
-    touches only the child's own flag.
+    This subclass reads as set when it or any parent signal is set, but
+    ``clear()`` touches only the child's own flag.
     """
 
-    def __init__(self, parent: threading.Event) -> None:
+    def __init__(self, *parents: threading.Event) -> None:
         super().__init__()
-        self._parent_signal = parent
+        self._parent_signals = parents
 
     def is_set(self) -> bool:
-        return super().is_set() or self._parent_signal.is_set()
+        return super().is_set() or any(p.is_set() for p in self._parent_signals)
 
 
 class _ParentRunContext:
@@ -111,18 +111,15 @@ _PARENT_RUN: ContextVar[_ParentRunContext | None] = ContextVar(
 )
 
 
-def enter_parent_run(agent: Any) -> Token[_ParentRunContext | None]:
-    """Install ``agent``'s run as the parent context for subagents.
+def enter_parent_run(cancel_signal: threading.Event) -> Token[_ParentRunContext | None]:
+    """Install a running loop as the parent context for subagents.
 
-    Called by the runtime loop at run start. Ensures the agent has a cancel
-    signal to link children to (``Agent.cancel()`` otherwise creates it
-    lazily, which would be too late for a child spawned before the first
-    ``cancel()``), then publishes the context. Returns a token for
+    Called by the runtime loop at run start with that run's own cancel
+    signal (``RunContext.cancel``), which ``Agent.cancel(thread_id=...)`` and
+    a no-argument ``Agent.cancel()`` both set. Returns a token for
     :func:`exit_parent_run`.
     """
-    if agent._cancel_signal is None:  # noqa: SLF001 — loop-side plumbing on our own Agent
-        agent._cancel_signal = threading.Event()  # noqa: SLF001
-    return _PARENT_RUN.set(_ParentRunContext(agent._cancel_signal))  # noqa: SLF001
+    return _PARENT_RUN.set(_ParentRunContext(cancel_signal))
 
 
 def exit_parent_run(token: Token[_ParentRunContext | None]) -> None:
@@ -223,7 +220,7 @@ async def run_subagent(
             Exceptions propagate to the caller.
         cancel_signal: Explicit parent signal to link to, for callers
             outside a running loop. Inside a tool body the running parent's
-            signal is picked up automatically; this parameter overrides it.
+            signal is picked up automatically; this one is linked as well.
         **agent_kwargs: Any further :class:`~tulip.agent.config.AgentConfig`
             field for the child (``token_budget``, ``temperature``,
             ``termination``, ...).
@@ -238,7 +235,11 @@ async def run_subagent(
     # runs it installs its own context (for grandchildren), and reporting
     # must go to the parent's sink, not the child's.
     parent_ctx = _PARENT_RUN.get()
-    linked_to = cancel_signal or (parent_ctx.cancel_signal if parent_ctx is not None else None)
+    linked_to = [
+        signal
+        for signal in (cancel_signal, parent_ctx.cancel_signal if parent_ctx else None)
+        if signal is not None
+    ]
 
     child = Agent(
         model=model,
@@ -253,8 +254,8 @@ async def run_subagent(
         name=name,
         **agent_kwargs,
     )
-    if linked_to is not None:
-        child._cancel_signal = _LinkedCancelSignal(linked_to)  # noqa: SLF001 — deliberate linkage into our own Agent
+    if linked_to:
+        child._cancel_signal = _LinkedCancelSignal(*linked_to)  # noqa: SLF001 — deliberate linkage into our own Agent
 
     terminate: TerminateEvent | None = None
     events = child.run(prompt)

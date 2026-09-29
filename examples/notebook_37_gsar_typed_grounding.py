@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 """Notebook 37: GSAR grounded findings — a finding ships, or the agent abstains.
 
@@ -7,10 +7,10 @@ agent emits is only as trustworthy as the evidence behind every
 sentence in it. An ungrounded vulnerability claim is a false positive
 *by construction* — so Tulip will not let you produce one.
 
-The primitive is :func:`tulip.security.ground_finding`. You hand it a
+The primitive is :func:`tulip.control.ground_finding`. You hand it a
 candidate finding plus a GSAR partition of its claims; it scores the
-partition, and either returns a typed :class:`~tulip.security.Evidence`
-(the finding ships) or an :class:`~tulip.security.Abstention` (the
+partition, and either returns a typed :class:`~tulip.control.Evidence`
+(the finding ships) or an :class:`~tulip.control.Abstention` (the
 finding is withheld, with an audit record of why). There is no public
 path that constructs a ``Evidence`` without clearing the grounding bar.
 
@@ -70,16 +70,7 @@ import time
 from config import get_model
 
 from tulip.agent import Agent
-from tulip.reasoning.gsar import (
-    DEFAULT_WEIGHT_MAP,
-    Claim,
-    EvidenceType,
-    GSARThresholds,
-    Partition,
-    decide,
-    gsar_score,
-)
-from tulip.security import (
+from tulip.control import (
     AtlasTechnique,
     Evidence,
     Indicator,
@@ -88,6 +79,15 @@ from tulip.security import (
     Severity,
     ground_finding,
     is_finding,
+)
+from tulip.reasoning.gsar import (
+    DEFAULT_WEIGHT_MAP,
+    Claim,
+    EvidenceType,
+    GSARThresholds,
+    Partition,
+    decide,
+    gsar_score,
 )
 
 

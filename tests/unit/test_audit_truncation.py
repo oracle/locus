@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """What the audit chain does and does not detect.
@@ -16,7 +16,7 @@ import dataclasses
 
 import pytest
 
-from tulip.security.audit import AuditRecord, AuditTrail, _entry_hash
+from tulip.control.audit import AuditRecord, AuditTrail, _entry_hash
 
 
 def _trail(n: int = 4) -> AuditTrail:

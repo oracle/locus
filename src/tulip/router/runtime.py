@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """Top-level :class:`Router` — the only public surface of the module.
@@ -52,7 +52,7 @@ class Router:
         policy, and model.
     on_frame:
         Optional callback fired right after a frame is extracted. Useful
-        for telemetry / workbench display.
+        for telemetry / UI display.
     """
 
     def __init__(

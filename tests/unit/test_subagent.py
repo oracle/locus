@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from typing import Any
 
 import pytest
 
@@ -320,6 +321,55 @@ async def test_parent_cancel_stops_running_child() -> None:
     assert not result.success
     # The child's finally cleared ITS signal, not the parent's.
     assert parent.is_cancelled
+
+
+async def test_thread_cancel_stops_a_child_spawned_by_that_run() -> None:
+    """``cancel(thread_id=...)`` reaches a child a tool body spawned in that
+    run: the child links to the run's own signal, not only the agent-wide
+    cancel-all."""
+    started = asyncio.Event()
+
+    @tool
+    async def spin(n: int) -> str:
+        """Busy-work so the child stays mid-run."""
+        started.set()
+        await asyncio.sleep(0)
+        return f"spun {n}"
+
+    calls = 0
+
+    def keep_spinning(messages: list[Message], tools: object) -> ModelResponse:
+        nonlocal calls
+        calls += 1
+        return tool_call("spin", n=calls, call_id=f"spin_{calls}")
+
+    child_results: list[Any] = []
+
+    @tool
+    async def delegate() -> str:
+        """Spawn a child that spins until cancelled."""
+        child_results.append(
+            await run_subagent(
+                "spin until told otherwise",
+                model=FunctionModel(keep_spinning),
+                tools=[spin],
+                max_iterations=200,
+            )
+        )
+        return "delegated"
+
+    parent = Agent(
+        model=ScriptedModel([tool_call("delegate", call_id="d1"), text("done")]),
+        tools=[delegate],
+    )
+    run = asyncio.create_task(parent.arun("go", thread_id="t-1"))
+
+    await asyncio.wait_for(started.wait(), timeout=5)
+    assert parent.cancel(thread_id="t-1") == 1
+    await asyncio.wait_for(run, timeout=5)
+
+    assert child_results[0].stop_reason == "cancelled"
+    assert not parent.is_cancelled  # a thread cancel is not a cancel-all
 
 
 def test_linked_signal_clear_never_clears_the_parent() -> None:

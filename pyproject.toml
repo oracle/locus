@@ -4,14 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tulip-agents"
-version = "2.13.0"
+version = "2.17.0"
 description = "The agent framework where the model never holds the trigger — every consequential action clears your policy first, waits for a human when it matters, and lands on a record you can verify. Build on it, or put it around the agent you already have."
 readme = "README.md"
 license = "Apache-2.0"
-license-files = ["LICENSE", "NOTICE"]
+license-files = ["LICENSE", "NOTICE", "LICENSES/*"]
 requires-python = ">=3.11"
 authors = [
-    { name = "Tulip Labs" },
+    { name = "The Tulip Authors" },
 ]
 # Ordered by the job a searcher is actually trying to do. The gate terms come
 # first on purpose: people arrive looking for "how do I stop my agent doing X
@@ -42,11 +42,6 @@ keywords = [
     "pydantic",
     "react",
     "reflexion",
-    "security",
-    "cybersecurity",
-    "soc",
-    "incident-response",
-    "threat-intelligence",
 ]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
@@ -60,7 +55,6 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Software Development :: Libraries :: Application Frameworks",
-    "Topic :: Security",
     "Typing :: Typed",
 ]
 
@@ -112,8 +106,8 @@ opensearch = ["opensearch-py>=2.4"]
 # S3 / MinIO / R2 object-storage checkpointer (src/tulip/memory/backends/s3.py).
 s3 = ["boto3>=1.34"]
 
-# AWS cloud-posture tools (src/tulip/security/aws.py) — boto3 + its botocore
-# service models are the spec that drives use_aws / describe_aws.
+# boto3 alone. The AWS cloud-posture tools that used it ship in the separate
+# tulip-agents-security distribution (see the ``security`` extra).
 aws = ["boto3>=1.34"]
 
 # Amazon Bedrock models (src/tulip/models/native/bedrock.py). Same single
@@ -121,12 +115,30 @@ aws = ["boto3>=1.34"]
 # chain, so there is nothing else to install or configure.
 bedrock = ["boto3>=1.34"]
 
-# Security domain layer (src/tulip/security/) — one install for the vertical.
-# The intel / SIEM / EDR / fingerprint adapters run their live paths on the
-# core httpx dependency and the scanner uses only the stdlib, so the sole
-# extra dep is boto3 for the AWS cloud-posture tools. The full read-only
-# triage loop works on core deps alone (offline samples need nothing).
-security = ["boto3>=1.34"]
+# Security-domain tooling — red-team probes, SOC triage, intel / SIEM / EDR /
+# scanner / fingerprint / AWS posture adapters — is a separate, opt-in
+# distribution (packages/tulip-agents-security/, imported as ``tulip_security``).
+# The core runtime ships without it; this extra installs it, with boto3 for the
+# AWS posture tools.
+security = ["tulip-agents-security[aws]>=2.17.0"]
+
+# Browser tools (src/tulip/tools/browser.py). After installing, fetch a browser
+# with `playwright install chromium`.
+browser = ["playwright>=1.45"]
+
+# Signed audit trails (src/tulip/control/audit.py) — Ed25519 signatures over
+# each record so an export verifies from public keys alone. Unsigned trails
+# need nothing.
+audit = ["cryptography>=42"]
+
+# Durable agent runs on Temporal (src/tulip/durable/temporal.py).
+temporal = ["temporalio>=1.7"]
+
+# Gemini Live realtime voice sessions (src/tulip/voice/gemini.py).
+gemini = ["google-genai>=1.30"]
+
+# Durable agent runs on DBOS (src/tulip/durable/dbos.py).
+dbos = ["dbos>=2.0"]
 
 # Mem0 agent-memory manager (src/tulip/memory/managers/mem0.py) — the
 # portable, self-hostable long-term memory backend.
@@ -223,7 +235,13 @@ dev = [
     "redis>=7.1.0",       # Redis checkpointer tests
     "sqlalchemy>=2.0.46", # PostgreSQL checkpointer schema tests
     "moto>=5.0",          # mock S3 for tests/unit/test_memory_backends_s3.py
+    "cryptography>=42",   # signed audit trail tests in tests/unit/test_signed_audit.py
+    "temporalio>=1.7",    # durable run tests in tests/unit/test_temporal_durable.py
+    "dbos>=2.0",          # durable run tests in tests/unit/test_dbos_durable.py
 ]
+
+[project.scripts]
+tulip = "tulip.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/tuliplabs-ai/tulip-agents"
@@ -258,11 +276,17 @@ include = [
 # on every FastAPI ``@app.get/.post`` and on MCP imports.
 features = ["dev", "server", "mcp", "openai", "anthropic", "rag", "s3", "mem0"]
 
+# The security-domain tooling is its own distribution in this repo. Install it
+# into the dev environment (editable) so one ``hatch run check`` lints, types
+# and tests both.
+[tool.hatch.envs.default.workspace]
+members = ["packages/tulip-agents-security"]
+
 [tool.hatch.envs.default.scripts]
 # Default test target = unit tests only (deterministic, no external deps).
 # Integration tests need credentials / live services and are run via
 # `test-integration` or `test-all` when those are available.
-test = "pytest {args:tests/unit}"
+test = "pytest {args:tests/unit packages/tulip-agents-security/tests/unit}"
 # Check every Python snippet in README.md / examples/README.md against the
 # installed SDK. Also runs as a unit test, so CI gates it either way; this
 # is the fast local loop when editing docs.
@@ -270,21 +294,21 @@ snippets = "python scripts/check_doc_snippets.py {args}"
 # The version is asserted in four documents no tool keeps in agreement.
 # Run this before tagging — CI runs it too, in the lint job.
 release-check = "python scripts/check_release_consistency.py {args}"
-test-integration = "pytest {args:tests/integration}"
-test-all = "pytest {args:tests}"
-test-cov = "pytest --cov=src/tulip --cov-report=term-missing --cov-report=html --cov-report=json {args:tests/unit}"
+test-integration = "pytest {args:tests/integration packages/tulip-agents-security/tests/integration}"
+test-all = "pytest {args:tests packages/tulip-agents-security/tests}"
+test-cov = "pytest --cov=src/tulip --cov=packages/tulip-agents-security/src/tulip_security --cov-report=term-missing --cov-report=html --cov-report=json {args:tests/unit packages/tulip-agents-security/tests/unit}"
 # Refresh the per-file coverage baseline (commit the resulting
 # ``scripts/coverage_baseline.json``).
 cov-baseline-update = [
-    "pytest --cov=src/tulip --cov-report=json {args:tests/unit}",
+    "pytest --cov=src/tulip --cov=packages/tulip-agents-security/src/tulip_security --cov-report=json {args:tests/unit packages/tulip-agents-security/tests/unit}",
     "python scripts/coverage_ratchet.py --update",
 ]
-test-fast = "pytest -n auto {args:tests/unit}"
-lint = "ruff check src tests examples"
-lint-fix = "ruff check --fix src tests examples"
-format = "ruff format src tests examples"
-format-check = "ruff format --check src tests examples"
-typecheck = "mypy src/tulip"
+test-fast = "pytest -n auto {args:tests/unit packages/tulip-agents-security/tests/unit}"
+lint = "ruff check src tests examples packages"
+lint-fix = "ruff check --fix src tests examples packages"
+format = "ruff format src tests examples packages"
+format-check = "ruff format --check src tests examples packages"
+typecheck = "mypy src/tulip packages/tulip-agents-security/src/tulip_security"
 # CI gate: every check the project enforces, in one command. A clean run
 # of `hatch run check` is what `_lint.yml` runs. The trailing ``test-cov``
 # runs the deterministic unit suite under coverage and FAILS the whole
@@ -323,7 +347,7 @@ python = ["3.11", "3.12", "3.13", "3.14"]
 [tool.ruff]
 target-version = "py311"
 line-length = 100
-src = ["src", "tests"]
+src = ["src", "tests", "packages/tulip-agents-security/src"]
 
 [tool.ruff.lint]
 select = [
@@ -439,9 +463,9 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# The grounding benchmark is a `python -m tulip.security.grounding_eval` CLI —
+# The grounding benchmark is a `python -m tulip.reasoning.grounding_eval` CLI —
 # printing its report is the point.
-"src/tulip/security/grounding_eval.py" = ["T201"]
+"src/tulip/reasoning/grounding_eval.py" = ["T201"]
 # Same for the rogue challenge (`python -m tulip.rogue`): it is a terminal
 # demo whose whole output — banner, per-attempt verdict, scoreboard, audit
 # dump — is printed. It ships inside the package so it runs from an install
@@ -453,10 +477,12 @@ ignore = [
 "benchmarks/*.py" = ["T201", "S603"]
 "examples/checkpointer_examples.py" = ["ALL"]
 "examples/config.py" = ["F821", "RET503"]
+"packages/*/examples/config.py" = ["F821", "RET503"]
 "examples/notebook_11_swarm_multiagent.py" = ["F821"]
 "examples/notebook_05_agent_hooks.py" = ["PLE2510"]
 "examples/projects/**/*.py" = ["PLE2510"]
-"tests/**/*.py" = [
+# ``**/`` so the workspace packages' tests/ and examples/ get the same rules.
+"**/tests/**/*.py" = [
     "ARG",     # unused arguments in fixtures
     "FBT",     # boolean trap in tests
     "PLR2004", # magic values
@@ -484,7 +510,7 @@ ignore = [
     "ASYNC230", # async open() — fine in tests, simpler than aiofiles round-trip
     "ASYNC240", # pathlib in async tests — fine, trio.Path/anyio.path overkill
 ]
-"examples/**/*.py" = [
+"**/examples/**/*.py" = [
     "S608",     # some notebooks construct SQL from validated identifiers
     "T201",     # print — notebooks/examples intentionally use print
     "DTZ005",   # datetime.now without tz — fine for demo UX
@@ -512,6 +538,9 @@ ignore = [
     "T201",    # print — runner scripts are CLI tools that print to stdout
     "S603",    # subprocess call — runner intentionally execs notebooks
     "BLE001",  # blind except — runner reports failures generically
+]
+"src/tulip/cli.py" = [
+    "T201",    # print — the tulip command's output is its interface
 ]
 "src/tulip/memory/backends/**/*.py" = [
     "S608",    # SQL built from validated identifiers (regex-checked at init)
@@ -573,7 +602,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["tulip"]
+known-first-party = ["tulip", "tulip_security"]
 force-single-line = false
 lines-after-imports = 2
 
@@ -653,9 +682,10 @@ module = [
     "pypdf.*",
     "PyPDF2.*",
     "pdf2image.*",
-    # Optional sandbox providers (``tulip.tools.sandbox`` lazy-imports the
-    # factory when a non-built-in provider name is requested).
-    "tulip_sandbox.*",
+    # Browser tools (``tulip.tools.browser``) import Playwright lazily.
+    "playwright.*",
+    "google.genai",
+    "google.genai.*",
 ]
 ignore_missing_imports = true
 
@@ -692,8 +722,8 @@ warn_required_dynamic_aliases = true
 
 [tool.pytest.ini_options]
 minversion = "8.0"
-testpaths = ["tests"]
-pythonpath = ["src"]
+testpaths = ["tests", "packages/tulip-agents-security/tests"]
+pythonpath = ["src", "packages/tulip-agents-security/src"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 addopts = [
@@ -718,7 +748,7 @@ filterwarnings = [
 # =============================================================================
 
 [tool.coverage.run]
-source = ["src/tulip"]
+source = ["src/tulip", "packages/tulip-agents-security/src/tulip_security"]
 branch = true
 parallel = true
 omit = [
@@ -755,3 +785,16 @@ show_missing = true
 # now in the ``[project.optional-dependencies].dev`` extra above. Kept
 # this comment as a marker so a future ``hatch sync`` doesn't reintroduce
 # the duplicate.
+
+# =============================================================================
+# Workspace
+# =============================================================================
+
+# The security-domain tooling ships as its own distribution from this repo
+# (``packages/tulip-agents-security/``). ``tulip-agents[security]`` depends on
+# it, and it depends back on tulip-agents; resolve both sides locally.
+[tool.uv.workspace]
+members = ["packages/tulip-agents-security"]
+
+[tool.uv.sources]
+tulip-agents-security = { workspace = true }

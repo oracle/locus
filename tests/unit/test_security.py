@@ -1,7 +1,7 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Unit tests for ``tulip.security`` — evidence-grounded findings.
+"""Unit tests for evidence-grounded findings (``tulip.control.grounded``).
 
 Covers the core invariant — a ``Evidence`` only exists when its evidence
 clears the GSAR proceed threshold, otherwise an ``Abstention`` is
@@ -13,14 +13,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from tulip.reasoning.gsar import (
-    DEFAULT_TAU_PROCEED,
-    Claim,
-    Decision,
-    EvidenceType,
-    Partition,
-)
-from tulip.security import (
+from tulip.control import (
     Abstention,
     AtlasTechnique,
     Evidence,
@@ -36,6 +29,13 @@ from tulip.security import (
     ground_fingerprint,
     is_finding,
     severity_at_least,
+)
+from tulip.reasoning.gsar import (
+    DEFAULT_TAU_PROCEED,
+    Claim,
+    Decision,
+    EvidenceType,
+    Partition,
 )
 
 

@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 """
 Notebook 09: a chat loop — actually talking to your agent.
@@ -59,7 +59,7 @@ Type a message and press enter. The agent remembers the conversation.
 # A scripted conversation for non-interactive runs. The second turn only
 # makes sense if the first was remembered, which is the point being shown.
 SCRIPTED = [
-    "My name is Federico and I'm looking at flights to Lisbon.",
+    "My name is Marta and I'm looking at flights to Lisbon.",
     "What's the weather there?",
     "What did I say my name was?",
 ]

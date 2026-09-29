@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """Notebook 87: A cloud-ops agent that can only touch production with a human's say-so.
@@ -80,7 +80,7 @@ IAM: dict[str, list[str]] = {
 
 
 # The side effects. Each is a zero-arg async callable — exactly what admit()
-# expects for `perform`. In a real agent these would call boto3 / the OCI SDK /
+# expects for `perform`. In a real agent these would call boto3 / the Azure SDK /
 # gcloud; here they just edit the dicts above and return a short receipt.
 
 

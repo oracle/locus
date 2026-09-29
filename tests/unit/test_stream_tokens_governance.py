@@ -12,7 +12,7 @@ because the caller only asked about tokens.
 
 Found the hard way: the gateway's own suite began failing `assert run.paused is
 True` the moment streaming was switched on, with the flag as the only variable
-(see FINDING-stream-tokens-loses-the-hold.md in the workspace).
+(the finding is recorded in this test's own history).
 """
 
 from __future__ import annotations

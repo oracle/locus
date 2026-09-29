@@ -1,0 +1,26 @@
+# Copyright 2026 The Tulip Authors
+# SPDX-License-Identifier: Apache-2.0
+
+"""Back-compat shim — remote-API timing fingerprint graduated into the SDK.
+
+The measurement is now first-class in :mod:`tulip_security.fingerprint`.
+Importing from here still works; prefer::
+
+    from tulip_security import (
+        measure_endpoint_timing,
+        FEATURE_KEYS,
+        default_classifier,
+    )
+"""
+
+from __future__ import annotations
+
+from tulip_security.fingerprint import (
+    _SAMPLE_FEATURES,
+    FEATURE_KEYS,
+    default_classifier,
+    measure_endpoint_timing,
+)
+
+
+__all__ = ["FEATURE_KEYS", "_SAMPLE_FEATURES", "default_classifier", "measure_endpoint_timing"]

@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """Agent evaluation framework.
@@ -18,11 +18,12 @@ from tulip.evaluation.framework import (
     EvalRunner,
 )
 from tulip.evaluation.graph import GraphEvalTarget, as_eval_target
-from tulip.evaluation.judge import LLMJudge, Verdict, check_trajectory
+from tulip.evaluation.judge import JudgeUnavailableError, LLMJudge, Verdict, check_trajectory
 
 
 __all__ = [
     "GraphEvalTarget",
+    "JudgeUnavailableError",
     "LLMJudge",
     "Verdict",
     "check_trajectory",

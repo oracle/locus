@@ -1,9 +1,9 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """Deriving the :class:`Action` a policy is weighed against.
 
-A :class:`~tulip.security.policy.ControlPolicy` matches on
+A :class:`~tulip.control.policy.ControlPolicy` matches on
 ``Action.labels()`` — ``{environment, kind, *tags}``. The action's *name* and
 *asset* are deliberately not labels, so a policy that says "hold anything in
 production" or "deny anything irreversible" can only work if something puts
@@ -28,8 +28,7 @@ evaluated against the call's arguments, that add tags or raise the blast radius
 (see :func:`derive_labels`). The rules are data, never code: comparisons only,
 no ``eval``, no callables, so a tool cannot talk its own labels down.
 
-Originally written for ``tulip-frameworks``; promoted here so the SDK, the
-gateway and the registry share one implementation rather than three.
+One implementation, so every gated tool derives its action the same way.
 """
 
 from __future__ import annotations
@@ -37,7 +36,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
-from tulip.security.policy import Action
+from tulip.control.policy import Action
 
 
 #: An :class:`Action`, or a callable that derives one from ``(name, kwargs)``.
@@ -85,7 +84,7 @@ def default_action(
     """A conservative :class:`Action` for ``name`` when none was supplied.
 
     Fail-safe by construction: ``environment="unknown"`` plus the stock
-    :class:`~tulip.security.policy.ControlPolicy` (which requires a verification
+    :class:`~tulip.control.policy.ControlPolicy` (which requires a verification
     score) lands an un-verified call on ``require_human`` rather than
     auto-allowing it.
 

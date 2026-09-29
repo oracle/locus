@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """Tool decorator for Tulip - 100% Pydantic."""
@@ -62,7 +62,7 @@ class Tool(BaseModel):
 
     labels: frozenset[str] = frozenset()
     """Policy-matching labels this tool declares (e.g. ``{"code-exec"}``).
-    Matched against :class:`~tulip.security.policy.ControlPolicy` label sets
+    Matched against :class:`~tulip.control.policy.ControlPolicy` label sets
     such as ``require_sandbox_for`` by governance hooks like
     :class:`~tulip.tools.sandbox.SandboxEnforcerHook`."""
 
@@ -80,6 +80,26 @@ class Tool(BaseModel):
     economy: only visibility changes. The tool is registered, gated, and
     policy-matched exactly as an eager tool; activating it adds its schema
     to the next model call, nothing more (#177)."""
+
+    native: dict[str, dict[str, Any]] = {}
+    """Provider-native definitions of this tool, keyed by adapter
+    (``"anthropic"``, ``"openai_responses"``). An adapter that finds its key
+    sends that definition instead of the function schema; the others keep
+    using :attr:`parameters`. Keys starting with ``_`` are directives to the
+    adapter (a beta header, a request option) and are never sent as part of
+    the tool. See :mod:`tulip.tools.computer`."""
+
+    emits_progress: bool = False
+    """When True, the agent runtime streams progress this tool reports
+    (:func:`tulip.tools.context.report_progress`, or an MCP server's
+    ``notifications/progress``) as live
+    :class:`~tulip.core.events.ToolProgressEvent` s while the call runs.
+    Tools created from an MCP server set it."""
+
+    output_schema: dict[str, Any] | None = None
+    """JSON Schema of the structured content the tool returns, when it
+    declares one (an MCP tool's ``outputSchema``). Informational: it is not
+    sent to the model and does not change how the result is handled."""
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -184,7 +204,11 @@ class Tool(BaseModel):
         return self._format_result(result.value)
 
     def _format_result(self, result: Any) -> str:
-        """Format tool result as string for LLM."""
+        """Format tool result as string for LLM.
+
+        A :class:`~tulip.tools.output.ToolOutput` is a ``str`` and passes
+        through untouched, so its structured content reaches the executor.
+        """
         if result is None:
             return "Success (no output)"
 
@@ -200,8 +224,12 @@ class Tool(BaseModel):
         return str(result)
 
     def to_openai_schema(self) -> dict[str, Any]:
-        """Get OpenAI-compatible tool schema."""
-        return {
+        """Get OpenAI-compatible tool schema.
+
+        A tool with :attr:`native` definitions carries them under a top-level
+        ``native`` key for the adapters that understand it.
+        """
+        schema: dict[str, Any] = {
             "type": "function",
             "function": {
                 "name": self.name,
@@ -209,6 +237,9 @@ class Tool(BaseModel):
                 "parameters": self.parameters,
             },
         }
+        if self.native:
+            schema["native"] = self.native
+        return schema
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         """Direct invocation of the tool.
@@ -255,6 +286,7 @@ def tool(
     labels: Iterable[str] | None = None,
     sandbox: SandboxSpec | ToolSandbox | str | bool | None = None,
     deferred: bool = False,
+    emits_progress: bool = False,
 ) -> Callable[[Callable[P, R]], Tool]: ...
 
 
@@ -267,6 +299,7 @@ def tool(
     labels: Iterable[str] | None = None,
     sandbox: SandboxSpec | ToolSandbox | str | bool | None = None,
     deferred: bool = False,
+    emits_progress: bool = False,
 ) -> Tool | Callable[[Callable[P, R]], Tool]:
     """
     Decorator to create a tool from a function.
@@ -304,7 +337,7 @@ def tool(
             duplicate side-effects when a model re-issues a tool call it
             has already made this turn.
         labels: Policy-matching labels the tool declares; matched against
-            :class:`~tulip.security.policy.ControlPolicy` label sets (e.g.
+            :class:`~tulip.control.policy.ControlPolicy` label sets (e.g.
             ``require_sandbox_for``).
         sandbox: Run the tool in an isolated box instead of the host
             process. ``True`` uses the default provider (``$TULIP_SANDBOX``
@@ -312,6 +345,9 @@ def tool(
             :class:`~tulip.tools.sandbox.SandboxSpec` selects/configures
             one. The function must be synchronous and self-contained; this
             is validated at decoration time. See :mod:`tulip.tools.sandbox`.
+        emits_progress: Stream the progress this tool reports with
+            :func:`tulip.tools.context.report_progress` as live
+            :class:`~tulip.core.events.ToolProgressEvent` s.
 
     Returns:
         Tool instance
@@ -335,6 +371,7 @@ def tool(
             labels=frozenset(labels or ()),
             sandbox=spec,
             deferred=deferred,
+            emits_progress=emits_progress,
         )
 
     if fn is not None:

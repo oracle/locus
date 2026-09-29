@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """Lightweight emit helpers — single line per instrumentation site.
@@ -17,7 +17,7 @@ construction, no allocation. SDK users who don't use telemetry pay
 exactly one ``ContextVar.get()`` per emission site.
 
 Module-level event-name constants pin the canonical wire types so
-changes are greppable and consumers (the workbench, third-party
+changes are greppable and consumers (SSE clients, third-party
 monitors) can rely on them.
 """
 
@@ -40,7 +40,7 @@ _BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
 
 
 # Canonical event-type names — change here, propagates to every
-# instrumentation site. Listed verbatim in the workbench's renderer
+# instrumentation site. Consumers list them verbatim,
 # so a typo here breaks one place, not many.
 
 # --- Multi-agent ---
@@ -131,6 +131,10 @@ EV_RESEARCH_COMPLETED = "research.completed"
 EV_HOOK_MODEL_RETRY = "agent.model.retry"
 EV_HOOK_STEERING_APPLIED = "agent.steering.applied"
 EV_HOOK_GUARDRAIL_TRIGGERED = "agent.guardrail.triggered"
+
+# --- Model failover (tulip.models.fallback) ---
+EV_MODEL_FALLBACK = "model.fallback"
+EV_MODEL_BREAKER = "model.fallback.breaker"
 
 # --- Sandboxed tool execution ---
 EV_TOOL_SANDBOX_STARTED = "tool.sandbox.started"

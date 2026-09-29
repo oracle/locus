@@ -14,7 +14,6 @@ are easy to conflate:
 * the AGENT — no. That is the meta-agent's delegation, a different mechanism;
 * the PLAYBOOK — no. Nothing selects one; it is static on the agent definition.
 
-See REVIEW-what-optic-has-that-tulip-lost.md for the last of those.
 """
 
 from __future__ import annotations

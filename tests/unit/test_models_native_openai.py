@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """Unit tests for ``tulip.models.native.openai`` (OpenAIModel).
@@ -1072,6 +1072,47 @@ class TestStreamTermination:
         m = _model_with(client)
         events = [ev async for ev in m.stream([Message.user("hi")])]
         assert sum(1 for e in events if e.done) == 1
+
+    @pytest.mark.asyncio
+    async def test_stream_requests_usage_by_default(self) -> None:
+        """The API only sends the usage chunk when asked; stream() must ask.
+
+        Without the opt-in the terminal chunk carries ``usage=None``, the
+        loop's counters never move, and ``TerminateEvent.usage`` is None for
+        every ``stream_tokens=True`` run — streaming turns cost accounting off.
+        """
+        client = _client_with(
+            stream_chunks=[_Chunk(choices=[_ChunkChoice(delta=_Delta(), finish_reason="stop")])]
+        )
+        m = _model_with(client)
+        async for _ in m.stream([Message.user("hi")]):
+            pass
+        args = client.chat.completions.create.call_args.kwargs
+        assert args["stream_options"] == {"include_usage": True}
+
+    @pytest.mark.asyncio
+    async def test_caller_stream_options_beat_the_default(self) -> None:
+        """A caller-supplied ``stream_options`` must reach the API verbatim."""
+        client = _client_with(
+            stream_chunks=[_Chunk(choices=[_ChunkChoice(delta=_Delta(), finish_reason="stop")])]
+        )
+        m = _model_with(client)
+        async for _ in m.stream([Message.user("hi")], stream_options={"include_usage": False}):
+            pass
+        args = client.chat.completions.create.call_args.kwargs
+        assert args["stream_options"] == {"include_usage": False}
+
+    @pytest.mark.asyncio
+    async def test_stream_usage_false_omits_the_field(self) -> None:
+        """An OpenAI-compatible server that rejects ``stream_options`` can opt out."""
+        client = _client_with(
+            stream_chunks=[_Chunk(choices=[_ChunkChoice(delta=_Delta(), finish_reason="stop")])]
+        )
+        m = _model_with(client, stream_usage=False)
+        async for _ in m.stream([Message.user("hi")]):
+            pass
+        args = client.chat.completions.create.call_args.kwargs
+        assert "stream_options" not in args
 
 
 # ---------------------------------------------------------------------------

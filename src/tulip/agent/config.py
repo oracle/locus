@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """Agent configuration - 100% Pydantic."""
@@ -222,6 +222,16 @@ class AgentConfig(BaseModel):
         default=None,
         ge=1,
         description="Maximum total tokens before stopping (None = unlimited)",
+    )
+
+    max_cost_usd: float | None = Field(
+        default=None,
+        gt=0.0,
+        description=(
+            "Maximum spend in USD before stopping (None = unlimited). Checked before "
+            "each model call against that call's worst case, and again after it. Needs "
+            "the model's prices in model metadata; an unpriced model refuses a budget."
+        ),
     )
 
     time_budget_seconds: float | None = Field(
@@ -468,6 +478,51 @@ class AgentConfig(BaseModel):
             "that reject strict ``json_schema`` mode (some model families)."
         ),
     )
+
+    # Final-answer verification — see tulip.agent.verification.
+    final_answer_verifier: Any | None = Field(
+        default=None,
+        description=(
+            "Async ``(draft_text, FinalAnswerContext) -> str | None`` run on "
+            "every final answer in auto completion mode, whether or not a tool "
+            "was called. ``None``/empty accepts; text rejects the draft and is "
+            "fed back to the model for another attempt (see "
+            "``final_answer_verifier_max_replans``). The rejected draft and the "
+            "feedback are kept out of checkpoints and the result state. Off "
+            "(``None``) by default."
+        ),
+    )
+    final_answer_verifier_max_replans: int = Field(
+        default=1,
+        ge=0,
+        le=10,
+        description=(
+            "How many rejected drafts the verifier may send back for another "
+            "attempt. When they run out the last draft is returned and the "
+            "FinalAnswerVerificationEvent reports it did not pass. 0 = judge "
+            "only, never replan."
+        ),
+    )
+    hold_final_answer_tokens: bool = Field(
+        default=False,
+        description=(
+            "With ``stream_tokens=True`` and a ``final_answer_verifier``: hold "
+            "each model call's content chunks until the call is over, release "
+            "them at once when it turned out to be a tool-calling step or its "
+            "answer passed the verifier (or replans ran out), and drop them "
+            "when the answer is rejected — so a streaming UI never shows a "
+            "draft the verifier sent back. Reasoning chunks still stream live. "
+            "Costs the token-by-token feel of the final answer: it arrives as "
+            "one burst after verification."
+        ),
+    )
+
+    @field_validator("final_answer_verifier")
+    @classmethod
+    def _validate_final_answer_verifier(cls, v: Any) -> Any:
+        if v is not None and not callable(v):
+            raise TypeError(f"final_answer_verifier must be an async callable, got: {v!r}")
+        return v
 
     @field_validator("output_schema")
     @classmethod

@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 """
 Notebook 25: Support tier escalation — L1 → L2 → L3 handoff with typed context.

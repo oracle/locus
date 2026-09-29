@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """Agent initialization — model, tools, executor, hooks, plugins, skills.
@@ -16,7 +16,7 @@ behaviour where ``_initialize()`` was called from both ``__init__`` and
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from tulip.tools.decorator import Tool
 from tulip.tools.executor import ConcurrentExecutor, SequentialExecutor
@@ -177,9 +177,36 @@ def initialize_agent(agent: Agent) -> None:
         agent._memory_manager = agent.config.memory_manager
 
     # --- Conversation manager ---------------------------------------------
+    from tulip.models.metadata import metadata_for, model_id_of
+
+    configured = agent.config.model
+    model_id = model_id_of(configured if isinstance(configured, str) else agent._model)
+    meta = metadata_for(model_id) if model_id is not None else None
+    if (
+        meta is not None
+        and meta.input_price_per_mtok is not None
+        and meta.output_price_per_mtok is not None
+    ):
+        agent._model_prices = (float(meta.input_price_per_mtok), float(meta.output_price_per_mtok))
+    if agent.config.max_cost_usd is not None and agent._model_prices is None:
+        # Fail closed: a budget that cannot measure spend would never stop anything.
+        raise ValueError(
+            f"max_cost_usd needs prices for model {model_id!r}. Register them with "
+            "tulip.models.metadata.register_metadata(ModelMetadata(..., "
+            "input_price_per_mtok=..., output_price_per_mtok=...))."
+        )
     if agent.config.conversation_manager is not None:
         agent._conversation_manager = agent.config.conversation_manager
-    elif agent.config.max_iterations > 10:
+    elif meta is not None:
+        # The window is known, so count tokens. No summariser, so no extra
+        # model calls: stale tool output is pruned and a token-budgeted tail
+        # kept, which is what stops one large tool result ending the run.
+        from tulip.memory.compactor import LLMCompactor
+
+        agent._conversation_manager = LLMCompactor(context_length=meta.context_length)
+    else:
+        # Unknown window: a message window, at any iteration count. A short
+        # run can still overflow on one large tool output.
         from tulip.memory.conversation import SlidingWindowManager
 
         window = max(20, agent.config.max_iterations * 2)
@@ -224,12 +251,23 @@ def initialize_agent(agent: Agent) -> None:
     agent._initialized = True
 
 
+def _run_for(agent: Agent, run_id: str | None) -> Any:
+    """The in-flight run context with ``run_id``, if any."""
+    if run_id is None:
+        return None
+    with agent._runs_lock:
+        for rc in agent._active_runs.values():
+            if rc.run_id == run_id:
+                return rc
+    return None
+
+
 def register_builtin_tools(agent: Agent) -> None:
     """Register the explicit-completion-mode built-ins on the agent.
 
     Adds ``task_complete`` and ``ask_user`` to the agent's tool registry.
     The closures capture the agent so ``task_complete`` can consult
-    ``require_verification`` / ``_has_unverified_writes`` and ``ask_user``
+    ``require_verification`` / the run's unverified-writes flag and ``ask_user``
     can emit the special ``__interrupt__`` marker the runtime loop
     recognises.
     """
@@ -247,10 +285,14 @@ def register_builtin_tools(agent: Agent) -> None:
             "Provide a summary of what was accomplished."
         ),
     )
-    def task_complete(summary: str, status: str = "success") -> str:
+    def task_complete(summary: str, status: str = "success", ctx: Any = None) -> str:
         """Signal task completion with a summary."""
-        if agent_ref.config.require_verification and agent_ref._has_unverified_writes:
-            agent_ref._has_unverified_writes = False  # Reset so it doesn't loop.
+        # The unverified-writes flag belongs to the run that called us (found
+        # by ``ctx.run_id``), not to the agent: a concurrent run's write must
+        # not block this run's completion, nor its verification unblock ours.
+        run = _run_for(agent_ref, getattr(ctx, "run_id", None))
+        if agent_ref.config.require_verification and run is not None and run.has_unverified_writes:
+            run.has_unverified_writes = False  # Reset so it doesn't loop.
             return (
                 "BLOCKED: You have unverified changes. "
                 "You wrote files but haven't run tests or verification commands yet. "

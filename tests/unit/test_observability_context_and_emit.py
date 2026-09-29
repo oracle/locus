@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """Unit tests for ``tulip.observability.context`` + ``emit`` helpers.
@@ -99,7 +99,7 @@ class TestConcurrentDispatches:
         different ``current_run_id`` values, even when ``asyncio.gather``
         interleaves them.
 
-        This is the property that lets the workbench dispatch many runs
+        This is the property that lets a host dispatch many runs
         on one event loop without cross-talk.
         """
         seen: dict[str, list[str | None]] = {"a": [], "b": []}

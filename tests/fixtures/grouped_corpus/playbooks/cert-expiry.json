@@ -1,0 +1,19 @@
+{
+  "id": "cert-expiry",
+  "title": "Certificate expiry check",
+  "summary": "Find endpoints whose certificate expires inside the renewal window.",
+  "step_groups": [
+    {
+      "id": "scan",
+      "goal": "List certificates that expire within 14 days.",
+      "steps": [
+        {
+          "id": "expiring",
+          "goal": "Query certificate expiry by endpoint.",
+          "required": true,
+          "guidance": {"skill_refs": ["cert-expiry-check"]}
+        }
+      ]
+    }
+  ]
+}

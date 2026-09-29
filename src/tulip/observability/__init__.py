@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """Observability — centralised event bus + SSE telemetry for tulip.
@@ -29,7 +29,7 @@ Quick start::
     async for ev in bus.subscribe("abc"):
         print(ev.event_type, ev.data)
 
-The workbench's SSE endpoint at ``/api/events/{run_id}`` is the public
+An SSE endpoint such as ``/api/events/{run_id}`` is the natural public
 HTTP wrapper around :meth:`EventBus.subscribe`.
 """
 

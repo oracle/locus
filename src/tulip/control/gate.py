@@ -1,14 +1,12 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """Put the admission gate around a Tulip tool.
 
-`tulip-frameworks` has shipped `gate_langchain_tool`, `gate_crewai_tool` and
-their siblings for a while: wrap one tool, and from then on the model's
-decision to call it goes through :func:`~tulip.control.admit` before anything
-happens. One line, no rebuild.
+Wrap one tool, and from then on the model's decision to call it goes through
+:func:`~tulip.control.admit` before anything happens. One line, no rebuild.
 
-Building on Tulip itself, you hand-wrote it::
+Without it, you hand-write the same thing around every tool::
 
     async def safe_refund(order_id: str, usd: float):
         try:
@@ -20,18 +18,18 @@ Building on Tulip itself, you hand-wrote it::
         except AdmissionError as e:
             notify_oncall(e.decision)
 
-That is the README's own example, and it is correct — but it means a LangChain
-user got better ergonomics from Tulip than a Tulip user did, on the one
-feature the project is built around. Everything needed was already here:
-:mod:`tulip.control.action` was promoted into core in 2.3.0 precisely so the
-SDK and the bridges could share one derivation. Only the bridges ever used it.
+That is correct, but every copy has to build the action the same way.
+``gate_tool`` derives it once, through :mod:`tulip.control.action`::
 
     from tulip.control import ControlPolicy, gate_tool
 
-    agent = Agent(model=model, tools=[
-        lookup_order,                                    # read-only, ungated
-        gate_tool(issue_refund, policy=ControlPolicy()), # gated
-    ])
+    agent = Agent(
+        model=model,
+        tools=[
+            lookup_order,  # read-only, ungated
+            gate_tool(issue_refund, policy=ControlPolicy()),  # gated
+        ],
+    )
 
 The returned tool keeps the original's name, description and parameter schema,
 so the model sees no difference and nothing else in the agent changes.
@@ -41,18 +39,21 @@ from __future__ import annotations
 
 import inspect
 import json
-from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
+from collections.abc import Awaitable, Callable, Mapping
+from typing import TYPE_CHECKING, Any, Literal, Protocol, cast, runtime_checkable
 
 from tulip.control.action import ActionSpec, resolve_action
-from tulip.security.admit import AdmissionError, admit
+from tulip.control.admission import AdmissionError, admit
+from tulip.control.approvals import ApprovalStore
+from tulip.control.policy import ApprovalOutcome
 
 
 if TYPE_CHECKING:
-    from tulip.security.audit import AuditTrail
-    from tulip.security.findings import Evidence
-    from tulip.security.policy import ApprovalDecision, ControlPolicy
-    from tulip.security.verify import VerificationResult
+    from tulip.control.audit import AuditTrail
+    from tulip.control.findings import Evidence
+    from tulip.control.policy import ApprovalDecision, ControlPolicy
+    from tulip.control.spend import SpendLedger
+    from tulip.control.verification import VerificationResult
     from tulip.tools.decorator import Tool
 
 
@@ -64,8 +65,7 @@ class ApprovalBridge(Protocol):
     """Submit a held action for out-of-band approval, and check its state.
 
     A structural Protocol, deliberately: it has no import-time dependency on
-    anything, so the same object satisfies this and ``tulip-frameworks``'s
-    bridge of the same name. A gateway approval broker matches it in shape.
+    anything, so any approval queue with these two methods satisfies it.
 
     Without one, a held action tells the model it was held and stops there —
     true, and not actionable. With one, the refusal carries an id the agent
@@ -81,9 +81,8 @@ class ApprovalBridge(Protocol):
         ...
 
 
-#: What the model is handed when the gate refuses. Deliberately identical to
-#: what the ``tulip-frameworks`` bridges return, so the same policy reads the
-#: same way whether the agent is built on Tulip or wrapped from LangChain.
+#: What the model is handed when the gate refuses. A public contract: callers
+#: and tests read these keys, so keys are only ever added, never renamed.
 _REFUSAL_KEYS = ("status", "outcome", "action", "asset", "reason")
 
 
@@ -134,6 +133,31 @@ def _refusal(
     return json.dumps(payload)
 
 
+def _scope_for(
+    spend_scope: str | Callable[[str, dict[str, Any]], str],
+    tool_name: str,
+    kwargs: Mapping[str, Any],
+) -> str:
+    """The spend scope for one call."""
+    return spend_scope(tool_name, dict(kwargs)) if callable(spend_scope) else spend_scope
+
+
+def _approval_context(
+    policy: ControlPolicy,
+    extra: Mapping[str, str] | Callable[[str, dict[str, Any]], Mapping[str, str]] | None,
+    tool_name: str,
+    kwargs: Mapping[str, Any],
+) -> dict[str, str]:
+    """The context an approval is bound to: the policy version plus the caller's."""
+    context: dict[str, str] = {}
+    if policy.version:
+        context["policy_version"] = policy.version
+    if extra is not None:
+        values = extra(tool_name, dict(kwargs)) if callable(extra) else extra
+        context.update({str(key): str(value) for key, value in values.items()})
+    return context
+
+
 def gate_tool(
     tool: Tool,
     *,
@@ -142,10 +166,15 @@ def gate_tool(
     trail: AuditTrail | None = None,
     finding: Evidence | None = None,
     verdict: VerificationResult | None = None,
-    on_refusal: Literal["return", "raise"] = "return",
+    on_refusal: Literal["return", "raise", "interrupt"] = "return",
     approval: ApprovalBridge | None = None,
     principal: str = "agent",
     refusal_reason: str | Callable[[ApprovalDecision], str] | None = None,
+    approval_context: (
+        Mapping[str, str] | Callable[[str, dict[str, Any]], Mapping[str, str]] | None
+    ) = None,
+    ledger: SpendLedger | None = None,
+    spend_scope: str | Callable[[str, dict[str, Any]], str] = "default",
 ) -> Tool:
     """Return a copy of ``tool`` whose call goes through :func:`admit` first.
 
@@ -173,10 +202,27 @@ def gate_tool(
             offering one would invite the agent to wait for a decision that is
             not coming.
         principal: Who the held action is attributed to on the approval.
+        approval_context: What an approval is bound to besides the call itself,
+            as a mapping or ``(tool_name, arguments) -> mapping``: a thread, a
+            tenant, a case id. It is part of the approval id, as is
+            ``policy.version`` when set, so a decision made in one context or
+            under one policy version is never redeemed in another.
+        ledger: A spend ledger. The gate reads the scope's cumulative spend
+            before each decision, for ``policy.spend_limit_usd``, and records
+            ``action.cost_usd`` after the call runs.
+        spend_scope: The scope spend counts against, as a string or
+            ``(tool_name, arguments) -> str``: a customer, a tenant, a month.
         on_refusal: ``"return"`` hands the model a JSON refusal naming the
             outcome and the reason, so it can explain itself to the user and
             the run continues. ``"raise"`` re-raises
             :class:`AdmissionError` for a caller that would rather stop.
+            ``"interrupt"`` pauses the run on a ``require_human`` hold: the call
+            returns the runtime's interrupt marker, the agent yields an
+            ``InterruptEvent`` whose ``metadata`` carries the ``approval_id``, and
+            ``agent.resume(..., perform_dangling=True)`` re-issues the call once a
+            person has decided on ``approval`` (which must be an
+            :class:`~tulip.control.ApprovalStore`). Approved runs the call exactly
+            once; denied returns a refusal. A policy ``deny`` never pauses.
         refusal_reason: What the model is told when an action is refused. By
             default it is the policy's own reason, which names the checks that
             fired — accurate, and written in control-plane vocabulary the model
@@ -197,6 +243,12 @@ def gate_tool(
     """
     from tulip.tools.decorator import Tool  # noqa: PLC0415 — avoids a cycle
 
+    if on_refusal == "interrupt" and not isinstance(approval, ApprovalStore):
+        raise TypeError(
+            'on_refusal="interrupt" needs approval= an ApprovalStore (InMemoryApprovals, '
+            "FileApprovals, or your own): a paused run has to find its decision somewhere"
+        )
+
     inner = tool.fn
     # A sandboxed tool must keep running in its sandbox. `Tool.execute` returns
     # early for `sandbox is not None` and never reaches `fn`, so the two cannot
@@ -209,25 +261,136 @@ def gate_tool(
     # to the ORIGINAL tool, whose own `execute` still does the sandboxing.
     sandboxed = tool.sandbox is not None
 
+    async def hold(
+        error: AdmissionError,
+        resolved: Any,
+        kwargs: dict[str, Any],
+        perform_with: Callable[[dict[str, Any]], Awaitable[Any]],
+    ) -> Any:
+        """A ``require_human`` hold in interrupt mode: pause, or act on a decision."""
+        store = cast("ApprovalStore", approval)
+        context = _approval_context(policy, approval_context, tool.name, kwargs)
+        approval_id = store.submit(
+            principal,
+            tool.name,
+            kwargs,
+            reason=error.decision.reason,
+            labels=sorted(resolved.labels()),
+            context=context,
+        )
+        record = store.get(approval_id)
+        where = {"approval_id": approval_id, "action": resolved.name, "asset": resolved.asset}
+
+        if record is not None and record.status in ("approved", "denied"):
+            if trail is not None:
+                trail.record(
+                    "approval-decision",
+                    {
+                        **where,
+                        "verdict": record.status,
+                        "decided_by": record.decided_by,
+                        "approvers": record.approvers,
+                    },
+                )
+            if record.status == "approved":
+                edited = record.approved_arguments
+                run_kwargs = dict(edited) if edited is not None else kwargs
+                run_action = (
+                    resolve_action(action, tool.name, run_kwargs)
+                    if edited is not None
+                    else resolved
+                )
+                if edited is not None and trail is not None:
+                    trail.record(
+                        "approval-edited",
+                        {
+                            **where,
+                            "requested_arguments": dict(kwargs),
+                            "approved_arguments": edited,
+                        },
+                    )
+
+                async def perform_once() -> Any:
+                    # Consumed before the side effect: a crash mid-call leaves
+                    # the approval spent, never a second execution on replay.
+                    store.consume(approval_id)
+                    return await perform_with(run_kwargs)
+
+                try:
+                    # An edited call is weighed again: an approver cannot edit
+                    # an action into one the policy denies.
+                    return await admit(
+                        run_action,
+                        perform_once,
+                        policy=policy,
+                        finding=finding,
+                        verdict=verdict,
+                        trail=trail,
+                        approved_by=record.decided_by,
+                        ledger=ledger,
+                        spend_scope=_scope_for(spend_scope, tool.name, run_kwargs),
+                    )
+                except AdmissionError as denial:
+                    store.consume(approval_id)
+                    return _refusal(denial, reason=refusal_reason)
+            store.consume(approval_id)
+            return json.dumps(
+                {
+                    "status": "denied",
+                    "outcome": error.decision.outcome,
+                    "action": resolved.name,
+                    "asset": resolved.asset,
+                    "reason": f"denied by {record.decided_by}",
+                    "approval_id": approval_id,
+                }
+            )
+
+        if trail is not None:
+            trail.record("approval-requested", {**where, "principal": principal})
+        return json.dumps(
+            {
+                "__interrupt__": True,
+                "question": f"Approve {resolved.name} on {resolved.asset}? "
+                + _reason_for(error, refusal_reason),
+                "metadata": {
+                    **where,
+                    "principal": principal,
+                    "reason": error.decision.reason,
+                    "arguments": dict(kwargs),
+                    "approvers": record.approvers if record is not None else [],
+                    "context": context,
+                },
+            },
+            default=str,
+        )
+
+    async def perform_with(call_kwargs: dict[str, Any]) -> Any:
+        if sandboxed:
+            return await tool.execute(**call_kwargs)
+        result = inner(**call_kwargs)
+        return await result if inspect.isawaitable(result) else result
+
     async def gated(**kwargs: Any) -> Any:
         async def perform() -> Any:
-            if sandboxed:
-                return await tool.execute(**kwargs)
-            result = inner(**kwargs)
-            return await result if inspect.isawaitable(result) else result
+            return await perform_with(kwargs)
 
+        resolved = resolve_action(action, tool.name, kwargs)
         try:
             return await admit(
-                resolve_action(action, tool.name, kwargs),
+                resolved,
                 perform,
                 policy=policy,
                 finding=finding,
                 verdict=verdict,
                 trail=trail,
+                ledger=ledger,
+                spend_scope=_scope_for(spend_scope, tool.name, kwargs),
             )
         except AdmissionError as error:
             if on_refusal == "raise":
                 raise
+            if on_refusal == "interrupt" and error.decision.outcome != ApprovalOutcome.DENY:
+                return await hold(error, resolved, kwargs, perform_with)
             return _refusal(
                 error,
                 approval=approval,

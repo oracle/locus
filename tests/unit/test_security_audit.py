@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """Tests for the tamper-evident, hash-chained audit trail."""
@@ -10,7 +10,7 @@ import itertools
 import json
 from collections.abc import Callable
 
-from tulip.security.audit import AuditTrail
+from tulip.control.audit import AuditTrail
 
 
 def _fixed_clock() -> Callable[[], str]:

@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """Unit tests for ControlPolicy + approve() — safe-before-action."""
@@ -10,9 +10,11 @@ from tulip.control import (
     Action,
     ApprovalOutcome,
     ControlPolicy,
+    Evidence,
+    Severity,
+    VerificationResult,
     approve,
 )
-from tulip.security import Evidence, Severity, VerificationResult
 
 
 def _verdict(confidence: float, *, survives: bool = True) -> VerificationResult:

@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """Agent runtime loop methods, extracted from ``Agent`` as a mixin.
@@ -23,11 +23,13 @@ moved methods.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import contextvars
 import functools
 import logging
 import threading
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -35,20 +37,36 @@ from pydantic import BaseModel
 
 from tulip.agent.config import AgentConfig
 from tulip.agent.result import StopReason
+from tulip.agent.run_context import (
+    PendingInterrupt,
+    RunContext,
+    claim_result_slot,
+    scrub_ephemeral_metadata,
+    split_ephemeral_metadata,
+)
 from tulip.agent.subagent import enter_parent_run, exit_parent_run, fold_subagent_usage
+from tulip.agent.verification import (
+    FinalAnswerContext,
+    is_ephemeral_message,
+    mark_ephemeral,
+)
 from tulip.core.events import (
+    FinalAnswerVerificationEvent,
     GroundingEvent,
     InterruptEvent,
     ReflectEvent,
     TerminateEvent,
     ThinkEvent,
     ToolCompleteEvent,
+    ToolProgressEvent,
     ToolStartEvent,
     TulipEvent,
 )
+from tulip.core.media import strip_images, text_length
 from tulip.core.messages import Message, Role, ToolCall, ToolResult
 from tulip.core.state import AgentState, ReasoningStep, ToolExecution
 from tulip.models.base import ModelResponse
+from tulip.tools.context import _progress_sink
 from tulip.tools.executor import ToolContextFactory, ToolExecutor
 from tulip.tools.registry import ToolRegistry
 
@@ -85,13 +103,115 @@ def _apply_hook_result(result: ToolResult, after_tool_event: Any) -> ToolResult:
         import json  # noqa: PLC0415
 
         replacement = json.dumps(replacement, default=str)
-    return ToolResult(
-        tool_call_id=result.tool_call_id,
-        name=result.name,
-        content=replacement,
-        error=result.error,
-        duration_ms=result.duration_ms,
-    )
+    return result.model_copy(update={"content": replacement})
+
+
+def _complete_event(tool_result: ToolResult, /, **overrides: Any) -> ToolCompleteEvent:
+    """The ``ToolCompleteEvent`` for a result, structured extras included."""
+    fields: dict[str, Any] = {
+        "tool_name": tool_result.name,
+        "tool_call_id": tool_result.tool_call_id,
+        "result": tool_result.content if tool_result.success else None,
+        "error": tool_result.error,
+        "duration_ms": tool_result.duration_ms,
+        "structured_content": tool_result.structured_content,
+        "content_blocks": tool_result.content_blocks,
+    }
+    fields.update(overrides)
+    return ToolCompleteEvent(**fields)
+
+
+def _invocation_arguments(tool_event: Any) -> dict[str, Any]:
+    """The arguments a tool is invoked with after the before-hooks ran.
+
+    ``event.arguments`` (what the run records) with the hooks'
+    ``event.secret_arguments`` merged over them. The secret part is used for
+    the invocation only: every persisted or emitted record of the call keeps
+    ``event.arguments``.
+    """
+    arguments: dict[str, Any] = tool_event.arguments
+    secret = getattr(tool_event, "secret_arguments", None)
+    if not secret:
+        return arguments
+    return {**arguments, **secret}
+
+
+_EXHAUSTED: Any = object()
+
+
+async def _interleave_progress(
+    stream: AsyncIterator[tuple[int, ToolResult]],
+    sink: asyncio.Queue[ToolProgressEvent],
+) -> AsyncIterator[tuple[int, ToolResult] | ToolProgressEvent]:
+    """Merge an executor's result stream with progress reported meanwhile.
+
+    The loop is otherwise parked on the executor for the whole batch, so
+    progress a tool reports would reach the consumer only after the tool had
+    finished — which is no progress at all. Each pull from ``stream`` runs as
+    its own task, raced against the progress queue. A tool's progress is
+    always yielded before its result. Closing this generator cancels the
+    pending pull (and with it the executor's in-flight tools) and closes
+    ``stream``.
+    """
+    loop = asyncio.get_running_loop()
+
+    def _deliver(event: ToolProgressEvent) -> None:
+        # Sync tools report from a worker thread; the queue is loop-bound.
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+        if running is loop:
+            sink.put_nowait(event)
+        else:
+            loop.call_soon_threadsafe(sink.put_nowait, event)
+
+    # One context for every pull: the executor generator must see the same
+    # context variables on each step, and they must include the sink.
+    context = contextvars.copy_context()
+    context.run(_progress_sink.set, _deliver)
+    iterator = stream.__aiter__()
+    pull: asyncio.Future[Any] | None = None
+    getter: asyncio.Future[Any] | None = None
+    try:
+        while True:
+            if pull is None:
+                pull = loop.create_task(_anext_or_stop(iterator), context=context)
+            if getter is None:
+                getter = asyncio.ensure_future(sink.get())
+            await asyncio.wait({pull, getter}, return_when=asyncio.FIRST_COMPLETED)
+            if getter.done():
+                event = getter.result()
+                getter = None
+                yield event
+                continue
+            item = pull.result()
+            pull = None
+            # Progress queued in the same tick as the result still comes first.
+            while not sink.empty():
+                yield sink.get_nowait()
+            if item is _EXHAUSTED:
+                break
+            yield item
+        while not sink.empty():
+            yield sink.get_nowait()
+    finally:
+        for pending in (pull, getter):
+            if pending is not None and not pending.done():
+                pending.cancel()
+                await asyncio.gather(pending, return_exceptions=True)
+        aclose = getattr(iterator, "aclose", None)
+        if aclose is not None:
+            await aclose()
+
+
+async def _anext_or_stop(iterator: AsyncIterator[Any]) -> Any:
+    """``anext`` that returns a sentinel at exhaustion (a Task cannot raise
+    ``StopAsyncIteration`` cleanly)."""
+    try:
+        return await iterator.__anext__()
+    except StopAsyncIteration:
+        return _EXHAUSTED
 
 
 if TYPE_CHECKING:
@@ -103,8 +223,8 @@ if TYPE_CHECKING:
 
 
 def _bus_bridge(
-    fn: Callable[..., AsyncIterator[TulipEvent]],
-) -> Callable[..., AsyncIterator[TulipEvent]]:
+    fn: Callable[..., AsyncGenerator[TulipEvent, None]],
+) -> Callable[..., AsyncGenerator[TulipEvent, None]]:
     """Decorate an ``async def run(...)`` style generator so each yielded
     :class:`TulipEvent` is also published on the SSE bus.
 
@@ -127,7 +247,7 @@ def _bus_bridge(
         return getattr(config, "name", None) or getattr(config, "agent_id", None)
 
     @functools.wraps(fn)
-    async def wrapper(*args: Any, **kwargs: Any) -> AsyncIterator[TulipEvent]:
+    async def wrapper(*args: Any, **kwargs: Any) -> AsyncGenerator[TulipEvent, None]:
         # Local import — no cost when telemetry is unused.
         from tulip.observability.agent_bridge import (  # noqa: PLC0415
             bridge_tulip_event,
@@ -139,20 +259,27 @@ def _bus_bridge(
         # that cannot be forgotten when a 21st is added.
         agent_name = _agent_label(args[0] if args else None)
 
-        async for raw in fn(*args, **kwargs):
-            # Only stamp what is unattributed. A nested agent's events arrive
-            # already labelled, and relabelling them with the orchestrator's
-            # name would destroy exactly the attribution this exists to give.
-            event = (
-                raw.model_copy(update={"agent_name": agent_name})
-                if agent_name is not None and raw.agent_name is None
-                else raw
-            )
-            try:
-                await bridge_tulip_event(event)
-            except Exception:  # noqa: BLE001 — telemetry never breaks the loop
-                pass
-            yield event
+        # ``aclosing``: when the consumer closes this generator (``aclose()``,
+        # ``break`` inside ``contextlib.aclosing``), the run it drives is
+        # closed right here — its ``finally`` (run bookkeeping, the final
+        # checkpoint) runs before ``aclose()`` returns instead of whenever
+        # the garbage collector finalizes the orphaned inner generator.
+        async with contextlib.aclosing(fn(*args, **kwargs)) as inner:
+            async for raw in inner:
+                # Only stamp what is unattributed. A nested agent's events
+                # arrive already labelled, and relabelling them with the
+                # orchestrator's name would destroy exactly the attribution
+                # this exists to give.
+                event = (
+                    raw.model_copy(update={"agent_name": agent_name})
+                    if agent_name is not None and raw.agent_name is None
+                    else raw
+                )
+                try:
+                    await bridge_tulip_event(event)
+                except Exception:  # noqa: BLE001 — telemetry never breaks the loop
+                    pass
+                yield event
 
     return wrapper
 
@@ -199,6 +326,51 @@ def _normalize_stop_reason(raw: str | None) -> StopReason:
     return "complete"
 
 
+#: Queued by ``_get_model_response`` when an after-model hook discards a
+#: streamed call (``retry``); never yielded to the caller.
+_DISCARDED_CALL = object()
+
+
+def _is_reasoning_only(chunk: Any) -> bool:
+    """A streamed chunk that carries chain-of-thought and nothing else."""
+    return bool(
+        getattr(chunk, "reasoning", None)
+        and not getattr(chunk, "content", None)
+        and not getattr(chunk, "tool_calls", None)
+        and not getattr(chunk, "done", False)
+    )
+
+
+def _without_ephemeral_messages(state: AgentState) -> AgentState:
+    """``state`` minus messages marked turn-only (see tulip.agent.verification)."""
+    if not any(is_ephemeral_message(m) for m in state.messages):
+        return state
+    return state.model_copy(
+        update={"messages": tuple(m for m in state.messages if not is_ephemeral_message(m))}
+    )
+
+
+def _durable(state: AgentState) -> AgentState:
+    """The form of ``state`` that outlives the turn: checkpoints, the result.
+
+    A memory manager's injected block is ephemeral — it is in ``state`` so
+    every model call of the turn sees it, and is dropped here so it is never
+    persisted (the next turn injects a fresh one).
+    """
+    from tulip.memory.manager import without_memory_blocks  # noqa: PLC0415
+
+    state = without_memory_blocks(state)
+    # Turn-only messages (a draft the final-answer verifier rejected, its
+    # feedback) were for the model's next attempt, not the conversation.
+    state = _without_ephemeral_messages(state)
+    # Ephemeral run metadata (``mcp_headers``: a bearer token) never reaches a
+    # checkpoint, whatever put it on the state.
+    scrubbed = scrub_ephemeral_metadata(state.metadata)
+    if len(scrubbed) != len(state.metadata):
+        state = state.model_copy(update={"metadata": scrubbed})
+    return state
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -224,19 +396,21 @@ class AgentRuntimeMixin:
         _hooks: list[Any]
         _hook_orchestrator: HookOrchestrator | None
         _conversation_manager: ConversationManager | None
+        _model_prices: tuple[float, float] | None
         _memory_manager: BaseMemoryManager | None
         _reflector: Reflector | None
         _grounding_evaluator: GroundingEvaluator | None
         _grounding_model: Any
         _auxiliary_model: Any
         _last_run_state: AgentState | None
-        _interrupt_state: AgentState | None
-        _interrupt_prompt: str | None
-        _has_unverified_writes: bool
-        _interrupt_thread_id: str | None
-        _interrupt_metadata: dict[str, Any] | None
+        _interrupts: dict[str | None, PendingInterrupt]
+        _active_runs: dict[int, RunContext]
+        _runs_lock: threading.Lock
         _cancel_signal: threading.Event | None
         _initialized: bool
+        _mcp_attached: bool
+        _mcp_attached_ids: set[int]
+        _mcp_retry_at: dict[int, float]
 
         @property
         def is_cancelled(self) -> bool: ...
@@ -245,39 +419,155 @@ class AgentRuntimeMixin:
 
         def add_tools(self, tools: list[Any]) -> None: ...
 
-    async def _attach_mcp_tools(self) -> None:
-        """Attach the tools of every configured MCP server, once.
+    # =========================================================================
+    # Per-run bookkeeping
+    # =========================================================================
+
+    def _begin_run(
+        self,
+        state: AgentState,
+        prompt: str,
+        thread_id: str | None,
+        metadata: dict[str, Any] | None,
+        *,
+        ephemeral: dict[str, Any] | None = None,
+    ) -> RunContext:
+        """Create and register the context that owns one run.
+
+        ``metadata`` may still carry ephemeral keys (direct callers); they are
+        moved to ``rc.ephemeral`` and merged with ``ephemeral``.
+        """
+        metadata, found = self._split_run_metadata(metadata)
+        rc = RunContext.create(
+            run_id=state.run_id,
+            thread_id=thread_id,
+            prompt=prompt,
+            metadata=metadata,
+            agent_name=self.config.name or self.config.agent_id,
+            termination=self.config.termination,
+            ephemeral={**found, **(ephemeral or {})},
+        )
+        with self._runs_lock:
+            self._active_runs[id(rc)] = rc
+        return rc
+
+    def _ephemeral_metadata_keys(self) -> frozenset[str]:
+        """Run-metadata keys never persisted: ``mcp_headers`` and any custom
+        ``metadata_headers_key`` a configured MCP client reads."""
+        keys: set[str] = set()
+        for client in getattr(self.config, "mcp_servers", None) or ():
+            key = getattr(client, "metadata_headers_key", None)
+            if isinstance(key, str) and key:
+                keys.add(key)
+        return frozenset(keys)
+
+    def _split_run_metadata(
+        self, metadata: dict[str, Any] | None
+    ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+        """``(persisted, ephemeral)`` halves of a run's metadata.
+
+        The ephemeral half (per-run MCP headers — a bearer token) lives on the
+        run's in-memory context only: never on the state, so never in a
+        checkpoint, an event, hook-visible ``run.metadata`` or a result.
+        """
+        return split_ephemeral_metadata(metadata, self._ephemeral_metadata_keys())
+
+    def _end_run(self, rc: RunContext, state: AgentState) -> None:
+        """Publish a run's final state and unregister it (idempotent)."""
+        state = _durable(state)
+        if rc.result_slot is not None:
+            rc.result_slot.state = state
+        # Kept for back-compat and single-run debugging only: with concurrent
+        # runs this is whichever finished last. ``arun`` never reads it.
+        self._last_run_state = state
+        with self._runs_lock:
+            self._active_runs.pop(id(rc), None)
+
+    def _run_cancelled(self, rc: RunContext) -> bool:
+        """This run was cancelled — by thread, or by a cancel-all."""
+        if rc.cancel.is_set():
+            return True
+        legacy = self._cancel_signal
+        return legacy is not None and legacy.is_set()
+
+    def _park_interrupt(self, rc: RunContext, state: AgentState) -> None:
+        """Hold a paused run in memory, keyed strictly by its thread id."""
+        self._interrupts[rc.thread_id] = PendingInterrupt(
+            state=state,
+            prompt=rc.prompt,
+            thread_id=rc.thread_id,
+            metadata=rc.metadata,
+            ephemeral=rc.ephemeral,
+        )
+
+    def _emits_progress(self, calls: list[ToolCall]) -> bool:
+        """Whether any tool in the batch streams progress (``emits_progress``)."""
+        for call in calls:
+            tool_obj = self._tool_registry.get(call.name)
+            if getattr(tool_obj, "emits_progress", False) is True:
+                return True
+        return False
+
+    async def _attach_mcp_tools(self, metadata: dict[str, Any] | None = None) -> None:
+        """Attach the tools of every configured MCP server.
 
         ``AgentConfig.mcp_servers`` holds clients rather than URLs because
-        connecting is async and ``Agent.__init__`` is not. This runs from the
-        first ``run()``, where there is a loop to await on, and is a no-op on
-        every later call.
+        connecting is async and ``Agent.__init__`` is not. This runs from
+        ``run()``, where there is a loop to await on. A server attaches once;
+        later runs skip it.
 
         A server that cannot be reached does not take the whole run down: the
         failure is logged and the agent proceeds with the tools it does have.
         The alternative — refusing to answer at all because an optional tool
         source is down — is the worse default for something wired in as an
-        enhancement.
+        enhancement. The server is retried on a later run, at most every
+        ``client.reconnect_interval`` seconds (default 30), so a server that
+        was down for the first run is not lost for the agent's lifetime.
+
+        ``metadata`` is the run's metadata, which a client's per-run headers
+        (``MCPClient.headers_provider``) may need for the ``tools/list``.
         """
         servers = getattr(self.config, "mcp_servers", None)
         if not servers or getattr(self, "_mcp_attached", False):
             return
-        self._mcp_attached = True
+        attached: set[int] = self._mcp_attached_ids
+        retry_at: dict[int, float] = self._mcp_retry_at
+        now = time.monotonic()
 
         for client in servers:
-            name = type(client).__name__
+            key = id(client)
+            if key in attached or now < retry_at.get(key, 0.0):
+                continue
+            name = getattr(client, "label", None) or type(client).__name__
             try:
-                if not getattr(client, "_connected", True):
-                    await client.connect()
-                schemas = await client.list_tools()
-                tools = client.to_tulip_tools(schemas)
+                loader = getattr(client, "load_tools", None)
+                if callable(loader):
+                    tools = await loader(metadata=metadata)
+                else:
+                    if not getattr(client, "_connected", True):
+                        await client.connect()
+                    schemas = await client.list_tools()
+                    tools = client.to_tulip_tools(schemas)
+            except asyncio.CancelledError:
+                # A transport's anyio cancel scope can leak a CancelledError
+                # that is not a cancellation of this run. Only a pending
+                # cancel request on *this* task means the run is cancelled.
+                task = asyncio.current_task()
+                if task is not None and task.cancelling() > 0:
+                    raise
+                logger.warning("MCP server %s unavailable (connection cancelled); skipping", name)
+                retry_at[key] = now + float(getattr(client, "reconnect_interval", 30.0))
+                continue
             except Exception:  # noqa: BLE001 - see below
                 # Intentionally broad: a server can fail as a connection
                 # error, a protocol error, a timeout, or a malformed
                 # schema, and none of those should decide whether the
                 # agent answers at all.
                 logger.warning("MCP server %s unavailable; skipping", name, exc_info=True)
+                retry_at[key] = now + float(getattr(client, "reconnect_interval", 30.0))
                 continue
+            attached.add(key)
+            retry_at.pop(key, None)
             if tools:
                 self.add_tools(tools)
                 logger.info(
@@ -286,6 +576,7 @@ class AgentRuntimeMixin:
                     name,
                     ", ".join(t.name for t in tools),
                 )
+        self._mcp_attached = all(id(client) in attached for client in servers)
 
     @_bus_bridge
     async def run(
@@ -296,7 +587,7 @@ class AgentRuntimeMixin:
         metadata: dict[str, Any] | None = None,
         model_kwargs: dict[str, Any] | None = None,
         stream_tokens: bool = False,
-    ) -> AsyncIterator[TulipEvent]:
+    ) -> AsyncGenerator[TulipEvent, None]:
         """
         Run the agent with streaming events.
 
@@ -319,15 +610,34 @@ class AgentRuntimeMixin:
             TulipEvent instances for each step
         """
         self._initialize()
-        await self._attach_mcp_tools()
+        # Attaching may list tools with the per-run MCP headers, so it sees
+        # the full metadata; nothing it is given is persisted.
+        await self._attach_mcp_tools(metadata)
 
-        # Publish this run as the parent context for subagents spawned from
-        # tool bodies: links their cancellation to this agent's signal and
-        # gives their usage reports a place to land (folded each iteration).
-        _subagent_ctx = enter_parent_run(self)
+        # From here on the run's metadata is split: per-run secrets
+        # (``mcp_headers``) ride on the in-memory run context only, never on
+        # the state — and so never in a checkpoint, an event or a result.
+        metadata, ephemeral = self._split_run_metadata(metadata)
+
+        # Claim the enclosing ``arun``'s result slot before any await that
+        # could let a nested run of this agent start in the same context.
+        result_slot = claim_result_slot(self)
+
+        # A new user message on a thread supersedes whatever interrupt was
+        # parked for it in memory: the checkpoint this run writes is the
+        # thread's truth from now on, and resume() must not revive the stale
+        # in-memory state over it. (Thread-less runs share one slot and keep
+        # the pre-2.17 behaviour: only a new pause replaces it.)
+        if thread_id is not None:
+            self._interrupts.pop(thread_id, None)
 
         # Create initial state
         state = await self._create_initial_state(prompt, thread_id, metadata)
+
+        # Everything that belongs to THIS run lives on ``rc``, never on the
+        # agent: one Agent instance serves concurrent runs.
+        rc = self._begin_run(state, prompt, thread_id, metadata, ephemeral=ephemeral)
+        rc.result_slot = result_slot
 
         # Track metrics
         started_at = datetime.now(UTC)
@@ -338,18 +648,38 @@ class AgentRuntimeMixin:
         _grounding_evals = 0
         _last_assistant_content: str | None = None
         _last_no_tool_calls = False
+        _verifier_attempts = 0
+        # Hold a call's content chunks until we know they are not a draft the
+        # verifier will send back (``hold_final_answer_tokens``).
+        _hold_tokens = (
+            stream_tokens
+            and self.config.final_answer_verifier is not None
+            and self.config.hold_final_answer_tokens
+        )
+        _held_chunks: list[Any] = []
 
-        # Reset any user-supplied composable termination condition so
-        # time-windowed checks (TimeLimit) start their clock at run start.
-        if self.config.termination is not None:
-            self.config.termination.reset()
+        # The composable termination condition was copied and reset for this
+        # run by ``_begin_run``: TimeLimit's clock starts now, and no other
+        # in-flight run's clock is touched.
+        termination = rc.termination
 
-        # Run hooks: before_invocation
-        state = await self._run_before_invocation_hooks(prompt, state)
+        try:
+            # Run hooks: before_invocation
+            state = await self._run_before_invocation_hooks(prompt, state)
 
-        # Inject long-term memories into the system prompt.
-        if self._memory_manager is not None:
-            state = await self._memory_manager.on_session_start(state)
+            # Inject long-term memories into the system prompt.
+            if self._memory_manager is not None:
+                state = await self._memory_manager.on_session_start(state)
+        except BaseException:
+            self._end_run(rc, state)
+            raise
+
+        # Publish this run as the parent context for subagents spawned from
+        # tool bodies: links their cancellation to THIS run's signal (which
+        # both cancel(thread_id=...) and a cancel-all set) and gives their
+        # usage reports a place to land (folded each iteration). Entered right
+        # before the try whose finally exits it.
+        _subagent_ctx = enter_parent_run(rc.cancel)
 
         try:
             # Main ReAct loop
@@ -383,8 +713,8 @@ class AgentRuntimeMixin:
                         )
                         break
 
-                # Check external cancellation
-                if self.is_cancelled:
+                # Check external cancellation (this run, or cancel-all)
+                if self._run_cancelled(rc):
                     yield TerminateEvent(
                         reason="cancelled",
                         iterations_used=state.iteration,
@@ -398,8 +728,8 @@ class AgentRuntimeMixin:
                 # User-supplied composable termination condition runs first
                 # so MaxIterations(...) | TextMention("DONE") and friends
                 # actually fire before the hard-coded fallbacks.
-                if self.config.termination is not None:
-                    user_stop, user_reason = self.config.termination.check(
+                if termination is not None:
+                    user_stop, user_reason = termination.check(
                         state,
                         last_message=_last_assistant_content or "",
                         no_tool_calls=_last_no_tool_calls,
@@ -527,20 +857,39 @@ class AgentRuntimeMixin:
                 # model call runs as a task and its chunks are drained here, so
                 # they surface while the model is still producing rather than
                 # after it finishes.
+                if state.would_exceed_cost_budget(self.config.max_tokens or 4096):
+                    yield TerminateEvent(
+                        reason="cost_budget",
+                        iterations_used=state.iteration,
+                        final_confidence=state.confidence,
+                        usage=_usage_of(state),
+                        total_tool_calls=len(state.tool_executions),
+                        final_message=_last_assistant_content,
+                    )
+                    break
+
                 if stream_tokens:
                     chunk_queue: asyncio.Queue[Any] = asyncio.Queue()
                     model_task = asyncio.create_task(
-                        self._get_model_response(state, model_kwargs, chunk_queue)
+                        self._get_model_response(state, model_kwargs, chunk_queue, run=rc)
                     )
                     while not model_task.done() or not chunk_queue.empty():
                         try:
                             chunk = await asyncio.wait_for(chunk_queue.get(), timeout=0.05)
                         except TimeoutError:
                             continue
+                        if chunk is _DISCARDED_CALL:
+                            _held_chunks = []
+                            continue
+                        if _hold_tokens and not _is_reasoning_only(chunk):
+                            _held_chunks.append(chunk)
+                            continue
                         yield chunk
                     response, state = await model_task
                 else:
-                    response, state = await self._get_model_response(state, model_kwargs)
+                    response, state = await self._get_model_response(state, model_kwargs, run=rc)
+                for custom in rc.drain():
+                    yield custom
                 prompt_toks = response.usage.get("prompt_tokens", 0)
                 completion_toks = response.usage.get("completion_tokens", 0)
                 cache_creation_toks = response.usage.get("cache_creation_input_tokens", 0)
@@ -591,8 +940,18 @@ class AgentRuntimeMixin:
                         state = state.model_copy(update={"messages": tuple(messages)})
                         _last_no_tool_calls = False
 
+                # A held call that turned out to be a tool step is not a final
+                # answer: release its chunks now, in order.
+                is_final = (
+                    not response.message.tool_calls and self.config.completion_mode != "explicit"
+                )
+                if _held_chunks and not is_final:
+                    for held in _held_chunks:
+                        yield held
+                    _held_chunks = []
+
                 # If still no tool calls — in auto mode we're done, in explicit mode we continue
-                if not response.message.tool_calls and self.config.completion_mode != "explicit":
+                if is_final:
                     # Apply grounding before final response if enabled
                     if (
                         self.config.grounding
@@ -703,6 +1062,24 @@ class AgentRuntimeMixin:
                                 state
                             )
 
+                    # Pluggable final-answer verification: runs on every final
+                    # answer, tool call or not.
+                    if self.config.final_answer_verifier is not None and final_content:
+                        verdict = await self._verify_final_answer(
+                            final_content, state, rc, _verifier_attempts
+                        )
+                        yield verdict
+                        if verdict.replanning:
+                            _verifier_attempts += 1
+                            _held_chunks = []  # the rejected draft is never shown
+                            state = self._queue_verifier_replan(
+                                state, final_content, verdict.feedback or ""
+                            )
+                            continue
+                    for held in _held_chunks:
+                        yield held
+                    _held_chunks = []
+
                     yield TerminateEvent(
                         reason="complete",
                         iterations_used=state.iteration,
@@ -758,8 +1135,10 @@ class AgentRuntimeMixin:
                     )
 
                     tool_event = await self._run_before_tool_hooks(
-                        tool_call.name, tool_call.id, tool_call.arguments
+                        tool_call.name, tool_call.id, tool_call.arguments, run=rc
                     )
+                    for custom in rc.drain():
+                        yield custom
 
                     if tool_event.cancel:
                         cancel_msg = (
@@ -795,6 +1174,10 @@ class AgentRuntimeMixin:
                         continue
 
                     modified_args = tool_event.arguments
+                    # What the tool is called with. ``modified_args`` is what
+                    # is recorded (state, checkpoint, after-hooks); hook
+                    # ``secret_arguments`` ride only on the invocation.
+                    invoke_args = _invocation_arguments(tool_event)
 
                     # Idempotent dedup: if the tool declared idempotent=True
                     # and a prior call in this run used the same arguments,
@@ -853,15 +1236,14 @@ class AgentRuntimeMixin:
                         {
                             "tool_call": tool_call,
                             "arguments": modified_args,
+                            "invoke_arguments": invoke_args,
                             "kind": "execute",
                             "result": None,
                             "execution": None,
                         }
                     )
                     to_execute_indices.append(len(slots) - 1)
-                    to_execute_calls.append(
-                        tool_call.model_copy(update={"arguments": modified_args})
-                    )
+                    to_execute_calls.append(tool_call.model_copy(update={"arguments": invoke_args}))
 
                 # Phase 2 — stream the survivors through the executor.
                 # Constructed after Phase 1 so ``state`` already reflects
@@ -886,15 +1268,29 @@ class AgentRuntimeMixin:
                         iteration=state.iteration,
                         state=state,
                         invocation_metadata=metadata or {},
+                        ephemeral_metadata=rc.ephemeral,
                     )
                     batch_start = time.perf_counter()
                     interrupted_slot_idx: int | None = None
+                    results_stream = self._executor.execute_streaming(
+                        to_execute_calls,
+                        self._tool_registry,
+                        ctx_factory,
+                    )
+                    # Tools that report progress (every MCP tool) need the
+                    # stream merged with their progress, or it would arrive
+                    # only once they had finished.
+                    merged: AsyncIterator[tuple[int, ToolResult] | ToolProgressEvent] = (
+                        _interleave_progress(results_stream, asyncio.Queue())
+                        if self._emits_progress(to_execute_calls)
+                        else results_stream
+                    )
                     try:
-                        async for input_idx, batched_result in self._executor.execute_streaming(
-                            to_execute_calls,
-                            self._tool_registry,
-                            ctx_factory,
-                        ):
+                        async for item in merged:
+                            if isinstance(item, ToolProgressEvent):
+                                yield item
+                                continue
+                            input_idx, batched_result = item
                             slot_idx = to_execute_indices[input_idx]
                             slots[slot_idx]["result"] = batched_result
 
@@ -903,15 +1299,7 @@ class AgentRuntimeMixin:
                                 # tool finishes. Phase 3 will skip its own
                                 # ToolCompleteEvent emission for execute-kind
                                 # slots when in completion mode.
-                                yield ToolCompleteEvent(
-                                    tool_name=batched_result.name,
-                                    tool_call_id=batched_result.tool_call_id,
-                                    result=(
-                                        batched_result.content if batched_result.success else None
-                                    ),
-                                    error=batched_result.error,
-                                    duration_ms=batched_result.duration_ms,
-                                )
+                                yield _complete_event(batched_result)
 
                             # Interrupt detection — break to trigger the
                             # executor's cancellation of in-flight siblings.
@@ -935,6 +1323,13 @@ class AgentRuntimeMixin:
                                     error=str(e),
                                     duration_ms=batch_duration,
                                 )
+                    finally:
+                        if merged is not results_stream:
+                            # Cancels a pull still in flight after an
+                            # interrupt ``break`` — the in-flight siblings
+                            # with it — and closes the executor stream.
+                            with contextlib.suppress(Exception):
+                                await merged.aclose()  # type: ignore[attr-defined]
 
                     # Synthesize "cancelled by sibling interrupt" results
                     # for slots whose tasks were cancelled (the interrupt
@@ -976,24 +1371,13 @@ class AgentRuntimeMixin:
                         tool_results.append(result)
                         state = state.with_tool_execution(slot["execution"])
                         reasoning_step_tools.append(slot["execution"])
-                        yield ToolCompleteEvent(
-                            tool_name=result.name,
-                            tool_call_id=result.tool_call_id,
-                            result=result.content,
-                            duration_ms=0.0,
-                        )
+                        yield _complete_event(result, result=result.content, duration_ms=0.0)
                         continue
                     if kind == "cache":
                         tool_results.append(result)
                         state = state.with_tool_execution(slot["execution"])
                         reasoning_step_tools.append(slot["execution"])
-                        yield ToolCompleteEvent(
-                            tool_name=result.name,
-                            tool_call_id=result.tool_call_id,
-                            result=result.content,
-                            error=result.error,
-                            duration_ms=result.duration_ms,
-                        )
+                        yield _complete_event(result, result=result.content)
                         continue
                     if kind == "batch_cache_ref":
                         # Same-args duplicate of an earlier slot in this same
@@ -1003,12 +1387,12 @@ class AgentRuntimeMixin:
                         # for this call's id.
                         ref_slot = slots[slot["ref_slot"]]
                         ref_result: ToolResult = ref_slot["result"]
-                        result = ToolResult(
-                            tool_call_id=tool_call.id,
-                            name=tool_call.name,
-                            content=ref_result.content,
-                            error=ref_result.error,
-                            duration_ms=0.0,
+                        result = ref_result.model_copy(
+                            update={
+                                "tool_call_id": tool_call.id,
+                                "name": tool_call.name,
+                                "duration_ms": 0.0,
+                            }
                         )
                         batch_cache_execution = ToolExecution(
                             tool_name=result.name,
@@ -1022,13 +1406,7 @@ class AgentRuntimeMixin:
                         tool_results.append(result)
                         state = state.with_tool_execution(batch_cache_execution)
                         reasoning_step_tools.append(batch_cache_execution)
-                        yield ToolCompleteEvent(
-                            tool_name=result.name,
-                            tool_call_id=result.tool_call_id,
-                            result=result.content,
-                            error=result.error,
-                            duration_ms=0.0,
-                        )
+                        yield _complete_event(result, result=result.content, duration_ms=0.0)
                         continue
 
                     # Interrupt marker from ``ask_user``. Sibling calls in
@@ -1043,11 +1421,7 @@ class AgentRuntimeMixin:
                         try:
                             interrupt_data = _json.loads(result.content)
                             if interrupt_data.get("__interrupt__"):
-                                self._last_run_state = state
-                                self._interrupt_state = state
-                                self._interrupt_prompt = prompt
-                                self._interrupt_thread_id = thread_id
-                                self._interrupt_metadata = metadata
+                                self._park_interrupt(rc, state)
                                 # Checkpoint BEFORE yielding: a consumer that
                                 # stops iterating on the interrupt (an HTTP
                                 # layer parking the run) never resumes this
@@ -1055,12 +1429,13 @@ class AgentRuntimeMixin:
                                 # only run at GC — too late if the process
                                 # dies while paused.
                                 if self.config.checkpointer and thread_id:
-                                    await self.config.checkpointer.save(state, thread_id)
+                                    await self.config.checkpointer.save(_durable(state), thread_id)
                                 yield InterruptEvent(
                                     question=interrupt_data.get("question", ""),
                                     options=interrupt_data.get("options"),
                                     fields=interrupt_data.get("fields"),
                                     interrupt_id=result.tool_call_id,
+                                    metadata=interrupt_data.get("metadata") or {},
                                 )
                                 return  # Pause the generator
                         except (ValueError, KeyError):
@@ -1074,7 +1449,7 @@ class AgentRuntimeMixin:
                     if (
                         self.config.max_tool_result_length > 0
                         and result.content
-                        and len(result.content) > self.config.max_tool_result_length
+                        and text_length(result.content) > self.config.max_tool_result_length
                     ):
                         if self.config.tool_result_store is not None:
                             result = self.config.tool_result_store.maybe_offload(
@@ -1083,16 +1458,17 @@ class AgentRuntimeMixin:
                                 iteration=state.iteration,
                             )
                         else:
-                            original_len = len(result.content)
-                            result = ToolResult(
-                                tool_call_id=result.tool_call_id,
-                                name=result.name,
-                                content=(
-                                    result.content[: self.config.max_tool_result_length]
-                                    + f"\n[OUTPUT TRUNCATED — original: {original_len} chars]"
-                                ),
-                                error=result.error,
-                                duration_ms=result.duration_ms,
+                            # Cutting through an embedded image would leave
+                            # corrupt base64, so images go before the cut.
+                            text = strip_images(result.content)
+                            original_len = len(text)
+                            result = result.model_copy(
+                                update={
+                                    "content": (
+                                        text[: self.config.max_tool_result_length]
+                                        + f"\n[OUTPUT TRUNCATED — original: {original_len} chars]"
+                                    )
+                                }
                             )
 
                     # After-hooks run BEFORE the result is folded into state
@@ -1113,7 +1489,9 @@ class AgentRuntimeMixin:
                         result.error,
                         tool_call_id=result.tool_call_id,
                         arguments=modified_args,
+                        run=rc,
                     )
+                    hook_events = rc.drain()
 
                     if after_tool_event.retry:
                         try:
@@ -1123,9 +1501,16 @@ class AgentRuntimeMixin:
                                 iteration=state.iteration,
                                 state=state,
                                 invocation_metadata=metadata or {},
+                                ephemeral_metadata=rc.ephemeral,
                             )
                             [result] = await self._executor.execute(
-                                [tool_call.model_copy(update={"arguments": modified_args})],
+                                [
+                                    tool_call.model_copy(
+                                        update={
+                                            "arguments": slot.get("invoke_arguments", modified_args)
+                                        }
+                                    )
+                                ],
                                 self._tool_registry,
                                 retry_ctx_factory,
                             )
@@ -1162,18 +1547,16 @@ class AgentRuntimeMixin:
                     # still emits here so consumers see events in
                     # tool_call order, carrying the post-hook result.
                     if self.config.tool_event_order == "sequential":
-                        yield ToolCompleteEvent(
-                            tool_name=result.name,
-                            tool_call_id=result.tool_call_id,
-                            result=result.content if result.success else None,
-                            error=result.error,
-                            duration_ms=result.duration_ms,
-                        )
+                        yield _complete_event(result)
+                    # UI-only events the after-hook emitted, right behind the
+                    # call they describe. Never folded into state/messages.
+                    for custom in hook_events:
+                        yield custom
 
                     if result.name in self.config.verify_tools:
-                        self._has_unverified_writes = True
+                        rc.has_unverified_writes = True
                     if result.name in self.config.verification_tools:
-                        self._has_unverified_writes = False
+                        rc.has_unverified_writes = False
 
                 # Add tool results to messages
                 for result in tool_results:
@@ -1239,7 +1622,7 @@ class AgentRuntimeMixin:
                 ):
                     _cp_thread = thread_id or state.run_id
                     await self.config.checkpointer.save(
-                        state,
+                        _durable(state),
                         _cp_thread,
                     )
                     from tulip.observability.emit import (  # noqa: PLC0415
@@ -1274,13 +1657,12 @@ class AgentRuntimeMixin:
         finally:
             # Fold what the last tool batch's children reported (the loop may
             # have exited before its next top-of-iteration fold), THEN stop
-            # being anyone's parent. ``_last_run_state`` below is what
-            # ``arun`` reads its metrics from, so this keeps AgentResult
-            # truthful on every exit path.
+            # being anyone's parent, so the state handed to ``_end_run``
+            # below counts delegated spend on every exit path.
             state = fold_subagent_usage(state)
             exit_parent_run(_subagent_ctx)
 
-            # Clear cancel signal
+            # Consume a pending cancel-all so it does not leak into the next run
             if self._cancel_signal is not None:
                 self._cancel_signal.clear()
 
@@ -1294,8 +1676,9 @@ class AgentRuntimeMixin:
                 if final_msg:
                     state = state.with_metadata(self.config.output_key, final_msg)
 
-            # Store final state for run_sync access
-            self._last_run_state = state
+            # Hand the final state to THIS run's arun (never read back off
+            # the shared agent), then release the run's bookkeeping.
+            self._end_run(rc, state)
 
             # Run hooks: after_invocation
             _duration_ms = (datetime.now(UTC) - started_at).total_seconds() * 1000  # noqa: F841
@@ -1303,11 +1686,13 @@ class AgentRuntimeMixin:
 
             # Extract and persist long-term memories from this session.
             if self._memory_manager is not None:
-                await self._memory_manager.on_session_end(state)
+                # Without turn-only messages: a rejected draft and the
+                # verifier's note are not facts about the user.
+                await self._memory_manager.on_session_end(_without_ephemeral_messages(state))
 
             # Final checkpoint
             if self.config.checkpointer and thread_id:
-                await self.config.checkpointer.save(state, thread_id)
+                await self.config.checkpointer.save(_durable(state), thread_id)
                 from tulip.observability.emit import (  # noqa: PLC0415
                     EV_CHECKPOINT_SAVED,
                     emit,
@@ -1329,14 +1714,19 @@ class AgentRuntimeMixin:
         thread_id: str | None,
         metadata: dict[str, Any] | None,
         model_kwargs: dict[str, Any] | None = None,
-    ) -> AsyncIterator[TulipEvent]:
-        """Continue execution from a given state (used for resume)."""
-        self._initialize()
+        _run: RunContext | None = None,
+    ) -> AsyncGenerator[TulipEvent, None]:
+        """Continue execution from a given state (used for resume).
 
-        # Same parent-context contract as run(): a resumed run can spawn
-        # subagents too, and their usage and cancellation must behave
-        # identically to the first pass.
-        _subagent_ctx = enter_parent_run(self)
+        A resumed segment continues the SAME turn: iteration, budgets and the
+        tool-loop window carry on from the paused state. ``_run`` is the run
+        context ``resume()`` already registered; without one (direct callers)
+        a fresh one is created for this segment.
+        """
+        self._initialize()
+        rc = _run if _run is not None else self._begin_run(state, prompt, thread_id, metadata)
+        # Tools get the persisted half; ephemeral keys ride on ``rc``.
+        metadata, _ = self._split_run_metadata(metadata)
 
         started_at = datetime.now(UTC)
         _total_tokens = 0
@@ -1346,6 +1736,7 @@ class AgentRuntimeMixin:
         _grounding_evals = 0
         _last_assistant_content: str | None = None
         _last_no_tool_calls = False
+        _verifier_attempts = 0
 
         # Extract last assistant content from state
         for msg in reversed(state.messages):
@@ -1353,9 +1744,14 @@ class AgentRuntimeMixin:
                 _last_assistant_content = msg.content
                 break
 
-        # Reset user-supplied composable termination state; resume = fresh clock.
-        if self.config.termination is not None:
-            self.config.termination.reset()
+        # The run's own copy of the termination condition, reset at
+        # ``_begin_run``: resume = fresh clock, for this run only.
+        termination = rc.termination
+
+        # Same parent-context contract as run(): a resumed run can spawn
+        # subagents too, and their usage and cancellation must behave
+        # identically to the first pass.
+        _subagent_ctx = enter_parent_run(rc.cancel)
 
         try:
             _open_iteration: int | None = None
@@ -1387,8 +1783,19 @@ class AgentRuntimeMixin:
                         )
                         break
 
-                if self.config.termination is not None:
-                    user_stop, user_reason = self.config.termination.check(
+                if self._run_cancelled(rc):
+                    yield TerminateEvent(
+                        reason="cancelled",
+                        iterations_used=state.iteration,
+                        final_confidence=state.confidence,
+                        usage=_usage_of(state),
+                        total_tool_calls=len(state.tool_executions),
+                        final_message="Agent cancelled by external signal.",
+                    )
+                    break
+
+                if termination is not None:
+                    user_stop, user_reason = termination.check(
                         state,
                         last_message=_last_assistant_content or "",
                         no_tool_calls=_last_no_tool_calls,
@@ -1417,7 +1824,20 @@ class AgentRuntimeMixin:
                     break
 
                 state = state.next_iteration()
-                response, state = await self._get_model_response(state, model_kwargs)
+                if state.would_exceed_cost_budget(self.config.max_tokens or 4096):
+                    yield TerminateEvent(
+                        reason="cost_budget",
+                        iterations_used=state.iteration,
+                        final_confidence=state.confidence,
+                        usage=_usage_of(state),
+                        total_tool_calls=len(state.tool_executions),
+                        final_message=_last_assistant_content,
+                    )
+                    break
+
+                response, state = await self._get_model_response(state, model_kwargs, run=rc)
+                for custom in rc.drain():
+                    yield custom
                 prompt_toks = response.usage.get("prompt_tokens", 0)
                 completion_toks = response.usage.get("completion_tokens", 0)
                 cache_creation_toks = response.usage.get("cache_creation_input_tokens", 0)
@@ -1439,6 +1859,17 @@ class AgentRuntimeMixin:
                 )
 
                 if not response.message.tool_calls and self.config.completion_mode != "explicit":
+                    if self.config.final_answer_verifier is not None and response.message.content:
+                        verdict = await self._verify_final_answer(
+                            response.message.content, state, rc, _verifier_attempts
+                        )
+                        yield verdict
+                        if verdict.replanning:
+                            _verifier_attempts += 1
+                            state = self._queue_verifier_replan(
+                                state, response.message.content, verdict.feedback or ""
+                            )
+                            continue
                     yield TerminateEvent(
                         reason="complete",
                         iterations_used=state.iteration,
@@ -1465,7 +1896,11 @@ class AgentRuntimeMixin:
                     # stopped firing the moment a run was answered — observed
                     # as a playbook tracker reporting a step "skipped" while
                     # the step's tool visibly ran in the same trace.
-                    tool_event = await self._run_before_tool_hooks(tc.name, tc.id, tc.arguments)
+                    tool_event = await self._run_before_tool_hooks(
+                        tc.name, tc.id, tc.arguments, run=rc
+                    )
+                    for custom in rc.drain():
+                        yield custom
                     if tool_event.cancel:
                         cancel_msg = (
                             tool_event.cancel
@@ -1488,15 +1923,12 @@ class AgentRuntimeMixin:
                             )
                         )
                         state = state.with_message(Message.tool(result))
-                        yield ToolCompleteEvent(
-                            tool_name=result.name,
-                            tool_call_id=result.tool_call_id,
-                            result=result.content,
-                            error=None,
-                            duration_ms=0.0,
+                        yield _complete_event(
+                            result, result=result.content, error=None, duration_ms=0.0
                         )
                         continue
                     modified_args = tool_event.arguments
+                    invoke_args = _invocation_arguments(tool_event)
 
                     start_time = time.perf_counter()
                     try:
@@ -1506,27 +1938,41 @@ class AgentRuntimeMixin:
                             iteration=state.iteration,
                             state=state,
                             invocation_metadata=metadata or {},
+                            ephemeral_metadata=rc.ephemeral,
                         )
-                        [result] = await self._executor.execute(
-                            [tc.model_copy(update={"arguments": modified_args})],
-                            self._tool_registry,
-                            ctx_factory,
-                        )
+                        call = tc.model_copy(update={"arguments": invoke_args})
+                        if self._emits_progress([call]):
+                            # Same as the main loop: merge the tool's progress
+                            # into the stream so a resumed turn reports it live.
+                            streamed: ToolResult | None = None
+                            async for item in _interleave_progress(
+                                self._executor.execute_streaming(
+                                    [call], self._tool_registry, ctx_factory
+                                ),
+                                asyncio.Queue(),
+                            ):
+                                if isinstance(item, ToolProgressEvent):
+                                    yield item
+                                else:
+                                    streamed = item[1]
+                            if streamed is None:  # pragma: no cover - executor contract
+                                raise RuntimeError(f"executor returned no result for {call.name}")
+                            result = streamed
+                        else:
+                            [result] = await self._executor.execute(
+                                [call], self._tool_registry, ctx_factory
+                            )
                     except Exception as e:  # noqa: BLE001 — catches tool errors and InterruptException; branched below
                         from tulip.core.interrupt import InterruptException
 
                         if isinstance(e, InterruptException):
-                            self._last_run_state = state
-                            self._interrupt_state = state
-                            self._interrupt_prompt = prompt
-                            self._interrupt_thread_id = thread_id
-                            self._interrupt_metadata = metadata
+                            self._park_interrupt(rc, state)
                             # Checkpoint BEFORE yielding — same rationale as
                             # the run loop's interrupt site: a consumer that
                             # parks on the interrupt never drives this
                             # generator to its finally.
                             if self.config.checkpointer and thread_id:
-                                await self.config.checkpointer.save(state, thread_id)
+                                await self.config.checkpointer.save(_durable(state), thread_id)
                             payload = e.value.payload if hasattr(e, "value") else {}
                             question = (
                                 payload.get("question", str(payload))
@@ -1569,18 +2015,15 @@ class AgentRuntimeMixin:
                         except (ValueError, KeyError):
                             interrupt_data = None
                         if interrupt_data and interrupt_data.get("__interrupt__"):
-                            self._last_run_state = state
-                            self._interrupt_state = state
-                            self._interrupt_prompt = prompt
-                            self._interrupt_thread_id = thread_id
-                            self._interrupt_metadata = metadata
+                            self._park_interrupt(rc, state)
                             if self.config.checkpointer and thread_id:
-                                await self.config.checkpointer.save(state, thread_id)
+                                await self.config.checkpointer.save(_durable(state), thread_id)
                             yield InterruptEvent(
                                 question=interrupt_data.get("question", ""),
                                 options=interrupt_data.get("options"),
                                 fields=interrupt_data.get("fields"),
                                 interrupt_id=result.tool_call_id,
+                                metadata=interrupt_data.get("metadata") or {},
                             )
                             return
 
@@ -1590,7 +2033,9 @@ class AgentRuntimeMixin:
                         result.error,
                         tool_call_id=result.tool_call_id,
                         arguments=modified_args,
+                        run=rc,
                     )
+                    hook_events = rc.drain()
                     if after_tool_event.retry:
                         try:
                             retry_ctx_factory = ToolContextFactory(
@@ -1599,9 +2044,10 @@ class AgentRuntimeMixin:
                                 iteration=state.iteration,
                                 state=state,
                                 invocation_metadata=metadata or {},
+                                ephemeral_metadata=rc.ephemeral,
                             )
                             [result] = await self._executor.execute(
-                                [tc.model_copy(update={"arguments": modified_args})],
+                                [tc.model_copy(update={"arguments": invoke_args})],
                                 self._tool_registry,
                                 retry_ctx_factory,
                             )
@@ -1628,13 +2074,9 @@ class AgentRuntimeMixin:
                     )
                     state = state.with_message(Message.tool(result))
 
-                    yield ToolCompleteEvent(
-                        tool_name=result.name,
-                        tool_call_id=result.tool_call_id,
-                        result=result.content if result.success else None,
-                        error=result.error,
-                        duration_ms=result.duration_ms,
-                    )
+                    yield _complete_event(result)
+                    for custom in hook_events:
+                        yield custom
 
             # The loop is done; close whichever iteration it left open.
             if _open_iteration is not None:
@@ -1646,13 +2088,15 @@ class AgentRuntimeMixin:
             state = fold_subagent_usage(state)
             exit_parent_run(_subagent_ctx)
 
-            self._last_run_state = state
+            if self._cancel_signal is not None:
+                self._cancel_signal.clear()
+            self._end_run(rc, state)
 
             # Final checkpoint — mirrors run(): a resumed run must stay as
             # durable as the original one (a second pause, or completion,
             # is persisted too — resume never downgrades durability).
             if self.config.checkpointer and thread_id:
-                await self.config.checkpointer.save(state, thread_id)
+                await self.config.checkpointer.save(_durable(state), thread_id)
                 from tulip.observability.emit import (  # noqa: PLC0415
                     EV_CHECKPOINT_SAVED,
                     emit,
@@ -1666,13 +2110,44 @@ class AgentRuntimeMixin:
                     trigger="final",
                 )
 
+    def _spend_fields(self) -> dict[str, Any]:
+        """The state fields that price a run and cap its spend."""
+        prices = self._model_prices
+        return {
+            "cost_budget_usd": self.config.max_cost_usd,
+            "input_price_per_mtok": prices[0] if prices else None,
+            "output_price_per_mtok": prices[1] if prices else None,
+        }
+
     async def _create_initial_state(
         self,
         prompt: str,
         thread_id: str | None,
         metadata: dict[str, Any] | None,
     ) -> AgentState:
-        """Create initial agent state."""
+        """Create the state a new run (a new user turn) starts from.
+
+        With a checkpointed thread this is a NEW TURN on an existing
+        conversation, which is not the same thing as resuming a paused one
+        (``resume()`` → ``_run_from_state`` continues the paused turn as-is).
+        A new turn keeps the conversation — messages and provider continuation
+        state — and starts everything that is per-turn afresh: the iteration
+        counter and budgets, the tool-loop window, confidence, the turn's tool
+        executions (which also scope ``@tool(idempotent=True)`` reuse), and a
+        new ``run_id``. The new run's ``metadata`` is applied (merged over the
+        thread's, new keys winning) and a callable ``system_prompt`` is
+        re-evaluated against it.
+
+        Before 2.17 the loaded state was continued verbatim: the iteration
+        counter kept climbing across turns (``max_iterations=3`` ended every
+        turn from the third on with ``max_iterations``), tool-loop detection
+        counted earlier turns, and the first turn's metadata and system prompt
+        were frozen for the life of the thread.
+        """
+        # Defense in depth: whoever calls this, ephemeral keys never land on
+        # the state (``run()`` has already split them off).
+        metadata, _ = self._split_run_metadata(metadata)
+
         # Try to load from checkpoint
         if self.config.checkpointer and thread_id:
             existing = await self.config.checkpointer.load(thread_id)
@@ -1688,12 +2163,18 @@ class AgentRuntimeMixin:
                     iteration=existing.iteration,
                     backend=type(self.config.checkpointer).__name__,
                 )
-                # Add new user message and continue
-                resumed: AgentState = existing.with_message(Message.user(prompt))
-                return resumed
+                return self._new_turn_state(existing, prompt, metadata)
 
         # Create fresh state
-        state = AgentState(
+        state = self._fresh_turn_state(metadata or {})
+        state = state.with_message(Message.system(self._resolve_system_prompt(prompt, metadata)))
+        state = state.with_message(Message.user(prompt))
+
+        return state
+
+    def _fresh_turn_state(self, metadata: dict[str, Any]) -> AgentState:
+        """An empty state carrying this agent's per-turn limits."""
+        return AgentState(
             agent_id=self.config.agent_id,
             max_iterations=self.config.max_iterations,
             confidence_threshold=(
@@ -1702,11 +2183,40 @@ class AgentRuntimeMixin:
             tool_loop_threshold=self.config.tool_loop_threshold,
             terminal_tools=frozenset(self.config.terminal_tools),
             token_budget=self.config.token_budget,
+            **self._spend_fields(),
             completion_mode=self.config.completion_mode,
-            metadata=metadata or {},
+            metadata=metadata,
         )
 
-        # Resolve system prompt (string or callable)
+    def _new_turn_state(
+        self,
+        existing: AgentState,
+        prompt: str,
+        metadata: dict[str, Any] | None,
+    ) -> AgentState:
+        """Start a new turn on a loaded thread (see ``_create_initial_state``)."""
+        # Scrubbed again: a checkpoint written before ephemeral metadata was
+        # split off may still carry a token; this turn does not re-persist it.
+        merged_metadata = scrub_ephemeral_metadata(
+            {**existing.metadata, **(metadata or {})}, self._ephemeral_metadata_keys()
+        )
+        state = self._fresh_turn_state(merged_metadata).model_copy(
+            update={"provider_state": existing.provider_state}
+        )
+        messages = list(existing.messages)
+        # Re-evaluate the system prompt for this turn: a callable prompt sees
+        # the new metadata, and a changed static prompt takes effect. Only the
+        # leading system message is the agent's prompt; anything else (memory
+        # blocks, runtime notes) is conversation and is kept as-is.
+        system_prompt = self._resolve_system_prompt(prompt, merged_metadata)
+        if messages and messages[0].role == Role.SYSTEM:
+            messages[0] = Message.system(system_prompt)
+        messages.append(Message.user(prompt))
+        new_turn: AgentState = state.model_copy(update={"messages": tuple(messages)})
+        return new_turn
+
+    def _resolve_system_prompt(self, prompt: str, metadata: dict[str, Any] | None) -> str:
+        """The system prompt text for a turn (callable prompts evaluated)."""
         prompt_value = self.config.system_prompt
         if callable(prompt_value):
             prompt_value = prompt_value({"prompt": prompt, "metadata": metadata or {}})
@@ -1729,11 +2239,7 @@ class AgentRuntimeMixin:
         from tulip.tools.tool_search import deferred_catalog_note
 
         prompt_str += deferred_catalog_note(self._tool_registry)
-
-        state = state.with_message(Message.system(prompt_str))
-        state = state.with_message(Message.user(prompt))
-
-        return state
+        return prompt_str
 
     async def _get_final_state(
         self,
@@ -1992,6 +2498,7 @@ class AgentRuntimeMixin:
         state: AgentState,
         model_kwargs: dict[str, Any] | None = None,
         chunk_queue: asyncio.Queue[Any] | None = None,
+        run: RunContext | None = None,
     ) -> tuple[ModelResponse, AgentState]:
         """Get a response from the model.
 
@@ -2032,7 +2539,7 @@ class AgentRuntimeMixin:
         tool_schemas = self._tool_registry.to_openai_schemas()
 
         # Pre-model hooks: allow hooks to modify messages before model call
-        messages = await self._run_before_model_hooks(messages, tool_schemas or None)
+        messages = await self._run_before_model_hooks(messages, tool_schemas or None, run=run)
 
         # When ``output_schema`` is set AND the provider ships native
         # structured output (OpenAI's ``response_format`` shape), pass
@@ -2095,9 +2602,24 @@ class AgentRuntimeMixin:
                 response = await self._model.complete(**complete_kwargs)
 
             # Post-model hooks: event.retry = True to re-call
-            after_event = await self._run_after_model_hooks(response, messages)
+            after_event = await self._run_after_model_hooks(response, messages, run=run)
 
             if after_event.retry:
+                if chunk_queue is not None:
+                    # Tell the loop this call's streamed chunks were discarded,
+                    # so held chunks are dropped rather than released.
+                    await chunk_queue.put(_DISCARDED_CALL)
+                feedback = getattr(after_event, "retry_feedback", None)
+                if isinstance(feedback, str) and feedback:
+                    # For the re-call only: ``messages`` is this call's local
+                    # list, never written back to state.
+                    messages = [
+                        *messages,
+                        Message.user(
+                            "[Retry feedback — automated, not from the user] "
+                            f"Your previous reply was discarded: {feedback}"
+                        ),
+                    ]
                 continue  # Retry model call
             response = after_event.response
             break
@@ -2189,6 +2711,77 @@ class AgentRuntimeMixin:
             duration_ms=0.0,
         )
 
+    async def _verify_final_answer(
+        self,
+        draft: str,
+        state: AgentState,
+        rc: RunContext,
+        attempt: int,
+    ) -> FinalAnswerVerificationEvent:
+        """Run ``config.final_answer_verifier`` on ``draft``; never raises."""
+        verifier = self.config.final_answer_verifier
+        max_replans = self.config.final_answer_verifier_max_replans
+        if verifier is None:
+            return FinalAnswerVerificationEvent(passed=True, attempt=attempt)
+        ctx = FinalAnswerContext(
+            run=rc.info,
+            prompt=rc.prompt,
+            messages=tuple(state.messages),
+            tool_executions=tuple(state.tool_executions),
+            attempt=attempt,
+            max_replans=max_replans,
+        )
+        try:
+            feedback = await verifier(draft, ctx)
+        except Exception as exc:  # noqa: BLE001 — a broken verifier must not kill the turn
+            logger.warning("final_answer_verifier raised; accepting the draft", exc_info=True)
+            return FinalAnswerVerificationEvent(
+                passed=False, attempt=attempt, error=f"{type(exc).__name__}: {exc}"
+            )
+        if not feedback:
+            return FinalAnswerVerificationEvent(passed=True, attempt=attempt)
+        return FinalAnswerVerificationEvent(
+            passed=False,
+            attempt=attempt,
+            feedback=str(feedback),
+            replanning=attempt < max_replans,
+        )
+
+    @staticmethod
+    def _queue_verifier_replan(state: AgentState, draft: str, feedback: str) -> AgentState:
+        """Mark the rejected draft turn-only and append the feedback (turn-only too)."""
+        messages = list(state.messages)
+        last = messages[-1] if messages else None
+        if (
+            last is not None
+            and last.role == Role.ASSISTANT
+            and not last.tool_calls
+            and (last.content or "") == draft
+        ):
+            messages[-1] = mark_ephemeral(last, "rejected_draft")
+        else:
+            # The draft came from the empty-content summary call and is not in
+            # state yet: add it so the model sees what it is revising.
+            messages.append(mark_ephemeral(Message.assistant(draft), "rejected_draft"))
+        # A user-role note, not a system message: conversation managers hoist
+        # system messages to the front and several adapters treat a mid-run
+        # system message as the system prompt, either of which would leave the
+        # draft as the last (prefill) turn. It is ephemeral, so it never reads
+        # as something the user said once the turn is over.
+        messages.append(
+            mark_ephemeral(
+                Message.user(
+                    "[Answer check — automated, not from the user] Your previous "
+                    "reply was not sent. Problem:\n"
+                    f"{feedback}\n\n"
+                    "Write a corrected reply to the user's last message. You may call "
+                    "tools if you need more information."
+                ),
+                "verifier_feedback",
+            )
+        )
+        return state.model_copy(update={"messages": tuple(messages)})
+
     async def _structure_output(
         self,
         state: AgentState,
@@ -2225,6 +2818,13 @@ class AgentRuntimeMixin:
 
         response_format = build_response_format(schema, strict=self.config.output_schema_strict)
 
+        # The repair exchange is sent to the model but never written to the
+        # returned state: the "[Schema Repair]" prompts and the invalid
+        # attempts are not part of the conversation, and the result state
+        # (what a caller persists or continues from) must not carry them.
+        # Only the calls' token usage is recorded, so the run is metered.
+        repair_messages: list[Message] = list(state.messages)
+
         for _retry in range(self.config.output_schema_retries):
             error_detail = format_validation_errors(last_validation_errors)
             repair_prompt = (
@@ -2234,8 +2834,8 @@ class AgentRuntimeMixin:
                 "Return ONLY a valid JSON object that matches the schema. "
                 "Do not wrap it in markdown fences. Do not add commentary."
             )
-            state = state.with_message(Message.system(repair_prompt))
-            messages = self._validate_messages(list(state.messages))
+            repair_messages.append(Message.system(repair_prompt))
+            messages = self._validate_messages(list(repair_messages))
 
             try:
                 response = await self._model.complete(
@@ -2255,7 +2855,14 @@ class AgentRuntimeMixin:
                 )
 
             new_message = response.message.content or ""
-            state = state.with_message(response.message)
+            repair_messages.append(response.message)
+            usage = response.usage or {}
+            state = state.with_token_usage(
+                usage.get("prompt_tokens", 0),
+                usage.get("completion_tokens", 0),
+                cache_creation_tokens=usage.get("cache_creation_input_tokens", 0),
+                cache_read_tokens=usage.get("cache_read_input_tokens", 0),
+            )
 
             attempt = parse_structured(new_message, schema, strict=False)
             if attempt.success:
@@ -2533,26 +3140,33 @@ class AgentRuntimeMixin:
         self,
         messages: list[Any],
         tools: list[dict[str, Any]] | None,
+        *,
+        run: RunContext | None = None,
     ) -> list[Any]:
-        return await self._orch().run_before_model(messages, tools)
+        return await self._orch().run_before_model(messages, tools, run=run)
 
     async def _run_after_model_hooks(
         self,
         response: Any,
         messages: list[Any],
+        *,
+        run: RunContext | None = None,
     ) -> Any:
-        return await self._orch().run_after_model(response, messages)
+        return await self._orch().run_after_model(response, messages, run=run)
 
     async def _run_before_tool_hooks(
         self,
         tool_name: str,
         tool_call_id: str,
         arguments: dict[str, Any],
+        *,
+        run: RunContext | None = None,
     ) -> Any:
         return await self._orch().run_before_tool(
             tool_name,
             tool_call_id,
             arguments,
+            run=run,
         )
 
     async def _run_after_tool_hooks(
@@ -2563,6 +3177,7 @@ class AgentRuntimeMixin:
         *,
         tool_call_id: str = "",
         arguments: dict[str, Any] | None = None,
+        run: RunContext | None = None,
     ) -> Any:
         return await self._orch().run_after_tool(
             tool_name,
@@ -2570,6 +3185,7 @@ class AgentRuntimeMixin:
             error,
             tool_call_id=tool_call_id,
             arguments=arguments,
+            run=run,
         )
 
     # Properties for easy access

@@ -1,11 +1,14 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """Event types for streaming and hooks - 100% Pydantic."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from types import MappingProxyType
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -85,11 +88,40 @@ class ToolCompleteEvent(TulipEvent):
     result: str | None = None
     error: str | None = None
     duration_ms: float | None = None
+    #: Machine-readable output the tool returned alongside its text — an MCP
+    #: server's ``structuredContent``, or ``ToolOutput.structured_content``
+    #: from a local tool. The model reads ``result``; a UI that renders a
+    #: widget from the data reads this. Present on failures too, so an error
+    #: payload is not lost. ``None`` when the tool returned plain text.
+    structured_content: dict[str, Any] | None = None
+    #: Non-text content the tool returned (images, audio, embedded
+    #: resources, resource links), each a JSON-mode dict in the tool
+    #: protocol's own shape (for MCP: ``{"type": "image", "data": ...,
+    #: "mimeType": ...}``). ``None`` when there was none.
+    content_blocks: list[dict[str, Any]] | None = None
 
     @property
     def success(self) -> bool:
         """Whether the tool execution succeeded."""
         return self.error is None
+
+
+class ToolProgressEvent(TulipEvent):
+    """A running tool reported progress.
+
+    Emitted between the tool's :class:`ToolStartEvent` and its
+    :class:`ToolCompleteEvent` — for an MCP tool, once per
+    ``notifications/progress`` the server sends. Only tools that declare
+    ``emits_progress=True`` (every MCP tool does) are streamed live; a tool
+    calls :func:`tulip.tools.context.report_progress` to send one.
+    """
+
+    event_type: Literal["tool_progress"] = "tool_progress"
+    tool_name: str
+    tool_call_id: str
+    progress: float
+    total: float | None = None
+    message: str | None = None
 
 
 class ReflectEvent(TulipEvent):
@@ -111,6 +143,25 @@ class GroundingEvent(TulipEvent):
     claims_evaluated: int
     ungrounded_claims: list[str] = Field(default_factory=list)
     requires_replan: bool = False
+
+
+class FinalAnswerVerificationEvent(TulipEvent):
+    """``AgentConfig.final_answer_verifier`` judged a final-answer draft.
+
+    ``passed`` is the verdict. On a rejection ``feedback`` is what the
+    verifier returned and ``replanning`` says whether the model is called
+    again with it (False once ``max_replans`` are spent — the draft is then
+    returned as the answer anyway). ``error`` is set when the verifier raised;
+    the draft is then accepted (the verifier fails open) and ``passed`` is
+    False. ``attempt`` is 0 for the first draft.
+    """
+
+    event_type: Literal["final_answer_verification"] = "final_answer_verification"
+    passed: bool
+    attempt: int
+    replanning: bool = False
+    feedback: str | None = None
+    error: str | None = None
 
 
 class TerminateEvent(TulipEvent):
@@ -158,6 +209,74 @@ class InterruptEvent(TulipEvent):
     fields: list[dict[str, Any]] | None = None
     interrupt_id: str
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class CustomEvent(TulipEvent):
+    """An application-defined event emitted from a hook for the UI only.
+
+    A hook that wants to tell the client something the model must not see
+    (render a hotel carousel, show a progress chip) calls
+    ``event.emit(CustomEvent(name="hotel_list", data={...}))`` on the hook
+    event it was handed. The runtime yields it from ``Agent.run()`` right
+    after the hook returns, in order with the surrounding tool events. It is
+    never added to ``state.messages``, never shown to the model, and never
+    checkpointed — it exists only on the event stream.
+    """
+
+    event_type: Literal["custom"] = "custom"
+    #: Application-chosen discriminator (``"hotel_list"``, ``"progress"``).
+    name: str
+    #: JSON-serialisable payload. Kept a plain dict so every transport
+    #: (SSE, websockets, A2A) can ship it with ``model_dump(mode="json")``.
+    data: dict[str, Any] = Field(default_factory=dict)
+    #: Filled by the runtime from the hook event's run context, so a consumer
+    #: multiplexing several runs can route the event without bookkeeping.
+    run_id: str | None = None
+    thread_id: str | None = None
+    #: The tool call the emitting hook was handling, when there was one.
+    tool_call_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RunInfo:
+    """Read-only identity of the run a hook is observing.
+
+    Attached to every hook event as ``event.run`` (``None`` only when a hook
+    event is constructed outside a run, e.g. in a unit test). A single Agent
+    instance serves many concurrent runs; this is how a hook tells them apart
+    without reaching for globals or context variables.
+
+    Attributes:
+        run_id: ``AgentState.run_id`` of the run (a new id per user turn;
+            a resumed run keeps the id of the turn it continues).
+        thread_id: The conversation the run belongs to (``None`` when the
+            caller passed none).
+        metadata: The run's invocation metadata, exactly what tools see as
+            ``ctx.invocation_metadata``. A read-only mapping.
+        agent_name: ``AgentConfig.name`` (or ``agent_id``), when set.
+    """
+
+    run_id: str
+    thread_id: str | None = None
+    metadata: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
+    agent_name: str | None = None
+
+    @classmethod
+    def build(
+        cls,
+        *,
+        run_id: str,
+        thread_id: str | None,
+        metadata: Mapping[str, Any] | None,
+        agent_name: str | None = None,
+    ) -> RunInfo:
+        """Construct with ``metadata`` frozen into a read-only snapshot."""
+        return cls(
+            run_id=run_id,
+            thread_id=thread_id,
+            metadata=MappingProxyType(dict(metadata or {})),
+            agent_name=agent_name,
+        )
 
 
 # =============================================================================
@@ -323,7 +442,14 @@ class AfterToolCallEvent(HookEvent):
 # =============================================================================
 
 LoopEvent = (
-    ThinkEvent | ToolStartEvent | ToolCompleteEvent | ReflectEvent | GroundingEvent | TerminateEvent
+    ThinkEvent
+    | ToolStartEvent
+    | ToolProgressEvent
+    | ToolCompleteEvent
+    | ReflectEvent
+    | GroundingEvent
+    | FinalAnswerVerificationEvent
+    | TerminateEvent
 )
 AgentEvent = LoopEvent | SpecialistStartEvent | SpecialistCompleteEvent | OrchestratorDecisionEvent
 AllEvents = (

@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """Skill data model — AgentSkills.io compliant.
@@ -203,16 +203,16 @@ class Skill:
         elif isinstance(allowed_tools_raw, list):
             allowed_tools = [str(t) for t in allowed_tools_raw]
 
-        # `required-probes` in optic's shape: a list of {name, match} mappings.
+        # `required-probes`: a list of {name, match} mappings.
         # Malformed entries are DROPPED rather than raising — a skill is a
         # document an operations person edits, and refusing to load the whole
         # thing because one probe lost its `match` would take the instructions
         # away too. A dropped probe is one fewer obligation; a failed load is no
         # procedure at all.
         probes: list[RequiredProbe] = []
-        # Both spellings, because optic's own files mix them: `allowed-tools`
-        # is hyphenated and `required_probes` is not. Accepting one would
-        # silently drop every probe in the corpus this was ported from.
+        # Both spellings, because skill files mix them: `allowed-tools` is
+        # hyphenated and `required_probes` often is not. Accepting one would
+        # silently drop every probe written the other way.
         declared = frontmatter.get("required_probes") or frontmatter.get("required-probes") or ()
         for entry in declared:
             if not isinstance(entry, dict):

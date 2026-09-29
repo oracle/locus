@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """
@@ -31,13 +31,17 @@ Usage:
 """
 
 from tulip.core.config import TulipSettings
-from tulip.core.errors import TulipError
+from tulip.core.errors import ApprovalPendingError, TulipError
 from tulip.core.events import (
+    CustomEvent,
+    FinalAnswerVerificationEvent,
     GroundingEvent,
     ReflectEvent,
+    RunInfo,
     TerminateEvent,
     ThinkEvent,
     ToolCompleteEvent,
+    ToolProgressEvent,
     ToolStartEvent,
     TulipEvent,
 )
@@ -135,23 +139,23 @@ _LAZY_IMPORTS = {
     "KnowledgeRow": ("tulip.deepagent", "KnowledgeRow"),
     "ItemRef": ("tulip.deepagent", "ItemRef"),
     "Grounding": ("tulip.deepagent", "Grounding"),
-    # Security — evidence-grounded findings (the cybersecurity layer).
-    "Evidence": ("tulip.security", "Evidence"),
-    "Indicator": ("tulip.security", "Indicator"),
-    "Severity": ("tulip.security", "Severity"),
-    "IndicatorType": ("tulip.security", "IndicatorType"),
-    "FingerprintFinding": ("tulip.security", "FingerprintFinding"),
-    "FingerprintVerdict": ("tulip.security", "FingerprintVerdict"),
-    "FingerprintClassifier": ("tulip.security", "FingerprintClassifier"),
-    "Abstention": ("tulip.security", "Abstention"),
-    "GroundedFinding": ("tulip.security", "GroundedFinding"),
-    "ground_finding": ("tulip.security", "ground_finding"),
-    "ground_fingerprint": ("tulip.security", "ground_fingerprint"),
-    "is_finding": ("tulip.security", "is_finding"),
-    "AtlasTechnique": ("tulip.security", "AtlasTechnique"),
-    "OwaspLLM": ("tulip.security", "OwaspLLM"),
-    "OwaspASI": ("tulip.security", "OwaspASI"),
-    "severity_at_least": ("tulip.security", "severity_at_least"),
+    # Grounding — evidence-grounded findings (home: tulip.control).
+    "Evidence": ("tulip.control", "Evidence"),
+    "Indicator": ("tulip.control", "Indicator"),
+    "Severity": ("tulip.control", "Severity"),
+    "IndicatorType": ("tulip.control", "IndicatorType"),
+    "FingerprintFinding": ("tulip.control", "FingerprintFinding"),
+    "FingerprintVerdict": ("tulip.control", "FingerprintVerdict"),
+    "FingerprintClassifier": ("tulip.control", "FingerprintClassifier"),
+    "Abstention": ("tulip.control", "Abstention"),
+    "GroundedFinding": ("tulip.control", "GroundedFinding"),
+    "ground_finding": ("tulip.control", "ground_finding"),
+    "ground_fingerprint": ("tulip.control", "ground_fingerprint"),
+    "is_finding": ("tulip.control", "is_finding"),
+    "AtlasTechnique": ("tulip.control", "AtlasTechnique"),
+    "OwaspLLM": ("tulip.control", "OwaspLLM"),
+    "OwaspASI": ("tulip.control", "OwaspASI"),
+    "severity_at_least": ("tulip.control", "severity_at_least"),
 }
 
 
@@ -167,9 +171,12 @@ def __getattr__(name: str) -> object:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-__version__ = "2.13.0"
+__version__ = "2.17.0"
 __all__ = [
     "Agent",
+    "ApprovalPendingError",
+    "CustomEvent",
+    "RunInfo",
     "AgentConfig",
     "AgentResult",
     "AgentState",
@@ -177,6 +184,7 @@ __all__ = [
     "END",
     "GraphConfig",
     "GroundingEvaluator",
+    "FinalAnswerVerificationEvent",
     "GroundingEvent",
     "Handoff",
     "HandoffContext",
@@ -206,6 +214,7 @@ __all__ = [
     "ToolCall",
     "ToolCompleteEvent",
     "ToolContext",
+    "ToolProgressEvent",
     "ToolStartEvent",
     "__version__",
     "create_handoff_agent",

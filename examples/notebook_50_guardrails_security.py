@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 """Notebook 50: Guardrails — indirect prompt injection via untrusted tool output.
 
@@ -10,7 +10,7 @@ into the output of a tool the agent itself called, which then tries to
 talk the agent into exfiltrating data or invoking a destructive tool
 (LLM02 Sensitive Information Disclosure / LLM06 Excessive Agency). The
 guardrail scans that tool output, and the detection is surfaced as a
-grounded ``Evidence`` via ``tulip.security.ground_finding`` — the
+grounded ``Evidence`` via ``tulip.control.ground_finding`` — the
 embedded instruction is the evidence, so the finding ships only because
 it traces to the tool-output row that carried it.
 
@@ -40,6 +40,15 @@ import time
 from config import get_model, print_config
 
 from tulip.agent import Agent
+from tulip.control import (
+    AtlasTechnique,
+    Indicator,
+    IndicatorType,
+    OwaspLLM,
+    Severity,
+    ground_finding,
+    is_finding,
+)
 from tulip.core.events import AfterToolCallEvent, BeforeToolCallEvent
 from tulip.core.state import AgentState
 from tulip.hooks import HookRegistry
@@ -51,15 +60,6 @@ from tulip.hooks.builtin.guardrails import (
     GuardrailViolation,
 )
 from tulip.reasoning.gsar import Claim, EvidenceType, Partition
-from tulip.security import (
-    AtlasTechnique,
-    Indicator,
-    IndicatorType,
-    OwaspLLM,
-    Severity,
-    ground_finding,
-    is_finding,
-)
 
 
 # Helper used by every Part: one model call with a timing/token banner so
@@ -214,7 +214,7 @@ async def main():
     # the claim is TOOL_MATCH provenance, so ground_finding clears the
     # GSAR threshold and a Evidence ships. An unsupported claim (e.g. "this
     # is TULIP-STORM") would stay ungrounded and drag the score down.
-    print("\n--- Grounding the detection via tulip.security ---")
+    print("\n--- Grounding the detection via tulip.control ---")
     if flagged:
         _offending, violation = flagged[0]
         rule = violation.rule_name if violation else "blocked_content"

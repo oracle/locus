@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """Agent state management - 100% Pydantic."""
@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from tulip.core.media import estimate_tokens
 from tulip.core.messages import Message, ToolCall
 
 
@@ -113,6 +114,12 @@ class AgentState(BaseModel):
     cache_creation_tokens_used: int = 0
     cache_read_tokens_used: int = 0
     token_budget: int | None = None
+    # Spend tracking. Prices come from model metadata (USD per million tokens);
+    # ``None`` means unknown, and an unknown price leaves ``cost_usd_used`` at 0.
+    input_price_per_mtok: float | None = None
+    output_price_per_mtok: float | None = None
+    cost_usd_used: float = 0.0
+    cost_budget_usd: float | None = None
 
     # Completion mode
     completion_mode: str = "auto"  # "auto" or "explicit"
@@ -275,6 +282,8 @@ class AgentState(BaseModel):
                     self.cache_creation_tokens_used + cache_creation_tokens
                 ),
                 "cache_read_tokens_used": self.cache_read_tokens_used + cache_read_tokens,
+                "cost_usd_used": self.cost_usd_used
+                + (self.cost_of(prompt_tokens, completion_tokens) or 0.0),
                 "updated_at": datetime.now(UTC),
             }
         )
@@ -282,6 +291,41 @@ class AgentState(BaseModel):
     # =========================================================================
     # Queries
     # =========================================================================
+
+    @property
+    def priced(self) -> bool:
+        """Whether both prices are known, so spend can be measured."""
+        return self.input_price_per_mtok is not None and self.output_price_per_mtok is not None
+
+    def cost_of(self, prompt_tokens: int, completion_tokens: int) -> float | None:
+        """USD for a call of this size, or ``None`` when the prices are unknown.
+
+        Cache-read and cache-write tokens are priced as ordinary input, which
+        overstates a cached call rather than understating it.
+        """
+        if self.input_price_per_mtok is None or self.output_price_per_mtok is None:
+            return None
+        return (
+            prompt_tokens * self.input_price_per_mtok
+            + completion_tokens * self.output_price_per_mtok
+        ) / 1_000_000
+
+    def would_exceed_cost_budget(self, max_output_tokens: int) -> bool:
+        """Whether the next call could cross the spend budget, at its worst case.
+
+        The worst case is the current conversation as input (a char/4 estimate)
+        plus ``max_output_tokens`` of output. Checked *before* the call, which is
+        what stops one large turn: a check after the call only stops the next one.
+        """
+        if self.cost_budget_usd is None:
+            return False
+        prompt_estimate = sum(
+            estimate_tokens(m.content)
+            + sum(len(str(tc.arguments or "")) for tc in m.tool_calls) // 4
+            for m in self.messages
+        )
+        worst = self.cost_of(prompt_estimate, max_output_tokens)
+        return worst is not None and self.cost_usd_used + worst > self.cost_budget_usd
 
     @property
     def has_tool_loop(self) -> bool:
@@ -319,8 +363,16 @@ class AgentState(BaseModel):
 
     @property
     def last_tool_calls(self) -> list[ToolCall]:
-        """Get tool calls from the last assistant message."""
+        """Get tool calls from the last assistant message of the current turn.
+
+        The scan stops at the most recent user message: calls made before it
+        belong to an earlier turn, and treating them as "last" made a new turn
+        on a thread whose previous turn ended with a terminal tool stop
+        immediately with ``terminal_tool`` before the model saw the message.
+        """
         for msg in reversed(self.messages):
+            if msg.role.value == "user":
+                return []
             if msg.role.value == "assistant" and msg.tool_calls:
                 return list(msg.tool_calls)
         return []
@@ -349,6 +401,9 @@ class AgentState(BaseModel):
 
         if self.token_budget and self.total_tokens_used >= self.token_budget:
             return True, "token_budget"
+
+        if self.cost_budget_usd is not None and self.cost_usd_used >= self.cost_budget_usd:
+            return True, "cost_budget"
 
         # Terminal tool always stops (both modes)
         if self.called_terminal_tool:
@@ -385,12 +440,11 @@ class AgentState(BaseModel):
         """Total tokens used. Returns real count if tracked, else char/4 estimate."""
         if self.total_tokens_used > 0:
             return self.total_tokens_used
-        # Fallback: rough estimate at 4 chars per token
-        total_chars = sum(
-            len(m.content or "") + sum(len(str(tc.arguments)) for tc in m.tool_calls)
+        # Fallback: rough estimate at 4 chars per token, images counted as images
+        return sum(
+            estimate_tokens(m.content) + sum(len(str(tc.arguments)) for tc in m.tool_calls) // 4
             for m in self.messages
         )
-        return total_chars // 4
 
     def to_checkpoint(self) -> dict[str, Any]:
         """Serialize state for checkpointing."""

@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """Main Agent class - 100% Pydantic."""
@@ -6,8 +6,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import threading
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -15,8 +16,14 @@ from pydantic import BaseModel, Field, PrivateAttr
 
 from tulip.agent.config import AgentConfig, GroundingConfig, ReflexionConfig
 from tulip.agent.result import AgentResult, ExecutionMetrics, StopReason
-from tulip.agent.runtime_loop import AgentRuntimeMixin
-from tulip.core.errors import GSARValidationError
+from tulip.agent.run_context import (
+    ARUN_RESULT_SLOT,
+    PendingInterrupt,
+    ResultSlot,
+    RunContext,
+)
+from tulip.agent.runtime_loop import AgentRuntimeMixin, _invocation_arguments
+from tulip.core.errors import ApprovalPendingError, GSARValidationError
 from tulip.core.events import (
     GroundingEvent,
     ReflectEvent,
@@ -53,6 +60,7 @@ _VALID_STOP_REASONS: frozenset[str] = frozenset(
         "no_tools",
         "grounding_failed",
         "token_budget",
+        "cost_budget",
         "time_budget",
         "interrupted",
         "error",
@@ -85,6 +93,37 @@ def _normalize_stop_reason(raw: str | None) -> StopReason:
         if known in raw:
             return known  # type: ignore[return-value]
     return "complete"
+
+
+def _interrupt_payload(content: str | None) -> dict[str, Any] | None:
+    """The interrupt marker a tool returned, or ``None`` for a real result."""
+    if not content or '"__interrupt__": true' not in content:
+        return None
+    import json  # noqa: PLC0415
+
+    try:
+        data = json.loads(content)
+    except ValueError:
+        return None
+    if isinstance(data, dict) and data.get("__interrupt__"):
+        return data
+    return None
+
+
+@contextlib.asynccontextmanager
+async def _closing(stream: Any) -> AsyncIterator[Any]:
+    """``contextlib.aclosing`` that tolerates a stream with no ``aclose``.
+
+    ``run`` may be overridden by something that returns a plain async
+    iterator; a real generator is closed on exit so an early exit (an
+    exception, a cancelled ``arun``) finalizes the run immediately.
+    """
+    try:
+        yield stream
+    finally:
+        aclose = getattr(stream, "aclose", None)
+        if aclose is not None:
+            await aclose()
 
 
 class Agent(AgentRuntimeMixin, BaseModel):
@@ -129,22 +168,32 @@ class Agent(AgentRuntimeMixin, BaseModel):
     _hooks: list[Any] = PrivateAttr(default_factory=list)
     _hook_orchestrator: HookOrchestrator | None = PrivateAttr(default=None)
     _conversation_manager: ConversationManager | None = PrivateAttr(default=None)
+    _model_prices: tuple[float, float] | None = PrivateAttr(default=None)
     _memory_manager: Any = PrivateAttr(default=None)  # BaseMemoryManager | None
     _reflector: Reflector | None = PrivateAttr(default=None)
     _grounding_evaluator: GroundingEvaluator | None = PrivateAttr(default=None)
     _grounding_model: Any = PrivateAttr(default=None)  # ModelProtocol
     _auxiliary_model: Any = PrivateAttr(default=None)  # ModelProtocol
+    # Last finished run's state. Informational only: under concurrency it is
+    # whichever run finished last, so nothing in the runtime reads it back.
     _last_run_state: AgentState | None = PrivateAttr(default=None)
-    _interrupt_state: AgentState | None = PrivateAttr(default=None)
-    _interrupt_prompt: str | None = PrivateAttr(default=None)
-    _has_unverified_writes: bool = PrivateAttr(default=False)
-    _interrupt_thread_id: str | None = PrivateAttr(default=None)
-    _interrupt_metadata: dict[str, Any] | None = PrivateAttr(default=None)
+    # Paused runs, keyed strictly by thread id (``None`` = a thread-less run).
+    _interrupts: dict[str | None, PendingInterrupt] = PrivateAttr(default_factory=dict)
+    # In-flight runs (keyed by ``id(RunContext)``), for ``cancel(thread_id=...)``.
+    _active_runs: dict[int, RunContext] = PrivateAttr(default_factory=dict)
+    _runs_lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
+    # Legacy cancel-all flag: set by ``cancel()`` with no thread id so a
+    # cancel issued before a run starts still stops it (pre-2.17 contract).
     _cancel_signal: threading.Event | None = PrivateAttr(default=None)
     _initialized: bool = PrivateAttr(default=False)
     # MCP tools are attached from the first run() (connecting is async);
     # this keeps that a one-time step rather than a per-run round trip.
     _mcp_attached: bool = PrivateAttr(default=False)
+    # Per-server attach bookkeeping: ids of attached clients, and when a
+    # failed one may be retried (a server down at the first run attaches on
+    # a later run instead of never).
+    _mcp_attached_ids: set[int] = PrivateAttr(default_factory=set)
+    _mcp_retry_at: dict[int, float] = PrivateAttr(default_factory=dict)
 
     def __init__(
         self,
@@ -263,8 +312,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
         drives the same event loop (``self.run(...)``), builds the same
         ``AgentResult``, but without spawning a thread or calling
         ``asyncio.run``. That makes it usable in environments where threads
-        are unavailable — notably Pyodide / WebAssembly (the Tulip workbench
-        runs notebooks in the browser), where ``run_sync`` cannot work.
+        are unavailable — notably Pyodide / WebAssembly, where ``run_sync`` cannot work.
 
         Unlike ``run_sync`` it does NOT close the underlying model client or
         checkpointer pool afterward — the caller owns the loop, so those
@@ -309,31 +357,41 @@ class Agent(AgentRuntimeMixin, BaseModel):
         reflexion_evaluations = 0
         grounding_evaluations = 0
 
-        async for event in self.run(prompt, **run_kwargs):
-            # Fire callback if set
-            if callback is not None:
-                callback(event)
+        # The run this call drives leaves its final state in ``slot`` — never
+        # on the shared agent, where a concurrent run on another thread would
+        # overwrite it between the last event and this read.
+        slot = ResultSlot(owner=self)
+        slot_token = ARUN_RESULT_SLOT.set(slot)
+        try:
+            async with _closing(self.run(prompt, **run_kwargs)) as events:
+                async for event in events:
+                    # Fire callback if set
+                    if callback is not None:
+                        callback(event)
 
-            if isinstance(event, TerminateEvent):
-                stop_reason = _normalize_stop_reason(event.reason)
-                final_message = event.final_message or ""
-            elif isinstance(event, ToolCompleteEvent):
-                if event.error:
-                    tool_errors += 1
-            elif isinstance(event, ReflectEvent):
-                reflexion_evaluations += 1
-            elif isinstance(event, GroundingEvent):
-                grounding_evaluations += 1
-                # The grounding loop already ran and emitted its verdict; it
-                # simply never reached the result. Keep the last one: with
-                # `max_replans` the answer is re-grounded after each replan,
-                # and the score that describes the answer being returned is
-                # the final one.
-                grounding_score = event.score
-                ungrounded_claims = list(event.ungrounded_claims)
+                    if isinstance(event, TerminateEvent):
+                        stop_reason = _normalize_stop_reason(event.reason)
+                        final_message = event.final_message or ""
+                    elif isinstance(event, ToolCompleteEvent):
+                        if event.error:
+                            tool_errors += 1
+                    elif isinstance(event, ReflectEvent):
+                        reflexion_evaluations += 1
+                    elif isinstance(event, GroundingEvent):
+                        grounding_evaluations += 1
+                        # The grounding loop already ran and emitted its verdict;
+                        # it simply never reached the result. Keep the last one:
+                        # with `max_replans` the answer is re-grounded after each
+                        # replan, and the score that describes the answer being
+                        # returned is the final one.
+                        grounding_score = event.score
+                        ungrounded_claims = list(event.ungrounded_claims)
+        finally:
+            ARUN_RESULT_SLOT.reset(slot_token)
 
-        # Use actual final state from run() instead of reconstructing
-        state = self._last_run_state
+        # The actual final state of THIS run. ``None`` only when ``run`` is
+        # overridden by something that never goes through the runtime loop.
+        state = slot.state
         if state is None:
             state = await self._create_initial_state(prompt, thread_id, metadata)
             if final_message:
@@ -388,6 +446,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
             completion_tokens=state.completion_tokens_used,
             cache_creation_input_tokens=state.cache_creation_tokens_used,
             cache_read_input_tokens=state.cache_read_tokens_used,
+            cost_usd=state.cost_usd_used if state.priced else None,
             duration_ms=elapsed_ms,
             reflexion_evaluations=reflexion_evaluations,
             grounding_evaluations=grounding_evaluations,
@@ -407,6 +466,20 @@ class Agent(AgentRuntimeMixin, BaseModel):
             gsar_score=gsar_score_value,
             gsar_decision=gsar_decision,
         )
+
+    async def drain_memory(self) -> None:
+        """Wait for the memory manager's background extractions to finish.
+
+        With ``LLMMemoryManager(extract_mode="background")`` extraction runs
+        after a turn's final event; await this at graceful shutdown (and in
+        tests) so none is lost — bound it with ``asyncio.timeout(...)`` if
+        needed. A no-op without a memory manager or in ``"inline"`` mode.
+        :meth:`run_sync` calls it before returning.
+        """
+        manager = self._memory_manager or self.config.memory_manager
+        drain = getattr(manager, "drain", None)
+        if drain is not None:
+            await drain()
 
     def run_sync(
         self,
@@ -447,6 +520,13 @@ class Agent(AgentRuntimeMixin, BaseModel):
                     prompt, thread_id=thread_id, metadata=metadata, model_kwargs=model_kwargs
                 )
             finally:
+                # Background memory extraction is bound to this loop, which
+                # closes on return: finish it here rather than lose it.
+                try:
+                    await self.drain_memory()
+                except Exception:  # noqa: BLE001 — cleanup must never mask a real error from arun()
+                    pass
+
                 close = getattr(self.model, "close", None)
                 if close is not None:
                     try:
@@ -520,13 +600,28 @@ class Agent(AgentRuntimeMixin, BaseModel):
         """
         return self.run_sync(prompt, thread_id=thread_id, metadata=metadata)
 
-    def cancel(self) -> None:
-        """Cancel a running agent from an external thread.
+    def cancel(self, thread_id: str | None = None) -> int:
+        """Cancel running agent work from any thread or task.
 
-        Sets a signal that the agent loop checks at each iteration.
-        The agent will stop gracefully with stop_reason="cancelled".
+        Sets a signal the agent loop checks at each iteration; the run stops
+        gracefully with ``stop_reason="cancelled"``.
+
+        * ``cancel(thread_id="t-42")`` stops only the in-flight run(s) on that
+          thread — the form a multi-user server wants, where one Agent serves
+          every conversation.
+        * ``cancel()`` (no argument) keeps the pre-2.17 meaning: stop every
+          in-flight run of this agent, and if none is running yet, the next run
+          to start.
 
         Thread-safe — can be called from any thread while the agent is running.
+
+        Args:
+            thread_id: Only cancel runs on this conversation.
+
+        Returns:
+            How many in-flight runs were signalled (a no-argument call with
+            nothing running still arms the signal for the next run and
+            returns 0).
 
         Example:
             import threading
@@ -541,14 +636,43 @@ class Agent(AgentRuntimeMixin, BaseModel):
             agent.cancel()  # Stop from main thread
             t.join()
         """
-        if self._cancel_signal is None:
-            self._cancel_signal = threading.Event()
-        self._cancel_signal.set()
+        with self._runs_lock:
+            runs = list(self._active_runs.values())
+        if thread_id is not None:
+            targets = [rc for rc in runs if rc.thread_id == thread_id]
+        else:
+            if self._cancel_signal is None:
+                self._cancel_signal = threading.Event()
+            self._cancel_signal.set()
+            targets = runs
+        for rc in targets:
+            rc.cancel.set()
+        return len(targets)
 
     @property
     def is_cancelled(self) -> bool:
-        """Check if cancellation has been requested."""
+        """Whether a cancel-all (``cancel()`` with no thread id) is pending."""
         return self._cancel_signal is not None and self._cancel_signal.is_set()
+
+    @property
+    def _interrupt_state(self) -> AgentState | None:
+        """The most recently parked interrupt's state (back-compat view).
+
+        Resume never reads this: paused runs are held per thread id in
+        ``_interrupts`` and resumed strictly by it.
+        """
+        if not self._interrupts:
+            return None
+        return list(self._interrupts.values())[-1].state
+
+    def pending_interrupts(self) -> list[str | None]:
+        """Thread ids that have a paused run held in this process's memory.
+
+        A thread paused in another process (or before a restart) is not
+        listed; ``resume(thread_id=...)`` still rehydrates it from the
+        checkpointer.
+        """
+        return list(self._interrupts)
 
     async def run_subagent(
         self,
@@ -669,17 +793,25 @@ class Agent(AgentRuntimeMixin, BaseModel):
         *,
         thread_id: str | None = None,
         perform_dangling: bool = False,
-    ) -> AsyncIterator[TulipEvent]:
+        metadata: dict[str, Any] | None = None,
+    ) -> AsyncGenerator[TulipEvent, None]:
         """
         Resume agent execution after an interrupt.
 
         When a tool calls ask_user() and the agent yields an InterruptEvent,
         call this method with the user's response to continue execution.
 
-        Without an in-memory interrupt (a fresh process — the pod that paused
-        is gone), pass ``thread_id``: the interrupted state is reloaded from
-        the configured checkpointer, so a durably-checkpointed run resumes
-        anywhere, not just in the process that paused it.
+        **Resume is keyed strictly by thread.** Paused runs are held in memory
+        per ``thread_id``; ``resume(thread_id="A")`` only ever continues
+        thread A — from memory when this process paused it, otherwise
+        rehydrated from the configured checkpointer (a fresh process: the pod
+        that paused is gone). It never picks up another thread's pause.
+        Without ``thread_id`` the call is accepted only when exactly one run
+        is paused in memory (the single-conversation back-compat form); with
+        several paused it raises rather than guess.
+
+        A resumed run continues the SAME turn: its iteration count and budgets
+        carry on from the pause.
 
         ``perform_dangling`` closes the gap the 2.11.1 fold left open for
         approval holds. The fold answers the dangling call with the human's
@@ -698,10 +830,25 @@ class Agent(AgentRuntimeMixin, BaseModel):
 
         Args:
             response: The user's response to the interrupt question
-            thread_id: Checkpoint thread to rehydrate from when this Agent
-                instance holds no in-memory interrupt (requires a checkpointer)
+            thread_id: The paused thread to continue. Resumes that thread's
+                in-memory interrupt, or rehydrates it from the checkpointer.
             perform_dangling: Re-invoke a dangling non-``ask_user`` call and
                 fold its real result, instead of folding ``response`` as text
+            metadata: Invocation metadata for the resumed segment (what tools
+                see as ``ctx.invocation_metadata`` and hooks as
+                ``event.run.metadata``). Defaults to the paused run's metadata
+                (in memory) or the thread's checkpointed metadata. Ephemeral
+                keys (``mcp_headers``) are never checkpointed: an in-process
+                resume reuses the paused run's, a cross-process resume that
+                needs them passes them here again.
+
+        Raises:
+            ApprovalPendingError: ``perform_dangling=True`` and the held call
+                interrupted again — its approval has not been decided yet. The
+                thread stays paused and nothing is folded or checkpointed.
+            RuntimeError: Nothing to resume (no paused run for the thread and
+                no checkpoint), or ``thread_id`` omitted while several runs
+                are paused.
 
         Yields:
             TulipEvent instances for the remaining execution
@@ -713,21 +860,19 @@ class Agent(AgentRuntimeMixin, BaseModel):
             ...         async for event in agent.resume(answer):
             ...             handle(event)
         """
-        if self._interrupt_state is not None:
-            state = self._interrupt_state
-            self._interrupt_state = None
-            # Re-run — we pass the original prompt; the state already has the
-            # full history
-            prompt = self._interrupt_prompt or ""
-            thread_id = self._interrupt_thread_id
-            metadata = self._interrupt_metadata
-            # Clear interrupt bookkeeping
-            self._interrupt_prompt = None
-            self._interrupt_thread_id = None
-            self._interrupt_metadata = None
+        pending = self._take_interrupt(thread_id)
+        if pending is not None:
+            state = pending.state
+            # The prompt of the paused run; the state already has the history.
+            prompt = pending.prompt
+            thread_id = pending.thread_id
+            if metadata is not None:
+                run_metadata, ephemeral = self._split_run_metadata(metadata)
+            else:
+                run_metadata, ephemeral = pending.metadata, dict(pending.ephemeral)
         else:
-            # Rehydrate: no in-memory interrupt, so reload the paused state
-            # from the checkpointer (the cross-process resume path).
+            # Rehydrate: no in-memory interrupt for this thread, so reload the
+            # paused state from the checkpointer (the cross-process path).
             if thread_id is None or self.config.checkpointer is None:
                 raise RuntimeError(
                     "No interrupt to resume from. Call run() first, or pass "
@@ -738,8 +883,76 @@ class Agent(AgentRuntimeMixin, BaseModel):
                 raise RuntimeError(f"No checkpoint found for thread {thread_id!r} to resume from.")
             state = loaded
             prompt = ""
-            metadata = None
+            # A checkpoint never holds ephemeral metadata (``mcp_headers``):
+            # a cross-process resume that needs it passes ``metadata=``.
+            run_metadata, ephemeral = self._split_run_metadata(
+                metadata if metadata is not None else dict(loaded.metadata)
+            )
+            # Checkpoints never carry the (ephemeral) memory block, so the
+            # rest of this turn gets it re-injected, as the in-memory path has.
+            # (A fresh process has not initialised the agent yet.)
+            memory_manager = self._memory_manager or self.config.memory_manager
+            if memory_manager is not None:
+                state = await memory_manager.on_session_start(state)
 
+        # This resumed segment is a run of its own: cancellable by thread,
+        # visible to hooks as ``event.run``, isolated from concurrent runs.
+        rc = self._begin_run(state, prompt, thread_id, run_metadata, ephemeral=ephemeral)
+        try:
+            folded_events: list[TulipEvent] = []
+            state = await self._fold_resume_response(
+                state, response, rc, perform_dangling, pending, folded_events
+            )
+        except BaseException:
+            self._end_run(rc, state)
+            raise
+        for folded_event in folded_events:
+            yield folded_event
+
+        # Continue execution from the interrupted state
+        async with contextlib.aclosing(
+            self._run_from_state(state, prompt, thread_id, run_metadata, _run=rc)
+        ) as segment:
+            async for event in segment:
+                yield event
+
+    def _take_interrupt(self, thread_id: str | None) -> PendingInterrupt | None:
+        """Pop the in-memory interrupt ``resume`` should continue, if any.
+
+        With a thread id only that thread's entry is eligible — never another
+        thread's, which is how a resume for thread A once executed thread B's
+        held booking. Without one, the single paused run is taken; several
+        paused runs make the call ambiguous and it is refused.
+        """
+        if thread_id is not None:
+            return self._interrupts.pop(thread_id, None)
+        if not self._interrupts:
+            return None
+        if len(self._interrupts) > 1:
+            raise RuntimeError(
+                f"{len(self._interrupts)} runs are paused on this agent "
+                f"(threads {sorted(map(str, self._interrupts))}); pass thread_id "
+                "to say which one to resume."
+            )
+        key = next(iter(self._interrupts))
+        return self._interrupts.pop(key)
+
+    async def _fold_resume_response(
+        self,
+        state: AgentState,
+        response: str,
+        rc: RunContext,
+        perform_dangling: bool,
+        pending: PendingInterrupt | None,
+        out_events: list[TulipEvent],
+    ) -> AgentState:
+        """Answer the paused call with ``response`` (or its real result).
+
+        Events produced here (the performed call's start/complete pair and any
+        custom events its hooks emitted) are appended to ``out_events`` and
+        yielded by ``resume`` only once the fold succeeded, so a still-pending
+        approval raises before the consumer sees a half-performed call.
+        """
         # Fold the user's response as the TOOL RESULT of the dangling
         # ask_user call. The pause leaves that call un-folded in state, and a
         # bare system note in its place breaks the call→result rhythm the
@@ -785,8 +998,9 @@ class Agent(AgentRuntimeMixin, BaseModel):
                 # fold rather than inventing a result.
                 self._initialize()
                 if self._tool_registry.get(dangling.name) is not None:
-                    from tulip.agent.runtime_loop import _apply_hook_result
+                    from tulip.agent.runtime_loop import _apply_hook_result, _complete_event
                     from tulip.core.messages import ToolCall as _ToolCall
+                    from tulip.tools.executor import ToolContextFactory
 
                     arguments = dict(dangling.arguments or {})
                     # The same start event the loop emits, so the performed
@@ -794,10 +1008,12 @@ class Agent(AgentRuntimeMixin, BaseModel):
                     # carries the ARGUMENTS, which ToolCompleteEvent does not,
                     # so a consumer compensating on this path can finally see
                     # what the approved call ran with.
-                    yield ToolStartEvent(
-                        tool_name=dangling.name,
-                        tool_call_id=dangling.id,
-                        arguments=arguments,
+                    out_events.append(
+                        ToolStartEvent(
+                            tool_name=dangling.name,
+                            tool_call_id=dangling.id,
+                            arguments=arguments,
+                        )
                     )
                     # The SAME hook seam the loop runs around every tool call
                     # (#172). This is the single most consequential call in a
@@ -808,8 +1024,9 @@ class Agent(AgentRuntimeMixin, BaseModel):
                     # before-hook that cancels is a legitimate second veto and
                     # is honoured here exactly as the loop honours it.
                     before_event = await self._orch().run_before_tool(
-                        dangling.name, dangling.id, arguments
+                        dangling.name, dangling.id, arguments, run=rc
                     )
+                    out_events.extend(rc.drain())
                     if before_event.cancel:
                         cancel_msg = (
                             before_event.cancel
@@ -830,17 +1047,46 @@ class Agent(AgentRuntimeMixin, BaseModel):
                                 _ToolCall(
                                     id=dangling.id,
                                     name=dangling.name,
-                                    arguments=arguments,
+                                    arguments=_invocation_arguments(before_event),
                                 )
                             ],
                             self._tool_registry,
+                            ToolContextFactory(
+                                run_id=state.run_id,
+                                agent_id=state.agent_id,
+                                iteration=state.iteration,
+                                state=state,
+                                invocation_metadata=rc.metadata or {},
+                                ephemeral_metadata=rc.ephemeral,
+                            ),
                         )
-                        folded = ToolResult(
-                            tool_call_id=dangling.id,
-                            name=dangling.name,
-                            content=invoked.content,
-                            error=invoked.error,
-                            duration_ms=invoked.duration_ms,
+                        still_held = _interrupt_payload(invoked.content)
+                        if still_held is not None:
+                            # The gate interrupted AGAIN: nobody has decided
+                            # yet. Folding the raw ``__interrupt__`` marker as
+                            # the call's result (the pre-2.17 behaviour) told
+                            # the model the action had "returned" and ended
+                            # the turn with the booking silently never made.
+                            # Leave the thread exactly as paused instead.
+                            self._interrupts[rc.thread_id] = pending or PendingInterrupt(
+                                state=state,
+                                prompt=rc.prompt,
+                                thread_id=rc.thread_id,
+                                metadata=rc.metadata,
+                                ephemeral=rc.ephemeral,
+                            )
+                            raise ApprovalPendingError(
+                                f"{dangling.name!r} on thread {rc.thread_id!r} is still "
+                                "awaiting a decision; record it before resuming.",
+                                thread_id=rc.thread_id,
+                                interrupt_id=dangling.id,
+                                question=str(still_held.get("question", "")),
+                                metadata=still_held.get("metadata") or {},
+                            )
+                        # Keep the structured result: the approved call is the
+                        # one a UI most needs to render (the confirmed booking).
+                        folded = invoked.model_copy(
+                            update={"tool_call_id": dangling.id, "name": dangling.name}
                         )
                         after_event = await self._orch().run_after_tool(
                             folded.name,
@@ -848,6 +1094,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
                             folded.error,
                             tool_call_id=folded.tool_call_id,
                             arguments=arguments,
+                            run=rc,
                         )
                         folded = _apply_hook_result(folded, after_event)
                     # This execution happens BEFORE the loop starts streaming,
@@ -856,25 +1103,114 @@ class Agent(AgentRuntimeMixin, BaseModel):
                     # it performed. Emit the same event the loop would have,
                     # so a trace, an audit sink, and a UI all see the approved
                     # action exactly as they see any other tool call.
-                    yield ToolCompleteEvent(
-                        tool_name=folded.name,
-                        tool_call_id=folded.tool_call_id,
-                        result=folded.content,
-                        error=folded.error,
-                        duration_ms=folded.duration_ms or 0.0,
+                    out_events.append(
+                        _complete_event(
+                            folded,
+                            result=folded.content,
+                            duration_ms=folded.duration_ms or 0.0,
+                        )
                     )
+                    out_events.extend(rc.drain())
             if folded is None:
                 folded = ToolResult(tool_call_id=dangling.id, name=dangling.name, content=response)
             state = state.with_message(Message.tool(folded))
         else:
             state = state.with_message(Message.system(f"[User Response] {response}"))
 
-        # Store for _create_initial_state to pick up
-        self._last_run_state = state
+        return state
 
-        # Continue execution from the interrupted state
-        async for event in self._run_from_state(state, prompt, thread_id, metadata):
-            yield event
+    # =========================================================================
+    # Checkpoint history: read, edit and fork a thread
+    # =========================================================================
+
+    def _require_checkpointer(self) -> Any:
+        checkpointer = self.config.checkpointer
+        if checkpointer is None:
+            raise RuntimeError("checkpoint history needs a checkpointer on the agent")
+        return checkpointer
+
+    async def get_state(self, thread_id: str, checkpoint_id: str | None = None) -> AgentState:
+        """The thread's state at ``checkpoint_id``, or its latest.
+
+        Raises:
+            RuntimeError: The agent has no checkpointer.
+            LookupError: No such thread or checkpoint.
+        """
+        state = await self._require_checkpointer().load(thread_id, checkpoint_id)
+        if state is None:
+            where = f"checkpoint {checkpoint_id!r} of " if checkpoint_id else ""
+            raise LookupError(f"no {where}thread {thread_id!r}")
+        loaded: AgentState = state
+        return loaded
+
+    async def get_state_history(
+        self, thread_id: str, limit: int = 10
+    ) -> list[tuple[str, AgentState]]:
+        """``(checkpoint_id, state)`` pairs for the thread, newest first."""
+        checkpointer = self._require_checkpointer()
+        history: list[tuple[str, AgentState]] = []
+        for checkpoint_id in await checkpointer.list_checkpoints(thread_id, limit=limit):
+            state = await checkpointer.load(thread_id, checkpoint_id)
+            if state is not None:
+                history.append((checkpoint_id, state))
+        return history
+
+    async def update_state(
+        self,
+        thread_id: str,
+        *,
+        messages: list[Message] | None = None,
+        metadata: dict[str, Any] | None = None,
+        checkpoint_id: str | None = None,
+    ) -> str:
+        """Write a new checkpoint: the given one (or the latest) plus these changes.
+
+        The source checkpoint is never modified, so history stays intact and
+        the edit can itself be inspected or forked. The next ``run`` or
+        ``resume`` on the thread continues from the new checkpoint.
+
+        Returns:
+            The new checkpoint's id.
+        """
+        state = await self.get_state(thread_id, checkpoint_id)
+        for message in messages or []:
+            state = state.with_message(message)
+        for key, value in (metadata or {}).items():
+            state = state.with_metadata(key, value)
+        new_id: str = await self._require_checkpointer().save(
+            state,
+            thread_id,
+            metadata={"source": "update_state", "parent_checkpoint_id": checkpoint_id},
+        )
+        return new_id
+
+    async def fork(
+        self,
+        thread_id: str,
+        checkpoint_id: str | None = None,
+        *,
+        new_thread_id: str | None = None,
+    ) -> str:
+        """Start a new thread from the given checkpoint (or the latest).
+
+        The new thread carries the conversation up to that point and nothing
+        after it; running on it never changes the parent thread.
+
+        Returns:
+            The new thread's id.
+        """
+        from uuid import uuid4  # noqa: PLC0415
+
+        state = await self.get_state(thread_id, checkpoint_id)
+        forked = new_thread_id or f"{thread_id}-fork-{uuid4().hex[:8]}"
+        if forked == thread_id:
+            raise ValueError("a fork needs a thread id different from its parent")
+        await self._require_checkpointer().save(
+            state,
+            forked,
+            metadata={"forked_from": thread_id, "parent_checkpoint_id": checkpoint_id},
+        )
+        return forked
 
     @property
     def model(self) -> Any:

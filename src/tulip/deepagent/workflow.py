@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """Research workflow primitives — composable nodes for long-horizon research.
@@ -525,7 +525,7 @@ def route_after_grounding(
 ) -> Any:
     """Return a routing function for the grounding_eval conditional edge.
 
-    Recovery strategy (mirrors Optic's two-level approach):
+    Recovery strategy (two levels, cheapest first):
     1. First failure  → ``"regenerate"``  (cheap: rewrite without re-running tools)
     2. Subsequent     → ``"replan"``      (expensive: full execute retry)
     3. Limits reached → ``END``

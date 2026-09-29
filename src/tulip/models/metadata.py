@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """Per-model metadata registry (context length, pricing, capabilities).
@@ -40,6 +40,7 @@ __all__ = [
     "ModelMetadata",
     "known_models",
     "metadata_for",
+    "model_id_of",
     "register_metadata",
 ]
 
@@ -85,13 +86,37 @@ class ModelMetadata(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-# Provider prefixes stripped at lookup time. Trimmed to the ones Tulip
-# actually ships bindings for — users supplying a different prefix can
-# register metadata under the canonical slug directly.
+# Provider prefixes stripped at lookup time: the native bindings plus every
+# OpenAI-compatible routing prefix in ``tulip.models.providers`` (a unit test
+# keeps the two lists in step). What remains is the slug the provider itself
+# is called with — the same string a built model carries as ``config.model``,
+# so ``"openrouter:deepseek/deepseek-v4-flash"`` and an ``OpenAIModel`` built
+# from it resolve to one entry. Slugs stay distinct across routes that price
+# differently: OpenRouter's ``deepseek/deepseek-v4-flash`` is not DeepSeek's
+# own ``deepseek-v4-flash``. Users supplying a different prefix can register
+# metadata under the canonical slug directly.
 _PROVIDER_PREFIXES: Final[frozenset[str]] = frozenset(
     {
         "openai",
         "anthropic",
+        # tulip.models.providers.COMPATIBLE_PROVIDERS
+        "ollama",
+        "vllm",
+        "lmstudio",
+        "llamacpp",
+        "litellm",
+        "groq",
+        "together",
+        "openrouter",
+        "deepseek",
+        "mistral",
+        "xai",
+        "fireworks",
+        "cerebras",
+        "perplexity",
+        "nvidia",
+        "gemini",
+        "openai-compatible",
     }
 )
 
@@ -130,6 +155,24 @@ def metadata_for(model_id: str) -> ModelMetadata | None:
     key = _strip_prefix(model_id.strip())
     with _lock:
         return _registry.get(key)
+
+
+def model_id_of(model: object) -> str | None:
+    """The model slug a model object (or a string id) is called with.
+
+    A string is returned as-is. An object is read the way the rest of the
+    SDK reads it: ``model.config.model`` (every native binding), else a
+    string ``model.model``. Wrappers that proxy attribute access to an inner
+    model — a ``FallbackChain`` (its ``config`` is the primary tier's), or a
+    caller's per-turn view that forwards ``__getattr__`` — resolve through
+    the proxy. ``None`` when nothing names the model.
+    """
+    if isinstance(model, str):
+        return model
+    name = getattr(getattr(model, "config", None), "model", None)
+    if not isinstance(name, str) or not name:
+        name = getattr(model, "model", None)
+    return name if isinstance(name, str) and name else None
 
 
 def known_models() -> list[str]:
@@ -286,4 +329,63 @@ _seed(
     family="qwen",
     context_length=262_000,
     max_output_tokens=32_768,
+)
+
+# DeepSeek V4 — two routes, priced separately because they bill differently.
+#
+# OpenRouter slugs (``openrouter:deepseek/...``): context length, output cap
+# (``top_provider.max_completion_tokens``) and price are OpenRouter's listed
+# values from ``GET https://openrouter.ai/api/v1/models`` on 2026-09-28.
+# OpenRouter routes each request to one of ~15 hosts whose prices differ
+# (V4 Flash output: $0.10-$1.28/M on that date), so the listed price is what
+# OpenRouter quotes, not a ceiling. A hard ``max_cost_usd`` cap that must
+# never under-count should register the highest price among the providers it
+# allows, or pin providers via ``extra_body={"provider": {...}}``.
+_seed(
+    "deepseek/deepseek-v4-flash",
+    family="deepseek",
+    context_length=1_048_576,
+    max_output_tokens=131_072,
+    input_price_per_mtok="0.05152",
+    output_price_per_mtok="0.10304",
+)
+_seed(
+    "deepseek/deepseek-v4.1-flash",
+    family="deepseek",
+    context_length=1_048_576,
+    max_output_tokens=943_718,
+    input_price_per_mtok="0.30",
+    output_price_per_mtok="1.20",
+)
+_seed(
+    "deepseek/deepseek-v4-pro",
+    family="deepseek",
+    context_length=1_048_576,
+    max_output_tokens=384_000,
+    input_price_per_mtok="0.783",
+    output_price_per_mtok="1.566",
+)
+
+# DeepSeek's own API (``deepseek:...``), per api-docs.deepseek.com
+# "Models & Pricing" on 2026-09-28: 1M context, 384K max output. Prices are
+# the PEAK (cache-miss input) rates — off-peak is half — so a budget never
+# under-counts. ``deepseek-flash`` is DeepSeek-V4.1-Flash; the legacy
+# ``deepseek-v4-flash`` name is still accepted and served (and billed) as it.
+for _slug in ("deepseek-flash", "deepseek-v4-flash"):
+    _seed(
+        _slug,
+        family="deepseek",
+        context_length=1_000_000,
+        max_output_tokens=384_000,
+        input_price_per_mtok="0.30",
+        output_price_per_mtok="1.20",
+    )
+del _slug
+_seed(
+    "deepseek-v4-pro",
+    family="deepseek",
+    context_length=1_000_000,
+    max_output_tokens=384_000,
+    input_price_per_mtok="1.32",
+    output_price_per_mtok="3.96",
 )

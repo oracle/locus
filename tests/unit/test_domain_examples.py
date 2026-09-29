@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """The non-security domain examples run end-to-end.
@@ -6,8 +6,8 @@
 The control runtime is domain-neutral: ``notebook_83``..``87`` show ``admit()``
 gating payments, infrastructure, customer-support, data-privacy, and cloud
 actions. They run offline (no network or credentials) and must exit 0 and hold
-the risky action for a human — the same contract the security examples are held
-to, so a future change that breaks one fails CI instead of silently shipping.
+the risky action for a human, so a future change that breaks one fails CI
+instead of silently shipping.
 """
 
 from __future__ import annotations
@@ -51,3 +51,10 @@ def test_domain_example_runs(notebook: str, domain: str) -> None:
     assert "require_human" in proc.stdout, (
         f"{notebook} ({domain}) never held an action for a human:\n{proc.stdout[-500:]}"
     )
+
+
+def test_ir_audit_trail_example_runs() -> None:
+    """The incident-response audit-trail example runs offline on the control core."""
+    proc = _run("notebook_81_ir_audit_trail.py")
+    assert proc.returncode == 0, f"notebook_81 exited {proc.returncode}:\n{proc.stderr}"
+    assert "Incident Response" in proc.stdout

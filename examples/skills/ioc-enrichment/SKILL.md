@@ -4,7 +4,7 @@ description: Use this skill when triaging an indicator of compromise (IP, domain
 allowed-tools: lookup_ioc enrich_domain kb_search
 license: Apache-2.0
 metadata:
-  author: tuliplabs
+  author: tulip
   domain: security
   version: "1.0"
 ---

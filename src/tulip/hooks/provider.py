@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """Hook provider protocol and base class for Tulip lifecycle hooks.
@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 
 if TYPE_CHECKING:
+    from tulip.core.events import CustomEvent, RunInfo
     from tulip.core.state import AgentState
 
 
@@ -44,6 +45,50 @@ class ProtectedEvent:
 
     _writable: set[str] = set()
 
+    #: Fields whose values never appear in ``repr()`` (only their keys do).
+    _redacted: frozenset[str] = frozenset()
+
+    #: The run this event belongs to; bound by the runtime, ``None`` when the
+    #: event was constructed by hand (tests, custom dispatchers).
+    _run_ctx: Any = None
+
+    @property
+    def run(self) -> RunInfo | None:
+        """Read-only identity of the run this hook fired in.
+
+        ``run.thread_id``, ``run.run_id`` and ``run.metadata`` (the run's
+        invocation metadata, read-only) let a hook on a shared agent tell
+        concurrent users apart without globals or context variables.
+        ``None`` when the event was not dispatched by a running agent.
+        """
+        ctx = self._run_ctx
+        info: RunInfo | None = ctx.info if ctx is not None else None
+        return info
+
+    def emit(self, event: CustomEvent) -> None:
+        """Send a UI-only :class:`~tulip.core.events.CustomEvent` to the run's stream.
+
+        The event is yielded from ``Agent.run()`` right after this hook
+        returns. It never reaches the model, the conversation, or the
+        checkpoint — use it for widgets and progress, and ``event.result`` for
+        what the model should read.
+
+        Raises:
+            RuntimeError: The event is not bound to a run.
+            TypeError: ``event`` is not a ``CustomEvent``.
+        """
+        ctx = self._run_ctx
+        if ctx is None:
+            raise RuntimeError(
+                f"{type(self).__name__}.emit() needs a running agent; this event "
+                "was not dispatched by one"
+            )
+        ctx.emit(event, tool_call_id=getattr(self, "tool_call_id", None) or None)
+
+    def _bind_run(self, run: Any) -> None:
+        """Attach the runtime's per-run context (internal)."""
+        object.__setattr__(self, "_run_ctx", run)
+
     def _init(self, name: str, value: Any) -> None:
         """Set a field during __init__ (bypasses protection)."""
         object.__setattr__(self, name, value)
@@ -62,6 +107,10 @@ class ProtectedEvent:
 
     def __repr__(self) -> str:
         attrs = {k: v for k, v in self.__dict__.items() if not k.startswith("_")}
+        for name in self._redacted:
+            value = attrs.get(name)
+            if isinstance(value, dict):
+                attrs[name] = dict.fromkeys(value, "***")
         pairs = ", ".join(f"{k}={v!r}" for k, v in attrs.items())
         return f"{type(self).__name__}({pairs})"
 
@@ -95,9 +144,10 @@ class BeforeModelCallEvent(ProtectedEvent):
     messages: list[Any]
     tools: list[Any] | None
 
-    def __init__(self, messages: list[Any], tools: list[Any] | None) -> None:
+    def __init__(self, messages: list[Any], tools: list[Any] | None, *, run: Any = None) -> None:
         self._init("messages", messages)
         self._init("tools", tools)
+        self._bind_run(run)
 
 
 class AfterModelCallEvent(ProtectedEvent):
@@ -105,6 +155,10 @@ class AfterModelCallEvent(ProtectedEvent):
 
     Writable fields:
         retry: Set True to discard response and re-call the model.
+        retry_feedback: With ``retry``, text the re-call sees as an
+            automated user-role note after the messages that were sent — why
+            the response was discarded. Sent for that re-call only: it never enters the run's
+            state, a checkpoint or the result.
         response: Replace the model response.
 
     Read-only fields:
@@ -114,25 +168,36 @@ class AfterModelCallEvent(ProtectedEvent):
         async def on_after_model_call(self, event):
             if not event.response.message.content:
                 event.retry = True  # Empty response, retry
+                event.retry_feedback = "Your reply was empty. Answer the user."
     """
 
-    _writable = {"retry", "response"}
+    _writable = {"retry", "retry_feedback", "response"}
 
     response: Any
     messages: list[Any]
     retry: bool
+    retry_feedback: str | None
 
-    def __init__(self, response: Any, messages: list[Any]) -> None:
+    def __init__(self, response: Any, messages: list[Any], *, run: Any = None) -> None:
         self._init("response", response)
         self._init("messages", messages)
         self._init("retry", False)
+        self._init("retry_feedback", None)
+        self._bind_run(run)
 
 
 class BeforeToolCallEvent(ProtectedEvent):
     """Event fired before each tool execution.
 
     Writable fields:
-        arguments: Modify tool arguments.
+        arguments: Modify tool arguments. Modified arguments are what the
+            run records: they are checkpointed with the call
+            (``state.tool_executions``) and passed to ``on_after_tool_call``.
+        secret_arguments: Extra arguments merged over ``arguments`` for the
+            tool invocation ONLY — never checkpointed, never written to the
+            conversation or the event stream, never shown to after-hooks. Use
+            it for anything that must reach the tool but must not be
+            persisted: a confirmation token, a per-user credential.
         cancel: Set True (or a string reason) to skip this tool call.
 
     Read-only fields:
@@ -143,20 +208,33 @@ class BeforeToolCallEvent(ProtectedEvent):
         async def on_before_tool_call(self, event):
             if event.tool_name == "delete_file":
                 event.cancel = "Blocked by security policy"
+            if event.tool_name == "book":
+                event.secret_arguments = {"confirm_token": mint_token(event.run)}
     """
 
-    _writable = {"arguments", "cancel"}
+    _writable = {"arguments", "secret_arguments", "cancel"}
+    _redacted = frozenset({"secret_arguments"})
 
     tool_name: str
     tool_call_id: str
     arguments: dict[str, Any]
+    secret_arguments: dict[str, Any]
     cancel: bool | str
 
-    def __init__(self, tool_name: str, tool_call_id: str, arguments: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        tool_name: str,
+        tool_call_id: str,
+        arguments: dict[str, Any],
+        *,
+        run: Any = None,
+    ) -> None:
         self._init("tool_name", tool_name)
         self._init("tool_call_id", tool_call_id)
         self._init("arguments", arguments)
+        self._init("secret_arguments", {})
         self._init("cancel", False)
+        self._bind_run(run)
 
 
 class AfterToolCallEvent(ProtectedEvent):
@@ -203,6 +281,7 @@ class AfterToolCallEvent(ProtectedEvent):
         *,
         tool_call_id: str = "",
         arguments: dict[str, Any] | None = None,
+        run: Any = None,
     ) -> None:
         self._init("tool_name", tool_name)
         self._init("tool_call_id", tool_call_id)
@@ -210,6 +289,7 @@ class AfterToolCallEvent(ProtectedEvent):
         self._init("result", result)
         self._init("error", error)
         self._init("retry", False)
+        self._bind_run(run)
 
 
 class HookPriority:

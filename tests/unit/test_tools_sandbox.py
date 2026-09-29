@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """Unit tests for sandboxed tool execution (`tulip.tools.sandbox`).
@@ -12,15 +12,14 @@ and ``run_tool`` recovers the function's return value.
 from __future__ import annotations
 
 import asyncio
-import sys
 from typing import Any
 
 import pytest
 
 from tulip.agent.hook_orchestrator import HookOrchestrator
+from tulip.control.policy import ControlPolicy
 from tulip.hooks.provider import BeforeToolCallEvent, HookPriority
 from tulip.observability import get_event_bus, reset_event_bus, run_context
-from tulip.security.policy import ControlPolicy
 from tulip.tools import tool
 from tulip.tools.sandbox import (
     SandboxEnforcerHook,
@@ -230,12 +229,12 @@ class TestNormalizeAndResolve:
         monkeypatch.setenv("TULIP_SANDBOX", "subprocess")
         assert isinstance(resolve_sandbox(SandboxSpec()), SubprocessSandbox)
 
-    def test_named_provider_without_tulip_sandbox_fails_closed(
+    def test_an_unregistered_provider_name_fails_closed(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setitem(sys.modules, "tulip_sandbox", None)
-        with pytest.raises(SandboxError, match="needs the tulip-sandbox package"):
-            resolve_sandbox(SandboxSpec(provider="docker"))
+        monkeypatch.setattr("importlib.metadata.entry_points", lambda group: [])
+        with pytest.raises(SandboxError, match="unknown sandbox provider 'firecracker'"):
+            resolve_sandbox(SandboxSpec(provider="firecracker"))
 
     def test_provider_object_passes_through(self) -> None:
         provider = _FakeProvider()

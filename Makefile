@@ -17,10 +17,10 @@ test-fast:
 	hatch run test-fast
 
 integration_tests:
-	hatch run pytest tests/integration/ -v
+	hatch run pytest tests/integration/ packages/tulip-agents-security/tests/integration/ -v
 
 test-all:
-	hatch run pytest tests/ -v
+	hatch run pytest tests/ packages/tulip-agents-security/tests/ -v
 
 ######################
 # LINTING AND FORMATTING
@@ -30,8 +30,8 @@ lint:
 	hatch run lint
 
 format:
-	hatch run ruff format src/ tests/
-	hatch run ruff check --select I --fix src/ tests/
+	hatch run ruff format src/ tests/ examples/ packages/
+	hatch run ruff check --select I --fix src/ tests/ examples/ packages/
 
 typecheck:
 	hatch run typecheck
@@ -52,7 +52,7 @@ install-dev:
 
 clean:
 	hatch env prune
-	rm -rf .pytest_cache .mypy_cache .ruff_cache htmlcov .coverage dist
+	rm -rf .pytest_cache .mypy_cache .ruff_cache htmlcov .coverage dist packages/*/dist
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete
 
@@ -60,8 +60,11 @@ clean:
 # BUILD & PUBLISH
 ######################
 
+# Both distributions land in dist/: tulip-agents (the core runtime) and
+# tulip-agents-security (the opt-in security-domain tooling).
 build:
 	hatch build
+	cd packages/tulip-agents-security && hatch build ../../dist
 
 publish:
 	hatch publish
@@ -75,7 +78,7 @@ help:
 	@echo '========================='
 	@echo ''
 	@echo 'Testing:'
-	@echo '  make test              - run unit tests'
+	@echo '  make test              - run unit tests (core + security package)'
 	@echo '  make test-cov          - run tests with coverage'
 	@echo '  make test-fast         - run tests in parallel'
 	@echo '  make integration_tests - run integration tests'
@@ -92,5 +95,5 @@ help:
 	@echo '  make clean             - remove build artifacts and envs'
 	@echo ''
 	@echo 'Build & Publish:'
-	@echo '  make build             - build package'
+	@echo '  make build             - build tulip-agents + tulip-agents-security'
 	@echo '  make publish           - publish to PyPI'

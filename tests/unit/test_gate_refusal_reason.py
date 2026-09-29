@@ -1,4 +1,4 @@
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """``refusal_reason`` — what the *user* hears when the gate refuses.
@@ -19,7 +19,7 @@ import pytest
 
 from tulip.control import Action, AuditTrail, ControlPolicy
 from tulip.control.gate import gate_tool
-from tulip.security.verify import VerificationResult
+from tulip.control.verification import VerificationResult
 from tulip.tools.decorator import tool
 
 
@@ -107,7 +107,7 @@ async def test_an_allowed_call_is_untouched() -> None:
 
 
 async def test_refusal_keys_are_still_the_shared_shape() -> None:
-    """The payload contract is shared with the tulip-frameworks bridges."""
+    """The refusal payload is a public contract; none of its keys go missing."""
     from tulip.control.gate import _REFUSAL_KEYS
 
     payload = json.loads(await _gate(refusal_reason="nope").fn(order_id="ord-1", amount_usd=900))

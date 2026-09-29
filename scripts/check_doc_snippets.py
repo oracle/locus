@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2026 Tulip Labs
+# Copyright 2026 The Tulip Authors
 # SPDX-License-Identifier: Apache-2.0
 
 """Check every Python snippet in this repo's Markdown against the real SDK.

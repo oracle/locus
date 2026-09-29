@@ -3,7 +3,7 @@ name: code-review
 description: Use this skill when reviewing code for quality, security, and maintainability issues. Provides a structured checklist for thorough code reviews.
 allowed-tools: read_file search_code
 metadata:
-  author: tuliplabs
+  author: tulip
   version: "1.0"
 ---
 

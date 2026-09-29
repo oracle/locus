@@ -14,6 +14,10 @@ jobs:
   build:
     name: "lint+typecheck #${{ matrix.python-version }}"
     runs-on: ubuntu-latest
+    env:
+      # ``hatch run check`` also runs the unit tests; the MCP loopback-server
+      # suite must run there, not skip (see _test.yml).
+      TULIP_REQUIRE_MCP_SERVER_TESTS: "1"
     strategy:
       matrix:
         # Lint on the min and max supported Python versions. mypy can
