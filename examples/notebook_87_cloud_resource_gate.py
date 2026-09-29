@@ -80,7 +80,7 @@ IAM: dict[str, list[str]] = {
 
 
 # The side effects. Each is a zero-arg async callable — exactly what admit()
-# expects for `perform`. In a real agent these would call boto3 / the OCI SDK /
+# expects for `perform`. In a real agent these would call boto3 / the Azure SDK /
 # gcloud; here they just edit the dicts above and return a short receipt.
 
 
