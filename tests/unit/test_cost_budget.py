@@ -169,3 +169,50 @@ def test_a_budget_on_an_unpriced_model_is_refused_when_the_agent_is_built() -> N
 
 def test_cost_budget_is_a_stop_reason() -> None:
     assert _normalize_stop_reason("cost_budget") == "cost_budget"
+
+
+class _TurnView:
+    """A caller's per-turn view over a shared model: proxies ``__getattr__``."""
+
+    def __init__(self, inner: Any) -> None:
+        self.inner = inner
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.inner, name)
+
+    async def complete(self, messages: Any, tools: Any = None, **kwargs: Any) -> Any:
+        return await self.inner.complete(messages, tools, **kwargs)
+
+    def stream(self, messages: Any, tools: Any = None, **kwargs: Any) -> Any:
+        return self.inner.stream(messages, tools, **kwargs)
+
+
+def test_a_budget_prices_a_model_behind_a_proxy_view() -> None:
+    from tulip.models.fallback import FallbackChain
+
+    calls: list[int] = []
+    chain = FallbackChain([_looping_model(_PRICED, calls)], names=["primary"])
+    agent = Agent(
+        model=_TurnView(chain),
+        tools=[lookup],
+        max_cost_usd=0.20,
+        max_tokens=4_000,
+        max_iterations=50,
+        reflexion=False,
+        grounding=False,
+    )
+
+    assert agent._model_prices == (10.0, 30.0)
+    assert agent.run_sync("look everything up").stop_reason == "cost_budget"
+
+
+def test_a_budget_on_an_openrouter_deepseek_id_is_accepted() -> None:
+    from tulip.models.native.openai import OpenAIModel
+
+    agent = Agent(
+        model=OpenAIModel(model="deepseek/deepseek-v4-flash", api_key="sk-test"),
+        max_cost_usd=0.05,
+        reflexion=False,
+        grounding=False,
+    )
+    assert agent._model_prices == pytest.approx((0.05152, 0.10304))
