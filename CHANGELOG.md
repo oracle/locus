@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [2.18.3] - 2026-09-29
+
 ### Added
 
 - **`hold_tool_step_text`** (with `hold_final_answer_tokens`): the text of a
