@@ -10,6 +10,17 @@ policy.
 
 ### Fixed
 
+- **Streamed chat-completions runs report usage again.** With
+  `stream_tokens=True` on an OpenAI chat-completions model,
+  `TerminateEvent.usage` came back `None` while the identical non-streamed
+  run reported full token counts — so `max_cost_usd` never tripped and usage
+  accounting read zero. OpenAI only sends the trailing usage chunk on a
+  stream when asked via `stream_options={"include_usage": True}`, and
+  `stream()` never asked. `stream()` now requests it by default; a
+  caller-supplied `stream_options` still reaches the API verbatim, and
+  `OpenAIModel(stream_usage=False)` omits it for an OpenAI-compatible server
+  that rejects the field. (OpenRouter always sends usage on the last SSE
+  chunk and ignores the field, so it was unaffected.)
 - **`max_cost_usd` works on DeepSeek V4, directly or through OpenRouter.** The
   price table had no DeepSeek entry, so an `Agent(max_cost_usd=...)` on
   `openrouter:deepseek/deepseek-v4-flash` (or `deepseek:deepseek-v4-flash`)
