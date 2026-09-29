@@ -503,6 +503,19 @@ class AgentConfig(BaseModel):
             "only, never replan."
         ),
     )
+    final_answer_fallback: Any | None = Field(
+        default=None,
+        description=(
+            "Async ``(draft_text, FinalAnswerContext, feedback) -> str | None`` "
+            "called when the final_answer_verifier rejects a draft and no "
+            "replan is left. Text it returns REPLACES the draft: it is the "
+            "run's answer, the assistant message saved to state and "
+            "checkpoints, and (with ``hold_final_answer_tokens``) the only "
+            "content streamed — the rejected draft is never shown. ``None`` "
+            "keeps the last draft (the behaviour without a fallback). A "
+            "raising fallback keeps the draft and says so on the event."
+        ),
+    )
     hold_final_answer_tokens: bool = Field(
         default=False,
         description=(
@@ -522,6 +535,13 @@ class AgentConfig(BaseModel):
     def _validate_final_answer_verifier(cls, v: Any) -> Any:
         if v is not None and not callable(v):
             raise TypeError(f"final_answer_verifier must be an async callable, got: {v!r}")
+        return v
+
+    @field_validator("final_answer_fallback")
+    @classmethod
+    def _validate_final_answer_fallback(cls, v: Any) -> Any:
+        if v is not None and not callable(v):
+            raise TypeError(f"final_answer_fallback must be an async callable, got: {v!r}")
         return v
 
     @field_validator("output_schema")

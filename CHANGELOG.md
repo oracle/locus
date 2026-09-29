@@ -8,6 +8,17 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **`AgentConfig.final_answer_fallback`** — async `(draft, ctx, feedback) ->
+  str | None`, called when the final-answer verifier rejects a draft and no
+  replan is left. Returned text replaces the draft as the run's answer, the
+  assistant message in state and checkpoints, and — with
+  `hold_final_answer_tokens` — the only content streamed, so a user never sees
+  an answer the verifier refused. `FinalAnswerVerificationEvent.replaced` says
+  it happened. `None`, or a fallback that raises, keeps the draft; a verifier
+  that raised (fail-open) is never replaced.
+
 ## [2.18.0] - 2026-09-29
 
 ### Fixed
@@ -107,6 +118,7 @@ policy.
   gets the token-counting `LLMCompactor` instead of the message-count
   `SlidingWindowManager`, as `Agent(model=get_model("vllm:qwen3.6-35b"))`
   already did.
+
 
 ## [2.17.0] - 2026-09-28
 
