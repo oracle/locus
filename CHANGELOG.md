@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [2.18.0] - 2026-09-29
+
 ### Fixed
 
 - **Streamed chat-completions runs report usage again.** With
