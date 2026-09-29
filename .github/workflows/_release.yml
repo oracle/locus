@@ -40,12 +40,14 @@ jobs:
       - name: Install Hatch
         run: pip install hatch==${{ env.HATCH_VERSION }}
 
-      # Both distributions are released in lockstep from this repo:
-      # tulip-agents (root) and tulip-agents-security (packages/).
+      # Only tulip-agents (root) is published. tulip-agents-security
+      # (packages/) is built into its own directory so pre-release-checks can
+      # prove the two still install together, but it is never uploaded: it is
+      # not published to PyPI.
       - name: Build project for distribution
         run: |
           hatch build
-          cd packages/tulip-agents-security && hatch build ../../dist
+          cd packages/tulip-agents-security && hatch build ../../dist-security
 
       # actions/upload-artifact@v7.0.1
       - name: Upload build
@@ -53,6 +55,13 @@ jobs:
         with:
           name: dist
           path: dist/
+
+      # actions/upload-artifact@v7.0.1
+      - name: Upload security build (checks only, never published)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: dist-security
+          path: dist-security/
 
       - name: Check Version
         id: check-version
@@ -80,8 +89,8 @@ jobs:
           path: dist/
 
       # pypa/gh-action-pypi-publish@v1.14.2 — Trusted Publishing (OIDC).
-      # Requires a "pending/trusted publisher" registered on test.pypi.org
-      # for each project (tulip-agents and tulip-agents-security):
+      # Requires a trusted publisher registered on test.pypi.org for
+      # tulip-agents:
       #   repo=tuliplabs-ai/tulip-agents, workflow=_release.yml, environment=testpypi
       # continue-on-error so a TestPyPI hiccup never blocks the prod publish;
       # skip-existing tolerates re-runs over an already-uploaded version.
@@ -117,6 +126,11 @@ jobs:
         with:
           name: dist
           path: dist/
+      - name: Download security build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: dist-security
+          path: dist-security/
       - name: Verify package imports
         env:
           PKG_NAME: ${{ needs.build.outputs.pkg-name }}
@@ -127,7 +141,7 @@ jobs:
           # alone first (it must not need the security package), then both.
           pip install "dist/${PKG_NAME//-/_}-${VERSION}-py3-none-any.whl"
           python -c "import tulip, tulip.control; print(dir(tulip))"
-          pip install "dist/tulip_agents_security-${VERSION}-py3-none-any.whl"
+          pip install "dist-security/tulip_agents_security-${VERSION}-py3-none-any.whl"
           python -c "import tulip_security; from tulip.security import red_team; print(tulip_security.__name__)"
 
   publish:
@@ -152,9 +166,9 @@ jobs:
           path: dist/
 
       # pypa/gh-action-pypi-publish@v1.14.2 — Trusted Publishing (OIDC).
-      # Requires a "pending/trusted publisher" on pypi.org for EACH project
-      # (tulip-agents and tulip-agents-security):
+      # Requires a trusted publisher on pypi.org for tulip-agents:
       #   repo=tuliplabs-ai/tulip-agents, workflow=_release.yml, environment=pypi
+      # dist/ holds tulip-agents only; tulip-agents-security is not published.
       #
       # Moved off v1.14.0 on 2026-08-12: `requires = ["hatchling"]` is unpinned,
       # so the build machine picked up a hatchling that emits
@@ -163,8 +177,8 @@ jobs:
       # The 2.5.0 release failed on this AFTER the tag was published, which is
       # the worst moment to find out. TestPyPI would have caught it first if
       # that step were not `continue-on-error` — it failed there too, silently.
-      # skip-existing: the two distributions upload independently, so a re-run
-      # after one of them failed must not trip over the one already published.
+      # skip-existing: a re-run after a partial upload (sdist but not wheel)
+      # must not trip over the file already published.
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33
         with:

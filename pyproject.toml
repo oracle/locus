@@ -107,7 +107,7 @@ opensearch = ["opensearch-py>=2.4"]
 s3 = ["boto3>=1.34"]
 
 # boto3 alone. The AWS cloud-posture tools that used it ship in the separate
-# tulip-agents-security distribution (see the ``security`` extra).
+# tulip-agents-security package (packages/tulip-agents-security/).
 aws = ["boto3>=1.34"]
 
 # Amazon Bedrock models (src/tulip/models/native/bedrock.py). Same single
@@ -116,11 +116,10 @@ aws = ["boto3>=1.34"]
 bedrock = ["boto3>=1.34"]
 
 # Security-domain tooling — red-team probes, SOC triage, intel / SIEM / EDR /
-# scanner / fingerprint / AWS posture adapters — is a separate, opt-in
-# distribution (packages/tulip-agents-security/, imported as ``tulip_security``).
-# The core runtime ships without it; this extra installs it, with boto3 for the
-# AWS posture tools.
-security = ["tulip-agents-security[aws]>=2.18.1"]
+# scanner / fingerprint / AWS posture adapters — is a separate, opt-in package
+# in this repo (packages/tulip-agents-security/, imported as ``tulip_security``).
+# It is not published to PyPI, so there is no extra for it: install it from
+# the repository.
 
 # Browser tools (src/tulip/tools/browser.py). After installing, fetch a browser
 # with `playwright install chromium`.
@@ -791,8 +790,8 @@ show_missing = true
 # =============================================================================
 
 # The security-domain tooling ships as its own distribution from this repo
-# (``packages/tulip-agents-security/``). ``tulip-agents[security]`` depends on
-# it, and it depends back on tulip-agents; resolve both sides locally.
+# (``packages/tulip-agents-security/``). It depends on tulip-agents; resolve
+# both sides locally.
 [tool.uv.workspace]
 members = ["packages/tulip-agents-security"]
 

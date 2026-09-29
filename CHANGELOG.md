@@ -8,6 +8,21 @@ policy.
 
 ## [Unreleased]
 
+### Removed
+
+- **The `security` extra.** `tulip-agents-security` is not published to PyPI,
+  so `pip install "tulip-agents[security]"` could not resolve. Install the
+  package from the repository instead:
+  `pip install "git+https://github.com/tuliplabs-ai/tulip-agents#subdirectory=packages/tulip-agents-security"`.
+  The release workflow still builds it and checks that it installs next to
+  the core wheel, but no longer tries to upload it — the upload is what failed
+  the 2.17.0 and 2.18.1 release runs after the core package had published.
+
+### Changed
+
+- The README cites GSAR as the paper Tulip's grounding layer is based on, and
+  the repository has a `PROVENANCE.md`.
+
 ## [2.18.1] - 2026-09-29
 
 ### Added

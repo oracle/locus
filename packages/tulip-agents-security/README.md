@@ -5,9 +5,12 @@ agents, shipped as a separate, opt-in distribution. The core `tulip-agents`
 runtime — the admission gate, policy, audit trail, and the GSAR grounding and
 verification layer in `tulip.control` — does not include any of it.
 
+It is not published to PyPI. Install it from the repository:
+
 ```bash
-pip install tulip-agents-security          # or: pip install "tulip-agents[security]"
-pip install "tulip-agents-security[aws]"   # + boto3 for the AWS posture tools
+pip install "git+https://github.com/tuliplabs-ai/tulip-agents#subdirectory=packages/tulip-agents-security"
+# + boto3 for the AWS posture tools:
+pip install "tulip-agents-security[aws] @ git+https://github.com/tuliplabs-ai/tulip-agents#subdirectory=packages/tulip-agents-security"
 ```
 
 It is imported as `tulip_security`.

@@ -52,7 +52,7 @@ jobs:
 
       # The security-domain tooling is a separate distribution in this repo
       # (packages/tulip-agents-security). Install it from the checkout so its
-      # suite runs here too — ``tulip-agents[security]`` would fetch it from PyPI.
+      # suite runs here too — it is not on PyPI.
       - name: Install tulip-agents-security
         run: pip install -e "packages/tulip-agents-security[aws]"
 
