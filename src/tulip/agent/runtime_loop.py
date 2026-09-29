@@ -44,6 +44,7 @@ from tulip.agent.run_context import (
     scrub_ephemeral_metadata,
     split_ephemeral_metadata,
 )
+from tulip.agent.subagent import enter_parent_run, exit_parent_run, fold_subagent_usage
 from tulip.agent.verification import (
     FinalAnswerContext,
     is_ephemeral_message,
@@ -674,10 +675,22 @@ class AgentRuntimeMixin:
             self._end_run(rc, state)
             raise
 
+        # Publish this run as the parent context for subagents spawned from
+        # tool bodies: links their cancellation to THIS run's signal (which
+        # both cancel(thread_id=...) and a cancel-all set) and gives their
+        # usage reports a place to land (folded each iteration). Entered right
+        # before the try whose finally exits it.
+        _subagent_ctx = enter_parent_run(rc.cancel)
+
         try:
             # Main ReAct loop
             _open_iteration: int | None = None
             while True:
+                # Fold any child-agent usage reported since the last pass, so
+                # the budget checks below and every TerminateEvent count
+                # delegated spend as spend.
+                state = fold_subagent_usage(state)
+
                 # Iteration boundary. The previous iteration is closed here
                 # rather than at each exit: this loop has seven ways out, and a
                 # hook contract that depends on remembering all of them is one
@@ -1655,6 +1668,13 @@ class AgentRuntimeMixin:
             raise
 
         finally:
+            # Fold what the last tool batch's children reported (the loop may
+            # have exited before its next top-of-iteration fold), THEN stop
+            # being anyone's parent, so the state handed to ``_end_run``
+            # below counts delegated spend on every exit path.
+            state = fold_subagent_usage(state)
+            exit_parent_run(_subagent_ctx)
+
             # Consume a pending cancel-all so it does not leak into the next run
             if self._cancel_signal is not None:
                 self._cancel_signal.clear()
@@ -1741,9 +1761,18 @@ class AgentRuntimeMixin:
         # ``_begin_run``: resume = fresh clock, for this run only.
         termination = rc.termination
 
+        # Same parent-context contract as run(): a resumed run can spawn
+        # subagents too, and their usage and cancellation must behave
+        # identically to the first pass.
+        _subagent_ctx = enter_parent_run(rc.cancel)
+
         try:
             _open_iteration: int | None = None
             while True:
+                # Fold pending child-agent usage first — same contract as
+                # run(): budgets and TerminateEvents count delegated spend.
+                state = fold_subagent_usage(state)
+
                 # Same loop as run() — check termination, get response, execute tools
                 # Iteration boundary. The previous iteration is closed here
                 # rather than at each exit: this loop has four ways out, and a
@@ -2074,6 +2103,11 @@ class AgentRuntimeMixin:
                 await self._run_iteration_end_hooks(_open_iteration, state)
 
         finally:
+            # Mirror run(): fold the final batch's child usage before the
+            # context goes away, so the state stored below stays truthful.
+            state = fold_subagent_usage(state)
+            exit_parent_run(_subagent_ctx)
+
             if self._cancel_signal is not None:
                 self._cancel_signal.clear()
             self._end_run(rc, state)
