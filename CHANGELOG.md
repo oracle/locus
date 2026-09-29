@@ -8,6 +8,13 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **`hold_tool_step_text`** (with `hold_final_answer_tokens`): the text of a
+  call that turned out to be a tool step is dropped from the stream instead of
+  released, so a streaming UI shows only the verified final answer. The model
+  keeps its words in its history; tool-call chunks and tool events still stream.
+
 ## [2.18.2] - 2026-09-29
 
 ### Removed

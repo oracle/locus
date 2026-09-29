@@ -529,6 +529,18 @@ class AgentConfig(BaseModel):
             "one burst after verification."
         ),
     )
+    hold_tool_step_text: bool = Field(
+        default=False,
+        description=(
+            "With ``hold_final_answer_tokens``: the text of a call that turned "
+            'out to be a tool-calling step ("let me check…") is dropped from '
+            "the stream instead of released, so the stream carries only the "
+            "verified final answer — words the verifier never saw never reach "
+            "the user. The text stays in the conversation the model sees, the "
+            "tool-call chunks and tool events still stream (a UI can show a "
+            "status line per tool)."
+        ),
+    )
 
     @field_validator("final_answer_verifier")
     @classmethod
@@ -678,6 +690,17 @@ class AgentConfig(BaseModel):
         default_factory=dict,
         description="Custom metadata passed to tools",
     )
+
+    @model_validator(mode="after")
+    def tool_step_text_needs_the_answer_hold(self) -> AgentConfig:
+        """``hold_tool_step_text`` drops what ``hold_final_answer_tokens`` holds;
+        without that hold nothing is held, and the flag would silently do nothing."""
+        if self.hold_tool_step_text and not self.hold_final_answer_tokens:
+            raise ValueError(
+                "hold_tool_step_text needs hold_final_answer_tokens=True (and a "
+                "final_answer_verifier): only held text can be dropped."
+            )
+        return self
 
     @model_validator(mode="before")
     @classmethod

@@ -30,6 +30,7 @@ from tulip.core.events import (
     InterruptEvent,
     ModelChunkEvent,
     TerminateEvent,
+    ToolStartEvent,
     TulipEvent,
 )
 from tulip.core.messages import Message
@@ -271,6 +272,50 @@ async def test_hold_releases_tool_steps_and_exhausted_drafts() -> None:
     # The rejected first draft is dropped; the returned (exhausted) one shows.
     assert _streamed_text(events) == "WRONG 2"
     assert _terminate(events).final_message == "WRONG 2"
+
+
+async def test_hold_tool_step_text_streams_only_the_verified_answer() -> None:
+    # Text a model writes before a tool call ("see https://stale.example") is
+    # never checked by the verifier, so a UI that must show only verified
+    # words cannot stream it. With hold_tool_step_text it is dropped from the
+    # stream (the model still sees it in its history) and the tool call still
+    # arrives, for a status line.
+    model = ScriptedModel(
+        [
+            tool_call("get_rate", content="see https://stale.example", hotel="Aman"),
+            text("It is 420 EUR"),
+        ]
+    )
+    agent = _agent(
+        model,
+        _Verifier(),
+        tools=[get_rate],
+        hold_final_answer_tokens=True,
+        hold_tool_step_text=True,
+    )
+    events = await _collect(agent.run("q", stream_tokens=True))
+
+    assert "stale.example" not in _streamed_text(events)
+    assert _streamed_text(events) == "It is 420 EUR"
+    chunks = [e for e in events if isinstance(e, ModelChunkEvent)]
+    assert any(c.tool_calls for c in chunks), "the tool call itself still streams"
+    assert any(isinstance(e, ToolStartEvent) for e in events)
+    # The model's own history keeps its words.
+    assert model.received_messages[1][-2].content == "see https://stale.example"
+
+
+async def test_tool_step_text_streams_by_default() -> None:
+    model = ScriptedModel(
+        [tool_call("get_rate", content="Checking. ", hotel="Aman"), text("It is 420 EUR")]
+    )
+    agent = _agent(model, _Verifier(), tools=[get_rate], hold_final_answer_tokens=True)
+    events = await _collect(agent.run("q", stream_tokens=True))
+    assert _streamed_text(events) == "Checking. It is 420 EUR"
+
+
+def test_hold_tool_step_text_needs_the_answer_hold() -> None:
+    with pytest.raises(ValueError, match="hold_final_answer_tokens"):
+        _agent(ScriptedModel([text("x")]), _Verifier(), hold_tool_step_text=True)
 
 
 async def test_hold_lets_reasoning_stream_live() -> None:

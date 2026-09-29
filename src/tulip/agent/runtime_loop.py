@@ -948,7 +948,14 @@ class AgentRuntimeMixin:
                 )
                 if _held_chunks and not is_final:
                     for held in _held_chunks:
-                        yield held
+                        out = held
+                        if self.config.hold_tool_step_text and held.content:
+                            # Words the verifier never saw stay off the
+                            # stream; tool-call and usage parts still go out.
+                            if not held.tool_calls and not getattr(held, "usage", None):
+                                continue
+                            out = held.model_copy(update={"content": None})
+                        yield out
                     _held_chunks = []
 
                 # If still no tool calls — in auto mode we're done, in explicit mode we continue
