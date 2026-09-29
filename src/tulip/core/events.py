@@ -145,6 +145,25 @@ class GroundingEvent(TulipEvent):
     requires_replan: bool = False
 
 
+class FinalAnswerVerificationEvent(TulipEvent):
+    """``AgentConfig.final_answer_verifier`` judged a final-answer draft.
+
+    ``passed`` is the verdict. On a rejection ``feedback`` is what the
+    verifier returned and ``replanning`` says whether the model is called
+    again with it (False once ``max_replans`` are spent — the draft is then
+    returned as the answer anyway). ``error`` is set when the verifier raised;
+    the draft is then accepted (the verifier fails open) and ``passed`` is
+    False. ``attempt`` is 0 for the first draft.
+    """
+
+    event_type: Literal["final_answer_verification"] = "final_answer_verification"
+    passed: bool
+    attempt: int
+    replanning: bool = False
+    feedback: str | None = None
+    error: str | None = None
+
+
 class TerminateEvent(TulipEvent):
     """Agent execution terminated.
 
@@ -429,6 +448,7 @@ LoopEvent = (
     | ToolCompleteEvent
     | ReflectEvent
     | GroundingEvent
+    | FinalAnswerVerificationEvent
     | TerminateEvent
 )
 AgentEvent = LoopEvent | SpecialistStartEvent | SpecialistCompleteEvent | OrchestratorDecisionEvent

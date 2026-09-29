@@ -44,7 +44,13 @@ from tulip.agent.run_context import (
     scrub_ephemeral_metadata,
     split_ephemeral_metadata,
 )
+from tulip.agent.verification import (
+    FinalAnswerContext,
+    is_ephemeral_message,
+    mark_ephemeral,
+)
 from tulip.core.events import (
+    FinalAnswerVerificationEvent,
     GroundingEvent,
     InterruptEvent,
     ReflectEvent,
@@ -319,6 +325,30 @@ def _normalize_stop_reason(raw: str | None) -> StopReason:
     return "complete"
 
 
+#: Queued by ``_get_model_response`` when an after-model hook discards a
+#: streamed call (``retry``); never yielded to the caller.
+_DISCARDED_CALL = object()
+
+
+def _is_reasoning_only(chunk: Any) -> bool:
+    """A streamed chunk that carries chain-of-thought and nothing else."""
+    return bool(
+        getattr(chunk, "reasoning", None)
+        and not getattr(chunk, "content", None)
+        and not getattr(chunk, "tool_calls", None)
+        and not getattr(chunk, "done", False)
+    )
+
+
+def _without_ephemeral_messages(state: AgentState) -> AgentState:
+    """``state`` minus messages marked turn-only (see tulip.agent.verification)."""
+    if not any(is_ephemeral_message(m) for m in state.messages):
+        return state
+    return state.model_copy(
+        update={"messages": tuple(m for m in state.messages if not is_ephemeral_message(m))}
+    )
+
+
 def _durable(state: AgentState) -> AgentState:
     """The form of ``state`` that outlives the turn: checkpoints, the result.
 
@@ -329,6 +359,9 @@ def _durable(state: AgentState) -> AgentState:
     from tulip.memory.manager import without_memory_blocks  # noqa: PLC0415
 
     state = without_memory_blocks(state)
+    # Turn-only messages (a draft the final-answer verifier rejected, its
+    # feedback) were for the model's next attempt, not the conversation.
+    state = _without_ephemeral_messages(state)
     # Ephemeral run metadata (``mcp_headers``: a bearer token) never reaches a
     # checkpoint, whatever put it on the state.
     scrubbed = scrub_ephemeral_metadata(state.metadata)
@@ -614,6 +647,15 @@ class AgentRuntimeMixin:
         _grounding_evals = 0
         _last_assistant_content: str | None = None
         _last_no_tool_calls = False
+        _verifier_attempts = 0
+        # Hold a call's content chunks until we know they are not a draft the
+        # verifier will send back (``hold_final_answer_tokens``).
+        _hold_tokens = (
+            stream_tokens
+            and self.config.final_answer_verifier is not None
+            and self.config.hold_final_answer_tokens
+        )
+        _held_chunks: list[Any] = []
 
         # The composable termination condition was copied and reset for this
         # run by ``_begin_run``: TimeLimit's clock starts now, and no other
@@ -823,6 +865,12 @@ class AgentRuntimeMixin:
                             chunk = await asyncio.wait_for(chunk_queue.get(), timeout=0.05)
                         except TimeoutError:
                             continue
+                        if chunk is _DISCARDED_CALL:
+                            _held_chunks = []
+                            continue
+                        if _hold_tokens and not _is_reasoning_only(chunk):
+                            _held_chunks.append(chunk)
+                            continue
                         yield chunk
                     response, state = await model_task
                 else:
@@ -879,8 +927,18 @@ class AgentRuntimeMixin:
                         state = state.model_copy(update={"messages": tuple(messages)})
                         _last_no_tool_calls = False
 
+                # A held call that turned out to be a tool step is not a final
+                # answer: release its chunks now, in order.
+                is_final = (
+                    not response.message.tool_calls and self.config.completion_mode != "explicit"
+                )
+                if _held_chunks and not is_final:
+                    for held in _held_chunks:
+                        yield held
+                    _held_chunks = []
+
                 # If still no tool calls — in auto mode we're done, in explicit mode we continue
-                if not response.message.tool_calls and self.config.completion_mode != "explicit":
+                if is_final:
                     # Apply grounding before final response if enabled
                     if (
                         self.config.grounding
@@ -990,6 +1048,24 @@ class AgentRuntimeMixin:
                             final_content = _last_assistant_content or self._build_fallback_summary(
                                 state
                             )
+
+                    # Pluggable final-answer verification: runs on every final
+                    # answer, tool call or not.
+                    if self.config.final_answer_verifier is not None and final_content:
+                        verdict = await self._verify_final_answer(
+                            final_content, state, rc, _verifier_attempts
+                        )
+                        yield verdict
+                        if verdict.replanning:
+                            _verifier_attempts += 1
+                            _held_chunks = []  # the rejected draft is never shown
+                            state = self._queue_verifier_replan(
+                                state, final_content, verdict.feedback or ""
+                            )
+                            continue
+                    for held in _held_chunks:
+                        yield held
+                    _held_chunks = []
 
                     yield TerminateEvent(
                         reason="complete",
@@ -1590,7 +1666,9 @@ class AgentRuntimeMixin:
 
             # Extract and persist long-term memories from this session.
             if self._memory_manager is not None:
-                await self._memory_manager.on_session_end(state)
+                # Without turn-only messages: a rejected draft and the
+                # verifier's note are not facts about the user.
+                await self._memory_manager.on_session_end(_without_ephemeral_messages(state))
 
             # Final checkpoint
             if self.config.checkpointer and thread_id:
@@ -1638,6 +1716,7 @@ class AgentRuntimeMixin:
         _grounding_evals = 0
         _last_assistant_content: str | None = None
         _last_no_tool_calls = False
+        _verifier_attempts = 0
 
         # Extract last assistant content from state
         for msg in reversed(state.messages):
@@ -1751,6 +1830,17 @@ class AgentRuntimeMixin:
                 )
 
                 if not response.message.tool_calls and self.config.completion_mode != "explicit":
+                    if self.config.final_answer_verifier is not None and response.message.content:
+                        verdict = await self._verify_final_answer(
+                            response.message.content, state, rc, _verifier_attempts
+                        )
+                        yield verdict
+                        if verdict.replanning:
+                            _verifier_attempts += 1
+                            state = self._queue_verifier_replan(
+                                state, response.message.content, verdict.feedback or ""
+                            )
+                            continue
                     yield TerminateEvent(
                         reason="complete",
                         iterations_used=state.iteration,
@@ -2481,6 +2571,21 @@ class AgentRuntimeMixin:
             after_event = await self._run_after_model_hooks(response, messages, run=run)
 
             if after_event.retry:
+                if chunk_queue is not None:
+                    # Tell the loop this call's streamed chunks were discarded,
+                    # so held chunks are dropped rather than released.
+                    await chunk_queue.put(_DISCARDED_CALL)
+                feedback = getattr(after_event, "retry_feedback", None)
+                if isinstance(feedback, str) and feedback:
+                    # For the re-call only: ``messages`` is this call's local
+                    # list, never written back to state.
+                    messages = [
+                        *messages,
+                        Message.user(
+                            "[Retry feedback — automated, not from the user] "
+                            f"Your previous reply was discarded: {feedback}"
+                        ),
+                    ]
                 continue  # Retry model call
             response = after_event.response
             break
@@ -2572,6 +2677,77 @@ class AgentRuntimeMixin:
             duration_ms=0.0,
         )
 
+    async def _verify_final_answer(
+        self,
+        draft: str,
+        state: AgentState,
+        rc: RunContext,
+        attempt: int,
+    ) -> FinalAnswerVerificationEvent:
+        """Run ``config.final_answer_verifier`` on ``draft``; never raises."""
+        verifier = self.config.final_answer_verifier
+        max_replans = self.config.final_answer_verifier_max_replans
+        if verifier is None:
+            return FinalAnswerVerificationEvent(passed=True, attempt=attempt)
+        ctx = FinalAnswerContext(
+            run=rc.info,
+            prompt=rc.prompt,
+            messages=tuple(state.messages),
+            tool_executions=tuple(state.tool_executions),
+            attempt=attempt,
+            max_replans=max_replans,
+        )
+        try:
+            feedback = await verifier(draft, ctx)
+        except Exception as exc:  # noqa: BLE001 — a broken verifier must not kill the turn
+            logger.warning("final_answer_verifier raised; accepting the draft", exc_info=True)
+            return FinalAnswerVerificationEvent(
+                passed=False, attempt=attempt, error=f"{type(exc).__name__}: {exc}"
+            )
+        if not feedback:
+            return FinalAnswerVerificationEvent(passed=True, attempt=attempt)
+        return FinalAnswerVerificationEvent(
+            passed=False,
+            attempt=attempt,
+            feedback=str(feedback),
+            replanning=attempt < max_replans,
+        )
+
+    @staticmethod
+    def _queue_verifier_replan(state: AgentState, draft: str, feedback: str) -> AgentState:
+        """Mark the rejected draft turn-only and append the feedback (turn-only too)."""
+        messages = list(state.messages)
+        last = messages[-1] if messages else None
+        if (
+            last is not None
+            and last.role == Role.ASSISTANT
+            and not last.tool_calls
+            and (last.content or "") == draft
+        ):
+            messages[-1] = mark_ephemeral(last, "rejected_draft")
+        else:
+            # The draft came from the empty-content summary call and is not in
+            # state yet: add it so the model sees what it is revising.
+            messages.append(mark_ephemeral(Message.assistant(draft), "rejected_draft"))
+        # A user-role note, not a system message: conversation managers hoist
+        # system messages to the front and several adapters treat a mid-run
+        # system message as the system prompt, either of which would leave the
+        # draft as the last (prefill) turn. It is ephemeral, so it never reads
+        # as something the user said once the turn is over.
+        messages.append(
+            mark_ephemeral(
+                Message.user(
+                    "[Answer check — automated, not from the user] Your previous "
+                    "reply was not sent. Problem:\n"
+                    f"{feedback}\n\n"
+                    "Write a corrected reply to the user's last message. You may call "
+                    "tools if you need more information."
+                ),
+                "verifier_feedback",
+            )
+        )
+        return state.model_copy(update={"messages": tuple(messages)})
+
     async def _structure_output(
         self,
         state: AgentState,
@@ -2608,6 +2784,13 @@ class AgentRuntimeMixin:
 
         response_format = build_response_format(schema, strict=self.config.output_schema_strict)
 
+        # The repair exchange is sent to the model but never written to the
+        # returned state: the "[Schema Repair]" prompts and the invalid
+        # attempts are not part of the conversation, and the result state
+        # (what a caller persists or continues from) must not carry them.
+        # Only the calls' token usage is recorded, so the run is metered.
+        repair_messages: list[Message] = list(state.messages)
+
         for _retry in range(self.config.output_schema_retries):
             error_detail = format_validation_errors(last_validation_errors)
             repair_prompt = (
@@ -2617,8 +2800,8 @@ class AgentRuntimeMixin:
                 "Return ONLY a valid JSON object that matches the schema. "
                 "Do not wrap it in markdown fences. Do not add commentary."
             )
-            state = state.with_message(Message.system(repair_prompt))
-            messages = self._validate_messages(list(state.messages))
+            repair_messages.append(Message.system(repair_prompt))
+            messages = self._validate_messages(list(repair_messages))
 
             try:
                 response = await self._model.complete(
@@ -2638,7 +2821,14 @@ class AgentRuntimeMixin:
                 )
 
             new_message = response.message.content or ""
-            state = state.with_message(response.message)
+            repair_messages.append(response.message)
+            usage = response.usage or {}
+            state = state.with_token_usage(
+                usage.get("prompt_tokens", 0),
+                usage.get("completion_tokens", 0),
+                cache_creation_tokens=usage.get("cache_creation_input_tokens", 0),
+                cache_read_tokens=usage.get("cache_read_input_tokens", 0),
+            )
 
             attempt = parse_structured(new_message, schema, strict=False)
             if attempt.success:

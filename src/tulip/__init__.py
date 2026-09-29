@@ -34,6 +34,7 @@ from tulip.core.config import TulipSettings
 from tulip.core.errors import ApprovalPendingError, TulipError
 from tulip.core.events import (
     CustomEvent,
+    FinalAnswerVerificationEvent,
     GroundingEvent,
     ReflectEvent,
     RunInfo,
@@ -180,6 +181,7 @@ __all__ = [
     "END",
     "GraphConfig",
     "GroundingEvaluator",
+    "FinalAnswerVerificationEvent",
     "GroundingEvent",
     "Handoff",
     "HandoffContext",

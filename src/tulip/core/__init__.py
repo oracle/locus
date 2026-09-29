@@ -37,6 +37,7 @@ from tulip.core.errors import (
 )
 from tulip.core.events import (
     CustomEvent,
+    FinalAnswerVerificationEvent,
     GroundingEvent,
     ModelChunkEvent,
     ReflectEvent,
@@ -100,6 +101,7 @@ __all__ = [
     "ToolProtocol",
     # Events
     "CustomEvent",
+    "FinalAnswerVerificationEvent",
     "GroundingEvent",
     "TulipEvent",
     "ModelChunkEvent",

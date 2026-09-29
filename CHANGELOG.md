@@ -32,6 +32,13 @@ policy.
   (whose `config.model` carries no prefix) found it. Every prefix in
   `tulip.models.providers.COMPATIBLE_PROVIDERS` is now stripped, so a string
   id and the model object resolve to the same entry.
+- **Structured-output repair no longer lands in the result state, and is
+  metered.** `output_schema` repair appended each `[Schema Repair]` prompt and
+  each invalid attempt to the state returned on `AgentResult.state`, so a
+  caller that persisted or continued from it carried the repair exchange in
+  the conversation; and the repair calls' tokens were never counted. The
+  exchange is now kept local to the repair calls, and their usage is added to
+  the run's counters (and so to `metrics` and cost).
 
 ### Added
 
@@ -47,6 +54,32 @@ policy.
   proxies — a `FallbackChain`, or a caller's per-turn view that forwards
   `__getattr__`. The agent uses it to find a model object's prices and
   context window.
+- **Pluggable final-answer verifier.** `Agent(final_answer_verifier=fn)` with
+  `async fn(draft: str, ctx: FinalAnswerContext) -> str | None` runs on every
+  final answer in auto completion mode — whether or not a tool was called
+  (the grounding evaluator only runs after a tool call), on the first pass
+  and after an approval `resume()`. `None` accepts; text rejects the draft and
+  is fed back to the model for another attempt, up to
+  `final_answer_verifier_max_replans` (default 1; 0 = judge only). When they
+  run out, the last draft is returned. Each verdict is a
+  `FinalAnswerVerificationEvent` (`passed`, `attempt`, `replanning`,
+  `feedback`, `error`). A verifier that raises fails open (the draft is
+  accepted, `error` is set, a warning is logged). `ctx` carries the run
+  identity, the prompt, the messages, the tool executions and the attempt.
+  The rejected draft and the feedback are turn-only: the model sees them for
+  the rest of the turn; checkpoints, `AgentResult.state` and memory
+  extraction never do (`tulip.agent.verification.EPHEMERAL_MESSAGE_KEY`).
+  Off by default.
+- **`hold_final_answer_tokens`.** With `stream_tokens=True` and a verifier,
+  each model call's content chunks are held until the call ends: released at
+  once for a tool step or an accepted (or replan-exhausted) answer, dropped
+  for a rejected draft — so a streaming UI never shows a draft the verifier
+  sent back. Reasoning chunks still stream live. Chunks of a call an
+  after-model hook discarded (`retry`) are dropped too. Default off.
+- **`AfterModelCallEvent.retry_feedback`.** With `retry = True`, a hook can
+  say why: the text is appended (as a user-role note marked automated) to the
+  messages of the re-call only — never to the run's state. `retry` alone
+  still re-calls blind, as before.
 - **Skills a host routes in code.** `SkillsPlugin(skills, active=[...])`
   puts the named skills' instructions in front of every model call (a system
   message after the system prompt, never written to the run state or a
