@@ -150,7 +150,6 @@ policy.
   `SlidingWindowManager`, as `Agent(model=get_model("vllm:qwen3.6-35b"))`
   already did.
 
-
 ## [2.17.0] - 2026-09-28
 
 Hardening for multi-user, multi-turn, human-approval chat
