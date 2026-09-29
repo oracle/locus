@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [2.18.2] - 2026-09-29
+
 ### Removed
 
 - **The `security` extra.** `tulip-agents-security` is not published to PyPI,
