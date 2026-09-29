@@ -60,6 +60,9 @@ _LAZY_IMPORTS = {
     "SequentialPipeline": ("tulip.agent.composition", "SequentialPipeline"),
     "ParallelPipeline": ("tulip.agent.composition", "ParallelPipeline"),
     "LoopAgent": ("tulip.agent.composition", "LoopAgent"),
+    # Subagents — isolated child loops with usage rollup and linked cancel.
+    "run_subagent": ("tulip.agent.subagent", "run_subagent"),
+    "SubagentResult": ("tulip.agent.subagent", "SubagentResult"),
     # Multi-agent primitives — graph + handoff + orchestrator/specialist.
     "StateGraph": ("tulip.multiagent.graph", "StateGraph"),
     "GraphConfig": ("tulip.multiagent.graph", "GraphConfig"),
@@ -205,6 +208,7 @@ __all__ = [
     "SequentialPipeline",
     "Specialist",
     "StateGraph",
+    "SubagentResult",
     "TerminateEvent",
     "ThinkEvent",
     "ToolCall",
@@ -216,6 +220,7 @@ __all__ = [
     "create_handoff_agent",
     "create_handoff_manager",
     "create_orchestrator",
+    "run_subagent",
     "tool",
     # RAG (lazy)
     "RAGRetriever",
