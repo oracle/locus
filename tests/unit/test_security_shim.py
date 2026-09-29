@@ -91,7 +91,7 @@ def test_domain_names_resolve_from_the_security_package(fresh_shim: object, name
 def test_domain_names_without_the_package_say_what_to_install(
     fresh_shim: object, without_security_package: None
 ) -> None:
-    with pytest.raises(ImportError, match="pip install tulip-agents-security") as exc:
+    with pytest.raises(ImportError, match="subdirectory=packages/tulip-agents-security") as exc:
         from tulip.security import red_team  # noqa: F401
     assert exc.value.name == "tulip_security"
 
@@ -138,7 +138,7 @@ def test_submodule_attribute_access_imports_it(monkeypatch: pytest.MonkeyPatch) 
 def test_domain_submodules_without_the_package_say_what_to_install(
     without_security_package: None,
 ) -> None:
-    with pytest.raises(ImportError, match="pip install tulip-agents-security"):
+    with pytest.raises(ImportError, match="subdirectory=packages/tulip-agents-security"):
         importlib.import_module("tulip.security.redteam.probes")
 
 

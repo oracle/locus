@@ -191,8 +191,10 @@ _DOMAIN_MODULES = frozenset(
 
 _DOMAIN_PACKAGE = "tulip_security"
 _INSTALL_HINT = (
-    "{what} moved to the separate tulip-agents-security distribution. "
-    'Install it with `pip install tulip-agents-security` (or "tulip-agents[security]") '
+    "{what} moved to the separate tulip-agents-security package, which is not "
+    "published to PyPI. Install it from the repository with "
+    '`pip install "git+https://github.com/tuliplabs-ai/tulip-agents'
+    '#subdirectory=packages/tulip-agents-security"` '
     "and import it from `tulip_security`."
 )
 

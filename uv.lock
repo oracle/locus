@@ -5362,9 +5362,6 @@ sdk = [
     { name = "sentence-transformers" },
     { name = "uvicorn", extra = ["standard"] },
 ]
-security = [
-    { name = "tulip-agents-security", extra = ["aws"] },
-]
 server = [
     { name = "fastapi" },
     { name = "uvicorn", extra = ["standard"] },
@@ -5460,12 +5457,11 @@ requires-dist = [
     { name = "starlette", marker = "extra == 'dev'", specifier = "<1.4" },
     { name = "temporalio", marker = "extra == 'dev'", specifier = ">=1.7" },
     { name = "temporalio", marker = "extra == 'temporal'", specifier = ">=1.7" },
-    { name = "tulip-agents-security", extras = ["aws"], marker = "extra == 'security'", editable = "packages/tulip-agents-security" },
     { name = "typing-extensions", specifier = ">=4.0" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'sdk'", specifier = ">=0.27" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'server'", specifier = ">=0.27" },
 ]
-provides-extras = ["openai", "anthropic", "llm", "telemetry", "mcp", "server", "redis", "postgresql", "mysql", "opensearch", "s3", "aws", "bedrock", "security", "browser", "audit", "temporal", "gemini", "dbos", "mem0", "checkpoints", "pgvector", "qdrant", "chroma", "cohere", "rerank-local", "rerank", "rag", "sdk", "dev"]
+provides-extras = ["openai", "anthropic", "llm", "telemetry", "mcp", "server", "redis", "postgresql", "mysql", "opensearch", "s3", "aws", "bedrock", "browser", "audit", "temporal", "gemini", "dbos", "mem0", "checkpoints", "pgvector", "qdrant", "chroma", "cohere", "rerank-local", "rerank", "rag", "sdk", "dev"]
 
 [[package]]
 name = "tulip-agents-security"

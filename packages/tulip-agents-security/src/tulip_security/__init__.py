@@ -192,7 +192,7 @@ def security_toolset(
     search, EDR forensics, vuln/posture scanning, and inference
     fingerprinting — from the **bundled reference adapters**. Containment
     (``isolate_host``) and the AWS posture tools are opt-in (the latter needs
-    ``boto3`` from the ``[aws]`` / ``[security]`` extra).
+    ``boto3`` from the ``[aws]`` extra).
 
     ``extra`` merges tools from **external integrations** you imported
     explicitly (the LangChain model — no auto-discovery), e.g.::

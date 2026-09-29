@@ -348,8 +348,8 @@ AgentServer(agent=my_agent, api_key=os.environ["API_KEY"]).run(host="0.0.0.0", p
 
 The same contracts run wherever an agent acts. Security-domain tooling built on them — AI
 red-teaming, SOC triage, and threat-intel / SIEM / EDR adapters — ships separately as the opt-in
-[`tulip-agents-security`](https://github.com/tuliplabs-ai/tulip-agents/tree/main/packages/tulip-agents-security) distribution
-(`pip install "tulip-agents[security]"`); the core runtime does not include it.
+[`tulip-agents-security`](https://github.com/tuliplabs-ai/tulip-agents/tree/main/packages/tulip-agents-security) package,
+installed from this repository (it is not published to PyPI); the core runtime does not include it.
 
 ---
 
