@@ -42,6 +42,7 @@ from tulip.core.events import (
     ModelChunkEvent,
     ModelRetryEvent,
     ReflectEvent,
+    SubagentEvent,
     TerminateEvent,
     ThinkEvent,
     ToolCompleteEvent,
@@ -111,6 +112,7 @@ __all__ = [
     "TerminateEvent",
     "ThinkEvent",
     "ToolCompleteEvent",
+    "SubagentEvent",
     "ToolProgressEvent",
     "ToolStartEvent",
     # Config

@@ -15,13 +15,16 @@ from tulip.agent.composition import (
 )
 from tulip.agent.config import AgentConfig, GroundingConfig, ModelRetryConfig, ReflexionConfig
 from tulip.agent.result import AgentResult, ExecutionMetrics, StopReason, StreamingResult
-from tulip.agent.subagent import SubagentResult, run_subagent
+from tulip.agent.specs import AgentSpec, load_agent_specs
+from tulip.agent.subagent import Subagent, SubagentResult, run_subagent
+from tulip.agent.tasks import TaskRegistry, task_tool
 
 
 __all__ = [
     "Agent",
     "AgentConfig",
     "AgentResult",
+    "AgentSpec",
     "ExecutionMetrics",
     "GroundingConfig",
     "ModelRetryConfig",
@@ -32,9 +35,13 @@ __all__ = [
     "SequentialPipeline",
     "StopReason",
     "StreamingResult",
+    "Subagent",
     "SubagentResult",
+    "TaskRegistry",
+    "load_agent_specs",
     "loop",
     "parallel",
     "run_subagent",
     "sequential",
+    "task_tool",
 ]

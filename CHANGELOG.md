@@ -8,6 +8,51 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **`tulip.agent.tasks.task_tool`: delegation as a tool.** The `task` tool
+  coding agents converge on (Claude Code's `Agent`, Codex's `spawn_agent`,
+  opencode's `task`), built on `run_subagent`'s plumbing. Each call runs a
+  subagent of a named type in its own conversation and returns its final
+  answer plus a `task_id`; passing the `task_id` back continues that
+  subagent's conversation instead of starting cold. Several calls in one turn
+  run in parallel. A type's tools are chosen from a pool the harness passes
+  (normally the parent's own tools) and can only narrow it; the calling
+  agent's hooks run inside the subagent unless `inherit_hooks=False`; nesting
+  stops at `max_depth` (default 2). `TaskRegistry` holds a session's
+  resumable subagents, least recently used dropped past 64.
+- **`tulip.agent.subagent.Subagent`**: a child agent that keeps its
+  conversation under a `task_id`, so `send()` is a new turn on it. Each turn
+  gets the accounting `run_subagent` gives — usage, cancellation, budgets,
+  live events. `SubagentResult.task_id` carries the id.
+- **`SubagentEvent`**: a subagent's events stream live on the parent's own
+  stream, wrapped (a bare child `TerminateEvent` would read as the parent
+  finishing), when the delegating tool declares `emits_progress=True` — as
+  `task_tool`'s does. A grandchild's events arrive wrapped twice.
+  `tulip.tools.context.forward_event()` is the general form of
+  `report_progress()` that carries them.
+- **`AgentSpec` and `load_agent_specs`** (`tulip.agent.specs`): agent
+  definitions as Markdown with frontmatter — name, description, model,
+  tools allow/deny, mode (`primary` / `subagent` / `all`), max turns, the
+  body as the system prompt. Reads Claude Code `.claude/agents` files and
+  opencode agent files as written: `tools` as a comma list, a YAML list or a
+  `{name: bool}` map; `disallowedTools`; `steps` / `maxTurns`;
+  `model: inherit`; `disable: true`. Tool names compare without case or
+  separators (`WebFetch` names `web_fetch`), and globs match. Uses PyYAML when
+  installed and a built-in subset parser otherwise, so the core install stays
+  dependency-free. Later directories override earlier ones; a broken file is
+  skipped and reported, not fatal.
+
+### Changed
+
+- **A subagent shares its parent's budgets.** A child started from a running
+  agent gets the smaller of its own limit and what the parent has left of
+  `time_budget_seconds`, `token_budget` and, when the child's model is
+  priced, `max_cost_usd`; one started with nothing left returns at once with
+  that budget as its stop reason, without calling its model. A child's spend
+  now folds into the parent's at the child's own prices when they are known,
+  rather than the parent's.
+
 ### Changed
 
 - **An oversized tool result keeps its head and its tail.** Past

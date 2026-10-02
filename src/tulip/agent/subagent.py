@@ -17,6 +17,18 @@ is the plumbing a hand-rolled child silently lacks:
 - **Events are observable.** Every child event reaches the ``on_event``
   callback (and the SSE bus, when a run context is active), stamped with
   the child's ``agent_name`` so a front end can render nested activity.
+  Called from a tool declared with ``emits_progress=True``, each one is
+  also yielded live on the parent's own stream, wrapped in a
+  :class:`~tulip.core.events.SubagentEvent`.
+- **Budgets are shared.** A child cannot outlive the parent's
+  ``time_budget_seconds`` or spend past what is left of its
+  ``token_budget`` (and of ``max_cost_usd``, when the child's model is
+  priced): each child is started with the smaller of its own limit and
+  what the parent has left, and one that starts with nothing left returns
+  at once.
+- **Conversations can be resumed.** A :class:`Subagent` keeps its
+  conversation under a ``task_id``, so a later call continues it rather
+  than starting cold.
 
 Building a Claude-Code-style ``task`` tool from this is one function::
 
@@ -50,15 +62,19 @@ to the child via the ``hooks`` parameter.
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import threading
+import time
+import uuid
 from contextvars import ContextVar, Token
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
 from tulip.agent.result import StopReason
-from tulip.core.events import TerminateEvent, TulipEvent
+from tulip.core.events import SubagentEvent, TerminateEvent, TulipEvent
+from tulip.tools.context import current_tool_context, forward_event, forwarding_events
 
 
 if TYPE_CHECKING:
@@ -67,7 +83,7 @@ if TYPE_CHECKING:
     from tulip.core.state import AgentState
 
 
-__all__ = ["SubagentResult", "run_subagent"]
+__all__ = ["Subagent", "SubagentResult", "parent_hooks", "run_subagent"]
 
 
 class _LinkedCancelSignal(threading.Event):
@@ -97,13 +113,25 @@ class _ParentRunContext:
     tool signatures.
     """
 
-    __slots__ = ("cancel_signal", "usage_sink")
+    __slots__ = ("cancel_signal", "deadline", "hooks", "usage_sink")
 
-    def __init__(self, cancel_signal: threading.Event) -> None:
+    def __init__(
+        self,
+        cancel_signal: threading.Event,
+        *,
+        deadline: float | None = None,
+        hooks: tuple[Any, ...] = (),
+    ) -> None:
         self.cancel_signal = cancel_signal
         #: Child usage reports, drained into the parent's state by the loop.
-        #: Each entry: (prompt, completion, cache_creation, cache_read).
-        self.usage_sink: list[tuple[int, int, int, int]] = []
+        #: Each entry: (prompt, completion, cache_creation, cache_read, cost);
+        #: cost is ``None`` when the child's model is unpriced.
+        self.usage_sink: list[tuple[int, int, int, int, float | None]] = []
+        #: ``time.monotonic()`` at which the parent's time budget runs out.
+        self.deadline = deadline
+        #: The parent's own lifecycle hooks, for a delegating tool that
+        #: applies the parent's policy inside the child.
+        self.hooks = hooks
 
 
 _PARENT_RUN: ContextVar[_ParentRunContext | None] = ContextVar(
@@ -111,15 +139,22 @@ _PARENT_RUN: ContextVar[_ParentRunContext | None] = ContextVar(
 )
 
 
-def enter_parent_run(cancel_signal: threading.Event) -> Token[_ParentRunContext | None]:
+def enter_parent_run(
+    cancel_signal: threading.Event,
+    *,
+    time_budget_seconds: float | None = None,
+    hooks: list[Any] | tuple[Any, ...] = (),
+) -> Token[_ParentRunContext | None]:
     """Install a running loop as the parent context for subagents.
 
     Called by the runtime loop at run start with that run's own cancel
     signal (``RunContext.cancel``), which ``Agent.cancel(thread_id=...)`` and
-    a no-argument ``Agent.cancel()`` both set. Returns a token for
+    a no-argument ``Agent.cancel()`` both set, its time budget (so children
+    stop when it would) and its hooks. Returns a token for
     :func:`exit_parent_run`.
     """
-    return _PARENT_RUN.set(_ParentRunContext(cancel_signal))
+    deadline = None if time_budget_seconds is None else time.monotonic() + time_budget_seconds
+    return _PARENT_RUN.set(_ParentRunContext(cancel_signal, deadline=deadline, hooks=tuple(hooks)))
 
 
 def exit_parent_run(token: Token[_ParentRunContext | None]) -> None:
@@ -133,19 +168,34 @@ def exit_parent_run(token: Token[_ParentRunContext | None]) -> None:
         pass
 
 
+def parent_hooks() -> tuple[Any, ...]:
+    """The hooks of the run this code is executing under, if any.
+
+    A delegating tool passes them to its child so a policy attached to the
+    parent (``on_before_tool_call`` + ``event.cancel``) also gates the
+    child's calls: delegation must never be a way around it.
+    """
+    ctx = _PARENT_RUN.get()
+    return ctx.hooks if ctx is not None else ()
+
+
 def fold_subagent_usage(state: AgentState) -> AgentState:
     """Fold any pending child usage reports into ``state``'s counters.
 
     Called by the runtime loop once per iteration, before the budget and
     termination checks, so ``token_budget`` and every ``TerminateEvent``
-    see delegated spend as spend. A no-op when no subagent ran.
+    see delegated spend as spend. A child's spend is counted at the child's
+    own prices when they are known, and at the parent's otherwise.
     """
     ctx = _PARENT_RUN.get()
     if ctx is None or not ctx.usage_sink:
         return state
     pending, ctx.usage_sink[:] = list(ctx.usage_sink), []
-    for prompt_toks, completion_toks, cache_creation, cache_read in pending:
+    for prompt_toks, completion_toks, cache_creation, cache_read, cost in pending:
+        spent_before = state.cost_usd_used
         state = state.with_token_usage(prompt_toks, completion_toks, cache_creation, cache_read)
+        if cost is not None:
+            state = state.model_copy(update={"cost_usd_used": spent_before + cost})
     return state
 
 
@@ -169,6 +219,9 @@ class SubagentResult(BaseModel):
     usage: dict[str, int] | None = None
     #: The name the child's events were stamped with.
     agent_name: str | None = None
+    #: The id that continues this child's conversation (:class:`Subagent`);
+    #: ``None`` for a one-shot child.
+    task_id: str | None = None
 
     @property
     def success(self) -> bool:
@@ -229,19 +282,25 @@ async def run_subagent(
         A :class:`SubagentResult` with the child's final text, usage,
         iterations, and stop reason.
     """
+    budgets = _child_budgets(model, agent_kwargs)
+    if isinstance(budgets, SubagentResult):
+        return budgets.model_copy(update={"agent_name": name})
+    child = _build_child(model, tools, system_prompt, name, max_iterations, hooks, budgets)
+    return await _drive(child, prompt, name=name, on_event=on_event, cancel_signal=cancel_signal)
+
+
+def _build_child(  # noqa: PLR0913 — every knob of a child, passed through
+    model: Any,
+    tools: list[Any] | None,
+    system_prompt: str,
+    name: str,
+    max_iterations: int,
+    hooks: list[Any] | None,
+    agent_kwargs: dict[str, Any],
+) -> Any:
     from tulip.agent.agent import Agent  # noqa: PLC0415 — break the agent<->subagent import cycle
 
-    # Capture the ambient parent BEFORE driving the child: while the child
-    # runs it installs its own context (for grandchildren), and reporting
-    # must go to the parent's sink, not the child's.
-    parent_ctx = _PARENT_RUN.get()
-    linked_to = [
-        signal
-        for signal in (cancel_signal, parent_ctx.cancel_signal if parent_ctx else None)
-        if signal is not None
-    ]
-
-    child = Agent(
+    return Agent(
         model=model,
         tools=list(tools or []),
         system_prompt=system_prompt,
@@ -254,17 +313,117 @@ async def run_subagent(
         name=name,
         **agent_kwargs,
     )
+
+
+def _priced(model: Any) -> bool:
+    """Whether spend on ``model`` can be measured, so a cost cap can hold."""
+    from tulip.models.metadata import metadata_for, model_id_of  # noqa: PLC0415
+
+    model_id = model_id_of(model)
+    meta = metadata_for(model_id) if model_id is not None else None
+    return (
+        meta is not None
+        and meta.input_price_per_mtok is not None
+        and meta.output_price_per_mtok is not None
+    )
+
+
+def _child_budgets(model: Any, agent_kwargs: dict[str, Any]) -> dict[str, Any] | SubagentResult:
+    """The child's budgets, capped by what its parent has left.
+
+    Time comes from the parent run's deadline. Tokens and spend come from
+    the state of the tool call spawning the child — the parent's counters
+    as of that batch, its latest model call included. Children started in
+    the same batch each see the same remainder; the parent counts their
+    combined spend at its next step and stops there if it is over.
+
+    Returns a finished result instead when the parent has nothing left: a
+    child started past the parent's deadline would spend a model call the
+    parent is about to refuse anyway.
+    """
+    ctx = _PARENT_RUN.get()
+    kwargs = dict(agent_kwargs)
+    if ctx is None:
+        return kwargs
+
+    def _exhausted(reason: StopReason) -> SubagentResult:
+        return SubagentResult(text="", stop_reason=reason, iterations=0)
+
+    if ctx.deadline is not None:
+        left = ctx.deadline - time.monotonic()
+        if left <= 0:
+            return _exhausted("time_budget")
+        own = kwargs.get("time_budget_seconds")
+        kwargs["time_budget_seconds"] = left if own is None else min(own, left)
+
+    call = current_tool_context()
+    state: Any = call.state if call is not None else None
+    token_budget = getattr(state, "token_budget", None)
+    if token_budget is not None:
+        tokens_left = int(token_budget) - int(state.total_tokens_used)
+        if tokens_left <= 0:
+            return _exhausted("token_budget")
+        own = kwargs.get("token_budget")
+        kwargs["token_budget"] = tokens_left if own is None else min(own, tokens_left)
+    cost_budget = getattr(state, "cost_budget_usd", None)
+    if cost_budget is not None:
+        cost_left = float(cost_budget) - float(state.cost_usd_used)
+        if cost_left <= 0:
+            return _exhausted("cost_budget")
+        # An unpriced child cannot hold a cost cap (the SDK refuses one it
+        # cannot measure); its spend still folds into the parent's at the
+        # parent's prices, so the parent stops at its next step instead.
+        if _priced(model):
+            own = kwargs.get("max_cost_usd")
+            kwargs["max_cost_usd"] = cost_left if own is None else min(own, cost_left)
+    return kwargs
+
+
+async def _drive(
+    child: Any,
+    prompt: str,
+    *,
+    name: str,
+    on_event: Callable[[TulipEvent], Awaitable[None] | None] | None,
+    cancel_signal: threading.Event | None,
+    thread_id: str | None = None,
+    task_id: str | None = None,
+) -> SubagentResult:
+    """Run ``child`` on ``prompt`` to the end and account for it to its parent."""
+    # Capture the ambient parent BEFORE driving the child: while the child
+    # runs it installs its own context (for grandchildren), and reporting
+    # must go to the parent's sink, not the child's.
+    parent_ctx = _PARENT_RUN.get()
+    linked_to = [
+        signal
+        for signal in (cancel_signal, parent_ctx.cancel_signal if parent_ctx else None)
+        if signal is not None
+    ]
     if linked_to:
         child._cancel_signal = _LinkedCancelSignal(*linked_to)  # noqa: SLF001 — deliberate linkage into our own Agent
 
+    # The tool call this child serves, when it runs inside one whose stream
+    # is listening: its events go out live, wrapped, as they happen.
+    call = current_tool_context() if forwarding_events() else None
+
     terminate: TerminateEvent | None = None
-    events = child.run(prompt)
+    events = child.run(prompt, thread_id=thread_id) if thread_id else child.run(prompt)
     try:
         async for event in events:
             if on_event is not None:
                 maybe_awaitable = on_event(event)
                 if inspect.isawaitable(maybe_awaitable):
                     await maybe_awaitable
+            if call is not None:
+                forward_event(
+                    SubagentEvent(
+                        tool_call_id=call.tool_call_id,
+                        tool_name=call.tool_name,
+                        task_id=task_id,
+                        event=event,
+                        agent_name=event.agent_name or name,
+                    )
+                )
             if isinstance(event, TerminateEvent):
                 terminate = event
     finally:
@@ -293,14 +452,17 @@ async def run_subagent(
             usage["cache_creation_input_tokens"] = state.cache_creation_tokens_used
             usage["cache_read_input_tokens"] = state.cache_read_tokens_used
         if parent_ctx is not None:
-            # One report per child, of its FINAL counters — grandchildren
-            # already folded into them, so the parent counts them once.
+            # One report per child turn, of its FINAL counters — grandchildren
+            # already folded into them, so the parent counts them once. The
+            # counters are per turn, so a resumed child reports only the new
+            # turn's spend.
             parent_ctx.usage_sink.append(
                 (
                     state.prompt_tokens_used,
                     state.completion_tokens_used,
                     state.cache_creation_tokens_used,
                     state.cache_read_tokens_used,
+                    state.cost_usd_used if state.priced else None,
                 )
             )
 
@@ -319,4 +481,96 @@ async def run_subagent(
         tool_calls=terminate.total_tool_calls if terminate else 0,
         usage=usage,
         agent_name=name,
+        task_id=task_id,
     )
+
+
+class Subagent:
+    """A child agent that keeps its conversation, so it can be resumed.
+
+    :func:`run_subagent` is one-shot: the child's conversation is gone when
+    it returns. A ``Subagent`` keeps it under :attr:`task_id`, and each
+    :meth:`send` is a new turn on the same conversation — "now also check
+    the tests", without re-reading everything the first turn read. Every
+    turn gets the same accounting as :func:`run_subagent`: usage into the
+    calling run, the calling run's cancellation and budgets, and its events
+    on the calling run's stream.
+
+    One turn at a time: a second :meth:`send` waits for the first. Turns run
+    on a fresh :class:`~tulip.agent.agent.Agent` each time, sharing an
+    in-memory checkpointer, so nothing about one turn's run (its cancel
+    signal, its budgets) leaks into the next.
+
+    Args:
+        model: Model string or ``ModelProtocol`` instance for the child.
+        tools: Explicit allowlist for the child (``None`` means no tools).
+        system_prompt: The child's system prompt.
+        name: Attribution label stamped on the child's events.
+        max_iterations: The child's iteration cap, per turn.
+        hooks: Lifecycle hooks for the child.
+        task_id: The id to keep the conversation under; generated if omitted.
+        **agent_kwargs: Further ``AgentConfig`` fields for the child.
+    """
+
+    def __init__(  # noqa: PLR0913 — mirrors run_subagent's surface
+        self,
+        *,
+        model: Any,
+        tools: list[Any] | None = None,
+        system_prompt: str = "You are a focused subagent. Complete the delegated task.",
+        name: str = "subagent",
+        max_iterations: int = 10,
+        hooks: list[Any] | None = None,
+        task_id: str | None = None,
+        **agent_kwargs: Any,
+    ) -> None:
+        from tulip.memory.backends.memory import MemoryCheckpointer  # noqa: PLC0415
+
+        if "checkpointer" in agent_kwargs:
+            msg = "a Subagent keeps its own conversation; do not pass a checkpointer"
+            raise ValueError(msg)
+        self.task_id = task_id or f"task_{uuid.uuid4().hex[:12]}"
+        self.name = name
+        #: Turns this child has run.
+        self.turns = 0
+        self._model = model
+        self._tools = list(tools or [])
+        self._system_prompt = system_prompt
+        self._max_iterations = max_iterations
+        self._hooks = list(hooks or [])
+        self._agent_kwargs = agent_kwargs
+        self._checkpointer = MemoryCheckpointer()
+        self._lock = asyncio.Lock()
+
+    async def send(
+        self,
+        prompt: str,
+        *,
+        on_event: Callable[[TulipEvent], Awaitable[None] | None] | None = None,
+        cancel_signal: threading.Event | None = None,
+    ) -> SubagentResult:
+        """Run one turn of this child's conversation and return its result."""
+        async with self._lock:
+            budgets = _child_budgets(self._model, self._agent_kwargs)
+            if isinstance(budgets, SubagentResult):
+                return budgets.model_copy(update={"agent_name": self.name, "task_id": self.task_id})
+            child = _build_child(
+                self._model,
+                self._tools,
+                self._system_prompt,
+                self.name,
+                self._max_iterations,
+                self._hooks,
+                {**budgets, "checkpointer": self._checkpointer},
+            )
+            result = await _drive(
+                child,
+                prompt,
+                name=self.name,
+                on_event=on_event,
+                cancel_signal=cancel_signal,
+                thread_id=self.task_id,
+                task_id=self.task_id,
+            )
+            self.turns += 1
+            return result

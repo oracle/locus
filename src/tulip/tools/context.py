@@ -12,7 +12,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from tulip.core.events import ToolProgressEvent
+from tulip.core.events import ToolProgressEvent, TulipEvent
 
 
 class ToolContext(BaseModel):
@@ -101,8 +101,9 @@ _current_tool_context: ContextVar[ToolContext | None] = ContextVar(
 
 #: Where progress for the current run goes. Set by the agent runtime around a
 #: tool batch that contains a progress-emitting tool; ``None`` everywhere else,
-#: which makes :func:`report_progress` a no-op.
-_progress_sink: ContextVar[Callable[[ToolProgressEvent], None] | None] = ContextVar(
+#: which makes :func:`report_progress` a no-op. It carries any event, not only
+#: progress: a delegating tool forwards its subagent's events on it.
+_progress_sink: ContextVar[Callable[[TulipEvent], None] | None] = ContextVar(
     "tulip_progress_sink", default=None
 )
 
@@ -182,8 +183,32 @@ def report_progress(
     return True
 
 
+def forwarding_events() -> bool:
+    """Whether :func:`forward_event` would reach anyone from this task."""
+    return _progress_sink.get() is not None and _current_tool_context.get() is not None
+
+
+def forward_event(event: TulipEvent) -> bool:
+    """Put ``event`` on the agent's stream, live, from inside a running tool.
+
+    The general form of :func:`report_progress`: the event is yielded by the
+    agent loop between the tool's start and its result, for a tool declared
+    with ``emits_progress=True``. Used to surface a subagent's activity
+    (:class:`~tulip.core.events.SubagentEvent`) while the call that runs it is
+    still in flight.
+
+    Returns:
+        Whether the event was delivered; ``False`` when nothing is listening.
+    """
+    sink = _progress_sink.get()
+    if sink is None or _current_tool_context.get() is None:
+        return False
+    sink(event)
+    return True
+
+
 @contextmanager
-def progress_sink(sink: Callable[[ToolProgressEvent], None] | None) -> Iterator[None]:
+def progress_sink(sink: Callable[[TulipEvent], None] | None) -> Iterator[None]:
     """Route :func:`report_progress` calls in the enclosed block to ``sink``."""
     token = _progress_sink.set(sink)
     try:
