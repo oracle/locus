@@ -31,7 +31,10 @@ It sends the model back when:
 
 The nudges are bounded: at most ``max_nudges`` per run, and never the same
 reason twice in a row — a second stop for the same reason with no tool call in
-between is accepted, since the model has heard the note and chose to stop. Each
+between is accepted, since the model has heard the note and chose to stop.
+``insist_on_changes=True`` lifts that rule for ``no_changes``: an unattended
+run that changed nothing is sent back until it changes something, says why
+nothing needed changing, or reaches the cap. Each
 nudge is a :class:`Continuation`: the loop keeps the model's reply in the
 conversation as an ordinary assistant message and adds the note as an automated
 user-role message (not turn-only, unlike a rejected answer), so the model sees
@@ -278,12 +281,18 @@ def announced_step(reply: str) -> str | None:
 # --------------------------------------------------- did it change anything --
 
 #: Verbs that, at the start of a sentence or clause of a request, ask for a
-#: change to be made.
+#: change to be made. Verbs that as often ask for information ("show",
+#: "list", "check", "review", "report", "test", "build", "generate") are left
+#: out: a question sent back for "no changes" is a worse failure than a task
+#: missed here, which only loses a nudge.
 _CHANGE_VERBS = _words(
-    "add adjust bump change clean convert correct create delete disable enable "
-    "ensure extract fix handle hook implement improve introduce make migrate modify "
-    "move optimise optimize patch port refactor remove rename replace resolve "
-    "restructure rewrite rework set split support update upgrade wire write"
+    "accept add adjust allow bump cache change clean configure convert correct create "
+    "define delete deprecate disable document drop emit enable ensure expose extend "
+    "extract fix fold give guard handle hold hook implement improve introduce keep log "
+    "make migrate modify move optimise optimize patch persist port protect publish "
+    "record refactor refuse register reject remove rename reorganise reorganize replace "
+    "resolve restore restructure retry rework rewrite route serve set split store "
+    "support track update upgrade wire wrap write"
 )
 
 _POLITE = re.compile(
@@ -293,28 +302,99 @@ _POLITE = re.compile(
     r"todo:|help me)\s*[,:]?\s*)+",
     re.IGNORECASE,
 )
-_CLAUSES = re.compile(r"(?<=[.!?;\n])\s+|\s+(?:and then|and|then)\s+|,\s*then\s+", re.IGNORECASE)
+#: Clause boundaries: a line break (specs are written one requirement a line),
+#: sentence ends, and "and"/"then" joining two requests.
+_CLAUSES = re.compile(r"\n+|(?<=[.!?;:])\s+|\s+(?:and then|and|then)\s+|,\s*then\s+", re.IGNORECASE)
+#: A change verb, not followed by "me"/"us" ("give me a summary" asks for text).
 _CHANGE_START = re.compile(
-    r"^(?:" + "|".join(_CHANGE_VERBS) + r")\b",
+    r"^(?:" + "|".join(_CHANGE_VERBS) + r")\b(?!\s+(?:me|us)\b)",
     re.IGNORECASE,
 )
+#: "Let people ask…", "let the agent retry…": a change to what someone can do.
+#: "Let me know" and "let's" are conversation, not a request.
+_LET = re.compile(r"^let\s+(?!me\b|us\b|['’]s\b)\w+\s+\w+", re.IGNORECASE)
+#: A requirement stated rather than ordered: "The response must contain…",
+#: "Tasks should get the same treatment".
+_REQUIREMENT = re.compile(
+    r"\b(?:must|should|shall|needs? to|has to|have to)\s+(?:not\s+|also\s+|still\s+|now\s+)?"
+    r"(?!be\s+(?:asked|answered|explained)\b)\w+",
+    re.IGNORECASE,
+)
+#: Clauses that ask for an answer, whatever modal follows: "Explain why it
+#: should pass", "Tell me what must change".
+_ASKS = re.compile(
+    r"^(?:explain|describe|summari[sz]e|tell|show|list|find|where|what|why|how|when|who|"
+    r"which|is|are|does|do|did|can|could|would|should|will|walk|compare|review|read|look)\b",
+    re.IGNORECASE,
+)
+#: An interface section: a list item that names a new function, field or
+#: file and says what it is ("- `generation_dir()`: the live generation's
+#: directory", "- New `policy/evidence.py`: …"), or an acceptance line.
+_INTERFACE_ITEM = re.compile(
+    r"^(?:[-*•]|\d+[.)])\s+(?:new\s+`|`[^`\n]+`\s*(?:[:—–]|\s-\s|\())",
+    re.IGNORECASE,
+)
+_DONE_WHEN = re.compile(r"^(?:done when|acceptance criteria|definition of done)\b", re.IGNORECASE)
+
+
+def _bare(clause: str) -> str:
+    return _POLITE.sub("", _MARKUP.sub("", clause.strip())).strip()
+
+
+def _orders_change(clause: str) -> bool:
+    """A clause that orders a change: "Fix…", "Can you add…?", "Let people…"."""
+    bare = _bare(clause)
+    return bool(_CHANGE_START.match(bare) or _LET.match(bare))
+
+
+def _states_requirement(clause: str) -> bool:
+    """A statement (not a question, not a request to explain) of what must hold."""
+    raw = clause.strip()
+    if raw.endswith(("?", "？")):
+        return False
+    bare = _bare(raw)
+    return not _ASKS.match(bare) and bool(_REQUIREMENT.search(bare))
+
+
+def _specifies(line: str) -> bool:
+    """An interface-section item or an acceptance line."""
+    raw = line.strip()
+    return not raw.endswith(("?", "？")) and bool(
+        _INTERFACE_ITEM.match(raw) or _DONE_WHEN.match(raw)
+    )
 
 
 def requests_changes(prompt: str) -> bool:
     """Whether ``prompt`` reads as asking for changes to be made.
 
-    True when a sentence or clause starts — after "please", "can you", "your
-    task is to" and the like — with a verb that asks for a change: "Fix the
-    flaky test", "Can you add a --dry-run flag?", "Review the module and fix
-    what you find". A question about the code ("what does admit() do?",
-    "why does this fail?") is not one. English only; for other languages it
-    says False, which only turns the ``no_changes`` nudge off.
+    True when a sentence, line or clause — after "please", "can you", "your
+    task is to" and the like — asks for a change:
+
+    - it starts with a verb that orders one: "Fix the flaky test", "Can you
+      add a --dry-run flag?", "Review the module and fix what you find",
+      "Serve the arguments from this plane";
+    - it starts with "Let" and someone other than the speaker: "Let people
+      ask luach about their email";
+    - it states a requirement: "The response must contain the totals",
+      "Tasks should get the same treatment";
+    - it is an interface section's item naming what to add ("- `search(query)`:
+      …", "- New `evidence.py`: …") or a "Done when:" line.
+
+    A question ("what does admit() do?", "why does this fail?"), a request for
+    an explanation ("Explain why the test should pass") and "Let me know…" are
+    not. English only; for other languages it says False, which only turns
+    the ``no_changes`` nudge off.
     """
-    for clause in _CLAUSES.split(prompt):
-        bare = _POLITE.sub("", _MARKUP.sub("", clause.strip()))
-        if _CHANGE_START.match(bare):
-            return True
-    return False
+    clauses = [c for c in _CLAUSES.split(prompt) if c.strip()]
+    if any(_orders_change(c) for c in clauses):
+        return True
+    # A prompt that opens by asking ("Explain these:", "What…?") lists things
+    # to explain, not to add, whatever shape its list takes.
+    if clauses and (clauses[0].strip().endswith(("?", "？")) or _ASKS.match(_bare(clauses[0]))):
+        return False
+    return any(_states_requirement(c) for c in clauses) or any(
+        _specifies(line) for line in prompt.splitlines()
+    )
 
 
 _NO_CHANGE = re.compile(
@@ -340,13 +420,36 @@ _NO_CHANGE = re.compile(
 )
 
 
+#: Not a reason: the run blaming its own stop. "The system requested my final
+#: answer before I could make the edits", "I ran out of iterations" — the
+#: work is undone and the loop can still give the model another turn.
+_NOT_A_REASON = re.compile(
+    r"\b(?:"
+    r"(?:system|harness|loop|runtime|you)\s+(?:has\s+|have\s+)?(?:requested|asked|told|wants?)"
+    r"\s+(?:me\s+)?(?:for\s+|to\s+(?:give|provide|write)\s+)?(?:my|a|the)\s+final\s+"
+    r"(?:answer|summary|response)"
+    r"|before i (?:could|was able to|had (?:a chance|time) to|got to)"
+    r"|ran out of (?:time|iterations|turns|steps|budget)"
+    r"|(?:iteration|turn|step) limit"
+    r"|(?:was|were|am) (?:asked|told) to stop"
+    r"|did(?:n't|n’t| not) (?:get|have) (?:a |the )?(?:chance|time|opportunity)"
+    r")",
+    re.IGNORECASE,
+)
+
+
 def explains_no_change(reply: str) -> bool:
     """Whether ``reply`` says why nothing was changed.
 
     "No changes were needed", "it is already implemented", "I could not…",
     "the edit was refused", "works as intended" — a reply that gives a reason
-    is accepted even when the task looked like it asked for changes.
+    is accepted even when the task looked like it asked for changes. A reply
+    that blames the run's own stop ("the system requested my final answer
+    before I could make the edits", "I ran out of iterations") gives none:
+    that is the work left undone, not a reason it needed no doing.
     """
+    if _NOT_A_REASON.search(reply):
+        return False
     return bool(_NO_CHANGE.search(reply))
 
 
@@ -468,6 +571,13 @@ class CompletionCheck:
             with the default tool names), or a ``(draft, ctx) -> bool`` of the
             caller's own. Off by default: not every task has a check to run.
         on_continuation: Called with ``(reason, ctx)`` for each nudge sent.
+        insist_on_changes: Send a ``no_changes`` stop back every time, up to
+            ``max_nudges``, until files change or the reply says why none
+            needed to — rather than accepting the second such stop in a row as
+            the model's choice. For unattended runs, where nobody reads the
+            reply: a model that answers a "make the changes" note with more
+            prose, or with a call the provider did not deliver, has not chosen
+            anything.
     """
 
     max_nudges: int = 3
@@ -475,6 +585,7 @@ class CompletionCheck:
     needs_changes: Callable[[str, FinalAnswerContext], bool] | None = None
     unchecked_edits: bool | Callable[[str, FinalAnswerContext], bool] = False
     on_continuation: Callable[[str, FinalAnswerContext], None] | None = None
+    insist_on_changes: bool = False
     _runs: OrderedDict[str, _RunState] = field(default_factory=OrderedDict, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -527,7 +638,11 @@ class CompletionCheck:
             return None
         tools = len(ctx.tool_executions)
         for reason, note in self._candidates(draft, ctx, state):
-            if reason == state.last_reason and tools == state.tools_at_last:
+            if (
+                reason == state.last_reason
+                and tools == state.tools_at_last
+                and not (reason == "no_changes" and self.insist_on_changes)
+            ):
                 # The model was just sent back for this and stopped again
                 # without calling a tool: it heard the note and chose to stop.
                 continue
