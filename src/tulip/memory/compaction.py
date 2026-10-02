@@ -80,6 +80,10 @@ CLEARED_OUTPUT_KEY = "tulip_compaction_cleared"
 _MEMORY_BLOCK_KEY = "tulip_memory_block"
 _EPHEMERAL_KEY = "tulip_ephemeral"
 
+# A user-role message the loop wrote (a continuation note): never the user's
+# latest request. See tulip.agent.completion.AUTOMATED_NOTE_KEY.
+_AUTOMATED_NOTE_KEY = "tulip_automated_note"
+
 # A tool result this small costs about as much as the stub that would replace
 # it, so clearing it loses information and frees nothing.
 _MIN_CLEARABLE_TOKENS = 64
@@ -139,6 +143,12 @@ def _is_pinned(message: Message) -> bool:
     """Messages that are never folded into a summary."""
     metadata = message.metadata
     return bool(metadata.get(_MEMORY_BLOCK_KEY) or metadata.get(_EPHEMERAL_KEY))
+
+
+def _is_automated(message: Message) -> bool:
+    """A user-role message the loop wrote, not the user."""
+    metadata = message.metadata
+    return bool(metadata.get(_AUTOMATED_NOTE_KEY) or metadata.get(_EPHEMERAL_KEY))
 
 
 @dataclass
@@ -479,8 +489,11 @@ class ContextCompactor(ConversationManager):
             else:
                 body.append(index)
 
+        # The user's latest request is kept verbatim. A note the loop added in
+        # the user's role (a continuation, a verifier's feedback) is not that
+        # request: taking it for one would fold the real task into the summary.
         latest_user = max(
-            (i for i in body if cleared[i].role == Role.USER),
+            (i for i in body if cleared[i].role == Role.USER and not _is_automated(cleared[i])),
             default=None,
         )
         turns = _turns(body, cleared)

@@ -185,6 +185,12 @@ class FinalAnswerVerificationEvent(TulipEvent):
     the draft is then accepted (the verifier fails open) and ``passed`` is
     False. ``attempt`` is 0 for the first draft. ``replaced`` is True when
     ``final_answer_fallback`` replaced a draft that failed its last attempt.
+
+    ``continuation`` is True when the verifier sent the model back to
+    unfinished work (a :class:`~tulip.agent.completion.Continuation`) rather
+    than rejecting an answer: the reply stays in the conversation and
+    ``reason`` names why the run did not stop (``announced_step``,
+    ``no_changes``, ``unchecked_edits``).
     """
 
     event_type: Literal["final_answer_verification"] = "final_answer_verification"
@@ -196,6 +202,11 @@ class FinalAnswerVerificationEvent(TulipEvent):
     #: The draft failed with no replan left and ``final_answer_fallback``
     #: replaced it: the run answers with the fallback text instead.
     replaced: bool = False
+    #: The verifier asked the model to keep working rather than to rewrite
+    #: its answer (see :class:`~tulip.agent.completion.Continuation`).
+    continuation: bool = False
+    #: Why, when the verifier gave a reason (a continuation always does).
+    reason: str | None = None
 
 
 class ModelRetryEvent(TulipEvent):

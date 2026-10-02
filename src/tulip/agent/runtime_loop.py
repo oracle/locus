@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
+from tulip.agent.completion import AUTOMATED_NOTE_KEY, CONTINUATION_NOTE_KEY, Continuation
 from tulip.agent.config import AgentConfig
 from tulip.agent.model_retry import call_with_retry
 from tulip.agent.result import StopReason
@@ -1244,8 +1245,12 @@ class AgentRuntimeMixin:
                             _verifier_attempts += 1
                             _held_chunks = []  # the rejected draft is never shown
                             state = self._queue_verifier_replan(
-                                state, final_content, verdict.feedback or ""
+                                state, final_content, verdict.feedback or "", verdict
                             )
+                            # The model is sent back: a termination condition
+                            # on "no tool calls" must not end the run on the
+                            # reply it is being sent back from.
+                            _last_no_tool_calls = False
                             continue
                         replacement = await self._final_answer_fallback(
                             verdict, final_content, state, rc
@@ -2054,8 +2059,12 @@ class AgentRuntimeMixin:
                             yield verdict
                             _verifier_attempts += 1
                             state = self._queue_verifier_replan(
-                                state, answer, verdict.feedback or ""
+                                state, answer, verdict.feedback or "", verdict
                             )
+                            # The model is sent back: a termination condition
+                            # on "no tool calls" must not end the run on the
+                            # reply it is being sent back from.
+                            _last_no_tool_calls = False
                             continue
                         replacement = await self._final_answer_fallback(verdict, answer, state, rc)
                         if replacement is not None:
@@ -3094,6 +3103,8 @@ class AgentRuntimeMixin:
             attempt=attempt,
             feedback=str(feedback),
             replanning=attempt < max_replans,
+            continuation=isinstance(feedback, Continuation),
+            reason=getattr(feedback, "reason", None),
         )
 
     async def _final_answer_fallback(
@@ -3146,8 +3157,57 @@ class AgentRuntimeMixin:
         return state.model_copy(update={"messages": tuple(messages)})
 
     @staticmethod
-    def _queue_verifier_replan(state: AgentState, draft: str, feedback: str) -> AgentState:
-        """Mark the rejected draft turn-only and append the feedback (turn-only too)."""
+    def _queue_continuation(
+        state: AgentState, draft: str, note: str, reason: str | None
+    ) -> AgentState:
+        """Keep the reply as history and append the continuation note.
+
+        Neither is turn-only, unlike a rejected answer: the reply is part of
+        the work ("Let me check the conftest:"), the model must see it to carry
+        out what it announced, and a checkpoint, a resumed turn and a
+        compaction summary must all read the same conversation the model did.
+        The note is user-role (a mid-run system message would be hoisted or
+        taken for the system prompt by several adapters) and marked automated,
+        so it is never mistaken for the user's request.
+        """
+        messages = list(state.messages)
+        last = messages[-1] if messages else None
+        if not (
+            last is not None
+            and last.role == Role.ASSISTANT
+            and not last.tool_calls
+            and (last.content or "") == draft
+        ):
+            # The reply came from the empty-content summary call and is not in
+            # state yet.
+            messages.append(Message.assistant(draft))
+        messages.append(
+            Message(
+                role=Role.USER,
+                content=note,
+                metadata={
+                    AUTOMATED_NOTE_KEY: True,
+                    CONTINUATION_NOTE_KEY: reason or "continuation",
+                },
+            )
+        )
+        return state.model_copy(update={"messages": tuple(messages)})
+
+    @classmethod
+    def _queue_verifier_replan(
+        cls,
+        state: AgentState,
+        draft: str,
+        feedback: str,
+        verdict: FinalAnswerVerificationEvent | None = None,
+    ) -> AgentState:
+        """Mark the rejected draft turn-only and append the feedback (turn-only too).
+
+        A continuation (``verdict.continuation``) is not a rejected answer and
+        goes to :meth:`_queue_continuation` instead.
+        """
+        if verdict is not None and verdict.continuation:
+            return cls._queue_continuation(state, draft, feedback, verdict.reason)
         messages = list(state.messages)
         last = messages[-1] if messages else None
         if (
