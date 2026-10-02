@@ -235,6 +235,33 @@ policy.
   threshold, the summary) and `agent.context.compacted` on the observability
   bus; **`on_before_compaction`** hook (`BeforeCompactionEvent`) sees the full
   history before it is compacted and can add summary instructions or skip it.
+- **`tulip.agent.CompletionCheck`**, a `final_answer_verifier` that sends a
+  run back to work when it stops before the work is done. Open-weight models
+  often end a turn on the announcement of their next step ("Let me first
+  check the conftest and the specific test area:") without the tool call, and
+  the loop took that for the answer. The check sends the model a short
+  continuation note when the reply announces an untaken step
+  (`announced_step`: a trailing colon, or a last sentence like "Let me…",
+  "I'll…", "Next, I…", in English and nine other languages; conservative,
+  tested on a corpus of real final answers), when the caller's
+  `needs_changes` signal says the task wanted changes that were not made and
+  the reply does not say why (`explains_no_change`), and, opt-in, once per
+  run when files were edited and no check ran afterwards (`edits_unchecked`).
+  At most `max_nudges` (3) per run, never twice in a row for the same reason
+  without a tool call in between. `agent_options()` gives the `Agent`
+  arguments; `requests_changes(prompt)` is a heuristic for "this task asks
+  for changes".
+- **`Continuation`**: a verifier may return one (a `str` with a `reason`) to
+  send the model back to unfinished work instead of rejecting its answer. The
+  reply stays in the conversation as an ordinary assistant message and the
+  note follows as an automated user-role message, both kept in checkpoints
+  (a rejected answer is turn-only). `FinalAnswerVerificationEvent` gains
+  `continuation` and `reason`. A nudged turn is a model call like any other:
+  it counts against `max_iterations` and every budget.
+- **`tulip.agent.chain_verifiers(*verifiers)`** runs several final-answer
+  verifiers as one (the first rejection decides; `None` entries are skipped),
+  and `max_replans_for(...)` sums their replans, so a completion check, a
+  structured-output reminder and a `Stop` hook can all hold one agent.
 
 ### Changed
 
@@ -291,6 +318,16 @@ policy.
 
 ### Fixed
 
+- **Compaction keeps the user's request verbatim even after an automated
+  note.** The summariser pinned the newest user-role message as "the user's
+  latest request", and a verifier's feedback or a continuation note is
+  user-role, so the real request could be folded into the summary. Messages
+  the loop writes (`tulip_automated_note`, or turn-only) are no longer taken
+  for it.
+- **A `NoToolCalls` termination condition no longer ends a run the verifier
+  just sent back.** The reply being sent back counted as the last turn
+  without tool calls, so the next iteration stopped before the model could
+  act on the feedback.
 - **A mid-run system note no longer replaces the agent's instructions on
   Anthropic models.** The agent loop adds system-role notes partway through a
   run (iteration-limit notice, grounding and verification reminders, the

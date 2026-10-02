@@ -4,6 +4,7 @@
 """Agent implementation for Tulip."""
 
 from tulip.agent.agent import Agent
+from tulip.agent.completion import CompletionCheck, Continuation, chain_verifiers
 from tulip.agent.composition import (
     LoopAgent,
     ParallelPipeline,
@@ -33,6 +34,8 @@ __all__ = [
     "AgentSpec",
     "ExecutionMetrics",
     "CompactionConfig",
+    "CompletionCheck",
+    "Continuation",
     "GroundingConfig",
     "ModelRetryConfig",
     "LoopAgent",
@@ -45,6 +48,7 @@ __all__ = [
     "Subagent",
     "SubagentResult",
     "TaskRegistry",
+    "chain_verifiers",
     "load_agent_specs",
     "loop",
     "parallel",
