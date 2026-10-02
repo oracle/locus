@@ -441,6 +441,55 @@ def _durable(state: AgentState) -> AgentState:
     return state
 
 
+#: State metadata naming the turn's per-iteration checkpoints. It rides in the
+#: saved state itself, so a process killed mid-turn hands the list to whatever
+#: finishes the turn — ``continue_turn`` or the next ``run`` — and that final
+#: save deletes them; a list kept in memory would die with the process.
+ITERATION_CHECKPOINTS_KEY = "_tulip_iteration_checkpoints"
+
+
+def _take_iteration_checkpoints(state: AgentState) -> tuple[list[str], AgentState]:
+    """The turn's iteration checkpoint ids, and ``state`` without the list."""
+    if ITERATION_CHECKPOINTS_KEY not in state.metadata:
+        return [], state
+    metadata = dict(state.metadata)
+    ids = metadata.pop(ITERATION_CHECKPOINTS_KEY) or []
+    return [str(i) for i in ids], state.model_copy(update={"metadata": metadata})
+
+
+UNFINISHED_CALL_ERROR = (
+    "The run stopped before this call returned, so its outcome is unknown: it may or "
+    "may not have taken effect. Check before calling it again."
+)
+
+
+def close_unfinished_calls(state: AgentState) -> AgentState:
+    """Answer the last assistant message's calls that have no result yet.
+
+    A provider rejects an assistant tool call with no result after it, and
+    re-running the call could repeat a side effect the stopped attempt
+    already performed. The error result keeps the conversation valid and
+    tells the model what is known: nothing about the outcome.
+    """
+    answered = {m.tool_call_id for m in state.messages if m.role == Role.TOOL and m.tool_call_id}
+    for msg in reversed(state.messages):
+        if msg.role == Role.ASSISTANT and msg.tool_calls:
+            for tc in msg.tool_calls:
+                if tc.id not in answered:
+                    state = state.with_message(
+                        Message.tool(
+                            ToolResult(
+                                tool_call_id=tc.id,
+                                name=tc.name,
+                                content="",
+                                error=UNFINISHED_CALL_ERROR,
+                            )
+                        )
+                    )
+            break
+    return state
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -1747,7 +1796,7 @@ class AgentRuntimeMixin:
 
                 # The iteration's tool results are folded in, so this is a
                 # boundary ``continue_turn`` can pick the turn up from.
-                await self._checkpoint_iteration(state, thread_id)
+                state = await self._checkpoint_iteration(state, thread_id)
 
             # The loop is done; close whichever iteration it left open.
             if _open_iteration is not None:
@@ -1790,7 +1839,9 @@ class AgentRuntimeMixin:
                     state = state.with_metadata(self.config.output_key, final_msg)
 
             # Hand the final state to THIS run's arun (never read back off
-            # the shared agent), then release the run's bookkeeping.
+            # the shared agent), then release the run's bookkeeping. The
+            # list of iteration saves is bookkeeping too, not a result.
+            superseded, state = _take_iteration_checkpoints(state)
             self._end_run(rc, state)
 
             # Run hooks: after_invocation
@@ -1804,20 +1855,7 @@ class AgentRuntimeMixin:
                 await self._memory_manager.on_session_end(_without_ephemeral_messages(state))
 
             # Final checkpoint
-            if self.config.checkpointer and thread_id:
-                await self.config.checkpointer.save(_durable(state), thread_id)
-                from tulip.observability.emit import (  # noqa: PLC0415
-                    EV_CHECKPOINT_SAVED,
-                    emit,
-                )
-
-                await emit(
-                    EV_CHECKPOINT_SAVED,
-                    thread_id=thread_id,
-                    iteration=state.iteration,
-                    backend=type(self.config.checkpointer).__name__,
-                    trigger="final",
-                )
+            await self._checkpoint_final(state, thread_id, superseded)
 
     @_bus_bridge
     async def _run_from_state(
@@ -2228,7 +2266,7 @@ class AgentRuntimeMixin:
 
                 # Same boundary as run(): a resumed or continued turn is as
                 # durable per iteration as the first pass.
-                await self._checkpoint_iteration(state, thread_id)
+                state = await self._checkpoint_iteration(state, thread_id)
 
             # The loop is done; close whichever iteration it left open.
             if _open_iteration is not None:
@@ -2258,41 +2296,103 @@ class AgentRuntimeMixin:
 
             if self._cancel_signal is not None:
                 self._cancel_signal.clear()
+            superseded, state = _take_iteration_checkpoints(state)
             self._end_run(rc, state)
 
             # Final checkpoint — mirrors run(): a resumed run must stay as
             # durable as the original one (a second pause, or completion,
             # is persisted too — resume never downgrades durability).
-            if self.config.checkpointer and thread_id:
-                await self.config.checkpointer.save(_durable(state), thread_id)
-                from tulip.observability.emit import (  # noqa: PLC0415
-                    EV_CHECKPOINT_SAVED,
-                    emit,
+            await self._checkpoint_final(state, thread_id, superseded)
+
+    async def _checkpoint_final(
+        self, state: AgentState, thread_id: str | None, superseded: list[str]
+    ) -> None:
+        """Save the segment's final state, then delete the iteration saves it supersedes.
+
+        ``superseded`` comes off the state (see :data:`ITERATION_CHECKPOINTS_KEY`)
+        so saves from a process that died before this point are deleted too.
+        They are deleted only after the final save succeeded — until then
+        they are the thread's only record of the turn — and a failed delete
+        is logged, never raised: losing the clean-up must not lose the turn.
+        """
+        checkpointer = self.config.checkpointer
+        if not checkpointer or not thread_id:
+            return
+        await checkpointer.save(_durable(state), thread_id)
+        from tulip.observability.emit import (  # noqa: PLC0415
+            EV_CHECKPOINT_SAVED,
+            emit,
+        )
+
+        await emit(
+            EV_CHECKPOINT_SAVED,
+            thread_id=thread_id,
+            iteration=state.iteration,
+            backend=type(checkpointer).__name__,
+            trigger="final",
+        )
+        if self.config.keep_iteration_checkpoints:
+            return
+        for checkpoint_id in superseded:
+            try:
+                await checkpointer.delete(thread_id, checkpoint_id)
+            except Exception:  # noqa: BLE001 — clean-up only; the turn is saved
+                logger.warning(
+                    "could not delete superseded iteration checkpoint %s of thread %s",
+                    checkpoint_id,
+                    thread_id,
+                    exc_info=True,
                 )
 
-                await emit(
-                    EV_CHECKPOINT_SAVED,
-                    thread_id=thread_id,
-                    iteration=state.iteration,
-                    backend=type(self.config.checkpointer).__name__,
-                    trigger="final",
-                )
+    def _iteration_checkpoint_interval(self, thread_id: str | None) -> int:
+        """How many iterations apart to checkpoint; 0 for none.
 
-    async def _checkpoint_iteration(self, state: AgentState, thread_id: str | None) -> None:
-        """Save ``state`` when ``checkpoint_every_n_iterations`` makes this iteration due.
+        An explicit ``checkpoint_every_n_iterations`` is obeyed as given. The
+        default (``None``) is 1 where the saves leave nothing behind — a
+        thread to finish the turn on, and a checkpointer that can delete the
+        saves the final one supersedes — and 0 elsewhere.
+        """
+        every = self.config.checkpoint_every_n_iterations
+        if every is not None:
+            return every
+        checkpointer = self.config.checkpointer
+        if thread_id and getattr(checkpointer, "deletes_single_checkpoints", False) is True:
+            return 1
+        return 0
+
+    async def _checkpoint_iteration(self, state: AgentState, thread_id: str | None) -> AgentState:
+        """Save ``state`` when this iteration is due a checkpoint; return the state to go on with.
 
         Called once the iteration's tool results are in the state, so the
         checkpoint never holds a call without its result: a process killed
         before the turn's final save leaves a state ``continue_turn`` resumes
         from without re-running any finished call. A thread-less run saves
         under its ``run_id``.
+
+        On a thread, the save's id is added to the state's list of the turn's
+        iteration checkpoints before saving, so the saved state names itself
+        and every earlier one; the returned state carries the list to the
+        turn's final save, which deletes them.
         """
         checkpointer = self.config.checkpointer
-        every = self.config.checkpoint_every_n_iterations
+        every = self._iteration_checkpoint_interval(thread_id)
         if not checkpointer or every <= 0 or state.iteration % every:
-            return
+            return state
         cp_thread = thread_id or state.run_id
-        await checkpointer.save(_durable(state), cp_thread)
+        checkpoint_id: str | None = None
+        # A checkpointer that cannot delete one checkpoint keeps every save,
+        # as it always did; tracking ids it can never delete would only log.
+        if (
+            thread_id
+            and not self.config.keep_iteration_checkpoints
+            and getattr(checkpointer, "deletes_single_checkpoints", False) is True
+        ):
+            from uuid import uuid4  # noqa: PLC0415
+
+            checkpoint_id = uuid4().hex
+            pending = list(state.metadata.get(ITERATION_CHECKPOINTS_KEY) or [])
+            state = state.with_metadata(ITERATION_CHECKPOINTS_KEY, [*pending, checkpoint_id])
+        await checkpointer.save(_durable(state), cp_thread, checkpoint_id)
         from tulip.observability.emit import (  # noqa: PLC0415
             EV_CHECKPOINT_SAVED,
             emit,
@@ -2305,6 +2405,7 @@ class AgentRuntimeMixin:
             backend=type(checkpointer).__name__,
             trigger="every_n_iterations",
         )
+        return state
 
     def _spend_fields(self) -> dict[str, Any]:
         """The state fields that price a run and cap its spend."""
@@ -2399,7 +2500,10 @@ class AgentRuntimeMixin:
         state = self._fresh_turn_state(merged_metadata).model_copy(
             update={"provider_state": existing.provider_state}
         )
-        messages = list(existing.messages)
+        # A thread whose last turn was killed mid-call ends on calls with no
+        # result, which a provider rejects; the new turn answers them as
+        # "outcome unknown" rather than failing on the first model call.
+        messages = list(close_unfinished_calls(existing).messages)
         # Re-evaluate the system prompt for this turn: a callable prompt sees
         # the new metadata, and a changed static prompt takes effect. Only the
         # leading system message is the agent's prompt; anything else (memory

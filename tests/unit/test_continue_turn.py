@@ -17,10 +17,12 @@ import pytest
 
 from tulip.agent import Agent
 from tulip.agent.agent import _UNFINISHED_CALL_ERROR
+from tulip.agent.runtime_loop import ITERATION_CHECKPOINTS_KEY
 from tulip.core.events import TerminateEvent, ToolStartEvent
 from tulip.core.messages import Message, Role, ToolCall, ToolResult
 from tulip.core.state import AgentState
 from tulip.memory.backends.memory import MemoryCheckpointer
+from tulip.memory.checkpointer import BaseCheckpointer
 from tulip.models.base import ModelResponse
 from tulip.tools.decorator import tool
 
@@ -69,6 +71,13 @@ class _KillableCheckpointer(MemoryCheckpointer):
             return "lost"
         self.saves += 1
         return await super().save(state, thread_id, checkpoint_id, metadata)
+
+    async def delete(self, thread_id: str, checkpoint_id: str | None = None) -> bool:
+        # A dead process deletes nothing either: the final save's clean-up of
+        # the turn's iteration checkpoints never runs.
+        if self.dead:
+            return False
+        return await super().delete(thread_id, checkpoint_id)
 
 
 calls: dict[str, int] = {}
@@ -213,13 +222,159 @@ async def test_continued_segment_checkpoints_every_iteration() -> None:
     assert store.saves == 2
 
 
-async def test_default_saves_only_at_the_end_of_the_turn() -> None:
+async def test_default_saves_every_iteration_and_keeps_only_the_final_save() -> None:
     store = _KillableCheckpointer()
     model = _Model([_call("step_one", "c1"), _call("step_two", "c2"), _answer("done")])
 
     await _drain(_agent(model, store).run("go", thread_id="t"))
 
+    # Two iterations ran tools, then the turn's final save ...
+    assert store.saves == 3
+    # ... which superseded the two iteration saves, so the thread's history
+    # is what a per-turn checkpointer would have left.
+    assert len(await store.list_checkpoints("t")) == 1
+    final = await store.load("t")
+    assert final is not None
+    assert ITERATION_CHECKPOINTS_KEY not in final.metadata
+
+
+class _NoDeleteCheckpointer(BaseCheckpointer):
+    """A backend without ``delete``: iteration saves could never be removed."""
+
+    def __init__(self) -> None:
+        self.inner = MemoryCheckpointer()
+        self.saves = 0
+
+    async def save(
+        self,
+        state: AgentState,
+        thread_id: str,
+        checkpoint_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        self.saves += 1
+        return await self.inner.save(state, thread_id, checkpoint_id, metadata)
+
+    async def load(self, thread_id: str, checkpoint_id: str | None = None) -> AgentState | None:
+        return await self.inner.load(thread_id, checkpoint_id)
+
+    async def list_checkpoints(self, thread_id: str, limit: int = 10) -> list[str]:
+        return await self.inner.list_checkpoints(thread_id, limit)
+
+
+async def test_default_saves_only_at_the_end_where_saves_cannot_be_deleted() -> None:
+    store = _NoDeleteCheckpointer()
+    assert not store.deletes_single_checkpoints
+    model = _Model([_call("step_one", "c1"), _call("step_two", "c2"), _answer("done")])
+
+    await _drain(_agent(model, store).run("go", thread_id="t"))
+
     assert store.saves == 1
+
+
+async def test_an_explicit_interval_on_a_backend_that_cannot_delete_keeps_every_save() -> None:
+    store = _NoDeleteCheckpointer()
+    model = _Model([_call("step_one", "c1"), _call("step_two", "c2"), _answer("done")])
+
+    await _drain(_agent(model, store, checkpoint_every_n_iterations=1).run("go", thread_id="t"))
+
+    assert store.saves == 3
+    assert len(await store.list_checkpoints("t")) == 3
+    for checkpoint_id in await store.list_checkpoints("t"):
+        saved = await store.load("t", checkpoint_id)
+        assert saved is not None
+        assert ITERATION_CHECKPOINTS_KEY not in saved.metadata
+
+
+async def test_a_run_without_a_thread_saves_nothing_by_default() -> None:
+    store = _KillableCheckpointer()
+    model = _Model([_call("step_one", "c1"), _answer("done")])
+
+    await _drain(_agent(model, store).run("go"))
+
+    assert store.saves == 0
+
+
+async def test_keep_iteration_checkpoints_leaves_them_in_the_history() -> None:
+    store = MemoryCheckpointer()
+    model = _Model([_call("step_one", "c1"), _call("step_two", "c2"), _answer("done")])
+    agent = _agent(model, store, keep_iteration_checkpoints=True)
+
+    await _drain(agent.run("go", thread_id="t"))
+
+    history = await agent.get_state_history("t")
+    assert len(history) == 3
+    assert all(ITERATION_CHECKPOINTS_KEY not in state.metadata for _, state in history)
+
+
+async def test_saves_from_a_killed_process_are_deleted_when_the_turn_is_continued() -> None:
+    store = _KillableCheckpointer()
+
+    class _DieError(_KilledError):
+        def __init__(self, msg: str) -> None:
+            store.dead = True
+            super().__init__(msg)
+
+    first = _Model([_call("step_one", "c1"), _call("step_two", "c2"), _DieError])
+    with pytest.raises(_KilledError):
+        await _drain(_agent(first, store).run("do both steps", thread_id="t"))
+    assert len(await store.list_checkpoints("t")) == 2
+
+    store.dead = False
+    await _drain(_agent(_Model([_answer("both done")]), store).continue_turn("t"))
+
+    # The new process never saved those two, but the checkpoint it continued
+    # from named them, so the turn's final save removed them.
+    [remaining] = await store.list_checkpoints("t")
+    final = await store.load("t", remaining)
+    assert final is not None
+    assert final.messages[-1].content == "both done"
+    assert ITERATION_CHECKPOINTS_KEY not in final.metadata
+
+
+async def test_a_new_turn_on_a_killed_thread_closes_its_dangling_calls() -> None:
+    store = MemoryCheckpointer()
+    await store.save(
+        AgentState(
+            messages=(
+                Message.system("sys"),
+                Message.user("go"),
+                Message.assistant(
+                    content=None, tool_calls=[ToolCall(id="c1", name="step_one", arguments={})]
+                ),
+            ),
+            metadata={ITERATION_CHECKPOINTS_KEY: ["gone-1"]},
+        ),
+        "t",
+        "gone-1",
+    )
+    model = _Model([_answer("fresh answer")])
+
+    result = await _agent(model, store).arun("something else", thread_id="t")
+
+    sent = model.seen[0]
+    tool_msgs = [m for m in sent if m.role == Role.TOOL]
+    assert tool_msgs[0].tool_call_id == "c1"
+    assert tool_msgs[0].content == f"Error: {_UNFINISHED_CALL_ERROR}"
+    assert [m.content for m in sent if m.role == Role.USER] == ["go", "something else"]
+    # The killed turn's iteration save is superseded by this turn's final one.
+    assert await store.list_checkpoints("t") != ["gone-1"]
+    assert "gone-1" not in await store.list_checkpoints("t")
+    assert ITERATION_CHECKPOINTS_KEY not in result.state.metadata
+
+
+async def test_a_failed_delete_is_logged_not_raised(caplog: pytest.LogCaptureFixture) -> None:
+    class _BrokenDelete(MemoryCheckpointer):
+        async def delete(self, thread_id: str, checkpoint_id: str | None = None) -> bool:
+            raise OSError("disk went away")
+
+    store = _BrokenDelete()
+    model = _Model([_call("step_one", "c1"), _answer("done")])
+
+    events = await _drain(_agent(model, store).run("go", thread_id="t"))
+
+    assert [e for e in events if isinstance(e, TerminateEvent)][-1].reason == "complete"
+    assert "could not delete superseded iteration checkpoint" in caplog.text
 
 
 async def test_continue_turn_reinjects_memory() -> None:

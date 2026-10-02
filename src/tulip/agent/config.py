@@ -577,19 +577,36 @@ class AgentConfig(BaseModel):
         description="Checkpointer for state persistence",
     )
 
-    # Off by default because every save is a new snapshot in the thread's
-    # history: built-in backends keep them all, so per-iteration saves grow
-    # storage with every iteration and change what ``get_state_history`` and
-    # ``fork`` see. Long unattended runs set 1.
-    checkpoint_every_n_iterations: int = Field(
-        default=0,
+    # ``None`` picks per iteration whenever that leaves nothing behind: the
+    # run has a thread and the checkpointer can delete a single checkpoint, so
+    # the turn's final save removes the iteration saves it supersedes. The
+    # thread's history and ``fork`` then see what they saw with per-turn
+    # saves, and storage grows with turns rather than iterations. A
+    # checkpointer that cannot delete keeps per-turn saves, because there
+    # every iteration save would stay for good.
+    checkpoint_every_n_iterations: int | None = Field(
+        default=None,
         ge=0,
         description=(
             "Save a checkpoint every N iterations, after the iteration's tool "
             "results are in the state (0 = only at the end of the turn and on "
             "an interrupt). With 1, a process killed mid-turn loses at most "
             "the iteration in flight, and Agent.continue_turn(thread_id) "
-            "picks the turn up from the last save."
+            "picks the turn up from the last save. None (the default) means 1 "
+            "for a run with a thread_id on a checkpointer that can delete a "
+            "single checkpoint, and 0 otherwise. Iteration saves are deleted "
+            "once the turn's final save supersedes them, unless "
+            "keep_iteration_checkpoints is set."
+        ),
+    )
+
+    keep_iteration_checkpoints: bool = Field(
+        default=False,
+        description=(
+            "Keep per-iteration checkpoints after the turn's final save, so "
+            "get_state_history and fork can reach mid-turn states. Off by "
+            "default: they exist to survive a crash, and keeping them grows "
+            "storage with every iteration of every turn."
         ),
     )
 
