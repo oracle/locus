@@ -428,16 +428,23 @@ class TestAnthropicAdapter:
     def test_screenshots_become_image_blocks_and_old_ones_placeholders(self) -> None:
         m = AnthropicModel(api_key="sk-x")  # noqa: S106
         shot = "done" + encode_image(PNG)
-        messages = [Message.user("go")] + [_tool_message(f"t{i}", shot) for i in range(4)]
+        messages = [Message.user("go")]
+        for i in range(4):
+            messages.append(
+                Message.assistant(
+                    None, tool_calls=[ToolCall(id=f"t{i}", name="computer", arguments={})]
+                )
+            )
+            messages.append(_tool_message(f"t{i}", shot))
         _, converted = m._convert_messages(messages)
-        oldest = converted[1]["content"][0]["content"]
+        oldest = converted[2]["content"][0]["content"]
         assert oldest == f"done\n{EARLIER_IMAGE_OMITTED}"
         latest = converted[-1]["content"][0]["content"]
         assert latest[0] == {"type": "text", "text": "done"}
         assert latest[1]["type"] == "image"
         assert latest[1]["source"]["media_type"] == "image/png"
         assert base64.b64decode(latest[1]["source"]["data"]) == PNG
-        assert isinstance(converted[2]["content"][0]["content"], list)
+        assert isinstance(converted[4]["content"][0]["content"], list)
 
     @pytest.mark.asyncio
     async def test_complete_sends_the_beta_header(self) -> None:

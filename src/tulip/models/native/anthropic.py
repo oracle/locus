@@ -69,6 +69,36 @@ def _tool_result_content(content: str | None, *, send_images: bool) -> str | lis
     return blocks
 
 
+def _system_note_block(text: str) -> dict[str, Any]:
+    """A mid-run system message as a user-turn text block, marked as guidance."""
+    return {"type": "text", "text": f"<system-note>\n{text}\n</system-note>"}
+
+
+def _as_blocks(content: str | list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """User-turn content as a block list, so two turns can be concatenated."""
+    if isinstance(content, str):
+        return [{"type": "text", "text": content}] if content else []
+    return list(content)
+
+
+def _merge_user_turns(turns: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge runs of adjacent user turns into one, ``tool_result`` blocks first.
+
+    A turn that is not merged with anything keeps its original shape, so a
+    plain ``user`` string stays a string on the wire.
+    """
+    merged: list[dict[str, Any]] = []
+    for turn in turns:
+        if turn["role"] == "user" and merged and merged[-1]["role"] == "user":
+            blocks = _as_blocks(merged[-1]["content"]) + _as_blocks(turn["content"])
+            results = [b for b in blocks if b.get("type") == "tool_result"]
+            rest = [b for b in blocks if b.get("type") != "tool_result"]
+            merged[-1] = {"role": "user", "content": results + rest}
+        else:
+            merged.append(turn)
+    return merged
+
+
 def _rejects_temperature(model_id: str) -> bool:
     """Return True if the named Claude model rejects the `temperature` param.
 
@@ -237,18 +267,55 @@ class AnthropicModel(BaseModel):
     def _convert_messages(self, messages: list[Message]) -> tuple[str | None, list[dict[str, Any]]]:
         """Convert Tulip messages to Anthropic format.
 
-        Returns (system_prompt, messages) since Anthropic takes system separately.
+        Returns ``(system_prompt, messages)`` since Anthropic takes the system
+        prompt separately. The system prompt is every leading system message
+        joined in order; see :meth:`_split_messages` for where later ones go.
         """
-        system_prompt: str | None = None
+        system_parts, anthropic_messages = self._split_messages(messages)
+        return ("\n\n".join(system_parts) or None), anthropic_messages
+
+    def _split_messages(self, messages: list[Message]) -> tuple[list[str], list[dict[str, Any]]]:
+        """Split Tulip messages into system prompt parts and Anthropic turns.
+
+        The Messages API has one ``system`` field and a strictly alternating
+        user/assistant conversation, while Tulip histories carry system
+        messages in two places:
+
+        - **Leading** ones (the agent's instructions, a memory block placed
+          right after them) form the system prompt, kept in order.
+        - **Later** ones are notes the agent loop adds mid-run — budget and
+          iteration-limit notices, grounding and verification reminders. Each
+          becomes a ``<system-note>`` text block in the user turn at its
+          position, the way Anthropic recommends steering a conversation that
+          is already under way. Lifting them into ``system`` instead would
+          either replace the agent's instructions (what this adapter used to
+          do: the last system message won) or move the note away from the
+          point in the run it refers to.
+
+        Adjacent user turns are then merged so roles alternate, with
+        ``tool_result`` blocks first in each merged turn: the API requires the
+        results to open the user turn that follows a ``tool_use``, and a note
+        must never sit between the two.
+        """
+        system_parts: list[str] = []
         anthropic_messages: list[dict[str, Any]] = []
         with_images = recent_image_positions(
             [m.content if m.role == Role.TOOL else None for m in messages]
         )
+        leading = True
 
         for index, msg in enumerate(messages):
             if msg.role == Role.SYSTEM:
-                system_prompt = msg.content
+                if not msg.content:
+                    continue
+                if leading:
+                    system_parts.append(msg.content)
+                else:
+                    anthropic_messages.append(
+                        {"role": "user", "content": [_system_note_block(msg.content)]}
+                    )
                 continue
+            leading = False
 
             if msg.role == Role.ASSISTANT:
                 content: list[dict[str, Any]] = []
@@ -286,6 +353,8 @@ class AnthropicModel(BaseModel):
             elif msg.role == Role.USER:
                 anthropic_messages.append({"role": "user", "content": msg.content or ""})
 
+        anthropic_messages = _merge_user_turns(anthropic_messages)
+
         # Anthropic requires the last message to be a user turn — it does not
         # support assistant-prefill. Strip any trailing assistant messages, but
         # only when the conversation has at least one user message (i.e. it is
@@ -296,7 +365,7 @@ class AnthropicModel(BaseModel):
             while anthropic_messages and anthropic_messages[-1]["role"] == "assistant":
                 anthropic_messages.pop()
 
-        return system_prompt, anthropic_messages
+        return system_parts, anthropic_messages
 
     def _convert_tools(self, tools: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
         """Convert OpenAI-format tools to Anthropic format."""
@@ -368,7 +437,7 @@ class AnthropicModel(BaseModel):
         ``response_format`` — a streaming agent paid full price for every
         cached turn and ran at the server's default temperature.
         """
-        system_prompt, anthropic_messages = self._convert_messages(messages)
+        system_parts, anthropic_messages = self._split_messages(messages)
         anthropic_tools = self._convert_tools(tools) or []
 
         params: dict[str, Any] = {
@@ -390,21 +459,27 @@ class AnthropicModel(BaseModel):
             # ModelConfig.temperature) — send nothing rather than a value.
             if temperature is not None:
                 params["temperature"] = temperature
-        if system_prompt:
+        if system_parts:
             # When prompt-caching is enabled, send the system prompt as a
             # block list with ``cache_control: ephemeral`` so subsequent
             # turns reuse the cached input at ~1/10x cost (Anthropic
-            # ephemeral cache TTL is ~5 min).
+            # ephemeral cache TTL is ~5 min). The first block — the agent's
+            # own instructions — carries a breakpoint of its own, so a block
+            # that changes per turn after it (a recalled-memory block) does
+            # not cost the instructions their cache hit; the last block's
+            # breakpoint covers the whole system prompt when nothing changed.
             if self.config.prompt_cache:
+                last = len(system_parts) - 1
                 params["system"] = [
                     {
                         "type": "text",
-                        "text": system_prompt,
-                        "cache_control": {"type": "ephemeral"},
+                        "text": part,
+                        **({"cache_control": {"type": "ephemeral"}} if i in (0, last) else {}),
                     }
+                    for i, part in enumerate(system_parts)
                 ]
             else:
-                params["system"] = system_prompt
+                params["system"] = "\n\n".join(system_parts)
 
         # Structured-output mode: emulate ``response_format`` via tool-use.
         response_format = kwargs.get("response_format")

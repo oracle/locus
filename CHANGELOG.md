@@ -8,6 +8,27 @@ policy.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A mid-run system note no longer replaces the agent's instructions on
+  Anthropic models.** The agent loop adds system-role notes partway through a
+  run (iteration-limit notice, grounding and verification reminders, the
+  final-answer nudge), and the Anthropic adapter sent the *last* system
+  message as `system` — so after the first note the model ran without its
+  real instructions. Every native adapter now maps system messages the same
+  way: the leading ones (instructions, then a recalled-memory block) form the
+  system prompt in order, and a later one stays at its position as user-role
+  guidance. On Anthropic and Bedrock it is a `<system-note>` text block in
+  the user turn there, merged with adjacent user turns so roles alternate and
+  tool results still open the turn after their tool calls; OpenAI, Azure and
+  Gemini keep their `[System guidance]` user note. With `prompt_cache=True`,
+  Anthropic marks both the instructions block and the last system block, so a
+  memory block that changes per turn does not cost the instructions their
+  cache hit. Bedrock no longer hoists mid-run notes into `system`, and now
+  sends parallel tool results in one user turn, as Converse requires. On
+  OpenAI-compatible endpoints a memory block now joins the opening system
+  message instead of becoming a user note before the prompt.
+
 ### Changed
 
 - **An oversized tool result keeps its head and its tail.** Past
