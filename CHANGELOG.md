@@ -21,6 +21,38 @@ policy.
   its wording changed, so code matching `original: N chars` needs updating.
 ### Added
 
+- **`tulip.models.profiles.profile_for(model)`** returns a frozen
+  `ModelProfile`: context window, output cap, native and parallel tool
+  calling, how reasoning is requested (`adaptive`, `budget_tokens`,
+  `reasoning_effort`, `thinking_budget`, `enable_thinking`), prompt caching,
+  vision, the edit format the model handles best (`apply_patch` for the GPT
+  family, `str_replace` otherwise) and a prompt variant. Families: claude,
+  gpt, gemini, qwen, deepseek, llama, mistral and a conservative default.
+  Window, output cap and caching come from `tulip.models.metadata`; overrides
+  by id or glob come from `overrides=` or a JSON file named by
+  `TULIP_MODEL_PROFILES`, and an unknown field in one is an error. The
+  profile describes a model; nothing changes behaviour because of it except
+  the image routing below.
+- **Metadata for current models**: `gpt-5.5`, `gpt-5.5-mini`, `gpt-5.5-nano`,
+  and Claude Fable 5.1 / 5, Opus 5.5 / 5 / 4.8 / 4.7 / 4.6, Sonnet 5.5 / 5 /
+  4.6 and Haiku 4.5, with list prices — so `max_cost_usd` works on them
+  instead of refusing to start. `metadata_for` also resolves a dated snapshot
+  (`-20250929`, `-2025-09-29`, `@20251101`) or a `-latest` alias to its base
+  record; no other suffix is stripped, so `gpt-5.6` never borrows `gpt-5`'s
+  price.
+- **`TerminateEvent.cost_usd`** (USD, `None` when the model is unpriced),
+  **cache tokens in `TerminateEvent.usage`** (`cache_read_input_tokens`,
+  `cache_creation_input_tokens`, present only when non-zero), and
+  **`TerminateEvent.error`**, the failure's text when `reason == "error"`. A
+  resumed or continued segment that fails now emits that error termination
+  too; it used to raise without one.
+- **Images in user messages.** A user turn carrying `encode_image` segments
+  is sent as text and image parts on Anthropic, OpenAI chat-completions and
+  the Responses API; Bedrock sends a placeholder instead of the base64 text.
+  On chat-completions a tool result's images (which a tool message cannot
+  hold) now follow the tool batch in a user message when the model's profile
+  says it can see; a text-only model keeps getting the placeholder.
+
 - **`AgentConfig.context_window`** and the **`TULIP_CONTEXT_WINDOW`**
   environment variable name a model's input window, so a model the metadata
   table does not know — a fine-tune or any self-hosted model behind vLLM,

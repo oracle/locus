@@ -284,7 +284,16 @@ class AnthropicModel(BaseModel):
                 )
 
             elif msg.role == Role.USER:
-                anthropic_messages.append({"role": "user", "content": msg.content or ""})
+                # A user turn may embed images (``encode_image``) — a harness
+                # attaching a screenshot or a diagram the person referenced.
+                # Every one is sent: the person chose them, unlike a stream
+                # of tool screenshots where only the latest few matter.
+                anthropic_messages.append(
+                    {
+                        "role": "user",
+                        "content": _tool_result_content(msg.content, send_images=True),
+                    }
+                )
 
         # Anthropic requires the last message to be a user turn — it does not
         # support assistant-prefill. Strip any trailing assistant messages, but

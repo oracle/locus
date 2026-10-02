@@ -533,6 +533,17 @@ class TestOpenAIChatAdapter:
         converted = m._convert_messages(
             [Message.user("go"), _tool_message("t1", "done" + encode_image(PNG))]
         )
+        # A chat-completions tool message takes text only: a model that can
+        # see gets the image in a user message after the tool batch.
+        assert converted[-2]["content"] == "done\n[image attached in the next message]"
+        assert converted[-1]["role"] == "user"
+        assert converted[-1]["content"][1]["type"] == "image_url"
+
+    def test_a_text_only_model_gets_the_placeholder(self) -> None:
+        m = OpenAIModel(model="gpt-3.5-turbo", api_key="sk-x")  # noqa: S106
+        converted = m._convert_messages(
+            [Message.user("go"), _tool_message("t1", "done" + encode_image(PNG))]
+        )
         assert converted[-1]["content"] == f"done\n{IMAGE_OMITTED}"
 
 

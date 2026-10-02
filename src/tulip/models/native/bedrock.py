@@ -44,6 +44,7 @@ from typing import Any
 from pydantic import Field
 
 from tulip.core.events import ModelChunkEvent
+from tulip.core.media import strip_images
 from tulip.core.messages import Message, Role, ToolCall
 from tulip.models.base import BaseModel, ModelConfig, ModelResponse
 
@@ -84,6 +85,16 @@ def _require_boto3() -> Any:
             "credentials file, profile, SSO, instance role)."
         ) from exc
     return boto3
+
+
+def _text_only(content: str | None) -> str:
+    """``content`` with embedded images replaced by a placeholder.
+
+    This adapter sends text blocks only, and an embedded image is a base64
+    payload that would otherwise reach the model as thousands of characters
+    of noise.
+    """
+    return strip_images(content or "")
 
 
 class BedrockConfig(ModelConfig):
@@ -262,7 +273,7 @@ class BedrockModel(BaseModel):
                             {
                                 "toolResult": {
                                     "toolUseId": msg.tool_call_id or "",
-                                    "content": [{"text": str(msg.content or "")}],
+                                    "content": [{"text": _text_only(msg.content)}],
                                 }
                             }
                         ],
@@ -270,7 +281,7 @@ class BedrockModel(BaseModel):
                 )
 
             elif msg.role == Role.USER:
-                converted.append({"role": "user", "content": [{"text": msg.content or ""}]})
+                converted.append({"role": "user", "content": [{"text": _text_only(msg.content)}]})
 
         return system, converted
 

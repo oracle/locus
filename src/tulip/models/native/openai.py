@@ -16,6 +16,7 @@ from tulip.core.events import ModelChunkEvent
 from tulip.core.loop_bound import loop_bound
 from tulip.core.media import (
     EARLIER_IMAGE_OMITTED,
+    ImagePart,
     has_images,
     images,
     recent_image_positions,
@@ -137,6 +138,37 @@ def _tool_output_items(
         for part in split_content(content)
     ]
     return [{"type": "function_call_output", "call_id": call_id, "output": parts}]
+
+
+#: What a chat-completions tool message says in place of an image that follows
+#: in the next user message.
+_IMAGE_FOLLOWS = "[image attached in the next message]"
+
+
+def _user_parts(content: str, *, responses: bool) -> list[dict[str, Any]]:
+    """A user turn with embedded images as content parts, text and images in order."""
+    if responses:
+        return [
+            {"type": "input_text", "text": part}
+            if isinstance(part, str)
+            else {"type": "input_image", "image_url": part.data_url}
+            for part in split_content(content)
+        ]
+    return [
+        {"type": "text", "text": part}
+        if isinstance(part, str)
+        else {"type": "image_url", "image_url": {"url": part.data_url}}
+        for part in split_content(content)
+    ]
+
+
+def _tool_images_turn(parts: list[ImagePart]) -> dict[str, Any]:
+    """The user message carrying the images a batch of tool results returned."""
+    content: list[dict[str, Any]] = [
+        {"type": "text", "text": "[Images returned by the tool calls above]"}
+    ]
+    content.extend({"type": "image_url", "image_url": {"url": p.data_url}} for p in parts)
+    return {"role": "user", "content": content}
 
 
 def _decode_tool_arguments(raw: str | None) -> dict[str, Any]:
@@ -657,19 +689,48 @@ class OpenAIModel(BaseModel):
         Qwen even though the same list is fine on api.openai.com.
         """
         openai_messages: list[dict[str, Any]] = []
+        # Chat-completions tool messages take text only, so a tool result's
+        # images travel in a user message after the batch of tool messages —
+        # the tool messages must stay contiguous behind their assistant turn.
+        # Only for a model that can see, and only the latest few results, as
+        # the other transports do; a text-only deployment keeps getting the
+        # placeholder, never an image part it would reject.
+        with_images = (
+            recent_image_positions([m.content if m.role == Role.TOOL else None for m in messages])
+            if self._sees_images()
+            else set()
+        )
+        held: list[ImagePart] = []
 
         for index, msg in enumerate(messages):
+            if held and msg.role != Role.TOOL:
+                openai_messages.append(_tool_images_turn(held))
+                held = []
             entry = msg.to_openai_format()
             if msg.role == Role.TOOL and has_images(msg.content):
-                entry["content"] = strip_images(msg.content or "")
+                if index in with_images:
+                    held.extend(images(msg.content))
+                    entry["content"] = strip_images(msg.content or "", _IMAGE_FOLLOWS)
+                else:
+                    entry["content"] = strip_images(msg.content or "")
+            elif msg.role == Role.USER and has_images(msg.content):
+                entry["content"] = _user_parts(msg.content or "", responses=False)
             if index > 0 and entry.get("role") == "system":
                 entry = {
                     "role": "user",
                     "content": f"[System guidance] {entry.get('content') or ''}",
                 }
             openai_messages.append(entry)
+        if held:
+            openai_messages.append(_tool_images_turn(held))
 
         return self._ensure_user_turn(openai_messages)
+
+    def _sees_images(self) -> bool:
+        """Whether this model accepts image parts, by its capability profile."""
+        from tulip.models.profiles import profile_for  # noqa: PLC0415 — profiles imports metadata
+
+        return profile_for(self.config.model).vision
 
     @classmethod
     def _is_plain_user_turn(cls, entry: dict[str, Any]) -> bool:
@@ -973,6 +1034,10 @@ class OpenAIModel(BaseModel):
                         "role": "user",
                         "content": f"[System guidance] {msg.content or ''}",
                     }
+                )
+            elif msg.role == Role.USER and has_images(msg.content):
+                items.append(
+                    {"role": "user", "content": _user_parts(msg.content or "", responses=True)}
                 )
             else:
                 items.append({"role": msg.role.value, "content": msg.content or ""})
