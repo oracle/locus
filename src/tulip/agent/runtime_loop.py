@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel
 
 from tulip.agent.config import AgentConfig
+from tulip.agent.model_retry import call_with_retry
 from tulip.agent.result import StopReason
 from tulip.agent.run_context import (
     PendingInterrupt,
@@ -55,6 +56,7 @@ from tulip.core.events import (
     GroundingEvent,
     InterruptEvent,
     ModelChunkEvent,
+    ModelRetryEvent,
     ReflectEvent,
     TerminateEvent,
     ThinkEvent,
@@ -330,6 +332,15 @@ def _normalize_stop_reason(raw: str | None) -> StopReason:
 #: Queued by ``_get_model_response`` when an after-model hook discards a
 #: streamed call (``retry``); never yielded to the caller.
 _DISCARDED_CALL = object()
+
+
+class _StreamProgress:
+    """Whether a streamed model call has handed any chunk to the caller yet."""
+
+    __slots__ = ("forwarded",)
+
+    def __init__(self) -> None:
+        self.forwarded = False
 
 
 def _is_reasoning_only(chunk: Any) -> bool:
@@ -882,13 +893,26 @@ class AgentRuntimeMixin:
                         if chunk is _DISCARDED_CALL:
                             _held_chunks = []
                             continue
+                        if isinstance(chunk, ModelRetryEvent):
+                            # A notice, not model text: the hold never applies.
+                            yield chunk
+                            continue
                         if _hold_tokens and not _is_reasoning_only(chunk):
                             _held_chunks.append(chunk)
                             continue
                         yield chunk
                     response, state = await model_task
                 else:
-                    response, state = await self._get_model_response(state, model_kwargs, run=rc)
+                    try:
+                        response, state = await self._get_model_response(
+                            state, model_kwargs, run=rc
+                        )
+                    except Exception:
+                        for retry in rc.drain_retries():
+                            yield retry
+                        raise
+                    for retry in rc.drain_retries():
+                        yield retry
                 for custom in rc.drain():
                     yield custom
                 prompt_toks = response.usage.get("prompt_tokens", 0)
@@ -1855,7 +1879,14 @@ class AgentRuntimeMixin:
                     )
                     break
 
-                response, state = await self._get_model_response(state, model_kwargs, run=rc)
+                try:
+                    response, state = await self._get_model_response(state, model_kwargs, run=rc)
+                except Exception:
+                    for retry in rc.drain_retries():
+                        yield retry
+                    raise
+                for retry in rc.drain_retries():
+                    yield retry
                 for custom in rc.drain():
                     yield custom
                 prompt_toks = response.usage.get("prompt_tokens", 0)
@@ -2482,6 +2513,7 @@ class AgentRuntimeMixin:
         self,
         complete_kwargs: dict[str, Any],
         chunk_queue: asyncio.Queue[Any],
+        progress: _StreamProgress | None = None,
     ) -> ModelResponse:
         """Drive the model's streaming API, forwarding chunks to the caller.
 
@@ -2498,6 +2530,8 @@ class AgentRuntimeMixin:
 
         async for chunk in self._model.stream(**complete_kwargs):
             await chunk_queue.put(chunk)
+            if progress is not None:
+                progress.forwarded = True
             if chunk.content:
                 content_parts.append(chunk.content)
             if getattr(chunk, "reasoning", None):
@@ -2518,6 +2552,49 @@ class AgentRuntimeMixin:
             usage=usage,
             stop_reason=stop_reason,
             reasoning="".join(reasoning_parts) or None,
+        )
+
+    async def _call_model(
+        self,
+        complete_kwargs: dict[str, Any],
+        chunk_queue: asyncio.Queue[Any] | None,
+        *,
+        streaming: bool,
+        run: RunContext | None,
+    ) -> ModelResponse:
+        """One model call, retried on transient failure per ``config.model_retry``.
+
+        Retry notices go wherever the loop can show them soonest: onto the
+        chunk queue when the caller is consuming one (it yields them live,
+        mid-backoff), else onto the run context, which the loop drains once
+        the call returns or fails.
+
+        A streamed attempt that has already forwarded a chunk is not retried:
+        the caller has shown that text and a second attempt would stream a
+        different answer after it. Nor is a cancelled run.
+        """
+        progress = _StreamProgress()
+
+        async def attempt() -> ModelResponse:
+            progress.forwarded = False
+            if streaming and chunk_queue is not None:
+                return await self._complete_streaming(complete_kwargs, chunk_queue, progress)
+            response: ModelResponse = await self._model.complete(**complete_kwargs)
+            return response
+
+        async def notify(event: ModelRetryEvent) -> None:
+            if chunk_queue is not None:
+                await chunk_queue.put(event)
+            elif run is not None:
+                run.retry_events.append(event)
+
+        def may_retry() -> bool:
+            if progress.forwarded:
+                return False
+            return not (run is not None and run.cancel.is_set())
+
+        return await call_with_retry(
+            attempt, self.config.model_retry, notify=notify, may_retry=may_retry
         )
 
     async def _get_model_response(
@@ -2623,10 +2700,12 @@ class AgentRuntimeMixin:
             # transport can supply them. Server-stateful transports are excluded:
             # they return a continuation token from complete() that the stream
             # API has no equivalent for.
-            if chunk_queue is not None and not server_stateful and hasattr(self._model, "stream"):
-                response = await self._complete_streaming(complete_kwargs, chunk_queue)
-            else:
-                response = await self._model.complete(**complete_kwargs)
+            streaming = (
+                chunk_queue is not None and not server_stateful and hasattr(self._model, "stream")
+            )
+            response = await self._call_model(
+                complete_kwargs, chunk_queue, streaming=streaming, run=run
+            )
 
             # Post-model hooks: event.retry = True to re-call
             after_event = await self._run_after_model_hooks(response, messages, run=run)

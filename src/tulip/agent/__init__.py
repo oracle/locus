@@ -13,7 +13,7 @@ from tulip.agent.composition import (
     parallel,
     sequential,
 )
-from tulip.agent.config import AgentConfig, GroundingConfig, ReflexionConfig
+from tulip.agent.config import AgentConfig, GroundingConfig, ModelRetryConfig, ReflexionConfig
 from tulip.agent.result import AgentResult, ExecutionMetrics, StopReason, StreamingResult
 from tulip.agent.subagent import SubagentResult, run_subagent
 
@@ -24,6 +24,7 @@ __all__ = [
     "AgentResult",
     "ExecutionMetrics",
     "GroundingConfig",
+    "ModelRetryConfig",
     "LoopAgent",
     "ParallelPipeline",
     "PipelineResult",
