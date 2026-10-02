@@ -33,6 +33,7 @@ from tulip.hooks.events import (
 from tulip.hooks.provider import (
     AfterModelCallEvent,
     AfterToolCallEvent,
+    BeforeCompactionEvent,
     BeforeModelCallEvent,
     BeforeToolCallEvent,
     HookPriority,
@@ -52,6 +53,7 @@ __all__ = [
     # Events - write-protected (from provider)
     "AfterModelCallEvent",
     "AfterToolCallEvent",
+    "BeforeCompactionEvent",
     "BeforeModelCallEvent",
     "BeforeToolCallEvent",
     # Events - info (from events)

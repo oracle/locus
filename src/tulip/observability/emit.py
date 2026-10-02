@@ -80,6 +80,7 @@ EV_AGENT_MODEL_COMPLETED = "agent.model.completed"
 EV_AGENT_TOKENS_USED = "agent.tokens.used"
 EV_AGENT_INTERRUPT = "agent.interrupt"
 EV_AGENT_TERMINATE = "agent.terminate"
+EV_AGENT_COMPACTION = "agent.context.compacted"
 
 # --- StateGraph node lifecycle ---
 EV_GRAPH_NODE_STARTED = "multiagent.graph.node.started"

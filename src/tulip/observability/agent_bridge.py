@@ -23,6 +23,7 @@ greppable and testable.
 from __future__ import annotations
 
 from tulip.core.events import (
+    CompactionEvent,
     GroundingEvent,
     InterruptEvent,
     ModelChunkEvent,
@@ -35,6 +36,7 @@ from tulip.core.events import (
     TulipEvent,
 )
 from tulip.observability.emit import (
+    EV_AGENT_COMPACTION,
     EV_AGENT_GROUNDING,
     EV_AGENT_INTERRUPT,
     EV_AGENT_MODEL_CHUNK,
@@ -83,6 +85,8 @@ async def bridge_tulip_event(event: TulipEvent) -> None:
       modals on the bus.
     * ``TerminateEvent`` → ``agent.terminate`` with the canonical
       stop reason + iteration count.
+    * ``CompactionEvent`` → ``agent.context.compacted`` with the stage
+      and the token counts before and after.
 
     Failures inside this bridge are swallowed by the underlying
     ``emit()`` — telemetry must never break the agent loop.
@@ -158,6 +162,16 @@ async def bridge_tulip_event(event: TulipEvent) -> None:
             interrupt_id=event.interrupt_id,
             question_preview=_preview(event.question),
             options=event.options,
+        )
+    elif isinstance(event, CompactionEvent):
+        await emit(
+            EV_AGENT_COMPACTION,
+            iteration=event.iteration,
+            stage=event.stage,
+            tokens_before=event.tokens_before,
+            tokens_after=event.tokens_after,
+            threshold=event.threshold,
+            exhausted=event.exhausted,
         )
     elif isinstance(event, TerminateEvent):
         await emit(

@@ -161,6 +161,53 @@ class GSARConfig(BaseModel):
         return v
 
 
+class CompactionConfig(BaseModel):
+    """How an agent with a known context window keeps a long run inside it.
+
+    Applies when the agent has no explicit ``conversation_manager`` and its
+    window is known (``context_window``, ``TULIP_CONTEXT_WINDOW``, model
+    metadata, or the model itself). Once the request reaches
+    ``trigger_fraction`` of the usable window (the window minus
+    ``reserved_tokens``), old tool outputs are cleared; when that is not
+    enough, ``summary_model`` summarises the older history for continuation
+    and the run carries on. A compaction that cannot get under the threshold,
+    or summaries needed again within ``min_iterations_between_summaries``,
+    ends the run with ``context_exhausted``. See
+    :class:`tulip.memory.compaction.ContextCompactor`.
+
+    ``enabled=False`` (or ``AgentConfig(compaction=False)``) keeps the
+    pre-summary behaviour: old tool output pruned and a token-budgeted tail
+    sent each call, with no model calls of its own.
+    """
+
+    model_config = {"arbitrary_types_allowed": True, "extra": "forbid"}
+
+    enabled: bool = True
+    trigger_fraction: float = Field(default=0.9, gt=0.0, le=1.0)
+    reserved_tokens: int | None = Field(
+        default=None,
+        ge=0,
+        description="Room kept for the reply. Default min(20_000, window // 5).",
+    )
+    tail_turns: int = Field(default=6, ge=1)
+    tail_token_fraction: float = Field(default=0.25, gt=0.0, lt=1.0)
+    tool_output_keep_tokens: int | None = Field(
+        default=None,
+        ge=0,
+        description="Newest tool output kept when clearing. Default min(40_000, usable // 4).",
+    )
+    summary_model: str | Any | None = Field(
+        default=None,
+        description=(
+            "Model that writes the summary: a provider string or a model "
+            "instance. None uses the agent's own model, which already knows "
+            "the task's vocabulary and has the window the summary is for."
+        ),
+    )
+    summary_max_tokens: int | None = Field(default=None, ge=1)
+    min_iterations_between_summaries: int = Field(default=3, ge=0)
+
+
 class AgentConfig(BaseModel):
     """
     Configuration for an Agent instance.
@@ -485,13 +532,34 @@ class AgentConfig(BaseModel):
         description=(
             "The model's input context window, in tokens. When set, and no "
             "conversation_manager is given, the default manager counts tokens "
-            "against this window (LLMCompactor) instead of keeping a message "
-            "window. Overrides the model-metadata window. Unset, the "
+            "against this window (see ``compaction``) instead of keeping a "
+            "message window. Overrides the model-metadata window. Unset, the "
             "TULIP_CONTEXT_WINDOW environment variable applies, then model "
             "metadata, then a context_window/context_length the model object "
             "itself reports."
         ),
     )
+
+    compaction: CompactionConfig = Field(
+        default_factory=CompactionConfig,
+        description=(
+            "How a known context window is kept on a long run: clear old tool "
+            "output, then summarise older history and continue. ``False`` "
+            "turns summarising off. Ignored when conversation_manager is given "
+            "or the window is unknown."
+        ),
+    )
+
+    @field_validator("compaction", mode="before")
+    @classmethod
+    def _compaction_flag(cls, v: Any) -> Any:
+        # ``compaction=False`` / ``True`` read better at a call site than a
+        # config object when all that is wanted is on or off.
+        if isinstance(v, bool):
+            return CompactionConfig(enabled=v)
+        if v is None:
+            return CompactionConfig()
+        return v
 
     memory_manager: Any | None = Field(
         default=None,

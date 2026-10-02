@@ -31,6 +31,7 @@ from tulip.core.events import CustomEvent, ModelRetryEvent, RunInfo
 if TYPE_CHECKING:
     from tulip.core.state import AgentState
     from tulip.core.termination import TerminationCondition
+    from tulip.memory.compaction import CompactionTracker
 
 
 @dataclass
@@ -142,6 +143,9 @@ class RunContext:
     #: Retry notices from a non-streaming model call. The call cannot yield
     #: while it backs off, so the loop yields these once it returns or fails.
     retry_events: list[ModelRetryEvent] = field(default_factory=list)
+    #: The run's compaction memory (thrash guard, last reported usage). Set by
+    #: the loop on first use, and only when the agent compacts its context.
+    compaction: CompactionTracker | None = None
 
     @classmethod
     def create(

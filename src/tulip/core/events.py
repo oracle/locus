@@ -194,6 +194,33 @@ class ModelRetryEvent(TulipEvent):
     from_retry_after: bool = False
 
 
+class CompactionEvent(TulipEvent):
+    """The run's context was compacted to keep it inside the model's window.
+
+    ``stage`` says what it took: ``"prune"`` cleared old tool outputs,
+    ``"summarize"`` replaced older history with a model-written summary, and
+    ``"truncate"`` dropped it without one. Token counts are estimates of the
+    whole request (messages plus tool definitions). ``exhausted`` means the
+    context could not be brought under ``threshold`` (or compaction was
+    thrashing) and the run ends with ``context_exhausted``; ``detail`` says why.
+    It doubles as the compact boundary: everything before it in the stream is
+    no longer verbatim in the model's context.
+    """
+
+    event_type: Literal["compaction"] = "compaction"
+    iteration: int
+    stage: Literal["prune", "summarize", "truncate"]
+    tokens_before: int
+    tokens_after: int
+    threshold: int
+    context_window: int
+    messages_before: int
+    messages_after: int
+    summary: str | None = None
+    exhausted: bool = False
+    detail: str | None = None
+
+
 class TerminateEvent(TulipEvent):
     """Agent execution terminated.
 
@@ -491,6 +518,7 @@ LoopEvent = (
     | GroundingEvent
     | FinalAnswerVerificationEvent
     | ModelRetryEvent
+    | CompactionEvent
     | TerminateEvent
 )
 AgentEvent = LoopEvent | SpecialistStartEvent | SpecialistCompleteEvent | OrchestratorDecisionEvent

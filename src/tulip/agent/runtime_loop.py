@@ -52,6 +52,7 @@ from tulip.agent.verification import (
     mark_ephemeral,
 )
 from tulip.core.events import (
+    CompactionEvent,
     FinalAnswerVerificationEvent,
     GroundingEvent,
     InterruptEvent,
@@ -340,6 +341,7 @@ def _normalize_stop_reason(raw: str | None) -> StopReason:
             "grounding_failed",
             "token_budget",
             "time_budget",
+            "context_exhausted",
             "interrupted",
             "error",
             "cancelled",
@@ -941,6 +943,24 @@ class AgentRuntimeMixin:
                         final_message=_last_assistant_content,
                     )
                     break
+
+                # Keep the request inside the window before it is sent. The
+                # compacted history replaces the state's, so the run continues
+                # from the summary on its own, with no prompt to resume.
+                state, compaction = await self._compact_context(state, rc)
+                if compaction is not None:
+                    yield compaction
+                    if compaction.exhausted:
+                        yield TerminateEvent(
+                            reason="context_exhausted",
+                            iterations_used=state.iteration,
+                            final_confidence=state.confidence,
+                            usage=_usage_of(state),
+                            cost_usd=_cost_of(state),
+                            total_tool_calls=len(state.tool_executions),
+                            final_message=f"[context exhausted] {compaction.detail}",
+                        )
+                        break
 
                 if stream_tokens:
                     chunk_queue: asyncio.Queue[Any] = asyncio.Queue()
@@ -1933,6 +1953,21 @@ class AgentRuntimeMixin:
                     )
                     break
 
+                state, compaction = await self._compact_context(state, rc)
+                if compaction is not None:
+                    yield compaction
+                    if compaction.exhausted:
+                        yield TerminateEvent(
+                            reason="context_exhausted",
+                            iterations_used=state.iteration,
+                            final_confidence=state.confidence,
+                            usage=_usage_of(state),
+                            cost_usd=_cost_of(state),
+                            total_tool_calls=len(state.tool_executions),
+                            final_message=f"[context exhausted] {compaction.detail}",
+                        )
+                        break
+
                 try:
                     response, state = await self._get_model_response(state, model_kwargs, run=rc)
                 except Exception:
@@ -2738,6 +2773,11 @@ class AgentRuntimeMixin:
         # Add assistant message to state
         state = state.with_message(response.message)
 
+        # The provider's count of this request and reply is the best measure of
+        # the context the next request starts from (see ``_compact_context``).
+        if run is not None and run.compaction is not None and not server_stateful:
+            run.compaction.observe(response.usage or {}, len(state.messages))
+
         # Server-stateful transports return a continuation token in
         # ``response.provider_state``; thread it into AgentState so
         # the next turn references the server-held thread.
@@ -2745,6 +2785,92 @@ class AgentRuntimeMixin:
             state = state.with_provider_state(response.provider_state)
 
         return response, state
+
+    async def _compact_context(
+        self, state: AgentState, rc: RunContext
+    ) -> tuple[AgentState, CompactionEvent | None]:
+        """Compact the run's context when the next request would reach the threshold.
+
+        Returns the state to continue with and the event to yield, or ``None``
+        when nothing was done. Only a :class:`ContextCompactor` compacts here;
+        other conversation managers shape each request in
+        ``_get_model_response`` instead. Server-stateful transports hold the
+        history on the server, so there is nothing local to compact.
+        """
+        from tulip.memory.compaction import (  # noqa: PLC0415
+            CompactionTracker,
+            ContextCompactor,
+        )
+
+        compactor = self._conversation_manager
+        if not isinstance(compactor, ContextCompactor):
+            return state, None
+        if getattr(self._model, "server_stateful", False) is True:
+            return state, None
+        if rc.compaction is None:
+            rc.compaction = CompactionTracker()
+        tracker = rc.compaction
+
+        messages = list(state.messages)
+        tool_tokens = compactor.tool_tokens(self._tool_registry.to_openai_schemas())
+        tokens = compactor.measure(messages, tool_tokens=tool_tokens, tracker=tracker)
+        if tokens < compactor.threshold:
+            return state, None
+
+        hook = await self._orch().run_before_compaction(
+            list(messages),
+            tokens=tokens,
+            threshold=compactor.threshold,
+            context_window=compactor.context_length,
+            iteration=state.iteration,
+            run=rc,
+        )
+        if hook.cancel:
+            logger.info("A before-compaction hook skipped compaction at %d tokens", tokens)
+            return state, None
+
+        outcome = await compactor.compact(
+            messages,
+            iteration=state.iteration,
+            tracker=tracker,
+            tool_tokens=tool_tokens,
+            tokens_before=tokens,
+            instructions=hook.instructions,
+        )
+        if outcome is None:
+            return state, None
+        if outcome.usage:
+            # Summary calls are spend like any other: they count against the
+            # run's token and cost budgets.
+            state = state.with_token_usage(
+                outcome.usage.get("prompt_tokens", 0),
+                outcome.usage.get("completion_tokens", 0),
+                cache_creation_tokens=outcome.usage.get("cache_creation_input_tokens", 0),
+                cache_read_tokens=outcome.usage.get("cache_read_input_tokens", 0),
+            )
+        state = state.model_copy(update={"messages": tuple(outcome.messages)})
+        if outcome.exhausted:
+            logger.warning("Context exhausted at iteration %d: %s", state.iteration, outcome.detail)
+        else:
+            logger.info(
+                "Compacted context (%s): %d -> %d tokens",
+                outcome.stage,
+                tokens,
+                outcome.tokens_after,
+            )
+        return state, CompactionEvent(
+            iteration=state.iteration,
+            stage=outcome.stage,
+            tokens_before=outcome.tokens_before,
+            tokens_after=outcome.tokens_after,
+            threshold=outcome.threshold,
+            context_window=compactor.context_length,
+            messages_before=len(messages),
+            messages_after=len(outcome.messages),
+            summary=outcome.summary,
+            exhausted=outcome.exhausted,
+            detail=outcome.detail,
+        )
 
     def _messages_since_last_assistant(self, state: AgentState) -> list[Message]:
         """Return the slice of state.messages that the model hasn't seen yet.
