@@ -20,13 +20,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from tulip.agent import Agent  # tulip.agent never imports tulip.control — no cycle
 from tulip.control.audit import AuditTrail
 from tulip.hooks import HookPriority, HookProvider
 from tulip.hooks.builtin.guardrails import GuardrailsHook
 
 
 if TYPE_CHECKING:
+    from tulip.agent import Agent
     from tulip.core.state import AgentState
     from tulip.hooks import AfterToolCallEvent, BeforeToolCallEvent
 
@@ -148,6 +148,11 @@ def governed_agent(
         hook_list.append(GuardrailsHook())
     if profile.audit:
         hook_list.append(AuditHook(trail))
+    # Imported here, not at the top: importing tulip.control (for admit(), the
+    # audit trail, permission rules) must not load the whole agent runtime and
+    # every model provider with it — a CLI's --help paid ~300ms for that.
+    from tulip.agent import Agent  # noqa: PLC0415
+
     agent = Agent(
         model=model,
         tools=tools,
