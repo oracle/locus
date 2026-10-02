@@ -270,6 +270,11 @@ policy.
   `AgentConfig.tool_loop_read_only_threshold` and
   `AgentConfig.tool_loop_read_only_tools`. A `tool_loop_warning`
   `CustomEvent` marks the point where the model was warned.
+- **`CompletionCheck(insist_on_changes=True)`** sends a `no_changes` stop
+  back every time, up to `max_nudges`, until files change or the reply says
+  why none needed to, instead of accepting the second such stop in a row. For
+  unattended runs, where a model answering "make the changes" with more prose
+  has not chosen anything.
 
 ### Changed
 
@@ -367,6 +372,21 @@ policy.
   structured call in the conversation. `AgentConfig.leaked_tool_call_formats`
   overrides the profile (`[]` turns it off), as does `text_tool_calls="off"`.
   A resumed turn recovers text calls the same way as the first pass.
+- **`requests_changes` recognises task prompts it missed.** It read only a
+  change verb at the start of a sentence, and sentences ended only at `.!?;`,
+  so a spec written one requirement a line ("…\nMake the library directory
+  count as a media root"), a prompt opening "Let people ask…", a stated
+  requirement ("The response must contain the totals") and an interface
+  section ("- `generation_dir()`: the live generation's directory") all read
+  as questions, and a run that changed nothing on them was never sent back.
+  Lines are now clauses, more change verbs count (not those that as often ask
+  for information, such as "show" or "review"), and requirement sentences,
+  interface items and "Done when:" lines count unless the prompt opens by
+  asking.
+- **`explains_no_change` no longer takes the run's own stop for a reason.**
+  "The system requested my final answer before I could make the edits" and
+  "I ran out of iterations" matched its "could not" / "unable to" patterns,
+  so a run that stopped mid-task was accepted as having explained itself.
 - **Compaction keeps the user's request verbatim even after an automated
   note.** The summariser pinned the newest user-role message as "the user's
   latest request", and a verifier's feedback or a continuation note is

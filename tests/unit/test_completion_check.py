@@ -205,6 +205,79 @@ def test_a_reply_that_just_stops_explains_nothing() -> None:
     assert not explains_no_change("I looked at the handler and the tests.")
 
 
+# Task prompts in the shapes real coding tasks take. Each one asks for
+# changes, and the narrow verb-first rule missed the second, fourth, fifth and
+# sixth: a run that changed nothing on them was never sent back.
+_TASK_PROMPTS = [
+    # A request with "and" before the verb.
+    "Let people ask the assistant about their email in chat and add what it finds "
+    "to the calendar when they say so.",
+    # "Let" + who, then a spec; no change verb leads any line.
+    "Let people ask the assistant about their email in chat. Nothing is added unless "
+    "the person asks.\n- mail: `search(query)` over the whole mailbox, newest first",
+    # A problem statement, then the order on its own line after a parenthesis.
+    "A film filed in the library directory answers 403 instead of playing.\n(In prod "
+    "nothing changes there.)\nMake the library directory count as a media root.",
+    # A requirement stated, not ordered.
+    "The endpoint returns a flat list, so callers add rows up themselves and get it "
+    "wrong. The response must contain the totals, computed by the service.",
+    # An interface section naming what to add.
+    "The cache keeps dead generations beside live ones.\n- `generation_dir()`: the "
+    "live generation's directory.\n- `generations()`: what is present, by name.",
+    # A new file in a spec list, then an acceptance line.
+    "Pending holds read `args: {}`.\n- New `policy/evidence.py`: an in-process store, "
+    "bounded.\nDone when: the reviewer sees the arguments.",
+    "Changing a task someone else made happens silently. Tasks should get the same "
+    "treatment as events: held for approval.",
+    "Two pieces of per-call state are shared. Give each call its own record.",
+    "Serve the arguments from this plane, at decision time.",
+]
+
+_QUESTION_PROMPTS = [
+    "How is the segment cache keyed, and where is `_FORMAT` read?",
+    "Where does the ingest read the mail label? Show me the function.",
+    "Walk me through how `/v1/admit` decides a hold.",
+    "Which tests cover the unlink path?",
+    "Is the library directory a media root today? Look at the stream endpoint and tell me.",
+    "Let me know what `generations()` returns for the legacy layout.",
+    "Review the fallback chain and tell me whether `last_tier` is safe under concurrency.",
+    "Give me a summary of how streaming usage is reported.",
+    "Read src/ingest/mail.py and describe what `search(query)` returns.",
+    "Can you tell me why `spending_by_category` returns a flat list?",
+    "Compare the two checkpointers: what does each one keep?",
+    "Find where the indexer key is read.",
+    "Explain why the cache should be keyed by format.",
+    "Look at the cache and tell me what must change for a new encode generation.",
+    "Explain these:\n- `generation_dir()`: what does it return?",
+    "The cache is keyed by format. Explain why it should be.",
+    "The cache is keyed by format. Should it be keyed by path instead?",
+]
+
+
+@pytest.mark.parametrize("prompt", _TASK_PROMPTS)
+def test_task_prompts_in_every_shape_request_changes(prompt: str) -> None:
+    assert requests_changes(prompt)
+
+
+@pytest.mark.parametrize("prompt", _QUESTION_PROMPTS)
+def test_question_prompts_still_do_not(prompt: str) -> None:
+    assert not requests_changes(prompt)
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "The system requested my final answer before I could make the actual edits, "
+        "so I was unable to apply them.",
+        "I ran out of iterations, so the edits are not made yet; I couldn't finish.",
+        "I didn't get a chance to apply the change.",
+        "You asked for a final answer, so here is the plan: I cannot edit yet.",
+    ],
+)
+def test_blaming_the_runs_own_stop_is_not_a_reason(reply: str) -> None:
+    assert not explains_no_change(reply)
+
+
 def _ex(name: str, error: str | None = None, **arguments: Any) -> ToolExecution:
     return ToolExecution(tool_name=name, tool_call_id=name, arguments=arguments, error=error)
 
@@ -272,6 +345,26 @@ async def test_never_twice_in_a_row_for_the_same_reason() -> None:
     # After real work, the same reason may send it back again.
     work = (_ex("bash", command="pytest"),)
     assert await check("Let me run the tests.", _ctx(attempt=1, executions=work)) is not None
+
+
+async def test_insisting_on_changes_sends_a_no_change_stop_back_until_the_cap() -> None:
+    check = CompletionCheck(
+        max_nudges=3, needs_changes=lambda _draft, _ctx: True, insist_on_changes=True
+    )
+    for attempt in range(3):
+        feedback = await check("Here is how the change would look.", _ctx(attempt=attempt))
+        assert isinstance(feedback, Continuation)
+        assert feedback.reason == "no_changes"
+    assert await check("Here is how it would look.", _ctx(attempt=3, max_replans=5)) is None
+    # A reason accepts the stop at once.
+    fresh = CompletionCheck(needs_changes=lambda _draft, _ctx: True, insist_on_changes=True)
+    assert await fresh("No changes were needed: it is already implemented.", _ctx()) is None
+
+
+async def test_without_insisting_a_second_no_change_stop_is_accepted() -> None:
+    check = CompletionCheck(needs_changes=lambda _draft, _ctx: True)
+    assert await check("Here is how the change would look.", _ctx()) is not None
+    assert await check("Here is how the change would look.", _ctx(attempt=1)) is None
 
 
 async def test_the_nudges_are_capped_per_run() -> None:
