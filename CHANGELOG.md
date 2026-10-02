@@ -19,6 +19,23 @@ policy.
   The new `AgentConfig.tool_result_head_fraction` sets the split; `1.0` keeps
   only the head, as before. The marker still starts `[OUTPUT TRUNCATED`, but
   its wording changed, so code matching `original: N chars` needs updating.
+### Added
+
+- **`AgentConfig.context_window`** and the **`TULIP_CONTEXT_WINDOW`**
+  environment variable name a model's input window, so a model the metadata
+  table does not know — a fine-tune or any self-hosted model behind vLLM,
+  LiteLLM or another OpenAI-compatible gateway — gets the token-counting
+  default (`LLMCompactor`) instead of a message window that one large tool
+  output can overflow. Precedence: an explicit `conversation_manager`, then
+  `context_window`, then the environment variable, then model metadata, then
+  a `context_window` / `context_length` the model object (or its config)
+  reports. An invalid environment value is ignored with a warning, and
+  falling back to the message window now logs, once per model, which knobs
+  name the window.
+- **`tulip.models.metadata.discover_context_length(base_url, model)`** reads
+  the window a server lists on `/models` (vLLM's `max_model_len`, or
+  `context_length`) and registers it, keeping any registered prices. It is an
+  explicit async call: agent construction stays offline.
 
 ## [2.18.3] - 2026-09-29
 

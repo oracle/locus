@@ -16,6 +16,8 @@ behaviour where ``_initialize()`` was called from both ``__init__`` and
 
 from __future__ import annotations
 
+import logging
+import os
 from typing import TYPE_CHECKING, Any
 
 from tulip.tools.decorator import Tool
@@ -25,6 +27,8 @@ from tulip.tools.registry import ToolRegistry
 
 if TYPE_CHECKING:
     from tulip.agent.agent import Agent
+
+logger = logging.getLogger(__name__)
 
 
 def initialize_agent(agent: Agent) -> None:
@@ -195,20 +199,27 @@ def initialize_agent(agent: Agent) -> None:
             "tulip.models.metadata.register_metadata(ModelMetadata(..., "
             "input_price_per_mtok=..., output_price_per_mtok=...))."
         )
+    context_window = (
+        None
+        if agent.config.conversation_manager is not None
+        else _context_window(agent, meta.context_length if meta is not None else None)
+    )
     if agent.config.conversation_manager is not None:
         agent._conversation_manager = agent.config.conversation_manager
-    elif meta is not None:
+    elif context_window is not None:
         # The window is known, so count tokens. No summariser, so no extra
         # model calls: stale tool output is pruned and a token-budgeted tail
         # kept, which is what stops one large tool result ending the run.
         from tulip.memory.compactor import LLMCompactor
 
-        agent._conversation_manager = LLMCompactor(context_length=meta.context_length)
+        agent._conversation_manager = LLMCompactor(context_length=context_window)
     else:
         # Unknown window: a message window, at any iteration count. A short
-        # run can still overflow on one large tool output.
+        # run can still overflow on one large tool output, so say how to
+        # name the window.
         from tulip.memory.conversation import SlidingWindowManager
 
+        _warn_unknown_window(model_id)
         window = max(20, agent.config.max_iterations * 2)
         agent._conversation_manager = SlidingWindowManager(window_size=window)
 
@@ -249,6 +260,63 @@ def initialize_agent(agent: Agent) -> None:
             agent._grounding_model = agent._auxiliary_model
 
     agent._initialized = True
+
+
+#: Names an input context window when neither the agent config nor model
+#: metadata does: one setting covers every agent in a process that talks to
+#: a self-hosted model the seed table cannot know.
+CONTEXT_WINDOW_ENV = "TULIP_CONTEXT_WINDOW"
+
+# Model ids already warned about, so a process that builds many agents on the
+# same unknown model logs the fallback once.
+_warned_unknown: set[str] = set()
+
+
+def _context_window(agent: Agent, metadata_window: int | None) -> int | None:
+    """The input window to count tokens against, or ``None`` when unknown.
+
+    Most specific first: the agent's own ``context_window``, the
+    ``TULIP_CONTEXT_WINDOW`` environment variable, the model-metadata entry,
+    then a window the model object reports itself (``context_window`` or
+    ``context_length`` on the model or its config — a gateway binding can
+    carry the ``max_model_len`` its server publishes).
+    """
+    if agent.config.context_window is not None:
+        return agent.config.context_window
+    raw = os.environ.get(CONTEXT_WINDOW_ENV, "").strip()
+    if raw:
+        try:
+            value = int(raw)
+        except ValueError:
+            value = 0
+        if value > 0:
+            return value
+        logger.warning("Ignoring %s=%r: it must be a positive integer.", CONTEXT_WINDOW_ENV, raw)
+    if metadata_window is not None:
+        return metadata_window
+    model = agent._model
+    for holder in (model, getattr(model, "config", None)):
+        for attr in ("context_window", "context_length"):
+            reported = getattr(holder, attr, None)
+            # ``bool`` is an int subclass; a flag is not a window.
+            if isinstance(reported, int) and not isinstance(reported, bool) and reported > 0:
+                return reported
+    return None
+
+
+def _warn_unknown_window(model_id: str | None) -> None:
+    key = model_id or "<unnamed>"
+    if key in _warned_unknown:
+        return
+    _warned_unknown.add(key)
+    logger.warning(
+        "No context window known for model %r; keeping a message window, which a large "
+        "tool output can still overflow. Set Agent(context_window=...), %s, or register "
+        "it with tulip.models.metadata.register_metadata (discover_context_length reads "
+        "it from a vLLM server) to count tokens instead.",
+        key,
+        CONTEXT_WINDOW_ENV,
+    )
 
 
 def _run_for(agent: Agent, run_id: str | None) -> Any:
