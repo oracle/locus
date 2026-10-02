@@ -52,6 +52,12 @@ _BLANK_PNG_URL = (
 )
 
 
+def _join_system(first: Any, extra: str | None) -> str:
+    """The opening system message's text with another leading system message appended."""
+    parts = [p for p in (first if isinstance(first, str) else "", extra or "") if p]
+    return "\n\n".join(parts)
+
+
 def _computer_call_arguments(item: dict[str, Any]) -> dict[str, Any]:
     """The tool arguments for a dumped ``computer_call`` item."""
     arguments: dict[str, Any] = {}
@@ -635,7 +641,9 @@ class OpenAIModel(BaseModel):
     def _convert_messages(self, messages: list[Message]) -> list[dict[str, Any]]:
         """Convert Tulip messages to OpenAI format.
 
-        A system message after the first position is re-encoded as a user
+        Leading system messages (the instructions, then a memory block placed
+        right after them) are joined into the one system message the request
+        opens with. A later system message is re-encoded as a user
         note. The agent loop legitimately injects mid-run guidance as system
         messages (grounding replans, repair prompts, iteration nudges), but
         several OpenAI-compatible chat templates accept a system message only
@@ -657,16 +665,25 @@ class OpenAIModel(BaseModel):
         Qwen even though the same list is fine on api.openai.com.
         """
         openai_messages: list[dict[str, Any]] = []
+        leading = True
 
-        for index, msg in enumerate(messages):
+        for msg in messages:
             entry = msg.to_openai_format()
             if msg.role == Role.TOOL and has_images(msg.content):
                 entry["content"] = strip_images(msg.content or "")
-            if index > 0 and entry.get("role") == "system":
+            if msg.role == Role.SYSTEM and leading and openai_messages:
+                # A second leading system message (a recalled-memory block
+                # placed after the instructions) joins the system prompt, so
+                # the request still opens with exactly one system message.
+                first = openai_messages[0]
+                first["content"] = _join_system(first.get("content"), msg.content)
+                continue
+            if msg.role == Role.SYSTEM and not leading:
                 entry = {
                     "role": "user",
                     "content": f"[System guidance] {entry.get('content') or ''}",
                 }
+            leading = leading and msg.role == Role.SYSTEM
             openai_messages.append(entry)
 
         return self._ensure_user_turn(openai_messages)
@@ -919,8 +936,8 @@ class OpenAIModel(BaseModel):
         items deliberately omit item ``id``s so the server does not try to
         pair them with reasoning items it never received.
 
-        A system message after the first position is re-encoded as a user
-        note, exactly like the chat-completions path (see
+        Leading system messages are joined into one, and a later system
+        message is re-encoded as a user note, exactly like the chat-completions path (see
         :meth:`_convert_messages`), so mid-run guidance behaves the same on
         both transports.
         """
@@ -930,7 +947,11 @@ class OpenAIModel(BaseModel):
             [m.content if m.role == Role.TOOL else None for m in messages]
         )
 
+        leading = True
+
         for index, msg in enumerate(messages):
+            was_leading = leading
+            leading = leading and msg.role == Role.SYSTEM
             if msg.role == Role.ASSISTANT:
                 raw_items = msg.metadata.get(RESPONSES_ITEMS_METADATA_KEY)
                 if isinstance(raw_items, list):
@@ -967,7 +988,9 @@ class OpenAIModel(BaseModel):
                 items.extend(
                     _tool_output_items(msg, computer_calls, send_images=index in with_images)
                 )
-            elif msg.role == Role.SYSTEM and index > 0:
+            elif msg.role == Role.SYSTEM and was_leading and items:
+                items[0]["content"] = _join_system(items[0].get("content"), msg.content)
+            elif msg.role == Role.SYSTEM and not was_leading:
                 items.append(
                     {
                         "role": "user",
