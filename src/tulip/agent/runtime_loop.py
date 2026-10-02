@@ -82,11 +82,41 @@ def _usage_of(state: AgentState) -> dict[str, int] | None:
     """
     if state.total_tokens_used <= 0:
         return None
-    return {
+    usage = {
         "prompt_tokens": state.prompt_tokens_used,
         "completion_tokens": state.completion_tokens_used,
         "total_tokens": state.total_tokens_used,
     }
+    # Cache counts only when there were any, so a provider without caching
+    # reports exactly the three keys it always did.
+    if state.cache_read_tokens_used:
+        usage["cache_read_input_tokens"] = state.cache_read_tokens_used
+    if state.cache_creation_tokens_used:
+        usage["cache_creation_input_tokens"] = state.cache_creation_tokens_used
+    return usage
+
+
+def _cost_of(state: AgentState) -> float | None:
+    """The run segment's spend in USD, or ``None`` when the model is unpriced.
+
+    ``cost_usd_used`` stays 0 for an unpriced model, so it is only a number
+    worth reporting when both prices are known.
+    """
+    return state.cost_usd_used if state.priced else None
+
+
+#: Longest error text a TerminateEvent carries. The exception is re-raised
+#: whole; the event's copy is for display, and a provider that echoes a whole
+#: request body into its message should not turn one event into megabytes.
+_MAX_ERROR_CHARS = 2_000
+
+
+def _error_text(exc: BaseException) -> str:
+    """A one-line description of ``exc`` for ``TerminateEvent.error``."""
+    text = str(exc).strip() or type(exc).__name__
+    if not text.startswith(type(exc).__name__):
+        text = f"{type(exc).__name__}: {text}"
+    return text if len(text) <= _MAX_ERROR_CHARS else text[: _MAX_ERROR_CHARS - 1] + "…"
 
 
 def _apply_hook_result(result: ToolResult, after_tool_event: Any) -> ToolResult:
@@ -746,6 +776,7 @@ class AgentRuntimeMixin:
                             iterations_used=state.iteration,
                             final_confidence=state.confidence,
                             usage=_usage_of(state),
+                            cost_usd=_cost_of(state),
                             total_tool_calls=len(state.tool_executions),
                             final_message=_last_assistant_content,
                         )
@@ -758,6 +789,7 @@ class AgentRuntimeMixin:
                         iterations_used=state.iteration,
                         final_confidence=state.confidence,
                         usage=_usage_of(state),
+                        cost_usd=_cost_of(state),
                         total_tool_calls=_tool_calls_count,
                         final_message="Agent cancelled by external signal.",
                     )
@@ -778,6 +810,7 @@ class AgentRuntimeMixin:
                             iterations_used=state.iteration,
                             final_confidence=state.confidence,
                             usage=_usage_of(state),
+                            cost_usd=_cost_of(state),
                             total_tool_calls=len(state.tool_executions),
                             final_message=_last_assistant_content,
                         )
@@ -837,6 +870,7 @@ class AgentRuntimeMixin:
                             iterations_used=state.iteration,
                             final_confidence=state.confidence,
                             usage=_usage_of(state),
+                            cost_usd=_cost_of(state),
                             total_tool_calls=len(state.tool_executions),
                             final_message=summary,
                         )
@@ -848,6 +882,7 @@ class AgentRuntimeMixin:
                         iterations_used=state.iteration,
                         final_confidence=state.confidence,
                         usage=_usage_of(state),
+                        cost_usd=_cost_of(state),
                         total_tool_calls=len(state.tool_executions),
                         final_message=_last_assistant_content,
                     )
@@ -901,6 +936,7 @@ class AgentRuntimeMixin:
                         iterations_used=state.iteration,
                         final_confidence=state.confidence,
                         usage=_usage_of(state),
+                        cost_usd=_cost_of(state),
                         total_tool_calls=len(state.tool_executions),
                         final_message=_last_assistant_content,
                     )
@@ -1160,6 +1196,7 @@ class AgentRuntimeMixin:
                         iterations_used=state.iteration,
                         final_confidence=state.confidence,
                         usage=_usage_of(state),
+                        cost_usd=_cost_of(state),
                         total_tool_calls=len(state.tool_executions),
                         final_message=final_content,
                     )
@@ -1704,7 +1741,9 @@ class AgentRuntimeMixin:
                 iterations_used=state.iteration,
                 final_confidence=state.confidence,
                 usage=_usage_of(state),
+                cost_usd=_cost_of(state),
                 total_tool_calls=len(state.tool_executions),
+                error=_error_text(e),
             )
             raise
 
@@ -1832,6 +1871,7 @@ class AgentRuntimeMixin:
                             iterations_used=state.iteration,
                             final_confidence=state.confidence,
                             usage=_usage_of(state),
+                            cost_usd=_cost_of(state),
                             total_tool_calls=len(state.tool_executions),
                             final_message=_last_assistant_content,
                         )
@@ -1843,6 +1883,7 @@ class AgentRuntimeMixin:
                         iterations_used=state.iteration,
                         final_confidence=state.confidence,
                         usage=_usage_of(state),
+                        cost_usd=_cost_of(state),
                         total_tool_calls=len(state.tool_executions),
                         final_message="Agent cancelled by external signal.",
                     )
@@ -1860,6 +1901,7 @@ class AgentRuntimeMixin:
                             iterations_used=state.iteration,
                             final_confidence=state.confidence,
                             usage=_usage_of(state),
+                            cost_usd=_cost_of(state),
                             total_tool_calls=len(state.tool_executions),
                             final_message=_last_assistant_content,
                         )
@@ -1872,6 +1914,7 @@ class AgentRuntimeMixin:
                         iterations_used=state.iteration,
                         final_confidence=state.confidence,
                         usage=_usage_of(state),
+                        cost_usd=_cost_of(state),
                         total_tool_calls=len(state.tool_executions),
                         final_message=_last_assistant_content,
                     )
@@ -1884,6 +1927,7 @@ class AgentRuntimeMixin:
                         iterations_used=state.iteration,
                         final_confidence=state.confidence,
                         usage=_usage_of(state),
+                        cost_usd=_cost_of(state),
                         total_tool_calls=len(state.tool_executions),
                         final_message=_last_assistant_content,
                     )
@@ -1943,6 +1987,7 @@ class AgentRuntimeMixin:
                         iterations_used=state.iteration,
                         final_confidence=state.confidence,
                         usage=_usage_of(state),
+                        cost_usd=_cost_of(state),
                         total_tool_calls=len(state.tool_executions),
                         final_message=answer,
                     )
@@ -2153,6 +2198,22 @@ class AgentRuntimeMixin:
             # The loop is done; close whichever iteration it left open.
             if _open_iteration is not None:
                 await self._run_iteration_end_hooks(_open_iteration, state)
+
+        except Exception as e:
+            # Mirror run(): a resumed or continued segment that fails says so
+            # with an error termination before the exception propagates, so a
+            # streaming consumer sees how the turn ended and why.
+            state = state.with_error(str(e))
+            yield TerminateEvent(
+                reason="error",
+                iterations_used=state.iteration,
+                final_confidence=state.confidence,
+                usage=_usage_of(state),
+                cost_usd=_cost_of(state),
+                total_tool_calls=len(state.tool_executions),
+                error=_error_text(e),
+            )
+            raise
 
         finally:
             # Mirror run(): fold the final batch's child usage before the

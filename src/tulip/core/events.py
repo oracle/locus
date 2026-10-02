@@ -211,9 +211,20 @@ class TerminateEvent(TulipEvent):
     total_tool_calls: int
     final_message: str | None = None  # Final assistant message content
     # Cumulative token usage for the run segment that ended here, read off the
-    # AgentState counters (prompt/completion/total). None when the model
-    # reported no usage — consumers must treat absence as "unmetered", not 0.
+    # AgentState counters (prompt/completion/total, plus
+    # cache_read_input_tokens / cache_creation_input_tokens when the provider
+    # reported cache activity). None when the model reported no usage —
+    # consumers must treat absence as "unmetered", not 0.
     usage: dict[str, int] | None = None
+    # What the segment cost in USD, from the model's metadata prices. None
+    # when the model is unpriced: a stream consumer cannot tell "free" from
+    # "unknown" otherwise, and a supervisor enforcing its own spend limit
+    # needs the number the loop already computed rather than a second table.
+    cost_usd: float | None = None
+    # Why the run failed, when ``reason == "error"``. The loop yields this
+    # event and then re-raises, so a consumer that stops at the event (a
+    # stream-json writer, a socket front end) otherwise has no message to show.
+    error: str | None = None
 
     @property
     def content(self) -> str | None:

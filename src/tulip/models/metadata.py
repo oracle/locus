@@ -29,6 +29,7 @@ Design:
 
 from __future__ import annotations
 
+import re
 import threading
 from decimal import Decimal
 from typing import Any, Final
@@ -131,6 +132,12 @@ def _strip_prefix(model_id: str) -> str:
     return model_id
 
 
+#: A snapshot suffix on a model slug: ``-20250929``, ``-2025-09-29``,
+#: Vertex's ``@20251101``, or ``-latest``.
+_SNAPSHOT_SUFFIX: Final[re.Pattern[str]] = re.compile(
+    r"(?:[-@](?:\d{8}|\d{4}-\d{2}-\d{2})|-latest)$"
+)
+
 _lock = threading.Lock()
 _registry: dict[str, ModelMetadata] = {}
 
@@ -155,7 +162,18 @@ def metadata_for(model_id: str) -> ModelMetadata | None:
     """
     key = _strip_prefix(model_id.strip())
     with _lock:
-        return _registry.get(key)
+        found = _registry.get(key)
+        if found is None:
+            # A dated snapshot or a ``-latest`` alias is the same model as its
+            # base slug, priced the same. Only those exact suffix shapes are
+            # stripped: a looser prefix match would let ``gpt-5`` answer for
+            # ``gpt-5.5``, which is a different model at a different price —
+            # and a wrong price under a hard ``max_cost_usd`` is worse than
+            # none.
+            base = _SNAPSHOT_SUFFIX.sub("", key)
+            if base != key:
+                found = _registry.get(base)
+        return found
 
 
 def model_id_of(model: object) -> str | None:
@@ -392,6 +410,58 @@ _seed(
     input_price_per_mtok="0.80",
     output_price_per_mtok="4.00",
 )
+
+# OpenAI GPT-5.5. Prices and window are the listed rates tulip-code's price
+# table carried (2026-08); the output cap follows the GPT-5 generation.
+for _slug, _in, _out in (
+    ("gpt-5.5", "1.25", "10.00"),
+    ("gpt-5.5-mini", "0.25", "2.00"),
+    ("gpt-5.5-nano", "0.05", "0.40"),
+):
+    _seed(
+        _slug,
+        family="openai",
+        context_length=400_000,
+        max_output_tokens=128_000,
+        supports_prompt_caching=True,
+        input_price_per_mtok=_in,
+        output_price_per_mtok=_out,
+    )
+
+# Anthropic, current generation — ids, windows, output caps and first-party
+# list prices as published 2026-09-25. Every one of these takes the full 1M
+# window by default and caps output at 128K, except Haiku 4.5 (200K / 64K).
+for _slug, _in, _out in (
+    ("claude-fable-5-1", "10.00", "50.00"),
+    ("claude-fable-5", "10.00", "50.00"),
+    ("claude-opus-5-5", "4.00", "20.00"),
+    ("claude-opus-5", "5.00", "25.00"),
+    ("claude-opus-4-8", "5.00", "25.00"),
+    ("claude-opus-4-7", "5.00", "25.00"),
+    ("claude-opus-4-6", "5.00", "25.00"),
+    ("claude-sonnet-5-5", "2.00", "10.00"),
+    ("claude-sonnet-5", "2.00", "10.00"),
+    ("claude-sonnet-4-6", "3.00", "15.00"),
+):
+    _seed(
+        _slug,
+        family="anthropic",
+        context_length=1_000_000,
+        max_output_tokens=128_000,
+        supports_prompt_caching=True,
+        input_price_per_mtok=_in,
+        output_price_per_mtok=_out,
+    )
+_seed(
+    "claude-haiku-4-5",
+    family="anthropic",
+    context_length=200_000,
+    max_output_tokens=64_000,
+    supports_prompt_caching=True,
+    input_price_per_mtok="1.00",
+    output_price_per_mtok="5.00",
+)
+del _slug, _in, _out
 
 # Qwen (Alibaba) — open-weight reasoning models commonly served via
 # vLLM with ``--reasoning-parser qwen``. Context windows as published
