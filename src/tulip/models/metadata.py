@@ -31,13 +31,14 @@ from __future__ import annotations
 
 import threading
 from decimal import Decimal
-from typing import Final
+from typing import Any, Final
 
 from pydantic import BaseModel, Field
 
 
 __all__ = [
     "ModelMetadata",
+    "discover_context_length",
     "known_models",
     "metadata_for",
     "model_id_of",
@@ -173,6 +174,84 @@ def model_id_of(model: object) -> str | None:
     if not isinstance(name, str) or not name:
         name = getattr(model, "model", None)
     return name if isinstance(name, str) and name else None
+
+
+async def discover_context_length(
+    base_url: str,
+    model: str,
+    *,
+    api_key: str | None = None,
+    request_timeout: float = 10.0,
+    register: bool = True,
+) -> int | None:
+    """Read a served model's context window from its ``/models`` listing.
+
+    vLLM lists ``max_model_len`` for each model it serves, the window it
+    was started with — which can be smaller than the model's published
+    one, so it is the number the server will actually enforce. OpenRouter
+    and some other gateways list ``context_length`` instead; both are read.
+
+    The call is explicit and async on purpose: agent construction stays
+    offline, and a caller that wants the window asks for it once, before
+    building agents. With ``register`` (the default) the window is stored
+    via :func:`register_metadata`, keeping any prices already registered
+    for the model, so every agent built afterwards counts tokens against it.
+
+    Args:
+        base_url: The OpenAI-compatible base URL, e.g. ``http://host:8000/v1``.
+        model: The served model id; a provider prefix (``vllm:``) is dropped.
+        api_key: Bearer token, when the server requires one.
+        request_timeout: Request timeout in seconds.
+        register: Store the discovered window in the metadata registry.
+
+    Returns:
+        The window in tokens, or ``None`` when the server is unreachable or
+        does not list one for ``model``. Never raises for those cases:
+        discovery is best effort and the caller decides the fallback.
+    """
+    import httpx
+
+    slug = _strip_prefix(model.strip())
+    url = f"{base_url.rstrip('/')}/models"
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    try:
+        async with httpx.AsyncClient(timeout=request_timeout) as client:
+            response = await client.get(url, headers=headers)
+            response.raise_for_status()
+            listed = response.json().get("data") or []
+    except (httpx.HTTPError, ValueError, AttributeError):
+        return None
+
+    window: int | None = None
+    for entry in listed:
+        if not isinstance(entry, dict) or entry.get("id") != slug:
+            continue
+        window = _positive_int(entry.get("max_model_len")) or _positive_int(
+            entry.get("context_length")
+        )
+        break
+    if window is None:
+        return None
+    if register:
+        existing = metadata_for(slug)
+        if existing is not None:
+            register_metadata(existing.model_copy(update={"context_length": window}))
+        else:
+            register_metadata(
+                ModelMetadata(
+                    model_id=slug,
+                    family="discovered",
+                    context_length=window,
+                    max_output_tokens=window,
+                )
+            )
+    return window
+
+
+def _positive_int(value: Any) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    return None
 
 
 def known_models() -> list[str]:

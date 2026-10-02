@@ -392,6 +392,20 @@ class AgentConfig(BaseModel):
         description="Conversation manager for message pruning/summarization",
     )
 
+    context_window: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "The model's input context window, in tokens. When set, and no "
+            "conversation_manager is given, the default manager counts tokens "
+            "against this window (LLMCompactor) instead of keeping a message "
+            "window. Overrides the model-metadata window. Unset, the "
+            "TULIP_CONTEXT_WINDOW environment variable applies, then model "
+            "metadata, then a context_window/context_length the model object "
+            "itself reports."
+        ),
+    )
+
     memory_manager: Any | None = Field(
         default=None,
         description=(
