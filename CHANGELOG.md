@@ -21,6 +21,24 @@ policy.
   its wording changed, so code matching `original: N chars` needs updating.
 ### Added
 
+- **`tulip.tools.structured_output.StructuredOutputTool(schema)`** holds a
+  turn to a final answer that matches a JSON Schema document, for callers
+  that have a schema rather than a Pydantic model and drive `run()` (a CLI's
+  `--json-schema`, an API taking a schema per request). The model delivers
+  the answer as the arguments of a tool whose parameters are the schema. A
+  call that does not validate comes back as a tool error listing every
+  offending path, and a turn that tries to end without a valid call is sent
+  back by a `final_answer_verifier` (`agent_options()`; `max_reminders`
+  replans). `value_from(executions)` reads the answer back, and
+  `load_schema(source)` takes inline JSON or a file path. A non-object
+  top-level schema is wrapped as `{"value": ...}` and unwrapped on the way
+  out. The tool is deliberately not a terminal tool, because the loop stops on
+  a terminal tool even when the call failed.
+- **`tulip.core.json_schema.validate(value, schema)`** — a dependency-free
+  validator for the JSON Schema keywords structured output uses (types,
+  enum/const, object and array constraints, string and number bounds,
+  combinators, `if`/`then`/`else`, local `$ref`). It returns path-prefixed
+  messages; `check_schema` rejects an unusable schema up front.
 - **`AgentConfig.context_window`** and the **`TULIP_CONTEXT_WINDOW`**
   environment variable name a model's input window, so a model the metadata
   table does not know — a fine-tune or any self-hosted model behind vLLM,
