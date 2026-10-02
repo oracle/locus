@@ -35,6 +35,49 @@ class GroundingConfig(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+class ModelRetryConfig(BaseModel):
+    """Retry of a failed model call inside the agent loop.
+
+    A long run makes hundreds of model calls; one 429, 503, dropped
+    connection or timeout among them otherwise ends the whole run with
+    ``TerminateEvent(reason="error")``. The loop re-issues the same request
+    after an exponential backoff with full jitter, honouring the provider's
+    ``retry-after`` when it sends one.
+
+    Only transient failures are retried — rate limits (429), overload and
+    server errors (5xx), transport errors and timeouts, as
+    :func:`tulip.models.failover.classify` names them. A context-length
+    overflow, a malformed request, a bad key, a billing failure or an
+    unknown model fails at once: the same request would fail the same way.
+    Exceptions the classifier cannot place are not retried either, so a bug
+    in a hook or a provider binding surfaces immediately.
+
+    This sits outside any retry the provider client does itself (the native
+    OpenAI binding retries 3 times by default): the loop starts a new attempt
+    only after the client has given up.
+
+    Attributes:
+        enabled: ``False`` turns loop-level retry off.
+        max_retries: Retries after the first attempt.
+        initial_delay: Backoff ceiling, in seconds, for the first retry; it
+            doubles each retry up to ``max_delay``. The actual delay is drawn
+            uniformly below the ceiling (full jitter), so parallel agents
+            hitting one rate limit do not retry in lockstep.
+        max_delay: Largest backoff ceiling, in seconds.
+        total_budget_seconds: Wall-clock seconds, from the first attempt,
+            after which no further retry starts. A ``retry-after`` that would
+            end past the budget fails the call at once instead of sleeping.
+    """
+
+    enabled: bool = True
+    max_retries: int = Field(default=6, ge=0)
+    initial_delay: float = Field(default=1.0, ge=0.0)
+    max_delay: float = Field(default=60.0, ge=0.0)
+    total_budget_seconds: float = Field(default=300.0, gt=0.0)
+
+    model_config = {"extra": "forbid"}
+
+
 class GSARConfig(BaseModel):
     """Configuration for the GSAR typed-grounding layer.
 
@@ -238,6 +281,16 @@ class AgentConfig(BaseModel):
         default=None,
         gt=0.0,
         description="Maximum wall-clock seconds before stopping (None = unlimited)",
+    )
+
+    model_retry: ModelRetryConfig | None = Field(
+        default_factory=ModelRetryConfig,
+        description=(
+            "Retry of transient model-call failures (429, 5xx, connection "
+            "errors, timeouts) with exponential backoff and jitter. On by "
+            "default; ``False``/``None`` disables it, ``True`` restores the "
+            "defaults. See ``ModelRetryConfig``."
+        ),
     )
 
     # Reasoning patterns. Both fields accept either ``True`` (use sensible
@@ -635,6 +688,16 @@ class AgentConfig(BaseModel):
         """
         if v is True:
             return ReflexionConfig()
+        if v is False:
+            return None
+        return v
+
+    @field_validator("model_retry", mode="before")
+    @classmethod
+    def _coerce_model_retry(cls, v: Any) -> Any:
+        """Accept ``True`` / ``False`` as shorthand, like ``reflexion``."""
+        if v is True:
+            return ModelRetryConfig()
         if v is False:
             return None
         return v

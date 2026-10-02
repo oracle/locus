@@ -168,6 +168,32 @@ class FinalAnswerVerificationEvent(TulipEvent):
     replaced: bool = False
 
 
+class ModelRetryEvent(TulipEvent):
+    """A model call failed transiently and the loop is about to retry it.
+
+    Emitted once per retry, before the backoff sleep, so a long-running
+    agent's UI can show "rate limited, retrying in 12 s" instead of going
+    quiet. With ``stream_tokens=True`` it arrives live, between chunks;
+    without it, after the call finally returns (or just before the error
+    ``TerminateEvent`` when every retry failed). See
+    :class:`~tulip.agent.config.ModelRetryConfig`.
+    """
+
+    event_type: Literal["model_retry"] = "model_retry"
+    #: 1 for the first retry, 2 for the second, and so on.
+    attempt: int
+    #: Seconds the loop waits before the retry.
+    delay_seconds: float
+    #: ``FailoverReason`` value: ``rate_limit``, ``overloaded``,
+    #: ``server_error`` or ``timeout``.
+    reason: str
+    status_code: int | None = None
+    #: The failure, as ``"ExceptionType: message"``.
+    error: str
+    #: Whether the delay came from the provider's ``retry-after``.
+    from_retry_after: bool = False
+
+
 class TerminateEvent(TulipEvent):
     """Agent execution terminated.
 
@@ -453,6 +479,7 @@ LoopEvent = (
     | ReflectEvent
     | GroundingEvent
     | FinalAnswerVerificationEvent
+    | ModelRetryEvent
     | TerminateEvent
 )
 AgentEvent = LoopEvent | SpecialistStartEvent | SpecialistCompleteEvent | OrchestratorDecisionEvent

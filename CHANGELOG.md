@@ -68,6 +68,22 @@ policy.
   history, so per-iteration saves grow storage with each iteration and change
   what `get_state_history` and `fork` list. Long unattended runs set `1`, and
   a kill then loses at most the iteration in flight.
+### Added
+
+- **Loop-level retry of transient model-call failures (`AgentConfig.model_retry`).**
+  A 429, a 5xx, a dropped connection or a timeout on any model call used to
+  end the run with `TerminateEvent(reason="error")` once the provider client
+  had spent its own retries, which a long autonomous run is all but certain
+  to hit. The loop now re-issues the call with exponential backoff and full
+  jitter (1 s doubling to 60 s, 6 retries, within a 300 s budget by default),
+  waiting what the provider's `retry-after` / `retry-after-ms` asks for when
+  it sends one. Context-length overflows, validation errors, auth and billing
+  failures, and anything the failover classifier cannot place fail at once.
+  Each retry emits a `ModelRetryEvent` (`attempt`, `delay_seconds`, `reason`,
+  `status_code`, `error`, `from_retry_after`) — live between chunks with
+  `stream_tokens=True`, otherwise once the call returns or fails. A streamed
+  call is not retried once a chunk has reached the caller, nor is a cancelled
+  run. `model_retry=False` restores the old behaviour.
 
 ## [2.18.3] - 2026-09-29
 
