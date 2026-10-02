@@ -161,6 +161,24 @@ policy.
   `check_jsonl()` return an `AuditReport` saying *where* a chain broke
   (`broken_at`) and why, not only whether it did; `verify()` and
   `verify_jsonl()` are unchanged.
+- **`tulip.hooks.ExternalHooks`: command and HTTP hooks configured in a
+  settings file.** The protocol is Claude Code's: the event as JSON on stdin;
+  exit 0 (with optional JSON: `decision`, `reason`, `continue`, `systemMessage`,
+  `hookSpecificOutput.permissionDecision` / `updatedInput` /
+  `additionalContext`), exit 2 to block with stderr as the reason, anything
+  else a non-blocking error. `HookConfig.from_settings()` reads the `hooks`
+  block (matchers are case-insensitive full-match regexes over the tool name),
+  with a per-hook `timeout` that kills the hook's whole process group.
+  `PreToolUse` can deny a call, rewrite its arguments, or hand an allow / ask to
+  the host's gate (`on_permission`); `PostToolUse` appends a block reason or
+  context to the result the model reads; `UserPromptSubmit` adds context or
+  raises `HookBlockedError`. **`Stop` and `SubagentStop` can block**:
+  `ExternalHooks.verifier()` is a `final_answer_verifier`, so a hook that says
+  the work is not done sends its reason back to the model and the loop goes on —
+  "verify before finishing" enforced rather than asked for. `SessionStart`,
+  `SessionEnd`, `PreCompact` and `Notification` are fired by the host with
+  `ExternalHooks.run()`. Every execution, including one the host's `guard`
+  refused, is reported to `on_run` as a `HookRun` for streaming and auditing.
 
 - **`AgentConfig.context_window`** and the **`TULIP_CONTEXT_WINDOW`**
   environment variable name a model's input window, so a model the metadata
