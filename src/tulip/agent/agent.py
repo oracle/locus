@@ -152,6 +152,9 @@ class Agent(AgentRuntimeMixin, BaseModel):
     _hook_orchestrator: HookOrchestrator | None = PrivateAttr(default=None)
     _conversation_manager: ConversationManager | None = PrivateAttr(default=None)
     _model_prices: tuple[float, float] | None = PrivateAttr(default=None)
+    # The model's leaked tool-call formats, resolved from its profile on first
+    # use (``None`` until then); see ``AgentConfig.leaked_tool_call_formats``.
+    _leaked_formats: tuple[str, ...] | None = PrivateAttr(default=None)
     _memory_manager: Any = PrivateAttr(default=None)  # BaseMemoryManager | None
     _reflector: Reflector | None = PrivateAttr(default=None)
     _grounding_evaluator: GroundingEvaluator | None = PrivateAttr(default=None)

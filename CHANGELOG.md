@@ -15,13 +15,15 @@ policy.
   calling, how reasoning is requested (`adaptive`, `budget_tokens`,
   `reasoning_effort`, `thinking_budget`, `enable_thinking`), prompt caching,
   vision, the edit format the model handles best (`apply_patch` for the GPT
-  family, `str_replace` otherwise) and a prompt variant. Families: claude,
-  gpt, gemini, qwen, deepseek, llama, mistral and a conservative default.
+  family, `str_replace` otherwise), a prompt variant and the tool-call markup
+  the model leaks as text (`leaked_tool_call_formats`). Families: claude,
+  gpt, gemini, qwen, deepseek, kimi, glm, llama, mistral and a conservative
+  default.
   Window, output cap and caching come from `tulip.models.metadata`; overrides
   by id or glob come from `overrides=` or a JSON file named by
   `TULIP_MODEL_PROFILES`, and an unknown field in one is an error. The
   profile describes a model; nothing changes behaviour because of it except
-  the image routing below.
+  the image routing below and the leaked tool-call recovery under Fixed.
 - **Metadata for current models**: `gpt-5.5`, `gpt-5.5-mini`, `gpt-5.5-nano`,
   and Claude Fable 5.1 / 5, Opus 5.5 / 5 / 4.8 / 4.7 / 4.6, Sonnet 5.5 / 5 /
   4.6 and Haiku 4.5, with list prices — so `max_cost_usd` works on them
@@ -349,6 +351,22 @@ policy.
   `complete`: the runtime's copy of the stop-reason list had drifted from the
   agent's and lacked it. Both now read one list, `tulip.agent.result.STOP_REASONS`,
   derived from `StopReason`.
+- **A tool call a model writes in its own markup is made, not taken for the
+  answer.** DeepSeek V4 through OpenRouter answered with
+  `<｜DSML｜tool_calls><｜DSML｜invoke name="edit">…` in the message body and
+  no structured call; the loop read it as the final answer and the run ended
+  with the edit never made. A model family now declares the markup it leaks
+  (`ModelProfile.leaked_tool_call_formats`): DeepSeek's DSML and its
+  V3/V3.1 `<｜tool▁calls▁begin｜>` form, Hermes/Qwen `<tool_call>{json}`,
+  Qwen3-Coder's `<function=…>` XML, Kimi K2's tool-call section and GLM's
+  `<arg_key>`/`<arg_value>` pairs. The loop recognises those even for a
+  model with native tool calling (`tulip.agent.leaked_tool_calls`), but only
+  when the whole message after any leading prose is one such block and every
+  call names a registered tool with declared arguments and its required
+  ones; one bad call rejects the block. The markup is replaced by the
+  structured call in the conversation. `AgentConfig.leaked_tool_call_formats`
+  overrides the profile (`[]` turns it off), as does `text_tool_calls="off"`.
+  A resumed turn recovers text calls the same way as the first pass.
 - **Compaction keeps the user's request verbatim even after an automated
   note.** The summariser pinned the newest user-role message as "the user's
   latest request", and a verifier's feedback or a continuation note is

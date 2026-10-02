@@ -492,6 +492,7 @@ class AgentRuntimeMixin:
         _hook_orchestrator: HookOrchestrator | None
         _conversation_manager: ConversationManager | None
         _model_prices: tuple[float, float] | None
+        _leaked_formats: tuple[str, ...] | None
         _memory_manager: BaseMemoryManager | None
         _reflector: Reflector | None
         _grounding_evaluator: GroundingEvaluator | None
@@ -1063,31 +1064,14 @@ class AgentRuntimeMixin:
                     tool_calls=list(response.message.tool_calls),
                 )
 
-                # No structured tool calls: a model without native tool calling
-                # may have written one in the body (see ``text_tool_calls``).
-                if (
-                    not response.message.tool_calls
-                    and response.message.content
-                    and self._text_tool_calls_enabled()
-                ):
-                    parsed_calls = self._parse_text_tool_calls(response.message.content)
-                    if parsed_calls:
-                        response = ModelResponse(
-                            message=Message(
-                                role=response.message.role,
-                                content=response.message.content,
-                                tool_calls=parsed_calls,
-                                tool_call_id=response.message.tool_call_id,
-                                name=response.message.name,
-                            ),
-                            usage=response.usage,
-                            stop_reason=response.stop_reason,
-                        )
-                        # Update the assistant message in state with parsed tool calls
-                        messages = list(state.messages)
-                        messages[-1] = response.message
-                        state = state.model_copy(update={"messages": tuple(messages)})
-                        _last_no_tool_calls = False
+                # No structured tool calls: the model may have written its call
+                # in the body — its own markup leaked as text, or, for a model
+                # without native tool calling, a plain text call.
+                recovered = self._recover_text_tool_calls(response, state)
+                if recovered is not None:
+                    response, state = recovered
+                    _last_assistant_content = response.message.content
+                    _last_no_tool_calls = False
 
                 # A held call that turned out to be a tool step is not a final
                 # answer: release its chunks now, in order.
@@ -2053,6 +2037,14 @@ class AgentRuntimeMixin:
                     tool_calls=list(response.message.tool_calls),
                 )
 
+                # The same recovery as the first pass: a resumed turn on the
+                # same model leaks the same markup.
+                recovered = self._recover_text_tool_calls(response, state)
+                if recovered is not None:
+                    response, state = recovered
+                    _last_assistant_content = response.message.content
+                    _last_no_tool_calls = False
+
                 if not response.message.tool_calls and self.config.completion_mode != "explicit":
                     answer = response.message.content
                     if not answer and state.tool_executions and not _empty_sent_back:
@@ -2685,6 +2677,86 @@ class AgentRuntimeMixin:
         if mode == "auto":
             return getattr(self._model, "supports_native_tool_calls", True) is False
         return mode == "on"
+
+    def _leaked_tool_call_formats(self) -> tuple[str, ...]:
+        """The tool-call markup this agent's model may leak into its message body.
+
+        ``config.leaked_tool_call_formats`` when set, else the model's
+        capability profile, resolved once per agent. A profile that cannot be
+        resolved (an unreadable override file, a model with no id) means no
+        formats: recognising leaked calls is a recovery, and it must never be
+        the thing that breaks a run.
+        """
+        configured = self.config.leaked_tool_call_formats
+        if configured is not None:
+            return tuple(configured)
+        if self._leaked_formats is None:
+            formats: tuple[str, ...] = ()
+            try:
+                from tulip.models.metadata import model_id_of
+                from tulip.models.profiles import profile_for
+
+                model = self.config.model
+                model_id = model_id_of(model if isinstance(model, str) else self._model)
+                if model_id is not None:
+                    formats = tuple(profile_for(model_id).leaked_tool_call_formats)
+            except Exception:  # noqa: BLE001 — a recovery must not fail the run
+                logger.warning("model profile unavailable; leaked tool calls off", exc_info=True)
+            self._leaked_formats = formats
+        return self._leaked_formats
+
+    def _recover_text_tool_calls(
+        self, response: ModelResponse, state: AgentState
+    ) -> tuple[ModelResponse, AgentState] | None:
+        """``response`` and ``state`` with the calls written in the body made structured.
+
+        ``None`` when the reply already carries structured calls, has no body,
+        or its body is not a call. Two sources, in order:
+
+        - the model's leaked markup (:mod:`tulip.agent.leaked_tool_calls`),
+          recognised even with native tool calling, since nobody writes
+          ``<｜DSML｜invoke name="…">`` to describe a call. The markup is
+          dropped from the assistant message, leaving any prose before it, so
+          the model is not shown its own leak as the way it calls tools;
+        - a plain text call, only when ``text_tool_calls`` enables it
+          (:meth:`_text_tool_calls_enabled`); the body stays as written.
+        """
+        message = response.message
+        if message.tool_calls or not message.content or self.config.text_tool_calls == "off":
+            return None
+        from tulip.agent.leaked_tool_calls import match_leaked_tool_calls
+
+        content: str | None = message.content
+        calls: list[ToolCall] = []
+        formats = self._leaked_tool_call_formats()
+        leaked = match_leaked_tool_calls(content, self._tool_registry, formats)
+        if leaked is not None:
+            logger.info(
+                "recovered %d tool call(s) written as %s markup in the message body",
+                len(leaked.calls),
+                leaked.format,
+            )
+            calls, content = leaked.calls, leaked.prose
+        elif self._text_tool_calls_enabled():
+            calls = self._parse_text_tool_calls(content)
+        if not calls:
+            return None
+        response = ModelResponse(
+            message=Message(
+                role=message.role,
+                content=content,
+                tool_calls=calls,
+                tool_call_id=message.tool_call_id,
+                name=message.name,
+            ),
+            usage=response.usage,
+            stop_reason=response.stop_reason,
+        )
+        # The assistant message already in state is the one with the calls as
+        # text; it becomes the one with them structured.
+        messages = list(state.messages)
+        messages[-1] = response.message
+        return response, state.model_copy(update={"messages": tuple(messages)})
 
     def _parse_text_tool_calls(self, text: str | None) -> list[ToolCall]:
         """Tool calls the model wrote as text; see :mod:`tulip.agent.text_tool_calls`.
