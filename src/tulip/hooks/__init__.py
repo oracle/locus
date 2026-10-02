@@ -30,6 +30,14 @@ from tulip.hooks.events import (
     IterationEndEvent,
     IterationStartEvent,
 )
+from tulip.hooks.external import (
+    ExternalHooks,
+    HookBlockedError,
+    HookCommand,
+    HookConfig,
+    HookOutcome,
+    HookRun,
+)
 from tulip.hooks.provider import (
     AfterModelCallEvent,
     AfterToolCallEvent,
@@ -49,6 +57,13 @@ __all__ = [
     "HookRegistry",
     "ProtectedEvent",
     "create_registry",
+    # Command and HTTP hooks an operator configures in a settings file
+    "ExternalHooks",
+    "HookBlockedError",
+    "HookCommand",
+    "HookConfig",
+    "HookOutcome",
+    "HookRun",
     # Events - write-protected (from provider)
     "AfterModelCallEvent",
     "AfterToolCallEvent",
