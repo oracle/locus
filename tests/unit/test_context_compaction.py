@@ -626,3 +626,28 @@ async def test_compaction_reaches_the_observability_bus(monkeypatch: pytest.Monk
             },
         )
     ]
+
+
+@pytest.mark.parametrize(("flag", "enabled"), [(True, True), (False, False), (None, True)])
+def test_compaction_accepts_a_plain_flag(flag: bool | None, enabled: bool) -> None:
+    from tulip.agent import AgentConfig
+
+    assert AgentConfig(model="openai:gpt-4o", compaction=flag).compaction.enabled is enabled
+
+
+def test_a_summary_model_named_by_string_is_resolved(monkeypatch: pytest.MonkeyPatch) -> None:
+    built = Summariser()
+    names: list[str] = []
+
+    def fake_get_model(name: str, **kwargs: Any) -> Any:
+        names.append(name)
+        return built
+
+    monkeypatch.setattr("tulip.agent.agent.get_model", fake_get_model)
+    agent = _agent(
+        lambda m, t: text("ok"), compaction=CompactionConfig(summary_model="openai:gpt-4o-mini")
+    )
+
+    assert names == ["openai:gpt-4o-mini"]
+    assert isinstance(agent._conversation_manager, ContextCompactor)
+    assert agent._conversation_manager.summary_model is built
