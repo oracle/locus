@@ -263,6 +263,12 @@ policy.
   and `max_replans_for(...)` sums their replans, so a completion check, a
   structured-output reminder and a `Stop` hook can all hold one agent.
 
+- **`tulip.core.loops.detect_tool_loop`** and **`ToolLoop`**: the tool-loop
+  detector as a function over a run's steps, with `AgentState.tool_loop`,
+  `AgentConfig.tool_loop_read_only_threshold` and
+  `AgentConfig.tool_loop_read_only_tools`. A `tool_loop_warning`
+  `CustomEvent` marks the point where the model was warned.
+
 ### Changed
 
 - **A subagent shares its parent's budgets.** A child started from a running
@@ -316,8 +322,33 @@ policy.
   (counted against token and cost budgets). Set `compaction=False` for the
   previous behaviour.
 
+- **A tool loop is warned about before it stops the run, and only a real
+  loop counts.** A loop is now the same step — calls by name and arguments,
+  *and their results* — repeated back to back with nothing in between, or the
+  same cycle of steps (A, B, A, B, …) repeated whole. A re-read between other
+  work, a repeat whose result changed and the same tool with other arguments
+  are progress. Steps made only of read-only tools (`read`, `ls`, `glob`,
+  `grep`, …) need one repeat more than `tool_loop_threshold`. When a loop
+  reaches its threshold the model gets a `[Repeated tool call]` note naming
+  the call and asking for another approach; the run stops with `tool_loop`
+  only if the loop repeats once more. `AgentState.has_tool_loop` still
+  reports detection; `AgentState.tool_loop_persists` is what stops a run.
+
 ### Fixed
 
+- **An empty reply mid-task no longer ends the run as `complete`.** A reply
+  with no text and no tool call, in a turn that had called tools, got a
+  tool-less "give your final answer" call, so a model that lost one call to
+  the provider (a reasoning-only turn, a call left in the reasoning channel)
+  wrote "the system requested my final answer before I could make the edits"
+  and the run was reported complete with nothing changed. The first such reply
+  in a turn is now sent back with the tools (`[Empty reply]`); the tool-less
+  final-answer call remains the fallback for a second one, and for a turn that
+  has called no tool yet.
+- **A subagent stopped by its spend budget reports `cost_budget`**, not
+  `complete`: the runtime's copy of the stop-reason list had drifted from the
+  agent's and lacked it. Both now read one list, `tulip.agent.result.STOP_REASONS`,
+  derived from `StopReason`.
 - **Compaction keeps the user's request verbatim even after an automated
   note.** The summariser pinned the newest user-role message as "the user's
   latest request", and a verifier's feedback or a continuation note is

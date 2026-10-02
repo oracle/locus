@@ -9,6 +9,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from tulip.core.loops import DEFAULT_READ_ONLY_TOOLS
+
 
 class ReflexionConfig(BaseModel):
     """Configuration for Reflexion reasoning pattern."""
@@ -423,7 +425,23 @@ class AgentConfig(BaseModel):
     tool_loop_threshold: int = Field(
         default=3,
         ge=2,
-        description="Consecutive same-tool calls to trigger loop detection",
+        description=(
+            "Consecutive identical steps (same calls, same arguments, same "
+            "results) that make a tool loop. The first time a loop is seen the "
+            "model is warned; the run stops only if it repeats after that."
+        ),
+    )
+    tool_loop_read_only_threshold: int | None = Field(
+        default=None,
+        ge=2,
+        description=(
+            "The same threshold for a step made only of read-only tools, whose "
+            "repeats are normal work. None means tool_loop_threshold + 1."
+        ),
+    )
+    tool_loop_read_only_tools: set[str] = Field(
+        default_factory=lambda: set(DEFAULT_READ_ONLY_TOOLS),
+        description="Tool names counted as read-only by the tool-loop detector.",
     )
 
     # Execution strategy

@@ -38,7 +38,7 @@ from pydantic import BaseModel
 from tulip.agent.completion import AUTOMATED_NOTE_KEY, CONTINUATION_NOTE_KEY, Continuation
 from tulip.agent.config import AgentConfig
 from tulip.agent.model_retry import call_with_retry
-from tulip.agent.result import StopReason
+from tulip.agent.result import normalize_stop_reason
 from tulip.agent.run_context import (
     PendingInterrupt,
     RunContext,
@@ -54,6 +54,7 @@ from tulip.agent.verification import (
 )
 from tulip.core.events import (
     CompactionEvent,
+    CustomEvent,
     FinalAnswerVerificationEvent,
     GroundingEvent,
     InterruptEvent,
@@ -66,6 +67,7 @@ from tulip.core.events import (
     ToolStartEvent,
     TulipEvent,
 )
+from tulip.core.loops import warning_text
 from tulip.core.media import strip_images, text_length
 from tulip.core.messages import Message, Role, ToolCall, ToolResult
 from tulip.core.state import AgentState, ReasoningStep, ToolExecution
@@ -322,43 +324,17 @@ def _bus_bridge(
 _ = Awaitable  # noqa: SLF001 — placeholder so mypy knows we imported it intentionally
 
 
-def _normalize_stop_reason(raw: str | None) -> StopReason:
-    """Map a free-form ``TerminateEvent.reason`` to the ``StopReason`` Literal.
+#: Re-exported for code that imported it from here; one copy lives in
+#: :mod:`tulip.agent.result`.
+_normalize_stop_reason = normalize_stop_reason
 
-    Lifted alongside the runtime methods so the mixin stays
-    self-contained. The original copy on ``tulip.agent.agent`` is
-    re-exported from this module for back-compat with any external
-    importer.
-    """
-    valid: frozenset[str] = frozenset(
-        {
-            "complete",
-            "terminal_tool",
-            "confidence_met",
-            "max_iterations",
-            "tool_loop",
-            "no_tools",
-            "grounding_failed",
-            "token_budget",
-            "time_budget",
-            "context_exhausted",
-            "interrupted",
-            "error",
-            "cancelled",
-        }
-    )
-    if not raw:
-        return "complete"
-    if raw in valid:
-        return raw  # type: ignore[return-value]
-    if "tool_called:" in raw:
-        return "terminal_tool"
-    if "text_mention:" in raw:
-        return "complete"
-    for known in valid:
-        if known in raw:
-            return known  # type: ignore[return-value]
-    return "complete"
+
+#: Sent back after an empty reply in a turn that is calling tools.
+_EMPTY_REPLY_NOTE = (
+    "[Empty reply] Your last reply had no text and no tool call. Continue the "
+    "task: call the tools you need next. If the task is done, write your final "
+    "answer instead."
+)
 
 
 #: Queued by ``_get_model_response`` when an after-model hook discards a
@@ -768,6 +744,8 @@ class AgentRuntimeMixin:
         _last_assistant_content: str | None = None
         _last_no_tool_calls = False
         _verifier_attempts = 0
+        # Whether an empty reply has already been sent back this turn.
+        _empty_sent_back = False
         # Hold a call's content chunks until we know they are not a draft the
         # verifier will send back (``hold_final_answer_tokens``).
         _hold_tokens = (
@@ -870,6 +848,12 @@ class AgentRuntimeMixin:
                             final_message=_last_assistant_content,
                         )
                         break
+
+                # A loop gets a warning before it can stop the run: the model
+                # is told what it is repeating and asked to change approach.
+                state, loop_warning = self._warn_tool_loop(state)
+                if loop_warning is not None:
+                    yield loop_warning
 
                 # Check termination conditions
                 should_stop, stop_reason = state.should_terminate
@@ -1183,7 +1167,22 @@ class AgentRuntimeMixin:
                     # model's actual answer based on the conversation
                     # so far. Costs ~one extra call only when the bug
                     # shape would otherwise produce empty output.
+                    #
+                    # Not on the first empty reply of a turn that is calling
+                    # tools, though: there an empty reply is far more often a
+                    # call the provider failed to deliver (a reasoning-only
+                    # turn, a call left in the reasoning channel) than an
+                    # answer. Asking for a final answer with the tools taken
+                    # away then ends a run mid-task — "the system requested my
+                    # final answer before I could make the edits" — and
+                    # reports it as complete. The model is sent back once,
+                    # with its tools, to carry on or to answer.
                     final_content = response.message.content
+                    if not final_content and state.tool_executions and not _empty_sent_back:
+                        _empty_sent_back = True
+                        state = state.with_message(Message.system(_EMPTY_REPLY_NOTE))
+                        _last_no_tool_calls = False
+                        continue
                     if not final_content:
                         state = state.with_message(
                             Message.system(
@@ -1897,6 +1896,7 @@ class AgentRuntimeMixin:
         _last_assistant_content: str | None = None
         _last_no_tool_calls = False
         _verifier_attempts = 0
+        _empty_sent_back = False
 
         # Extract last assistant content from state
         for msg in reversed(state.messages):
@@ -1978,6 +1978,10 @@ class AgentRuntimeMixin:
                         )
                         break
 
+                state, loop_warning = self._warn_tool_loop(state)
+                if loop_warning is not None:
+                    yield loop_warning
+
                 should_stop, stop_reason = state.should_terminate
                 if should_stop and stop_reason:
                     yield TerminateEvent(
@@ -2051,6 +2055,13 @@ class AgentRuntimeMixin:
 
                 if not response.message.tool_calls and self.config.completion_mode != "explicit":
                     answer = response.message.content
+                    if not answer and state.tool_executions and not _empty_sent_back:
+                        # As in ``run``: an empty reply mid-task is sent back
+                        # once, with the tools, rather than taken as the answer.
+                        _empty_sent_back = True
+                        state = state.with_message(Message.system(_EMPTY_REPLY_NOTE))
+                        _last_no_tool_calls = False
+                        continue
                     if self.config.final_answer_verifier is not None and answer:
                         verdict = await self._verify_final_answer(
                             answer, state, rc, _verifier_attempts
@@ -2424,6 +2435,22 @@ class AgentRuntimeMixin:
         )
         return state
 
+    @staticmethod
+    def _warn_tool_loop(state: AgentState) -> tuple[AgentState, CustomEvent | None]:
+        """Warn the model about a loop it has not been warned about yet.
+
+        Returns the state with the note added and the warning recorded, and
+        a ``tool_loop_warning`` event for the stream; or the state unchanged
+        and ``None`` when there is no new loop. A loop the model was already
+        warned about is left to ``should_terminate``, which stops the run
+        once the loop repeats after its warning.
+        """
+        loop = state.tool_loop
+        if loop is None or state.tool_loop_warned(loop):
+            return state, None
+        state = state.with_tool_loop_warning(loop).with_message(Message.system(warning_text(loop)))
+        return state, CustomEvent(name="tool_loop_warning", data=loop.as_dict())
+
     def _spend_fields(self) -> dict[str, Any]:
         """The state fields that price a run and cap its spend."""
         prices = self._model_prices
@@ -2495,6 +2522,8 @@ class AgentRuntimeMixin:
                 self.config.reflexion.confidence_threshold if self.config.reflexion else 0.85
             ),
             tool_loop_threshold=self.config.tool_loop_threshold,
+            tool_loop_read_only_threshold=self.config.tool_loop_read_only_threshold,
+            tool_loop_read_only_tools=frozenset(self.config.tool_loop_read_only_tools),
             terminal_tools=frozenset(self.config.terminal_tools),
             token_budget=self.config.token_budget,
             **self._spend_fields(),
