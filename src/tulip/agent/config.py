@@ -9,6 +9,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from tulip.models.profiles import LeakedToolCallFormat
+
 
 class ReflexionConfig(BaseModel):
     """Configuration for Reflexion reasoning pattern."""
@@ -441,6 +443,20 @@ class AgentConfig(BaseModel):
             "``supports_native_tool_calls = False``: with native tool calling, "
             "text that looks like a call is the model talking about a tool, "
             "and running it executes a command nobody issued."
+        ),
+    )
+    leaked_tool_call_formats: list[LeakedToolCallFormat] | None = Field(
+        default=None,
+        description=(
+            "Tool-call markup to recognise in the message body even though the "
+            "model calls tools natively: its own training format, which a "
+            "router or server sometimes leaves as text (DeepSeek's "
+            "``<｜DSML｜tool_calls>``, Kimi's ``<|tool_calls_section_begin|>``). "
+            "``None`` (the default) takes the formats from the model's capability "
+            "profile (``tulip.models.profiles``); ``[]`` turns this off. A block is "
+            "a call only when it is the whole message after any leading prose and "
+            "every call names a registered tool with declared arguments; "
+            "``text_tool_calls='off'`` turns this off too."
         ),
     )
     tool_execution: Literal["sequential", "concurrent"] = Field(

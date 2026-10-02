@@ -21,13 +21,15 @@ layers, most specific first:
    window, the output cap and prompt caching for the models it seeds. The
    profile reads them from there rather than keeping a second table.
 3. **Family** — the rest comes from the family the id belongs to (claude,
-   gpt, gemini, qwen, deepseek, llama, mistral), with a few per-generation
+   gpt, gemini, qwen, deepseek, kimi, glm, llama, mistral), with a few per-generation
    refinements such as which Claude models take adaptive thinking.
 4. **Default** — an OpenAI-compatible model nobody has described: tool
    calling yes, everything else conservative.
 
-The profile describes; it does not configure. Nothing in the SDK changes
-behaviour because of it — a harness reads it and decides.
+The profile describes; it does not configure. The SDK acts on two of its
+facts — ``vision``, for where a tool result's images go, and
+``leaked_tool_call_formats``, the call markup the agent loop recognises in a
+message body — and a harness reads the rest and decides.
 """
 
 from __future__ import annotations
@@ -49,6 +51,7 @@ __all__ = [
     "FAMILIES",
     "PROFILES_ENV",
     "EditFormat",
+    "LeakedToolCallFormat",
     "ModelProfile",
     "family_of",
     "load_overrides",
@@ -65,6 +68,8 @@ FAMILIES: Final[tuple[str, ...]] = (
     "gemini",
     "qwen",
     "deepseek",
+    "kimi",
+    "glm",
     "llama",
     "mistral",
     "default",
@@ -79,6 +84,18 @@ FAMILIES: Final[tuple[str, ...]] = (
 #: ``whole_file``   rewriting the file; for models that fumble both of the
 #:                  above
 EditFormat = Literal["str_replace", "apply_patch", "whole_file"]
+
+
+#: Tool-call markup a model may leak into its message body as text; the
+#: parsers live in :mod:`tulip.agent.leaked_tool_calls`.
+#:
+#: ``dsml``      DeepSeek V3.2 / V4 (``<｜DSML｜tool_calls>``)
+#: ``deepseek``  DeepSeek V3 / V3.1 (``<｜tool▁calls▁begin｜>``)
+#: ``hermes``    ``<tool_call>{json}</tool_call>`` (Hermes, Qwen 2.5 / 3)
+#: ``qwen_xml``  Qwen3-Coder (``<tool_call><function=…>``)
+#: ``kimi``      Kimi K2 (``<|tool_calls_section_begin|>``)
+#: ``glm``       GLM-4.5 / 4.6 (``<tool_call>name<arg_key>…``)
+LeakedToolCallFormat = Literal["dsml", "deepseek", "hermes", "qwen_xml", "kimi", "glm"]
 
 
 class ModelProfile(BaseModel):
@@ -115,6 +132,16 @@ class ModelProfile(BaseModel):
     edit_format: EditFormat = Field(
         default="str_replace", description="The edit tool the model handles best."
     )
+    leaked_tool_call_formats: tuple[LeakedToolCallFormat, ...] = Field(
+        default=(),
+        description=(
+            "Tool-call markup the model writes into its message body even though "
+            "it calls tools natively — its own training format, which a router "
+            "or server sometimes fails to lift into structured calls. The agent "
+            "loop recognises these as calls (see "
+            ":mod:`tulip.agent.leaked_tool_calls`)."
+        ),
+    )
     prompt_variant: str = Field(
         default="default",
         description="Which system-prompt variant suits it; a harness maps this to text.",
@@ -137,6 +164,10 @@ _METADATA_FAMILIES: Final[dict[str, str]] = {
     "gemini": "gemini",
     "qwen": "qwen",
     "deepseek": "deepseek",
+    "moonshot": "kimi",
+    "kimi": "kimi",
+    "zhipu": "glm",
+    "glm": "glm",
     "meta": "llama",
     "llama": "llama",
     "mistral": "mistral",
@@ -150,6 +181,8 @@ _FAMILY_PATTERNS: Final[tuple[tuple[str, re.Pattern[str]], ...]] = (
     ("gemini", re.compile(r"gemini|gemma")),
     ("qwen", re.compile(r"qwen|qwq")),
     ("deepseek", re.compile(r"deepseek")),
+    ("kimi", re.compile(r"kimi|moonshot")),
+    ("glm", re.compile(r"glm|zhipu|z-ai/|chatglm")),
     ("llama", re.compile(r"llama")),
     ("mistral", re.compile(r"mistral|mixtral|codestral|devstral|pixtral|magistral")),
 )
@@ -180,8 +213,18 @@ _FAMILY_DEFAULTS: Final[dict[str, dict[str, Any]]] = {
     # Open-weight families are usually served by vLLM, llama.cpp or Ollama,
     # where parallel calls depend on the server's tool parser — off until an
     # override says the deployment handles them.
-    "qwen": {"reasoning": "enable_thinking", "prompt_variant": "qwen"},
-    "deepseek": {"prompt_variant": "deepseek"},
+    #
+    # ``leaked_tool_call_formats`` is each family's own call markup, which
+    # reaches the message body as text when the server does not parse it —
+    # observed with DeepSeek V4 through OpenRouter.
+    "qwen": {
+        "reasoning": "enable_thinking",
+        "prompt_variant": "qwen",
+        "leaked_tool_call_formats": ("hermes", "qwen_xml"),
+    },
+    "deepseek": {"prompt_variant": "deepseek", "leaked_tool_call_formats": ("dsml", "deepseek")},
+    "kimi": {"prompt_variant": "default", "leaked_tool_call_formats": ("kimi",)},
+    "glm": {"prompt_variant": "default", "leaked_tool_call_formats": ("glm",)},
     "llama": {"prompt_variant": "default"},
     "mistral": {"prompt_variant": "default"},
     "default": {"prompt_variant": "default"},
@@ -258,7 +301,7 @@ def _refine(family: str, model: str) -> dict[str, Any]:
             # Served like any open-weight model, not by OpenAI's API.
             out["parallel_tool_calls"] = False
             out["prompt_caching"] = False
-    elif family in {"qwen", "llama", "mistral", "deepseek", "default"}:
+    elif family in {"qwen", "llama", "mistral", "deepseek", "kimi", "glm", "default"}:
         if _OPEN_VISION.search(lowered):
             out["vision"] = True
         if family == "deepseek" and _DEEPSEEK_REASONER.search(lowered):
