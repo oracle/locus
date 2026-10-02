@@ -1664,29 +1664,9 @@ class AgentRuntimeMixin:
                 )
                 state = state.with_reasoning_step(reasoning_step)
 
-                # Checkpoint if enabled
-                if (
-                    self.config.checkpointer
-                    and self.config.checkpoint_every_n_iterations > 0
-                    and state.iteration % self.config.checkpoint_every_n_iterations == 0
-                ):
-                    _cp_thread = thread_id or state.run_id
-                    await self.config.checkpointer.save(
-                        _durable(state),
-                        _cp_thread,
-                    )
-                    from tulip.observability.emit import (  # noqa: PLC0415
-                        EV_CHECKPOINT_SAVED,
-                        emit,
-                    )
-
-                    await emit(
-                        EV_CHECKPOINT_SAVED,
-                        thread_id=_cp_thread,
-                        iteration=state.iteration,
-                        backend=type(self.config.checkpointer).__name__,
-                        trigger="every_n_iterations",
-                    )
+                # The iteration's tool results are folded in, so this is a
+                # boundary ``continue_turn`` can pick the turn up from.
+                await self._checkpoint_iteration(state, thread_id)
 
             # The loop is done; close whichever iteration it left open.
             if _open_iteration is not None:
@@ -2135,6 +2115,10 @@ class AgentRuntimeMixin:
                     for custom in hook_events:
                         yield custom
 
+                # Same boundary as run(): a resumed or continued turn is as
+                # durable per iteration as the first pass.
+                await self._checkpoint_iteration(state, thread_id)
+
             # The loop is done; close whichever iteration it left open.
             if _open_iteration is not None:
                 await self._run_iteration_end_hooks(_open_iteration, state)
@@ -2166,6 +2150,34 @@ class AgentRuntimeMixin:
                     backend=type(self.config.checkpointer).__name__,
                     trigger="final",
                 )
+
+    async def _checkpoint_iteration(self, state: AgentState, thread_id: str | None) -> None:
+        """Save ``state`` when ``checkpoint_every_n_iterations`` makes this iteration due.
+
+        Called once the iteration's tool results are in the state, so the
+        checkpoint never holds a call without its result: a process killed
+        before the turn's final save leaves a state ``continue_turn`` resumes
+        from without re-running any finished call. A thread-less run saves
+        under its ``run_id``.
+        """
+        checkpointer = self.config.checkpointer
+        every = self.config.checkpoint_every_n_iterations
+        if not checkpointer or every <= 0 or state.iteration % every:
+            return
+        cp_thread = thread_id or state.run_id
+        await checkpointer.save(_durable(state), cp_thread)
+        from tulip.observability.emit import (  # noqa: PLC0415
+            EV_CHECKPOINT_SAVED,
+            emit,
+        )
+
+        await emit(
+            EV_CHECKPOINT_SAVED,
+            thread_id=cp_thread,
+            iteration=state.iteration,
+            backend=type(checkpointer).__name__,
+            trigger="every_n_iterations",
+        )
 
     def _spend_fields(self) -> dict[str, Any]:
         """The state fields that price a run and cap its spend."""

@@ -456,10 +456,20 @@ class AgentConfig(BaseModel):
         description="Checkpointer for state persistence",
     )
 
+    # Off by default because every save is a new snapshot in the thread's
+    # history: built-in backends keep them all, so per-iteration saves grow
+    # storage with every iteration and change what ``get_state_history`` and
+    # ``fork`` see. Long unattended runs set 1.
     checkpoint_every_n_iterations: int = Field(
         default=0,
         ge=0,
-        description="Auto-checkpoint interval (0 to disable)",
+        description=(
+            "Save a checkpoint every N iterations, after the iteration's tool "
+            "results are in the state (0 = only at the end of the turn and on "
+            "an interrupt). With 1, a process killed mid-turn loses at most "
+            "the iteration in flight, and Agent.continue_turn(thread_id) "
+            "picks the turn up from the last save."
+        ),
     )
 
     # Hooks and plugins

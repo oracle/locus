@@ -50,6 +50,24 @@ policy.
   undeclared argument rejects the call instead of being dropped. Agents on
   a server that returns calls as text (no tool parser) set
   ``text_tool_calls="on"``; the rogue demo's local mode does.
+### Added
+
+- **`Agent.continue_turn(thread_id)`** continues a turn that stopped before
+  it finished — a process killed mid-turn — from the thread's latest
+  checkpoint. Unlike `run()`, it adds no user message: the iteration count
+  and budgets carry on, and every call whose result is in the checkpoint
+  stays done. A call the checkpoint holds without a result is answered with
+  an error saying its outcome is unknown, never re-run. A thread paused on an
+  in-process interrupt is still answered with `resume()`.
+
+### Changed
+
+- `checkpoint_every_n_iterations` also applies to resumed and continued
+  segments (`resume()`, `continue_turn()`), which previously saved only at
+  the end. The default stays `0`: built-in checkpointers keep every save as
+  history, so per-iteration saves grow storage with each iteration and change
+  what `get_state_history` and `fork` list. Long unattended runs set `1`, and
+  a kill then loses at most the iteration in flight.
 
 ## [2.18.3] - 2026-09-29
 

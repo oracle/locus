@@ -110,6 +110,47 @@ def _interrupt_payload(content: str | None) -> dict[str, Any] | None:
     return None
 
 
+_UNFINISHED_CALL_ERROR = (
+    "The run stopped before this call returned, so its outcome is unknown: it may or "
+    "may not have taken effect. Check before calling it again."
+)
+
+
+def _turn_finished(state: AgentState) -> bool:
+    """Whether ``state`` ends on the model's answer rather than inside a turn."""
+    if not state.messages:
+        return False
+    last = state.messages[-1]
+    return last.role == Role.ASSISTANT and not last.tool_calls
+
+
+def _close_unfinished_calls(state: AgentState) -> AgentState:
+    """Answer the last assistant message's calls that have no result yet.
+
+    A provider rejects an assistant tool call with no result after it, and
+    re-running the call could repeat a side effect the stopped attempt
+    already performed. The error result keeps the conversation valid and
+    tells the model what is known: nothing about the outcome.
+    """
+    answered = {m.tool_call_id for m in state.messages if m.role == Role.TOOL and m.tool_call_id}
+    for msg in reversed(state.messages):
+        if msg.role == Role.ASSISTANT and msg.tool_calls:
+            for tc in msg.tool_calls:
+                if tc.id not in answered:
+                    state = state.with_message(
+                        Message.tool(
+                            ToolResult(
+                                tool_call_id=tc.id,
+                                name=tc.name,
+                                content="",
+                                error=_UNFINISHED_CALL_ERROR,
+                            )
+                        )
+                    )
+            break
+    return state
+
+
 @contextlib.asynccontextmanager
 async def _closing(stream: Any) -> AsyncIterator[Any]:
     """``contextlib.aclosing`` that tolerates a stream with no ``aclose``.
@@ -912,6 +953,83 @@ class Agent(AgentRuntimeMixin, BaseModel):
         # Continue execution from the interrupted state
         async with contextlib.aclosing(
             self._run_from_state(state, prompt, thread_id, run_metadata, _run=rc)
+        ) as segment:
+            async for event in segment:
+                yield event
+
+    async def continue_turn(
+        self,
+        thread_id: str,
+        *,
+        metadata: dict[str, Any] | None = None,
+        model_kwargs: dict[str, Any] | None = None,
+    ) -> AsyncGenerator[TulipEvent, None]:
+        """Continue a turn that stopped before it finished, from its checkpoint.
+
+        A process killed mid-turn (a deploy, an OOM, a lost pod) leaves the
+        thread's latest checkpoint inside the turn — with
+        ``checkpoint_every_n_iterations`` set, at the last iteration whose
+        tool results were saved. ``run()`` on that thread would start a NEW
+        turn with a new user message; this continues the SAME turn instead:
+        no user message is added, iteration count and budgets carry on, and
+        every call whose result is in the checkpoint stays done — the model
+        is called next, with those results in front of it.
+
+        A call the checkpoint holds without a result (the process stopped
+        while it ran) is answered with an error saying its outcome is
+        unknown, never re-run: re-running a side effect the first attempt
+        may already have performed is the model's decision to make, with
+        that error in front of it.
+
+        A thread paused on an interrupt in this process is answered with
+        :meth:`resume`, which folds the human's response; ``continue_turn``
+        refuses it.
+
+        Args:
+            thread_id: The thread whose turn to continue.
+            metadata: Invocation metadata for the continued segment. Defaults
+                to the thread's checkpointed metadata; ephemeral keys
+                (``mcp_headers``) are never checkpointed, so a segment that
+                needs them passes them here again.
+            model_kwargs: Per-call model parameters, as for :meth:`run`.
+
+        Raises:
+            RuntimeError: No checkpointer, no checkpoint for the thread, the
+                thread is paused on an in-memory interrupt, or its last turn
+                already finished with an answer (start a new one with
+                ``run()``).
+
+        Yields:
+            TulipEvent instances for the rest of the turn.
+        """
+        checkpointer = self.config.checkpointer
+        if checkpointer is None:
+            raise RuntimeError("continue_turn needs a checkpointer on the agent")
+        if thread_id in self._interrupts:
+            raise RuntimeError(
+                f"Thread {thread_id!r} is paused on an interrupt; answer it with resume()."
+            )
+        loaded = await checkpointer.load(thread_id)
+        if loaded is None:
+            raise RuntimeError(f"No checkpoint found for thread {thread_id!r} to continue.")
+        if _turn_finished(loaded):
+            raise RuntimeError(
+                f"The last turn on thread {thread_id!r} already finished; "
+                "call run() to start a new one."
+            )
+        self._initialize()
+        state = _close_unfinished_calls(loaded)
+        run_metadata, ephemeral = self._split_run_metadata(
+            metadata if metadata is not None else dict(loaded.metadata)
+        )
+        # Checkpoints never carry the (ephemeral) memory block; the rest of
+        # the turn gets it re-injected, as a cross-process resume does.
+        if self._memory_manager is not None:
+            state = await self._memory_manager.on_session_start(state)
+
+        rc = self._begin_run(state, "", thread_id, run_metadata, ephemeral=ephemeral)
+        async with contextlib.aclosing(
+            self._run_from_state(state, "", thread_id, run_metadata, model_kwargs, _run=rc)
         ) as segment:
             async for event in segment:
                 yield event
