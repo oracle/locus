@@ -26,11 +26,16 @@ appended to the audit trail, so there is **no un-recorded path to a side effect*
         trail=trail,
     )
     # production label -> require_human -> AdmissionError, and the attempt is on the trail.
+
+:func:`admit_sync` is the same gate for a side effect that is not a coroutine —
+a tool body that writes a file or runs a process, called on a worker thread
+with no event loop of its own. Both share one decision-and-record path, so the
+two can never disagree about what was admitted or what was written down.
 """
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from tulip.control.audit import AuditTrail
@@ -77,6 +82,7 @@ async def admit(
     approved_by: str | None = None,
     ledger: SpendLedger | None = None,
     spend_scope: str = "default",
+    context: Mapping[str, Any] | None = None,
 ) -> T:
     """Run ``perform`` only if ``action`` clears the trust chain; else reject.
 
@@ -102,6 +108,9 @@ async def admit(
         ledger: Where ``spend_scope``'s cumulative spend is read before the
             decision and ``action.cost_usd`` recorded after ``perform`` succeeds.
         spend_scope: The scope the spend counts against: a customer, a tenant.
+        context: What the caller knows about this decision that the action
+            does not carry — the rule that matched, the mode, who is acting, a
+            summary of the arguments. Recorded on the trail under ``context``.
 
     Returns:
         Whatever ``perform`` returns.
@@ -110,6 +119,73 @@ async def admit(
         AdmissionError: if the action is not admitted (deny, or require_human
             without ``approved_by``).
     """
+    _decide(
+        action,
+        policy=policy,
+        finding=finding,
+        verdict=verdict,
+        trail=trail,
+        approved_by=approved_by,
+        ledger=ledger,
+        spend_scope=spend_scope,
+        context=context,
+    )
+    result = await perform()
+    _spend(action, ledger, spend_scope)
+    return result
+
+
+def admit_sync(
+    action: Action,
+    perform: Callable[[], T],
+    *,
+    policy: ControlPolicy,
+    finding: Evidence | None = None,
+    verdict: VerificationResult | None = None,
+    trail: AuditTrail | None = None,
+    approved_by: str | None = None,
+    ledger: SpendLedger | None = None,
+    spend_scope: str = "default",
+    context: Mapping[str, Any] | None = None,
+) -> T:
+    """:func:`admit` for a synchronous side effect.
+
+    Same arguments, same decision, same record; ``perform`` is a plain
+    zero-argument callable. For tool bodies that run on a worker thread, where
+    there is no event loop to await :func:`admit` on.
+
+    Raises:
+        AdmissionError: if the action is not admitted.
+    """
+    _decide(
+        action,
+        policy=policy,
+        finding=finding,
+        verdict=verdict,
+        trail=trail,
+        approved_by=approved_by,
+        ledger=ledger,
+        spend_scope=spend_scope,
+        context=context,
+    )
+    result = perform()
+    _spend(action, ledger, spend_scope)
+    return result
+
+
+def _decide(  # noqa: PLR0913 — admit()'s arguments, minus the side effect
+    action: Action,
+    *,
+    policy: ControlPolicy,
+    finding: Evidence | None,
+    verdict: VerificationResult | None,
+    trail: AuditTrail | None,
+    approved_by: str | None,
+    ledger: SpendLedger | None,
+    spend_scope: str,
+    context: Mapping[str, Any] | None,
+) -> ApprovalDecision:
+    """Decide, record, and raise unless admitted. The one path both gates share."""
     spent = ledger.spent(spend_scope) if ledger is not None else 0.0
     decision = approve(action, policy=policy, finding=finding, verdict=verdict, spent_usd=spent)
     human = approved_by is not None and decision.outcome == ApprovalOutcome.REQUIRE_HUMAN
@@ -126,14 +202,18 @@ async def admit(
             )
         if human:
             entry["approved_by"] = approved_by
+        if context:
+            entry["context"] = dict(context)
         trail.record("action-admission", entry)
     if not (decision.allowed or human):
         raise AdmissionError(decision)
-    result = await perform()
+    return decision
+
+
+def _spend(action: Action, ledger: SpendLedger | None, spend_scope: str) -> None:
+    # Only after it ran: a refused or failed action spends nothing.
     if ledger is not None and action.cost_usd:
-        # Only after it ran: a refused or failed action spends nothing.
         ledger.record(spend_scope, action.cost_usd, action=action.name)
-    return result
 
 
-__all__ = ["AdmissionError", "admit"]
+__all__ = ["AdmissionError", "admit", "admit_sync"]
