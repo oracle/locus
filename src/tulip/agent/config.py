@@ -368,21 +368,39 @@ class AgentConfig(BaseModel):
     max_tool_result_length: int = Field(
         default=32000,
         ge=0,
-        description="Max chars per tool result (0 = unlimited). Long results are truncated.",
+        description=(
+            "Max chars per tool result (0 = unlimited). Longer results keep their "
+            "head and tail with a marker saying how much was cut; see "
+            "``tool_result_head_fraction``."
+        ),
+    )
+
+    # A test runner, compiler or linter prints its verdict last: the failing
+    # assertion, the error count, the summary line. A head-only cut drops
+    # exactly that, so the cut keeps both ends and loses the middle.
+    tool_result_head_fraction: float = Field(
+        default=0.4,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Share of ``max_tool_result_length`` kept from the start of an "
+            "oversized tool result; the rest is kept from its end. 1.0 keeps "
+            "only the head, 0.0 only the tail."
+        ),
     )
 
     # Optional external offload for oversized tool results. When set,
     # results above ``max_tool_result_length`` are persisted via the
     # store and replaced inline with a recoverable reference key
-    # instead of being head-truncated. See
+    # instead of being cut. See
     # ``tulip.tools.result_storage.ToolResultStore`` for the contract.
     tool_result_store: Any | None = Field(
         default=None,
         description=(
             "Optional ToolResultStore. When set, oversized tool "
             "results are offloaded to its backend and a reference "
-            "key is inlined; without it the agent falls back to "
-            "head-truncation."
+            "key is inlined; without it the agent keeps the head and "
+            "tail of the result and cuts the middle."
         ),
     )
 

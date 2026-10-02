@@ -4,7 +4,7 @@
 """Tests for the AgentConfig.tool_result_store wiring.
 
 Covers the agent.py integration that replaces the lossy
-head-truncation path with a checkpointer-backed offload when the
+head-and-tail cut with a checkpointer-backed offload when the
 config slot is set, and confirms the legacy truncation path still
 works when the slot is left ``None``.
 """
@@ -73,7 +73,7 @@ def _build_agent(*, store: ToolResultStore | None) -> Agent:
 
 
 # ---------------------------------------------------------------------------
-# Legacy path: no store → head truncation as before.
+# Legacy path: no store → the head-and-tail cut.
 # ---------------------------------------------------------------------------
 
 

@@ -351,6 +351,32 @@ def _without_ephemeral_messages(state: AgentState) -> AgentState:
     )
 
 
+def truncate_tool_output(text: str, limit: int, head_fraction: float = 0.4) -> str:
+    """``text`` cut to ``limit`` characters around a marker, keeping both ends.
+
+    The first ``limit * head_fraction`` characters and the last of the rest
+    are kept. Tools put what matters at either end: what was run at the top,
+    the verdict (a failing test, an error count) at the bottom. The marker
+    says how much was cut so the model knows the output is partial and can
+    re-run the tool more narrowly. ``text`` within ``limit`` is returned
+    unchanged; the marker is not counted against ``limit``.
+    """
+    original = len(text)
+    if limit <= 0 or original <= limit:
+        return text
+    head = int(limit * min(max(head_fraction, 0.0), 1.0))
+    tail = limit - head
+    marker = (
+        f"[OUTPUT TRUNCATED — {original - limit} of {original} chars cut; "
+        f"first {head} and last {tail} kept]"
+    )
+    if tail == 0:
+        return f"{text[:head]}\n{marker}"
+    if head == 0:
+        return f"{marker}\n{text[-tail:]}"
+    return f"{text[:head]}\n{marker}\n{text[-tail:]}"
+
+
 def _durable(state: AgentState) -> AgentState:
     """The form of ``state`` that outlives the turn: checkpoints, the result.
 
@@ -1463,9 +1489,9 @@ class AgentRuntimeMixin:
 
                     # Cap oversized tool results so they don't blow the
                     # model's context window. When ``tool_result_store`` is
-                    # configured we offload the full payload through it and
-                    # inline a recoverable reference key; otherwise we fall
-                    # back to lossy head-truncation.
+                    # configured the full payload is offloaded through it and
+                    # a recoverable reference key inlined; otherwise the
+                    # middle is cut and both ends kept.
                     if (
                         self.config.max_tool_result_length > 0
                         and result.content
@@ -1480,13 +1506,12 @@ class AgentRuntimeMixin:
                         else:
                             # Cutting through an embedded image would leave
                             # corrupt base64, so images go before the cut.
-                            text = strip_images(result.content)
-                            original_len = len(text)
                             result = result.model_copy(
                                 update={
-                                    "content": (
-                                        text[: self.config.max_tool_result_length]
-                                        + f"\n[OUTPUT TRUNCATED — original: {original_len} chars]"
+                                    "content": truncate_tool_output(
+                                        strip_images(result.content),
+                                        self.config.max_tool_result_length,
+                                        self.config.tool_result_head_fraction,
                                     )
                                 }
                             )

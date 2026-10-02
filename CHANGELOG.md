@@ -8,6 +8,18 @@ policy.
 
 ## [Unreleased]
 
+### Changed
+
+- **An oversized tool result keeps its head and its tail.** Past
+  `max_tool_result_length`, the loop used to keep the first N characters, so
+  a test run, build or lint lost its verdict: the failing test and the
+  `1 failed, 39999 passed` summary are printed last. The cut now keeps the
+  first 40% and the last 60% of the budget, with a marker between them —
+  `[OUTPUT TRUNCATED — 38123 of 40123 chars cut; first 800 and last 1200 kept]`.
+  The new `AgentConfig.tool_result_head_fraction` sets the split; `1.0` keeps
+  only the head, as before. The marker still starts `[OUTPUT TRUNCATED`, but
+  its wording changed, so code matching `original: N chars` needs updating.
+
 ## [2.18.3] - 2026-09-29
 
 ### Added
