@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from types import MappingProxyType
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SerializeAsAny
 
 from tulip.core.messages import ToolCall
 
@@ -122,6 +122,36 @@ class ToolProgressEvent(TulipEvent):
     progress: float
     total: float | None = None
     message: str | None = None
+
+
+class SubagentEvent(TulipEvent):
+    """An event from a subagent, delivered live on its parent's stream.
+
+    A delegating tool (:func:`tulip.agent.tasks.task_tool`, or any tool that
+    calls :func:`tulip.agent.subagent.run_subagent`) runs a whole child loop
+    inside one tool call. Without this the parent's stream goes quiet for
+    the length of that call, and a front end shows a frozen agent over a busy
+    one.
+
+    The child's event is wrapped, not passed through: a child's bare
+    :class:`TerminateEvent` would read to every consumer of the parent's
+    stream as the *parent* finishing, and its tool events would be counted as
+    the parent's. A consumer that does not know this type skips it.
+
+    Emitted between the delegating call's :class:`ToolStartEvent` and its
+    :class:`ToolCompleteEvent`, for a tool declared with
+    ``emits_progress=True``. A grandchild's events arrive as a
+    ``SubagentEvent`` wrapping a ``SubagentEvent``.
+    """
+
+    event_type: Literal["subagent"] = "subagent"
+    #: The parent's tool call that is running the child.
+    tool_call_id: str
+    tool_name: str
+    #: The child's resumable id, when it has one.
+    task_id: str | None = None
+    #: The child's own event, attributed to the child by ``agent_name``.
+    event: SerializeAsAny[TulipEvent]
 
 
 class ReflectEvent(TulipEvent):
@@ -513,6 +543,7 @@ LoopEvent = (
     ThinkEvent
     | ToolStartEvent
     | ToolProgressEvent
+    | SubagentEvent
     | ToolCompleteEvent
     | ReflectEvent
     | GroundingEvent

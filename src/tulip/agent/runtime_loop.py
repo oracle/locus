@@ -62,7 +62,6 @@ from tulip.core.events import (
     TerminateEvent,
     ThinkEvent,
     ToolCompleteEvent,
-    ToolProgressEvent,
     ToolStartEvent,
     TulipEvent,
 )
@@ -175,8 +174,8 @@ _EXHAUSTED: Any = object()
 
 async def _interleave_progress(
     stream: AsyncIterator[tuple[int, ToolResult]],
-    sink: asyncio.Queue[ToolProgressEvent],
-) -> AsyncIterator[tuple[int, ToolResult] | ToolProgressEvent]:
+    sink: asyncio.Queue[TulipEvent],
+) -> AsyncIterator[tuple[int, ToolResult] | TulipEvent]:
     """Merge an executor's result stream with progress reported meanwhile.
 
     The loop is otherwise parked on the executor for the whole batch, so
@@ -189,7 +188,7 @@ async def _interleave_progress(
     """
     loop = asyncio.get_running_loop()
 
-    def _deliver(event: ToolProgressEvent) -> None:
+    def _deliver(event: TulipEvent) -> None:
         # Sync tools report from a worker thread; the queue is loop-bound.
         try:
             running = asyncio.get_running_loop()
@@ -798,7 +797,11 @@ class AgentRuntimeMixin:
         # both cancel(thread_id=...) and a cancel-all set) and gives their
         # usage reports a place to land (folded each iteration). Entered right
         # before the try whose finally exits it.
-        _subagent_ctx = enter_parent_run(rc.cancel)
+        _subagent_ctx = enter_parent_run(
+            rc.cancel,
+            time_budget_seconds=self.config.time_budget_seconds,
+            hooks=self.config.hooks,
+        )
 
         try:
             # Main ReAct loop
@@ -1461,14 +1464,15 @@ class AgentRuntimeMixin:
                     # Tools that report progress (every MCP tool) need the
                     # stream merged with their progress, or it would arrive
                     # only once they had finished.
-                    merged: AsyncIterator[tuple[int, ToolResult] | ToolProgressEvent] = (
+                    merged: AsyncIterator[tuple[int, ToolResult] | TulipEvent] = (
                         _interleave_progress(results_stream, asyncio.Queue())
                         if self._emits_progress(to_execute_calls)
                         else results_stream
                     )
                     try:
                         async for item in merged:
-                            if isinstance(item, ToolProgressEvent):
+                            # Progress, or a subagent's event forwarded live.
+                            if isinstance(item, TulipEvent):
                                 yield item
                                 continue
                             input_idx, batched_result = item
@@ -1902,7 +1906,11 @@ class AgentRuntimeMixin:
         # Same parent-context contract as run(): a resumed run can spawn
         # subagents too, and their usage and cancellation must behave
         # identically to the first pass.
-        _subagent_ctx = enter_parent_run(rc.cancel)
+        _subagent_ctx = enter_parent_run(
+            rc.cancel,
+            time_budget_seconds=self.config.time_budget_seconds,
+            hooks=self.config.hooks,
+        )
 
         try:
             _open_iteration: int | None = None
@@ -2137,7 +2145,7 @@ class AgentRuntimeMixin:
                                 ),
                                 asyncio.Queue(),
                             ):
-                                if isinstance(item, ToolProgressEvent):
+                                if isinstance(item, TulipEvent):
                                     yield item
                                 else:
                                     streamed = item[1]
