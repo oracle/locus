@@ -8,45 +8,6 @@ policy.
 
 ## [Unreleased]
 
-### Fixed
-
-- **A mid-run system note no longer replaces the agent's instructions on
-  Anthropic models.** The agent loop adds system-role notes partway through a
-  run (iteration-limit notice, grounding and verification reminders, the
-  final-answer nudge), and the Anthropic adapter sent the *last* system
-  message as `system` — so after the first note the model ran without its
-  real instructions. Every native adapter now maps system messages the same
-  way: the leading ones (instructions, then a recalled-memory block) form the
-  system prompt in order, and a later one stays at its position as user-role
-  guidance. On Anthropic and Bedrock it is a `<system-note>` text block in
-  the user turn there, merged with adjacent user turns so roles alternate and
-  tool results still open the turn after their tool calls; OpenAI, Azure and
-  Gemini keep their `[System guidance]` user note. With `prompt_cache=True`,
-  Anthropic marks both the instructions block and the last system block, so a
-  memory block that changes per turn does not cost the instructions their
-  cache hit. Bedrock no longer hoists mid-run notes into `system`, and now
-  sends parallel tool results in one user turn, as Converse requires. On
-  OpenAI-compatible endpoints a memory block now joins the opening system
-  message instead of becoming a user note before the prompt.
-
-### Changed
-
-- **A subagent shares its parent's budgets.** A child started from a running
-  agent gets the smaller of its own limit and what the parent has left of
-  `time_budget_seconds`, `token_budget` and, when the child's model is
-  priced, `max_cost_usd`; one started with nothing left returns at once with
-  that budget as its stop reason, without calling its model. A child's spend
-  now folds into the parent's at the child's own prices when they are known,
-  rather than the parent's.
-- **An oversized tool result keeps its head and its tail.** Past
-  `max_tool_result_length`, the loop used to keep the first N characters, so
-  a test run, build or lint lost its verdict: the failing test and the
-  `1 failed, 39999 passed` summary are printed last. The cut now keeps the
-  first 40% and the last 60% of the budget, with a marker between them —
-  `[OUTPUT TRUNCATED — 38123 of 40123 chars cut; first 800 and last 1200 kept]`.
-  The new `AgentConfig.tool_result_head_fraction` sets the split; `1.0` keeps
-  only the head, as before. The marker still starts `[OUTPUT TRUNCATED`, but
-  its wording changed, so code matching `original: N chars` needs updating.
 ### Added
 
 - **`tulip.models.profiles.profile_for(model)`** returns a frozen
@@ -80,7 +41,6 @@ policy.
   On chat-completions a tool result's images (which a tool message cannot
   hold) now follow the tool batch in a user message when the model's profile
   says it can see; a text-only model keeps getting the placeholder.
-
 - **`tulip.tools.structured_output.StructuredOutputTool(schema)`** holds a
   turn to a final answer that matches a JSON Schema document, for callers
   that have a schema rather than a Pydantic model and drive `run()` (a CLI's
@@ -179,7 +139,6 @@ policy.
   `SessionEnd`, `PreCompact` and `Notification` are fired by the host with
   `ExternalHooks.run()`. Every execution, including one the host's `guard`
   refused, is reported to `on_run` as a `HookRun` for streaming and auditing.
-
 - **`AgentConfig.context_window`** and the **`TULIP_CONTEXT_WINDOW`**
   environment variable name a model's input window, so a model the metadata
   table does not know — a fine-tune or any self-hosted model behind vLLM,
@@ -209,8 +168,6 @@ policy.
   undeclared argument rejects the call instead of being dropped. Agents on
   a server that returns calls as text (no tool parser) set
   ``text_tool_calls="on"``; the rogue demo's local mode does.
-### Added
-
 - **`FileCheckpointer` as a session store**: `list_threads(limit, pattern)`
   returns thread ids newest first, as they were saved (not the sanitised
   directory names); `list_with_metadata(limit)` lists checkpoints across
@@ -224,37 +181,6 @@ policy.
   stays done. A call the checkpoint holds without a result is answered with
   an error saying its outcome is unknown, never re-run. A thread paused on an
   in-process interrupt is still answered with `resume()`.
-
-### Changed
-
-- `checkpoint_every_n_iterations` also applies to resumed and continued
-  segments (`resume()`, `continue_turn()`), which previously saved only at
-  the end.
-- **Per-iteration checkpoints are on by default where they leave nothing
-  behind.** `checkpoint_every_n_iterations` now defaults to `None`: `1` for a
-  run with a `thread_id` on a checkpointer that can delete a single
-  checkpoint (`BaseCheckpointer.deletes_single_checkpoints`, true for the
-  memory, file, HTTP, S3 and storage-adapter backends), `0` otherwise — a
-  thread-less run, or a backend such as `DeltaCheckpointer` whose saves
-  depend on each other. Each iteration save records its id in the state, and
-  the turn's final save deletes them all, including saves made by a process
-  that was killed before finishing the turn. A kill loses at most the
-  iteration in flight, while `get_state_history`, `fork` and storage see one
-  checkpoint per turn, as before. `keep_iteration_checkpoints=True` keeps them
-  as history; an explicit `0` restores per-turn saves only.
-- **A new turn on a thread whose last turn was killed mid-call** answers the
-  calls left without a result with the same "outcome unknown" error
-  `continue_turn()` uses, instead of sending the provider a tool call with no
-  result, which it rejects.
-- **`FileCheckpointer` writes atomically and survives a torn file.** Each
-  checkpoint is written beside its target and renamed into place, so a kill
-  mid-write leaves the previous checkpoint intact; a file that does not parse
-  is skipped with a warning instead of making the thread unloadable, and
-  loading a thread's latest state falls back to the newest one that parses.
-  Listing a thread's checkpoints reads only each file's head and tail rather
-  than parsing every saved conversation in full.
-### Added
-
 - **Loop-level retry of transient model-call failures (`AgentConfig.model_retry`).**
   A 429, a 5xx, a dropped connection or a timeout on any model call used to
   end the run with `TerminateEvent(reason="error")` once the provider client
@@ -269,8 +195,6 @@ policy.
   `stream_tokens=True`, otherwise once the call returns or fails. A streamed
   call is not retried once a chunk has reached the caller, nor is a cancelled
   run. `model_retry=False` restores the old behaviour.
-### Added
-
 - **`tulip.tools.text_edit`** — find-and-replace for file-editing tools that
   survives a model's near misses. `apply_edit(content, old, new,
   replace_all=False)` tries `exact`, `line_trimmed` (indentation, tabs for
@@ -282,13 +206,6 @@ policy.
   CRLF files are matched with CRLF, `new` is re-indented to the file's
   indentation, and a miss raises `EditMatchError` with the closest region of
   the file, numbered. `EditOutcome.strategy` says which reading matched.
-
-### Changed
-
-- The deepagent `StateBackend` and `FilesystemBackend` read `edit_file`'s
-  `old_str` through `apply_edit`, so a snippet with the wrong indentation or
-  spacing now edits instead of failing, and a miss names the closest region.
-  The `not found` / `matches N times` messages are unchanged.
 - **Summarising context compaction** (`tulip.memory.compaction.ContextCompactor`),
   the new default for an agent whose context window is known, so a long
   autonomous run (hours, hundreds of tool calls) keeps working when its
@@ -321,10 +238,77 @@ policy.
 
 ### Changed
 
+- **A subagent shares its parent's budgets.** A child started from a running
+  agent gets the smaller of its own limit and what the parent has left of
+  `time_budget_seconds`, `token_budget` and, when the child's model is
+  priced, `max_cost_usd`; one started with nothing left returns at once with
+  that budget as its stop reason, without calling its model. A child's spend
+  now folds into the parent's at the child's own prices when they are known,
+  rather than the parent's.
+- **An oversized tool result keeps its head and its tail.** Past
+  `max_tool_result_length`, the loop used to keep the first N characters, so
+  a test run, build or lint lost its verdict: the failing test and the
+  `1 failed, 39999 passed` summary are printed last. The cut now keeps the
+  first 40% and the last 60% of the budget, with a marker between them —
+  `[OUTPUT TRUNCATED — 38123 of 40123 chars cut; first 800 and last 1200 kept]`.
+  The new `AgentConfig.tool_result_head_fraction` sets the split; `1.0` keeps
+  only the head, as before. The marker still starts `[OUTPUT TRUNCATED`, but
+  its wording changed, so code matching `original: N chars` needs updating.
+- `checkpoint_every_n_iterations` also applies to resumed and continued
+  segments (`resume()`, `continue_turn()`), which previously saved only at
+  the end.
+- **Per-iteration checkpoints are on by default where they leave nothing
+  behind.** `checkpoint_every_n_iterations` now defaults to `None`: `1` for a
+  run with a `thread_id` on a checkpointer that can delete a single
+  checkpoint (`BaseCheckpointer.deletes_single_checkpoints`, true for the
+  memory, file, HTTP, S3 and storage-adapter backends), `0` otherwise — a
+  thread-less run, or a backend such as `DeltaCheckpointer` whose saves
+  depend on each other. Each iteration save records its id in the state, and
+  the turn's final save deletes them all, including saves made by a process
+  that was killed before finishing the turn. A kill loses at most the
+  iteration in flight, while `get_state_history`, `fork` and storage see one
+  checkpoint per turn, as before. `keep_iteration_checkpoints=True` keeps them
+  as history; an explicit `0` restores per-turn saves only.
+- **A new turn on a thread whose last turn was killed mid-call** answers the
+  calls left without a result with the same "outcome unknown" error
+  `continue_turn()` uses, instead of sending the provider a tool call with no
+  result, which it rejects.
+- **`FileCheckpointer` writes atomically and survives a torn file.** Each
+  checkpoint is written beside its target and renamed into place, so a kill
+  mid-write leaves the previous checkpoint intact; a file that does not parse
+  is skipped with a warning instead of making the thread unloadable, and
+  loading a thread's latest state falls back to the newest one that parses.
+  Listing a thread's checkpoints reads only each file's head and tail rather
+  than parsing every saved conversation in full.
+- The deepagent `StateBackend` and `FilesystemBackend` read `edit_file`'s
+  `old_str` through `apply_edit`, so a snippet with the wrong indentation or
+  spacing now edits instead of failing, and a miss names the closest region.
+  The `not found` / `matches N times` messages are unchanged.
 - An agent with a known context window now summarises older history when
   clearing tool output is not enough, which costs a model call per summary
   (counted against token and cost budgets). Set `compaction=False` for the
   previous behaviour.
+
+### Fixed
+
+- **A mid-run system note no longer replaces the agent's instructions on
+  Anthropic models.** The agent loop adds system-role notes partway through a
+  run (iteration-limit notice, grounding and verification reminders, the
+  final-answer nudge), and the Anthropic adapter sent the *last* system
+  message as `system` — so after the first note the model ran without its
+  real instructions. Every native adapter now maps system messages the same
+  way: the leading ones (instructions, then a recalled-memory block) form the
+  system prompt in order, and a later one stays at its position as user-role
+  guidance. On Anthropic and Bedrock it is a `<system-note>` text block in
+  the user turn there, merged with adjacent user turns so roles alternate and
+  tool results still open the turn after their tool calls; OpenAI, Azure and
+  Gemini keep their `[System guidance]` user note. With `prompt_cache=True`,
+  Anthropic marks both the instructions block and the last system block, so a
+  memory block that changes per turn does not cost the instructions their
+  cache hit. Bedrock no longer hoists mid-run notes into `system`, and now
+  sends parallel tool results in one user turn, as Converse requires. On
+  OpenAI-compatible endpoints a memory block now joins the opening system
+  message instead of becoming a user note before the prompt.
 
 ## [2.18.3] - 2026-09-29
 
