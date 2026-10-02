@@ -8,6 +8,24 @@ policy.
 
 ## [Unreleased]
 
+### Changed
+
+- **A subagent shares its parent's budgets.** A child started from a running
+  agent gets the smaller of its own limit and what the parent has left of
+  `time_budget_seconds`, `token_budget` and, when the child's model is
+  priced, `max_cost_usd`; one started with nothing left returns at once with
+  that budget as its stop reason, without calling its model. A child's spend
+  now folds into the parent's at the child's own prices when they are known,
+  rather than the parent's.
+- **An oversized tool result keeps its head and its tail.** Past
+  `max_tool_result_length`, the loop used to keep the first N characters, so
+  a test run, build or lint lost its verdict: the failing test and the
+  `1 failed, 39999 passed` summary are printed last. The cut now keeps the
+  first 40% and the last 60% of the budget, with a marker between them —
+  `[OUTPUT TRUNCATED — 38123 of 40123 chars cut; first 800 and last 1200 kept]`.
+  The new `AgentConfig.tool_result_head_fraction` sets the split; `1.0` keeps
+  only the head, as before. The marker still starts `[OUTPUT TRUNCATED`, but
+  its wording changed, so code matching `original: N chars` needs updating.
 ### Added
 
 - **`tulip.agent.tasks.task_tool`: delegation as a tool.** The `task` tool
@@ -42,30 +60,6 @@ policy.
   installed and a built-in subset parser otherwise, so the core install stays
   dependency-free. Later directories override earlier ones; a broken file is
   skipped and reported, not fatal.
-
-### Changed
-
-- **A subagent shares its parent's budgets.** A child started from a running
-  agent gets the smaller of its own limit and what the parent has left of
-  `time_budget_seconds`, `token_budget` and, when the child's model is
-  priced, `max_cost_usd`; one started with nothing left returns at once with
-  that budget as its stop reason, without calling its model. A child's spend
-  now folds into the parent's at the child's own prices when they are known,
-  rather than the parent's.
-
-### Changed
-
-- **An oversized tool result keeps its head and its tail.** Past
-  `max_tool_result_length`, the loop used to keep the first N characters, so
-  a test run, build or lint lost its verdict: the failing test and the
-  `1 failed, 39999 passed` summary are printed last. The cut now keeps the
-  first 40% and the last 60% of the budget, with a marker between them —
-  `[OUTPUT TRUNCATED — 38123 of 40123 chars cut; first 800 and last 1200 kept]`.
-  The new `AgentConfig.tool_result_head_fraction` sets the split; `1.0` keeps
-  only the head, as before. The marker still starts `[OUTPUT TRUNCATED`, but
-  its wording changed, so code matching `original: N chars` needs updating.
-### Added
-
 - **`AgentConfig.context_window`** and the **`TULIP_CONTEXT_WINDOW`**
   environment variable name a model's input window, so a model the metadata
   table does not know — a fine-tune or any self-hosted model behind vLLM,
