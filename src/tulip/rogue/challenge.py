@@ -273,6 +273,10 @@ def build_agent(mode: str) -> Agent:
         reflexion=False,
         grounding=False,
         max_iterations=6,
+        # A self-hosted server started without a tool parser hands the call
+        # back as text; parsed, it still meets the gate and the audit trail
+        # instead of passing for a refusal.
+        text_tool_calls="on" if mode == MODE_LOCAL else "auto",
         tools=[
             server_status,
             read_logs,
