@@ -292,6 +292,59 @@ class AfterToolCallEvent(ProtectedEvent):
         self._bind_run(run)
 
 
+class BeforeCompactionEvent(ProtectedEvent):
+    """Event fired before the agent compacts its context.
+
+    Compaction loses the verbatim history: tool outputs become stubs and older
+    turns become a summary. This is the last point at which the full
+    conversation exists, so it is where a hook saves a transcript, or steers
+    what the summary must keep.
+
+    Writable fields:
+        instructions: Extra guidance appended to the summary prompt
+            ("keep every failing test name"). Hooks that run later see and may
+            extend what earlier hooks wrote.
+        cancel: Set True to skip this compaction. The request then goes out
+            over the threshold, and may exceed the model's window.
+
+    Read-only fields:
+        messages: The whole conversation about to be compacted.
+        tokens: Estimated size of the next request (messages plus tools).
+        threshold: The size at which compaction starts.
+        context_window: The model's input window.
+        iteration: The run's current iteration.
+    """
+
+    _writable = {"instructions", "cancel"}
+
+    messages: list[Any]
+    tokens: int
+    threshold: int
+    context_window: int
+    iteration: int
+    instructions: str | None
+    cancel: bool
+
+    def __init__(
+        self,
+        messages: list[Any],
+        *,
+        tokens: int,
+        threshold: int,
+        context_window: int,
+        iteration: int,
+        run: Any = None,
+    ) -> None:
+        self._init("messages", messages)
+        self._init("tokens", tokens)
+        self._init("threshold", threshold)
+        self._init("context_window", context_window)
+        self._init("iteration", iteration)
+        self._init("instructions", None)
+        self._init("cancel", False)
+        self._bind_run(run)
+
+
 class HookPriority:
     """Standard priority ranges for hook ordering.
 
@@ -465,6 +518,19 @@ class HookProvider(ABC):
             event: Write-protected event. Writable: response, retry.
         """
 
+    async def on_before_compaction(
+        self,
+        event: BeforeCompactionEvent,
+    ) -> None:
+        """Called before the agent compacts its context.
+
+        Set event.instructions to steer the summary; set event.cancel = True
+        to skip this compaction. event.messages is the full conversation.
+
+        Args:
+            event: Write-protected event. Writable: instructions, cancel.
+        """
+
     def register_hooks(self) -> dict[str, bool]:
         """Return which hooks this provider implements.
 
@@ -481,4 +547,5 @@ class HookProvider(ABC):
             "on_iteration_end": True,
             "on_before_model_call": True,
             "on_after_model_call": True,
+            "on_before_compaction": True,
         }

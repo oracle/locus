@@ -131,6 +131,36 @@ class HookOrchestrator:
                 await hook.on_after_model_call(event)
         return event
 
+    async def run_before_compaction(
+        self,
+        messages: list[Any],
+        *,
+        tokens: int,
+        threshold: int,
+        context_window: int,
+        iteration: int,
+        run: Any = None,
+    ) -> Any:
+        """Dispatch ``on_before_compaction`` in order; returns the event.
+
+        Callers read ``event.cancel`` to skip the compaction and
+        ``event.instructions`` to steer the summary.
+        """
+        from tulip.hooks.provider import BeforeCompactionEvent
+
+        event = BeforeCompactionEvent(
+            messages,
+            tokens=tokens,
+            threshold=threshold,
+            context_window=context_window,
+            iteration=iteration,
+            run=run,
+        )
+        for hook in self._hooks:
+            if hasattr(hook, "on_before_compaction"):
+                await hook.on_before_compaction(event)
+        return event
+
     async def run_before_tool(
         self,
         tool_name: str,

@@ -206,10 +206,31 @@ def initialize_agent(agent: Agent) -> None:
     )
     if agent.config.conversation_manager is not None:
         agent._conversation_manager = agent.config.conversation_manager
+    elif context_window is not None and agent.config.compaction.enabled:
+        # The window is known, so a long run can be kept inside it: clear old
+        # tool output, then summarise older history and carry on (the loop
+        # drives it; see ``_compact_context``).
+        from tulip.memory.compaction import ContextCompactor
+
+        compaction = agent.config.compaction
+        summary_model = compaction.summary_model
+        if isinstance(summary_model, str):
+            summary_model = get_model(summary_model)
+        agent._conversation_manager = ContextCompactor(
+            context_length=context_window,
+            summary_model=summary_model if summary_model is not None else agent._model,
+            trigger_fraction=compaction.trigger_fraction,
+            reserved_tokens=compaction.reserved_tokens,
+            tail_turns=compaction.tail_turns,
+            tail_token_fraction=compaction.tail_token_fraction,
+            tool_output_keep_tokens=compaction.tool_output_keep_tokens,
+            summary_max_tokens=compaction.summary_max_tokens,
+            min_iterations_between_summaries=compaction.min_iterations_between_summaries,
+        )
     elif context_window is not None:
-        # The window is known, so count tokens. No summariser, so no extra
-        # model calls: stale tool output is pruned and a token-budgeted tail
-        # kept, which is what stops one large tool result ending the run.
+        # Summarising is off, so no extra model calls: stale tool output is
+        # pruned and a token-budgeted tail kept on each request, which is what
+        # stops one large tool result ending the run.
         from tulip.memory.compactor import LLMCompactor
 
         agent._conversation_manager = LLMCompactor(context_length=context_window)

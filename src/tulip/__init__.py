@@ -33,6 +33,7 @@ Usage:
 from tulip.core.config import TulipSettings
 from tulip.core.errors import ApprovalPendingError, TulipError
 from tulip.core.events import (
+    CompactionEvent,
     CustomEvent,
     FinalAnswerVerificationEvent,
     GroundingEvent,
@@ -185,6 +186,7 @@ __all__ = [
     "GraphConfig",
     "GroundingEvaluator",
     "FinalAnswerVerificationEvent",
+    "CompactionEvent",
     "GroundingEvent",
     "Handoff",
     "HandoffContext",

@@ -25,6 +25,42 @@ policy.
   the window a server lists on `/models` (vLLM's `max_model_len`, or
   `context_length`) and registers it, keeping any registered prices. It is an
   explicit async call: agent construction stays offline.
+- **Summarising context compaction** (`tulip.memory.compaction.ContextCompactor`),
+  the new default for an agent whose context window is known, so a long
+  autonomous run (hours, hundreds of tool calls) keeps working when its
+  context fills. Before each model call the loop measures the request (the
+  provider's reported usage when it has one, messages plus tool definitions
+  otherwise); at `trigger_fraction` (0.9) of the window minus
+  `reserved_tokens` (default `min(20_000, window // 5)`) it first clears tool
+  outputs older than the newest `tool_output_keep_tokens` (default
+  `min(40_000, usable // 4)`) to a one-line stub naming the call, and when
+  that does not free a tenth of the window, has the agent's own model (or
+  `summary_model`) write a summary for continuation — goal and constraints,
+  decisions, files and their state, what was verified, what is left, open
+  problems, the next step — built on the previous summary. The system prompt,
+  the task message, the latest user message, memory blocks and the last
+  `tail_turns` (6) turns stay verbatim, no tool call is separated from its
+  result, and the run carries on from the summary by itself. The compacted
+  history replaces the state's, so checkpoints and the next turn start from
+  it. Configure with `AgentConfig.compaction` (`CompactionConfig`);
+  `compaction=False` keeps the previous prune-and-tail behaviour with no
+  model calls of its own.
+- **`context_exhausted` stop reason.** A compaction that cannot bring the
+  request under the threshold, or a summary needed again within
+  `min_iterations_between_summaries` (3) iterations of the last, ends the run
+  with `context_exhausted` and a message saying why, instead of compacting in
+  a loop.
+- **`CompactionEvent`** on the event stream (stage, tokens before and after,
+  threshold, the summary) and `agent.context.compacted` on the observability
+  bus; **`on_before_compaction`** hook (`BeforeCompactionEvent`) sees the full
+  history before it is compacted and can add summary instructions or skip it.
+
+### Changed
+
+- An agent with a known context window now summarises older history when
+  clearing tool output is not enough, which costs a model call per summary
+  (counted against token and cost budgets). Set `compaction=False` for the
+  previous behaviour.
 
 ## [2.18.3] - 2026-09-29
 

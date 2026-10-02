@@ -31,6 +31,7 @@ from tulip.core.events import CustomEvent, RunInfo
 if TYPE_CHECKING:
     from tulip.core.state import AgentState
     from tulip.core.termination import TerminationCondition
+    from tulip.memory.compaction import CompactionTracker
 
 
 @dataclass
@@ -139,6 +140,9 @@ class RunContext:
     has_unverified_writes: bool = False
     result_slot: ResultSlot | None = None
     pending_events: list[CustomEvent] = field(default_factory=list)
+    #: The run's compaction memory (thrash guard, last reported usage). Set by
+    #: the loop on first use, and only when the agent compacts its context.
+    compaction: CompactionTracker | None = None
 
     @classmethod
     def create(

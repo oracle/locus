@@ -21,6 +21,7 @@ import pytest
 from tulip.agent import Agent
 from tulip.core.events import InterruptEvent, TerminateEvent
 from tulip.core.messages import Message, Role, ToolCall
+from tulip.memory.compaction import ContextCompactor
 from tulip.memory.compactor import LLMCompactor
 from tulip.memory.conversation import NullManager, SlidingWindowManager
 from tulip.models.metadata import ModelMetadata, register_metadata
@@ -84,12 +85,27 @@ def _assert_valid(messages: list[Message]) -> None:
     assert any(m.role == Role.USER for m in messages), "the opening request was lost"
 
 
-def test_a_known_window_gets_a_token_counting_default() -> None:
-    agent = Agent(model=_provider([text("ok")], []), tools=[], reflexion=False, grounding=False)
+def test_a_known_window_gets_a_summarising_default() -> None:
+    model = _provider([text("ok")], [])
+    agent = Agent(model=model, tools=[], reflexion=False, grounding=False)
+
+    assert isinstance(agent._conversation_manager, ContextCompactor)
+    assert agent._conversation_manager.context_length == _WINDOW
+    assert agent._conversation_manager.summary_model is model, "the agent's own model summarises"
+
+
+def test_compaction_off_keeps_the_token_counting_window_without_model_calls() -> None:
+    agent = Agent(
+        model=_provider([text("ok")], []),
+        tools=[],
+        reflexion=False,
+        grounding=False,
+        compaction=False,
+    )
 
     assert isinstance(agent._conversation_manager, LLMCompactor)
     assert agent._conversation_manager.context_length == _WINDOW
-    assert agent._conversation_manager.summarize_fn is None, "no extra model calls by default"
+    assert agent._conversation_manager.summarize_fn is None, "no extra model calls"
 
 
 def test_an_unknown_window_gets_a_message_window_at_any_iteration_count() -> None:
@@ -225,14 +241,14 @@ def _no_window_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_an_explicit_window_counts_tokens_for_an_unknown_model() -> None:
     agent = _agent(_unknown_model(), context_window=64_000)
 
-    assert isinstance(agent._conversation_manager, LLMCompactor)
+    assert isinstance(agent._conversation_manager, ContextCompactor)
     assert agent._conversation_manager.context_length == 64_000
 
 
 def test_an_explicit_window_overrides_the_metadata_window() -> None:
     agent = _agent(_provider([text("ok")], []), context_window=8_000)
 
-    assert isinstance(agent._conversation_manager, LLMCompactor)
+    assert isinstance(agent._conversation_manager, ContextCompactor)
     assert agent._conversation_manager.context_length == 8_000
 
 
@@ -243,7 +259,7 @@ def test_the_environment_names_the_window_when_the_config_does_not(
 
     agent = _agent(_unknown_model())
 
-    assert isinstance(agent._conversation_manager, LLMCompactor)
+    assert isinstance(agent._conversation_manager, ContextCompactor)
     assert agent._conversation_manager.context_length == 131_072
     explicit = _agent(_unknown_model(), context_window=32_000)
     assert explicit._conversation_manager.context_length == 32_000
@@ -265,7 +281,7 @@ def test_an_invalid_environment_window_is_ignored_with_a_warning(
 def test_a_window_the_model_reports_is_used_when_nothing_else_names_one() -> None:
     agent = _agent(_unknown_model(context_window=40_960))
 
-    assert isinstance(agent._conversation_manager, LLMCompactor)
+    assert isinstance(agent._conversation_manager, ContextCompactor)
     assert agent._conversation_manager.context_length == 40_960
 
 

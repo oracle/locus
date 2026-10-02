@@ -36,6 +36,7 @@ from tulip.core.errors import (
     VectorStoreError,
 )
 from tulip.core.events import (
+    CompactionEvent,
     CustomEvent,
     FinalAnswerVerificationEvent,
     GroundingEvent,
@@ -102,6 +103,7 @@ __all__ = [
     # Events
     "CustomEvent",
     "FinalAnswerVerificationEvent",
+    "CompactionEvent",
     "GroundingEvent",
     "TulipEvent",
     "ModelChunkEvent",

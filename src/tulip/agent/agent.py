@@ -62,6 +62,7 @@ _VALID_STOP_REASONS: frozenset[str] = frozenset(
         "token_budget",
         "cost_budget",
         "time_budget",
+        "context_exhausted",
         "interrupted",
         "error",
         "cancelled",

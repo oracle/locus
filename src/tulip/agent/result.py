@@ -69,6 +69,7 @@ StopReason = Literal[
     "token_budget",  # Token budget exhausted
     "cost_budget",  # Spend budget exhausted
     "time_budget",  # Time budget exhausted
+    "context_exhausted",  # Compaction could not keep the context inside the window
     "interrupted",  # Agent paused for user input
     "error",  # Execution error
     "cancelled",  # User cancelled
