@@ -5,36 +5,19 @@
 
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from tulip.core.loops import DEFAULT_READ_ONLY_TOOLS, ToolLoop, call_signature, detect_tool_loop
 from tulip.core.media import estimate_tokens
 from tulip.core.messages import Message, ToolCall
 
 
-def _tool_call_signature(tc: ToolCall) -> tuple[str, str]:
-    """Stable (name, args) signature used by the tool-loop detector.
-
-    Loop detection must compare both the tool name and its arguments.
-    Same name with different arguments — paged discovery, sweeping a
-    list of inputs, retrying with a corrected parameter — is forward
-    progress, not a loop.
-
-    JSON with ``sort_keys=True`` canonicalizes dict argument order so
-    ``{"a": 1, "b": 2}`` matches ``{"b": 2, "a": 1}``. Falls back to a
-    sorted-items repr when arguments contain values json can't
-    serialize (rare; tool args are scalars/strings/lists/dicts in
-    practice).
-    """
-    try:
-        canonical = json.dumps(tc.arguments, sort_keys=True, default=str)
-    except (TypeError, ValueError):
-        canonical = repr(sorted(tc.arguments.items()))
-    return (tc.name, canonical)
+#: Kept under its old name for code that imported it from here.
+_tool_call_signature = call_signature
 
 
 class ToolExecution(BaseModel):
@@ -95,9 +78,16 @@ class AgentState(BaseModel):
     confidence_threshold: float = 0.85
     confidence_history: tuple[float, ...] = Field(default_factory=tuple)
 
-    # Tool loop detection
+    # Tool loop detection (see tulip.core.loops)
     tool_history: tuple[str, ...] = Field(default_factory=tuple)
     tool_loop_threshold: int = 3
+    # Repeats a step made only of read-only tools needs; None = threshold + 1.
+    tool_loop_read_only_threshold: int | None = None
+    tool_loop_read_only_tools: frozenset[str] = DEFAULT_READ_ONLY_TOOLS
+    # (loop signature, reasoning steps at the time) for each loop the model
+    # was warned about, so one sighting gets one note. A loop stops the run
+    # only once it repeats past the point where it was warned about.
+    tool_loop_warnings: tuple[tuple[str, int], ...] = Field(default_factory=tuple)
 
     # Terminal tools
     terminal_tools: frozenset[str] = Field(
@@ -328,38 +318,46 @@ class AgentState(BaseModel):
         return worst is not None and self.cost_usd_used + worst > self.cost_budget_usd
 
     @property
-    def has_tool_loop(self) -> bool:
-        """Check if agent is stuck in a tool loop across iterations.
+    def tool_loop(self) -> ToolLoop | None:
+        """The loop the run's last steps are in, or ``None`` (see :mod:`tulip.core.loops`).
 
-        Multiple calls to the same tool in one turn (parallel execution)
-        is normal. A loop is the same call signature — name **and**
-        arguments — repeating across consecutive iterations. Same name
-        with different arguments (paged discovery, sweeping inputs,
-        retrying with a corrected parameter) counts as forward progress
-        and is not a loop.
+        A loop is the same step — calls by name and arguments, and their
+        results — repeated back to back, or the same short cycle of steps
+        repeated whole. Re-reading a file between other work, the same tool
+        with other arguments, and a repeat whose result changed are progress.
         """
-        # Need at least threshold iterations with reasoning steps
-        if len(self.reasoning_steps) < self.tool_loop_threshold:
-            return False
+        return detect_tool_loop(
+            self.reasoning_steps,
+            threshold=self.tool_loop_threshold,
+            read_only_threshold=self.tool_loop_read_only_threshold,
+            read_only_tools=self.tool_loop_read_only_tools,
+        )
 
-        # Check if last N iterations all used the exact same call set,
-        # where "call set" = the multiset of (name, args) signatures
-        # invoked in that step. Frozenset collapses parallel-duplicate
-        # calls within a single step, but since duplicate calls within a
-        # step are themselves not a loop signal, that collapse is fine.
-        recent_steps = self.reasoning_steps[-self.tool_loop_threshold :]
-        call_sets: list[frozenset[tuple[str, str]]] = []
-        for step in recent_steps:
-            if step.tool_calls:
-                call_sets.append(frozenset(_tool_call_signature(tc) for tc in step.tool_calls))
-            else:
-                return False  # An iteration without tools = not looping
+    @property
+    def has_tool_loop(self) -> bool:
+        """Whether the run's last steps are a loop (warned about or not)."""
+        return self.tool_loop is not None
 
-        if len(call_sets) < self.tool_loop_threshold:
-            return False
+    def tool_loop_warned(self, loop: ToolLoop) -> bool:
+        """Whether the model has already been warned about ``loop``."""
+        return any(sig == loop.signature for sig, _ in self.tool_loop_warnings)
 
-        # All iterations used the exact same (name, args) call set
-        return len(set(call_sets)) == 1
+    def with_tool_loop_warning(self, loop: ToolLoop) -> AgentState:
+        """Record that the model was warned about ``loop`` at this step."""
+        warnings = (*self.tool_loop_warnings, (loop.signature, len(self.reasoning_steps)))
+        return self.model_copy(update={"tool_loop_warnings": warnings})
+
+    @property
+    def tool_loop_persists(self) -> bool:
+        """Whether the run's loop went on past the point where it is warned about.
+
+        This is what stops a run. The runtime warns the model when a loop
+        reaches its threshold (:meth:`with_tool_loop_warning`); the warning is
+        the model's chance to change approach, and one more repeat is the
+        model ignoring it.
+        """
+        loop = self.tool_loop
+        return loop is not None and loop.past_warning
 
     @property
     def last_tool_calls(self) -> list[ToolCall]:
@@ -417,7 +415,7 @@ class AgentState(BaseModel):
         if self.confidence >= self.confidence_threshold:
             return True, "confidence_met"
 
-        if self.has_tool_loop:
+        if self.tool_loop_persists:
             return True, "tool_loop"
 
         if self.iteration > 0 and self._has_assistant_message() and not self.last_tool_calls:
