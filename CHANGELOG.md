@@ -8,6 +8,27 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **`tulip.tools.text_edit`** — find-and-replace for file-editing tools that
+  survives a model's near misses. `apply_edit(content, old, new,
+  replace_all=False)` tries `exact`, `line_trimmed` (indentation, tabs for
+  spaces, trailing whitespace), `whitespace_normalized` (spacing between
+  tokens), `escape_normalized` (quotes escaped one level too deep) and
+  `block_anchor` (first and last lines match, middle at least 75% similar),
+  strictest first. Every reading must be unique: a strategy that finds two
+  places refuses the edit instead of falling through to a looser one.
+  CRLF files are matched with CRLF, `new` is re-indented to the file's
+  indentation, and a miss raises `EditMatchError` with the closest region of
+  the file, numbered. `EditOutcome.strategy` says which reading matched.
+
+### Changed
+
+- The deepagent `StateBackend` and `FilesystemBackend` read `edit_file`'s
+  `old_str` through `apply_edit`, so a snippet with the wrong indentation or
+  spacing now edits instead of failing, and a miss names the closest region.
+  The `not found` / `matches N times` messages are unchanged.
+
 ## [2.18.3] - 2026-09-29
 
 ### Added

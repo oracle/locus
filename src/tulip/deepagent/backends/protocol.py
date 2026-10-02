@@ -23,6 +23,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal, Protocol, runtime_checkable
 
+from tulip.tools.text_edit import EditMatchError, apply_edit
+
 
 ErrorCode = Literal[
     "file_not_found",
@@ -30,6 +32,33 @@ ErrorCode = Literal[
     "is_directory",
     "invalid_path",
 ]
+
+
+def replace_in_file(path: str, content: str, old_str: str, new_str: str) -> str:
+    """``content`` with ``old_str`` replaced by ``new_str``, for ``edit``.
+
+    Shared by the backends so they read a near miss the same way: through
+    :func:`tulip.tools.text_edit.apply_edit`, which forgives indentation,
+    whitespace and escaping but never an ambiguous match. Raises
+    ``ValueError`` worded for the model — ``not found`` with the closest
+    region of the file, or ``matches N times`` — as the protocol promises.
+    """
+    if old_str == new_str and old_str and content.count(old_str) == 1:
+        # A no-op edit of a unique snippet has always succeeded here.
+        return content
+    try:
+        return apply_edit(content, old_str, new_str).content
+    except EditMatchError as exc:
+        if exc.reason == "not_found":
+            msg = f"old_str not found in {path}" + (f"\n{exc.hint}" if exc.hint else "")
+        elif exc.reason == "ambiguous":
+            msg = (
+                f"old_str matches {len(exc.lines)} times in {path}; "
+                "provide a longer / more specific snippet so the match is unique"
+            )
+        else:
+            msg = f"{exc} ({path})"
+        raise ValueError(msg) from exc
 
 
 class BackendError(Exception):
@@ -97,7 +126,9 @@ class BackendProtocol(Protocol):
         ``BackendError("file_not_found", path)`` if the file is
         missing; raises a ``ValueError`` when ``old_str`` doesn't
         match exactly once (zero or multiple matches both reject so
-        the agent can retry with a more specific snippet).
+        the agent can retry with a more specific snippet). A near
+        miss — indentation, whitespace, escaping — is read the way
+        :func:`replace_in_file` reads it.
         """
         ...
 

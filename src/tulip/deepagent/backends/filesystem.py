@@ -27,6 +27,7 @@ from tulip.deepagent.backends.protocol import (
     BackendError,
     FileInfo,
     Match,
+    replace_in_file,
 )
 
 
@@ -116,18 +117,9 @@ class FilesystemBackend:
             content = target.read_text(encoding="utf-8")
         except PermissionError as exc:
             raise BackendError("permission_denied", path) from exc
-        occurrences = content.count(old_str)
-        if occurrences == 0:
-            msg = f"old_str not found in {path}"
-            raise ValueError(msg)
-        if occurrences > 1:
-            msg = (
-                f"old_str matches {occurrences} times in {path}; "
-                "provide a longer / more specific snippet so the match is unique"
-            )
-            raise ValueError(msg)
+        updated = replace_in_file(path, content, old_str, new_str)
         try:
-            target.write_text(content.replace(old_str, new_str, 1), encoding="utf-8")
+            target.write_text(updated, encoding="utf-8")
         except PermissionError as exc:
             raise BackendError("permission_denied", path) from exc
 
