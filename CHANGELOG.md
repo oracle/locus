@@ -52,6 +52,12 @@ policy.
   ``text_tool_calls="on"``; the rogue demo's local mode does.
 ### Added
 
+- **`FileCheckpointer` as a session store**: `list_threads(limit, pattern)`
+  returns thread ids newest first, as they were saved (not the sanitised
+  directory names); `list_with_metadata(limit)` lists checkpoints across
+  threads without loading their state; `vacuum(older_than_days)` deletes old
+  checkpoints and the threads they leave empty; and
+  `max_checkpoints_per_thread` keeps only a thread's newest N checkpoints.
 - **`Agent.continue_turn(thread_id)`** continues a turn that stopped before
   it finished — a process killed mid-turn — from the thread's latest
   checkpoint. Unlike `run()`, it adds no user message: the iteration count
@@ -64,10 +70,30 @@ policy.
 
 - `checkpoint_every_n_iterations` also applies to resumed and continued
   segments (`resume()`, `continue_turn()`), which previously saved only at
-  the end. The default stays `0`: built-in checkpointers keep every save as
-  history, so per-iteration saves grow storage with each iteration and change
-  what `get_state_history` and `fork` list. Long unattended runs set `1`, and
-  a kill then loses at most the iteration in flight.
+  the end.
+- **Per-iteration checkpoints are on by default where they leave nothing
+  behind.** `checkpoint_every_n_iterations` now defaults to `None`: `1` for a
+  run with a `thread_id` on a checkpointer that can delete a single
+  checkpoint (`BaseCheckpointer.deletes_single_checkpoints`, true for the
+  memory, file, HTTP, S3 and storage-adapter backends), `0` otherwise — a
+  thread-less run, or a backend such as `DeltaCheckpointer` whose saves
+  depend on each other. Each iteration save records its id in the state, and
+  the turn's final save deletes them all, including saves made by a process
+  that was killed before finishing the turn. A kill loses at most the
+  iteration in flight, while `get_state_history`, `fork` and storage see one
+  checkpoint per turn, as before. `keep_iteration_checkpoints=True` keeps them
+  as history; an explicit `0` restores per-turn saves only.
+- **A new turn on a thread whose last turn was killed mid-call** answers the
+  calls left without a result with the same "outcome unknown" error
+  `continue_turn()` uses, instead of sending the provider a tool call with no
+  result, which it rejects.
+- **`FileCheckpointer` writes atomically and survives a torn file.** Each
+  checkpoint is written beside its target and renamed into place, so a kill
+  mid-write leaves the previous checkpoint intact; a file that does not parse
+  is skipped with a warning instead of making the thread unloadable, and
+  loading a thread's latest state falls back to the newest one that parses.
+  Listing a thread's checkpoints reads only each file's head and tail rather
+  than parsing every saved conversation in full.
 ### Added
 
 - **Loop-level retry of transient model-call failures (`AgentConfig.model_retry`).**

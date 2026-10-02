@@ -22,7 +22,12 @@ from tulip.agent.run_context import (
     ResultSlot,
     RunContext,
 )
-from tulip.agent.runtime_loop import AgentRuntimeMixin, _invocation_arguments
+from tulip.agent.runtime_loop import (
+    UNFINISHED_CALL_ERROR,
+    AgentRuntimeMixin,
+    _invocation_arguments,
+    close_unfinished_calls,
+)
 from tulip.core.errors import ApprovalPendingError, GSARValidationError
 from tulip.core.events import (
     GroundingEvent,
@@ -110,10 +115,8 @@ def _interrupt_payload(content: str | None) -> dict[str, Any] | None:
     return None
 
 
-_UNFINISHED_CALL_ERROR = (
-    "The run stopped before this call returned, so its outcome is unknown: it may or "
-    "may not have taken effect. Check before calling it again."
-)
+#: Kept under its old name for code that imported it from here.
+_UNFINISHED_CALL_ERROR = UNFINISHED_CALL_ERROR
 
 
 def _turn_finished(state: AgentState) -> bool:
@@ -122,33 +125,6 @@ def _turn_finished(state: AgentState) -> bool:
         return False
     last = state.messages[-1]
     return last.role == Role.ASSISTANT and not last.tool_calls
-
-
-def _close_unfinished_calls(state: AgentState) -> AgentState:
-    """Answer the last assistant message's calls that have no result yet.
-
-    A provider rejects an assistant tool call with no result after it, and
-    re-running the call could repeat a side effect the stopped attempt
-    already performed. The error result keeps the conversation valid and
-    tells the model what is known: nothing about the outcome.
-    """
-    answered = {m.tool_call_id for m in state.messages if m.role == Role.TOOL and m.tool_call_id}
-    for msg in reversed(state.messages):
-        if msg.role == Role.ASSISTANT and msg.tool_calls:
-            for tc in msg.tool_calls:
-                if tc.id not in answered:
-                    state = state.with_message(
-                        Message.tool(
-                            ToolResult(
-                                tool_call_id=tc.id,
-                                name=tc.name,
-                                content="",
-                                error=_UNFINISHED_CALL_ERROR,
-                            )
-                        )
-                    )
-            break
-    return state
 
 
 @contextlib.asynccontextmanager
@@ -1018,7 +994,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
                 "call run() to start a new one."
             )
         self._initialize()
-        state = _close_unfinished_calls(loaded)
+        state = close_unfinished_calls(loaded)
         run_metadata, ephemeral = self._split_run_metadata(
             metadata if metadata is not None else dict(loaded.metadata)
         )
