@@ -33,6 +33,19 @@ handing the verifier both public keys. Signing needs the ``cryptography``
 package (``pip install "tulip-agents[audit]"``); an unsigned trail needs nothing
 and exports exactly as before.
 
+**Persistence.** Give the trail a ``path`` and every record is appended to that
+JSONL file as it is written — flushed and fsynced before :meth:`AuditTrail.record`
+returns, so a crash loses nothing that was decided. Opening the same path again
+continues the chain where the file ends::
+
+    trail = AuditTrail(path=".sessions/s1/audit.jsonl")
+    ...
+    report = check_jsonl(Path(".sessions/s1/audit.jsonl").read_text())
+    report.ok, report.broken_at, report.problem
+
+:func:`check_jsonl` says *where* a chain breaks and why, which is what an
+operator needs; :func:`verify_jsonl` is the same check as a bool.
+
 This is a *supporting property* of a trustworthy agent — the agent leaves a
 record that holds up — not a governance/policy product. It does not block or
 enforce; it makes the record auditable after the fact.
@@ -44,9 +57,12 @@ import base64
 import binascii
 import hashlib
 import json
+import os
+import threading
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 
@@ -188,13 +204,36 @@ class AuditRecord:
     signature: str | None = None
 
 
+@dataclass(frozen=True)
+class AuditReport:
+    """The outcome of checking a chain, and where it broke if it did.
+
+    Attributes:
+        ok: Whether every check passed.
+        records: How many records were read.
+        head: The hash of the last record read (the genesis anchor if none).
+        broken_at: The ``seq`` (line index) of the first bad record, or
+            ``None`` when the chain is intact or the problem is not one record.
+        problem: What failed, in a sentence; empty when ``ok``.
+    """
+
+    ok: bool
+    records: int
+    head: str
+    broken_at: int | None = None
+    problem: str = ""
+
+
 class AuditTrail:
     """An append-only, hash-chained log of agent actions.
 
     Append with :meth:`record` (or :meth:`record_event` for a Tulip event);
     check integrity with :meth:`verify`; ship with :meth:`export_jsonl`.
-    Pass ``clock`` to make timestamps deterministic in tests, and ``signer``
-    to sign every record.
+    Pass ``clock`` to make timestamps deterministic in tests, ``signer``
+    to sign every record, and ``path`` to persist every record as it is made.
+
+    Recording is thread-safe: concurrent tool calls append one at a time, so
+    two decisions can never claim the same ``seq`` or the same parent.
     """
 
     def __init__(
@@ -202,10 +241,42 @@ class AuditTrail:
         *,
         clock: Callable[[], str] | None = None,
         signer: AuditSigner | None = None,
+        path: str | os.PathLike[str] | None = None,
     ) -> None:
         self._records: list[AuditRecord] = []
         self._clock = clock or _utc_now_iso
         self._signer = signer
+        self._lock = threading.Lock()
+        self._path = Path(path) if path is not None else None
+        #: Lines of an existing file that did not parse as records. They keep
+        #: the chain from verifying: a line that is not a record is tampering
+        #: or damage, and either way the trail no longer stands on its own.
+        self._unreadable = 0
+        if self._path is not None and self._path.exists():
+            self._load(self._path)
+
+    @property
+    def path(self) -> Path | None:
+        """The JSONL file records are appended to, if any."""
+        return self._path
+
+    def _load(self, path: Path) -> None:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                self._records.append(AuditRecord(**json.loads(line)))
+            except (TypeError, ValueError):
+                self._unreadable += 1
+
+    def _append(self, rec: AuditRecord) -> None:
+        """Write one record to the file and make it durable before returning."""
+        assert self._path is not None  # noqa: S101 — only called when a path is set
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        with self._path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(_exported(rec), default=str) + "\n")
+            fh.flush()
+            os.fsync(fh.fileno())
 
     @property
     def head(self) -> str:
@@ -224,27 +295,37 @@ class AuditTrail:
         self._signer = signer
 
     def record(self, event_type: str, payload: Mapping[str, Any] | None = None) -> AuditRecord:
-        """Append a record committing to the current chain head."""
-        seq = len(self._records)
-        prev = self.head
-        ts = self._clock()
+        """Append a record committing to the current chain head.
+
+        With a ``path``, the record is on disk before this returns. A write
+        that fails raises, and the record is not kept in memory either: the
+        trail never claims a decision it could not write down.
+        """
         body = dict(payload or {})
-        digest = _entry_hash(seq, ts, event_type, body, prev)
-        key_id = signature = None
-        if self._signer is not None:
-            key_id = self._signer.key_id
-            signature = base64.b64encode(self._signer.sign(digest.encode("ascii"))).decode("ascii")
-        rec = AuditRecord(
-            seq=seq,
-            ts=ts,
-            event_type=event_type,
-            payload=body,
-            prev_hash=prev,
-            hash=digest,
-            key_id=key_id,
-            signature=signature,
-        )
-        self._records.append(rec)
+        with self._lock:
+            seq = len(self._records)
+            prev = self.head
+            ts = self._clock()
+            digest = _entry_hash(seq, ts, event_type, body, prev)
+            key_id = signature = None
+            if self._signer is not None:
+                key_id = self._signer.key_id
+                signature = base64.b64encode(self._signer.sign(digest.encode("ascii"))).decode(
+                    "ascii"
+                )
+            rec = AuditRecord(
+                seq=seq,
+                ts=ts,
+                event_type=event_type,
+                payload=body,
+                prev_hash=prev,
+                hash=digest,
+                key_id=key_id,
+                signature=signature,
+            )
+            if self._path is not None:
+                self._append(rec)
+            self._records.append(rec)
         return rec
 
     def record_event(self, event: Any) -> AuditRecord:
@@ -307,18 +388,16 @@ class AuditTrail:
             ``True`` if the chain is intact, ends at ``expected_head`` when one
             was supplied, and every record is validly signed when ``keys`` was.
         """
-        prev = _GENESIS
-        for i, rec in enumerate(self._records):
-            if rec.seq != i or rec.prev_hash != prev:
-                return False
-            if _entry_hash(rec.seq, rec.ts, rec.event_type, rec.payload, rec.prev_hash) != rec.hash:
-                return False
-            prev = rec.hash
-        if expected_head is not None and self.head != expected_head:
-            return False
-        if keys is not None:
-            return _signatures_valid(self._records, keys)
-        return True
+        return self.check(expected_head=expected_head, keys=keys).ok
+
+    def check(
+        self,
+        *,
+        expected_head: str | None = None,
+        keys: Mapping[str, bytes | str] | None = None,
+    ) -> AuditReport:
+        """:meth:`verify`, saying where the chain broke and why."""
+        return _check(self._records, self._unreadable, expected_head=expected_head, keys=keys)
 
     def export_jsonl(self) -> str:
         """The chain as newline-delimited JSON — one record per line, SIEM-ready."""
@@ -340,26 +419,59 @@ def _exported(rec: AuditRecord) -> dict[str, Any]:
     return data
 
 
-def _signatures_valid(records: list[AuditRecord], keys: Mapping[str, bytes | str]) -> bool:
+def _check(
+    records: list[AuditRecord],
+    unreadable: int,
+    *,
+    expected_head: str | None,
+    keys: Mapping[str, bytes | str] | None,
+) -> AuditReport:
+    head = records[-1].hash if records else _GENESIS
+
+    def broken(at: int | None, problem: str) -> AuditReport:
+        return AuditReport(ok=False, records=len(records), head=head, broken_at=at, problem=problem)
+
+    if unreadable:
+        return broken(None, f"{unreadable} line(s) are not audit records")
+    prev = _GENESIS
+    for i, rec in enumerate(records):
+        if rec.seq != i:
+            return broken(i, f"record {i} carries seq {rec.seq}: a record was removed or moved")
+        if rec.prev_hash != prev:
+            return broken(i, f"record {i} does not follow record {i - 1}")
+        if _entry_hash(rec.seq, rec.ts, rec.event_type, rec.payload, rec.prev_hash) != rec.hash:
+            return broken(i, f"record {i} was changed after it was written")
+        prev = rec.hash
+    if expected_head is not None and head != expected_head:
+        return broken(None, "the chain does not end at the expected head: records were cut off")
+    if keys is not None:
+        bad = _first_unsigned(records, keys)
+        if bad is not None:
+            return broken(bad, f"record {bad} is not signed by a trusted key")
+    return AuditReport(ok=True, records=len(records), head=head)
+
+
+def _first_unsigned(records: list[AuditRecord], keys: Mapping[str, bytes | str]) -> int | None:
+    """Index of the first record without a valid signature from ``keys``."""
     serialization, ed25519, invalid_signature = _crypto()
     loaded: dict[str, Any] = {}
-    for rec in records:
+    for i, rec in enumerate(records):
         if rec.key_id is None or rec.signature is None or rec.key_id not in keys:
-            return False
+            return i
         if rec.key_id not in loaded:
             pem = keys[rec.key_id]
             data = pem.encode("ascii") if isinstance(pem, str) else pem
             public = serialization.load_pem_public_key(data)
             if not isinstance(public, ed25519.Ed25519PublicKey):
-                return False
+                return i
             loaded[rec.key_id] = public
         try:
             loaded[rec.key_id].verify(
                 base64.b64decode(rec.signature, validate=True), rec.hash.encode("ascii")
             )
         except (invalid_signature, binascii.Error, ValueError):
-            return False
-    return True
+            return i
+    return None
 
 
 def verify_jsonl(
@@ -373,15 +485,34 @@ def verify_jsonl(
     Needs no Tulip runtime state: an auditor with the export and the public
     keys runs this and nothing else. A line that is not a record fails.
     """
+    return check_jsonl(text, keys=keys, expected_head=expected_head).ok
+
+
+def check_jsonl(
+    text: str,
+    *,
+    keys: Mapping[str, bytes | str] | None = None,
+    expected_head: str | None = None,
+) -> AuditReport:
+    """:func:`verify_jsonl`, saying where the chain broke and why."""
     records: list[AuditRecord] = []
+    unreadable = 0
     for line in text.splitlines():
         if not line.strip():
             continue
         try:
             records.append(AuditRecord(**json.loads(line)))
         except (TypeError, ValueError):
-            return False
-    return AuditTrail.from_records(records).verify(expected_head=expected_head, keys=keys)
+            unreadable += 1
+    return _check(records, unreadable, expected_head=expected_head, keys=keys)
 
 
-__all__ = ["AuditRecord", "AuditSigner", "AuditTrail", "Ed25519Signer", "verify_jsonl"]
+__all__ = [
+    "AuditRecord",
+    "AuditReport",
+    "AuditSigner",
+    "AuditTrail",
+    "Ed25519Signer",
+    "check_jsonl",
+    "verify_jsonl",
+]
