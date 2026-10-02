@@ -327,6 +327,22 @@ class AgentConfig(BaseModel):
     )
 
     # Execution strategy
+    text_tool_calls: Literal["auto", "on", "off"] = Field(
+        default="auto",
+        description=(
+            "Whether a tool call written in the message body (no structured "
+            "``tool_calls``) is parsed and executed. ``'on'`` is for models "
+            "served without a tool parser that print calls as text; it accepts "
+            "only unambiguous shapes — a message that is entirely a JSON call "
+            "or entirely ``name(key=value)`` lines, a ``json`` / ``tool_call`` / "
+            "``tool_code`` fence, or a ``<tool_call>`` tag — never a call "
+            "mentioned inside prose. ``'off'`` never parses. ``'auto'`` (the "
+            "default) parses only when the model declares "
+            "``supports_native_tool_calls = False``: with native tool calling, "
+            "text that looks like a call is the model talking about a tool, "
+            "and running it executes a command nobody issued."
+        ),
+    )
     tool_execution: Literal["sequential", "concurrent"] = Field(
         default="concurrent",
         description="How to execute multiple tool calls",

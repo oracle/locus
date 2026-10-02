@@ -930,7 +930,7 @@ class AgentRuntimeMixin:
                 )
                 _last_assistant_content = response.message.content
                 # Track for the user-supplied termination condition. Updated again
-                # below if a Cohere-style text tool call is parsed out of the body.
+                # below if a text tool call is parsed out of the body.
                 _last_no_tool_calls = not response.message.tool_calls
 
                 # Store plan from first iteration if planning enabled
@@ -946,8 +946,13 @@ class AgentRuntimeMixin:
                     tool_calls=list(response.message.tool_calls),
                 )
 
-                # If no structured tool calls, try parsing from text (Cohere fallback)
-                if not response.message.tool_calls and response.message.content:
+                # No structured tool calls: a model without native tool calling
+                # may have written one in the body (see ``text_tool_calls``).
+                if (
+                    not response.message.tool_calls
+                    and response.message.content
+                    and self._text_tool_calls_enabled()
+                ):
                     parsed_calls = self._parse_text_tool_calls(response.message.content)
                     if parsed_calls:
                         response = ModelResponse(
@@ -2379,129 +2384,31 @@ class AgentRuntimeMixin:
 
         return validated
 
-    def _parse_text_tool_calls(self, text: str) -> list[ToolCall]:
-        """Parse tool calls from model text output (text fallback).
+    def _text_tool_calls_enabled(self) -> bool:
+        """Whether this run parses tool calls out of the message body.
 
-        Some models output tool calls as text instead of structured function
-        calls. Two shapes are recognised, both validated against the
-        registered tool registry:
-
-        - call syntax -- ``search(query="test")``
-        - JSON -- ``{"name": "search", "arguments": {"query": "test"}}``,
-          optionally inside a ``json`` fence, and optionally a list of them
-
-        The JSON shape is what small self-hosted models emit most often
-        (Ollama, the Hermes/Qwen tool templates) whenever the server does
-        not lift it into a structured ``tool_calls`` field. Missing it does
-        not just lose the call -- an attempted action that is never parsed
-        is never dispatched, so it is never weighed by the admission gate
-        and never reaches the audit trail. Nothing runs, which is
-        fail-safe, but "the model tried to wipe production" then looks
-        identical to "the model declined", and only one of those is true.
-
-        Returns parsed ToolCall list, or empty list if no matches found.
+        ``'auto'`` reads ``supports_native_tool_calls`` off the model and
+        parses only on an explicit ``False``: a model with native tool
+        calling that writes ``name(args)`` in its answer is describing a
+        call, not making one.
         """
-        import json
-        import re
+        mode = self.config.text_tool_calls
+        if mode == "auto":
+            return getattr(self._model, "supports_native_tool_calls", True) is False
+        return mode == "on"
 
-        if not text or not self._tool_registry:
-            return []
+    def _parse_text_tool_calls(self, text: str | None) -> list[ToolCall]:
+        """Tool calls the model wrote as text; see :mod:`tulip.agent.text_tool_calls`.
 
-        # Build case-insensitive lookup: normalized_name -> real_name
-        tool_lookup: dict[str, str] = {}
-        for name in self._tool_registry.tools:
-            normalized = name.lower().replace("_", "").replace("-", "")
-            tool_lookup[normalized] = name
+        Parsing matters for governance as much as for function: an attempted
+        action that is never parsed is never dispatched, so it is never
+        weighed by the admission gate and never reaches the audit trail.
+        Only unambiguous shapes count, so a final answer that mentions a
+        tool is never executed.
+        """
+        from tulip.agent.text_tool_calls import parse_text_tool_calls
 
-        # Match patterns like: tool_name(arg1="val1", arg2=val2)
-        # Handles: search(query="test"), search(query='test'), search(query=test)
-        pattern = re.compile(
-            r"\b([a-zA-Z_][a-zA-Z0-9_-]*)\s*\(\s*(.*?)\s*\)",
-            re.DOTALL,
-        )
-
-        parsed: list[ToolCall] = []
-        seen: set[str] = set()
-
-        # JSON shape first: a name/arguments object, bare or fenced, one or
-        # many. Scanned by balancing braces rather than by regex so a nested
-        # ``arguments`` object does not truncate the match.
-        for start in (i for i, ch in enumerate(text) if ch == "{"):
-            depth = 0
-            for end in range(start, len(text)):
-                if text[end] == "{":
-                    depth += 1
-                elif text[end] == "}":
-                    depth -= 1
-                    if depth == 0:
-                        break
-            else:
-                continue
-            try:
-                obj = json.loads(text[start : end + 1])
-            except ValueError:
-                continue
-            if not isinstance(obj, dict):
-                continue
-            raw_name = obj.get("name") or obj.get("tool") or obj.get("function")
-            if not isinstance(raw_name, str):
-                continue
-            real = tool_lookup.get(raw_name.lower().replace("_", "").replace("-", ""))
-            if not real:
-                continue
-            raw_args = obj.get("arguments")
-            if raw_args is None:
-                raw_args = obj.get("parameters")
-            if isinstance(raw_args, str):
-                try:
-                    raw_args = json.loads(raw_args)
-                except ValueError:
-                    raw_args = {}
-            if not isinstance(raw_args, dict):
-                raw_args = {}
-            key = f"{real}:{sorted(raw_args.items()) if raw_args else ''}"
-            if key in seen:
-                continue
-            seen.add(key)
-            parsed.append(ToolCall(name=real, arguments=raw_args))
-
-        for match in pattern.finditer(text):
-            func_name = match.group(1)
-            args_str = match.group(2)
-
-            # Match against registry (case-insensitive, ignore underscores/hyphens)
-            normalized = func_name.lower().replace("_", "").replace("-", "")
-            real_name = tool_lookup.get(normalized)
-            if not real_name:
-                continue
-
-            # Parse arguments: key="value" or key='value' or key=value
-            args: dict[str, Any] = {}
-            arg_pattern = re.compile(r'(\w+)\s*=\s*(?:"([^"]*?)"|\'([^\']*?)\'|(\S+?))\s*[,)]')
-            # Add trailing ) to help match last arg
-            args_text = args_str + ")"
-            for arg_match in arg_pattern.finditer(args_text):
-                key = arg_match.group(1)
-                value = arg_match.group(2) or arg_match.group(3) or arg_match.group(4)
-                if value is not None:
-                    args[key] = value
-
-            # Validate arguments against tool's schema before accepting
-            tool_obj = self._tool_registry.get(real_name)
-            if tool_obj:
-                schema = tool_obj.to_openai_schema().get("function", {})
-                params = schema.get("parameters", {})
-                valid_params = set(params.get("properties", {}).keys())
-                # Drop any argument not declared in the tool's schema
-                args = {k: v for k, v in args.items() if k in valid_params}
-
-            key = f"{real_name}:{sorted(args.items()) if args else ''}"
-            if key in seen:
-                continue
-            seen.add(key)
-            parsed.append(ToolCall(name=real_name, arguments=args))
-
-        return parsed
+        return parse_text_tool_calls(text, self._tool_registry)
 
     async def _complete_streaming(
         self,

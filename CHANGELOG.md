@@ -36,6 +36,20 @@ policy.
   the window a server lists on `/models` (vLLM's `max_model_len`, or
   `context_length`) and registers it, keeping any registered prices. It is an
   explicit async call: agent construction stays offline.
+- **Text tool calls are off by default and never parsed out of prose.** A
+  final answer such as ``run bash(command="pytest") to verify`` used to be
+  parsed into a real ``bash`` call and executed, and ``read(path)`` ran as
+  ``read({})``. The new ``AgentConfig.text_tool_calls`` (``"auto"`` |
+  ``"on"`` | ``"off"``) decides whether the message body is parsed at all;
+  ``"auto"``, the default, parses only for a model that declares
+  ``supports_native_tool_calls = False``. When parsing is on, only
+  unambiguous shapes count: a message that is entirely JSON call objects or
+  ``name(key=value)`` lines, a ``json`` / ``tool_call`` / ``tool_code``
+  fence, or a ``<tool_call>`` tag. Call syntax needs keyword arguments that
+  are Python literals declared in the tool's schema; a positional or
+  undeclared argument rejects the call instead of being dropped. Agents on
+  a server that returns calls as text (no tool parser) set
+  ``text_tool_calls="on"``; the rogue demo's local mode does.
 
 ## [2.18.3] - 2026-09-29
 

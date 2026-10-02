@@ -1629,12 +1629,17 @@ class TestMalformedToolCallRecovery:
         return agent
 
     def test_parse_simple_tool_call(self, mock_model):
-        """Parse a simple tool call from text."""
+        """A message that is only a call parses."""
         agent = self._make_agent_with_tools(mock_model)
-        result = agent._parse_text_tool_calls('I will search_web(query="python notebooks")')
+        result = agent._parse_text_tool_calls('search_web(query="python notebooks")')
         assert len(result) == 1
         assert result[0].name == "search_web"
         assert result[0].arguments["query"] == "python notebooks"
+
+    def test_call_mentioned_in_prose_is_not_a_call(self, mock_model):
+        """A sentence that names a call is not one."""
+        agent = self._make_agent_with_tools(mock_model)
+        assert agent._parse_text_tool_calls('I will search_web(query="python notebooks")') == []
 
     def test_parse_single_quotes(self, mock_model):
         """Parse tool call with single-quoted arguments."""
@@ -1688,7 +1693,7 @@ class TestMalformedToolCallRecovery:
 
         # First response: model outputs tool call as TEXT (no structured tool_calls)
         first_response = ModelResponse(
-            message=Message.assistant('I need to calculate. calculator(expression="6*7")'),
+            message=Message.assistant('calculator(expression="6*7")'),
         )
         # Second response: after tool execution, model gives final answer
         second_response = ModelResponse(
@@ -1696,7 +1701,7 @@ class TestMalformedToolCallRecovery:
         )
         mock_model.complete = AsyncMock(side_effect=[first_response, second_response])
 
-        agent = Agent(model=mock_model, tools=[calculator])
+        agent = Agent(model=mock_model, tools=[calculator], text_tool_calls="on")
 
         events = []
         async for event in agent.run("What is 6*7?"):
@@ -1780,7 +1785,7 @@ class TestMalformedToolCallRecovery:
         """A model that prints both must not fire the tool twice."""
         agent = self._make_agent_with_tools(mock_model)
         result = agent._parse_text_tool_calls(
-            '{"name": "search_web", "arguments": {"query": "z"}} or search_web(query="z")'
+            '{"name": "search_web", "arguments": {"query": "z"}}\nsearch_web(query="z")'
         )
         assert len(result) == 1
 
@@ -5000,11 +5005,9 @@ class TestTextToolCallValidation:
             'search(query="test", evil_param="DROP TABLE", __import__="os")'
         )
 
-        assert len(parsed) == 1
-        # Only "query" should survive — evil_param and __import__ filtered out
-        assert "query" in parsed[0].arguments
-        assert "evil_param" not in parsed[0].arguments
-        assert "__import__" not in parsed[0].arguments
+        # An undeclared argument means the call is not the one the schema
+        # describes, so none of it runs.
+        assert parsed == []
 
     @pytest.mark.asyncio
     async def test_unregistered_tool_ignored(self):
@@ -5029,11 +5032,13 @@ class TestTextToolCallValidation:
         )
         agent._initialize()
 
-        parsed = agent._parse_text_tool_calls('os.system("rm -rf /") and safe_tool(x="hello")')
+        # Prose around the calls: nothing runs, not even the registered one.
+        assert agent._parse_text_tool_calls('os.system("rm -rf /") and safe_tool(x="hello")') == []
+        # A dotted call is never a tool call, so a block holding one is rejected.
+        assert agent._parse_text_tool_calls('os.system("rm -rf /")\nsafe_tool(x="hello")') == []
 
-        # Only safe_tool should be parsed, os.system ignored
-        assert len(parsed) == 1
-        assert parsed[0].name == "safe_tool"
+        parsed = agent._parse_text_tool_calls('safe_tool(x="hello")')
+        assert [c.name for c in parsed] == ["safe_tool"]
 
 
 # =============================================================================
