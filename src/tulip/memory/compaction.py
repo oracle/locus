@@ -27,6 +27,11 @@ the way established coding-agent harnesses (opencode, Codex) do:
    ``context_exhausted``. Compacting again would only burn the same tokens to
    reach the same place.
 
+With an :class:`~tulip.memory.observation_pack.ObservationPack` (``archive``),
+clearing is lossless: each cleared output is archived and its stub names the
+id ``obs_recall`` reads it back by, and a summary ends with the ids of the
+outputs it folded, so the model can still recall them after the summary.
+
 Unlike the other conversation managers this one rewrites the run's state
 rather than the request: the summary replaces the history in ``state.messages``
 and in the checkpoint, so the next turn and the next compaction start from it.
@@ -40,11 +45,12 @@ import json
 import logging
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
 from tulip.core.messages import Message, Role
 from tulip.memory.compactor import _char_count_tokens, _repair_boundaries
 from tulip.memory.conversation import ConversationManager
+from tulip.memory.observation_pack import OBSERVATION_ID_KEY
 
 
 logger = logging.getLogger(__name__)
@@ -56,6 +62,8 @@ __all__ = [
     "CompactionStage",
     "CompactionTracker",
     "ContextCompactor",
+    "RECALLABLE_OUTPUTS_KEY",
+    "OutputArchive",
     "is_summary_message",
 ]
 
@@ -132,6 +140,29 @@ Rules: when a previous summary is given, update it: keep everything still true, 
 revise what changed, and add what is new; never drop a requirement, a decision \
 or a file. Do not invent anything that is not in the input; mark uncertain \
 details as uncertain. Be dense: no preamble, no closing remarks."""
+
+
+#: ``Message.metadata`` key on a summary listing the archived outputs it folded,
+#: as ``[id, label, characters]`` triples, carried into the next summary.
+RECALLABLE_OUTPUTS_KEY = "tulip_recallable_outputs"
+
+#: How many recallable outputs a summary lists: the newest ones. A long run's
+#: list would otherwise grow by a line for every output it ever cleared.
+_RECALLABLE_LIST_LIMIT = 64
+
+_RECALLABLE_HEADING = "## Recallable tool outputs"
+
+
+class OutputArchive(Protocol):
+    """Where compaction archives the outputs it clears, so they stay recallable."""
+
+    def clear(self, message: Message, label: str) -> Message | None:
+        """``message`` as a stub naming its archive id; ``None`` when it cannot be archived."""
+        ...
+
+    def recall_id(self, message: Message) -> str | None:
+        """The archive id of a tool output, archiving it first when needed."""
+        ...
 
 
 def is_summary_message(message: Message) -> bool:
@@ -368,6 +399,7 @@ class ContextCompactor(ConversationManager):
         tool_tokens: int = 0,
         tokens_before: int | None = None,
         instructions: str | None = None,
+        archive: OutputArchive | None = None,
     ) -> CompactionOutcome | None:
         """Compact ``messages`` when they reach the threshold; ``None`` when not.
 
@@ -378,6 +410,9 @@ class ContextCompactor(ConversationManager):
             tool_tokens: Tokens the tool definitions add (see :meth:`tool_tokens`).
             tokens_before: The measured context, when the caller already has it.
             instructions: Extra guidance for the summary (from a pre-compact hook).
+            archive: Archives cleared and folded outputs so ``obs_recall`` can
+                read them back (see :mod:`tulip.memory.observation_pack`).
+                ``None`` clears to a lossy stub.
         """
         original = list(messages)
         before = (
@@ -399,7 +434,7 @@ class ContextCompactor(ConversationManager):
         # though: clearing one output per turn would change an old message on
         # every request, which defeats the provider's prompt cache each time,
         # and only postpones the summary by a turn.
-        cleared = self._clear_tool_outputs(original)
+        cleared = self._clear_tool_outputs(original, archive)
         after_clearing = int((self.tokens(cleared) + tool_tokens) * scale)
         if after_clearing < threshold - self.usable_tokens // 10:
             tracker.forget_report()
@@ -434,14 +469,16 @@ class ContextCompactor(ConversationManager):
             )
 
         outcome = await self._summarise_history(
-            original, cleared, tool_tokens, before, scale, instructions
+            original, cleared, tool_tokens, before, scale, instructions, archive
         )
         tracker.forget_report()
         if outcome.stage in ("summarize", "truncate") and not outcome.exhausted:
             tracker.last_summary_iteration = iteration
         return outcome
 
-    def _clear_tool_outputs(self, messages: list[Message]) -> list[Message]:
+    def _clear_tool_outputs(
+        self, messages: list[Message], archive: OutputArchive | None = None
+    ) -> list[Message]:
         """Replace tool outputs older than the newest ``tool_output_keep_tokens``."""
         calls = {tc.id: tc for m in messages if m.role == Role.ASSISTANT for tc in m.tool_calls}
         out = list(messages)
@@ -462,7 +499,17 @@ class ContextCompactor(ConversationManager):
                 newest = False
                 continue
             full = True
-            out[index] = _stub(message, calls.get(message.tool_call_id or ""))
+            call = calls.get(message.tool_call_id or "")
+            recallable = (
+                archive.clear(message, _call_label(call, message.name)) if archive else None
+            )
+            out[index] = (
+                recallable.model_copy(
+                    update={"metadata": {**recallable.metadata, CLEARED_OUTPUT_KEY: True}}
+                )
+                if recallable is not None
+                else _stub(message, call)
+            )
         return out
 
     async def _summarise_history(
@@ -473,6 +520,7 @@ class ContextCompactor(ConversationManager):
         before: int,
         scale: float,
         instructions: str | None,
+        archive: OutputArchive | None = None,
     ) -> CompactionOutcome:
         threshold = self.threshold
         # Budgets below are in estimated tokens; the threshold, scaled down to
@@ -481,11 +529,13 @@ class ContextCompactor(ConversationManager):
         head_end = _head_end(cleared)
         head = cleared[:head_end]
         previous = None
+        recallable: list[list[Any]] = []
         body: list[int] = []
         for index in range(head_end, len(cleared)):
             message = cleared[index]
             if is_summary_message(message):
                 previous = _summary_text(message)
+                recallable = list(message.metadata.get(RECALLABLE_OUTPUTS_KEY) or [])
             else:
                 body.append(index)
 
@@ -535,10 +585,23 @@ class ContextCompactor(ConversationManager):
         usage: dict[str, int] = {}
         summary: str | None = None
         error: str | None = None
+        # The outputs being folded stay recallable: their ids go on the summary,
+        # which is the only thing the model will have of them.
+        ids: dict[int, str] = {}
+        if archive is not None:
+            for i in folded:
+                if cleared[i].role != Role.TOOL:
+                    continue
+                stored = cleared[i].metadata.get(OBSERVATION_ID_KEY)
+                found = stored if isinstance(stored, str) else archive.recall_id(original[i])
+                if found:
+                    ids[i] = found
+                    label = _call_label(_call_for(cleared, i), cleared[i].name)
+                    recallable.append([found, label, len(original[i].content or "")])
         if self.summary_model is not None:
             # The summariser reads the original tool output (clipped), not the
             # stubs: clearing was for the agent's window, not for its memory.
-            rendered = [_render(original[i], cleared, i) for i in folded]
+            rendered = [_render(original[i], cleared, i, ids.get(i)) for i in folded]
             for attempt in range(2):
                 try:
                     summary = await self._summarise(rendered, previous, instructions, usage)
@@ -557,11 +620,13 @@ class ContextCompactor(ConversationManager):
         # among them) send a single system prompt and take the last system
         # message for it, so a system-role summary would replace the agent's
         # instructions on those providers.
-        summary_message = Message(
-            role=Role.USER,
-            content=f"{SUMMARY_PREFIX}\n\n{summary}",
-            metadata={SUMMARY_MESSAGE_KEY: True},
-        )
+        metadata: dict[str, Any] = {SUMMARY_MESSAGE_KEY: True}
+        content = f"{SUMMARY_PREFIX}\n\n{summary}"
+        if recallable:
+            recallable = _dedupe_recallable(recallable)[-_RECALLABLE_LIST_LIMIT:]
+            metadata[RECALLABLE_OUTPUTS_KEY] = recallable
+            content = f"{content}\n\n{_recallable_section(recallable)}"
+        summary_message = Message(role=Role.USER, content=content, metadata=metadata)
         compacted = [
             *head,
             summary_message,
@@ -701,7 +766,38 @@ def _turns(indices: list[int], messages: list[Message]) -> list[list[int]]:
 def _summary_text(message: Message) -> str:
     content = message.content or ""
     content = content.removeprefix(SUMMARY_PREFIX)
+    # The recallable list is rebuilt from metadata, not summarised.
+    content = content.split(f"\n\n{_RECALLABLE_HEADING}\n", 1)[0]
     return content.strip()
+
+
+def _call_for(messages: list[Message], index: int) -> Any:
+    """The call a tool result at ``index`` answers, if it is still in ``messages``."""
+    call_id = messages[index].tool_call_id
+    for prior in reversed(messages[:index]):
+        match = next((tc for tc in prior.tool_calls if tc.id == call_id), None)
+        if match is not None:
+            return match
+    return None
+
+
+def _dedupe_recallable(entries: list[list[Any]]) -> list[list[Any]]:
+    """Each id once, at its latest position."""
+    latest: dict[str, list[Any]] = {}
+    for entry in entries:
+        latest.pop(str(entry[0]), None)
+        latest[str(entry[0])] = entry
+    return list(latest.values())
+
+
+def _recallable_section(entries: list[list[Any]]) -> str:
+    lines = [
+        _RECALLABLE_HEADING,
+        "The exact text of these earlier tool outputs is archived. Call obs_recall "
+        'with {"id": "<id>", "offset": 0} to read one again instead of re-running the tool.',
+    ]
+    lines.extend(f"- {entry[0]}: {entry[1]}, {entry[2]} characters" for entry in entries)
+    return "\n".join(lines)
 
 
 def _call_label(call: Any, name: str | None) -> str:
@@ -726,17 +822,19 @@ def _stub(message: Message, call: Any) -> Message:
     )
 
 
-def _render(message: Message, cleared: list[Message], index: int) -> str:
+def _render(
+    message: Message, cleared: list[Message], index: int, recall_id: str | None = None
+) -> str:
     """One message as summariser input."""
     role = message.role
     if role == Role.TOOL:
-        label = message.name or "tool"
-        for prior in reversed(cleared[:index]):
-            match = next((tc for tc in prior.tool_calls if tc.id == message.tool_call_id), None)
-            if match is not None:
-                label = match.name
-                break
-        return f"[tool result: {label}]\n{_clip(message.content or '', _SUMMARY_TOOL_OUTPUT_CHARS)}"
+        call = _call_for(cleared, index)
+        label = call.name if call is not None else (message.name or "tool")
+        archived = f", archived as {recall_id}" if recall_id else ""
+        return (
+            f"[tool result: {label}{archived}]\n"
+            f"{_clip(message.content or '', _SUMMARY_TOOL_OUTPUT_CHARS)}"
+        )
     text = _clip(message.content or "", _SUMMARY_TEXT_CHARS)
     if role == Role.ASSISTANT:
         calls = "\n".join(

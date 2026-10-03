@@ -533,6 +533,7 @@ class AgentRuntimeMixin:
         _hooks: list[Any]
         _hook_orchestrator: HookOrchestrator | None
         _conversation_manager: ConversationManager | None
+        _observation_pack: Any
         _model_prices: tuple[float, float] | None
         _leaked_formats: tuple[str, ...] | None
         _memory_manager: BaseMemoryManager | None
@@ -3179,6 +3180,23 @@ class AgentRuntimeMixin:
             # Validate message pairs (remove orphaned tool calls/results)
             messages = self._validate_messages(messages)
 
+            # Large old tool outputs go as recallable placeholders. Only this
+            # request's list changes: the state and its checkpoints keep them.
+            pack = self._observation_pack
+            if pack is not None:
+                session = self._observation_session(state, run)
+
+                def _announce(data: dict[str, Any]) -> None:
+                    if run is not None:
+                        run.emit(CustomEvent(name="observation_pack", data=data))
+
+                messages = pack.project(
+                    messages,
+                    session=session,
+                    on_event=_announce,
+                    context_limit=self._compaction_limit(),
+                )
+
         # Get tool schemas
         tool_schemas = self._tool_registry.to_openai_schemas()
 
@@ -3313,7 +3331,13 @@ class AgentRuntimeMixin:
 
         messages = list(state.messages)
         tool_tokens = compactor.tool_tokens(self._tool_registry.to_openai_schemas())
-        tokens = compactor.measure(messages, tool_tokens=tool_tokens, tracker=tracker)
+        # With ObservationPack the request carries placeholders for the outputs
+        # it already swapped, so the context is measured as it will be sent:
+        # those outputs no longer push the run towards a lossy compaction.
+        pack = self._observation_pack
+        session = self._observation_session(state, rc) if pack is not None else ""
+        measured = pack.view(messages, session=session) if pack is not None else messages
+        tokens = compactor.measure(measured, tool_tokens=tool_tokens, tracker=tracker)
         if tokens < compactor.threshold:
             return state, None
 
@@ -3336,6 +3360,7 @@ class AgentRuntimeMixin:
             tool_tokens=tool_tokens,
             tokens_before=tokens,
             instructions=hook.instructions,
+            archive=pack.archive_for(session) if pack is not None else None,
         )
         if outcome is None:
             return state, None
@@ -3366,6 +3391,25 @@ class AgentRuntimeMixin:
             exhausted=outcome.exhausted,
             detail=outcome.detail,
         )
+
+    def _compaction_limit(self) -> int | None:
+        """Estimated message tokens at which the next compaction starts, if any."""
+        from tulip.memory.compaction import ContextCompactor  # noqa: PLC0415
+
+        compactor = self._conversation_manager
+        if not isinstance(compactor, ContextCompactor):
+            return None
+        tool_tokens = compactor.tool_tokens(self._tool_registry.to_openai_schemas())
+        return compactor.threshold - tool_tokens
+
+    @staticmethod
+    def _observation_session(state: AgentState, run: RunContext | None) -> str:
+        """The ObservationPack session of a run: its thread, else the run itself."""
+        from tulip.memory.observation_pack import ObservationPack  # noqa: PLC0415
+
+        if run is not None:
+            return ObservationPack.session_key(run.thread_id, run.run_id)
+        return ObservationPack.session_key(None, state.run_id)
 
     def _messages_since_last_assistant(self, state: AgentState) -> list[Message]:
         """Return the slice of state.messages that the model hasn't seen yet.

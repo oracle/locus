@@ -151,6 +151,14 @@ def initialize_agent(agent: Agent) -> None:
             )
         )
 
+    # --- ObservationPack → obs_recall ---------------------------------------
+    # Large old tool outputs leave the request as placeholders; obs_recall is
+    # how the model reads their exact bytes back, so it comes with them.
+    if agent.config.observation_pack.enabled:
+        agent._observation_pack = _build_observation_pack(agent)
+        if "obs_recall" not in agent._tool_registry:
+            agent._tool_registry.register(_observation_recall_tool(agent))
+
     # --- Deferred tools → tool_search --------------------------------------
     # Runs after every registration path above (config tools, plugins,
     # skills, providers) so the catalog sees them all. Deferral is
@@ -434,3 +442,63 @@ def register_builtin_tools(agent: Agent) -> None:
         agent._tool_registry.register(task_complete)
     if "ask_user" not in agent._tool_registry.tools:
         agent._tool_registry.register(ask_user)
+
+
+def _build_observation_pack(agent: Agent) -> Any:
+    from tulip.memory.observation_pack import ObservationPack, SwapCostModel
+
+    config = agent.config.observation_pack
+    return ObservationPack(
+        directory=config.directory,
+        threshold_bytes=config.threshold_bytes,
+        full_sends=config.full_sends,
+        excerpt_bytes=config.excerpt_bytes,
+        recall_max_bytes=config.recall_max_bytes,
+        recall_max_lines=config.recall_max_lines,
+        cost_model=SwapCostModel(
+            cache_read_cost=config.cache_read_cost,
+            cache_write_cost=config.cache_write_cost,
+            horizon_requests=config.horizon_requests,
+            min_horizon_requests=config.min_horizon_requests,
+            min_batch_bytes=config.min_batch_bytes,
+        ),
+    )
+
+
+def _observation_recall_tool(agent: Agent) -> Any:
+    """``obs_recall``: one page of an archived tool output, by id."""
+    from tulip.core.events import CustomEvent
+    from tulip.tools.decorator import tool as tool_decorator
+
+    agent_ref = agent
+
+    @tool_decorator(
+        name="obs_recall",
+        description=(
+            "Read back the exact text of an earlier tool output that was archived to "
+            "save context. Pass the id from its placeholder (obs_...) and a byte offset "
+            "(0 to start, then the returned next_offset to continue), or a 1-based "
+            "line to start at. Returns up to 16 KB or 400 lines per call."
+        ),
+        idempotent=True,
+    )
+    def obs_recall(id: str, offset: int = 0, line: int | None = None, ctx: Any = None) -> str:  # noqa: A002 — the id the placeholder names
+        """Recall a page of an archived tool output.
+
+        Args:
+            id: The observation id from the placeholder, e.g. obs_0123456789abcdef01234567.
+            offset: Byte offset to start at; use the previous call's next_offset to continue.
+            line: 1-based line to start at instead of a byte offset.
+        """
+        pack = agent_ref._observation_pack
+        if pack is None:
+            raise ValueError("ObservationPack is not enabled")
+        run_id = getattr(ctx, "run_id", None)
+        run = _run_for(agent_ref, run_id)
+        session = pack.session_key(run.thread_id if run is not None else None, run_id)
+        text, details = pack.recall(session, id, offset=offset, line=line)
+        if run is not None:
+            run.emit(CustomEvent(name="observation_pack", data={"event": "recall", **details}))
+        return str(text)
+
+    return obs_recall

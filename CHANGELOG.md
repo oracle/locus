@@ -330,6 +330,31 @@ policy.
   command is seen by the hooks as `bash`, with the same deny, rewritten input
   and gate verdict a standalone call gets. `ToolCallVerdict` is what
   `pre_tool_use()` returns.
+- **ObservationPack** (`AgentConfig.observation_pack`, off by default;
+  `True` or an `ObservationPackConfig`), adapted from SoL-Pi
+  (arXiv 2609.20519, MIT). A text tool output over `threshold_bytes` (10 KiB)
+  is sent whole in its first `full_sends` (2) requests; after that the
+  *request* shows a placeholder — an id, its size and about a kilobyte of its
+  first and last lines — while the run's state and checkpoints keep the full
+  output. The exact bytes go to a content-addressed archive per session
+  (`<directory>/<thread>/observation-pack/`), and the `obs_recall` tool,
+  registered with it, pages them back by byte offset or line (16 KB / 400
+  lines a call). Swaps are batched against the prompt cache: due outputs
+  wait until together they free `min_batch_bytes` (32 KiB) and the
+  cache-read savings over the expected rest of the run (the requests so far,
+  capped at those left before compaction) beat rewriting the cached suffix,
+  or until the prefix breaks anyway, when they go for free; the prices are
+  `cache_read_cost` / `cache_write_cost` (`SwapCostModel`). The context
+  compaction measures is the one sent, so swapped outputs no longer bring a
+  compaction closer; compaction clears outputs into stubs naming their
+  archive id instead of lossy ones, and a summary lists the ids of the
+  outputs it folded (carried into the next summary). Any failure sends the
+  full output. Swaps, recalls and bytes saved are counted in
+  `agent.observation_pack.stats(thread_id)`, recorded in the run's
+  `MechanismLedger` as `observation_pack` (swap batches, bytes not resent
+  per request, recalls, recallable clears, fail-opens), announced as
+  `observation_pack` `CustomEvent`s and logged to the session's
+  `ledger.jsonl`.
 
 ### Changed
 

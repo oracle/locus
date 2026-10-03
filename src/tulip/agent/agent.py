@@ -151,6 +151,8 @@ class Agent(AgentRuntimeMixin, BaseModel):
     _hooks: list[Any] = PrivateAttr(default_factory=list)
     _hook_orchestrator: HookOrchestrator | None = PrivateAttr(default=None)
     _conversation_manager: ConversationManager | None = PrivateAttr(default=None)
+    # ObservationPack (``config.observation_pack``), built on initialisation.
+    _observation_pack: Any = PrivateAttr(default=None)
     _model_prices: tuple[float, float] | None = PrivateAttr(default=None)
     # The model's leaked tool-call formats, resolved from its profile on first
     # use (``None`` until then); see ``AgentConfig.leaked_tool_call_formats``.
@@ -277,6 +279,16 @@ class Agent(AgentRuntimeMixin, BaseModel):
         from tulip.agent.initializer import initialize_agent
 
         initialize_agent(self)
+
+    @property
+    def observation_pack(self) -> Any:
+        """The agent's :class:`~tulip.memory.observation_pack.ObservationPack`, or ``None``.
+
+        Its ``stats(session)`` says what it did for a thread (or a thread-less
+        run, by run id).
+        """
+        self._initialize()
+        return self._observation_pack
 
     @property
     def name(self) -> str | None:
