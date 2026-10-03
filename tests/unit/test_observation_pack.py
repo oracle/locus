@@ -13,7 +13,9 @@ survive a summary.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -790,3 +792,248 @@ def test_the_mechanism_ledger_records_swaps_placeholders_recalls_and_clears(
     assert row["tokens_saved_est"] == row["bytes_saved"] // 4
     lines = (tmp_path / "mechanisms.jsonl").read_text().splitlines()
     assert all(json.loads(line)["mechanism"] == OBSERVATION_PACK for line in lines)
+
+
+# ---------------------------------------------------------------------------
+# Nothing lost to the per-result cap
+# ---------------------------------------------------------------------------
+
+HUGE = "\n".join(f"row {n:06d} é {'z' * 50}" for n in range(1_800))  # ~110k chars
+
+
+@tool(idempotent=False)
+def dump(size: str) -> str:
+    """Print a large output."""
+    return {"huge": HUGE, "big": HUGE[:60_000]}[size]
+
+
+def _one_call_agent(tmp_path: Path, size: str, **pack: Any) -> tuple[Agent, list[list[Message]]]:
+    requests: list[list[Message]] = []
+
+    def handler(messages: list[Message], tools: list[dict[str, Any]]) -> ModelResponse:
+        requests.append(list(messages))
+        if len(requests) == 1:
+            call = ToolCall(id="d", name="dump", arguments={"size": size})
+            return ModelResponse(message=Message.assistant("Dumping.", tool_calls=[call]))
+        return ModelResponse(message=Message.assistant("Done."))
+
+    model = FunctionModel(handler)
+    model.config = SimpleNamespace(model="tulip-test-observation-pack")  # type: ignore[attr-defined]
+    window = pack.pop("context_window", 1_000_000)
+    enabled = pack.pop("enabled", True)
+    agent = Agent(
+        model=model,
+        tools=[dump],
+        context_window=window,
+        observation_pack=ObservationPackConfig(enabled=enabled, directory=tmp_path, **pack),
+        reflexion=False,
+        grounding=False,
+    )
+    return agent, requests
+
+
+def _sent_output(requests: list[list[Message]]) -> str:
+    return next(m.content or "" for m in requests[1] if m.tool_call_id == "d")
+
+
+async def test_with_the_pack_on_an_output_over_the_cap_goes_whole(tmp_path: Path) -> None:
+    agent, requests = _one_call_agent(tmp_path, "big")
+    [e async for e in agent.run("go", thread_id="t")]
+    assert _sent_output(requests) == HUGE[:60_000]
+
+    off, off_requests = _one_call_agent(tmp_path / "off", "big", enabled=False)
+    [e async for e in off.run("go", thread_id="t")]
+    cut = _sent_output(off_requests)
+    assert "[OUTPUT TRUNCATED" in cut
+    assert "archived as" not in cut
+
+
+async def test_an_output_over_the_inline_limit_is_archived_whole_and_cut_at_a_pointer(
+    tmp_path: Path,
+) -> None:
+    agent, requests = _one_call_agent(tmp_path, "huge", max_inline_chars=40_000)
+    [e async for e in agent.run("go", thread_id="t")]
+    sent = _sent_output(requests)
+    marker = next(line for line in sent.splitlines() if line.startswith("[OUTPUT TRUNCATED"))
+    obs_id = marker.split("archived as ", 1)[1].split()[0]
+    offset = json.loads(marker.split("call obs_recall with ", 1)[1].split(" to read")[0])["offset"]
+    pack = agent.observation_pack
+
+    # Reading on from the pointer gives exactly what the cut left out, and
+    # the whole archive is the original.
+    page, _ = pack.recall("t", obs_id, offset=offset)
+    head_kept = sent.split("\n[OUTPUT TRUNCATED", 1)[0]
+    assert HUGE.startswith(head_kept + _page(page)[1][:100])
+    assert _recall_all(pack, obs_id, "t") == HUGE
+    assert pack.stats("t").archived_on_arrival == 1
+
+    # Once old, the cut output's placeholder names the original, not a copy.
+    message = Message(role=Role.TOOL, tool_call_id="d", name="dump", content=sent)
+    history = [
+        *_history([])[:2],
+        Message.assistant("x", tool_calls=[ToolCall(id="d", name="dump")]),
+    ]
+    history += [message, Message.assistant("1"), Message.assistant("2")]
+    swapped = pack.project(history, session="t")
+    placeholder = swapped[3].content or ""
+    assert f"id: {obs_id}" in placeholder
+    assert f"original_bytes: {len(HUGE.encode())}" in placeholder
+    assert len(list((tmp_path / "t" / "observation-pack" / "objects").iterdir())) == 1
+    # Compaction's stub points at the original too.
+    assert pack.archive_for("t").recall_id(message) == obs_id
+
+
+async def test_the_window_bounds_what_goes_whole(tmp_path: Path) -> None:
+    # A 100k-token window: an eighth is 50k characters, less than the 60k output.
+    agent, requests = _one_call_agent(tmp_path, "big", context_window=100_000)
+    [e async for e in agent.run("go", thread_id="t")]
+    sent = _sent_output(requests)
+    assert "archived as obs_" in sent
+    assert len(sent) < 51_000
+
+
+async def test_an_output_that_cannot_be_archived_is_cut_at_the_cap(tmp_path: Path) -> None:
+    blocker = tmp_path / "blocked"
+    blocker.write_text("x")
+    agent, requests = _one_call_agent(blocker, "huge", max_inline_chars=40_000)
+    [e async for e in agent.run("go", thread_id="t")]
+    sent = _sent_output(requests)
+    assert "[OUTPUT TRUNCATED" in sent
+    assert "archived as" not in sent
+    assert len(sent) < 32_200
+
+
+def test_intake_leaves_short_or_image_outputs_alone(tmp_path: Path) -> None:
+    pack = _pack(tmp_path)
+    assert pack.intake("short", tool_name="t", tool_call_id="c", session="s", limit=100) is None
+    image = f"{'x' * 200}{encode_image(b'png')}"
+    assert pack.intake(image, tool_name="t", tool_call_id="c", session="s", limit=100) is None
+    cut = pack.intake(
+        "a" * 300, tool_name="t", tool_call_id="c", session="s", limit=100, head_fraction=0
+    )
+    assert cut is not None
+    assert cut.startswith("[OUTPUT TRUNCATED")
+    assert '"offset": 0' in cut
+
+
+# ---------------------------------------------------------------------------
+# Subagents
+# ---------------------------------------------------------------------------
+
+
+def _child_model(requests: list[list[Message]]) -> FunctionModel:
+    """Reads big.txt, takes three small steps, recalls it, answers."""
+    return _scripted_recall(requests)
+
+
+async def test_a_subagent_gets_its_own_pack_under_the_parent_session(tmp_path: Path) -> None:
+    import contextvars
+
+    from tulip.agent.subagent import run_subagent
+    from tulip.observability.mechanisms import OBSERVATION_PACK, MechanismLedger, bind_ledger
+
+    child_requests: list[list[Message]] = []
+    results: list[Any] = []
+
+    @tool(idempotent=False)
+    async def delegate(task: str) -> str:
+        """Hand a task to a subagent."""
+        result = await run_subagent(
+            task, model=_child_model(child_requests), tools=[read], name="reader"
+        )
+        results.append(result)
+        return result.text
+
+    def parent(messages: list[Message], tools: list[dict[str, Any]]) -> ModelResponse:
+        if not any(m.role == Role.TOOL for m in messages):
+            call = ToolCall(id="p1", name="delegate", arguments={"task": "look at big.txt"})
+            return ModelResponse(message=Message.assistant("Delegating.", tool_calls=[call]))
+        return ModelResponse(message=Message.assistant("All done."))
+
+    parent_model = FunctionModel(parent)
+    parent_model.config = SimpleNamespace(model="tulip-test-parent")  # type: ignore[attr-defined]
+    agent = Agent(
+        model=parent_model,
+        tools=[delegate],
+        context_window=1_000_000,
+        observation_pack=ObservationPackConfig(
+            enabled=True, directory=tmp_path, min_batch_bytes=0, horizon_requests=1_000
+        ),
+        reflexion=False,
+        grounding=False,
+    )
+    ledger = MechanismLedger(run="r")
+
+    async def go() -> None:
+        bind_ledger(ledger)
+        [e async for e in agent.run("Delegate it", thread_id="parent/1")]
+
+    await contextvars.copy_context().run(asyncio.ensure_future, go())
+
+    # The child sent big.txt as a placeholder once it was old, and recalled it.
+    def big_in(request: list[Message]) -> str:
+        return next(m.content or "" for m in request if m.tool_call_id == "big")
+
+    assert big_in(child_requests[2]) == BIG_FILE
+    assert big_in(child_requests[3]).startswith("[large tool output archived")
+    recall = next(m.content or "" for m in child_requests[-1] if m.tool_call_id == "r")
+    assert BIG_FILE.startswith(_page(recall)[1])
+    assert "obs_recall" in [t["function"]["name"] for t in agent._tool_registry.to_openai_schemas()]
+
+    # Its archive is under the parent's session, in a namespace of its own.
+    subagents = tmp_path / "parent_1" / "subagents"
+    archives = list(subagents.glob("*/observation-pack/objects/*.txt"))
+    assert len(archives) == 1
+    assert archives[0].read_text() == BIG_FILE
+
+    # Its ledger rows name it.
+    rows = [r for r in ledger.records if r.mechanism == OBSERVATION_PACK]
+    child_rows = [r for r in rows if r.detail.get("agent") == "reader"]
+    assert {r.outcome for r in child_rows} >= {"swap", "placeholders", "recall"}
+    assert all(r.detail["session"] != "parent/1" for r in child_rows)
+
+
+async def test_a_subagent_keeps_the_callers_choice(tmp_path: Path) -> None:
+    from tulip.agent.subagent import _build_child, enter_parent_run, exit_parent_run
+
+    token = enter_parent_run(
+        threading.Event(), observation_pack=ObservationPackConfig(enabled=True, directory=tmp_path)
+    )
+    try:
+        model = FunctionModel(lambda m, t: ModelResponse(message=Message.assistant("ok")))
+        inherited = _build_child(model, [], "p", "c", 3, None, {})
+        assert inherited.config.observation_pack.enabled is True
+        chosen = _build_child(model, [], "p", "c", 3, None, {"observation_pack": False})
+        assert chosen.config.observation_pack.enabled is False
+    finally:
+        exit_parent_run(token)
+    model = FunctionModel(lambda m, t: ModelResponse(message=Message.assistant("ok")))
+    assert _build_child(model, [], "p", "c", 3, None, {}).config.observation_pack.enabled is False
+
+
+def test_a_cut_output_whose_archive_went_missing_stays_whole(tmp_path: Path) -> None:
+    pack = _pack(tmp_path, full_sends=0)
+    cut = pack.intake(HUGE, tool_name="dump", tool_call_id="d", session="s", limit=20_000)
+    assert cut is not None
+    for leftover in (tmp_path / "s" / "observation-pack" / "objects").iterdir():
+        leftover.unlink()
+    history = [
+        *_history([])[:2],
+        Message.assistant("x", tool_calls=[ToolCall(id="d", name="dump")]),
+    ]
+    history.append(Message(role=Role.TOOL, tool_call_id="d", name="dump", content=cut))
+    assert pack.project(history, session="s") == history
+    assert pack.stats("s").fail_open == 1
+
+
+async def test_an_explicit_result_store_still_wins(tmp_path: Path) -> None:
+    from tulip.tools.result_storage import ToolResultStore
+
+    stored: dict[str, str] = {}
+    agent, requests = _one_call_agent(tmp_path, "huge")
+    agent.config.tool_result_store = ToolResultStore(
+        save=stored.__setitem__, load=stored.get, threshold_chars=32_000
+    )
+    [e async for e in agent.run("go", thread_id="t")]
+    assert "[TOOL RESULT STORED externally]" in _sent_output(requests)
+    assert list(stored.values()) == [HUGE]

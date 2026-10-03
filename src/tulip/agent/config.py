@@ -222,8 +222,11 @@ class ObservationPackConfig(BaseModel):
     the exact bytes back from a per-session archive under ``directory``.
     Swaps are batched and priced against the prompt cache (see
     :class:`tulip.memory.observation_pack.SwapCostModel`), and compaction
-    clears outputs into recallable stubs instead of lossy ones. See
-    :mod:`tulip.memory.observation_pack`.
+    clears outputs into recallable stubs instead of lossy ones. A tool output
+    is no longer cut at ``max_tool_result_length``: up to ``max_inline_chars``
+    goes whole, and anything larger is archived whole and cut around a pointer
+    to the archive. Subagents a run starts get a pack of their own, archived
+    under the run's session. See :mod:`tulip.memory.observation_pack`.
     """
 
     model_config = {"arbitrary_types_allowed": True, "extra": "forbid"}
@@ -237,6 +240,17 @@ class ObservationPackConfig(BaseModel):
         ),
     )
     threshold_bytes: int = Field(default=10 * 1024, ge=0)
+    max_inline_chars: int | None = Field(
+        default=128_000,
+        ge=1,
+        description=(
+            "Largest tool output, in characters, sent whole while the pack is on; "
+            "``max_tool_result_length`` stops applying. Larger outputs are archived "
+            "whole and sent cut around a pointer to the archive. Never more than an "
+            "eighth of a known context window, never less than max_tool_result_length. "
+            "None: only the window bounds it."
+        ),
+    )
     full_sends: int = Field(default=2, ge=0)
     excerpt_bytes: int = Field(default=1024, ge=0)
     recall_max_bytes: int = Field(default=16 * 1024, gt=512)

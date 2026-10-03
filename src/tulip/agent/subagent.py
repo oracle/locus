@@ -128,7 +128,7 @@ class _ParentRunContext:
     tool signatures.
     """
 
-    __slots__ = ("cancel_signal", "deadline", "hooks", "usage_sink")
+    __slots__ = ("cancel_signal", "deadline", "hooks", "observation_pack", "usage_sink")
 
     def __init__(
         self,
@@ -136,6 +136,7 @@ class _ParentRunContext:
         *,
         deadline: float | None = None,
         hooks: tuple[Any, ...] = (),
+        observation_pack: Any = None,
     ) -> None:
         self.cancel_signal = cancel_signal
         #: Child usage reports, drained into the parent's state by the loop.
@@ -145,6 +146,9 @@ class _ParentRunContext:
         #: The parent's own lifecycle hooks, for a delegating tool that
         #: applies the parent's policy inside the child.
         self.hooks = hooks
+        #: The ObservationPack config a child gets (the parent's, archived
+        #: under the parent's session), or ``None`` when the parent has none.
+        self.observation_pack = observation_pack
 
 
 _PARENT_RUN: ContextVar[_ParentRunContext | None] = ContextVar(
@@ -157,17 +161,25 @@ def enter_parent_run(
     *,
     time_budget_seconds: float | None = None,
     hooks: list[Any] | tuple[Any, ...] = (),
+    observation_pack: Any = None,
 ) -> Token[_ParentRunContext | None]:
     """Install a running loop as the parent context for subagents.
 
     Called by the runtime loop at run start with that run's own cancel
     signal (``RunContext.cancel``), which ``Agent.cancel(thread_id=...)`` and
     a no-argument ``Agent.cancel()`` both set, its time budget (so children
-    stop when it would) and its hooks. Returns a token for
-    :func:`exit_parent_run`.
+    stop when it would), its hooks, and the ObservationPack config its
+    subagents get. Returns a token for :func:`exit_parent_run`.
     """
     deadline = None if time_budget_seconds is None else time.monotonic() + time_budget_seconds
-    return _PARENT_RUN.set(_ParentRunContext(cancel_signal, deadline=deadline, hooks=tuple(hooks)))
+    return _PARENT_RUN.set(
+        _ParentRunContext(
+            cancel_signal,
+            deadline=deadline,
+            hooks=tuple(hooks),
+            observation_pack=observation_pack,
+        )
+    )
 
 
 def exit_parent_run(token: Token[_ParentRunContext | None]) -> None:
@@ -321,6 +333,16 @@ def _build_child(  # noqa: PLR0913 — every knob of a child, passed through
 ) -> Any:
     from tulip.agent.agent import Agent  # noqa: PLC0415 — break the agent<->subagent import cycle
 
+    # A child of a run with ObservationPack gets one too, unless the caller
+    # chose: its large outputs leave its requests the same way, archived
+    # under the parent's session, and obs_recall comes with it.
+    parent = _PARENT_RUN.get()
+    if (
+        parent is not None
+        and parent.observation_pack is not None
+        and "observation_pack" not in agent_kwargs
+    ):
+        agent_kwargs = {**agent_kwargs, "observation_pack": parent.observation_pack}
     return Agent(
         model=model,
         tools=list(tools or []),
