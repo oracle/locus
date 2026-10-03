@@ -8,17 +8,6 @@ policy.
 
 ## [Unreleased]
 
-### Changed
-
-- **An oversized tool result keeps its head and its tail.** Past
-  `max_tool_result_length`, the loop used to keep the first N characters, so
-  a test run, build or lint lost its verdict: the failing test and the
-  `1 failed, 39999 passed` summary are printed last. The cut now keeps the
-  first 40% and the last 60% of the budget, with a marker between them —
-  `[OUTPUT TRUNCATED — 38123 of 40123 chars cut; first 800 and last 1200 kept]`.
-  The new `AgentConfig.tool_result_head_fraction` sets the split; `1.0` keeps
-  only the head, as before. The marker still starts `[OUTPUT TRUNCATED`, but
-  its wording changed, so code matching `original: N chars` needs updating.
 ### Added
 
 - **`AgentConfig.context_window`** and the **`TULIP_CONTEXT_WINDOW`**
@@ -50,7 +39,6 @@ policy.
   undeclared argument rejects the call instead of being dropped. Agents on
   a server that returns calls as text (no tool parser) set
   ``text_tool_calls="on"``; the rogue demo's local mode does.
-### Added
 
 - **`FileCheckpointer` as a session store**: `list_threads(limit, pattern)`
   returns thread ids newest first, as they were saved (not the sanitised
@@ -66,7 +54,32 @@ policy.
   an error saying its outcome is unknown, never re-run. A thread paused on an
   in-process interrupt is still answered with `resume()`.
 
+- **Loop-level retry of transient model-call failures (`AgentConfig.model_retry`).**
+  A 429, a 5xx, a dropped connection or a timeout on any model call used to
+  end the run with `TerminateEvent(reason="error")` once the provider client
+  had spent its own retries, which a long autonomous run is all but certain
+  to hit. The loop now re-issues the call with exponential backoff and full
+  jitter (1 s doubling to 60 s, 6 retries, within a 300 s budget by default),
+  waiting what the provider's `retry-after` / `retry-after-ms` asks for when
+  it sends one. Context-length overflows, validation errors, auth and billing
+  failures, and anything the failover classifier cannot place fail at once.
+  Each retry emits a `ModelRetryEvent` (`attempt`, `delay_seconds`, `reason`,
+  `status_code`, `error`, `from_retry_after`) — live between chunks with
+  `stream_tokens=True`, otherwise once the call returns or fails. A streamed
+  call is not retried once a chunk has reached the caller, nor is a cancelled
+  run. `model_retry=False` restores the old behaviour.
+
 ### Changed
+
+- **An oversized tool result keeps its head and its tail.** Past
+  `max_tool_result_length`, the loop used to keep the first N characters, so
+  a test run, build or lint lost its verdict: the failing test and the
+  `1 failed, 39999 passed` summary are printed last. The cut now keeps the
+  first 40% and the last 60% of the budget, with a marker between them —
+  `[OUTPUT TRUNCATED — 38123 of 40123 chars cut; first 800 and last 1200 kept]`.
+  The new `AgentConfig.tool_result_head_fraction` sets the split; `1.0` keeps
+  only the head, as before. The marker still starts `[OUTPUT TRUNCATED`, but
+  its wording changed, so code matching `original: N chars` needs updating.
 
 - `checkpoint_every_n_iterations` also applies to resumed and continued
   segments (`resume()`, `continue_turn()`), which previously saved only at
@@ -94,22 +107,6 @@ policy.
   loading a thread's latest state falls back to the newest one that parses.
   Listing a thread's checkpoints reads only each file's head and tail rather
   than parsing every saved conversation in full.
-### Added
-
-- **Loop-level retry of transient model-call failures (`AgentConfig.model_retry`).**
-  A 429, a 5xx, a dropped connection or a timeout on any model call used to
-  end the run with `TerminateEvent(reason="error")` once the provider client
-  had spent its own retries, which a long autonomous run is all but certain
-  to hit. The loop now re-issues the call with exponential backoff and full
-  jitter (1 s doubling to 60 s, 6 retries, within a 300 s budget by default),
-  waiting what the provider's `retry-after` / `retry-after-ms` asks for when
-  it sends one. Context-length overflows, validation errors, auth and billing
-  failures, and anything the failover classifier cannot place fail at once.
-  Each retry emits a `ModelRetryEvent` (`attempt`, `delay_seconds`, `reason`,
-  `status_code`, `error`, `from_retry_after`) — live between chunks with
-  `stream_tokens=True`, otherwise once the call returns or fails. A streamed
-  call is not retried once a chunk has reached the caller, nor is a cancelled
-  run. `model_retry=False` restores the old behaviour.
 
 ## [2.18.3] - 2026-09-29
 
