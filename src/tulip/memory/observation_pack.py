@@ -59,8 +59,11 @@ run outweigh rewriting the cached suffix — or until the prefix breaks anyway
 (a compaction, a message window sliding), when a swap behind the break costs
 nothing. Once swapped, a result stays swapped, so the new prefix is stable.
 
-Every batch and recall is counted (:class:`ObservationStats`) and logged to
-the session's ``ledger.jsonl``.
+Every batch and recall is counted (:class:`ObservationStats`), logged to the
+session's ``ledger.jsonl`` beside the archive, and recorded in the run's
+:class:`~tulip.observability.mechanisms.MechanismLedger` as ``observation_pack``:
+``swap`` per batch, ``placeholders`` per request that sent any (with the bytes
+not resent), ``recall``, ``cleared_recallable`` and ``fail_open``.
 """
 
 from __future__ import annotations
@@ -82,6 +85,7 @@ from typing import Any
 from tulip.core.media import has_images
 from tulip.core.messages import Message, Role
 from tulip.memory.compactor import _char_count_tokens
+from tulip.observability.mechanisms import OBSERVATION_PACK, record_mechanism
 
 
 logger = logging.getLogger(__name__)
@@ -713,8 +717,12 @@ class ObservationPack:
             return self._project(messages, state, on_event, context_limit)
         except Exception as exc:  # noqa: BLE001 — fail open: the full outputs go
             state.stats.fail_open += 1
-            logger.warning("ObservationPack failed open: %s", exc)
-            self._log(state, {"event": "fail_open", "error": f"{type(exc).__name__}: {exc}"})
+            error = f"{type(exc).__name__}: {exc}"
+            logger.warning("ObservationPack failed open: %s", error)
+            self._log(state, {"event": "fail_open", "error": error})
+            record_mechanism(
+                OBSERVATION_PACK, triggered=False, outcome="fail_open", detail={"error": error}
+            )
             return list(messages)
 
     def _project(
@@ -760,6 +768,16 @@ class ObservationPack:
         stats.requests += 1
         stats.bytes_saved += saved
         stats.placeholders_sent += shown
+        if saved > 0:
+            # Per request, because that is where the saving happens: these
+            # bytes were not sent this time, and would have been.
+            record_mechanism(
+                OBSERVATION_PACK,
+                outcome="placeholders",
+                bytes_saved=saved,
+                tokens_saved=saved // _CHARS_PER_TOKEN,
+                detail={"placeholders": shown},
+            )
         state.last_digests = [_digest(m) for m in view]
         state.last_tokens = sum(_char_count_tokens(m) for m in view)
         return view
@@ -814,6 +832,12 @@ class ObservationPack:
                 state.stats.fail_open += 1
                 logger.warning("Could not archive %s: %s", observation.id, exc)
                 self._log(state, {"event": "fail_open", "id": observation.id, "error": str(exc)})
+                record_mechanism(
+                    OBSERVATION_PACK,
+                    triggered=False,
+                    outcome="fail_open",
+                    detail={"id": observation.id, "error": str(exc)},
+                )
                 continue
             stored.append(observation)
         if not stored:
@@ -840,6 +864,18 @@ class ObservationPack:
             "request": requests_so_far + 1,
         }
         self._log(state, entry)
+        record_mechanism(
+            OBSERVATION_PACK,
+            outcome="swap",
+            detail={
+                "reason": decision.reason,
+                "swapped": len(stored),
+                "original_bytes": entry["original_bytes"],
+                "saved_tokens_per_request": decision.saved_tokens,
+                "rewrite_tokens": decision.rewrite_tokens,
+                "prefix_break": decision.reason != "free",
+            },
+        )
         if on_event is not None:
             on_event({**entry, "stats": stats.as_dict()})
         return view
@@ -919,6 +955,7 @@ class ObservationPack:
         stats.recalls += 1
         stats.recalled_bytes += len(chunk)
         self._log(state, {"event": "recall", **details})
+        record_mechanism(OBSERVATION_PACK, outcome="recall", detail=details)
         return f"{header}\n{chunk.decode('utf-8', 'surrogatepass')}", {
             **details,
             "stats": stats.as_dict(),
@@ -960,6 +997,11 @@ class SessionArchive:
         if observation is None:
             return None
         self._state.stats.cleared_recallable += 1
+        # The room it frees is the compaction's own record; this one says the
+        # clearing kept the bytes.
+        record_mechanism(
+            OBSERVATION_PACK, outcome="cleared_recallable", detail={"id": observation.id}
+        )
         return message.model_copy(
             update={
                 "content": recall_stub_for(observation, label),

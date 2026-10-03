@@ -748,3 +748,45 @@ async def test_a_summary_without_a_working_archive_lists_nothing(tmp_path: Path)
     summary = next(m for m in outcome.messages if is_summary_message(m))
     assert RECALLABLE_OUTPUTS_KEY not in summary.metadata
     assert "Recallable" not in (summary.content or "")
+
+
+def test_the_mechanism_ledger_records_swaps_placeholders_recalls_and_clears(
+    tmp_path: Path,
+) -> None:
+    import contextvars
+
+    from tulip.observability.mechanisms import (
+        OBSERVATION_PACK,
+        MechanismLedger,
+        bind_ledger,
+    )
+
+    def scenario() -> MechanismLedger:
+        ledger = MechanismLedger(tmp_path / "mechanisms.jsonl", run="r")
+        bind_ledger(ledger)
+        pack = _pack(tmp_path / "archive", full_sends=0)
+        obs_id = _swapped_id(pack, _big("a"))
+        pack.recall("s", obs_id)
+        compactor = ContextCompactor(context_length=40_000, tool_output_keep_tokens=2_000)
+        compactor._clear_tool_outputs(
+            _history([_big(f"o{n}") for n in range(8)]), pack.archive_for("s")
+        )
+        blocked = tmp_path / "blocked"
+        blocked.write_text("x")
+        ObservationPack(directory=blocked, full_sends=0, cost_model=EAGER).project(
+            _history([_big("b")]), session="s"
+        )
+        return ledger
+
+    ledger = contextvars.copy_context().run(scenario)
+    row = ledger.summary()[OBSERVATION_PACK]
+    outcomes = row["outcomes"]
+    assert outcomes["swap"] == 1
+    assert outcomes["placeholders"] == 1
+    assert outcomes["recall"] == 1
+    assert outcomes["cleared_recallable"] >= 1
+    assert outcomes["fail_open"] == 1
+    assert row["bytes_saved"] > 10_000
+    assert row["tokens_saved_est"] == row["bytes_saved"] // 4
+    lines = (tmp_path / "mechanisms.jsonl").read_text().splitlines()
+    assert all(json.loads(line)["mechanism"] == OBSERVATION_PACK for line in lines)
