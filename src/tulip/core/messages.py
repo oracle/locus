@@ -31,6 +31,10 @@ class ToolCall(BaseModel):
         default_factory=dict,
         description="Arguments to pass to the tool",
     )
+    malformed_arguments: str | None = Field(
+        default=None,
+        description="The provider's raw argument text when it was not valid JSON",
+    )
 
     @model_validator(mode="before")
     @classmethod

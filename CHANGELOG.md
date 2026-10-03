@@ -10,6 +10,15 @@ policy.
 
 ### Added
 
+- **`ModelRetryConfig(retry_unclassified=True)`** also retries failures the
+  classifier cannot place, with the same backoff. Off by default, since such an
+  exception is as likely a bug in a hook as a provider failure.
+- **Malformed tool-call arguments go back to the model.** A tool call whose
+  arguments are not JSON no longer runs with `{}`: the tool is skipped and the
+  model gets an error that asks it to resend the call as a valid JSON object.
+  The raw text is kept on `ToolCall.malformed_arguments`. Covers the OpenAI
+  chat-completions adapter, streaming and not.
+
 - **`tulip.models.profiles.profile_for(model)`** returns a frozen
   `ModelProfile`: context window, output cap, native and parallel tool
   calling, how reasoning is requested (`adaptive`, `budget_tokens`,
@@ -370,6 +379,10 @@ policy.
   `docs/observation-pack.md` describes the mechanism and its status.
 
 ### Changed
+
+- **A summary that fails is retried with shorter input.** The second summary
+  attempt shortens each folded message to its first and last 2,000 characters,
+  so an over-size failure can succeed. Before, both attempts sent identical input.
 
 - **History is append-only between compactions**, so a provider's prefix
   cache keeps serving it (`tests/unit/test_cache_prefix.py` checks every

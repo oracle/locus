@@ -603,8 +603,10 @@ class ContextCompactor(ConversationManager):
             # stubs: clearing was for the agent's window, not for its memory.
             rendered = [_render(original[i], cleared, i, ids.get(i)) for i in folded]
             for attempt in range(2):
+                # A retry sends shorter input: a summary that failed on size would fail the same way.
+                sent = rendered if attempt == 0 else [_shorten_for_retry(text) for text in rendered]
                 try:
-                    summary = await self._summarise(rendered, previous, instructions, usage)
+                    summary = await self._summarise(sent, previous, instructions, usage)
                 except Exception as exc:  # noqa: BLE001 — a failed summary falls back below
                     error = f"{type(exc).__name__}: {exc}"
                     logger.warning("Context summary failed (attempt %d): %s", attempt + 1, error)
@@ -819,6 +821,18 @@ def _stub(message: Message, call: Any) -> Message:
             f"returned {size} characters. Call the tool again if you need it.]"
         ),
         metadata={CLEARED_OUTPUT_KEY: True},
+    )
+
+
+_RETRY_KEEP_CHARS = 2_000
+
+
+def _shorten_for_retry(text: str) -> str:
+    if len(text) <= 2 * _RETRY_KEEP_CHARS:
+        return text
+    return (
+        f"{text[:_RETRY_KEEP_CHARS]}\n[... shortened for the summary retry ...]\n"
+        f"{text[-_RETRY_KEEP_CHARS:]}"
     )
 
 

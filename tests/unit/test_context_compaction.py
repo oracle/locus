@@ -651,3 +651,23 @@ def test_a_summary_model_named_by_string_is_resolved(monkeypatch: pytest.MonkeyP
     assert names == ["openai:gpt-4o-mini"]
     assert isinstance(agent._conversation_manager, ContextCompactor)
     assert agent._conversation_manager.summary_model is built
+
+
+async def test_a_summary_that_fails_on_size_is_retried_with_shorter_input() -> None:
+    summariser = Summariser()
+
+    def reply(prompt: str) -> Any:
+        if "shortened for the summary retry" not in prompt:
+            return RuntimeError("maximum context length exceeded")
+        return "SHORT SUMMARY"
+
+    summariser.reply = reply
+    compactor = _compactor(summariser)
+    messages = _conversation(12, said=6_000)
+    outcome = await compactor.compact(messages, iteration=16, tracker=CompactionTracker())
+
+    assert outcome is not None
+    assert outcome.stage == "summarize"
+    assert outcome.summary == "SHORT SUMMARY"
+    assert "shortened for the summary retry" not in summariser.prompts[0]
+    assert "shortened for the summary retry" in summariser.prompts[-1]

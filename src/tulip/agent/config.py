@@ -71,6 +71,9 @@ class ModelRetryConfig(BaseModel):
         total_budget_seconds: Wall-clock seconds, from the first attempt,
             after which no further retry starts. A ``retry-after`` that would
             end past the budget fails the call at once instead of sleeping.
+        retry_unclassified: ``True`` also retries failures the classifier
+            cannot place, with the same backoff. Off by default, because such
+            an exception is as likely a bug in a hook as a provider hiccup.
     """
 
     enabled: bool = True
@@ -78,6 +81,7 @@ class ModelRetryConfig(BaseModel):
     initial_delay: float = Field(default=1.0, ge=0.0)
     max_delay: float = Field(default=60.0, ge=0.0)
     total_budget_seconds: float = Field(default=300.0, gt=0.0)
+    retry_unclassified: bool = False
 
     model_config = {"extra": "forbid"}
 

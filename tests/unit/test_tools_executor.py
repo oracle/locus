@@ -590,3 +590,34 @@ class TestConcurrentExecutorStreaming:
         # Give the event loop one tick to settle cancellations.
         await _asyncio.sleep(0.05)
         assert executed == ["fast"], f"expected siblings cancelled; got {executed}"
+
+
+class TestMalformedArguments:
+    @pytest.mark.asyncio
+    async def test_malformed_arguments_are_not_run_and_the_model_is_told(self) -> None:
+        mock_tool = MagicMock()
+        mock_tool.execute = AsyncMock(return_value="result")
+        registry = MagicMock()
+        registry.get = MagicMock(return_value=mock_tool)
+        call = ToolCall(id="call1", name="test_tool", malformed_arguments='{"path": "a')
+
+        results = await SequentialExecutor().execute([call], registry)
+
+        mock_tool.execute.assert_not_called()
+        assert results[0].tool_call_id == "call1"
+        assert results[0].error is not None
+        assert "not valid JSON" in results[0].error
+        assert "valid JSON object" in results[0].error
+
+    @pytest.mark.asyncio
+    async def test_malformed_arguments_are_not_run_by_the_concurrent_executor(self) -> None:
+        mock_tool = MagicMock()
+        mock_tool.execute = AsyncMock(return_value="result")
+        registry = MagicMock()
+        registry.get = MagicMock(return_value=mock_tool)
+        call = ToolCall(id="call1", name="test_tool", malformed_arguments="[1, 2")
+
+        results = await ConcurrentExecutor().execute([call], registry)
+
+        mock_tool.execute.assert_not_called()
+        assert "not valid JSON" in (results[0].error or "")

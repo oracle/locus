@@ -241,6 +241,17 @@ def _decode_tool_arguments(raw: str | None) -> dict[str, Any]:
     return {}
 
 
+def _malformed_tool_arguments(raw: str | None) -> str | None:
+    """The raw argument text when it is not JSON at all, else ``None``."""
+    if not raw:
+        return None
+    try:
+        json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+    return None
+
+
 def _strip_model_namespace(name: str) -> str:
     """Drop a leading purely-alphabetic namespace segment.
 
@@ -936,6 +947,7 @@ class OpenAIModel(BaseModel):
                         id=tc.id,
                         name=tc.function.name,
                         arguments=arguments,
+                        malformed_arguments=_malformed_tool_arguments(tc.function.arguments),
                     )
                 )
 
@@ -960,6 +972,7 @@ class OpenAIModel(BaseModel):
                         id=tc.id,
                         name=tc.function.name,
                         arguments=_decode_tool_arguments(tc.function.arguments),
+                        malformed_arguments=_malformed_tool_arguments(tc.function.arguments),
                     )
                 )
             extra_content = getattr(extra_msg, "content", None)
@@ -1725,17 +1738,19 @@ class OpenAIModel(BaseModel):
                 if current_tool_calls:
                     tool_calls = []
                     for tc_data in current_tool_calls.values():
+                        raw = tc_data["arguments"]
                         try:
-                            arguments = (
-                                json.loads(tc_data["arguments"]) if tc_data["arguments"] else {}
-                            )
+                            arguments = json.loads(raw) if raw else {}
+                            malformed = None
                         except json.JSONDecodeError:
                             arguments = {}
+                            malformed = raw
                         tool_calls.append(
                             ToolCall(
                                 id=tc_data["id"],
                                 name=tc_data["name"],
                                 arguments=arguments,
+                                malformed_arguments=malformed,
                             )
                         )
                     yield ModelChunkEvent(tool_calls=tool_calls, model=served_model)

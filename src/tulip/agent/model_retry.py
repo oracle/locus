@@ -152,7 +152,10 @@ async def call_with_retry(
             if retries >= policy.max_retries or not may_retry():
                 raise
             decision = classify(exc)
-            if decision.reason not in RETRYABLE_REASONS:
+            retryable = decision.reason in RETRYABLE_REASONS or (
+                policy.retry_unclassified and decision.reason is FailoverReason.UNKNOWN
+            )
+            if not retryable:
                 raise
             requested = retry_after_seconds(exc)
             if requested is not None:

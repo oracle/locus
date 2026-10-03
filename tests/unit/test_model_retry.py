@@ -347,3 +347,12 @@ def test_retry_after_ignores_odd_header_containers() -> None:
     odd = FakeHTTPError(429, "x")
     odd.response = SimpleNamespace(headers=["not", "a", "mapping"])
     assert retry_after_seconds(odd) is None
+
+
+async def test_unclassified_failure_is_retried_when_opted_in(sleeps: list[float]) -> None:
+    model = _failing_then(ValueError("a provider wrapper with no known status"))
+    events = await _events(_agent(model, model_retry=ModelRetryConfig(retry_unclassified=True)))
+
+    assert [r.reason for r in _retries(events)] == ["unknown"]
+    assert model.call_count == 2
+    assert sleeps == [1.0]
