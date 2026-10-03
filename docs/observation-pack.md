@@ -1,6 +1,6 @@
 # ObservationPack: purpose, design and status
 
-Handover notes for whoever picks this up next. Last updated 2026-10-03.
+Handover notes for whoever picks this up next. Last updated 2026-10-03, after PR #100 merged.
 
 ## Why we are building it
 
@@ -120,7 +120,7 @@ a named agent such as a subagent. Per-session counters are also available from
   Merge commit `94b96b8`.
 - Both full suites passed in the VM before the merge.
 
-### In progress on branch `harness/observation-pack-2` (this commit)
+### Also merged: whole outputs past the cap, and subagents (PR #100, merge `a9aedf0`)
 
 **1. Nothing lost to the per-result cap.**
 - With the pack on, `max_tool_result_length` (32,000 chars) no longer cuts
@@ -150,15 +150,9 @@ a named agent such as a subagent. Per-session counters are also available from
   parent-run context (`enter_parent_run(observation_pack=...)`), and
   `_build_child` in `src/tulip/agent/subagent.py` picks them up.
 
-**Next steps for this branch:**
-1. Run the full SDK and tulip-code suites in the VM
-   (`agents:~/integ-check-observation-pack/`, `all.sh`; never touch `~/bench`
-   or the `bench` user). Update the copied sources first.
-2. Open a PR against `harness/integration-all`, rebase on it, and merge once
-   it is green. Never merge to `main`.
-3. tulip-code needs no code change for this branch: its `task` tool goes
-   through the SDK's `_build_child`, and the inline limit comes from the SDK
-   config. A README line on the larger whole-output limit would help.
+Both full suites passed in the VM before the merge. tulip-code needed no
+change: its `task` tool builds subagents through the SDK, and the inline
+limit comes from the SDK config.
 
 ### Not started (deliberately)
 
