@@ -567,3 +567,56 @@ async def test_the_small_cases(tmp_path: Path) -> None:
 
     state = AgentState()
     assert await hooks.on_before_invocation("p", state) is state
+
+
+# ------------------------------------------------- a call inside another call --
+
+
+def test_pre_tool_use_for_a_nested_call_sees_it_under_its_own_name(tmp_path: Path) -> None:
+    command = _script(
+        tmp_path,
+        "nested",
+        "assert event['tool_name'] == 'bash'\n"
+        "assert event['tool_use_id'] == 'c1:then_run'\n"
+        "print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse',"
+        " 'permissionDecision': 'allow', 'permissionDecisionReason': 'tests are fine',"
+        " 'updatedInput': {'command': event['tool_input']['command'] + ' -q'}}}))\n",
+    )
+    verdicts: list[tuple[str, dict[str, Any], str, str]] = []
+    hooks, runs = _hooks(
+        _config("PreToolUse", command, matcher="bash"),
+        tmp_path,
+        on_permission=lambda *args: verdicts.append(args),
+    )
+    verdict = hooks.pre_tool_use("bash", {"command": "pytest"}, tool_use_id="c1:then_run")
+    assert verdict.cancel is None
+    assert verdict.arguments == {"command": "pytest -q"}
+    assert verdicts == [("bash", {"command": "pytest -q"}, "allow", "tests are fine")]
+    assert runs[0].event == "PreToolUse"
+
+
+def test_pre_tool_use_for_a_nested_call_can_refuse_it(tmp_path: Path) -> None:
+    command = _script(tmp_path, "deny", "print('not that', file=sys.stderr); sys.exit(2)\n")
+    hooks, _ = _hooks(_config("PreToolUse", command, matcher="bash"), tmp_path)
+    verdict = hooks.pre_tool_use("bash", {"command": "make deploy"})
+    assert verdict.cancel == "Refused by a PreToolUse hook: not that"
+    assert verdict.arguments == {"command": "make deploy"}
+
+
+def test_nested_calls_skip_hooks_that_do_not_match(tmp_path: Path) -> None:
+    hooks, runs = _hooks(_config("PreToolUse", "exit 2", matcher="edit"), tmp_path)
+    assert hooks.pre_tool_use("bash", {"command": "ls"}).cancel is None
+    assert hooks.post_tool_use("bash", {"command": "ls"}, "exit 0") == ""
+    assert runs == []
+
+
+def test_post_tool_use_for_a_nested_call_returns_its_notes(tmp_path: Path) -> None:
+    command = _script(
+        tmp_path,
+        "post",
+        "assert event['tool_response'] == 'exit 0'\n"
+        "print(json.dumps({'decision': 'block', 'reason': 'coverage dropped'}))\n",
+    )
+    hooks, _ = _hooks(_config("PostToolUse", command, matcher="bash"), tmp_path)
+    notes = hooks.post_tool_use("bash", {"command": "pytest"}, "exit 0", tool_use_id="c2")
+    assert notes == "[PostToolUse hook] coverage dropped"

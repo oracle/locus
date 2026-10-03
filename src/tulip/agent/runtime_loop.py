@@ -72,6 +72,7 @@ from tulip.core.media import strip_images, text_length
 from tulip.core.messages import Message, Role, ToolCall, ToolResult
 from tulip.core.state import AgentState, ReasoningStep, ToolExecution
 from tulip.models.base import ModelResponse
+from tulip.observability.mechanisms import LEAKED_TOOL_CALLS, record_mechanism
 from tulip.tools.context import _progress_sink
 from tulip.tools.executor import ToolContextFactory, ToolExecutor
 from tulip.tools.registry import ToolRegistry
@@ -2938,6 +2939,11 @@ class AgentRuntimeMixin:
             calls = leaked.calls
             if content:
                 content = leaked.prose
+            record_mechanism(
+                LEAKED_TOOL_CALLS,
+                outcome=leaked.format,
+                detail={"calls": len(leaked.calls), "source": source},
+            )
         elif content and self._text_tool_calls_enabled():
             calls = self._parse_text_tool_calls(content)
         if not calls:

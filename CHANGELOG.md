@@ -305,6 +305,31 @@ policy.
   `max_tokens`) caps what one delegated task of that type may spend; the
   `task` tool gives it to the subagent, the smaller of it and any
   `token_budget` in `agent_kwargs`.
+- **`tulip.tools.action_fusion`** lets a file-changing tool take an optional
+  `then_run: {command, timeout?}` and run that command once the change has
+  landed, returning one result: the change's report, then `[then_run] $ cmd`
+  with the command's exit code and output. The command is skipped (marked
+  `[then_run skipped]`, with the reason) when the change failed, when a written
+  file's SHA-256 no longer matches what was written, or when the host refuses
+  it. `FileLocks` holds one lock per canonical path, from a thread or a
+  coroutine, so two fused calls on one file never interleave. `fuse()` takes
+  the host's own shell runner, so the gate, hooks and limits of its shell tool
+  apply unchanged; `fusable(tool, enabled=)` adds or hides the argument in the
+  tool's schema. The mechanism is SoL-Pi's (NVIDIA, arXiv 2609.20519),
+  reimplemented.
+- **`tulip.observability.mechanisms.MechanismLedger`**: a per-run record of
+  the harness mechanisms that fired — name, whether it triggered, steps and
+  tokens or bytes saved (estimates), outcome — in memory and as JSONL, with
+  `summary()` counters per mechanism for one-change-at-a-time ablations.
+  `record_mechanism()` writes to the ledger bound with `bind_ledger()` and is
+  a no-op without one. Recorded: fused calls, leaked tool-call recoveries, and,
+  through `observe(event)`, completion-check continuations, compactions and
+  tool-loop warnings.
+- **`ExternalHooks.pre_tool_use()` / `post_tool_use()`** run `PreToolUse` and
+  `PostToolUse` for a call a tool makes inside its own body — a fused edit's
+  command is seen by the hooks as `bash`, with the same deny, rewritten input
+  and gate verdict a standalone call gets. `ToolCallVerdict` is what
+  `pre_tool_use()` returns.
 
 ### Changed
 
@@ -389,6 +414,9 @@ policy.
   the call and asking for another approach; the run stops with `tool_loop`
   only if the loop repeats once more. `AgentState.has_tool_loop` still
   reports detection; `AgentState.tool_loop_persists` is what stops a run.
+- **The completion check counts a fused check.** An edit that ran a check
+  command as `then_run` is an edit and a check at once for
+  `edits_unchecked`; one whose command was skipped is still unchecked.
 
 ### Fixed
 

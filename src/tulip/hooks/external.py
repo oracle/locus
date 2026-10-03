@@ -117,6 +117,7 @@ __all__ = [
     "HookConfig",
     "HookOutcome",
     "HookRun",
+    "ToolCallVerdict",
 ]
 
 #: Events a configuration may name.
@@ -484,22 +485,15 @@ class ExternalHooks(HookProvider):
             return
         out = await self.arun(
             "PreToolUse",
-            {
-                "tool_name": event.tool_name,
-                "tool_input": dict(event.arguments),
-                "tool_use_id": event.tool_call_id,
-            },
+            _pre_payload(event.tool_name, event.arguments, event.tool_call_id),
             subject=event.tool_name,
             session_id=_thread_of(event),
         )
-        if out.blocked or out.stop:
-            why = out.reason or out.stop_reason or "no reason given"
-            event.cancel = f"Refused by a PreToolUse hook: {why}"
+        verdict = self._pre_verdict(event.tool_name, event.arguments, out)
+        if verdict.cancel is not None:
+            event.cancel = verdict.cancel
             return
-        if out.updated_input is not None:
-            event.arguments = dict(out.updated_input)
-        if out.decision in ("allow", "ask") and self._on_permission is not None:
-            self._on_permission(event.tool_name, dict(event.arguments), out.decision, out.reason)
+        event.arguments = verdict.arguments
 
     async def on_after_tool_call(self, event: AfterToolCallEvent) -> None:
         """``PostToolUse``: hand the model a hook's objection or added context."""
@@ -507,23 +501,76 @@ class ExternalHooks(HookProvider):
             return
         out = await self.arun(
             "PostToolUse",
-            {
-                "tool_name": event.tool_name,
-                "tool_input": dict(event.arguments),
-                "tool_use_id": event.tool_call_id,
-                "tool_response": event.result,
-            },
+            _post_payload(event.tool_name, event.arguments, event.tool_call_id, event.result),
             subject=event.tool_name,
             session_id=_thread_of(event),
         )
-        notes: list[str] = []
-        if out.blocked and out.reason:
-            notes.append(f"[PostToolUse hook] {out.reason}")
-        if out.additional_context:
-            notes.append(f"[PostToolUse hook context] {out.additional_context}")
+        notes = _post_notes(out)
         if notes:
             result = event.result if isinstance(event.result, str) else json.dumps(event.result)
-            event.result = result + "\n\n" + "\n".join(notes)
+            event.result = result + "\n\n" + notes
+
+    # --------------------------------------- the same points, for a nested call --
+
+    def pre_tool_use(
+        self,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+        *,
+        tool_use_id: str = "",
+        session_id: str | None = None,
+    ) -> ToolCallVerdict:
+        """``PreToolUse`` for a call the loop does not dispatch itself.
+
+        A tool that runs another tool's action inside its own body — a file
+        edit that runs a test command afterwards — calls this so the hooks see
+        that action under its own tool name, exactly as they would see a
+        standalone call: the same payload, the same deny, the same rewritten
+        arguments, the same verdict passed to the gate. Blocking: call it from
+        a worker thread (a sync tool body is on one).
+        """
+        if not self.config.for_event("PreToolUse", tool_name):
+            return ToolCallVerdict(arguments=dict(arguments))
+        out = self.run(
+            "PreToolUse",
+            _pre_payload(tool_name, arguments, tool_use_id),
+            subject=tool_name,
+            session_id=session_id,
+        )
+        return self._pre_verdict(tool_name, arguments, out)
+
+    def post_tool_use(
+        self,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+        result: Any,
+        *,
+        tool_use_id: str = "",
+        session_id: str | None = None,
+    ) -> str:
+        """``PostToolUse`` for a nested call: the notes its hooks add, or ``""``."""
+        if not self.config.for_event("PostToolUse", tool_name):
+            return ""
+        out = self.run(
+            "PostToolUse",
+            _post_payload(tool_name, arguments, tool_use_id, result),
+            subject=tool_name,
+            session_id=session_id,
+        )
+        return _post_notes(out)
+
+    def _pre_verdict(
+        self, tool_name: str, arguments: Mapping[str, Any], out: HookOutcome
+    ) -> ToolCallVerdict:
+        if out.blocked or out.stop:
+            why = out.reason or out.stop_reason or "no reason given"
+            return ToolCallVerdict(
+                arguments=dict(arguments), cancel=f"Refused by a PreToolUse hook: {why}"
+            )
+        final = dict(out.updated_input) if out.updated_input is not None else dict(arguments)
+        if out.decision in ("allow", "ask") and self._on_permission is not None:
+            self._on_permission(tool_name, dict(final), out.decision, out.reason)
+        return ToolCallVerdict(arguments=final)
 
     def verifier(
         self, event: str = "Stop"
@@ -550,6 +597,38 @@ class ExternalHooks(HookProvider):
 
 
 # ----------------------------------------------------------------- helpers --
+
+
+@dataclass(frozen=True)
+class ToolCallVerdict:
+    """What ``PreToolUse`` hooks made of one call.
+
+    ``cancel`` is the refusal to hand the model when a hook denied it;
+    otherwise ``arguments`` are what the call should run with — a hook's
+    ``updatedInput`` when one rewrote them.
+    """
+
+    arguments: dict[str, Any]
+    cancel: str | None = None
+
+
+def _pre_payload(tool_name: str, arguments: Mapping[str, Any], tool_use_id: str) -> dict[str, Any]:
+    return {"tool_name": tool_name, "tool_input": dict(arguments), "tool_use_id": tool_use_id}
+
+
+def _post_payload(
+    tool_name: str, arguments: Mapping[str, Any], tool_use_id: str, result: Any
+) -> dict[str, Any]:
+    return {**_pre_payload(tool_name, arguments, tool_use_id), "tool_response": result}
+
+
+def _post_notes(out: HookOutcome) -> str:
+    notes: list[str] = []
+    if out.blocked and out.reason:
+        notes.append(f"[PostToolUse hook] {out.reason}")
+    if out.additional_context:
+        notes.append(f"[PostToolUse hook context] {out.additional_context}")
+    return "\n".join(notes)
 
 
 def _thread_of(event: Any) -> str | None:
