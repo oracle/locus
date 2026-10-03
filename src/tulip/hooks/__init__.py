@@ -37,6 +37,7 @@ from tulip.hooks.external import (
     HookConfig,
     HookOutcome,
     HookRun,
+    ToolCallVerdict,
 )
 from tulip.hooks.provider import (
     AfterModelCallEvent,
@@ -65,6 +66,7 @@ __all__ = [
     "HookConfig",
     "HookOutcome",
     "HookRun",
+    "ToolCallVerdict",
     # Events - write-protected (from provider)
     "AfterModelCallEvent",
     "AfterToolCallEvent",

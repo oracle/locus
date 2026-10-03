@@ -422,6 +422,26 @@ class TestLoop:
         assert not assistant[-1].content
 
     @pytest.mark.asyncio
+    async def test_a_recovery_is_recorded_in_the_mechanism_ledger(self) -> None:
+        from tulip.observability.mechanisms import (
+            LEAKED_TOOL_CALLS,
+            MechanismLedger,
+            bind_ledger,
+        )
+
+        ledger = MechanismLedger()
+        bind_ledger(ledger)
+        try:
+            model = _deepseek_model(text(DSML_EDIT), text("Done."))
+            await Agent(model=model, tools=[edit, read]).arun("type the cache path")
+        finally:
+            bind_ledger(None)
+        [entry] = ledger.records
+        assert entry.mechanism == LEAKED_TOOL_CALLS
+        assert entry.outcome == "dsml"
+        assert entry.detail == {"calls": 1, "source": "message body"}
+
+    @pytest.mark.asyncio
     async def test_leading_prose_stays_in_the_conversation(self) -> None:
         model = _deepseek_model(text("Making the edit.\n" + DSML_EDIT), text("Done."))
         agent = Agent(model=model, tools=[edit])

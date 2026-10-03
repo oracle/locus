@@ -297,6 +297,27 @@ def test_edits_without_a_later_check_are_unchecked() -> None:
     )
 
 
+def test_an_edit_that_ran_its_check_as_then_run_is_checked() -> None:
+    def fused(command: str, result: str) -> ToolExecution:
+        return ToolExecution(
+            tool_name="edit",
+            tool_call_id="e1",
+            arguments={"path": "a.py", "then_run": {"command": command}},
+            result=result,
+        )
+
+    assert not edits_unchecked(
+        [fused("pytest -q", "edited a.py\n\n[then_run] $ pytest -q\nexit 0")]
+    )
+    # Skipped, or not a check: the edit is still unchecked.
+    assert edits_unchecked([fused("pytest -q", "edited a.py\n\n[then_run skipped] changed")])
+    assert edits_unchecked([fused("ls", "edited a.py\n\n[then_run] $ ls\nexit 0")])
+    # A malformed then_run is no command at all.
+    assert edits_unchecked(
+        [ToolExecution(tool_name="edit", tool_call_id="e2", arguments={"then_run": 3}, result="")]
+    )
+
+
 # ------------------------------------------------------------ the check alone --
 
 

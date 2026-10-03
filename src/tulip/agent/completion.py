@@ -51,6 +51,8 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
+from tulip.tools.action_fusion import RAN, fused_command
+
 
 if TYPE_CHECKING:
     from tulip.agent.verification import FinalAnswerContext, FinalAnswerVerifier
@@ -500,14 +502,18 @@ def edits_unchecked(
     tool_executions``). An edit is a successful call of one of ``edit_tools``;
     a check is a call of one of ``shell_tools`` whose ``command`` argument
     matches ``check`` — run, not passed: a failing test run still told the
-    model something.
+    model something. An edit that carried its check as ``then_run``
+    (:mod:`tulip.tools.action_fusion`) and ran it is an edit and a check at
+    once; one whose command was skipped is only an edit.
     """
     edits = frozenset(edit_tools)
     shells = frozenset(shell_tools)
     unchecked = False
     for execution in executions:
         if execution.tool_name in edits and execution.error is None:
-            unchecked = True
+            fused = fused_command(execution.arguments)
+            ran = fused is not None and RAN in (execution.result or "")
+            unchecked = not (ran and check.search(fused or ""))
         elif execution.tool_name in shells and check.search(
             str(execution.arguments.get("command", ""))
         ):
