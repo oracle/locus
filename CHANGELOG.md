@@ -8,38 +8,6 @@ policy.
 
 ## [Unreleased]
 
-### Fixed
-
-- **A mid-run system note no longer replaces the agent's instructions on
-  Anthropic models.** The agent loop adds system-role notes partway through a
-  run (iteration-limit notice, grounding and verification reminders, the
-  final-answer nudge), and the Anthropic adapter sent the *last* system
-  message as `system` — so after the first note the model ran without its
-  real instructions. Every native adapter now maps system messages the same
-  way: the leading ones (instructions, then a recalled-memory block) form the
-  system prompt in order, and a later one stays at its position as user-role
-  guidance. On Anthropic and Bedrock it is a `<system-note>` text block in
-  the user turn there, merged with adjacent user turns so roles alternate and
-  tool results still open the turn after their tool calls; OpenAI, Azure and
-  Gemini keep their `[System guidance]` user note. With `prompt_cache=True`,
-  Anthropic marks both the instructions block and the last system block, so a
-  memory block that changes per turn does not cost the instructions their
-  cache hit. Bedrock no longer hoists mid-run notes into `system`, and now
-  sends parallel tool results in one user turn, as Converse requires. On
-  OpenAI-compatible endpoints a memory block now joins the opening system
-  message instead of becoming a user note before the prompt.
-
-### Changed
-
-- **An oversized tool result keeps its head and its tail.** Past
-  `max_tool_result_length`, the loop used to keep the first N characters, so
-  a test run, build or lint lost its verdict: the failing test and the
-  `1 failed, 39999 passed` summary are printed last. The cut now keeps the
-  first 40% and the last 60% of the budget, with a marker between them —
-  `[OUTPUT TRUNCATED — 38123 of 40123 chars cut; first 800 and last 1200 kept]`.
-  The new `AgentConfig.tool_result_head_fraction` sets the split; `1.0` keeps
-  only the head, as before. The marker still starts `[OUTPUT TRUNCATED`, but
-  its wording changed, so code matching `original: N chars` needs updating.
 ### Added
 
 - **`AgentConfig.context_window`** and the **`TULIP_CONTEXT_WINDOW`**
@@ -71,7 +39,6 @@ policy.
   undeclared argument rejects the call instead of being dropped. Agents on
   a server that returns calls as text (no tool parser) set
   ``text_tool_calls="on"``; the rogue demo's local mode does.
-### Added
 
 - **`Agent.continue_turn(thread_id)`** continues a turn that stopped before
   it finished — a process killed mid-turn — from the thread's latest
@@ -80,16 +47,6 @@ policy.
   stays done. A call the checkpoint holds without a result is answered with
   an error saying its outcome is unknown, never re-run. A thread paused on an
   in-process interrupt is still answered with `resume()`.
-
-### Changed
-
-- `checkpoint_every_n_iterations` also applies to resumed and continued
-  segments (`resume()`, `continue_turn()`), which previously saved only at
-  the end. The default stays `0`: built-in checkpointers keep every save as
-  history, so per-iteration saves grow storage with each iteration and change
-  what `get_state_history` and `fork` list. Long unattended runs set `1`, and
-  a kill then loses at most the iteration in flight.
-### Added
 
 - **Loop-level retry of transient model-call failures (`AgentConfig.model_retry`).**
   A 429, a 5xx, a dropped connection or a timeout on any model call used to
@@ -105,6 +62,46 @@ policy.
   `stream_tokens=True`, otherwise once the call returns or fails. A streamed
   call is not retried once a chunk has reached the caller, nor is a cancelled
   run. `model_retry=False` restores the old behaviour.
+
+### Changed
+
+- **An oversized tool result keeps its head and its tail.** Past
+  `max_tool_result_length`, the loop used to keep the first N characters, so
+  a test run, build or lint lost its verdict: the failing test and the
+  `1 failed, 39999 passed` summary are printed last. The cut now keeps the
+  first 40% and the last 60% of the budget, with a marker between them —
+  `[OUTPUT TRUNCATED — 38123 of 40123 chars cut; first 800 and last 1200 kept]`.
+  The new `AgentConfig.tool_result_head_fraction` sets the split; `1.0` keeps
+  only the head, as before. The marker still starts `[OUTPUT TRUNCATED`, but
+  its wording changed, so code matching `original: N chars` needs updating.
+
+- `checkpoint_every_n_iterations` also applies to resumed and continued
+  segments (`resume()`, `continue_turn()`), which previously saved only at
+  the end. The default stays `0`: built-in checkpointers keep every save as
+  history, so per-iteration saves grow storage with each iteration and change
+  what `get_state_history` and `fork` list. Long unattended runs set `1`, and
+  a kill then loses at most the iteration in flight.
+
+### Fixed
+
+- **A mid-run system note no longer replaces the agent's instructions on
+  Anthropic models.** The agent loop adds system-role notes partway through a
+  run (iteration-limit notice, grounding and verification reminders, the
+  final-answer nudge), and the Anthropic adapter sent the *last* system
+  message as `system` — so after the first note the model ran without its
+  real instructions. Every native adapter now maps system messages the same
+  way: the leading ones (instructions, then a recalled-memory block) form the
+  system prompt in order, and a later one stays at its position as user-role
+  guidance. On Anthropic and Bedrock it is a `<system-note>` text block in
+  the user turn there, merged with adjacent user turns so roles alternate and
+  tool results still open the turn after their tool calls; OpenAI, Azure and
+  Gemini keep their `[System guidance]` user note. With `prompt_cache=True`,
+  Anthropic marks both the instructions block and the last system block, so a
+  memory block that changes per turn does not cost the instructions their
+  cache hit. Bedrock no longer hoists mid-run notes into `system`, and now
+  sends parallel tool results in one user turn, as Converse requires. On
+  OpenAI-compatible endpoints a memory block now joins the opening system
+  message instead of becoming a user note before the prompt.
 
 ## [2.18.3] - 2026-09-29
 
