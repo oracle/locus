@@ -233,7 +233,11 @@ def initialize_agent(agent: Agent) -> None:
         # stops one large tool result ending the run.
         from tulip.memory.compactor import LLMCompactor
 
-        agent._conversation_manager = LLMCompactor(context_length=context_window)
+        # Its cuts move in steps, so most requests keep the previous one's
+        # prefix and the provider's prompt cache keeps serving it.
+        agent._conversation_manager = LLMCompactor(
+            context_length=context_window, slide_step=_CACHE_FRIENDLY_STEP
+        )
     else:
         # Unknown window: a message window, at any iteration count. A short
         # run can still overflow on one large tool output, so say how to
@@ -242,7 +246,11 @@ def initialize_agent(agent: Agent) -> None:
 
         _warn_unknown_window(model_id)
         window = max(20, agent.config.max_iterations * 2)
-        agent._conversation_manager = SlidingWindowManager(window_size=window)
+        # Slides a quarter of the window at a time rather than a message per
+        # request, so the start of the history stays cacheable in between.
+        agent._conversation_manager = SlidingWindowManager(
+            window_size=window, slide_step=max(1, window // 4)
+        )
 
     # --- Reflexion ---------------------------------------------------------
     if agent.config.reflexion and agent.config.reflexion.enabled:
@@ -291,6 +299,10 @@ CONTEXT_WINDOW_ENV = "TULIP_CONTEXT_WINDOW"
 # Model ids already warned about, so a process that builds many agents on the
 # same unknown model logs the fallback once.
 _warned_unknown: set[str] = set()
+
+
+#: How many messages the default token-window manager's cuts move at a time.
+_CACHE_FRIENDLY_STEP = 8
 
 
 def _context_window(agent: Agent, metadata_window: int | None) -> int | None:

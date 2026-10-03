@@ -117,9 +117,12 @@ async def test_memory_block_does_not_pile_up_on_checkpointed_thread() -> None:
     assert saved is not None
     # The block is ephemeral: it never reaches the checkpoint at all.
     assert len(_memory_blocks(list(saved.messages))) == 0
-    # The block stays right after the primary system prompt.
-    assert model.calls[-1][0].content == "You are helpful."
-    assert model.calls[-1][1].metadata.get(MEMORY_BLOCK_METADATA_KEY) is True
+    # The system prompt stays first, and the block follows the turn's prompt:
+    # per-turn content after the history the next turn sends again.
+    last = model.calls[-1]
+    assert last[0].content == "You are helpful."
+    assert last[-1].metadata.get(MEMORY_BLOCK_METADATA_KEY) is True
+    assert last[-2].content == "turn 4"
 
 
 async def test_legacy_untagged_block_from_old_checkpoint_is_replaced() -> None:

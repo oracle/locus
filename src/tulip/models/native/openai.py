@@ -59,6 +59,44 @@ def _join_system(first: Any, extra: str | None) -> str:
     return "\n\n".join(parts)
 
 
+def _int_field(holder: Any, name: str) -> int | None:
+    value = holder.get(name) if isinstance(holder, dict) else getattr(holder, name, None)
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _chat_usage(usage: Any) -> tuple[dict[str, int], float | None]:
+    """A chat-completions ``usage`` block in Tulip's keys, and the cost it reports.
+
+    ``cached_tokens`` (OpenAI, DeepSeek, OpenRouter: the prompt tokens served
+    from the provider's prefix cache) and OpenRouter's ``cache_write_tokens``
+    are kept under those names: they are part of ``prompt_tokens``, unlike
+    Anthropic's ``cache_read_input_tokens``, so the two must not be added up as
+    if they were the same thing. OpenRouter also reports what the call cost
+    (``usage.cost``, USD); it is returned apart because usage counts tokens.
+    """
+    out: dict[str, int] = {}
+    prompt = _int_field(usage, "prompt_tokens")
+    completion = _int_field(usage, "completion_tokens")
+    if prompt is None or completion is None:
+        return out, None
+    out["prompt_tokens"] = prompt
+    out["completion_tokens"] = completion
+    details = (
+        usage.get("prompt_tokens_details")
+        if isinstance(usage, dict)
+        else getattr(usage, "prompt_tokens_details", None)
+    )
+    if details is not None:
+        for name in ("cached_tokens", "cache_write_tokens"):
+            value = _int_field(details, name)
+            if value:
+                out[name] = value
+    cost = usage.get("cost") if isinstance(usage, dict) else getattr(usage, "cost", None)
+    if isinstance(cost, bool) or not isinstance(cost, int | float):
+        cost = None
+    return out, (float(cost) if cost is not None else None)
+
+
 def _computer_call_arguments(item: dict[str, Any]) -> dict[str, Any]:
     """The tool arguments for a dumped ``computer_call`` item."""
     arguments: dict[str, Any] = {}
@@ -903,12 +941,10 @@ class OpenAIModel(BaseModel):
 
         message = Message.assistant(content=content, tool_calls=tool_calls)
 
-        usage = {}
+        usage: dict[str, int] = {}
+        cost: float | None = None
         if response.usage:
-            usage = {
-                "prompt_tokens": response.usage.prompt_tokens,
-                "completion_tokens": response.usage.completion_tokens,
-            }
+            usage, cost = _chat_usage(response.usage)
 
         # ``n>1`` costs the caller tokens for every candidate; keep the extras
         # instead of discarding everything past choices[0].
@@ -942,6 +978,7 @@ class OpenAIModel(BaseModel):
             reasoning=reasoning,
             logprobs=logprobs,
             candidates=candidates,
+            cost_usd=cost,
         )
 
     # ------------------------------------------------------------------
@@ -1604,6 +1641,7 @@ class OpenAIModel(BaseModel):
         stream = await self.client.chat.completions.create(**request_kwargs)
 
         final_usage: dict[str, int] | None = None
+        final_cost: float | None = None
         final_stop_reason: str | None = None
         # The SERVED model, off the stream itself. Behind a router this can
         # differ from the requested name (a fallback answers while the
@@ -1620,13 +1658,10 @@ class OpenAIModel(BaseModel):
             # the only chunk that has it.
             chunk_usage = getattr(chunk, "usage", None)
             if chunk_usage is not None:
-                prompt_tokens = getattr(chunk_usage, "prompt_tokens", None)
-                completion_tokens = getattr(chunk_usage, "completion_tokens", None)
-                if isinstance(prompt_tokens, int) and isinstance(completion_tokens, int):
-                    final_usage = {
-                        "prompt_tokens": prompt_tokens,
-                        "completion_tokens": completion_tokens,
-                    }
+                parsed_usage, parsed_cost = _chat_usage(chunk_usage)
+                if parsed_usage:
+                    final_usage = parsed_usage
+                    final_cost = parsed_cost
 
             if not chunk.choices:
                 continue
@@ -1712,5 +1747,9 @@ class OpenAIModel(BaseModel):
         # chunk arrives *after* the choice that carries the finish reason, so
         # closing early would report a turn we cannot yet meter.
         yield ModelChunkEvent(
-            done=True, usage=final_usage, stop_reason=final_stop_reason, model=served_model
+            done=True,
+            usage=final_usage,
+            stop_reason=final_stop_reason,
+            model=served_model,
+            cost_usd=final_cost,
         )

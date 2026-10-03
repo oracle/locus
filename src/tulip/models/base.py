@@ -99,6 +99,10 @@ class ModelResponse(BaseModel):
     # never sent to the model. ``FallbackChain`` records the tier that served
     # the call under ``"fallback"`` (``{"tier", "model", "attempts"}``).
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # What the provider says this call cost in USD, when it says (OpenRouter
+    # puts ``cost`` in the usage block). ``None`` means not reported, never
+    # free; the metadata price table remains the estimate then.
+    cost_usd: float | None = None
 
     @property
     def content(self) -> str | None:

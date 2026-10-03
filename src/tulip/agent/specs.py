@@ -18,6 +18,7 @@ opencode ``agent/`` files work unchanged::
     disallowed_tools: [bash]
     mode: subagent                   # primary | subagent | all
     max_turns: 12
+    token_budget: 300000             # tokens in and out, per task
     ---
     You review code changes. Report bugs with file and line...
 
@@ -29,6 +30,8 @@ What each harness accepts as a key:
   ``web_fetch``; ``*`` and ``?`` match as globs (``mcp__github__*``).
 - ``disallowed_tools`` / ``disallowedTools`` — always removed.
 - ``max_turns`` / ``maxTurns`` / ``steps`` / ``maxSteps`` — iteration cap.
+- ``token_budget`` / ``tokenBudget`` / ``max_tokens`` — tokens (in and out)
+  one delegated task may spend before it is stopped.
 - ``model: inherit`` — the same as leaving it out.
 - ``disable: true`` — the file is skipped.
 
@@ -66,6 +69,7 @@ AgentMode = Literal["primary", "subagent", "all"]
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 _TURN_KEYS = ("max_turns", "maxTurns", "steps", "maxSteps", "max_iterations")
 _DENY_KEYS = ("disallowed_tools", "disallowedTools", "disallowed-tools")
+_BUDGET_KEYS = ("token_budget", "tokenBudget", "max_tokens")
 _KNOWN_KEYS = {
     "name",
     "description",
@@ -76,6 +80,7 @@ _KNOWN_KEYS = {
     "disable",
     *_TURN_KEYS,
     *_DENY_KEYS,
+    *_BUDGET_KEYS,
 }
 
 
@@ -113,6 +118,10 @@ class AgentSpec(BaseModel):
     #: ``primary`` drives a session, ``subagent`` is delegated to, ``all`` both.
     mode: AgentMode = "all"
     max_turns: int | None = Field(default=None, ge=1, le=500)
+    #: Tokens, in and out, one task of this type may spend. A delegated search
+    #: that reads without end costs the parent as much as reading it itself,
+    #: and more. ``None`` leaves the child only the parent's own budget.
+    token_budget: int | None = Field(default=None, ge=1)
     temperature: float | None = None
     #: The file it was read from, for messages that point at it.
     source: str | None = None
@@ -370,6 +379,7 @@ def parse_agent_markdown(
     for key in _DENY_KEYS:
         denied = (*denied, *_names(data.get(key)))
     max_turns = next((data[k] for k in _TURN_KEYS if data.get(k) is not None), None)
+    token_budget = next((data[k] for k in _BUDGET_KEYS if data.get(k) is not None), None)
     model = data.get("model")
     if isinstance(model, str) and model.strip().lower() in ("", "inherit", "default"):
         model = None
@@ -385,6 +395,7 @@ def parse_agent_markdown(
         disallowed_tools=denied,
         mode=data.get("mode") or default_mode,
         max_turns=max_turns,
+        token_budget=token_budget,
         temperature=data.get("temperature"),
         source=source,
         metadata=metadata,

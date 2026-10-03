@@ -68,7 +68,7 @@ import threading
 import time
 import uuid
 from contextvars import ContextVar, Token
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from pydantic import BaseModel
 
@@ -104,6 +104,21 @@ class _LinkedCancelSignal(threading.Event):
         return super().is_set() or any(p.is_set() for p in self._parent_signals)
 
 
+class ChildSpend(NamedTuple):
+    """One finished child turn's spend, as reported to its parent run."""
+
+    prompt: int
+    completion: int
+    cache_creation: int
+    cache_read: int
+    #: At the child's metadata prices; ``None`` when its model is unpriced.
+    cost: float | None
+    cached: int = 0
+    cache_write: int = 0
+    #: What the provider reported; ``None`` when no call reported a cost.
+    reported_cost: float | None = None
+
+
 class _ParentRunContext:
     """What a running loop exposes to the subagents spawned beneath it.
 
@@ -124,9 +139,7 @@ class _ParentRunContext:
     ) -> None:
         self.cancel_signal = cancel_signal
         #: Child usage reports, drained into the parent's state by the loop.
-        #: Each entry: (prompt, completion, cache_creation, cache_read, cost);
-        #: cost is ``None`` when the child's model is unpriced.
-        self.usage_sink: list[tuple[int, int, int, int, float | None]] = []
+        self.usage_sink: list[ChildSpend] = []
         #: ``time.monotonic()`` at which the parent's time budget runs out.
         self.deadline = deadline
         #: The parent's own lifecycle hooks, for a delegating tool that
@@ -191,11 +204,19 @@ def fold_subagent_usage(state: AgentState) -> AgentState:
     if ctx is None or not ctx.usage_sink:
         return state
     pending, ctx.usage_sink[:] = list(ctx.usage_sink), []
-    for prompt_toks, completion_toks, cache_creation, cache_read, cost in pending:
+    for spend in pending:
         spent_before = state.cost_usd_used
-        state = state.with_token_usage(prompt_toks, completion_toks, cache_creation, cache_read)
-        if cost is not None:
-            state = state.model_copy(update={"cost_usd_used": spent_before + cost})
+        state = state.with_token_usage(
+            spend.prompt,
+            spend.completion,
+            spend.cache_creation,
+            spend.cache_read,
+            cached_tokens=spend.cached,
+            cache_write_tokens=spend.cache_write,
+            reported_cost_usd=spend.reported_cost,
+        )
+        if spend.cost is not None:
+            state = state.model_copy(update={"cost_usd_used": spent_before + spend.cost})
     return state
 
 
@@ -457,12 +478,15 @@ async def _drive(
             # counters are per turn, so a resumed child reports only the new
             # turn's spend.
             parent_ctx.usage_sink.append(
-                (
+                ChildSpend(
                     state.prompt_tokens_used,
                     state.completion_tokens_used,
                     state.cache_creation_tokens_used,
                     state.cache_read_tokens_used,
                     state.cost_usd_used if state.priced else None,
+                    cached=state.cached_tokens_used,
+                    cache_write=state.cache_write_tokens_used,
+                    reported_cost=(state.reported_cost_usd if state.reported_cost_calls else None),
                 )
             )
 

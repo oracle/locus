@@ -58,8 +58,11 @@ __all__ = ["DEFAULT_SUBAGENT_PROMPT", "TaskRegistry", "task_depth", "task_tool"]
 DEFAULT_SUBAGENT_PROMPT = (
     "You are a subagent. Another agent delegated the task below to you and will "
     "read only your final message, not your tool calls — so finish with a "
-    "concise, self-contained answer: what you found or did, with file paths "
-    "and line numbers where they matter, and anything you could not settle."
+    "concise, self-contained answer: what you found or did, and anything you "
+    "could not settle. Cite every place that matters as path:start-end with "
+    "the few lines that answer the question quoted under it, so the agent "
+    "that delegated can act without reading those files again. Stop as soon "
+    "as you can answer; do not read what the answer does not need."
 )
 
 #: How deep the current code is in a chain of task calls: 0 in a top-level
@@ -204,13 +207,18 @@ def task_tool(  # noqa: PLR0913, C901 — the whole delegation policy, passed in
 
     description = (
         "Delegate a task to a subagent that works in its own context window and "
-        "returns only its final answer. Use it for searches and investigations "
-        "that would fill your context with material you do not need afterwards, "
-        "and for independent pieces of work. Several calls in one turn run in "
-        "parallel. Give the subagent everything it needs in `prompt` — it cannot "
-        "see this conversation. The result ends with a task_id: pass it back as "
-        "`task_id` to continue that subagent with a follow-up instead of starting "
-        "a new one.\n\nSubagent types:\n" + _describe(by_name.values())
+        "returns only its final answer. Use it for broad searches across many "
+        "files or an unfamiliar codebase, whose material you will not need "
+        "afterwards, and for independent pieces of work. Do not use it to read "
+        "a few files you already know or can find with one search: read those "
+        "yourself, since what a subagent reads is not in your context and you "
+        "would pay to read it twice. Its answer cites path:line ranges with "
+        "excerpts: work from them and read only the ranges you will change. "
+        "Several calls in one turn run in parallel. Give the subagent everything "
+        "it needs in `prompt` — it cannot see this conversation. The result ends "
+        "with a task_id: pass it back as `task_id` to continue that subagent with "
+        "a follow-up instead of starting a new one.\n\nSubagent types:\n"
+        + _describe(by_name.values())
     )
 
     async def task(
@@ -255,6 +263,12 @@ def task_tool(  # noqa: PLR0913, C901 — the whole delegation policy, passed in
             child_kwargs: dict[str, Any] = dict(extra)
             if spec.temperature is not None:
                 child_kwargs["temperature"] = spec.temperature
+            if spec.token_budget is not None:
+                # The tighter of the type's own cap and one every subagent got.
+                shared = child_kwargs.get("token_budget")
+                child_kwargs["token_budget"] = (
+                    spec.token_budget if shared is None else min(shared, spec.token_budget)
+                )
             subagent = Subagent(
                 model=_model_for(spec),
                 tools=_child_tools(spec, depth),

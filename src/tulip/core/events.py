@@ -281,14 +281,21 @@ class TerminateEvent(TulipEvent):
     # Cumulative token usage for the run segment that ended here, read off the
     # AgentState counters (prompt/completion/total, plus
     # cache_read_input_tokens / cache_creation_input_tokens when the provider
-    # reported cache activity). None when the model reported no usage —
-    # consumers must treat absence as "unmetered", not 0.
+    # reported cache activity Anthropic's way, outside ``prompt_tokens``, and
+    # cached_tokens / cache_write_tokens when it reported it OpenAI's way,
+    # inside them). None when the model reported no usage — consumers must
+    # treat absence as "unmetered", not 0.
     usage: dict[str, int] | None = None
     # What the segment cost in USD, from the model's metadata prices. None
     # when the model is unpriced: a stream consumer cannot tell "free" from
     # "unknown" otherwise, and a supervisor enforcing its own spend limit
     # needs the number the loop already computed rather than a second table.
     cost_usd: float | None = None
+    # What the provider itself reported the segment's calls cost (OpenRouter's
+    # ``usage.cost``), delegated subagents included. None when no call
+    # reported one. Where both are set this is the bill and ``cost_usd`` the
+    # list-price estimate, which ignores prompt caching.
+    reported_cost_usd: float | None = None
     # Why the run failed, when ``reason == "error"``. The loop yields this
     # event and then re-raises, so a consumer that stops at the event (a
     # stream-json writer, a socket front end) otherwise has no message to show.
@@ -426,6 +433,9 @@ class ModelChunkEvent(TulipEvent):
     # surfaces as an empty reply rather than an error.
     usage: dict[str, int] | None = None
     stop_reason: str | None = None
+    # The provider's own figure for the call, in USD, on the terminal chunk
+    # when it reports one (see ``ModelResponse.cost_usd``).
+    cost_usd: float | None = None
 
 
 class ModelCompleteEvent(TulipEvent):

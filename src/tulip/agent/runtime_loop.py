@@ -96,7 +96,17 @@ def _usage_of(state: AgentState) -> dict[str, int] | None:
         usage["cache_read_input_tokens"] = state.cache_read_tokens_used
     if state.cache_creation_tokens_used:
         usage["cache_creation_input_tokens"] = state.cache_creation_tokens_used
+    # The OpenAI-style counters, which are inside ``prompt_tokens``.
+    if state.cached_tokens_used:
+        usage["cached_tokens"] = state.cached_tokens_used
+    if state.cache_write_tokens_used:
+        usage["cache_write_tokens"] = state.cache_write_tokens_used
     return usage
+
+
+def _reported_cost_of(state: AgentState) -> float | None:
+    """What the provider said the segment's calls cost, or ``None`` when it never said."""
+    return state.reported_cost_usd if state.reported_cost_calls else None
 
 
 def _cost_of(state: AgentState) -> float | None:
@@ -106,6 +116,14 @@ def _cost_of(state: AgentState) -> float | None:
     worth reporting when both prices are known.
     """
     return state.cost_usd_used if state.priced else None
+
+
+#: The smallest ``max_iterations`` that counts as a budget for the nudge.
+_MIN_NUDGED_ITERATIONS = 10
+
+#: ``Message.metadata`` key on the budget note (see ``budget_nudge_at``),
+#: naming the budget that prompted it.
+BUDGET_NOTE_KEY = "tulip_budget_note"
 
 
 #: Longest error text a TerminateEvent carries. The exception is re-raised
@@ -760,6 +778,8 @@ class AgentRuntimeMixin:
 
         # Track metrics
         started_at = datetime.now(UTC)
+        # Whether the run has had its one note to converge (``budget_nudge_at``).
+        _budget_nudged = False
         _total_tokens = 0
         _tool_calls_count = 0
         _tool_errors_count = 0
@@ -790,7 +810,7 @@ class AgentRuntimeMixin:
             # Run hooks: before_invocation
             state = await self._run_before_invocation_hooks(prompt, state)
 
-            # Inject long-term memories into the system prompt.
+            # Inject long-term memories, after the turn's prompt.
             if self._memory_manager is not None:
                 state = await self._memory_manager.on_session_start(state)
         except BaseException:
@@ -836,6 +856,7 @@ class AgentRuntimeMixin:
                             final_confidence=state.confidence,
                             usage=_usage_of(state),
                             cost_usd=_cost_of(state),
+                            reported_cost_usd=_reported_cost_of(state),
                             total_tool_calls=len(state.tool_executions),
                             final_message=_last_assistant_content,
                         )
@@ -849,6 +870,7 @@ class AgentRuntimeMixin:
                         final_confidence=state.confidence,
                         usage=_usage_of(state),
                         cost_usd=_cost_of(state),
+                        reported_cost_usd=_reported_cost_of(state),
                         total_tool_calls=_tool_calls_count,
                         final_message="Agent cancelled by external signal.",
                     )
@@ -870,6 +892,7 @@ class AgentRuntimeMixin:
                             final_confidence=state.confidence,
                             usage=_usage_of(state),
                             cost_usd=_cost_of(state),
+                            reported_cost_usd=_reported_cost_of(state),
                             total_tool_calls=len(state.tool_executions),
                             final_message=_last_assistant_content,
                         )
@@ -915,14 +938,9 @@ class AgentRuntimeMixin:
                         )
                         prompt_toks = response.usage.get("prompt_tokens", 0)
                         completion_toks = response.usage.get("completion_tokens", 0)
-                        cache_creation_toks = response.usage.get("cache_creation_input_tokens", 0)
-                        cache_read_toks = response.usage.get("cache_read_input_tokens", 0)
                         _total_tokens += prompt_toks + completion_toks
-                        state = state.with_token_usage(
-                            prompt_toks,
-                            completion_toks,
-                            cache_creation_tokens=cache_creation_toks,
-                            cache_read_tokens=cache_read_toks,
+                        state = state.with_response_usage(
+                            response.usage, getattr(response, "cost_usd", None)
                         )
 
                         # A model that is not done answers with its next call in
@@ -942,6 +960,7 @@ class AgentRuntimeMixin:
                             final_confidence=state.confidence,
                             usage=_usage_of(state),
                             cost_usd=_cost_of(state),
+                            reported_cost_usd=_reported_cost_of(state),
                             total_tool_calls=len(state.tool_executions),
                             final_message=summary,
                         )
@@ -954,6 +973,7 @@ class AgentRuntimeMixin:
                         final_confidence=state.confidence,
                         usage=_usage_of(state),
                         cost_usd=_cost_of(state),
+                        reported_cost_usd=_reported_cost_of(state),
                         total_tool_calls=len(state.tool_executions),
                         final_message=_last_assistant_content,
                     )
@@ -997,6 +1017,12 @@ class AgentRuntimeMixin:
                             )
                         )
 
+                if not _budget_nudged:
+                    state, nudge = self._budget_nudge(state, started_at)
+                    if nudge is not None:
+                        _budget_nudged = True
+                        yield nudge
+
                 # Get model response. When the caller asked for tokens, the
                 # model call runs as a task and its chunks are drained here, so
                 # they surface while the model is still producing rather than
@@ -1008,6 +1034,7 @@ class AgentRuntimeMixin:
                         final_confidence=state.confidence,
                         usage=_usage_of(state),
                         cost_usd=_cost_of(state),
+                        reported_cost_usd=_reported_cost_of(state),
                         total_tool_calls=len(state.tool_executions),
                         final_message=_last_assistant_content,
                     )
@@ -1026,6 +1053,7 @@ class AgentRuntimeMixin:
                             final_confidence=state.confidence,
                             usage=_usage_of(state),
                             cost_usd=_cost_of(state),
+                            reported_cost_usd=_reported_cost_of(state),
                             total_tool_calls=len(state.tool_executions),
                             final_message=f"[context exhausted] {compaction.detail}",
                         )
@@ -1068,14 +1096,9 @@ class AgentRuntimeMixin:
                     yield custom
                 prompt_toks = response.usage.get("prompt_tokens", 0)
                 completion_toks = response.usage.get("completion_tokens", 0)
-                cache_creation_toks = response.usage.get("cache_creation_input_tokens", 0)
-                cache_read_toks = response.usage.get("cache_read_input_tokens", 0)
                 _total_tokens += prompt_toks + completion_toks
-                state = state.with_token_usage(
-                    prompt_toks,
-                    completion_toks,
-                    cache_creation_tokens=cache_creation_toks,
-                    cache_read_tokens=cache_read_toks,
+                state = state.with_response_usage(
+                    response.usage, getattr(response, "cost_usd", None)
                 )
                 _last_assistant_content = response.message.content
                 # Track for the user-supplied termination condition. Updated again
@@ -1190,14 +1213,9 @@ class AgentRuntimeMixin:
                         )
                         s_prompt_toks = summary_resp.usage.get("prompt_tokens", 0)
                         s_completion_toks = summary_resp.usage.get("completion_tokens", 0)
-                        s_cc_toks = summary_resp.usage.get("cache_creation_input_tokens", 0)
-                        s_cr_toks = summary_resp.usage.get("cache_read_input_tokens", 0)
                         _total_tokens += s_prompt_toks + s_completion_toks
-                        state = state.with_token_usage(
-                            s_prompt_toks,
-                            s_completion_toks,
-                            cache_creation_tokens=s_cc_toks,
-                            cache_read_tokens=s_cr_toks,
+                        state = state.with_response_usage(
+                            summary_resp.usage, getattr(summary_resp, "cost_usd", None)
                         )
                     except Exception:  # noqa: BLE001
                         # Summary call failed — fall back to the last
@@ -1332,6 +1350,7 @@ class AgentRuntimeMixin:
                         final_confidence=state.confidence,
                         usage=_usage_of(state),
                         cost_usd=_cost_of(state),
+                        reported_cost_usd=_reported_cost_of(state),
                         total_tool_calls=len(state.tool_executions),
                         final_message=final_content,
                     )
@@ -1878,6 +1897,7 @@ class AgentRuntimeMixin:
                 final_confidence=state.confidence,
                 usage=_usage_of(state),
                 cost_usd=_cost_of(state),
+                reported_cost_usd=_reported_cost_of(state),
                 total_tool_calls=len(state.tool_executions),
                 error=_error_text(e),
             )
@@ -1947,6 +1967,8 @@ class AgentRuntimeMixin:
         metadata, _ = self._split_run_metadata(metadata)
 
         started_at = datetime.now(UTC)
+        # Whether the run has had its one note to converge (``budget_nudge_at``).
+        _budget_nudged = False
         _total_tokens = 0
         _tool_calls_count = 0
         _tool_errors_count = 0
@@ -2003,6 +2025,7 @@ class AgentRuntimeMixin:
                             final_confidence=state.confidence,
                             usage=_usage_of(state),
                             cost_usd=_cost_of(state),
+                            reported_cost_usd=_reported_cost_of(state),
                             total_tool_calls=len(state.tool_executions),
                             final_message=_last_assistant_content,
                         )
@@ -2015,6 +2038,7 @@ class AgentRuntimeMixin:
                         final_confidence=state.confidence,
                         usage=_usage_of(state),
                         cost_usd=_cost_of(state),
+                        reported_cost_usd=_reported_cost_of(state),
                         total_tool_calls=len(state.tool_executions),
                         final_message="Agent cancelled by external signal.",
                     )
@@ -2033,6 +2057,7 @@ class AgentRuntimeMixin:
                             final_confidence=state.confidence,
                             usage=_usage_of(state),
                             cost_usd=_cost_of(state),
+                            reported_cost_usd=_reported_cost_of(state),
                             total_tool_calls=len(state.tool_executions),
                             final_message=_last_assistant_content,
                         )
@@ -2050,12 +2075,18 @@ class AgentRuntimeMixin:
                         final_confidence=state.confidence,
                         usage=_usage_of(state),
                         cost_usd=_cost_of(state),
+                        reported_cost_usd=_reported_cost_of(state),
                         total_tool_calls=len(state.tool_executions),
                         final_message=_last_assistant_content,
                     )
                     break
 
                 state = state.next_iteration()
+                if not _budget_nudged:
+                    state, nudge = self._budget_nudge(state, started_at)
+                    if nudge is not None:
+                        _budget_nudged = True
+                        yield nudge
                 if state.would_exceed_cost_budget(self.config.max_tokens or 4096):
                     yield TerminateEvent(
                         reason="cost_budget",
@@ -2063,6 +2094,7 @@ class AgentRuntimeMixin:
                         final_confidence=state.confidence,
                         usage=_usage_of(state),
                         cost_usd=_cost_of(state),
+                        reported_cost_usd=_reported_cost_of(state),
                         total_tool_calls=len(state.tool_executions),
                         final_message=_last_assistant_content,
                     )
@@ -2078,6 +2110,7 @@ class AgentRuntimeMixin:
                             final_confidence=state.confidence,
                             usage=_usage_of(state),
                             cost_usd=_cost_of(state),
+                            reported_cost_usd=_reported_cost_of(state),
                             total_tool_calls=len(state.tool_executions),
                             final_message=f"[context exhausted] {compaction.detail}",
                         )
@@ -2095,14 +2128,9 @@ class AgentRuntimeMixin:
                     yield custom
                 prompt_toks = response.usage.get("prompt_tokens", 0)
                 completion_toks = response.usage.get("completion_tokens", 0)
-                cache_creation_toks = response.usage.get("cache_creation_input_tokens", 0)
-                cache_read_toks = response.usage.get("cache_read_input_tokens", 0)
                 _total_tokens += prompt_toks + completion_toks
-                state = state.with_token_usage(
-                    prompt_toks,
-                    completion_toks,
-                    cache_creation_tokens=cache_creation_toks,
-                    cache_read_tokens=cache_read_toks,
+                state = state.with_response_usage(
+                    response.usage, getattr(response, "cost_usd", None)
                 )
                 _last_assistant_content = response.message.content
                 _last_no_tool_calls = not response.message.tool_calls
@@ -2169,6 +2197,7 @@ class AgentRuntimeMixin:
                         final_confidence=state.confidence,
                         usage=_usage_of(state),
                         cost_usd=_cost_of(state),
+                        reported_cost_usd=_reported_cost_of(state),
                         total_tool_calls=len(state.tool_executions),
                         final_message=answer,
                     )
@@ -2391,6 +2420,7 @@ class AgentRuntimeMixin:
                 final_confidence=state.confidence,
                 usage=_usage_of(state),
                 cost_usd=_cost_of(state),
+                reported_cost_usd=_reported_cost_of(state),
                 total_tool_calls=len(state.tool_executions),
                 error=_error_text(e),
             )
@@ -2530,6 +2560,76 @@ class AgentRuntimeMixin:
             return state, None
         state = state.with_tool_loop_warning(loop).with_message(Message.system(warning_text(loop)))
         return state, CustomEvent(name="tool_loop_warning", data=loop.as_dict())
+
+    def _budget_nudge(
+        self, state: AgentState, started_at: datetime
+    ) -> tuple[AgentState, CustomEvent | None]:
+        """One note to converge, once the run has used ``budget_nudge_at`` of a budget.
+
+        Checked before each model call against every budget the run has —
+        tokens, cost, wall-clock time, iterations — and given for the one
+        furthest along. The note asks the model to finish the work in hand,
+        not to stop: a run that is told to wrap up and stops with the task
+        undone has wasted everything it spent, and the completion check
+        still sends such a stop back.
+        """
+        at = self.config.budget_nudge_at
+        if at is None:
+            return state, None
+        used: list[tuple[float, str, str]] = []
+        if state.token_budget:
+            used.append(
+                (
+                    state.total_tokens_used / state.token_budget,
+                    "token",
+                    f"{state.total_tokens_used:,} of {state.token_budget:,} tokens",
+                )
+            )
+        if state.cost_budget_usd:
+            used.append(
+                (
+                    state.cost_usd_used / state.cost_budget_usd,
+                    "cost",
+                    f"${state.cost_usd_used:.2f} of ${state.cost_budget_usd:.2f}",
+                )
+            )
+        if self.config.time_budget_seconds:
+            elapsed = (datetime.now(UTC) - started_at).total_seconds()
+            used.append(
+                (
+                    elapsed / self.config.time_budget_seconds,
+                    "time",
+                    f"{elapsed:.0f}s of {self.config.time_budget_seconds:.0f}s",
+                )
+            )
+        # A cap of a few turns is a deliberately short leash, not a budget to
+        # pace against: a note there would be most of the conversation.
+        if state.max_iterations >= _MIN_NUDGED_ITERATIONS:
+            used.append(
+                (
+                    state.iteration / state.max_iterations,
+                    "iteration",
+                    f"{state.iteration} of {state.max_iterations} turns",
+                )
+            )
+        fraction, budget, detail = max(used, default=(0.0, "", ""))
+        if fraction < at:
+            return state, None
+        note = Message(
+            role=Role.USER,
+            content=(
+                "[Budget note — automated, not from the user] This run has used "
+                f"{fraction:.0%} of its {budget} budget ({detail}). Converge: finish "
+                "the change in progress, run the check that proves it, and report. Do "
+                "not start new exploration or re-read files you have already read. "
+                "The task still has to be done — do not stop with it unfinished."
+            ),
+            metadata={AUTOMATED_NOTE_KEY: True, BUDGET_NOTE_KEY: budget},
+        )
+        return state.with_message(note), CustomEvent(
+            name="budget_nudge",
+            data={"budget": budget, "fraction": round(fraction, 3), "detail": detail},
+        )
 
     def _spend_fields(self) -> dict[str, Any]:
         """The state fields that price a run and cap its spend."""
@@ -2956,6 +3056,7 @@ class AgentRuntimeMixin:
         tool_calls: list[ToolCall] = []
         usage: dict[str, int] = {}
         stop_reason: str | None = None
+        cost_usd: float | None = None
 
         async for chunk in self._model.stream(**complete_kwargs):
             await chunk_queue.put(chunk)
@@ -2972,6 +3073,9 @@ class AgentRuntimeMixin:
                 usage = chunk.usage or {}
             if getattr(chunk, "stop_reason", None):
                 stop_reason = chunk.stop_reason
+            chunk_cost = getattr(chunk, "cost_usd", None)
+            if isinstance(chunk_cost, int | float) and not isinstance(chunk_cost, bool):
+                cost_usd = float(chunk_cost)
 
         return ModelResponse(
             message=Message.assistant(
@@ -2981,6 +3085,7 @@ class AgentRuntimeMixin:
             usage=usage,
             stop_reason=stop_reason,
             reasoning="".join(reasoning_parts) or None,
+            cost_usd=cost_usd,
         )
 
     async def _call_model(
@@ -3231,12 +3336,7 @@ class AgentRuntimeMixin:
         if outcome.usage:
             # Summary calls are spend like any other: they count against the
             # run's token and cost budgets.
-            state = state.with_token_usage(
-                outcome.usage.get("prompt_tokens", 0),
-                outcome.usage.get("completion_tokens", 0),
-                cache_creation_tokens=outcome.usage.get("cache_creation_input_tokens", 0),
-                cache_read_tokens=outcome.usage.get("cache_read_input_tokens", 0),
-            )
+            state = state.with_response_usage(outcome.usage)
         state = state.model_copy(update={"messages": tuple(outcome.messages)})
         if outcome.exhausted:
             logger.warning("Context exhausted at iteration %d: %s", state.iteration, outcome.detail)
@@ -3582,13 +3682,7 @@ class AgentRuntimeMixin:
 
             new_message = response.message.content or ""
             repair_messages.append(response.message)
-            usage = response.usage or {}
-            state = state.with_token_usage(
-                usage.get("prompt_tokens", 0),
-                usage.get("completion_tokens", 0),
-                cache_creation_tokens=usage.get("cache_creation_input_tokens", 0),
-                cache_read_tokens=usage.get("cache_read_input_tokens", 0),
-            )
+            state = state.with_response_usage(response.usage, getattr(response, "cost_usd", None))
 
             attempt = parse_structured(new_message, schema, strict=False)
             if attempt.success:
