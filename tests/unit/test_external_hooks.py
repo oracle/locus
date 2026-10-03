@@ -91,7 +91,7 @@ def test_configuration_is_read_and_problems_are_kept() -> None:
                 {"hooks": ["not an object"]},
                 "not a group",
             ],
-            "Stopp": [],
+            "Stopped": [],
             "Stop": "not a list",
         },
         source="settings.json",
@@ -111,7 +111,7 @@ def test_configuration_is_read_and_problems_are_kept() -> None:
         "must be positive",
         "hook that is not an object",
         "entry that is not an object",
-        "unknown hook event 'Stopp'",
+        "unknown hook event 'Stopped'",
         "hooks.Stop must be a list",
     ):
         assert expected in problems
