@@ -372,6 +372,23 @@ policy.
   structured call in the conversation. `AgentConfig.leaked_tool_call_formats`
   overrides the profile (`[]` turns it off), as does `text_tool_calls="off"`.
   A resumed turn recovers text calls the same way as the first pass.
+- **A leaked call is made wherever the reply puts it.** In real runs on
+  `litellm:openrouter/deepseek/deepseek-v4-pro` the DSML never reached the
+  recovery above: DeepSeek left its call at the end of the reasoning channel,
+  so the reply had no body; the second empty reply made the loop ask for a
+  final answer with the tools taken away, and with nothing to call the model
+  wrote its call as DSML, which became the run's answer — and every
+  continuation the completion check sent got the same. Now a reply with no
+  body whose reasoning ends in the model's markup is that call, and a reply
+  to the no-tools final-answer request that is a call is the turn's tool
+  step (the request is dropped from the history). An iteration-limit summary
+  that is a call falls back to the last answer or the deterministic summary.
+- **A call cut off by the output limit is asked for again.** A reply that
+  opens one of the model's call blocks and never closes it — a large `write`
+  stopped at `max_tokens` — was taken for the final answer. The model is now
+  sent back with an automated user-role note to make the call again, smaller
+  if it was cut off (`tulip.agent.leaked_tool_calls.unfinished_leaked_tool_call`),
+  up to twice in a row before the reply is taken as it is.
 - **`requests_changes` recognises task prompts it missed.** It read only a
   change verb at the start of a sentence, and sentences ended only at `.!?;`,
   so a spec written one requirement a line ("…\nMake the library directory

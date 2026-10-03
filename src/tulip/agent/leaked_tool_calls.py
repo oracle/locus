@@ -26,6 +26,11 @@ rules that keep the generic parser safe:
 - one bad call rejects the block: running half of what the model wrote is a
   different action from the one it asked for.
 
+A block the reply opens and never closes is a call cut off — usually by the
+output-token limit, in the middle of a large ``write``. It is not a call and
+not an answer either: :func:`unfinished_leaked_tool_call` recognises it, so the
+loop can ask for the call again instead of ending the run on half of it.
+
 Formats, each as the model's published encoding or the vLLM parser for it
 writes it:
 
@@ -64,8 +69,10 @@ __all__ = [
     "LEAKED_TOOL_CALL_FORMATS",
     "LeakedToolCallFormat",
     "LeakedToolCalls",
+    "UnfinishedToolCall",
     "match_leaked_tool_calls",
     "parse_leaked_tool_calls",
+    "unfinished_leaked_tool_call",
 ]
 
 #: Every format :func:`parse_leaked_tool_calls` knows, in the order tried.
@@ -85,6 +92,14 @@ class LeakedToolCalls:
     """The calls found in a message, the prose before them, and their format."""
 
     calls: list[ToolCall]
+    prose: str | None
+    format: LeakedToolCallFormat
+
+
+@dataclass(frozen=True)
+class UnfinishedToolCall:
+    """A call block the message opens and never closes, and the prose before it."""
+
     prose: str | None
     format: LeakedToolCallFormat
 
@@ -363,6 +378,23 @@ _FORMATS: dict[str, tuple[re.Pattern[str], _Reader]] = {
 }
 
 
+_TOOL_CALL_OPEN = re.compile(r"(?:^|\n)[ \t]*(<tool_call>)")
+_TOOL_CALL_CLOSE = re.compile(r"</tool_call>")
+
+#: Each format: where a block of it starts (group 1 when the pattern has one),
+#: and the tag that closes it. ``<tool_call>`` counts only at the start of a
+#: line: unlike the special-token formats it is ordinary text a final answer
+#: may quote.
+_ENDS: dict[str, tuple[re.Pattern[str], re.Pattern[str]]] = {
+    "dsml": (_DSML_OPEN, _DSML_CLOSE),
+    "deepseek": (_DS_OPEN, _DS_CLOSE),
+    "hermes": (_TOOL_CALL_OPEN, _TOOL_CALL_CLOSE),
+    "qwen_xml": (_TOOL_CALL_OPEN, _TOOL_CALL_CLOSE),
+    "kimi": (_KIMI_OPEN, _KIMI_CLOSE),
+    "glm": (_TOOL_CALL_OPEN, _TOOL_CALL_CLOSE),
+}
+
+
 # ------------------------------------------------------------- validation --
 
 
@@ -461,3 +493,32 @@ def parse_leaked_tool_calls(
     if found is None:
         return [], None
     return found.calls, found.prose
+
+
+def unfinished_leaked_tool_call(
+    text: str | None,
+    formats: Iterable[str],
+) -> UnfinishedToolCall | None:
+    """The call block ``text`` opens in one of ``formats`` and never closes, or ``None``.
+
+    Only for a message :func:`match_leaked_tool_calls` did not read as calls:
+    a block whose finished part is a valid call is a call. The last block the
+    message opens is the one that counts, so a reply that quotes a closed
+    block and then is cut off inside a new one is still unfinished.
+    """
+    if not text:
+        return None
+    for fmt in formats:
+        ends = _ENDS.get(fmt)
+        if ends is None:
+            continue
+        opener, closer = ends
+        opened = list(opener.finditer(text))
+        if not opened:
+            continue
+        last = opened[-1]
+        start = last.start(1) if opener.groups else last.start()
+        if closer.search(text, last.end()) is None:
+            prose = text[:start].strip() or None
+            return UnfinishedToolCall(prose=prose, format=cast("LeakedToolCallFormat", fmt))
+    return None
