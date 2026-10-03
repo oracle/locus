@@ -536,6 +536,12 @@ READS = [
 ]
 
 
+def _unordered(calls: list[tuple[str, dict[str, object]]]) -> list[tuple[str, dict[str, object]]]:
+    """``calls`` in a fixed order: recovered calls in one step run concurrently, so the
+    order they finish in (and append to ``ran``) varies from run to run."""
+    return sorted(calls, key=repr)
+
+
 def _empty(reasoning: str | None = None) -> ModelResponse:
     """A reply with no body and no call, its reasoning in the separate channel."""
     return ModelResponse(
@@ -604,7 +610,7 @@ class TestLoopAroundEmptyReplies:
 
         result = await agent.arun("what builds this?")
 
-        assert ran == READS
+        assert _unordered(ran) == _unordered(READS)
         assert result.text == "Done."
         assistant = [m for m in model.received_messages[1] if m.role.value == "assistant"]
         assert [c.name for c in assistant[-1].tool_calls] == ["read", "read"]
@@ -637,7 +643,8 @@ class TestLoopAroundEmptyReplies:
         # is the next tool step, and the run goes on with the tools.
         assert model.offered_tools[3] == []
         assert model.offered_tools[4] == ["edit", "read"]
-        assert ran == [("read", {"path": "README.md", "limit": 0}), *READS]
+        assert ran[0] == ("read", {"path": "README.md", "limit": 0})
+        assert _unordered(ran[1:]) == _unordered(READS)
         assert result.text == "Done."
         assert not any("[Final answer requested]" in n for n in _notes(model.received_messages[4]))
 
