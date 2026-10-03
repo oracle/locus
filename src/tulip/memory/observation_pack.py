@@ -45,6 +45,9 @@ frees the room losslessly:
 * The exact bytes are archived per session, content addressed, and the
   ``obs_recall`` tool pages them back by byte offset or line, at most
   ``recall_max_bytes`` / ``recall_max_lines`` per call.
+* An output too large to send even once (over the agent's inline limit) is
+  archived whole on arrival and sent cut around a pointer to the archive, so
+  the part that was cut is recallable too (:meth:`ObservationPack.intake`).
 * Anything that fails (a full disk, a symlinked archive) fails open: the
   request keeps the full result.
 
@@ -266,9 +269,16 @@ class Observation:
     id: str
     content_hash: str
     tool_name: str
+    #: What the message carries. For an output cut on arrival this is the cut
+    #: text (its two ends are the original's), not the archived original.
     text: str
+    #: Bytes of the archived original.
     size: int
     lines: int
+    #: Bytes of ``text``, what a request sends while the output goes whole.
+    sent: int = -1
+    #: The original was archived on arrival (:meth:`ObservationPack.intake`).
+    archived: bool = False
 
     @property
     def data(self) -> bytes:
@@ -276,7 +286,7 @@ class Observation:
 
     @property
     def tokens(self) -> int:
-        return -(-len(self.text) // _CHARS_PER_TOKEN)
+        return -(-self.size // _CHARS_PER_TOKEN)
 
     @classmethod
     def of(cls, message: Message) -> Observation:
@@ -293,7 +303,14 @@ class Observation:
             text=text,
             size=len(data),
             lines=_count_lines(data),
+            sent=len(data),
         )
+
+
+#: How an output cut on arrival names the archived original, in the cut
+#: marker: ``... archived as obs_<id> (<bytes> bytes, <lines> lines) ...``.
+_POINTER = re.compile(r"archived as (obs_[a-f0-9]{24}) \((\d+) bytes, (\d+) lines\)")
+_CUT_MARKER = "[OUTPUT TRUNCATED"
 
 
 class ObservationArchive:
@@ -320,6 +337,11 @@ class ObservationArchive:
 
     def store(self, observation: Observation) -> None:
         """Write ``observation``'s bytes, or check the copy already there."""
+        if observation.archived:
+            # Written on arrival; the message holds only its two ends.
+            if not self.path_of(observation.id).is_file():
+                raise OSError(f"archived {observation.id} is missing")
+            return
         self._ensure_dir(self.objects)
         path = self.path_of(observation.id)
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
@@ -439,8 +461,8 @@ def recall_stub_for(observation: Observation, label: str) -> str:
     """A cleared output's one-line stub that still leads back to its exact text."""
     recall = json.dumps({"id": observation.id, "offset": 0})
     return (
-        f"[output cleared to free context: {label} returned {len(observation.text)} "
-        f"characters. Its exact text is archived as {observation.id}: call obs_recall "
+        f"[output cleared to free context: {label} returned {observation.size} "
+        f"bytes. Its exact text is archived as {observation.id}: call obs_recall "
         f"with {recall} to read it.]"
     )
 
@@ -469,6 +491,9 @@ class ObservationStats:
     bytes_saved: int = 0
     #: Outputs compaction cleared into a recallable stub instead of a lossy one.
     cleared_recallable: int = 0
+    #: Outputs too large to send whole, archived on arrival and sent cut
+    #: around a pointer to the archive.
+    archived_on_arrival: int = 0
     recalls: int = 0
     recalled_bytes: int = 0
     #: Times something failed and the full output was sent instead.
@@ -480,6 +505,7 @@ class ObservationStats:
 
 @dataclass
 class _Session:
+    key: str
     archive: ObservationArchive
     swapped: set[str]
     stats: ObservationStats = field(default_factory=ObservationStats)
@@ -537,6 +563,8 @@ class ObservationPack:
         recall_max_bytes: Most bytes one ``obs_recall`` returns, header included.
         recall_max_lines: Most lines one ``obs_recall`` returns, header included.
         cost_model: When a batch of due outputs is swapped.
+        label: The agent this pack serves (a subagent's name), stamped on its
+            mechanism-ledger rows so a subagent's are told from its parent's.
     """
 
     def __init__(
@@ -549,6 +577,7 @@ class ObservationPack:
         recall_max_bytes: int = 16 * 1024,
         recall_max_lines: int = 400,
         cost_model: SwapCostModel | None = None,
+        label: str | None = None,
     ) -> None:
         if threshold_bytes < 0:
             raise ValueError("threshold_bytes must be non-negative")
@@ -571,9 +600,10 @@ class ObservationPack:
         self.recall_max_bytes = recall_max_bytes
         self.recall_max_lines = recall_max_lines
         self.cost_model = cost_model or SwapCostModel()
+        self.label = label
         self._sessions: dict[str, _Session] = {}
         self._lock = threading.Lock()
-        self._observed: dict[tuple[Any, ...], tuple[str, str, int, int]] = {}
+        self._observed: dict[tuple[Any, ...], tuple[str, str, int, int, int, bool]] = {}
         self._placeholders: dict[str, str] = {}
 
     # ------------------------------------------------------------------
@@ -595,13 +625,36 @@ class ObservationPack:
                     swapped = archive.swapped()
                 except OSError:
                     swapped = set()
-                found = _Session(archive=archive, swapped=swapped)
+                found = _Session(key=session, archive=archive, swapped=swapped)
                 self._sessions[session] = found
             return found
 
     def stats(self, session: str) -> ObservationStats:
         """What the mechanism did for ``session`` in this process."""
         return self._session(session).stats
+
+    def record(
+        self,
+        state: _Session,
+        outcome: str,
+        *,
+        triggered: bool = True,
+        bytes_saved: int | None = None,
+        tokens_saved: int | None = None,
+        detail: dict[str, Any] | None = None,
+    ) -> None:
+        """One row in the run's mechanism ledger, naming the session and agent."""
+        attribution: dict[str, Any] = {"session": state.key}
+        if self.label:
+            attribution["agent"] = self.label
+        record_mechanism(
+            OBSERVATION_PACK,
+            triggered=triggered,
+            outcome=outcome,
+            bytes_saved=bytes_saved,
+            tokens_saved=tokens_saved,
+            detail={**attribution, **(detail or {})},
+        )
 
     def _log(self, state: _Session, entry: dict[str, Any]) -> None:
         try:
@@ -627,7 +680,7 @@ class ObservationPack:
         key = (message.tool_call_id, message.name, len(content), hash(content))
         known = self._observed.get(key)
         if known is None:
-            observation = Observation.of(message)
+            observation = _observation_of(message)
             if len(self._observed) > _OBSERVED_CACHE_LIMIT:
                 self._observed.clear()
             # Only the small facts are cached: the text is the message's own.
@@ -636,13 +689,22 @@ class ObservationPack:
                 observation.content_hash,
                 observation.size,
                 observation.lines,
+                observation.sent,
+                observation.archived,
             )
         else:
-            observation_id, content_hash, size, lines = known
+            observation_id, content_hash, size, lines, sent, archived = known
             observation = Observation(
-                observation_id, content_hash, message.name or "tool", content, size, lines
+                observation_id,
+                content_hash,
+                message.name or "tool",
+                content,
+                size,
+                lines,
+                sent,
+                archived,
             )
-        return observation if observation.size > threshold else None
+        return observation if observation.sent > threshold else None
 
     def _placeholder(self, observation: Observation) -> str:
         text = self._placeholders.get(observation.id)
@@ -674,7 +736,7 @@ class ObservationPack:
             observation = self._packable(message, self.threshold_bytes)
             if observation is not None and observation.id in swapped:
                 out[index] = self._swap(message, observation)
-                saved += observation.size - len(out[index].content or "")
+                saved += observation.sent - len(out[index].content or "")
                 shown += 1
         return out, saved, shown
 
@@ -720,9 +782,7 @@ class ObservationPack:
             error = f"{type(exc).__name__}: {exc}"
             logger.warning("ObservationPack failed open: %s", error)
             self._log(state, {"event": "fail_open", "error": error})
-            record_mechanism(
-                OBSERVATION_PACK, triggered=False, outcome="fail_open", detail={"error": error}
-            )
+            self.record(state, "fail_open", triggered=False, detail={"error": error})
             return list(messages)
 
     def _project(
@@ -771,9 +831,9 @@ class ObservationPack:
         if saved > 0:
             # Per request, because that is where the saving happens: these
             # bytes were not sent this time, and would have been.
-            record_mechanism(
-                OBSERVATION_PACK,
-                outcome="placeholders",
+            self.record(
+                state,
+                "placeholders",
                 bytes_saved=saved,
                 tokens_saved=saved // _CHARS_PER_TOKEN,
                 detail={"placeholders": shown},
@@ -806,7 +866,7 @@ class ObservationPack:
         saved_bytes = 0
         for index, observation in due:
             tentative[index] = self._swap(messages[index], observation)
-            saved_bytes += observation.size - len(tentative[index].content or "")
+            saved_bytes += observation.sent - len(tentative[index].content or "")
         first = min(index for index, _ in due)
         rewrite = (
             sum(_char_count_tokens(m) for m in tentative[first:cached_end])
@@ -832,10 +892,10 @@ class ObservationPack:
                 state.stats.fail_open += 1
                 logger.warning("Could not archive %s: %s", observation.id, exc)
                 self._log(state, {"event": "fail_open", "id": observation.id, "error": str(exc)})
-                record_mechanism(
-                    OBSERVATION_PACK,
+                self.record(
+                    state,
+                    "fail_open",
                     triggered=False,
-                    outcome="fail_open",
                     detail={"id": observation.id, "error": str(exc)},
                 )
                 continue
@@ -864,9 +924,9 @@ class ObservationPack:
             "request": requests_so_far + 1,
         }
         self._log(state, entry)
-        record_mechanism(
-            OBSERVATION_PACK,
-            outcome="swap",
+        self.record(
+            state,
+            "swap",
             detail={
                 "reason": decision.reason,
                 "swapped": len(stored),
@@ -883,6 +943,64 @@ class ObservationPack:
     # ------------------------------------------------------------------
     # Compaction: clear into a recallable stub
     # ------------------------------------------------------------------
+
+    def intake(
+        self,
+        text: str,
+        *,
+        tool_name: str,
+        tool_call_id: str | None,
+        session: str,
+        limit: int,
+        head_fraction: float = 0.4,
+    ) -> str | None:
+        """An output over ``limit`` characters, archived whole and cut around a pointer.
+
+        The cut keeps ``limit * head_fraction`` characters from the start and
+        the rest from the end, as plain truncation does, and its marker names
+        the archive id and the byte offset of the cut, so ``obs_recall`` reads
+        exactly what was left out. Returns ``None`` when the output cannot be
+        archived: the caller then truncates it the lossy way.
+        """
+        if limit <= 0 or len(text) <= limit or has_images(text):
+            return None
+        state = self._session(session)
+        message = Message(role=Role.TOOL, tool_call_id=tool_call_id, name=tool_name, content=text)
+        observation = Observation.of(message)
+        try:
+            state.archive.store(observation)
+        except (OSError, ValueError) as exc:
+            state.stats.fail_open += 1
+            logger.warning("Could not archive %s: %s", observation.id, exc)
+            self.record(
+                state,
+                "fail_open",
+                triggered=False,
+                detail={"id": observation.id, "error": str(exc)},
+            )
+            return None
+        head = int(limit * min(max(head_fraction, 0.0), 1.0))
+        tail = limit - head
+        cut_at = len(text[:head].encode("utf-8", "surrogatepass"))
+        recall = json.dumps({"id": observation.id, "offset": cut_at})
+        marker = (
+            f"{_CUT_MARKER} — {len(text) - limit} of {len(text)} chars cut here; first "
+            f"{head} and last {tail} kept. The whole output is archived as {observation.id} "
+            f"({observation.size} bytes, {observation.lines} lines): call obs_recall with "
+            f"{recall} to read on from the cut.]"
+        )
+        state.stats.archived_on_arrival += 1
+        self._log(state, {"event": "archived_on_arrival", "id": observation.id, "cut_at": cut_at})
+        self.record(
+            state,
+            "archived_on_arrival",
+            detail={"id": observation.id, "original_bytes": observation.size, "kept_chars": limit},
+        )
+        parts = [text[:head]] if head else []
+        parts.append(marker)
+        if tail:
+            parts.append(text[-tail:])
+        return "\n".join(parts)
 
     def archive_for(self, session: str) -> SessionArchive:
         """What compaction uses to clear outputs losslessly in ``session``."""
@@ -955,11 +1073,33 @@ class ObservationPack:
         stats.recalls += 1
         stats.recalled_bytes += len(chunk)
         self._log(state, {"event": "recall", **details})
-        record_mechanism(OBSERVATION_PACK, outcome="recall", detail=details)
+        self.record(state, "recall", detail=details)
         return f"{header}\n{chunk.decode('utf-8', 'surrogatepass')}", {
             **details,
             "stats": stats.as_dict(),
         }
+
+
+def _observation_of(message: Message) -> Observation:
+    """The observation a tool message stands for.
+
+    An output cut on arrival stands for its archived original: the pointer in
+    its cut marker gives the id, size and lines.
+    """
+    content = message.content or ""
+    pointer = _POINTER.search(content) if _CUT_MARKER in content else None
+    if pointer is None:
+        return Observation.of(message)
+    return Observation(
+        id=pointer[1],
+        content_hash="",
+        tool_name=message.name or "tool",
+        text=content,
+        size=int(pointer[2]),
+        lines=int(pointer[3]),
+        sent=len(content.encode("utf-8", "surrogatepass")),
+        archived=True,
+    )
 
 
 class SessionArchive:
@@ -976,7 +1116,7 @@ class SessionArchive:
             return None
         if has_images(message.content):
             return None
-        observation = Observation.of(message)
+        observation = _observation_of(message)
         try:
             self._state.archive.store(observation)
         except (OSError, ValueError) as exc:
@@ -999,9 +1139,7 @@ class SessionArchive:
         self._state.stats.cleared_recallable += 1
         # The room it frees is the compaction's own record; this one says the
         # clearing kept the bytes.
-        record_mechanism(
-            OBSERVATION_PACK, outcome="cleared_recallable", detail={"id": observation.id}
-        )
+        self._pack.record(self._state, "cleared_recallable", detail={"id": observation.id})
         return message.model_copy(
             update={
                 "content": recall_stub_for(observation, label),

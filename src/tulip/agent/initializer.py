@@ -455,6 +455,7 @@ def _build_observation_pack(agent: Agent) -> Any:
         excerpt_bytes=config.excerpt_bytes,
         recall_max_bytes=config.recall_max_bytes,
         recall_max_lines=config.recall_max_lines,
+        label=agent.config.name,
         cost_model=SwapCostModel(
             cache_read_cost=config.cache_read_cost,
             cache_write_cost=config.cache_write_cost,

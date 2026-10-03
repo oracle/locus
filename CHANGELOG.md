@@ -355,6 +355,19 @@ policy.
   per request, recalls, recallable clears, fail-opens), announced as
   `observation_pack` `CustomEvent`s and logged to the session's
   `ledger.jsonl`.
+- **ObservationPack loses nothing to the per-result cap, and covers
+  subagents.** With the pack on, `max_tool_result_length` no longer cuts a
+  tool output before the pack sees it: up to
+  `ObservationPackConfig.max_inline_chars` (128,000 characters, at most an
+  eighth of a known window) goes whole, and a larger output is archived whole
+  on arrival and sent cut around a pointer naming its archive id and the byte
+  offset of the cut, so `obs_recall` reads exactly what was left out. The cap
+  still applies with the pack off, when archiving fails, with images, or with
+  a `tool_result_store`. A subagent started by a run with the pack (the
+  `task` tool, `run_subagent`, `Subagent`) gets the parent's settings and
+  `obs_recall`, archives under `<session>/subagents/<task>/`, and its ledger
+  rows carry its name; an explicit `observation_pack=` from the caller wins.
+  `docs/observation-pack.md` describes the mechanism and its status.
 
 ### Changed
 

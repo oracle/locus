@@ -68,7 +68,7 @@ from tulip.core.events import (
     TulipEvent,
 )
 from tulip.core.loops import warning_text
-from tulip.core.media import strip_images, text_length
+from tulip.core.media import has_images, strip_images, text_length
 from tulip.core.messages import Message, Role, ToolCall, ToolResult
 from tulip.core.state import AgentState, ReasoningStep, ToolExecution
 from tulip.models.base import ModelResponse
@@ -828,6 +828,7 @@ class AgentRuntimeMixin:
             rc.cancel,
             time_budget_seconds=self.config.time_budget_seconds,
             hooks=self.config.hooks,
+            observation_pack=self._child_observation_pack(state, rc),
         )
 
         try:
@@ -1715,12 +1716,23 @@ class AgentRuntimeMixin:
                     # configured the full payload is offloaded through it and
                     # a recoverable reference key inlined; otherwise the
                     # middle is cut and both ends kept.
+                    # With ObservationPack on, nothing is lost to the cap: an
+                    # output up to the pack's inline limit goes whole (the pack
+                    # sends it as a placeholder once it is old), and a larger
+                    # one is archived whole and cut around a pointer to it.
                     if (
                         self.config.max_tool_result_length > 0
                         and result.content
                         and text_length(result.content) > self.config.max_tool_result_length
                     ):
-                        if self.config.tool_result_store is not None:
+                        packed = (
+                            self._intake_large_output(result, state, rc)
+                            if self.config.tool_result_store is None
+                            else None
+                        )
+                        if packed is not None:
+                            result = packed
+                        elif self.config.tool_result_store is not None:
                             result = self.config.tool_result_store.maybe_offload(
                                 result,
                                 run_id=state.run_id,
@@ -1999,6 +2011,7 @@ class AgentRuntimeMixin:
             rc.cancel,
             time_budget_seconds=self.config.time_budget_seconds,
             hooks=self.config.hooks,
+            observation_pack=self._child_observation_pack(state, rc),
         )
 
         try:
@@ -3391,6 +3404,60 @@ class AgentRuntimeMixin:
             exhausted=outcome.exhausted,
             detail=outcome.detail,
         )
+
+    def _child_observation_pack(self, state: AgentState, run: RunContext) -> Any:
+        """The ObservationPack config a subagent of this run gets, or ``None``.
+
+        The parent's settings, with the archive under the parent's session
+        (``<session>/subagents/<task>/observation-pack/``), so a subagent's
+        outputs are recallable to it and kept with the session that paid for
+        them.
+        """
+        pack = self._observation_pack
+        if pack is None:
+            return None
+        from tulip.memory.observation_pack import session_directory_name  # noqa: PLC0415
+
+        session = session_directory_name(self._observation_session(state, run))
+        return self.config.observation_pack.model_copy(
+            update={"directory": pack.directory / session / "subagents"}
+        )
+
+    def _inline_limit(self) -> int:
+        """Characters of one tool output sent whole while ObservationPack is on."""
+        from tulip.memory.compaction import ContextCompactor  # noqa: PLC0415
+
+        limit = self.config.observation_pack.max_inline_chars or 2**62
+        compactor = self._conversation_manager
+        if isinstance(compactor, ContextCompactor):
+            # One output never takes more than an eighth of the window.
+            limit = min(limit, compactor.context_length * 4 // 8)
+        return max(limit, self.config.max_tool_result_length)
+
+    def _intake_large_output(
+        self, result: ToolResult, state: AgentState, run: RunContext
+    ) -> ToolResult | None:
+        """``result`` as ObservationPack sends it when it is over the plain cap.
+
+        ``None`` means the pack is off or could not archive it, and the caller
+        cuts it at ``max_tool_result_length`` as before.
+        """
+        pack = self._observation_pack
+        content = result.content
+        if pack is None or not isinstance(content, str) or has_images(content):
+            return None
+        limit = self._inline_limit()
+        if text_length(content) <= limit:
+            return result
+        cut = pack.intake(
+            content,
+            tool_name=result.name,
+            tool_call_id=result.tool_call_id,
+            session=self._observation_session(state, run),
+            limit=limit,
+            head_fraction=self.config.tool_result_head_fraction,
+        )
+        return result.model_copy(update={"content": cut}) if cut is not None else None
 
     def _compaction_limit(self) -> int | None:
         """Estimated message tokens at which the next compaction starts, if any."""
