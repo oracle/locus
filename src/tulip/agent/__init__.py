@@ -19,6 +19,7 @@ from tulip.agent.config import (
     CompactionConfig,
     GroundingConfig,
     ModelRetryConfig,
+    ObservationPackConfig,
     ReflexionConfig,
 )
 from tulip.agent.result import AgentResult, ExecutionMetrics, StopReason, StreamingResult
@@ -38,6 +39,7 @@ __all__ = [
     "Continuation",
     "GroundingConfig",
     "ModelRetryConfig",
+    "ObservationPackConfig",
     "LoopAgent",
     "ParallelPipeline",
     "PipelineResult",

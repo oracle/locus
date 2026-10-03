@@ -66,6 +66,7 @@ COMPLETION_CHECK = "completion_check"
 LEAKED_TOOL_CALLS = "leaked_tool_call_recovery"
 COMPACTION = "compaction"
 LOOP_WARNING = "loop_warning"
+OBSERVATION_PACK = "observation_pack"
 
 
 @dataclass(frozen=True)
@@ -270,6 +271,7 @@ __all__ = [
     "COMPLETION_CHECK",
     "LEAKED_TOOL_CALLS",
     "LOOP_WARNING",
+    "OBSERVATION_PACK",
     "MechanismLedger",
     "MechanismRecord",
     "bind_ledger",

@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -209,6 +210,54 @@ class CompactionConfig(BaseModel):
     )
     summary_max_tokens: int | None = Field(default=None, ge=1)
     min_iterations_between_summaries: int = Field(default=3, ge=0)
+
+
+class ObservationPackConfig(BaseModel):
+    """Send large old tool outputs as recallable placeholders (ObservationPack).
+
+    A text tool output over ``threshold_bytes`` goes whole in its first
+    ``full_sends`` requests; after that the request shows a placeholder (an id,
+    its size, a kilobyte of its first and last lines) while the run's state
+    keeps the output, and the ``obs_recall`` tool, registered with it, pages
+    the exact bytes back from a per-session archive under ``directory``.
+    Swaps are batched and priced against the prompt cache (see
+    :class:`tulip.memory.observation_pack.SwapCostModel`), and compaction
+    clears outputs into recallable stubs instead of lossy ones. See
+    :mod:`tulip.memory.observation_pack`.
+    """
+
+    model_config = {"arbitrary_types_allowed": True, "extra": "forbid"}
+
+    enabled: bool = False
+    directory: str | Path | None = Field(
+        default=None,
+        description=(
+            "Where per-session archives live, as <directory>/<session>/observation-pack/. "
+            "None uses $TMPDIR/tulip-observation-pack."
+        ),
+    )
+    threshold_bytes: int = Field(default=10 * 1024, ge=0)
+    full_sends: int = Field(default=2, ge=0)
+    excerpt_bytes: int = Field(default=1024, ge=0)
+    recall_max_bytes: int = Field(default=16 * 1024, gt=512)
+    recall_max_lines: int = Field(default=400, gt=2)
+    # The cost model. Prices are relative to an uncached input token.
+    min_batch_bytes: int = Field(
+        default=32 * 1024,
+        ge=0,
+        description="Bytes a swap batch must free before it may break a cached prefix.",
+    )
+    cache_read_cost: float = Field(default=0.1, ge=0.0)
+    cache_write_cost: float = Field(default=1.0, ge=0.0)
+    horizon_requests: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Requests a swap is expected to save on. None: the requests made so far "
+            "(at least min_horizon_requests)."
+        ),
+    )
+    min_horizon_requests: int = Field(default=4, ge=1)
 
 
 class AgentConfig(BaseModel):
@@ -605,6 +654,23 @@ class AgentConfig(BaseModel):
             return CompactionConfig(enabled=v)
         if v is None:
             return CompactionConfig()
+        return v
+
+    observation_pack: ObservationPackConfig = Field(
+        default_factory=ObservationPackConfig,
+        description=(
+            "Send large old tool outputs as recallable placeholders and register "
+            "obs_recall (off by default). ``True`` turns it on with the defaults."
+        ),
+    )
+
+    @field_validator("observation_pack", mode="before")
+    @classmethod
+    def _observation_pack_flag(cls, v: Any) -> Any:
+        if isinstance(v, bool):
+            return ObservationPackConfig(enabled=v)
+        if v is None:
+            return ObservationPackConfig()
         return v
 
     memory_manager: Any | None = Field(

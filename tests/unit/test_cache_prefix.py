@@ -17,17 +17,19 @@ from __future__ import annotations
 
 import itertools
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from tulip.agent import Agent
+from tulip.agent import Agent, ObservationPackConfig
 from tulip.core.events import CompactionEvent, CustomEvent, TerminateEvent
 from tulip.core.messages import Message, Role, ToolCall
 from tulip.memory.backends.memory import MemoryCheckpointer
 from tulip.memory.conversation import SlidingWindowManager
 from tulip.memory.manager import BaseMemoryManager, Memory, MemoryType
+from tulip.memory.observation_pack import OBSERVATION_ID_KEY
 from tulip.models.base import ModelResponse
 from tulip.models.native.anthropic import AnthropicModel
 from tulip.models.native.openai import OpenAIModel
@@ -41,7 +43,17 @@ def read(path: str) -> str:
     return f"# {path}\n" + "\n".join(f"line {n} of {path}: value = {n * 7}" for n in range(120))
 
 
-def _scripted(steps: int, *, parallel: bool = False) -> tuple[FunctionModel, list[list[Message]]]:
+@tool(idempotent=False)
+def read_big(path: str) -> str:
+    """Read a large file (13 KB, over ObservationPack's 10 KiB threshold)."""
+    return f"# {path}\n" + "\n".join(
+        f"line {n} of {path}: value = {n * 7} {'x' * 40}" for n in range(200)
+    )
+
+
+def _scripted(
+    steps: int, *, parallel: bool = False, tool_name: str = "read"
+) -> tuple[FunctionModel, list[list[Message]]]:
     """A model that reads ``steps`` files, one per turn, then answers; and its requests."""
     requests: list[list[Message]] = []
 
@@ -55,9 +67,11 @@ def _scripted(steps: int, *, parallel: bool = False) -> tuple[FunctionModel, lis
                 message=Message.assistant("Done."),
                 usage={"prompt_tokens": 1_000, "completion_tokens": 10},
             )
-        calls = [ToolCall(id=f"c{turn}a", name="read", arguments={"path": f"f{turn}.py"})]
+        calls = [ToolCall(id=f"c{turn}a", name=tool_name, arguments={"path": f"f{turn}.py"})]
         if parallel:
-            calls.append(ToolCall(id=f"c{turn}b", name="read", arguments={"path": f"g{turn}.py"}))
+            calls.append(
+                ToolCall(id=f"c{turn}b", name=tool_name, arguments={"path": f"g{turn}.py"})
+            )
         return ModelResponse(
             message=Message.assistant(f"Reading file {turn}.", tool_calls=calls),
             usage={"prompt_tokens": 1_000, "completion_tokens": 10},
@@ -394,3 +408,80 @@ async def test_anthropic_turns_keep_their_shape_when_the_breakpoint_moves_on() -
         settled = [_strip_markers(m) for m in before[:-1]]
         assert [_strip_markers(m) for m in after[: len(settled)]] == settled
     assert all(isinstance(m["content"], list) for turns in sent for m in turns)
+
+
+# ---------------------------------------------------------------------------
+# ObservationPack: a swap rewrites the request from the swapped output on, so
+# swaps come in batches, and each batch is the only break between requests.
+# ---------------------------------------------------------------------------
+
+
+def _packed_run(tmp_path: Path, steps: int, **pack: Any) -> tuple[Agent, list[list[Message]]]:
+    model, requests = _scripted(steps, tool_name="read_big")
+    agent = Agent(
+        model=model,
+        tools=[read_big],
+        max_iterations=steps + 10,
+        context_window=pack.pop("context_window", 1_000_000),
+        observation_pack=ObservationPackConfig(enabled=True, directory=tmp_path, **pack),
+        reflexion=False,
+        grounding=False,
+    )
+    return agent, requests
+
+
+def _sent_bytes(requests: list[list[Message]]) -> int:
+    return sum(len((m.content or "").encode()) for r in requests for m in r)
+
+
+async def test_observation_pack_breaks_the_prefix_only_once_per_batch(tmp_path: Path) -> None:
+    agent, requests = _packed_run(tmp_path, 40)
+    events = await _events(agent, thread_id="t")
+    assert isinstance(events[-1], TerminateEvent)
+
+    stats = agent.observation_pack.stats("t")
+    breaks = _breaks([_wire(r) for r in requests])
+    # Every break is a swap batch, and nothing else rewrote the history.
+    assert breaks
+    assert len(breaks) == stats.batches == stats.prefix_breaks
+    assert _breaks([_openai_wire(r) for r in requests]) == breaks
+    # Batches are bounded by the bytes they free: one per min_batch_bytes of
+    # packed output (32 KiB, about three of these files).
+    packed = stats.swaps * len(read_big.fn("f0.py").encode())  # type: ignore[attr-defined]
+    assert len(breaks) <= packed // (32 * 1024)
+    assert len(breaks) * 3 <= len(requests)
+    # And they pay: the last request carries placeholders, not the files.
+    assert sum(OBSERVATION_ID_KEY in m.metadata for m in requests[-1]) == stats.swaps
+    assert stats.bytes_saved > 0
+
+
+async def test_without_batching_every_request_would_break_the_prefix(tmp_path: Path) -> None:
+    # The cost model off: each output swaps the request it becomes due.
+    eager, eager_requests = _packed_run(
+        tmp_path / "eager", 40, min_batch_bytes=0, horizon_requests=1_000_000
+    )
+    await _events(eager)
+    batched, batched_requests = _packed_run(tmp_path / "batched", 40)
+    await _events(batched)
+
+    eager_breaks = _breaks([_wire(r) for r in eager_requests])
+    batched_breaks = _breaks([_wire(r) for r in batched_requests])
+    assert len(eager_breaks) >= len(eager_requests) - 4
+    assert len(batched_breaks) * 3 <= len(eager_breaks)
+
+
+async def test_observation_pack_rides_on_compaction_rather_than_adding_to_it(
+    tmp_path: Path,
+) -> None:
+    agent, requests = _packed_run(tmp_path, 40, context_window=30_000)
+    events = await _events(agent, thread_id="t")
+    compactions = [e for e in events if isinstance(e, CompactionEvent)]
+    stats = agent.observation_pack.stats("t")
+    breaks = _breaks([_wire(r) for r in requests])
+    assert compactions
+    # Each break is a compaction or a swap batch; with compaction this close,
+    # swaps that would break the cache are not worth it.
+    assert len(breaks) <= len(compactions) + stats.prefix_breaks
+    assert stats.prefix_breaks <= 1
+    # Compaction cleared into recallable stubs, not lossy ones.
+    assert stats.cleared_recallable > 0
