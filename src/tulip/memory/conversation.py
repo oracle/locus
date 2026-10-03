@@ -81,11 +81,26 @@ class SlidingWindowManager(ConversationManager):
     A chat is left alone: while any user turn survives in the window, the newest
     ones are the live context and the first is not privileged.
 
+    Only the *leading* system messages (the instructions, a memory block right
+    after them) are kept at the front. A system note the loop added mid-run
+    stays where it was written and leaves with the turns around it: moving it
+    to the front would change the start of every request after it, and a
+    provider's prompt cache serves only a byte-identical prefix.
+
+    For the same reason the window can slide in steps. With ``slide_step=1``
+    the oldest message goes on every request once the window is full, so the
+    history after the system prompt is different every time and nothing past
+    it is ever served from cache. A larger step drops that many messages at
+    once and then leaves the start alone until the window fills again: the
+    window holds between ``window_size - slide_step + 1`` and ``window_size``
+    messages, and all but one request in ``slide_step`` reuses the cache.
+
     Args:
         window_size: Maximum number of messages to keep (excluding system message)
-        preserve_system: Whether to preserve the system message at the start
+        preserve_system: Whether to preserve the leading system messages at the start
         preserve_first_user: Whether to re-attach the opening user turn when the
             window would otherwise contain none
+        slide_step: How many messages the window drops at a time once full.
     """
 
     def __init__(
@@ -93,12 +108,16 @@ class SlidingWindowManager(ConversationManager):
         window_size: int = 20,
         preserve_system: bool = True,
         preserve_first_user: bool = True,
+        slide_step: int = 1,
     ):
         if window_size < 1:
             raise ValueError("window_size must be at least 1")
+        if not 1 <= slide_step <= window_size:
+            raise ValueError("slide_step must be between 1 and window_size")
         self.window_size = window_size
         self.preserve_system = preserve_system
         self.preserve_first_user = preserve_first_user
+        self.slide_step = slide_step
 
     def apply(self, messages: list[Message]) -> list[Message]:
         """
@@ -116,8 +135,10 @@ class SlidingWindowManager(ConversationManager):
         result: list[Message] = []
         non_system_messages: list[Message] = []
 
+        leading = True
         for msg in messages:
-            if msg.role == Role.SYSTEM and self.preserve_system:
+            leading = leading and msg.role == Role.SYSTEM
+            if leading and self.preserve_system:
                 result.append(msg)
             else:
                 non_system_messages.append(msg)
@@ -132,7 +153,10 @@ class SlidingWindowManager(ConversationManager):
                     None,
                 )
 
-            non_system_messages = non_system_messages[-self.window_size :]
+            # Drop whole steps, so the cut stays put until the window refills.
+            excess = before_count - self.window_size
+            drop = -(-excess // self.slide_step) * self.slide_step
+            non_system_messages = non_system_messages[drop:]
 
             # The cut lands at a fixed offset, not a turn boundary, so it can
             # fall between an assistant's tool_calls and the tool messages
@@ -159,11 +183,14 @@ class SlidingWindowManager(ConversationManager):
             # and therefore no statement of the task.
             #
             # Trimming orphans usually frees the slot; if it didn't, drop one
-            # more turn from the front and re-normalise, since that drop can
-            # itself orphan the results that followed it.
+            # more step from the front (the cut the next slide would make
+            # anyway) and re-normalise, since that drop can itself orphan the
+            # results that followed it.
             if anchor is not None and not any(m.role == Role.USER for m in non_system_messages):
                 if len(non_system_messages) >= self.window_size:
-                    non_system_messages = _drop_leading_orphans(non_system_messages[1:])
+                    non_system_messages = _drop_leading_orphans(
+                        non_system_messages[self.slide_step :]
+                    )
                 non_system_messages.insert(0, anchor)
             from tulip.observability.emit import (  # noqa: PLC0415
                 EV_MEMORY_CONVERSATION_PRUNED,
@@ -183,7 +210,10 @@ class SlidingWindowManager(ConversationManager):
         return result
 
     def __repr__(self) -> str:
-        return f"SlidingWindowManager(window_size={self.window_size}, preserve_system={self.preserve_system})"
+        return (
+            f"SlidingWindowManager(window_size={self.window_size}, "
+            f"preserve_system={self.preserve_system}, slide_step={self.slide_step})"
+        )
 
 
 class SummarizingManager(ConversationManager):

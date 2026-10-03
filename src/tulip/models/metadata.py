@@ -138,6 +138,9 @@ _SNAPSHOT_SUFFIX: Final[re.Pattern[str]] = re.compile(
     r"(?:[-@](?:\d{8}|\d{4}-\d{2}-\d{2})|-latest)$"
 )
 
+#: A Claude slug's ``-<major>.<minor>`` version, as OpenRouter writes it.
+_CLAUDE_DOTTED: Final[re.Pattern[str]] = re.compile(r"^(claude-[a-z]+-\d+)\.(\d)$")
+
 _lock = threading.Lock()
 _registry: dict[str, ModelMetadata] = {}
 
@@ -173,6 +176,14 @@ def metadata_for(model_id: str) -> ModelMetadata | None:
             base = _SNAPSHOT_SUFFIX.sub("", key)
             if base != key:
                 found = _registry.get(base)
+        if found is None:
+            # OpenRouter's spelling of a Claude model, with or without its
+            # ``anthropic/`` vendor part, as the Anthropic binding sends it to
+            # OpenRouter's Messages API: the same model at the same list price
+            # (``anthropic/claude-sonnet-5.5`` is ``claude-sonnet-5-5``).
+            bare = key.removeprefix("anthropic/")
+            if _CLAUDE_DOTTED.match(bare) or bare != key:
+                found = _registry.get(_CLAUDE_DOTTED.sub(r"\1-\2", bare))
         return found
 
 

@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
@@ -15,6 +16,11 @@ from tulip.core.loops import DEFAULT_READ_ONLY_TOOLS, ToolLoop, call_signature, 
 from tulip.core.media import estimate_tokens
 from tulip.core.messages import Message, ToolCall
 
+
+#: Anthropic's prices for prompt-cache traffic, as multiples of the input
+#: price: a write to the 5-minute cache and a read from it.
+_CACHE_WRITE_MULTIPLIER = 1.25
+_CACHE_READ_MULTIPLIER = 0.1
 
 #: Kept under its old name for code that imported it from here.
 _tool_call_signature = call_signature
@@ -103,6 +109,18 @@ class AgentState(BaseModel):
     # other providers.
     cache_creation_tokens_used: int = 0
     cache_read_tokens_used: int = 0
+    # Prompt tokens an OpenAI-compatible provider served from its prefix cache
+    # (``prompt_tokens_details.cached_tokens``) and, where it says, wrote to it
+    # (OpenRouter's ``cache_write_tokens``). Unlike Anthropic's counters these
+    # are part of ``prompt_tokens_used``, not in addition to it.
+    cached_tokens_used: int = 0
+    cache_write_tokens_used: int = 0
+    # What the provider itself said the calls cost (OpenRouter's
+    # ``usage.cost``), summed over the calls that said; ``reported_cost_calls``
+    # counts them. Exact where the metadata-priced ``cost_usd_used`` is a list
+    # price that ignores caching and routing.
+    reported_cost_usd: float = 0.0
+    reported_cost_calls: int = 0
     token_budget: int | None = None
     # Spend tracking. Prices come from model metadata (USD per million tokens);
     # ``None`` means unknown, and an unknown price leaves ``cost_usd_used`` at 0.
@@ -249,12 +267,16 @@ class AgentState(BaseModel):
             }
         )
 
-    def with_token_usage(
+    def with_token_usage(  # noqa: PLR0913 — one keyword per counter a provider reports
         self,
         prompt_tokens: int,
         completion_tokens: int,
         cache_creation_tokens: int = 0,
         cache_read_tokens: int = 0,
+        *,
+        cached_tokens: int = 0,
+        cache_write_tokens: int = 0,
+        reported_cost_usd: float | None = None,
     ) -> AgentState:
         """Record token usage from a model response.
 
@@ -262,20 +284,60 @@ class AgentState(BaseModel):
         only when Anthropic returns prompt-cache stats on the response
         usage (i.e., the AnthropicModel was configured with
         ``prompt_cache=True``). Default 0 for other providers.
+        ``cached_tokens`` and ``cache_write_tokens`` are the OpenAI-style
+        counters, already inside ``prompt_tokens``. ``reported_cost_usd`` is
+        the provider's own figure for the call, when it gives one.
         """
-        return self.model_copy(
-            update={
-                "total_tokens_used": self.total_tokens_used + prompt_tokens + completion_tokens,
-                "prompt_tokens_used": self.prompt_tokens_used + prompt_tokens,
-                "completion_tokens_used": self.completion_tokens_used + completion_tokens,
-                "cache_creation_tokens_used": (
-                    self.cache_creation_tokens_used + cache_creation_tokens
-                ),
-                "cache_read_tokens_used": self.cache_read_tokens_used + cache_read_tokens,
-                "cost_usd_used": self.cost_usd_used
-                + (self.cost_of(prompt_tokens, completion_tokens) or 0.0),
-                "updated_at": datetime.now(UTC),
-            }
+        update: dict[str, Any] = {
+            "total_tokens_used": self.total_tokens_used + prompt_tokens + completion_tokens,
+            "prompt_tokens_used": self.prompt_tokens_used + prompt_tokens,
+            "completion_tokens_used": self.completion_tokens_used + completion_tokens,
+            "cache_creation_tokens_used": (self.cache_creation_tokens_used + cache_creation_tokens),
+            "cache_read_tokens_used": self.cache_read_tokens_used + cache_read_tokens,
+            "cached_tokens_used": self.cached_tokens_used + cached_tokens,
+            "cache_write_tokens_used": self.cache_write_tokens_used + cache_write_tokens,
+            "cost_usd_used": self.cost_usd_used
+            + (
+                self.cost_of(
+                    prompt_tokens,
+                    completion_tokens,
+                    cache_creation_tokens=cache_creation_tokens,
+                    cache_read_tokens=cache_read_tokens,
+                )
+                or 0.0
+            ),
+            "updated_at": datetime.now(UTC),
+        }
+        if reported_cost_usd is not None:
+            update["reported_cost_usd"] = self.reported_cost_usd + reported_cost_usd
+            update["reported_cost_calls"] = self.reported_cost_calls + 1
+        return self.model_copy(update=update)
+
+    def with_response_usage(
+        self, usage: Mapping[str, Any] | None, reported_cost_usd: float | None = None
+    ) -> AgentState:
+        """Record a model response's ``usage`` dict, every counter it carries."""
+        usage = usage or {}
+
+        def count(key: str) -> int:
+            value = usage.get(key, 0)
+            return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+        # Only a real number counts: a test double's attribute is not a price.
+        cost = (
+            float(reported_cost_usd)
+            if isinstance(reported_cost_usd, int | float)
+            and not isinstance(reported_cost_usd, bool)
+            else None
+        )
+        return self.with_token_usage(
+            count("prompt_tokens"),
+            count("completion_tokens"),
+            cache_creation_tokens=count("cache_creation_input_tokens"),
+            cache_read_tokens=count("cache_read_input_tokens"),
+            cached_tokens=count("cached_tokens"),
+            cache_write_tokens=count("cache_write_tokens"),
+            reported_cost_usd=cost,
         )
 
     # =========================================================================
@@ -287,16 +349,34 @@ class AgentState(BaseModel):
         """Whether both prices are known, so spend can be measured."""
         return self.input_price_per_mtok is not None and self.output_price_per_mtok is not None
 
-    def cost_of(self, prompt_tokens: int, completion_tokens: int) -> float | None:
+    def cost_of(
+        self,
+        prompt_tokens: int,
+        completion_tokens: int,
+        *,
+        cache_creation_tokens: int = 0,
+        cache_read_tokens: int = 0,
+    ) -> float | None:
         """USD for a call of this size, or ``None`` when the prices are unknown.
 
-        Cache-read and cache-write tokens are priced as ordinary input, which
-        overstates a cached call rather than understating it.
+        ``cache_creation_tokens`` and ``cache_read_tokens`` are the counts
+        Anthropic (and Bedrock) report beside ``prompt_tokens``, priced at
+        their published multiples of the input price: a write at 1.25x, a
+        read at 0.1x. Left out, as they were, a cached Claude run looked
+        almost free and a ``max_cost_usd`` never stopped it. OpenAI-style
+        ``cached_tokens`` are inside ``prompt_tokens`` and stay at the full
+        input price, since the discount differs by provider: that overstates
+        a cached call rather than understating it.
         """
         if self.input_price_per_mtok is None or self.output_price_per_mtok is None:
             return None
+        input_tokens = (
+            prompt_tokens
+            + cache_creation_tokens * _CACHE_WRITE_MULTIPLIER
+            + cache_read_tokens * _CACHE_READ_MULTIPLIER
+        )
         return (
-            prompt_tokens * self.input_price_per_mtok
+            input_tokens * self.input_price_per_mtok
             + completion_tokens * self.output_price_per_mtok
         ) / 1_000_000
 

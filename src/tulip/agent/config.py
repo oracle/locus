@@ -333,6 +333,19 @@ class AgentConfig(BaseModel):
         description="Maximum wall-clock seconds before stopping (None = unlimited)",
     )
 
+    budget_nudge_at: float | None = Field(
+        default=0.8,
+        gt=0.0,
+        lt=1.0,
+        description=(
+            "Once the run has used this fraction of any of its budgets "
+            "(token_budget, max_cost_usd, time_budget_seconds, max_iterations), "
+            "append one note asking the model to converge: finish the change in "
+            "progress, verify it, report. Once per run; the note is appended, so "
+            "the cached prefix is kept. None turns it off."
+        ),
+    )
+
     model_retry: ModelRetryConfig | None = Field(
         default_factory=ModelRetryConfig,
         description=(
@@ -598,7 +611,7 @@ class AgentConfig(BaseModel):
         default=None,
         description=(
             "Long-term memory manager. When set, the agent retrieves stored "
-            "memories at session start (injected into the system prompt) and "
+            "memories at session start (injected after the turn's prompt) and "
             "extracts new memories at session end (persisted to the configured "
             "store backend). Pass a BaseMemoryManager instance; use "
             "LLMMemoryManager for LLM-backed extraction with any store backend."

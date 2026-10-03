@@ -275,8 +275,57 @@ policy.
   why none needed to, instead of accepting the second such stop in a row. For
   unattended runs, where a model answering "make the changes" with more prose
   has not chosen anything.
+- **Prompt caching through OpenRouter, and a rolling cache breakpoint.**
+  `AnthropicModel(prompt_cache=True)` now marks the end of the conversation
+  too (the last block of the request, and the user turn before it when a
+  slot is free; four `cache_control` markers at most), so each request reads
+  the previous one's history from the cache instead of only the instructions
+  and tools. The endpoint comes from `base_url`, else `ANTHROPIC_BASE_URL`;
+  `auth_token` (else `ANTHROPIC_AUTH_TOKEN`) is sent as a bearer token, and
+  with one an `ANTHROPIC_API_KEY` from the environment is never sent along.
+  Against `https://openrouter.ai/api` a Claude id is sent as OpenRouter's
+  slug (`claude-sonnet-5-5` as `anthropic/claude-sonnet-5.5`), and
+  `metadata_for` resolves that slug to the Claude record.
+- **Cache and provider cost on every run.** The OpenAI-compatible binding
+  keeps `prompt_tokens_details.cached_tokens` (and OpenRouter's
+  `cache_write_tokens`) as `cached_tokens` / `cache_write_tokens` in usage —
+  inside `prompt_tokens`, unlike Anthropic's `cache_read_input_tokens` — and
+  the cost a provider reports (OpenRouter's `usage.cost`) as
+  `ModelResponse.cost_usd` / `ModelChunkEvent.cost_usd`. Both reach
+  `TerminateEvent` (`usage["cached_tokens"]`, `reported_cost_usd`),
+  subagents' spend included. `AgentState.with_response_usage` records a
+  response's whole usage block.
+- **`AgentConfig.budget_nudge_at`** (default `0.8`): once a run has used that
+  fraction of a budget — `token_budget`, `max_cost_usd`,
+  `time_budget_seconds`, or a `max_iterations` of 10 or more — the model gets
+  one appended note to converge (finish the change in progress, verify it,
+  report; the task still has to be done) and a `budget_nudge` `CustomEvent`
+  is emitted. `None` turns it off.
+- **`AgentSpec.token_budget`** (frontmatter `token_budget`, `tokenBudget` or
+  `max_tokens`) caps what one delegated task of that type may spend; the
+  `task` tool gives it to the subagent, the smaller of it and any
+  `token_budget` in `agent_kwargs`.
 
 ### Changed
+
+- **History is append-only between compactions**, so a provider's prefix
+  cache keeps serving it (`tests/unit/test_cache_prefix.py` checks every
+  request of scripted sessions against the one before, in Tulip's messages
+  and on the OpenAI and Anthropic wire). A recalled-memory block now goes
+  right after the turn's prompt instead of after the system prompt: it
+  changes every turn, and at the front it made every turn resend the whole
+  conversation uncached. `SlidingWindowManager` keeps a mid-run system note
+  where it was written instead of moving it to the front, and slides in
+  steps (`slide_step`; the agent's default window uses a quarter of its
+  size) rather than one message per request; `LLMCompactor` moves its
+  tool-output and tail cuts in steps too (`slide_step`, 8 by default in the
+  agent).
+- **The `task` tool asks for less and gets more back.** Its description says
+  to delegate broad searches across many files, not reading a few known
+  files, and to work from the subagent's path:line citations; the default
+  subagent prompt asks for `path:start-end` with the lines that answer the
+  question quoted, so the parent does not read the same files again, and to
+  stop as soon as it can answer.
 
 - **A subagent shares its parent's budgets.** A child started from a running
   agent gets the smaller of its own limit and what the parent has left of
@@ -342,6 +391,14 @@ policy.
   reports detection; `AgentState.tool_loop_persists` is what stops a run.
 
 ### Fixed
+
+- **A cached Claude run is no longer counted as nearly free.** Anthropic's
+  `cache_read_input_tokens` and `cache_creation_input_tokens` sit beside
+  `prompt_tokens`, and spend left them out, so `cost_usd` and `max_cost_usd`
+  saw only the uncached tail of each request. They are now priced at
+  Anthropic's multiples of the input price (reads 0.1x, writes 1.25x).
+  With `prompt_cache=True` every turn is sent as a block list, so a turn the
+  rolling breakpoint has moved past is byte-identical to how it was cached.
 
 - **An empty reply mid-task no longer ends the run as `complete`.** A reply
   with no text and no tool call, in a turn that had called tools, got a

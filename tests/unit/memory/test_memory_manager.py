@@ -171,8 +171,11 @@ class TestFormatting:
         new_state = _inject_memories_into_state(state, sample_memories)
         msgs = list(new_state.messages)
         assert len(msgs) == 2
-        assert msgs[0].role == Role.SYSTEM  # memory block goes first
-        assert "[Long-term Memory]" in msgs[0].content
+        # The block follows the turn's prompt: per-turn content goes after
+        # what the next turn will send again, never before it.
+        assert msgs[0].content == "Hello"
+        assert msgs[1].role == Role.SYSTEM
+        assert "[Long-term Memory]" in msgs[1].content
 
     def test_inject_empty_messages(self, sample_memories):
         state = AgentState(messages=())

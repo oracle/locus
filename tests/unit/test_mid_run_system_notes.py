@@ -198,7 +198,18 @@ async def test_anthropic_prompt_cache_marks_the_instructions_and_the_whole_promp
         {"type": "text", "text": INSTRUCTIONS, "cache_control": {"type": "ephemeral"}},
         {"type": "text", "text": MEMORY, "cache_control": {"type": "ephemeral"}},
     ]
-    assert "cache_control" not in str(sent["messages"])
+    turns = sent["messages"]
+    _assert_valid_anthropic_turns(turns)
+    marked = [
+        (i, b.get("type"))
+        for i, turn in enumerate(turns)
+        for b in (turn["content"] if isinstance(turn["content"], list) else [])
+        if "cache_control" in b
+    ]
+    # The rolling breakpoints: the end of the request (the note closing the
+    # last user turn) and the user turn before it — four markers in all.
+    assert marked == [(0, "text"), (len(turns) - 1, "text")]
+    assert turns[-1]["content"][-1]["text"].startswith("<system-note>")
 
 
 def test_anthropic_convert_messages_still_returns_the_joined_prompt() -> None:
