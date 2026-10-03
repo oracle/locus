@@ -8,24 +8,6 @@ policy.
 
 ## [Unreleased]
 
-### Changed
-
-- **A subagent shares its parent's budgets.** A child started from a running
-  agent gets the smaller of its own limit and what the parent has left of
-  `time_budget_seconds`, `token_budget` and, when the child's model is
-  priced, `max_cost_usd`; one started with nothing left returns at once with
-  that budget as its stop reason, without calling its model. A child's spend
-  now folds into the parent's at the child's own prices when they are known,
-  rather than the parent's.
-- **An oversized tool result keeps its head and its tail.** Past
-  `max_tool_result_length`, the loop used to keep the first N characters, so
-  a test run, build or lint lost its verdict: the failing test and the
-  `1 failed, 39999 passed` summary are printed last. The cut now keeps the
-  first 40% and the last 60% of the budget, with a marker between them —
-  `[OUTPUT TRUNCATED — 38123 of 40123 chars cut; first 800 and last 1200 kept]`.
-  The new `AgentConfig.tool_result_head_fraction` sets the split; `1.0` keeps
-  only the head, as before. The marker still starts `[OUTPUT TRUNCATED`, but
-  its wording changed, so code matching `original: N chars` needs updating.
 ### Added
 
 - **`tulip.agent.tasks.task_tool`: delegation as a tool.** The `task` tool
@@ -89,7 +71,6 @@ policy.
   undeclared argument rejects the call instead of being dropped. Agents on
   a server that returns calls as text (no tool parser) set
   ``text_tool_calls="on"``; the rogue demo's local mode does.
-### Added
 
 - **`Agent.continue_turn(thread_id)`** continues a turn that stopped before
   it finished — a process killed mid-turn — from the thread's latest
@@ -98,16 +79,6 @@ policy.
   stays done. A call the checkpoint holds without a result is answered with
   an error saying its outcome is unknown, never re-run. A thread paused on an
   in-process interrupt is still answered with `resume()`.
-
-### Changed
-
-- `checkpoint_every_n_iterations` also applies to resumed and continued
-  segments (`resume()`, `continue_turn()`), which previously saved only at
-  the end. The default stays `0`: built-in checkpointers keep every save as
-  history, so per-iteration saves grow storage with each iteration and change
-  what `get_state_history` and `fork` list. Long unattended runs set `1`, and
-  a kill then loses at most the iteration in flight.
-### Added
 
 - **Loop-level retry of transient model-call failures (`AgentConfig.model_retry`).**
   A 429, a 5xx, a dropped connection or a timeout on any model call used to
@@ -123,6 +94,32 @@ policy.
   `stream_tokens=True`, otherwise once the call returns or fails. A streamed
   call is not retried once a chunk has reached the caller, nor is a cancelled
   run. `model_retry=False` restores the old behaviour.
+
+### Changed
+
+- **A subagent shares its parent's budgets.** A child started from a running
+  agent gets the smaller of its own limit and what the parent has left of
+  `time_budget_seconds`, `token_budget` and, when the child's model is
+  priced, `max_cost_usd`; one started with nothing left returns at once with
+  that budget as its stop reason, without calling its model. A child's spend
+  now folds into the parent's at the child's own prices when they are known,
+  rather than the parent's.
+- **An oversized tool result keeps its head and its tail.** Past
+  `max_tool_result_length`, the loop used to keep the first N characters, so
+  a test run, build or lint lost its verdict: the failing test and the
+  `1 failed, 39999 passed` summary are printed last. The cut now keeps the
+  first 40% and the last 60% of the budget, with a marker between them —
+  `[OUTPUT TRUNCATED — 38123 of 40123 chars cut; first 800 and last 1200 kept]`.
+  The new `AgentConfig.tool_result_head_fraction` sets the split; `1.0` keeps
+  only the head, as before. The marker still starts `[OUTPUT TRUNCATED`, but
+  its wording changed, so code matching `original: N chars` needs updating.
+
+- `checkpoint_every_n_iterations` also applies to resumed and continued
+  segments (`resume()`, `continue_turn()`), which previously saved only at
+  the end. The default stays `0`: built-in checkpointers keep every save as
+  history, so per-iteration saves grow storage with each iteration and change
+  what `get_state_history` and `fork` list. Long unattended runs set `1`, and
+  a kill then loses at most the iteration in flight.
 
 ## [2.18.3] - 2026-09-29
 
