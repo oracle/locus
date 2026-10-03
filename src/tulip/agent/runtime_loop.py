@@ -252,6 +252,7 @@ async def _anext_or_stop(iterator: AsyncIterator[Any]) -> Any:
 
 if TYPE_CHECKING:
     from tulip.agent.hook_orchestrator import HookOrchestrator
+    from tulip.agent.leaked_tool_calls import UnfinishedToolCall
     from tulip.memory.conversation import ConversationManager
     from tulip.memory.manager import BaseMemoryManager
     from tulip.reasoning.grounding import GroundingEvaluator
@@ -335,6 +336,28 @@ _EMPTY_REPLY_NOTE = (
     "task: call the tools you need next. If the task is done, write your final "
     "answer instead."
 )
+
+#: Sent, with the tools taken away, when a reply is empty again.
+_FINAL_ANSWER_REQUEST = (
+    "[Final answer requested]\n"
+    "Your previous turn produced no visible response. "
+    "Provide your final answer to the user's question "
+    "based on the conversation so far. Do NOT call any "
+    "more tools — write the answer as plain text."
+)
+
+#: Sent back after a reply that ends inside a tool call written as text.
+_UNFINISHED_CALL_NOTE = (
+    "[Unfinished tool call — automated, not from the user] Your last reply ended "
+    "inside a tool call written as "
+    "text, so nothing was run. Make the call again through the tool interface. "
+    "If it was cut off by the output limit, send less in one call: write a large "
+    "file in parts, or change it with edits."
+)
+
+#: How many unfinished calls in a row are sent back before the reply is taken
+#: as it is: a model that cannot finish a call should not spend the run on it.
+_MAX_UNFINISHED_SENDS = 2
 
 
 #: Queued by ``_get_model_response`` when an after-model hook discards a
@@ -747,6 +770,8 @@ class AgentRuntimeMixin:
         _verifier_attempts = 0
         # Whether an empty reply has already been sent back this turn.
         _empty_sent_back = False
+        # Unfinished text tool calls sent back since the last call that ran.
+        _unfinished_sent_back = 0
         # Hold a call's content chunks until we know they are not a draft the
         # verifier will send back (``hold_final_answer_tokens``).
         _hold_tokens = (
@@ -900,8 +925,14 @@ class AgentRuntimeMixin:
                             cache_read_tokens=cache_read_toks,
                         )
 
+                        # A model that is not done answers with its next call in
+                        # its own markup, the request having no tools; that is
+                        # no summary.
+                        written = response.message.content
+                        if written and self._is_text_tool_call(written):
+                            written = None
                         summary = (
-                            response.message.content
+                            written
                             or _last_assistant_content
                             or self._build_fallback_summary(state)
                         )
@@ -1073,6 +1104,136 @@ class AgentRuntimeMixin:
                     _last_assistant_content = response.message.content
                     _last_no_tool_calls = False
 
+                # A call block cut off before its end — the output-token limit
+                # in the middle of a large write — is neither a call nor an
+                # answer: the model is asked for the call again.
+                if response.message.tool_calls:
+                    _unfinished_sent_back = 0
+                elif _unfinished_sent_back < _MAX_UNFINISHED_SENDS:
+                    unfinished = self._unfinished_text_tool_call(response.message.content)
+                    if unfinished is not None:
+                        _unfinished_sent_back += 1
+                        state = self._send_back_unfinished_call(state, unfinished, replace=True)
+                        _last_assistant_content = unfinished.prose
+                        _last_no_tool_calls = False
+                        _held_chunks = []  # the broken call is never shown
+                        continue
+
+                # Empty-content safety net (fixes #280).
+                #
+                # The model can return zero tool_calls AND zero
+                # ``content`` for several reasons that all look the
+                # same to the runtime:
+                #
+                #   - Reasoning-only iteration (gpt-5.x / o-series /
+                #     Gemini 2.5 thinking mode generate
+                #     ``completion_tokens`` that land in a separate
+                #     reasoning channel — ``message.content`` is
+                #     None even though tokens were consumed).
+                #   - The model decided "I'm done" without writing
+                #     anything after a long context (observed on
+                #     Gemini with > 50K-token system prompts).
+                #   - The model returned an empty assistant message
+                #     between tool calls and the runtime collapses
+                #     to this branch on the trailing iteration.
+                #
+                # Without the safety net, ``TerminateEvent.final_message``
+                # becomes None → ``AgentResult.message`` becomes ""
+                # → callers see empty output despite real work done.
+                # Mirror the MaxIterations summary-injection path:
+                # force one no-tools completion to extract the
+                # model's actual answer based on the conversation
+                # so far. Costs ~one extra call only when the bug
+                # shape would otherwise produce empty output.
+                #
+                # Not on the first empty reply of a turn that is calling
+                # tools, though: there an empty reply is far more often a
+                # call the provider failed to deliver (a reasoning-only
+                # turn, a call left in the reasoning channel) than an
+                # answer. Asking for a final answer with the tools taken
+                # away then ends a run mid-task — "the system requested my
+                # final answer before I could make the edits" — and
+                # reports it as complete. The model is sent back once,
+                # with its tools, to carry on or to answer.
+                #
+                # A model that answers the no-tools request with a call is not
+                # done either, so the call is made (``_summary_as_tool_step``).
+                summary_answer: str | None = None
+                if (
+                    not response.message.tool_calls
+                    and self.config.completion_mode != "explicit"
+                    and not response.message.content
+                ):
+                    if state.tool_executions and not _empty_sent_back:
+                        _empty_sent_back = True
+                        state = state.with_message(Message.system(_EMPTY_REPLY_NOTE))
+                        _last_no_tool_calls = False
+                        continue
+                    before_note = state
+                    state = state.with_message(Message.system(_FINAL_ANSWER_REQUEST))
+                    messages = list(state.messages)
+                    if self._conversation_manager:
+                        if hasattr(self._conversation_manager, "async_apply"):
+                            messages = await self._conversation_manager.async_apply(messages)
+                        else:
+                            messages = self._conversation_manager.apply(messages)
+                    messages = self._validate_messages(messages)
+
+                    summary_model = self._auxiliary_model or self._model
+                    summary_resp: ModelResponse | None = None
+                    try:
+                        summary_resp = await summary_model.complete(
+                            messages=messages,
+                            tools=None,  # No tools — force text
+                            temperature=self.config.temperature,
+                            max_tokens=self.config.max_tokens,
+                        )
+                        s_prompt_toks = summary_resp.usage.get("prompt_tokens", 0)
+                        s_completion_toks = summary_resp.usage.get("completion_tokens", 0)
+                        s_cc_toks = summary_resp.usage.get("cache_creation_input_tokens", 0)
+                        s_cr_toks = summary_resp.usage.get("cache_read_input_tokens", 0)
+                        _total_tokens += s_prompt_toks + s_completion_toks
+                        state = state.with_token_usage(
+                            s_prompt_toks,
+                            s_completion_toks,
+                            cache_creation_tokens=s_cc_toks,
+                            cache_read_tokens=s_cr_toks,
+                        )
+                    except Exception:  # noqa: BLE001
+                        # Summary call failed — fall back to the last
+                        # assistant content we saw or a deterministic stub.
+                        # Better than empty.
+                        summary_resp = None
+                    # The state without the note asking for an answer, which
+                    # the model is not shown again if it is sent back on.
+                    without_note = state.model_copy(update={"messages": before_note.messages})
+                    as_call = (
+                        self._summary_as_tool_step(summary_resp, without_note)
+                        if summary_resp is not None
+                        else None
+                    )
+                    if isinstance(as_call, tuple):
+                        # The model's own markup, written because the request
+                        # had no tools to call: DeepSeek answers "give your
+                        # final answer" with its next read.
+                        response, state = as_call
+                        _last_assistant_content = response.message.content
+                        _last_no_tool_calls = False
+                        _unfinished_sent_back = 0
+                    elif as_call is not None and _unfinished_sent_back < _MAX_UNFINISHED_SENDS:
+                        _unfinished_sent_back += 1
+                        state = self._send_back_unfinished_call(
+                            without_note, as_call, replace=False
+                        )
+                        _last_no_tool_calls = False
+                        continue
+                    else:
+                        summary_answer = (
+                            (summary_resp.message.content if summary_resp is not None else None)
+                            or _last_assistant_content
+                            or self._build_fallback_summary(state)
+                        )
+
                 # A held call that turned out to be a tool step is not a final
                 # answer: release its chunks now, in order.
                 is_final = (
@@ -1125,97 +1286,11 @@ class AgentRuntimeMixin:
                             )
                             continue  # Re-enter loop for replanning
 
-                    # Empty-content safety net (fixes #280).
-                    #
-                    # The model can return zero tool_calls AND zero
-                    # ``content`` for several reasons that all look the
-                    # same to the runtime:
-                    #
-                    #   - Reasoning-only iteration (gpt-5.x / o-series /
-                    #     Gemini 2.5 thinking mode generate
-                    #     ``completion_tokens`` that land in a separate
-                    #     reasoning channel — ``message.content`` is
-                    #     None even though tokens were consumed).
-                    #   - The model decided "I'm done" without writing
-                    #     anything after a long context (observed on
-                    #     Gemini with > 50K-token system prompts).
-                    #   - The model returned an empty assistant message
-                    #     between tool calls and the runtime collapses
-                    #     to this branch on the trailing iteration.
-                    #
-                    # Without the safety net, ``TerminateEvent.final_message``
-                    # becomes None → ``AgentResult.message`` becomes ""
-                    # → callers see empty output despite real work done.
-                    # Mirror the MaxIterations summary-injection path:
-                    # force one no-tools completion to extract the
-                    # model's actual answer based on the conversation
-                    # so far. Costs ~one extra call only when the bug
-                    # shape would otherwise produce empty output.
-                    #
-                    # Not on the first empty reply of a turn that is calling
-                    # tools, though: there an empty reply is far more often a
-                    # call the provider failed to deliver (a reasoning-only
-                    # turn, a call left in the reasoning channel) than an
-                    # answer. Asking for a final answer with the tools taken
-                    # away then ends a run mid-task — "the system requested my
-                    # final answer before I could make the edits" — and
-                    # reports it as complete. The model is sent back once,
-                    # with its tools, to carry on or to answer.
-                    final_content = response.message.content
-                    if not final_content and state.tool_executions and not _empty_sent_back:
-                        _empty_sent_back = True
-                        state = state.with_message(Message.system(_EMPTY_REPLY_NOTE))
-                        _last_no_tool_calls = False
-                        continue
-                    if not final_content:
-                        state = state.with_message(
-                            Message.system(
-                                "[Final answer requested]\n"
-                                "Your previous turn produced no visible response. "
-                                "Provide your final answer to the user's question "
-                                "based on the conversation so far. Do NOT call any "
-                                "more tools — write the answer as plain text."
-                            )
-                        )
-                        messages = list(state.messages)
-                        if self._conversation_manager:
-                            if hasattr(self._conversation_manager, "async_apply"):
-                                messages = await self._conversation_manager.async_apply(messages)
-                            else:
-                                messages = self._conversation_manager.apply(messages)
-                        messages = self._validate_messages(messages)
-
-                        summary_model = self._auxiliary_model or self._model
-                        try:
-                            summary_resp = await summary_model.complete(
-                                messages=messages,
-                                tools=None,  # No tools — force text
-                                temperature=self.config.temperature,
-                                max_tokens=self.config.max_tokens,
-                            )
-                            s_prompt_toks = summary_resp.usage.get("prompt_tokens", 0)
-                            s_completion_toks = summary_resp.usage.get("completion_tokens", 0)
-                            s_cc_toks = summary_resp.usage.get("cache_creation_input_tokens", 0)
-                            s_cr_toks = summary_resp.usage.get("cache_read_input_tokens", 0)
-                            _total_tokens += s_prompt_toks + s_completion_toks
-                            state = state.with_token_usage(
-                                s_prompt_toks,
-                                s_completion_toks,
-                                cache_creation_tokens=s_cc_toks,
-                                cache_read_tokens=s_cr_toks,
-                            )
-                            final_content = (
-                                summary_resp.message.content
-                                or _last_assistant_content
-                                or self._build_fallback_summary(state)
-                            )
-                        except Exception:  # noqa: BLE001
-                            # Summary call failed — fall back to the
-                            # last assistant content we saw or a
-                            # deterministic stub. Better than empty.
-                            final_content = _last_assistant_content or self._build_fallback_summary(
-                                state
-                            )
+                    # An empty reply was answered by the no-tools request
+                    # above; its answer is the run's.
+                    final_content = (
+                        summary_answer if summary_answer is not None else response.message.content
+                    )
 
                     # Pluggable final-answer verification: runs on every final
                     # answer, tool call or not.
@@ -1881,6 +1956,7 @@ class AgentRuntimeMixin:
         _last_no_tool_calls = False
         _verifier_attempts = 0
         _empty_sent_back = False
+        _unfinished_sent_back = 0
 
         # Extract last assistant content from state
         for msg in reversed(state.messages):
@@ -2044,6 +2120,18 @@ class AgentRuntimeMixin:
                     response, state = recovered
                     _last_assistant_content = response.message.content
                     _last_no_tool_calls = False
+
+                # And a call cut off before its end is asked for again.
+                if response.message.tool_calls:
+                    _unfinished_sent_back = 0
+                elif _unfinished_sent_back < _MAX_UNFINISHED_SENDS:
+                    unfinished = self._unfinished_text_tool_call(response.message.content)
+                    if unfinished is not None:
+                        _unfinished_sent_back += 1
+                        state = self._send_back_unfinished_call(state, unfinished, replace=True)
+                        _last_assistant_content = unfinished.prose
+                        _last_no_tool_calls = False
+                        continue
 
                 if not response.message.tool_calls and self.config.completion_mode != "explicit":
                     answer = response.message.content
@@ -2710,53 +2798,132 @@ class AgentRuntimeMixin:
     ) -> tuple[ModelResponse, AgentState] | None:
         """``response`` and ``state`` with the calls written in the body made structured.
 
-        ``None`` when the reply already carries structured calls, has no body,
-        or its body is not a call. Two sources, in order:
+        ``None`` when the reply already carries structured calls, or neither
+        its body nor its reasoning ends in a call. Three sources, in order:
 
         - the model's leaked markup (:mod:`tulip.agent.leaked_tool_calls`),
           recognised even with native tool calling, since nobody writes
           ``<｜DSML｜invoke name="…">`` to describe a call. The markup is
           dropped from the assistant message, leaving any prose before it, so
           the model is not shown its own leak as the way it calls tools;
+        - the same markup ending the reasoning of a reply with no body: a
+          reasoning model that leaks its call leaks it into the channel it was
+          writing in, and the reply then looks empty. The reasoning stays
+          reasoning; only the call is lifted;
         - a plain text call, only when ``text_tool_calls`` enables it
           (:meth:`_text_tool_calls_enabled`); the body stays as written.
         """
         message = response.message
-        if message.tool_calls or not message.content or self.config.text_tool_calls == "off":
+        if message.tool_calls or self.config.text_tool_calls == "off":
             return None
         from tulip.agent.leaked_tool_calls import match_leaked_tool_calls
 
         content: str | None = message.content
         calls: list[ToolCall] = []
         formats = self._leaked_tool_call_formats()
-        leaked = match_leaked_tool_calls(content, self._tool_registry, formats)
+        if content:
+            leaked = match_leaked_tool_calls(content, self._tool_registry, formats)
+            source = "message body"
+        else:
+            reasoning = response.reasoning if isinstance(response.reasoning, str) else None
+            leaked = match_leaked_tool_calls(reasoning, self._tool_registry, formats)
+            source = "reasoning"
         if leaked is not None:
             logger.info(
-                "recovered %d tool call(s) written as %s markup in the message body",
+                "recovered %d tool call(s) written as %s markup in the %s",
                 len(leaked.calls),
                 leaked.format,
+                source,
             )
-            calls, content = leaked.calls, leaked.prose
-        elif self._text_tool_calls_enabled():
+            calls = leaked.calls
+            if content:
+                content = leaked.prose
+        elif content and self._text_tool_calls_enabled():
             calls = self._parse_text_tool_calls(content)
         if not calls:
             return None
-        response = ModelResponse(
-            message=Message(
-                role=message.role,
-                content=content,
-                tool_calls=calls,
-                tool_call_id=message.tool_call_id,
-                name=message.name,
-            ),
-            usage=response.usage,
-            stop_reason=response.stop_reason,
+        response = response.model_copy(
+            update={
+                "message": Message(
+                    role=message.role,
+                    content=content,
+                    tool_calls=calls,
+                    tool_call_id=message.tool_call_id,
+                    name=message.name,
+                )
+            }
         )
         # The assistant message already in state is the one with the calls as
         # text; it becomes the one with them structured.
         messages = list(state.messages)
         messages[-1] = response.message
         return response, state.model_copy(update={"messages": tuple(messages)})
+
+    def _unfinished_text_tool_call(self, text: str | None) -> UnfinishedToolCall | None:
+        """The leaked call block ``text`` opens and never closes, if any.
+
+        Only the model's own formats, and never with ``text_tool_calls='off'``:
+        the same switches as :meth:`_recover_text_tool_calls`, which has
+        already declined to read ``text`` as a call.
+        """
+        if not text or self.config.text_tool_calls == "off":
+            return None
+        from tulip.agent.leaked_tool_calls import unfinished_leaked_tool_call
+
+        return unfinished_leaked_tool_call(text, self._leaked_tool_call_formats())
+
+    @staticmethod
+    def _send_back_unfinished_call(
+        state: AgentState, unfinished: UnfinishedToolCall, *, replace: bool
+    ) -> AgentState:
+        """``state`` with the model asked to make its cut-off call again.
+
+        With ``replace`` the last message is the reply that broke off, and it
+        keeps only the prose before the block — or goes, when there is none —
+        so the model is not shown half a call in its own markup as an example.
+        """
+        logger.info("sent back a tool call written as %s markup and cut off", unfinished.format)
+        if replace and state.messages:
+            messages = list(state.messages[:-1])
+            if unfinished.prose:
+                messages.append(Message.assistant(content=unfinished.prose))
+            state = state.model_copy(update={"messages": tuple(messages)})
+        # User-role and marked automated, like a continuation: a mid-run
+        # system message is hoisted or taken for the system prompt by several
+        # adapters, which would leave the model's own reply as the last turn.
+        return state.with_message(
+            Message(
+                role=Role.USER,
+                content=_UNFINISHED_CALL_NOTE,
+                metadata={AUTOMATED_NOTE_KEY: True},
+            )
+        )
+
+    def _is_text_tool_call(self, text: str) -> bool:
+        """Whether ``text`` is a call in the model's own markup, finished or cut off."""
+        from tulip.agent.leaked_tool_calls import match_leaked_tool_calls
+
+        if self.config.text_tool_calls == "off":
+            return False
+        formats = self._leaked_tool_call_formats()
+        found = match_leaked_tool_calls(text, self._tool_registry, formats)
+        return found is not None or self._unfinished_text_tool_call(text) is not None
+
+    def _summary_as_tool_step(
+        self, summary: ModelResponse, state: AgentState
+    ) -> tuple[ModelResponse, AgentState] | UnfinishedToolCall | None:
+        """What a reply to the no-tools final-answer request is, when it is not an answer.
+
+        Asked for an answer with its tools taken away, a model that is not
+        done writes its next call in its own markup — the only way left to
+        it. That reply, added to ``state``, is the turn's tool step; a block
+        it never closes is an unfinished call; anything else (``None``) is the
+        answer.
+        """
+        recovered = self._recover_text_tool_calls(summary, state.with_message(summary.message))
+        if recovered is not None:
+            return recovered
+        return self._unfinished_text_tool_call(summary.message.content)
 
     def _parse_text_tool_calls(self, text: str | None) -> list[ToolCall]:
         """Tool calls the model wrote as text; see :mod:`tulip.agent.text_tool_calls`.
