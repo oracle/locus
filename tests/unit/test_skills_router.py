@@ -282,3 +282,49 @@ class TestWrapperText:
         assert '<skill name="guide">\nWalk to the named place.\n</skill>' in sent
         assert "Allowed tools" not in sent
         assert "Compatibility" not in sent
+
+
+class TestBookkeeping:
+    def test_runs_that_never_finish_are_bounded(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import tulip.skills.plugin as plugin_module
+
+        monkeypatch.setattr(plugin_module, "_MAX_TRACKED_RUNS", 2)
+        plugin = _plugin(active=["greet"])
+        for run_id in ("a", "b", "c"):
+            plugin._run(run_id)
+        assert list(plugin._runs) == ["b", "c"]
+
+    async def test_a_run_the_plugin_never_saw_ends_quietly(self) -> None:
+        plugin = _plugin(active=["greet"])
+
+        class _State:
+            run_id = "never-seen"
+
+        await plugin.on_after_invocation(_State(), True)
+        assert plugin.activated_skills == ["greet"]
+
+    def test_failing_telemetry_never_breaks_an_activation(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import importlib
+
+        # The package re-exports a function named `emit`, so take the module itself.
+        emit_module = importlib.import_module("tulip.observability.emit")
+
+        def boom(*_args: Any, **_kwargs: Any) -> None:
+            raise RuntimeError("telemetry down")
+
+        monkeypatch.setattr(emit_module, "emit_sync", boom)
+        plugin = _plugin()
+        reply = plugin.get_activation_tool().fn(skill_name="build")
+        assert "Build only in the kid's own plot." in reply
+
+    def test_the_latest_user_text_skips_other_roles_and_reads_any_content(self) -> None:
+        from tulip.skills.plugin import _latest_user_text
+
+        class _Odd:
+            role = "user"
+            content = 42
+
+        assert _latest_user_text([_Odd(), Message.assistant("hi")]) == "42"
+        assert _latest_user_text([Message.assistant("only me")]) == ""
