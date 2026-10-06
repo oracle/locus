@@ -123,6 +123,7 @@ a named agent such as a subagent. Per-session counters are also available from
 ### Also merged: whole outputs past the cap, and subagents (PR #100, merge `a9aedf0`)
 
 **1. Nothing lost to the per-result cap.**
+
 - With the pack on, `max_tool_result_length` (32,000 chars) no longer cuts
   output before the pack sees it. An output up to `max_inline_chars`
   (default 128,000 chars) goes whole.
@@ -139,6 +140,7 @@ a named agent such as a subagent. Per-session counters are also available from
   configured.
 
 **2. Subagents get the pack too.**
+
 - A subagent started by a run that has the pack (the `task` tool,
   `run_subagent`, `Subagent`) gets the parent's settings and `obs_recall`.
 - Its archive lives in its own namespace under the parent's session:

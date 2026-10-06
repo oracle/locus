@@ -586,8 +586,6 @@ policy.
   OpenAI-compatible endpoints a memory block now joins the opening system
   message instead of becoming a user note before the prompt.
 
-### Fixed
-
 - **A mid-run system note no longer replaces the agent's instructions on
   Anthropic models.** The agent loop adds system-role notes partway through a
   run (iteration-limit notice, grounding and verification reminders, the
