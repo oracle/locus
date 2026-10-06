@@ -24,4 +24,10 @@ paths = [
 # the same files are still flagged).
 regexes = [
   '''sk-proj-abc123def456''',
+  # ObservationPack ids: ``obs_`` + a millisecond timestamp + a hex suffix.
+  # The shape has enough entropy to trip generic-api-key, and the ids are
+  # synthetic fixtures (tests/unit/test_observation_pack.py). The scan reads
+  # every ref in the clone, so one such id on any branch failed Secret Scan
+  # for every pull request in the repository.
+  '''obs_[0-9]{10}[a-z0-9]{14}''',
 ]

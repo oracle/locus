@@ -179,6 +179,7 @@ policy.
   undeclared argument rejects the call instead of being dropped. Agents on
   a server that returns calls as text (no tool parser) set
   ``text_tool_calls="on"``; the rogue demo's local mode does.
+
 - **`FileCheckpointer` as a session store**: `list_threads(limit, pattern)`
   returns thread ids newest first, as they were saved (not the sanitised
   directory names); `list_with_metadata(limit)` lists checkpoints across
@@ -378,6 +379,21 @@ policy.
   rows carry its name; an explicit `observation_pack=` from the caller wins.
   `docs/observation-pack.md` describes the mechanism and its status.
 
+- **Loop-level retry of transient model-call failures (`AgentConfig.model_retry`).**
+  A 429, a 5xx, a dropped connection or a timeout on any model call used to
+  end the run with `TerminateEvent(reason="error")` once the provider client
+  had spent its own retries, which a long autonomous run is all but certain
+  to hit. The loop now re-issues the call with exponential backoff and full
+  jitter (1 s doubling to 60 s, 6 retries, within a 300 s budget by default),
+  waiting what the provider's `retry-after` / `retry-after-ms` asks for when
+  it sends one. Context-length overflows, validation errors, auth and billing
+  failures, and anything the failover classifier cannot place fail at once.
+  Each retry emits a `ModelRetryEvent` (`attempt`, `delay_seconds`, `reason`,
+  `status_code`, `error`, `from_retry_after`) — live between chunks with
+  `stream_tokens=True`, otherwise once the call returns or fails. A streamed
+  call is not retried once a chunk has reached the caller, nor is a cancelled
+  run. `model_retry=False` restores the old behaviour.
+
 ### Changed
 
 - **A summary that fails is retried with shorter input.** The second summary
@@ -419,6 +435,7 @@ policy.
   The new `AgentConfig.tool_result_head_fraction` sets the split; `1.0` keeps
   only the head, as before. The marker still starts `[OUTPUT TRUNCATED`, but
   its wording changed, so code matching `original: N chars` needs updating.
+
 - `checkpoint_every_n_iterations` also applies to resumed and continued
   segments (`resume()`, `continue_turn()`), which previously saved only at
   the end.
