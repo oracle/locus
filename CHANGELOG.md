@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [2.20.0] - 2026-10-06
+
 ### Added
 
 - **`tulip.harness`: a coding harness written once, run on any workspace.**
