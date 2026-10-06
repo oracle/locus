@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [2.21.1] - 2026-10-06
+
 ### Fixed
 
 - **A command that only reads is no longer held as an exec because of `2>&1`.**
