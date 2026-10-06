@@ -44,6 +44,7 @@ from tulip.control.policy import (
     Action,
     ApprovalDecision,
     ApprovalOutcome,
+    ControlAdvisor,
     ControlPolicy,
     approve,
 )
@@ -83,6 +84,7 @@ async def admit(
     ledger: SpendLedger | None = None,
     spend_scope: str = "default",
     context: Mapping[str, Any] | None = None,
+    advisor: ControlAdvisor | None = None,
 ) -> T:
     """Run ``perform`` only if ``action`` clears the trust chain; else reject.
 
@@ -111,6 +113,12 @@ async def admit(
         context: What the caller knows about this decision that the action
             does not carry — the rule that matched, the mode, who is acting, a
             summary of the arguments. Recorded on the trail under ``context``.
+        advisor: A trained control model consulted by
+            :func:`~tulip.control.policy.approve`. It can only make the
+            decision stricter, and one that fails or has no opinion leaves the
+            policy's decision as it was. When one is given the trail entry also
+            carries ``policy_outcome`` and ``model_outcome``, so a reviewer sees
+            what the model changed.
 
     Returns:
         Whatever ``perform`` returns.
@@ -129,6 +137,7 @@ async def admit(
         ledger=ledger,
         spend_scope=spend_scope,
         context=context,
+        advisor=advisor,
     )
     result = await perform()
     _spend(action, ledger, spend_scope)
@@ -147,6 +156,7 @@ def admit_sync(
     ledger: SpendLedger | None = None,
     spend_scope: str = "default",
     context: Mapping[str, Any] | None = None,
+    advisor: ControlAdvisor | None = None,
 ) -> T:
     """:func:`admit` for a synchronous side effect.
 
@@ -167,6 +177,7 @@ def admit_sync(
         ledger=ledger,
         spend_scope=spend_scope,
         context=context,
+        advisor=advisor,
     )
     result = perform()
     _spend(action, ledger, spend_scope)
@@ -184,10 +195,18 @@ def _decide(  # noqa: PLR0913 — admit()'s arguments, minus the side effect
     ledger: SpendLedger | None,
     spend_scope: str,
     context: Mapping[str, Any] | None,
+    advisor: ControlAdvisor | None = None,
 ) -> ApprovalDecision:
     """Decide, record, and raise unless admitted. The one path both gates share."""
     spent = ledger.spent(spend_scope) if ledger is not None else 0.0
-    decision = approve(action, policy=policy, finding=finding, verdict=verdict, spent_usd=spent)
+    decision = approve(
+        action,
+        policy=policy,
+        finding=finding,
+        verdict=verdict,
+        advisor=advisor,
+        spent_usd=spent,
+    )
     human = approved_by is not None and decision.outcome == ApprovalOutcome.REQUIRE_HUMAN
     if trail is not None:
         entry: dict[str, Any] = {
@@ -200,6 +219,11 @@ def _decide(  # noqa: PLR0913 — admit()'s arguments, minus the side effect
             entry.update(
                 {"cost_usd": action.cost_usd, "spent_usd": spent, "spend_scope": spend_scope}
             )
+        if advisor is not None:
+            # Additive keys, and only when a model was in the loop: entries
+            # written without one keep exactly the shape they always had.
+            entry["policy_outcome"] = decision.policy_outcome
+            entry["model_outcome"] = decision.model_outcome
         if human:
             entry["approved_by"] = approved_by
         if context:
