@@ -142,6 +142,9 @@ EV_TOOL_SANDBOX_STARTED = "tool.sandbox.started"
 EV_TOOL_SANDBOX_COMPLETED = "tool.sandbox.completed"
 EV_TOOL_SANDBOX_DENIED = "tool.sandbox.denied"
 
+# --- Coding harness (tulip.harness) ---
+EV_HARNESS_EXEC = "harness.exec"
+
 
 async def emit(event_type: str, /, **data: Any) -> None:
     """Publish a :class:`StreamEvent` if a run_id is in the current
