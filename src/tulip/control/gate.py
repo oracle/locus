@@ -40,24 +40,42 @@ from __future__ import annotations
 import inspect
 import json
 from collections.abc import Awaitable, Callable, Mapping
-from typing import TYPE_CHECKING, Any, Literal, Protocol, cast, runtime_checkable
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Literal,
+    Protocol,
+    TypeAlias,
+    TypeVar,
+    cast,
+    runtime_checkable,
+)
 
 from tulip.control.action import ActionSpec, resolve_action
 from tulip.control.admission import AdmissionError, admit
 from tulip.control.approvals import ApprovalStore
-from tulip.control.policy import ApprovalOutcome
+from tulip.control.policy import ApprovalDecision, ApprovalOutcome
 
 
 if TYPE_CHECKING:
     from tulip.control.audit import AuditTrail
     from tulip.control.findings import Evidence
-    from tulip.control.policy import ApprovalDecision, ControlPolicy
+    from tulip.control.policy import Action, ControlAdvisor, ControlPolicy
     from tulip.control.spend import SpendLedger
     from tulip.control.verification import VerificationResult
     from tulip.tools.decorator import Tool
 
 
-__all__ = ["ApprovalBridge", "gate_tool"]
+__all__ = ["ApprovalBridge", "PerCall", "gate_tool"]
+
+_T = TypeVar("_T")
+
+#: A value fixed when the tool is wrapped, or worked out for each call:
+#: ``(tool_name, arguments) -> value``, sync or async. ``gate_tool`` takes its
+#: ``verdict`` and ``finding`` this way, so a verification that depends on what
+#: the call is about (a safety score of the text a tool would send, a grounding
+#: check of the claim it would act on) is made for that call and no other.
+PerCall: TypeAlias = _T | Callable[[str, dict[str, Any]], "_T | None | Awaitable[_T | None]"] | None
 
 
 @runtime_checkable
@@ -158,14 +176,76 @@ def _approval_context(
     return context
 
 
+async def _per_call(source: Any, tool_name: str, kwargs: Mapping[str, Any]) -> Any:
+    """``source`` itself, or what it returns for this call when it is callable."""
+    if source is None or not callable(source):
+        return source
+    value = source(tool_name, dict(kwargs))
+    return await value if inspect.isawaitable(value) else value
+
+
+def _unavailable(action: Action, what: str, error: Exception, trail: AuditTrail | None) -> Any:
+    """The refusal for a call whose verdict or finding could not be worked out.
+
+    A deny, not a missing value. Read as ``None``, a failed verification would
+    let the call through under any policy that does not demand one
+    (``require_verification_score=0``) -- the one outcome a failure must never
+    have. So the call is refused, recorded like any other admission decision,
+    and handed to the usual refusal path. A callable that *returns* ``None`` is
+    different: that is an honest "no verification", and the policy weighs it.
+    """
+    from tulip.control.admission import AdmissionError  # noqa: PLC0415
+
+    reason = f"{what} unavailable ({type(error).__name__}); the call was not performed"
+    decision = ApprovalDecision(
+        outcome=ApprovalOutcome.DENY,
+        reason=reason,
+        action=action,
+        checks=[reason],
+        policy_outcome=ApprovalOutcome.DENY,
+    )
+    if trail is not None:
+        trail.record(
+            "action-admission",
+            {
+                "action": action.name,
+                "asset": action.asset,
+                "outcome": decision.outcome,
+                "reason": decision.reason,
+            },
+        )
+    return AdmissionError(decision)
+
+
+async def _evidence_for(
+    action: Action,
+    finding: Any,
+    verdict: Any,
+    tool_name: str,
+    kwargs: Mapping[str, Any],
+    trail: AuditTrail | None,
+) -> tuple[Evidence | None, VerificationResult | None]:
+    """This call's finding and verdict; raises :class:`AdmissionError` if either fails."""
+    try:
+        call_finding = await _per_call(finding, tool_name, kwargs)
+    except Exception as error:  # noqa: BLE001 - fail closed, see _unavailable
+        raise _unavailable(action, "finding", error, trail) from error
+    try:
+        call_verdict = await _per_call(verdict, tool_name, kwargs)
+    except Exception as error:  # noqa: BLE001 - fail closed, see _unavailable
+        raise _unavailable(action, "verification", error, trail) from error
+    return call_finding, call_verdict
+
+
 def gate_tool(
     tool: Tool,
     *,
     policy: ControlPolicy,
     action: ActionSpec | None = None,
     trail: AuditTrail | None = None,
-    finding: Evidence | None = None,
-    verdict: VerificationResult | None = None,
+    finding: PerCall[Evidence] = None,
+    verdict: PerCall[VerificationResult] = None,
+    advisor: ControlAdvisor | None = None,
     on_refusal: Literal["return", "raise", "interrupt"] = "return",
     approval: ApprovalBridge | None = None,
     principal: str = "agent",
@@ -192,9 +272,27 @@ def gate_tool(
         trail: Records every decision, allowed or not. Omit and decisions are
             weighed but not written down.
         finding: Grounded evidence supporting the action, when the policy
-            requires one.
+            requires one. A fixed value, or ``(tool_name, arguments) -> Evidence
+            | None`` (sync or async) worked out for each call.
         verdict: A verification result, when the policy sets
-            ``require_verification_score``.
+            ``require_verification_score``. A fixed value, or ``(tool_name,
+            arguments) -> VerificationResult | None`` (sync or async) worked out
+            for each call -- a safety score of the text this call would send,
+            say, rather than one score fixed when the tool was wrapped. A
+            callable that returns ``None`` means no verification, which the
+            policy weighs as usual. One that raises refuses the call with a
+            ``deny``: a verification that failed is never read as one that was
+            not required. After an approver edits a held call's arguments, it is
+            asked again about the edited call.
+        advisor: A trained control model (any
+            :class:`~tulip.control.policy.ControlAdvisor`), consulted on every
+            call through :func:`~tulip.control.policy.approve`. It sees the
+            call's :class:`Action` and can only make the decision stricter -- a
+            ``deny`` or ``require_human`` it returns is a refusal or a hold like
+            any other; one that fails or has no opinion changes nothing. An
+            admit head served through ``tulip.decision.DecisionAdvisor`` plugs
+            in here, as does a ``VerificationResult`` from its
+            ``verification_from_decision`` through a ``verdict`` callable.
         approval: Where to submit an action held for a human. Without one, a
             hold tells the model it was held and stops there — true, and not
             actionable. With one, the refusal carries an ``approval_id`` the
@@ -266,6 +364,8 @@ def gate_tool(
         resolved: Any,
         kwargs: dict[str, Any],
         perform_with: Callable[[dict[str, Any]], Awaitable[Any]],
+        call_finding: Evidence | None,
+        call_verdict: VerificationResult | None,
     ) -> Any:
         """A ``require_human`` hold in interrupt mode: pause, or act on a decision."""
         store = cast("ApprovalStore", approval)
@@ -318,17 +418,26 @@ def gate_tool(
 
                 try:
                     # An edited call is weighed again: an approver cannot edit
-                    # an action into one the policy denies.
+                    # an action into one the policy denies. Its finding and
+                    # verdict are the edited call's, not the requested one's.
+                    run_finding, run_verdict = (
+                        await _evidence_for(
+                            run_action, finding, verdict, tool.name, run_kwargs, trail
+                        )
+                        if edited is not None
+                        else (call_finding, call_verdict)
+                    )
                     return await admit(
                         run_action,
                         perform_once,
                         policy=policy,
-                        finding=finding,
-                        verdict=verdict,
+                        finding=run_finding,
+                        verdict=run_verdict,
                         trail=trail,
                         approved_by=record.decided_by,
                         ledger=ledger,
                         spend_scope=_scope_for(spend_scope, tool.name, run_kwargs),
+                        advisor=advisor,
                     )
                 except AdmissionError as denial:
                     store.consume(approval_id)
@@ -375,22 +484,28 @@ def gate_tool(
             return await perform_with(kwargs)
 
         resolved = resolve_action(action, tool.name, kwargs)
+        call_finding: Evidence | None = None
+        call_verdict: VerificationResult | None = None
         try:
+            call_finding, call_verdict = await _evidence_for(
+                resolved, finding, verdict, tool.name, kwargs, trail
+            )
             return await admit(
                 resolved,
                 perform,
                 policy=policy,
-                finding=finding,
-                verdict=verdict,
+                finding=call_finding,
+                verdict=call_verdict,
                 trail=trail,
                 ledger=ledger,
                 spend_scope=_scope_for(spend_scope, tool.name, kwargs),
+                advisor=advisor,
             )
         except AdmissionError as error:
             if on_refusal == "raise":
                 raise
             if on_refusal == "interrupt" and error.decision.outcome != ApprovalOutcome.DENY:
-                return await hold(error, resolved, kwargs, perform_with)
+                return await hold(error, resolved, kwargs, perform_with, call_finding, call_verdict)
             return _refusal(
                 error,
                 approval=approval,

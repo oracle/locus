@@ -10,6 +10,55 @@ policy.
 
 ### Added
 
+- **`tulip.testing.CompromisedModel`: a model an attacker has already won,
+  for your own rogue suite.** It calls the attack on every model call that
+  offers tools and never refuses, so a test checks what has to hold when the
+  model does not: the gate, the offered tools, the audit trail. Name a tool
+  and its arguments, or pass `(messages, tools) -> (name, arguments) |
+  ModelResponse | None` to choose each turn's call. `rounds=` caps the calls
+  per run (counted from the conversation, so one model serves concurrent
+  runs), `after=` is what it says once it stops, and by default it also calls
+  tools the agent never offered, which the agent has to refuse
+  (`offered_only=True` turns that off). Every call is recorded on
+  `attempts`. It is the offline mode of `python -m tulip.rogue`, made
+  reusable against your own agent.
+- **`tulip.testing.MockModel`**, another name for `FunctionModel`, because
+  that is the name people coming from other SDKs look for. A fixed list of
+  turns is still a `ScriptedModel`.
+- **`gate_tool(advisor=)`, and a verdict worked out for each call.** A
+  trained control model (any `ControlAdvisor`) is now passed through
+  `gate_tool`, `admit` and `admit_sync` to `approve(advisor=)` on every call,
+  including the re-admission of an approved hold; as everywhere, it can only
+  make a decision stricter, and one that fails or has no opinion changes
+  nothing. When an advisor is given, the `action-admission` trail entry also
+  carries `policy_outcome` and `model_outcome`. `gate_tool`'s `verdict=` and
+  `finding=` also take `(tool_name, arguments) -> value`, sync or async,
+  asked for each call instead of fixed when the tool is wrapped (and asked
+  again about an approver's edited arguments), so one gated tool on a shared
+  agent can be verified call by call. A callable that returns `None` is no
+  verification; one that raises refuses the call with a `deny`, recorded on the
+  trail, so a failed verification never passes for one that was not required.
+- **`tulip.decision`: typed decisions with probabilities.** Ask a model a
+  `Choice(name, question, options)`, a `YesNo(name, question)` or a
+  `Score(name, question, levels)` about one input and get back an `Answer` per
+  field: a probability for every listed answer, the argmax, its margin, and
+  `coverage`, the share of the model's probability that went to the listed
+  answers at all. The default provider, `LogprobDecider`, needs only an
+  OpenAI-compatible server that returns logprobs (vLLM, llama.cpp, LM Studio):
+  one `max_tokens=1` request per field with `top_logprobs`, fields of one
+  input sent concurrently, and `DecisionError` instead of a guess when no
+  listed answer is among the top tokens. The prompt (`SYSTEM_PROMPT`,
+  `render()`) is a fixed, tested contract, so a head fine-tuned on it is served
+  with no glue. `DecisionAdvisor` plugs an admit head into
+  `approve(advisor=)`, by argmax or by a certified `hold_at` threshold on
+  `1 - P(allow)`, and like every advisor it can only make a decision stricter.
+  `verification_from_decision()` turns yes/no safety heads into the
+  `VerificationResult` that `ControlPolicy.require_verification_score` weighs:
+  a head at its threshold denies. `TenantDecisionRouter` serves each tenant
+  from its own head only, refuses an unknown tenant, and records every
+  decision (labels and probabilities, never the input unless
+  `record_text=True`) on that tenant's audit chain; `per_tenant_trails()` is
+  its zero-infra audit side. See [`docs/decision.md`](docs/decision.md).
 - **`EventBusHook()` without a `run_id` follows the run.** Each event is
   tagged when it fires: with the id of the active `run_context` when the
   caller entered one, else with the run's own `AgentState.run_id`. One hook on
