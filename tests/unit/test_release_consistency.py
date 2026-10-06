@@ -15,6 +15,7 @@ breaks exactly one thing, so a failure names the drift rather than a fixture.
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
@@ -43,6 +44,8 @@ def _repo(
     dunder: str = "2.11.0",
     changelog: str = "2.11.0",
     security_major: str = "2",
+    security_pkg: str = "2.11.0",
+    security_floor: str = "2.11.0",
 ) -> Path:
     """A complete repo, consistent unless a caller asks for drift."""
     (tmp_path / "src" / "tulip").mkdir(parents=True)
@@ -57,6 +60,12 @@ def _repo(
         f"# Security Policy\n\n## Supported Versions\n\n"
         f"| Latest `{security_major}.x` minor | yes |\n"
     )
+    pkg = tmp_path / "packages" / "tulip-agents-security"
+    pkg.mkdir(parents=True)
+    (pkg / "pyproject.toml").write_text(
+        f'[project]\nname = "tulip-agents-security"\nversion = "{security_pkg}"\n'
+        f'dependencies = ["tulip-agents>={security_floor}"]\n'
+    )
     return tmp_path
 
 
@@ -68,6 +77,7 @@ def test_a_consistent_repo_passes(tmp_path: Path) -> None:
     version = module.check_versions_agree(verbose=False)
     module.check_changelog(version, verbose=False)
     module.check_security_major(version, verbose=False)
+    module.check_security_lockstep(version, verbose=False)
     assert version == "2.11.0"
 
 
@@ -113,6 +123,18 @@ def test_security_covering_the_wrong_major_is_caught(tmp_path: Path) -> None:
         module.check_security_major("2.11.0", verbose=False)
     assert "`2.x`" in str(exc.value)
     assert "['9']" in str(exc.value)
+
+
+def test_security_package_left_behind_is_caught(tmp_path: Path) -> None:
+    module = _load(_repo(tmp_path, security_pkg="2.10.0"))
+    with pytest.raises(module.ConsistencyError, match=re.escape("version is 2.10.0")):
+        module.check_security_lockstep("2.11.0", verbose=False)
+
+
+def test_security_floor_left_behind_is_caught(tmp_path: Path) -> None:
+    module = _load(_repo(tmp_path, security_floor="2.10.0"))
+    with pytest.raises(module.ConsistencyError, match=re.escape("tulip-agents>=2.11.0")):
+        module.check_security_lockstep("2.11.0", verbose=False)
 
 
 def test_a_missing_document_is_a_failure_not_a_crash(tmp_path: Path) -> None:
