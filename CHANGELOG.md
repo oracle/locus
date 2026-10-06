@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [2.21.0] - 2026-10-06
+
 ### Added
 
 - **`tulip.testing.CompromisedModel`: a model an attacker has already won,
@@ -156,7 +158,16 @@ policy.
   A run paused for approval and resumed in the same process keeps its run id,
   and with it its place in the plan. `hook.enforcer` is the most recent run's,
   which is what it showed before for runs one at a time; pass
-  `scope="agent"` for the old single plan.
+  `scope="agent"` for the old single plan. To keep one plan across runs,
+  install the hook yourself instead of passing `playbook=`:
+
+  ```python
+  from tulip.playbooks.hook import PlaybookEnforcerHook
+
+  # 2.20: Agent(..., playbook=pb)
+  agent = Agent(..., hooks=[PlaybookEnforcerHook(pb, scope="agent")])
+  ```
+
 - **A recall costs two store calls.** `LLMMemoryManager.retrieve` reads every
   memory type of every recalled namespace with one `search_many` for the
   ranking and one for the recency top-up. On `PgMemory` that is 2
