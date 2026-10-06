@@ -329,14 +329,22 @@ GIT_LISTING = {
 
 
 def _plain_pipeline(command: str, patterns: list[re.Pattern[str]]) -> bool:
-    """One command or a pipeline, each matching ``patterns``, nothing else going on."""
+    """Commands each matching ``patterns``, piped or listed, nothing else going on.
+
+    A redirection that writes no file -- ``2>&1``, ``>&2``, ``2>/dev/null`` -- does
+    not make a command write (:attr:`SimpleCommand.writes_files`); models append
+    ``2>&1`` to nearly every command, and holding ``cat x 2>&1`` for a person was
+    the cost of reading it as a write. A list (``;``, ``&&``, ``||``) of read-only
+    commands only reads. Backgrounding (``&``) does not: the command outlives the
+    call that was admitted.
+    """
     parsed = parse_command(command)
     if not parsed.parsed or parsed.has_substitution or not parsed.commands:
         return False
     for simple in parsed.commands:
-        if simple.nested or simple.wrappers or simple.redirects or not simple.argv:
+        if simple.nested or simple.wrappers or simple.writes_files or not simple.argv:
             return False
-        if simple.connector not in ("", "|"):
+        if simple.connector not in ("", "|", "|&", ";", "&&", "||"):
             return False
         if not any(rx.search(simple.text) for rx in patterns) or _writes_after_all(simple):
             return False
