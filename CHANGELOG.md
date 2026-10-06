@@ -89,6 +89,25 @@ policy.
   and the catalog, `render_skill=(skill) -> str` renders each active skill,
   and `skill_footer=False` leaves the `Allowed tools` / `Compatibility` /
   location footer out of the default rendering.
+- **`BaseStore.search_many(namespaces, query, limit)`: one call for several
+  namespaces.** It returns one list per namespace, as `search` would. The
+  default loops `search`, so every store has it. `PgMemory` answers it in one
+  transaction and one `SELECT` (`unnest ... WITH ORDINALITY` with a `LATERAL`
+  search per namespace), encodes the query once, and refuses a call whose
+  namespaces belong to more than one tenant (`namespace[0]`).
+- **`MemoryScope`: recall shared memories with a run's own.** A
+  `namespace_resolver` may return `MemoryScope(namespace=..., recall=(...))`
+  instead of a prefix. Session start then recalls the run's namespace and the
+  read-only `recall` namespaces (a team's, a household's) in one call and one
+  memory block, and extraction still writes only to `namespace`. A recall
+  namespace whose first element differs from `namespace[0]` belongs to
+  another tenant: it is dropped with a warning and never read.
+  `LLMMemoryManager.retrieve` / `retrieve_relevant` also take `namespaces=`,
+  and `scoped(prefix, recall=...)` sets the same scope by hand.
+- **`PgMemory(encoding_cache=1024)`.** Encodings are cached per store, keyed
+  by `(tenant, text)`, so an entry is never reused for another tenant. One
+  recall no longer runs the pure-Python HRR encoding once per memory type for
+  the same words. `0` turns the cache off.
 
 ### Changed
 
@@ -101,6 +120,20 @@ policy.
   and with it its place in the plan. `hook.enforcer` is the most recent run's,
   which is what it showed before for runs one at a time; pass
   `scope="agent"` for the old single plan.
+- **A recall costs two store calls.** `LLMMemoryManager.retrieve` reads every
+  memory type of every recalled namespace with one `search_many` for the
+  ranking and one for the recency top-up. On `PgMemory` that is 2
+  transactions and 4 statements instead of 8 and 16. Results are the same:
+  matches are interleaved rank by rank and topped up by recency. A store whose
+  `search_many` fails falls back to the per-namespace path. Pruning to
+  `max_memories` reads a type with one `search` instead of `list_keys` plus a
+  `get` per key.
+- **`tulip-agents[pgvector]` installs numpy.** `PgMemory`'s HRR encoding needs
+  numpy. Without it, rows were stored with no vector and recall quietly became
+  a substring match. Now `PgMemory` raises a `RuntimeWarning` when it is built
+  without numpy and without an embedder, and logs a warning the first time a
+  search degrades to `ILIKE`. Its missing-driver error now names
+  `tulip-agents[pgvector]`.
 
 ### Fixed
 
