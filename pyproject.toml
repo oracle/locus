@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tulip-agents"
-version = "2.19.0"
+version = "2.20.0"
 description = "The agent framework where the model never holds the trigger — every consequential action clears your policy first, waits for a human when it matters, and lands on a record you can verify. Build on it, or put it around the agent you already have."
 readme = "README.md"
 license = "Apache-2.0"
@@ -138,6 +138,11 @@ gemini = ["google-genai>=1.30"]
 
 # Durable agent runs on DBOS (src/tulip/durable/dbos.py).
 dbos = ["dbos>=2.0"]
+
+# NVIDIA OpenShell sandboxes as a coding-harness workspace
+# (src/tulip/harness/openshell.py). Only the client constructors import it; a
+# caller that passes its own client needs nothing from it.
+openshell = ["openshell>=0.1.2,<0.2"]
 
 # Mem0 agent-memory manager (src/tulip/memory/managers/mem0.py) — the
 # portable, self-hostable long-term memory backend.
@@ -685,6 +690,9 @@ module = [
     "playwright.*",
     "google.genai",
     "google.genai.*",
+    # The coding harness's OpenShell backend imports it lazily.
+    "openshell",
+    "openshell.*",
 ]
 ignore_missing_imports = true
 

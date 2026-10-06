@@ -10,6 +10,34 @@ policy.
 
 ### Added
 
+- **`tulip.testing.CompromisedModel`: a model an attacker has already won,
+  for your own rogue suite.** It calls the attack on every model call that
+  offers tools and never refuses, so a test checks what has to hold when the
+  model does not: the gate, the offered tools, the audit trail. Name a tool
+  and its arguments, or pass `(messages, tools) -> (name, arguments) |
+  ModelResponse | None` to choose each turn's call. `rounds=` caps the calls
+  per run (counted from the conversation, so one model serves concurrent
+  runs), `after=` is what it says once it stops, and by default it also calls
+  tools the agent never offered, which the agent has to refuse
+  (`offered_only=True` turns that off). Every call is recorded on
+  `attempts`. It is the offline mode of `python -m tulip.rogue`, made
+  reusable against your own agent.
+- **`tulip.testing.MockModel`**, another name for `FunctionModel`, because
+  that is the name people coming from other SDKs look for. A fixed list of
+  turns is still a `ScriptedModel`.
+- **`gate_tool(advisor=)`, and a verdict worked out for each call.** A
+  trained control model (any `ControlAdvisor`) is now passed through
+  `gate_tool`, `admit` and `admit_sync` to `approve(advisor=)` on every call,
+  including the re-admission of an approved hold; as everywhere, it can only
+  make a decision stricter, and one that fails or has no opinion changes
+  nothing. When an advisor is given, the `action-admission` trail entry also
+  carries `policy_outcome` and `model_outcome`. `gate_tool`'s `verdict=` and
+  `finding=` also take `(tool_name, arguments) -> value`, sync or async,
+  asked for each call instead of fixed when the tool is wrapped (and asked
+  again about an approver's edited arguments), so one gated tool on a shared
+  agent can be verified call by call. A callable that returns `None` is no
+  verification; one that raises refuses the call with a `deny`, recorded on the
+  trail, so a failed verification never passes for one that was not required.
 - **`tulip.decision`: typed decisions with probabilities.** Ask a model a
   `Choice(name, question, options)`, a `YesNo(name, question)` or a
   `Score(name, question, levels)` about one input and get back an `Answer` per
@@ -31,6 +59,42 @@ policy.
   decision (labels and probabilities, never the input unless
   `record_text=True`) on that tenant's audit chain; `per_tenant_trails()` is
   its zero-infra audit side. See [`docs/decision.md`](docs/decision.md).
+
+## [2.20.0] - 2026-10-06
+
+### Added
+
+- **`tulip.harness`: a coding harness written once, run on any workspace.**
+  The tools every coding agent converges on — `read`, `write`, `edit`,
+  `multi_edit`, `apply_patch`, `glob`, `grep`, `ls`, `bash` with
+  `bash_output` / `write_stdin` / `kill_shell` for background commands,
+  `notebook_edit`, `todo_write` / `todo_read` — written against one
+  `WorkspaceBackend` protocol (an extension of the deepagent
+  `BackendProtocol` with bytes, stat, windowed reads, `exec` and background
+  jobs). Four backends: `LocalBackend` (the host, files confined to a root,
+  commands in their own process groups, labelled `UNISOLATED: host shell`),
+  `MemoryBackend` (files only, for tests), `SessionBackend` (any sandbox that
+  can run a command and move a file, through a three-method `SessionLike`
+  adapter; background commands are process groups the sandbox owns) and
+  `OpenShellBackend` (an NVIDIA OpenShell sandbox, files over `exec`, the
+  gateway's `execution_timeout`; `pip install "tulip-agents[openshell]"`).
+  The behaviour is tulip-code's: read-before-edit with a staleness check on
+  the content hash, CRLF kept, near-miss edits matched and reported, head and
+  tail output with the full text spillable to a `ToolResultStore`, a
+  command that outlives its timeout kept under a handle.
+- **The single-gate rule.** Tool bodies never call a gate.
+  `build_harness(backend, wrap=...)` applies one `wrap(tool, action_spec)` to
+  every tool — `tulip.control.gate_tool` locally, the gateway's own gate
+  remotely — and `tulip.harness.labels` derives each call's `Action`:
+  `workspace.read` / `workspace.write` / `workspace.exec` / `network`, with
+  shell lines classified by `classify_command` into tags such as
+  `exec:destructive`, `exec:vcs-push`, `exec:network`, `exec:check` and
+  `exec:unparsed` (an unparseable line fails closed). `wrap=None` builds
+  ungated tools and logs a warning when they include a host shell.
+  `Harness.preview(name, args)` shows a file change's diff without writing.
+- **`ExecRecord` evidence for every command**: command and output by
+  SHA-256, exit status, duration, timeout, truncation and the backend label,
+  emitted as `harness.exec` on the event bus and to an `on_exec` sink.
 
 ## [2.19.0] - 2026-10-06
 
