@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "tulip-agents-security"
 # Released in lockstep with tulip-agents: bump this, and the tulip-agents floor
 # below, together with the core version.
-version = "2.18.3"
+version = "2.19.0"
 description = "Security-domain tooling for Tulip agents — AI red-team probes, SOC triage, threat-intel / SIEM / EDR / scanner / fingerprint / AWS posture adapters, and IR playbooks, all grounded through the tulip-agents control core."
 readme = "README.md"
 license = "Apache-2.0"
@@ -50,7 +50,7 @@ classifiers = [
 # read-only triage loop works on tulip-agents alone (offline samples need
 # nothing).
 dependencies = [
-    "tulip-agents>=2.18.3",
+    "tulip-agents>=2.19.0",
 ]
 
 [project.optional-dependencies]
