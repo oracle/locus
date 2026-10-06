@@ -8,6 +8,17 @@ policy.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A command that only reads is no longer held as an exec because of `2>&1`.**
+  `tulip.harness.labels` counted any redirection as a write, so `cat x 2>&1`,
+  `grep y f >&2` and `ls 2>/dev/null` were classified `workspace.exec` and held
+  for a person under a blast-radius maximum of 1 (seen live: a subagent's
+  `ls -la notes.txt 2>&1; cat notes.txt 2>&1`). Only a redirection that writes a
+  file counts now (`SimpleCommand.writes_files`), and a list (`;`, `&&`, `||`)
+  of read-only commands reads; `> file`, `>> file`, `2>file`, `tee` and
+  backgrounding (`&`) still do not.
+
 ## [2.21.0] - 2026-10-06
 
 ### Added

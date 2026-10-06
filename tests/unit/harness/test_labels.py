@@ -111,7 +111,7 @@ def test_reads_and_pipelines_of_reads_are_reads(command: str) -> None:
         "date -s 2020-01-01",
         "rg --pre ./run.sh pattern",
         "grep x f | tee out",
-        "ls; ls",
+        "ls; rm -rf build",
         "cat $(echo f)",
         "cat secrets.env > /tmp/stolen",
         'cat "unclosed',
@@ -206,3 +206,30 @@ def test_action_specs_derive_the_action(
     assert action.environment == "dev"
     assert tags <= action.tags
     assert name in action.tags
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat notes.txt 2>&1",
+        "ls -la x 2>&1; cat x 2>&1",
+        "cat x 2>/dev/null",
+        "grep foo x >&2",
+        "ls && cat x",
+        "git status || git log --oneline",
+    ],
+)
+def test_a_redirect_that_writes_no_file_still_only_reads(command: str) -> None:
+    # Live on dev (functional F23) a subagent's `ls -la notes.txt 2>&1; cat notes.txt 2>&1`
+    # was held for a person as an exec: `2>&1` read as a write.
+    assert read_only(command)
+    assert classify_command(command).kind == KIND_READ
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["cat x > out.txt", "cat x >> out.txt", "cat x 2>err.log", "ls | tee out.txt", "sleep 100 &"],
+)
+def test_a_redirect_into_a_file_or_a_background_job_is_not_a_read(command: str) -> None:
+    assert not read_only(command)
+    assert classify_command(command).kind == KIND_EXEC
