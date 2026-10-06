@@ -8,6 +8,24 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **`tulip.testing.CompromisedModel`: a model an attacker has already won,
+  for your own rogue suite.** It calls the attack on every model call that
+  offers tools and never refuses, so a test checks what has to hold when the
+  model does not: the gate, the offered tools, the audit trail. Name a tool
+  and its arguments, or pass `(messages, tools) -> (name, arguments) |
+  ModelResponse | None` to choose each turn's call. `rounds=` caps the calls
+  per run (counted from the conversation, so one model serves concurrent
+  runs), `after=` is what it says once it stops, and by default it also calls
+  tools the agent never offered, which the agent has to refuse
+  (`offered_only=True` turns that off). Every call is recorded on
+  `attempts`. It is the offline mode of `python -m tulip.rogue`, made
+  reusable against your own agent.
+- **`tulip.testing.MockModel`**, another name for `FunctionModel`, because
+  that is the name people coming from other SDKs look for. A fixed list of
+  turns is still a `ScriptedModel`.
+
 ## [2.20.0] - 2026-10-06
 
 ### Added
