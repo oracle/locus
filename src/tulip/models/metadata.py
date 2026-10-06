@@ -29,15 +29,17 @@ Design:
 
 from __future__ import annotations
 
+import re
 import threading
 from decimal import Decimal
-from typing import Final
+from typing import Any, Final
 
 from pydantic import BaseModel, Field
 
 
 __all__ = [
     "ModelMetadata",
+    "discover_context_length",
     "known_models",
     "metadata_for",
     "model_id_of",
@@ -130,6 +132,15 @@ def _strip_prefix(model_id: str) -> str:
     return model_id
 
 
+#: A snapshot suffix on a model slug: ``-20250929``, ``-2025-09-29``,
+#: Vertex's ``@20251101``, or ``-latest``.
+_SNAPSHOT_SUFFIX: Final[re.Pattern[str]] = re.compile(
+    r"(?:[-@](?:\d{8}|\d{4}-\d{2}-\d{2})|-latest)$"
+)
+
+#: A Claude slug's ``-<major>.<minor>`` version, as OpenRouter writes it.
+_CLAUDE_DOTTED: Final[re.Pattern[str]] = re.compile(r"^(claude-[a-z]+-\d+)\.(\d)$")
+
 _lock = threading.Lock()
 _registry: dict[str, ModelMetadata] = {}
 
@@ -154,7 +165,26 @@ def metadata_for(model_id: str) -> ModelMetadata | None:
     """
     key = _strip_prefix(model_id.strip())
     with _lock:
-        return _registry.get(key)
+        found = _registry.get(key)
+        if found is None:
+            # A dated snapshot or a ``-latest`` alias is the same model as its
+            # base slug, priced the same. Only those exact suffix shapes are
+            # stripped: a looser prefix match would let ``gpt-5`` answer for
+            # ``gpt-5.5``, which is a different model at a different price —
+            # and a wrong price under a hard ``max_cost_usd`` is worse than
+            # none.
+            base = _SNAPSHOT_SUFFIX.sub("", key)
+            if base != key:
+                found = _registry.get(base)
+        if found is None:
+            # OpenRouter's spelling of a Claude model, with or without its
+            # ``anthropic/`` vendor part, as the Anthropic binding sends it to
+            # OpenRouter's Messages API: the same model at the same list price
+            # (``anthropic/claude-sonnet-5.5`` is ``claude-sonnet-5-5``).
+            bare = key.removeprefix("anthropic/")
+            if _CLAUDE_DOTTED.match(bare) or bare != key:
+                found = _registry.get(_CLAUDE_DOTTED.sub(r"\1-\2", bare))
+        return found
 
 
 def model_id_of(model: object) -> str | None:
@@ -173,6 +203,84 @@ def model_id_of(model: object) -> str | None:
     if not isinstance(name, str) or not name:
         name = getattr(model, "model", None)
     return name if isinstance(name, str) and name else None
+
+
+async def discover_context_length(
+    base_url: str,
+    model: str,
+    *,
+    api_key: str | None = None,
+    request_timeout: float = 10.0,
+    register: bool = True,
+) -> int | None:
+    """Read a served model's context window from its ``/models`` listing.
+
+    vLLM lists ``max_model_len`` for each model it serves, the window it
+    was started with — which can be smaller than the model's published
+    one, so it is the number the server will actually enforce. OpenRouter
+    and some other gateways list ``context_length`` instead; both are read.
+
+    The call is explicit and async on purpose: agent construction stays
+    offline, and a caller that wants the window asks for it once, before
+    building agents. With ``register`` (the default) the window is stored
+    via :func:`register_metadata`, keeping any prices already registered
+    for the model, so every agent built afterwards counts tokens against it.
+
+    Args:
+        base_url: The OpenAI-compatible base URL, e.g. ``http://host:8000/v1``.
+        model: The served model id; a provider prefix (``vllm:``) is dropped.
+        api_key: Bearer token, when the server requires one.
+        request_timeout: Request timeout in seconds.
+        register: Store the discovered window in the metadata registry.
+
+    Returns:
+        The window in tokens, or ``None`` when the server is unreachable or
+        does not list one for ``model``. Never raises for those cases:
+        discovery is best effort and the caller decides the fallback.
+    """
+    import httpx
+
+    slug = _strip_prefix(model.strip())
+    url = f"{base_url.rstrip('/')}/models"
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    try:
+        async with httpx.AsyncClient(timeout=request_timeout) as client:
+            response = await client.get(url, headers=headers)
+            response.raise_for_status()
+            listed = response.json().get("data") or []
+    except (httpx.HTTPError, ValueError, AttributeError):
+        return None
+
+    window: int | None = None
+    for entry in listed:
+        if not isinstance(entry, dict) or entry.get("id") != slug:
+            continue
+        window = _positive_int(entry.get("max_model_len")) or _positive_int(
+            entry.get("context_length")
+        )
+        break
+    if window is None:
+        return None
+    if register:
+        existing = metadata_for(slug)
+        if existing is not None:
+            register_metadata(existing.model_copy(update={"context_length": window}))
+        else:
+            register_metadata(
+                ModelMetadata(
+                    model_id=slug,
+                    family="discovered",
+                    context_length=window,
+                    max_output_tokens=window,
+                )
+            )
+    return window
+
+
+def _positive_int(value: Any) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    return None
 
 
 def known_models() -> list[str]:
@@ -313,6 +421,58 @@ _seed(
     input_price_per_mtok="0.80",
     output_price_per_mtok="4.00",
 )
+
+# OpenAI GPT-5.5. Prices and window are the listed rates tulip-code's price
+# table carried (2026-08); the output cap follows the GPT-5 generation.
+for _slug, _in, _out in (
+    ("gpt-5.5", "1.25", "10.00"),
+    ("gpt-5.5-mini", "0.25", "2.00"),
+    ("gpt-5.5-nano", "0.05", "0.40"),
+):
+    _seed(
+        _slug,
+        family="openai",
+        context_length=400_000,
+        max_output_tokens=128_000,
+        supports_prompt_caching=True,
+        input_price_per_mtok=_in,
+        output_price_per_mtok=_out,
+    )
+
+# Anthropic, current generation — ids, windows, output caps and first-party
+# list prices as published 2026-09-25. Every one of these takes the full 1M
+# window by default and caps output at 128K, except Haiku 4.5 (200K / 64K).
+for _slug, _in, _out in (
+    ("claude-fable-5-1", "10.00", "50.00"),
+    ("claude-fable-5", "10.00", "50.00"),
+    ("claude-opus-5-5", "4.00", "20.00"),
+    ("claude-opus-5", "5.00", "25.00"),
+    ("claude-opus-4-8", "5.00", "25.00"),
+    ("claude-opus-4-7", "5.00", "25.00"),
+    ("claude-opus-4-6", "5.00", "25.00"),
+    ("claude-sonnet-5-5", "2.00", "10.00"),
+    ("claude-sonnet-5", "2.00", "10.00"),
+    ("claude-sonnet-4-6", "3.00", "15.00"),
+):
+    _seed(
+        _slug,
+        family="anthropic",
+        context_length=1_000_000,
+        max_output_tokens=128_000,
+        supports_prompt_caching=True,
+        input_price_per_mtok=_in,
+        output_price_per_mtok=_out,
+    )
+_seed(
+    "claude-haiku-4-5",
+    family="anthropic",
+    context_length=200_000,
+    max_output_tokens=64_000,
+    supports_prompt_caching=True,
+    input_price_per_mtok="1.00",
+    output_price_per_mtok="5.00",
+)
+del _slug, _in, _out
 
 # Qwen (Alibaba) — open-weight reasoning models commonly served via
 # vLLM with ``--reasoning-parser qwen``. Context windows as published

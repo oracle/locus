@@ -222,6 +222,20 @@ def tool_result_from_output(tool_call: ToolCall, output: Any, duration_ms: float
     )
 
 
+def _malformed_arguments_result(tool_call: ToolCall) -> ToolResult:
+    """Tell the model its arguments were not JSON, so it sends them again."""
+    raw = (tool_call.malformed_arguments or "")[:300]
+    return ToolResult(
+        tool_call_id=tool_call.id,
+        name=tool_call.name,
+        content="",
+        error=(
+            f"The arguments for {tool_call.name} were not valid JSON: {raw!r}. "
+            "The tool did not run. Call it again with the same arguments as a valid JSON object."
+        ),
+    )
+
+
 def _bound_context(
     tool_call: ToolCall, ctx_factory: ToolContextFactory | None
 ) -> tuple[ToolContext | None, ToolContext]:
@@ -377,6 +391,8 @@ class SequentialExecutor(ToolExecutor):
     ) -> ToolResult:
         """Execute a single tool call."""
         start = time.perf_counter()
+        if tool_call.malformed_arguments is not None:
+            return _malformed_arguments_result(tool_call)
 
         try:
             tool = registry.get(tool_call.name)
@@ -511,6 +527,8 @@ class ConcurrentExecutor(ToolExecutor):
     ) -> ToolResult:
         """Execute a single tool call."""
         start = time.perf_counter()
+        if tool_call.malformed_arguments is not None:
+            return _malformed_arguments_result(tool_call)
 
         try:
             tool = registry.get(tool_call.name)

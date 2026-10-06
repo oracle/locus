@@ -5,7 +5,8 @@
 
 Extracts durable facts from conversation history, persists them via a
 :class:`~tulip.memory.store.BaseStore` backend, and injects relevant
-memories into the system prompt at the start of every new session.
+memories at the start of every new session, as a system message right after
+the turn's prompt (see :func:`_inject_memories_into_state` for why there).
 
 Storage layout
 --------------
@@ -107,6 +108,10 @@ logger = logging.getLogger(__name__)
 #: rather than adding another one, so a checkpointed thread carries at most one
 #: memory block no matter how many turns it has run.
 MEMORY_BLOCK_METADATA_KEY = "tulip_memory_block"
+
+#: ``Message.metadata`` key on a user-role note the agent loop wrote (see
+#: :data:`tulip.agent.completion.AUTOMATED_NOTE_KEY`): never the turn's prompt.
+_AUTOMATED_NOTE_KEY = "tulip_automated_note"
 
 #: Header line inside every block :func:`_format_memory_block` renders. Used to
 #: recognise blocks injected before the metadata tag existed (still sitting in
@@ -901,12 +906,17 @@ def _inject_memories_into_state(
 ) -> AgentState:
     """Place a formatted memory block in state.messages, replacing any old one.
 
-    Inserts a system message immediately after the first system prompt
-    (position 1), or at position 0 when there is no system prompt. This
-    keeps the primary system prompt intact and first, while the memory
-    block follows it. Any memory block already present — typically
-    injected by an earlier turn and persisted in the thread's checkpoint —
-    is removed first, so the state never carries more than one.
+    The block goes right after the turn's prompt (the latest user message),
+    or after the leading system messages when there is none. A provider's
+    prompt cache serves only a byte-identical prefix, and the block is
+    per-turn content: it is retrieved for this turn's prompt and stripped
+    before the turn is saved. Placed after the system prompt, it would change
+    the start of the request every turn and every turn would pay full price
+    for the whole conversation; placed after the prompt, the next turn still
+    starts with this one's history up to and including its prompt. Any memory
+    block already present — typically injected by an earlier turn and
+    persisted in the thread's checkpoint — is removed first, so the state
+    never carries more than one.
     """
     from tulip.core.messages import Message, Role  # noqa: PLC0415
 
@@ -918,10 +928,21 @@ def _inject_memories_into_state(
     )
 
     msgs = list(_strip_memory_blocks(state).messages)
-    if msgs and msgs[0].role == Role.SYSTEM:
-        msgs.insert(1, memory_msg)
+    prompt = next(
+        (
+            i
+            for i in range(len(msgs) - 1, -1, -1)
+            if msgs[i].role == Role.USER and not msgs[i].metadata.get(_AUTOMATED_NOTE_KEY)
+        ),
+        None,
+    )
+    if prompt is not None:
+        at = prompt + 1
     else:
-        msgs.insert(0, memory_msg)
+        at = 0
+        while at < len(msgs) and msgs[at].role == Role.SYSTEM:
+            at += 1
+    msgs.insert(at, memory_msg)
 
     return state.model_copy(update={"messages": tuple(msgs)})
 

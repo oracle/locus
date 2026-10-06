@@ -5,8 +5,11 @@
 
 from __future__ import annotations
 
+import os
+import re
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field
 
@@ -69,13 +72,131 @@ def _tool_result_content(content: str | None, *, send_images: bool) -> str | lis
     return blocks
 
 
+def _system_note_block(text: str) -> dict[str, Any]:
+    """A mid-run system message as a user-turn text block, marked as guidance."""
+    return {"type": "text", "text": f"<system-note>\n{text}\n</system-note>"}
+
+
+def _as_blocks(content: str | list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """User-turn content as a block list, so two turns can be concatenated."""
+    if isinstance(content, str):
+        return [{"type": "text", "text": content}] if content else []
+    return list(content)
+
+
+def _merge_user_turns(turns: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge runs of adjacent user turns into one, ``tool_result`` blocks first.
+
+    A turn that is not merged with anything keeps its original shape, so a
+    plain ``user`` string stays a string on the wire.
+    """
+    merged: list[dict[str, Any]] = []
+    for turn in turns:
+        if turn["role"] == "user" and merged and merged[-1]["role"] == "user":
+            blocks = _as_blocks(merged[-1]["content"]) + _as_blocks(turn["content"])
+            results = [b for b in blocks if b.get("type") == "tool_result"]
+            rest = [b for b in blocks if b.get("type") != "tool_result"]
+            merged[-1] = {"role": "user", "content": results + rest}
+        else:
+            merged.append(turn)
+    return merged
+
+
+#: A Claude id's trailing ``-<major>-<minor>`` version, which OpenRouter writes
+#: ``-<major>.<minor>`` (``claude-sonnet-5-5`` is ``anthropic/claude-sonnet-5.5``).
+_DASHED_VERSION = re.compile(r"^(claude-[a-z]+-\d+)-(\d)$")
+_DOTTED_VERSION = re.compile(r"^(claude-[a-z]+-\d+)\.(\d)$")
+#: A dated snapshot suffix (``-20251001``), which OpenRouter's slugs do not carry.
+_SNAPSHOT = re.compile(r"-\d{8}$")
+
+#: Maximum ``cache_control`` breakpoints Anthropic accepts in one request.
+MAX_CACHE_BREAKPOINTS = 4
+
+
+def native_model_id(model_id: str) -> str:
+    """Anthropic's own id for ``model_id``, also when given as an OpenRouter slug.
+
+    ``anthropic/claude-sonnet-5.5`` is ``claude-sonnet-5-5``; any other id is
+    returned as it is. The model's capabilities (which ids reject
+    ``temperature``) are keyed on Anthropic's ids.
+    """
+    bare = model_id.removeprefix("anthropic/")
+    return _DOTTED_VERSION.sub(r"\1-\2", bare)
+
+
+def openrouter_model_id(model_id: str) -> str:
+    """OpenRouter's slug for a Claude model (``claude-sonnet-5-5`` → ``anthropic/claude-sonnet-5.5``).
+
+    An id that already names a vendor (contains ``/``) is returned unchanged.
+    """
+    if "/" in model_id:
+        return model_id
+    bare = _SNAPSHOT.sub("", model_id)
+    return "anthropic/" + _DASHED_VERSION.sub(r"\1.\2", bare)
+
+
+def _is_openrouter(base_url: str | None) -> bool:
+    host = urlparse(base_url).hostname if base_url else None
+    return bool(host) and (host == "openrouter.ai" or str(host).endswith(".openrouter.ai"))
+
+
 def _rejects_temperature(model_id: str) -> bool:
     """Return True if the named Claude model rejects the `temperature` param.
 
     Public so callers (or wrappers) can pre-flight the same check without
     relying on a 400 round-trip to the API.
     """
+    model_id = native_model_id(model_id)
     return any(model_id.startswith(p) for p in _TEMPERATURE_DEPRECATED_PREFIXES)
+
+
+def _with_cache_breakpoint(message: dict[str, Any]) -> dict[str, Any]:
+    """``message`` with ``cache_control`` on its last content block.
+
+    The prefix up to and including that block is written to the cache, and
+    read back by the next request that starts with it.
+    """
+    blocks = _as_blocks(message["content"])
+    if not blocks:
+        return message
+    last = {**blocks[-1], "cache_control": {"type": "ephemeral"}}
+    return {**message, "content": [*blocks[:-1], last]}
+
+
+def _rolling_breakpoints(messages: list[dict[str, Any]], slots: int) -> list[dict[str, Any]]:
+    """Mark the end of the conversation, and the user turn before it, for caching.
+
+    The breakpoint on the latest message caches the whole request; the next
+    request, which starts with all of it (the history only grows between
+    compactions), reads it back and pays full price only for what it added.
+    Anthropic looks back a limited number of blocks from a breakpoint for an
+    earlier cache entry, so when a slot is free the previous user turn gets
+    one too: a turn that added many blocks still finds the last one written.
+    """
+    if slots <= 0 or not messages:
+        return messages
+    # Every turn as a block list: a breakpoint turns the turn it lands on into
+    # one, and that turn must look the same in the next request, where the
+    # breakpoint has moved on, or the prefix would differ there.
+    marked = [{**m, "content": _as_blocks(m["content"]) or m["content"]} for m in messages]
+    targets = [len(marked) - 1]
+    if slots > 1:
+        earlier = next(
+            (i for i in range(len(marked) - 2, -1, -1) if marked[i]["role"] == "user"), None
+        )
+        if earlier is not None:
+            targets.append(earlier)
+    for index in targets:
+        marked[index] = _with_cache_breakpoint(marked[index])
+    return marked
+
+
+def _reported_cost(usage: Any) -> float | None:
+    """The call's cost in USD when the endpoint reports one (OpenRouter does)."""
+    cost = getattr(usage, "cost", None)
+    if isinstance(cost, bool) or not isinstance(cost, int | float):
+        return None
+    return float(cost)
 
 
 def _usage_dict(usage: Any) -> dict[str, int]:
@@ -105,7 +226,26 @@ class AnthropicConfig(ModelConfig):
     temperature: float = 0.7
     top_p: float = 0.9
     api_key: str | None = Field(default=None, description="Anthropic API key")
-    base_url: str | None = Field(default=None, description="Custom API base URL")
+    base_url: str | None = Field(
+        default=None,
+        description=(
+            "Custom API base URL: any endpoint that speaks the Messages API. "
+            "Unset, ANTHROPIC_BASE_URL applies, then api.anthropic.com. "
+            "OpenRouter serves it at https://openrouter.ai/api; a Claude id "
+            "such as claude-sonnet-5-5 is then sent as OpenRouter's slug "
+            "(anthropic/claude-sonnet-5.5)."
+        ),
+    )
+    auth_token: str | None = Field(
+        default=None,
+        description=(
+            "Bearer token sent as ``Authorization`` instead of an ``x-api-key`` "
+            "(what OpenRouter and most gateways take). Unset, "
+            "ANTHROPIC_AUTH_TOKEN applies. With a token, an ANTHROPIC_API_KEY "
+            "in the environment is not sent: an Anthropic key never goes to "
+            "another vendor's endpoint unless passed as api_key explicitly."
+        ),
+    )
     default_headers: dict[str, str] | None = Field(
         default=None,
         description=(
@@ -118,10 +258,11 @@ class AnthropicConfig(ModelConfig):
     prompt_cache: bool = Field(
         default=False,
         description=(
-            "When True, mark the system prompt and tool catalog with "
-            "Anthropic's `cache_control: ephemeral` so subsequent turns "
-            "reuse the cached input at ~1/10x cost. Default False for "
-            "backward compatibility."
+            "When True, mark the system prompt, the tool catalog and the "
+            "end of the conversation (a rolling breakpoint, at most four in "
+            "all) with Anthropic's `cache_control: ephemeral`, so each request "
+            "reads the previous one's prefix back at ~1/10x cost. Default "
+            "False for backward compatibility."
         ),
     )
 
@@ -174,12 +315,14 @@ class AnthropicModel(BaseModel):
         temperature: float = 0.7,
         prompt_cache: bool = False,
         default_headers: dict[str, str] | None = None,
+        auth_token: str | None = None,
         **kwargs: Any,
     ) -> None:
         config = AnthropicConfig(
             model=model,
             api_key=api_key,
             base_url=base_url,
+            auth_token=auth_token,
             max_tokens=max_tokens,
             temperature=temperature,
             prompt_cache=prompt_cache,
@@ -201,16 +344,43 @@ class AnthropicModel(BaseModel):
         def build() -> anthropic.AsyncAnthropic:
             import anthropic  # noqa: PLC0415
 
-            return anthropic.AsyncAnthropic(
+            token = self._auth_token()
+            client = anthropic.AsyncAnthropic(
                 api_key=self.config.api_key,
-                base_url=self.config.base_url,
+                auth_token=token,
+                base_url=self.base_url,
                 max_retries=self.config.max_retries,
                 timeout=self.config.request_timeout,
                 default_headers=self.config.default_headers,
             )
+            if token is not None and self.config.api_key is None:
+                # Some SDK versions read ANTHROPIC_API_KEY whatever else is
+                # passed; with a bearer token for another endpoint that key
+                # must not ride along.
+                client.api_key = None
+            return client
 
         # Bound to the loop that built it — see tulip.core.loop_bound.
         return loop_bound(self, "_client", build)
+
+    @property
+    def base_url(self) -> str | None:
+        """The endpoint requests go to: the configured one, else ANTHROPIC_BASE_URL."""
+        return self.config.base_url or os.environ.get("ANTHROPIC_BASE_URL") or None
+
+    def _auth_token(self) -> str | None:
+        return self.config.auth_token or os.environ.get("ANTHROPIC_AUTH_TOKEN") or None
+
+    @property
+    def wire_model(self) -> str:
+        """The model id as the endpoint names it.
+
+        OpenRouter's Messages API takes its own slugs, so a Claude id is
+        translated there; an id already written as a slug is sent unchanged.
+        """
+        if _is_openrouter(self.base_url):
+            return openrouter_model_id(self.config.model)
+        return self.config.model
 
     async def close(self) -> None:
         """Close the underlying httpx client.
@@ -237,18 +407,55 @@ class AnthropicModel(BaseModel):
     def _convert_messages(self, messages: list[Message]) -> tuple[str | None, list[dict[str, Any]]]:
         """Convert Tulip messages to Anthropic format.
 
-        Returns (system_prompt, messages) since Anthropic takes system separately.
+        Returns ``(system_prompt, messages)`` since Anthropic takes the system
+        prompt separately. The system prompt is every leading system message
+        joined in order; see :meth:`_split_messages` for where later ones go.
         """
-        system_prompt: str | None = None
+        system_parts, anthropic_messages = self._split_messages(messages)
+        return ("\n\n".join(system_parts) or None), anthropic_messages
+
+    def _split_messages(self, messages: list[Message]) -> tuple[list[str], list[dict[str, Any]]]:
+        """Split Tulip messages into system prompt parts and Anthropic turns.
+
+        The Messages API has one ``system`` field and a strictly alternating
+        user/assistant conversation, while Tulip histories carry system
+        messages in two places:
+
+        - **Leading** ones (the agent's instructions, a memory block placed
+          right after them) form the system prompt, kept in order.
+        - **Later** ones are notes the agent loop adds mid-run — budget and
+          iteration-limit notices, grounding and verification reminders. Each
+          becomes a ``<system-note>`` text block in the user turn at its
+          position, the way Anthropic recommends steering a conversation that
+          is already under way. Lifting them into ``system`` instead would
+          either replace the agent's instructions (what this adapter used to
+          do: the last system message won) or move the note away from the
+          point in the run it refers to.
+
+        Adjacent user turns are then merged so roles alternate, with
+        ``tool_result`` blocks first in each merged turn: the API requires the
+        results to open the user turn that follows a ``tool_use``, and a note
+        must never sit between the two.
+        """
+        system_parts: list[str] = []
         anthropic_messages: list[dict[str, Any]] = []
         with_images = recent_image_positions(
             [m.content if m.role == Role.TOOL else None for m in messages]
         )
+        leading = True
 
         for index, msg in enumerate(messages):
             if msg.role == Role.SYSTEM:
-                system_prompt = msg.content
+                if not msg.content:
+                    continue
+                if leading:
+                    system_parts.append(msg.content)
+                else:
+                    anthropic_messages.append(
+                        {"role": "user", "content": [_system_note_block(msg.content)]}
+                    )
                 continue
+            leading = False
 
             if msg.role == Role.ASSISTANT:
                 content: list[dict[str, Any]] = []
@@ -284,7 +491,18 @@ class AnthropicModel(BaseModel):
                 )
 
             elif msg.role == Role.USER:
-                anthropic_messages.append({"role": "user", "content": msg.content or ""})
+                # A user turn may embed images (``encode_image``) — a harness
+                # attaching a screenshot or a diagram the person referenced.
+                # Every one is sent: the person chose them, unlike a stream
+                # of tool screenshots where only the latest few matter.
+                anthropic_messages.append(
+                    {
+                        "role": "user",
+                        "content": _tool_result_content(msg.content, send_images=True),
+                    }
+                )
+
+        anthropic_messages = _merge_user_turns(anthropic_messages)
 
         # Anthropic requires the last message to be a user turn — it does not
         # support assistant-prefill. Strip any trailing assistant messages, but
@@ -296,7 +514,7 @@ class AnthropicModel(BaseModel):
             while anthropic_messages and anthropic_messages[-1]["role"] == "assistant":
                 anthropic_messages.pop()
 
-        return system_prompt, anthropic_messages
+        return system_parts, anthropic_messages
 
     def _convert_tools(self, tools: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
         """Convert OpenAI-format tools to Anthropic format."""
@@ -368,11 +586,13 @@ class AnthropicModel(BaseModel):
         ``response_format`` — a streaming agent paid full price for every
         cached turn and ran at the server's default temperature.
         """
-        system_prompt, anthropic_messages = self._convert_messages(messages)
+        system_parts, anthropic_messages = self._split_messages(messages)
         anthropic_tools = self._convert_tools(tools) or []
+        #: ``cache_control`` markers placed so far; Anthropic accepts four.
+        breakpoints = 0
 
         params: dict[str, Any] = {
-            "model": self.config.model,
+            "model": self.wire_model,
             "messages": anthropic_messages,
             "max_tokens": kwargs.get("max_tokens") or self.config.max_tokens,
         }
@@ -390,21 +610,28 @@ class AnthropicModel(BaseModel):
             # ModelConfig.temperature) — send nothing rather than a value.
             if temperature is not None:
                 params["temperature"] = temperature
-        if system_prompt:
+        if system_parts:
             # When prompt-caching is enabled, send the system prompt as a
             # block list with ``cache_control: ephemeral`` so subsequent
             # turns reuse the cached input at ~1/10x cost (Anthropic
-            # ephemeral cache TTL is ~5 min).
+            # ephemeral cache TTL is ~5 min). The first block — the agent's
+            # own instructions — carries a breakpoint of its own, so a block
+            # that changes per turn after it (a recalled-memory block) does
+            # not cost the instructions their cache hit; the last block's
+            # breakpoint covers the whole system prompt when nothing changed.
             if self.config.prompt_cache:
+                last = len(system_parts) - 1
+                breakpoints += 1 if last == 0 else 2
                 params["system"] = [
                     {
                         "type": "text",
-                        "text": system_prompt,
-                        "cache_control": {"type": "ephemeral"},
+                        "text": part,
+                        **({"cache_control": {"type": "ephemeral"}} if i in (0, last) else {}),
                     }
+                    for i, part in enumerate(system_parts)
                 ]
             else:
-                params["system"] = system_prompt
+                params["system"] = "\n\n".join(system_parts)
 
         # Structured-output mode: emulate ``response_format`` via tool-use.
         response_format = kwargs.get("response_format")
@@ -424,6 +651,7 @@ class AnthropicModel(BaseModel):
             # turns and can be large. Anthropic walks the cache_control
             # markers in order; tagging the last tool covers the catalog.
             if self.config.prompt_cache and anthropic_tools:
+                breakpoints += 1
                 anthropic_tools = [
                     *anthropic_tools[:-1],
                     {
@@ -432,6 +660,14 @@ class AnthropicModel(BaseModel):
                     },
                 ]
             params["tools"] = anthropic_tools
+
+        if self.config.prompt_cache:
+            # The conversation itself, which is most of a long run's request:
+            # without a breakpoint here only the instructions and tools are
+            # ever read from cache.
+            params["messages"] = _rolling_breakpoints(
+                anthropic_messages, MAX_CACHE_BREAKPOINTS - breakpoints
+            )
 
         beta_headers = self._native_betas(tools)
         if beta_headers:
@@ -491,6 +727,7 @@ class AnthropicModel(BaseModel):
             message=Message.assistant(content=content, tool_calls=tool_calls),
             usage=usage,
             stop_reason=response.stop_reason,
+            cost_usd=_reported_cost(response.usage) if response.usage else None,
         )
 
     async def stream(
@@ -548,4 +785,9 @@ class AnthropicModel(BaseModel):
         if final.usage is not None:
             usage = _usage_dict(final.usage)
 
-        yield ModelChunkEvent(done=True, usage=usage, stop_reason=final.stop_reason)
+        yield ModelChunkEvent(
+            done=True,
+            usage=usage,
+            stop_reason=final.stop_reason,
+            cost_usd=_reported_cost(final.usage) if final.usage is not None else None,
+        )

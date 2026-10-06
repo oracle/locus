@@ -46,7 +46,7 @@ from tulip.control.action import (
     derive_labels,
     resolve_action,
 )
-from tulip.control.admission import AdmissionError, admit
+from tulip.control.admission import AdmissionError, admit, admit_sync
 from tulip.control.approvals import (
     ApprovalAuthority,
     ApprovalAuthorityError,
@@ -60,9 +60,11 @@ from tulip.control.approvals import (
 )
 from tulip.control.audit import (
     AuditRecord,
+    AuditReport,
     AuditSigner,
     AuditTrail,
     Ed25519Signer,
+    check_jsonl,
     verify_jsonl,
 )
 from tulip.control.findings import (
@@ -87,6 +89,14 @@ from tulip.control.grounded import (
     ground_fingerprint,
     is_finding,
 )
+from tulip.control.permissions import (
+    VERDICT_POLICY,
+    PermissionMatch,
+    PermissionRule,
+    PermissionRules,
+    verdict_action,
+    verdict_tag,
+)
 from tulip.control.policy import (
     SANDBOXED_TAG,
     Action,
@@ -95,6 +105,7 @@ from tulip.control.policy import (
     ControlPolicy,
     approve,
 )
+from tulip.control.shell import ShellCommand, SimpleCommand, parse_command
 from tulip.control.spend import FileSpendLedger, InMemorySpendLedger, SpendLedger
 from tulip.control.taxonomy import (
     SEVERITY_ORDER,
@@ -146,7 +157,19 @@ __all__ = [
     "UNDETERMINED_TAG",
     # Admission control — the runtime's enforcement point
     "admit",
+    "admit_sync",
     "AdmissionError",
+    # Operator-written allow / ask / deny rules, fed to admission as labels
+    "PermissionRule",
+    "PermissionRules",
+    "PermissionMatch",
+    "VERDICT_POLICY",
+    "verdict_action",
+    "verdict_tag",
+    # What a shell line runs, for rules and gates that decide about commands
+    "parse_command",
+    "ShellCommand",
+    "SimpleCommand",
     # Policy + approval — safe-before-action
     "Action",
     "ControlPolicy",
@@ -157,6 +180,8 @@ __all__ = [
     # Tamper-evident audit
     "AuditTrail",
     "AuditRecord",
+    "AuditReport",
+    "check_jsonl",
     "AuditSigner",
     "Ed25519Signer",
     "verify_jsonl",

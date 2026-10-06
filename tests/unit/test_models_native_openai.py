@@ -29,7 +29,11 @@ from unittest.mock import AsyncMock
 import pytest
 
 from tulip.core.messages import Message, ToolCall, ToolResult
-from tulip.models.native.openai import OpenAIModel, _decode_tool_arguments
+from tulip.models.native.openai import (
+    OpenAIModel,
+    _decode_tool_arguments,
+    _malformed_tool_arguments,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1318,3 +1322,9 @@ class TestResponseExtrasEdgeCases:
         names = mod._openai_param_names()
         assert "tool_choice" in names
         assert names == mod._FALLBACK_OPENAI_PARAMS
+
+
+def test_malformed_tool_arguments_keep_the_raw_text() -> None:
+    assert _malformed_tool_arguments('{"path": "a') == '{"path": "a'
+    assert _malformed_tool_arguments('{"path": "a"}') is None
+    assert _malformed_tool_arguments("") is None

@@ -35,8 +35,10 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
+from tulip.agent.completion import AUTOMATED_NOTE_KEY, CONTINUATION_NOTE_KEY, Continuation
 from tulip.agent.config import AgentConfig
-from tulip.agent.result import StopReason
+from tulip.agent.model_retry import call_with_retry
+from tulip.agent.result import normalize_stop_reason
 from tulip.agent.run_context import (
     PendingInterrupt,
     RunContext,
@@ -51,22 +53,26 @@ from tulip.agent.verification import (
     mark_ephemeral,
 )
 from tulip.core.events import (
+    CompactionEvent,
+    CustomEvent,
     FinalAnswerVerificationEvent,
     GroundingEvent,
     InterruptEvent,
     ModelChunkEvent,
+    ModelRetryEvent,
     ReflectEvent,
     TerminateEvent,
     ThinkEvent,
     ToolCompleteEvent,
-    ToolProgressEvent,
     ToolStartEvent,
     TulipEvent,
 )
-from tulip.core.media import strip_images, text_length
+from tulip.core.loops import warning_text
+from tulip.core.media import has_images, strip_images, text_length
 from tulip.core.messages import Message, Role, ToolCall, ToolResult
 from tulip.core.state import AgentState, ReasoningStep, ToolExecution
 from tulip.models.base import ModelResponse
+from tulip.observability.mechanisms import LEAKED_TOOL_CALLS, record_mechanism
 from tulip.tools.context import _progress_sink
 from tulip.tools.executor import ToolContextFactory, ToolExecutor
 from tulip.tools.registry import ToolRegistry
@@ -80,11 +86,59 @@ def _usage_of(state: AgentState) -> dict[str, int] | None:
     """
     if state.total_tokens_used <= 0:
         return None
-    return {
+    usage = {
         "prompt_tokens": state.prompt_tokens_used,
         "completion_tokens": state.completion_tokens_used,
         "total_tokens": state.total_tokens_used,
     }
+    # Cache counts only when there were any, so a provider without caching
+    # reports exactly the three keys it always did.
+    if state.cache_read_tokens_used:
+        usage["cache_read_input_tokens"] = state.cache_read_tokens_used
+    if state.cache_creation_tokens_used:
+        usage["cache_creation_input_tokens"] = state.cache_creation_tokens_used
+    # The OpenAI-style counters, which are inside ``prompt_tokens``.
+    if state.cached_tokens_used:
+        usage["cached_tokens"] = state.cached_tokens_used
+    if state.cache_write_tokens_used:
+        usage["cache_write_tokens"] = state.cache_write_tokens_used
+    return usage
+
+
+def _reported_cost_of(state: AgentState) -> float | None:
+    """What the provider said the segment's calls cost, or ``None`` when it never said."""
+    return state.reported_cost_usd if state.reported_cost_calls else None
+
+
+def _cost_of(state: AgentState) -> float | None:
+    """The run segment's spend in USD, or ``None`` when the model is unpriced.
+
+    ``cost_usd_used`` stays 0 for an unpriced model, so it is only a number
+    worth reporting when both prices are known.
+    """
+    return state.cost_usd_used if state.priced else None
+
+
+#: The smallest ``max_iterations`` that counts as a budget for the nudge.
+_MIN_NUDGED_ITERATIONS = 10
+
+#: ``Message.metadata`` key on the budget note (see ``budget_nudge_at``),
+#: naming the budget that prompted it.
+BUDGET_NOTE_KEY = "tulip_budget_note"
+
+
+#: Longest error text a TerminateEvent carries. The exception is re-raised
+#: whole; the event's copy is for display, and a provider that echoes a whole
+#: request body into its message should not turn one event into megabytes.
+_MAX_ERROR_CHARS = 2_000
+
+
+def _error_text(exc: BaseException) -> str:
+    """A one-line description of ``exc`` for ``TerminateEvent.error``."""
+    text = str(exc).strip() or type(exc).__name__
+    if not text.startswith(type(exc).__name__):
+        text = f"{type(exc).__name__}: {text}"
+    return text if len(text) <= _MAX_ERROR_CHARS else text[: _MAX_ERROR_CHARS - 1] + "…"
 
 
 def _apply_hook_result(result: ToolResult, after_tool_event: Any) -> ToolResult:
@@ -142,8 +196,8 @@ _EXHAUSTED: Any = object()
 
 async def _interleave_progress(
     stream: AsyncIterator[tuple[int, ToolResult]],
-    sink: asyncio.Queue[ToolProgressEvent],
-) -> AsyncIterator[tuple[int, ToolResult] | ToolProgressEvent]:
+    sink: asyncio.Queue[TulipEvent],
+) -> AsyncIterator[tuple[int, ToolResult] | TulipEvent]:
     """Merge an executor's result stream with progress reported meanwhile.
 
     The loop is otherwise parked on the executor for the whole batch, so
@@ -156,7 +210,7 @@ async def _interleave_progress(
     """
     loop = asyncio.get_running_loop()
 
-    def _deliver(event: ToolProgressEvent) -> None:
+    def _deliver(event: TulipEvent) -> None:
         # Sync tools report from a worker thread; the queue is loop-bound.
         try:
             running = asyncio.get_running_loop()
@@ -217,6 +271,7 @@ async def _anext_or_stop(iterator: AsyncIterator[Any]) -> Any:
 
 if TYPE_CHECKING:
     from tulip.agent.hook_orchestrator import HookOrchestrator
+    from tulip.agent.leaked_tool_calls import UnfinishedToolCall
     from tulip.memory.conversation import ConversationManager
     from tulip.memory.manager import BaseMemoryManager
     from tulip.reasoning.grounding import GroundingEvaluator
@@ -289,47 +344,53 @@ def _bus_bridge(
 _ = Awaitable  # noqa: SLF001 — placeholder so mypy knows we imported it intentionally
 
 
-def _normalize_stop_reason(raw: str | None) -> StopReason:
-    """Map a free-form ``TerminateEvent.reason`` to the ``StopReason`` Literal.
+#: Re-exported for code that imported it from here; one copy lives in
+#: :mod:`tulip.agent.result`.
+_normalize_stop_reason = normalize_stop_reason
 
-    Lifted alongside the runtime methods so the mixin stays
-    self-contained. The original copy on ``tulip.agent.agent`` is
-    re-exported from this module for back-compat with any external
-    importer.
-    """
-    valid: frozenset[str] = frozenset(
-        {
-            "complete",
-            "terminal_tool",
-            "confidence_met",
-            "max_iterations",
-            "tool_loop",
-            "no_tools",
-            "grounding_failed",
-            "token_budget",
-            "time_budget",
-            "interrupted",
-            "error",
-            "cancelled",
-        }
-    )
-    if not raw:
-        return "complete"
-    if raw in valid:
-        return raw  # type: ignore[return-value]
-    if "tool_called:" in raw:
-        return "terminal_tool"
-    if "text_mention:" in raw:
-        return "complete"
-    for known in valid:
-        if known in raw:
-            return known  # type: ignore[return-value]
-    return "complete"
+
+#: Sent back after an empty reply in a turn that is calling tools.
+_EMPTY_REPLY_NOTE = (
+    "[Empty reply] Your last reply had no text and no tool call. Continue the "
+    "task: call the tools you need next. If the task is done, write your final "
+    "answer instead."
+)
+
+#: Sent, with the tools taken away, when a reply is empty again.
+_FINAL_ANSWER_REQUEST = (
+    "[Final answer requested]\n"
+    "Your previous turn produced no visible response. "
+    "Provide your final answer to the user's question "
+    "based on the conversation so far. Do NOT call any "
+    "more tools — write the answer as plain text."
+)
+
+#: Sent back after a reply that ends inside a tool call written as text.
+_UNFINISHED_CALL_NOTE = (
+    "[Unfinished tool call — automated, not from the user] Your last reply ended "
+    "inside a tool call written as "
+    "text, so nothing was run. Make the call again through the tool interface. "
+    "If it was cut off by the output limit, send less in one call: write a large "
+    "file in parts, or change it with edits."
+)
+
+#: How many unfinished calls in a row are sent back before the reply is taken
+#: as it is: a model that cannot finish a call should not spend the run on it.
+_MAX_UNFINISHED_SENDS = 2
 
 
 #: Queued by ``_get_model_response`` when an after-model hook discards a
 #: streamed call (``retry``); never yielded to the caller.
 _DISCARDED_CALL = object()
+
+
+class _StreamProgress:
+    """Whether a streamed model call has handed any chunk to the caller yet."""
+
+    __slots__ = ("forwarded",)
+
+    def __init__(self) -> None:
+        self.forwarded = False
 
 
 def _is_reasoning_only(chunk: Any) -> bool:
@@ -351,6 +412,32 @@ def _without_ephemeral_messages(state: AgentState) -> AgentState:
     )
 
 
+def truncate_tool_output(text: str, limit: int, head_fraction: float = 0.4) -> str:
+    """``text`` cut to ``limit`` characters around a marker, keeping both ends.
+
+    The first ``limit * head_fraction`` characters and the last of the rest
+    are kept. Tools put what matters at either end: what was run at the top,
+    the verdict (a failing test, an error count) at the bottom. The marker
+    says how much was cut so the model knows the output is partial and can
+    re-run the tool more narrowly. ``text`` within ``limit`` is returned
+    unchanged; the marker is not counted against ``limit``.
+    """
+    original = len(text)
+    if limit <= 0 or original <= limit:
+        return text
+    head = int(limit * min(max(head_fraction, 0.0), 1.0))
+    tail = limit - head
+    marker = (
+        f"[OUTPUT TRUNCATED — {original - limit} of {original} chars cut; "
+        f"first {head} and last {tail} kept]"
+    )
+    if tail == 0:
+        return f"{text[:head]}\n{marker}"
+    if head == 0:
+        return f"{marker}\n{text[-tail:]}"
+    return f"{text[:head]}\n{marker}\n{text[-tail:]}"
+
+
 def _durable(state: AgentState) -> AgentState:
     """The form of ``state`` that outlives the turn: checkpoints, the result.
 
@@ -369,6 +456,55 @@ def _durable(state: AgentState) -> AgentState:
     scrubbed = scrub_ephemeral_metadata(state.metadata)
     if len(scrubbed) != len(state.metadata):
         state = state.model_copy(update={"metadata": scrubbed})
+    return state
+
+
+#: State metadata naming the turn's per-iteration checkpoints. It rides in the
+#: saved state itself, so a process killed mid-turn hands the list to whatever
+#: finishes the turn — ``continue_turn`` or the next ``run`` — and that final
+#: save deletes them; a list kept in memory would die with the process.
+ITERATION_CHECKPOINTS_KEY = "_tulip_iteration_checkpoints"
+
+
+def _take_iteration_checkpoints(state: AgentState) -> tuple[list[str], AgentState]:
+    """The turn's iteration checkpoint ids, and ``state`` without the list."""
+    if ITERATION_CHECKPOINTS_KEY not in state.metadata:
+        return [], state
+    metadata = dict(state.metadata)
+    ids = metadata.pop(ITERATION_CHECKPOINTS_KEY) or []
+    return [str(i) for i in ids], state.model_copy(update={"metadata": metadata})
+
+
+UNFINISHED_CALL_ERROR = (
+    "The run stopped before this call returned, so its outcome is unknown: it may or "
+    "may not have taken effect. Check before calling it again."
+)
+
+
+def close_unfinished_calls(state: AgentState) -> AgentState:
+    """Answer the last assistant message's calls that have no result yet.
+
+    A provider rejects an assistant tool call with no result after it, and
+    re-running the call could repeat a side effect the stopped attempt
+    already performed. The error result keeps the conversation valid and
+    tells the model what is known: nothing about the outcome.
+    """
+    answered = {m.tool_call_id for m in state.messages if m.role == Role.TOOL and m.tool_call_id}
+    for msg in reversed(state.messages):
+        if msg.role == Role.ASSISTANT and msg.tool_calls:
+            for tc in msg.tool_calls:
+                if tc.id not in answered:
+                    state = state.with_message(
+                        Message.tool(
+                            ToolResult(
+                                tool_call_id=tc.id,
+                                name=tc.name,
+                                content="",
+                                error=UNFINISHED_CALL_ERROR,
+                            )
+                        )
+                    )
+            break
     return state
 
 
@@ -397,7 +533,9 @@ class AgentRuntimeMixin:
         _hooks: list[Any]
         _hook_orchestrator: HookOrchestrator | None
         _conversation_manager: ConversationManager | None
+        _observation_pack: Any
         _model_prices: tuple[float, float] | None
+        _leaked_formats: tuple[str, ...] | None
         _memory_manager: BaseMemoryManager | None
         _reflector: Reflector | None
         _grounding_evaluator: GroundingEvaluator | None
@@ -642,6 +780,8 @@ class AgentRuntimeMixin:
 
         # Track metrics
         started_at = datetime.now(UTC)
+        # Whether the run has had its one note to converge (``budget_nudge_at``).
+        _budget_nudged = False
         _total_tokens = 0
         _tool_calls_count = 0
         _tool_errors_count = 0
@@ -650,6 +790,10 @@ class AgentRuntimeMixin:
         _last_assistant_content: str | None = None
         _last_no_tool_calls = False
         _verifier_attempts = 0
+        # Whether an empty reply has already been sent back this turn.
+        _empty_sent_back = False
+        # Unfinished text tool calls sent back since the last call that ran.
+        _unfinished_sent_back = 0
         # Hold a call's content chunks until we know they are not a draft the
         # verifier will send back (``hold_final_answer_tokens``).
         _hold_tokens = (
@@ -668,7 +812,7 @@ class AgentRuntimeMixin:
             # Run hooks: before_invocation
             state = await self._run_before_invocation_hooks(prompt, state)
 
-            # Inject long-term memories into the system prompt.
+            # Inject long-term memories, after the turn's prompt.
             if self._memory_manager is not None:
                 state = await self._memory_manager.on_session_start(state)
         except BaseException:
@@ -680,7 +824,12 @@ class AgentRuntimeMixin:
         # both cancel(thread_id=...) and a cancel-all set) and gives their
         # usage reports a place to land (folded each iteration). Entered right
         # before the try whose finally exits it.
-        _subagent_ctx = enter_parent_run(rc.cancel)
+        _subagent_ctx = enter_parent_run(
+            rc.cancel,
+            time_budget_seconds=self.config.time_budget_seconds,
+            hooks=self.config.hooks,
+            observation_pack=self._child_observation_pack(state, rc),
+        )
 
         try:
             # Main ReAct loop
@@ -709,6 +858,8 @@ class AgentRuntimeMixin:
                             iterations_used=state.iteration,
                             final_confidence=state.confidence,
                             usage=_usage_of(state),
+                            cost_usd=_cost_of(state),
+                            reported_cost_usd=_reported_cost_of(state),
                             total_tool_calls=len(state.tool_executions),
                             final_message=_last_assistant_content,
                         )
@@ -721,6 +872,8 @@ class AgentRuntimeMixin:
                         iterations_used=state.iteration,
                         final_confidence=state.confidence,
                         usage=_usage_of(state),
+                        cost_usd=_cost_of(state),
+                        reported_cost_usd=_reported_cost_of(state),
                         total_tool_calls=_tool_calls_count,
                         final_message="Agent cancelled by external signal.",
                     )
@@ -741,10 +894,18 @@ class AgentRuntimeMixin:
                             iterations_used=state.iteration,
                             final_confidence=state.confidence,
                             usage=_usage_of(state),
+                            cost_usd=_cost_of(state),
+                            reported_cost_usd=_reported_cost_of(state),
                             total_tool_calls=len(state.tool_executions),
                             final_message=_last_assistant_content,
                         )
                         break
+
+                # A loop gets a warning before it can stop the run: the model
+                # is told what it is repeating and asked to change approach.
+                state, loop_warning = self._warn_tool_loop(state)
+                if loop_warning is not None:
+                    yield loop_warning
 
                 # Check termination conditions
                 should_stop, stop_reason = state.should_terminate
@@ -780,18 +941,19 @@ class AgentRuntimeMixin:
                         )
                         prompt_toks = response.usage.get("prompt_tokens", 0)
                         completion_toks = response.usage.get("completion_tokens", 0)
-                        cache_creation_toks = response.usage.get("cache_creation_input_tokens", 0)
-                        cache_read_toks = response.usage.get("cache_read_input_tokens", 0)
                         _total_tokens += prompt_toks + completion_toks
-                        state = state.with_token_usage(
-                            prompt_toks,
-                            completion_toks,
-                            cache_creation_tokens=cache_creation_toks,
-                            cache_read_tokens=cache_read_toks,
+                        state = state.with_response_usage(
+                            response.usage, getattr(response, "cost_usd", None)
                         )
 
+                        # A model that is not done answers with its next call in
+                        # its own markup, the request having no tools; that is
+                        # no summary.
+                        written = response.message.content
+                        if written and self._is_text_tool_call(written):
+                            written = None
                         summary = (
-                            response.message.content
+                            written
                             or _last_assistant_content
                             or self._build_fallback_summary(state)
                         )
@@ -800,6 +962,8 @@ class AgentRuntimeMixin:
                             iterations_used=state.iteration,
                             final_confidence=state.confidence,
                             usage=_usage_of(state),
+                            cost_usd=_cost_of(state),
+                            reported_cost_usd=_reported_cost_of(state),
                             total_tool_calls=len(state.tool_executions),
                             final_message=summary,
                         )
@@ -811,6 +975,8 @@ class AgentRuntimeMixin:
                         iterations_used=state.iteration,
                         final_confidence=state.confidence,
                         usage=_usage_of(state),
+                        cost_usd=_cost_of(state),
+                        reported_cost_usd=_reported_cost_of(state),
                         total_tool_calls=len(state.tool_executions),
                         final_message=_last_assistant_content,
                     )
@@ -854,6 +1020,12 @@ class AgentRuntimeMixin:
                             )
                         )
 
+                if not _budget_nudged:
+                    state, nudge = self._budget_nudge(state, started_at)
+                    if nudge is not None:
+                        _budget_nudged = True
+                        yield nudge
+
                 # Get model response. When the caller asked for tokens, the
                 # model call runs as a task and its chunks are drained here, so
                 # they surface while the model is still producing rather than
@@ -864,10 +1036,31 @@ class AgentRuntimeMixin:
                         iterations_used=state.iteration,
                         final_confidence=state.confidence,
                         usage=_usage_of(state),
+                        cost_usd=_cost_of(state),
+                        reported_cost_usd=_reported_cost_of(state),
                         total_tool_calls=len(state.tool_executions),
                         final_message=_last_assistant_content,
                     )
                     break
+
+                # Keep the request inside the window before it is sent. The
+                # compacted history replaces the state's, so the run continues
+                # from the summary on its own, with no prompt to resume.
+                state, compaction = await self._compact_context(state, rc)
+                if compaction is not None:
+                    yield compaction
+                    if compaction.exhausted:
+                        yield TerminateEvent(
+                            reason="context_exhausted",
+                            iterations_used=state.iteration,
+                            final_confidence=state.confidence,
+                            usage=_usage_of(state),
+                            cost_usd=_cost_of(state),
+                            reported_cost_usd=_reported_cost_of(state),
+                            total_tool_calls=len(state.tool_executions),
+                            final_message=f"[context exhausted] {compaction.detail}",
+                        )
+                        break
 
                 if stream_tokens:
                     chunk_queue: asyncio.Queue[Any] = asyncio.Queue()
@@ -882,29 +1075,37 @@ class AgentRuntimeMixin:
                         if chunk is _DISCARDED_CALL:
                             _held_chunks = []
                             continue
+                        if isinstance(chunk, ModelRetryEvent):
+                            # A notice, not model text: the hold never applies.
+                            yield chunk
+                            continue
                         if _hold_tokens and not _is_reasoning_only(chunk):
                             _held_chunks.append(chunk)
                             continue
                         yield chunk
                     response, state = await model_task
                 else:
-                    response, state = await self._get_model_response(state, model_kwargs, run=rc)
+                    try:
+                        response, state = await self._get_model_response(
+                            state, model_kwargs, run=rc
+                        )
+                    except Exception:
+                        for retry in rc.drain_retries():
+                            yield retry
+                        raise
+                    for retry in rc.drain_retries():
+                        yield retry
                 for custom in rc.drain():
                     yield custom
                 prompt_toks = response.usage.get("prompt_tokens", 0)
                 completion_toks = response.usage.get("completion_tokens", 0)
-                cache_creation_toks = response.usage.get("cache_creation_input_tokens", 0)
-                cache_read_toks = response.usage.get("cache_read_input_tokens", 0)
                 _total_tokens += prompt_toks + completion_toks
-                state = state.with_token_usage(
-                    prompt_toks,
-                    completion_toks,
-                    cache_creation_tokens=cache_creation_toks,
-                    cache_read_tokens=cache_read_toks,
+                state = state.with_response_usage(
+                    response.usage, getattr(response, "cost_usd", None)
                 )
                 _last_assistant_content = response.message.content
                 # Track for the user-supplied termination condition. Updated again
-                # below if a Cohere-style text tool call is parsed out of the body.
+                # below if a text tool call is parsed out of the body.
                 _last_no_tool_calls = not response.message.tool_calls
 
                 # Store plan from first iteration if planning enabled
@@ -920,26 +1121,139 @@ class AgentRuntimeMixin:
                     tool_calls=list(response.message.tool_calls),
                 )
 
-                # If no structured tool calls, try parsing from text (Cohere fallback)
-                if not response.message.tool_calls and response.message.content:
-                    parsed_calls = self._parse_text_tool_calls(response.message.content)
-                    if parsed_calls:
-                        response = ModelResponse(
-                            message=Message(
-                                role=response.message.role,
-                                content=response.message.content,
-                                tool_calls=parsed_calls,
-                                tool_call_id=response.message.tool_call_id,
-                                name=response.message.name,
-                            ),
-                            usage=response.usage,
-                            stop_reason=response.stop_reason,
-                        )
-                        # Update the assistant message in state with parsed tool calls
-                        messages = list(state.messages)
-                        messages[-1] = response.message
-                        state = state.model_copy(update={"messages": tuple(messages)})
+                # No structured tool calls: the model may have written its call
+                # in the body — its own markup leaked as text, or, for a model
+                # without native tool calling, a plain text call.
+                recovered = self._recover_text_tool_calls(response, state)
+                if recovered is not None:
+                    response, state = recovered
+                    _last_assistant_content = response.message.content
+                    _last_no_tool_calls = False
+
+                # A call block cut off before its end — the output-token limit
+                # in the middle of a large write — is neither a call nor an
+                # answer: the model is asked for the call again.
+                if response.message.tool_calls:
+                    _unfinished_sent_back = 0
+                elif _unfinished_sent_back < _MAX_UNFINISHED_SENDS:
+                    unfinished = self._unfinished_text_tool_call(response.message.content)
+                    if unfinished is not None:
+                        _unfinished_sent_back += 1
+                        state = self._send_back_unfinished_call(state, unfinished, replace=True)
+                        _last_assistant_content = unfinished.prose
                         _last_no_tool_calls = False
+                        _held_chunks = []  # the broken call is never shown
+                        continue
+
+                # Empty-content safety net (fixes #280).
+                #
+                # The model can return zero tool_calls AND zero
+                # ``content`` for several reasons that all look the
+                # same to the runtime:
+                #
+                #   - Reasoning-only iteration (gpt-5.x / o-series /
+                #     Gemini 2.5 thinking mode generate
+                #     ``completion_tokens`` that land in a separate
+                #     reasoning channel — ``message.content`` is
+                #     None even though tokens were consumed).
+                #   - The model decided "I'm done" without writing
+                #     anything after a long context (observed on
+                #     Gemini with > 50K-token system prompts).
+                #   - The model returned an empty assistant message
+                #     between tool calls and the runtime collapses
+                #     to this branch on the trailing iteration.
+                #
+                # Without the safety net, ``TerminateEvent.final_message``
+                # becomes None → ``AgentResult.message`` becomes ""
+                # → callers see empty output despite real work done.
+                # Mirror the MaxIterations summary-injection path:
+                # force one no-tools completion to extract the
+                # model's actual answer based on the conversation
+                # so far. Costs ~one extra call only when the bug
+                # shape would otherwise produce empty output.
+                #
+                # Not on the first empty reply of a turn that is calling
+                # tools, though: there an empty reply is far more often a
+                # call the provider failed to deliver (a reasoning-only
+                # turn, a call left in the reasoning channel) than an
+                # answer. Asking for a final answer with the tools taken
+                # away then ends a run mid-task — "the system requested my
+                # final answer before I could make the edits" — and
+                # reports it as complete. The model is sent back once,
+                # with its tools, to carry on or to answer.
+                #
+                # A model that answers the no-tools request with a call is not
+                # done either, so the call is made (``_summary_as_tool_step``).
+                summary_answer: str | None = None
+                if (
+                    not response.message.tool_calls
+                    and self.config.completion_mode != "explicit"
+                    and not response.message.content
+                ):
+                    if state.tool_executions and not _empty_sent_back:
+                        _empty_sent_back = True
+                        state = state.with_message(Message.system(_EMPTY_REPLY_NOTE))
+                        _last_no_tool_calls = False
+                        continue
+                    before_note = state
+                    state = state.with_message(Message.system(_FINAL_ANSWER_REQUEST))
+                    messages = list(state.messages)
+                    if self._conversation_manager:
+                        if hasattr(self._conversation_manager, "async_apply"):
+                            messages = await self._conversation_manager.async_apply(messages)
+                        else:
+                            messages = self._conversation_manager.apply(messages)
+                    messages = self._validate_messages(messages)
+
+                    summary_model = self._auxiliary_model or self._model
+                    summary_resp: ModelResponse | None = None
+                    try:
+                        summary_resp = await summary_model.complete(
+                            messages=messages,
+                            tools=None,  # No tools — force text
+                            temperature=self.config.temperature,
+                            max_tokens=self.config.max_tokens,
+                        )
+                        s_prompt_toks = summary_resp.usage.get("prompt_tokens", 0)
+                        s_completion_toks = summary_resp.usage.get("completion_tokens", 0)
+                        _total_tokens += s_prompt_toks + s_completion_toks
+                        state = state.with_response_usage(
+                            summary_resp.usage, getattr(summary_resp, "cost_usd", None)
+                        )
+                    except Exception:  # noqa: BLE001
+                        # Summary call failed — fall back to the last
+                        # assistant content we saw or a deterministic stub.
+                        # Better than empty.
+                        summary_resp = None
+                    # The state without the note asking for an answer, which
+                    # the model is not shown again if it is sent back on.
+                    without_note = state.model_copy(update={"messages": before_note.messages})
+                    as_call = (
+                        self._summary_as_tool_step(summary_resp, without_note)
+                        if summary_resp is not None
+                        else None
+                    )
+                    if isinstance(as_call, tuple):
+                        # The model's own markup, written because the request
+                        # had no tools to call: DeepSeek answers "give your
+                        # final answer" with its next read.
+                        response, state = as_call
+                        _last_assistant_content = response.message.content
+                        _last_no_tool_calls = False
+                        _unfinished_sent_back = 0
+                    elif as_call is not None and _unfinished_sent_back < _MAX_UNFINISHED_SENDS:
+                        _unfinished_sent_back += 1
+                        state = self._send_back_unfinished_call(
+                            without_note, as_call, replace=False
+                        )
+                        _last_no_tool_calls = False
+                        continue
+                    else:
+                        summary_answer = (
+                            (summary_resp.message.content if summary_resp is not None else None)
+                            or _last_assistant_content
+                            or self._build_fallback_summary(state)
+                        )
 
                 # A held call that turned out to be a tool step is not a final
                 # answer: release its chunks now, in order.
@@ -993,82 +1307,11 @@ class AgentRuntimeMixin:
                             )
                             continue  # Re-enter loop for replanning
 
-                    # Empty-content safety net (fixes #280).
-                    #
-                    # The model can return zero tool_calls AND zero
-                    # ``content`` for several reasons that all look the
-                    # same to the runtime:
-                    #
-                    #   - Reasoning-only iteration (gpt-5.x / o-series /
-                    #     Gemini 2.5 thinking mode generate
-                    #     ``completion_tokens`` that land in a separate
-                    #     reasoning channel — ``message.content`` is
-                    #     None even though tokens were consumed).
-                    #   - The model decided "I'm done" without writing
-                    #     anything after a long context (observed on
-                    #     Gemini with > 50K-token system prompts).
-                    #   - The model returned an empty assistant message
-                    #     between tool calls and the runtime collapses
-                    #     to this branch on the trailing iteration.
-                    #
-                    # Without the safety net, ``TerminateEvent.final_message``
-                    # becomes None → ``AgentResult.message`` becomes ""
-                    # → callers see empty output despite real work done.
-                    # Mirror the MaxIterations summary-injection path:
-                    # force one no-tools completion to extract the
-                    # model's actual answer based on the conversation
-                    # so far. Costs ~one extra call only when the bug
-                    # shape would otherwise produce empty output.
-                    final_content = response.message.content
-                    if not final_content:
-                        state = state.with_message(
-                            Message.system(
-                                "[Final answer requested]\n"
-                                "Your previous turn produced no visible response. "
-                                "Provide your final answer to the user's question "
-                                "based on the conversation so far. Do NOT call any "
-                                "more tools — write the answer as plain text."
-                            )
-                        )
-                        messages = list(state.messages)
-                        if self._conversation_manager:
-                            if hasattr(self._conversation_manager, "async_apply"):
-                                messages = await self._conversation_manager.async_apply(messages)
-                            else:
-                                messages = self._conversation_manager.apply(messages)
-                        messages = self._validate_messages(messages)
-
-                        summary_model = self._auxiliary_model or self._model
-                        try:
-                            summary_resp = await summary_model.complete(
-                                messages=messages,
-                                tools=None,  # No tools — force text
-                                temperature=self.config.temperature,
-                                max_tokens=self.config.max_tokens,
-                            )
-                            s_prompt_toks = summary_resp.usage.get("prompt_tokens", 0)
-                            s_completion_toks = summary_resp.usage.get("completion_tokens", 0)
-                            s_cc_toks = summary_resp.usage.get("cache_creation_input_tokens", 0)
-                            s_cr_toks = summary_resp.usage.get("cache_read_input_tokens", 0)
-                            _total_tokens += s_prompt_toks + s_completion_toks
-                            state = state.with_token_usage(
-                                s_prompt_toks,
-                                s_completion_toks,
-                                cache_creation_tokens=s_cc_toks,
-                                cache_read_tokens=s_cr_toks,
-                            )
-                            final_content = (
-                                summary_resp.message.content
-                                or _last_assistant_content
-                                or self._build_fallback_summary(state)
-                            )
-                        except Exception:  # noqa: BLE001
-                            # Summary call failed — fall back to the
-                            # last assistant content we saw or a
-                            # deterministic stub. Better than empty.
-                            final_content = _last_assistant_content or self._build_fallback_summary(
-                                state
-                            )
+                    # An empty reply was answered by the no-tools request
+                    # above; its answer is the run's.
+                    final_content = (
+                        summary_answer if summary_answer is not None else response.message.content
+                    )
 
                     # Pluggable final-answer verification: runs on every final
                     # answer, tool call or not.
@@ -1081,8 +1324,12 @@ class AgentRuntimeMixin:
                             _verifier_attempts += 1
                             _held_chunks = []  # the rejected draft is never shown
                             state = self._queue_verifier_replan(
-                                state, final_content, verdict.feedback or ""
+                                state, final_content, verdict.feedback or "", verdict
                             )
+                            # The model is sent back: a termination condition
+                            # on "no tool calls" must not end the run on the
+                            # reply it is being sent back from.
+                            _last_no_tool_calls = False
                             continue
                         replacement = await self._final_answer_fallback(
                             verdict, final_content, state, rc
@@ -1105,6 +1352,8 @@ class AgentRuntimeMixin:
                         iterations_used=state.iteration,
                         final_confidence=state.confidence,
                         usage=_usage_of(state),
+                        cost_usd=_cost_of(state),
+                        reported_cost_usd=_reported_cost_of(state),
                         total_tool_calls=len(state.tool_executions),
                         final_message=final_content,
                     )
@@ -1300,14 +1549,15 @@ class AgentRuntimeMixin:
                     # Tools that report progress (every MCP tool) need the
                     # stream merged with their progress, or it would arrive
                     # only once they had finished.
-                    merged: AsyncIterator[tuple[int, ToolResult] | ToolProgressEvent] = (
+                    merged: AsyncIterator[tuple[int, ToolResult] | TulipEvent] = (
                         _interleave_progress(results_stream, asyncio.Queue())
                         if self._emits_progress(to_execute_calls)
                         else results_stream
                     )
                     try:
                         async for item in merged:
-                            if isinstance(item, ToolProgressEvent):
+                            # Progress, or a subagent's event forwarded live.
+                            if isinstance(item, TulipEvent):
                                 yield item
                                 continue
                             input_idx, batched_result = item
@@ -1463,15 +1713,26 @@ class AgentRuntimeMixin:
 
                     # Cap oversized tool results so they don't blow the
                     # model's context window. When ``tool_result_store`` is
-                    # configured we offload the full payload through it and
-                    # inline a recoverable reference key; otherwise we fall
-                    # back to lossy head-truncation.
+                    # configured the full payload is offloaded through it and
+                    # a recoverable reference key inlined; otherwise the
+                    # middle is cut and both ends kept.
+                    # With ObservationPack on, nothing is lost to the cap: an
+                    # output up to the pack's inline limit goes whole (the pack
+                    # sends it as a placeholder once it is old), and a larger
+                    # one is archived whole and cut around a pointer to it.
                     if (
                         self.config.max_tool_result_length > 0
                         and result.content
                         and text_length(result.content) > self.config.max_tool_result_length
                     ):
-                        if self.config.tool_result_store is not None:
+                        packed = (
+                            self._intake_large_output(result, state, rc)
+                            if self.config.tool_result_store is None
+                            else None
+                        )
+                        if packed is not None:
+                            result = packed
+                        elif self.config.tool_result_store is not None:
                             result = self.config.tool_result_store.maybe_offload(
                                 result,
                                 run_id=state.run_id,
@@ -1480,13 +1741,12 @@ class AgentRuntimeMixin:
                         else:
                             # Cutting through an embedded image would leave
                             # corrupt base64, so images go before the cut.
-                            text = strip_images(result.content)
-                            original_len = len(text)
                             result = result.model_copy(
                                 update={
-                                    "content": (
-                                        text[: self.config.max_tool_result_length]
-                                        + f"\n[OUTPUT TRUNCATED — original: {original_len} chars]"
+                                    "content": truncate_tool_output(
+                                        strip_images(result.content),
+                                        self.config.max_tool_result_length,
+                                        self.config.tool_result_head_fraction,
                                     )
                                 }
                             )
@@ -1634,29 +1894,9 @@ class AgentRuntimeMixin:
                 )
                 state = state.with_reasoning_step(reasoning_step)
 
-                # Checkpoint if enabled
-                if (
-                    self.config.checkpointer
-                    and self.config.checkpoint_every_n_iterations > 0
-                    and state.iteration % self.config.checkpoint_every_n_iterations == 0
-                ):
-                    _cp_thread = thread_id or state.run_id
-                    await self.config.checkpointer.save(
-                        _durable(state),
-                        _cp_thread,
-                    )
-                    from tulip.observability.emit import (  # noqa: PLC0415
-                        EV_CHECKPOINT_SAVED,
-                        emit,
-                    )
-
-                    await emit(
-                        EV_CHECKPOINT_SAVED,
-                        thread_id=_cp_thread,
-                        iteration=state.iteration,
-                        backend=type(self.config.checkpointer).__name__,
-                        trigger="every_n_iterations",
-                    )
+                # The iteration's tool results are folded in, so this is a
+                # boundary ``continue_turn`` can pick the turn up from.
+                state = await self._checkpoint_iteration(state, thread_id)
 
             # The loop is done; close whichever iteration it left open.
             if _open_iteration is not None:
@@ -1670,7 +1910,10 @@ class AgentRuntimeMixin:
                 iterations_used=state.iteration,
                 final_confidence=state.confidence,
                 usage=_usage_of(state),
+                cost_usd=_cost_of(state),
+                reported_cost_usd=_reported_cost_of(state),
                 total_tool_calls=len(state.tool_executions),
+                error=_error_text(e),
             )
             raise
 
@@ -1697,7 +1940,9 @@ class AgentRuntimeMixin:
                     state = state.with_metadata(self.config.output_key, final_msg)
 
             # Hand the final state to THIS run's arun (never read back off
-            # the shared agent), then release the run's bookkeeping.
+            # the shared agent), then release the run's bookkeeping. The
+            # list of iteration saves is bookkeeping too, not a result.
+            superseded, state = _take_iteration_checkpoints(state)
             self._end_run(rc, state)
 
             # Run hooks: after_invocation
@@ -1711,20 +1956,7 @@ class AgentRuntimeMixin:
                 await self._memory_manager.on_session_end(_without_ephemeral_messages(state))
 
             # Final checkpoint
-            if self.config.checkpointer and thread_id:
-                await self.config.checkpointer.save(_durable(state), thread_id)
-                from tulip.observability.emit import (  # noqa: PLC0415
-                    EV_CHECKPOINT_SAVED,
-                    emit,
-                )
-
-                await emit(
-                    EV_CHECKPOINT_SAVED,
-                    thread_id=thread_id,
-                    iteration=state.iteration,
-                    backend=type(self.config.checkpointer).__name__,
-                    trigger="final",
-                )
+            await self._checkpoint_final(state, thread_id, superseded)
 
     @_bus_bridge
     async def _run_from_state(
@@ -1749,6 +1981,8 @@ class AgentRuntimeMixin:
         metadata, _ = self._split_run_metadata(metadata)
 
         started_at = datetime.now(UTC)
+        # Whether the run has had its one note to converge (``budget_nudge_at``).
+        _budget_nudged = False
         _total_tokens = 0
         _tool_calls_count = 0
         _tool_errors_count = 0
@@ -1757,6 +1991,8 @@ class AgentRuntimeMixin:
         _last_assistant_content: str | None = None
         _last_no_tool_calls = False
         _verifier_attempts = 0
+        _empty_sent_back = False
+        _unfinished_sent_back = 0
 
         # Extract last assistant content from state
         for msg in reversed(state.messages):
@@ -1771,7 +2007,12 @@ class AgentRuntimeMixin:
         # Same parent-context contract as run(): a resumed run can spawn
         # subagents too, and their usage and cancellation must behave
         # identically to the first pass.
-        _subagent_ctx = enter_parent_run(rc.cancel)
+        _subagent_ctx = enter_parent_run(
+            rc.cancel,
+            time_budget_seconds=self.config.time_budget_seconds,
+            hooks=self.config.hooks,
+            observation_pack=self._child_observation_pack(state, rc),
+        )
 
         try:
             _open_iteration: int | None = None
@@ -1798,6 +2039,8 @@ class AgentRuntimeMixin:
                             iterations_used=state.iteration,
                             final_confidence=state.confidence,
                             usage=_usage_of(state),
+                            cost_usd=_cost_of(state),
+                            reported_cost_usd=_reported_cost_of(state),
                             total_tool_calls=len(state.tool_executions),
                             final_message=_last_assistant_content,
                         )
@@ -1809,6 +2052,8 @@ class AgentRuntimeMixin:
                         iterations_used=state.iteration,
                         final_confidence=state.confidence,
                         usage=_usage_of(state),
+                        cost_usd=_cost_of(state),
+                        reported_cost_usd=_reported_cost_of(state),
                         total_tool_calls=len(state.tool_executions),
                         final_message="Agent cancelled by external signal.",
                     )
@@ -1826,10 +2071,16 @@ class AgentRuntimeMixin:
                             iterations_used=state.iteration,
                             final_confidence=state.confidence,
                             usage=_usage_of(state),
+                            cost_usd=_cost_of(state),
+                            reported_cost_usd=_reported_cost_of(state),
                             total_tool_calls=len(state.tool_executions),
                             final_message=_last_assistant_content,
                         )
                         break
+
+                state, loop_warning = self._warn_tool_loop(state)
+                if loop_warning is not None:
+                    yield loop_warning
 
                 should_stop, stop_reason = state.should_terminate
                 if should_stop and stop_reason:
@@ -1838,36 +2089,63 @@ class AgentRuntimeMixin:
                         iterations_used=state.iteration,
                         final_confidence=state.confidence,
                         usage=_usage_of(state),
+                        cost_usd=_cost_of(state),
+                        reported_cost_usd=_reported_cost_of(state),
                         total_tool_calls=len(state.tool_executions),
                         final_message=_last_assistant_content,
                     )
                     break
 
                 state = state.next_iteration()
+                if not _budget_nudged:
+                    state, nudge = self._budget_nudge(state, started_at)
+                    if nudge is not None:
+                        _budget_nudged = True
+                        yield nudge
                 if state.would_exceed_cost_budget(self.config.max_tokens or 4096):
                     yield TerminateEvent(
                         reason="cost_budget",
                         iterations_used=state.iteration,
                         final_confidence=state.confidence,
                         usage=_usage_of(state),
+                        cost_usd=_cost_of(state),
+                        reported_cost_usd=_reported_cost_of(state),
                         total_tool_calls=len(state.tool_executions),
                         final_message=_last_assistant_content,
                     )
                     break
 
-                response, state = await self._get_model_response(state, model_kwargs, run=rc)
+                state, compaction = await self._compact_context(state, rc)
+                if compaction is not None:
+                    yield compaction
+                    if compaction.exhausted:
+                        yield TerminateEvent(
+                            reason="context_exhausted",
+                            iterations_used=state.iteration,
+                            final_confidence=state.confidence,
+                            usage=_usage_of(state),
+                            cost_usd=_cost_of(state),
+                            reported_cost_usd=_reported_cost_of(state),
+                            total_tool_calls=len(state.tool_executions),
+                            final_message=f"[context exhausted] {compaction.detail}",
+                        )
+                        break
+
+                try:
+                    response, state = await self._get_model_response(state, model_kwargs, run=rc)
+                except Exception:
+                    for retry in rc.drain_retries():
+                        yield retry
+                    raise
+                for retry in rc.drain_retries():
+                    yield retry
                 for custom in rc.drain():
                     yield custom
                 prompt_toks = response.usage.get("prompt_tokens", 0)
                 completion_toks = response.usage.get("completion_tokens", 0)
-                cache_creation_toks = response.usage.get("cache_creation_input_tokens", 0)
-                cache_read_toks = response.usage.get("cache_read_input_tokens", 0)
                 _total_tokens += prompt_toks + completion_toks
-                state = state.with_token_usage(
-                    prompt_toks,
-                    completion_toks,
-                    cache_creation_tokens=cache_creation_toks,
-                    cache_read_tokens=cache_read_toks,
+                state = state.with_response_usage(
+                    response.usage, getattr(response, "cost_usd", None)
                 )
                 _last_assistant_content = response.message.content
                 _last_no_tool_calls = not response.message.tool_calls
@@ -1878,8 +2156,35 @@ class AgentRuntimeMixin:
                     tool_calls=list(response.message.tool_calls),
                 )
 
+                # The same recovery as the first pass: a resumed turn on the
+                # same model leaks the same markup.
+                recovered = self._recover_text_tool_calls(response, state)
+                if recovered is not None:
+                    response, state = recovered
+                    _last_assistant_content = response.message.content
+                    _last_no_tool_calls = False
+
+                # And a call cut off before its end is asked for again.
+                if response.message.tool_calls:
+                    _unfinished_sent_back = 0
+                elif _unfinished_sent_back < _MAX_UNFINISHED_SENDS:
+                    unfinished = self._unfinished_text_tool_call(response.message.content)
+                    if unfinished is not None:
+                        _unfinished_sent_back += 1
+                        state = self._send_back_unfinished_call(state, unfinished, replace=True)
+                        _last_assistant_content = unfinished.prose
+                        _last_no_tool_calls = False
+                        continue
+
                 if not response.message.tool_calls and self.config.completion_mode != "explicit":
                     answer = response.message.content
+                    if not answer and state.tool_executions and not _empty_sent_back:
+                        # As in ``run``: an empty reply mid-task is sent back
+                        # once, with the tools, rather than taken as the answer.
+                        _empty_sent_back = True
+                        state = state.with_message(Message.system(_EMPTY_REPLY_NOTE))
+                        _last_no_tool_calls = False
+                        continue
                     if self.config.final_answer_verifier is not None and answer:
                         verdict = await self._verify_final_answer(
                             answer, state, rc, _verifier_attempts
@@ -1888,8 +2193,12 @@ class AgentRuntimeMixin:
                             yield verdict
                             _verifier_attempts += 1
                             state = self._queue_verifier_replan(
-                                state, answer, verdict.feedback or ""
+                                state, answer, verdict.feedback or "", verdict
                             )
+                            # The model is sent back: a termination condition
+                            # on "no tool calls" must not end the run on the
+                            # reply it is being sent back from.
+                            _last_no_tool_calls = False
                             continue
                         replacement = await self._final_answer_fallback(verdict, answer, state, rc)
                         if replacement is not None:
@@ -1902,6 +2211,8 @@ class AgentRuntimeMixin:
                         iterations_used=state.iteration,
                         final_confidence=state.confidence,
                         usage=_usage_of(state),
+                        cost_usd=_cost_of(state),
+                        reported_cost_usd=_reported_cost_of(state),
                         total_tool_calls=len(state.tool_executions),
                         final_message=answer,
                     )
@@ -1978,7 +2289,7 @@ class AgentRuntimeMixin:
                                 ),
                                 asyncio.Queue(),
                             ):
-                                if isinstance(item, ToolProgressEvent):
+                                if isinstance(item, TulipEvent):
                                     yield item
                                 else:
                                     streamed = item[1]
@@ -2105,9 +2416,30 @@ class AgentRuntimeMixin:
                     for custom in hook_events:
                         yield custom
 
+                # Same boundary as run(): a resumed or continued turn is as
+                # durable per iteration as the first pass.
+                state = await self._checkpoint_iteration(state, thread_id)
+
             # The loop is done; close whichever iteration it left open.
             if _open_iteration is not None:
                 await self._run_iteration_end_hooks(_open_iteration, state)
+
+        except Exception as e:
+            # Mirror run(): a resumed or continued segment that fails says so
+            # with an error termination before the exception propagates, so a
+            # streaming consumer sees how the turn ended and why.
+            state = state.with_error(str(e))
+            yield TerminateEvent(
+                reason="error",
+                iterations_used=state.iteration,
+                final_confidence=state.confidence,
+                usage=_usage_of(state),
+                cost_usd=_cost_of(state),
+                reported_cost_usd=_reported_cost_of(state),
+                total_tool_calls=len(state.tool_executions),
+                error=_error_text(e),
+            )
+            raise
 
         finally:
             # Mirror run(): fold the final batch's child usage before the
@@ -2117,25 +2449,202 @@ class AgentRuntimeMixin:
 
             if self._cancel_signal is not None:
                 self._cancel_signal.clear()
+            superseded, state = _take_iteration_checkpoints(state)
             self._end_run(rc, state)
 
             # Final checkpoint — mirrors run(): a resumed run must stay as
             # durable as the original one (a second pause, or completion,
             # is persisted too — resume never downgrades durability).
-            if self.config.checkpointer and thread_id:
-                await self.config.checkpointer.save(_durable(state), thread_id)
-                from tulip.observability.emit import (  # noqa: PLC0415
-                    EV_CHECKPOINT_SAVED,
-                    emit,
+            await self._checkpoint_final(state, thread_id, superseded)
+
+    async def _checkpoint_final(
+        self, state: AgentState, thread_id: str | None, superseded: list[str]
+    ) -> None:
+        """Save the segment's final state, then delete the iteration saves it supersedes.
+
+        ``superseded`` comes off the state (see :data:`ITERATION_CHECKPOINTS_KEY`)
+        so saves from a process that died before this point are deleted too.
+        They are deleted only after the final save succeeded — until then
+        they are the thread's only record of the turn — and a failed delete
+        is logged, never raised: losing the clean-up must not lose the turn.
+        """
+        checkpointer = self.config.checkpointer
+        if not checkpointer or not thread_id:
+            return
+        await checkpointer.save(_durable(state), thread_id)
+        from tulip.observability.emit import (  # noqa: PLC0415
+            EV_CHECKPOINT_SAVED,
+            emit,
+        )
+
+        await emit(
+            EV_CHECKPOINT_SAVED,
+            thread_id=thread_id,
+            iteration=state.iteration,
+            backend=type(checkpointer).__name__,
+            trigger="final",
+        )
+        if self.config.keep_iteration_checkpoints:
+            return
+        for checkpoint_id in superseded:
+            try:
+                await checkpointer.delete(thread_id, checkpoint_id)
+            except Exception:  # noqa: BLE001 — clean-up only; the turn is saved
+                logger.warning(
+                    "could not delete superseded iteration checkpoint %s of thread %s",
+                    checkpoint_id,
+                    thread_id,
+                    exc_info=True,
                 )
 
-                await emit(
-                    EV_CHECKPOINT_SAVED,
-                    thread_id=thread_id,
-                    iteration=state.iteration,
-                    backend=type(self.config.checkpointer).__name__,
-                    trigger="final",
+    def _iteration_checkpoint_interval(self, thread_id: str | None) -> int:
+        """How many iterations apart to checkpoint; 0 for none.
+
+        An explicit ``checkpoint_every_n_iterations`` is obeyed as given. The
+        default (``None``) is 1 where the saves leave nothing behind — a
+        thread to finish the turn on, and a checkpointer that can delete the
+        saves the final one supersedes — and 0 elsewhere.
+        """
+        every = self.config.checkpoint_every_n_iterations
+        if every is not None:
+            return every
+        checkpointer = self.config.checkpointer
+        if thread_id and getattr(checkpointer, "deletes_single_checkpoints", False) is True:
+            return 1
+        return 0
+
+    async def _checkpoint_iteration(self, state: AgentState, thread_id: str | None) -> AgentState:
+        """Save ``state`` when this iteration is due a checkpoint; return the state to go on with.
+
+        Called once the iteration's tool results are in the state, so the
+        checkpoint never holds a call without its result: a process killed
+        before the turn's final save leaves a state ``continue_turn`` resumes
+        from without re-running any finished call. A thread-less run saves
+        under its ``run_id``.
+
+        On a thread, the save's id is added to the state's list of the turn's
+        iteration checkpoints before saving, so the saved state names itself
+        and every earlier one; the returned state carries the list to the
+        turn's final save, which deletes them.
+        """
+        checkpointer = self.config.checkpointer
+        every = self._iteration_checkpoint_interval(thread_id)
+        if not checkpointer or every <= 0 or state.iteration % every:
+            return state
+        cp_thread = thread_id or state.run_id
+        checkpoint_id: str | None = None
+        # A checkpointer that cannot delete one checkpoint keeps every save,
+        # as it always did; tracking ids it can never delete would only log.
+        if (
+            thread_id
+            and not self.config.keep_iteration_checkpoints
+            and getattr(checkpointer, "deletes_single_checkpoints", False) is True
+        ):
+            from uuid import uuid4  # noqa: PLC0415
+
+            checkpoint_id = uuid4().hex
+            pending = list(state.metadata.get(ITERATION_CHECKPOINTS_KEY) or [])
+            state = state.with_metadata(ITERATION_CHECKPOINTS_KEY, [*pending, checkpoint_id])
+        await checkpointer.save(_durable(state), cp_thread, checkpoint_id)
+        from tulip.observability.emit import (  # noqa: PLC0415
+            EV_CHECKPOINT_SAVED,
+            emit,
+        )
+
+        await emit(
+            EV_CHECKPOINT_SAVED,
+            thread_id=cp_thread,
+            iteration=state.iteration,
+            backend=type(checkpointer).__name__,
+            trigger="every_n_iterations",
+        )
+        return state
+
+    @staticmethod
+    def _warn_tool_loop(state: AgentState) -> tuple[AgentState, CustomEvent | None]:
+        """Warn the model about a loop it has not been warned about yet.
+
+        Returns the state with the note added and the warning recorded, and
+        a ``tool_loop_warning`` event for the stream; or the state unchanged
+        and ``None`` when there is no new loop. A loop the model was already
+        warned about is left to ``should_terminate``, which stops the run
+        once the loop repeats after its warning.
+        """
+        loop = state.tool_loop
+        if loop is None or state.tool_loop_warned(loop):
+            return state, None
+        state = state.with_tool_loop_warning(loop).with_message(Message.system(warning_text(loop)))
+        return state, CustomEvent(name="tool_loop_warning", data=loop.as_dict())
+
+    def _budget_nudge(
+        self, state: AgentState, started_at: datetime
+    ) -> tuple[AgentState, CustomEvent | None]:
+        """One note to converge, once the run has used ``budget_nudge_at`` of a budget.
+
+        Checked before each model call against every budget the run has —
+        tokens, cost, wall-clock time, iterations — and given for the one
+        furthest along. The note asks the model to finish the work in hand,
+        not to stop: a run that is told to wrap up and stops with the task
+        undone has wasted everything it spent, and the completion check
+        still sends such a stop back.
+        """
+        at = self.config.budget_nudge_at
+        if at is None:
+            return state, None
+        used: list[tuple[float, str, str]] = []
+        if state.token_budget:
+            used.append(
+                (
+                    state.total_tokens_used / state.token_budget,
+                    "token",
+                    f"{state.total_tokens_used:,} of {state.token_budget:,} tokens",
                 )
+            )
+        if state.cost_budget_usd:
+            used.append(
+                (
+                    state.cost_usd_used / state.cost_budget_usd,
+                    "cost",
+                    f"${state.cost_usd_used:.2f} of ${state.cost_budget_usd:.2f}",
+                )
+            )
+        if self.config.time_budget_seconds:
+            elapsed = (datetime.now(UTC) - started_at).total_seconds()
+            used.append(
+                (
+                    elapsed / self.config.time_budget_seconds,
+                    "time",
+                    f"{elapsed:.0f}s of {self.config.time_budget_seconds:.0f}s",
+                )
+            )
+        # A cap of a few turns is a deliberately short leash, not a budget to
+        # pace against: a note there would be most of the conversation.
+        if state.max_iterations >= _MIN_NUDGED_ITERATIONS:
+            used.append(
+                (
+                    state.iteration / state.max_iterations,
+                    "iteration",
+                    f"{state.iteration} of {state.max_iterations} turns",
+                )
+            )
+        fraction, budget, detail = max(used, default=(0.0, "", ""))
+        if fraction < at:
+            return state, None
+        note = Message(
+            role=Role.USER,
+            content=(
+                "[Budget note — automated, not from the user] This run has used "
+                f"{fraction:.0%} of its {budget} budget ({detail}). Converge: finish "
+                "the change in progress, run the check that proves it, and report. Do "
+                "not start new exploration or re-read files you have already read. "
+                "The task still has to be done — do not stop with it unfinished."
+            ),
+            metadata={AUTOMATED_NOTE_KEY: True, BUDGET_NOTE_KEY: budget},
+        )
+        return state.with_message(note), CustomEvent(
+            name="budget_nudge",
+            data={"budget": budget, "fraction": round(fraction, 3), "detail": detail},
+        )
 
     def _spend_fields(self) -> dict[str, Any]:
         """The state fields that price a run and cap its spend."""
@@ -2208,6 +2717,8 @@ class AgentRuntimeMixin:
                 self.config.reflexion.confidence_threshold if self.config.reflexion else 0.85
             ),
             tool_loop_threshold=self.config.tool_loop_threshold,
+            tool_loop_read_only_threshold=self.config.tool_loop_read_only_threshold,
+            tool_loop_read_only_tools=frozenset(self.config.tool_loop_read_only_tools),
             terminal_tools=frozenset(self.config.terminal_tools),
             token_budget=self.config.token_budget,
             **self._spend_fields(),
@@ -2230,7 +2741,10 @@ class AgentRuntimeMixin:
         state = self._fresh_turn_state(merged_metadata).model_copy(
             update={"provider_state": existing.provider_state}
         )
-        messages = list(existing.messages)
+        # A thread whose last turn was killed mid-call ends on calls with no
+        # result, which a provider rejects; the new turn answers them as
+        # "outcome unknown" rather than failing on the first model call.
+        messages = list(close_unfinished_calls(existing).messages)
         # Re-evaluate the system prompt for this turn: a callable prompt sees
         # the new metadata, and a changed static prompt takes effect. Only the
         # leading system message is the agent's prompt; anything else (memory
@@ -2354,134 +2868,201 @@ class AgentRuntimeMixin:
 
         return validated
 
-    def _parse_text_tool_calls(self, text: str) -> list[ToolCall]:
-        """Parse tool calls from model text output (text fallback).
+    def _text_tool_calls_enabled(self) -> bool:
+        """Whether this run parses tool calls out of the message body.
 
-        Some models output tool calls as text instead of structured function
-        calls. Two shapes are recognised, both validated against the
-        registered tool registry:
-
-        - call syntax -- ``search(query="test")``
-        - JSON -- ``{"name": "search", "arguments": {"query": "test"}}``,
-          optionally inside a ``json`` fence, and optionally a list of them
-
-        The JSON shape is what small self-hosted models emit most often
-        (Ollama, the Hermes/Qwen tool templates) whenever the server does
-        not lift it into a structured ``tool_calls`` field. Missing it does
-        not just lose the call -- an attempted action that is never parsed
-        is never dispatched, so it is never weighed by the admission gate
-        and never reaches the audit trail. Nothing runs, which is
-        fail-safe, but "the model tried to wipe production" then looks
-        identical to "the model declined", and only one of those is true.
-
-        Returns parsed ToolCall list, or empty list if no matches found.
+        ``'auto'`` reads ``supports_native_tool_calls`` off the model and
+        parses only on an explicit ``False``: a model with native tool
+        calling that writes ``name(args)`` in its answer is describing a
+        call, not making one.
         """
-        import json
-        import re
+        mode = self.config.text_tool_calls
+        if mode == "auto":
+            return getattr(self._model, "supports_native_tool_calls", True) is False
+        return mode == "on"
 
-        if not text or not self._tool_registry:
-            return []
+    def _leaked_tool_call_formats(self) -> tuple[str, ...]:
+        """The tool-call markup this agent's model may leak into its message body.
 
-        # Build case-insensitive lookup: normalized_name -> real_name
-        tool_lookup: dict[str, str] = {}
-        for name in self._tool_registry.tools:
-            normalized = name.lower().replace("_", "").replace("-", "")
-            tool_lookup[normalized] = name
+        ``config.leaked_tool_call_formats`` when set, else the model's
+        capability profile, resolved once per agent. A profile that cannot be
+        resolved (an unreadable override file, a model with no id) means no
+        formats: recognising leaked calls is a recovery, and it must never be
+        the thing that breaks a run.
+        """
+        configured = self.config.leaked_tool_call_formats
+        if configured is not None:
+            return tuple(configured)
+        if self._leaked_formats is None:
+            formats: tuple[str, ...] = ()
+            try:
+                from tulip.models.metadata import model_id_of
+                from tulip.models.profiles import profile_for
 
-        # Match patterns like: tool_name(arg1="val1", arg2=val2)
-        # Handles: search(query="test"), search(query='test'), search(query=test)
-        pattern = re.compile(
-            r"\b([a-zA-Z_][a-zA-Z0-9_-]*)\s*\(\s*(.*?)\s*\)",
-            re.DOTALL,
+                model = self.config.model
+                model_id = model_id_of(model if isinstance(model, str) else self._model)
+                if model_id is not None:
+                    formats = tuple(profile_for(model_id).leaked_tool_call_formats)
+            except Exception:  # noqa: BLE001 — a recovery must not fail the run
+                logger.warning("model profile unavailable; leaked tool calls off", exc_info=True)
+            self._leaked_formats = formats
+        return self._leaked_formats
+
+    def _recover_text_tool_calls(
+        self, response: ModelResponse, state: AgentState
+    ) -> tuple[ModelResponse, AgentState] | None:
+        """``response`` and ``state`` with the calls written in the body made structured.
+
+        ``None`` when the reply already carries structured calls, or neither
+        its body nor its reasoning ends in a call. Three sources, in order:
+
+        - the model's leaked markup (:mod:`tulip.agent.leaked_tool_calls`),
+          recognised even with native tool calling, since nobody writes
+          ``<｜DSML｜invoke name="…">`` to describe a call. The markup is
+          dropped from the assistant message, leaving any prose before it, so
+          the model is not shown its own leak as the way it calls tools;
+        - the same markup ending the reasoning of a reply with no body: a
+          reasoning model that leaks its call leaks it into the channel it was
+          writing in, and the reply then looks empty. The reasoning stays
+          reasoning; only the call is lifted;
+        - a plain text call, only when ``text_tool_calls`` enables it
+          (:meth:`_text_tool_calls_enabled`); the body stays as written.
+        """
+        message = response.message
+        if message.tool_calls or self.config.text_tool_calls == "off":
+            return None
+        from tulip.agent.leaked_tool_calls import match_leaked_tool_calls
+
+        content: str | None = message.content
+        calls: list[ToolCall] = []
+        formats = self._leaked_tool_call_formats()
+        if content:
+            leaked = match_leaked_tool_calls(content, self._tool_registry, formats)
+            source = "message body"
+        else:
+            reasoning = response.reasoning if isinstance(response.reasoning, str) else None
+            leaked = match_leaked_tool_calls(reasoning, self._tool_registry, formats)
+            source = "reasoning"
+        if leaked is not None:
+            logger.info(
+                "recovered %d tool call(s) written as %s markup in the %s",
+                len(leaked.calls),
+                leaked.format,
+                source,
+            )
+            calls = leaked.calls
+            if content:
+                content = leaked.prose
+            record_mechanism(
+                LEAKED_TOOL_CALLS,
+                outcome=leaked.format,
+                detail={"calls": len(leaked.calls), "source": source},
+            )
+        elif content and self._text_tool_calls_enabled():
+            calls = self._parse_text_tool_calls(content)
+        if not calls:
+            return None
+        response = response.model_copy(
+            update={
+                "message": Message(
+                    role=message.role,
+                    content=content,
+                    tool_calls=calls,
+                    tool_call_id=message.tool_call_id,
+                    name=message.name,
+                )
+            }
+        )
+        # The assistant message already in state is the one with the calls as
+        # text; it becomes the one with them structured.
+        messages = list(state.messages)
+        messages[-1] = response.message
+        return response, state.model_copy(update={"messages": tuple(messages)})
+
+    def _unfinished_text_tool_call(self, text: str | None) -> UnfinishedToolCall | None:
+        """The leaked call block ``text`` opens and never closes, if any.
+
+        Only the model's own formats, and never with ``text_tool_calls='off'``:
+        the same switches as :meth:`_recover_text_tool_calls`, which has
+        already declined to read ``text`` as a call.
+        """
+        if not text or self.config.text_tool_calls == "off":
+            return None
+        from tulip.agent.leaked_tool_calls import unfinished_leaked_tool_call
+
+        return unfinished_leaked_tool_call(text, self._leaked_tool_call_formats())
+
+    @staticmethod
+    def _send_back_unfinished_call(
+        state: AgentState, unfinished: UnfinishedToolCall, *, replace: bool
+    ) -> AgentState:
+        """``state`` with the model asked to make its cut-off call again.
+
+        With ``replace`` the last message is the reply that broke off, and it
+        keeps only the prose before the block — or goes, when there is none —
+        so the model is not shown half a call in its own markup as an example.
+        """
+        logger.info("sent back a tool call written as %s markup and cut off", unfinished.format)
+        if replace and state.messages:
+            messages = list(state.messages[:-1])
+            if unfinished.prose:
+                messages.append(Message.assistant(content=unfinished.prose))
+            state = state.model_copy(update={"messages": tuple(messages)})
+        # User-role and marked automated, like a continuation: a mid-run
+        # system message is hoisted or taken for the system prompt by several
+        # adapters, which would leave the model's own reply as the last turn.
+        return state.with_message(
+            Message(
+                role=Role.USER,
+                content=_UNFINISHED_CALL_NOTE,
+                metadata={AUTOMATED_NOTE_KEY: True},
+            )
         )
 
-        parsed: list[ToolCall] = []
-        seen: set[str] = set()
+    def _is_text_tool_call(self, text: str) -> bool:
+        """Whether ``text`` is a call in the model's own markup, finished or cut off."""
+        from tulip.agent.leaked_tool_calls import match_leaked_tool_calls
 
-        # JSON shape first: a name/arguments object, bare or fenced, one or
-        # many. Scanned by balancing braces rather than by regex so a nested
-        # ``arguments`` object does not truncate the match.
-        for start in (i for i, ch in enumerate(text) if ch == "{"):
-            depth = 0
-            for end in range(start, len(text)):
-                if text[end] == "{":
-                    depth += 1
-                elif text[end] == "}":
-                    depth -= 1
-                    if depth == 0:
-                        break
-            else:
-                continue
-            try:
-                obj = json.loads(text[start : end + 1])
-            except ValueError:
-                continue
-            if not isinstance(obj, dict):
-                continue
-            raw_name = obj.get("name") or obj.get("tool") or obj.get("function")
-            if not isinstance(raw_name, str):
-                continue
-            real = tool_lookup.get(raw_name.lower().replace("_", "").replace("-", ""))
-            if not real:
-                continue
-            raw_args = obj.get("arguments")
-            if raw_args is None:
-                raw_args = obj.get("parameters")
-            if isinstance(raw_args, str):
-                try:
-                    raw_args = json.loads(raw_args)
-                except ValueError:
-                    raw_args = {}
-            if not isinstance(raw_args, dict):
-                raw_args = {}
-            key = f"{real}:{sorted(raw_args.items()) if raw_args else ''}"
-            if key in seen:
-                continue
-            seen.add(key)
-            parsed.append(ToolCall(name=real, arguments=raw_args))
+        if self.config.text_tool_calls == "off":
+            return False
+        formats = self._leaked_tool_call_formats()
+        found = match_leaked_tool_calls(text, self._tool_registry, formats)
+        return found is not None or self._unfinished_text_tool_call(text) is not None
 
-        for match in pattern.finditer(text):
-            func_name = match.group(1)
-            args_str = match.group(2)
+    def _summary_as_tool_step(
+        self, summary: ModelResponse, state: AgentState
+    ) -> tuple[ModelResponse, AgentState] | UnfinishedToolCall | None:
+        """What a reply to the no-tools final-answer request is, when it is not an answer.
 
-            # Match against registry (case-insensitive, ignore underscores/hyphens)
-            normalized = func_name.lower().replace("_", "").replace("-", "")
-            real_name = tool_lookup.get(normalized)
-            if not real_name:
-                continue
+        Asked for an answer with its tools taken away, a model that is not
+        done writes its next call in its own markup — the only way left to
+        it. That reply, added to ``state``, is the turn's tool step; a block
+        it never closes is an unfinished call; anything else (``None``) is the
+        answer.
+        """
+        recovered = self._recover_text_tool_calls(summary, state.with_message(summary.message))
+        if recovered is not None:
+            return recovered
+        return self._unfinished_text_tool_call(summary.message.content)
 
-            # Parse arguments: key="value" or key='value' or key=value
-            args: dict[str, Any] = {}
-            arg_pattern = re.compile(r'(\w+)\s*=\s*(?:"([^"]*?)"|\'([^\']*?)\'|(\S+?))\s*[,)]')
-            # Add trailing ) to help match last arg
-            args_text = args_str + ")"
-            for arg_match in arg_pattern.finditer(args_text):
-                key = arg_match.group(1)
-                value = arg_match.group(2) or arg_match.group(3) or arg_match.group(4)
-                if value is not None:
-                    args[key] = value
+    def _parse_text_tool_calls(self, text: str | None) -> list[ToolCall]:
+        """Tool calls the model wrote as text; see :mod:`tulip.agent.text_tool_calls`.
 
-            # Validate arguments against tool's schema before accepting
-            tool_obj = self._tool_registry.get(real_name)
-            if tool_obj:
-                schema = tool_obj.to_openai_schema().get("function", {})
-                params = schema.get("parameters", {})
-                valid_params = set(params.get("properties", {}).keys())
-                # Drop any argument not declared in the tool's schema
-                args = {k: v for k, v in args.items() if k in valid_params}
+        Parsing matters for governance as much as for function: an attempted
+        action that is never parsed is never dispatched, so it is never
+        weighed by the admission gate and never reaches the audit trail.
+        Only unambiguous shapes count, so a final answer that mentions a
+        tool is never executed.
+        """
+        from tulip.agent.text_tool_calls import parse_text_tool_calls
 
-            key = f"{real_name}:{sorted(args.items()) if args else ''}"
-            if key in seen:
-                continue
-            seen.add(key)
-            parsed.append(ToolCall(name=real_name, arguments=args))
-
-        return parsed
+        return parse_text_tool_calls(text, self._tool_registry)
 
     async def _complete_streaming(
         self,
         complete_kwargs: dict[str, Any],
         chunk_queue: asyncio.Queue[Any],
+        progress: _StreamProgress | None = None,
     ) -> ModelResponse:
         """Drive the model's streaming API, forwarding chunks to the caller.
 
@@ -2495,9 +3076,12 @@ class AgentRuntimeMixin:
         tool_calls: list[ToolCall] = []
         usage: dict[str, int] = {}
         stop_reason: str | None = None
+        cost_usd: float | None = None
 
         async for chunk in self._model.stream(**complete_kwargs):
             await chunk_queue.put(chunk)
+            if progress is not None:
+                progress.forwarded = True
             if chunk.content:
                 content_parts.append(chunk.content)
             if getattr(chunk, "reasoning", None):
@@ -2509,6 +3093,9 @@ class AgentRuntimeMixin:
                 usage = chunk.usage or {}
             if getattr(chunk, "stop_reason", None):
                 stop_reason = chunk.stop_reason
+            chunk_cost = getattr(chunk, "cost_usd", None)
+            if isinstance(chunk_cost, int | float) and not isinstance(chunk_cost, bool):
+                cost_usd = float(chunk_cost)
 
         return ModelResponse(
             message=Message.assistant(
@@ -2518,6 +3105,50 @@ class AgentRuntimeMixin:
             usage=usage,
             stop_reason=stop_reason,
             reasoning="".join(reasoning_parts) or None,
+            cost_usd=cost_usd,
+        )
+
+    async def _call_model(
+        self,
+        complete_kwargs: dict[str, Any],
+        chunk_queue: asyncio.Queue[Any] | None,
+        *,
+        streaming: bool,
+        run: RunContext | None,
+    ) -> ModelResponse:
+        """One model call, retried on transient failure per ``config.model_retry``.
+
+        Retry notices go wherever the loop can show them soonest: onto the
+        chunk queue when the caller is consuming one (it yields them live,
+        mid-backoff), else onto the run context, which the loop drains once
+        the call returns or fails.
+
+        A streamed attempt that has already forwarded a chunk is not retried:
+        the caller has shown that text and a second attempt would stream a
+        different answer after it. Nor is a cancelled run.
+        """
+        progress = _StreamProgress()
+
+        async def attempt() -> ModelResponse:
+            progress.forwarded = False
+            if streaming and chunk_queue is not None:
+                return await self._complete_streaming(complete_kwargs, chunk_queue, progress)
+            response: ModelResponse = await self._model.complete(**complete_kwargs)
+            return response
+
+        async def notify(event: ModelRetryEvent) -> None:
+            if chunk_queue is not None:
+                await chunk_queue.put(event)
+            elif run is not None:
+                run.retry_events.append(event)
+
+        def may_retry() -> bool:
+            if progress.forwarded:
+                return False
+            return not (run is not None and run.cancel.is_set())
+
+        return await call_with_retry(
+            attempt, self.config.model_retry, notify=notify, may_retry=may_retry
         )
 
     async def _get_model_response(
@@ -2561,6 +3192,23 @@ class AgentRuntimeMixin:
 
             # Validate message pairs (remove orphaned tool calls/results)
             messages = self._validate_messages(messages)
+
+            # Large old tool outputs go as recallable placeholders. Only this
+            # request's list changes: the state and its checkpoints keep them.
+            pack = self._observation_pack
+            if pack is not None:
+                session = self._observation_session(state, run)
+
+                def _announce(data: dict[str, Any]) -> None:
+                    if run is not None:
+                        run.emit(CustomEvent(name="observation_pack", data=data))
+
+                messages = pack.project(
+                    messages,
+                    session=session,
+                    on_event=_announce,
+                    context_limit=self._compaction_limit(),
+                )
 
         # Get tool schemas
         tool_schemas = self._tool_registry.to_openai_schemas()
@@ -2623,10 +3271,12 @@ class AgentRuntimeMixin:
             # transport can supply them. Server-stateful transports are excluded:
             # they return a continuation token from complete() that the stream
             # API has no equivalent for.
-            if chunk_queue is not None and not server_stateful and hasattr(self._model, "stream"):
-                response = await self._complete_streaming(complete_kwargs, chunk_queue)
-            else:
-                response = await self._model.complete(**complete_kwargs)
+            streaming = (
+                chunk_queue is not None and not server_stateful and hasattr(self._model, "stream")
+            )
+            response = await self._call_model(
+                complete_kwargs, chunk_queue, streaming=streaming, run=run
+            )
 
             # Post-model hooks: event.retry = True to re-call
             after_event = await self._run_after_model_hooks(response, messages, run=run)
@@ -2654,6 +3304,11 @@ class AgentRuntimeMixin:
         # Add assistant message to state
         state = state.with_message(response.message)
 
+        # The provider's count of this request and reply is the best measure of
+        # the context the next request starts from (see ``_compact_context``).
+        if run is not None and run.compaction is not None and not server_stateful:
+            run.compaction.observe(response.usage or {}, len(state.messages))
+
         # Server-stateful transports return a continuation token in
         # ``response.provider_state``; thread it into AgentState so
         # the next turn references the server-held thread.
@@ -2661,6 +3316,167 @@ class AgentRuntimeMixin:
             state = state.with_provider_state(response.provider_state)
 
         return response, state
+
+    async def _compact_context(
+        self, state: AgentState, rc: RunContext
+    ) -> tuple[AgentState, CompactionEvent | None]:
+        """Compact the run's context when the next request would reach the threshold.
+
+        Returns the state to continue with and the event to yield, or ``None``
+        when nothing was done. Only a :class:`ContextCompactor` compacts here;
+        other conversation managers shape each request in
+        ``_get_model_response`` instead. Server-stateful transports hold the
+        history on the server, so there is nothing local to compact.
+        """
+        from tulip.memory.compaction import (  # noqa: PLC0415
+            CompactionTracker,
+            ContextCompactor,
+        )
+
+        compactor = self._conversation_manager
+        if not isinstance(compactor, ContextCompactor):
+            return state, None
+        if getattr(self._model, "server_stateful", False) is True:
+            return state, None
+        if rc.compaction is None:
+            rc.compaction = CompactionTracker()
+        tracker = rc.compaction
+
+        messages = list(state.messages)
+        tool_tokens = compactor.tool_tokens(self._tool_registry.to_openai_schemas())
+        # With ObservationPack the request carries placeholders for the outputs
+        # it already swapped, so the context is measured as it will be sent:
+        # those outputs no longer push the run towards a lossy compaction.
+        pack = self._observation_pack
+        session = self._observation_session(state, rc) if pack is not None else ""
+        measured = pack.view(messages, session=session) if pack is not None else messages
+        tokens = compactor.measure(measured, tool_tokens=tool_tokens, tracker=tracker)
+        if tokens < compactor.threshold:
+            return state, None
+
+        hook = await self._orch().run_before_compaction(
+            list(messages),
+            tokens=tokens,
+            threshold=compactor.threshold,
+            context_window=compactor.context_length,
+            iteration=state.iteration,
+            run=rc,
+        )
+        if hook.cancel:
+            logger.info("A before-compaction hook skipped compaction at %d tokens", tokens)
+            return state, None
+
+        outcome = await compactor.compact(
+            messages,
+            iteration=state.iteration,
+            tracker=tracker,
+            tool_tokens=tool_tokens,
+            tokens_before=tokens,
+            instructions=hook.instructions,
+            archive=pack.archive_for(session) if pack is not None else None,
+        )
+        if outcome is None:
+            return state, None
+        if outcome.usage:
+            # Summary calls are spend like any other: they count against the
+            # run's token and cost budgets.
+            state = state.with_response_usage(outcome.usage)
+        state = state.model_copy(update={"messages": tuple(outcome.messages)})
+        if outcome.exhausted:
+            logger.warning("Context exhausted at iteration %d: %s", state.iteration, outcome.detail)
+        else:
+            logger.info(
+                "Compacted context (%s): %d -> %d tokens",
+                outcome.stage,
+                tokens,
+                outcome.tokens_after,
+            )
+        return state, CompactionEvent(
+            iteration=state.iteration,
+            stage=outcome.stage,
+            tokens_before=outcome.tokens_before,
+            tokens_after=outcome.tokens_after,
+            threshold=outcome.threshold,
+            context_window=compactor.context_length,
+            messages_before=len(messages),
+            messages_after=len(outcome.messages),
+            summary=outcome.summary,
+            exhausted=outcome.exhausted,
+            detail=outcome.detail,
+        )
+
+    def _child_observation_pack(self, state: AgentState, run: RunContext) -> Any:
+        """The ObservationPack config a subagent of this run gets, or ``None``.
+
+        The parent's settings, with the archive under the parent's session
+        (``<session>/subagents/<task>/observation-pack/``), so a subagent's
+        outputs are recallable to it and kept with the session that paid for
+        them.
+        """
+        pack = self._observation_pack
+        if pack is None:
+            return None
+        from tulip.memory.observation_pack import session_directory_name  # noqa: PLC0415
+
+        session = session_directory_name(self._observation_session(state, run))
+        return self.config.observation_pack.model_copy(
+            update={"directory": pack.directory / session / "subagents"}
+        )
+
+    def _inline_limit(self) -> int:
+        """Characters of one tool output sent whole while ObservationPack is on."""
+        from tulip.memory.compaction import ContextCompactor  # noqa: PLC0415
+
+        limit = self.config.observation_pack.max_inline_chars or 2**62
+        compactor = self._conversation_manager
+        if isinstance(compactor, ContextCompactor):
+            # One output never takes more than an eighth of the window.
+            limit = min(limit, compactor.context_length * 4 // 8)
+        return max(limit, self.config.max_tool_result_length)
+
+    def _intake_large_output(
+        self, result: ToolResult, state: AgentState, run: RunContext
+    ) -> ToolResult | None:
+        """``result`` as ObservationPack sends it when it is over the plain cap.
+
+        ``None`` means the pack is off or could not archive it, and the caller
+        cuts it at ``max_tool_result_length`` as before.
+        """
+        pack = self._observation_pack
+        content = result.content
+        if pack is None or not isinstance(content, str) or has_images(content):
+            return None
+        limit = self._inline_limit()
+        if text_length(content) <= limit:
+            return result
+        cut = pack.intake(
+            content,
+            tool_name=result.name,
+            tool_call_id=result.tool_call_id,
+            session=self._observation_session(state, run),
+            limit=limit,
+            head_fraction=self.config.tool_result_head_fraction,
+        )
+        return result.model_copy(update={"content": cut}) if cut is not None else None
+
+    def _compaction_limit(self) -> int | None:
+        """Estimated message tokens at which the next compaction starts, if any."""
+        from tulip.memory.compaction import ContextCompactor  # noqa: PLC0415
+
+        compactor = self._conversation_manager
+        if not isinstance(compactor, ContextCompactor):
+            return None
+        tool_tokens = compactor.tool_tokens(self._tool_registry.to_openai_schemas())
+        return compactor.threshold - tool_tokens
+
+    @staticmethod
+    def _observation_session(state: AgentState, run: RunContext | None) -> str:
+        """The ObservationPack session of a run: its thread, else the run itself."""
+        from tulip.memory.observation_pack import ObservationPack  # noqa: PLC0415
+
+        if run is not None:
+            return ObservationPack.session_key(run.thread_id, run.run_id)
+        return ObservationPack.session_key(None, state.run_id)
 
     def _messages_since_last_assistant(self, state: AgentState) -> list[Message]:
         """Return the slice of state.messages that the model hasn't seen yet.
@@ -2772,6 +3588,8 @@ class AgentRuntimeMixin:
             attempt=attempt,
             feedback=str(feedback),
             replanning=attempt < max_replans,
+            continuation=isinstance(feedback, Continuation),
+            reason=getattr(feedback, "reason", None),
         )
 
     async def _final_answer_fallback(
@@ -2824,8 +3642,57 @@ class AgentRuntimeMixin:
         return state.model_copy(update={"messages": tuple(messages)})
 
     @staticmethod
-    def _queue_verifier_replan(state: AgentState, draft: str, feedback: str) -> AgentState:
-        """Mark the rejected draft turn-only and append the feedback (turn-only too)."""
+    def _queue_continuation(
+        state: AgentState, draft: str, note: str, reason: str | None
+    ) -> AgentState:
+        """Keep the reply as history and append the continuation note.
+
+        Neither is turn-only, unlike a rejected answer: the reply is part of
+        the work ("Let me check the conftest:"), the model must see it to carry
+        out what it announced, and a checkpoint, a resumed turn and a
+        compaction summary must all read the same conversation the model did.
+        The note is user-role (a mid-run system message would be hoisted or
+        taken for the system prompt by several adapters) and marked automated,
+        so it is never mistaken for the user's request.
+        """
+        messages = list(state.messages)
+        last = messages[-1] if messages else None
+        if not (
+            last is not None
+            and last.role == Role.ASSISTANT
+            and not last.tool_calls
+            and (last.content or "") == draft
+        ):
+            # The reply came from the empty-content summary call and is not in
+            # state yet.
+            messages.append(Message.assistant(draft))
+        messages.append(
+            Message(
+                role=Role.USER,
+                content=note,
+                metadata={
+                    AUTOMATED_NOTE_KEY: True,
+                    CONTINUATION_NOTE_KEY: reason or "continuation",
+                },
+            )
+        )
+        return state.model_copy(update={"messages": tuple(messages)})
+
+    @classmethod
+    def _queue_verifier_replan(
+        cls,
+        state: AgentState,
+        draft: str,
+        feedback: str,
+        verdict: FinalAnswerVerificationEvent | None = None,
+    ) -> AgentState:
+        """Mark the rejected draft turn-only and append the feedback (turn-only too).
+
+        A continuation (``verdict.continuation``) is not a rejected answer and
+        goes to :meth:`_queue_continuation` instead.
+        """
+        if verdict is not None and verdict.continuation:
+            return cls._queue_continuation(state, draft, feedback, verdict.reason)
         messages = list(state.messages)
         last = messages[-1] if messages else None
         if (
@@ -2932,13 +3799,7 @@ class AgentRuntimeMixin:
 
             new_message = response.message.content or ""
             repair_messages.append(response.message)
-            usage = response.usage or {}
-            state = state.with_token_usage(
-                usage.get("prompt_tokens", 0),
-                usage.get("completion_tokens", 0),
-                cache_creation_tokens=usage.get("cache_creation_input_tokens", 0),
-                cache_read_tokens=usage.get("cache_read_input_tokens", 0),
-            )
+            state = state.with_response_usage(response.usage, getattr(response, "cost_usd", None))
 
             attempt = parse_structured(new_message, schema, strict=False)
             if attempt.success:

@@ -33,11 +33,14 @@ Usage:
 from tulip.core.config import TulipSettings
 from tulip.core.errors import ApprovalPendingError, TulipError
 from tulip.core.events import (
+    CompactionEvent,
     CustomEvent,
     FinalAnswerVerificationEvent,
     GroundingEvent,
+    ModelRetryEvent,
     ReflectEvent,
     RunInfo,
+    SubagentEvent,
     TerminateEvent,
     ThinkEvent,
     ToolCompleteEvent,
@@ -63,6 +66,11 @@ _LAZY_IMPORTS = {
     # Subagents — isolated child loops with usage rollup and linked cancel.
     "run_subagent": ("tulip.agent.subagent", "run_subagent"),
     "SubagentResult": ("tulip.agent.subagent", "SubagentResult"),
+    "Subagent": ("tulip.agent.subagent", "Subagent"),
+    # Delegation as a tool, and agents defined in Markdown files.
+    "task_tool": ("tulip.agent.tasks", "task_tool"),
+    "AgentSpec": ("tulip.agent.specs", "AgentSpec"),
+    "load_agent_specs": ("tulip.agent.specs", "load_agent_specs"),
     # Multi-agent primitives — graph + handoff + orchestrator/specialist.
     "StateGraph": ("tulip.multiagent.graph", "StateGraph"),
     "GraphConfig": ("tulip.multiagent.graph", "GraphConfig"),
@@ -179,13 +187,16 @@ __all__ = [
     "RunInfo",
     "AgentConfig",
     "AgentResult",
+    "AgentSpec",
     "AgentState",
     "CausalChain",
     "END",
     "GraphConfig",
     "GroundingEvaluator",
     "FinalAnswerVerificationEvent",
+    "CompactionEvent",
     "GroundingEvent",
+    "ModelRetryEvent",
     "Handoff",
     "HandoffContext",
     "HandoffReason",
@@ -208,6 +219,8 @@ __all__ = [
     "SequentialPipeline",
     "Specialist",
     "StateGraph",
+    "Subagent",
+    "SubagentEvent",
     "SubagentResult",
     "TerminateEvent",
     "ThinkEvent",
@@ -220,7 +233,9 @@ __all__ = [
     "create_handoff_agent",
     "create_handoff_manager",
     "create_orchestrator",
+    "load_agent_specs",
     "run_subagent",
+    "task_tool",
     "tool",
     # RAG (lazy)
     "RAGRetriever",

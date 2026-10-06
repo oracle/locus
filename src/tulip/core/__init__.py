@@ -36,11 +36,14 @@ from tulip.core.errors import (
     VectorStoreError,
 )
 from tulip.core.events import (
+    CompactionEvent,
     CustomEvent,
     FinalAnswerVerificationEvent,
     GroundingEvent,
     ModelChunkEvent,
+    ModelRetryEvent,
     ReflectEvent,
+    SubagentEvent,
     TerminateEvent,
     ThinkEvent,
     ToolCompleteEvent,
@@ -102,13 +105,16 @@ __all__ = [
     # Events
     "CustomEvent",
     "FinalAnswerVerificationEvent",
+    "CompactionEvent",
     "GroundingEvent",
+    "ModelRetryEvent",
     "TulipEvent",
     "ModelChunkEvent",
     "ReflectEvent",
     "TerminateEvent",
     "ThinkEvent",
     "ToolCompleteEvent",
+    "SubagentEvent",
     "ToolProgressEvent",
     "ToolStartEvent",
     # Config

@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any, Literal, TypeVar
+from typing import Any, Literal, TypeVar, get_args
 
 from pydantic import BaseModel, Field, computed_field
 
@@ -69,10 +69,43 @@ StopReason = Literal[
     "token_budget",  # Token budget exhausted
     "cost_budget",  # Spend budget exhausted
     "time_budget",  # Time budget exhausted
+    "context_exhausted",  # Compaction could not keep the context inside the window
     "interrupted",  # Agent paused for user input
     "error",  # Execution error
     "cancelled",  # User cancelled
 ]
+
+
+#: Every ``StopReason``, in declaration order (the order a composite reason is
+#: matched in). One list: two hand-kept copies drifted, and a reason missing
+#: from one (``cost_budget``) was reported as ``complete``.
+STOP_REASONS: tuple[str, ...] = get_args(StopReason)
+
+
+def normalize_stop_reason(raw: str | None) -> StopReason:
+    """Map a free-form ``TerminateEvent.reason`` to the ``StopReason`` Literal.
+
+    User-supplied composable termination conditions emit reasons like
+    ``"text_mention:DONE"``, ``"tool_called:book_flight"``, or AND-combined
+    strings like ``"confidence_met AND tool_called:book_flight"``. Map by
+    membership / prefix to the closest semantic match and fall back to
+    ``"complete"``.
+    """
+    if not raw:
+        return "complete"
+    if raw in STOP_REASONS:
+        return raw  # type: ignore[return-value]
+    # AND combinator joins child reasons with " AND ". Take the strongest
+    # signal (terminal tool) if any branch matched it; otherwise fall through.
+    if "tool_called:" in raw:
+        return "terminal_tool"
+    if "text_mention:" in raw:
+        return "complete"
+    # Composite reasons that contain a known literal as a substring.
+    for known in STOP_REASONS:
+        if known in raw:
+            return known  # type: ignore[return-value]
+    return "complete"
 
 
 class AgentResult(BaseModel):

@@ -44,6 +44,7 @@ from typing import Any
 from pydantic import Field
 
 from tulip.core.events import ModelChunkEvent
+from tulip.core.media import strip_images
 from tulip.core.messages import Message, Role, ToolCall
 from tulip.models.base import BaseModel, ModelConfig, ModelResponse
 
@@ -84,6 +85,16 @@ def _require_boto3() -> Any:
             "credentials file, profile, SSO, instance role)."
         ) from exc
     return boto3
+
+
+def _text_only(content: str | None) -> str:
+    """``content`` with embedded images replaced by a placeholder.
+
+    This adapter sends text blocks only, and an embedded image is a base64
+    payload that would otherwise reach the model as thousands of characters
+    of noise.
+    """
+    return strip_images(content or "")
 
 
 class BedrockConfig(ModelConfig):
@@ -215,15 +226,39 @@ class BedrockModel(BaseModel):
 
         Returns ``(system_blocks, messages)`` — Converse takes the system
         prompt as a separate top-level argument, not as a message.
+
+        Only the **leading** system messages (the agent's instructions and a
+        memory block placed right after them) become ``system`` blocks. A
+        system message later in the history is a note the agent loop adds
+        mid-run — a budget or iteration-limit notice, a grounding or
+        verification reminder — and becomes a ``<system-note>`` text block in
+        the user turn at its position. Hoisting it into ``system`` would move
+        the note away from the point in the run it refers to and change the
+        system prompt on every iteration that adds one.
+
+        Adjacent user turns are then merged: Converse rejects a conversation
+        whose roles do not alternate, and wants every ``toolResult`` answering
+        an assistant turn in the one user turn after it, ahead of any text.
         """
         system: list[dict[str, Any]] = []
         converted: list[dict[str, Any]] = []
+        leading = True
 
         for msg in messages:
             if msg.role == Role.SYSTEM:
-                if msg.content:
+                if not msg.content:
+                    continue
+                if leading:
                     system.append({"text": msg.content})
+                else:
+                    converted.append(
+                        {
+                            "role": "user",
+                            "content": [{"text": f"<system-note>\n{msg.content}\n</system-note>"}],
+                        }
+                    )
                 continue
+            leading = False
 
             if msg.role == Role.ASSISTANT:
                 content: list[dict[str, Any]] = []
@@ -262,7 +297,7 @@ class BedrockModel(BaseModel):
                             {
                                 "toolResult": {
                                     "toolUseId": msg.tool_call_id or "",
-                                    "content": [{"text": str(msg.content or "")}],
+                                    "content": [{"text": _text_only(msg.content)}],
                                 }
                             }
                         ],
@@ -270,9 +305,9 @@ class BedrockModel(BaseModel):
                 )
 
             elif msg.role == Role.USER:
-                converted.append({"role": "user", "content": [{"text": msg.content or ""}]})
+                converted.append({"role": "user", "content": [{"text": _text_only(msg.content)}]})
 
-        return system, converted
+        return system, _merge_user_turns(converted)
 
     def _convert_tools(self, tools: list[dict[str, Any]] | None) -> dict[str, Any] | None:
         """Convert OpenAI-format tool schemas to a Converse ``toolConfig``."""
@@ -501,3 +536,17 @@ def _loads_or_empty(buffer: str) -> dict[str, Any]:
     except _json.JSONDecodeError:
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def _merge_user_turns(turns: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge runs of adjacent user turns into one, ``toolResult`` blocks first."""
+    merged: list[dict[str, Any]] = []
+    for turn in turns:
+        if turn["role"] == "user" and merged and merged[-1]["role"] == "user":
+            blocks = [*merged[-1]["content"], *turn["content"]]
+            results = [b for b in blocks if "toolResult" in b]
+            rest = [b for b in blocks if "toolResult" not in b]
+            merged[-1] = {"role": "user", "content": results + rest}
+        else:
+            merged.append(turn)
+    return merged

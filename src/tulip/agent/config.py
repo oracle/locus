@@ -5,9 +5,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+from tulip.core.loops import DEFAULT_READ_ONLY_TOOLS
+from tulip.models.profiles import LeakedToolCallFormat
 
 
 class ReflexionConfig(BaseModel):
@@ -31,6 +35,53 @@ class GroundingConfig(BaseModel):
     max_replans: int = Field(default=2, ge=0)
     check_before_final: bool = True
     model: str | None = None  # Optional separate model for grounding
+
+    model_config = {"extra": "forbid"}
+
+
+class ModelRetryConfig(BaseModel):
+    """Retry of a failed model call inside the agent loop.
+
+    A long run makes hundreds of model calls; one 429, 503, dropped
+    connection or timeout among them otherwise ends the whole run with
+    ``TerminateEvent(reason="error")``. The loop re-issues the same request
+    after an exponential backoff with full jitter, honouring the provider's
+    ``retry-after`` when it sends one.
+
+    Only transient failures are retried — rate limits (429), overload and
+    server errors (5xx), transport errors and timeouts, as
+    :func:`tulip.models.failover.classify` names them. A context-length
+    overflow, a malformed request, a bad key, a billing failure or an
+    unknown model fails at once: the same request would fail the same way.
+    Exceptions the classifier cannot place are not retried either, so a bug
+    in a hook or a provider binding surfaces immediately.
+
+    This sits outside any retry the provider client does itself (the native
+    OpenAI binding retries 3 times by default): the loop starts a new attempt
+    only after the client has given up.
+
+    Attributes:
+        enabled: ``False`` turns loop-level retry off.
+        max_retries: Retries after the first attempt.
+        initial_delay: Backoff ceiling, in seconds, for the first retry; it
+            doubles each retry up to ``max_delay``. The actual delay is drawn
+            uniformly below the ceiling (full jitter), so parallel agents
+            hitting one rate limit do not retry in lockstep.
+        max_delay: Largest backoff ceiling, in seconds.
+        total_budget_seconds: Wall-clock seconds, from the first attempt,
+            after which no further retry starts. A ``retry-after`` that would
+            end past the budget fails the call at once instead of sleeping.
+        retry_unclassified: ``True`` also retries failures the classifier
+            cannot place, with the same backoff. Off by default, because such
+            an exception is as likely a bug in a hook as a provider hiccup.
+    """
+
+    enabled: bool = True
+    max_retries: int = Field(default=6, ge=0)
+    initial_delay: float = Field(default=1.0, ge=0.0)
+    max_delay: float = Field(default=60.0, ge=0.0)
+    total_budget_seconds: float = Field(default=300.0, gt=0.0)
+    retry_unclassified: bool = False
 
     model_config = {"extra": "forbid"}
 
@@ -116,6 +167,115 @@ class GSARConfig(BaseModel):
                 f"tau_regenerate ({v}) must be strictly less than tau_proceed ({proceed})."
             )
         return v
+
+
+class CompactionConfig(BaseModel):
+    """How an agent with a known context window keeps a long run inside it.
+
+    Applies when the agent has no explicit ``conversation_manager`` and its
+    window is known (``context_window``, ``TULIP_CONTEXT_WINDOW``, model
+    metadata, or the model itself). Once the request reaches
+    ``trigger_fraction`` of the usable window (the window minus
+    ``reserved_tokens``), old tool outputs are cleared; when that is not
+    enough, ``summary_model`` summarises the older history for continuation
+    and the run carries on. A compaction that cannot get under the threshold,
+    or summaries needed again within ``min_iterations_between_summaries``,
+    ends the run with ``context_exhausted``. See
+    :class:`tulip.memory.compaction.ContextCompactor`.
+
+    ``enabled=False`` (or ``AgentConfig(compaction=False)``) keeps the
+    pre-summary behaviour: old tool output pruned and a token-budgeted tail
+    sent each call, with no model calls of its own.
+    """
+
+    model_config = {"arbitrary_types_allowed": True, "extra": "forbid"}
+
+    enabled: bool = True
+    trigger_fraction: float = Field(default=0.9, gt=0.0, le=1.0)
+    reserved_tokens: int | None = Field(
+        default=None,
+        ge=0,
+        description="Room kept for the reply. Default min(20_000, window // 5).",
+    )
+    tail_turns: int = Field(default=6, ge=1)
+    tail_token_fraction: float = Field(default=0.25, gt=0.0, lt=1.0)
+    tool_output_keep_tokens: int | None = Field(
+        default=None,
+        ge=0,
+        description="Newest tool output kept when clearing. Default min(40_000, usable // 4).",
+    )
+    summary_model: str | Any | None = Field(
+        default=None,
+        description=(
+            "Model that writes the summary: a provider string or a model "
+            "instance. None uses the agent's own model, which already knows "
+            "the task's vocabulary and has the window the summary is for."
+        ),
+    )
+    summary_max_tokens: int | None = Field(default=None, ge=1)
+    min_iterations_between_summaries: int = Field(default=3, ge=0)
+
+
+class ObservationPackConfig(BaseModel):
+    """Send large old tool outputs as recallable placeholders (ObservationPack).
+
+    A text tool output over ``threshold_bytes`` goes whole in its first
+    ``full_sends`` requests; after that the request shows a placeholder (an id,
+    its size, a kilobyte of its first and last lines) while the run's state
+    keeps the output, and the ``obs_recall`` tool, registered with it, pages
+    the exact bytes back from a per-session archive under ``directory``.
+    Swaps are batched and priced against the prompt cache (see
+    :class:`tulip.memory.observation_pack.SwapCostModel`), and compaction
+    clears outputs into recallable stubs instead of lossy ones. A tool output
+    is no longer cut at ``max_tool_result_length``: up to ``max_inline_chars``
+    goes whole, and anything larger is archived whole and cut around a pointer
+    to the archive. Subagents a run starts get a pack of their own, archived
+    under the run's session. See :mod:`tulip.memory.observation_pack`.
+    """
+
+    model_config = {"arbitrary_types_allowed": True, "extra": "forbid"}
+
+    enabled: bool = False
+    directory: str | Path | None = Field(
+        default=None,
+        description=(
+            "Where per-session archives live, as <directory>/<session>/observation-pack/. "
+            "None uses $TMPDIR/tulip-observation-pack."
+        ),
+    )
+    threshold_bytes: int = Field(default=10 * 1024, ge=0)
+    max_inline_chars: int | None = Field(
+        default=128_000,
+        ge=1,
+        description=(
+            "Largest tool output, in characters, sent whole while the pack is on; "
+            "``max_tool_result_length`` stops applying. Larger outputs are archived "
+            "whole and sent cut around a pointer to the archive. Never more than an "
+            "eighth of a known context window, never less than max_tool_result_length. "
+            "None: only the window bounds it."
+        ),
+    )
+    full_sends: int = Field(default=2, ge=0)
+    excerpt_bytes: int = Field(default=1024, ge=0)
+    recall_max_bytes: int = Field(default=16 * 1024, gt=512)
+    recall_max_lines: int = Field(default=400, gt=2)
+    # The cost model. Prices are relative to an uncached input token.
+    min_batch_bytes: int = Field(
+        default=32 * 1024,
+        ge=0,
+        description="Bytes a swap batch must free before it may break a cached prefix.",
+    )
+    cache_read_cost: float = Field(default=0.1, ge=0.0)
+    cache_write_cost: float = Field(default=1.0, ge=0.0)
+    horizon_requests: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Requests a swap is expected to save on. None: the requests made so far "
+            "(at least min_horizon_requests)."
+        ),
+    )
+    min_horizon_requests: int = Field(default=4, ge=1)
 
 
 class AgentConfig(BaseModel):
@@ -240,6 +400,29 @@ class AgentConfig(BaseModel):
         description="Maximum wall-clock seconds before stopping (None = unlimited)",
     )
 
+    budget_nudge_at: float | None = Field(
+        default=0.8,
+        gt=0.0,
+        lt=1.0,
+        description=(
+            "Once the run has used this fraction of any of its budgets "
+            "(token_budget, max_cost_usd, time_budget_seconds, max_iterations), "
+            "append one note asking the model to converge: finish the change in "
+            "progress, verify it, report. Once per run; the note is appended, so "
+            "the cached prefix is kept. None turns it off."
+        ),
+    )
+
+    model_retry: ModelRetryConfig | None = Field(
+        default_factory=ModelRetryConfig,
+        description=(
+            "Retry of transient model-call failures (429, 5xx, connection "
+            "errors, timeouts) with exponential backoff and jitter. On by "
+            "default; ``False``/``None`` disables it, ``True`` restores the "
+            "defaults. See ``ModelRetryConfig``."
+        ),
+    )
+
     # Reasoning patterns. Both fields accept either ``True`` (use sensible
     # defaults — see ``ReflexionConfig`` / ``GroundingConfig``), an
     # explicit config instance, or ``None`` (disabled). The boolean
@@ -323,10 +506,56 @@ class AgentConfig(BaseModel):
     tool_loop_threshold: int = Field(
         default=3,
         ge=2,
-        description="Consecutive same-tool calls to trigger loop detection",
+        description=(
+            "Consecutive identical steps (same calls, same arguments, same "
+            "results) that make a tool loop. The first time a loop is seen the "
+            "model is warned; the run stops only if it repeats after that."
+        ),
+    )
+    tool_loop_read_only_threshold: int | None = Field(
+        default=None,
+        ge=2,
+        description=(
+            "The same threshold for a step made only of read-only tools, whose "
+            "repeats are normal work. None means tool_loop_threshold + 1."
+        ),
+    )
+    tool_loop_read_only_tools: set[str] = Field(
+        default_factory=lambda: set(DEFAULT_READ_ONLY_TOOLS),
+        description="Tool names counted as read-only by the tool-loop detector.",
     )
 
     # Execution strategy
+    text_tool_calls: Literal["auto", "on", "off"] = Field(
+        default="auto",
+        description=(
+            "Whether a tool call written in the message body (no structured "
+            "``tool_calls``) is parsed and executed. ``'on'`` is for models "
+            "served without a tool parser that print calls as text; it accepts "
+            "only unambiguous shapes — a message that is entirely a JSON call "
+            "or entirely ``name(key=value)`` lines, a ``json`` / ``tool_call`` / "
+            "``tool_code`` fence, or a ``<tool_call>`` tag — never a call "
+            "mentioned inside prose. ``'off'`` never parses. ``'auto'`` (the "
+            "default) parses only when the model declares "
+            "``supports_native_tool_calls = False``: with native tool calling, "
+            "text that looks like a call is the model talking about a tool, "
+            "and running it executes a command nobody issued."
+        ),
+    )
+    leaked_tool_call_formats: list[LeakedToolCallFormat] | None = Field(
+        default=None,
+        description=(
+            "Tool-call markup to recognise in the message body even though the "
+            "model calls tools natively: its own training format, which a "
+            "router or server sometimes leaves as text (DeepSeek's "
+            "``<｜DSML｜tool_calls>``, Kimi's ``<|tool_calls_section_begin|>``). "
+            "``None`` (the default) takes the formats from the model's capability "
+            "profile (``tulip.models.profiles``); ``[]`` turns this off. A block is "
+            "a call only when it is the whole message after any leading prose and "
+            "every call names a registered tool with declared arguments; "
+            "``text_tool_calls='off'`` turns this off too."
+        ),
+    )
     tool_execution: Literal["sequential", "concurrent"] = Field(
         default="concurrent",
         description="How to execute multiple tool calls",
@@ -368,21 +597,39 @@ class AgentConfig(BaseModel):
     max_tool_result_length: int = Field(
         default=32000,
         ge=0,
-        description="Max chars per tool result (0 = unlimited). Long results are truncated.",
+        description=(
+            "Max chars per tool result (0 = unlimited). Longer results keep their "
+            "head and tail with a marker saying how much was cut; see "
+            "``tool_result_head_fraction``."
+        ),
+    )
+
+    # A test runner, compiler or linter prints its verdict last: the failing
+    # assertion, the error count, the summary line. A head-only cut drops
+    # exactly that, so the cut keeps both ends and loses the middle.
+    tool_result_head_fraction: float = Field(
+        default=0.4,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Share of ``max_tool_result_length`` kept from the start of an "
+            "oversized tool result; the rest is kept from its end. 1.0 keeps "
+            "only the head, 0.0 only the tail."
+        ),
     )
 
     # Optional external offload for oversized tool results. When set,
     # results above ``max_tool_result_length`` are persisted via the
     # store and replaced inline with a recoverable reference key
-    # instead of being head-truncated. See
+    # instead of being cut. See
     # ``tulip.tools.result_storage.ToolResultStore`` for the contract.
     tool_result_store: Any | None = Field(
         default=None,
         description=(
             "Optional ToolResultStore. When set, oversized tool "
             "results are offloaded to its backend and a reference "
-            "key is inlined; without it the agent falls back to "
-            "head-truncation."
+            "key is inlined; without it the agent keeps the head and "
+            "tail of the result and cuts the middle."
         ),
     )
 
@@ -392,11 +639,63 @@ class AgentConfig(BaseModel):
         description="Conversation manager for message pruning/summarization",
     )
 
+    context_window: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "The model's input context window, in tokens. When set, and no "
+            "conversation_manager is given, the default manager counts tokens "
+            "against this window (see ``compaction``) instead of keeping a "
+            "message window. Overrides the model-metadata window. Unset, the "
+            "TULIP_CONTEXT_WINDOW environment variable applies, then model "
+            "metadata, then a context_window/context_length the model object "
+            "itself reports."
+        ),
+    )
+
+    compaction: CompactionConfig = Field(
+        default_factory=CompactionConfig,
+        description=(
+            "How a known context window is kept on a long run: clear old tool "
+            "output, then summarise older history and continue. ``False`` "
+            "turns summarising off. Ignored when conversation_manager is given "
+            "or the window is unknown."
+        ),
+    )
+
+    @field_validator("compaction", mode="before")
+    @classmethod
+    def _compaction_flag(cls, v: Any) -> Any:
+        # ``compaction=False`` / ``True`` read better at a call site than a
+        # config object when all that is wanted is on or off.
+        if isinstance(v, bool):
+            return CompactionConfig(enabled=v)
+        if v is None:
+            return CompactionConfig()
+        return v
+
+    observation_pack: ObservationPackConfig = Field(
+        default_factory=ObservationPackConfig,
+        description=(
+            "Send large old tool outputs as recallable placeholders and register "
+            "obs_recall (off by default). ``True`` turns it on with the defaults."
+        ),
+    )
+
+    @field_validator("observation_pack", mode="before")
+    @classmethod
+    def _observation_pack_flag(cls, v: Any) -> Any:
+        if isinstance(v, bool):
+            return ObservationPackConfig(enabled=v)
+        if v is None:
+            return ObservationPackConfig()
+        return v
+
     memory_manager: Any | None = Field(
         default=None,
         description=(
             "Long-term memory manager. When set, the agent retrieves stored "
-            "memories at session start (injected into the system prompt) and "
+            "memories at session start (injected after the turn's prompt) and "
             "extracts new memories at session end (persisted to the configured "
             "store backend). Pass a BaseMemoryManager instance; use "
             "LLMMemoryManager for LLM-backed extraction with any store backend."
@@ -408,10 +707,37 @@ class AgentConfig(BaseModel):
         description="Checkpointer for state persistence",
     )
 
-    checkpoint_every_n_iterations: int = Field(
-        default=0,
+    # ``None`` picks per iteration whenever that leaves nothing behind: the
+    # run has a thread and the checkpointer can delete a single checkpoint, so
+    # the turn's final save removes the iteration saves it supersedes. The
+    # thread's history and ``fork`` then see what they saw with per-turn
+    # saves, and storage grows with turns rather than iterations. A
+    # checkpointer that cannot delete keeps per-turn saves, because there
+    # every iteration save would stay for good.
+    checkpoint_every_n_iterations: int | None = Field(
+        default=None,
         ge=0,
-        description="Auto-checkpoint interval (0 to disable)",
+        description=(
+            "Save a checkpoint every N iterations, after the iteration's tool "
+            "results are in the state (0 = only at the end of the turn and on "
+            "an interrupt). With 1, a process killed mid-turn loses at most "
+            "the iteration in flight, and Agent.continue_turn(thread_id) "
+            "picks the turn up from the last save. None (the default) means 1 "
+            "for a run with a thread_id on a checkpointer that can delete a "
+            "single checkpoint, and 0 otherwise. Iteration saves are deleted "
+            "once the turn's final save supersedes them, unless "
+            "keep_iteration_checkpoints is set."
+        ),
+    )
+
+    keep_iteration_checkpoints: bool = Field(
+        default=False,
+        description=(
+            "Keep per-iteration checkpoints after the turn's final save, so "
+            "get_state_history and fork can reach mid-turn states. Off by "
+            "default: they exist to survive a crash, and keeping them grows "
+            "storage with every iteration of every turn."
+        ),
     )
 
     # Hooks and plugins
@@ -577,6 +903,16 @@ class AgentConfig(BaseModel):
         """
         if v is True:
             return ReflexionConfig()
+        if v is False:
+            return None
+        return v
+
+    @field_validator("model_retry", mode="before")
+    @classmethod
+    def _coerce_model_retry(cls, v: Any) -> Any:
+        """Accept ``True`` / ``False`` as shorthand, like ``reflexion``."""
+        if v is True:
+            return ModelRetryConfig()
         if v is False:
             return None
         return v

@@ -15,14 +15,25 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, Field, PrivateAttr
 
 from tulip.agent.config import AgentConfig, GroundingConfig, ReflexionConfig
-from tulip.agent.result import AgentResult, ExecutionMetrics, StopReason
+from tulip.agent.result import (
+    STOP_REASONS,
+    AgentResult,
+    ExecutionMetrics,
+    StopReason,
+    normalize_stop_reason,
+)
 from tulip.agent.run_context import (
     ARUN_RESULT_SLOT,
     PendingInterrupt,
     ResultSlot,
     RunContext,
 )
-from tulip.agent.runtime_loop import AgentRuntimeMixin, _invocation_arguments
+from tulip.agent.runtime_loop import (
+    UNFINISHED_CALL_ERROR,
+    AgentRuntimeMixin,
+    _invocation_arguments,
+    close_unfinished_calls,
+)
 from tulip.core.errors import ApprovalPendingError, GSARValidationError
 from tulip.core.events import (
     GroundingEvent,
@@ -50,49 +61,9 @@ if TYPE_CHECKING:
     from tulip.reasoning.reflexion import Reflector
 
 
-_VALID_STOP_REASONS: frozenset[str] = frozenset(
-    {
-        "complete",
-        "terminal_tool",
-        "confidence_met",
-        "max_iterations",
-        "tool_loop",
-        "no_tools",
-        "grounding_failed",
-        "token_budget",
-        "cost_budget",
-        "time_budget",
-        "interrupted",
-        "error",
-        "cancelled",
-    }
-)
-
-
-def _normalize_stop_reason(raw: str | None) -> StopReason:
-    """Map a free-form ``TerminateEvent.reason`` to the ``StopReason`` Literal.
-
-    User-supplied composable termination conditions emit reasons like
-    ``"text_mention:DONE"``, ``"tool_called:book_flight"``, or AND-combined
-    strings like ``"confidence_met AND tool_called:book_flight"``. Map by
-    membership / prefix to the closest semantic match and fall back to
-    ``"complete"``.
-    """
-    if not raw:
-        return "complete"
-    if raw in _VALID_STOP_REASONS:
-        return raw  # type: ignore[return-value]
-    # AND combinator joins child reasons with " AND ". Take the strongest
-    # signal (terminal tool) if any branch matched it; otherwise fall through.
-    if "tool_called:" in raw:
-        return "terminal_tool"
-    if "text_mention:" in raw:
-        return "complete"
-    # Composite reasons that contain a known literal as a substring.
-    for known in _VALID_STOP_REASONS:
-        if known in raw:
-            return known  # type: ignore[return-value]
-    return "complete"
+#: Kept under their old names for code that imported them from here.
+_VALID_STOP_REASONS: frozenset[str] = frozenset(STOP_REASONS)
+_normalize_stop_reason = normalize_stop_reason
 
 
 def _interrupt_payload(content: str | None) -> dict[str, Any] | None:
@@ -108,6 +79,18 @@ def _interrupt_payload(content: str | None) -> dict[str, Any] | None:
     if isinstance(data, dict) and data.get("__interrupt__"):
         return data
     return None
+
+
+#: Kept under its old name for code that imported it from here.
+_UNFINISHED_CALL_ERROR = UNFINISHED_CALL_ERROR
+
+
+def _turn_finished(state: AgentState) -> bool:
+    """Whether ``state`` ends on the model's answer rather than inside a turn."""
+    if not state.messages:
+        return False
+    last = state.messages[-1]
+    return last.role == Role.ASSISTANT and not last.tool_calls
 
 
 @contextlib.asynccontextmanager
@@ -168,7 +151,12 @@ class Agent(AgentRuntimeMixin, BaseModel):
     _hooks: list[Any] = PrivateAttr(default_factory=list)
     _hook_orchestrator: HookOrchestrator | None = PrivateAttr(default=None)
     _conversation_manager: ConversationManager | None = PrivateAttr(default=None)
+    # ObservationPack (``config.observation_pack``), built on initialisation.
+    _observation_pack: Any = PrivateAttr(default=None)
     _model_prices: tuple[float, float] | None = PrivateAttr(default=None)
+    # The model's leaked tool-call formats, resolved from its profile on first
+    # use (``None`` until then); see ``AgentConfig.leaked_tool_call_formats``.
+    _leaked_formats: tuple[str, ...] | None = PrivateAttr(default=None)
     _memory_manager: Any = PrivateAttr(default=None)  # BaseMemoryManager | None
     _reflector: Reflector | None = PrivateAttr(default=None)
     _grounding_evaluator: GroundingEvaluator | None = PrivateAttr(default=None)
@@ -291,6 +279,16 @@ class Agent(AgentRuntimeMixin, BaseModel):
         from tulip.agent.initializer import initialize_agent
 
         initialize_agent(self)
+
+    @property
+    def observation_pack(self) -> Any:
+        """The agent's :class:`~tulip.memory.observation_pack.ObservationPack`, or ``None``.
+
+        Its ``stats(session)`` says what it did for a thread (or a thread-less
+        run, by run id).
+        """
+        self._initialize()
+        return self._observation_pack
 
     @property
     def name(self) -> str | None:
@@ -912,6 +910,83 @@ class Agent(AgentRuntimeMixin, BaseModel):
         # Continue execution from the interrupted state
         async with contextlib.aclosing(
             self._run_from_state(state, prompt, thread_id, run_metadata, _run=rc)
+        ) as segment:
+            async for event in segment:
+                yield event
+
+    async def continue_turn(
+        self,
+        thread_id: str,
+        *,
+        metadata: dict[str, Any] | None = None,
+        model_kwargs: dict[str, Any] | None = None,
+    ) -> AsyncGenerator[TulipEvent, None]:
+        """Continue a turn that stopped before it finished, from its checkpoint.
+
+        A process killed mid-turn (a deploy, an OOM, a lost pod) leaves the
+        thread's latest checkpoint inside the turn — with
+        ``checkpoint_every_n_iterations`` set, at the last iteration whose
+        tool results were saved. ``run()`` on that thread would start a NEW
+        turn with a new user message; this continues the SAME turn instead:
+        no user message is added, iteration count and budgets carry on, and
+        every call whose result is in the checkpoint stays done — the model
+        is called next, with those results in front of it.
+
+        A call the checkpoint holds without a result (the process stopped
+        while it ran) is answered with an error saying its outcome is
+        unknown, never re-run: re-running a side effect the first attempt
+        may already have performed is the model's decision to make, with
+        that error in front of it.
+
+        A thread paused on an interrupt in this process is answered with
+        :meth:`resume`, which folds the human's response; ``continue_turn``
+        refuses it.
+
+        Args:
+            thread_id: The thread whose turn to continue.
+            metadata: Invocation metadata for the continued segment. Defaults
+                to the thread's checkpointed metadata; ephemeral keys
+                (``mcp_headers``) are never checkpointed, so a segment that
+                needs them passes them here again.
+            model_kwargs: Per-call model parameters, as for :meth:`run`.
+
+        Raises:
+            RuntimeError: No checkpointer, no checkpoint for the thread, the
+                thread is paused on an in-memory interrupt, or its last turn
+                already finished with an answer (start a new one with
+                ``run()``).
+
+        Yields:
+            TulipEvent instances for the rest of the turn.
+        """
+        checkpointer = self.config.checkpointer
+        if checkpointer is None:
+            raise RuntimeError("continue_turn needs a checkpointer on the agent")
+        if thread_id in self._interrupts:
+            raise RuntimeError(
+                f"Thread {thread_id!r} is paused on an interrupt; answer it with resume()."
+            )
+        loaded = await checkpointer.load(thread_id)
+        if loaded is None:
+            raise RuntimeError(f"No checkpoint found for thread {thread_id!r} to continue.")
+        if _turn_finished(loaded):
+            raise RuntimeError(
+                f"The last turn on thread {thread_id!r} already finished; "
+                "call run() to start a new one."
+            )
+        self._initialize()
+        state = close_unfinished_calls(loaded)
+        run_metadata, ephemeral = self._split_run_metadata(
+            metadata if metadata is not None else dict(loaded.metadata)
+        )
+        # Checkpoints never carry the (ephemeral) memory block; the rest of
+        # the turn gets it re-injected, as a cross-process resume does.
+        if self._memory_manager is not None:
+            state = await self._memory_manager.on_session_start(state)
+
+        rc = self._begin_run(state, "", thread_id, run_metadata, ephemeral=ephemeral)
+        async with contextlib.aclosing(
+            self._run_from_state(state, "", thread_id, run_metadata, model_kwargs, _run=rc)
         ) as segment:
             async for event in segment:
                 yield event

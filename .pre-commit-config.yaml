@@ -125,7 +125,9 @@ repos:
         #   reqeusts    — intentional typo-squat fixture for OSV malware test
         #   unparseable — accepted English variant of ``unparsable``
         #   re-use      — accepted hyphenation
-    - --ignore-words-list=te,whats,re-use,pres,reqeusts,unparseable,transferrin,transferring,ferritin,hepcidin,ferroportin,deferoxamine,deferasirox,deferiprone,erythroferrone,hemojuvelin,IRIDA,IDA,ACD,nin
+        #   sie, als, fonction, hace — German, French and Spanish words in
+        #                 the completion check's multilingual patterns and tests
+    - --ignore-words-list=te,whats,re-use,pres,reqeusts,unparseable,transferrin,transferring,ferritin,hepcidin,ferroportin,deferoxamine,deferasirox,deferiprone,erythroferrone,hemojuvelin,IRIDA,IDA,ACD,nin,sie,als,fonction,hace
     - --skip=*.lock,*.json,*.yaml,*.yml,*.svg,*.gif,*.png,*.jpg,*.pdf
 
   # ==========================================================================

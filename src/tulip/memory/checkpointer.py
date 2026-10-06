@@ -136,6 +136,20 @@ class BaseCheckpointer(ABC):
         """
         raise NotImplementedError("delete not implemented for this backend")
 
+    @property
+    def deletes_single_checkpoints(self) -> bool:
+        """Whether :meth:`delete` can remove one checkpoint and leave the rest.
+
+        The agent saves after every iteration only where this holds: those
+        saves exist to survive a crash mid-turn, and the turn's final save
+        deletes them. A backend that cannot delete would keep every one.
+
+        True when a subclass implements :meth:`delete`. A backend whose
+        checkpoints depend on one another (deltas chained to a parent) must
+        override this to return False, because deleting one breaks the rest.
+        """
+        return type(self).delete is not BaseCheckpointer.delete
+
     async def exists(
         self,
         thread_id: str,

@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from types import MappingProxyType
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SerializeAsAny
 
 from tulip.core.messages import ToolCall
 
@@ -124,6 +124,36 @@ class ToolProgressEvent(TulipEvent):
     message: str | None = None
 
 
+class SubagentEvent(TulipEvent):
+    """An event from a subagent, delivered live on its parent's stream.
+
+    A delegating tool (:func:`tulip.agent.tasks.task_tool`, or any tool that
+    calls :func:`tulip.agent.subagent.run_subagent`) runs a whole child loop
+    inside one tool call. Without this the parent's stream goes quiet for
+    the length of that call, and a front end shows a frozen agent over a busy
+    one.
+
+    The child's event is wrapped, not passed through: a child's bare
+    :class:`TerminateEvent` would read to every consumer of the parent's
+    stream as the *parent* finishing, and its tool events would be counted as
+    the parent's. A consumer that does not know this type skips it.
+
+    Emitted between the delegating call's :class:`ToolStartEvent` and its
+    :class:`ToolCompleteEvent`, for a tool declared with
+    ``emits_progress=True``. A grandchild's events arrive as a
+    ``SubagentEvent`` wrapping a ``SubagentEvent``.
+    """
+
+    event_type: Literal["subagent"] = "subagent"
+    #: The parent's tool call that is running the child.
+    tool_call_id: str
+    tool_name: str
+    #: The child's resumable id, when it has one.
+    task_id: str | None = None
+    #: The child's own event, attributed to the child by ``agent_name``.
+    event: SerializeAsAny[TulipEvent]
+
+
 class ReflectEvent(TulipEvent):
     """Reflexion evaluation completed."""
 
@@ -155,6 +185,12 @@ class FinalAnswerVerificationEvent(TulipEvent):
     the draft is then accepted (the verifier fails open) and ``passed`` is
     False. ``attempt`` is 0 for the first draft. ``replaced`` is True when
     ``final_answer_fallback`` replaced a draft that failed its last attempt.
+
+    ``continuation`` is True when the verifier sent the model back to
+    unfinished work (a :class:`~tulip.agent.completion.Continuation`) rather
+    than rejecting an answer: the reply stays in the conversation and
+    ``reason`` names why the run did not stop (``announced_step``,
+    ``no_changes``, ``unchecked_edits``).
     """
 
     event_type: Literal["final_answer_verification"] = "final_answer_verification"
@@ -166,6 +202,64 @@ class FinalAnswerVerificationEvent(TulipEvent):
     #: The draft failed with no replan left and ``final_answer_fallback``
     #: replaced it: the run answers with the fallback text instead.
     replaced: bool = False
+    #: The verifier asked the model to keep working rather than to rewrite
+    #: its answer (see :class:`~tulip.agent.completion.Continuation`).
+    continuation: bool = False
+    #: Why, when the verifier gave a reason (a continuation always does).
+    reason: str | None = None
+
+
+class ModelRetryEvent(TulipEvent):
+    """A model call failed transiently and the loop is about to retry it.
+
+    Emitted once per retry, before the backoff sleep, so a long-running
+    agent's UI can show "rate limited, retrying in 12 s" instead of going
+    quiet. With ``stream_tokens=True`` it arrives live, between chunks;
+    without it, after the call finally returns (or just before the error
+    ``TerminateEvent`` when every retry failed). See
+    :class:`~tulip.agent.config.ModelRetryConfig`.
+    """
+
+    event_type: Literal["model_retry"] = "model_retry"
+    #: 1 for the first retry, 2 for the second, and so on.
+    attempt: int
+    #: Seconds the loop waits before the retry.
+    delay_seconds: float
+    #: ``FailoverReason`` value: ``rate_limit``, ``overloaded``,
+    #: ``server_error`` or ``timeout``.
+    reason: str
+    status_code: int | None = None
+    #: The failure, as ``"ExceptionType: message"``.
+    error: str
+    #: Whether the delay came from the provider's ``retry-after``.
+    from_retry_after: bool = False
+
+
+class CompactionEvent(TulipEvent):
+    """The run's context was compacted to keep it inside the model's window.
+
+    ``stage`` says what it took: ``"prune"`` cleared old tool outputs,
+    ``"summarize"`` replaced older history with a model-written summary, and
+    ``"truncate"`` dropped it without one. Token counts are estimates of the
+    whole request (messages plus tool definitions). ``exhausted`` means the
+    context could not be brought under ``threshold`` (or compaction was
+    thrashing) and the run ends with ``context_exhausted``; ``detail`` says why.
+    It doubles as the compact boundary: everything before it in the stream is
+    no longer verbatim in the model's context.
+    """
+
+    event_type: Literal["compaction"] = "compaction"
+    iteration: int
+    stage: Literal["prune", "summarize", "truncate"]
+    tokens_before: int
+    tokens_after: int
+    threshold: int
+    context_window: int
+    messages_before: int
+    messages_after: int
+    summary: str | None = None
+    exhausted: bool = False
+    detail: str | None = None
 
 
 class TerminateEvent(TulipEvent):
@@ -185,9 +279,27 @@ class TerminateEvent(TulipEvent):
     total_tool_calls: int
     final_message: str | None = None  # Final assistant message content
     # Cumulative token usage for the run segment that ended here, read off the
-    # AgentState counters (prompt/completion/total). None when the model
-    # reported no usage — consumers must treat absence as "unmetered", not 0.
+    # AgentState counters (prompt/completion/total, plus
+    # cache_read_input_tokens / cache_creation_input_tokens when the provider
+    # reported cache activity Anthropic's way, outside ``prompt_tokens``, and
+    # cached_tokens / cache_write_tokens when it reported it OpenAI's way,
+    # inside them). None when the model reported no usage — consumers must
+    # treat absence as "unmetered", not 0.
     usage: dict[str, int] | None = None
+    # What the segment cost in USD, from the model's metadata prices. None
+    # when the model is unpriced: a stream consumer cannot tell "free" from
+    # "unknown" otherwise, and a supervisor enforcing its own spend limit
+    # needs the number the loop already computed rather than a second table.
+    cost_usd: float | None = None
+    # What the provider itself reported the segment's calls cost (OpenRouter's
+    # ``usage.cost``), delegated subagents included. None when no call
+    # reported one. Where both are set this is the bill and ``cost_usd`` the
+    # list-price estimate, which ignores prompt caching.
+    reported_cost_usd: float | None = None
+    # Why the run failed, when ``reason == "error"``. The loop yields this
+    # event and then re-raises, so a consumer that stops at the event (a
+    # stream-json writer, a socket front end) otherwise has no message to show.
+    error: str | None = None
 
     @property
     def content(self) -> str | None:
@@ -321,6 +433,9 @@ class ModelChunkEvent(TulipEvent):
     # surfaces as an empty reply rather than an error.
     usage: dict[str, int] | None = None
     stop_reason: str | None = None
+    # The provider's own figure for the call, in USD, on the terminal chunk
+    # when it reports one (see ``ModelResponse.cost_usd``).
+    cost_usd: float | None = None
 
 
 class ModelCompleteEvent(TulipEvent):
@@ -449,10 +564,13 @@ LoopEvent = (
     ThinkEvent
     | ToolStartEvent
     | ToolProgressEvent
+    | SubagentEvent
     | ToolCompleteEvent
     | ReflectEvent
     | GroundingEvent
     | FinalAnswerVerificationEvent
+    | ModelRetryEvent
+    | CompactionEvent
     | TerminateEvent
 )
 AgentEvent = LoopEvent | SpecialistStartEvent | SpecialistCompleteEvent | OrchestratorDecisionEvent

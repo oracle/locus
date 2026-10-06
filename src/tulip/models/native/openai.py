@@ -16,6 +16,7 @@ from tulip.core.events import ModelChunkEvent
 from tulip.core.loop_bound import loop_bound
 from tulip.core.media import (
     EARLIER_IMAGE_OMITTED,
+    ImagePart,
     has_images,
     images,
     recent_image_positions,
@@ -50,6 +51,50 @@ _BLANK_PNG_URL = (
     "data:image/png;base64,"
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
 )
+
+
+def _join_system(first: Any, extra: str | None) -> str:
+    """The opening system message's text with another leading system message appended."""
+    parts = [p for p in (first if isinstance(first, str) else "", extra or "") if p]
+    return "\n\n".join(parts)
+
+
+def _int_field(holder: Any, name: str) -> int | None:
+    value = holder.get(name) if isinstance(holder, dict) else getattr(holder, name, None)
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _chat_usage(usage: Any) -> tuple[dict[str, int], float | None]:
+    """A chat-completions ``usage`` block in Tulip's keys, and the cost it reports.
+
+    ``cached_tokens`` (OpenAI, DeepSeek, OpenRouter: the prompt tokens served
+    from the provider's prefix cache) and OpenRouter's ``cache_write_tokens``
+    are kept under those names: they are part of ``prompt_tokens``, unlike
+    Anthropic's ``cache_read_input_tokens``, so the two must not be added up as
+    if they were the same thing. OpenRouter also reports what the call cost
+    (``usage.cost``, USD); it is returned apart because usage counts tokens.
+    """
+    out: dict[str, int] = {}
+    prompt = _int_field(usage, "prompt_tokens")
+    completion = _int_field(usage, "completion_tokens")
+    if prompt is None or completion is None:
+        return out, None
+    out["prompt_tokens"] = prompt
+    out["completion_tokens"] = completion
+    details = (
+        usage.get("prompt_tokens_details")
+        if isinstance(usage, dict)
+        else getattr(usage, "prompt_tokens_details", None)
+    )
+    if details is not None:
+        for name in ("cached_tokens", "cache_write_tokens"):
+            value = _int_field(details, name)
+            if value:
+                out[name] = value
+    cost = usage.get("cost") if isinstance(usage, dict) else getattr(usage, "cost", None)
+    if isinstance(cost, bool) or not isinstance(cost, int | float):
+        cost = None
+    return out, (float(cost) if cost is not None else None)
 
 
 def _computer_call_arguments(item: dict[str, Any]) -> dict[str, Any]:
@@ -139,6 +184,37 @@ def _tool_output_items(
     return [{"type": "function_call_output", "call_id": call_id, "output": parts}]
 
 
+#: What a chat-completions tool message says in place of an image that follows
+#: in the next user message.
+_IMAGE_FOLLOWS = "[image attached in the next message]"
+
+
+def _user_parts(content: str, *, responses: bool) -> list[dict[str, Any]]:
+    """A user turn with embedded images as content parts, text and images in order."""
+    if responses:
+        return [
+            {"type": "input_text", "text": part}
+            if isinstance(part, str)
+            else {"type": "input_image", "image_url": part.data_url}
+            for part in split_content(content)
+        ]
+    return [
+        {"type": "text", "text": part}
+        if isinstance(part, str)
+        else {"type": "image_url", "image_url": {"url": part.data_url}}
+        for part in split_content(content)
+    ]
+
+
+def _tool_images_turn(parts: list[ImagePart]) -> dict[str, Any]:
+    """The user message carrying the images a batch of tool results returned."""
+    content: list[dict[str, Any]] = [
+        {"type": "text", "text": "[Images returned by the tool calls above]"}
+    ]
+    content.extend({"type": "image_url", "image_url": {"url": p.data_url}} for p in parts)
+    return {"role": "user", "content": content}
+
+
 def _decode_tool_arguments(raw: str | None) -> dict[str, Any]:
     """Decode the ``tc.function.arguments`` payload into a dict.
 
@@ -163,6 +239,17 @@ def _decode_tool_arguments(raw: str | None) -> dict[str, Any]:
         if isinstance(second, dict):
             return second
     return {}
+
+
+def _malformed_tool_arguments(raw: str | None) -> str | None:
+    """The raw argument text when it is not JSON at all, else ``None``."""
+    if not raw:
+        return None
+    try:
+        json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+    return None
 
 
 def _strip_model_namespace(name: str) -> str:
@@ -635,7 +722,9 @@ class OpenAIModel(BaseModel):
     def _convert_messages(self, messages: list[Message]) -> list[dict[str, Any]]:
         """Convert Tulip messages to OpenAI format.
 
-        A system message after the first position is re-encoded as a user
+        Leading system messages (the instructions, then a memory block placed
+        right after them) are joined into the one system message the request
+        opens with. A later system message is re-encoded as a user
         note. The agent loop legitimately injects mid-run guidance as system
         messages (grounding replans, repair prompts, iteration nudges), but
         several OpenAI-compatible chat templates accept a system message only
@@ -657,19 +746,57 @@ class OpenAIModel(BaseModel):
         Qwen even though the same list is fine on api.openai.com.
         """
         openai_messages: list[dict[str, Any]] = []
+        leading = True
+        # Chat-completions tool messages take text only, so a tool result's
+        # images travel in a user message after the batch of tool messages —
+        # the tool messages must stay contiguous behind their assistant turn.
+        # Only for a model that can see, and only the latest few results, as
+        # the other transports do; a text-only deployment keeps getting the
+        # placeholder, never an image part it would reject.
+        with_images = (
+            recent_image_positions([m.content if m.role == Role.TOOL else None for m in messages])
+            if self._sees_images()
+            else set()
+        )
+        held: list[ImagePart] = []
 
         for index, msg in enumerate(messages):
+            if held and msg.role != Role.TOOL:
+                openai_messages.append(_tool_images_turn(held))
+                held = []
             entry = msg.to_openai_format()
             if msg.role == Role.TOOL and has_images(msg.content):
-                entry["content"] = strip_images(msg.content or "")
-            if index > 0 and entry.get("role") == "system":
+                if index in with_images:
+                    held.extend(images(msg.content))
+                    entry["content"] = strip_images(msg.content or "", _IMAGE_FOLLOWS)
+                else:
+                    entry["content"] = strip_images(msg.content or "")
+            elif msg.role == Role.USER and has_images(msg.content):
+                entry["content"] = _user_parts(msg.content or "", responses=False)
+            if msg.role == Role.SYSTEM and leading and openai_messages:
+                # A second leading system message (a recalled-memory block
+                # placed after the instructions) joins the system prompt, so
+                # the request still opens with exactly one system message.
+                first = openai_messages[0]
+                first["content"] = _join_system(first.get("content"), msg.content)
+                continue
+            if msg.role == Role.SYSTEM and not leading:
                 entry = {
                     "role": "user",
                     "content": f"[System guidance] {entry.get('content') or ''}",
                 }
+            leading = leading and msg.role == Role.SYSTEM
             openai_messages.append(entry)
+        if held:
+            openai_messages.append(_tool_images_turn(held))
 
         return self._ensure_user_turn(openai_messages)
+
+    def _sees_images(self) -> bool:
+        """Whether this model accepts image parts, by its capability profile."""
+        from tulip.models.profiles import profile_for  # noqa: PLC0415 — profiles imports metadata
+
+        return profile_for(self.config.model).vision
 
     @classmethod
     def _is_plain_user_turn(cls, entry: dict[str, Any]) -> bool:
@@ -820,17 +947,16 @@ class OpenAIModel(BaseModel):
                         id=tc.id,
                         name=tc.function.name,
                         arguments=arguments,
+                        malformed_arguments=_malformed_tool_arguments(tc.function.arguments),
                     )
                 )
 
         message = Message.assistant(content=content, tool_calls=tool_calls)
 
-        usage = {}
+        usage: dict[str, int] = {}
+        cost: float | None = None
         if response.usage:
-            usage = {
-                "prompt_tokens": response.usage.prompt_tokens,
-                "completion_tokens": response.usage.completion_tokens,
-            }
+            usage, cost = _chat_usage(response.usage)
 
         # ``n>1`` costs the caller tokens for every candidate; keep the extras
         # instead of discarding everything past choices[0].
@@ -846,6 +972,7 @@ class OpenAIModel(BaseModel):
                         id=tc.id,
                         name=tc.function.name,
                         arguments=_decode_tool_arguments(tc.function.arguments),
+                        malformed_arguments=_malformed_tool_arguments(tc.function.arguments),
                     )
                 )
             extra_content = getattr(extra_msg, "content", None)
@@ -864,6 +991,7 @@ class OpenAIModel(BaseModel):
             reasoning=reasoning,
             logprobs=logprobs,
             candidates=candidates,
+            cost_usd=cost,
         )
 
     # ------------------------------------------------------------------
@@ -919,8 +1047,8 @@ class OpenAIModel(BaseModel):
         items deliberately omit item ``id``s so the server does not try to
         pair them with reasoning items it never received.
 
-        A system message after the first position is re-encoded as a user
-        note, exactly like the chat-completions path (see
+        Leading system messages are joined into one, and a later system
+        message is re-encoded as a user note, exactly like the chat-completions path (see
         :meth:`_convert_messages`), so mid-run guidance behaves the same on
         both transports.
         """
@@ -930,7 +1058,11 @@ class OpenAIModel(BaseModel):
             [m.content if m.role == Role.TOOL else None for m in messages]
         )
 
+        leading = True
+
         for index, msg in enumerate(messages):
+            was_leading = leading
+            leading = leading and msg.role == Role.SYSTEM
             if msg.role == Role.ASSISTANT:
                 raw_items = msg.metadata.get(RESPONSES_ITEMS_METADATA_KEY)
                 if isinstance(raw_items, list):
@@ -967,12 +1099,18 @@ class OpenAIModel(BaseModel):
                 items.extend(
                     _tool_output_items(msg, computer_calls, send_images=index in with_images)
                 )
-            elif msg.role == Role.SYSTEM and index > 0:
+            elif msg.role == Role.SYSTEM and was_leading and items:
+                items[0]["content"] = _join_system(items[0].get("content"), msg.content)
+            elif msg.role == Role.SYSTEM and not was_leading:
                 items.append(
                     {
                         "role": "user",
                         "content": f"[System guidance] {msg.content or ''}",
                     }
+                )
+            elif msg.role == Role.USER and has_images(msg.content):
+                items.append(
+                    {"role": "user", "content": _user_parts(msg.content or "", responses=True)}
                 )
             else:
                 items.append({"role": msg.role.value, "content": msg.content or ""})
@@ -1516,6 +1654,7 @@ class OpenAIModel(BaseModel):
         stream = await self.client.chat.completions.create(**request_kwargs)
 
         final_usage: dict[str, int] | None = None
+        final_cost: float | None = None
         final_stop_reason: str | None = None
         # The SERVED model, off the stream itself. Behind a router this can
         # differ from the requested name (a fallback answers while the
@@ -1532,13 +1671,10 @@ class OpenAIModel(BaseModel):
             # the only chunk that has it.
             chunk_usage = getattr(chunk, "usage", None)
             if chunk_usage is not None:
-                prompt_tokens = getattr(chunk_usage, "prompt_tokens", None)
-                completion_tokens = getattr(chunk_usage, "completion_tokens", None)
-                if isinstance(prompt_tokens, int) and isinstance(completion_tokens, int):
-                    final_usage = {
-                        "prompt_tokens": prompt_tokens,
-                        "completion_tokens": completion_tokens,
-                    }
+                parsed_usage, parsed_cost = _chat_usage(chunk_usage)
+                if parsed_usage:
+                    final_usage = parsed_usage
+                    final_cost = parsed_cost
 
             if not chunk.choices:
                 continue
@@ -1602,17 +1738,19 @@ class OpenAIModel(BaseModel):
                 if current_tool_calls:
                     tool_calls = []
                     for tc_data in current_tool_calls.values():
+                        raw = tc_data["arguments"]
                         try:
-                            arguments = (
-                                json.loads(tc_data["arguments"]) if tc_data["arguments"] else {}
-                            )
+                            arguments = json.loads(raw) if raw else {}
+                            malformed = None
                         except json.JSONDecodeError:
                             arguments = {}
+                            malformed = raw
                         tool_calls.append(
                             ToolCall(
                                 id=tc_data["id"],
                                 name=tc_data["name"],
                                 arguments=arguments,
+                                malformed_arguments=malformed,
                             )
                         )
                     yield ModelChunkEvent(tool_calls=tool_calls, model=served_model)
@@ -1624,5 +1762,9 @@ class OpenAIModel(BaseModel):
         # chunk arrives *after* the choice that carries the finish reason, so
         # closing early would report a turn we cannot yet meter.
         yield ModelChunkEvent(
-            done=True, usage=final_usage, stop_reason=final_stop_reason, model=served_model
+            done=True,
+            usage=final_usage,
+            stop_reason=final_stop_reason,
+            model=served_model,
+            cost_usd=final_cost,
         )

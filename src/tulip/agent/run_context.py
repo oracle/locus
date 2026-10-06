@@ -25,12 +25,13 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from tulip.core.events import CustomEvent, RunInfo
+from tulip.core.events import CustomEvent, ModelRetryEvent, RunInfo
 
 
 if TYPE_CHECKING:
     from tulip.core.state import AgentState
     from tulip.core.termination import TerminationCondition
+    from tulip.memory.compaction import CompactionTracker
 
 
 @dataclass
@@ -139,6 +140,12 @@ class RunContext:
     has_unverified_writes: bool = False
     result_slot: ResultSlot | None = None
     pending_events: list[CustomEvent] = field(default_factory=list)
+    #: Retry notices from a non-streaming model call. The call cannot yield
+    #: while it backs off, so the loop yields these once it returns or fails.
+    retry_events: list[ModelRetryEvent] = field(default_factory=list)
+    #: The run's compaction memory (thrash guard, last reported usage). Set by
+    #: the loop on first use, and only when the agent compacts its context.
+    compaction: CompactionTracker | None = None
 
     @classmethod
     def create(
@@ -198,6 +205,14 @@ class RunContext:
             return []
         out = self.pending_events
         self.pending_events = []
+        return out
+
+    def drain_retries(self) -> list[ModelRetryEvent]:
+        """Take every queued model-retry notice, oldest first."""
+        if not self.retry_events:
+            return []
+        out = self.retry_events
+        self.retry_events = []
         return out
 
 

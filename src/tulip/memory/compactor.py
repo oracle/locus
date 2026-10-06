@@ -132,6 +132,14 @@ class LLMCompactor(ConversationManager):
             to a token count. Default is a char/4 heuristic.
         preserve_system: Keep the first system message verbatim at the
             head of the returned list. Default ``True``.
+        slide_step: Granularity, in messages, of the two cuts this makes on
+            every request once over the trigger: where tool output starts
+            being kept and where the kept tail starts. With ``1`` both move
+            by one message per request, so an earlier message changes on
+            every request and a provider's prompt cache never serves what
+            follows it. A larger step moves them only at multiples of it,
+            leaving the request's start byte-identical in between (the tail
+            then keeps up to ``slide_step - 1`` fewer messages).
     """
 
     def __init__(
@@ -145,6 +153,7 @@ class LLMCompactor(ConversationManager):
         tool_output_ttl_turns: int = 10,
         token_counter: Callable[[Message], int] | None = None,
         preserve_system: bool = True,
+        slide_step: int = 1,
     ) -> None:
         if context_length < 1:
             raise ValueError("context_length must be positive")
@@ -156,6 +165,8 @@ class LLMCompactor(ConversationManager):
             raise ValueError("tail_token_fraction must be in (0, 1)")
         if tool_output_ttl_turns < 0:
             raise ValueError("tool_output_ttl_turns must be non-negative")
+        if slide_step < 1:
+            raise ValueError("slide_step must be at least 1")
 
         self.summarize_fn = summarize_fn
         self.context_length = context_length
@@ -165,6 +176,7 @@ class LLMCompactor(ConversationManager):
         self.tool_output_ttl_turns = tool_output_ttl_turns
         self._token_counter = token_counter or _char_count_tokens
         self.preserve_system = preserve_system
+        self.slide_step = slide_step
         self._last_summary: str | None = None
 
     # ------------------------------------------------------------------
@@ -268,6 +280,9 @@ class LLMCompactor(ConversationManager):
         # placeholders. A "turn" here is a single message — good enough for
         # our purposes and avoids encoding a notion of assistant-user pairs.
         cutoff = max(0, len(messages) - self.tool_output_ttl_turns)
+        # Whole steps only: the stubbed range then grows a step at a time
+        # rather than by one message per request.
+        cutoff -= cutoff % self.slide_step
         out: list[Message] = []
         for idx, msg in enumerate(messages):
             if idx < cutoff and msg.role == Role.TOOL:
@@ -300,7 +315,12 @@ class LLMCompactor(ConversationManager):
                 break
             running += toks
             keep += 1
-        return list(rest[-keep:]) if keep else []
+        # Start the tail on a step boundary (counted from the front, which
+        # does not move), keeping at least the newest message.
+        start = len(rest) - keep
+        start += -start % self.slide_step
+        start = min(start, len(rest) - 1) if keep else len(rest)
+        return list(rest[start:]) if keep else []
 
     def _compact_without_llm(self, messages: list[Message]) -> list[Message]:
         """Sync / fallback path — pre-prune + budget-adjusted tail."""

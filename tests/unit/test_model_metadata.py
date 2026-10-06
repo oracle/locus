@@ -280,3 +280,124 @@ class TestModelIdOf:
         from tulip.models.metadata import model_id_of
 
         assert model_id_of(object()) is None
+
+
+class TestDiscoverContextLength:
+    """The window a vLLM (or OpenRouter-style) server lists for a model."""
+
+    _BASE = "http://vllm.test:8000/v1"
+
+    @pytest.mark.asyncio
+    async def test_reads_max_model_len_and_registers_it(self) -> None:
+        import httpx
+        import respx
+
+        from tulip.models.metadata import discover_context_length
+
+        with respx.mock:
+            route = respx.get(f"{self._BASE}/models").mock(
+                return_value=httpx.Response(
+                    200,
+                    json={
+                        "data": [
+                            {"id": "other", "max_model_len": 4096},
+                            {"id": "discover-test-qwen", "max_model_len": 65_536},
+                        ]
+                    },
+                )
+            )
+            window = await discover_context_length(
+                self._BASE, "vllm:discover-test-qwen", api_key="k"
+            )
+
+        assert window == 65_536
+        assert route.calls.last.request.headers["Authorization"] == "Bearer k"
+        md = metadata_for("vllm:discover-test-qwen")
+        assert md is not None
+        assert md.context_length == 65_536
+
+    @pytest.mark.asyncio
+    async def test_keeps_registered_prices(self) -> None:
+        import httpx
+        import respx
+
+        from tulip.models.metadata import discover_context_length
+
+        register_metadata(
+            ModelMetadata(
+                model_id="discover-test-priced",
+                family="test",
+                context_length=1_000,
+                max_output_tokens=500,
+                input_price_per_mtok=Decimal(1),
+                output_price_per_mtok=Decimal(2),
+            )
+        )
+        with respx.mock:
+            respx.get(f"{self._BASE}/models").mock(
+                return_value=httpx.Response(
+                    200, json={"data": [{"id": "discover-test-priced", "context_length": 32_768}]}
+                )
+            )
+            window = await discover_context_length(self._BASE, "discover-test-priced")
+
+        md = metadata_for("discover-test-priced")
+        assert window == 32_768
+        assert md is not None
+        assert md.context_length == 32_768
+        assert md.input_price_per_mtok == Decimal(1)
+
+    @pytest.mark.asyncio
+    async def test_register_false_leaves_the_registry_alone(self) -> None:
+        import httpx
+        import respx
+
+        from tulip.models.metadata import discover_context_length
+
+        with respx.mock:
+            respx.get(f"{self._BASE}/models").mock(
+                return_value=httpx.Response(
+                    200, json={"data": [{"id": "discover-test-dry", "max_model_len": 8192}]}
+                )
+            )
+            window = await discover_context_length(self._BASE, "discover-test-dry", register=False)
+
+        assert window == 8192
+        assert metadata_for("discover-test-dry") is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "response",
+        [
+            {"status_code": 500, "json": {}},
+            {"status_code": 200, "json": {"data": [{"id": "x", "max_model_len": 1}]}},
+            {"status_code": 200, "json": {"data": [{"id": "discover-test-none"}]}},
+            {
+                "status_code": 200,
+                "json": {"data": [{"id": "discover-test-none", "max_model_len": True}]},
+            },
+            {"status_code": 200, "text": "not json"},
+            {"status_code": 200, "json": ["not", "an", "object"]},
+        ],
+    )
+    async def test_unlisted_or_unreadable_returns_none(self, response: dict[str, object]) -> None:
+        import httpx
+        import respx
+
+        from tulip.models.metadata import discover_context_length
+
+        with respx.mock:
+            respx.get(f"{self._BASE}/models").mock(return_value=httpx.Response(**response))  # type: ignore[arg-type]
+            assert await discover_context_length(self._BASE, "discover-test-none") is None
+        assert metadata_for("discover-test-none") is None
+
+    @pytest.mark.asyncio
+    async def test_unreachable_server_returns_none(self) -> None:
+        import httpx
+        import respx
+
+        from tulip.models.metadata import discover_context_length
+
+        with respx.mock:
+            respx.get(f"{self._BASE}/models").mock(side_effect=httpx.ConnectError("refused"))
+            assert await discover_context_length(self._BASE, "discover-test-none") is None
