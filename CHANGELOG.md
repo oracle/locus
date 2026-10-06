@@ -130,6 +130,21 @@ policy.
   save and `purge_messages(older_than)` rewrites idle threads in place;
   `RetainedCheckpointer(inner, max_age=...)` gives any checkpointer, the local
   `MemoryCheckpointer` and `FileCheckpointer` included, the same trim on save.
+- **Durable `StateGraph` runs on DBOS** (`tulip.durable.dbos`). A graph runs
+  the way an agent already does: in segments, each at most once, with the
+  workflow waiting durably at every `interrupt()` for the value to resume
+  with — a person's decision, a job's result from another machine — across
+  process restarts. `register_graphs`, `start_graph_run`, `pending_interrupt`
+  (the pausing node and its payload), `resume_graph`, the `TulipGraphRun`
+  workflow and the `tulip_run_graph_segment` step; `GraphSegmentOutcome` says
+  where a segment left the run (`done`, `paused`, `failed`). Each segment runs
+  with its own copy of the graph's config, so one registered graph serves any
+  number of runs at once. The engine-independent segment is
+  `tulip.durable.segments.run_graph`. Local default: DBOS on SQLite and a file
+  checkpointer; in production both in Postgres. DBOS's and the checkpointer's
+  tables carry no tenant column, so a multi-tenant caller keeps tenant data
+  under its own row-level security, puts only ids in graph state, and keys
+  thread and workflow ids per tenant.
 
 ### Changed
 
