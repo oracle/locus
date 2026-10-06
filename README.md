@@ -175,6 +175,7 @@ A bundled `MockModel` means every notebook runs offline with no credentials.
 |---|---|
 | **[⚖️ Admission gate](https://tulipagents.ai/concepts/security/)** | `admit()` / `approve()` run a consequential action only if your `ControlPolicy` allows — else hold for a human or deny, recorded either way. |
 | **[🧠 GSAR grounding](https://tulipagents.ai/concepts/gsar/)** | Claims partitioned grounded / ungrounded / contradicted / complementary; below threshold the agent regenerates, replans, or abstains. `arXiv:2604.23366`. |
+| **[🎯 Decisions](docs/decision.md)** | `tulip.decision` — `Choice` / `YesNo` / `Score` answered with a probability per answer from one forward pass, on any OpenAI-compatible server. An admit head plugs into `approve(advisor=)`; safety heads feed verification. Escalate-only. |
 | **[🔁 Idempotent tools](https://tulipagents.ai/concepts/idempotency/)** | `@tool(idempotent=True)` — dedupes on `(name, args)`. The model can't double-charge, double-book, or double-page. |
 | **[🪝 Hooks](https://tulipagents.ai/concepts/hooks/)** | Logging · OpenTelemetry · ModelRetry · Guardrails · Steering (LLM-as-judge). |
 
@@ -358,6 +359,7 @@ installed from this repository (it is not published to PyPI); the core runtime d
 ```text
 src/tulip/
 ├── control/        Admission gate, policy, audit trail, grounded findings, verification
+├── decision/       Typed decisions (choice, yes/no, score) with probabilities; per-tenant heads
 ├── rogue/          The rogue-agent challenge (`python -m tulip.rogue`)
 ├── agent/          Agent runtime, config, Sequential / Parallel / Loop pipelines
 ├── core/           AgentState, Message, events, termination algebra, Send
