@@ -107,3 +107,26 @@ class TestHookBuiltinExports:
             "SteeringDecision",
         ):
             assert name in mod.__all__, f"{name} missing from tulip.hooks.builtin.__all__"
+
+
+class TestHarnessExports:
+    """The coding harness's documented surface (docs/harness.md)."""
+
+    def test_harness_names_import(self):
+        harness = importlib.import_module("tulip.harness")
+        for name in (
+            "build_harness",
+            "Harness",
+            "HarnessConfig",
+            "WorkspaceBackend",
+            "LocalBackend",
+            "MemoryBackend",
+            "SessionBackend",
+            "SessionLike",
+            "OpenShellBackend",
+            "ExecRecord",
+            "classify_command",
+            "action_spec",
+        ):
+            assert hasattr(harness, name), name
+            assert name in harness.__all__, name

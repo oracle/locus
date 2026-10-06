@@ -8,6 +8,40 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **`tulip.harness`: a coding harness written once, run on any workspace.**
+  The tools every coding agent converges on — `read`, `write`, `edit`,
+  `multi_edit`, `apply_patch`, `glob`, `grep`, `ls`, `bash` with
+  `bash_output` / `write_stdin` / `kill_shell` for background commands,
+  `notebook_edit`, `todo_write` / `todo_read` — written against one
+  `WorkspaceBackend` protocol (an extension of the deepagent
+  `BackendProtocol` with bytes, stat, windowed reads, `exec` and background
+  jobs). Four backends: `LocalBackend` (the host, files confined to a root,
+  commands in their own process groups, labelled `UNISOLATED: host shell`),
+  `MemoryBackend` (files only, for tests), `SessionBackend` (any sandbox that
+  can run a command and move a file, through a three-method `SessionLike`
+  adapter; background commands are process groups the sandbox owns) and
+  `OpenShellBackend` (an NVIDIA OpenShell sandbox, files over `exec`, the
+  gateway's `execution_timeout`; `pip install "tulip-agents[openshell]"`).
+  The behaviour is tulip-code's: read-before-edit with a staleness check on
+  the content hash, CRLF kept, near-miss edits matched and reported, head and
+  tail output with the full text spillable to a `ToolResultStore`, a
+  command that outlives its timeout kept under a handle.
+- **The single-gate rule.** Tool bodies never call a gate.
+  `build_harness(backend, wrap=...)` applies one `wrap(tool, action_spec)` to
+  every tool — `tulip.control.gate_tool` locally, the gateway's own gate
+  remotely — and `tulip.harness.labels` derives each call's `Action`:
+  `workspace.read` / `workspace.write` / `workspace.exec` / `network`, with
+  shell lines classified by `classify_command` into tags such as
+  `exec:destructive`, `exec:vcs-push`, `exec:network`, `exec:check` and
+  `exec:unparsed` (an unparseable line fails closed). `wrap=None` builds
+  ungated tools and logs a warning when they include a host shell.
+  `Harness.preview(name, args)` shows a file change's diff without writing.
+- **`ExecRecord` evidence for every command**: command and output by
+  SHA-256, exit status, duration, timeout, truncation and the backend label,
+  emitted as `harness.exec` on the event bus and to an `on_exec` sink.
+
 ## [2.19.0] - 2026-10-06
 
 ### Added

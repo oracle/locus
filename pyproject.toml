@@ -139,6 +139,11 @@ gemini = ["google-genai>=1.30"]
 # Durable agent runs on DBOS (src/tulip/durable/dbos.py).
 dbos = ["dbos>=2.0"]
 
+# NVIDIA OpenShell sandboxes as a coding-harness workspace
+# (src/tulip/harness/openshell.py). Only the client constructors import it; a
+# caller that passes its own client needs nothing from it.
+openshell = ["openshell>=0.1.2,<0.2"]
+
 # Mem0 agent-memory manager (src/tulip/memory/managers/mem0.py) — the
 # portable, self-hostable long-term memory backend.
 mem0 = ["mem0ai>=0.1"]
@@ -685,6 +690,9 @@ module = [
     "playwright.*",
     "google.genai",
     "google.genai.*",
+    # The coding harness's OpenShell backend imports it lazily.
+    "openshell",
+    "openshell.*",
 ]
 ignore_missing_imports = true
 
