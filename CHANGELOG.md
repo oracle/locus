@@ -8,6 +8,38 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **`PgCheckpointer`: agent threads in Postgres, one tenant's apart from
+  another's.** Every row carries its tenant and Row-Level Security admits only
+  the tenant pinned for the transaction (`tulip.tenant`, the setting `PgMemory`
+  uses), on read and write, `FORCE`d for the owner too; every query also
+  filters on it. The tenant comes from a `tenant_scope()` block, a
+  `tenant_of(thread_id)` callable, or `tenant=`; a `tenant_of` that cannot place
+  a thread fails the call. A save is one statement (the upsert, and with
+  `keep_checkpoints=N` the thread's pruning) where the generic
+  `postgresql_checkpointer()` adapter makes four round trips. The schema is
+  probed before any DDL, so a role with no `CREATE` works against a table a
+  migration made (`PgCheckpointer.ddl()` gives the statements,
+  `create_schema=False` never runs any). Per tenant: `vacuum()`,
+  `purge_messages()` and `forget_tenant()`. See
+  [`docs/pg-checkpointer.md`](docs/pg-checkpointer.md).
+- **Per-message retention, so a thread used every day stops growing.**
+  `tulip.memory.retention` stamps each message the first time it is
+  checkpointed (`Message.metadata["tulip_at"]`, never sent to a provider) and
+  drops whole exchanges older than a cut-off, keeping system messages and
+  anything unstamped. `PgCheckpointer(message_retention=...)` trims at every
+  save and `purge_messages(older_than)` rewrites idle threads in place;
+  `RetainedCheckpointer(inner, max_age=...)` gives any checkpointer, the local
+  `MemoryCheckpointer` and `FileCheckpointer` included, the same trim on save.
+
+### Fixed
+
+- **`PostgreSQLBackend` no longer needs `CREATE` when its table exists.** It ran
+  `CREATE SCHEMA IF NOT EXISTS` on first use, which Postgres refuses without
+  `CREATE` on the database even when the schema is there; it now probes for the
+  table first and runs no DDL when it finds it.
+
 ## [2.20.0] - 2026-10-06
 
 ### Added
