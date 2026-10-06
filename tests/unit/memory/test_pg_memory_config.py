@@ -96,7 +96,7 @@ class TestDriverIsCheckedAtConstruction:
             PgMemory(_DSN)
         message = str(excinfo.value)
         assert "asyncpg" in message
-        assert "tulip-agents[postgresql]" in message, "say which extra installs it"
+        assert "tulip-agents[pgvector]" in message, "say which extra installs it"
 
     def test_construction_succeeds_when_the_driver_is_present(self):
         # No connection is made at construction, so this only proves the check

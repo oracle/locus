@@ -21,6 +21,17 @@ Usage::
     #   on_after_tool_call, on_after_model_call, on_after_invocation
     #   all flow through the bus as ``agent.<phase>`` events.
 
+One Agent serving many runs (a chat backend builds it once) takes one hook
+with no ``run_id``. Each event is then tagged with the id of the run that
+produced it, read when the event fires: the id bound by
+:func:`~tulip.observability.context.run_context` if the caller entered one,
+else the run's own ``AgentState.run_id``::
+
+    agent = Agent(model=..., hooks=[EventBusHook()])
+
+    async with run_context(turn_id):
+        await agent.arun(message)  # every event under ``turn_id``
+
 Inside the router the bridge is wired automatically by
 :class:`Router.dispatch` so the user doesn't have to.
 """
@@ -36,6 +47,7 @@ from tulip.hooks.provider import (
     BeforeToolCallEvent,
     HookProvider,
 )
+from tulip.observability.context import current_run_id
 from tulip.observability.event_bus import StreamEvent, get_event_bus
 
 
@@ -60,11 +72,23 @@ class EventBusHook(HookProvider):
     The hook never mutates events — it's pure-observation. Tools and
     model calls retain whatever cancellation / retry / replacement
     behaviour the surrounding code dictates.
+
+    Args:
+        run_id: The id every event is tagged with. Omit it to tag each event
+            with the run that produced it, read per call: the id of the
+            active :func:`~tulip.observability.context.run_context` when
+            there is one, else the run's own ``AgentState.run_id``. That is
+            what lets one hook on one shared Agent serve every run.
+
+    Raises:
+        ValueError: ``run_id`` is an empty string.
     """
 
-    def __init__(self, run_id: str) -> None:
-        if not run_id:
-            raise ValueError("EventBusHook requires a non-empty run_id")
+    def __init__(self, run_id: str | None = None) -> None:
+        if run_id is not None and not run_id:
+            raise ValueError("EventBusHook run_id must be non-empty (or None to follow the run)")
+        # Kept under this private name: subclasses written before ``run_id``
+        # became optional override ``_run_id`` to follow the run themselves.
         self._run_id = run_id
         self._bus = get_event_bus()
 
@@ -73,13 +97,29 @@ class EventBusHook(HookProvider):
         return _BUS_HOOK_PRIORITY
 
     @property
-    def run_id(self) -> str:
-        return self._run_id
+    def run_id(self) -> str | None:
+        """The id an event fired now would carry, outside any agent run.
+
+        The fixed ``run_id`` when one was given; otherwise the active
+        ``run_context`` id, or ``None`` when there is none (an event fired
+        inside a run then falls back to that run's own id).
+        """
+        return self._run_id or current_run_id()
+
+    def _rid(self, run: Any = None, state: AgentState | None = None) -> str:
+        """The id for one event: fixed, else the active run context, else the run's."""
+        if self._run_id is not None:
+            return self._run_id
+        bound = current_run_id()
+        if bound:
+            return bound
+        own = getattr(run, "run_id", None) or getattr(state, "run_id", None)
+        return str(own) if own else "default"
 
     async def on_before_invocation(self, prompt: str, state: AgentState) -> AgentState:
         await self._bus.publish(
             _ev(
-                self._run_id,
+                self._rid(state=state),
                 "agent.invocation.started",
                 prompt_preview=prompt[:160],
                 agent_id=state.agent_id,
@@ -91,7 +131,7 @@ class EventBusHook(HookProvider):
     async def on_after_invocation(self, state: AgentState, success: bool) -> None:
         await self._bus.publish(
             _ev(
-                self._run_id,
+                self._rid(state=state),
                 "agent.invocation.completed",
                 agent_id=state.agent_id,
                 iteration=state.iteration,
@@ -104,7 +144,7 @@ class EventBusHook(HookProvider):
     async def on_iteration_start(self, iteration: int, state: AgentState) -> None:
         await self._bus.publish(
             _ev(
-                self._run_id,
+                self._rid(state=state),
                 "agent.iteration.started",
                 iteration=iteration,
                 agent_id=state.agent_id,
@@ -114,7 +154,7 @@ class EventBusHook(HookProvider):
     async def on_iteration_end(self, iteration: int, state: AgentState) -> None:
         await self._bus.publish(
             _ev(
-                self._run_id,
+                self._rid(state=state),
                 "agent.iteration.completed",
                 iteration=iteration,
                 agent_id=state.agent_id,
@@ -125,7 +165,7 @@ class EventBusHook(HookProvider):
     async def on_before_tool_call(self, event: BeforeToolCallEvent) -> None:
         await self._bus.publish(
             _ev(
-                self._run_id,
+                self._rid(event.run),
                 "agent.tool.started",
                 tool_name=event.tool_name,
                 tool_call_id=event.tool_call_id,
@@ -145,7 +185,7 @@ class EventBusHook(HookProvider):
             result_preview = repr(result)[:200]
         await self._bus.publish(
             _ev(
-                self._run_id,
+                self._rid(event.run),
                 "agent.tool.completed",
                 tool_name=event.tool_name,
                 error=str(event.error) if event.error else None,
@@ -156,7 +196,7 @@ class EventBusHook(HookProvider):
     async def on_before_model_call(self, event: BeforeModelCallEvent) -> None:
         await self._bus.publish(
             _ev(
-                self._run_id,
+                self._rid(event.run),
                 "agent.model.started",
                 message_count=len(event.messages),
                 tool_count=len(event.tools or []),
@@ -166,7 +206,7 @@ class EventBusHook(HookProvider):
     async def on_after_model_call(self, event: AfterModelCallEvent) -> None:
         await self._bus.publish(
             _ev(
-                self._run_id,
+                self._rid(event.run),
                 "agent.model.completed",
                 stop_reason=str(getattr(event.response, "stop_reason", "")),
                 content_length=len(getattr(event.response.message, "content", "") or ""),
