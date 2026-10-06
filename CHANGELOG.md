@@ -8,6 +8,34 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **`EventBusHook()` without a `run_id` follows the run.** Each event is
+  tagged when it fires: with the id of the active `run_context` when the
+  caller entered one, else with the run's own `AgentState.run_id`. One hook on
+  one shared Agent now serves every run, concurrent ones included, instead of
+  a host subclassing the hook to override its private `_run_id`. A given
+  `run_id` still tags every event, and an empty one is still refused.
+- **`PlaybookEnforcerHook(select=...)` enables a playbook per run.**
+  `select(run) -> Playbook | None` is asked once per run, on its first tool
+  call, so a host turns a playbook on for one turn (from `run.metadata`, say)
+  and leaves the others alone. A selector that raises fails closed: every tool
+  call of that run is cancelled with a message saying the playbook could not
+  be chosen. `enforcer_for(run_id)` inspects one run's plan; `scope="thread"`
+  keeps one plan per conversation and `scope="agent"` one for everything.
+
+### Changed
+
+- **A playbook's progress belongs to the run, not to the Agent.**
+  `PlaybookEnforcerHook` (and so `Agent(playbook=...)`) keeps one enforcer per
+  run id, in a most-recently-used map bounded by `max_runs` (1024). Two users
+  on one Agent no longer advance, or violate, each other's plan, and a second
+  run starts the playbook at step one rather than where the last run left it.
+  A run paused for approval and resumed in the same process keeps its run id,
+  and with it its place in the plan. `hook.enforcer` is the most recent run's,
+  which is what it showed before for runs one at a time; pass
+  `scope="agent"` for the old single plan.
+
 ## [2.20.0] - 2026-10-06
 
 ### Added
