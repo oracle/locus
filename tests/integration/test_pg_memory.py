@@ -315,3 +315,85 @@ async def test_rls_blocks_cross_tenant_access_for_app_role(store: PgMemory) -> N
         await admin.execute(f"REVOKE ALL ON SCHEMA public FROM {_RLS_ROLE}")
         await admin.execute(f"DROP ROLE IF EXISTS {_RLS_ROLE}")
         await admin.close()
+
+
+# ── search_many — several namespaces of one tenant in one statement ─────────────
+async def test_search_many_equals_one_search_per_namespace(store: PgMemory) -> None:
+    kid, family, empty = ("acme", "kid", "user"), ("acme", "family", "user"), ("acme", "x")
+    await store.put(kid, "castle", {"content": "likes building castles with towers"})
+    await store.put(kid, "pet", {"content": "has a cat named Pixel"})
+    await store.put(family, "names", {"content": "the family names castles after cats"})
+    await store.put(("globex", "kid", "user"), "castle", {"content": "globex castles"})
+
+    for query in ("castles", None):
+        many = await store.search_many([kid, family, empty], query, limit=2)
+        single = [await store.search(ns, query, limit=2) for ns in (kid, family, empty)]
+        assert [[i.key for i in r] for r in many] == [[i.key for i in r] for r in single]
+        assert many[1][0].namespace == family
+    assert (await store.search_many([kid], "castles", limit=1))[0][0].key == "castle"
+
+    with pytest.raises(ValueError, match="spans tenants"):
+        await store.search_many([kid, ("globex", "kid", "user")], "castles")
+
+
+async def test_search_many_is_confined_by_rls_for_app_role(store: PgMemory) -> None:
+    """search_many's statement, run by an unprivileged role: with the tenant pinned
+    to globex, asking for acme's namespaces returns nothing — RLS holds even when
+    the query's own ``tenant=`` filter names another tenant."""
+    import asyncpg
+
+    acme = ("acme", "kid", "user")
+    await store.put(acme, "castle", {"content": "acme kid likes castles"})
+    await store.put(("globex", "kid", "user"), "castle", {"content": "globex castles"})
+
+    admin = await asyncpg.connect(_admin_dsn())
+    await admin.execute(
+        f"DO $$ BEGIN "
+        f"IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='{_RLS_ROLE}') THEN "
+        f"CREATE ROLE {_RLS_ROLE} LOGIN PASSWORD '{_RLS_PW}' NOSUPERUSER NOBYPASSRLS; "
+        f"END IF; END $$"
+    )
+    await admin.execute(f"GRANT USAGE ON SCHEMA public TO {_RLS_ROLE}")
+    await admin.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON {_TABLE} TO {_RLS_ROLE}")
+    await admin.close()
+
+    as_role = PgMemory(_admin_dsn(), table=_TABLE, dim=256)
+    # The schema exists (built by the admin store); the role only reads.
+    as_role._pool = await asyncpg.create_pool(_role_dsn(), min_size=1, max_size=1)
+    try:
+        found = await as_role.search_many([acme], "castles", limit=5)
+        assert [i.value["content"] for i in found[0]] == ["acme kid likes castles"]
+
+        async def pin_globex(conn: object, tenant: str) -> None:
+            await conn.execute("SELECT set_config('tulip.tenant', 'globex', true)")  # type: ignore[attr-defined]
+
+        as_role._scoped = pin_globex  # type: ignore[method-assign]
+        assert await as_role.search_many([acme], "castles", limit=5) == [[]]
+        assert await as_role.search_many([acme], None, limit=5) == [[]]
+    finally:
+        await as_role.close()
+        admin = await asyncpg.connect(_admin_dsn())
+        await admin.execute(f"REVOKE ALL ON {_TABLE} FROM {_RLS_ROLE}")
+        await admin.execute(f"REVOKE ALL ON SCHEMA public FROM {_RLS_ROLE}")
+        await admin.execute(f"DROP ROLE IF EXISTS {_RLS_ROLE}")
+        await admin.close()
+
+
+async def test_manager_recalls_own_and_family_in_two_statements(store: PgMemory) -> None:
+    """LLMMemoryManager over real PgMemory: a MemoryScope recall of the run's own
+    namespace and a family one, every memory type, in one ranked + one recency call."""
+    from tulip.memory.manager import LLMMemoryManager, Memory, MemoryType
+
+    manager = LLMMemoryManager(store=store)
+    with manager.scoped(("acme", "kid", "sofia")):
+        await manager.save([Memory(MemoryType.USER, "castle", "Sofia likes castles")])
+    with manager.scoped(("acme", "family")):
+        await manager.save([Memory(MemoryType.USER, "cats", "the family names castles after cats")])
+    with manager.scoped(("globex", "family")):
+        await manager.save([Memory(MemoryType.USER, "plan", "globex castles plan")])
+
+    with manager.scoped(
+        ("acme", "kid", "sofia"), recall=[("acme", "family"), ("globex", "family")]
+    ):
+        found = await manager.retrieve(query="castles")
+    assert {m.key for m in found} == {"castle", "cats"}

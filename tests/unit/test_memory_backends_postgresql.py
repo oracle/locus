@@ -44,7 +44,9 @@ class _StubConn:
         fetchrow: Any | None = None,
         fetch: list[Any] | None = None,
         execute_results: list[str] | None = None,
+        fetchval: Any | None = None,
     ) -> None:
+        self.fetchval_value = fetchval
         self.fetchrow_value = fetchrow
         self.fetch_value = fetch or []
         self.execute_results = execute_results or []
@@ -56,6 +58,9 @@ class _StubConn:
 
     async def fetchrow(self, sql: str, *args: Any) -> Any:
         return self.fetchrow_value
+
+    async def fetchval(self, sql: str, *args: Any) -> Any:
+        return self.fetchval_value
 
     async def fetch(self, sql: str, *args: Any) -> list[Any]:
         return self.fetch_value
@@ -201,6 +206,17 @@ class TestEnsureTable:
         # Second call short-circuits — no further DDL.
         await backend._ensure_table()
         assert len(conn.execute_calls) == first_count
+
+    @pytest.mark.asyncio
+    async def test_existing_table_runs_no_ddl(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # A table made by a migration needs no CREATE privilege: the probe
+        # finds it and nothing else runs (CREATE ... IF NOT EXISTS checks the
+        # privilege before it checks existence).
+        conn = _StubConn(fetchval="public.checkpoints")
+        _stub_asyncpg(monkeypatch, conn)
+        backend = PostgreSQLBackend()
+        await backend._ensure_table()
+        assert conn.execute_calls == []
 
     @pytest.mark.asyncio
     async def test_full_table_name_includes_schema(self) -> None:

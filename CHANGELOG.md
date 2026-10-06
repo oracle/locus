@@ -10,6 +10,126 @@ policy.
 
 ### Added
 
+- **`tulip.testing.CompromisedModel`: a model an attacker has already won,
+  for your own rogue suite.** It calls the attack on every model call that
+  offers tools and never refuses, so a test checks what has to hold when the
+  model does not: the gate, the offered tools, the audit trail. Name a tool
+  and its arguments, or pass `(messages, tools) -> (name, arguments) |
+  ModelResponse | None` to choose each turn's call. `rounds=` caps the calls
+  per run (counted from the conversation, so one model serves concurrent
+  runs), `after=` is what it says once it stops, and by default it also calls
+  tools the agent never offered, which the agent has to refuse
+  (`offered_only=True` turns that off). Every call is recorded on
+  `attempts`. It is the offline mode of `python -m tulip.rogue`, made
+  reusable against your own agent.
+- **`tulip.testing.MockModel`**, another name for `FunctionModel`, because
+  that is the name people coming from other SDKs look for. A fixed list of
+  turns is still a `ScriptedModel`.
+- **`gate_tool(advisor=)`, and a verdict worked out for each call.** A
+  trained control model (any `ControlAdvisor`) is now passed through
+  `gate_tool`, `admit` and `admit_sync` to `approve(advisor=)` on every call,
+  including the re-admission of an approved hold; as everywhere, it can only
+  make a decision stricter, and one that fails or has no opinion changes
+  nothing. When an advisor is given, the `action-admission` trail entry also
+  carries `policy_outcome` and `model_outcome`. `gate_tool`'s `verdict=` and
+  `finding=` also take `(tool_name, arguments) -> value`, sync or async,
+  asked for each call instead of fixed when the tool is wrapped (and asked
+  again about an approver's edited arguments), so one gated tool on a shared
+  agent can be verified call by call. A callable that returns `None` is no
+  verification; one that raises refuses the call with a `deny`, recorded on the
+  trail, so a failed verification never passes for one that was not required.
+- **`tulip.decision`: typed decisions with probabilities.** Ask a model a
+  `Choice(name, question, options)`, a `YesNo(name, question)` or a
+  `Score(name, question, levels)` about one input and get back an `Answer` per
+  field: a probability for every listed answer, the argmax, its margin, and
+  `coverage`, the share of the model's probability that went to the listed
+  answers at all. The default provider, `LogprobDecider`, needs only an
+  OpenAI-compatible server that returns logprobs (vLLM, llama.cpp, LM Studio):
+  one `max_tokens=1` request per field with `top_logprobs`, fields of one
+  input sent concurrently, and `DecisionError` instead of a guess when no
+  listed answer is among the top tokens. The prompt (`SYSTEM_PROMPT`,
+  `render()`) is a fixed, tested contract, so a head fine-tuned on it is served
+  with no glue. `DecisionAdvisor` plugs an admit head into
+  `approve(advisor=)`, by argmax or by a certified `hold_at` threshold on
+  `1 - P(allow)`, and like every advisor it can only make a decision stricter.
+  `verification_from_decision()` turns yes/no safety heads into the
+  `VerificationResult` that `ControlPolicy.require_verification_score` weighs:
+  a head at its threshold denies. `TenantDecisionRouter` serves each tenant
+  from its own head only, refuses an unknown tenant, and records every
+  decision (labels and probabilities, never the input unless
+  `record_text=True`) on that tenant's audit chain; `per_tenant_trails()` is
+  its zero-infra audit side. See [`docs/decision.md`](docs/decision.md).
+- **`EventBusHook()` without a `run_id` follows the run.** Each event is
+  tagged when it fires: with the id of the active `run_context` when the
+  caller entered one, else with the run's own `AgentState.run_id`. One hook on
+  one shared Agent now serves every run, concurrent ones included, instead of
+  a host subclassing the hook to override its private `_run_id`. A given
+  `run_id` still tags every event, and an empty one is still refused.
+- **`PlaybookEnforcerHook(select=...)` enables a playbook per run.**
+  `select(run) -> Playbook | None` is asked once per run, on its first tool
+  call, so a host turns a playbook on for one turn (from `run.metadata`, say)
+  and leaves the others alone. A selector that raises fails closed: every tool
+  call of that run is cancelled with a message saying the playbook could not
+  be chosen. `enforcer_for(run_id)` inspects one run's plan; `scope="thread"`
+  keeps one plan per conversation and `scope="agent"` one for everything.
+- **`SkillsPlugin(router=...)`: skills a host routes per run, on one Agent.**
+  `router(text, run)` gets the run's latest user message and its `RunInfo`
+  (`run.metadata` is what `agent.run(..., metadata=)` passed), sync or async,
+  and returns the skill names active for that run. It is asked once per run,
+  before the run's first model call, and its answer replaces `active=` for
+  that run (`None` keeps `active`, an empty list means none). An unknown name
+  is logged and ignored, and a router that raises leaves the run on `active`,
+  so a routing mistake never costs a live turn. With
+  `enforce_allowed_tools=True` the routed skills' `allowed-tools` bind that
+  run's calls. The router cannot change which tools the model is offered
+  (`BeforeModelCallEvent.tools` is read-only); a disallowed call is cancelled
+  before it runs.
+- **The wrapper text around skills is the host's.** `active_preamble=` and
+  `catalog_preamble=` replace the sentences before the active instructions
+  and the catalog, `render_skill=(skill) -> str` renders each active skill,
+  and `skill_footer=False` leaves the `Allowed tools` / `Compatibility` /
+  location footer out of the default rendering.
+- **`BaseStore.search_many(namespaces, query, limit)`: one call for several
+  namespaces.** It returns one list per namespace, as `search` would. The
+  default loops `search`, so every store has it. `PgMemory` answers it in one
+  transaction and one `SELECT` (`unnest ... WITH ORDINALITY` with a `LATERAL`
+  search per namespace), encodes the query once, and refuses a call whose
+  namespaces belong to more than one tenant (`namespace[0]`).
+- **`MemoryScope`: recall shared memories with a run's own.** A
+  `namespace_resolver` may return `MemoryScope(namespace=..., recall=(...))`
+  instead of a prefix. Session start then recalls the run's namespace and the
+  read-only `recall` namespaces (a team's, a household's) in one call and one
+  memory block, and extraction still writes only to `namespace`. A recall
+  namespace whose first element differs from `namespace[0]` belongs to
+  another tenant: it is dropped with a warning and never read.
+  `LLMMemoryManager.retrieve` / `retrieve_relevant` also take `namespaces=`,
+  and `scoped(prefix, recall=...)` sets the same scope by hand.
+- **`PgMemory(encoding_cache=1024)`.** Encodings are cached per store, keyed
+  by `(tenant, text)`, so an entry is never reused for another tenant. One
+  recall no longer runs the pure-Python HRR encoding once per memory type for
+  the same words. `0` turns the cache off.
+- **`PgCheckpointer`: agent threads in Postgres, one tenant's apart from
+  another's.** Every row carries its tenant and Row-Level Security admits only
+  the tenant pinned for the transaction (`tulip.tenant`, the setting `PgMemory`
+  uses), on read and write, `FORCE`d for the owner too; every query also
+  filters on it. The tenant comes from a `tenant_scope()` block, a
+  `tenant_of(thread_id)` callable, or `tenant=`; a `tenant_of` that cannot place
+  a thread fails the call. A save is one statement (the upsert, and with
+  `keep_checkpoints=N` the thread's pruning) where the generic
+  `postgresql_checkpointer()` adapter makes four round trips. The schema is
+  probed before any DDL, so a role with no `CREATE` works against a table a
+  migration made (`PgCheckpointer.ddl()` gives the statements,
+  `create_schema=False` never runs any). Per tenant: `vacuum()`,
+  `purge_messages()` and `forget_tenant()`. See
+  [`docs/pg-checkpointer.md`](docs/pg-checkpointer.md).
+- **Per-message retention, so a thread used every day stops growing.**
+  `tulip.memory.retention` stamps each message the first time it is
+  checkpointed (`Message.metadata["tulip_at"]`, never sent to a provider) and
+  drops whole exchanges older than a cut-off, keeping system messages and
+  anything unstamped. `PgCheckpointer(message_retention=...)` trims at every
+  save and `purge_messages(older_than)` rewrites idle threads in place;
+  `RetainedCheckpointer(inner, max_age=...)` gives any checkpointer, the local
+  `MemoryCheckpointer` and `FileCheckpointer` included, the same trim on save.
 - **Durable `StateGraph` runs on DBOS** (`tulip.durable.dbos`). A graph runs
   the way an agent already does: in segments, each at most once, with the
   workflow waiting durably at every `interrupt()` for the value to resume
@@ -25,6 +145,46 @@ policy.
   tables carry no tenant column, so a multi-tenant caller keeps tenant data
   under its own row-level security, puts only ids in graph state, and keys
   thread and workflow ids per tenant.
+
+### Changed
+
+- **A playbook's progress belongs to the run, not to the Agent.**
+  `PlaybookEnforcerHook` (and so `Agent(playbook=...)`) keeps one enforcer per
+  run id, in a most-recently-used map bounded by `max_runs` (1024). Two users
+  on one Agent no longer advance, or violate, each other's plan, and a second
+  run starts the playbook at step one rather than where the last run left it.
+  A run paused for approval and resumed in the same process keeps its run id,
+  and with it its place in the plan. `hook.enforcer` is the most recent run's,
+  which is what it showed before for runs one at a time; pass
+  `scope="agent"` for the old single plan.
+- **A recall costs two store calls.** `LLMMemoryManager.retrieve` reads every
+  memory type of every recalled namespace with one `search_many` for the
+  ranking and one for the recency top-up. On `PgMemory` that is 2
+  transactions and 4 statements instead of 8 and 16. Results are the same:
+  matches are interleaved rank by rank and topped up by recency. A store whose
+  `search_many` fails falls back to the per-namespace path. Pruning to
+  `max_memories` reads a type with one `search` instead of `list_keys` plus a
+  `get` per key.
+- **`tulip-agents[pgvector]` installs numpy.** `PgMemory`'s HRR encoding needs
+  numpy. Without it, rows were stored with no vector and recall quietly became
+  a substring match. Now `PgMemory` raises a `RuntimeWarning` when it is built
+  without numpy and without an embedder, and logs a warning the first time a
+  search degrades to `ILIKE`. Its missing-driver error now names
+  `tulip-agents[pgvector]`.
+
+### Fixed
+
+- **A skill activated in one run no longer widens another run's tools.**
+  `SkillsPlugin` kept one activation list for every run it served, so a skill
+  the model activated through the `skills` tool stayed in
+  `allowed_tools()` for every later and concurrent run of a shared Agent.
+  Routed and model-activated skills are now per run and dropped when the run
+  ends; `allowed_tools(run_id)` reads one run's, and `activated_skills` still
+  reports the most recent run's.
+- **`PostgreSQLBackend` no longer needs `CREATE` when its table exists.** It ran
+  `CREATE SCHEMA IF NOT EXISTS` on first use, which Postgres refuses without
+  `CREATE` on the database even when the schema is there; it now probes for the
+  table first and runs no DDL when it finds it.
 
 ## [2.20.0] - 2026-10-06
 

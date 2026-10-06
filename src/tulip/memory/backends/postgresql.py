@@ -175,6 +175,15 @@ class PostgreSQLBackend(BaseModel):
         pool = await self._get_pool()
 
         async with pool.acquire() as conn:
+            # An existing table needs no DDL. Probing first matters: CREATE
+            # SCHEMA / TABLE / INDEX ... IF NOT EXISTS check privileges before
+            # existence, so a role without CREATE on the database (or schema)
+            # failed against a table a migration had already made.
+            existing = await conn.fetchval("SELECT to_regclass($1)", self._full_table_name)
+            if existing is not None:
+                self._initialized = True
+                return
+
             # Create schema if needed
             await conn.execute(f"""
                 CREATE SCHEMA IF NOT EXISTS {self.config.schema_name}

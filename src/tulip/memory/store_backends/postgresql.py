@@ -31,8 +31,11 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import json
+import logging
 import re
 import warnings
+from collections import OrderedDict
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -45,6 +48,8 @@ if TYPE_CHECKING:
     from asyncpg import Pool
 
     from tulip.rag.embeddings.base import BaseEmbedding
+
+logger = logging.getLogger(__name__)
 
 _NS_SEP = "\x1f"
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -65,6 +70,18 @@ PGVECTOR_ANN_MAX_DIM = 2000
 #: and left every default-constructed store unusable. 512 → 1024 columns, well
 #: inside the limit with room for pgvector's own headroom.
 _DEFAULT_PG_DIM = 512
+
+#: Encodings a store keeps by default (see ``PgMemory(encoding_cache=)``).
+_DEFAULT_ENCODING_CACHE = 1024
+
+#: Said once per store, the first time a search falls back to substring matching.
+_SUBSTRING_ONLY = (
+    "PgMemory: numpy is not installed and no embedder was given, so memories are "
+    "stored without vectors and recall is a substring match (content ILIKE "
+    "'%query%'): a query only finds memories that contain it word for word. "
+    "Install numpy (`pip install 'tulip-agents[pgvector]'` pulls it) for HRR "
+    "recall, or pass an embedder."
+)
 
 
 def _validate_ident(value: str, field: str) -> str:
@@ -112,6 +129,23 @@ class PgMemory(BaseStore):
     wider than the limit is allowed — its width is the model's, not ours — but
     the table is then created without an ANN index and the constructor emits a
     ``RuntimeWarning`` saying so.
+
+    **numpy.** The HRR encoding needs numpy (the ``[pgvector]`` extra installs
+    it). Without numpy and without an embedder nothing is wrong at write time,
+    but rows are stored with no vector and recall degrades to a substring match;
+    the constructor warns (``RuntimeWarning``) and the first degraded search
+    logs a warning, so this never happens quietly.
+
+    **Encoding cache.** Encoding a text costs a pure-Python HRR pass (or an
+    embedding call), and one recall often encodes the same words several times.
+    Each store keeps the last ``encoding_cache`` encodings (``0`` turns the
+    cache off), keyed by ``(tenant, text)``: an entry is only ever reused within
+    the tenant that computed it, so the cache is not a surface two tenants
+    share.
+
+    **Several namespaces at once.** :meth:`search_many` ranks several namespaces
+    of ONE tenant in one transaction and one statement, encoding the query once.
+    Namespaces of different tenants in one call are refused.
     """
 
     def __init__(
@@ -121,9 +155,12 @@ class PgMemory(BaseStore):
         table: str = "tulip_memories",
         dim: int = _DEFAULT_PG_DIM,
         embedder: BaseEmbedding | None = None,
+        encoding_cache: int = _DEFAULT_ENCODING_CACHE,
     ) -> None:
         if dim < 1:
             raise ValueError(f"dim must be >= 1, got {dim}")
+        if encoding_cache < 0:
+            raise ValueError(f"encoding_cache must be >= 0, got {encoding_cache}")
         # asyncpg is an optional dependency imported lazily inside the pool
         # builder, so a missing package used to surface as a bare
         # ModuleNotFoundError from deep inside a coroutine on first *use* —
@@ -134,8 +171,8 @@ class PgMemory(BaseStore):
             raise ImportError(
                 "PgMemory needs the asyncpg driver, which ships as an optional "
                 "dependency. Install it with:\n\n"
-                "    pip install 'tulip-agents[postgresql]'\n\n"
-                "(or `pip install asyncpg` if you manage dependencies yourself)."
+                "    pip install 'tulip-agents[pgvector]'\n\n"
+                "(or `pip install asyncpg numpy` if you manage dependencies yourself)."
             )
         self._dsn = dsn
         self._table = _validate_ident(table, "table")
@@ -171,6 +208,14 @@ class PgMemory(BaseStore):
                 RuntimeWarning,
                 stacklevel=2,
             )
+        # Without numpy (and without an embedder) there is no vector to store or
+        # to rank by: recall silently became a substring match. Say so now.
+        self._substring_only = embedder is None and _numpy() is None
+        self._substring_warned = False
+        if self._substring_only:
+            warnings.warn(_SUBSTRING_ONLY, RuntimeWarning, stacklevel=2)
+        self._encoding_cache = encoding_cache
+        self._encodings: OrderedDict[tuple[str, str], str | None] = OrderedDict()
         self._pool: Pool | None = None
         # Serialises first use so two concurrent calls cannot each build a pool
         # (and each run schema creation).
@@ -183,6 +228,30 @@ class PgMemory(BaseStore):
             result = await self._embedder.embed(content)
             return "[" + ",".join(f"{x:.6f}" for x in result.embedding) + "]"
         return _embed_literal(content, self._dim)
+
+    async def _vector(self, tenant: str, content: str) -> str | None:
+        """:meth:`_embed`, remembered per ``(tenant, content)``.
+
+        The key carries the tenant on purpose: an encoding computed for one
+        tenant is never handed to another, so the cache is per tenant even
+        though the store is shared.
+        """
+        if self._encoding_cache == 0:
+            return await self._embed(content)
+        key = (tenant, content)
+        if key in self._encodings:
+            self._encodings.move_to_end(key)
+            return self._encodings[key]
+        vector = await self._embed(content)
+        self._encodings[key] = vector
+        while len(self._encodings) > self._encoding_cache:
+            self._encodings.popitem(last=False)
+        return vector
+
+    def _warn_substring(self) -> None:
+        if not self._substring_warned:
+            self._substring_warned = True
+            logger.warning(_SUBSTRING_ONLY)
 
     async def _get_pool(self) -> Pool:
         """The connection pool, built (and its schema created) on first use.
@@ -304,7 +373,7 @@ class PgMemory(BaseStore):
         tenant = self._tenant_of(namespace)
         ns = _NS_SEP.join(namespace)
         content = _content_for(value)
-        emb = await self._embed(content)
+        emb = await self._vector(tenant, content)
         pool = await self._get_pool()
         async with pool.acquire() as conn, conn.transaction():
             await self._scoped(conn, tenant)
@@ -387,8 +456,9 @@ class PgMemory(BaseStore):
                     limit,
                 )
             else:
-                qvec = await self._embed(query)
-                if qvec is None:  # pragma: no cover - numpy-less fallback
+                qvec = await self._vector(tenant, query)
+                if qvec is None:
+                    self._warn_substring()
                     rows = await conn.fetch(
                         f"SELECT {cols} FROM {self._table} "
                         "WHERE tenant=$1 AND ns=$2 AND content ILIKE '%'||$3||'%' "
@@ -409,6 +479,72 @@ class PgMemory(BaseStore):
                         limit,
                     )
         return [self._row_to_item(namespace, r) for r in rows]
+
+    async def search_many(
+        self,
+        namespaces: Sequence[tuple[str, ...]],
+        query: str | None = None,
+        limit: int = 10,
+    ) -> list[list[StoreItem]]:
+        """:meth:`search` over several namespaces of ONE tenant, in one statement.
+
+        One transaction (the tenant pin and one ``SELECT``), the query encoded
+        once, and each namespace ranked on its own exactly as :meth:`search`
+        would rank it (``LATERAL`` per namespace), so the result is
+        ``[search(ns, query, limit) for ns in namespaces]`` at the cost of one
+        round trip.
+
+        Raises:
+            ValueError: The namespaces belong to more than one tenant
+                (``namespace[0]``). A call never spans tenants.
+        """
+        if not namespaces:
+            return []
+        tenants = {self._tenant_of(ns) for ns in namespaces}
+        if len(tenants) > 1:
+            raise ValueError(
+                f"search_many spans tenants {sorted(tenants)}: every namespace of one "
+                "call must share namespace[0], the tenant"
+            )
+        tenant = tenants.pop()
+        names = [_NS_SEP.join(ns) for ns in namespaces]
+        cols = "key, value, metadata, created_at, updated_at, version"
+        where = f"FROM {self._table} WHERE tenant=$1 AND ns=n.ns"
+        args: list[Any] = [tenant, names]
+        if not query:
+            inner = f"SELECT {cols}, updated_at AS _rank {where} ORDER BY updated_at DESC"
+            order = "n.idx, m._rank DESC"
+        else:
+            qvec = await self._vector(tenant, query)
+            if qvec is None:
+                self._warn_substring()
+                inner = (
+                    f"SELECT {cols}, updated_at AS _rank {where} "
+                    "AND content ILIKE '%'||$3||'%' ORDER BY updated_at DESC"
+                )
+                order = "n.idx, m._rank DESC"
+                args.append(query)
+            else:
+                inner = (
+                    f"SELECT {cols}, embedding <=> $3::vector AS _rank {where} "
+                    "AND embedding IS NOT NULL ORDER BY embedding <=> $3::vector"
+                )
+                order = "n.idx, m._rank"
+                args.append(qvec)
+        args.append(limit)
+        sql = (
+            f"SELECT n.idx, m.* FROM unnest($2::text[]) WITH ORDINALITY AS n(ns, idx) "
+            f"CROSS JOIN LATERAL ({inner} LIMIT ${len(args)}) m ORDER BY {order}"
+        )
+        pool = await self._get_pool()
+        async with pool.acquire() as conn, conn.transaction():
+            await self._scoped(conn, tenant)
+            rows = await conn.fetch(sql, *args)
+        out: list[list[StoreItem]] = [[] for _ in namespaces]
+        for r in rows:
+            i = int(r["idx"]) - 1
+            out[i].append(self._row_to_item(tuple(namespaces[i]), r))
+        return out
 
     def _row_to_item(self, namespace: tuple[str, ...], r: Any) -> StoreItem:
         return StoreItem(

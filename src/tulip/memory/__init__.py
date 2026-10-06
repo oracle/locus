@@ -30,6 +30,7 @@ Long-term Memory Manager:
 - NoopMemoryManager: Pass-through (no storage) for testing
 - LLMMemoryManager: LLM-backed extraction, persists via any BaseStore backend
 - Memory: A single durable memory entry
+- MemoryScope: A run's write namespace plus read-only recall namespaces
 - MemoryType: Semantic category (user / feedback / project / reference)
 
 Backends (in tulip.memory.backends):
@@ -58,6 +59,7 @@ from tulip.memory.manager import (
     BaseMemoryManager,
     LLMMemoryManager,
     Memory,
+    MemoryScope,
     MemoryType,
     NoopMemoryManager,
 )
@@ -109,6 +111,7 @@ __all__ = [
     "BaseMemoryManager",
     "LLMMemoryManager",
     "Memory",
+    "MemoryScope",
     "MemoryType",
     "NoopMemoryManager",
 ]

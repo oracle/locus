@@ -39,6 +39,7 @@ from __future__ import annotations
 import asyncio
 import json
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -293,6 +294,27 @@ class BaseStore(ABC):
                 "(e.g., InMemoryStore, OpenSearch, pgvector)."
             ),
         )
+
+    async def search_many(
+        self,
+        namespaces: Sequence[tuple[str, ...]],
+        query: str | None = None,
+        limit: int = 10,
+    ) -> list[list[StoreItem]]:
+        """:meth:`search` over several namespaces at once.
+
+        Returns one list per namespace, in the order given:
+        ``[await search(ns, query, limit) for ns in namespaces]``, which is
+        exactly what this default does. A backend that can answer them in one
+        round trip overrides it (``PgMemory`` does, in one statement); callers
+        such as :class:`~tulip.memory.manager.LLMMemoryManager` use it so a
+        recall over every memory type costs one store call instead of one per
+        type.
+
+        Raises:
+            StoreCapabilityError: If the backend does not support search.
+        """
+        return [await self.search(ns, query=query, limit=limit) for ns in namespaces]
 
     # -------------------------------------------------------------------------
     # Semantic Search Methods (Vector/Embedding-based)

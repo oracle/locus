@@ -6,6 +6,8 @@ Available backends:
 - HTTPCheckpointer: Remote HTTP API storage
 - RedisBackend: Redis key-value store
 - PostgreSQLBackend: PostgreSQL with JSONB
+- PgCheckpointer: PostgreSQL, one tenant's threads apart from another's (RLS),
+  one statement per save, per-message retention
 - MySQLBackend: MySQL with JSON columns
 - OpenSearchBackend: OpenSearch with full-text search
 - S3Backend: S3-compatible object storage (AWS S3, MinIO, Cloudflare R2)
@@ -60,6 +62,7 @@ __all__ = [
     # Storage backends (simple dict interface)
     "MySQLBackend",
     "OpenSearchBackend",
+    "PgCheckpointer",
     "PostgreSQLBackend",
     "RedisBackend",
     "S3Backend",
@@ -75,6 +78,10 @@ __all__ = [
 
 def __getattr__(name: str) -> Any:
     """Lazy import backends that pull optional runtime dependencies."""
+    if name == "PgCheckpointer":
+        from tulip.memory.backends.pg_checkpointer import PgCheckpointer
+
+        return PgCheckpointer
     if name == "S3Backend":
         from tulip.memory.backends.s3 import S3Backend
 
