@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [2.19.0] - 2026-10-06
+
 ### Added
 
 - **`ModelRetryConfig(retry_unclassified=True)`** also retries failures the
