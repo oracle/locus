@@ -770,6 +770,9 @@ omit = [
     "src/tulip/memory/backends/oci_bucket.py",
     # PgMemory needs a live Postgres+pgvector; covered by integration tests.
     "src/tulip/memory/store_backends/postgresql.py",
+    # PgCheckpointer likewise: its unit tests pin the statements it sends, and
+    # tests/integration/test_pg_checkpointer.py covers it on a real Postgres.
+    "src/tulip/memory/backends/pg_checkpointer.py",
 ]
 
 [tool.coverage.report]
