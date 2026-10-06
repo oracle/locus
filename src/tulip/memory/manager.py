@@ -35,6 +35,18 @@ the prefix per run from its metadata::
     )
     agent.run(prompt, metadata={"user_id": user_id})
 
+A resolver may also return a :class:`MemoryScope`: the namespace the run
+writes to, plus namespaces it only recalls from (a team's or a family's shared
+facts), all recalled in one call::
+
+    namespace_resolver = lambda run: MemoryScope(
+        namespace=(tenant, "users", run.metadata["user_id"]),
+        recall=((tenant, "team"),),
+    )
+
+A recall namespace must share the write namespace's first element (the
+tenant); one that does not is dropped with a warning and never read.
+
 Memory types
 ------------
 ``user``
@@ -86,7 +98,7 @@ import asyncio
 import hashlib
 import logging
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable, Coroutine, Iterator
+from collections.abc import Awaitable, Callable, Coroutine, Iterator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -130,18 +142,39 @@ ExtractFn = Callable[
 ]
 
 
-#: ``(run) -> namespace prefix`` for :class:`LLMMemoryManager`. ``run`` is a
-#: :class:`~tulip.core.events.RunInfo` built from the run's state: ``run_id``,
-#: ``metadata`` (the run's persisted metadata) and ``agent_name`` (the agent
-#: id). ``None`` means NO memory for that run — no recall, no injection, no
-#: extraction — never the manager's shared ``namespace_prefix``; return that
-#: prefix explicitly to opt a run into it.
-NamespaceResolver = Callable[["RunInfo"], "tuple[str, ...] | None"]
+@dataclass(frozen=True)
+class MemoryScope:
+    """Where one run's memories are written, and where else they are recalled from.
 
-#: ``(manager, prefix)`` a scoped manager call is running under.
-_ACTIVE_NAMESPACE: ContextVar[tuple[object, tuple[str, ...]] | None] = ContextVar(
-    "tulip_memory_namespace", default=None
-)
+    Returned by a ``namespace_resolver`` instead of a bare prefix when a run
+    should also recall shared memories — a team's, a household's — that it
+    never writes to.
+
+    Attributes:
+        namespace: The prefix the run reads AND writes (extraction saves here
+            and only here).
+        recall: Further prefixes recalled alongside ``namespace``, read-only.
+            Each must share ``namespace[0]`` (the tenant, in a multi-tenant
+            store); one that does not is dropped with a warning and never read.
+    """
+
+    namespace: tuple[str, ...]
+    recall: tuple[tuple[str, ...], ...] = ()
+
+
+#: ``(run) -> namespace prefix`` (or a :class:`MemoryScope`) for
+#: :class:`LLMMemoryManager`. ``run`` is a :class:`~tulip.core.events.RunInfo`
+#: built from the run's state: ``run_id``, ``metadata`` (the run's persisted
+#: metadata) and ``agent_name`` (the agent id). ``None`` means NO memory for
+#: that run — no recall, no injection, no extraction — never the manager's
+#: shared ``namespace_prefix``; return that prefix explicitly to opt a run into
+#: it.
+NamespaceResolver = Callable[["RunInfo"], "tuple[str, ...] | MemoryScope | None"]
+
+#: ``(manager, prefix, recall prefixes)`` a scoped manager call is running under.
+_ACTIVE_NAMESPACE: ContextVar[
+    tuple[object, tuple[str, ...], tuple[tuple[str, ...], ...]] | None
+] = ContextVar("tulip_memory_namespace", default=None)
 
 
 class MemoryType(StrEnum):
@@ -479,7 +512,9 @@ class LLMMemoryManager(BaseMemoryManager):
             neither reads nor writes memories — it never falls back to the
             shared ``namespace_prefix``, which would pool every such run
             together. Return ``namespace_prefix`` explicitly to opt a run
-            into it. A resolver that raises is treated the same way.
+            into it. A resolver that raises is treated the same way. Return a
+            :class:`MemoryScope` to also recall read-only namespaces of the
+            same tenant in the same call.
 
     Example::
 
@@ -534,29 +569,49 @@ class LLMMemoryManager(BaseMemoryManager):
             return active[1]
         return tuple(self.namespace_prefix)
 
+    @property
+    def active_recall(self) -> tuple[tuple[str, ...], ...]:
+        """Every prefix a recall in the current scope reads: the active
+        namespace first, then the scope's read-only ``recall`` prefixes."""
+        active = _ACTIVE_NAMESPACE.get()
+        if active is not None and active[0] is self:
+            return (active[1], *active[2])
+        return (tuple(self.namespace_prefix),)
+
     @contextmanager
-    def scoped(self, namespace_prefix: tuple[str, ...]) -> Iterator[None]:
+    def scoped(
+        self,
+        namespace_prefix: tuple[str, ...],
+        *,
+        recall: Sequence[tuple[str, ...]] = (),
+    ) -> Iterator[None]:
         """Run :meth:`retrieve` / :meth:`save` / :meth:`extract` calls — and
         background jobs scheduled — inside the block under
         ``namespace_prefix``.
 
+        ``recall`` adds read-only prefixes that :meth:`retrieve` also reads;
+        writes still go to ``namespace_prefix`` alone. A recall prefix whose
+        first element differs from ``namespace_prefix[0]`` (another tenant) is
+        dropped with a warning.
+
         Context-local: concurrent tasks each keep their own scope. The agent
         runtime does this for you when ``namespace_resolver`` is set.
         """
-        token = _ACTIVE_NAMESPACE.set((self, tuple(namespace_prefix)))
+        prefix = tuple(namespace_prefix)
+        token = _ACTIVE_NAMESPACE.set((self, prefix, _same_tenant(prefix, recall)))
         try:
             yield
         finally:
             _ACTIVE_NAMESPACE.reset(token)
 
-    def _resolve_namespace(self, state: AgentState) -> tuple[str, ...] | None:
-        """This run's prefix; ``None`` means no memory for this run.
+    def _resolve_namespace(self, state: AgentState) -> MemoryScope | None:
+        """This run's scope; ``None`` means no memory for this run.
 
         That is the case when the resolver returns ``None`` or raises: both
         fail closed, never into the shared ``namespace_prefix``.
         """
         if self.namespace_resolver is None:
-            return tuple(self.namespace_prefix)
+            return MemoryScope(tuple(self.namespace_prefix))
         from tulip.core.events import RunInfo  # noqa: PLC0415
 
         run = RunInfo.build(
@@ -576,14 +631,17 @@ class LLMMemoryManager(BaseMemoryManager):
             return None
         if resolved is None:
             return None
-        return tuple(resolved)
+        if isinstance(resolved, MemoryScope):
+            return MemoryScope(tuple(resolved.namespace), tuple(map(tuple, resolved.recall)))
+        return MemoryScope(tuple(resolved))
 
     async def on_session_start(self, state: AgentState) -> AgentState:
-        """Inject this run's memories, read from the run's namespace."""
-        namespace = self._resolve_namespace(state)
-        if namespace is None:
+        """Inject this run's memories, read from the run's namespace (and the
+        read-only namespaces its :class:`MemoryScope` names) in one recall."""
+        scope = self._resolve_namespace(state)
+        if scope is None:
             return _strip_memory_blocks(state)
-        with self.scoped(namespace):
+        with self.scoped(scope.namespace, recall=scope.recall):
             return await super().on_session_start(state)
 
     async def on_session_end(self, state: AgentState) -> None:
@@ -593,10 +651,12 @@ class LLMMemoryManager(BaseMemoryManager):
         shares this manager's one semaphore and one :meth:`drain` with every
         other namespace's jobs.
         """
-        namespace = self._resolve_namespace(state)
-        if namespace is None:
+        scope = self._resolve_namespace(state)
+        if scope is None:
             return
-        with self.scoped(namespace):
+        # Extraction writes to the run's own namespace only, never to a
+        # recall namespace.
+        with self.scoped(scope.namespace):
             await super().on_session_end(state)
 
     def _extraction_order_key(self) -> tuple[str, ...]:
@@ -621,6 +681,7 @@ class LLMMemoryManager(BaseMemoryManager):
         limit: int | None = None,
         *,
         query: str | None = None,
+        namespaces: Sequence[tuple[str, ...]] | None = None,
     ) -> list[Memory]:
         """Retrieve stored memories across every type.
 
@@ -634,38 +695,92 @@ class LLMMemoryManager(BaseMemoryManager):
         because no memory contains the whole user message. Stores that cannot
         search at all fall back to recency.
 
+        Every type of every namespace is read with one
+        :meth:`~tulip.memory.store.BaseStore.search_many` call for the ranking
+        and one for the recency top-up — one round trip each on ``PgMemory``
+        — instead of a search per type.
+
         Args:
             limit: Maximum memories returned. ``None`` uses
                 ``retrieve_limit``.
             query: Optional text to rank memories against.
+            namespaces: Prefixes to recall from, in priority order. ``None``
+                reads the current scope: the active namespace and the scope's
+                read-only recall prefixes (see :class:`MemoryScope`). All must
+                share their first element (the tenant).
+
+        Raises:
+            ValueError: ``namespaces`` span more than one first element.
         """
         top = self.retrieve_limit if limit is None else limit
         if top <= 0:
             return []
+        if namespaces is None:
+            prefixes = list(self.active_recall)
+        else:
+            prefixes = [tuple(p) for p in namespaces]
+            if len({p[:1] for p in prefixes}) > 1:
+                raise ValueError(
+                    "retrieve(namespaces=...) spans more than one tenant (first "
+                    "element); recall one tenant per call"
+                )
+        if not prefixes:
+            return []
+        targets = [(*p, t.value) for p in prefixes for t in MemoryType]
 
         ranked: list[Memory] = []
         if query and query.strip():
-            per_type: list[list[Memory]] = []
-            for memory_type in MemoryType:
-                try:
-                    items = await self.store.search(self._ns(memory_type), query=query, limit=top)
-                except Exception:  # noqa: BLE001
-                    # No (or failing) query search: recency below covers it.
-                    items = []
-                per_type.append(_memories_from_items(items))
-            # Scores are not comparable across separate searches, so merge
-            # the per-type rankings rank-by-rank instead of by score.
-            for rank in range(max((len(r) for r in per_type), default=0)):
-                ranked.extend(r[rank] for r in per_type if rank < len(r))
+            per_ns = [
+                _memories_from_items(items) for items in await self._ranked(targets, query, top)
+            ]
+            # Scores are not comparable across separate rankings, so merge
+            # them rank-by-rank instead of by score.
+            for rank in range(max((len(r) for r in per_ns), default=0)):
+                ranked.extend(r[rank] for r in per_ns if rank < len(r))
 
-        recent = await self._recent(top)
+        recent = await self._recent(top, targets)
         return _dedupe(ranked + recent)[:top]
 
-    async def _recent(self, limit: int) -> list[Memory]:
+    async def _search_many(
+        self, namespaces: list[tuple[str, ...]], query: str | None, limit: int
+    ) -> list[list[StoreItem]]:
+        """The store's ``search_many``, or a loop for a duck-typed store without one."""
+        many = getattr(self.store, "search_many", None)
+        if many is not None:
+            found: list[list[StoreItem]] = await many(namespaces, query=query, limit=limit)
+            return found
+        return [await self.store.search(ns, query=query, limit=limit) for ns in namespaces]
+
+    async def _ranked(
+        self, namespaces: list[tuple[str, ...]], query: str, limit: int
+    ) -> list[list[StoreItem]]:
+        """Each namespace's best matches for ``query``; ``[]`` where it cannot rank."""
+        try:
+            return await self._search_many(namespaces, query, limit)
+        except Exception:  # noqa: BLE001
+            pass
+        out: list[list[StoreItem]] = []
+        for ns in namespaces:
+            try:
+                out.append(await self.store.search(ns, query=query, limit=limit))
+            except Exception:  # noqa: BLE001
+                # No (or failing) query search: recency covers it.
+                out.append([])
+        return out
+
+    async def _recent(
+        self, limit: int, namespaces: list[tuple[str, ...]] | None = None
+    ) -> list[Memory]:
         """Up to ``limit`` memories across every type, newest first."""
+        if namespaces is None:
+            namespaces = [self._ns(t) for t in MemoryType]
+        try:
+            per_ns = await self._search_many(namespaces, None, limit)
+        except Exception:  # noqa: BLE001
+            per_ns = [await self._list_items_in(ns, limit) for ns in namespaces]
         memories: list[Memory] = []
-        for memory_type in MemoryType:
-            memories.extend(_memories_from_items(await self._list_items(memory_type, limit)))
+        for items in per_ns:
+            memories.extend(_memories_from_items(items))
         # Sort newest first by updated_at (best-effort — not all items carry it).
         memories.sort(
             key=lambda m: m.metadata.get("updated_at", ""),
@@ -675,7 +790,10 @@ class LLMMemoryManager(BaseMemoryManager):
 
     async def _list_items(self, memory_type: MemoryType, limit: int) -> list[StoreItem]:
         """List a type's items, via ``search`` or ``list_keys`` + ``get``."""
-        ns = self._ns(memory_type)
+        return await self._list_items_in(self._ns(memory_type), limit)
+
+    async def _list_items_in(self, ns: tuple[str, ...], limit: int) -> list[StoreItem]:
+        """List a namespace's items, via ``search`` or ``list_keys`` + ``get``."""
         try:
             return await self.store.search(ns, query=None, limit=limit)
         except Exception:  # noqa: BLE001
@@ -701,9 +819,15 @@ class LLMMemoryManager(BaseMemoryManager):
                     )
             return items
 
-    async def retrieve_relevant(self, query: str | None, limit: int | None = None) -> list[Memory]:
+    async def retrieve_relevant(
+        self,
+        query: str | None,
+        limit: int | None = None,
+        *,
+        namespaces: Sequence[tuple[str, ...]] | None = None,
+    ) -> list[Memory]:
         """Rank stored memories against ``query`` — see :meth:`retrieve`."""
-        return await self.retrieve(limit, query=query)
+        return await self.retrieve(limit, query=query, namespaces=namespaces)
 
     async def save(self, memories: list[Memory]) -> None:
         """Upsert memories into the backing store.
@@ -739,18 +863,17 @@ class LLMMemoryManager(BaseMemoryManager):
         if self.max_memories <= 0:
             return
         ns = self._ns(memory_type)
-        keys = await self.store.list_keys(ns, limit=_PRUNE_SCAN_LIMIT)
-        if len(keys) <= self.max_memories:
+        try:
+            # One read: the items carry their values, and so their updated_at.
+            items = await self.store.search(ns, query=None, limit=_PRUNE_SCAN_LIMIT)
+            stamped = [(_updated_at(item.value), item.key) for item in items]
+        except Exception:  # noqa: BLE001
+            keys = await self.store.list_keys(ns, limit=_PRUNE_SCAN_LIMIT)
+            if len(keys) <= self.max_memories:
+                return
+            stamped = [(_updated_at(await self.store.get(ns, key)), key) for key in keys]
+        if len(stamped) <= self.max_memories:
             return
-        stamped: list[tuple[str, str]] = []
-        for key in keys:
-            raw = await self.store.get(ns, key)
-            updated = ""
-            if isinstance(raw, dict):
-                meta = raw.get("metadata")
-                if isinstance(meta, dict):
-                    updated = str(meta.get("updated_at", ""))
-            stamped.append((updated, key))
         stamped.sort(reverse=True)
         for _, key in stamped[self.max_memories :]:
             await self.store.delete(ns, key)
@@ -875,6 +998,36 @@ def _latest_user_text(state: AgentState) -> str | None:
         if message.role == Role.USER and message.content:
             return message.content
     return None
+
+
+def _same_tenant(
+    namespace: tuple[str, ...], recall: Sequence[tuple[str, ...]]
+) -> tuple[tuple[str, ...], ...]:
+    """``recall`` without the prefixes of another tenant (first element), each
+    dropped with a warning: a run never recalls across tenants."""
+    kept: list[tuple[str, ...]] = []
+    for raw in recall:
+        prefix = tuple(raw)
+        if prefix[:1] != namespace[:1]:
+            logger.warning(
+                "memory recall namespace %r dropped: its first element (the tenant) "
+                "differs from the run's namespace %r",
+                prefix,
+                namespace,
+            )
+            continue
+        if prefix != namespace and prefix not in kept:
+            kept.append(prefix)
+    return tuple(kept)
+
+
+def _updated_at(raw: Any) -> str:
+    """The ``updated_at`` a stored memory value carries, or ``""``."""
+    if isinstance(raw, dict):
+        meta = raw.get("metadata")
+        if isinstance(meta, dict):
+            return str(meta.get("updated_at", ""))
+    return ""
 
 
 def _memories_from_items(items: list[StoreItem]) -> list[Memory]:

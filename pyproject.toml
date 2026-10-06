@@ -160,7 +160,9 @@ checkpoints = [
 
 # RAG vector stores — one extra per store under src/tulip/rag/stores/
 # that needs a runtime dep. Keep in sync.
-pgvector = ["asyncpg>=0.29"]
+# numpy is PgMemory's HRR encoding: without it rows are stored with no vector
+# and recall degrades to a substring match.
+pgvector = ["asyncpg>=0.29", "numpy>=1.26"]
 qdrant = ["qdrant-client>=1.9"]
 chroma = ["chromadb>=0.5"]
 
