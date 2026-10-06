@@ -38,6 +38,27 @@ policy.
   agent can be verified call by call. A callable that returns `None` is no
   verification; one that raises refuses the call with a `deny`, recorded on the
   trail, so a failed verification never passes for one that was not required.
+- **`tulip.decision`: typed decisions with probabilities.** Ask a model a
+  `Choice(name, question, options)`, a `YesNo(name, question)` or a
+  `Score(name, question, levels)` about one input and get back an `Answer` per
+  field: a probability for every listed answer, the argmax, its margin, and
+  `coverage`, the share of the model's probability that went to the listed
+  answers at all. The default provider, `LogprobDecider`, needs only an
+  OpenAI-compatible server that returns logprobs (vLLM, llama.cpp, LM Studio):
+  one `max_tokens=1` request per field with `top_logprobs`, fields of one
+  input sent concurrently, and `DecisionError` instead of a guess when no
+  listed answer is among the top tokens. The prompt (`SYSTEM_PROMPT`,
+  `render()`) is a fixed, tested contract, so a head fine-tuned on it is served
+  with no glue. `DecisionAdvisor` plugs an admit head into
+  `approve(advisor=)`, by argmax or by a certified `hold_at` threshold on
+  `1 - P(allow)`, and like every advisor it can only make a decision stricter.
+  `verification_from_decision()` turns yes/no safety heads into the
+  `VerificationResult` that `ControlPolicy.require_verification_score` weighs:
+  a head at its threshold denies. `TenantDecisionRouter` serves each tenant
+  from its own head only, refuses an unknown tenant, and records every
+  decision (labels and probabilities, never the input unless
+  `record_text=True`) on that tenant's audit chain; `per_tenant_trails()` is
+  its zero-infra audit side. See [`docs/decision.md`](docs/decision.md).
 
 ## [2.20.0] - 2026-10-06
 
