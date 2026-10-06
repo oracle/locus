@@ -8,6 +8,22 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **`gate_tool(advisor=)`, and a verdict worked out for each call.** A
+  trained control model (any `ControlAdvisor`) is now passed through
+  `gate_tool`, `admit` and `admit_sync` to `approve(advisor=)` on every call,
+  including the re-admission of an approved hold; as everywhere, it can only
+  make a decision stricter, and one that fails or has no opinion changes
+  nothing. When an advisor is given, the `action-admission` trail entry also
+  carries `policy_outcome` and `model_outcome`. `gate_tool`'s `verdict=` and
+  `finding=` also take `(tool_name, arguments) -> value`, sync or async,
+  asked for each call instead of fixed when the tool is wrapped (and asked
+  again about an approver's edited arguments), so one gated tool on a shared
+  agent can be verified call by call. A callable that returns `None` is no
+  verification; one that raises refuses the call with a `deny`, recorded on the
+  trail, so a failed verification never passes for one that was not required.
+
 ## [2.20.0] - 2026-10-06
 
 ### Added
