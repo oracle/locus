@@ -8,6 +8,36 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **`SkillsPlugin(router=...)`: skills a host routes per run, on one Agent.**
+  `router(text, run)` gets the run's latest user message and its `RunInfo`
+  (`run.metadata` is what `agent.run(..., metadata=)` passed), sync or async,
+  and returns the skill names active for that run. It is asked once per run,
+  before the run's first model call, and its answer replaces `active=` for
+  that run (`None` keeps `active`, an empty list means none). An unknown name
+  is logged and ignored, and a router that raises leaves the run on `active`,
+  so a routing mistake never costs a live turn. With
+  `enforce_allowed_tools=True` the routed skills' `allowed-tools` bind that
+  run's calls. The router cannot change which tools the model is offered
+  (`BeforeModelCallEvent.tools` is read-only); a disallowed call is cancelled
+  before it runs.
+- **The wrapper text around skills is the host's.** `active_preamble=` and
+  `catalog_preamble=` replace the sentences before the active instructions
+  and the catalog, `render_skill=(skill) -> str` renders each active skill,
+  and `skill_footer=False` leaves the `Allowed tools` / `Compatibility` /
+  location footer out of the default rendering.
+
+### Fixed
+
+- **A skill activated in one run no longer widens another run's tools.**
+  `SkillsPlugin` kept one activation list for every run it served, so a skill
+  the model activated through the `skills` tool stayed in
+  `allowed_tools()` for every later and concurrent run of a shared Agent.
+  Routed and model-activated skills are now per run and dropped when the run
+  ends; `allowed_tools(run_id)` reads one run's, and `activated_skills` still
+  reports the most recent run's.
+
 ## [2.20.0] - 2026-10-06
 
 ### Added
