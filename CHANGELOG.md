@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [2.21.2] - 2026-10-07
+
 ### Fixed
 
 - **A read after an edit shows the edit.** `read`, `grep`, `glob`, `ls` and
