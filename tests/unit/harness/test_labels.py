@@ -228,7 +228,16 @@ def test_a_redirect_that_writes_no_file_still_only_reads(command: str) -> None:
 
 @pytest.mark.parametrize(
     "command",
-    ["cat x > out.txt", "cat x >> out.txt", "cat x 2>err.log", "ls | tee out.txt", "sleep 100 &"],
+    [
+        "cat x > out.txt",
+        "cat x >> out.txt",
+        "cat x 2>err.log",
+        "ls | tee out.txt",
+        "sleep 100 &",
+        # A redirect FROM a file reads a path no argument names, out of the workspace checks' sight.
+        "cat /dev/null < /etc/passwd",
+        "wc -l < /etc/shadow",
+    ],
 )
 def test_a_redirect_into_a_file_or_a_background_job_is_not_a_read(command: str) -> None:
     assert not read_only(command)

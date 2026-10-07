@@ -328,11 +328,29 @@ GIT_LISTING = {
 }
 
 
+def _harmless_redirects(simple: SimpleCommand) -> bool:
+    """Every redirection only joins or discards output: ``2>&1``, ``>&2``, ``>/dev/null``.
+
+    Anything else counts against a read: a redirect into a file writes it, and a redirect
+    FROM a file (``< /etc/passwd``) reads a path the command's arguments never name, so the
+    workspace checks on those arguments would not see it.
+    """
+    for op, target in simple.redirects:
+        if "<" in op:
+            return False
+        if target == "/dev/null":
+            continue
+        if op.endswith("&") and (target.isdigit() or target == "-"):
+            continue
+        return False
+    return True
+
+
 def _plain_pipeline(command: str, patterns: list[re.Pattern[str]]) -> bool:
     """Commands each matching ``patterns``, piped or listed, nothing else going on.
 
-    A redirection that writes no file -- ``2>&1``, ``>&2``, ``2>/dev/null`` -- does
-    not make a command write (:attr:`SimpleCommand.writes_files`); models append
+    A redirection that only joins or discards output -- ``2>&1``, ``>&2``, ``2>/dev/null``
+    -- does not make a command write (:func:`_harmless_redirects`); a redirect from a file does; models append
     ``2>&1`` to nearly every command, and holding ``cat x 2>&1`` for a person was
     the cost of reading it as a write. A list (``;``, ``&&``, ``||``) of read-only
     commands only reads. Backgrounding (``&``) does not: the command outlives the
@@ -342,7 +360,7 @@ def _plain_pipeline(command: str, patterns: list[re.Pattern[str]]) -> bool:
     if not parsed.parsed or parsed.has_substitution or not parsed.commands:
         return False
     for simple in parsed.commands:
-        if simple.nested or simple.wrappers or simple.writes_files or not simple.argv:
+        if simple.nested or simple.wrappers or not _harmless_redirects(simple) or not simple.argv:
             return False
         if simple.connector not in ("", "|", "|&", ";", "&&", "||"):
             return False
