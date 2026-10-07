@@ -121,7 +121,7 @@ def make_glob(h: HarnessContext) -> Tool:
             return f"no files matching {pattern}"
         return _page(found, max(0, int(offset)), GLOB_LIMIT)
 
-    return tool(idempotent=True)(glob)
+    return tool(glob)
 
 
 def make_grep(h: HarnessContext) -> Tool:
@@ -186,4 +186,4 @@ def make_grep(h: HarnessContext) -> Tool:
             return f"no matches for {pattern} past offset {start}"
         return "\n".join(shown)
 
-    return tool(idempotent=True)(grep)
+    return tool(grep)

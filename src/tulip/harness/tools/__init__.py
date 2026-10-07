@@ -11,6 +11,10 @@ gate: governance is applied around the built tool, in one place, by
 
 from __future__ import annotations
 
+#: No harness tool is declared ``idempotent``. The agent loop answers a repeated call to an
+#: idempotent tool from the run's earlier result without running it, and a workspace read is
+#: not repeatable: after an edit, ``read`` of the same path must show the edit. Seen live on
+#: dev (functional F23): a subagent's read after its own edit returned the file as it was.
 from collections.abc import Callable
 
 from tulip.harness.tools.common import HarnessConfig, HarnessContext, Plan

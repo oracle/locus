@@ -8,6 +8,18 @@ policy.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A read after an edit shows the edit.** `read`, `grep`, `glob`, `ls` and
+  `todo_read` were declared idempotent, and the agent loop answers a repeated
+  idempotent call from the run's earlier result without running it, so a read
+  after a write returned the file as it was (seen live in a subagent). No
+  harness tool is idempotent now.
+- **A redirect from a file is not a read.** 2.21.1 let any redirection that
+  writes no file pass as a read, which included `cat /dev/null < /etc/passwd`:
+  a path no argument names, out of the workspace checks' sight. Only
+  redirections that join or discard output (`2>&1`, `>&2`, `>/dev/null`) pass.
+
 ## [2.21.1] - 2026-10-06
 
 ### Fixed
