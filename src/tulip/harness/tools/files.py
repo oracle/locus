@@ -172,7 +172,7 @@ def make_read(h: HarnessContext) -> Tool:
             f"\n... {more:,} more lines (of {window.total:,}) — read again with offset={following}"
         )
 
-    return tool(idempotent=True)(read)
+    return tool(read)
 
 
 # ------------------------------------------------------------------ write --
@@ -409,4 +409,4 @@ def make_ls(h: HarnessContext) -> Tool:
         entries = h.backend.ls(path, recursive=True, depth=depth)
         return "\n".join(_tree(entries, top, depth)) or "(empty)"
 
-    return tool(idempotent=True)(ls)
+    return tool(ls)

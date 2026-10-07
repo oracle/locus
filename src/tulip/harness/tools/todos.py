@@ -73,4 +73,4 @@ def make_todo_read(h: HarnessContext) -> Tool:
         """Read the current plan back."""
         return render(h.todos.snapshot())
 
-    return tool(idempotent=True)(todo_read)
+    return tool(todo_read)
