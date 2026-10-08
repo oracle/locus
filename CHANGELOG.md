@@ -110,6 +110,7 @@ policy.
     -- and whoever owns the chain makes the record.
   - ``enforcement_mode(playbook, deployment="record")`` takes the deployment's
     default as an argument instead of reading ``TULIP_GATEWAY_PLAYBOOK_ENFORCEMENT``.
+
 ## [2.21.3] - 2026-10-07
 
 ### Security
