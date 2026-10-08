@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [2.22.0] - 2026-10-08
+
 ### Added
 
 - **`tulip.runner`: the protocol a box runner speaks with the Tulip gateway.**
