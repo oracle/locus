@@ -37,7 +37,7 @@ policy, data and all, so the CLI and the gateway hold one copy.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -376,6 +376,51 @@ def read_only(command: str) -> bool:
     return _plain_pipeline(command, AUTO_OK)
 
 
+#: sed commands that write a file (``w``, ``W``, the ``w`` flag of ``s``) or run one (GNU ``e``,
+#: the ``e`` flag of ``s``). A script holding any of these letters is not judged a read, even
+#: when the letter only sits inside a regex: telling them apart needs a sed parser, and a held
+#: ``sed -n '/hello/p'`` costs a click where a missed ``sed -n '1e rm -rf ~'`` costs the box.
+_SED_WRITE_OR_RUN = frozenset("wWe")
+
+
+def _sed_writes_or_runs(args: Sequence[str]) -> bool:
+    """``sed`` that edits in place, reads its script from a file, or whose script writes or runs.
+
+    ``sed -n`` is on the read-only list because it only prints. But ``-n -i`` still edits
+    in place, and GNU sed's ``e`` command runs a shell command: ``sed -n '1e id' f`` was
+    classified a read (found by a Tulip harness agent reviewing this module).
+    """
+    scripts: list[str] = []
+    expect_script = False
+    positional: list[str] = []
+    for a in args:
+        if expect_script:
+            scripts.append(a)
+            expect_script = False
+            continue
+        if a in ("-e", "--expression"):
+            expect_script = True
+            continue
+        if a.startswith("--expression="):
+            scripts.append(a.split("=", 1)[1])
+            continue
+        if a.startswith(("--in-place", "--file")) or a == "-f":
+            return True
+        if a.startswith("--"):
+            continue
+        if a.startswith("-") and len(a) > 1:
+            flags = a[1:]
+            if "i" in flags or "f" in flags:
+                return True  # -i, -i.bak, -ni: in place; -f: a script we cannot see
+            if flags.endswith("e"):
+                expect_script = True  # -ne 'script'
+            continue
+        positional.append(a)
+    if not scripts and positional:
+        scripts.append(positional[0])
+    return any(ch in _SED_WRITE_OR_RUN for script in scripts for ch in script)
+
+
 def _writes_after_all(c: SimpleCommand) -> bool:  # noqa: PLR0911 - one answer per program
     """A read-only program used in a way that writes, deletes or runs something."""
     name, args = c.name, c.argv[1:]
@@ -391,6 +436,8 @@ def _writes_after_all(c: SimpleCommand) -> bool:  # noqa: PLR0911 - one answer p
         return any(a in ("-s", "--set") or a.startswith("--set=") for a in args)
     if name == "rg":
         return any(a.startswith("--pre") for a in args)
+    if name == "sed":
+        return _sed_writes_or_runs(args)
     if name == "git":
         sub, rest = _git_subcommand(args)
         if any(a.startswith("--output") for a in rest):

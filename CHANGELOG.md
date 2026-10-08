@@ -8,6 +8,16 @@ policy.
 
 ## [Unreleased]
 
+### Security
+
+- **`sed` that edits in place, writes a file or runs a command is no longer a
+  read.** `sed -n` is on the read-only list because it prints, but `sed -n -i`,
+  `--in-place`, `-i.bak`, the `w` command and GNU's `e` command
+  (`sed -n '1e touch pwned' f`) were classified `workspace.read`, so an edit or
+  a shell command cleared the gate as a read. Found by a Tulip harness agent
+  asked to review `tulip.harness.labels`. A script holding `w`, `W` or `e`
+  anywhere, or read from a file (`-f`), is now an exec.
+
 ## [2.21.2] - 2026-10-07
 
 ### Fixed
