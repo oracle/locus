@@ -242,3 +242,33 @@ def test_a_redirect_that_writes_no_file_still_only_reads(command: str) -> None:
 def test_a_redirect_into_a_file_or_a_background_job_is_not_a_read(command: str) -> None:
     assert not read_only(command)
     assert classify_command(command).kind == KIND_EXEC
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "sed -n -i 's/x/y/' f",  # -n prints, -i still edits in place
+        "sed -ni 's/x/y/' f",
+        "sed -n --in-place 's/x/y/' f",
+        "sed -n -i.bak 's/x/y/' f",
+        "sed -n 'w out.txt' f",  # w writes a file
+        "sed -n -e 's/x/y/w out.txt' f",
+        "sed -n '1e touch pwned' f",  # GNU e runs a shell command
+        "sed -n 's/.*/id/e' f",
+        "sed -n -f prog.sed f",  # a script we cannot see
+    ],
+)
+def test_sed_that_edits_writes_or_runs_is_not_a_read(command: str) -> None:
+    # Found by a Tulip harness agent asked to review this module: `sed -n -i` and
+    # `sed -n '1e ...'` passed as reads, so an in-place edit or a shell command cleared
+    # the gate as a read.
+    assert not read_only(command)
+    assert classify_command(command).kind == KIND_EXEC
+
+
+@pytest.mark.parametrize(
+    "command", ["sed -n 1,5p f", "sed -n '/x/p' f", "sed -n -e 10p -e 20p file.txt"]
+)
+def test_sed_that_only_prints_is_still_a_read(command: str) -> None:
+    assert read_only(command)
+    assert classify_command(command).kind == KIND_READ
