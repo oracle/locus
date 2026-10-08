@@ -196,7 +196,7 @@ jobs:
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
     permissions:
-      contents: write # attach the .pyz to the release
+      contents: read
       packages: write # push ghcr.io/tuliplabs-ai/tulip-runner
     env:
       VERSION: ${{ needs.build.outputs.version }}
@@ -229,14 +229,6 @@ jobs:
             echo "the runner started without a gateway" >&2
             exit 1
           fi
-
-      - name: Attach the .pyz to the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event.release.tag_name }}
-        run: |
-          gh release upload "$TAG" dist-runner/tulip-runner.pyz \
-            dist-runner/tulip-runner.pyz.requirements.txt --clobber
 
       - name: Build and push the runner image
         env:

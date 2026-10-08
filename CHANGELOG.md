@@ -8,6 +8,14 @@ policy.
 
 ## [Unreleased]
 
+### Changed
+
+- **`tulip-runner.pyz` is no longer attached to GitHub releases.** The release
+  still builds it (and checks that it starts) for the private
+  `ghcr.io/tuliplabs-ai/tulip-runner` image. Anyone else builds it from the
+  published wheel with `scripts/build_runner_pyz.sh`; a Tulip gateway builds its
+  own at image build time.
+
 ## [2.23.0] - 2026-10-08
 
 ### Added
