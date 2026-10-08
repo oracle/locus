@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [2.21.3] - 2026-10-07
+
 ### Security
 
 - **`sed` that edits in place, writes a file or runs a command is no longer a
