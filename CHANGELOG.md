@@ -10,6 +10,47 @@ policy.
 
 ## [2.23.0] - 2026-10-08
 
+### Added
+
+- **The box runner itself: `python -m tulip.runner` (also `tulip-runner`).**
+  Builds a run's agent from its `RunManifest` and nothing else, runs it inside
+  the box, and parks or reports when it stops. See `docs/runner.md`.
+  - `build_runtime`: an OpenAI-compatible model on `model.base_url`, keyed by
+    the OpenShell placeholder (never a key) and sending
+    `Accept-Encoding: identity` so the box guard can meter usage
+    (`OpenAIConfig.default_headers` is new). Tools by `runs`: `box` → the
+    harness tools over `/sandbox`, plus `ask_user` (pauses the run) and `task`
+    (a subagent in the same box, as a child run the gateway mints); `gateway`
+    → `RemoteTool`; `mcp:<id>` → `tools/call` on that mount; `api:<id>` → one
+    operation of an API connector. A box tool the runner cannot build refuses
+    the run. Every call except the gateway's own goes through `RemoteGate`;
+    its decision token reaches only the MCP and API tools, which send it as
+    `x-tulip-decision`. A call still held after `budgets.park_ttl_s` (default
+    600 s) pauses the run, checkpointed with the gateway. A v2 playbook is shown
+    in `tulip.playbooks.v2`'s own prose; plan mode adds its rules to the prompt.
+  - `RunManifest` learns API connectors (`api`, `ApiConnector`, `ToolEntry.operation`,
+    `runs: api:<id>`), the run's `input`, and `budgets.park_ttl_s`.
+    `api_request` maps a call's arguments to exactly one request (path
+    parameters, query, canonical JSON body), so the gateway can bind a decision
+    token to the request the box guard will see.
+  - `McpClient`: a minimal streamable-HTTP MCP client (`initialize` once, then
+    `tools/call` with the token).
+  - Two routes for the gateway to serve: `POST /internal/v1/runs/{id}/result`
+    (`report_result`: done, parked — with what it waits for —, refused or
+    error, the final message and the runner's own usage count) and
+    `POST /internal/v1/runs/{id}/children` (`mint_child`: a subagent's run and
+    its workload token).
+  - `RemoteGate` gains `server_admitted` (tools the gateway admits on its own
+    route), `token_tools` (which bodies get the token), `defer_unsettled`,
+    `prime` and `pending_hold` (park and resume a held call).
+  - Commands the harness runs do not inherit the runner's workload token or any
+    credential placeholder (`LocalBackend(base_env=...)` is new), and the
+    runner marks itself non-dumpable so a command cannot read them back from
+    `/proc`.
+  - Shipped as `tulip-runner.pyz` on each GitHub release and as the image
+    `ghcr.io/tuliplabs-ai/tulip-runner` (`runner.Dockerfile`,
+    `scripts/build_runner_pyz.sh`).
+
 ## [2.22.0] - 2026-10-08
 
 ### Added
@@ -69,45 +110,6 @@ policy.
     -- and whoever owns the chain makes the record.
   - ``enforcement_mode(playbook, deployment="record")`` takes the deployment's
     default as an argument instead of reading ``TULIP_GATEWAY_PLAYBOOK_ENFORCEMENT``.
-- **The box runner itself: `python -m tulip.runner` (also `tulip-runner`).**
-  Builds a run's agent from its `RunManifest` and nothing else, runs it inside
-  the box, and parks or reports when it stops. See `docs/runner.md`.
-  - `build_runtime`: an OpenAI-compatible model on `model.base_url`, keyed by
-    the OpenShell placeholder (never a key) and sending
-    `Accept-Encoding: identity` so the box guard can meter usage
-    (`OpenAIConfig.default_headers` is new). Tools by `runs`: `box` → the
-    harness tools over `/sandbox`, plus `ask_user` (pauses the run) and `task`
-    (a subagent in the same box, as a child run the gateway mints); `gateway`
-    → `RemoteTool`; `mcp:<id>` → `tools/call` on that mount; `api:<id>` → one
-    operation of an API connector. A box tool the runner cannot build refuses
-    the run. Every call except the gateway's own goes through `RemoteGate`;
-    its decision token reaches only the MCP and API tools, which send it as
-    `x-tulip-decision`. A call still held after `budgets.park_ttl_s` (default
-    600 s) pauses the run, checkpointed with the gateway. A v2 playbook is shown
-    in `tulip.playbooks.v2`'s own prose; plan mode adds its rules to the prompt.
-  - `RunManifest` learns API connectors (`api`, `ApiConnector`, `ToolEntry.operation`,
-    `runs: api:<id>`), the run's `input`, and `budgets.park_ttl_s`.
-    `api_request` maps a call's arguments to exactly one request (path
-    parameters, query, canonical JSON body), so the gateway can bind a decision
-    token to the request the box guard will see.
-  - `McpClient`: a minimal streamable-HTTP MCP client (`initialize` once, then
-    `tools/call` with the token).
-  - Two routes for the gateway to serve: `POST /internal/v1/runs/{id}/result`
-    (`report_result`: done, parked — with what it waits for —, refused or
-    error, the final message and the runner's own usage count) and
-    `POST /internal/v1/runs/{id}/children` (`mint_child`: a subagent's run and
-    its workload token).
-  - `RemoteGate` gains `server_admitted` (tools the gateway admits on its own
-    route), `token_tools` (which bodies get the token), `defer_unsettled`,
-    `prime` and `pending_hold` (park and resume a held call).
-  - Commands the harness runs do not inherit the runner's workload token or any
-    credential placeholder (`LocalBackend(base_env=...)` is new), and the
-    runner marks itself non-dumpable so a command cannot read them back from
-    `/proc`.
-  - Shipped as `tulip-runner.pyz` on each GitHub release and as the image
-    `ghcr.io/tuliplabs-ai/tulip-runner` (`runner.Dockerfile`,
-    `scripts/build_runner_pyz.sh`).
-
 ## [2.21.3] - 2026-10-07
 
 ### Security
