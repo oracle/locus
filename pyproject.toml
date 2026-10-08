@@ -248,6 +248,7 @@ dev = [
 
 [project.scripts]
 tulip = "tulip.cli:main"
+tulip-runner = "tulip.runner.main:main"
 
 [project.urls]
 Homepage = "https://github.com/tuliplabs-ai/tulip-agents"

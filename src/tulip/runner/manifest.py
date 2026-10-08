@@ -36,7 +36,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 __all__ = [
+    "DEFAULT_PARK_TTL_S",
     "MANIFEST_VERSION",
+    "ApiConnector",
+    "ApiOperation",
     "Budgets",
     "McpMount",
     "ModelRoute",
@@ -48,8 +51,15 @@ __all__ = [
 #: The manifest format this SDK reads and writes.
 MANIFEST_VERSION: Literal[1] = 1
 
-#: Where a tool runs: in the box, on the gateway, or on a mounted MCP server.
-_RUNS = re.compile(r"^(box|gateway|mcp:[A-Za-z0-9][A-Za-z0-9._-]{0,127})$")
+#: Where a tool runs: in the box, on the gateway, on a mounted MCP server, or
+#: as one operation of an API connector.
+_RUNS = re.compile(r"^(box|gateway|(mcp|api):[A-Za-z0-9][A-Za-z0-9._-]{0,127})$")
+
+#: Seconds a runner waits on a held call before it parks the run.
+DEFAULT_PARK_TTL_S = 600.0
+
+#: A ``{name}`` placeholder in an operation's path.
+_PATH_PARAM = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 
 def canonical_digest(value: Any) -> str:
@@ -60,6 +70,61 @@ def canonical_digest(value: Any) -> str:
 
 class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class ApiOperation(_Strict):
+    """How one ``api:<id>`` tool's arguments become one HTTP request.
+
+    The mapping is fixed, so the gateway can compute the exact request a call
+    will make when it admits it (and bind the call's decision token to it) and
+    the box guard can check the request on the wire against that token.
+    :func:`tulip.runner.connectors.api_request` is the one implementation both
+    sides use.
+
+    - ``path`` may name arguments as ``{name}``; each is URL-quoted into place.
+    - ``query`` names the arguments sent as query parameters.
+    - Every other argument goes in the JSON body when ``body`` is ``"json"``;
+      with ``"none"`` an argument that is neither in the path nor the query is
+      refused.
+    """
+
+    method: Literal["GET", "POST", "PUT", "PATCH", "DELETE"] = "GET"
+    path: str = Field(min_length=1, description="Relative to the connector's base URL.")
+    query: tuple[str, ...] = ()
+    body: Literal["json", "none"] = "none"
+
+    @field_validator("path")
+    @classmethod
+    def _path(cls, value: str) -> str:
+        if not value.startswith("/"):
+            raise ValueError(f"an operation's path must start with '/', not {value!r}")
+        return value
+
+    @property
+    def path_params(self) -> tuple[str, ...]:
+        """The argument names the path takes, in order."""
+        return tuple(_PATH_PARAM.findall(self.path))
+
+
+class ApiConnector(_Strict):
+    """An HTTP API the agent's ``api:<id>`` tools call, from the box.
+
+    The credential, if any, is named only by the env var holding its OpenShell
+    placeholder; the sandbox's proxy swaps it for the real value on the
+    connector's host and nowhere else.
+    """
+
+    id: str = Field(min_length=1, max_length=128)
+    base_url: str = Field(min_length=1, description="Scheme and host, optionally a base path.")
+    credential_env: str | None = Field(
+        default=None, description="The env var holding the credential's placeholder."
+    )
+    credential_header: str = Field(
+        default="authorization", description="The header the credential is sent in."
+    )
+    credential_prefix: str = Field(
+        default="Bearer ", description="Written before the placeholder ('' for a bare key)."
+    )
 
 
 class ToolEntry(_Strict):
@@ -77,20 +142,39 @@ class ToolEntry(_Strict):
     runs: str = Field(
         default="box",
         description="'box' (in this sandbox), 'gateway' (performed server-side), "
-        "or 'mcp:<mount id>' (on that mounted MCP server).",
+        "'mcp:<mount id>' (on that mounted MCP server), or 'api:<connector id>' "
+        "(one operation of that API connector).",
+    )
+    operation: ApiOperation | None = Field(
+        default=None, description="For an 'api:<id>' tool: the request it makes."
     )
 
     @field_validator("runs")
     @classmethod
     def _runs(cls, value: str) -> str:
         if not _RUNS.match(value):
-            raise ValueError(f"runs must be 'box', 'gateway' or 'mcp:<id>', not {value!r}")
+            raise ValueError(
+                f"runs must be 'box', 'gateway', 'mcp:<id>' or 'api:<id>', not {value!r}"
+            )
         return value
+
+    @model_validator(mode="after")
+    def _operation(self) -> ToolEntry:
+        if self.connector is not None and self.operation is None:
+            raise ValueError(f"tool {self.name!r} runs on {self.runs} but names no operation")
+        if self.connector is None and self.operation is not None:
+            raise ValueError(f"tool {self.name!r} has an operation but runs on {self.runs}")
+        return self
 
     @property
     def mount(self) -> str | None:
         """The MCP mount id when ``runs`` is ``mcp:<id>``, else ``None``."""
         return self.runs[4:] if self.runs.startswith("mcp:") else None
+
+    @property
+    def connector(self) -> str | None:
+        """The API connector id when ``runs`` is ``api:<id>``, else ``None``."""
+        return self.runs[4:] if self.runs.startswith("api:") else None
 
 
 class McpMount(_Strict):
@@ -112,6 +196,11 @@ class Budgets(_Strict):
     max_tokens: int | None = Field(default=None, ge=1)
     max_cost_usd: float | None = Field(default=None, ge=0)
     timeout_s: float | None = Field(default=None, gt=0)
+    park_ttl_s: float = Field(
+        default=DEFAULT_PARK_TTL_S,
+        ge=0,
+        description="How long the runner waits on a held call before it parks the run.",
+    )
 
 
 class ModelRoute(_Strict):
@@ -144,8 +233,10 @@ class RunManifest(_Strict):
         default=None, description="The registry's digest of ``definition``."
     )
     instructions: str = ""
+    input: str = Field(default="", description="The run's input: what the agent is asked.")
     tools: tuple[ToolEntry, ...] = ()
     mcp: tuple[McpMount, ...] = ()
+    api: tuple[ApiConnector, ...] = ()
     harness: dict[str, Any] | None = Field(default=None, description="The harness spec, if any.")
     playbook: dict[str, Any] | None = Field(default=None, description="A v2 playbook, if any.")
     budgets: Budgets = Field(default_factory=Budgets)
@@ -158,12 +249,25 @@ class RunManifest(_Strict):
         if duplicate is not None:
             raise ValueError(f"tool {duplicate!r} is listed twice")
         mounts = {mount.id for mount in self.mcp}
+        connectors = {connector.id for connector in self.api}
         for tool in self.tools:
             if tool.mount is not None and tool.mount not in mounts:
                 raise ValueError(
                     f"tool {tool.name!r} runs on mcp:{tool.mount}, which is not mounted"
                 )
+            if tool.connector is not None and tool.connector not in connectors:
+                raise ValueError(
+                    f"tool {tool.name!r} runs on api:{tool.connector}, which is not connected"
+                )
         return self
+
+    def connector(self, connector_id: str) -> ApiConnector | None:
+        """The API connector called ``connector_id``, or ``None``."""
+        return next((c for c in self.api if c.id == connector_id), None)
+
+    def mount(self, mount_id: str) -> McpMount | None:
+        """The MCP mount called ``mount_id``, or ``None``."""
+        return next((m for m in self.mcp if m.id == mount_id), None)
 
     def digest(self) -> str:
         """``sha256:`` over this manifest's canonical JSON."""
