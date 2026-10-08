@@ -8,6 +8,43 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **`tulip.runner`: the protocol a box runner speaks with the Tulip gateway.**
+  A box runner is one agent's loop running inside an NVIDIA OpenShell sandbox,
+  started by a gateway for one run; the gateway stays the control plane. This
+  release adds the runner's side of that contract, with no agent building yet:
+  - `RunManifest` (v1): what the runner runs — the pinned definition, the tool
+    surface and where each tool runs (`box`, `gateway` or `mcp:<id>`), MCP
+    mounts, harness, an optional v2 playbook, budgets and the model route. Strict
+    (unknown fields refused) and digested as `sha256:` over canonical JSON. The
+    model key is named only by the env var holding its OpenShell placeholder.
+  - `RemoteGate`: the admission hook, first of all hooks. Every tool call is
+    sent to `POST /v1/admit` as `{run_id, call_id, tool, arguments}` — never
+    labels — and decided by the gateway. Allowed calls keep a one-shot decision
+    token (optionally passed to the tool in `secret_arguments`); held calls wait
+    for a person up to `hold_wait_s`, are asked again with the `approval_id`, or
+    are recorded in `RemoteGate.held` for the runner to park on; denials are
+    cancelled with the gateway's reason. An unreachable or refusing gateway
+    cancels the call: it fails closed.
+  - `GatewayEvents`: progress events (`token`, `think`, `tool_start`,
+    `tool_complete`, `tool.sandbox.output`, `harness.exec`, `playbook_step`,
+    `playbook_progress` — nothing the gateway alone writes) to
+    `POST /internal/v1/runs/{id}/events` in numbered batches, spooled to
+    `/sandbox/.tulip/events.jsonl` while the gateway is unreachable and replayed
+    in order.
+  - `GatewayCheckpointer`: a `BaseCheckpointer` whose checkpoints the gateway
+    keeps (`PUT`/`GET /internal/v1/runs/{id}/checkpoint`,
+    `GET …/checkpoints`).
+  - `RemoteTool`: a `runs: gateway` tool, performed by
+    `POST /internal/v1/runs/{id}/tools/{name}`.
+  - `next_op` / `fetch_manifest`: the start-up handshake
+    (`GET /internal/v1/runner/next`, `GET /internal/v1/runner/manifest`); a
+    manifest for another run is refused.
+  - `RunnerConfig.from_env` reads `TULIP_ADMIT_URL`, `TULIP_ADMIT_TOKEN` and
+    `TULIP_RUN_ID`, the values a gateway sets in every box. The workload token
+    is sent as a bearer token and never appears in a repr or an error.
+
 ## [2.21.3] - 2026-10-07
 
 ### Security
