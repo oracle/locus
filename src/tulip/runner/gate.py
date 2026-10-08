@@ -28,8 +28,17 @@ about what a tool does changes nothing. The answer:
   again with the ``approval_id`` (the gateway checks the approval was granted
   for these exact arguments) and runs on the new answer. Still undecided, the
   call is cancelled with the hold's reason and recorded in :attr:`~RemoteGate.held`,
-  so the runner can park the run until the decision comes.
+  so the runner can park the run until the decision comes. With
+  ``defer_unsettled`` the call is *not* cancelled: it is recorded in
+  :attr:`~RemoteGate.held` and :meth:`~RemoteGate.pending_hold` names it, so the
+  runner's tool wrapper can pause the run (an interrupt, checkpointed) instead
+  of telling the model the call failed. When the run resumes the same call is
+  asked about again with its ``approval_id`` (:meth:`~RemoteGate.prime`).
 - ``deny`` — the call is cancelled with the gateway's reason.
+
+Tools the gateway performs itself (``runs: gateway``) are admitted by the
+gateway on their own route, so the gate leaves them to it
+(``server_admitted``) rather than have the gateway weigh each one twice.
 
 The gate **fails closed**: if the gateway cannot be reached or refuses the
 request, the call is cancelled. There is no local fallback policy.
@@ -122,6 +131,14 @@ class RemoteGate(HookProvider):
         token_argument: When set, an admitted call's decision token is passed
             to the tool body under this argument name, through
             ``secret_arguments``.
+        token_tools: The tools whose bodies get the token (``token_argument``);
+            ``None`` means every tool. A tool that makes no request of its own
+            has no use for it, and a body with a fixed signature would refuse
+            the extra argument.
+        server_admitted: Tools the gateway admits on its own route; the gate
+            does not ask about them.
+        defer_unsettled: Leave a call still held after ``hold_wait_s``
+            uncancelled, for the runner to park on (see :meth:`pending_hold`).
     """
 
     def __init__(
@@ -131,12 +148,19 @@ class RemoteGate(HookProvider):
         hold_wait_s: float = 0.0,
         poll_interval_s: float = 2.0,
         token_argument: str | None = None,
+        token_tools: frozenset[str] | None = None,
+        server_admitted: frozenset[str] = frozenset(),
+        defer_unsettled: bool = False,
     ) -> None:
         self._client = client
         self.hold_wait_s = max(0.0, hold_wait_s)
         self.poll_interval_s = max(0.01, poll_interval_s)
         self.token_argument = token_argument
+        self.token_tools = token_tools
+        self.server_admitted = server_admitted
+        self.defer_unsettled = defer_unsettled
         self._tokens: dict[str, str] = {}
+        self._primed: dict[str, str] = {}
         #: Calls held for a person that were still undecided; the runner parks on these.
         self.held: list[Hold] = []
 
@@ -185,7 +209,18 @@ class RemoteGate(HookProvider):
         """Take the decision token of an admitted call (each is given out once)."""
         return self._tokens.pop(call_id, None)
 
+    def prime(self, call_id: str, approval_id: str) -> None:
+        """Ask about ``call_id`` next time naming ``approval_id`` (a resumed hold)."""
+        self._primed[call_id] = approval_id
+
+    def pending_hold(self, call_id: str) -> Hold | None:
+        """The deferred hold on ``call_id``, if the call is waiting on a person."""
+        return next((hold for hold in self.held if hold.call_id == call_id), None)
+
     async def on_before_tool_call(self, event: BeforeToolCallEvent) -> None:
+        if event.tool_name in self.server_admitted:
+            return
+        self.held = [hold for hold in self.held if hold.call_id != event.tool_call_id]
         try:
             result = await self._decide(event.tool_call_id, event.tool_name, dict(event.arguments))
         except (GatewayUnavailable, GatewayError) as exc:
@@ -194,7 +229,9 @@ class RemoteGate(HookProvider):
         if result.allowed:
             if result.decision_token is not None:
                 self._tokens[event.tool_call_id] = result.decision_token
-                if self.token_argument:
+                if self.token_argument and (
+                    self.token_tools is None or event.tool_name in self.token_tools
+                ):
                     event.secret_arguments = {
                         **event.secret_arguments,
                         self.token_argument: result.decision_token,
@@ -209,12 +246,18 @@ class RemoteGate(HookProvider):
                     reason=result.reason,
                 )
             )
-            event.cancel = f"held for a person's approval ({result.approval_id}): {result.reason}"
+            if not self.defer_unsettled:
+                event.cancel = (
+                    f"held for a person's approval ({result.approval_id}): {result.reason}"
+                )
             return
         event.cancel = f"denied by the gateway: {result.reason or result.outcome}"
 
     async def _decide(self, call_id: str, tool: str, arguments: dict[str, Any]) -> AdmitResult:
-        result = await self.admit(call_id=call_id, tool=tool, arguments=arguments)
+        primed = self._primed.pop(call_id, None)
+        result = await self.admit(
+            call_id=call_id, tool=tool, arguments=arguments, approval_id=primed
+        )
         if result.outcome != "require_human" or not result.approval_id or not self.hold_wait_s:
             return result
         state = await self.wait_for_approval(result.approval_id, timeout_s=self.hold_wait_s)

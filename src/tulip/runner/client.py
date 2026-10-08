@@ -115,6 +115,8 @@ class GatewayClient:
         self, config: RunnerConfig, *, transport: httpx.AsyncBaseTransport | None = None
     ) -> None:
         self.config = config
+        #: The transport given, for clients this one starts (a subagent's).
+        self.transport = transport
         self._http = httpx.AsyncClient(
             base_url=config.url,
             timeout=config.timeout,

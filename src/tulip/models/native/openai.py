@@ -490,6 +490,14 @@ class OpenAIConfig(ModelConfig):
     api_key: str | None = Field(default=None, description="OpenAI API key")
     base_url: str | None = Field(default=None, description="Custom API base URL")
     organization: str | None = Field(default=None, description="OpenAI organization ID")
+    default_headers: dict[str, str] | None = Field(
+        default=None,
+        description=(
+            "Headers sent on every request. A box runner sends "
+            "``Accept-Encoding: identity`` so the sandbox's guard can read the "
+            "usage in each response and meter the run."
+        ),
+    )
     api: Literal["auto", "responses", "chat_completions"] = Field(
         default="auto",
         description=(
@@ -699,6 +707,7 @@ class OpenAIModel(BaseModel):
                 api_key=self.config.api_key,
                 base_url=self.config.base_url,
                 organization=self.config.organization,
+                default_headers=self.config.default_headers,
                 max_retries=self.config.max_retries,
                 timeout=self.config.request_timeout,
             )

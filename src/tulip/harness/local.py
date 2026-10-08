@@ -264,6 +264,12 @@ class LocalBackend(WorkspaceTextMixin):
         env: Variables added to every command's environment, on top of this
             process's own.
         max_background: How many background commands may run at once.
+        base_env: The environment commands start from, instead of this
+            process's own. A box runner passes its environment without the
+            variables a command must not inherit (its gateway token, its
+            credential placeholders).
+        label: How the workspace describes itself to the model, and whether it
+            is ``isolated`` — a backend inside a sandbox box is.
 
     Commands still running when the backend is closed, garbage collected or
     the interpreter exits are killed with their process groups. Each command
@@ -277,17 +283,21 @@ class LocalBackend(WorkspaceTextMixin):
         *,
         env: Mapping[str, str] | None = None,
         max_background: int = MAX_BACKGROUND,
+        base_env: Mapping[str, str] | None = None,
+        label: str = "UNISOLATED: host shell",
+        isolated: bool = False,
     ) -> None:
         self._root = Path(root).resolve()
         self._root.mkdir(parents=True, exist_ok=True)
         self._env = dict(env or {})
+        self._base_env = dict(base_env) if base_env is not None else None
         self._max_background = max_background
         self._shells: dict[str, Shell] = {}
         self._lock = threading.Lock()
         self._ids = itertools.count(1)
         self._capabilities = BackendCapabilities(
-            isolated=False,
-            label="UNISOLATED: host shell",
+            isolated=isolated,
+            label=label,
             has_rg=shutil.which("rg") is not None,
             root=str(self._root),
         )
@@ -510,7 +520,8 @@ class LocalBackend(WorkspaceTextMixin):
         on_output: Callable[[bytes], None] | None = None,
     ) -> Shell:
         workdir = self._path(cwd) if cwd else self._root
-        merged = {**os.environ, **self._env, **(env or {})}
+        base = os.environ if self._base_env is None else self._base_env
+        merged = {**base, **self._env, **(env or {})}
         proc = subprocess.Popen(  # noqa: S602 - the tool is "run a command"; the caller gated it
             command,
             shell=True,

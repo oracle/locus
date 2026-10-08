@@ -17,14 +17,21 @@ runner's side of that contract:
 - :class:`GatewayCheckpointer` — the agent's checkpoints, kept by the gateway.
 - :class:`RemoteTool` — a ``runs: gateway`` tool, performed server-side.
 - :func:`next_op` / :func:`fetch_manifest` — the start-up handshake.
+- :func:`report_result` / :func:`mint_child` — how the process ended, and a
+  subagent's child run.
+- :func:`build_runtime` — the agent, built from a manifest and nothing else:
+  harness tools in the box, gateway tools server-side, MCP and API connector
+  calls from the box with their decision tokens (:mod:`tulip.runner.connectors`).
+- :func:`run_box` — ``python -m tulip.runner`` (also ``tulip-runner``): one
+  run, started, resumed or parked.
 
 All of them share one :class:`GatewayClient`, configured from the box's
-environment (:meth:`RunnerConfig.from_env`). Building the agent from a
-manifest comes in a later release.
+environment (:meth:`RunnerConfig.from_env`).
 """
 
 from __future__ import annotations
 
+from tulip.runner.build import RunnerRefused, Runtime, build_runtime
 from tulip.runner.checkpoint import GatewayCheckpointer
 from tulip.runner.client import (
     ADMIT_TOKEN_VAR,
@@ -35,11 +42,23 @@ from tulip.runner.client import (
     GatewayUnavailable,
     RunnerConfig,
 )
+from tulip.runner.connectors import (
+    DECISION_HEADER,
+    ApiRequest,
+    ConnectorError,
+    McpClient,
+    api_request,
+    call_api,
+)
 from tulip.runner.events import ALLOWED_TYPES, GatewayEvents
 from tulip.runner.gate import AdmitResult, Hold, RemoteGate
 from tulip.runner.handshake import NextOp, fetch_manifest, next_op
+from tulip.runner.main import run_box
 from tulip.runner.manifest import (
+    DEFAULT_PARK_TTL_S,
     MANIFEST_VERSION,
+    ApiConnector,
+    ApiOperation,
     Budgets,
     McpMount,
     ModelRoute,
@@ -47,6 +66,7 @@ from tulip.runner.manifest import (
     ToolEntry,
     canonical_digest,
 )
+from tulip.runner.outcome import ChildRun, RunResult, mint_child, report_result
 from tulip.runner.tools import RemoteTool, RemoteToolError
 
 
@@ -54,16 +74,24 @@ __all__ = [
     "ADMIT_TOKEN_VAR",
     "ADMIT_URL_VAR",
     "ALLOWED_TYPES",
+    "DECISION_HEADER",
+    "DEFAULT_PARK_TTL_S",
     "MANIFEST_VERSION",
     "RUN_ID_VAR",
     "AdmitResult",
+    "ApiConnector",
+    "ApiOperation",
+    "ApiRequest",
     "Budgets",
+    "ChildRun",
+    "ConnectorError",
     "GatewayCheckpointer",
     "GatewayClient",
     "GatewayError",
     "GatewayEvents",
     "GatewayUnavailable",
     "Hold",
+    "McpClient",
     "McpMount",
     "ModelRoute",
     "NextOp",
@@ -71,9 +99,18 @@ __all__ = [
     "RemoteTool",
     "RemoteToolError",
     "RunManifest",
+    "RunResult",
     "RunnerConfig",
+    "RunnerRefused",
+    "Runtime",
     "ToolEntry",
+    "api_request",
+    "build_runtime",
+    "call_api",
     "canonical_digest",
     "fetch_manifest",
+    "mint_child",
     "next_op",
+    "report_result",
+    "run_box",
 ]
