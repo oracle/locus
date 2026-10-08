@@ -1,0 +1,3180 @@
+{
+ "scenarios": {
+  "f19_damaged": {
+   "audit": [
+    {
+     "correlation_id": "run-golden",
+     "event": "playbook_step",
+     "playbook": "functional-p0-pb",
+     "playbook_digest": "sha256:feed",
+     "playbook_version": "7",
+     "principal": "gw-golden",
+     "reason": "",
+     "required": true,
+     "status": "done",
+     "step": "inspect",
+     "tool_calls": 1
+    },
+    {
+     "correlation_id": "run-golden",
+     "event": "playbook_step",
+     "playbook": "functional-p0-pb",
+     "playbook_digest": "sha256:feed",
+     "playbook_version": "7",
+     "principal": "gw-golden",
+     "reason": "no branch that names it was taken",
+     "required": false,
+     "status": "waived",
+     "step": "explain_charge",
+     "tool_calls": 0
+    },
+    {
+     "correlation_id": "run-golden",
+     "event": "playbook_step",
+     "playbook": "functional-p0-pb",
+     "playbook_digest": "sha256:feed",
+     "playbook_version": "7",
+     "principal": "gw-golden",
+     "reason": "",
+     "required": false,
+     "status": "done",
+     "step": "check_warranty",
+     "tool_calls": 1
+    },
+    {
+     "correlation_id": "run-golden",
+     "event": "playbook_step",
+     "playbook": "functional-p0-pb",
+     "playbook_digest": "sha256:feed",
+     "playbook_version": "7",
+     "principal": "gw-golden",
+     "reason": "",
+     "required": true,
+     "status": "done",
+     "step": "decide",
+     "tool_calls": 0
+    },
+    {
+     "classification": "",
+     "converged": true,
+     "correlation_id": "run-golden",
+     "deviations": [
+      "unexpected_tool"
+     ],
+     "event": "playbook_decision",
+     "evidence_refs_sha256": "3d766f6d2f412768f709fd98f8f0b063b66bfaa922cccd40238551c6231ecc43",
+     "outcome_id": "REPLACE",
+     "playbook": "functional-p0-pb",
+     "playbook_digest": "sha256:feed",
+     "playbook_version": "7",
+     "principal": "gw-golden",
+     "rationale_sha256": "354f8fec0dd833619781f0490b74b2a8d71f2c812f3402fe07258a8baa92790b",
+     "steps": {
+      "check_warranty": "done",
+      "decide": "done",
+      "explain_charge": "waived",
+      "inspect": "done"
+     }
+    }
+   ],
+   "converged": false,
+   "decision": {
+    "action": "Recommend a replacement.",
+    "classification": null,
+    "escalation_target": null,
+    "outcome_id": "REPLACE",
+    "priority": 2
+   },
+   "events": [
+    {
+     "allowed_tools": [
+      "functional_p0_pb_look"
+     ],
+     "description": "Call functional_p0_pb_look with the order id and report the condition it arrived in.",
+     "expected_tools": [
+      "functional_p0_pb_look"
+     ],
+     "group": "gather",
+     "index": 0,
+     "parallel_group": null,
+     "playbook": "functional-p0-pb",
+     "required": true,
+     "status": "pending",
+     "step": "inspect",
+     "step_id": "inspect",
+     "title": "Read the order",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "functional_p0_pb_warranty"
+     ],
+     "description": "Call functional_p0_pb_warranty with the order id.",
+     "expected_tools": [
+      "functional_p0_pb_warranty"
+     ],
+     "group": "drilldown",
+     "index": 1,
+     "parallel_group": "evidence",
+     "playbook": "functional-p0-pb",
+     "required": false,
+     "status": "pending",
+     "step": "check_warranty",
+     "step_id": "check_warranty",
+     "title": "Check the warranty",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [],
+     "description": "Explain the order",
+     "expected_tools": [],
+     "group": "drilldown",
+     "index": 2,
+     "parallel_group": "evidence",
+     "playbook": "functional-p0-pb",
+     "required": false,
+     "status": "pending",
+     "step": "explain_charge",
+     "step_id": "explain_charge",
+     "title": "Explain the order",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "submit_decision"
+     ],
+     "description": "Submit one decision",
+     "expected_tools": [
+      "submit_decision"
+     ],
+     "group": "conclude",
+     "index": 3,
+     "parallel_group": null,
+     "playbook": "functional-p0-pb",
+     "required": true,
+     "status": "pending",
+     "step": "decide",
+     "step_id": "decide",
+     "title": "Submit one decision",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "functional_p0_pb_look"
+     ],
+     "description": "Call functional_p0_pb_look with the order id and report the condition it arrived in.",
+     "expected_tools": [
+      "functional_p0_pb_look"
+     ],
+     "group": "gather",
+     "index": 0,
+     "parallel_group": null,
+     "playbook": "functional-p0-pb",
+     "required": true,
+     "status": "active",
+     "step": "inspect",
+     "step_id": "inspect",
+     "title": "Read the order",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "functional_p0_pb_look"
+     ],
+     "branches_not_taken": [
+      "intact"
+     ],
+     "branches_taken": [
+      "damaged"
+     ],
+     "description": "Call functional_p0_pb_look with the order id and report the condition it arrived in.",
+     "enabled_steps": [
+      "check_warranty"
+     ],
+     "expected_tools": [
+      "functional_p0_pb_look"
+     ],
+     "group": "gather",
+     "index": 0,
+     "outputs": {
+      "condition": "damaged"
+     },
+     "parallel_group": null,
+     "playbook": "functional-p0-pb",
+     "required": true,
+     "routed_by": "when",
+     "status": "done",
+     "step": "inspect",
+     "step_id": "inspect",
+     "title": "Read the order",
+     "tool_calls": 1,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [],
+     "description": "Explain the order",
+     "expected_tools": [],
+     "group": "drilldown",
+     "index": 2,
+     "parallel_group": "evidence",
+     "playbook": "functional-p0-pb",
+     "reason": "no branch that names it was taken",
+     "required": false,
+     "status": "waived",
+     "step": "explain_charge",
+     "step_id": "explain_charge",
+     "title": "Explain the order",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "functional_p0_pb_warranty"
+     ],
+     "description": "Call functional_p0_pb_warranty with the order id.",
+     "expected_tools": [
+      "functional_p0_pb_warranty"
+     ],
+     "group": "drilldown",
+     "index": 1,
+     "parallel_group": "evidence",
+     "playbook": "functional-p0-pb",
+     "required": false,
+     "status": "active",
+     "step": "check_warranty",
+     "step_id": "check_warranty",
+     "title": "Check the warranty",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "functional_p0_pb_warranty"
+     ],
+     "description": "Call functional_p0_pb_warranty with the order id.",
+     "expected_tools": [
+      "functional_p0_pb_warranty"
+     ],
+     "group": "drilldown",
+     "index": 1,
+     "outputs": {
+      "covered": true
+     },
+     "parallel_group": "evidence",
+     "playbook": "functional-p0-pb",
+     "required": false,
+     "status": "done",
+     "step": "check_warranty",
+     "step_id": "check_warranty",
+     "title": "Check the warranty",
+     "tool_calls": 1,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "submit_decision"
+     ],
+     "description": "Submit one decision",
+     "expected_tools": [
+      "submit_decision"
+     ],
+     "group": "conclude",
+     "index": 3,
+     "parallel_group": null,
+     "playbook": "functional-p0-pb",
+     "required": true,
+     "status": "active",
+     "step": "decide",
+     "step_id": "decide",
+     "title": "Submit one decision",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "blocked": false,
+     "enforcement": "record",
+     "expected_tools": [
+      "submit_decision"
+     ],
+     "index": 3,
+     "playbook": "functional-p0-pb",
+     "required": true,
+     "step": "decide",
+     "tool": "functional_p0_pb_refund",
+     "type": "playbook_deviation",
+     "version": "playbook.v2",
+     "violation": "unexpected_tool"
+    },
+    {
+     "allowed_tools": [
+      "submit_decision"
+     ],
+     "description": "Submit one decision",
+     "expected_tools": [
+      "submit_decision"
+     ],
+     "group": "conclude",
+     "index": 3,
+     "outputs": {
+      "outcome_id": "REPLACE"
+     },
+     "parallel_group": null,
+     "playbook": "functional-p0-pb",
+     "required": true,
+     "status": "done",
+     "step": "decide",
+     "step_id": "decide",
+     "title": "Submit one decision",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": false,
+     "version": "playbook.v2"
+    },
+    {
+     "action": "Recommend a replacement.",
+     "classification": null,
+     "converged": true,
+     "enforcement": "record",
+     "escalation_target": null,
+     "evidence_refs": [
+      "functional_p0_pb_look",
+      "functional_p0_pb_warranty"
+     ],
+     "outcome_id": "REPLACE",
+     "playbook": "functional-p0-pb",
+     "priority": 2,
+     "rationale": "damaged and covered",
+     "recommendation_only": true,
+     "step": "decide",
+     "type": "playbook_decision",
+     "version": "playbook.v2"
+    }
+   ],
+   "ops": [
+    {
+     "args": [
+      [],
+      {}
+     ],
+     "op": "start",
+     "out": null
+    },
+    {
+     "cancel": null,
+     "op": "before",
+     "tool": "functional_p0_pb_look"
+    },
+    {
+     "op": "after",
+     "tool": "functional_p0_pb_look"
+    },
+    {
+     "args": [
+      [
+       "inspect",
+       {
+        "condition": "damaged"
+       }
+      ],
+      {}
+     ],
+     "op": "complete_step",
+     "out": {
+      "active": [
+       "check_warranty"
+      ],
+      "branches_not_taken": [
+       "intact"
+      ],
+      "branches_taken": [
+       "damaged"
+      ],
+      "enabled_steps": [
+       "check_warranty"
+      ],
+      "next": [
+       "### Step check_warranty: Check the warranty (optional)\nGoal: Call functional_p0_pb_warranty with the order id.\nTools: functional_p0_pb_warranty (at least 1 and at most 2 calls)\nExpected outputs (pass each to complete_step): covered"
+      ],
+      "ok": true,
+      "routed_by": "when",
+      "status": "done",
+      "step": "inspect",
+      "waived": [
+       "explain_charge"
+      ]
+     }
+    },
+    {
+     "cancel": null,
+     "op": "before",
+     "tool": "functional_p0_pb_warranty"
+    },
+    {
+     "op": "after",
+     "tool": "functional_p0_pb_warranty"
+    },
+    {
+     "args": [
+      [
+       "check_warranty",
+       {
+        "covered": true
+       }
+      ],
+      {}
+     ],
+     "op": "complete_step",
+     "out": {
+      "active": [
+       "decide"
+      ],
+      "next": [
+       "### Step decide: Submit one decision\nTools: submit_decision (at most 1 calls)"
+      ],
+      "ok": true,
+      "status": "done",
+      "step": "check_warranty",
+      "waived": [
+       "explain_charge"
+      ]
+     }
+    },
+    {
+     "cancel": null,
+     "op": "before",
+     "tool": "functional_p0_pb_refund"
+    },
+    {
+     "op": "after",
+     "tool": "functional_p0_pb_refund"
+    },
+    {
+     "args": [
+      [
+       "REPLACE",
+       "damaged and covered",
+       [
+        "functional_p0_pb_look",
+        "functional_p0_pb_warranty"
+       ]
+      ],
+      {}
+     ],
+     "op": "submit_decision",
+     "out": {
+      "action": "Recommend a replacement.",
+      "classification": null,
+      "escalation_target": null,
+      "next": "The playbook is concluded. Write your final answer: the outcome, why, and the evidence it rests on -- as a recommendation; do not act on it.",
+      "ok": true,
+      "outcome_id": "REPLACE",
+      "recommendation_only": true
+     }
+    },
+    {
+     "args": [
+      [],
+      {}
+     ],
+     "op": "finish",
+     "out": null
+    }
+   ],
+   "outcome": {
+    "classification": null,
+    "outcome_id": "REPLACE"
+   },
+   "status": {
+    "check_warranty": "done",
+    "decide": "done",
+    "explain_charge": "waived",
+    "inspect": "done"
+   },
+   "violations": [
+    "unexpected_tool"
+   ]
+  },
+  "f19_intact_block": {
+   "audit": [
+    {
+     "correlation_id": "run-golden",
+     "event": "playbook_step",
+     "playbook": "functional-p0-pb",
+     "playbook_digest": "sha256:feed",
+     "playbook_version": "7",
+     "principal": "gw-golden",
+     "reason": "",
+     "required": true,
+     "status": "done",
+     "step": "inspect",
+     "tool_calls": 2
+    },
+    {
+     "correlation_id": "run-golden",
+     "event": "playbook_step",
+     "playbook": "functional-p0-pb",
+     "playbook_digest": "sha256:feed",
+     "playbook_version": "7",
+     "principal": "gw-golden",
+     "reason": "no branch that names it was taken",
+     "required": false,
+     "status": "waived",
+     "step": "check_warranty",
+     "tool_calls": 0
+    },
+    {
+     "correlation_id": "run-golden",
+     "event": "playbook_step",
+     "playbook": "functional-p0-pb",
+     "playbook_digest": "sha256:feed",
+     "playbook_version": "7",
+     "principal": "gw-golden",
+     "reason": "",
+     "required": false,
+     "status": "done",
+     "step": "explain_charge",
+     "tool_calls": 0
+    },
+    {
+     "correlation_id": "run-golden",
+     "event": "playbook_step",
+     "playbook": "functional-p0-pb",
+     "playbook_digest": "sha256:feed",
+     "playbook_version": "7",
+     "principal": "gw-golden",
+     "reason": "",
+     "required": true,
+     "status": "done",
+     "step": "decide",
+     "tool_calls": 0
+    },
+    {
+     "classification": "INCONCLUSIVE",
+     "converged": true,
+     "correlation_id": "run-golden",
+     "deviations": [
+      "too_many_calls",
+      "unexpected_tool"
+     ],
+     "event": "playbook_decision",
+     "evidence_refs_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+     "outcome_id": "INCONCLUSIVE",
+     "playbook": "functional-p0-pb",
+     "playbook_digest": "sha256:feed",
+     "playbook_version": "7",
+     "principal": "gw-golden",
+     "rationale_sha256": "733daa05c792ac245f5696dd7e7fcf3b83cd444f112d98a53ca12349aba3cf44",
+     "steps": {
+      "check_warranty": "waived",
+      "decide": "done",
+      "explain_charge": "done",
+      "inspect": "done"
+     }
+    }
+   ],
+   "converged": false,
+   "decision": {
+    "action": "Say what is missing.",
+    "classification": "INCONCLUSIVE",
+    "escalation_target": null,
+    "outcome_id": "INCONCLUSIVE",
+    "priority": 1
+   },
+   "events": [
+    {
+     "allowed_tools": [
+      "functional_p0_pb_look"
+     ],
+     "description": "Call functional_p0_pb_look with the order id and report the condition it arrived in.",
+     "expected_tools": [
+      "functional_p0_pb_look"
+     ],
+     "group": "gather",
+     "index": 0,
+     "parallel_group": null,
+     "playbook": "functional-p0-pb",
+     "required": true,
+     "status": "pending",
+     "step": "inspect",
+     "step_id": "inspect",
+     "title": "Read the order",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "functional_p0_pb_warranty"
+     ],
+     "description": "Call functional_p0_pb_warranty with the order id.",
+     "expected_tools": [
+      "functional_p0_pb_warranty"
+     ],
+     "group": "drilldown",
+     "index": 1,
+     "parallel_group": "evidence",
+     "playbook": "functional-p0-pb",
+     "required": false,
+     "status": "pending",
+     "step": "check_warranty",
+     "step_id": "check_warranty",
+     "title": "Check the warranty",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [],
+     "description": "Explain the order",
+     "expected_tools": [],
+     "group": "drilldown",
+     "index": 2,
+     "parallel_group": "evidence",
+     "playbook": "functional-p0-pb",
+     "required": false,
+     "status": "pending",
+     "step": "explain_charge",
+     "step_id": "explain_charge",
+     "title": "Explain the order",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "submit_decision"
+     ],
+     "description": "Submit one decision",
+     "expected_tools": [
+      "submit_decision"
+     ],
+     "group": "conclude",
+     "index": 3,
+     "parallel_group": null,
+     "playbook": "functional-p0-pb",
+     "required": true,
+     "status": "pending",
+     "step": "decide",
+     "step_id": "decide",
+     "title": "Submit one decision",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "functional_p0_pb_look"
+     ],
+     "description": "Call functional_p0_pb_look with the order id and report the condition it arrived in.",
+     "expected_tools": [
+      "functional_p0_pb_look"
+     ],
+     "group": "gather",
+     "index": 0,
+     "parallel_group": null,
+     "playbook": "functional-p0-pb",
+     "required": true,
+     "status": "active",
+     "step": "inspect",
+     "step_id": "inspect",
+     "title": "Read the order",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "blocked": true,
+     "enforcement": "block",
+     "expected_tools": [
+      "functional_p0_pb_look"
+     ],
+     "index": 0,
+     "limit": 2,
+     "playbook": "functional-p0-pb",
+     "required": true,
+     "step": "inspect",
+     "tool": "functional_p0_pb_look",
+     "type": "playbook_deviation",
+     "version": "playbook.v2",
+     "violation": "too_many_calls"
+    },
+    {
+     "allowed_tools": [
+      "functional_p0_pb_look"
+     ],
+     "branches_not_taken": [
+      "damaged"
+     ],
+     "branches_taken": [
+      "intact"
+     ],
+     "description": "Call functional_p0_pb_look with the order id and report the condition it arrived in.",
+     "enabled_steps": [
+      "explain_charge"
+     ],
+     "expected_tools": [
+      "functional_p0_pb_look"
+     ],
+     "group": "gather",
+     "index": 0,
+     "outputs": {
+      "condition": "arrived intact"
+     },
+     "parallel_group": null,
+     "playbook": "functional-p0-pb",
+     "required": true,
+     "routed_by": "when",
+     "status": "done",
+     "step": "inspect",
+     "step_id": "inspect",
+     "title": "Read the order",
+     "tool_calls": 2,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": false,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "functional_p0_pb_warranty"
+     ],
+     "description": "Call functional_p0_pb_warranty with the order id.",
+     "expected_tools": [
+      "functional_p0_pb_warranty"
+     ],
+     "group": "drilldown",
+     "index": 1,
+     "parallel_group": "evidence",
+     "playbook": "functional-p0-pb",
+     "reason": "no branch that names it was taken",
+     "required": false,
+     "status": "waived",
+     "step": "check_warranty",
+     "step_id": "check_warranty",
+     "title": "Check the warranty",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [],
+     "description": "Explain the order",
+     "expected_tools": [],
+     "group": "drilldown",
+     "index": 2,
+     "parallel_group": "evidence",
+     "playbook": "functional-p0-pb",
+     "required": false,
+     "status": "active",
+     "step": "explain_charge",
+     "step_id": "explain_charge",
+     "title": "Explain the order",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "blocked": true,
+     "enforcement": "block",
+     "expected_tools": [],
+     "index": 2,
+     "playbook": "functional-p0-pb",
+     "required": false,
+     "step": "explain_charge",
+     "tool": "functional_p0_pb_warranty",
+     "type": "playbook_deviation",
+     "version": "playbook.v2",
+     "violation": "unexpected_tool"
+    },
+    {
+     "allowed_tools": [],
+     "description": "Explain the order",
+     "expected_tools": [],
+     "group": "drilldown",
+     "index": 2,
+     "outputs": {
+      "note": "fine"
+     },
+     "parallel_group": "evidence",
+     "playbook": "functional-p0-pb",
+     "required": false,
+     "status": "done",
+     "step": "explain_charge",
+     "step_id": "explain_charge",
+     "title": "Explain the order",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": false,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "submit_decision"
+     ],
+     "description": "Submit one decision",
+     "expected_tools": [
+      "submit_decision"
+     ],
+     "group": "conclude",
+     "index": 3,
+     "parallel_group": null,
+     "playbook": "functional-p0-pb",
+     "required": true,
+     "status": "active",
+     "step": "decide",
+     "step_id": "decide",
+     "title": "Submit one decision",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "submit_decision"
+     ],
+     "description": "Submit one decision",
+     "expected_tools": [
+      "submit_decision"
+     ],
+     "group": "conclude",
+     "index": 3,
+     "outputs": {
+      "outcome_id": "INCONCLUSIVE"
+     },
+     "parallel_group": null,
+     "playbook": "functional-p0-pb",
+     "required": true,
+     "status": "done",
+     "step": "decide",
+     "step_id": "decide",
+     "title": "Submit one decision",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "action": "Say what is missing.",
+     "classification": "INCONCLUSIVE",
+     "converged": true,
+     "enforcement": "block",
+     "escalation_target": null,
+     "evidence_refs": [],
+     "outcome_id": "INCONCLUSIVE",
+     "playbook": "functional-p0-pb",
+     "priority": 1,
+     "rationale": "could not tell",
+     "recommendation_only": true,
+     "step": "decide",
+     "type": "playbook_decision",
+     "version": "playbook.v2"
+    }
+   ],
+   "ops": [
+    {
+     "args": [
+      [],
+      {}
+     ],
+     "op": "start",
+     "out": null
+    },
+    {
+     "cancel": null,
+     "op": "before",
+     "tool": "functional_p0_pb_look"
+    },
+    {
+     "op": "after",
+     "tool": "functional_p0_pb_look"
+    },
+    {
+     "cancel": null,
+     "op": "before",
+     "tool": "functional_p0_pb_look"
+    },
+    {
+     "op": "after",
+     "tool": "functional_p0_pb_look"
+    },
+    {
+     "cancel": "Playbook functional-p0-pb: step inspect allows at most 2 tool calls and has made them; call complete_step with what you have.",
+     "op": "before",
+     "tool": "functional_p0_pb_look"
+    },
+    {
+     "args": [
+      [
+       "inspect",
+       {
+        "condition": "arrived intact"
+       }
+      ],
+      {}
+     ],
+     "op": "complete_step",
+     "out": {
+      "active": [
+       "explain_charge"
+      ],
+      "branches_not_taken": [
+       "damaged"
+      ],
+      "branches_taken": [
+       "intact"
+      ],
+      "enabled_steps": [
+       "explain_charge"
+      ],
+      "next": [
+       "### Step explain_charge: Explain the order (optional)\nTools: none (reason over what you already have)\nExpected outputs (pass each to complete_step): note"
+      ],
+      "ok": true,
+      "routed_by": "when",
+      "status": "done",
+      "step": "inspect",
+      "waived": [
+       "check_warranty"
+      ]
+     }
+    },
+    {
+     "cancel": "Playbook functional-p0-pb: functional_p0_pb_warranty is not allowed in the active step (explain_charge). Allowed: no tools. Finish the step with complete_step to move on.",
+     "op": "before",
+     "tool": "functional_p0_pb_warranty"
+    },
+    {
+     "args": [
+      [
+       "explain_charge",
+       {
+        "note": "fine"
+       }
+      ],
+      {}
+     ],
+     "op": "complete_step",
+     "out": {
+      "active": [
+       "decide"
+      ],
+      "next": [
+       "### Step decide: Submit one decision\nTools: submit_decision (at most 1 calls)"
+      ],
+      "ok": true,
+      "status": "done",
+      "step": "explain_charge",
+      "waived": [
+       "check_warranty"
+      ]
+     }
+    },
+    {
+     "args": [
+      [
+       "INCONCLUSIVE",
+       "could not tell",
+       []
+      ],
+      {}
+     ],
+     "op": "submit_decision",
+     "out": {
+      "action": "Say what is missing.",
+      "classification": "INCONCLUSIVE",
+      "escalation_target": null,
+      "next": "The playbook is concluded. Write your final answer: the outcome, why, and the evidence it rests on -- as a recommendation; do not act on it.",
+      "ok": true,
+      "outcome_id": "INCONCLUSIVE",
+      "recommendation_only": true
+     }
+    },
+    {
+     "args": [
+      [],
+      {}
+     ],
+     "op": "finish",
+     "out": null
+    }
+   ],
+   "outcome": {
+    "classification": "INCONCLUSIVE",
+    "outcome_id": "INCONCLUSIVE"
+   },
+   "status": {
+    "check_warranty": "waived",
+    "decide": "done",
+    "explain_charge": "done",
+    "inspect": "done"
+   },
+   "violations": [
+    "too_many_calls",
+    "unexpected_tool"
+   ]
+  },
+  "refund_block": {
+   "audit": [
+    {
+     "correlation_id": "run-golden",
+     "event": "playbook_step",
+     "playbook": "refund-dispute",
+     "playbook_digest": "sha256:feed",
+     "playbook_version": "7",
+     "principal": "gw-golden",
+     "reason": "",
+     "required": true,
+     "status": "done",
+     "step": "triage",
+     "tool_calls": 1
+    },
+    {
+     "correlation_id": "run-golden",
+     "event": "playbook_step",
+     "playbook": "refund-dispute",
+     "playbook_digest": "sha256:feed",
+     "playbook_version": "7",
+     "principal": "gw-golden",
+     "reason": "",
+     "required": false,
+     "status": "done",
+     "step": "check_amount",
+     "tool_calls": 1
+    },
+    {
+     "correlation_id": "run-golden",
+     "event": "playbook_step",
+     "playbook": "refund-dispute",
+     "playbook_digest": "sha256:feed",
+     "playbook_version": "7",
+     "principal": "gw-golden",
+     "reason": "",
+     "required": false,
+     "status": "done",
+     "step": "check_duplicates",
+     "tool_calls": 1
+    },
+    {
+     "correlation_id": "run-golden",
+     "event": "playbook_step",
+     "playbook": "refund-dispute",
+     "playbook_digest": "sha256:feed",
+     "playbook_version": "7",
+     "principal": "gw-golden",
+     "reason": "",
+     "required": true,
+     "status": "done",
+     "step": "decide",
+     "tool_calls": 0
+    },
+    {
+     "classification": "",
+     "converged": true,
+     "correlation_id": "run-golden",
+     "deviations": [
+      "unexpected_tool",
+      "decision_before_convergence"
+     ],
+     "event": "playbook_decision",
+     "evidence_refs_sha256": "1a400710dc8dcd79d6f3b554795b85a8dc2dd0bcd1941bd15f51fad5eb14a3fe",
+     "outcome_id": "REFUND_DIFFERENCE",
+     "playbook": "refund-dispute",
+     "playbook_digest": "sha256:feed",
+     "playbook_version": "7",
+     "principal": "gw-golden",
+     "rationale_sha256": "126e2312a5b337adff50c6b57d2ae56150a857591bf837478b54784af126acaf",
+     "steps": {
+      "check_amount": "done",
+      "check_duplicates": "done",
+      "decide": "done",
+      "triage": "done"
+     }
+    }
+   ],
+   "converged": false,
+   "decision": {
+    "action": "Recommend refunding the difference.",
+    "classification": null,
+    "escalation_target": null,
+    "outcome_id": "REFUND_DIFFERENCE",
+    "priority": 3
+   },
+   "events": [
+    {
+     "allowed_tools": [
+      "lookup_order",
+      "select_branches"
+     ],
+     "description": "Read the order and the customer's account of it; select the branches that apply.",
+     "expected_tools": [
+      "lookup_order",
+      "select_branches"
+     ],
+     "group": "gather",
+     "index": 0,
+     "parallel_group": null,
+     "playbook": "refund-dispute",
+     "required": true,
+     "status": "pending",
+     "step": "triage",
+     "step_id": "triage",
+     "title": "Classify the dispute",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "lookup_order"
+     ],
+     "description": "Look for duplicate charges",
+     "expected_tools": [
+      "lookup_order"
+     ],
+     "group": "drilldown",
+     "index": 1,
+     "parallel_group": "evidence",
+     "playbook": "refund-dispute",
+     "required": false,
+     "status": "pending",
+     "step": "check_duplicates",
+     "step_id": "check_duplicates",
+     "title": "Look for duplicate charges",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "lookup_order",
+      "get_balance"
+     ],
+     "description": "Compare the charge with the order",
+     "expected_tools": [
+      "lookup_order",
+      "get_balance"
+     ],
+     "group": "drilldown",
+     "index": 2,
+     "parallel_group": "evidence",
+     "playbook": "refund-dispute",
+     "required": false,
+     "status": "pending",
+     "step": "check_amount",
+     "step_id": "check_amount",
+     "title": "Compare the charge with the order",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "submit_decision"
+     ],
+     "description": "Submit one decision",
+     "expected_tools": [
+      "submit_decision"
+     ],
+     "group": "conclude",
+     "index": 3,
+     "parallel_group": null,
+     "playbook": "refund-dispute",
+     "required": true,
+     "status": "pending",
+     "step": "decide",
+     "step_id": "decide",
+     "title": "Submit one decision",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "lookup_order",
+      "select_branches"
+     ],
+     "description": "Read the order and the customer's account of it; select the branches that apply.",
+     "expected_tools": [
+      "lookup_order",
+      "select_branches"
+     ],
+     "group": "gather",
+     "index": 0,
+     "parallel_group": null,
+     "playbook": "refund-dispute",
+     "required": true,
+     "status": "active",
+     "step": "triage",
+     "step_id": "triage",
+     "title": "Classify the dispute",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "blocked": true,
+     "enforcement": "block",
+     "expected_tools": [
+      "lookup_order",
+      "select_branches"
+     ],
+     "index": 0,
+     "playbook": "refund-dispute",
+     "required": true,
+     "step": "triage",
+     "tool": "get_balance",
+     "type": "playbook_deviation",
+     "version": "playbook.v2",
+     "violation": "unexpected_tool"
+    },
+    {
+     "blocked": true,
+     "enforcement": "block",
+     "expected_tools": [],
+     "index": -1,
+     "playbook": "refund-dispute",
+     "reason": "steps still open: triage, check_duplicates, check_amount, decide",
+     "required": false,
+     "step": "",
+     "tool": "submit_decision",
+     "type": "playbook_deviation",
+     "version": "playbook.v2",
+     "violation": "decision_before_convergence"
+    },
+    {
+     "allowed_tools": [
+      "lookup_order",
+      "select_branches"
+     ],
+     "branches_not_taken": [],
+     "branches_taken": [
+      "duplicate",
+      "amount"
+     ],
+     "description": "Read the order and the customer's account of it; select the branches that apply.",
+     "enabled_steps": [
+      "check_amount",
+      "check_duplicates"
+     ],
+     "expected_tools": [
+      "lookup_order",
+      "select_branches"
+     ],
+     "group": "gather",
+     "index": 0,
+     "outputs": {
+      "customer_statement": "x",
+      "dispute_kind": "duplicate",
+      "selected_branch_ids": []
+     },
+     "parallel_group": null,
+     "playbook": "refund-dispute",
+     "required": true,
+     "routed_by": "select_branches",
+     "status": "done",
+     "step": "triage",
+     "step_id": "triage",
+     "title": "Classify the dispute",
+     "tool_calls": 1,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": false,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "lookup_order"
+     ],
+     "description": "Look for duplicate charges",
+     "expected_tools": [
+      "lookup_order"
+     ],
+     "group": "drilldown",
+     "index": 1,
+     "parallel_group": "evidence",
+     "playbook": "refund-dispute",
+     "required": false,
+     "status": "active",
+     "step": "check_duplicates",
+     "step_id": "check_duplicates",
+     "title": "Look for duplicate charges",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "lookup_order",
+      "get_balance"
+     ],
+     "description": "Compare the charge with the order",
+     "expected_tools": [
+      "lookup_order",
+      "get_balance"
+     ],
+     "group": "drilldown",
+     "index": 2,
+     "parallel_group": "evidence",
+     "playbook": "refund-dispute",
+     "required": false,
+     "status": "active",
+     "step": "check_amount",
+     "step_id": "check_amount",
+     "title": "Compare the charge with the order",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "lookup_order",
+      "get_balance"
+     ],
+     "description": "Compare the charge with the order",
+     "expected_tools": [
+      "lookup_order",
+      "get_balance"
+     ],
+     "group": "drilldown",
+     "index": 2,
+     "outputs": {
+      "amount_delta": 3
+     },
+     "parallel_group": "evidence",
+     "playbook": "refund-dispute",
+     "required": false,
+     "status": "done",
+     "step": "check_amount",
+     "step_id": "check_amount",
+     "title": "Compare the charge with the order",
+     "tool_calls": 1,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "lookup_order"
+     ],
+     "description": "Look for duplicate charges",
+     "expected_tools": [
+      "lookup_order"
+     ],
+     "group": "drilldown",
+     "index": 1,
+     "outputs": {
+      "duplicate_charges": []
+     },
+     "parallel_group": "evidence",
+     "playbook": "refund-dispute",
+     "required": false,
+     "status": "done",
+     "step": "check_duplicates",
+     "step_id": "check_duplicates",
+     "title": "Look for duplicate charges",
+     "tool_calls": 1,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "submit_decision"
+     ],
+     "description": "Submit one decision",
+     "expected_tools": [
+      "submit_decision"
+     ],
+     "group": "conclude",
+     "index": 3,
+     "parallel_group": null,
+     "playbook": "refund-dispute",
+     "required": true,
+     "status": "active",
+     "step": "decide",
+     "step_id": "decide",
+     "title": "Submit one decision",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "submit_decision"
+     ],
+     "description": "Submit one decision",
+     "expected_tools": [
+      "submit_decision"
+     ],
+     "group": "conclude",
+     "index": 3,
+     "outputs": {
+      "outcome_id": "REFUND_DIFFERENCE"
+     },
+     "parallel_group": null,
+     "playbook": "refund-dispute",
+     "required": true,
+     "status": "done",
+     "step": "decide",
+     "step_id": "decide",
+     "title": "Submit one decision",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "action": "Recommend refunding the difference.",
+     "classification": null,
+     "converged": true,
+     "enforcement": "block",
+     "escalation_target": null,
+     "evidence_refs": [
+      "ch_9"
+     ],
+     "outcome_id": "REFUND_DIFFERENCE",
+     "playbook": "refund-dispute",
+     "priority": 3,
+     "rationale": "short by 3",
+     "recommendation_only": true,
+     "step": "decide",
+     "type": "playbook_decision",
+     "version": "playbook.v2"
+    }
+   ],
+   "ops": [
+    {
+     "args": [
+      [],
+      {}
+     ],
+     "op": "start",
+     "out": null
+    },
+    {
+     "cancel": "Playbook refund-dispute: get_balance is not allowed in the active step (triage). Allowed: lookup_order, select_branches. Finish the step with complete_step to move on.",
+     "op": "before",
+     "tool": "get_balance"
+    },
+    {
+     "args": [
+      [
+       "REFUND_DUPLICATE",
+       "too early",
+       []
+      ],
+      {}
+     ],
+     "op": "submit_decision",
+     "out": {
+      "error": "the playbook has not converged: finish triage, check_duplicates, check_amount, decide first (or conclude INCONCLUSIVE if the evidence cannot be had)",
+      "ok": false
+     }
+    },
+    {
+     "args": [
+      [
+       "triage",
+       {
+        "dispute_kind": "x"
+       }
+      ],
+      {}
+     ],
+     "op": "complete_step",
+     "out": {
+      "error": "step triage still owes outputs: selected_branch_ids",
+      "missing": [
+       "selected_branch_ids"
+      ],
+      "ok": false
+     }
+    },
+    {
+     "args": [
+      [
+       "check_amount",
+       {
+        "amount_delta": 1
+       }
+      ],
+      {}
+     ],
+     "op": "complete_step",
+     "out": {
+      "active": [
+       "triage"
+      ],
+      "error": "step check_amount is pending, not active",
+      "ok": false
+     }
+    },
+    {
+     "args": [
+      [
+       "triage",
+       [
+        "nope"
+       ],
+       "bad id"
+      ],
+      {}
+     ],
+     "op": "select_branches",
+     "out": {
+      "branches": [
+       "duplicate",
+       "amount"
+      ],
+      "error": "unknown branches ['nope']",
+      "ok": false
+     }
+    },
+    {
+     "args": [
+      [
+       "triage",
+       [
+        "duplicate",
+        "amount"
+       ],
+       "both"
+      ],
+      {}
+     ],
+     "op": "select_branches",
+     "out": {
+      "next": "Call complete_step('triage', outputs) to close the step and take these branches.",
+      "ok": true,
+      "reason": "both",
+      "selected": [
+       "duplicate",
+       "amount"
+      ],
+      "step": "triage",
+      "waives": []
+     }
+    },
+    {
+     "cancel": null,
+     "op": "before",
+     "tool": "lookup_order"
+    },
+    {
+     "op": "after",
+     "tool": "lookup_order"
+    },
+    {
+     "args": [
+      [
+       "triage",
+       {
+        "customer_statement": "x",
+        "dispute_kind": "duplicate",
+        "selected_branch_ids": []
+       }
+      ],
+      {}
+     ],
+     "op": "complete_step",
+     "out": {
+      "active": [
+       "check_duplicates",
+       "check_amount"
+      ],
+      "branches_not_taken": [],
+      "branches_taken": [
+       "duplicate",
+       "amount"
+      ],
+      "enabled_steps": [
+       "check_amount",
+       "check_duplicates"
+      ],
+      "next": [
+       "### Step check_duplicates: Look for duplicate charges (optional)\nTools: lookup_order\nExpected outputs (pass each to complete_step): duplicate_charges",
+       "### Step check_amount: Compare the charge with the order (optional)\nTools: lookup_order, get_balance\nExpected outputs (pass each to complete_step): amount_delta"
+      ],
+      "ok": true,
+      "routed_by": "select_branches",
+      "status": "done",
+      "step": "triage",
+      "waived": []
+     }
+    },
+    {
+     "cancel": null,
+     "op": "before",
+     "tool": "lookup_order"
+    },
+    {
+     "op": "after",
+     "tool": "lookup_order"
+    },
+    {
+     "cancel": null,
+     "op": "before",
+     "tool": "lookup_order"
+    },
+    {
+     "op": "after",
+     "tool": "lookup_order"
+    },
+    {
+     "cancel": null,
+     "op": "before",
+     "tool": "get_balance"
+    },
+    {
+     "op": "after",
+     "tool": "get_balance"
+    },
+    {
+     "args": [
+      [
+       "check_amount",
+       {
+        "amount_delta": 3
+       }
+      ],
+      {}
+     ],
+     "op": "complete_step",
+     "out": {
+      "active": [
+       "check_duplicates"
+      ],
+      "next": "No step is waiting for work. Conclude with submit_decision (one of: INCONCLUSIVE, REFUND_DUPLICATE, REFUND_DIFFERENCE, NO_REFUND).",
+      "ok": true,
+      "status": "done",
+      "step": "check_amount",
+      "waived": []
+     }
+    },
+    {
+     "cancel": null,
+     "op": "before",
+     "tool": "lookup_order"
+    },
+    {
+     "op": "after",
+     "tool": "lookup_order"
+    },
+    {
+     "args": [
+      [
+       "check_duplicates",
+       {
+        "duplicate_charges": []
+       }
+      ],
+      {}
+     ],
+     "op": "complete_step",
+     "out": {
+      "active": [
+       "decide"
+      ],
+      "next": [
+       "### Step decide: Submit one decision\nTools: submit_decision (at most 1 calls)"
+      ],
+      "ok": true,
+      "status": "done",
+      "step": "check_duplicates",
+      "waived": []
+     }
+    },
+    {
+     "args": [
+      [
+       "NOPE",
+       "unknown",
+       []
+      ],
+      {}
+     ],
+     "op": "submit_decision",
+     "out": {
+      "error": "'NOPE' is not an outcome of this playbook",
+      "ok": false,
+      "outcomes": [
+       "INCONCLUSIVE",
+       "REFUND_DUPLICATE",
+       "REFUND_DIFFERENCE",
+       "NO_REFUND"
+      ]
+     }
+    },
+    {
+     "args": [
+      [
+       "REFUND_DIFFERENCE",
+       "short by 3",
+       [
+        "ch_9"
+       ]
+      ],
+      {}
+     ],
+     "op": "submit_decision",
+     "out": {
+      "action": "Recommend refunding the difference.",
+      "classification": null,
+      "escalation_target": null,
+      "next": "The playbook is concluded. Write your final answer: the outcome, why, and the evidence it rests on -- as a recommendation; do not act on it.",
+      "ok": true,
+      "outcome_id": "REFUND_DIFFERENCE",
+      "recommendation_only": true
+     }
+    },
+    {
+     "args": [
+      [],
+      {}
+     ],
+     "op": "finish",
+     "out": null
+    }
+   ],
+   "outcome": {
+    "classification": null,
+    "outcome_id": "REFUND_DIFFERENCE"
+   },
+   "status": {
+    "check_amount": "done",
+    "check_duplicates": "done",
+    "decide": "done",
+    "triage": "done"
+   },
+   "violations": [
+    "unexpected_tool",
+    "decision_before_convergence"
+   ]
+  },
+  "refund_pause_and_observe": {
+   "audit": [
+    {
+     "correlation_id": "run-golden",
+     "event": "playbook_step",
+     "playbook": "refund-dispute",
+     "playbook_digest": "sha256:feed",
+     "playbook_version": "7",
+     "principal": "gw-golden",
+     "reason": "",
+     "required": true,
+     "status": "done",
+     "step": "triage",
+     "tool_calls": 1
+    },
+    {
+     "correlation_id": "run-golden",
+     "event": "playbook_step",
+     "playbook": "refund-dispute",
+     "playbook_digest": "sha256:feed",
+     "playbook_version": "7",
+     "principal": "gw-golden",
+     "reason": "no branch that names it was taken",
+     "required": false,
+     "status": "waived",
+     "step": "check_duplicates",
+     "tool_calls": 0
+    },
+    {
+     "correlation_id": "run-golden",
+     "event": "playbook_step",
+     "playbook": "refund-dispute",
+     "playbook_digest": "sha256:feed",
+     "playbook_version": "7",
+     "principal": "gw-golden",
+     "reason": "tool lookup_order did not execute: no body",
+     "required": false,
+     "status": "not_executed",
+     "step": "check_amount",
+     "tool_calls": 0
+    }
+   ],
+   "converged": true,
+   "decision": null,
+   "events": [
+    {
+     "allowed_tools": [
+      "lookup_order",
+      "select_branches"
+     ],
+     "description": "Read the order and the customer's account of it; select the branches that apply.",
+     "expected_tools": [
+      "lookup_order",
+      "select_branches"
+     ],
+     "group": "gather",
+     "index": 0,
+     "parallel_group": null,
+     "playbook": "refund-dispute",
+     "required": true,
+     "status": "pending",
+     "step": "triage",
+     "step_id": "triage",
+     "title": "Classify the dispute",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "lookup_order"
+     ],
+     "description": "Look for duplicate charges",
+     "expected_tools": [
+      "lookup_order"
+     ],
+     "group": "drilldown",
+     "index": 1,
+     "parallel_group": "evidence",
+     "playbook": "refund-dispute",
+     "required": false,
+     "status": "pending",
+     "step": "check_duplicates",
+     "step_id": "check_duplicates",
+     "title": "Look for duplicate charges",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "lookup_order",
+      "get_balance"
+     ],
+     "description": "Compare the charge with the order",
+     "expected_tools": [
+      "lookup_order",
+      "get_balance"
+     ],
+     "group": "drilldown",
+     "index": 2,
+     "parallel_group": "evidence",
+     "playbook": "refund-dispute",
+     "required": false,
+     "status": "pending",
+     "step": "check_amount",
+     "step_id": "check_amount",
+     "title": "Compare the charge with the order",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "submit_decision"
+     ],
+     "description": "Submit one decision",
+     "expected_tools": [
+      "submit_decision"
+     ],
+     "group": "conclude",
+     "index": 3,
+     "parallel_group": null,
+     "playbook": "refund-dispute",
+     "required": true,
+     "status": "pending",
+     "step": "decide",
+     "step_id": "decide",
+     "title": "Submit one decision",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "lookup_order",
+      "select_branches"
+     ],
+     "description": "Read the order and the customer's account of it; select the branches that apply.",
+     "expected_tools": [
+      "lookup_order",
+      "select_branches"
+     ],
+     "group": "gather",
+     "index": 0,
+     "parallel_group": null,
+     "playbook": "refund-dispute",
+     "required": true,
+     "status": "active",
+     "step": "triage",
+     "step_id": "triage",
+     "title": "Classify the dispute",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "lookup_order",
+      "select_branches"
+     ],
+     "description": "Read the order and the customer's account of it; select the branches that apply.",
+     "expected_tools": [
+      "lookup_order",
+      "select_branches"
+     ],
+     "group": "gather",
+     "index": 0,
+     "parallel_group": null,
+     "playbook": "refund-dispute",
+     "reason": "awaiting approval",
+     "required": true,
+     "status": "blocked",
+     "step": "triage",
+     "step_id": "triage",
+     "title": "Classify the dispute",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "lookup_order",
+      "select_branches"
+     ],
+     "description": "Read the order and the customer's account of it; select the branches that apply.",
+     "expected_tools": [
+      "lookup_order",
+      "select_branches"
+     ],
+     "group": "gather",
+     "index": 0,
+     "parallel_group": null,
+     "playbook": "refund-dispute",
+     "required": true,
+     "status": "active",
+     "step": "triage",
+     "step_id": "triage",
+     "title": "Classify the dispute",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "blocked": false,
+     "enforcement": "record",
+     "expected_tools": [
+      "lookup_order",
+      "select_branches"
+     ],
+     "index": 0,
+     "playbook": "refund-dispute",
+     "reason": "tool lookup_order did not execute: label-only tool",
+     "required": true,
+     "step": "triage",
+     "tool": "lookup_order",
+     "type": "playbook_deviation",
+     "version": "playbook.v2",
+     "violation": "tool_not_executed"
+    },
+    {
+     "allowed_tools": [
+      "lookup_order",
+      "select_branches"
+     ],
+     "branches_not_taken": [
+      "duplicate"
+     ],
+     "branches_taken": [
+      "amount"
+     ],
+     "description": "Read the order and the customer's account of it; select the branches that apply.",
+     "enabled_steps": [
+      "check_amount"
+     ],
+     "expected_tools": [
+      "lookup_order",
+      "select_branches"
+     ],
+     "group": "gather",
+     "index": 0,
+     "outputs": {
+      "customer_statement": "y",
+      "dispute_kind": "amount",
+      "selected_branch_ids": [
+       "amount_mismatch"
+      ]
+     },
+     "parallel_group": null,
+     "playbook": "refund-dispute",
+     "required": true,
+     "routed_by": "when",
+     "status": "done",
+     "step": "triage",
+     "step_id": "triage",
+     "title": "Classify the dispute",
+     "tool_calls": 1,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": false,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "lookup_order"
+     ],
+     "description": "Look for duplicate charges",
+     "expected_tools": [
+      "lookup_order"
+     ],
+     "group": "drilldown",
+     "index": 1,
+     "parallel_group": "evidence",
+     "playbook": "refund-dispute",
+     "reason": "no branch that names it was taken",
+     "required": false,
+     "status": "waived",
+     "step": "check_duplicates",
+     "step_id": "check_duplicates",
+     "title": "Look for duplicate charges",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "lookup_order",
+      "get_balance"
+     ],
+     "description": "Compare the charge with the order",
+     "expected_tools": [
+      "lookup_order",
+      "get_balance"
+     ],
+     "group": "drilldown",
+     "index": 2,
+     "parallel_group": "evidence",
+     "playbook": "refund-dispute",
+     "required": false,
+     "status": "active",
+     "step": "check_amount",
+     "step_id": "check_amount",
+     "title": "Compare the charge with the order",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "blocked": false,
+     "enforcement": "record",
+     "expected_tools": [
+      "lookup_order",
+      "get_balance"
+     ],
+     "index": 2,
+     "playbook": "refund-dispute",
+     "reason": "tool lookup_order did not execute: no body",
+     "required": false,
+     "step": "check_amount",
+     "tool": "lookup_order",
+     "type": "playbook_deviation",
+     "version": "playbook.v2",
+     "violation": "tool_not_executed"
+    },
+    {
+     "allowed_tools": [
+      "lookup_order",
+      "get_balance"
+     ],
+     "description": "Compare the charge with the order",
+     "expected_tools": [
+      "lookup_order",
+      "get_balance"
+     ],
+     "group": "drilldown",
+     "index": 2,
+     "parallel_group": "evidence",
+     "playbook": "refund-dispute",
+     "reason": "tool lookup_order did not execute: no body",
+     "required": false,
+     "status": "not_executed",
+     "step": "check_amount",
+     "step_id": "check_amount",
+     "title": "Compare the charge with the order",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": false,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "submit_decision"
+     ],
+     "description": "Submit one decision",
+     "expected_tools": [
+      "submit_decision"
+     ],
+     "group": "conclude",
+     "index": 3,
+     "parallel_group": null,
+     "playbook": "refund-dispute",
+     "required": true,
+     "status": "active",
+     "step": "decide",
+     "step_id": "decide",
+     "title": "Submit one decision",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "blocked": false,
+     "enforcement": "record",
+     "expected_tools": [
+      "submit_decision"
+     ],
+     "index": 3,
+     "playbook": "refund-dispute",
+     "reason": "the run ended before it",
+     "required": true,
+     "step": "decide",
+     "tool": "",
+     "type": "playbook_deviation",
+     "version": "playbook.v2",
+     "violation": "required_step_skipped"
+    },
+    {
+     "blocked": false,
+     "enforcement": "record",
+     "expected_tools": [],
+     "index": -1,
+     "playbook": "refund-dispute",
+     "reason": "the run ended undecided",
+     "required": false,
+     "step": "",
+     "tool": "",
+     "type": "playbook_deviation",
+     "version": "playbook.v2",
+     "violation": "no_decision"
+    }
+   ],
+   "ops": [
+    {
+     "args": [
+      [],
+      {}
+     ],
+     "op": "start",
+     "out": null
+    },
+    {
+     "args": [
+      [
+       "awaiting approval"
+      ],
+      {}
+     ],
+     "op": "pause",
+     "out": null
+    },
+    {
+     "args": [
+      [],
+      {}
+     ],
+     "op": "unpause",
+     "out": null
+    },
+    {
+     "args": [
+      [
+       "lookup_order"
+      ],
+      {
+       "arguments": {
+        "order_id": "o1"
+       }
+      }
+     ],
+     "op": "observe",
+     "out": null
+    },
+    {
+     "args": [
+      [
+       "lookup_order"
+      ],
+      {
+       "not_executed": "label-only tool"
+      }
+     ],
+     "op": "observe",
+     "out": null
+    },
+    {
+     "cancel": null,
+     "op": "before",
+     "tool": "ask_user"
+    },
+    {
+     "op": "after",
+     "tool": "ask_user"
+    },
+    {
+     "args": [
+      [
+       "triage",
+       {
+        "customer_statement": "y",
+        "dispute_kind": "amount",
+        "selected_branch_ids": [
+         "amount_mismatch"
+        ]
+       }
+      ],
+      {}
+     ],
+     "op": "complete_step",
+     "out": {
+      "active": [
+       "check_amount"
+      ],
+      "branches_not_taken": [
+       "duplicate"
+      ],
+      "branches_taken": [
+       "amount"
+      ],
+      "enabled_steps": [
+       "check_amount"
+      ],
+      "next": [
+       "### Step check_amount: Compare the charge with the order (optional)\nTools: lookup_order, get_balance\nExpected outputs (pass each to complete_step): amount_delta"
+      ],
+      "ok": true,
+      "routed_by": "when",
+      "status": "done",
+      "step": "triage",
+      "waived": [
+       "check_duplicates"
+      ]
+     }
+    },
+    {
+     "cancel": null,
+     "op": "before",
+     "tool": "lookup_order"
+    },
+    {
+     "op": "after",
+     "tool": "lookup_order"
+    },
+    {
+     "args": [
+      [
+       "check_amount",
+       {
+        "amount_delta": 0
+       }
+      ],
+      {}
+     ],
+     "op": "complete_step",
+     "out": {
+      "active": [
+       "decide"
+      ],
+      "next": [
+       "### Step decide: Submit one decision\nTools: submit_decision (at most 1 calls)"
+      ],
+      "ok": false,
+      "reason": "tool lookup_order did not execute: no body",
+      "status": "not_executed",
+      "step": "check_amount",
+      "waived": [
+       "check_duplicates"
+      ]
+     }
+    },
+    {
+     "args": [
+      [],
+      {}
+     ],
+     "op": "finish",
+     "out": null
+    }
+   ],
+   "outcome": null,
+   "status": {
+    "check_amount": "not_executed",
+    "check_duplicates": "waived",
+    "decide": "active",
+    "triage": "done"
+   },
+   "violations": [
+    "tool_not_executed",
+    "tool_not_executed",
+    "required_step_skipped",
+    "no_decision"
+   ]
+  },
+  "refund_record": {
+   "audit": [
+    {
+     "correlation_id": "run-golden",
+     "event": "playbook_step",
+     "playbook": "refund-dispute",
+     "playbook_digest": "sha256:feed",
+     "playbook_version": "7",
+     "principal": "gw-golden",
+     "reason": "",
+     "required": true,
+     "status": "done",
+     "step": "triage",
+     "tool_calls": 1
+    },
+    {
+     "correlation_id": "run-golden",
+     "event": "playbook_step",
+     "playbook": "refund-dispute",
+     "playbook_digest": "sha256:feed",
+     "playbook_version": "7",
+     "principal": "gw-golden",
+     "reason": "no branch that names it was taken",
+     "required": false,
+     "status": "waived",
+     "step": "check_amount",
+     "tool_calls": 0
+    },
+    {
+     "correlation_id": "run-golden",
+     "event": "playbook_step",
+     "playbook": "refund-dispute",
+     "playbook_digest": "sha256:feed",
+     "playbook_version": "7",
+     "principal": "gw-golden",
+     "reason": "",
+     "required": false,
+     "status": "done",
+     "step": "check_duplicates",
+     "tool_calls": 1
+    },
+    {
+     "correlation_id": "run-golden",
+     "event": "playbook_step",
+     "playbook": "refund-dispute",
+     "playbook_digest": "sha256:feed",
+     "playbook_version": "7",
+     "principal": "gw-golden",
+     "reason": "",
+     "required": true,
+     "status": "done",
+     "step": "decide",
+     "tool_calls": 0
+    },
+    {
+     "classification": "",
+     "converged": true,
+     "correlation_id": "run-golden",
+     "deviations": [
+      "unexpected_tool"
+     ],
+     "event": "playbook_decision",
+     "evidence_refs_sha256": "f78d2edf0ed75b9a2765ce29c84cb066390aa2dce76dc1f3f47ac8675dd221f3",
+     "outcome_id": "REFUND_DUPLICATE",
+     "playbook": "refund-dispute",
+     "playbook_digest": "sha256:feed",
+     "playbook_version": "7",
+     "principal": "gw-golden",
+     "rationale_sha256": "d6d2071048e436104e984cf6dcbfc11e875d82f421e0640e99ad4ab42a1dfd4c",
+     "steps": {
+      "check_amount": "waived",
+      "check_duplicates": "done",
+      "decide": "done",
+      "triage": "done"
+     }
+    }
+   ],
+   "converged": false,
+   "decision": {
+    "action": "Recommend refunding the duplicate.",
+    "classification": null,
+    "escalation_target": null,
+    "outcome_id": "REFUND_DUPLICATE",
+    "priority": 2
+   },
+   "events": [
+    {
+     "allowed_tools": [
+      "lookup_order",
+      "select_branches"
+     ],
+     "description": "Read the order and the customer's account of it; select the branches that apply.",
+     "expected_tools": [
+      "lookup_order",
+      "select_branches"
+     ],
+     "group": "gather",
+     "index": 0,
+     "parallel_group": null,
+     "playbook": "refund-dispute",
+     "required": true,
+     "status": "pending",
+     "step": "triage",
+     "step_id": "triage",
+     "title": "Classify the dispute",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "lookup_order"
+     ],
+     "description": "Look for duplicate charges",
+     "expected_tools": [
+      "lookup_order"
+     ],
+     "group": "drilldown",
+     "index": 1,
+     "parallel_group": "evidence",
+     "playbook": "refund-dispute",
+     "required": false,
+     "status": "pending",
+     "step": "check_duplicates",
+     "step_id": "check_duplicates",
+     "title": "Look for duplicate charges",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "lookup_order",
+      "get_balance"
+     ],
+     "description": "Compare the charge with the order",
+     "expected_tools": [
+      "lookup_order",
+      "get_balance"
+     ],
+     "group": "drilldown",
+     "index": 2,
+     "parallel_group": "evidence",
+     "playbook": "refund-dispute",
+     "required": false,
+     "status": "pending",
+     "step": "check_amount",
+     "step_id": "check_amount",
+     "title": "Compare the charge with the order",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "submit_decision"
+     ],
+     "description": "Submit one decision",
+     "expected_tools": [
+      "submit_decision"
+     ],
+     "group": "conclude",
+     "index": 3,
+     "parallel_group": null,
+     "playbook": "refund-dispute",
+     "required": true,
+     "status": "pending",
+     "step": "decide",
+     "step_id": "decide",
+     "title": "Submit one decision",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "lookup_order",
+      "select_branches"
+     ],
+     "description": "Read the order and the customer's account of it; select the branches that apply.",
+     "expected_tools": [
+      "lookup_order",
+      "select_branches"
+     ],
+     "group": "gather",
+     "index": 0,
+     "parallel_group": null,
+     "playbook": "refund-dispute",
+     "required": true,
+     "status": "active",
+     "step": "triage",
+     "step_id": "triage",
+     "title": "Classify the dispute",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "blocked": false,
+     "enforcement": "record",
+     "expected_tools": [
+      "lookup_order",
+      "select_branches"
+     ],
+     "index": 0,
+     "playbook": "refund-dispute",
+     "required": true,
+     "step": "triage",
+     "tool": "get_balance",
+     "type": "playbook_deviation",
+     "version": "playbook.v2",
+     "violation": "unexpected_tool"
+    },
+    {
+     "allowed_tools": [
+      "lookup_order",
+      "select_branches"
+     ],
+     "branches_not_taken": [
+      "amount"
+     ],
+     "branches_taken": [
+      "duplicate"
+     ],
+     "description": "Read the order and the customer's account of it; select the branches that apply.",
+     "enabled_steps": [
+      "check_duplicates"
+     ],
+     "expected_tools": [
+      "lookup_order",
+      "select_branches"
+     ],
+     "group": "gather",
+     "index": 0,
+     "outputs": {
+      "customer_statement": "x",
+      "dispute_kind": "duplicate",
+      "selected_branch_ids": [
+       "duplicate_charge"
+      ]
+     },
+     "parallel_group": null,
+     "playbook": "refund-dispute",
+     "required": true,
+     "routed_by": "when",
+     "status": "done",
+     "step": "triage",
+     "step_id": "triage",
+     "title": "Classify the dispute",
+     "tool_calls": 1,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": false,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "lookup_order",
+      "get_balance"
+     ],
+     "description": "Compare the charge with the order",
+     "expected_tools": [
+      "lookup_order",
+      "get_balance"
+     ],
+     "group": "drilldown",
+     "index": 2,
+     "parallel_group": "evidence",
+     "playbook": "refund-dispute",
+     "reason": "no branch that names it was taken",
+     "required": false,
+     "status": "waived",
+     "step": "check_amount",
+     "step_id": "check_amount",
+     "title": "Compare the charge with the order",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "lookup_order"
+     ],
+     "description": "Look for duplicate charges",
+     "expected_tools": [
+      "lookup_order"
+     ],
+     "group": "drilldown",
+     "index": 1,
+     "parallel_group": "evidence",
+     "playbook": "refund-dispute",
+     "required": false,
+     "status": "active",
+     "step": "check_duplicates",
+     "step_id": "check_duplicates",
+     "title": "Look for duplicate charges",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "lookup_order"
+     ],
+     "description": "Look for duplicate charges",
+     "expected_tools": [
+      "lookup_order"
+     ],
+     "group": "drilldown",
+     "index": 1,
+     "outputs": {
+      "duplicate_charges": [
+       "ch_2"
+      ]
+     },
+     "parallel_group": "evidence",
+     "playbook": "refund-dispute",
+     "required": false,
+     "status": "done",
+     "step": "check_duplicates",
+     "step_id": "check_duplicates",
+     "title": "Look for duplicate charges",
+     "tool_calls": 1,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "submit_decision"
+     ],
+     "description": "Submit one decision",
+     "expected_tools": [
+      "submit_decision"
+     ],
+     "group": "conclude",
+     "index": 3,
+     "parallel_group": null,
+     "playbook": "refund-dispute",
+     "required": true,
+     "status": "active",
+     "step": "decide",
+     "step_id": "decide",
+     "title": "Submit one decision",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "allowed_tools": [
+      "submit_decision"
+     ],
+     "description": "Submit one decision",
+     "expected_tools": [
+      "submit_decision"
+     ],
+     "group": "conclude",
+     "index": 3,
+     "outputs": {
+      "outcome_id": "REFUND_DUPLICATE"
+     },
+     "parallel_group": null,
+     "playbook": "refund-dispute",
+     "required": true,
+     "status": "done",
+     "step": "decide",
+     "step_id": "decide",
+     "title": "Submit one decision",
+     "tool_calls": 0,
+     "total": 4,
+     "type": "playbook_step",
+     "verified": true,
+     "version": "playbook.v2"
+    },
+    {
+     "action": "Recommend refunding the duplicate.",
+     "classification": null,
+     "converged": true,
+     "enforcement": "record",
+     "escalation_target": null,
+     "evidence_refs": [
+      "ch_1",
+      "ch_2"
+     ],
+     "outcome_id": "REFUND_DUPLICATE",
+     "playbook": "refund-dispute",
+     "priority": 2,
+     "rationale": "charged twice",
+     "recommendation_only": true,
+     "step": "decide",
+     "type": "playbook_decision",
+     "version": "playbook.v2"
+    },
+    {
+     "blocked": false,
+     "enforcement": "record",
+     "expected_tools": [],
+     "index": -1,
+     "playbook": "refund-dispute",
+     "required": false,
+     "step": "",
+     "tool": "lookup_order",
+     "type": "playbook_deviation",
+     "version": "playbook.v2",
+     "violation": "playbook_complete"
+    }
+   ],
+   "ops": [
+    {
+     "args": [
+      [],
+      {}
+     ],
+     "op": "start",
+     "out": null
+    },
+    {
+     "args": [
+      [],
+      {}
+     ],
+     "op": "start",
+     "out": null
+    },
+    {
+     "cancel": null,
+     "op": "before",
+     "tool": "get_balance"
+    },
+    {
+     "op": "after",
+     "tool": "get_balance"
+    },
+    {
+     "cancel": null,
+     "op": "before",
+     "tool": "lookup_order"
+    },
+    {
+     "op": "after",
+     "tool": "lookup_order"
+    },
+    {
+     "args": [
+      [
+       "triage",
+       {
+        "customer_statement": "x",
+        "dispute_kind": "duplicate",
+        "selected_branch_ids": [
+         "duplicate_charge"
+        ]
+       }
+      ],
+      {}
+     ],
+     "op": "complete_step",
+     "out": {
+      "active": [
+       "check_duplicates"
+      ],
+      "branches_not_taken": [
+       "amount"
+      ],
+      "branches_taken": [
+       "duplicate"
+      ],
+      "enabled_steps": [
+       "check_duplicates"
+      ],
+      "next": [
+       "### Step check_duplicates: Look for duplicate charges (optional)\nTools: lookup_order\nExpected outputs (pass each to complete_step): duplicate_charges"
+      ],
+      "ok": true,
+      "routed_by": "when",
+      "status": "done",
+      "step": "triage",
+      "waived": [
+       "check_amount"
+      ]
+     }
+    },
+    {
+     "cancel": null,
+     "op": "before",
+     "tool": "lookup_order"
+    },
+    {
+     "op": "after",
+     "tool": "lookup_order"
+    },
+    {
+     "args": [
+      [
+       "check_duplicates",
+       {
+        "duplicate_charges": [
+         "ch_2"
+        ]
+       }
+      ],
+      {}
+     ],
+     "op": "complete_step",
+     "out": {
+      "active": [
+       "decide"
+      ],
+      "next": [
+       "### Step decide: Submit one decision\nTools: submit_decision (at most 1 calls)"
+      ],
+      "ok": true,
+      "status": "done",
+      "step": "check_duplicates",
+      "waived": [
+       "check_amount"
+      ]
+     }
+    },
+    {
+     "args": [
+      [
+       "REFUND_DUPLICATE",
+       "charged twice",
+       [
+        "ch_1",
+        "ch_2"
+       ]
+      ],
+      {}
+     ],
+     "op": "submit_decision",
+     "out": {
+      "action": "Recommend refunding the duplicate.",
+      "classification": null,
+      "escalation_target": null,
+      "next": "The playbook is concluded. Write your final answer: the outcome, why, and the evidence it rests on -- as a recommendation; do not act on it.",
+      "ok": true,
+      "outcome_id": "REFUND_DUPLICATE",
+      "recommendation_only": true
+     }
+    },
+    {
+     "cancel": null,
+     "op": "before",
+     "tool": "lookup_order"
+    },
+    {
+     "op": "after",
+     "tool": "lookup_order"
+    },
+    {
+     "args": [
+      [],
+      {}
+     ],
+     "op": "finish",
+     "out": null
+    }
+   ],
+   "outcome": {
+    "classification": null,
+    "outcome_id": "REFUND_DUPLICATE"
+   },
+   "status": {
+    "check_amount": "waived",
+    "check_duplicates": "done",
+    "decide": "done",
+    "triage": "done"
+   },
+   "violations": [
+    "unexpected_tool",
+    "playbook_complete"
+   ]
+  },
+  "static": {
+   "f19": {
+    "briefs": [
+     "### Step inspect: Read the order\nGoal: Call functional_p0_pb_look with the order id and report the condition it arrived in.\nTools: functional_p0_pb_look (at least 1 and at most 2 calls)\nExpected outputs (pass each to complete_step): condition\nBranches (decided by your outputs, or pick them with select_branches before complete_step):\n- damaged (Arrived damaged): when condition contains damaged -> check_warranty\n- intact (Arrived intact): when NOT (condition contains damaged) -> explain_charge",
+     "### Step check_warranty: Check the warranty (optional)\nGoal: Call functional_p0_pb_warranty with the order id.\nTools: functional_p0_pb_warranty (at least 1 and at most 2 calls)\nExpected outputs (pass each to complete_step): covered",
+     "### Step explain_charge: Explain the order (optional)\nTools: none (reason over what you already have)\nExpected outputs (pass each to complete_step): note",
+     "### Step decide: Submit one decision\nTools: submit_decision (at most 1 calls)"
+    ],
+    "deny": [
+     "functional-p0-forbidden"
+    ],
+    "digest": "sha256:9451b4212c88ae933bf9decf4a583fe7f6aa7f16e9f891f3b1cb2a617ecf15d1",
+    "digest_stamped": "sha256:6a5f37dea01f0cd61e6be323ad97bd0d5217d6d1d275a37e624f2595f7455d29",
+    "initial": [
+     "inspect"
+    ],
+    "is_v2": true,
+    "mode_block": "block",
+    "mode_record": "record",
+    "prose": "# Playbook: Functional check: v2 playbook\nThrowaway (F19): read an order, check its warranty when it arrived damaged, decide.\nInputs:\n- order_id: The order to assess.\n## How this run works\nThe runtime tracks this playbook step by step. Work only on the active step(s).\n- When a step's work is done, call complete_step(step_id, outputs) with every expected output in `outputs`. Its result tells you which step is active next and gives you that step's full brief.\n- A step with branches routes the run: its outputs decide (each branch's `when`), or call select_branches(step_id, branch_ids, reason) before complete_step.\n- Conclude with submit_decision(outcome_id, rationale, evidence_refs): exactly once, one of the outcomes below. If evidence is missing, the honest outcome is INCONCLUSIVE.\n- A call outside the active step's tools is recorded as a deviation.\n## Steps\nGather\n- inspect: Read the order (branches to check_warranty, explain_charge)\nDrill down\n- check_warranty: Check the warranty (optional; after inspect; in parallel group evidence)\n- explain_charge: Explain the order (optional; after inspect; in parallel group evidence)\nConclude\n- decide: Submit one decision (after inspect; joins evidence)\n## Decision policy\n- Choose exactly one outcome.\n- Name the tool results it rests on.\nOutcomes, checked in this order:\n- INCONCLUSIVE [INCONCLUSIVE]: The order or its warranty could not be read. Then: Say what is missing.\n- REPLACE: The order arrived damaged and its warranty covers it. Then: Recommend a replacement.\n- NO_REPLACEMENT: The order arrived intact, or its warranty does not cover it. Then: Explain why no replacement is due.\nThis playbook recommends; it does not act on its conclusion.\n## Never\n- functional-p0-forbidden: This playbook diagnoses; a person issues any refund.\n## Active now\n### Step inspect: Read the order\nGoal: Call functional_p0_pb_look with the order id and report the condition it arrived in.\nTools: functional_p0_pb_look (at least 1 and at most 2 calls)\nExpected outputs (pass each to complete_step): condition\nBranches (decided by your outputs, or pick them with select_branches before complete_step):\n- damaged (Arrived damaged): when condition contains damaged -> check_warranty\n- intact (Arrived intact): when NOT (condition contains damaged) -> explain_charge",
+    "prose_block": "# Playbook: Functional check: v2 playbook\nThrowaway (F19): read an order, check its warranty when it arrived damaged, decide.\nInputs:\n- order_id: The order to assess.\n## How this run works\nThe runtime tracks this playbook step by step. Work only on the active step(s).\n- When a step's work is done, call complete_step(step_id, outputs) with every expected output in `outputs`. Its result tells you which step is active next and gives you that step's full brief.\n- A step with branches routes the run: its outputs decide (each branch's `when`), or call select_branches(step_id, branch_ids, reason) before complete_step.\n- Conclude with submit_decision(outcome_id, rationale, evidence_refs): exactly once, one of the outcomes below. If evidence is missing, the honest outcome is INCONCLUSIVE.\n- A call outside the active step's tools is refused.\n## Steps\nGather\n- inspect: Read the order (branches to check_warranty, explain_charge)\nDrill down\n- check_warranty: Check the warranty (optional; after inspect; in parallel group evidence)\n- explain_charge: Explain the order (optional; after inspect; in parallel group evidence)\nConclude\n- decide: Submit one decision (after inspect; joins evidence)\n## Decision policy\n- Choose exactly one outcome.\n- Name the tool results it rests on.\nOutcomes, checked in this order:\n- INCONCLUSIVE [INCONCLUSIVE]: The order or its warranty could not be read. Then: Say what is missing.\n- REPLACE: The order arrived damaged and its warranty covers it. Then: Recommend a replacement.\n- NO_REPLACEMENT: The order arrived intact, or its warranty does not cover it. Then: Explain why no replacement is due.\nThis playbook recommends; it does not act on its conclusion.\n## Never\n- functional-p0-forbidden: This playbook diagnoses; a person issues any refund.\n## Skills\nEach arrives in full with the step that uses it; until then, what it is for:\n- x\n## Active now\n### Step inspect: Read the order\nGoal: Call functional_p0_pb_look with the order id and report the condition it arrived in.\nTools: functional_p0_pb_look (at least 1 and at most 2 calls)\nExpected outputs (pass each to complete_step): condition\nBranches (decided by your outputs, or pick them with select_branches before complete_step):\n- damaged (Arrived damaged): when condition contains damaged -> check_warranty\n- intact (Arrived intact): when NOT (condition contains damaged) -> explain_charge\n### Step check_warranty: Check the warranty (optional)\nGoal: Call functional_p0_pb_warranty with the order id.\nTools: functional_p0_pb_warranty (at least 1 and at most 2 calls)\nExpected outputs (pass each to complete_step): covered\n### Step explain_charge: Explain the order (optional)\nTools: none (reason over what you already have)\nExpected outputs (pass each to complete_step): note\n### Step decide: Submit one decision\nTools: submit_decision (at most 1 calls)",
+    "skills": [
+     "a",
+     "b"
+    ],
+    "with_forbidden": {
+     "deny_for": [
+      "functional-p0-forbidden"
+     ],
+     "max_blast_radius": 2
+    }
+   },
+   "refund": {
+    "briefs": [
+     "### Step triage: Classify the dispute\nGoal: Read the order and the customer's account of it; select the branches that apply.\nTools: lookup_order, select_branches (at least 1 and at most 3 calls)\nExpected outputs (pass each to complete_step): dispute_kind, selected_branch_ids\nAsk the person with ask_user, unless they already told you:\n- customer_statement: What does the customer say happened?\nBranches (decided by your outputs, or pick them with select_branches before complete_step):\n- duplicate (Charged twice): when selected_branch_ids contains duplicate_charge -> check_duplicates\n- amount (Amount disputed): when selected_branch_ids contains amount_mismatch -> check_amount\n#### Skill: refund-checklist\nCHECK",
+     "### Step check_duplicates: Look for duplicate charges (optional)\nTools: lookup_order\nExpected outputs (pass each to complete_step): duplicate_charges",
+     "### Step check_amount: Compare the charge with the order (optional)\nTools: lookup_order, get_balance\nExpected outputs (pass each to complete_step): amount_delta",
+     "### Step decide: Submit one decision\nTools: submit_decision (at most 1 calls)"
+    ],
+    "deny": [
+     "bulk",
+     "issue_refund"
+    ],
+    "digest": "sha256:fa1993c36e07e1272a2daa4fa34586e3ddce59aa5f1fa7e6f5fea7e3eb60f32f",
+    "digest_stamped": "sha256:dfda2c2887e3fe5d972a67b27fa2aa6140c12707bee07962aa4dec9cacb0c1cc",
+    "initial": [
+     "triage"
+    ],
+    "is_v2": true,
+    "mode_block": "block",
+    "mode_record": "record",
+    "prose": "# Playbook: Refund dispute\nInvestigate a disputed charge, branch on what the order shows, gather the evidence for each branch side by side, and conclude with exactly one decision.\nInputs:\n- order_id: The order the customer disputes.\n## How this run works\nThe runtime tracks this playbook step by step. Work only on the active step(s).\n- When a step's work is done, call complete_step(step_id, outputs) with every expected output in `outputs`. Its result tells you which step is active next and gives you that step's full brief.\n- A step with branches routes the run: its outputs decide (each branch's `when`), or call select_branches(step_id, branch_ids, reason) before complete_step.\n- Conclude with submit_decision(outcome_id, rationale, evidence_refs): exactly once, one of the outcomes below. If evidence is missing, the honest outcome is INCONCLUSIVE.\n- A call outside the active step's tools is recorded as a deviation.\n## Steps\nGather: Establish the facts once and say which paths apply.\n- triage: Classify the dispute (branches to check_duplicates, check_amount)\nDrill down\n- check_duplicates: Look for duplicate charges (optional; after triage; in parallel group evidence)\n- check_amount: Compare the charge with the order (optional; after triage; in parallel group evidence)\nConclude\n- decide: Submit one decision (after triage; joins evidence)\n## Decision policy\n- Choose exactly one outcome.\n- Quote the evidence each outcome relies on.\nOutcomes, checked in this order:\n- INCONCLUSIVE [INCONCLUSIVE]: The order or its charges could not be read. Then: Say what is missing and ask for it.\n- REFUND_DUPLICATE: A duplicate charge is confirmed. Then: Recommend refunding the duplicate.\n- REFUND_DIFFERENCE: The amount charged exceeds the order total. Then: Recommend refunding the difference.\n- NO_REFUND: The charge matches the order. Then: Explain the charge to the customer.\nThis playbook recommends; it does not act on its conclusion.\n## Never\n- issue_refund: This playbook diagnoses; a person issues the refund.\n- bulk: Never act on more than one customer at a time.\n## Skills\nEach arrives in full with the step that uses it; until then, what it is for:\n- refund-checklist\n## Active now\n### Step triage: Classify the dispute\nGoal: Read the order and the customer's account of it; select the branches that apply.\nTools: lookup_order, select_branches (at least 1 and at most 3 calls)\nExpected outputs (pass each to complete_step): dispute_kind, selected_branch_ids\nAsk the person with ask_user, unless they already told you:\n- customer_statement: What does the customer say happened?\nBranches (decided by your outputs, or pick them with select_branches before complete_step):\n- duplicate (Charged twice): when selected_branch_ids contains duplicate_charge -> check_duplicates\n- amount (Amount disputed): when selected_branch_ids contains amount_mismatch -> check_amount\n#### Skill: refund-checklist\nCHECK",
+    "prose_block": "# Playbook: Refund dispute\nInvestigate a disputed charge, branch on what the order shows, gather the evidence for each branch side by side, and conclude with exactly one decision.\nInputs:\n- order_id: The order the customer disputes.\n## How this run works\nThe runtime tracks this playbook step by step. Work only on the active step(s).\n- When a step's work is done, call complete_step(step_id, outputs) with every expected output in `outputs`. Its result tells you which step is active next and gives you that step's full brief.\n- A step with branches routes the run: its outputs decide (each branch's `when`), or call select_branches(step_id, branch_ids, reason) before complete_step.\n- Conclude with submit_decision(outcome_id, rationale, evidence_refs): exactly once, one of the outcomes below. If evidence is missing, the honest outcome is INCONCLUSIVE.\n- A call outside the active step's tools is refused.\n## Steps\nGather: Establish the facts once and say which paths apply.\n- triage: Classify the dispute (branches to check_duplicates, check_amount)\nDrill down\n- check_duplicates: Look for duplicate charges (optional; after triage; in parallel group evidence)\n- check_amount: Compare the charge with the order (optional; after triage; in parallel group evidence)\nConclude\n- decide: Submit one decision (after triage; joins evidence)\n## Decision policy\n- Choose exactly one outcome.\n- Quote the evidence each outcome relies on.\nOutcomes, checked in this order:\n- INCONCLUSIVE [INCONCLUSIVE]: The order or its charges could not be read. Then: Say what is missing and ask for it.\n- REFUND_DUPLICATE: A duplicate charge is confirmed. Then: Recommend refunding the duplicate.\n- REFUND_DIFFERENCE: The amount charged exceeds the order total. Then: Recommend refunding the difference.\n- NO_REFUND: The charge matches the order. Then: Explain the charge to the customer.\nThis playbook recommends; it does not act on its conclusion.\n## Never\n- issue_refund: This playbook diagnoses; a person issues the refund.\n- bulk: Never act on more than one customer at a time.\n## Skills\nEach arrives in full with the step that uses it; until then, what it is for:\n- x\n- refund-checklist\n## Active now\n### Step triage: Classify the dispute\nGoal: Read the order and the customer's account of it; select the branches that apply.\nTools: lookup_order, select_branches (at least 1 and at most 3 calls)\nExpected outputs (pass each to complete_step): dispute_kind, selected_branch_ids\nAsk the person with ask_user, unless they already told you:\n- customer_statement: What does the customer say happened?\nBranches (decided by your outputs, or pick them with select_branches before complete_step):\n- duplicate (Charged twice): when selected_branch_ids contains duplicate_charge -> check_duplicates\n- amount (Amount disputed): when selected_branch_ids contains amount_mismatch -> check_amount\n#### Skill: refund-checklist\nCHECK\n### Step check_duplicates: Look for duplicate charges (optional)\nTools: lookup_order\nExpected outputs (pass each to complete_step): duplicate_charges\n### Step check_amount: Compare the charge with the order (optional)\nTools: lookup_order, get_balance\nExpected outputs (pass each to complete_step): amount_delta\n### Step decide: Submit one decision\nTools: submit_decision (at most 1 calls)",
+    "skills": [
+     "a",
+     "b"
+    ],
+    "with_forbidden": {
+     "deny_for": [
+      "bulk",
+      "issue_refund"
+     ],
+     "max_blast_radius": 2
+    }
+   }
+  },
+  "when": [
+   {
+    "holds": true,
+    "paths": [],
+    "when": "always"
+   },
+   {
+    "holds": true,
+    "paths": [
+     "selected_branch_ids"
+    ],
+    "when": "selected_branch_ids contains duplicate_charge"
+   },
+   {
+    "holds": false,
+    "paths": [
+     "selected_branch_ids"
+    ],
+    "when": "selected_branch_ids contains duplicate_charge"
+   },
+   {
+    "holds": true,
+    "paths": [
+     "condition"
+    ],
+    "when": "condition contains damaged"
+   },
+   {
+    "holds": true,
+    "paths": [
+     "condition"
+    ],
+    "when": "NOT (condition contains damaged)"
+   },
+   {
+    "holds": true,
+    "paths": [
+     "outputs.router.error_count",
+     "outputs.router.scope"
+    ],
+    "when": "outputs.router.scope == 'CLUSTER-WIDE' AND outputs.router.error_count > 10"
+   },
+   {
+    "holds": false,
+    "paths": [
+     "outputs.router.error_count"
+    ],
+    "when": "outputs.router.error_count > 10"
+   },
+   {
+    "holds": false,
+    "paths": [
+     "findings"
+    ],
+    "when": "NOT (findings is empty)"
+   },
+   {
+    "holds": true,
+    "paths": [
+     "findings"
+    ],
+    "when": "findings is empty"
+   },
+   {
+    "holds": true,
+    "paths": [
+     "amount",
+     "kind"
+    ],
+    "when": "amount >= 3 OR kind equals refund"
+   },
+   {
+    "holds": false,
+    "paths": [
+     "amount"
+    ],
+    "when": "amount < 'x'"
+   },
+   {
+    "holds": true,
+    "paths": [
+     "a.b.c"
+    ],
+    "when": "a.b.c != null"
+   },
+   {
+    "error": "the condition is empty",
+    "when": ""
+   },
+   {
+    "error": "expected a value, found the end",
+    "when": "a =="
+   },
+   {
+    "error": "expected ')', found the end",
+    "when": "(a"
+   },
+   {
+    "error": "expected a value, found the end",
+    "when": "a contains"
+   },
+   {
+    "error": "the condition is longer than 500 characters",
+    "when": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   },
+   {
+    "error": "unexpected '=' at position 4",
+    "when": "a === b"
+   }
+  ]
+ },
+ "source": "tulip-gateway 80aed44"
+}
