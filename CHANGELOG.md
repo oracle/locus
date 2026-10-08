@@ -44,6 +44,27 @@ policy.
   - `RunnerConfig.from_env` reads `TULIP_ADMIT_URL`, `TULIP_ADMIT_TOKEN` and
     `TULIP_RUN_ID`, the values a gateway sets in every box. The workload token
     is sent as a bearer token and never appears in a repr or an error.
+- **`tulip.playbooks.v2`: the v2 playbook engine, moved out of the gateway.** The
+  step graph a ``playbook.v2`` definition describes (groups, ``after``,
+  ``parallel_group`` and ``joins``, branches routed by the ``when`` language, one
+  decision policy outcome), the three control tools that drive it
+  (``complete_step``, ``select_branches``, ``submit_decision``), its allowlist and
+  effort-floor checks, waivers, deviations and the prose the model is shown. It was
+  ``tulip_gateway.playbook_v2`` and ``tulip_gateway.when``; it now lives here so the
+  same code can run next to the agent loop wherever that loop is (the gateway, or a
+  runner inside a sandbox box), with the gateway's copy the authoritative one.
+  Behaviour is unchanged: ``tests/unit/playbooks_v2/test_golden.py`` replays seven
+  scripted runs (the registry's refund-dispute example and the live suite's F19
+  playbook, recording and blocking, paused and resumed, plus the ``when`` corpus)
+  and wants the exact events, audit fields, answers and prose the gateway's engine
+  produced at gateway ``80aed44``. Pure: no I/O, no environment. Two seams differ
+  from the gateway's module:
+  - ``PlaybookRuntime(record=...)`` replaces ``audit=``: it is handed
+    ``(event, fields)`` -- ``playbook_step`` or ``playbook_decision`` and exactly
+    the fields of the gateway's ``PlaybookStepAudit`` / ``PlaybookDecisionAudit``
+    -- and whoever owns the chain makes the record.
+  - ``enforcement_mode(playbook, deployment="record")`` takes the deployment's
+    default as an argument instead of reading ``TULIP_GATEWAY_PLAYBOOK_ENFORCEMENT``.
 
 ## [2.21.3] - 2026-10-07
 

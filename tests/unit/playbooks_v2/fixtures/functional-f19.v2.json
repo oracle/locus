@@ -1,0 +1,143 @@
+{
+  "completion": {
+    "recommendation_only": true
+  },
+  "decision_policy": {
+    "id": "functional-p0-pb-decision",
+    "outcomes": [
+      {
+        "action": "Say what is missing.",
+        "classification": "INCONCLUSIVE",
+        "condition": "The order or its warranty could not be read.",
+        "id": "INCONCLUSIVE",
+        "priority": 1
+      },
+      {
+        "action": "Recommend a replacement.",
+        "condition": "The order arrived damaged and its warranty covers it.",
+        "id": "REPLACE",
+        "priority": 2
+      },
+      {
+        "action": "Explain why no replacement is due.",
+        "condition": "The order arrived intact, or its warranty does not cover it.",
+        "id": "NO_REPLACEMENT",
+        "priority": 3
+      }
+    ],
+    "rules": [
+      "Choose exactly one outcome.",
+      "Name the tool results it rests on."
+    ]
+  },
+  "forbidden_actions": [
+    {
+      "label": "functional-p0-forbidden",
+      "reason": "This playbook diagnoses; a person issues any refund."
+    }
+  ],
+  "id": "functional-p0-pb",
+  "inputs": [
+    {
+      "description": "The order to assess.",
+      "name": "order_id"
+    }
+  ],
+  "mode": "diagnosis",
+  "step_groups": [
+    {
+      "id": "gather",
+      "steps": [
+        {
+          "allowed_tools": [
+            "functional_p0_pb_look"
+          ],
+          "branches": [
+            {
+              "id": "damaged",
+              "label": "Arrived damaged",
+              "next_step_id": "check_warranty",
+              "when": "condition contains damaged"
+            },
+            {
+              "id": "intact",
+              "label": "Arrived intact",
+              "next_step_id": "explain_charge",
+              "when": "NOT (condition contains damaged)"
+            }
+          ],
+          "expected_outputs": [
+            "condition"
+          ],
+          "goal": "Call functional_p0_pb_look with the order id and report the condition it arrived in.",
+          "id": "inspect",
+          "max_tool_calls": 2,
+          "min_tool_calls": 1,
+          "title": "Read the order"
+        }
+      ],
+      "title": "Gather"
+    },
+    {
+      "id": "drilldown",
+      "steps": [
+        {
+          "after": [
+            "inspect"
+          ],
+          "allowed_tools": [
+            "functional_p0_pb_warranty"
+          ],
+          "expected_outputs": [
+            "covered"
+          ],
+          "goal": "Call functional_p0_pb_warranty with the order id.",
+          "id": "check_warranty",
+          "max_tool_calls": 2,
+          "min_tool_calls": 1,
+          "parallel_group": "evidence",
+          "required": false,
+          "title": "Check the warranty"
+        },
+        {
+          "after": [
+            "inspect"
+          ],
+          "allowed_tools": [],
+          "expected_outputs": [
+            "note"
+          ],
+          "id": "explain_charge",
+          "parallel_group": "evidence",
+          "required": false,
+          "title": "Explain the order"
+        }
+      ],
+      "title": "Drill down"
+    },
+    {
+      "id": "conclude",
+      "steps": [
+        {
+          "after": [
+            "inspect"
+          ],
+          "allowed_tools": [
+            "submit_decision"
+          ],
+          "id": "decide",
+          "joins": "evidence",
+          "max_tool_calls": 1,
+          "title": "Submit one decision"
+        }
+      ],
+      "title": "Conclude"
+    }
+  ],
+  "summary": "Throwaway (F19): read an order, check its warranty when it arrived damaged, decide.",
+  "tags": [
+    "functional"
+  ],
+  "title": "Functional check: v2 playbook",
+  "version": "playbook.v2"
+}

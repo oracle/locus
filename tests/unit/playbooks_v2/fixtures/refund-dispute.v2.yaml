@@ -1,0 +1,94 @@
+version: playbook.v2
+id: refund-dispute
+title: Refund dispute
+summary: >-
+  Investigate a disputed charge, branch on what the order shows, gather the evidence for
+  each branch side by side, and conclude with exactly one decision.
+mode: diagnosis
+inputs:
+- name: order_id
+  description: The order the customer disputes.
+step_groups:
+- id: gather
+  title: Gather
+  goal: Establish the facts once and say which paths apply.
+  steps:
+  - id: triage
+    title: Classify the dispute
+    goal: Read the order and the customer's account of it; select the branches that apply.
+    skill_refs: [refund-checklist]
+    allowed_tools: [lookup_order, select_branches]
+    min_tool_calls: 1
+    max_tool_calls: 3
+    expected_outputs: [dispute_kind, selected_branch_ids]
+    required_from_user:
+    - name: customer_statement
+      question: What does the customer say happened?
+    branches:
+    - id: duplicate
+      label: Charged twice
+      when: selected_branch_ids contains duplicate_charge
+      next_step_id: check_duplicates
+    - id: amount
+      label: Amount disputed
+      when: selected_branch_ids contains amount_mismatch
+      next_step_id: check_amount
+- id: drilldown
+  title: Drill down
+  steps:
+  - id: check_duplicates
+    title: Look for duplicate charges
+    required: false
+    after: [triage]
+    parallel_group: evidence
+    allowed_tools: [lookup_order]
+    expected_outputs: [duplicate_charges]
+  - id: check_amount
+    title: Compare the charge with the order
+    required: false
+    after: [triage]
+    parallel_group: evidence
+    allowed_tools: [lookup_order, get_balance]
+    expected_outputs: [amount_delta]
+- id: conclude
+  title: Conclude
+  steps:
+  - id: decide
+    title: Submit one decision
+    after: [triage]
+    joins: evidence
+    allowed_tools: [submit_decision]
+    max_tool_calls: 1
+decision_policy:
+  id: refund-dispute-decision
+  rules:
+  - Choose exactly one outcome.
+  - Quote the evidence each outcome relies on.
+  outcomes:
+  - id: INCONCLUSIVE
+    priority: 1
+    classification: INCONCLUSIVE
+    condition: The order or its charges could not be read.
+    action: Say what is missing and ask for it.
+  - id: REFUND_DUPLICATE
+    priority: 2
+    condition: A duplicate charge is confirmed.
+    action: Recommend refunding the duplicate.
+  - id: REFUND_DIFFERENCE
+    priority: 3
+    condition: The amount charged exceeds the order total.
+    action: Recommend refunding the difference.
+  - id: NO_REFUND
+    priority: 4
+    condition: The charge matches the order.
+    action: Explain the charge to the customer.
+    escalation_target:
+      team: payments-support
+forbidden_actions:
+- tool: issue_refund
+  reason: This playbook diagnoses; a person issues the refund.
+- label: bulk
+  reason: Never act on more than one customer at a time.
+completion:
+  recommendation_only: true
+tags: [payments, refund]

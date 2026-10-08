@@ -1,0 +1,97 @@
+# Copyright 2026 The Tulip Authors
+# SPDX-License-Identifier: Apache-2.0
+
+"""v2 playbooks: a step graph the model walks with three control tools.
+
+The engine that runs a ``playbook.v2`` definition (:mod:`tulip.playbooks.v2.engine`), the
+safe ``when`` condition language its branches route on (:mod:`tulip.playbooks.v2.when`)
+and the result shapes it reads (:mod:`tulip.playbooks.v2.results`). Pure: no I/O, no
+environment, no clock. The same code runs next to the agent loop wherever that loop is --
+in the gateway, or in a box runner -- and the gateway's copy is the authoritative one.
+"""
+
+from tulip.playbooks.v2.engine import (
+    ACTIVE,
+    ASK_USER,
+    BLOCK,
+    BLOCKED,
+    CONTROL_TOOLS,
+    DECISION_EVENT,
+    DEVIATION_EVENT,
+    DONE,
+    INCONCLUSIVE,
+    NOT_EXECUTED,
+    PENDING,
+    PLAYBOOK_V2,
+    PROPOSAL_TOOLS,
+    RECORD,
+    STEP_EVENT,
+    TERMINAL,
+    WAIVED,
+    PlaybookRuntime,
+    PlaybookV2,
+    PlaybookV2Error,
+    StepGraph,
+    control_tool,
+    definition_digest,
+    enforcement_mode,
+    forbidden_deny,
+    initial_active,
+    is_playbook_v2,
+    parse_playbook_v2,
+    playbook_prose,
+    skills_by_name,
+    step_brief,
+    with_forbidden,
+)
+from tulip.playbooks.v2.results import (
+    DENIAL_PREFIX,
+    not_executed_reason,
+    not_executed_result,
+    refused,
+)
+from tulip.playbooks.v2.when import WhenSyntaxError, evaluate_when, parse_when, when_paths
+
+
+__all__ = [
+    "ACTIVE",
+    "ASK_USER",
+    "BLOCK",
+    "BLOCKED",
+    "CONTROL_TOOLS",
+    "DECISION_EVENT",
+    "DENIAL_PREFIX",
+    "DEVIATION_EVENT",
+    "DONE",
+    "INCONCLUSIVE",
+    "NOT_EXECUTED",
+    "PENDING",
+    "PLAYBOOK_V2",
+    "PROPOSAL_TOOLS",
+    "RECORD",
+    "STEP_EVENT",
+    "TERMINAL",
+    "WAIVED",
+    "PlaybookRuntime",
+    "PlaybookV2",
+    "PlaybookV2Error",
+    "StepGraph",
+    "WhenSyntaxError",
+    "control_tool",
+    "definition_digest",
+    "enforcement_mode",
+    "evaluate_when",
+    "forbidden_deny",
+    "initial_active",
+    "is_playbook_v2",
+    "not_executed_reason",
+    "not_executed_result",
+    "parse_playbook_v2",
+    "parse_when",
+    "playbook_prose",
+    "refused",
+    "skills_by_name",
+    "step_brief",
+    "when_paths",
+    "with_forbidden",
+]
