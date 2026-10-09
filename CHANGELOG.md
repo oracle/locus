@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [2.23.1] - 2026-10-08
+
 ### Fixed
 
 - **A box runner can reach its gateway inside NVIDIA OpenShell.** The runner made
