@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [2.25.1] - 2026-10-09
+
 ### Fixed
 
 - **A call held for its step's approver runs once approved.** `PlaybookRuntime.pause()`
