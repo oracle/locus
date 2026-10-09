@@ -7,7 +7,7 @@ The process the gateway starts in a box. It:
 
 1. reads its gateway, run and workload token from the environment
    (:meth:`~tulip.runner.client.RunnerConfig.from_env`), and marks itself
-   non-dumpable (:func:`~tulip.runner.harden.make_non_dumpable`);
+   protects what it read once its runtime is built (:func:`~tulip.runner.harden.protect`);
 2. asks the gateway what to do (``GET /internal/v1/runner/next``): start,
    resume, or stop;
 3. fetches the run's manifest and builds the agent from it
@@ -37,10 +37,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from tulip.runner.build import DEFAULT_WORKSPACE, RunnerRefused, Runtime, build_runtime
-from tulip.runner.client import GatewayClient, GatewayError, GatewayUnavailable, RunnerConfig
+from tulip.runner.client import (
+    ADMIT_TOKEN_VAR,
+    GatewayClient,
+    GatewayError,
+    GatewayUnavailable,
+    RunnerConfig,
+)
 from tulip.runner.events import GatewayEvents
 from tulip.runner.handshake import fetch_manifest, next_op
-from tulip.runner.harden import make_non_dumpable
+from tulip.runner.harden import protect, withheld_names
 from tulip.runner.outcome import RunResult, report_result
 
 
@@ -209,6 +215,24 @@ def _stream(runtime: Runtime, op: Any, workspace: Path) -> Any:
     return agent.resume(str(op.resume.get("answer", "")), thread_id=thread)
 
 
+#: The runner's own log in the box, where its gateway can read it back when the box
+#: ends without a report (``tail`` of it goes into the run's error). No values in it.
+RUNNER_LOG = Path(".tulip") / "runner.log"
+
+
+def _log_to_workspace(root: Path) -> logging.Handler | None:
+    """Also write this process's log lines to ``<root>/.tulip/runner.log`` (best effort)."""
+    try:
+        path = root / RUNNER_LOG
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handler = logging.FileHandler(path, encoding="utf-8")
+    except OSError:
+        return None
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    logging.getLogger().addHandler(handler)
+    return handler
+
+
 async def run_box(
     env: Mapping[str, str] | None = None,
     *,
@@ -225,8 +249,8 @@ async def run_box(
     except ValueError as exc:
         logger.error("%s", exc)  # noqa: TRY400 — names a variable, never a value
         return EXIT_ERROR
-    make_non_dumpable()
     root = Path(workspace)
+    log_file = _log_to_workspace(root)
     client = GatewayClient(config, transport=transport)
     events = GatewayEvents(client, spool=root / ".tulip" / "events.jsonl")
     try:
@@ -248,6 +272,19 @@ async def run_box(
         except RunnerRefused as exc:
             await report_result(client, RunResult(status="refused", error=str(exc)))
             return EXIT_REFUSED
+        # Read, built: no command has run yet. From here on nothing the runner holds
+        # is readable from a command it starts (tulip.runner.harden).
+        protect(
+            withheld_names(
+                [
+                    ADMIT_TOKEN_VAR,
+                    manifest.model.api_key_env,
+                    *(mount.credential_env for mount in manifest.mcp),
+                    *(connector.credential_env for connector in manifest.api),
+                ]
+            ),
+            environ=env,
+        )
         try:
             result = await _drive(runtime, events, _stream(runtime, op, root), root)
         except ApprovalPendingError:
@@ -264,6 +301,9 @@ async def run_box(
         return EXIT_ERROR
     finally:
         await client.aclose()
+        if log_file is not None:
+            logging.getLogger().removeHandler(log_file)
+            log_file.close()
 
 
 def main(argv: list[str] | None = None) -> int:

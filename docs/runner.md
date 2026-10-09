@@ -102,3 +102,14 @@ every model call per run, whoever sends it.
   tulip-agents version it pins and hands it to the box.
 - `ghcr.io/tuliplabs-ai/tulip-runner:<version>`: `python:3.12-slim` with git,
   ripgrep and the `.pyz`; workspace `/sandbox`.
+
+## Keeping the token and placeholders from commands
+
+The runner stays dumpable, because NVIDIA OpenShell identifies the process behind every
+DNS lookup and connection through `/proc/<pid>` and refuses one it cannot identify. Once
+its runtime is built, before any command runs, it wipes its token and every placeholder
+out of its initial environment block (`/proc/<pid>/environ`) and `os.environ`; commands
+never inherit them. `TULIP_RUNNER_HARDEN=non-dumpable` adds `prctl(PR_SET_DUMPABLE, 0)`
+for a sandbox that does not identify processes that way. The runner also writes its log
+to `/sandbox/.tulip/runner.log` (no values), which its gateway reads when a box ends
+without a report.
