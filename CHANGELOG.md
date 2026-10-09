@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [2.24.1] - 2026-10-09
+
 ### Fixed
 
 - **A resumed box runner numbers its events on.** A runner resumed after a hold is a new
