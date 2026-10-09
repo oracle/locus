@@ -1197,11 +1197,29 @@ class PlaybookRuntime(HookProvider):
     # ── pauses ───────────────────────────────────────────────────────────────
 
     def pause(self, reason: str) -> None:
-        """The run is waiting on a person: its active steps are blocked until it resumes."""
+        """The run is waiting on a person: its active steps are blocked until it resumes.
+
+        A call admitted but not yet finished when the run pauses is the call held for that
+        person: it has not run. Its admission is released, so the same call redelivered on
+        resume is counted once -- otherwise a step with ``max_tool_calls: 1`` refuses its own
+        approved call (``too_many_calls``) and then cannot close (``insufficient_effort``).
+        """
+        self._release_pending()
         for s in self.graph.active():
             if self.graph.status[s.id] == ACTIVE:
                 self.graph.status[s.id] = BLOCKED
                 self._step_event(s.id, reason=reason)
+
+    def _release_pending(self) -> None:
+        """Forget the admissions of calls that never finished (see :meth:`pause`)."""
+        for tool, step_ids in self._owners.items():
+            if tool == ASK_USER:
+                continue
+            for step_id in step_ids:
+                work = self._work.get(step_id)
+                if work is not None and work.attempts > 0:
+                    work.attempts -= 1
+        self._owners = {}
 
     def unpause(self) -> None:
         for s in self.graph.active():

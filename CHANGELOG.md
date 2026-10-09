@@ -8,6 +8,15 @@ policy.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A call held for its step's approver runs once approved.** `PlaybookRuntime.pause()`
+  now releases the admission of a call that was admitted but had not finished -- the call
+  held for the person. Before, the redelivered call counted a second time: a step with
+  `max_tool_calls: 1` refused its own approved call (`too_many_calls`) and then could not
+  close (`insufficient_effort`), so the approved action never ran (live F38/F39 on dev).
+  A call that finished before the pause still counts.
+
 ## [2.25.0] - 2026-10-09
 
 ### Added
