@@ -527,6 +527,14 @@ class OpenAIConfig(ModelConfig):
         gt=0,
         description="Per-request timeout in seconds.",
     )
+    keepalive: bool = Field(
+        default=True,
+        description=(
+            "Reuse connections between requests. Off inside an NVIDIA OpenShell box: its "
+            "proxy closes a kept-alive tunnel once the box's policy generation moves on "
+            "(any new DNS mapping does), so a reused connection fails the next call."
+        ),
+    )
 
     # OpenAI-specific settings
     frequency_penalty: float = 0.0
@@ -703,6 +711,16 @@ class OpenAIModel(BaseModel):
         def build() -> openai.AsyncOpenAI:
             import openai  # noqa: PLC0415
 
+            http_client = None
+            if not self.config.keepalive:
+                import sys  # noqa: PLC0415
+
+                # A fresh connection per request: nothing pooled can go stale. The limits
+                # come from the HTTP library this openai release's client is built on
+                # (httpx2 from openai 3.x, httpx before), whatever else is installed.
+                http_lib = sys.modules[openai.DefaultAsyncHttpxClient.__mro__[1].__module__]
+                limits = http_lib.Limits(max_keepalive_connections=0)
+                http_client = openai.DefaultAsyncHttpxClient(limits=limits)
             return openai.AsyncOpenAI(
                 api_key=self.config.api_key,
                 base_url=self.config.base_url,
@@ -710,6 +728,7 @@ class OpenAIModel(BaseModel):
                 default_headers=self.config.default_headers,
                 max_retries=self.config.max_retries,
                 timeout=self.config.request_timeout,
+                http_client=http_client,
             )
 
         return loop_bound(self, "_client", build)

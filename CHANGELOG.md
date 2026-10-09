@@ -8,6 +8,21 @@ policy.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A resumed box runner numbers its events on.** A runner resumed after a hold is a new
+  process, and it numbered its events from 0 again; the gateway drops a batch whose numbers
+  it has seen, so the first events after a resume (the approved call's start, its result and
+  its `harness.exec` record) never reached the run's record. The runner now leaves its next
+  event number in `/sandbox/.tulip/events.seq` and the next runner of the run starts from it.
+- **The box runner keeps no connection alive.** NVIDIA OpenShell closes a kept-alive tunnel
+  once the box's policy generation moves on, and a command resolving a new host is enough
+  (`L7 tunnel closed before inspection because policy changed: policy generation is stale`).
+  A turn whose tool calls resolved two hosts left the runner's pooled model connection stale,
+  and its next model call failed with `APIConnectionError: Connection error.` The runner's
+  model client and gateway client now open a connection per request
+  (`OpenAIModel(keepalive=False)`, a new option, on by default elsewhere).
+
 ## [2.24.0] - 2026-10-09
 
 ### Added

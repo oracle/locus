@@ -121,6 +121,9 @@ class GatewayClient:
             base_url=config.url,
             timeout=config.timeout,
             transport=transport,
+            # No kept-alive connections: inside an OpenShell box a pooled tunnel is closed
+            # once the box's policy generation moves on, and the next call would fail.
+            limits=httpx.Limits(max_keepalive_connections=0),
             headers={"authorization": f"Bearer {config.token}"},
         )
 
