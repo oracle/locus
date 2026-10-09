@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [2.25.0] - 2026-10-09
+
 ### Added
 
 - **A playbook v2 runtime can be restored from its own step events.**
