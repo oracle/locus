@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -297,8 +298,12 @@ class TestGraph:
 
         graph = create_graph()
 
+        spans: list[tuple[float, float]] = []
+
         async def slow_fn(inputs: dict[str, Any]) -> dict[str, str]:
+            start = time.monotonic()
             await asyncio.sleep(0.1)
+            spans.append((start, time.monotonic()))
             return {"result": "done"}
 
         n1 = Node(name="parallel1", executor=slow_fn)
@@ -318,9 +323,12 @@ class TestGraph:
         result = await graph.execute({})
 
         assert result.success
-        # With parallel execution, n1 and n2 should run concurrently
-        # So total time should be ~100ms, not ~200ms
-        assert result.duration_ms < 250  # Allow some overhead
+        # n1 and n2 run concurrently: each started before the other finished. This
+        # checks overlap rather than wall time, which a loaded CI runner stretches.
+        assert len(spans) == 2
+        (a_start, a_end), (b_start, b_end) = spans
+        assert a_start < b_end
+        assert b_start < a_end
 
     @pytest.mark.asyncio
     async def test_execute_passes_data_between_nodes(self):
