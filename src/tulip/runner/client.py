@@ -25,6 +25,7 @@ else lets them propagate.
 
 from __future__ import annotations
 
+import asyncio
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -102,6 +103,27 @@ class RunnerConfig:
         )
 
 
+#: How many times a call the box's network dropped is sent again, and the first wait (s).
+GATEWAY_RETRIES = 3
+GATEWAY_RETRY_DELAY = 0.25
+
+
+def _safe_to_repeat(method: str, path: str, exc: httpx.TransportError) -> bool:
+    """Whether a call that failed with ``exc`` may be sent again.
+
+    Always when it never connected (``ConnectError``/``ConnectTimeout``: nothing was
+    sent). Otherwise only when repeating it changes nothing: a read, a checkpoint (a
+    ``PUT`` of the same state) or an event batch (the gateway drops what it has by
+    ``seq_from``). An admission, a gateway tool or a result is never sent twice: the
+    first may have arrived.
+    """
+    if isinstance(exc, httpx.ConnectError | httpx.ConnectTimeout):
+        return True
+    if method.upper() in ("GET", "PUT"):
+        return True
+    return method.upper() == "POST" and path.rstrip("/").endswith("/events")
+
+
 class GatewayClient:
     """JSON over HTTP to the gateway, authenticated as this box.
 
@@ -152,17 +174,27 @@ class GatewayClient:
             GatewayUnavailable: no answer, a timeout, or a 5xx.
             GatewayError: a 4xx.
         """
-        try:
-            response = await self._http.request(
-                method,
-                path,
-                json=json,
-                params=dict(params) if params else None,
-            )
-        except httpx.TransportError as exc:
-            # The exception's text can carry the URL but never the token: the
-            # token is a header, and httpx does not echo headers in errors.
-            raise GatewayUnavailable(f"{method} {path}: {type(exc).__name__}") from None
+        attempt = 0
+        while True:
+            try:
+                response = await self._http.request(
+                    method,
+                    path,
+                    json=json,
+                    params=dict(params) if params else None,
+                )
+                break
+            except httpx.TransportError as exc:
+                # Inside an OpenShell box a connection is cut whenever the box's policy
+                # generation moves on. Asked again: a call that is safe to repeat, and any
+                # call that never connected (nothing reached the gateway).
+                if attempt < GATEWAY_RETRIES and _safe_to_repeat(method, path, exc):
+                    attempt += 1
+                    await asyncio.sleep(GATEWAY_RETRY_DELAY * attempt)
+                    continue
+                # The exception's text can carry the URL but never the token: the
+                # token is a header, and httpx does not echo headers in errors.
+                raise GatewayUnavailable(f"{method} {path}: {type(exc).__name__}") from None
         if response.status_code >= 500:  # noqa: PLR2004 — HTTP status classes
             raise GatewayUnavailable(f"{method} {path}: gateway answered {response.status_code}")
         if response.status_code == 404 and allow_404:  # noqa: PLR2004

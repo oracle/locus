@@ -8,6 +8,23 @@ policy.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A box run survives OpenShell cutting its connections.** OpenShell cuts a box's
+  connections whenever the box's policy generation moves on, and the first settings poll
+  after start always moves it (`provider_env_changed`, about 10 s in). A model turn still
+  streaming then broke (`L7 tunnel closed before inspection because policy changed: policy
+  generation is stale`), and the OpenAI client never retries a stream that broke after it
+  began: the run ended `APIConnectionError: Connection error.` (live F29/F30 on dev, about
+  one box run in three that lasted past 10 s).
+  - `OpenAIModel(stream_reconnects=n)` (default 0, unchanged): each turn is read whole and
+    asked again when its connection drops part way, up to `n` times; partial output is never
+    yielded, so no turn is seen twice. A refusal (any HTTP status, e.g. a box guard's
+    `token_budget_exhausted`) is never asked again. The box runner turns it on (3).
+  - The runner's gateway client sends again a call the box's network cut, when that is
+    safe: any call that never connected, and reads, checkpoints and event batches (deduped
+    by `seq_from`). An admission, a gateway tool or a result is never sent twice.
+
 ## [2.25.1] - 2026-10-09
 
 ### Fixed
