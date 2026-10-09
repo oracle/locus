@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -53,7 +54,7 @@ from tulip.playbooks.v2.when import WhenSyntaxError, evaluate_when, parse_when
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Mapping
+    from collections.abc import Callable, Iterable, Sequence
 
     from tulip.hooks.provider import AfterToolCallEvent, BeforeToolCallEvent
 
@@ -89,12 +90,41 @@ TERMINAL = frozenset({DONE, WAIVED, NOT_EXECUTED})
 #: What a gated step's ``after`` accepts as finished.
 _SATISFIES = frozenset({DONE, NOT_EXECUTED})
 
+#: Every status a step can have; a restored record must name one of these.
+STATUSES = frozenset({PENDING, ACTIVE, BLOCKED, DONE, WAIVED, NOT_EXECUTED})
+#: What a restored step's calls are recorded as: the count survives a move, the names do not.
+RESTORED_CALL = "(before the run moved)"
+
 #: The registry's ``PUBLISH_STAMP_KEY``, excluded from a definition's digest.
 _STAMP_KEY = "tulip.publish"
 
 
 class PlaybookV2Error(ValueError):
     """A v2 playbook the gateway cannot run as written. The run is refused."""
+
+
+class RestoreError(ValueError):
+    """A runtime could not be restored from the step records given; nothing was changed.
+
+    ``reason`` says why, in the words a log line or a fail-closed notice can carry.
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+@dataclass(frozen=True)
+class RestoreResult:
+    """What :meth:`PlaybookRuntime.restore` put back.
+
+    ``records`` is how many step records were read; ``statuses`` is every step's
+    status, in definition order; ``active`` the steps active (or blocked) now.
+    """
+
+    records: int
+    statuses: Mapping[str, str]
+    active: tuple[str, ...]
 
 
 def is_playbook_v2(definition: Any) -> bool:
@@ -834,6 +864,7 @@ class PlaybookRuntime(HookProvider):
         self.decision: dict[str, Any] | None = None
         self._finished = False
         self._started = False
+        self._restored = False
         self.violations: list[str] = []
 
     @property
@@ -945,6 +976,115 @@ class PlaybookRuntime(HookProvider):
         for s in self.playbook.steps:
             self._step_event(s.id)
         self._settle()
+
+    # ── restoring a run from its own records ─────────────────────────────────
+
+    @property
+    def restored(self) -> bool:
+        """Whether this runtime's state came from :meth:`restore` rather than :meth:`start`."""
+        return self._restored
+
+    def restore(self, events: Sequence[Mapping[str, Any]]) -> RestoreResult:
+        """Put the runtime where a run's ``playbook_step`` records left it; emit nothing.
+
+        For a run rebuilt somewhere else (another pod) from its trace: without this the
+        rebuilt runtime would start over, ``owner_of`` would attribute nothing, and a call
+        a step's approval holds would run unasked. ``events`` are the payloads this engine
+        emitted as ``playbook_step`` (``{"type": "playbook_step", "playbook", "step_id",
+        "status", ...}``), in the order they were emitted (the trace's ``seq``). A payload
+        whose ``type`` names another event (a deviation, a decision) is skipped; one
+        without a ``type`` is read as a step record.
+
+        Each step's last record gives its status, why it was waived, how many calls it
+        made (and whether it deviated), and -- for a step that closed ``done`` -- its
+        outputs, which a later branch's ``when`` may read. A branching step that ended
+        routed the run: the targets its record says it enabled (``enabled_steps``), or,
+        for a record without them, the targets that were not waived. The runtime then
+        counts as started: :meth:`start` records no fresh step tree over the real one.
+
+        All or nothing. :class:`RestoreError` is raised, and nothing changes, when a
+        record is not a mapping, names another playbook or a step this playbook does not
+        have, carries a status the engine does not know, when there are no step records,
+        or when a step of the playbook has none (:meth:`start` records them all).
+
+        What the records do not carry is not restored: a selection made with
+        ``select_branches`` on a step still active, whether a step already asked the
+        person, which of its tools did not execute, and the decision.
+        """
+        playbook = self.playbook
+        known = {s.id for s in playbook.steps}
+        last: dict[str, Mapping[str, Any]] = {}
+        records = 0
+        for event in events:
+            if not isinstance(event, Mapping):
+                raise RestoreError("a step record without its fields")
+            kind = event.get("type")
+            if kind is not None and kind != STEP_EVENT:
+                continue
+            if str(event.get("playbook") or "") != playbook.id:
+                raise RestoreError(f"a step record of another playbook ({event.get('playbook')!r})")
+            step_id = str(event.get("step_id") or event.get("step") or "")
+            if step_id not in known:
+                raise RestoreError(
+                    f"a step record for a step this playbook does not have ({step_id!r})"
+                )
+            if str(event.get("status") or "") not in STATUSES:
+                raise RestoreError(
+                    f"a step record with an unknown status ({event.get('status')!r})"
+                )
+            last[step_id] = event
+            records += 1
+        if not last:
+            raise RestoreError("the trace has no step records")
+        missing = sorted(known - set(last))
+        if missing:
+            raise RestoreError(f"the trace has no record of step(s) {', '.join(missing)}")
+
+        # Everything read: build the new state aside, then swap it in.
+        graph = StepGraph(playbook)
+        work: dict[str, _Work] = {s.id: _Work() for s in playbook.steps}
+        for step_id, data in last.items():
+            status = str(data["status"])
+            graph.status[step_id] = status
+            if status == WAIVED and data.get("reason"):
+                graph.waived_because[step_id] = str(data["reason"])
+            if status == DONE and isinstance(data.get("outputs"), Mapping):
+                graph.outputs[step_id] = dict(data["outputs"])
+            calls = data.get("tool_calls")
+            if isinstance(calls, int) and not isinstance(calls, bool) and calls > 0:
+                work[step_id].executed = [RESTORED_CALL] * calls
+                work[step_id].attempts = calls
+            if data.get("verified") is False and status != NOT_EXECUTED:
+                work[step_id].deviated = True
+        for step in playbook.steps:
+            if not step.branches or graph.status[step.id] not in TERMINAL:
+                continue
+            enabled = last[step.id].get("enabled_steps")
+            targets = {b.next_step_id for b in step.branches}
+            if isinstance(enabled, list | tuple):
+                graph.routed[step.id] = {str(t) for t in enabled} & targets
+            else:
+                graph.routed[step.id] = {t for t in targets if graph.status[t] != WAIVED}
+        self.graph = graph
+        self._work = work
+        self._owners = {}
+        self._started = True
+        self._restored = True
+        return RestoreResult(
+            records=records,
+            statuses={s.id: graph.status[s.id] for s in playbook.steps},
+            active=tuple(s.id for s in graph.active()),
+        )
+
+    def hold_unstarted(self) -> None:
+        """Count the runtime as started without recording a step tree or activating a step.
+
+        For a run whose steps could not be restored (:class:`RestoreError`) and that fails
+        closed instead: :meth:`start` would otherwise record a fresh tree that was never
+        true over the real one. Nothing is active afterwards, so ``owner_of`` attributes
+        nothing.
+        """
+        self._started = True
 
     def brief(self, step_ids: Iterable[str]) -> list[str]:
         return [
@@ -1399,12 +1539,16 @@ __all__ = [
     "PLAYBOOK_V2",
     "PROPOSAL_TOOLS",
     "RECORD",
+    "RESTORED_CALL",
+    "STATUSES",
     "STEP_EVENT",
     "TERMINAL",
     "WAIVED",
     "PlaybookRuntime",
     "PlaybookV2",
     "PlaybookV2Error",
+    "RestoreError",
+    "RestoreResult",
     "StepGraph",
     "control_tool",
     "definition_digest",

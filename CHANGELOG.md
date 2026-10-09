@@ -8,6 +8,25 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **A playbook v2 runtime can be restored from its own step events.**
+  `PlaybookRuntime.restore(events)` takes a run's `playbook_step` payloads, as the engine
+  emitted them, in order, and puts a fresh runtime where they left it, emitting nothing:
+  each step's last status, why a waived step was waived, the calls each step made (and
+  whether it deviated), a done step's outputs (a later branch's `when` reads them), and the
+  targets each finished router took (its record's `enabled_steps`, else the targets that
+  were not waived). It returns a `RestoreResult` (`records`, `statuses`, `active`), and the
+  runtime then reports `restored` and counts as started. It is all or nothing: a record
+  that is not a mapping, names another playbook or an unknown step, or carries an unknown
+  status, no step records at all, or a step with no record raises `RestoreError` (with
+  `reason`) and changes nothing. `PlaybookRuntime.hold_unstarted()` is for a caller that
+  then fails closed: it counts as started without recording a step tree. A run that moves
+  pods resumes in the step it was in, so a step's approval still holds the calls made in it;
+  the gateway did this by writing the runtime's private fields and now has an API for it.
+  `RestoreError`, `RestoreResult`, `STATUSES` and `RESTORED_CALL` are exported from
+  `tulip.playbooks.v2`. Playbook events are unchanged.
+
 ## [2.24.1] - 2026-10-09
 
 ### Fixed
