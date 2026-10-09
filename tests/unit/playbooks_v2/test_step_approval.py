@@ -156,3 +156,54 @@ def test_parallel_steps_are_active_together_and_the_first_owns_a_shared_tool() -
 def test_the_private_owner_name_is_the_public_one() -> None:
     rt = runtime()
     assert rt._owner("lookup_order") == rt.owner_of("lookup_order")
+
+
+# ── a held call is counted once ─────────────────────────────────────────────
+
+
+def one_call_triage() -> dict[str, Any]:
+    body = example(triage={"by": "finance-approvers"})
+    for group in body["step_groups"]:
+        for step in group["steps"]:
+            if step["id"] == "triage":
+                step["min_tool_calls"] = 1
+                step["max_tool_calls"] = 1
+    return body
+
+
+def enforcing(body: dict[str, Any]) -> PlaybookRuntime:
+    rt = PlaybookRuntime(parse_playbook_v2(body), emit=lambda _e: None, enforce=True)
+    rt.start()
+    return rt
+
+
+def test_a_call_held_for_its_step_runs_once_approved_and_the_step_closes() -> None:
+    # Live F38: the call was admitted (1 of 1), held for the step's approver, and the run
+    # paused. On resume the same call came back and was refused as too_many_calls, then
+    # complete_step was refused as insufficient_effort -- the approved call never ran.
+    rt = enforcing(one_call_triage())
+    assert rt._admit("lookup_order") == ""
+    rt.pause("waiting for approval a-1")  # held: the call has not run
+
+    rt.unpause()
+    assert rt._admit("lookup_order") == ""  # the approved call, redelivered
+    rt._credit("lookup_order", '{"ok": true}')
+    result = rt.complete_step(
+        "triage",
+        {
+            "dispute_kind": "amount",
+            "selected_branch_ids": ["amount_mismatch"],
+            "customer_statement": "wrong amount",
+        },
+    )
+    assert result["ok"], result
+
+
+def test_a_finished_call_still_counts_after_a_pause() -> None:
+    rt = enforcing(one_call_triage())
+    assert rt._admit("lookup_order") == ""
+    rt._credit("lookup_order", '{"ok": true}')  # it ran
+    rt.pause("waiting for approval a-2")
+    rt.unpause()
+    refusal = rt._admit("lookup_order")
+    assert "allows at most 1 tool calls" in refusal
