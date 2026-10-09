@@ -51,6 +51,7 @@ from tulip.runner.harden import (
     make_non_dumpable,
     protect,
     scrub_environ,
+    value_ranges,
     wipe_initial_environ,
     withheld_names,
 )
@@ -855,7 +856,9 @@ def test_a_child_command_cannot_read_a_protected_value_from_its_parent() -> None
 
 def test_protect_modes(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
     calls: list[str] = []
-    monkeypatch.setattr("tulip.runner.harden.make_non_dumpable", lambda: calls.append("nd") or True)
+    monkeypatch.setattr(
+        "tulip.runner.harden.make_non_dumpable", lambda: calls.append("non-dumpable") or True
+    )
     monkeypatch.setattr(
         "tulip.runner.harden.wipe_initial_environ", lambda names: calls.append("wipe") or 0
     )
@@ -865,11 +868,24 @@ def test_protect_modes(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptur
     assert "TULIP_T_GONE" not in os.environ
     calls.clear()
     protect([], environ={HARDEN_VAR: "non-dumpable"})
-    assert calls == ["wipe", "nd"]
+    assert calls == ["wipe", "non-dumpable"]
     calls.clear()
     protect([], environ={HARDEN_VAR: "bogus"})
     assert calls == ["wipe"]
     assert "not a mode this runner knows" in caplog.text
+
+
+def test_value_ranges_finds_only_the_named_values() -> None:
+    block = b"PATH=/bin\0TULIP_T_SECRET=abc\0TULIP_T_SECRETX=keep\0EMPTY=\0TULIP_T_SECRET2=xy"
+    ranges = value_ranges(block, [b"TULIP_T_SECRET=", b"TULIP_T_SECRET2=", b"EMPTY="])
+    assert [block[o : o + n] for o, n in ranges] == [b"abc", b"xy"]
+    assert value_ranges(b"", [b"A="]) == []
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="/proc is Linux")
+def test_wipe_in_process_finds_the_block_and_skips_absent_names() -> None:
+    # Names this process was not started with: the block is read, nothing is changed.
+    assert wipe_initial_environ(["TULIP_T_NEVER_SET_A", "TULIP_T_NEVER_SET_B"]) == 0
 
 
 def test_wipe_is_a_no_op_off_linux_or_with_no_names(monkeypatch: pytest.MonkeyPatch) -> None:

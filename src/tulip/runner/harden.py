@@ -53,6 +53,7 @@ __all__ = [
     "command_env",
     "make_non_dumpable",
     "protect",
+    "value_ranges",
     "scrub_environ",
     "wipe_initial_environ",
     "withheld_names",
@@ -126,20 +127,28 @@ def wipe_initial_environ(names: Iterable[str]) -> int:
     if end <= start:  # pragma: no cover - an empty block
         return 0
     block = (ctypes.c_char * (end - start)).from_address(start)
-    raw = bytes(block)
-    wiped = 0
+    ranges = value_ranges(bytes(block), keys)
+    for offset, length in ranges:
+        ctypes.memset(start + offset, 0, length)
+    return len(ranges)
+
+
+def value_ranges(block: bytes, keys: Iterable[bytes]) -> list[tuple[int, int]]:
+    """``(offset, length)`` of each value in a NUL-separated environment ``block``
+    whose entry starts with one of ``keys`` (each ``b"NAME="``); empty values skipped."""
+    wanted = tuple(keys)
+    found: list[tuple[int, int]] = []
     offset = 0
-    while offset < len(raw):
-        stop = raw.find(b"\0", offset)
-        stop = len(raw) if stop == -1 else stop
-        entry = raw[offset:stop]
-        for key in keys:
+    while offset < len(block):
+        stop = block.find(b"\0", offset)
+        stop = len(block) if stop == -1 else stop
+        entry = block[offset:stop]
+        for key in wanted:
             if entry.startswith(key) and len(entry) > len(key):
-                ctypes.memset(start + offset + len(key), 0, len(entry) - len(key))
-                wiped += 1
+                found.append((offset + len(key), len(entry) - len(key)))
                 break
         offset = stop + 1
-    return wiped
+    return found
 
 
 def protect(names: Iterable[str], environ: Mapping[str, str] | None = None) -> None:
