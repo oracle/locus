@@ -23,6 +23,8 @@ policy.
   model client and gateway client now open a connection per request
   (`OpenAIModel(keepalive=False)`, a new option, on by default elsewhere).
 
+## [2.24.0] - 2026-10-09
+
 ### Added
 
 - **A playbook v2 step may name who approves it.** A step takes an optional
