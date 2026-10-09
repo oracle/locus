@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [2.24.0] - 2026-10-09
+
 ### Added
 
 - **A playbook v2 step may name who approves it.** A step takes an optional
