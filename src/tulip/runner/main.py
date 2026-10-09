@@ -113,6 +113,33 @@ def _write_parked(workspace: Path, waiting: Mapping[str, Any]) -> None:
     path.write_text(json.dumps(dict(waiting)), encoding="utf-8")
 
 
+#: The number of the next event this run's runner will send (``<workspace>/.tulip``), kept
+#: across the processes of one run: the box is stopped on a park and started on a resume,
+#: and its workspace volume with it.
+EVENTS_SEQ = Path(".tulip") / "events.seq"
+
+
+def _read_seq(workspace: Path) -> int:
+    """The next event number a previous runner of this run left, or 0."""
+    try:
+        value = int((workspace / EVENTS_SEQ).read_text().strip())
+    except (OSError, ValueError):
+        return 0
+    return max(0, value)
+
+
+def _write_seq(workspace: Path, seq: int) -> None:
+    """Leave ``seq`` for the next runner of this run (best effort, atomic)."""
+    path = workspace / EVENTS_SEQ
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(str(int(seq)))
+        tmp.replace(path)
+    except OSError:
+        logger.warning("could not record the next event number")
+
+
 def _read_parked(workspace: Path) -> dict[str, Any]:
     path = _parked_path(workspace)
     if not path.exists():
@@ -252,7 +279,11 @@ async def run_box(
     root = Path(workspace)
     log_file = _log_to_workspace(root)
     client = GatewayClient(config, transport=transport)
-    events = GatewayEvents(client, spool=root / ".tulip" / "events.jsonl")
+    # A resumed runner is a new process: it numbers its events on from where the last one
+    # stopped, or the gateway (which drops a batch whose numbers it has seen) loses them.
+    events = GatewayEvents(
+        client, spool=root / ".tulip" / "events.jsonl", start_seq=_read_seq(root)
+    )
     try:
         op = await next_op(client)
         if op.op == "stop":
@@ -294,6 +325,7 @@ async def run_box(
             logger.exception("the run failed")
             result = RunResult(status="error", error=f"{type(exc).__name__}: {exc}")
         await events.flush()
+        _write_seq(root, events.next_seq)
         await report_result(client, result)
         return EXIT_ERROR if result.status == "error" else EXIT_DONE
     except (GatewayError, GatewayUnavailable) as exc:

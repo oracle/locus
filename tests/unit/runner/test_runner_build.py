@@ -445,6 +445,29 @@ def test_build_model_meters_cleanly(world: World, tmp_path: Path) -> None:
     assert runtime.thread_id == RUN_ID
 
 
+def test_the_runner_keeps_no_connection_alive(world: World, tmp_path: Path) -> None:
+    # Inside an OpenShell box a kept-alive tunnel is closed once the box's policy generation
+    # moves on (a command resolving a new host is enough): on dev, a turn whose tool calls
+    # resolved two hosts left the runner's pooled model connection stale and the next model
+    # call failed with "Connection error". Every request opens its own connection.
+    manifest = RunManifest.model_validate(_manifest(tools=[]))
+    runtime = build_runtime(manifest, _client(world), workspace=tmp_path, environ=_env())
+    model = runtime.agent.config.model
+    assert model.config.keepalive is False
+    pool = model.client._client._transport._pool
+    assert pool._max_keepalive_connections == 0
+    gateway = GatewayClient(RunnerConfig(url="http://gw", token=TOKEN, run_id=RUN_ID))
+    assert gateway._http._transport._pool._max_keepalive_connections == 0
+
+
+def test_an_openai_model_keeps_connections_alive_by_default() -> None:
+    from tulip.models.native.openai import OpenAIModel
+
+    model = OpenAIModel(model="m", api_key="k", base_url="http://m")
+    assert model.config.keepalive is True
+    assert model.client._client._transport._pool._max_keepalive_connections != 0
+
+
 def test_commands_inherit_no_token_and_no_placeholder(world: World, tmp_path: Path) -> None:
     manifest = RunManifest.model_validate(_manifest())
     runtime = build_runtime(
@@ -572,6 +595,31 @@ async def test_a_parked_run_resumes_after_approval_and_finishes(
     assert execs[-1]["attested_by"] == "runner"
     assert execs[-1]["exit_code"] == 0
     assert not (tmp_path / ".tulip" / "parked.json").exists()
+
+
+async def test_a_resumed_runner_numbers_its_events_on(world: World, tmp_path: Path) -> None:
+    # The gateway drops a batch whose numbers it has already seen. A resumed runner is a new
+    # process: numbering from 0 again, its first events (the approved call's start, result
+    # and exec record) were dropped on dev and the run's record never showed the call ran.
+    world.admit["bash"] = {"outcome": "require_human", "approval_id": "ap-1", "reason": "exec"}
+    first = ScriptedModel(
+        [tool_call("bash", call_id="c1", command="echo approved-run"), text("unused")]
+    )
+    await run_box(_env(), workspace=tmp_path, transport=world.transport, model=first)
+    parked_batches = len(world.bodies(f"/internal/v1/runs/{RUN_ID}/events"))
+    world.next_ops = [{"op": "resume", "resume": {"approval_id": "ap-1", "decision": "approve"}}]
+    second = ScriptedModel([text("all done")])
+    await run_box(_env(), workspace=tmp_path, transport=world.transport, model=second)
+
+    batches = world.bodies(f"/internal/v1/runs/{RUN_ID}/events")
+    assert len(batches) > parked_batches
+    expected = 0
+    for batch in batches:  # contiguous across both processes: nothing renumbered, no gap
+        assert batch["seq_from"] == expected
+        expected += len(batch["events"])
+    resumed = [e for b in batches[parked_batches:] for e in b["events"]]
+    assert any(e["type"] == "tool_complete" and e.get("tool") == "bash" for e in resumed)
+    assert any(e["type"] == "harness.exec" for e in resumed)
 
 
 async def test_a_question_parks_and_the_answer_resumes(world: World, tmp_path: Path) -> None:

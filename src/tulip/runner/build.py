@@ -330,6 +330,10 @@ def _model(manifest: RunManifest, environ: Mapping[str, str]) -> Any:
         base_url=route.base_url,
         api_key=placeholder,
         default_headers={"Accept-Encoding": "identity"},
+        # OpenShell closes a kept-alive tunnel once the box's policy generation moves on
+        # (a command resolving a new host is enough); a reused connection would fail the
+        # next model call with "Connection error".
+        keepalive=False,
     )
 
 
