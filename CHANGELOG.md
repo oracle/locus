@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [2.25.2] - 2026-10-09
+
 ### Fixed
 
 - **A box run survives OpenShell cutting its connections.** OpenShell cuts a box's
