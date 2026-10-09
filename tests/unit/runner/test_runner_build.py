@@ -45,7 +45,15 @@ from tulip.runner import (
     run_box,
 )
 from tulip.runner.build import TOKEN_ARGUMENT, system_prompt
-from tulip.runner.harden import command_env, make_non_dumpable, scrub_environ, withheld_names
+from tulip.runner.harden import (
+    HARDEN_VAR,
+    command_env,
+    make_non_dumpable,
+    protect,
+    scrub_environ,
+    wipe_initial_environ,
+    withheld_names,
+)
 from tulip.runner.main import EXIT_DONE, EXIT_ERROR, EXIT_REFUSED, event_for, main
 from tulip.testing import ScriptedModel, text, tool_call
 
@@ -528,6 +536,8 @@ async def test_a_run_uses_every_kind_of_tool_then_parks_on_a_hold(
     assert "tool_start" in types
     assert "tool_complete" in types
     assert "think" in types
+    # The runner kept a log of its own in the workspace, for its gateway to read back.
+    assert (tmp_path / ".tulip" / "runner.log").is_file()
 
 
 async def test_a_parked_run_resumes_after_approval_and_finishes(
@@ -578,6 +588,20 @@ async def test_a_question_parks_and_the_answer_resumes(world: World, tmp_path: P
     assert world.results()[-1]["final_message"] == "using staging"
     seen = " ".join(m.content or "" for m in second.received_messages[-1])
     assert "staging" in seen
+
+
+async def test_the_runner_protects_what_it_read_once_built(
+    world: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    protected: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        "tulip.runner.main.protect", lambda names, environ=None: protected.append(tuple(names))
+    )
+    code = await run_box(
+        _env(), workspace=tmp_path, transport=world.transport, model=ScriptedModel([text("done")])
+    )
+    assert code == EXIT_DONE
+    assert protected == [("TULIP_ADMIT_TOKEN", MODEL_KEY_ENV, MCP_KEY_ENV, API_KEY_ENV)]
 
 
 async def test_a_denied_call_is_reported_to_the_model(world: World, tmp_path: Path) -> None:
@@ -773,6 +797,85 @@ def test_non_dumpable_on_linux_only(monkeypatch: pytest.MonkeyPatch) -> None:
         assert child.returncode == 0
     monkeypatch.setattr(sys, "platform", "darwin")
     assert make_non_dumpable() is False
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="/proc is Linux")
+def test_wipe_hides_values_from_proc_environ_and_keeps_the_process_identifiable() -> None:
+    # In a child: its own initial environment block is what another process would read.
+    import subprocess
+
+    code = (
+        "import os, sys;"
+        "from tulip.runner.harden import wipe_initial_environ;"
+        "before = open('/proc/self/environ', 'rb').read();"
+        "n = wipe_initial_environ(['TULIP_T_SECRET', 'TULIP_T_ABSENT']);"
+        "after = open('/proc/self/environ', 'rb').read();"
+        "ok = b'hunter2-value' in before and b'hunter2-value' not in after "
+        "and b'TULIP_T_SECRET=' in after and b'TULIP_T_KEEP=still-here' in after and n == 1;"
+        "sys.exit(0 if ok else 1)"
+    )
+    child = subprocess.run(  # noqa: S603 — a fixed interpreter and script
+        [sys.executable, "-c", code],
+        check=False,
+        env={
+            **os.environ,
+            "PYTHONPATH": os.pathsep.join(sys.path),
+            "TULIP_T_SECRET": "hunter2-value",
+            "TULIP_T_KEEP": "still-here",
+        },
+    )
+    assert child.returncode == 0
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="/proc is Linux")
+def test_a_child_command_cannot_read_a_protected_value_from_its_parent() -> None:
+    # The runner's situation: protect(), then start a command as the same user.
+    import subprocess
+
+    code = (
+        "import os, subprocess, sys;"
+        "from tulip.runner.harden import protect;"
+        "protect(['TULIP_T_SECRET']);"
+        "assert 'TULIP_T_SECRET' not in os.environ;"
+        'peek = \'import os; print(open(f"/proc/{os.getppid()}/environ", "rb").read().count(b"hunter2-value"))\';'
+        "out = subprocess.run([sys.executable, '-c', peek], capture_output=True, text=True, check=True).stdout;"
+        "sys.exit(0 if out.strip() == '0' else 1)"
+    )
+    child = subprocess.run(  # noqa: S603 — a fixed interpreter and script
+        [sys.executable, "-c", code],
+        check=False,
+        env={
+            **os.environ,
+            "PYTHONPATH": os.pathsep.join(sys.path),
+            "TULIP_T_SECRET": "hunter2-value",
+        },
+    )
+    assert child.returncode == 0
+
+
+def test_protect_modes(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr("tulip.runner.harden.make_non_dumpable", lambda: calls.append("nd") or True)
+    monkeypatch.setattr(
+        "tulip.runner.harden.wipe_initial_environ", lambda names: calls.append("wipe") or 0
+    )
+    monkeypatch.setenv("TULIP_T_GONE", "x")
+    protect(["TULIP_T_GONE"], environ={})
+    assert calls == ["wipe"]
+    assert "TULIP_T_GONE" not in os.environ
+    calls.clear()
+    protect([], environ={HARDEN_VAR: "non-dumpable"})
+    assert calls == ["wipe", "nd"]
+    calls.clear()
+    protect([], environ={HARDEN_VAR: "bogus"})
+    assert calls == ["wipe"]
+    assert "not a mode this runner knows" in caplog.text
+
+
+def test_wipe_is_a_no_op_off_linux_or_with_no_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert wipe_initial_environ([]) == 0
+    monkeypatch.setattr(sys, "platform", "darwin")
+    assert wipe_initial_environ(["ANY"]) == 0
 
 
 def test_local_backend_can_start_from_a_given_environment(tmp_path: Path) -> None:

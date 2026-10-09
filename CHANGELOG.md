@@ -8,6 +8,25 @@ policy.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A box runner can reach its gateway inside NVIDIA OpenShell.** The runner made
+  itself non-dumpable at start (`prctl(PR_SET_DUMPABLE, 0)`) to keep its token and
+  placeholders from its commands. OpenShell identifies the process behind every DNS
+  lookup and connection through `/proc/<pid>` (`require_binary_identity`) and cannot
+  identify a non-dumpable one, so it refused the runner's lookups: every box run ended
+  at once with `ConnectError` (`Temporary failure in name resolution`) on
+  `GET /internal/v1/runner/next`, exit code 1, nothing logged.
+  - The runner now stays dumpable and, once its runtime is built and before any
+    command can run, wipes the token and every placeholder out of its initial
+    environment block (what `/proc/<pid>/environ` shows) and out of `os.environ`
+    (`tulip.runner.harden.protect`, `wipe_initial_environ`). Commands still never
+    inherit them; reading the runner's memory needs ptrace, which Yama refuses a child.
+  - `TULIP_RUNNER_HARDEN=non-dumpable` keeps the old behaviour for a sandbox that does
+    not identify processes that way.
+- **The runner keeps a log in the workspace** (`/sandbox/.tulip/runner.log`), so its
+  gateway can show why a box ended without a report. It holds no values.
+
 ### Changed
 
 - **`tulip-runner.pyz` is no longer attached to GitHub releases.** The release
