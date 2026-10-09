@@ -8,6 +8,19 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **A playbook v2 step may name who approves it.** A step takes an optional
+  `approval: {by, ask, show}`: `by` is an approvals grant label, `ask` the plain text
+  the approver reads, `show` the call's arguments to put in front of them first. The
+  engine parses it into `StepApproval` (exported from `tulip.playbooks.v2`) on
+  `Step.approval`, tolerantly: without a non-empty string `by` it reads as no approval
+  (the registry validates the shape strictly at publish). The gateway compiles it into a
+  hold on that step's tool calls only. Playbook events are unchanged.
+- **`PlaybookRuntime.owner_of(tool)` and `PlaybookRuntime.active_steps()`**: the active
+  step a call would be attributed to, and the steps active now -- so a caller can find
+  the approval that governs a call before it runs.
+
 ## [2.23.1] - 2026-10-08
 
 ### Fixed

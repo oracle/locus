@@ -124,6 +124,20 @@ class Branch:
 
 
 @dataclass(frozen=True)
+class StepApproval:
+    """Who approves a step's tool calls, and what they are asked (``approval`` on a step).
+
+    ``by`` is an approvals grant label; ``ask`` is the plain text the approver reads;
+    ``show`` names the call's arguments to put in front of them first. The engine only
+    carries it: the gateway compiles it into a hold on that step's tool calls.
+    """
+
+    by: str
+    ask: str = ""
+    show: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class Step:
     """One step and the contract it runs under (the registry's ``PlaybookStep``)."""
 
@@ -146,6 +160,8 @@ class Step:
     required_from_user: tuple[tuple[str, str], ...] = ()
     rules: tuple[str, ...] = ()
     facts: tuple[str, ...] = ()
+    #: Who must approve this step's tool calls; ``None`` = no approval of its own.
+    approval: StepApproval | None = None
 
     def allows(self, tool: str) -> bool:
         """Whether this step's allowlist admits ``tool`` (kernel tools aside)."""
@@ -235,6 +251,25 @@ def _count(value: Any) -> int | None:
     return int(value) if isinstance(value, int) and not isinstance(value, bool) else None
 
 
+def _approval(value: Any) -> StepApproval | None:
+    """Read a step's ``approval`` tolerantly: no grant label, no approval.
+
+    The registry validates the shape strictly at publish; here a malformed value
+    reads as absent rather than refusing the run.
+    """
+    if not isinstance(value, dict):
+        return None
+    by = value.get("by")
+    if not isinstance(by, str) or not by.strip():
+        return None
+    ask = value.get("ask")
+    return StepApproval(
+        by=by.strip(),
+        ask=ask.strip() if isinstance(ask, str) else "",
+        show=_strs(value.get("show")),
+    )
+
+
 def _step(raw: Mapping[str, Any], group: str) -> Step:
     step_id = _text(raw.get("id"))
     if not step_id:
@@ -279,6 +314,7 @@ def _step(raw: Mapping[str, Any], group: str) -> Step:
         ),
         rules=_strs(raw.get("rules")),
         facts=_strs(raw.get("facts")),
+        approval=_approval(raw.get("approval")),
     )
 
 
@@ -919,8 +955,18 @@ class PlaybookRuntime(HookProvider):
 
     # ── enforcement at the hook seam ─────────────────────────────────────────
 
-    def _owner(self, tool: str) -> Step | None:
+    def owner_of(self, tool: str) -> Step | None:
+        """The active step a call to ``tool`` would be attributed to, or ``None``.
+
+        The first active step (in definition order) whose allowlist admits ``tool``.
+        """
         return next((s for s in self.graph.active() if s.allows(tool)), None)
+
+    _owner = owner_of
+
+    def active_steps(self) -> list[Step]:
+        """The steps active now (``active`` or ``blocked``), in definition order."""
+        return self.graph.active()
 
     def _admit(self, tool: str) -> str:
         """Attribute a call about to run; ``""`` to let it run, else why it is refused."""
