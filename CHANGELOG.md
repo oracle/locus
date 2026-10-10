@@ -43,7 +43,8 @@ policy.
     `groups`, `due_seconds`, `escalate_to`, `only_named`, `ask`, `show`, `rule_index`,
     `matched` and a plain `reason` ("The amount is more than $10,000, so Finance and CFO must
     both approve."); `hold_fields()` gives the registry hold's `approver_groups`,
-    `only_named_groups`, `escalate_to_label` and `escalate_after_seconds`. `pick_rule()` is
+    `only_named_groups`, `escalate_to_label`, `ttl_seconds` and `escalate_after_seconds`
+    (never `approver_labels`; see Fixed). `pick_rule()` is
     the same choice, pure.
   - `parse_duration("30m" | "4h" | "2d")` -> seconds.
   - `authority_from_resolved(resolved, roles_of=..., members=..., also=..., break_glass=...)`
@@ -82,6 +83,13 @@ policy.
   - The step brief and the playbook prose tell the model the routing is automatic when the
     conditions decide. `StepGraph.condition_verdicts()`, `StepGraph.conditions_decide()`
     and `Branch.conditioned` say it in code.
+- **Playbooks v2: `ResolvedApproval.hold_fields()` no longer names the groups as
+  `approver_labels`.** On the registry an approver label makes its holders general
+  approvers who count for ANY group, so with `only_these_approvers: false` two Finance
+  people could have satisfied "Finance and CFO". The hold now carries only
+  `approver_groups`, `only_named_groups`, `escalate_to_label`, and -- with a `due` --
+  `ttl_seconds` (twice the due when the hold escalates, so the escalation gets its turn;
+  the due otherwise) and `escalate_after_seconds` (the due, only with `escalate_to`).
 
 ## [2.26.0] - 2026-10-10
 
