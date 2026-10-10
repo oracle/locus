@@ -31,6 +31,15 @@ Two rules worth knowing:
   ``selected_branch_ids contains tx_locking`` means the string ``"tx_locking"``.
 * A path that does not resolve is ``null``. Ordering comparisons against ``null`` (or
   between values that cannot be ordered) are false, never an error.
+
+**Withheld values.** A run restored from a trace kept under ``metadata_only`` custody
+does not have the outputs of the steps it closed before it moved: the trace holds a digest
+(``{"redacted": true, "sha256": ..., "bytes": ...}``, the gateway's ``persist._digest``) in
+their place. Those read as :data:`UNAVAILABLE`, and :func:`when_verdict` answers a
+condition that reads one -- any path that resolves to a withheld value, passes through one
+or holds one -- with :data:`UNKNOWN`, never true or false: a digest is not the data it
+digests, and ``null`` would be a lie about it. :func:`evaluate_when` keeps its yes/no
+answer (unknown is not true).
 """
 
 from __future__ import annotations
@@ -45,6 +54,13 @@ from typing import Any
 MAX_WHEN_LENGTH = 500
 #: The deepest nesting of parentheses and NOTs accepted.
 MAX_WHEN_DEPTH = 32
+#: How deep a value is searched for a withheld member before it is taken as withheld.
+_MAX_VALUE_DEPTH = 64
+
+#: What :func:`when_verdict` answers.
+TRUE = "true"
+FALSE = "false"
+UNKNOWN = "unknown"
 
 _KEYWORDS = frozenset(
     {"and", "or", "not", "contains", "equals", "is", "empty", "always", "true", "false", "null"}
@@ -325,6 +341,91 @@ def when_paths(node: Node) -> list[str]:
     return seen
 
 
+# ── withheld values ──────────────────────────────────────────────────────────
+
+
+class Unavailable:
+    """A value the run once had and cannot see now (see :data:`UNAVAILABLE`).
+
+    One instance, :data:`UNAVAILABLE`; copies are the same instance. Test for it with
+    :func:`is_withheld`, which also recognizes the trace's digest objects.
+    """
+
+    _instance: Unavailable | None = None
+
+    def __new__(cls) -> Unavailable:
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __copy__(self) -> Unavailable:
+        return self
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> Unavailable:
+        return self
+
+    def __reduce__(self) -> str:
+        return "UNAVAILABLE"
+
+    def __repr__(self) -> str:
+        return "UNAVAILABLE"
+
+
+#: Stands in for a step output the run cannot see: a condition that reads it is unknown.
+UNAVAILABLE = Unavailable()
+
+
+def is_digest(value: Any) -> bool:
+    """Whether ``value`` is a trace digest in place of a body (the gateway's ``_digest``).
+
+    ``{"redacted": true, "sha256": "<hex>", "bytes": <n>}``: read as a digest whenever
+    ``redacted`` is ``true`` and ``sha256`` is text, so a digest that grows a field still
+    reads as one.
+    """
+    return (
+        isinstance(value, Mapping)
+        and value.get("redacted") is True
+        and isinstance(value.get("sha256"), str)
+    )
+
+
+def is_withheld(value: Any) -> bool:
+    """Whether ``value`` is :data:`UNAVAILABLE` or a trace digest: not data to decide on."""
+    return isinstance(value, Unavailable) or is_digest(value)
+
+
+def _holds_withheld(value: Any, depth: int = 0) -> bool:
+    if is_withheld(value):
+        return True
+    if depth >= _MAX_VALUE_DEPTH:
+        return True  # too deep to look through: not known to be whole
+    if isinstance(value, Mapping):
+        return any(_holds_withheld(v, depth + 1) for v in value.values())
+    if isinstance(value, list | tuple | set | frozenset):
+        return any(_holds_withheld(v, depth + 1) for v in value)
+    return False
+
+
+def _reads_withheld(context: Mapping[str, Any], dotted: str) -> bool:
+    """Whether ``dotted`` resolves to, passes through, or holds a withheld value."""
+    current: Any = context
+    for part in dotted.split("."):
+        if is_withheld(current):
+            return True
+        if isinstance(current, Mapping):
+            if part not in current:
+                return False
+            current = current[part]
+        elif isinstance(current, Sequence) and not isinstance(current, str) and part.isdigit():
+            index = int(part)
+            if index >= len(current):
+                return False
+            current = current[index]
+        else:
+            return False
+    return _holds_withheld(current)
+
+
 # ── evaluation ───────────────────────────────────────────────────────────────
 
 
@@ -406,21 +507,46 @@ def _eval(node: Node, context: Mapping[str, Any]) -> bool:
     return any(_eval(part, context) for part in node.operands)
 
 
-def evaluate_when(condition: str | Node, context: Mapping[str, Any]) -> bool:
-    """Whether ``condition`` holds against ``context``. Never raises: bad input is false."""
+def when_verdict(condition: str | Node, context: Mapping[str, Any]) -> str:
+    """:data:`TRUE`, :data:`FALSE` or :data:`UNKNOWN`: whether ``condition`` holds.
+
+    :data:`UNKNOWN` when any path the condition reads resolves to a withheld value
+    (:func:`is_withheld`), passes through one, or holds one -- whatever the rest of the
+    condition says: an answer that rests on part of it would still be a guess about what
+    the withheld value was. Never raises: a condition that does not parse is false.
+    """
     try:
         node = parse_when(condition) if isinstance(condition, str) else condition
-        return _eval(node, context)
+        if any(_reads_withheld(context, path) for path in when_paths(node)):
+            return UNKNOWN
+        return TRUE if _eval(node, context) else FALSE
     except (WhenSyntaxError, RecursionError):
-        return False
+        return FALSE
+
+
+def evaluate_when(condition: str | Node, context: Mapping[str, Any]) -> bool:
+    """Whether ``condition`` holds against ``context``. Never raises: bad input is false.
+
+    A condition :func:`when_verdict` calls :data:`UNKNOWN` does not hold here; a caller
+    that must tell "false" from "cannot tell" asks :func:`when_verdict`.
+    """
+    return when_verdict(condition, context) == TRUE
 
 
 __all__ = [
+    "FALSE",
     "MAX_WHEN_DEPTH",
     "MAX_WHEN_LENGTH",
+    "TRUE",
+    "UNAVAILABLE",
+    "UNKNOWN",
     "Node",
+    "Unavailable",
     "WhenSyntaxError",
     "evaluate_when",
+    "is_digest",
+    "is_withheld",
     "parse_when",
     "when_paths",
+    "when_verdict",
 ]
