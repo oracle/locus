@@ -40,13 +40,27 @@ condition that reads one -- any path that resolves to a withheld value, passes t
 or holds one -- with :data:`UNKNOWN`, never true or false: a digest is not the data it
 digests, and ``null`` would be a lie about it. :func:`evaluate_when` keeps its yes/no
 answer (unknown is not true).
+
+**Typed values.** The runtime puts a typed field's value in the context as a typed value
+(:func:`tulip.playbooks.v2.fields.typed_value`), and comparisons honour the type:
+
+* a :class:`Money` value compares by its amount -- with a number (``inputs.amount >
+  10000``) or with money in the same currency. Ordering two amounts in different
+  currencies is :data:`UNKNOWN` (the run holds rather than guess at an exchange rate);
+  they are never equal. Its parts read as paths (``inputs.amount.currency``);
+* a :class:`Day` value (a date) compares chronologically with another date, or with a
+  date written ``'YYYY-MM-DD'``; ordered against anything else it is false;
+* a number compares numerically, as it always has.
+
+A context with no typed value in it is evaluated exactly as the registry's copy does.
 """
 
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
 
@@ -426,6 +440,96 @@ def _reads_withheld(context: Mapping[str, Any], dotted: str) -> bool:
     return _holds_withheld(current)
 
 
+# ── typed values ─────────────────────────────────────────────────────────────
+
+
+class Money(Mapping[str, Any]):
+    """An amount of money in one currency: a money field's value, as a condition reads it.
+
+    A read-only mapping of ``amount`` and ``currency``, so ``<path>.amount`` and
+    ``<path>.currency`` resolve, and it equals the plain ``{"amount", "currency"}`` value it
+    stands for. Comparisons read the amount (see the module's *Typed values*).
+    """
+
+    __slots__ = ("_amount", "_currency")
+
+    def __init__(self, amount: float, currency: str) -> None:
+        self._amount = amount
+        self._currency = currency
+
+    @property
+    def amount(self) -> float:
+        return self._amount
+
+    @property
+    def currency(self) -> str:
+        return self._currency
+
+    def __getitem__(self, key: str) -> Any:
+        if key == "amount":
+            return self._amount
+        if key == "currency":
+            return self._currency
+        raise KeyError(key)
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(("amount", "currency"))
+
+    def __len__(self) -> int:
+        return 2
+
+    def __repr__(self) -> str:
+        return f"Money({self._amount!r}, {self._currency!r})"
+
+
+class Day(str):
+    """A date field's value (``YYYY-MM-DD``), as a condition reads it: ordered as a date."""
+
+    __slots__ = ()
+
+
+_ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_ORDERING = frozenset({">", "<", ">=", "<="})
+
+
+class _UndecidableError(Exception):
+    """A comparison that cannot be told true or false: two currencies, ordered."""
+
+
+def _as_date(value: Any) -> date | None:
+    if not isinstance(value, str) or not _ISO_DATE.match(value):
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _number(value: Any) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool)
+
+
+def _typed(op: str, left: Any, right: Any) -> tuple[Any, Any]:
+    """The two sides of a comparison as their types compare them (see *Typed values*)."""
+    if isinstance(left, Money) and isinstance(right, Money):
+        if left.currency == right.currency:
+            return left.amount, right.amount
+        if op in _ORDERING:
+            raise _UndecidableError
+        return left, right  # never equal: they differ in currency
+    if isinstance(left, Money) and _number(right):
+        return left.amount, right
+    if isinstance(right, Money) and _number(left):
+        return left, right.amount
+    if isinstance(left, Day) or isinstance(right, Day):
+        left_day, right_day = _as_date(left), _as_date(right)
+        if left_day is not None and right_day is not None:
+            return left_day, right_day
+        if op in _ORDERING:
+            return None, None  # a date orders only against a date
+    return left, right
+
+
 # ── evaluation ───────────────────────────────────────────────────────────────
 
 
@@ -453,6 +557,7 @@ def _value(context: Mapping[str, Any], operand: Operand) -> Any:
 
 
 def _compare(op: str, left: Any, right: Any) -> bool:
+    left, right = _typed(op, left, right)
     if op == "==":
         return bool(left == right)
     if op == "!=":
@@ -502,9 +607,9 @@ def _eval(node: Node, context: Mapping[str, Any]) -> bool:
         return _is_empty(_value(context, node.operand)) != node.negate
     if isinstance(node, Not):
         return not _eval(node.operand, context)
-    if isinstance(node, AllOf):
-        return all(_eval(part, context) for part in node.operands)
-    return any(_eval(part, context) for part in node.operands)
+    # Every part is evaluated, so an undecidable one is found whatever the others say.
+    results = [_eval(part, context) for part in node.operands]
+    return all(results) if isinstance(node, AllOf) else any(results)
 
 
 def when_verdict(condition: str | Node, context: Mapping[str, Any]) -> str:
@@ -513,13 +618,17 @@ def when_verdict(condition: str | Node, context: Mapping[str, Any]) -> str:
     :data:`UNKNOWN` when any path the condition reads resolves to a withheld value
     (:func:`is_withheld`), passes through one, or holds one -- whatever the rest of the
     condition says: an answer that rests on part of it would still be a guess about what
-    the withheld value was. Never raises: a condition that does not parse is false.
+    the withheld value was. :data:`UNKNOWN` too when the condition orders two amounts of
+    money in different currencies, wherever in the condition it does so. Never raises: a
+    condition that does not parse is false.
     """
     try:
         node = parse_when(condition) if isinstance(condition, str) else condition
         if any(_reads_withheld(context, path) for path in when_paths(node)):
             return UNKNOWN
         return TRUE if _eval(node, context) else FALSE
+    except _UndecidableError:
+        return UNKNOWN
     except (WhenSyntaxError, RecursionError):
         return FALSE
 
@@ -540,6 +649,8 @@ __all__ = [
     "TRUE",
     "UNAVAILABLE",
     "UNKNOWN",
+    "Day",
+    "Money",
     "Node",
     "Unavailable",
     "WhenSyntaxError",

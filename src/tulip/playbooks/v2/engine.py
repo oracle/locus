@@ -34,6 +34,18 @@ is ``unknown``, and the step is not routed on a guess -- ``complete_step`` refus
 ``routing: "unknown"``, which the gateway turns into a hold, unless the caller restored
 with the real values (``restore(events, outputs=...)``).
 
+**Typed process data** (:mod:`tulip.playbooks.v2.fields`). A playbook declares its
+``inputs``, each step's ``outputs`` (beside the old ``expected_outputs``, each a text field)
+and a question's answer (``required_from_user[].field``) as typed fields. ``complete_step``
+checks every typed value against its field and refuses, listing each bad one in the
+registry's own words. A run's inputs (:meth:`PlaybookRuntime.set_inputs`) are read by
+conditions as ``inputs.<name>``; money compares by amount and never across currencies,
+dates compare as dates. A value the run cannot use -- a required input not given, an
+invalid one, a digest -- is UNAVAILABLE, as above. ``sensitive: false`` marks the values the
+gateway may mirror in clear (:meth:`PlaybookRuntime.public_outputs`,
+:meth:`PlaybookRuntime.public_inputs`); every other value it digests. The engine emits no
+event field for them: the gateway decides what to mirror.
+
 What is enforced, before a call executes (:meth:`PlaybookRuntime.on_before_tool_call`):
 the active steps' ``allowed_tools`` (``None`` = the agent's tools, ``[]`` = none, the
 union across the steps active together) and each step's ``max_tool_calls``. As for
@@ -59,6 +71,15 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from tulip.hooks.provider import HookPriority, HookProvider
+from tulip.playbooks.v2.fields import (
+    Field,
+    describe,
+    parse_field,
+    parse_fields,
+    text_field,
+    typed_value,
+    validate_value,
+)
 from tulip.playbooks.v2.results import not_executed_reason, not_executed_result, refused
 from tulip.playbooks.v2.when import (
     FALSE,
@@ -69,6 +90,7 @@ from tulip.playbooks.v2.when import (
     is_digest,
     is_withheld,
     parse_when,
+    when_paths,
     when_verdict,
 )
 
@@ -219,6 +241,52 @@ class Step:
     facts: tuple[str, ...] = ()
     #: Who must approve this step's tool calls; ``None`` = no approval of its own.
     approval: StepApproval | None = None
+    #: The step's outputs as typed fields (``outputs``), beside ``expected_outputs``.
+    outputs: tuple[Field, ...] = ()
+    #: The typed answers its questions declare (``required_from_user[].field``), by the
+    #: question's name; a question without one has a sensitive text answer.
+    answer_fields: tuple[Field, ...] = ()
+
+    def output_fields(self) -> list[Field]:
+        """The step's outputs as fields: ``expected_outputs`` merged with ``outputs``.
+
+        The registry's ``PlaybookStep.output_fields``: in ``expected_outputs`` order, a
+        name declared in ``outputs`` takes that field, a name only in ``expected_outputs``
+        is a sensitive text field; the fields only ``outputs`` declares follow, in order.
+        """
+        typed = {f.name: f for f in self.outputs}
+        merged: list[Field] = []
+        seen: set[str] = set()
+        for name in self.expected_outputs:
+            if name in seen:
+                continue
+            seen.add(name)
+            merged.append(typed.get(name) or text_field(name))
+        merged += [f for f in self.outputs if f.name not in seen]
+        return merged
+
+    def data_fields(self) -> dict[str, Field]:
+        """Every value this step produces, by name: its outputs, then its answers.
+
+        What a condition may read of the step (``outputs.<step>.<name>``, or a bare
+        ``<name>`` in the step's own branches).
+        """
+        fields = {f.name: f for f in self.output_fields()}
+        answers = {f.name: f for f in self.answer_fields}
+        for name, _ in self.required_from_user:
+            fields.setdefault(name, answers.get(name) or text_field(name))
+        return fields
+
+    def typed_fields(self) -> list[Field]:
+        """The fields whose values ``complete_step`` checks: the ones declared with a type.
+
+        An ``expected_outputs`` name with no field in ``outputs`` (and a question with no
+        ``field``) is untyped, as it always was: any value is accepted for it.
+        """
+        typed = list(self.outputs)
+        names = {f.name for f in typed}
+        typed += [f for f in self.answer_fields if f.name not in names]
+        return typed
 
     def allows(self, tool: str) -> bool:
         """Whether this step's allowlist admits ``tool`` (kernel tools aside)."""
@@ -273,6 +341,7 @@ class PlaybookV2:
     mode: str
     groups: tuple[Group, ...]
     steps: tuple[Step, ...]
+    #: ``(name, description)`` of each input, as before typed data.
     inputs: tuple[tuple[str, str], ...] = ()
     decision_policy_id: str = ""
     decision_rules: tuple[str, ...] = ()
@@ -282,6 +351,8 @@ class PlaybookV2:
     all_required_steps_resolved: bool = True
     recommendation_only: bool = False
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    #: The inputs as typed fields (``inputs.<name>`` in a condition).
+    input_fields: tuple[Field, ...] = ()
 
     def step(self, step_id: str) -> Step | None:
         return next((s for s in self.steps if s.id == step_id), None)
@@ -332,6 +403,11 @@ def _step(raw: Mapping[str, Any], group: str) -> Step:
     if not step_id:
         raise PlaybookV2Error(f"a step in group {group!r} has no id")
     allowed = raw.get("allowed_tools")
+    asks = [
+        r
+        for r in raw.get("required_from_user") or []
+        if isinstance(r, dict) and _text(r.get("name"))
+    ]
     branches = tuple(
         Branch(
             id=_text(b.get("id")),
@@ -364,15 +440,24 @@ def _step(raw: Mapping[str, Any], group: str) -> Step:
         min_tool_calls=_count(raw.get("min_tool_calls")),
         max_tool_calls=_count(raw.get("max_tool_calls")),
         expected_outputs=_strs(raw.get("expected_outputs")),
-        required_from_user=tuple(
-            (_text(r.get("name")), _text(r.get("question")))
-            for r in raw.get("required_from_user") or []
-            if isinstance(r, dict) and _text(r.get("name"))
-        ),
+        required_from_user=tuple((_text(r.get("name")), _text(r.get("question"))) for r in asks),
         rules=_strs(raw.get("rules")),
         facts=_strs(raw.get("facts")),
         approval=_approval(raw.get("approval")),
+        outputs=parse_fields(raw.get("outputs")),
+        answer_fields=tuple(
+            answer
+            for r in asks
+            if (answer := _answer_field(r.get("field"), _text(r.get("name")))) is not None
+        ),
     )
+
+
+def _answer_field(raw: Any, name: str) -> Field | None:
+    """A question's typed answer: its ``field``, under the question's name."""
+    if not isinstance(raw, Mapping):
+        return None
+    return parse_field({**raw, "name": name})
 
 
 def parse_playbook_v2(definition: Mapping[str, Any]) -> PlaybookV2:
@@ -439,6 +524,7 @@ def parse_playbook_v2(definition: Mapping[str, Any]) -> PlaybookV2:
     completion = definition.get("completion")
     completion = completion if isinstance(completion, dict) else {}
     metadata = definition.get("metadata")
+    input_fields = parse_fields(definition.get("inputs"))
     return PlaybookV2(
         id=_text(definition.get("id")) or "playbook",
         title=_text(definition.get("title")) or _text(definition.get("id")) or "Playbook",
@@ -446,11 +532,7 @@ def parse_playbook_v2(definition: Mapping[str, Any]) -> PlaybookV2:
         mode=_text(definition.get("mode")) or "diagnosis",
         groups=tuple(groups),
         steps=tuple(steps),
-        inputs=tuple(
-            (_text(i.get("name")), _text(i.get("description")))
-            for i in definition.get("inputs") or []
-            if isinstance(i, dict) and _text(i.get("name"))
-        ),
+        inputs=tuple((f.name, f.description) for f in input_fields),
         decision_policy_id=_text(policy.get("id")),
         decision_rules=_strs(policy.get("rules")),
         decision_facts=_strs(policy.get("facts")),
@@ -460,6 +542,7 @@ def parse_playbook_v2(definition: Mapping[str, Any]) -> PlaybookV2:
         is not False,
         recommendation_only=completion.get("recommendation_only") is True,
         metadata=dict(metadata) if isinstance(metadata, dict) else {},
+        input_fields=input_fields,
     )
 
 
@@ -541,6 +624,10 @@ class StepGraph:
         #: Closed steps whose outputs this run cannot see (restored from a digest, or from
         #: a record without them): a condition that reads them is ``unknown``.
         self.withheld: set[str] = set()
+        #: The playbook's inputs as conditions read them (``inputs.<name>``), set by the
+        #: runtime: a value it cannot use is :data:`UNAVAILABLE`, an optional input not
+        #: given is absent.
+        self.inputs: dict[str, Any] = {}
 
     def index(self, step_id: str) -> int:
         return next(i for i, s in enumerate(self.playbook.steps) if s.id == step_id)
@@ -623,20 +710,38 @@ class StepGraph:
 
         An explicit selection decides (chosen is true, the rest false). Otherwise each
         ``when`` is evaluated against the step's outputs -- ``outputs`` when given, the
-        recorded ones otherwise -- with earlier steps' under ``outputs.<id>``; a branch
-        that reads an output this run cannot see (:attr:`withheld`, or a withheld value
-        inside one) is ``"unknown"``.
+        recorded ones otherwise -- with earlier steps' under ``outputs.<id>`` and the
+        playbook's inputs under ``inputs.<name>``; a branch that reads a value this run
+        cannot see (:attr:`withheld`, a withheld value inside one, an input it was not
+        given) is ``"unknown"``. Typed values compare as their type says
+        (:func:`~tulip.playbooks.v2.fields.typed_value`), so ordering money in two
+        currencies is ``"unknown"`` too.
         """
         if step.id in self.selected:
             chosen = self.selected[step.id]
             return {b.id: TRUE if b.id in chosen else FALSE for b in step.branches}
-        own = dict(self.outputs.get(step.id, {}) if outputs is None else outputs)
-        earlier: dict[str, Any] = {**self.outputs, **dict.fromkeys(self.withheld, UNAVAILABLE)}
+        return {b.id: when_verdict(b.when, self.context(step, outputs)) for b in step.branches}
+
+    def context(self, step: Step, outputs: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        """What a ``when`` of ``step`` reads: its outputs bare, the earlier steps' under
+        ``outputs.<id>``, the inputs under ``inputs`` -- each typed by its field."""
+        own = _typed(step, self.outputs.get(step.id, {}) if outputs is None else outputs)
+        earlier: dict[str, Any] = {
+            step_id: _typed(self.playbook.step(step_id), values)
+            for step_id, values in self.outputs.items()
+        }
+        earlier.update(dict.fromkeys(self.withheld, UNAVAILABLE))
         if outputs is not None:
             earlier[step.id] = own
         context: dict[str, Any] = {"outputs": earlier}
         context.update(own)
-        return {b.id: when_verdict(b.when, context) for b in step.branches}
+        if self.playbook.input_fields:
+            # ``inputs`` always names the inputs, as the registry reads a path.
+            fields = {f.name: f for f in self.playbook.input_fields}
+            context["inputs"] = {
+                name: typed_value(fields[name], value) for name, value in self.inputs.items()
+            }
+        return context
 
     def route(self, step: Step) -> tuple[list[str], list[str], str]:
         """Settle a branching step's routing: ``(taken, not taken, routed_by)``.
@@ -668,6 +773,15 @@ class StepGraph:
         if deciders:
             return any(self.status[s.id] in (ACTIVE, BLOCKED) for s in deciders)
         return all(self.status[s.id] in (DONE, WAIVED) for s in self.playbook.steps if s.required)
+
+
+def _typed(step: Step | None, values: Mapping[str, Any]) -> dict[str, Any]:
+    """A step's outputs with each typed one as a condition reads it."""
+    fields = step.data_fields() if step is not None else {}
+    return {
+        name: typed_value(fields[name], value) if name in fields else value
+        for name, value in values.items()
+    }
 
 
 # ── prose: what the model is told ────────────────────────────────────────────
@@ -702,22 +816,33 @@ def _tools_line(step: Step) -> str:
     return f"Tools: {tools}" + (f" ({' and '.join(bounds)} calls)" if bounds else "")
 
 
+def _field_note(field: Field) -> str:
+    """A field's name as the model is told it: with how to write it, when typed."""
+    notes = [n for n in (describe(field), "" if field.required else "optional") if n]
+    return field.name + (f" ({'; '.join(notes)})" if notes else "")
+
+
 def step_brief(step: Step, skills: Mapping[str, Mapping[str, Any]]) -> str:
     """Everything the model needs to do one step, its skills' instructions in full."""
     lines = [f"### Step {step.id}: {step.title}" + ("" if step.required else " (optional)")]
     if step.goal:
         lines.append(f"Goal: {step.goal}")
     lines.append(_tools_line(step))
-    if step.expected_outputs:
+    outputs = step.output_fields()
+    if outputs:
         lines.append(
-            "Expected outputs (pass each to complete_step): " + ", ".join(step.expected_outputs)
+            "Expected outputs (pass each to complete_step): "
+            + ", ".join(_field_note(f) for f in outputs)
         )
     if step.required_from_user:
+        answers = {f.name: f for f in step.answer_fields}
         lines.append("Ask the person with ask_user, unless they already told you:")
-        lines.extend(
-            f"- {name}: {question or 'ask for ' + name}"
-            for name, question in step.required_from_user
-        )
+        for name, question in step.required_from_user:
+            shape = describe(answers[name]) if name in answers else ""
+            lines.append(
+                f"- {name}: {question or 'ask for ' + name}"
+                + (f" (answer as {shape})" if shape else "")
+            )
     if step.rules:
         lines.append("Rules:")
         lines.extend(f"- {rule}" for rule in step.rules)
@@ -762,9 +887,12 @@ def playbook_prose(
     lines = [f"# Playbook: {playbook.title}"]
     if playbook.summary:
         lines.append(playbook.summary)
-    if playbook.inputs:
+    if playbook.input_fields:
         lines.append("Inputs:")
-        lines.extend(f"- {name}: {desc}" if desc else f"- {name}" for name, desc in playbook.inputs)
+        lines.extend(
+            f"- {_field_note(f)}: {f.description}" if f.description else f"- {_field_note(f)}"
+            for f in playbook.input_fields
+        )
     lines.append(
         "## How this run works\n"
         "The runtime tracks this playbook step by step. Work only on the active step(s).\n"
@@ -880,6 +1008,37 @@ def _answered(value: Any) -> bool:
     return True
 
 
+def _public(field: Field, value: Any) -> bool:
+    """Whether ``value`` of a ``sensitive: false`` field may be shown: a valid value held."""
+    return value is not None and not is_withheld(value) and validate_value(field, value) is None
+
+
+def validate_inputs(playbook: PlaybookV2, values: Any) -> list[str]:
+    """Why ``values`` cannot start a run of ``playbook``, one sentence each (empty = fine).
+
+    The registry's ``validate_inputs``: every required input must be given, every value
+    must suit its field (:func:`~tulip.playbooks.v2.fields.validate_value`), and no value
+    may name an input the playbook does not declare. A value held as a digest is not
+    checked: the runtime cannot see it, and reads it as UNAVAILABLE.
+    """
+    if values is None:
+        values = {}
+    if not isinstance(values, Mapping):
+        return ["The inputs must be given as names and their values."]
+    fields = {f.name: f for f in playbook.input_fields}
+    problems = [
+        f"The playbook has no input named {name!r}." for name in values if name not in fields
+    ]
+    for name, f in fields.items():
+        value = values.get(name)
+        if is_withheld(value):
+            continue
+        problem = validate_value(f, value)
+        if problem is not None:
+            problems.append(problem)
+    return problems
+
+
 def _sha256(value: Any) -> str:
     encoded = json.dumps(value, sort_keys=True, default=str).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
@@ -931,6 +1090,9 @@ class PlaybookRuntime(HookProvider):
         self._started = False
         self._restored = False
         self.violations: list[str] = []
+        #: The inputs the run was started with (:meth:`set_inputs`); ``None`` = none given.
+        self._given_inputs: dict[str, Any] | None = None
+        self.graph.inputs = self._input_context(None, withheld=False)
 
     @property
     def name(self) -> str:
@@ -1033,14 +1195,84 @@ class PlaybookRuntime(HookProvider):
             self._step_event(step_id)
         return active
 
-    def start(self) -> None:
-        """Record every step as pending, then activate the first. Idempotent."""
+    def start(self, inputs: Mapping[str, Any] | None = None) -> None:
+        """Record every step as pending, then activate the first. Idempotent.
+
+        ``inputs`` are the run's input values, as :meth:`set_inputs` takes them (whose
+        result says what was wrong with them); they are set even when the run has started.
+        """
+        if inputs is not None:
+            self.set_inputs(inputs)
         if self._started:
             return
         self._started = True
         for s in self.playbook.steps:
             self._step_event(s.id)
         self._settle()
+
+    # ── process data: the inputs, and what may be shown in clear ─────────────
+
+    def set_inputs(self, values: Mapping[str, Any]) -> list[str]:
+        """Give the run its input values; what was wrong with them, one sentence each.
+
+        Each declared input's value is checked against its field (:func:`validate_inputs`,
+        the registry's run-start check; the gateway refuses a run whose inputs fail it).
+        The engine stays tolerant: a value that fails -- or a required input not given,
+        or a value held as a digest -- reads as UNAVAILABLE, so a branch that reads it is
+        ``unknown`` and the step is not routed on a guess. A value for an input the
+        playbook does not declare is reported and left out of the conditions. Values can
+        be set at any time; a restored run needs them set again (:meth:`restore`).
+        """
+        given = dict(values)
+        self._given_inputs = given
+        self.graph.inputs = self._input_context(given, withheld=False)
+        return validate_inputs(self.playbook, given)
+
+    def _input_context(self, values: Mapping[str, Any] | None, *, withheld: bool) -> dict[str, Any]:
+        """The inputs as conditions read them: valid values, UNAVAILABLE for the rest."""
+        context: dict[str, Any] = {}
+        for f in self.playbook.input_fields:
+            value = (values or {}).get(f.name)
+            if withheld or is_withheld(value) or validate_value(f, value) is not None:
+                context[f.name] = UNAVAILABLE
+            elif value is not None:
+                context[f.name] = value
+        return context
+
+    def unavailable_inputs(self) -> list[str]:
+        """The declared inputs this run cannot read: not given, not valid, or withheld."""
+        return [name for name, value in self.graph.inputs.items() if is_withheld(value)]
+
+    def public_inputs(self) -> dict[str, Any]:
+        """The run's input values that may be shown in clear: the ``sensitive: false`` ones.
+
+        For the gateway's mirror: these may be kept in clear, every other value is
+        digested. Only valid values the run holds are included.
+        """
+        given = self._given_inputs or {}
+        return {
+            f.name: given[f.name]
+            for f in self.playbook.input_fields
+            if not f.sensitive and _public(f, given.get(f.name))
+        }
+
+    def public_outputs(self, step_id: str) -> dict[str, Any]:
+        """A closed step's output values that may be shown in clear (``sensitive: false``).
+
+        Its outputs and its answers, as :meth:`Step.data_fields` declares them; an
+        untyped or undeclared value is sensitive and never included, nor is a value the
+        run cannot see or one that is not valid for its field. Empty for a step that has
+        recorded no outputs, or one this playbook does not have.
+        """
+        step = self.playbook.step(_text(step_id))
+        if step is None:
+            return {}
+        values = self.graph.outputs.get(step.id, {})
+        return {
+            name: values[name]
+            for name, f in step.data_fields().items()
+            if not f.sensitive and name in values and _public(f, values[name])
+        }
 
     # ── restoring a run from its own records ─────────────────────────────────
 
@@ -1094,7 +1326,9 @@ class PlaybookRuntime(HookProvider):
 
         What the records do not carry is not restored: a selection made with
         ``select_branches`` on a step still active, whether (and how often) a step already
-        asked the person, which of its tools did not execute, and the decision.
+        asked the person, which of its tools did not execute, and the decision. Nor are
+        the run's inputs: the ones :meth:`set_inputs` gave this runtime carry over, and
+        without them every input is UNAVAILABLE until they are set.
         """
         playbook = self.playbook
         known = {s.id for s in playbook.steps}
@@ -1162,6 +1396,9 @@ class PlaybookRuntime(HookProvider):
                 graph.routed[step.id] = {str(t) for t in enabled} & targets
             else:
                 graph.routed[step.id] = {t for t in targets if graph.status[t] != WAIVED}
+        # The records never carry the inputs: the ones set on this runtime carry over, and
+        # without them every input is UNAVAILABLE until :meth:`set_inputs` gives them.
+        graph.inputs = self._input_context(self._given_inputs, withheld=self._given_inputs is None)
         self.graph = graph
         self._work = work
         self._owners = {}
@@ -1420,7 +1657,7 @@ class PlaybookRuntime(HookProvider):
                 "active": self._active_ids(),
             }
         given = dict(outputs or {})
-        missing = [name for name in step.expected_outputs if name not in given]
+        missing = [f.name for f in step.output_fields() if f.required and f.name not in given]
         if missing:
             return {
                 "ok": False,
@@ -1437,22 +1674,24 @@ class PlaybookRuntime(HookProvider):
                 "you), then pass each answer in outputs under its name",
                 "missing": unanswered,
             }
+        invalid = {
+            f.name: problem
+            for f in step.typed_fields()
+            if f.name in given and (problem := validate_value(f, given[f.name])) is not None
+        }
+        if invalid:
+            return {
+                "ok": False,
+                "error": f"step {step.id} cannot close: "
+                + " ".join(invalid.values())
+                + " Fix each of these outputs and call complete_step again.",
+                "invalid": invalid,
+            }
         if step.branches and step.id not in self.graph.selected:
             verdicts = self.graph.branch_verdicts(step, given)
             unknown = [b for b, v in verdicts.items() if v == UNKNOWN]
             if unknown:
-                unseen = sorted(self.unavailable_outputs())
-                return {
-                    "ok": False,
-                    "error": f"step {step.id} cannot be routed: branch "
-                    f"{', '.join(unknown)} reads outputs this run cannot see"
-                    + (f" (of {', '.join(unseen)})" if unseen else "")
-                    + " -- the trace does not hold their values. A person must choose the "
-                    "branches, or the run must be restored with those outputs.",
-                    "routing": ROUTING_UNKNOWN,
-                    "branches_unknown": unknown,
-                    "unavailable": unseen,
-                }
+                return self._unroutable(step, unknown)
         self.graph.outputs[step.id] = given
         if not work.executed and work.unrun:
             reason = "; ".join(f"tool {t} did not execute: {why}" for t, why in work.unrun.items())
@@ -1480,6 +1719,44 @@ class PlaybookRuntime(HookProvider):
                 }
         self.graph.status[step.id] = DONE
         return self._after_close(step, status=DONE, outputs=given)
+
+    def _unroutable(self, step: Step, unknown: list[str]) -> dict[str, Any]:
+        """``complete_step``'s refusal for a step whose branches cannot be told."""
+        unseen = sorted(self.unavailable_outputs())
+        read = {
+            path.split(".")[1]
+            for b in step.branches
+            if b.id in unknown
+            for path in when_paths(parse_when(b.when))
+            if path.startswith("inputs.")
+        }
+        inputs = [name for name in self.unavailable_inputs() if name in read]
+        why: list[str] = []
+        if unseen:
+            why.append(
+                f"reads outputs this run cannot see (of {', '.join(unseen)}) -- the trace "
+                "does not hold their values"
+            )
+        if inputs:
+            why.append(
+                f"reads inputs this run does not have ({', '.join(inputs)}): not given, "
+                "not valid, or not restored"
+            )
+        if not why:
+            why.append(
+                "cannot be decided from the data this run holds (it may order amounts of "
+                "money in different currencies)"
+            )
+        return {
+            "ok": False,
+            "error": f"step {step.id} cannot be routed: branch {', '.join(unknown)} "
+            + "; it ".join(why)
+            + ". A person must choose the branches, or the run must be given that data.",
+            "routing": ROUTING_UNKNOWN,
+            "branches_unknown": unknown,
+            "unavailable": unseen,
+            "unavailable_inputs": inputs,
+        }
 
     def _after_close(
         self,
@@ -1699,7 +1976,8 @@ def control_tool(name: str, runtime: PlaybookRuntime) -> Any:
             """Close an active playbook step. ``outputs`` maps each expected output to its value.
 
             Each answer the person gave a step's question goes in ``outputs`` too, under the
-            question's name.
+            question's name. A typed value is written as the step's brief says: money as
+            ``{"amount": <number>, "currency": "<ISO 4217 code>"}``, a date as YYYY-MM-DD.
 
             Call it once the step's work is done. The result says which step is
             active next and gives its full brief, or why the step cannot close yet.
@@ -1770,5 +2048,6 @@ __all__ = [
     "playbook_prose",
     "skills_by_name",
     "step_brief",
+    "validate_inputs",
     "with_forbidden",
 ]
