@@ -13,6 +13,7 @@ policy.
 - **Playbooks v2: a step's approval rules, picked from the process data and the call.** A
   step's `approval` grows `rules` -- first match wins, the default rule (no `when`) last --
   and `only_these_approvers`, the registry's `StepApprovalRule` (`tulip.playbooks.v2.approvals`):
+
   ```yaml
   approval:
     rules:
@@ -25,6 +26,7 @@ policy.
         due: 24h
     only_these_approvers: true
   ```
+
   - `StepApproval.rules` are frozen `ApprovalRule`s (`groups` of `(label, count)`, `when`,
     `due_seconds`, `escalate_to`). The old `by` is one default rule, so `StepApproval(by=...)`
     reads as before and `by` stays set for readers that know only it. Reading stays tolerant:
