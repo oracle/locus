@@ -33,6 +33,15 @@ declared answer is in its outputs, and the questions it declares are not the age
 own -- :meth:`PlaybookRuntime.ask_is_declared` tells a per-run ``ask_user`` budget which
 asks to leave out.
 
+**Task steps** (``kind: task``, :mod:`tulip.playbooks.v2.tasks`) are done by a person.
+The model has no tools in one and cannot complete it (``complete_step`` and
+``select_branches`` refuse: "This step is done by a person"; while only task steps are
+active every other call is refused, whatever the enforcement mode).
+:meth:`PlaybookRuntime.pending_task` says which task is waiting, for the gateway to file
+its hold and park the run; :meth:`PlaybookRuntime.complete_task` takes the person's
+values, checks them against the form, and records them as the step's outputs. The
+briefs of the steps after it show what the person gave (the ``sensitive: false`` values).
+
 A run restored from its trace (:meth:`PlaybookRuntime.restore`) never mistakes a digest
 for data: an output the trace holds only as a digest (``metadata_only`` custody) is
 restored as :data:`~tulip.playbooks.v2.when.UNAVAILABLE`, a branch whose ``when`` reads it
@@ -94,7 +103,15 @@ from tulip.playbooks.v2.fields import (
     typed_value,
     validate_value,
 )
+from tulip.playbooks.v2.notify import NotifyRule, parse_notify_rules
 from tulip.playbooks.v2.results import not_executed_reason, not_executed_result, refused
+from tulip.playbooks.v2.tasks import (
+    TaskRequest,
+    TaskSpec,
+    form_problems,
+    is_task,
+    parse_task,
+)
 from tulip.playbooks.v2.when import (
     FALSE,
     TRUE,
@@ -272,6 +289,14 @@ class Step:
     #: The typed answers its questions declare (``required_from_user[].field``), by the
     #: question's name; a question without one has a sensitive text answer.
     answer_fields: tuple[Field, ...] = ()
+    #: What a person is asked to do, for a task step (``kind: task``); ``None`` for a step
+    #: the model does. A task step has no tools, and its form is its ``outputs``.
+    task: TaskSpec | None = None
+
+    @property
+    def is_task(self) -> bool:
+        """Whether a person does this step (``kind: task``), not the model."""
+        return self.task is not None
 
     def output_fields(self) -> list[Field]:
         """The step's outputs as fields: ``expected_outputs`` merged with ``outputs``.
@@ -315,7 +340,12 @@ class Step:
         return typed
 
     def allows(self, tool: str) -> bool:
-        """Whether this step's allowlist admits ``tool`` (kernel tools aside)."""
+        """Whether this step's allowlist admits ``tool`` (kernel tools aside).
+
+        Never for a task step: the model has no tools in a step a person does.
+        """
+        if self.task is not None:
+            return False
         if self.allowed_tools is None:
             return True
         if tool == ASK_USER and self.required_from_user:
@@ -379,6 +409,9 @@ class PlaybookV2:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     #: The inputs as typed fields (``inputs.<name>`` in a condition).
     input_fields: tuple[Field, ...] = ()
+    #: Who is told when a step starts, waits, ends or fails (:mod:`~tulip.playbooks.v2.notify`).
+    #: The registry sends the notices; the engine only reads the rules.
+    notify_rules: tuple[NotifyRule, ...] = ()
 
     def step(self, step_id: str) -> Step | None:
         return next((s for s in self.steps if s.id == step_id), None)
@@ -405,16 +438,7 @@ def _count(value: Any) -> int | None:
     return int(value) if isinstance(value, int) and not isinstance(value, bool) else None
 
 
-def _step(raw: Mapping[str, Any], group: str) -> Step:
-    step_id = _text(raw.get("id"))
-    if not step_id:
-        raise PlaybookV2Error(f"a step in group {group!r} has no id")
-    allowed = raw.get("allowed_tools")
-    asks = [
-        r
-        for r in raw.get("required_from_user") or []
-        if isinstance(r, dict) and _text(r.get("name"))
-    ]
+def _branches(raw: Mapping[str, Any], step_id: str) -> tuple[Branch, ...]:
     branches = tuple(
         Branch(
             id=_text(b.get("id")),
@@ -432,6 +456,43 @@ def _step(raw: Mapping[str, Any], group: str) -> Step:
             raise PlaybookV2Error(
                 f"step {step_id!r} branch {branch.id!r}: when {branch.when!r}: {exc}"
             ) from exc
+    return branches
+
+
+def _task_step(raw: Mapping[str, Any], step_id: str, group: str) -> Step:
+    """A step a person does: no tools, no questions, no approval; its form is its outputs."""
+    task = parse_task(raw)
+    return Step(
+        id=step_id,
+        title=_text(raw.get("title")) or step_id,
+        group=group,
+        goal=_text(raw.get("goal")) or task.instructions,
+        required=raw.get("required", True) is not False,
+        after=_strs(raw.get("after")),
+        parallel_group=_text(raw.get("parallel_group")) or None,
+        joins=_text(raw.get("joins")) or None,
+        branches=_branches(raw, step_id),
+        allowed_tools=(),
+        rules=_strs(raw.get("rules")),
+        facts=_strs(raw.get("facts")),
+        outputs=task.form,
+        task=task,
+    )
+
+
+def _step(raw: Mapping[str, Any], group: str) -> Step:
+    step_id = _text(raw.get("id"))
+    if not step_id:
+        raise PlaybookV2Error(f"a step in group {group!r} has no id")
+    if is_task(raw):
+        return _task_step(raw, step_id, group)
+    allowed = raw.get("allowed_tools")
+    asks = [
+        r
+        for r in raw.get("required_from_user") or []
+        if isinstance(r, dict) and _text(r.get("name"))
+    ]
+    branches = _branches(raw, step_id)
     return Step(
         id=step_id,
         title=_text(raw.get("title")) or step_id,
@@ -550,6 +611,7 @@ def parse_playbook_v2(definition: Mapping[str, Any]) -> PlaybookV2:
         recommendation_only=completion.get("recommendation_only") is True,
         metadata=dict(metadata) if isinstance(metadata, dict) else {},
         input_fields=input_fields,
+        notify_rules=parse_notify_rules(definition),
     )
 
 
@@ -868,11 +930,85 @@ def _field_note(field: Field) -> str:
     return field.name + (f" ({'; '.join(notes)})" if notes else "")
 
 
-def step_brief(step: Step, skills: Mapping[str, Mapping[str, Any]]) -> str:
-    """Everything the model needs to do one step, its skills' instructions in full."""
-    lines = [f"### Step {step.id}: {step.title}" + ("" if step.required else " (optional)")]
-    if step.goal:
+def _shown_value(value: Any) -> str:
+    """A value as the model reads it in a brief: text as written, the rest as JSON."""
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, sort_keys=True, default=str, ensure_ascii=False)
+
+
+def _people_lines(people: Sequence[tuple[Step, Mapping[str, Any]]]) -> list[str]:
+    """What people gave in the task steps before this one: the values that may be shown.
+
+    A sensitive value is named, never shown; a value this run cannot see (restored from
+    a digest) is said to be unavailable.
+    """
+    lines: list[str] = []
+    for task_step, values in people:
+        lines.append(f"Done by a person -- {task_step.title} ({task_step.id}):")
+        fields = task_step.output_fields()
+        if not fields:
+            lines.append("- (the form asked for nothing)")
+        for f in fields:
+            if f.name not in values:
+                lines.append(f"- {f.shown_as}: not given")
+            elif is_withheld(values[f.name]):
+                lines.append(f"- {f.shown_as}: given, not available to this run")
+            elif f.sensitive:
+                lines.append(f"- {f.shown_as}: given (sensitive, not shown)")
+            else:
+                lines.append(f"- {f.shown_as}: {_shown_value(values[f.name])}")
+    return lines
+
+
+def _task_brief(step: Step) -> list[str]:
+    """What the model is told of a step a person does: that it is theirs, and to wait."""
+    task = step.task
+    assert task is not None  # only called for a task step
+    lines = [
+        f"This step is done by a person ({task.assignee.shown_as}), not by you. You have no "
+        "tools in it and cannot complete it: the run waits until they do, and their answers "
+        "become the step's outputs."
+    ]
+    if task.instructions:
+        lines.append(f"What they are asked to do: {task.instructions}")
+    if task.form:
+        lines.append("What they fill in: " + ", ".join(_field_note(f) for f in task.form))
+    if task.due:
+        lines.append(f"Due within {task.due}.")
+    return lines
+
+
+def step_brief(
+    step: Step,
+    skills: Mapping[str, Mapping[str, Any]],
+    *,
+    people: Sequence[tuple[Step, Mapping[str, Any]]] = (),
+) -> str:
+    """Everything the model needs to do one step, its skills' instructions in full.
+
+    ``people`` are the task steps done before it, each with its recorded outputs: their
+    ``sensitive: false`` values are shown as the person gave them, the others named.
+    A task step's own brief says that a person does it.
+    """
+    lines = [
+        f"### Step {step.id}: {step.title}"
+        + ("" if step.required else " (optional)")
+        + (" (done by a person)" if step.is_task else "")
+    ]
+    if step.goal and not (step.task is not None and step.goal == step.task.instructions):
         lines.append(f"Goal: {step.goal}")
+    lines.extend(_people_lines(people))
+    if step.is_task:
+        lines.extend(_task_brief(step))
+        if step.branches:
+            lines.append("Branches (routed by what the person gives):")
+            lines.extend(
+                f"- {b.id}{' (' + b.label + ')' if b.label else ''}: when {b.when} -> "
+                f"{b.next_step_id}"
+                for b in step.branches
+            )
+        return "\n".join(lines)
     lines.append(_tools_line(step))
     outputs = step.output_fields()
     if outputs:
@@ -969,6 +1105,13 @@ def playbook_prose(
             else ""
         )
         + (
+            "- A step done by a person is theirs: you have no tools in it and cannot "
+            "complete it. The run waits until they complete it, and what they give becomes "
+            "its outputs.\n"
+            if any(s.is_task for s in playbook.steps)
+            else ""
+        )
+        + (
             "- A call outside the active step's tools is refused."
             if enforcement == BLOCK
             else "- A call outside the active step's tools is recorded as a deviation."
@@ -981,6 +1124,8 @@ def playbook_prose(
             if s.group != group.id:
                 continue
             notes = []
+            if s.is_task:
+                notes.append("done by a person")
             if not s.required:
                 notes.append("optional")
             if s.after:
@@ -1103,6 +1248,18 @@ def validate_inputs(playbook: PlaybookV2, values: Any) -> list[str]:
         if problem is not None:
             problems.append(problem)
     return problems
+
+
+def _by_person(steps: Sequence[Step]) -> str:
+    """Why the model cannot act in these task steps, in one sentence."""
+    named = ", ".join(
+        f"{s.id} ({s.task.assignee.shown_as})" if s.task is not None else s.id for s in steps
+    )
+    return (
+        f"This step is done by a person: {named}. The run waits until they complete it."
+        if len(steps) == 1
+        else f"These steps are done by people: {named}. The run waits until they complete them."
+    )
 
 
 def _sha256(value: Any) -> str:
@@ -1526,10 +1683,30 @@ class PlaybookRuntime(HookProvider):
         self._started = True
 
     def brief(self, step_ids: Iterable[str]) -> list[str]:
+        """Each step's brief; a step after a task step done by a person shows what they gave.
+
+        The task steps shown are the ones earlier in the playbook that closed ``done``,
+        their ``sensitive: false`` values as given and the rest named
+        (:func:`step_brief`'s ``people``).
+        """
         return [
-            step_brief(step, self._skills)
+            step_brief(step, self._skills, people=self._people_before(step))
             for step_id in step_ids
             if (step := self.playbook.step(step_id)) is not None
+        ]
+
+    def _people_before(self, step: Step) -> list[tuple[Step, Mapping[str, Any]]]:
+        """The task steps done before ``step``, each with its recorded outputs."""
+        index = self.graph.index(step.id)
+        return [
+            (
+                s,
+                dict.fromkeys((f.name for f in s.output_fields()), UNAVAILABLE)
+                if s.id in self.graph.withheld
+                else self.graph.outputs.get(s.id, {}),
+            )
+            for i, s in enumerate(self.playbook.steps)
+            if i < index and s.is_task and self.graph.status[s.id] == DONE
         ]
 
     # ── enforcement at the hook seam ─────────────────────────────────────────
@@ -1617,6 +1794,11 @@ class PlaybookRuntime(HookProvider):
                 else ""
             )
         owner = self._ask_owner() if tool == ASK_USER else self._owner(tool)
+        if owner is None and active and all(s.is_task for s in active):
+            # Only people's steps are active: the model has nothing to do but wait, and
+            # this is refused whatever the enforcement mode.
+            self._deviation(active[0], tool, "unexpected_tool", blocked=True)
+            return _by_person(active) + f" {tool} cannot run until they complete it."
         if owner is None:
             allowed = sorted({t for s in active for t in (s.allowed_tools or ())})
             anchor = active[0] if active else None
@@ -1736,6 +1918,13 @@ class PlaybookRuntime(HookProvider):
             return {
                 "ok": False,
                 "error": f"no step {step_id!r} in this playbook",
+                "active": self._active_ids(),
+            }
+        if step.is_task:
+            return {
+                "ok": False,
+                "error": _by_person([step]) + " You cannot complete it.",
+                "done_by_person": True,
                 "active": self._active_ids(),
             }
         if self.graph.status[step.id] not in (ACTIVE, BLOCKED):
@@ -1865,6 +2054,7 @@ class PlaybookRuntime(HookProvider):
         reason: str = "",
         outputs: Mapping[str, Any] | None = None,
         set_aside: str = "",
+        completed_by: str = "",
     ) -> dict[str, Any]:
         taken, not_taken, routed_by = self.graph.route(step)
         routing: dict[str, Any] = {}
@@ -1876,7 +2066,8 @@ class PlaybookRuntime(HookProvider):
                 "enabled_steps": sorted(self.graph.routed.get(step.id, set())),
             }
         if status == DONE:
-            self._step_event(step.id, outputs=dict(outputs or {}), **routing)
+            done_by = {"completed_by": completed_by} if completed_by else {}
+            self._step_event(step.id, outputs=dict(outputs or {}), **routing, **done_by)
         active = self._settle()
         result: dict[str, Any] = {
             "ok": status == DONE,
@@ -1897,6 +2088,93 @@ class PlaybookRuntime(HookProvider):
             )
         return result
 
+    # ── task steps: the steps people do ─────────────────────────────────────
+
+    def pending_task(self) -> TaskRequest | None:
+        """The task step active now and waiting on its person, or ``None``.
+
+        The first active (or blocked) task step in definition order. The gateway files the
+        task hold from it (:meth:`TaskRequest.hold_fields
+        <tulip.playbooks.v2.tasks.TaskRequest.hold_fields>`) and parks the run; the person's
+        values come back through :meth:`complete_task`. ``None`` once the playbook is
+        decided, or when no task step is active. Changes nothing.
+        """
+        if self.decision is not None:
+            return None
+        step = next((s for s in self.graph.active() if s.task is not None), None)
+        if step is None or step.task is None:
+            return None
+        task = step.task
+        return TaskRequest(
+            step_id=step.id,
+            title=step.title,
+            instructions=task.instructions or step.goal,
+            form=task.form,
+            assignee=task.assignee,
+            due_seconds=task.due_seconds,
+            escalate_to=task.escalate_to,
+        )
+
+    def complete_task(self, step_id: str, values: Any, by: str) -> dict[str, Any]:
+        """A person completed task step ``step_id`` with ``values``: close it, or say why not.
+
+        ``values`` are checked against the step's form, in the registry's words
+        (:func:`~tulip.playbooks.v2.tasks.form_problems`): each names a field, each suits its
+        field, every required field is given. Then they are the step's outputs -- typed, as
+        conditions read them -- the step closes ``done`` and the run routes on as it does
+        after ``complete_step`` (a branch whose ``when`` reads the form is decided by it).
+        The ``playbook_step`` ``done`` event carries ``completed_by`` (``by``), the one
+        field a task step adds. ``by`` is who completed it; whether they may is the
+        registry's to check (it holds the grants), not this method's.
+
+        The result is ``complete_step``'s: the step, its routing, the active steps and the
+        briefs of the next (which show what the person gave, the ``sensitive: false``
+        values in clear). A refusal (``ok: false``) changes nothing: ``invalid`` names each
+        bad value by field, ``routing: "unknown"`` says a branch cannot be told.
+        """
+        self.start()
+        step = self.playbook.step(_text(step_id))
+        if step is None:
+            return {
+                "ok": False,
+                "error": f"no step {step_id!r} in this playbook",
+                "active": self._active_ids(),
+            }
+        if step.task is None:
+            return {
+                "ok": False,
+                "error": f"step {step.id} is not a task step: the agent completes it",
+                "active": self._active_ids(),
+            }
+        if self.graph.status[step.id] not in (ACTIVE, BLOCKED):
+            return {
+                "ok": False,
+                "error": f"step {step.id} is {self.graph.status[step.id]}, not active",
+                "active": self._active_ids(),
+            }
+        who = _text(by)
+        if not who:
+            return {"ok": False, "error": "say who completed the task: `by` is required"}
+        invalid = form_problems(step.task.form, values)
+        if invalid:
+            return {
+                "ok": False,
+                "error": f"The task {step.title} cannot be completed: "
+                + " ".join(invalid.values()),
+                "invalid": invalid,
+            }
+        given = dict(values)
+        if step.branches:
+            verdicts = self.graph.branch_verdicts(step, given)
+            unknown = [b for b, v in verdicts.items() if v == UNKNOWN]
+            if unknown:
+                return self._unroutable(step, unknown)
+        self.graph.outputs[step.id] = given
+        self.graph.status[step.id] = DONE
+        result = self._after_close(step, status=DONE, outputs=given, completed_by=who)
+        result["completed_by"] = who
+        return result
+
     def select_branches(
         self, step_id: str, branch_ids: Iterable[str], reason: str
     ) -> dict[str, Any]:
@@ -1905,6 +2183,12 @@ class PlaybookRuntime(HookProvider):
         step = self.playbook.step(_text(step_id))
         if step is None or not step.branches:
             return {"ok": False, "error": f"{step_id!r} is not a step with branches"}
+        if step.is_task:
+            return {
+                "ok": False,
+                "error": _by_person([step]) + " What they give routes it.",
+                "done_by_person": True,
+            }
         if self.graph.status[step.id] not in (ACTIVE, BLOCKED):
             return {
                 "ok": False,
@@ -2182,6 +2466,8 @@ __all__ = [
     "RestoreError",
     "RestoreResult",
     "StepGraph",
+    "TaskRequest",
+    "TaskSpec",
     "control_tool",
     "definition_digest",
     "enforcement_mode",

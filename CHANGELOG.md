@@ -8,6 +8,56 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **Playbooks v2: task steps a person completes.** A step with `kind: task` is a person's,
+  not the model's (`tulip.playbooks.v2.tasks`):
+
+  ```yaml
+  - id: confirm_by_phone
+    kind: task
+    title: Call the vendor back on the number on file
+    instructions: Use the number in the vendor master, never one from the request.
+    assignee: {by: ap-clerks}            # allow_requester: true lets the requester do it
+    form: [{name: confirmed_by, type: text, sensitive: false}, {name: call_recording, type: file}]
+    due: 8h
+    escalate_to: ap-leads
+  ```
+
+  - Read tolerantly into a frozen `TaskSpec` (`assignee: TaskAssignee {by, allow_requester}`,
+    `form`, `instructions`, `due`, `due_seconds`, `escalate_to`) on `Step.task`
+    (`Step.is_task`). A task step has no tools whatever its definition says, and its form is
+    its outputs (so a branch's `when` reads `confirmed`, a later one `outputs.<task>.confirmed`).
+  - The model cannot act in it: `complete_step` and `select_branches` on a task step are
+    refused ("This step is done by a person: confirm_by_phone (AP Clerks). The run waits
+    until they complete it."), and while only task steps are active every other call is
+    refused and recorded as a blocked deviation, whatever the enforcement mode. Its brief and
+    the playbook outline say a person does it.
+  - `PlaybookRuntime.pending_task()` -> `TaskRequest | None` (`step_id`, `title`,
+    `instructions`, `form`, `assignee`, `due_seconds`, `escalate_to`): the task step active
+    now, for the gateway to file the task hold and park the run. `TaskRequest.hold_fields()`
+    gives `approver_groups` (the assignee, one completion), `only_named_groups`,
+    `escalate_to_label`, `ttl_seconds`, `escalate_after_seconds` and `task` (the step, its
+    instructions, the form as plain fields, `allow_requester`).
+  - `PlaybookRuntime.complete_task(step_id, values, by)`: the values are checked against the
+    form in the registry's words (`form_problems`; `validate_value`'s sentences, "Spoke with
+    is required." for a required field left out, "The form has no field named 'notes'." for
+    a stray one, a file only as a `{ref, name, size?, media_type?}` reference). A refusal
+    changes nothing and lists each bad value under `invalid`. Valid values become the
+    step's typed outputs, the step closes `done` and routes on by its branches' conditions
+    (`routing: "unknown"` when one cannot be told, as for `complete_step`). The
+    `playbook_step` `done` event of a task step carries one new field, `completed_by`.
+  - The briefs of the steps after a task step show what the person gave: the
+    `sensitive: false` values as given, the others named but not shown, and a value the run
+    restored as a digest said to be unavailable.
+  - A task step's outputs restore like any step's: withheld when the trace holds a digest,
+    supplied with `restore(outputs=...)`; a task that was waiting restores waiting.
+- **Playbooks v2: `notify` rules, read.** `PlaybookV2.notify_rules` is the playbook's
+  `notify` (else `metadata.notify`), read as the registry's notice dispatcher reads it, into
+  frozen `NotifyRule`s (`on`, `to: NotifyTarget {kind: by | requester | slack, name}`,
+  `steps`, `include`; `applies(event, step_id)`). The engine sends nothing: the registry
+  does.
+
 ## [2.27.0] - 2026-10-10
 
 ### Added
