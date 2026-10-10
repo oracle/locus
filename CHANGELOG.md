@@ -62,6 +62,27 @@ policy.
   single authority (`authority_for(record)` says which applies). `ApprovalAuthority.check()`
   takes the decision's `verdict`.
 
+### Fixed
+
+- **Playbooks v2: a branch's condition decides; the model cannot choose against the data.**
+  The live dev suite (F40) caught a model calling `select_branches` on a step whose two
+  branches read typed data (`inputs.amount > 10000` / `NOT (inputs.amount > 10000)`): the
+  trace said `routed_by: "select_branches"`, so a model could take the branch meant for
+  small amounts on a large one and skip the approval the other branch's step carries. Now
+  every branch whose `when` the run can tell decides by it:
+  - `select_branches` against a known verdict is refused in plain words ("This step routes
+    by its conditions: the amount is more than $10,000, so it goes to Large invoice."); a
+    choice that agrees is accepted and the step is recorded as `routed_by: "when"`.
+  - A condition on the step's own outputs cannot be judged before `complete_step` gives
+    them: the choice is taken, then set aside where the outputs go against it (the result
+    says so under `selection_set_aside`), and the step routes by its conditions.
+  - Choosing stays for the branches without a condition (`always`) and for conditions the
+    run cannot tell (`unknown`: a withheld output, a missing input), as before; a choice
+    must still agree with the verdicts the run can tell.
+  - The step brief and the playbook prose tell the model the routing is automatic when the
+    conditions decide. `StepGraph.condition_verdicts()`, `StepGraph.conditions_decide()`
+    and `Branch.conditioned` say it in code.
+
 ## [2.26.0] - 2026-10-10
 
 ### Fixed

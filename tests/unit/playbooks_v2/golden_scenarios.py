@@ -158,7 +158,9 @@ def scenario_refund_block(eng: Engine) -> dict[str, Any]:
     s.op("complete_step", "check_amount", {"amount_delta": 1})  # not active
     s.op("select_branches", "triage", ["nope"], "bad id")
     s.op("select_branches", "triage", ["duplicate", "amount"], "both")
-    _refund_triage(s, [])
+    # The outputs agree with the choice: a branch's condition decides, and one that went
+    # against the choice would set it aside (tests/unit/playbooks_v2/test_conditions_decide.py).
+    _refund_triage(s, ["duplicate_charge", "amount_mismatch"])
     s.call("lookup_order", "⛔ denied: by policy")  # the gate's refusal is not the step's work
     s.call("lookup_order", error="boom")  # a failed call neither
     s.call("get_balance")
