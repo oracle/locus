@@ -71,6 +71,13 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from tulip.hooks.provider import HookPriority, HookProvider
+from tulip.playbooks.v2.approvals import (
+    ResolvedApproval,
+    StepApproval,
+    call_context,
+    parse_step_approval,
+    pick_rule,
+)
 from tulip.playbooks.v2.fields import (
     Field,
     describe,
@@ -200,20 +207,6 @@ class Branch:
     label: str
     when: str
     next_step_id: str
-
-
-@dataclass(frozen=True)
-class StepApproval:
-    """Who approves a step's tool calls, and what they are asked (``approval`` on a step).
-
-    ``by`` is an approvals grant label; ``ask`` is the plain text the approver reads;
-    ``show`` names the call's arguments to put in front of them first. The engine only
-    carries it: the gateway compiles it into a hold on that step's tool calls.
-    """
-
-    by: str
-    ask: str = ""
-    show: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -379,25 +372,6 @@ def _count(value: Any) -> int | None:
     return int(value) if isinstance(value, int) and not isinstance(value, bool) else None
 
 
-def _approval(value: Any) -> StepApproval | None:
-    """Read a step's ``approval`` tolerantly: no grant label, no approval.
-
-    The registry validates the shape strictly at publish; here a malformed value
-    reads as absent rather than refusing the run.
-    """
-    if not isinstance(value, dict):
-        return None
-    by = value.get("by")
-    if not isinstance(by, str) or not by.strip():
-        return None
-    ask = value.get("ask")
-    return StepApproval(
-        by=by.strip(),
-        ask=ask.strip() if isinstance(ask, str) else "",
-        show=_strs(value.get("show")),
-    )
-
-
 def _step(raw: Mapping[str, Any], group: str) -> Step:
     step_id = _text(raw.get("id"))
     if not step_id:
@@ -443,7 +417,7 @@ def _step(raw: Mapping[str, Any], group: str) -> Step:
         required_from_user=tuple((_text(r.get("name")), _text(r.get("question"))) for r in asks),
         rules=_strs(raw.get("rules")),
         facts=_strs(raw.get("facts")),
-        approval=_approval(raw.get("approval")),
+        approval=parse_step_approval(raw.get("approval")),
         outputs=parse_fields(raw.get("outputs")),
         answer_fields=tuple(
             answer
@@ -1476,6 +1450,28 @@ class PlaybookRuntime(HookProvider):
         return next((s for s in self.graph.active() if s.allows(tool)), None)
 
     _owner = owner_of
+
+    def approval_for(
+        self, tool: str, args: Mapping[str, Any] | None = None
+    ) -> ResolvedApproval | None:
+        """Who must approve a call to ``tool`` with ``args``, or ``None`` if nobody need.
+
+        The step that owns the call (:meth:`owner_of`) decides: ``None`` when no active
+        step owns it or the step has no ``approval``. Otherwise its rules are read, first
+        match wins (:func:`~tulip.playbooks.v2.approvals.pick_rule`), each ``when``
+        against what the step's branches read -- the run's inputs (``inputs.<name>``),
+        the earlier steps' outputs (``outputs.<id>.<name>``) -- plus the call's arguments
+        (``args.<name>``). A rule that cannot be told (a withheld value, two currencies,
+        an argument that is not the number it is ordered against) means the strictest of
+        it and the rules after it: a call never needs fewer approvers for what the run
+        cannot see. Changes nothing.
+        """
+        step = self.owner_of(tool)
+        if step is None or step.approval is None:
+            return None
+        context = self.graph.context(step)
+        context["args"] = call_context(args)
+        return pick_rule(step.approval, context, step=step.id)
 
     def active_steps(self) -> list[Step]:
         """The steps active now (``active`` or ``blocked``), in definition order."""

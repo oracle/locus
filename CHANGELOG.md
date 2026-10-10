@@ -8,6 +8,60 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **Playbooks v2: a step's approval rules, picked from the process data and the call.** A
+  step's `approval` grows `rules` -- first match wins, the default rule (no `when`) last --
+  and `only_these_approvers`, the registry's `StepApprovalRule` (`tulip.playbooks.v2.approvals`):
+
+  ```yaml
+  approval:
+    rules:
+      - when: "inputs.amount > 10000"
+        all_of: [{by: finance, count: 1}, {by: cfo, count: 1}]
+        due: 4h
+        escalate_to: finance-leads
+      - by: finance
+        count: 1
+        due: 24h
+    only_these_approvers: true
+  ```
+
+  - `StepApproval.rules` are frozen `ApprovalRule`s (`groups` of `(label, count)`, `when`,
+    `due_seconds`, `escalate_to`). The old `by` is one default rule, so `StepApproval(by=...)`
+    reads as before and `by` stays set for readers that know only it. Reading stays tolerant:
+    a rule naming no group is left out, a count below 1 reads as 1, an unreadable `due` as
+    none; a `when` that does not parse keeps its rule and reads as `unknown`.
+  - `PlaybookRuntime.approval_for(tool, args)` -> `ResolvedApproval | None`: for the step
+    that owns the call, each rule's `when` is read against the step's typed context
+    (`inputs.<name>`, `outputs.<step>.<name>`) plus the call's arguments (`args.<name>`; a
+    money value compares as money). The first true rule applies. A rule that is `unknown` --
+    a withheld value, two currencies ordered, an argument ordered against a number that is
+    not a number (missing, or `"20000"` as text), a `when` that does not parse -- means the
+    STRICTEST of it and the rules after it (most approvers in all, the first on a tie), never
+    a laxer one; no match and no default means the strictest rule. The result carries
+    `groups`, `due_seconds`, `escalate_to`, `only_named`, `ask`, `show`, `rule_index`,
+    `matched` and a plain `reason` ("The amount is more than $10,000, so Finance and CFO must
+    both approve."); `hold_fields()` gives the registry hold's `approver_groups`,
+    `only_named_groups`, `escalate_to_label` and `escalate_after_seconds`. `pick_rule()` is
+    the same choice, pure.
+  - `parse_duration("30m" | "4h" | "2d")` -> seconds.
+  - `authority_from_resolved(resolved, roles_of=..., members=..., also=..., break_glass=...)`
+    -> an `ApprovalAuthority` that enforces it in the open-source stores: one rule per group
+    with the group's count as quorum (all of them), distinct people, each approval counting
+    for one group only; `only_named` keeps general approvers (`also`) out, break-glass roles
+    stay in. Pinned by `tests/unit/playbooks_v2/fixtures/approval_rules.json`, written here
+    until the registry's copy of the vectors lands.
+- **`ApprovalAuthority(count_once=True)`**: each approval counts toward one rule only, the
+  first still short of its quorum that the approver holds; an approver whose rules have all
+  counted while another waits is refused ("Finance already counted; this approval needs
+  someone from CFO"). A denial is never narrowed. `ApproverRule.name` names a rule in that
+  refusal. Off by default.
+- **An approval store's `authority` may be per record**: `InMemoryApprovals` and
+  `FileApprovals` take a callable `(ApprovalRecord) -> ApprovalAuthority | None` beside a
+  single authority (`authority_for(record)` says which applies). `ApprovalAuthority.check()`
+  takes the decision's `verdict`.
+
 ## [2.26.0] - 2026-10-10
 
 ### Fixed

@@ -69,6 +69,13 @@ directly or through a delegation it granted, unless every matching rule says
 ``allow_self_approval``. A decision by someone without authority raises
 :class:`ApprovalAuthorityError` and is kept on the record. An action no rule
 covers cannot be approved by anyone: the authority fails closed.
+
+**Groups that must each approve.** ``count_once=True`` makes each approval count
+toward one rule only, so "Finance and CFO must both approve" takes two people even
+when one of them is in both groups. A store's ``authority`` may also be a callable
+that returns the authority for one record, for holds that each carry their own
+approvers -- a playbook step's approval rules, through
+:func:`tulip.playbooks.v2.approvals.authority_from_resolved`.
 """
 
 from __future__ import annotations
@@ -124,6 +131,12 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+def _names(names: list[str], joiner: str) -> str:
+    if len(names) <= 1:
+        return "".join(names)
+    return f"{', '.join(names[:-1])} {joiner} {names[-1]}"
+
+
 @dataclass(frozen=True)
 class ApprovalRecord:
     """One held call and what became of it."""
@@ -176,6 +189,8 @@ class ApproverRule:
         quorum: Distinct authorised approvals needed.
         allow_self_approval: Whether the principal that requested the action may
             approve it. Off by default: separation of duties.
+        name: What a person calls the rule ("Finance"), for refusals. Empty = its
+            approvers and roles.
     """
 
     labels: frozenset[str] = frozenset()
@@ -183,6 +198,7 @@ class ApproverRule:
     roles: frozenset[str] = frozenset()
     quorum: int = 1
     allow_self_approval: bool = False
+    name: str = ""
 
     def __post_init__(self) -> None:
         if self.quorum < 1:
@@ -193,6 +209,11 @@ class ApproverRule:
     def matches(self, labels: frozenset[str]) -> bool:
         """Whether this rule governs an action carrying ``labels``."""
         return not self.labels or bool(self.labels & labels)
+
+    @property
+    def shown_as(self) -> str:
+        """The rule as a refusal names it: its ``name``, or who it lets decide."""
+        return self.name or ", ".join(sorted(self.approvers | self.roles))
 
 
 @dataclass(frozen=True)
@@ -235,12 +256,22 @@ class ApprovalAuthority:
 
     Rules are evaluated by position, so keep their order stable for records
     that are still pending.
+
+    ``count_once`` makes each approval count toward one rule only: the first, in
+    order, the approver may decide under that is still short of its quorum. So two
+    rules of quorum 1 take two people even when one person could decide under both
+    ("Finance and CFO must both approve"), and an approver whose rules have all
+    counted while another still waits is refused ("Finance already counted; this
+    approval needs someone from CFO"). A denial is not narrowed: any authorised
+    denial ends it. Off by default, as before;
+    :func:`tulip.playbooks.v2.approvals.authority_from_resolved` turns it on.
     """
 
     rules: tuple[ApproverRule, ...]
     delegations: tuple[Delegation, ...] = ()
     roles_of: Callable[[str], Iterable[str]] | None = None
     clock: Callable[[], datetime] = _utcnow
+    count_once: bool = False
 
     def matching(self, labels: Iterable[str]) -> dict[int, ApproverRule]:
         """The rules governing an action carrying ``labels``, by position."""
@@ -254,14 +285,52 @@ class ApprovalAuthority:
             return bool(rule.roles & frozenset(self.roles_of(principal)))
         return False
 
-    def check(self, record: ApprovalRecord, by: str) -> _Basis:
+    def check(self, record: ApprovalRecord, by: str, verdict: Verdict = "approved") -> _Basis:
         """Which matching rules ``by`` may decide under, and on what basis.
+
+        With ``count_once``, an approval counts under one rule (see the class).
 
         Raises:
             ApprovalAuthorityError: No rule covers the action, ``by`` requested
                 it, or ``by`` holds none of the matching rules, directly or by an
-                active delegation.
+                active delegation; with ``count_once``, every rule ``by`` holds has
+                its quorum while another still waits.
         """
+        basis = self._basis(record, by)
+        if self.count_once and verdict == "approved":
+            return self._count_once(record, basis, by)
+        return basis
+
+    def _counted(self, record: ApprovalRecord, rules: Mapping[int, ApproverRule]) -> dict[int, int]:
+        """Distinct approvers each rule has so far."""
+        return {
+            i: len(
+                {
+                    a["by"]
+                    for a in record.approvals
+                    if a.get("verdict") == "approved" and i in a.get("rules", ())
+                }
+            )
+            for i in rules
+        }
+
+    def _count_once(self, record: ApprovalRecord, basis: _Basis, by: str) -> _Basis:
+        rules = self.matching(record.labels)
+        counted = self._counted(record, rules)
+        unmet = [i for i in sorted(rules) if counted[i] < rules[i].quorum]
+        pick = next((i for i in unmet if i in basis.rules), None)
+        if pick is not None:
+            return _Basis(frozenset({pick}), basis.label)
+        if unmet:
+            theirs = _names([rules[i].shown_as for i in sorted(basis.rules)], "and")
+            needed = _names([rules[i].shown_as for i in unmet], "or")
+            raise ApprovalAuthorityError(
+                f"{theirs} already counted; this approval needs someone from {needed} "
+                f"({by} may not count for it)"
+            )
+        return _Basis(frozenset({min(basis.rules)}), basis.label)
+
+    def _basis(self, record: ApprovalRecord, by: str) -> _Basis:
         labels = frozenset(record.labels)
         rules = self.matching(labels)
         if not rules:
@@ -352,11 +421,28 @@ class ApprovalStore(Protocol):
 
 
 class _Approvals:
-    """The state machine, over a load/save pair a subclass provides."""
+    """The state machine, over a load/save pair a subclass provides.
 
-    def __init__(self, authority: ApprovalAuthority | None = None) -> None:
+    ``authority`` is one :class:`ApprovalAuthority` for every record, or a callable
+    that returns the one for a record -- for holds that each carry their own approvers,
+    as a playbook step's approval rules do
+    (:func:`tulip.playbooks.v2.approvals.authority_from_resolved`).
+    """
+
+    def __init__(
+        self,
+        authority: ApprovalAuthority
+        | Callable[[ApprovalRecord], ApprovalAuthority | None]
+        | None = None,
+    ) -> None:
         self._lock = threading.Lock()
         self.authority = authority
+
+    def authority_for(self, record: ApprovalRecord) -> ApprovalAuthority | None:
+        """The authority ``record``'s decisions are checked against, if any."""
+        if self.authority is None or isinstance(self.authority, ApprovalAuthority):
+            return self.authority
+        return self.authority(record)
 
     def _load(self) -> dict[str, ApprovalRecord]:
         raise NotImplementedError
@@ -448,7 +534,8 @@ class _Approvals:
         entry: dict[str, Any] = {"by": by, "at": now, "verdict": verdict}
         if edited is not None:
             entry["arguments"] = edited
-        if self.authority is None:
+        authority = self.authority_for(record)
+        if authority is None:
             return replace(
                 record,
                 status=verdict,
@@ -460,7 +547,7 @@ class _Approvals:
             )
 
         try:
-            basis = self.authority.check(record, by)
+            basis = authority.check(record, by, verdict)
         except ApprovalAuthorityError as error:
             records[record.approval_id] = replace(
                 record, rejections=[*record.rejections, {**entry, "reason": str(error)}]
@@ -487,7 +574,7 @@ class _Approvals:
                 "from an earlier one"
             )
         approvals = [*record.approvals, entry]
-        if not self.authority.satisfied(record, approvals):
+        if not authority.satisfied(record, approvals):
             return replace(record, approvals=approvals)
         approved = replace(record, approvals=approvals)
         return replace(
@@ -521,7 +608,12 @@ class _Approvals:
 class InMemoryApprovals(_Approvals):
     """An approval store in this process only. Gone on restart; for tests and demos."""
 
-    def __init__(self, authority: ApprovalAuthority | None = None) -> None:
+    def __init__(
+        self,
+        authority: ApprovalAuthority
+        | Callable[[ApprovalRecord], ApprovalAuthority | None]
+        | None = None,
+    ) -> None:
         super().__init__(authority)
         self._records: dict[str, ApprovalRecord] = {}
 
@@ -542,7 +634,13 @@ class FileApprovals(_Approvals):
     for many.
     """
 
-    def __init__(self, path: str | Path, authority: ApprovalAuthority | None = None) -> None:
+    def __init__(
+        self,
+        path: str | Path,
+        authority: ApprovalAuthority
+        | Callable[[ApprovalRecord], ApprovalAuthority | None]
+        | None = None,
+    ) -> None:
         super().__init__(authority)
         self.path = Path(path)
 

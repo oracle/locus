@@ -5,12 +5,20 @@
 
 The engine that runs a ``playbook.v2`` definition (:mod:`tulip.playbooks.v2.engine`), the
 safe ``when`` condition language its branches route on (:mod:`tulip.playbooks.v2.when`),
+who approves a step's calls (:mod:`tulip.playbooks.v2.approvals`),
 the typed fields its process data is declared with (:mod:`tulip.playbooks.v2.fields`)
 and the result shapes it reads (:mod:`tulip.playbooks.v2.results`). Pure: no I/O, no
 environment, no clock. The same code runs next to the agent loop wherever that loop is --
 in the gateway, or in a box runner -- and the gateway's copy is the authoritative one.
 """
 
+from tulip.playbooks.v2.approvals import (
+    ApprovalRule,
+    ResolvedApproval,
+    authority_from_resolved,
+    parse_duration,
+    pick_rule,
+)
 from tulip.playbooks.v2.engine import (
     ACTIVE,
     ASK_USER,
@@ -99,17 +107,20 @@ __all__ = [
     "UNAVAILABLE",
     "UNKNOWN",
     "WAIVED",
+    "ApprovalRule",
     "Day",
     "Field",
     "Money",
     "PlaybookRuntime",
     "PlaybookV2",
     "PlaybookV2Error",
+    "ResolvedApproval",
     "RestoreError",
     "RestoreResult",
     "StepApproval",
     "StepGraph",
     "WhenSyntaxError",
+    "authority_from_resolved",
     "control_tool",
     "definition_digest",
     "enforcement_mode",
@@ -121,8 +132,10 @@ __all__ = [
     "is_withheld",
     "not_executed_reason",
     "not_executed_result",
+    "parse_duration",
     "parse_playbook_v2",
     "parse_when",
+    "pick_rule",
     "playbook_prose",
     "refused",
     "skills_by_name",
