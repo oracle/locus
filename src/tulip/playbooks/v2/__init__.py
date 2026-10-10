@@ -4,7 +4,8 @@
 """v2 playbooks: a step graph the model walks with three control tools.
 
 The engine that runs a ``playbook.v2`` definition (:mod:`tulip.playbooks.v2.engine`), the
-safe ``when`` condition language its branches route on (:mod:`tulip.playbooks.v2.when`)
+safe ``when`` condition language its branches route on (:mod:`tulip.playbooks.v2.when`),
+the typed fields its process data is declared with (:mod:`tulip.playbooks.v2.fields`)
 and the result shapes it reads (:mod:`tulip.playbooks.v2.results`). Pure: no I/O, no
 environment, no clock. The same code runs next to the agent loop wherever that loop is --
 in the gateway, or in a box runner -- and the gateway's copy is the authoritative one.
@@ -48,8 +49,10 @@ from tulip.playbooks.v2.engine import (
     playbook_prose,
     skills_by_name,
     step_brief,
+    validate_inputs,
     with_forbidden,
 )
+from tulip.playbooks.v2.fields import FIELD_TYPES, Field, validate_value
 from tulip.playbooks.v2.results import (
     DENIAL_PREFIX,
     not_executed_reason,
@@ -59,6 +62,8 @@ from tulip.playbooks.v2.results import (
 from tulip.playbooks.v2.when import (
     UNAVAILABLE,
     UNKNOWN,
+    Day,
+    Money,
     WhenSyntaxError,
     evaluate_when,
     is_digest,
@@ -79,6 +84,7 @@ __all__ = [
     "DENIAL_PREFIX",
     "DEVIATION_EVENT",
     "DONE",
+    "FIELD_TYPES",
     "INCONCLUSIVE",
     "NOT_EXECUTED",
     "PENDING",
@@ -93,6 +99,9 @@ __all__ = [
     "UNAVAILABLE",
     "UNKNOWN",
     "WAIVED",
+    "Day",
+    "Field",
+    "Money",
     "PlaybookRuntime",
     "PlaybookV2",
     "PlaybookV2Error",
@@ -118,6 +127,8 @@ __all__ = [
     "refused",
     "skills_by_name",
     "step_brief",
+    "validate_inputs",
+    "validate_value",
     "when_paths",
     "when_verdict",
     "with_forbidden",

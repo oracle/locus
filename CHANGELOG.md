@@ -8,6 +8,37 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **Playbooks v2: typed process data.** A v2 playbook declares its data as typed fields,
+  the registry's `PlaybookField` (`tulip.playbooks.v2.fields.Field`): `name`, `label`,
+  `type` (`text | number | money | date | boolean | choice | email | url | file`),
+  `choices`, `required`, `sensitive` (default `true`) and `description`.
+  - `inputs` are fields (`PlaybookV2.input_fields`); an old `{name, description,
+    required}` input still reads as a sensitive text field, and `PlaybookV2.inputs` keeps
+    its `(name, description)` pairs. A step's `outputs: [field]` sits beside the old
+    `expected_outputs: [str]` (each a text field); `Step.output_fields()` merges them the
+    registry's way, and `Step.data_fields()` adds the answers. `required_from_user[].field`
+    types a question's answer. Reading stays tolerant: an unknown type reads as text.
+  - `complete_step` checks every typed output and typed answer with
+    `validate_value(field, value)` -- a port of the registry's, same sentences -- and
+    refuses with `{"ok": false, "invalid": {name: sentence}}`, listing every bad field at
+    once. Money is `{amount, currency}` with an ISO 4217 code; a date is `YYYY-MM-DD`; a
+    file is `{ref, name, size?, media_type?}`, never bytes. A required typed output must
+    be present. Untyped `expected_outputs` accept any value, as before.
+  - `PlaybookRuntime.set_inputs(values)` (or `start(inputs=...)`) gives a run its inputs
+    and returns what was wrong with them (`validate_inputs`, the registry's run-start
+    check). Conditions read them as `inputs.<name>`. Money compares by amount -- with a
+    number (`inputs.amount > 10000`) or money in the same currency; ordering two
+    currencies is `unknown`. Dates compare chronologically, numbers numerically
+    (`when.Money`, `when.Day`). A required input not given, an invalid one or a digest
+    is UNAVAILABLE, so a branch reading it is `unknown` and `complete_step` refuses to
+    route (`"unavailable_inputs": [...]`); a restored run needs its inputs set again.
+  - `PlaybookRuntime.public_outputs(step_id)` and `public_inputs()` return only the valid
+    values of `sensitive: false` fields, for the gateway to mirror in clear while it
+    digests the rest. No event gains a field.
+  - A step's brief tells the model how to write each typed value.
+
 ### Fixed
 
 - **A restored v2 playbook run never mistakes a digest for data.** Under the gateway's
