@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [2.28.0] - 2026-10-10
+
 ### Added
 
 - **Playbooks v2: task steps a person completes.** A step with `kind: task` is a person's,
