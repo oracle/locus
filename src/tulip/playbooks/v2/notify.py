@@ -16,7 +16,8 @@ the engine sends nothing. This module only reads the rules, the way the registry
 (``tulip_registry.notices.rules_of``), so a local run, a test or a tool can see them:
 :attr:`~tulip.playbooks.v2.engine.PlaybookV2.notify_rules`.
 
-Reading is tolerant: the top-level ``notify`` first, else ``metadata.notify``; a rule that
+Reading is tolerant: the top-level ``notify`` first, else (when it is missing or empty)
+``metadata.notify``; a rule that
 is not a mapping, names no known event or nobody to tell is left out.
 """
 
@@ -85,9 +86,15 @@ def _target(raw: Any) -> NotifyTarget | None:
 
 
 def parse_notify_rules(definition: Mapping[str, Any]) -> tuple[NotifyRule, ...]:
-    """A playbook's ``notify`` rules: the top-level field, else ``metadata.notify``."""
+    """A playbook's ``notify`` rules: the top-level field, else ``metadata.notify``.
+
+    The fallback is taken when the top-level field is missing or an empty list, as the
+    registry's dispatcher takes it.
+    """
     raw = definition.get("notify")
-    if raw is None:
+    if raw is None or (isinstance(raw, list | tuple) and not raw):
+        # The registry stores every playbook with ``notify: []``: an empty list says
+        # nothing, and the rules may still live under ``metadata.notify``.
         metadata = definition.get("metadata")
         raw = metadata.get("notify") if isinstance(metadata, Mapping) else None
     rules: list[NotifyRule] = []

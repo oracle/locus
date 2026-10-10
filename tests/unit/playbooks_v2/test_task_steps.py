@@ -238,7 +238,31 @@ def test_notify_rules_fall_back_to_metadata_and_drop_what_does_not_read() -> Non
     assert rules == (NotifyRule(on=("process.done",), to=(NotifyTarget("requester"),)),)
     assert rules[0].applies("process.done", "any-step")
     assert parse_notify_rules({}) == ()
-    assert parse_notify_rules({"notify": [], "metadata": {"notify": rules}}) == ()
+    # Top-level rules win over metadata ones.
+    top = {"on": ["step.done"], "to": [{"by": "ops"}]}
+    meta = {"on": ["process.done"], "to": ["requester"]}
+    assert parse_notify_rules({"notify": [top], "metadata": {"notify": [meta]}}) == (
+        NotifyRule(on=("step.done",), to=(NotifyTarget("by", "ops"),)),
+    )
+
+
+@pytest.mark.parametrize("stored", [[], (), None])
+def test_an_empty_top_level_notify_falls_back_to_metadata(stored: Any) -> None:
+    """The registry stores every playbook with ``notify: []``; the rules may still be in
+    ``metadata.notify``, and its dispatcher reads them there."""
+    meta = {"on": ["step.waiting"], "steps": ["call"], "to": [{"by": "finance"}]}
+    definition: dict[str, Any] = {"metadata": {"notify": [meta]}}
+    if stored is not None:
+        definition["notify"] = stored
+    expected = (
+        NotifyRule(on=("step.waiting",), to=(NotifyTarget("by", "finance"),), steps=("call",)),
+    )
+    assert parse_notify_rules(definition) == expected
+    playbook = _definition()
+    playbook["notify"] = stored if stored is not None else []
+    playbook["metadata"] = {"notify": [meta]}
+    assert parse_playbook_v2(playbook).notify_rules == expected
+    assert parse_notify_rules({"notify": stored}) == ()
     assert parse_playbook_v2({**_definition(), "notify": None}).notify_rules == ()
 
 

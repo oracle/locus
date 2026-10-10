@@ -53,7 +53,8 @@ policy.
   - A task step's outputs restore like any step's: withheld when the trace holds a digest,
     supplied with `restore(outputs=...)`; a task that was waiting restores waiting.
 - **Playbooks v2: `notify` rules, read.** `PlaybookV2.notify_rules` is the playbook's
-  `notify` (else `metadata.notify`), read as the registry's notice dispatcher reads it, into
+  `notify` (else -- when it is missing or empty, as the registry stores every playbook with
+  `notify: []` -- `metadata.notify`), read as the registry's notice dispatcher reads it, into
   frozen `NotifyRule`s (`on`, `to: NotifyTarget {kind: by | requester | slack, name}`,
   `steps`, `include`; `applies(event, step_id)`). The engine sends nothing: the registry
   does.
