@@ -504,7 +504,13 @@ def test_complete_step_wants_the_person_s_answers() -> None:
     assert not result["ok"]
     assert result["missing"] == ["customer_statement"]
     run.call("ask_user")
-    assert run.rt.complete_step("triage", {"dispute_kind": "x", "selected_branch_ids": []})["ok"]
+    # Asking is not answering: the answer itself must be in the outputs.
+    again = run.rt.complete_step("triage", {"dispute_kind": "x", "selected_branch_ids": []})
+    assert not again["ok"]
+    assert again["missing"] == ["customer_statement"]
+    assert "customer_statement" in again["error"]
+    owed = {"dispute_kind": "x", "selected_branch_ids": []}
+    assert run.rt.complete_step("triage", {**owed, "customer_statement": "charged twice"})["ok"]
 
 
 def test_complete_step_only_closes_an_active_step() -> None:

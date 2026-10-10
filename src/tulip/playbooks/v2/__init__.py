@@ -26,6 +26,7 @@ from tulip.playbooks.v2.engine import (
     PROPOSAL_TOOLS,
     RECORD,
     RESTORED_CALL,
+    ROUTING_UNKNOWN,
     STATUSES,
     STEP_EVENT,
     TERMINAL,
@@ -55,7 +56,17 @@ from tulip.playbooks.v2.results import (
     not_executed_result,
     refused,
 )
-from tulip.playbooks.v2.when import WhenSyntaxError, evaluate_when, parse_when, when_paths
+from tulip.playbooks.v2.when import (
+    UNAVAILABLE,
+    UNKNOWN,
+    WhenSyntaxError,
+    evaluate_when,
+    is_digest,
+    is_withheld,
+    parse_when,
+    when_paths,
+    when_verdict,
+)
 
 
 __all__ = [
@@ -75,9 +86,12 @@ __all__ = [
     "PROPOSAL_TOOLS",
     "RECORD",
     "RESTORED_CALL",
+    "ROUTING_UNKNOWN",
     "STATUSES",
     "STEP_EVENT",
     "TERMINAL",
+    "UNAVAILABLE",
+    "UNKNOWN",
     "WAIVED",
     "PlaybookRuntime",
     "PlaybookV2",
@@ -93,7 +107,9 @@ __all__ = [
     "evaluate_when",
     "forbidden_deny",
     "initial_active",
+    "is_digest",
     "is_playbook_v2",
+    "is_withheld",
     "not_executed_reason",
     "not_executed_result",
     "parse_playbook_v2",
@@ -103,5 +119,6 @@ __all__ = [
     "skills_by_name",
     "step_brief",
     "when_paths",
+    "when_verdict",
     "with_forbidden",
 ]

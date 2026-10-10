@@ -22,7 +22,17 @@ outcome of a decision policy. The model *declares* its progress:
 
 Those three are not governed (they change nothing outside the run) and are always
 handed to a run that follows a v2 playbook. ``ask_user`` is how a step gets what
-only the person knows (``required_from_user``).
+only the person knows (``required_from_user``): such a step closes only once every
+declared answer is in its outputs, and the questions it declares are not the agent's
+own -- :meth:`PlaybookRuntime.ask_is_declared` tells a per-run ``ask_user`` budget which
+asks to leave out.
+
+A run restored from its trace (:meth:`PlaybookRuntime.restore`) never mistakes a digest
+for data: an output the trace holds only as a digest (``metadata_only`` custody) is
+restored as :data:`~tulip.playbooks.v2.when.UNAVAILABLE`, a branch whose ``when`` reads it
+is ``unknown``, and the step is not routed on a guess -- ``complete_step`` refuses with
+``routing: "unknown"``, which the gateway turns into a hold, unless the caller restored
+with the real values (``restore(events, outputs=...)``).
 
 What is enforced, before a call executes (:meth:`PlaybookRuntime.on_before_tool_call`):
 the active steps' ``allowed_tools`` (``None`` = the agent's tools, ``[]`` = none, the
@@ -50,7 +60,17 @@ from typing import TYPE_CHECKING, Any
 
 from tulip.hooks.provider import HookPriority, HookProvider
 from tulip.playbooks.v2.results import not_executed_reason, not_executed_result, refused
-from tulip.playbooks.v2.when import WhenSyntaxError, evaluate_when, parse_when
+from tulip.playbooks.v2.when import (
+    FALSE,
+    TRUE,
+    UNAVAILABLE,
+    UNKNOWN,
+    WhenSyntaxError,
+    is_digest,
+    is_withheld,
+    parse_when,
+    when_verdict,
+)
 
 
 if TYPE_CHECKING:
@@ -103,6 +123,10 @@ class PlaybookV2Error(ValueError):
     """A v2 playbook the gateway cannot run as written. The run is refused."""
 
 
+#: ``complete_step``'s refusal when a branch cannot be told true or false.
+ROUTING_UNKNOWN = UNKNOWN
+
+
 class RestoreError(ValueError):
     """A runtime could not be restored from the step records given; nothing was changed.
 
@@ -119,12 +143,15 @@ class RestoreResult:
     """What :meth:`PlaybookRuntime.restore` put back.
 
     ``records`` is how many step records were read; ``statuses`` is every step's
-    status, in definition order; ``active`` the steps active (or blocked) now.
+    status, in definition order; ``active`` the steps active (or blocked) now;
+    ``unavailable`` the closed steps whose outputs, or part of them, the trace holds only
+    as a digest (or not at all) and nobody supplied (:meth:`PlaybookRuntime.restore`).
     """
 
     records: int
     statuses: Mapping[str, str]
     active: tuple[str, ...]
+    unavailable: tuple[str, ...] = ()
 
 
 def is_playbook_v2(definition: Any) -> bool:
@@ -511,6 +538,9 @@ class StepGraph:
         self.selected: dict[str, list[str]] = {}
         #: Why a step was waived.
         self.waived_because: dict[str, str] = {}
+        #: Closed steps whose outputs this run cannot see (restored from a digest, or from
+        #: a record without them): a condition that reads them is ``unknown``.
+        self.withheld: set[str] = set()
 
     def index(self, step_id: str) -> int:
         return next(i for i, s in enumerate(self.playbook.steps) if s.id == step_id)
@@ -586,25 +616,47 @@ class StepGraph:
             self.status[s.id] = ACTIVE
         return waived, [s.id for s in batch]
 
+    def branch_verdicts(
+        self, step: Step, outputs: Mapping[str, Any] | None = None
+    ) -> dict[str, str]:
+        """Each branch of ``step``: ``"true"``, ``"false"`` or ``"unknown"``. Changes nothing.
+
+        An explicit selection decides (chosen is true, the rest false). Otherwise each
+        ``when`` is evaluated against the step's outputs -- ``outputs`` when given, the
+        recorded ones otherwise -- with earlier steps' under ``outputs.<id>``; a branch
+        that reads an output this run cannot see (:attr:`withheld`, or a withheld value
+        inside one) is ``"unknown"``.
+        """
+        if step.id in self.selected:
+            chosen = self.selected[step.id]
+            return {b.id: TRUE if b.id in chosen else FALSE for b in step.branches}
+        own = dict(self.outputs.get(step.id, {}) if outputs is None else outputs)
+        earlier: dict[str, Any] = {**self.outputs, **dict.fromkeys(self.withheld, UNAVAILABLE)}
+        if outputs is not None:
+            earlier[step.id] = own
+        context: dict[str, Any] = {"outputs": earlier}
+        context.update(own)
+        return {b.id: when_verdict(b.when, context) for b in step.branches}
+
     def route(self, step: Step) -> tuple[list[str], list[str], str]:
         """Settle a branching step's routing: ``(taken, not taken, routed_by)``.
 
         An explicit selection wins; otherwise each branch's ``when`` is evaluated
-        against the step's outputs (earlier steps' under ``outputs.<id>``).
+        against the step's outputs (earlier steps' under ``outputs.<id>``). When some
+        branch is ``unknown`` (:meth:`branch_verdicts`) nothing is settled: ``routed_by``
+        is ``"unknown"``, the unknown branches are in neither list, and every target
+        keeps waiting -- a guess is never routed on. (:meth:`PlaybookRuntime.complete_step`
+        refuses to close such a step before it gets here.)
         """
         if not step.branches:
             return [], [], ""
-        if step.id in self.selected:
-            taken = [b.id for b in step.branches if b.id in self.selected[step.id]]
-            routed_by = "select_branches"
-        else:
-            context: dict[str, Any] = {"outputs": dict(self.outputs)}
-            context.update(self.outputs.get(step.id, {}))
-            taken = [b.id for b in step.branches if evaluate_when(b.when, context)]
-            routed_by = "when"
+        verdicts = self.branch_verdicts(step)
+        taken = [b for b, v in verdicts.items() if v == TRUE]
+        not_taken = [b for b, v in verdicts.items() if v == FALSE]
+        if len(taken) + len(not_taken) < len(verdicts):
+            return taken, not_taken, UNKNOWN
         self.routed[step.id] = {b.next_step_id for b in step.branches if b.id in taken}
-        not_taken = [b.id for b in step.branches if b.id not in taken]
-        return taken, not_taken, routed_by
+        return taken, not_taken, "select_branches" if step.id in self.selected else "when"
 
     def converged(self) -> bool:
         """Whether a positive decision may be submitted now.
@@ -812,7 +864,20 @@ class _Work:
     executed: list[str] = field(default_factory=list)
     unrun: dict[str, str] = field(default_factory=dict)
     asked: bool = False
+    #: ``ask_user`` calls attributed to the step (asking is not one of its tool calls).
+    asks: int = 0
     deviated: bool = False
+
+
+def _answered(value: Any) -> bool:
+    """Whether ``value`` is an answer: present, and not blank or empty."""
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, Mapping | list | tuple | set | frozenset):
+        return len(value) > 0
+    return True
 
 
 def _sha256(value: Any) -> str:
@@ -984,7 +1049,12 @@ class PlaybookRuntime(HookProvider):
         """Whether this runtime's state came from :meth:`restore` rather than :meth:`start`."""
         return self._restored
 
-    def restore(self, events: Sequence[Mapping[str, Any]]) -> RestoreResult:
+    def restore(
+        self,
+        events: Sequence[Mapping[str, Any]],
+        *,
+        outputs: Mapping[str, Mapping[str, Any]] | None = None,
+    ) -> RestoreResult:
         """Put the runtime where a run's ``playbook_step`` records left it; emit nothing.
 
         For a run rebuilt somewhere else (another pod) from its trace: without this the
@@ -1002,17 +1072,41 @@ class PlaybookRuntime(HookProvider):
         for a record without them, the targets that were not waived. The runtime then
         counts as started: :meth:`start` records no fresh step tree over the real one.
 
+        **A digest is never data.** Under the gateway's ``metadata_only`` custody a
+        record's ``outputs`` is a digest (``{"redacted": true, "sha256", "bytes"}``), not
+        the values. Such a step -- and a closed step whose record carries no outputs at
+        all, as a ``not_executed`` one never does -- is restored with its outputs
+        UNAVAILABLE (:meth:`unavailable_outputs`); so is any single output value the
+        record holds as a digest, and a step whose ``verified`` is a digest is restored
+        unverified. A branch whose ``when`` reads one is ``unknown``, and
+        :meth:`complete_step` will not route on it. ``outputs`` lets a caller that holds
+        the real values (the gateway's data-plane checkpoint) supply them, by step id: a
+        supplied mapping is used for a step that closed, after it is checked against the
+        record -- its digest must be the record's ``sha256`` (or equal the record's own
+        plain outputs). Supplied outputs for a step that has not closed are ignored.
+
         All or nothing. :class:`RestoreError` is raised, and nothing changes, when a
         record is not a mapping, names another playbook or a step this playbook does not
         have, carries a status the engine does not know, when there are no step records,
-        or when a step of the playbook has none (:meth:`start` records them all).
+        or when a step of the playbook has none (:meth:`start` records them all); and
+        when supplied ``outputs`` name a step this playbook does not have, are not a
+        mapping, or are not the outputs the record holds.
 
         What the records do not carry is not restored: a selection made with
-        ``select_branches`` on a step still active, whether a step already asked the
-        person, which of its tools did not execute, and the decision.
+        ``select_branches`` on a step still active, whether (and how often) a step already
+        asked the person, which of its tools did not execute, and the decision.
         """
         playbook = self.playbook
         known = {s.id for s in playbook.steps}
+        supplied: dict[str, dict[str, Any]] = {}
+        for step_id, values in (outputs or {}).items():
+            if step_id not in known:
+                raise RestoreError(
+                    f"outputs supplied for a step this playbook does not have ({step_id!r})"
+                )
+            if not isinstance(values, Mapping):
+                raise RestoreError(f"the outputs supplied for step {step_id} are not a mapping")
+            supplied[step_id] = dict(values)
         last: dict[str, Mapping[str, Any]] = {}
         records = 0
         for event in events:
@@ -1046,15 +1140,18 @@ class PlaybookRuntime(HookProvider):
         for step_id, data in last.items():
             status = str(data["status"])
             graph.status[step_id] = status
-            if status == WAIVED and data.get("reason"):
+            if status == WAIVED and data.get("reason") and not is_withheld(data["reason"]):
                 graph.waived_because[step_id] = str(data["reason"])
-            if status == DONE and isinstance(data.get("outputs"), Mapping):
-                graph.outputs[step_id] = dict(data["outputs"])
+            if status in (DONE, NOT_EXECUTED):
+                self._restore_outputs(graph, step_id, data.get("outputs"), supplied.get(step_id))
             calls = data.get("tool_calls")
             if isinstance(calls, int) and not isinstance(calls, bool) and calls > 0:
                 work[step_id].executed = [RESTORED_CALL] * calls
                 work[step_id].attempts = calls
-            if data.get("verified") is False and status != NOT_EXECUTED:
+            # A digest in place of ``verified`` is not a yes: a step the record cannot
+            # vouch for stays unverified.
+            verified = data.get("verified")
+            if (verified is False or is_withheld(verified)) and status != NOT_EXECUTED:
                 work[step_id].deviated = True
         for step in playbook.steps:
             if not step.branches or graph.status[step.id] not in TERMINAL:
@@ -1074,7 +1171,46 @@ class PlaybookRuntime(HookProvider):
             records=records,
             statuses={s.id: graph.status[s.id] for s in playbook.steps},
             active=tuple(s.id for s in graph.active()),
+            unavailable=tuple(s.id for s in playbook.steps if s.id in self.unavailable_outputs()),
         )
+
+    @staticmethod
+    def _restore_outputs(
+        graph: StepGraph, step_id: str, recorded: Any, supplied: dict[str, Any] | None
+    ) -> None:
+        """A closed step's outputs, from what the caller supplied or what its record holds."""
+        if supplied is not None:
+            if is_digest(recorded):
+                matches = recorded.get("sha256") == _sha256(supplied)
+            elif isinstance(recorded, Mapping):
+                matches = _sha256(dict(recorded)) == _sha256(supplied)
+            else:
+                matches = True  # the record says nothing to check them against
+            if not matches:
+                raise RestoreError(
+                    f"the outputs supplied for step {step_id} are not the ones its record holds"
+                )
+            graph.outputs[step_id] = supplied
+            return
+        if isinstance(recorded, Mapping) and not is_withheld(recorded):
+            graph.outputs[step_id] = {
+                str(k): UNAVAILABLE if is_withheld(v) else v for k, v in recorded.items()
+            }
+            return
+        graph.withheld.add(step_id)
+
+    def unavailable_outputs(self) -> set[str]:
+        """The closed steps whose outputs, or part of them, this run cannot see.
+
+        Only a restored run has any (:meth:`restore`): the trace held them as digests, or
+        not at all, and nobody supplied them. A branch that reads one is ``unknown``.
+        """
+        partial = {
+            step_id
+            for step_id, values in self.graph.outputs.items()
+            if any(is_withheld(v) for v in values.values())
+        }
+        return set(self.graph.withheld) | partial
 
     def hold_unstarted(self) -> None:
         """Count the runtime as started without recording a step tree or activating a step.
@@ -1108,6 +1244,40 @@ class PlaybookRuntime(HookProvider):
         """The steps active now (``active`` or ``blocked``), in definition order."""
         return self.graph.active()
 
+    # ── questions: the playbook's, or the agent's own ────────────────────────
+
+    def declared_question(self, step_id: str, name: str) -> bool:
+        """Whether ``name`` is a question step ``step_id`` declares (``required_from_user``)."""
+        step = self.playbook.step(_text(step_id))
+        return step is not None and _text(name) in {n for n, _ in step.required_from_user}
+
+    def _declaring(self) -> Step | None:
+        """The first active step that still has declared questions it has not asked."""
+        return next(
+            (
+                s
+                for s in self.graph.active()
+                if s.required_from_user and self._work[s.id].asks < len(s.required_from_user)
+            ),
+            None,
+        )
+
+    def _ask_owner(self) -> Step | None:
+        return self._declaring() or self._owner(ASK_USER)
+
+    def ask_is_declared(self) -> bool:
+        """Whether the next ``ask_user`` call asks one of the playbook's declared questions.
+
+        For a per-run budget of the agent's own questions: a declared question
+        (``required_from_user``) is the playbook asking, not the agent, and should not
+        count. Ask it *before* the call is admitted: an active step that declares ``n``
+        questions makes its first ``n`` asks declared, and every ask after that -- or one
+        no such step owns -- is the agent's own. The allowance is per step, so a step
+        cannot buy unlimited questions by declaring one. A restored run counts its
+        steps' asks afresh (the records do not carry them).
+        """
+        return self._declaring() is not None
+
     def _admit(self, tool: str) -> str:
         """Attribute a call about to run; ``""`` to let it run, else why it is refused."""
         self.start()
@@ -1121,7 +1291,7 @@ class PlaybookRuntime(HookProvider):
                 if self.enforce
                 else ""
             )
-        owner = self._owner(tool)
+        owner = self._ask_owner() if tool == ASK_USER else self._owner(tool)
         if owner is None:
             allowed = sorted({t for s in active for t in (s.allowed_tools or ())})
             anchor = active[0] if active else None
@@ -1147,6 +1317,7 @@ class PlaybookRuntime(HookProvider):
                 )
         if tool == ASK_USER:
             work.asked = True
+            work.asks += 1
         else:
             work.attempts += 1
         self._owners.setdefault(tool, []).append(owner.id)
@@ -1257,14 +1428,31 @@ class PlaybookRuntime(HookProvider):
                 "missing": missing,
             }
         work = self._work[step.id]
-        unasked = [name for name, _ in step.required_from_user if name not in given]
-        if unasked and not work.asked:
+        unanswered = [name for name, _ in step.required_from_user if not _answered(given.get(name))]
+        if unanswered:
             return {
                 "ok": False,
-                "error": "this step needs answers only the person has: ask them with ask_user "
-                "(or pass what they already told you as outputs)",
-                "missing": unasked,
+                "error": f"step {step.id} still needs the person's answer to "
+                f"{', '.join(unanswered)}: ask them with ask_user (unless they already told "
+                "you), then pass each answer in outputs under its name",
+                "missing": unanswered,
             }
+        if step.branches and step.id not in self.graph.selected:
+            verdicts = self.graph.branch_verdicts(step, given)
+            unknown = [b for b, v in verdicts.items() if v == UNKNOWN]
+            if unknown:
+                unseen = sorted(self.unavailable_outputs())
+                return {
+                    "ok": False,
+                    "error": f"step {step.id} cannot be routed: branch "
+                    f"{', '.join(unknown)} reads outputs this run cannot see"
+                    + (f" (of {', '.join(unseen)})" if unseen else "")
+                    + " -- the trace does not hold their values. A person must choose the "
+                    "branches, or the run must be restored with those outputs.",
+                    "routing": ROUTING_UNKNOWN,
+                    "branches_unknown": unknown,
+                    "unavailable": unseen,
+                }
         self.graph.outputs[step.id] = given
         if not work.executed and work.unrun:
             reason = "; ".join(f"tool {t} did not execute: {why}" for t, why in work.unrun.items())
@@ -1510,6 +1698,9 @@ def control_tool(name: str, runtime: PlaybookRuntime) -> Any:
         def complete_step(step_id: str, outputs: dict[str, Any]) -> str:
             """Close an active playbook step. ``outputs`` maps each expected output to its value.
 
+            Each answer the person gave a step's question goes in ``outputs`` too, under the
+            question's name.
+
             Call it once the step's work is done. The result says which step is
             active next and gives its full brief, or why the step cannot close yet.
             """
@@ -1558,6 +1749,7 @@ __all__ = [
     "PROPOSAL_TOOLS",
     "RECORD",
     "RESTORED_CALL",
+    "ROUTING_UNKNOWN",
     "STATUSES",
     "STEP_EVENT",
     "TERMINAL",

@@ -8,6 +8,45 @@ policy.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A restored v2 playbook run never mistakes a digest for data.** Under the gateway's
+  `metadata_only` custody a mirrored `playbook_step` record holds a digest
+  (`{"redacted": true, "sha256", "bytes"}`) where a step's `outputs` were. Before,
+  `PlaybookRuntime.restore()` put that digest back as if it were the outputs, and a later
+  branch reading `outputs.<step>.<name>` routed on it: every such path resolved `null`, so
+  the run took (or waived) branches on a guess.
+  - A closed step whose record holds its outputs as a digest -- or not at all, as a
+    `not_executed` one never does -- is restored with its outputs UNAVAILABLE; so is a
+    single output value held as a digest. `PlaybookRuntime.unavailable_outputs()` and
+    `RestoreResult.unavailable` name those steps.
+  - The `when` language answers a condition that reads a withheld value `unknown`
+    (`when_verdict()`; `evaluate_when()` still answers yes/no, and unknown is not yes).
+    `StepGraph.branch_verdicts()` gives each branch's `true`/`false`/`unknown`.
+  - `complete_step` on a step with an `unknown` branch refuses to route and changes
+    nothing: `{"ok": false, "routing": "unknown", "branches_unknown": [...],
+    "unavailable": [...]}`, which the gateway can turn into a hold. An explicit
+    `select_branches` still routes.
+  - `restore(events, outputs={step_id: {...}})` takes the real values from a caller that
+    holds them (the gateway's data-plane checkpoint). They are checked against the record:
+    their digest must be the record's `sha256` (or equal its plain outputs), else
+    `RestoreError`.
+  - A record whose `verified` is a digest restores the step unverified (a digest is not a
+    yes). Under `metadata_only` the steps active at the move therefore emit
+    `verified: false` afterwards, until the gateway passes `verified` through as shape.
+- **A step that declares questions closes only with their answers.** A step with
+  `required_from_user` now closes only when each declared name is in its outputs and not
+  blank; calling `ask_user` once no longer stands in for the answers. The refusal names
+  what is missing.
+
+### Added
+
+- **Declared questions are told apart from the agent's own**, for a per-run `ask_user`
+  budget: `PlaybookRuntime.declared_question(step_id, name)` and
+  `PlaybookRuntime.ask_is_declared()` -- asked before the call is admitted, true for the
+  first `n` asks of an active step that declares `n` questions, false after that. A
+  declared ask is attributed to the step that declares it.
+
 ## [2.25.2] - 2026-10-09
 
 ### Fixed
