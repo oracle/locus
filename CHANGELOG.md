@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [2.27.0] - 2026-10-10
+
 ### Added
 
 - **Playbooks v2: a step's approval rules, picked from the process data and the call.** A
