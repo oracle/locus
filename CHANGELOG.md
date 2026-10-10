@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [2.26.0] - 2026-10-10
+
 ### Fixed
 
 - **A restored v2 playbook run never mistakes a digest for data.** Under the gateway's
