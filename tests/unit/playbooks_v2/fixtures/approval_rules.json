@@ -1,0 +1,654 @@
+{
+  "about": "Which approval rule of a step applies to one held call. Written in the SDK while the registry's StepApprovalRule / pick_rule (tuliplabs-ai/registry, branch step-approval-rules) is not yet open; replace with the registry's tests/unit/fixtures/approval_rules.json once it lands, and keep both copies agreeing. Money is {amount, currency}; a withheld value is a trace digest {redacted, sha256, bytes}.",
+  "approvals": {
+    "vendor_change": {
+      "ask": "Confirm the new account was verified with the vendor.",
+      "show": [
+        "vendor_id",
+        "vendor_name"
+      ],
+      "rules": [
+        {
+          "when": "inputs.amount > 10000",
+          "all_of": [
+            {
+              "by": "finance",
+              "count": 1
+            },
+            {
+              "by": "cfo",
+              "count": 1
+            }
+          ],
+          "due": "4h",
+          "escalate_to": "finance-leads"
+        },
+        {
+          "by": "finance",
+          "count": 1,
+          "due": "24h"
+        }
+      ],
+      "only_these_approvers": true
+    },
+    "by_only": {
+      "by": "leads"
+    },
+    "args_and_outputs": {
+      "rules": [
+        {
+          "when": "args.country == 'IR' OR args.country == 'KP'",
+          "by": "sanctions",
+          "count": 2,
+          "due": "30m"
+        },
+        {
+          "when": "outputs.verify.risk == 'high'",
+          "all_of": [
+            {
+              "by": "risk",
+              "count": 1
+            },
+            {
+              "by": "finance",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "when": "args.amount >= 5000",
+          "by": "ap-leads",
+          "count": 1,
+          "due": "2d"
+        },
+        {
+          "by": "ap",
+          "count": 1
+        }
+      ]
+    },
+    "unknown_then_stricter": {
+      "rules": [
+        {
+          "when": "inputs.amount > 100",
+          "by": "finance",
+          "count": 1
+        },
+        {
+          "when": "inputs.region == 'EU'",
+          "all_of": [
+            {
+              "by": "finance",
+              "count": 1
+            },
+            {
+              "by": "legal",
+              "count": 1
+            },
+            {
+              "by": "cfo",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "by": "ap",
+          "count": 1
+        }
+      ]
+    },
+    "ties": {
+      "rules": [
+        {
+          "when": "inputs.amount > 100",
+          "all_of": [
+            {
+              "by": "finance",
+              "count": 1
+            },
+            {
+              "by": "cfo",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "when": "inputs.amount > 50",
+          "by": "controllers",
+          "count": 2
+        },
+        {
+          "by": "ap",
+          "count": 1
+        }
+      ]
+    },
+    "no_default": {
+      "rules": [
+        {
+          "when": "inputs.amount > 10000",
+          "by": "cfo",
+          "count": 1
+        },
+        {
+          "when": "inputs.amount > 1000",
+          "by": "finance",
+          "count": 2
+        }
+      ]
+    },
+    "over_limit": {
+      "rules": [
+        {
+          "when": "inputs.amount > inputs.limit",
+          "by": "cfo",
+          "count": 1
+        },
+        {
+          "all_of": [
+            {
+              "by": "ap",
+              "count": 1
+            }
+          ]
+        }
+      ]
+    },
+    "broken": {
+      "rules": [
+        {
+          "when": "amount >",
+          "by": "finance",
+          "count": 2
+        },
+        {
+          "by": "ap"
+        }
+      ]
+    }
+  },
+  "cases": [
+    {
+      "name": "the first true rule applies",
+      "approval": "vendor_change",
+      "context": {
+        "inputs": {
+          "amount": {
+            "amount": 25000,
+            "currency": "USD"
+          }
+        }
+      },
+      "expect": {
+        "rule_index": 0,
+        "matched": "when",
+        "groups": [
+          [
+            "finance",
+            1
+          ],
+          [
+            "cfo",
+            1
+          ]
+        ],
+        "due_seconds": 14400,
+        "escalate_to": "finance-leads",
+        "only_named": true
+      }
+    },
+    {
+      "name": "no earlier rule holds: the default",
+      "approval": "vendor_change",
+      "context": {
+        "inputs": {
+          "amount": {
+            "amount": 900,
+            "currency": "USD"
+          }
+        }
+      },
+      "expect": {
+        "rule_index": 1,
+        "matched": "default",
+        "groups": [
+          [
+            "finance",
+            1
+          ]
+        ],
+        "due_seconds": 86400,
+        "escalate_to": null,
+        "only_named": true
+      }
+    },
+    {
+      "name": "the amount withheld: unknown, the strictest remaining",
+      "approval": "vendor_change",
+      "context": {
+        "inputs": {
+          "amount": {
+            "redacted": true,
+            "sha256": "ab12",
+            "bytes": 40
+          }
+        }
+      },
+      "expect": {
+        "rule_index": 0,
+        "matched": "unknown",
+        "groups": [
+          [
+            "finance",
+            1
+          ],
+          [
+            "cfo",
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "money in another currency than the literal compares by amount",
+      "approval": "vendor_change",
+      "context": {
+        "inputs": {
+          "amount": {
+            "amount": 12000,
+            "currency": "EUR"
+          }
+        }
+      },
+      "expect": {
+        "rule_index": 0,
+        "matched": "when"
+      }
+    },
+    {
+      "name": "the old by is one default rule",
+      "approval": "by_only",
+      "context": {},
+      "expect": {
+        "rule_index": 0,
+        "matched": "default",
+        "groups": [
+          [
+            "leads",
+            1
+          ]
+        ],
+        "due_seconds": null,
+        "only_named": false
+      }
+    },
+    {
+      "name": "an argument decides first",
+      "approval": "args_and_outputs",
+      "context": {
+        "args": {
+          "country": "KP",
+          "amount": 10
+        },
+        "outputs": {
+          "verify": {
+            "risk": "high"
+          }
+        }
+      },
+      "expect": {
+        "rule_index": 0,
+        "matched": "when",
+        "groups": [
+          [
+            "sanctions",
+            2
+          ]
+        ],
+        "due_seconds": 1800
+      }
+    },
+    {
+      "name": "an earlier step's output decides",
+      "approval": "args_and_outputs",
+      "context": {
+        "args": {
+          "country": "FR",
+          "amount": 10
+        },
+        "outputs": {
+          "verify": {
+            "risk": "high"
+          }
+        }
+      },
+      "expect": {
+        "rule_index": 1,
+        "matched": "when",
+        "groups": [
+          [
+            "risk",
+            1
+          ],
+          [
+            "finance",
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "an argument amount decides",
+      "approval": "args_and_outputs",
+      "context": {
+        "args": {
+          "country": "FR",
+          "amount": 5000
+        },
+        "outputs": {
+          "verify": {
+            "risk": "low"
+          }
+        }
+      },
+      "expect": {
+        "rule_index": 2,
+        "matched": "when",
+        "groups": [
+          [
+            "ap-leads",
+            1
+          ]
+        ],
+        "due_seconds": 172800
+      }
+    },
+    {
+      "name": "a money argument compares by its amount",
+      "approval": "args_and_outputs",
+      "context": {
+        "args": {
+          "country": "FR",
+          "amount": {
+            "amount": 7500,
+            "currency": "USD"
+          }
+        },
+        "outputs": {
+          "verify": {
+            "risk": "low"
+          }
+        }
+      },
+      "expect": {
+        "rule_index": 2,
+        "matched": "when"
+      }
+    },
+    {
+      "name": "an argument spelled as text is not a smaller amount: unknown",
+      "approval": "args_and_outputs",
+      "context": {
+        "args": {
+          "country": "FR",
+          "amount": "7500"
+        },
+        "outputs": {
+          "verify": {
+            "risk": "low"
+          }
+        }
+      },
+      "expect": {
+        "rule_index": 2,
+        "matched": "unknown",
+        "groups": [
+          [
+            "ap-leads",
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "an argument the call does not carry is not a smaller amount: unknown",
+      "approval": "args_and_outputs",
+      "context": {
+        "args": {
+          "country": "FR"
+        },
+        "outputs": {
+          "verify": {
+            "risk": "low"
+          }
+        }
+      },
+      "expect": {
+        "rule_index": 2,
+        "matched": "unknown"
+      }
+    },
+    {
+      "name": "nothing holds: the default",
+      "approval": "args_and_outputs",
+      "context": {
+        "args": {
+          "country": "FR",
+          "amount": 20
+        },
+        "outputs": {
+          "verify": {
+            "risk": "low"
+          }
+        }
+      },
+      "expect": {
+        "rule_index": 3,
+        "matched": "default",
+        "groups": [
+          [
+            "ap",
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "a withheld output: unknown picks the strictest from there on",
+      "approval": "args_and_outputs",
+      "context": {
+        "args": {
+          "country": "FR",
+          "amount": 20
+        },
+        "outputs": {
+          "verify": {
+            "redacted": true,
+            "sha256": "cd34",
+            "bytes": 12
+          }
+        }
+      },
+      "expect": {
+        "rule_index": 1,
+        "matched": "unknown",
+        "groups": [
+          [
+            "risk",
+            1
+          ],
+          [
+            "finance",
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "unknown picks a stricter later rule over itself",
+      "approval": "unknown_then_stricter",
+      "context": {
+        "inputs": {
+          "amount": {
+            "redacted": true,
+            "sha256": "ef56",
+            "bytes": 3
+          },
+          "region": "US"
+        }
+      },
+      "expect": {
+        "rule_index": 1,
+        "matched": "unknown",
+        "groups": [
+          [
+            "finance",
+            1
+          ],
+          [
+            "legal",
+            1
+          ],
+          [
+            "cfo",
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "unknown never looks back at an earlier, stricter rule that was false",
+      "approval": "args_and_outputs",
+      "context": {
+        "args": {
+          "country": "FR"
+        },
+        "outputs": {
+          "verify": {
+            "risk": "low"
+          }
+        }
+      },
+      "expect": {
+        "rule_index": 2,
+        "matched": "unknown"
+      }
+    },
+    {
+      "name": "a tie on the most approvers goes to the first",
+      "approval": "ties",
+      "context": {
+        "inputs": {
+          "amount": {
+            "redacted": true,
+            "sha256": "aa",
+            "bytes": 3
+          }
+        }
+      },
+      "expect": {
+        "rule_index": 0,
+        "matched": "unknown",
+        "groups": [
+          [
+            "finance",
+            1
+          ],
+          [
+            "cfo",
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "two currencies ordered: unknown",
+      "approval": "over_limit",
+      "context": {
+        "inputs": {
+          "amount": {
+            "amount": 500,
+            "currency": "USD"
+          },
+          "limit": {
+            "amount": 100,
+            "currency": "EUR"
+          }
+        }
+      },
+      "expect": {
+        "rule_index": 0,
+        "matched": "unknown",
+        "groups": [
+          [
+            "cfo",
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "no rule matches and none is the default: the strictest of all",
+      "approval": "no_default",
+      "context": {
+        "inputs": {
+          "amount": {
+            "amount": 10,
+            "currency": "USD"
+          }
+        }
+      },
+      "expect": {
+        "rule_index": 1,
+        "matched": "no_rule",
+        "groups": [
+          [
+            "finance",
+            2
+          ]
+        ]
+      }
+    },
+    {
+      "name": "two amounts in one currency compare",
+      "approval": "over_limit",
+      "context": {
+        "inputs": {
+          "amount": {
+            "amount": 50,
+            "currency": "EUR"
+          },
+          "limit": {
+            "amount": 100,
+            "currency": "EUR"
+          }
+        }
+      },
+      "expect": {
+        "rule_index": 1,
+        "matched": "default",
+        "groups": [
+          [
+            "ap",
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "a when that does not parse: unknown, never laxer",
+      "approval": "broken",
+      "context": {},
+      "expect": {
+        "rule_index": 0,
+        "matched": "unknown",
+        "groups": [
+          [
+            "finance",
+            2
+          ]
+        ]
+      }
+    }
+  ]
+}
