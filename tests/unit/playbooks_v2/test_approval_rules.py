@@ -338,18 +338,37 @@ def test_group_names_read_as_the_registrys(label: str, name: str) -> None:
 def test_hold_fields() -> None:
     resolved = vendor({"inputs": {"amount": Money(25000, "USD")}})
     assert resolved.hold_fields() == {
-        "approver_labels": ["finance", "cfo"],
         "approver_groups": [{"label": "finance", "count": 1}, {"label": "cfo", "count": 1}],
         "only_named_groups": True,
         "escalate_to_label": "finance-leads",
+        "ttl_seconds": 28800,  # twice the due: the escalation gets its turn
         "escalate_after_seconds": 14400,
     }
     plain = pick_rule(StepApproval(by="leads"), {})
     assert plain.hold_fields() == {
-        "approver_labels": ["leads"],
         "approver_groups": [{"label": "leads", "count": 1}],
         "only_named_groups": False,
     }
+
+
+def test_hold_fields_never_name_general_approvers() -> None:
+    """An ``approver_labels`` entry makes its holders count for ANY group on the registry:
+    two Finance people would satisfy "Finance and CFO". The groups alone say who decides."""
+    both = pick_rule(
+        StepApproval(
+            rules=(ApprovalRule(groups=(("finance", 1), ("cfo", 1)), due_seconds=3600),),
+            only_these_approvers=False,
+        ),
+        {},
+    )
+    fields = both.hold_fields()
+    assert "approver_labels" not in fields
+    assert fields == {
+        "approver_groups": [{"label": "finance", "count": 1}, {"label": "cfo", "count": 1}],
+        "only_named_groups": False,
+        "ttl_seconds": 3600,  # no escalation: the due is the hold's life
+    }
+    assert "escalate_after_seconds" not in fields
 
 
 def test_call_context_types_money_only() -> None:

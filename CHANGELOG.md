@@ -43,7 +43,8 @@ policy.
     `groups`, `due_seconds`, `escalate_to`, `only_named`, `ask`, `show`, `rule_index`,
     `matched` and a plain `reason` ("The amount is more than $10,000, so Finance and CFO must
     both approve."); `hold_fields()` gives the registry hold's `approver_groups`,
-    `only_named_groups`, `escalate_to_label` and `escalate_after_seconds`. `pick_rule()` is
+    `only_named_groups`, `escalate_to_label`, `ttl_seconds` and `escalate_after_seconds`
+    (never `approver_labels`; see Fixed). `pick_rule()` is
     the same choice, pure.
   - `parse_duration("30m" | "4h" | "2d")` -> seconds.
   - `authority_from_resolved(resolved, roles_of=..., members=..., also=..., break_glass=...)`
@@ -61,6 +62,34 @@ policy.
   `FileApprovals` take a callable `(ApprovalRecord) -> ApprovalAuthority | None` beside a
   single authority (`authority_for(record)` says which applies). `ApprovalAuthority.check()`
   takes the decision's `verdict`.
+
+### Fixed
+
+- **Playbooks v2: a branch's condition decides; the model cannot choose against the data.**
+  The live dev suite (F40) caught a model calling `select_branches` on a step whose two
+  branches read typed data (`inputs.amount > 10000` / `NOT (inputs.amount > 10000)`): the
+  trace said `routed_by: "select_branches"`, so a model could take the branch meant for
+  small amounts on a large one and skip the approval the other branch's step carries. Now
+  every branch whose `when` the run can tell decides by it:
+  - `select_branches` against a known verdict is refused in plain words ("This step routes
+    by its conditions: the amount is more than $10,000, so it goes to Large invoice."); a
+    choice that agrees is accepted and the step is recorded as `routed_by: "when"`.
+  - A condition on the step's own outputs cannot be judged before `complete_step` gives
+    them: the choice is taken, then set aside where the outputs go against it (the result
+    says so under `selection_set_aside`), and the step routes by its conditions.
+  - Choosing stays for the branches without a condition (`always`) and for conditions the
+    run cannot tell (`unknown`: a withheld output, a missing input), as before; a choice
+    must still agree with the verdicts the run can tell.
+  - The step brief and the playbook prose tell the model the routing is automatic when the
+    conditions decide. `StepGraph.condition_verdicts()`, `StepGraph.conditions_decide()`
+    and `Branch.conditioned` say it in code.
+- **Playbooks v2: `ResolvedApproval.hold_fields()` no longer names the groups as
+  `approver_labels`.** On the registry an approver label makes its holders general
+  approvers who count for ANY group, so with `only_these_approvers: false` two Finance
+  people could have satisfied "Finance and CFO". The hold now carries only
+  `approver_groups`, `only_named_groups`, `escalate_to_label`, and -- with a `due` --
+  `ttl_seconds` (twice the due when the hold escalates, so the escalation gets its turn;
+  the due otherwise) and `escalate_after_seconds` (the due, only with `escalate_to`).
 
 ## [2.26.0] - 2026-10-10
 

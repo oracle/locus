@@ -245,19 +245,25 @@ class ResolvedApproval:
     def hold_fields(self) -> dict[str, Any]:
         """The registry hold's fields for this approval (``POST /v1/approvals``).
 
-        ``approver_labels`` (who may approve, for a registry that knows only that),
-        ``approver_groups``, ``only_named_groups``, and -- when set --
-        ``escalate_to_label`` and ``escalate_after_seconds``.
+        ``approver_groups`` and ``only_named_groups``; with a ``due``, ``ttl_seconds`` --
+        twice the due when the hold escalates, so the escalation gets its turn, the due
+        otherwise -- and, with ``escalate_to``, ``escalate_to_label`` and
+        ``escalate_after_seconds`` (the due). Never ``approver_labels``: on the registry
+        an approver label makes its holders general approvers who count for ANY group, so
+        two people of one group could satisfy "Finance and CFO".
         """
         fields: dict[str, Any] = {
-            "approver_labels": self.labels,
             "approver_groups": [{"label": label, "count": count} for label, count in self.groups],
             "only_named_groups": self.only_named,
         }
         if self.escalate_to:
             fields["escalate_to_label"] = self.escalate_to
         if self.due_seconds is not None:
-            fields["escalate_after_seconds"] = self.due_seconds
+            if self.escalate_to:
+                fields["ttl_seconds"] = 2 * self.due_seconds
+                fields["escalate_after_seconds"] = self.due_seconds
+            else:
+                fields["ttl_seconds"] = self.due_seconds
         return fields
 
 

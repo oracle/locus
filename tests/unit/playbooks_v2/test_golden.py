@@ -7,6 +7,11 @@
 ``golden_scenarios.py`` as tulip-gateway's own engine produced it (``make_golden.py``):
 the events, the audit records, every call's answer, the final graph, the model's prose,
 the ``when`` corpus. The same scripts run here on :mod:`tulip.playbooks.v2`.
+
+Changed since, by this engine on purpose: ``static`` and ``refund_block``, when a
+branch's condition came to decide whenever the run can tell it (the brief says the
+routing is automatic; ``refund_block``'s triage outputs agree with its choice, which is
+now recorded as ``routed_by: "when"``).
 """
 
 from __future__ import annotations

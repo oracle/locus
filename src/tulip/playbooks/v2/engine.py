@@ -15,8 +15,14 @@ outcome of a decision policy. The model *declares* its progress:
   promised is present (and, under ``block``, once it made the calls its floor asks
   for). A step whose tools were allowed but ran nothing closes ``not_executed``,
   never ``done``: calling a tool with no body is not doing the step's work;
-* ``select_branches(step_id, branch_ids, reason)`` routes a router step by branch id
-  instead of by its outputs; the branches it does not pick are waived;
+* ``select_branches(step_id, branch_ids, reason)`` routes a router step by branch id,
+  the branches it does not pick waived -- but only where the data cannot: a branch whose
+  ``when`` the run can tell (inputs, earlier outputs, the step's own outputs once
+  ``complete_step`` gives them) is decided by it. A choice against such a verdict is
+  refused, or -- when the step's own outputs settle it only at ``complete_step`` -- set
+  aside; a choice that agrees is recorded as ``routed_by: "when"``. Branches without a
+  condition of their own (``always``) and conditions that are ``unknown`` are still the
+  model's (or a person's) to choose;
 * ``submit_decision(outcome_id, rationale, evidence_refs)`` concludes the playbook
   with one of the decision policy's outcomes, and is the run's decision.
 
@@ -75,6 +81,7 @@ from tulip.playbooks.v2.approvals import (
     ResolvedApproval,
     StepApproval,
     call_context,
+    describe_when,
     parse_step_approval,
     pick_rule,
 )
@@ -93,6 +100,7 @@ from tulip.playbooks.v2.when import (
     TRUE,
     UNAVAILABLE,
     UNKNOWN,
+    Always,
     WhenSyntaxError,
     is_digest,
     is_withheld,
@@ -207,6 +215,31 @@ class Branch:
     label: str
     when: str
     next_step_id: str
+
+    @property
+    def conditioned(self) -> bool:
+        """Whether the branch has a condition of its own: a ``when`` that is neither
+        missing nor ``always``. Such a branch is decided by its condition whenever the run
+        can tell it (:meth:`StepGraph.condition_verdicts`), never by a model's choice."""
+        text = self.when.strip()
+        if not text:
+            return False
+        try:
+            return not isinstance(parse_when(text), Always)
+        except WhenSyntaxError:
+            return True  # evaluated as it always was: false
+
+    def reads_own_outputs(self, step_id: str) -> bool:
+        """Whether the condition reads the outputs of the step it belongs to."""
+        try:
+            paths = when_paths(parse_when(self.when))
+        except WhenSyntaxError:
+            return False
+        own = f"outputs.{step_id}"
+        return any(
+            p.split(".")[0] not in ("inputs", "outputs") or p == own or p.startswith(own + ".")
+            for p in paths
+        )
 
 
 @dataclass(frozen=True)
@@ -693,8 +726,43 @@ class StepGraph:
         """
         if step.id in self.selected:
             chosen = self.selected[step.id]
-            return {b.id: TRUE if b.id in chosen else FALSE for b in step.branches}
+            verdicts = {b.id: TRUE if b.id in chosen else FALSE for b in step.branches}
+            # A selection never goes against the data: a branch whose condition the run
+            # can tell is decided by it, whatever was chosen.
+            for branch_id, verdict in self.condition_verdicts(step, outputs).items():
+                if verdict != UNKNOWN:
+                    verdicts[branch_id] = verdict
+            return verdicts
         return {b.id: when_verdict(b.when, self.context(step, outputs)) for b in step.branches}
+
+    def condition_verdicts(
+        self, step: Step, outputs: Mapping[str, Any] | None = None, *, own_pending: bool = False
+    ) -> dict[str, str]:
+        """Each branch of ``step`` with a condition (:attr:`Branch.conditioned`): what its
+        ``when`` says, whatever ``select_branches`` chose. Changes nothing.
+
+        ``own_pending`` is for a step whose outputs are not given yet (``select_branches``
+        runs before ``complete_step``): a condition that reads them is ``"unknown"`` until
+        they are, rather than read against nothing.
+        """
+        context = self.context(step, outputs)
+        return {
+            b.id: UNKNOWN
+            if own_pending and b.reads_own_outputs(step.id)
+            else when_verdict(b.when, context)
+            for b in step.branches
+            if b.conditioned
+        }
+
+    def conditions_decide(self, step: Step, outputs: Mapping[str, Any] | None = None) -> bool:
+        """Whether ``step``'s conditions alone settle its routing: every branch has one,
+        and the run can tell each."""
+        verdicts = self.condition_verdicts(step, outputs)
+        return (
+            bool(step.branches)
+            and len(verdicts) == len(step.branches)
+            and UNKNOWN not in verdicts.values()
+        )
 
     def context(self, step: Step, outputs: Mapping[str, Any] | None = None) -> dict[str, Any]:
         """What a ``when`` of ``step`` reads: its outputs bare, the earlier steps' under
@@ -720,8 +788,11 @@ class StepGraph:
     def route(self, step: Step) -> tuple[list[str], list[str], str]:
         """Settle a branching step's routing: ``(taken, not taken, routed_by)``.
 
-        An explicit selection wins; otherwise each branch's ``when`` is evaluated
-        against the step's outputs (earlier steps' under ``outputs.<id>``). When some
+        Each branch's ``when`` is evaluated against the step's outputs (earlier steps'
+        under ``outputs.<id>``). An explicit selection decides only the branches without a
+        condition and the ones whose condition the run cannot tell; ``routed_by`` is
+        ``"when"`` whenever the conditions alone settle it (:meth:`conditions_decide`),
+        a selection that agrees with them included. When some
         branch is ``unknown`` (:meth:`branch_verdicts`) nothing is settled: ``routed_by``
         is ``"unknown"``, the unknown branches are in neither list, and every target
         keeps waiting -- a guess is never routed on. (:meth:`PlaybookRuntime.complete_step`
@@ -735,7 +806,8 @@ class StepGraph:
         if len(taken) + len(not_taken) < len(verdicts):
             return taken, not_taken, UNKNOWN
         self.routed[step.id] = {b.next_step_id for b in step.branches if b.id in taken}
-        return taken, not_taken, "select_branches" if step.id in self.selected else "when"
+        chose = step.id in self.selected and not self.conditions_decide(step)
+        return taken, not_taken, "select_branches" if chose else "when"
 
     def converged(self) -> bool:
         """Whether a positive decision may be submitted now.
@@ -824,10 +896,21 @@ def step_brief(step: Step, skills: Mapping[str, Mapping[str, Any]]) -> str:
         lines.append("Facts you may take as given:")
         lines.extend(f"- {fact}" for fact in step.facts)
     if step.branches:
-        lines.append(
-            "Branches (decided by your outputs, or pick them with select_branches "
-            "before complete_step):"
-        )
+        conditioned = [b for b in step.branches if b.conditioned]
+        if len(conditioned) == len(step.branches):
+            how = (
+                "routed automatically by their conditions when you call complete_step; "
+                "select_branches cannot choose against them"
+            )
+        elif conditioned:
+            how = (
+                "a branch with a condition is routed by it automatically when you call "
+                "complete_step; choose among the others with select_branches before "
+                "complete_step"
+            )
+        else:
+            how = "decided by your outputs, or pick them with select_branches before complete_step"
+        lines.append(f"Branches ({how}):")
         lines.extend(
             f"- {b.id}{' (' + b.label + ')' if b.label else ''}: when {b.when} -> {b.next_step_id}"
             for b in step.branches
@@ -873,8 +956,11 @@ def playbook_prose(
         "- When a step's work is done, call complete_step(step_id, outputs) with every "
         "expected output in `outputs`. Its result tells you which step is active next and "
         "gives you that step's full brief.\n"
-        "- A step with branches routes the run: its outputs decide (each branch's `when`), "
-        "or call select_branches(step_id, branch_ids, reason) before complete_step.\n"
+        "- A step with branches routes the run: each branch's `when` decides it "
+        "automatically when complete_step closes the step, and select_branches cannot "
+        "choose against a condition the run can tell. Call select_branches(step_id, "
+        "branch_ids, reason) before complete_step only to choose among branches without a "
+        "condition, or when the runtime says a condition cannot be decided.\n"
         + (
             "- Conclude with submit_decision(outcome_id, rationale, evidence_refs): exactly "
             "once, one of the outcomes below. If evidence is missing, the honest outcome is "
@@ -946,6 +1032,12 @@ def playbook_prose(
             if step is not None:
                 lines.append(step_brief(step, skills))
     return "\n".join(lines)
+
+
+def _against(verdicts: Mapping[str, str], chosen: Iterable[str]) -> list[str]:
+    """The branches whose known verdict a choice of ``chosen`` contradicts."""
+    picked = set(chosen)
+    return [b for b, v in verdicts.items() if v != UNKNOWN and (b in picked) != (v == TRUE)]
 
 
 def initial_active(playbook: PlaybookV2) -> list[str]:
@@ -1688,6 +1780,17 @@ class PlaybookRuntime(HookProvider):
             unknown = [b for b, v in verdicts.items() if v == UNKNOWN]
             if unknown:
                 return self._unroutable(step, unknown)
+        set_aside = ""
+        if step.id in self.graph.selected:
+            # Chosen before the outputs were given: now they are, the conditions they let
+            # the run tell decide, and the choice yields to them.
+            verdicts = self.graph.condition_verdicts(step, given)
+            against = _against(verdicts, self.graph.selected[step.id])
+            if against:
+                set_aside = (
+                    self._conditions_say(step, verdicts, against, given)
+                    + " Your select_branches choice was set aside where it went against them."
+                )
         self.graph.outputs[step.id] = given
         if not work.executed and work.unrun:
             reason = "; ".join(f"tool {t} did not execute: {why}" for t, why in work.unrun.items())
@@ -1697,7 +1800,7 @@ class PlaybookRuntime(HookProvider):
                 self._deviation(
                     step, next(iter(work.unrun)), "required_step_not_executed", reason=reason
                 )
-            return self._after_close(step, status=NOT_EXECUTED, reason=reason)
+            return self._after_close(step, status=NOT_EXECUTED, reason=reason, set_aside=set_aside)
         floor = step.min_tool_calls or 0
         if len(work.executed) < floor:
             short = floor - len(work.executed)
@@ -1714,7 +1817,7 @@ class PlaybookRuntime(HookProvider):
                     "error": f"step {step.id} needs {short} more tool call(s) before it can close",
                 }
         self.graph.status[step.id] = DONE
-        return self._after_close(step, status=DONE, outputs=given)
+        return self._after_close(step, status=DONE, outputs=given, set_aside=set_aside)
 
     def _unroutable(self, step: Step, unknown: list[str]) -> dict[str, Any]:
         """``complete_step``'s refusal for a step whose branches cannot be told."""
@@ -1761,6 +1864,7 @@ class PlaybookRuntime(HookProvider):
         status: str,
         reason: str = "",
         outputs: Mapping[str, Any] | None = None,
+        set_aside: str = "",
     ) -> dict[str, Any]:
         taken, not_taken, routed_by = self.graph.route(step)
         routing: dict[str, Any] = {}
@@ -1780,6 +1884,7 @@ class PlaybookRuntime(HookProvider):
             "status": status,
             **({"reason": reason} if reason else {}),
             **routing,
+            **({"selection_set_aside": set_aside} if set_aside else {}),
             "active": self._active_ids(),
             "waived": sorted(s for s, st in self.graph.status.items() if st == WAIVED),
         }
@@ -1810,6 +1915,20 @@ class PlaybookRuntime(HookProvider):
         unknown = [b for b in chosen if b not in known]
         if unknown:
             return {"ok": False, "error": f"unknown branches {unknown}", "branches": known}
+        # The data decides whenever it can: a choice against a condition the run can tell
+        # is refused. A condition on the step's own outputs waits for them (complete_step).
+        verdicts = self.graph.condition_verdicts(step, own_pending=True)
+        against = _against(verdicts, chosen)
+        if against:
+            return {
+                "ok": False,
+                "error": self._conditions_say(step, verdicts, against)
+                + " select_branches cannot choose against the step's conditions: call "
+                f"complete_step({step.id!r}, outputs) and they route it.",
+                "routed_by": "when",
+                "branches_taken": [b for b, v in verdicts.items() if v == TRUE],
+                "branches_not_taken": [b for b, v in verdicts.items() if v == FALSE],
+            }
         self.graph.selected[step.id] = chosen
         return {
             "ok": True,
@@ -1820,6 +1939,35 @@ class PlaybookRuntime(HookProvider):
             "next": f"Call complete_step({step.id!r}, outputs) to close the step and take "
             "these branches.",
         }
+
+    def _conditions_say(
+        self,
+        step: Step,
+        verdicts: Mapping[str, str],
+        against: list[str],
+        outputs: Mapping[str, Any] | None = None,
+    ) -> str:
+        """Why a choice goes against the conditions, in plain words: "This step routes by
+        its conditions: the amount is more than $10,000, so it goes to Large payment."
+        """
+        context = self.graph.context(step, outputs)
+        named = {b.id: b for b in step.branches}
+
+        def words(branch_id: str) -> str:
+            try:
+                return describe_when(parse_when(named[branch_id].when), context)
+            except WhenSyntaxError:
+                return f"`{named[branch_id].when}`"
+
+        to = [b for b in against if verdicts[b] == TRUE]
+        if to:
+            said = [f"{words(b)}, so it goes to {named[b].label or b}" for b in to]
+        else:
+            said = [
+                f"{words(b)} does not hold, so it does not go to {named[b].label or b}"
+                for b in against
+            ]
+        return "This step routes by its conditions: " + "; and ".join(said) + "."
 
     def submit_decision(
         self, outcome_id: str, rationale: str, evidence_refs: Iterable[str]
