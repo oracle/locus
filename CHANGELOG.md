@@ -10,6 +10,15 @@ policy.
 
 ### Fixed
 
+- **Tool arguments are coerced to the declared parameter types.** Models do
+  not reliably honour the JSON types in a tool schema: Llama on OCI sends
+  `{"a": "17", "b": "25"}` for two `int` parameters, and `add("17", "25")`
+  returned `"1725"`. `Tool.execute()` now validates each argument against
+  the parameter annotation with pydantic in lax mode (numeric strings,
+  `"true"`, JSON strings for containers, dicts for `BaseModel` parameters,
+  numbers for `str` parameters); values that still do not validate are
+  passed through unchanged, and unannotated or `Any` parameters are left
+  alone.
 - **Oracle agent memory with a single connection crashed the driver.**
   `oracleagentmemory` extracts memories on a background thread; sharing
   one sync `oracledb.Connection` between that thread and the agent's own

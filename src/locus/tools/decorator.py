@@ -10,9 +10,9 @@ import asyncio
 import inspect
 import json
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar, overload
+from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar, get_type_hints, overload
 
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from locus.observability.emit import (
     EV_TOOL_SANDBOX_COMPLETED,
@@ -123,11 +123,13 @@ class Tool(BaseModel):
         Returns:
             Tool result
         """
+        sig = inspect.signature(self.fn)
+        kwargs = self._coerce_arguments(sig, kwargs)
+
         if self.sandbox is not None:
             return await self._execute_sandboxed(self.sandbox, kwargs)
 
         # Check if function accepts context
-        sig = inspect.signature(self.fn)
         accepts_ctx = any(name in ("ctx", "context") for name in sig.parameters)
 
         if accepts_ctx and ctx is not None:
@@ -177,6 +179,57 @@ class Tool(BaseModel):
             )
 
         return self._format_result(result)
+
+    def _coerce_arguments(self, sig: inspect.Signature, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Coerce model-provided arguments to the declared parameter types.
+
+        Models do not reliably honour the JSON types in a tool schema:
+        Llama on OCI sends ``{"a": "17", "b": "25"}`` for two ``int``
+        parameters, and ``add("17", "25")`` is ``"1725"``. Each argument
+        is validated against the parameter's annotation with pydantic in
+        lax mode (``"17"`` → ``17``, ``"2.5"`` → ``2.5``, ``"true"`` →
+        ``True``, a dict → the declared ``BaseModel``); a string that fails
+        is parsed as JSON once (``"[1, 2]"`` → ``[1, 2]``) and validated
+        again; a number handed to a ``str`` parameter is stringified. An
+        argument that still does not validate is passed through unchanged
+        so a permissive tool keeps working as before. Unannotated
+        parameters, ``Any`` and the ``ctx``/``context`` slot are left
+        alone. The input dict is not mutated.
+        """
+        try:
+            hints = get_type_hints(self.fn)
+        except Exception:  # noqa: BLE001 - unresolved forward refs: nothing to coerce against
+            return kwargs
+        out = dict(kwargs)
+        for name, value in kwargs.items():
+            if name in ("ctx", "context") or name not in sig.parameters:
+                continue
+            hint = hints.get(name)
+            if hint is None or hint is Any:
+                continue
+            if hint is str:
+                if isinstance(value, bool | int | float) and not isinstance(value, str):
+                    out[name] = str(value)
+                continue
+            try:
+                adapter: TypeAdapter[Any] = TypeAdapter(hint)
+            except Exception:  # noqa: BLE001 - exotic annotation pydantic can't model
+                continue
+            try:
+                out[name] = adapter.validate_python(value)
+                continue
+            except ValidationError:
+                pass
+            if isinstance(value, str):
+                try:
+                    parsed = json.loads(value)
+                except ValueError:
+                    continue
+                try:
+                    out[name] = adapter.validate_python(parsed)
+                except ValidationError:
+                    pass
+        return out
 
     async def _execute_sandboxed(self, spec: SandboxSpec, kwargs: dict[str, Any]) -> str:
         """Run the tool's source in the configured sandbox (worker thread —
