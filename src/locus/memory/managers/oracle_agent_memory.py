@@ -104,7 +104,7 @@ class OracleAgentMemoryManager(BaseMemoryManager):
                 wallet_location="~/.oci/wallets/mydb",
                 wallet_password=...,
             ),
-            embedder="oci/cohere.embed-english-v3.0",
+            embedder="oci/cohere.embed-v4.0",
             llm="oci/openai.gpt-4.1",
             table_name_prefix="locus_oam_",
         )
@@ -169,7 +169,7 @@ class OracleAgentMemoryManager(BaseMemoryManager):
         *,
         connection: Any = None,
         store: Any = None,
-        embedder: Any = "oci/cohere.embed-english-v3.0",
+        embedder: Any = "oci/cohere.embed-v4.0",
         llm: Any = "oci/openai.gpt-4.1",
         extract_memories: bool = True,
         table_name_prefix: str = "locus_oam_",

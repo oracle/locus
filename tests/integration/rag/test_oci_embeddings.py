@@ -32,7 +32,7 @@ class TestOCIEmbeddingsIntegration:
         from locus.rag.embeddings.oci import OCIEmbeddings
 
         return OCIEmbeddings(
-            model_id=os.getenv("OCI_EMBED_MODEL", "cohere.embed-english-v3.0"),
+            model_id=os.getenv("OCI_EMBED_MODEL", "cohere.embed-v4.0"),
             profile_name=oci_config["profile_name"],
             auth_type=oci_config["auth_type"],
             compartment_id=oci_config["compartment_id"],
@@ -127,7 +127,7 @@ class TestOCIEmbeddingsMultilingual:
         from locus.rag.embeddings.oci import OCIEmbeddings
 
         return OCIEmbeddings(
-            model_id=os.getenv("OCI_EMBED_MULTILINGUAL_MODEL", "cohere.embed-multilingual-v3.0"),
+            model_id=os.getenv("OCI_EMBED_MULTILINGUAL_MODEL", "cohere.embed-v4.0"),
             profile_name=oci_config["profile_name"],
             auth_type=oci_config["auth_type"],
             compartment_id=oci_config["compartment_id"],
@@ -150,13 +150,11 @@ class TestOCIEmbeddingsMultilingual:
 
 
 class TestOCIEmbeddingsLight:
-    """Tests for light (smaller) embedding model.
+    """Tests for a light (smaller) embedding model.
 
-    Pins the light variant explicitly — the ``OCI_EMBED_MODEL`` env var
-    (read by the other test classes) points to the default variant used
-    by the rest of the suite, which is the 1024-dim full model. The
-    light-variant tests need the 384-dim model regardless. Optional
-    override via ``OCI_EMBED_LIGHT_MODEL``.
+    Runs only with ``OCI_EMBED_LIGHT_MODEL`` set: the Cohere v3 light models
+    (384-dim) were OCI's only light ones, and on-demand retired them on
+    2026-09-30. A dedicated AI cluster that still hosts one can name it here.
     """
 
     @pytest.fixture
@@ -164,8 +162,13 @@ class TestOCIEmbeddingsLight:
         """Create light embedder."""
         from locus.rag.embeddings.oci import OCIEmbeddings
 
+        model_id = os.getenv("OCI_EMBED_LIGHT_MODEL")
+        if not model_id:
+            # The v3 light models were the only light ones, and OCI retired
+            # them from on-demand on 2026-09-30.
+            pytest.skip("no light embedding model on OCI on-demand; set OCI_EMBED_LIGHT_MODEL")
         return OCIEmbeddings(
-            model_id=os.getenv("OCI_EMBED_LIGHT_MODEL", "cohere.embed-english-light-v3.0"),
+            model_id=model_id,
             profile_name=oci_config["profile_name"],
             auth_type=oci_config["auth_type"],
             compartment_id=oci_config["compartment_id"],

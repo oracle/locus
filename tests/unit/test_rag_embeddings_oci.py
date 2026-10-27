@@ -138,7 +138,7 @@ def _stub_oci_modules(
 class TestConfigAndCapabilities:
     def test_defaults(self) -> None:
         cfg = OCIEmbeddingConfig()
-        assert cfg.model_id == OCIEmbeddingModel.COHERE_EMBED_ENGLISH_V3.value
+        assert cfg.model_id == OCIEmbeddingModel.COHERE_EMBED_V4.value
         assert cfg.profile_name == "DEFAULT"
         assert cfg.input_type == "SEARCH_DOCUMENT"
         assert cfg.query_input_type == "SEARCH_QUERY"

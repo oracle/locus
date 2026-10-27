@@ -29,6 +29,15 @@ policy.
 
 ### Fixed
 
+- **`OCIEmbeddings()` and `OracleAgentMemoryManager` failed with their
+  default embedding model.** OCI retired the Cohere v3.0 embedding models
+  from on-demand on 2026-09-30 (`404 Entity with key
+  cohere.embed-english-v3.0 not found`). The default is now
+  `cohere.embed-v4.0`, which is multilingual and 1536-dimensional (it was
+  1024): an index built with v3 has to be re-embedded either way, since v3
+  and v4 vectors are not comparable. Pass `output_dimensions=1024` to keep
+  1024-wide columns. The v3 ids remain for dedicated AI clusters.
+
 - **Session-token OCI profiles work on every OCI client, not only the V1
   transport.** `oci session authenticate` writes a profile with
   `security_token_file` and no `user`; `OCIModel` (the Cohere / SDK

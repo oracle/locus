@@ -34,8 +34,9 @@ class OCIEmbeddingModel(str, Enum):
     COHERE_EMBED_MULTILINGUAL_V3 = "cohere.embed-multilingual-v3.0"
     COHERE_EMBED_ENGLISH_LIGHT_V3 = "cohere.embed-english-light-v3.0"
     COHERE_EMBED_MULTILINGUAL_LIGHT_V3 = "cohere.embed-multilingual-light-v3.0"
-    # Current generation. OCI has deprecated the v3.0 family; tenancies
-    # onboarded recently only serve v4 (1536-dim).
+    # Current generation, and the default. OCI retired the v3.0 family from
+    # on-demand on 2026-09-30 (404 "Entity with key … not found"); the v3
+    # ids stay for dedicated AI clusters that still host them.
     COHERE_EMBED_V4 = "cohere.embed-v4.0"
     COHERE_EMBED_MULTILINGUAL_V4 = "cohere.embed-multilingual-v4.0"
 
@@ -61,7 +62,7 @@ class OCIEmbeddingConfig(BaseModel):
     """Configuration for OCI GenAI Embeddings."""
 
     model_id: str = Field(
-        default=OCIEmbeddingModel.COHERE_EMBED_ENGLISH_V3.value,
+        default=OCIEmbeddingModel.COHERE_EMBED_V4.value,
         description="OCI GenAI embedding model ID",
     )
     compartment_id: str = Field(
@@ -129,16 +130,16 @@ class OCIEmbeddings(BaseModel, BaseEmbedding):
 
     Example:
         >>> embedder = OCIEmbeddings(
-        ...     model_id="cohere.embed-english-v3.0",
+        ...     model_id="cohere.embed-v4.0",
         ...     profile_name="DEFAULT",
         ...     auth_type="security_token",
         ... )
         >>> result = await embedder.embed("Hello world")
-        >>> print(len(result.embedding))  # 1024
+        >>> print(len(result.embedding))  # 1536
 
     Example with compartment:
         >>> embedder = OCIEmbeddings(
-        ...     model_id="cohere.embed-multilingual-v3.0",
+        ...     model_id="cohere.embed-v4.0",  # multilingual as well
         ...     compartment_id="ocid1.compartment.oc1..xxx",
         ... )
     """
@@ -155,7 +156,7 @@ class OCIEmbeddings(BaseModel, BaseEmbedding):
 
     def __init__(
         self,
-        model_id: str = OCIEmbeddingModel.COHERE_EMBED_ENGLISH_V3.value,
+        model_id: str = OCIEmbeddingModel.COHERE_EMBED_V4.value,
         compartment_id: str = "",
         profile_name: str = "DEFAULT",
         auth_type: str = "api_key",

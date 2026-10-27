@@ -58,7 +58,7 @@ def get_embedder():
             from locus.rag.embeddings import OCIEmbeddings
 
             return OCIEmbeddings(
-                model_id=os.getenv("OCI_EMBED_MODEL", "cohere.embed-english-v3.0"),
+                model_id=os.getenv("OCI_EMBED_MODEL", "cohere.embed-v4.0"),
                 profile_name=os.getenv("OCI_PROFILE", "DEFAULT"),
                 auth_type=os.getenv("OCI_AUTH_TYPE", "api_key"),
                 compartment_id=os.getenv("OCI_COMPARTMENT", ""),
@@ -347,7 +347,7 @@ class TestOracleWithBothEmbedders:
             from locus.rag.stores.oracle import OracleVectorStore
 
             embedder = OCIEmbeddings(
-                model_id=os.getenv("OCI_EMBED_MODEL", "cohere.embed-english-v3.0"),
+                model_id=os.getenv("OCI_EMBED_MODEL", "cohere.embed-v4.0"),
                 profile_name=os.getenv("OCI_PROFILE", "DEFAULT"),
                 auth_type=os.getenv("OCI_AUTH_TYPE", "api_key"),
                 compartment_id=os.getenv("OCI_COMPARTMENT", ""),

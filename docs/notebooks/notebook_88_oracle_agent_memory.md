@@ -71,7 +71,7 @@ from oracleagentmemory.core.embedders import Embedder
 from oracleagentmemory.core.llms import Llm
 
 embedder = Embedder(
-    model="oci/cohere.embed-english-v3.0",
+    model="oci/cohere.embed-v4.0",
     oci_region="us-chicago-1",
     oci_compartment_id="ocid1.compartment.oc1..xxx",
     oci_tenancy="ocid1.tenancy.oc1..xxx",
