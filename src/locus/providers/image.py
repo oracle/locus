@@ -10,7 +10,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field
 
-from locus.core.loop_bound import loop_bound
+from locus.core.loop_bound import loop_bound, own_loop_http_client
 
 
 class ImageResult(BaseModel):
@@ -50,8 +50,9 @@ class OpenAIImageProvider:
     """Image generation via OpenAI ``images.generate`` (DALL-E / gpt-image).
 
     Args:
-        model: Model id — ``"gpt-image-1"`` (default; OpenAI's current
-            image model), or any OpenAI-compatible equivalent the user wants to
+        model: Model id — ``"gpt-image-2"`` (default; OpenAI's current
+            image model; ``"gpt-image-1-mini"`` is the cheap one, and
+            ``"gpt-image-1"`` is retired), or any OpenAI-compatible equivalent the user wants to
             call through an OpenAI-compatible client. ``"dall-e-3"`` and
             ``"dall-e-2"`` are deprecated by OpenAI; pass them explicitly
             if you still need them.
@@ -65,7 +66,7 @@ class OpenAIImageProvider:
 
     def __init__(
         self,
-        model: str = "gpt-image-1",
+        model: str = "gpt-image-2",
         *,
         api_key: str | None = None,
         base_url: str | None = None,
@@ -80,7 +81,11 @@ class OpenAIImageProvider:
         def build() -> Any:
             import openai  # noqa: PLC0415
 
-            return openai.AsyncOpenAI(api_key=self._api_key, base_url=self._base_url)
+            return openai.AsyncOpenAI(
+                api_key=self._api_key,
+                base_url=self._base_url,
+                http_client=own_loop_http_client(openai),
+            )
 
         # Bound to the loop that built it — see locus.core.loop_bound.
         return loop_bound(self, "_client", build)

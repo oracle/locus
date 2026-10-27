@@ -279,6 +279,19 @@ class TestOpenAISearchPreviewProvider:
         assert out[0].title == "1"
         assert out[1].title == "2"
 
+    @pytest.mark.asyncio
+    async def test_requests_a_strict_schema(self) -> None:
+        # The search models ignore a non-strict schema and return JSON of
+        # their own shape, which parses to no results.
+        model = MagicMock()
+        model.complete = AsyncMock(return_value=_build_response('{"results":[]}'))
+        await OpenAISearchPreviewProvider(model).search("q")
+        fmt = model.complete.call_args.kwargs["response_format"]["json_schema"]
+        assert fmt["strict"] is True
+        hit = fmt["schema"]["$defs"]["_Hit"]
+        assert hit["additionalProperties"] is False
+        assert set(hit["required"]) == {"title", "url", "snippet"}
+
     def test_provider_is_runtime_checkable(self) -> None:
         model = MagicMock()
         provider = OpenAISearchPreviewProvider(model)

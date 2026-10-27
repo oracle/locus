@@ -52,7 +52,9 @@ class TestOpenAIImageProvider:
         with patch("openai.AsyncOpenAI", return_value=fake_client) as mock_ctor:
             provider = OpenAIImageProvider(model="dall-e-3", api_key="sk-x")  # noqa: S106
             results = await provider.generate("two robots", n=2)
-        mock_ctor.assert_called_once_with(api_key="sk-x", base_url=None)
+        mock_ctor.assert_called_once()
+        assert mock_ctor.call_args.kwargs["api_key"] == "sk-x"
+        assert mock_ctor.call_args.kwargs["base_url"] is None
         assert len(results) == 2
         assert isinstance(results[0], ImageResult)
         assert results[0].url == "https://x.example/a.png"

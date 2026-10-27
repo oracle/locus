@@ -6,16 +6,18 @@
 
 from __future__ import annotations
 
+import inspect
 import os
 import re
 from collections.abc import AsyncIterator
+from functools import cache
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field
 
 from locus.core.events import ModelChunkEvent
-from locus.core.loop_bound import loop_bound
+from locus.core.loop_bound import loop_bound, own_loop_http_client
 from locus.core.media import (
     EARLIER_IMAGE_OMITTED,
     has_images,
@@ -149,6 +151,20 @@ def _rejects_temperature(model_id: str) -> bool:
     """
     model_id = native_model_id(model_id)
     return any(model_id.startswith(p) for p in _TEMPERATURE_DEPRECATED_PREFIXES)
+
+
+@cache
+def _sdk_declares_temperature() -> bool:
+    """Whether the installed SDK's ``messages.create()`` takes ``temperature``.
+
+    anthropic 2.x pins API version 2026-10-21, which removed ``temperature``
+    for every model: the SDK raises ``TypeError`` on the keyword and the API
+    answers ``temperature: Extra inputs are not permitted`` if it is smuggled
+    in through ``extra_body``. Against that SDK it is never sent.
+    """
+    from anthropic.resources.messages import AsyncMessages  # noqa: PLC0415
+
+    return "temperature" in inspect.signature(AsyncMessages.create).parameters
 
 
 def _with_cache_breakpoint(message: dict[str, Any]) -> dict[str, Any]:
@@ -350,6 +366,7 @@ class AnthropicModel(BaseModel):
                 "base_url": self.base_url,
                 "max_retries": self.config.max_retries,
                 "timeout": self.config.request_timeout,
+                "http_client": own_loop_http_client(anthropic),
             }
             if token is None:
                 return anthropic.AsyncAnthropic(
@@ -615,7 +632,7 @@ class AnthropicModel(BaseModel):
         # every Agent(model="claude-opus-4-7") on the first turn. The
         # wrapper's job here is to keep the agent loop running; callers who
         # need the parameter back can pin to a model that accepts it.
-        if not _rejects_temperature(self.config.model):
+        if _sdk_declares_temperature() and not _rejects_temperature(self.config.model):
             temperature = kwargs.get("temperature", self.config.temperature)
             # ``None`` means the caller wants the server's default (see
             # ModelConfig.temperature) — send nothing rather than a value.

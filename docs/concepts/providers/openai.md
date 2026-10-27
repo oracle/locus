@@ -56,7 +56,7 @@ Vision input (image URLs / base64), audio input, and
 function calling work the same way you'd use them on the OpenAI SDK
 directly — the SDK just normalises the events the model emits.
 
-Image *generation* (`gpt-image-1`) is a separate provider, not a chat
+Image *generation* (`gpt-image-2`) is a separate provider, not a chat
 model — see [Multi-modal providers](../multi-modal-providers.md).
 
 ### Reasoning models — the o-series

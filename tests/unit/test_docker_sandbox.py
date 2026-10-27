@@ -51,17 +51,17 @@ class _Docker:
 
     def __call__(self, argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         self.calls.append(list(argv))
-        if argv[1] == "run":
+        if argv[1] == "create":
             mount = argv[argv.index("--mount") + 1]
             root = Path(mount.split("source=", 1)[1].split(",", 1)[0])
             self.workspace = {p.name: p.read_text() for p in root.iterdir() if p.is_file()}
-            if self.timeout:
-                raise subprocess.TimeoutExpired(argv, kwargs.get("timeout", 0), output="partial")
+        if argv[1] == "start" and self.timeout:
+            raise subprocess.TimeoutExpired(argv, kwargs.get("timeout", 0), output="partial")
         return subprocess.CompletedProcess(argv, self.returncode, self.stdout, self.stderr)
 
     @property
     def run_argv(self) -> list[str]:
-        return next(call for call in self.calls if call[1] == "run")
+        return next(call for call in self.calls if call[1] == "create")
 
 
 @pytest.fixture
@@ -139,7 +139,16 @@ def test_a_timeout_kills_the_container(docker: _Docker) -> None:
     assert (result.ok, result.timed_out, result.exit_code) == (False, True, 124)
     assert result.stdout == "partial"
     name = _flag(docker.run_argv, "--name")
-    assert docker.calls[-1] == ["/usr/bin/docker", "kill", name]
+    assert docker.calls[-1] == ["/usr/bin/docker", "rm", "--force", name]
+
+
+def test_only_starting_the_box_is_timed(docker: _Docker) -> None:
+    """The container exists before the timeout can fire, so it can always be removed."""
+    DockerSandbox().run_code("pass", timeout=7)
+
+    create, start = docker.calls
+    name = _flag(create, "--name")
+    assert start == ["/usr/bin/docker", "start", "--attach", name]
 
 
 def test_a_docker_error_is_a_failed_run_not_an_exception(docker: _Docker) -> None:

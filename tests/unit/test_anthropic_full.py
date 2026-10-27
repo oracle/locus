@@ -32,6 +32,7 @@ import pytest
 pytest.importorskip("anthropic")
 
 from locus.core.messages import Message, Role, ToolCall  # noqa: E402
+from locus.models.native import anthropic as anthropic_mod  # noqa: E402
 from locus.models.native.anthropic import AnthropicModel, _rejects_temperature  # noqa: E402
 
 
@@ -373,12 +374,23 @@ class TestTemperatureOmission:
         assert "temperature" not in sent_params
 
     @pytest.mark.asyncio
-    async def test_sonnet_4_6_still_sends_temperature(self) -> None:
+    async def test_sonnet_4_6_still_sends_temperature(self, monkeypatch) -> None:
+        monkeypatch.setattr(anthropic_mod, "_sdk_declares_temperature", lambda: True)
         m = AnthropicModel(model="claude-sonnet-4-6", api_key="sk-x")  # noqa: S106
         client = _patch_client(m, _make_response(blocks=[_block(type="text", text="ok")]))
         await m.complete([Message.user("hi")], temperature=0.3)
         sent_params = client.messages.create.call_args.kwargs
         assert sent_params["temperature"] == 0.3
+
+    @pytest.mark.asyncio
+    async def test_sdk_without_temperature_omits_it(self, monkeypatch) -> None:
+        # anthropic 2.3+ (API version 2026-10-21) removed ``temperature`` for
+        # every model: the SDK raises TypeError on it and the API 400s.
+        monkeypatch.setattr(anthropic_mod, "_sdk_declares_temperature", lambda: False)
+        m = AnthropicModel(model="claude-sonnet-4-6", api_key="sk-x")  # noqa: S106
+        client = _patch_client(m, _make_response(blocks=[_block(type="text", text="ok")]))
+        await m.complete([Message.user("hi")], temperature=0.3)
+        assert "temperature" not in client.messages.create.call_args.kwargs
 
 
 class TestStream:

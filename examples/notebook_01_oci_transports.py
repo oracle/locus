@@ -53,9 +53,10 @@ def _env(name: str) -> str:
     val = os.environ.get(name)
     if not val:
         sys.stderr.write(
-            f"missing env var {name} — see the prerequisites in the notebook docstring\n"
+            f"skipped: missing env var {name} — see the prerequisites in the notebook docstring\n"
         )
-        sys.exit(2)
+        # 77 = skipped: scripts/run_notebooks.py reports SKIP, not FAIL.
+        sys.exit(77)
     return val
 
 

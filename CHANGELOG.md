@@ -8,6 +8,16 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **The generic integration tests and the notebooks run against any
+  provider.** `LOCUS_TEST_MODEL=provider:model` points the shared `model`
+  fixture at anything `locus.models.get_model` accepts (it only knew OpenAI,
+  Anthropic and OCI), and `LOCUS_MODEL_PROVIDER` / `LOCUS_MODEL_ID` do the
+  same for the notebooks (`scripts/run_notebooks.py --provider <prefix>
+  --model <id>`). Notebooks whose prerequisites are missing exit with 77 and
+  the runner reports them as SKIP instead of FAIL.
+
 ### Removed
 
 - **Amazon Bedrock and Azure OpenAI providers.** The `bedrock:` and `azure:`
@@ -70,6 +80,46 @@ policy.
   `gpt-5.6` and `gpt-6` generations still received `max_tokens` and OCI
   answered `400 Unsupported parameter: 'max_tokens'`. The check is now a
   pattern over the generation number.
+- **Every Anthropic call failed with anthropic 2.3.** The SDK pins API
+  version `2026-10-21`, which removed `temperature` for every model:
+  `messages.create()` raised `TypeError: unexpected keyword argument
+  'temperature'`, and the API answers `temperature: Extra inputs are not
+  permitted` if it is sent anyway. `AnthropicModel` now omits `temperature`
+  when the installed SDK does not declare it, as it already did for the
+  models that reject it.
+- **`OpenAISearchPreviewProvider` returned nothing.** OpenAI retired
+  `gpt-4o-search-preview` and `gpt-4o-mini-search-preview` (`404
+  model_not_found`); their successor, `gpt-5-search-api`, ignores a
+  non-strict JSON schema and answers in a shape of its own, which parsed to
+  no results. The provider now requests a strict schema, the docs and
+  notebook 57 use `gpt-5-search-api`, and `*-search-api` models are
+  treated as rejecting sampling parameters.
+- **"Task exception was never retrieved … Event loop is closed" on every
+  loop change.** The openai and anthropic SDKs close their HTTP client from
+  `__del__` by scheduling `aclose()` on whichever loop is running; a client
+  built under an earlier `asyncio.run()` was closed through a dead loop and
+  printed a traceback. The native OpenAI and Anthropic models and the
+  OpenAI image, speech and embedding providers now pass an HTTP client that
+  closes only on the loop that built it (`locus.core.loop_bound.own_loop_http_client`).
+- **`OpenAIImageProvider()` failed with its default model.** OpenAI retired
+  `gpt-image-1` (`400 The model 'gpt-image-1' does not exist`); the default
+  is now `gpt-image-2`.
+- **A timed-out `DockerSandbox` call could leave its code running.** With a
+  single `docker run`, the timeout could fire before the daemon had created
+  the container; the `docker kill` then found nothing, and the daemon went
+  on to start the container and run the timed-out code to completion. The
+  container is now created first and started under the timeout, so it
+  always exists to be removed (`docker rm --force`).
+- **Notebook 34 timed out on Claude.** It printed which protocol each router
+  picks, but called `dispatch()`, which also runs the protocol — ten full
+  multi-agent runs for ten protocol ids. It now uses `Router.compile()` and
+  hands both routers the same frame, so a difference comes from the picker
+  alone; under the mock model, which cannot fill a `GoalFrame`, it explains
+  that and exits instead of printing a table of errors.
+- **Notebook 81 timed out on Claude.** Its telemetry stubs ignored the
+  rollback, so a careful model kept re-verifying a mitigation the simulated
+  cluster never applied. The stubs now reflect the rollback.
+
 - **Tool arguments are coerced to the declared parameter types.** Models do
   not reliably honour the JSON types in a tool schema: Llama on OCI sends
   `{"a": "17", "b": "25"}` for two `int` parameters, and `add("17", "25")`

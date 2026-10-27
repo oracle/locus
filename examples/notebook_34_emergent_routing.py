@@ -33,10 +33,11 @@ agents that touch production infrastructure.
 Run it:
     .venv/bin/python examples/notebook_34_emergent_routing.py
 
-The default provider is the bundled mock model. Set LOCUS_MODEL_PROVIDER=openai
-(or anthropic) and the matching credentials to use a live model. Set
-``LOCUS_MODEL_PROVIDER=mock`` for offline runs — the picker will
-emerge with its mock rationale.
+It needs a live model: the router's first step fills a structured
+``GoalFrame``, which the bundled mock model cannot produce, so under mock the
+notebook explains that and exits. Set LOCUS_MODEL_PROVIDER=openai (or
+anthropic, or any registry provider with LOCUS_MODEL_ID) and the matching
+credentials.
 
 Prerequisites:
 - Notebook 35 (structured output).
@@ -48,7 +49,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from config import get_model
+from config import check_structured_output_capable, get_model
 
 from locus.agent import Agent
 from locus.router import (
@@ -185,7 +186,18 @@ PROMPTS = [
 ]
 
 
+async def _selected(router: Router, prompt: str, frame: GoalFrame) -> str:
+    """The protocol ``router`` picks for ``frame``, without running it."""
+    try:
+        runnable = await router.compile(prompt, frame=frame)
+    except Exception as exc:  # noqa: BLE001
+        return f"ERR: {type(exc).__name__}"
+    inner = getattr(runnable, "inner", None)
+    return getattr(runnable, "protocol_id", None) or getattr(inner, "protocol_id", "?")
+
+
 async def main() -> None:
+    check_structured_output_capable()
     default, emergent, model = build_routers()
 
     print(f"{'─' * 90}")
@@ -193,17 +205,18 @@ async def main() -> None:
     print(f"{'─' * 90}")
 
     for prompt in PROMPTS:
+        # Routing is the subject here, so compile() — choose and build the
+        # topology — rather than dispatch(), which would also run it: ten
+        # full multi-agent protocols to print ten protocol ids. Both routers
+        # get the same frame, so a ≠ comes from the picker alone, not from
+        # two extractions reading the request differently.
         try:
-            d_res = await default.dispatch(prompt)
-            d_pid = d_res.protocol_id
+            frame = await default.extract(prompt)
         except Exception as exc:  # noqa: BLE001
-            d_pid = f"ERR: {type(exc).__name__}"
-
-        try:
-            e_res = await emergent.dispatch(prompt)
-            e_pid = e_res.protocol_id
-        except Exception as exc:  # noqa: BLE001
-            e_pid = f"ERR: {type(exc).__name__}"
+            d_pid = e_pid = f"ERR: {type(exc).__name__}"
+        else:
+            d_pid = await _selected(default, prompt, frame)
+            e_pid = await _selected(emergent, prompt, frame)
 
         marker = "  " if d_pid == e_pid else "≠ "
         print(f"{marker}{prompt[:48]:<48} | {d_pid:<19} | {e_pid}")

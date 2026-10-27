@@ -137,13 +137,31 @@ def sre_incident_runbook() -> Runbook:
 # ing how you would never hand an unattended agent a destructive verb by default.
 #
 # Every tool here is a deterministic offline stub returning canned data, so the
-# notebook runs with no cluster, no creds, and no network.
+# notebook runs with no cluster, no creds, and no network. The stubs share one
+# piece of state — the release checkout-api is running — so a rollback shows up
+# in the telemetry. Static stubs left it degraded after a "successful"
+# rollback, and a careful model kept re-verifying the mitigation that the
+# simulated cluster never applied.
 # ---------------------------------------------------------------------------
+
+_BAD_RELEASE = "checkout-api:1.9.0"
+_cluster = {"checkout-api": _BAD_RELEASE}
+
+
+def _rolled_back(service: str) -> bool:
+    return service in _cluster and _cluster[service] != _BAD_RELEASE
 
 
 @tool
 def query_metrics(service: str) -> str:
     """Query the metrics backend (Prometheus) for a service's golden signals."""
+    if _rolled_back("checkout-api"):
+        healthy = {
+            "checkout-api": "p99=180ms err=0.2% rps=1180 db_pool_in_use=34/100 (within SLO)",
+            "orders-db-primary": "connections=34/100 wait_queue=0 (healthy)",
+            "cart-api": "p99=140ms err=0.1% (recovered)",
+        }
+        return healthy.get(service, f"{service}: within SLO, no anomalies")
     table = {
         "checkout-api": "p99=4.8s err=37% rps=1200 db_pool_in_use=100/100 (degraded)",
         "orders-db-primary": "connections=100/100 wait_queue=812 (pool exhausted)",
@@ -155,6 +173,8 @@ def query_metrics(service: str) -> str:
 @tool
 def tail_logs(service: str) -> str:
     """Tail the most recent error logs for a service."""
+    if _rolled_back("checkout-api"):
+        return f"{service}: no errors since the rollback"
     table = {
         "checkout-api": "FATAL: remaining connection slots are reserved (x3.2k/min) since 02:08Z",
         "orders-db-primary": "too many clients already; max_connections=100 reached",
@@ -165,6 +185,11 @@ def tail_logs(service: str) -> str:
 @tool
 def describe_deploy(service: str) -> str:
     """Describe the current and previous rollout for a service."""
+    if _rolled_back(service):
+        return (
+            f"current={_cluster[service]} (rolled back from {_BAD_RELEASE}); "
+            f"previous={_BAD_RELEASE}; ready 12/12"
+        )
     table = {
         "checkout-api": (
             "current=checkout-api:1.9.0 (rolled 02:08Z, canary skipped); "
@@ -181,7 +206,10 @@ def rollback_deploy_tool() -> object:
     def rollback_deploy(service: str, to_revision: str) -> str:
         """Roll a service back to a known-good revision (mitigation action)."""
         # Real version: `kubectl rollout undo deploy/<service> --to-revision=…`.
-        return f"rolled back {service} to {to_revision}; new pods healthy 12/12"
+        if service not in _cluster:
+            return f"{service}: no rollout to undo"
+        _cluster[service] = to_revision if ":" in to_revision else f"{service}:{to_revision}"
+        return f"rolled back {service} to {_cluster[service]}; new pods healthy 12/12"
 
     return rollback_deploy
 
@@ -221,7 +249,9 @@ async def run_incident_response(incident: str) -> None:
         tools=tools,
         system_prompt=(
             "You are a senior site-reliability engineer on call. Follow the SRE "
-            "incident runbook exactly. Document every action and cite your evidence."
+            "incident runbook exactly. Document every action and cite your evidence. "
+            "Report each phase in at most 150 words: what you checked, what the "
+            "tools returned, and what you did — no claims the tools did not return."
         ),
         profile=profile,
         audit_trail=trail,

@@ -28,10 +28,11 @@ agents that touch production infrastructure.
 Run it:
     .venv/bin/python examples/notebook_34_emergent_routing.py
 
-The default provider is the bundled mock model. Set LOCUS_MODEL_PROVIDER=openai
-(or anthropic) and the matching credentials to use a live model. Set
-``LOCUS_MODEL_PROVIDER=mock`` for offline runs — the picker will
-emerge with its mock rationale.
+It needs a live model: the router's first step fills a structured
+``GoalFrame``, which the bundled mock model cannot produce, so under mock the
+notebook explains that and exits. Set LOCUS_MODEL_PROVIDER=openai (or
+anthropic, or any registry provider with LOCUS_MODEL_ID) and the matching
+credentials.
 
 Prerequisites:
 

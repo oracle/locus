@@ -399,6 +399,12 @@ class TestSearchPreviewSamplingGate:
         assert OpenAIModel._rejects_sampling_params("gpt-4o-search-preview")
         assert OpenAIModel._rejects_sampling_params("gpt-4o-mini-search-preview")
 
+    def test_detects_search_api(self) -> None:
+        from locus.models.native.openai import OpenAIModel
+
+        assert OpenAIModel._rejects_sampling_params("gpt-5-search-api")
+        assert OpenAIModel._rejects_sampling_params("openai.gpt-5-search-api-2025-10-14")
+
     def test_detects_oci_namespaced_search_preview(self) -> None:
         from locus.models.native.openai import OpenAIModel
 

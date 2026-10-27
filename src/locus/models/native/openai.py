@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel, Field
 
 from locus.core.events import ModelChunkEvent
-from locus.core.loop_bound import loop_bound
+from locus.core.loop_bound import loop_bound, own_loop_http_client
 from locus.core.media import (
     EARLIER_IMAGE_OMITTED,
     ImagePart,
@@ -755,7 +755,7 @@ class OpenAIModel(BaseModel):
         def build() -> openai.AsyncOpenAI:
             import openai  # noqa: PLC0415
 
-            http_client = None
+            http_kwargs: dict[str, Any] = {}
             if not self.config.keepalive:
                 import sys  # noqa: PLC0415
 
@@ -764,7 +764,7 @@ class OpenAIModel(BaseModel):
                 # (httpx2 from openai 3.x, httpx before), whatever else is installed.
                 http_lib = sys.modules[openai.DefaultAsyncHttpxClient.__mro__[1].__module__]
                 limits = http_lib.Limits(max_keepalive_connections=0)
-                http_client = openai.DefaultAsyncHttpxClient(limits=limits)
+                http_kwargs["limits"] = limits
             return openai.AsyncOpenAI(
                 api_key=self.config.api_key,
                 base_url=self.config.base_url,
@@ -772,7 +772,7 @@ class OpenAIModel(BaseModel):
                 default_headers=self.config.default_headers,
                 max_retries=self.config.max_retries,
                 timeout=self.config.request_timeout,
-                http_client=http_client,
+                http_client=own_loop_http_client(openai, **http_kwargs),
             )
 
         return loop_bound(self, "_client", build)
@@ -946,14 +946,15 @@ class OpenAIModel(BaseModel):
     def _rejects_sampling_params(model: str) -> bool:
         """Whether the model rejects ``temperature`` / ``top_p``.
 
-        OpenAI's ``*-search-preview`` chat-completions models perform their
-        own retrieval and refuse caller-supplied sampling controls with a
-        400 ``Model incompatible request arguments supplied: temperature,
-        top_p`` error. Treat them like reasoning models for the purposes
+        OpenAI's search models (``*-search-preview``, ``*-search-api``)
+        perform their own retrieval and refuse caller-supplied sampling
+        controls with a 400 ``Model incompatible request arguments
+        supplied: temperature, top_p`` error. Treat them like reasoning models for the purposes
         of building the request body, even though they still use plain
         ``max_tokens``.
         """
-        return "search-preview" in _strip_model_namespace(model.lower())
+        name = _strip_model_namespace(model.lower())
+        return "search-preview" in name or "search-api" in name
 
     @staticmethod
     def _requires_responses_api(model: str) -> bool:

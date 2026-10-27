@@ -22,6 +22,7 @@ import pytest
 pytest.importorskip("anthropic")
 
 from locus.core.messages import Message  # noqa: E402
+from locus.models.native import anthropic as anthropic_mod  # noqa: E402
 from locus.models.native.anthropic import AnthropicModel  # noqa: E402
 
 
@@ -103,7 +104,8 @@ def _final(content: list[Any] | None = None) -> SimpleNamespace:
     )
 
 
-async def test_stream_request_matches_complete_request() -> None:
+async def test_stream_request_matches_complete_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(anthropic_mod, "_sdk_declares_temperature", lambda: True)
     model, streamed, created = _model(_final(), prompt_cache=True, temperature=0.2)
     messages = [Message.system("be brief"), Message.user("hi")]
 
@@ -116,7 +118,8 @@ async def test_stream_request_matches_complete_request() -> None:
     assert streamed["tools"][-1]["cache_control"] == {"type": "ephemeral"}
 
 
-async def test_stream_honours_per_call_temperature() -> None:
+async def test_stream_honours_per_call_temperature(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(anthropic_mod, "_sdk_declares_temperature", lambda: True)
     model, streamed, _ = _model(_final())
     _ = [c async for c in model.stream([Message.user("hi")], temperature=0.9)]
     assert streamed["temperature"] == 0.9

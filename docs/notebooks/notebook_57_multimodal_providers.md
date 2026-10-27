@@ -15,7 +15,7 @@ voicemail to transcribe. Each modality is one provider kwarg away.
   example.com, standing in for a merchant's order-confirmation URL.
 - Bring-your-own: any duck-typed object that implements the protocol
   method — here, an internal transaction-ledger search.
-- Optional OpenAI-backed providers (image, speech, search-preview).
+- Optional OpenAI-backed providers (image, speech, web search).
 
 Run it (defaults to the bundled mock model; set `LOCUS_MODEL_PROVIDER` to `openai` / `anthropic` for a live model):
 

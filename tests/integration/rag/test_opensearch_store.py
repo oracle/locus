@@ -15,6 +15,9 @@ Configuration via environment variables:
 import pytest
 
 
+# A dev cluster's self-signed certificate is tested with OPENSEARCH_VERIFY_CERTS=false;
+# opensearch-py warns about that on every connection, and warnings are errors here.
+@pytest.mark.filterwarnings("ignore:Connecting to .* verify_certs=False is insecure:UserWarning")
 class TestOpenSearchVectorStoreIntegration:
     """Integration tests for OpenSearch vector store."""
 
@@ -27,6 +30,7 @@ class TestOpenSearchVectorStoreIntegration:
             hosts=opensearch_config["hosts"],
             http_auth=opensearch_config["http_auth"],
             use_ssl=opensearch_config["use_ssl"],
+            verify_certs=opensearch_config["verify_certs"],
             index_name="locus_test_vectors",
             dimension=128,  # Small dimension for testing
         )

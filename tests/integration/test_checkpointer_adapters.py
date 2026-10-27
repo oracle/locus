@@ -468,6 +468,9 @@ class TestMySQLAdapter:
 # =============================================================================
 
 
+# A dev cluster's self-signed certificate is tested with OPENSEARCH_VERIFY_CERTS=false;
+# opensearch-py warns about that on every connection, and warnings are errors here.
+@pytest.mark.filterwarnings("ignore:Connecting to .* verify_certs=False is insecure:UserWarning")
 @pytest.mark.requires_opensearch
 class TestOpenSearchAdapter:
     """Test OpenSearch checkpointer adapter."""

@@ -17,9 +17,9 @@ from locus.models.native.openai import OpenAIModel
 
 agent = Agent(
     model="openai:gpt-4o-mini",
-    web_search=OpenAISearchPreviewProvider(OpenAIModel("gpt-4o-search-preview")),  # order / product lookups
+    web_search=OpenAISearchPreviewProvider(OpenAIModel("gpt-5-search-api")),  # order / product lookups
     web_fetch=HTTPXWebFetcher(),         # pull policy pages, docs, status pages
-    image_generator=OpenAIImageProvider(),  # gpt-image-1 by default — render report figures
+    image_generator=OpenAIImageProvider(),  # gpt-image-2 by default — render report figures
     speech_provider=OpenAISpeechProvider(),  # transcribe call recordings
 )
 ```
@@ -64,13 +64,13 @@ The shared Pydantic types live in `locus.providers.types` (`SearchResult`,
   stdlib `HTMLParser` shim that strips `<script>` / `<style>` and
   collapses whitespace. No `beautifulsoup` dep. Good for pulling
   policy pages, vendor docs, and status pages.
-- `OpenAISearchPreviewProvider` — wraps OpenAI's `gpt-4o-search-preview`
-  chat-completions model. The model performs the retrieval itself and
-  returns annotated results; the provider pins them through a strict
+- `OpenAISearchPreviewProvider` — wraps an OpenAI search model
+  (`gpt-5-search-api`) on chat-completions. The model performs the
+  retrieval itself; the provider pins its results to a strict
   JSON schema and returns a list of `SearchResult` — handy for a quick
   open-web pivot before you commit to a hard API call.
 - `OpenAIImageProvider` — `images.generate`, defaulting to
-  `gpt-image-1`. `dall-e-3` / `dall-e-2` are deprecated by OpenAI; pass
+  `gpt-image-2` (`gpt-image-1` is retired). `dall-e-3` / `dall-e-2` are deprecated by OpenAI; pass
   one explicitly only if you still need it. Surfaces hosted URLs when
   the API returns them and base64 PNG bytes otherwise. Use it to render
   figures and diagrams for a report.

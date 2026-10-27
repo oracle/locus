@@ -42,10 +42,12 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from functools import cache
+from types import ModuleType
 from typing import Any, TypeVar
 
 
-__all__ = ["loop_bound", "loop_bound_async", "loop_key_for"]
+__all__ = ["loop_bound", "loop_bound_async", "loop_key_for", "own_loop_http_client"]
 
 T = TypeVar("T")
 
@@ -116,3 +118,45 @@ async def loop_bound_async(owner: Any, attr: str, factory: Callable[[], Awaitabl
         setattr(owner, attr, cached)
         setattr(owner, key, loop)
     return cached
+
+
+def own_loop_http_client(sdk: ModuleType, **kwargs: Any) -> Any:
+    """``sdk.DefaultAsyncHttpxClient(**kwargs)`` that closes only on its own loop.
+
+    For ``openai`` and ``anthropic``, passed as ``http_client=``. Without one,
+    each SDK wraps its default client in a class whose ``__del__`` schedules
+    ``aclose()`` on whatever loop is running when the garbage collector gets
+    to it. A client dropped by :func:`loop_bound`, or a model built in an
+    earlier ``asyncio.run()``, is collected under the next loop, so its
+    sockets are closed through a loop that is already closed: the task fails
+    with ``Event loop is closed``, nothing awaits it, and asyncio prints
+    "Task exception was never retrieved" with a full traceback each time.
+
+    This client closes the way the SDK's does when it is collected on the loop
+    that built it, and otherwise leaves its sockets to the garbage collector,
+    which is all that is possible once that loop is gone.
+    """
+    return _own_loop_class(sdk.DefaultAsyncHttpxClient)(**kwargs)
+
+
+@cache
+def _own_loop_class(base: type) -> type:
+    class OwnLoopHttpxClient(base):
+        def __init__(self, **kwargs: Any) -> None:
+            super().__init__(**kwargs)
+            try:
+                self._locus_loop: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
+            except RuntimeError:
+                self._locus_loop = None
+
+        def __del__(self) -> None:
+            if self.is_closed:
+                return
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                return
+            if loop is getattr(self, "_locus_loop", None):
+                loop.create_task(self.aclose())  # noqa: RUF006 - as the SDK finalizer does
+
+    return OwnLoopHttpxClient

@@ -336,10 +336,12 @@ def test_rejected_call_is_still_audited():
 
     forbidden_model = _GATEWAY_MODEL_B
     result = _make_completion(vkey, model=forbidden_model, content="hi")
-    # Allowlist rejection — either 401 (auth-error) or 403 (forbidden);
-    # either way it's a 4xx with an "allowed to access" string.
+    # Allowlist rejection — either 401 (auth-error) or 403 (forbidden).
+    # Older LiteLLM says "not allowed to access" in the message; current
+    # releases answer 403 with ``type: key_model_access_denied``.
     assert result["status"] >= 400, "allowlist did not refuse the call"
-    assert "allowed to access" in str(result["body"]).lower(), (
+    body = str(result["body"]).lower()
+    assert "allowed to access" in body or "key_model_access_denied" in body, (
         f"allowlist refusal returned an unexpected error shape: {result['body']!r}"
     )
     # No assertion about whether the rejection lands in /spend/logs —

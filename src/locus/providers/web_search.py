@@ -11,10 +11,10 @@ optional dependencies so locus stays a small core.
 Built-in implementations
 ------------------------
 
-- :class:`OpenAISearchPreviewProvider` — uses OpenAI's
-  ``gpt-4o-search-preview`` model. The model performs the search itself
-  and returns annotations with URLs + snippets; we parse those into
-  ``SearchResult`` objects. Requires the ``openai`` extra.
+- :class:`OpenAISearchPreviewProvider` — uses one of OpenAI's search
+  models (``gpt-5-search-api``). The model performs the search itself and
+  returns URLs + snippets as JSON; we parse those into ``SearchResult``
+  objects. Requires the ``openai`` extra.
 """
 
 from __future__ import annotations
@@ -43,14 +43,15 @@ class BaseWebSearchProvider(Protocol):
 
 
 class OpenAISearchPreviewProvider:
-    """Web search via OpenAI's ``gpt-4o-search-preview`` model.
+    """Web search via an OpenAI search model such as ``gpt-5-search-api``.
 
-    The search-preview chat completions return annotated URLs + snippets
-    inline; we ask the model to return a strict JSON list and parse it.
+    The search model runs the query itself; we ask it for the hits under a
+    strict JSON schema and parse them. (The name predates the retirement of
+    the ``gpt-4o-*-search-preview`` models it was built for.)
 
     Args:
         model: An :class:`OpenAIModel` instance. The caller picks the
-            search-capable model id (e.g. ``"gpt-4o-search-preview"``).
+            search-capable model id (e.g. ``"gpt-5-search-api"``).
         max_chars_per_snippet: Cap each snippet to this length so the
             agent context doesn't blow up.
     """
@@ -72,17 +73,21 @@ class OpenAISearchPreviewProvider:
     ) -> list[SearchResult]:
         # Importing here keeps the file lazy on the openai dep at
         # module-load time — locus core stays import-free of openai.
-        from pydantic import BaseModel, Field
+        from pydantic import BaseModel, ConfigDict
 
         from locus.core.messages import Message
         from locus.core.structured import parse_structured
 
         class _Hit(BaseModel):
+            model_config = ConfigDict(extra="forbid")
+
             title: str
             url: str
-            snippet: str = Field(default="")
+            snippet: str
 
         class _Hits(BaseModel):
+            model_config = ConfigDict(extra="forbid")
+
             results: list[_Hit]
 
         messages = [
@@ -102,7 +107,9 @@ class OpenAISearchPreviewProvider:
                 "json_schema": {
                     "name": "Hits",
                     "schema": _Hits.model_json_schema(),
-                    "strict": False,
+                    # The search models ignore a non-strict schema and answer
+                    # in a JSON shape of their own, which parses to nothing.
+                    "strict": True,
                 },
             },
         )

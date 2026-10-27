@@ -62,8 +62,11 @@ from locus.tools.decorator import tool
 def _env(name: str) -> str:
     val = os.environ.get(name)
     if not val:
-        sys.stderr.write(f"missing env var {name} — see prerequisites in the notebook docstring\n")
-        sys.exit(2)
+        sys.stderr.write(
+            f"skipped: missing env var {name} — see prerequisites in the notebook docstring\n"
+        )
+        # 77 = skipped: scripts/run_notebooks.py reports SKIP, not FAIL.
+        sys.exit(77)
     return val
 
 

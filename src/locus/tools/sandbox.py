@@ -527,9 +527,10 @@ class DockerSandbox:
         self.user = user if user is not None else _host_user()
 
     def _argv(self, docker: str, root: Path, name: str, env: dict[str, str]) -> list[str]:
+        """``docker create`` for the box; :meth:`run_code` then starts it under the timeout."""
         argv = [
             docker,
-            "run",
+            "create",
             "--rm",
             "--name",
             name,
@@ -584,18 +585,35 @@ class DockerSandbox:
             _seed_files(root, dict(m.files))
             (root / _PROGRAM_FILE).write_text(_compose_code(code, list(m.deps)), encoding="utf-8")
             env = {"LANG": _BASE_ENV["LANG"], **m.env}
-            argv = self._argv(docker, root.resolve(), name, env)
+            # Created first, outside the timeout, then started under it. With a
+            # single ``docker run`` the timeout could fire before the daemon had
+            # created the container: the kill then found nothing, and the daemon
+            # went on to start the box and run the timed-out code to the end.
+            created = subprocess.run(  # noqa: S603 — running tool code in a locked-down container is this class's purpose
+                self._argv(docker, root.resolve(), name, env),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if created.returncode != 0:
+                return SandboxResult(
+                    ok=False,
+                    stdout=created.stdout,
+                    stderr=created.stderr,
+                    exit_code=created.returncode,
+                    duration_ms=(time.perf_counter() - started) * 1000,
+                )
             try:
-                proc = subprocess.run(  # noqa: S603 — running tool code in a locked-down container is this class's purpose
-                    argv,
+                proc = subprocess.run(  # noqa: S603 — see above
+                    [docker, "start", "--attach", name],
                     capture_output=True,
                     text=True,
                     timeout=timeout,
                     check=False,
                 )
             except subprocess.TimeoutExpired as exc:
-                subprocess.run(  # noqa: S603 — kill the container the timed-out call left running
-                    [docker, "kill", name],
+                subprocess.run(  # noqa: S603 — stop and remove the box the timed-out call left running
+                    [docker, "rm", "--force", name],
                     capture_output=True,
                     text=True,
                     check=False,

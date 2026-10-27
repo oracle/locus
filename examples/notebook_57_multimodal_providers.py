@@ -16,7 +16,7 @@ you don't write the wrapper.
   stands in for a merchant's order-confirmation URL.
 - Bring-your-own: any duck-typed object that implements the protocol
   method, e.g. an internal transaction-ledger search.
-- Optional OpenAI-backed providers (image, speech, search-preview).
+- Optional OpenAI-backed providers (image, speech, web search).
 
 Run it
     # Default: the bundled mock model (set LOCUS_MODEL_PROVIDER for a live provider)
@@ -179,7 +179,7 @@ def example_openai_providers():
   agent = Agent(config=AgentConfig(
       model=get_model(),
       web_search=OpenAISearchPreviewProvider(
-          OpenAIModel("gpt-4o-search-preview")
+          OpenAIModel("gpt-5-search-api")
       ),
       image_generator=OpenAIImageProvider(model="dall-e-3"),
       speech_provider=OpenAISpeechProvider(),  # tts-1 + whisper-1

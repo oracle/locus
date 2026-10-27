@@ -142,12 +142,19 @@ class TestParallelToolExecution:
         ):
             events.append(event)
 
-        tool_events = [e for e in events if isinstance(e, ToolCompleteEvent)]
-        assert len(tool_events) >= 2  # At least 2 tool calls
+        started = {e.tool_call_id for e in events if isinstance(e, ToolStartEvent)}
+        completed = {e.tool_call_id for e in events if isinstance(e, ToolCompleteEvent)}
+        # What locus owes: every call the model made runs to completion and
+        # the run ends with an answer. Whether the model fans out at all is
+        # its own choice — Claude Haiku sometimes stops after one call.
+        assert completed == started
 
         terminate = next((e for e in events if isinstance(e, TerminateEvent)), None)
         assert terminate is not None
         assert terminate.final_message is not None
+
+        if len(started) < 2:
+            pytest.skip(f"the model made {len(started)} tool call(s) this run, not several")
 
     @pytest.mark.asyncio
     async def test_parallel_tool_calls_execute_concurrently_wall_time(self, model) -> None:  # type: ignore[no-untyped-def]

@@ -462,9 +462,7 @@ def get_model(**kwargs: Any) -> Any:
     elif provider == "anthropic":
         return _get_anthropic_model(**kwargs)
     else:
-        raise ValueError(
-            f"Unknown model provider: {provider}. Use 'oci', 'mock', 'openai', or 'anthropic'."
-        )
+        return _get_registry_model(provider, **kwargs)
 
 
 def get_model_b(**kwargs: Any) -> Any:
@@ -614,6 +612,24 @@ def _get_openai_model(**kwargs: Any) -> Any:
         api_key=api_key,
         **kwargs,
     )
+
+
+def _get_registry_model(provider: str, **kwargs: Any) -> Any:
+    """Any other provider the model registry knows — openrouter, groq, gemini, ollama, …
+
+    The provider reads its own credentials; ``LOCUS_MODEL_ID`` names the model.
+    """
+    from locus.models import get_model as registry_get_model
+    from locus.models.registry import list_providers
+
+    if provider not in list_providers():
+        raise ValueError(
+            f"Unknown model provider: {provider}. Use 'mock' or one of {list_providers()}."
+        )
+    model_id = kwargs.pop("model_id", None) or os.environ.get("LOCUS_MODEL_ID")
+    if not model_id:
+        raise ValueError(f"LOCUS_MODEL_ID is required with LOCUS_MODEL_PROVIDER={provider}")
+    return registry_get_model(f"{provider}:{model_id}", **kwargs)
 
 
 def _get_anthropic_model(**kwargs: Any) -> Any:

@@ -15,7 +15,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field
 
-from locus.core.loop_bound import loop_bound
+from locus.core.loop_bound import loop_bound, own_loop_http_client
 
 
 class SynthesizedAudio(BaseModel):
@@ -111,7 +111,11 @@ class OpenAISpeechProvider:
         def build() -> Any:
             import openai  # noqa: PLC0415
 
-            return openai.AsyncOpenAI(api_key=self._api_key, base_url=self._base_url)
+            return openai.AsyncOpenAI(
+                api_key=self._api_key,
+                base_url=self._base_url,
+                http_client=own_loop_http_client(openai),
+            )
 
         # Bound to the loop that built it — see locus.core.loop_bound.
         return loop_bound(self, "_client", build)

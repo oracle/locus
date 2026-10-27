@@ -14,6 +14,9 @@ Usage:
     # Run specific notebook:
     python scripts/run_notebooks.py --provider openai --notebook 06
 
+    # Any other provider the model registry knows (needs --model):
+    python scripts/run_notebooks.py --provider gemini --model gemini-2.5-flash
+
     # List available notebooks:
     python scripts/run_notebooks.py --list
 """
@@ -23,6 +26,12 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+
+
+#: Exit status a notebook uses to say it cannot run here — its prerequisites
+#: (an OCI profile, a service endpoint) are missing. The automake/meson
+#: convention for a skipped test; Python itself never exits with it.
+SKIP_EXIT_CODE = 77
 
 
 # Provider configurations.
@@ -48,10 +57,11 @@ def get_notebooks() -> list[Path]:
     return notebooks
 
 
-def run_notebook(notebook: Path, env: dict[str, str], timeout: int = 120) -> bool:
+def run_notebook(notebook: Path, env: dict[str, str], timeout: int = 120) -> str:
     """Run a single notebook.
 
-    Returns True if successful, False otherwise.
+    Returns ``"PASS"``, ``"SKIP"`` (it exited with :data:`SKIP_EXIT_CODE`) or
+    ``"FAIL"``.
     """
     print(f"\n{'=' * 60}")
     print(f"Running: {notebook.name}")
@@ -65,22 +75,28 @@ def run_notebook(notebook: Path, env: dict[str, str], timeout: int = 120) -> boo
             capture_output=False,
             check=False,
         )
-        return result.returncode == 0
+        if result.returncode == 0:
+            return "PASS"
+        if result.returncode == SKIP_EXIT_CODE:
+            return "SKIP"
+        return "FAIL"
     except subprocess.TimeoutExpired:
         print(f"TIMEOUT: {notebook.name} exceeded {timeout}s")
-        return False
+        return "FAIL"
     except Exception as e:
         print(f"ERROR: {e}")
-        return False
+        return "FAIL"
 
 
 def main():
     parser = argparse.ArgumentParser(description="Run Locus notebooks")
     parser.add_argument(
         "--provider",
-        choices=list(PROVIDERS.keys()),
         default="mock",
-        help="Model provider to use",
+        help=(
+            f"Model provider: {', '.join(PROVIDERS)}, or any prefix in "
+            "locus.models.registry.list_providers() together with --model"
+        ),
     )
     parser.add_argument(
         "--model",
@@ -116,7 +132,12 @@ def main():
         return
 
     # Get provider config
-    env = PROVIDERS[args.provider].copy()
+    if args.provider in PROVIDERS:
+        env = PROVIDERS[args.provider].copy()
+    elif args.model:
+        env = {"LOCUS_MODEL_PROVIDER": args.provider}
+    else:
+        parser.error(f"--provider {args.provider} needs --model")
 
     # Apply overrides
     if args.model:
@@ -139,22 +160,21 @@ def main():
     # Run notebooks
     results = {}
     for notebook in notebooks:
-        success = run_notebook(notebook, env, args.timeout)
-        results[notebook.name] = success
+        results[notebook.name] = run_notebook(notebook, env, args.timeout)
 
     # Summary
     print(f"\n{'=' * 60}")
     print("SUMMARY")
     print(f"{'=' * 60}")
 
-    passed = sum(1 for s in results.values() if s)
-    failed = len(results) - passed
+    passed = sum(1 for s in results.values() if s == "PASS")
+    skipped = sum(1 for s in results.values() if s == "SKIP")
+    failed = len(results) - passed - skipped
 
-    for name, success in results.items():
-        status = "PASS" if success else "FAIL"
+    for name, status in results.items():
         print(f"  [{status}] {name}")
 
-    print(f"\nTotal: {passed} passed, {failed} failed")
+    print(f"\nTotal: {passed} passed, {skipped} skipped, {failed} failed")
 
     sys.exit(0 if failed == 0 else 1)
 

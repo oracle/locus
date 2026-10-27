@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
-from locus.core.loop_bound import loop_bound
+from locus.core.loop_bound import loop_bound, own_loop_http_client
 from locus.rag.embeddings.base import (
     BaseEmbedding,
     EmbeddingCapabilities,
@@ -128,6 +128,7 @@ class OpenAIEmbeddings(BaseEmbedding):
 
         def build() -> AsyncOpenAI:
             try:
+                import openai  # noqa: PLC0415
                 from openai import AsyncOpenAI  # noqa: PLC0415
             except ImportError as e:
                 raise ImportError(
@@ -137,6 +138,7 @@ class OpenAIEmbeddings(BaseEmbedding):
             return AsyncOpenAI(
                 api_key=self._config_model.api_key,
                 base_url=self._config_model.base_url,
+                http_client=own_loop_http_client(openai),
             )
 
         # Bound to the loop that built it — see locus.core.loop_bound.

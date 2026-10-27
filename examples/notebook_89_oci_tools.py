@@ -93,9 +93,11 @@ def _env(name: str, default: str | None = None, *, fallbacks: tuple[str, ...] = 
     if not val:
         tried = [name, *fallbacks]
         sys.stderr.write(
-            f"missing env var (tried {tried}) — see the prerequisites in the notebook docstring\n"
+            f"skipped: missing env var (tried {tried}) — see the prerequisites in the notebook "
+            "docstring\n"
         )
-        sys.exit(2)
+        # 77 = skipped: scripts/run_notebooks.py reports SKIP, not FAIL.
+        sys.exit(77)
     return val
 
 

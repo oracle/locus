@@ -8,9 +8,9 @@ These hit real services and are auto-skipped when credentials / network
 aren't available:
 
 - ``HTTPXWebFetcher`` against ``https://example.com`` (network-only).
-- ``OpenAISearchPreviewProvider`` against ``gpt-4o-search-preview``
+- ``OpenAISearchPreviewProvider`` against ``gpt-5-search-api``
   (needs ``OPENAI_API_KEY``).
-- ``OpenAIImageProvider`` against ``gpt-image-1`` (needs ``OPENAI_API_KEY``,
+- ``OpenAIImageProvider`` against ``gpt-image-2`` (needs ``OPENAI_API_KEY``,
   costs cents per call — gated behind ``LOCUS_LIVE_IMAGE=1``).
 - ``OpenAISpeechProvider`` round-trip TTS→STT (needs ``OPENAI_API_KEY``,
   costs cents per call — gated behind ``LOCUS_LIVE_SPEECH=1``).
@@ -88,7 +88,7 @@ async def test_openai_search_preview_returns_results() -> None:
     from locus.providers.web_search import OpenAISearchPreviewProvider
 
     model = OpenAIModel(
-        model=os.environ.get("LOCUS_OPENAI_SEARCH_MODEL", "gpt-4o-search-preview"), max_tokens=1024
+        model=os.environ.get("LOCUS_OPENAI_SEARCH_MODEL", "gpt-5-search-api"), max_tokens=1024
     )
     provider = OpenAISearchPreviewProvider(model)
     hits = await provider.search("OpenAI generative AI service", max_results=3)
@@ -110,7 +110,7 @@ async def test_openai_search_preview_returns_results() -> None:
 async def test_openai_image_provider_round_trip() -> None:
     from locus.providers.image import OpenAIImageProvider
 
-    provider = OpenAIImageProvider(model="gpt-image-1")
+    provider = OpenAIImageProvider(model=os.environ.get("LOCUS_OPENAI_IMAGE_MODEL", "gpt-image-2"))
     results = await provider.generate(
         "a tiny cartoon orange octopus holding a wrench",
         size="1024x1024",

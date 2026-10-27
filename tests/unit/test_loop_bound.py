@@ -187,3 +187,40 @@ def test_no_async_client_is_cached_without_a_loop_key() -> None:
             *offenders,
         ]
     )
+
+
+# --------------------------------------------------------------------------
+# Finalizing an SDK http client
+# --------------------------------------------------------------------------
+
+
+def test_a_client_collected_under_another_loop_schedules_nothing() -> None:
+    """The SDK's own finalizer ran ``aclose()`` on the new loop against the old
+    loop's sockets; that task failed with ``Event loop is closed`` and asyncio
+    printed "Task exception was never retrieved" at every loop change."""
+    openai = pytest.importorskip("openai")
+    from locus.core.loop_bound import own_loop_http_client
+
+    async def build() -> object:
+        return own_loop_http_client(openai)
+
+    client = asyncio.run(build())
+
+    async def collect_here() -> set[asyncio.Task[object]]:
+        nonlocal client
+        before = asyncio.all_tasks()
+        client.__del__()  # type: ignore[attr-defined]
+        return asyncio.all_tasks() - before
+
+    assert asyncio.run(collect_here()) == set()
+
+
+async def test_a_client_collected_under_its_own_loop_still_closes() -> None:
+    openai = pytest.importorskip("openai")
+    from locus.core.loop_bound import own_loop_http_client
+
+    client = own_loop_http_client(openai)
+    client.__del__()
+    await asyncio.sleep(0)
+
+    assert client.is_closed
