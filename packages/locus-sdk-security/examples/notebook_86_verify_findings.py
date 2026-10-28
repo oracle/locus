@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -11,31 +10,30 @@ well-grounded finding **survives**; an unsupported or fabricated one is
 **refuted** — so a hallucinated "critical" never drives a real action.
 
 `verify()` is framework-agnostic: it takes a Locus `Evidence` *or* a
-finding-shaped dict produced by any other agent (LangGraph/CrewAI/anything),
-which is what lets Locus sit above the stack as the verification layer.
+finding-shaped dict produced by any other agent, which is what lets Locus
+sit above the stack as the verification layer.
 
 Runs fully offline.
 
-Run:
-    python examples/notebook_86_verify_findings.py
+Run it:
+    python packages/locus-sdk-security/examples/notebook_86_verify_findings.py
 """
 
 from __future__ import annotations
 
 import asyncio
 
-from locus_security import Target, is_finding, red_team, verify
+from locus_security import Target, VerificationResult, is_finding, red_team, verify
 
 
 def _vulnerable_bot(prompt: str) -> str:
     return prompt  # naive bot: obeys injected instructions (see notebook 84)
 
 
-def _show(label: str, verdict: object) -> None:
-    v = verdict  # VerificationResult
-    status = "SURVIVES" if v.survives else "REFUTED"  # type: ignore[attr-defined]
-    print(f"\n[{status}] {label}  (confidence {v.confidence:.2f})")  # type: ignore[attr-defined]
-    for r in v.refutations:  # type: ignore[attr-defined]
+def _show(label: str, v: VerificationResult) -> None:
+    status = "SURVIVES" if v.survives else "REFUTED"
+    print(f"\n[{status}] {label}  (confidence {v.confidence:.2f})")
+    for r in v.refutations:
         print(f"    - ({r.weight}) {r.reason}")
 
 

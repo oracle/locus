@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -30,8 +29,7 @@ Prerequisite (one-time, out-of-band)::
 
     GRANT EXECUTE ON DBMS_VECTOR_CHAIN TO locus_app;
 
-Run it::
-
+Run it:
     export ORACLE_DSN=mydb_low                   # tnsnames alias in the wallet
     export ORACLE_USER=locus_app                 # least-privileged app schema
     export ORACLE_PASSWORD='<app-password>'
@@ -54,12 +52,17 @@ import json
 import os
 import sys
 from collections import Counter
+from typing import TYPE_CHECKING
 
 from config import get_model, print_config
 
 from locus.agent import Agent
 from locus.rag.chunkers import OracleInDBChunker
 from locus.tools import tool
+
+
+if TYPE_CHECKING:
+    import oracledb
 
 
 _REQUIRED_ENV = (
@@ -141,7 +144,8 @@ def _conn_kwargs() -> dict[str, str]:
     }
 
 
-async def _setup_demo_table() -> None:
+async def _connect() -> oracledb.AsyncConnection:
+    """One async connection on the same wallet envelope the chunker uses."""
     import oracledb
 
     kw = _conn_kwargs()
@@ -151,10 +155,13 @@ async def _setup_demo_table() -> None:
         params["wallet_location"] = kw["wallet_location"]
         if kw["wallet_password"]:
             params["wallet_password"] = kw["wallet_password"]
-
-    conn = await oracledb.connect_async(
+    return await oracledb.connect_async(
         user=kw["user"], password=kw["password"], dsn=kw["dsn"], **params
     )
+
+
+async def _setup_demo_table() -> None:
+    conn = await _connect()
     try:
         cursor = conn.cursor()
         try:
@@ -179,19 +186,7 @@ async def _setup_demo_table() -> None:
 
 
 async def _drop_demo_table() -> None:
-    import oracledb
-
-    kw = _conn_kwargs()
-    params: dict[str, str] = {}
-    if kw["wallet_location"]:
-        params["config_dir"] = kw["wallet_location"]
-        params["wallet_location"] = kw["wallet_location"]
-        if kw["wallet_password"]:
-            params["wallet_password"] = kw["wallet_password"]
-
-    conn = await oracledb.connect_async(
-        user=kw["user"], password=kw["password"], dsn=kw["dsn"], **params
-    )
+    conn = await _connect()
     try:
         cursor = conn.cursor()
         try:
@@ -250,6 +245,8 @@ async def main() -> None:
 
     print_config()
 
+    # Deliberately tiny window: 20 words makes even one paragraph yield
+    # several chunks, so the stats the agent reports are visibly non-trivial.
     chunker = OracleInDBChunker(
         **_conn_kwargs(),
         max_tokens=20,
@@ -285,8 +282,8 @@ async def main() -> None:
     async def chunk_table_rows(limit: int = 100) -> dict:
         """Stream chunks from every row in the demo CLOB table.
 
-        Wraps OracleInDBChunker.chunk_column over the
-        ``locus_notebook_40_docs`` table. The source CLOBs never leave
+        Wraps OracleInDBChunker.chunk_column over the demo CLOB table
+        (``_TABLE``). The source CLOBs never leave
         the database — only the chunk records come back. Useful for
         an ingest agent that wants to know "how big is this corpus, in
         chunks" before committing to write to a vector store.
@@ -299,19 +296,22 @@ async def main() -> None:
             {"rows": int, "chunks": int, "per_row": {source_id: count}}
         """
         per_row: Counter[str] = Counter()
-        seen = 0
+        chunks = 0
         async for chunk in chunker.chunk_column(
             table_name=_TABLE,
             text_column="body",
             id_column="id",
         ):
-            seen += 1
-            per_row[str(chunk["source_id"])] += 1
-            if seen >= limit * 50:  # safety stop
+            source_id = str(chunk["source_id"])
+            # chunk_column streams every row; stop before a new row would
+            # push the count past ``limit`` — the cap is on rows, not chunks.
+            if source_id not in per_row and len(per_row) >= limit:
                 break
+            per_row[source_id] += 1
+            chunks += 1
         return {
             "rows": len(per_row),
-            "chunks": seen,
+            "chunks": chunks,
             "per_row": dict(per_row),
         }
 

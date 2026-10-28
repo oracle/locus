@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -14,6 +13,7 @@ tooling, audit logs, on-call paging) can consume directly. Two-advocate
 adjudication is a cheap way to surface the disconfirming evidence a
 single-pass triage agent tends to skip.
 
+Key ideas:
 - Each turn is a ``Turn(side, round, text)`` Pydantic model. The
   transcript is a ``list[Turn]`` accumulated in graph state.
 - The Judge uses Locus's ``output_schema=Verdict``, so the result is a
@@ -26,11 +26,10 @@ single-pass triage agent tends to skip.
 Run it:
     .venv/bin/python examples/notebook_26_debate_with_judge.py
 
-The default provider is the bundled mock model. Set LOCUS_MODEL_PROVIDER=openai
-(or anthropic) and the matching credentials to use a live model that
-supports constrained decoding (e.g. ``openai:gpt-4o``). Set
-``LOCUS_MODEL_PROVIDER=mock`` and the notebook exits cleanly with
-setup instructions.
+The default provider is OCI GenAI when ``~/.oci/config`` holds a usable profile, otherwise the bundled mock model; set ``LOCUS_MODEL_PROVIDER`` (``oci``, ``openai``, ``anthropic``, ``mock``) to choose.g. ``LOCUS_MODEL_PROVIDER=oci
+LOCUS_MODEL_ID=openai.gpt-4o``, or ``LOCUS_MODEL_PROVIDER=openai
+LOCUS_MODEL_ID=gpt-4o``). Set ``LOCUS_MODEL_PROVIDER=mock`` and the
+notebook exits cleanly with setup instructions.
 
 Prerequisites:
 - Notebook 07 (structured output).
@@ -42,11 +41,10 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from config import get_model
+from config import check_structured_output_capable, get_model, print_config
 from pydantic import BaseModel, Field
 
 from locus.agent import Agent, AgentConfig
-from locus.core.events import TerminateEvent
 from locus.multiagent.graph import END, START, StateGraph
 
 
@@ -119,11 +117,7 @@ async def _argue(agent: Agent, transcript: list[Turn], alert: str, side: str, rn
         f"Transcript so far:\n{history or '(no turns yet)'}\n\n"
         f"You are arguing the {side.upper()} side, round {rnd}. Make your point now."
     )
-    final = ""
-    async for event in agent.run(prompt):
-        if isinstance(event, TerminateEvent):
-            final = event.final_message or ""
-    return final.strip()
+    return ((await agent.arun(prompt)).message or "").strip()
 
 
 # ---------------------------------------------------------------------------
@@ -156,8 +150,6 @@ async def judge_turn(state: dict[str, Any]) -> dict[str, Any]:
     If the configured model can't honor the JSON schema we raise rather
     than fabricating a verdict from free text.
     """
-    import asyncio as _asyncio
-
     agent = Agent(
         config=AgentConfig(
             agent_id="judge",
@@ -174,25 +166,16 @@ async def judge_turn(state: dict[str, Any]) -> dict[str, Any]:
         f"[{t.side.upper()} r{t.round}] {t.text}" for t in state["transcript"]
     )
     prompt = f"Alert: {state['alert']}\n\nTranscript:\n{transcript_text}\n\nNow emit your Verdict."
-    # arun returns the parsed object directly on the running loop — no
-    # worker-thread hop needed (browsers/WASM have no threads).
-    last_exc: BaseException | None = None
-    final = None
-    for attempt in range(3):
-        try:
-            final = await agent.arun(prompt)
-            break
-        # Retry covers transient provider flakiness.
-        except Exception as exc:  # noqa: BLE001
-            last_exc = exc
-            await _asyncio.sleep(0.5 * (attempt + 1))
-    if final is None:
-        raise RuntimeError(f"Judge failed after 3 attempts. Last error: {last_exc!r}") from last_exc
+    # Transient provider failures (429, 5xx, timeouts) are retried inside
+    # the agent loop by ``AgentConfig.model_retry`` — on by default with
+    # exponential backoff — so there is no retry loop to write here.
+    final = await agent.arun(prompt)
     if final.parsed is None:
         raise RuntimeError(
             "Judge returned no parsed Verdict. The configured model could not "
-            "honor the JSON schema. Use a stronger model (e.g. openai.gpt-4o, "
-            "openai.gpt-5, anthropic.claude-3-5-sonnet) for notebook 26. "
+            "honor the JSON schema. Use a model with constrained decoding for "
+            "notebook 26, e.g. LOCUS_MODEL_PROVIDER=oci LOCUS_MODEL_ID=openai.gpt-4o, "
+            "or LOCUS_MODEL_PROVIDER=openai LOCUS_MODEL_ID=gpt-4o. "
             f"Raw output: {final.message!r}"
         )
     return {"verdict": final.parsed}
@@ -232,12 +215,16 @@ def build_debate_graph() -> StateGraph:
 
 
 async def main() -> None:
-    from config import check_structured_output_capable
+    print("=" * 60)
+    print("Notebook 26: incident adjudication debate — incident vs noise with a typed judge")
+    print("=" * 60)
+    print()
+
+    print_config()
+    print()
 
     # Short-circuits the notebook when the model can't produce JSON.
     check_structured_output_capable()
-    print("Notebook 26: incident adjudication debate — incident vs noise with a typed judge")
-    print("=" * 60)
 
     model = get_model()
     graph = build_debate_graph()
@@ -245,8 +232,8 @@ async def main() -> None:
         "alert": (
             "Alert CLOUD-4189 (suspected reliability incident): service "
             "checkout-api p99 latency rose from 120ms to 2.4s over 8 minutes; "
-            "the HPA scaled the deployment from 6 to 20 pods; one node in the "
-            "autoscaling group reported MemoryPressure. The error rate held "
+            "the instance pool scaled from 6 to 20 instances; one node in the "
+            "pool reported MemoryPressure. The error rate held "
             "flat at 0.1%, a scheduled nightly reindex job is running on the "
             "same cluster, and no recent deploy preceded the spike."
         ),
@@ -283,6 +270,10 @@ async def main() -> None:
     for p in verdict.key_points:
         print(f"    - {p}")
     print(f"  Reasoning:  {verdict.reasoning}")
+
+    print("\n" + "=" * 60)
+    print("Next: Notebook 27 — human-approved disbursement — multi-agent HITL")
+    print("=" * 60)
 
 
 if __name__ == "__main__":

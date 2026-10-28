@@ -156,9 +156,7 @@ judgment; letting a reader discover it is not.
 ```python
 from locus.control import Action, ControlPolicy, approve
 
-# Every distinct consequence family your catalog can produce, with one real
-# call that exercises it. Nothing here is exhaustive on purpose -- the value
-# is that adding a family is cheap, so a missing one is a choice.
+# One representative call per consequence family; adding a family is cheap.
 FAMILY_PROBES = {
     "destruction": Action(name="delete_record", environment="production"),
     "value_out": Action(name="issue_refund", environment="production"),
@@ -172,14 +170,7 @@ FAMILY_PROBES = {
 
 
 def uncovered(policy: ControlPolicy, classify, benign: Action) -> list[str]:
-    """Families whose representative action would be auto-allowed.
-
-    `classify` is your own function mapping a proposed call to an `Action`
-    -- the part the gate cannot check for you. `benign` is a call that
-    *should* sail through, and it is the reason this probe can be trusted:
-    a policy that holds everything reports no gaps while telling you
-    nothing, which is the exact false all-clear this page is about.
-    """
+    """Families whose probe would be auto-allowed; `classify` maps a call to an `Action`."""
     if not approve(classify(benign.name, {}), policy=policy).allowed:
         raise AssertionError(
             f"{benign.name!r} was held, so this policy holds everything and "

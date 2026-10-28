@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -14,10 +13,10 @@ firing a real tool call, and grounding its reply in what came back.
 Key concepts:
 
 - ``OracleVectorStore`` opens an async pool against an Autonomous
-  Database wallet, auto-creates a ``VECTOR(1024, FLOAT32)`` table on
+  Database wallet, auto-creates a ``VECTOR(1536, FLOAT32)`` table on
   first use, and serves cosine similarity via ``VECTOR_DISTANCE``.
-- ``OCIEmbeddings`` produces 1024-dim Cohere V3 vectors on OCI GenAI;
-  ``RAGRetriever`` glues the two together.
+- ``OCIEmbeddings`` produces 1536-dim Cohere embed-v4.0 vectors on OCI
+  GenAI; ``RAGRetriever`` glues the two together.
 - ``create_rag_tool(retriever, ...)`` returns a ``@tool``-decorated
   callable. Hand it to an ``Agent`` and the model picks when to call
   it — Locus surfaces every retrieval as ``ToolStartEvent`` /
@@ -27,8 +26,7 @@ Key concepts:
   store import to OpenSearch, pgvector, or in-memory and nothing else
   changes.
 
-Run it::
-
+Run it:
     # Database side — Autonomous Database wallet (TLS) + credentials.
     export ORACLE_DSN=mydb_low                  # tnsnames alias in the wallet
     export ORACLE_USER=locus_app                # least-privileged app schema
@@ -142,7 +140,7 @@ def _print_skip_banner(missing: list[str]) -> None:
 
 
 async def _seed_corpus(retriever: RAGRetriever) -> None:
-    print(f"\nSeeding {len(CORPUS)} passages into the VECTOR(1024) table…")
+    print(f"\nSeeding {len(CORPUS)} passages into the VECTOR(1536) table…")
     await retriever.add_documents(CORPUS)
 
 
@@ -197,7 +195,7 @@ async def main() -> None:
     auth_type = os.environ.get("LOCUS_OCI_AUTH_TYPE") or os.environ.get("OCI_AUTH_TYPE", "api_key")
 
     embedder = OCIEmbeddings(
-        # 1024-dim Cohere V3 on OCI GenAI — matches the VECTOR(1024, FLOAT32) column.
+        # 1536-dim Cohere embed-v4.0 on OCI GenAI — matches the VECTOR(1536, FLOAT32) column.
         model_id="cohere.embed-v4.0",
         profile_name=profile,
         auth_type=auth_type,
@@ -231,8 +229,8 @@ async def main() -> None:
         name="search_oracle_26ai_corpus",
         description=(
             "Search the Oracle 26ai vector knowledge base. Returns up to N "
-            "passages with cosine-similarity scores against a 1024-dim "
-            "Cohere V3 query embedding. Call this whenever the answer might "
+            "passages with cosine-similarity scores against a 1536-dim "
+            "Cohere embed-v4.0 query embedding. Call this whenever the answer might "
             "depend on Oracle 26ai's vector storage, index types, or wallet "
             "details — do not guess."
         ),

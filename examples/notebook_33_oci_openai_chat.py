@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -24,8 +23,7 @@ For Responses-only models or server-side conversation state, see
 ``notebook_34_oci_responses``. For Cohere R-series, see
 ``notebook_01_oci_transports``.
 
-Run it::
-
+Run it:
     export OCI_PROFILE=<your-profile>             # ~/.oci/config profile
     export OCI_REGION=us-chicago-1                # GenAI inference region
     export OCI_COMPARTMENT=ocid1.compartment.…    # GenAI access
@@ -193,11 +191,6 @@ def part5_model_swap() -> None:
         except Exception as e:  # noqa: BLE001 — model availability varies per tenancy
             print(f"  {fam:42s} → [unavailable: {type(e).__name__}]")
     print()
-
-
-# =============================================================================
-# Main
-# =============================================================================
 
 
 def main() -> None:

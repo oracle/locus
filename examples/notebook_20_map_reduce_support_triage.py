@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -11,6 +10,7 @@ everything into a single triage summary. Each lens emits a structured tag —
 SENTIMENT, QUEUE, PRIORITY — so the output lands in vocabulary a helpdesk
 or routing pipeline already speaks.
 
+Key ideas:
 - ``Send(node, payload, metadata)`` is a first-class graph primitive.
   The splitter node returns a list of Sends; the executor fans them out
   and runs them concurrently. No queues, no manual ``asyncio.gather``.
@@ -22,10 +22,9 @@ or routing pipeline already speaks.
   cancellation, checkpointing, and GSAR judgment attach for free.
 
 Run it:
-    .venv/bin/python examples/notebook_20_map_reduce_code_review.py
+    .venv/bin/python examples/notebook_20_map_reduce_support_triage.py
 
-The default provider is the bundled mock model. Set LOCUS_MODEL_PROVIDER=openai
-(or anthropic) and the matching credentials to use a live model. Set
+The default provider is OCI GenAI when ``~/.oci/config`` holds a usable profile, otherwise the bundled mock model; set ``LOCUS_MODEL_PROVIDER`` (``oci``, ``openai``, ``anthropic``, ``mock``) to choose. Set
 ``LOCUS_MODEL_PROVIDER=mock`` for offline runs.
 
 Prerequisites:
@@ -136,13 +135,9 @@ async def split_tickets(state: dict[str, Any]) -> list[Send]:
 async def analyze_one(state: dict[str, Any]) -> dict[str, Any]:
     """One analyst Agent against one (ticket, lens).
 
-    Uses ``async for event in agent.run(...)`` instead of the blocking
-    sync path so the 9 instances run truly in parallel inside the graph's
-    ``asyncio.gather`` — a blocking sync call would serialise them on a
-    shared thread-pool worker.
+    ``arun`` is a coroutine, so the nine instances overlap inside the
+    graph's ``asyncio.gather`` instead of waiting on each other.
     """
-    from locus.core.events import TerminateEvent
-
     role: str = state["role"]
     ticket_id: str = state["ticket_id"]
     message: str = state["message"]
@@ -154,18 +149,13 @@ async def analyze_one(state: dict[str, Any]) -> dict[str, Any]:
         f'"""\n{message}\n"""\n\n'
         f"Analyze the ticket through the {role} lens."
     )
-    final_msg: str = ""
-    iterations = 0
-    async for event in agent.run(prompt):
-        if isinstance(event, TerminateEvent):
-            final_msg = event.final_message or ""
-            iterations = event.iterations_used
+    result = await agent.arun(prompt)
     return {
         "analysis": {
             "ticket": ticket_id,
             "role": role,
-            "comments": final_msg.strip(),
-            "iterations": iterations,
+            "comments": (result.message or "").strip(),
+            "iterations": result.metrics.iterations,
         }
     }
 
@@ -196,7 +186,7 @@ def build_triage_graph(model: Any) -> StateGraph:
     """Wire the three nodes: split → analyze_one (parallel) → synthesize → END.
 
     The model is threaded through state under ``__model__`` rather than
-    captured by closure so the graph stays picklable for checkpointing.
+    captured by closure so the nodes stay plain module-level functions.
     """
     graph = StateGraph(name="support-triage-crew")
     graph.add_node("split", split_tickets)

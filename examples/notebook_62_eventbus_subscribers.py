@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -14,16 +13,14 @@ in a cloud-ops pipeline:
 - bus.subscribe_global(): every event from every run, no history
   replay. The shape a telemetry forwarder uses — one tap covering all
   concurrent deployments.
-- bus._history.get(run_id, ()): direct read of the per-run history
-  deque (test helper; capped at 500 events x 200 runs LRU).
 
 - Per-deployment subscriber alongside an observability-style global
   subscriber on two concurrent rollouts.
 - bus.stats() snapshot — queue sizes, history depth, drop counter,
   retained-run count: the health metrics of your event pipeline.
 
-Run it
-    # Default: the bundled mock model (set LOCUS_MODEL_PROVIDER for a live provider)
+Run it:
+    # Default: OCI GenAI if ~/.oci/config has a usable profile, else the bundled mock model
     python examples/notebook_62_eventbus_subscribers.py
 
     # Offline / no credentials:
@@ -54,11 +51,15 @@ async def part1_global_vs_per_run() -> None:
     async def telemetry_forwarder() -> None:
         # In production this loop would POST each event to your
         # observability platform's intake API; here it just records
-        # what it would ship.
+        # what it would ship. The global stream has no per-run sentinel,
+        # so we stop after both deployments have terminated.
+        terminated = 0
         async for ev in bus.subscribe_global():
             telemetry_kinds.append(f"{ev.run_id[:6]}/{ev.event_type}")
-            if ev.event_type == "agent.terminate" and len(telemetry_kinds) >= 4:
-                return
+            if ev.event_type == "agent.terminate":
+                terminated += 1
+                if terminated == 2:
+                    return
 
     async def deploy_a_sub(rid: str) -> None:
         async for ev in bus.subscribe(rid):
@@ -74,13 +75,16 @@ async def part1_global_vs_per_run() -> None:
 
     g_task = asyncio.create_task(telemetry_forwarder())
     a_task = asyncio.create_task(deploy_a_sub("deploy-A"))
+    # Yield once so both subscribers attach before the first event is
+    # published; the global stream has no history replay to fall back on.
     await asyncio.sleep(0)
 
     await asyncio.gather(
         dispatch("deploy-A", "Reply: rollout recorded for deployment A"),
         dispatch("deploy-B", "Reply: rollout recorded for deployment B"),
     )
-    # Both subscribers exit on their close-stream sentinels.
+    # Both subscribers return on agent.terminate: the per-deployment one
+    # on its own, the forwarder after the second deployment's.
     await asyncio.wait_for(asyncio.gather(g_task, a_task), timeout=15.0)
 
     print(f"telemetry forwarder saw {len(telemetry_kinds)} events across both deployments:")

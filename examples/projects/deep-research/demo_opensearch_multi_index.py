@@ -28,7 +28,6 @@ import sys
 import time
 import uuid
 from pathlib import Path
-from urllib.parse import urlparse
 
 from locus.deepagent import create_deepagent
 from locus.models import get_model

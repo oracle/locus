@@ -26,27 +26,33 @@ Key ideas:
 - A small set of fields *is* writable: ``event.arguments`` (so a hook
   can rewrite tool input) and ``event.cancel`` (set it to a string to
   block the call and surface that message as the tool's "result").
-- Hooks declare a ``priority``; lower runs first. The reverse order
-  applies on the "after" callbacks so cleanup unwinds in LIFO order.
+- Hooks run in the order they are listed (a ``HookRegistry`` sorts them
+  by ``priority`` first); the "after" callbacks unwind in reverse so
+  cleanup is LIFO.
 
 Run it:
     .venv/bin/python examples/notebook_10_hooks_advanced.py
 
-The default provider is the mock model; set LOCUS_MODEL_PROVIDER for a live one (e.g.
-``openai`` or ``anthropic``). Set
-``LOCUS_MODEL_PROVIDER=mock`` for offline runs; OpenAI and Anthropic
-also work.
+The default provider is OCI GenAI when ``~/.oci/config`` holds a usable profile,
+otherwise the bundled mock model; set ``LOCUS_MODEL_PROVIDER`` (``oci``,
+``openai``, ``anthropic``, ``mock``) to choose.
 
 Prerequisite: notebook 09.
 """
 
 import asyncio
 
-from config import get_model
+from config import get_model, print_config
 
 from locus.agent import Agent, AgentConfig
 from locus.hooks.provider import HookProvider
 from locus.tools.decorator import tool
+
+
+@tool
+def get_rollout_status(name: str) -> str:
+    """Read the rollout status for a deployment."""
+    return f"Status for {name}: 3/3 replicas ready, last revision healthy"
 
 
 # =============================================================================
@@ -70,7 +76,7 @@ async def example_cancel_tool():
 
         @property
         def priority(self):
-            return 50  # Lower than the default band so this runs first.
+            return 50  # SECURITY band; list it first so it runs first.
 
         async def on_before_tool_call(self, event):
             if "delete" in event.tool_name:
@@ -80,17 +86,11 @@ async def example_cancel_tool():
                 event.cancel = (
                     f"BLOCKED: {event.tool_name} is forbidden during an active change freeze"
                 )
-                # event.tool_name = "spoofed"  # would raise AttributeError
 
     @tool
     def delete_namespace(name: str) -> str:
         """Delete a Kubernetes namespace and everything in it."""
         return f"Deleted namespace {name}"
-
-    @tool
-    def get_rollout_status(name: str) -> str:
-        """Read the rollout status for a deployment."""
-        return f"Status for {name}: 3/3 replicas ready, last revision healthy"
 
     agent = Agent(
         config=AgentConfig(
@@ -107,6 +107,7 @@ async def example_cancel_tool():
     print(f"Response: {result.message[:150]}")
     for te in result.tool_executions:
         print(f"  Tool: {te.tool_name} → {te.result}")
+    print()
 
 
 # =============================================================================
@@ -116,7 +117,7 @@ async def example_cancel_tool():
 
 async def example_write_protection():
     """Probe a BeforeToolCallEvent directly — see what mutations are allowed."""
-    print("\n=== Part 2: Write Protection ===\n")
+    print("=== Part 2: Write Protection ===\n")
 
     from locus.hooks.provider import BeforeToolCallEvent
 
@@ -135,29 +136,80 @@ async def example_write_protection():
         event.tool_name = "spoofed"
     except AttributeError as e:
         print(f"tool_name (read-only): {e}")
+    print()
 
-    # Ask the model to explain the design — exercises the configured provider.
-    import time as _t
 
-    agent = Agent(model=get_model(max_tokens=80), system_prompt="Reply in one short sentence.")
-    t0 = _t.perf_counter()
-    res = await agent.arun(
-        "In one sentence, why does Locus mark BeforeToolCallEvent.tool_name as "
-        "read-only while letting hooks edit `arguments` and `cancel` — and why "
-        "does that matter for an infrastructure change log?"
+# =============================================================================
+# Part 3: list order on the way in, reverse order on the way out
+# =============================================================================
+
+
+class TraceHook(HookProvider):
+    """Append its name to a shared log on the way into and out of each tool call."""
+
+    def __init__(self, name: str, priority: int, log: list[str]):
+        self._name = name
+        self._priority = priority
+        self._log = log
+
+    @property
+    def priority(self) -> int:
+        return self._priority
+
+    async def on_before_tool_call(self, event):
+        self._log.append(f"before:{self._name}")
+
+    async def on_after_tool_call(self, event):
+        self._log.append(f"after:{self._name}")
+
+
+async def example_hook_order():
+    """Two hooks — watch the order flip on the 'after' side.
+
+    The agent runs the "before" callbacks in the order the hooks were
+    given, so list the security gate first and it sees a call before the
+    business ledger does. The "after" callbacks unwind in reverse, like
+    nested context managers: whoever was let in last is let out first,
+    and the gate gets the final word on the record.
+    """
+    print("=== Part 3: Hook ordering ===\n")
+
+    order: list[str] = []
+    gate = TraceHook("gate", priority=50, log=order)  # security band
+    ledger = TraceHook("ledger", priority=250, log=order)  # business band
+
+    agent = Agent(
+        model=get_model(),
+        tools=[get_rollout_status],
+        system_prompt="Use get_rollout_status to answer rollout questions.",
+        # Gate first: the agent dispatches before-hooks in list order and
+        # unwinds the after-hooks in reverse (LIFO).
+        hooks=[gate, ledger],
     )
-    dt = _t.perf_counter() - t0
-    print(
-        f"  [model call: {dt:.2f}s · "
-        f"{res.metrics.prompt_tokens}→{res.metrics.completion_tokens} tokens]"
-    )
-    print(f"  AI rationale: {res.message.strip()}")
+    await agent.arun("Check the rollout status of payments-api")
+
+    print(f"Call sequence: {' → '.join(order)}")
+    print("  gate runs first on the way in; ledger unwinds first on the way out.")
+    print()
 
 
 async def main():
     """Run all notebook parts."""
+    print("=" * 60)
+    print("Notebook 10: RELEASE GUARD — Guardrails Around a Deploy-Ops Agent")
+    print("=" * 60)
+    print()
+
+    print_config()
+    print()
+
     await example_cancel_tool()
     await example_write_protection()
+    await example_hook_order()
+
+    print("=" * 60)
+    print("Next: Notebook 11 — Model providers: one cloud-ops agent, swap models with a string")
+    print("=" * 60)
 
 
 if __name__ == "__main__":

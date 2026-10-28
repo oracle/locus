@@ -17,12 +17,12 @@ can't accidentally corrupt the run.
 from locus.core.state import AgentState
 from locus.core.messages import Message, Role
 
-state = AgentState(agent_id="my-agent", max_iterations=20)
-state = state.with_message(Message(role=Role.USER, content="hi"))
-state = state.with_confidence(0.85)
+original = AgentState(agent_id="my-agent", max_iterations=20)
+original = original.with_message(Message(role=Role.USER, content="hi"))
+updated = original.with_confidence(0.85)
 
-# The original is untouched.
-assert state.confidence == 0.85
+# Every with_* returns a copy; the original is untouched.
+assert original.confidence != updated.confidence
 ```
 
 ## When you'll touch state directly

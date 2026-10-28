@@ -11,7 +11,6 @@ picks the wording; the *side effects* follow the plan.
 
 ```python
 from locus.playbooks import Playbook, PlaybookStep
-from locus.playbooks.hook import PlaybookEnforcerHook
 
 # A refund-escalation runbook: verify, check eligibility, then pay out.
 refund_escalation = Playbook(
@@ -41,7 +40,7 @@ refund_escalation = Playbook(
 agent = Agent(
     model="{{ locus_example_model }}",
     tools=[lookup_order, lookup_customer, check_refund_policy, issue_refund],
-    hooks=[PlaybookEnforcerHook(playbook=refund_escalation)],
+    playbook=refund_escalation,   # installs the PlaybookEnforcerHook for you
 )
 ```
 
@@ -60,46 +59,11 @@ agent = Agent(
 
 ### 1. Build a `Playbook` in Python
 
-The same shape carries a security-flavored example: a runnable
-NIST SP 800-61 flow (the standard incident-response process) —
-**detection → analysis → containment** — wired to a security toolset.
-Detection pulls from the SIEM (a security team's log platform),
-analysis enriches each IOC (indicator of compromise — a suspicious
-hash, IP, or domain), and containment never fires before
-`enrich_indicator` has run:
-
-```python
-from locus.playbooks import Playbook, PlaybookStep
-
-nist_ir = Playbook(
-    id="nist-800-61-ir",
-    name="NIST 800-61 incident response",
-    description="Detect from the SIEM, analyze the IOCs, then contain.",
-    steps=[
-        PlaybookStep(
-            id="detection",
-            description="Pull the alert and its correlated events from the SIEM.",
-            expected_tools=["query_siem"],
-            hints=["Filter on the alert's src_ip", "Last hour first"],
-            required=True,
-        ),
-        PlaybookStep(
-            id="analysis",
-            description="Enrich every IOC from detection; confirm it's malicious.",
-            expected_tools=["enrich_indicator"],
-            hints=["Do not contain on an unenriched indicator"],
-            required=True,
-        ),
-        PlaybookStep(
-            id="containment",
-            description="Isolate the affected host from the network.",
-            expected_tools=["isolate_host"],
-            required=True,
-        ),
-    ],
-    allow_extra_tools=False,
-)
-```
+`refund_escalation` above is the whole shape: a `Playbook` of ordered
+`PlaybookStep`s. The same shape carries a security-flavored example — a
+NIST SP 800-61 flow (the standard incident-response process),
+**detection → analysis → containment**, where containment never fires
+before `enrich_indicator` has run — shown as YAML in the next step.
 
 `PlaybookStep` fields:
 
@@ -148,17 +112,22 @@ steps:
 
 ### 3. Wire the enforcer
 
+`Agent(playbook=...)` installs the `PlaybookEnforcerHook` for you.
+Construct it yourself when you want a handle on the enforcer — to
+[inspect the plan](#inspecting-execution) after the run — or when steps
+`uses` skills you resolve explicitly:
+
 ```python
 from locus.playbooks.hook import PlaybookEnforcerHook
 
-enforcer_hook = PlaybookEnforcerHook(playbook=nist_ir)
+enforcer_hook = PlaybookEnforcerHook(playbook=refund_escalation)
 agent = Agent(
     model="{{ locus_example_model }}",
-    tools=[query_siem, enrich_indicator, isolate_host],
+    tools=[lookup_order, lookup_customer, check_refund_policy, issue_refund],
     hooks=[enforcer_hook],
 )
 
-result = agent.run_sync("Triage alert ALT-7 (host WS-014) and contain if malicious.")
+result = agent.run_sync("Customer on ord-4821 reports a duplicate charge — refund if eligible.")
 ```
 
 The hook validates each tool call against the current step's
@@ -168,9 +137,9 @@ rejected (with the hook's default `block_violations=True`), as part of
 the `PlaybookEnforcer blocked: … | Hints: …` tool result the model then
 has to recover from; `description` is never sent. If you want the
 model steered up front, put the procedure in `system_prompt=` as well.
-The detection → analysis → containment order is enforced: an
-`isolate_host` call during the `detection` step is rejected, so the
-host can't be contained before `enrich_indicator` has run.
+The verify → check-eligibility → refund order is enforced: an
+`issue_refund` call during the `verify_order` step is rejected, so no
+refund fires before `check_refund_policy` has run.
 
 ## Strict vs lenient enforcement
 
@@ -279,44 +248,33 @@ the evidence on the step, then read the violations off the enforcer
 after the run:
 
 ```python
-from locus.playbooks import Playbook, PlaybookStep
-from locus.playbooks.hook import PlaybookEnforcerHook
+from locus.playbooks import PlaybookStep
 from locus.playbooks.models import RequiredProbe
 
-triage = Playbook(
-    id="alert-triage",
-    name="Alert triage",
-    steps=[
-        PlaybookStep(
-            id="detection",
-            description="Pull the alert and its authentication events from the SIEM.",
-            expected_tools=["query_siem"],
-            required_probes=[RequiredProbe(name="auth_events", match="index=auth")],
-        ),
-        PlaybookStep(
-            id="containment",
-            description="Isolate the affected host from the network.",
-            expected_tools=["isolate_host"],
-        ),
-    ],
+# The refund playbook's first step, now with evidence it must gather:
+PlaybookStep(
+    id="verify_order",
+    description="Pull the order record and its payment history.",
+    expected_tools=["lookup_order", "lookup_customer"],
+    required_probes=[RequiredProbe(name="charge_history", match="include_charges")],
 )
 
-triage_hook = PlaybookEnforcerHook(playbook=triage)
-# ... run the agent with hooks=[triage_hook] ...
+# ... run the agent with hooks=[enforcer_hook] as in step 3 ...
 
-for violation in triage_hook.enforcer.violations:
+for violation in enforcer_hook.enforcer.violations:
     print(f"{violation.violation_type} @ {violation.step_id}: {violation.message}")
 
-print(f"probe coverage (steps reached): {triage_hook.enforcer.adherence_score():.2f}")
+print(f"probe coverage (steps reached): {enforcer_hook.enforcer.adherence_score():.2f}")
 ```
 
-If the agent's `query_siem` arguments never mention `index=auth`, the
-`detection` step still closes — probes are recorded, they don't block —
-and the violation list carries an `evidence_incomplete` entry naming
-`auth_events`. `adherence_score()` averages probe coverage over the
-steps the run reached, not the whole playbook: a run that closes
-`detection` with its probe matched and then stops scores 1.00, so read
-it alongside `triage_hook.enforcer.plan.unresolved_required_steps()`. A substring match
+If the agent's `lookup_order` arguments never mention `include_charges`,
+the `verify_order` step still closes — probes are recorded, they don't
+block — and the violation list carries an `evidence_incomplete` entry
+naming `charge_history`. `adherence_score()` averages probe coverage
+over the steps the run reached, not the whole playbook: a run that
+closes `verify_order` with its probe matched and then stops scores
+1.00, so read it alongside
+`enforcer_hook.enforcer.plan.unresolved_required_steps()`. A substring match
 shows the string was asked for, not that the evidence was examined, so
 a low score is worth investigating and a high one proves little. The
 violation list is the thing to show a reviewer.
@@ -328,7 +286,7 @@ violation list is the thing to show a reviewer.
 | Agent skips a step it shouldn't | Nothing up front tells the model the procedure: it never sees a step's `description`, and sees `hints` only after a rejected call. Put the procedure in `system_prompt=` too, and check `enforcer_hook.enforcer.plan.unresolved_required_steps()` after the run — a model that answers without calling a step's tools leaves that step unresolved rather than tripping a rejection. |
 | Enforcer rejects a tool that *should* be allowed | The tool isn't in `expected_tools` for the current step. Add it, or set `allow_extra_tools=True` if the policy allows. |
 | `max_tool_calls` exhausts mid-step | Bump the limit or split the step in two — the model may need search-and-refine cycles. |
-| YAML loads but the agent doesn't follow it | Pass it through `PlaybookEnforcerHook(...)` — `Playbook` alone is just data. |
+| YAML loads but the agent doesn't follow it | Pass it as `Agent(playbook=...)` or through `PlaybookEnforcerHook(...)` — `Playbook` alone is just data. |
 
 ## Source and notebook
 

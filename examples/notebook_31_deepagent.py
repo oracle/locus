@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -27,15 +26,14 @@ and observability primitive in the SDK attaches normally.
   context window.
 - ``datastores={name: {retriever, description, top_k}}``: auto-wire a
   ``search_<name>`` tool from any ``RAGRetriever`` and prepend a routing
-  block to the system prompt. Part 5 wires an in-memory ``QdrantVectorStore`` +
-  ``OpenAIEmbeddings`` retriever over prior incident notes and gracefully
-  skips when no embedding key is set.
+  block to the system prompt. Part 5 wires an in-memory ``QdrantVectorStore``
+  behind the shared ``get_embedder()`` into a retriever over prior incident
+  notes and gracefully skips when no embedding key is set.
 
 Run it:
     python examples/notebook_31_deepagent.py
 
-The default provider is the bundled mock model; set LOCUS_MODEL_PROVIDER
-to openai / anthropic for a live model. Set
+The default provider is OCI GenAI when ``~/.oci/config`` holds a usable profile, otherwise the bundled mock model; set ``LOCUS_MODEL_PROVIDER`` (``oci``, ``openai``, ``anthropic``, ``mock``) to choose. Set
 ``LOCUS_MODEL_PROVIDER=mock`` for offline runs.
 
 Prerequisites:
@@ -52,12 +50,7 @@ import asyncio
 from config import get_embedder, get_model
 from pydantic import BaseModel, Field
 
-from locus.deepagent import (
-    SubAgentDef,
-    TodoState,
-    create_deepagent,
-    make_todo_tools,
-)
+from locus.deepagent import SubAgentDef, TodoState, create_deepagent
 from locus.observability import get_event_bus, run_context
 from locus.tools import tool
 
@@ -304,8 +297,11 @@ async def part4_observability() -> None:
     async with run_context() as rid:
         collector = asyncio.create_task(_collect(rid))
         result = await agent.arun("Review the payments-worker service.")
-        await asyncio.sleep(0.1)
-        collector.cancel()
+        # Closing the stream ends the subscriber's ``async for``; awaiting the
+        # collector then guarantees every event published during the run was
+        # counted before we print — no sleep-and-hope.
+        await get_event_bus().close_stream(rid)
+        await asyncio.wait_for(collector, timeout=5.0)
 
     print("deepagent.* events seen:")
     for ev_type in sorted(set(deepagent_events)):
@@ -339,7 +335,7 @@ async def part5_datastores() -> None:
             print(f"  - {n}")
         return
 
-    from locus.rag import OpenAIEmbeddings, QdrantVectorStore, RAGRetriever
+    from locus.rag import QdrantVectorStore, RAGRetriever
 
     embedder = get_embedder()
     probe = await embedder.embed_query("probe")

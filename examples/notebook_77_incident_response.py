@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -35,8 +34,8 @@ Models the loop an infra/devops on-call engineer runs when a page fires::
 - output_schema=Postmortem: the final report is a typed Pydantic
   instance, ready to file into the reliability-review database.
 
-Run it
-    # Default: the bundled mock model (set LOCUS_MODEL_PROVIDER for a live provider)
+Run it:
+    # Default: OCI GenAI if ~/.oci/config has a usable profile, else the bundled mock model
     python examples/notebook_77_incident_response.py
 
     # Offline / no credentials:
@@ -170,12 +169,14 @@ async def investigate(state: dict[str, Any]) -> dict[str, Any]:
         "report": InvestigatorReport(
             source=source,
             findings=findings or [findings_text or f"(no {source} signal)"],
-            confidence=0.7,
+            confidence=0.7,  # placeholder score; a real investigator would self-rate
         )
     }
 
 
 async def synthesize(state: dict[str, Any]) -> dict[str, Any]:
+    # Each Send's output is merged into state under its auto-generated
+    # send_id, so the investigator reports are collected by shape, not by key.
     reports = [v["report"] for v in state.values() if isinstance(v, dict) and "report" in v]
     bullets = "\n".join(f"[{r.source}] " + "; ".join(r.findings) for r in reports)
     agent = _make_agent("synthesize", state["__model__"])
@@ -223,8 +224,6 @@ async def write_postmortem(state: dict[str, Any]) -> dict[str, Any]:
     ``result.parsed`` must be populated — if the model can't honor the JSON
     schema we surface that as a hard error rather than fabricating a record.
     """
-    import asyncio as _asyncio
-
     reports: list[InvestigatorReport] = state.get("reports", [])
     bullets = "\n".join(f"- [{r.source}] {'; '.join(r.findings)}" for r in reports)
     agent = Agent(
@@ -257,7 +256,7 @@ async def write_postmortem(state: dict[str, Any]) -> dict[str, Any]:
             break
         except Exception as exc:  # noqa: BLE001 — retry transient provider flakiness
             last_exc = exc
-            await _asyncio.sleep(0.5 * (attempt + 1))
+            await asyncio.sleep(0.5 * (attempt + 1))
     if result is None:
         raise RuntimeError(
             f"Postmortem writer failed after 3 attempts. Last error: {last_exc!r}"
@@ -266,9 +265,9 @@ async def write_postmortem(state: dict[str, Any]) -> dict[str, Any]:
     if pm is None:
         raise RuntimeError(
             "Postmortem writer returned no parsed Postmortem. The configured "
-            "model could not honor the JSON schema. Use a stronger model "
-            "(e.g. openai.gpt-4o, openai.gpt-5, anthropic.claude-3-5-sonnet) "
-            f"for notebook 77. Raw output: {result.message!r}"
+            "model could not honor the JSON schema. Set LOCUS_MODEL_PROVIDER / "
+            "LOCUS_MODEL_ID to a provider and model that support structured "
+            f"output. Raw output: {result.message!r}"
         )
     return {"postmortem": pm}
 
@@ -300,7 +299,8 @@ def build_runbook() -> StateGraph:
     return g
 
 
-# Driver.
+# Run the runbook once, resuming through the human page if it fires, then
+# print the structured postmortem.
 
 
 def _print_postmortem(pm: Postmortem | None) -> None:
@@ -314,9 +314,9 @@ def _print_postmortem(pm: Postmortem | None) -> None:
     print(f"  Root cause:      {pm.root_cause_hypothesis}")
     print(f"  Mitigation:      {pm.mitigation_applied}")
     print(
-        f"  Contributing:    " + ("\n                   ".join(pm.contributing_factors) or "(none)")
+        "  Contributing:    " + ("\n                   ".join(pm.contributing_factors) or "(none)")
     )
-    print(f"  Follow-ups:      " + "\n                   ".join(pm.follow_up_actions))
+    print("  Follow-ups:      " + "\n                   ".join(pm.follow_up_actions))
 
 
 async def main() -> None:
@@ -340,6 +340,9 @@ async def main() -> None:
             "Customer-facing checkout is degraded for paying users across "
             "multiple regions; on-call has been paged."
         ),
+        # The model rides along in graph state so every node can build its
+        # agent from it; it is re-injected on each Command(resume=...) because
+        # a resumed run starts from the checkpointed state, not from here.
         "__model__": model,
     }
 

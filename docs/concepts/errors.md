@@ -89,17 +89,19 @@ import time
 from locus.core.errors import GSARValidationError, LocusError
 from locus.models.failover import FailoverReason, classify
 
-for attempt in range(3):
-    try:
-        return agent.run_sync(prompt)
-    except GSARValidationError:
-        return fallback_path(prompt)     # answer not grounded — degrade gracefully
-    except LocusError:
-        raise                            # everything else from the hierarchy: no retry
-    except Exception as exc:             # provider errors arrive unwrapped
-        if classify(exc).reason is not FailoverReason.RATE_LIMIT:
-            raise                        # anything but a rate limit: no retry
-        time.sleep(2 ** attempt)         # rate limit — exponential back-off
+def run_with_backoff(prompt: str):
+    for attempt in range(3):
+        try:
+            return agent.run_sync(prompt)
+        except GSARValidationError:
+            return fallback_path(prompt)     # answer not grounded — degrade gracefully
+        except LocusError:
+            raise                            # everything else from the hierarchy: no retry
+        except Exception as exc:             # provider errors arrive unwrapped
+            if classify(exc).reason is not FailoverReason.RATE_LIMIT:
+                raise                        # anything but a rate limit: no retry
+            time.sleep(2 ** attempt)         # rate limit — exponential back-off
+    raise RuntimeError("still rate-limited after 3 attempts")
 ```
 
 ### Chained causes

@@ -39,10 +39,9 @@ Set LOCUS_MODEL_PROVIDER=mock for an offline run.
 """
 
 import asyncio
-import os
 import sys
 
-from config import get_model, print_config
+from config import get_model, print_config, resolved_provider
 
 from locus.agent import Agent
 from locus.memory.backends import MemoryCheckpointer
@@ -109,7 +108,7 @@ async def scripted_run(agent: Agent) -> None:
         print(f"  you  : {line}")
         await say(agent, thread_id, line)
 
-    if os.environ.get("LOCUS_MODEL_PROVIDER", "mock").lower() == "mock":
+    if resolved_provider() == "mock":
         # Be straight about it: the mock answers the same way whatever it is
         # asked, so this run shows the loop and the tool calls but proves
         # nothing about memory. Against a real model the third answer names
@@ -170,7 +169,7 @@ async def main() -> None:
 
     print()
     print("=" * 60)
-    print("Next: Notebook 06 — Streaming")
+    print("Next: Notebook 05 — Conversation memory: remembering what you told it")
     print("=" * 60)
 
 

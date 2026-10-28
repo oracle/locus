@@ -175,10 +175,10 @@ builder, validation-error formatter.
   covers both the standalone `parse_structured()` parser (useful for
   non-Agent flows) and the Agent `output_schema=` integration above.
 - [`notebook_26_debate_with_judge.py`](https://github.com/oracle/locus/blob/main/examples/notebook_26_debate_with_judge.py)
-  — typed `VerificationResult` as the workflow boundary artifact.
+  — typed `Verdict` as the workflow boundary artifact.
 - [`notebook_77_incident_response.py`](https://github.com/oracle/locus/blob/main/examples/notebook_77_incident_response.py)
   — typed `Postmortem` as the terminal artifact of an incident graph.
-- [`notebook_78_procurement_approval.py`](https://github.com/oracle/locus/blob/main/examples/notebook_78_procurement_approval.py)
+- [`notebook_78_concession_approval.py`](https://github.com/oracle/locus/blob/main/examples/notebook_78_concession_approval.py)
   — typed `ConcessionDecision` from a risk-tiered approval flow.
 - [`notebook_79_contract_review.py`](https://github.com/oracle/locus/blob/main/examples/notebook_79_contract_review.py)
   — typed `ContractDecision` from a parallel-review + negotiation loop.

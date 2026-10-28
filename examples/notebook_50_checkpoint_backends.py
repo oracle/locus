@@ -7,8 +7,9 @@ A real customer-support case runs for days and survives restarts,
 shift handoffs, and redeploys. Locus persists that conversation state
 in a durable store — the team's system of record for checkpointed case
 state. The checkpointer contract is backend-agnostic; this notebook
-drives it against ``S3Backend`` — S3 / MinIO / Cloudflare R2 via boto3 —
-a durable store over a single bucket, so case state outlives any one
+drives it against ``S3Backend`` — OCI Object Storage through its
+S3-compatible API, or S3 / MinIO / Cloudflare R2, all via boto3 — a
+durable store over a single bucket, so case state outlives any one
 process. Object storage has no index, so it reports ``search=False``;
 the notebook branches on the capability descriptor rather than assuming.
 Notebook 05 covers the checkpointer contract itself. Portable SQL
@@ -21,13 +22,19 @@ key/value deployments can use Redis.
 - Vacuum checkpoints past the conversation-retention window.
 - Branch on the capability descriptor for search.
 
-Run it
-    # Requires an S3-compatible endpoint (e.g. MinIO) + a bucket:
-    export S3_ENDPOINT_URL=http://localhost:9000   # MinIO / R2 endpoint
+Run it:
+    # OCI Object Storage (S3-compatible API) — the bucket lives in your
+    # tenancy; the credentials are an OCI "Customer Secret Key" pair:
+    export S3_ENDPOINT_URL=https://<namespace>.compat.objectstorage.<region>.oraclecloud.com
     export S3_BUCKET=locus-checkpoints
+    export AWS_ACCESS_KEY_ID=<customer-secret-key-id>
+    export AWS_SECRET_ACCESS_KEY=<customer-secret-key>
+    python examples/notebook_50_checkpoint_backends.py
+
+    # Any other S3-compatible endpoint works the same way, e.g. a local MinIO:
+    export S3_ENDPOINT_URL=http://localhost:9000
     export AWS_ACCESS_KEY_ID=minioadmin
     export AWS_SECRET_ACCESS_KEY=minioadmin
-    python examples/notebook_50_checkpoint_backends.py
 
 Without the env vars the notebook prints what's missing and exits cleanly
 so CI stays green. The in-memory checkpointer covered in notebook 05 is
@@ -58,7 +65,7 @@ def _make_backend() -> S3Backend:
     return S3Backend(
         bucket=os.environ["S3_BUCKET"],
         endpoint_url=os.environ.get("S3_ENDPOINT_URL") or None,
-        prefix="locus_notebook_52/",
+        prefix="locus_notebook_50/",
     )
 
 
@@ -76,8 +83,8 @@ async def main() -> None:
         for name in missing:
             print(f"  - {name}")
         print(
-            "\nStand up an S3-compatible endpoint (MinIO / R2), create a "
-            "bucket, then set the variables above and re-run."
+            "\nCreate a bucket on OCI Object Storage (or any S3-compatible "
+            "endpoint such as MinIO), then set the variables above and re-run."
         )
         return
 

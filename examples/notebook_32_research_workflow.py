@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -28,8 +27,8 @@ investigation end-to-end the same way you would stream an Agent run.
 - Compose custom graphs from individual node primitives.
 - Read the final state: summary, structured output, grounding score.
 
-Run it
-    # Default: the bundled mock model (set LOCUS_MODEL_PROVIDER for a live provider)
+Run it:
+    # Default: OCI GenAI if ~/.oci/config has a usable profile, else the bundled mock model
     python examples/notebook_32_research_workflow.py
 
     # Offline / no credentials:
@@ -208,6 +207,9 @@ async def part2_custom_graph() -> None:
     graph.add_edge(START, "execute")
     graph.add_edge("execute", "summarize")
     graph.add_edge("summarize", "grounding_eval")
+    # With max_replans=0 and max_regenerations=0 the router only ever returns
+    # END; "regenerate" / "replan" are mapped to END so compile() sees every
+    # label the router is able to emit.
     graph.add_conditional_edges(
         "grounding_eval",
         router,

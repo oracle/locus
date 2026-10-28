@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -17,21 +16,22 @@ abstains. The model gathers and proposes; Python decides what ships.
 
 This is the differentiator. A commodity "AWS agent" will confidently narrate
 misconfigurations it never actually observed. Here, an ungrounded claim cannot
-become a Evidence — it abstains — so the report is trustworthy by construction.
+become an ``Evidence`` — it abstains — so the report is trustworthy by construction.
 
 Maps to OWASP ASI: Identity & Privilege Abuse (the root-access-key class of
 finding); the read-only-by-construction tooling is the control that keeps the
 auditor itself from becoming a liability.
 
 Run it:
-    python examples/notebook_81_cloud_posture_agent.py
+    python packages/locus-sdk-security/examples/notebook_81_cloud_posture_agent.py
 
 Part 1 (the grounding decision) runs fully offline and deterministically — no
 model, no cloud account. Part 2 builds the live agent; it runs against a real
-account only when BOTH a real model provider (``LOCUS_MODEL_PROVIDER=openai`` /
-``anthropic``) and AWS credentials (the read-only ``locus-security-audit``
-profile, or ``LOCUS_AWS_PROFILE``) are present. With neither, it prints the
-bring-your-own-credentials note and exits cleanly.
+account only when BOTH a real model (``get_model()`` auto-detects OCI GenAI
+from your OCI profile, or set ``LOCUS_MODEL_PROVIDER``) and AWS credentials
+(the read-only ``locus-security-audit`` profile, or ``LOCUS_AWS_PROFILE``)
+are present. With neither, it prints the bring-your-own-credentials note and
+exits cleanly.
 
 Prerequisites:
 - Notebook 31 (DeepAgent) — the core this factory wraps.
@@ -44,7 +44,7 @@ from __future__ import annotations
 import asyncio
 import os
 
-from config import get_model
+from config import MockModel, get_model
 
 from locus.control.taxonomy import OwaspASI
 from locus_security import (
@@ -167,18 +167,20 @@ def _aws_available() -> bool:
 async def part2_live_agent() -> None:
     print("\n--- Part 2: the live cloud-posture agent ---")
     controls = SecurityControls(min_gsar=0.6, min_confidence=0.6)
-    analyst = create_soc_analyst(model=get_model(), controls=controls, max_iterations=14)
+    model = get_model()
+    analyst = create_soc_analyst(model=model, controls=controls, max_iterations=14)
 
     tool_names = sorted(getattr(t, "name", "?") for t in analyst.config.tools)
     print(f"analyst tools: {tool_names}")
     print("read-only by construction: use_aws refuses any non-describe/list/get call.")
 
-    provider = os.environ.get("LOCUS_MODEL_PROVIDER", "mock").lower()
-    if provider == "mock" or not _aws_available():
+    # get_model() already auto-detected OCI (or honoured LOCUS_MODEL_PROVIDER);
+    # only the bundled mock means there is no real model to drive the audit.
+    if isinstance(model, MockModel) or not _aws_available():
         print(
             "\nLive run skipped (bring-your-own-credentials).\n"
-            "  Set LOCUS_MODEL_PROVIDER=openai|anthropic (+ the API key) and configure\n"
-            "  the read-only locus-security-audit AWS profile to audit a real account.\n"
+            "  Configure an OCI profile (or set LOCUS_MODEL_PROVIDER to a live provider)\n"
+            "  and the read-only locus-security-audit AWS profile to audit a real account.\n"
             "  Offline, Part 1 already showed the grounding decision that gates the report."
         )
         return

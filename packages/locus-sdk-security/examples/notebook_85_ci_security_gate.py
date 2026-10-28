@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -23,8 +22,8 @@ In real CI you assess your one agent and exit non-zero on failure:
 This notebook runs offline and shows the gate catching a regression: a
 "previous" build that passes and a "candidate" that fails the bar.
 
-Run:
-    python examples/notebook_85_ci_security_gate.py
+Run it:
+    python packages/locus-sdk-security/examples/notebook_85_ci_security_gate.py
 """
 
 from __future__ import annotations
@@ -74,10 +73,9 @@ async def main() -> int:
         "PASSED — safe to merge" if candidate_ok else "FAILED — regression caught; block the merge"
     )
     print(f"Candidate gate: {verdict}.")
-    print("\nIn real CI you assess your one agent and exit non-zero to block the merge:")
-    print("    if (await assure(target))[0].confidence < THRESHOLD: raise SystemExit(1)")
     # This demo returns 0 so it stays runnable as an example; the gating exit
-    # lives in the snippet above, which you drop into your pipeline step.
+    # lives in the module docstring's CI snippet, which you drop into your
+    # pipeline step.
     return 0
 
 

@@ -45,12 +45,12 @@ Key concepts:
 Run it::
 
     # 1. Pick a tenancy-side profile for the OCI control-plane calls
-    export OCI_USE_PROFILE=API_FREE_TIER         # or any other profile in ~/.oci/config
-    export OCI_USE_REGION=ca-toronto-1           # whichever region you have resources in
-    export OCI_USE_TENANCY=ocid1.tenancy.oc1...  # your tenancy OCID (for compartment-scoped reads)
+    export OCI_USE_PROFILE=<your-profile>          # any profile in ~/.oci/config
+    export OCI_USE_REGION=us-ashburn-1             # whichever region you have resources in
+    export OCI_USE_TENANCY=ocid1.tenancy.oc1...    # tenancy OCID for compartment-scoped reads
 
     # 2. Pick a GenAI-side profile for the model driving the agent
-    export OCI_GENAI_PROFILE=LUIGI_FRA_API       # any profile with OCI GenAI access
+    export OCI_GENAI_PROFILE=<your-genai-profile>  # any profile with OCI GenAI access
     export OCI_GENAI_REGION=us-chicago-1
 
     python examples/notebook_36_oci_tools.py

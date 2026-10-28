@@ -13,7 +13,7 @@ from locus.providers.web_fetch import HTTPXWebFetcher
 from locus.providers.web_search import OpenAISearchPreviewProvider
 from locus.providers.image import OpenAIImageProvider
 from locus.providers.speech import OpenAISpeechProvider
-from locus.models.native.openai import OpenAIModel
+from locus.models import OpenAIModel
 
 agent = Agent(
     model="openai:gpt-4o-mini",

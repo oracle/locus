@@ -29,7 +29,7 @@ export OCI_PROFILE=<your-profile>          # api_key or security_token
 export OCI_REGION=us-chicago-1
 export OCI_COMPARTMENT=ocid1.compartment.oc1..…
 
-# Oracle 26ai side — see notebook 45 for wallet setup.
+# Oracle 26ai side — see notebook 38 for wallet setup.
 export ORACLE_DSN=mydb_low
 export ORACLE_USER=locus_app
 export ORACLE_PASSWORD='<app-password>'

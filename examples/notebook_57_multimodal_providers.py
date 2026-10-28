@@ -18,8 +18,8 @@ you don't write the wrapper.
   method, e.g. an internal transaction-ledger search.
 - Optional OpenAI-backed providers (image, speech, web search).
 
-Run it
-    # Default: the bundled mock model (set LOCUS_MODEL_PROVIDER for a live provider)
+Run it:
+    # Default: OCI GenAI if ~/.oci/config has a usable profile, else the bundled mock model
     python examples/notebook_57_multimodal_providers.py
 
     # Offline / no credentials:
@@ -36,30 +36,54 @@ import os
 from config import get_model
 
 from locus.agent import Agent, AgentConfig
+from locus.providers import (
+    BaseImageGenerationProvider,
+    BaseSpeechProvider,
+    BaseWebFetchProvider,
+    BaseWebSearchProvider,
+)
+from locus.providers.types import SearchResult
 from locus.providers.web_fetch import HTTPXWebFetcher
+
+
+class StaticLedgerSearch:
+    """Hard-coded ledger hits — swap for your real payments-ledger client.
+
+    Deliberately not a subclass of anything: the provider Protocols are
+    structural, so implementing ``search`` is all it takes.
+    """
+
+    async def search(self, query, *, max_results=5):
+        return [
+            SearchResult(
+                title=f"Transaction {i + 1} matching {query!r}",
+                url=f"https://ledger.example/txns/{i}",
+                snippet="settled charge, USD 49.00 (mock)",
+            )
+            for i in range(min(max_results, 3))
+        ]
 
 
 # Part 1: the four provider Protocols. Implement one and Locus accepts it.
 
 
 def example_protocols():
-    """Print the four Protocols you can implement to plug a backend."""
+    """Check real objects against the four runtime_checkable Protocols."""
     print("=== Part 1: The four provider Protocols ===\n")
 
-    print("locus.providers exposes four runtime_checkable Protocols:")
+    fetcher = HTTPXWebFetcher(timeout_seconds=10.0)
+    ledger = StaticLedgerSearch()
+    checks = [
+        ("HTTPXWebFetcher()", fetcher, BaseWebFetchProvider),
+        ("StaticLedgerSearch()", ledger, BaseWebSearchProvider),
+        ("HTTPXWebFetcher()", fetcher, BaseSpeechProvider),
+        ("StaticLedgerSearch()", ledger, BaseImageGenerationProvider),
+    ]
+    for label, obj, proto in checks:
+        print(f"  isinstance({label}, {proto.__name__}) = {isinstance(obj, proto)}")
     print()
-    print("  BaseWebSearchProvider:    async search(query, max_results)")
-    print("                            -> list[SearchResult]")
-    print("  BaseWebFetchProvider:     async fetch(url, max_chars, keep_html)")
-    print("                            -> WebPage")
-    print("  BaseImageGenerationProvider: async generate(prompt, size, n)")
-    print("                            -> list[ImageResult]")
-    print("  BaseSpeechProvider:       capabilities: frozenset[str]")
-    print("                            async speak(text, voice)")
-    print("                            async transcribe(audio_bytes, content_type)")
-    print()
-    print("Any duck-typed object implementing the methods passes")
-    print("`isinstance(obj, BaseXxxProvider)` — no subclassing required.")
+    print("The Protocols are structural: StaticLedgerSearch subclasses nothing,")
+    print("yet it passes as a web-search provider because it has `search`.")
 
 
 # Part 2: setting a provider on AgentConfig auto-registers the tool.
@@ -81,7 +105,7 @@ def example_auto_register():
         )
     )
 
-    print(f"Registered tools: {sorted(agent._tool_registry.tools.keys())}")
+    print(f"Registered tools: {sorted(agent.tools.tools.keys())}")
     print()
     print("Notice `web_fetch` appears even though we didn't pass it via `tools=`.")
     print("Setting `web_fetch=` is enough — locus auto-registered the wrapper.")
@@ -110,7 +134,7 @@ async def example_live_fetch():
         )
     )
 
-    tool = agent._tool_registry.get("web_fetch")
+    tool = agent.tools.get("web_fetch")
     assert tool is not None, "web_fetch tool was not registered"
 
     # Calling tool.fn directly bypasses the model so we can verify wiring
@@ -130,21 +154,6 @@ def example_byo_backend():
     """A toy transaction-ledger search provider — any duck-typed class works."""
     print("\n=== Part 4: Bring your own ledger backend ===\n")
 
-    from locus.providers.types import SearchResult
-
-    class StaticLedgerSearch:
-        """Hard-coded ledger hits — swap for your real payments-ledger client."""
-
-        async def search(self, query, *, max_results=5):
-            return [
-                SearchResult(
-                    title=f"Transaction {i + 1} matching {query!r}",
-                    url=f"https://ledger.example/txns/{i}",
-                    snippet="settled charge, USD 49.00 (mock)",
-                )
-                for i in range(min(max_results, 3))
-            ]
-
     agent = Agent(
         config=AgentConfig(
             model=get_model(),
@@ -152,7 +161,7 @@ def example_byo_backend():
             web_search=StaticLedgerSearch(),
         )
     )
-    print(f"Registered tools: {sorted(agent._tool_registry.tools.keys())}")
+    print(f"Registered tools: {sorted(agent.tools.tools.keys())}")
     print()
     print("The model now has a `web_search(query, max_results)` tool that")
     print("calls our StaticLedgerSearch.search() under the hood. Swap it for")

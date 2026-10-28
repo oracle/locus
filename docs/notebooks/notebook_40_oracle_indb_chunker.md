@@ -32,7 +32,7 @@ PL/SQL chunker is the subject.
 - `@tool chunk_paragraph(text)` / `@tool chunk_table_rows(limit)` —
   exposing each shape as an agent tool.
 - One connection envelope (DSN, user, wallet) shared with the loader
-  (notebook 05) and the vector store (notebook 02).
+  (notebook 39) and the vector store (notebook 38).
 
 ## Prerequisites
 

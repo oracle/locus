@@ -28,7 +28,7 @@ Ticket splitter ──> N analysts (parallel via Send) ──> Synthesizer
 ## Run
 
 ```bash
-python examples/notebook_20_map_reduce_code_review.py
+python examples/notebook_20_map_reduce_support_triage.py
 ```
 
 The default provider is the bundled mock model. Set
@@ -39,5 +39,5 @@ live model. Set
 ## Source
 
 ````python
---8<-- "examples/notebook_20_map_reduce_code_review.py"
+--8<-- "examples/notebook_20_map_reduce_support_triage.py"
 ````

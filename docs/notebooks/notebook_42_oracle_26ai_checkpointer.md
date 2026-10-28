@@ -22,7 +22,7 @@ The user never calls `cp.save` — the agent does that for them.
 
 ## Prerequisites
 
-The checkpointer and the vector store from notebook 45 can share a
+The checkpointer and the vector store from notebook 38 can share a
 single Autonomous Database:
 
 ```bash
@@ -45,7 +45,7 @@ python examples/notebook_42_oracle_26ai_checkpointer.py
 
 ## Schema hygiene
 
-This notebook writes to `locus_notebook_06` (overridable via
+This notebook writes to `locus_notebook_42` (overridable via
 `table_name=`). For production, pre-create the table out-of-band as a
 least-privileged app schema owner and run the application user with
 `INSERT / SELECT / UPDATE / DELETE` only — see the

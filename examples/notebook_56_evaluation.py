@@ -18,8 +18,8 @@ eval framework for the common cases.
 - EvalRunner runs the agent against every case.
 - EvalReport summarises pass/fail counts and an average score.
 
-Run it
-    # Default: the bundled mock model (set LOCUS_MODEL_PROVIDER for a live provider)
+Run it:
+    # Default: OCI GenAI if ~/.oci/config has a usable profile, else the bundled mock model
     python examples/notebook_56_evaluation.py
 
     # Offline / no credentials:
@@ -79,7 +79,7 @@ def example_evaluation():
                 "Request: a single internal report counting total active "
                 "accounts, with no personal data. Allow or block?"
             ),
-            expected_output_not_contains=["hipaa-violation", "data-breach"],
+            expected_output_not_contains=["hipaa", "breach"],
         ),
     ]
 

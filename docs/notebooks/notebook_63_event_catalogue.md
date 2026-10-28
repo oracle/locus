@@ -25,7 +25,7 @@ Prefix map::
 
 - List every `EV_*` constant and its category prefix (read at import
   time from `locus.observability.emit`).
-- Drive a two-stage dispute-triage `SequentialPipeline` + `LoopAgent`
+- Drive a two-stage dispute-triage `SequentialPipeline`
   that surfaces `composition.*` events end-to-end.
 
 Run it (defaults to the bundled mock model; set `LOCUS_MODEL_PROVIDER` to `openai` / `anthropic` for a live model):

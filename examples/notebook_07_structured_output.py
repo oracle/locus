@@ -11,6 +11,7 @@ the round-trip happen. The typed contracts are ordinary Pydantic models —
 the same ``ContactPoint``, ``Resolution``, and priority enums a Locus
 support agent emits ticket updates with.
 
+Key ideas:
 - ``extract_json`` and ``parse_structured`` — pull JSON out of a model
   reply and validate it against a Pydantic schema (a typed model that
   the LLM must produce JSON for).
@@ -26,22 +27,23 @@ support agent emits ticket updates with.
   signal a downstream grounding step uses to abstain.
 
 Run it:
-    # The bundled mock model is the default; set LOCUS_MODEL_PROVIDER for a live provider.
+    # Default: OCI GenAI if ~/.oci/config has a usable profile, else the bundled mock model
     LOCUS_MODEL_PROVIDER=openai LOCUS_MODEL_ID=gpt-4o python examples/notebook_07_structured_output.py
 
-    # Offline:
-    LOCUS_MODEL_PROVIDER=mock python examples/notebook_07_structured_output.py
+    # There is no offline run: every part needs a live model that can
+    # produce JSON, so under the mock provider the notebook exits at once.
 
 Prerequisites:
-- An OpenAI or Anthropic API key (or set ``LOCUS_MODEL_PROVIDER`` to
-  ``openai`` / ``anthropic`` / ``mock``).
-- A model that supports constrained JSON decoding for Part 8 — the
+- A live, JSON-capable model: OCI GenAI (the default when an OCI profile
+  is present), or an OpenAI / Anthropic key with the matching
+  ``LOCUS_MODEL_PROVIDER``.
+- Constrained JSON decoding for Part 8 — the
   ``check_structured_output_capable()`` helper exits cleanly under mock.
 """
 
 import asyncio
+import functools
 import json
-import time
 from enum import StrEnum
 
 from config import get_model
@@ -63,6 +65,17 @@ from locus.core.structured import (
 # ---------------------------------------------------------------------------
 
 
+@functools.lru_cache(maxsize=1)
+def _model():
+    """One model client for the whole notebook.
+
+    Building a provider client per call re-reads credentials and re-opens
+    HTTP pools eight times for no gain; the per-call knobs (system prompt,
+    token cap) live on the Agent instead.
+    """
+    return get_model()
+
+
 def _banner(result, label: str = "") -> None:
     m = result.metrics
     tag = f" {label}" if label else ""
@@ -75,14 +88,9 @@ def _banner(result, label: str = "") -> None:
 async def _llm_call(
     prompt: str, *, system: str = "Reply in one sentence.", max_tokens: int = 100
 ) -> str:
-    agent = Agent(model=get_model(max_tokens=max_tokens), system_prompt=system)
-    t0 = time.perf_counter()
+    agent = Agent(model=_model(), system_prompt=system, max_tokens=max_tokens)
     res = await agent.arun(prompt)
-    dt = time.perf_counter() - t0
-    print(
-        f"  [model call: {dt:.2f}s · "
-        f"{res.metrics.prompt_tokens}→{res.metrics.completion_tokens} tokens]"
-    )
+    _banner(res)
     return res.message.strip()
 
 
@@ -324,31 +332,28 @@ async def main() -> None:
     # =========================================================================
     print("\n=== Part 8: Agent(output_schema=IssueList) ===\n")
     live_agent = Agent(
-        model=get_model(max_tokens=300),
+        model=_model(),
+        max_tokens=300,
         output_schema=IssueList,
         system_prompt=(
             "You are a support-ticket triager. Report exactly three "
             "distinct issues for the ticket under review as a structured list."
         ),
     )
-    t0 = time.perf_counter()
     live = await live_agent.arun(
         "Triage: a customer reports the mobile app crashes on checkout, they were "
         "double-charged for one order, and the help center login link is broken. "
         "Top three issues."
     )
-    dt = time.perf_counter() - t0
-    print(
-        f"  [model call: {dt:.2f}s · "
-        f"{live.metrics.prompt_tokens}→{live.metrics.completion_tokens} tokens]"
-    )
+    _banner(live, "output_schema")
     report: IssueList | None = live.parsed
     if not isinstance(report, IssueList):
         raise TypeError(
             "Triage agent returned no parsed IssueList. The configured model "
-            "could not honor the JSON schema. Use a stronger model "
-            "(e.g. openai.gpt-4o, openai.gpt-5, anthropic.claude-3-5-sonnet) "
-            f"for notebook 07 (Part 8). Raw output: {live.message!r}"
+            "could not honor the JSON schema. Use a stronger model for "
+            "notebook 07 (Part 8) — e.g. LOCUS_MODEL_PROVIDER=oci "
+            "LOCUS_MODEL_ID=openai.gpt-4o, or LOCUS_MODEL_PROVIDER=openai "
+            f"LOCUS_MODEL_ID=gpt-4o. Raw output: {live.message!r}"
         )
     for f in report.issues:
         print(f"  {f.title[:40]:<40}  confidence={f.confidence:.2f}  priority={f.priority.value}")

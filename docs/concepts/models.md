@@ -113,19 +113,22 @@ export — so audit those separately.
 
 ## Custom providers
 
-Implement the `ModelProtocol` interface — two methods (`complete` and
-`stream`) — and you are a first-class provider. No adapter layer, no
+Implement the `ModelProtocol` interface — `complete()` returns one
+`ModelResponse`, `stream()` yields `ModelChunkEvent`s — and you are a
+first-class provider. No adapter layer, no
 inheritance from `OpenAIModel`. Register the class with the prefix you
 want; it becomes a valid model id. This is the hook for a self-hosted
 model behind your own audit proxy — every prompt logged to your own audit
 store before it reaches the LLM.
 
 ```python
-from locus.models import register_provider
+from collections.abc import AsyncIterator
+from locus.core.events import ModelChunkEvent
+from locus.models import ModelResponse, register_provider
 
 class AuditedModel:                          # duck-typed ModelProtocol
-    async def complete(self, messages, tools=None, **kw): ...  # tee → audit store, then forward
-    async def stream(self, messages, tools=None, **kw): ...
+    async def complete(self, messages, tools=None, **kw) -> ModelResponse: ...  # tee → audit store, then forward
+    async def stream(self, messages, tools=None, **kw) -> AsyncIterator[ModelChunkEvent]: ...
 
 register_provider("audited", lambda model_id, **kw: AuditedModel(model_id, **kw))
 
@@ -145,7 +148,7 @@ import os
 from pydantic import SecretStr
 from locus.models.credentials import Credential, CredentialPool
 from locus.models.pooled import CredentialPoolModel
-from locus.models.native.anthropic import AnthropicModel
+from locus.models import AnthropicModel
 
 pool = CredentialPool([
     Credential(label="primary", api_key=SecretStr(os.environ["KEY_A"])),
@@ -153,7 +156,7 @@ pool = CredentialPool([
 ])
 
 def _build(cred: Credential) -> AnthropicModel:
-    return AnthropicModel(model="claude-sonnet-5-5", api_key=cred.api_key)
+    return AnthropicModel(model="claude-sonnet-5-5", api_key=cred.api_key.get_secret_value())
 
 agent = Agent(
     model=CredentialPoolModel(pool=pool, build_model=_build),

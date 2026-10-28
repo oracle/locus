@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -38,7 +37,7 @@ calling kubectl, so the script runs offline with no cluster, no creds, no
 network. Swap that one function for a real `kubectl rollout` call and the
 gate is unchanged.
 
-Run it
+Run it:
     python examples/notebook_72_infra_deploy_gate.py
 
     # Fully offline — this example needs no model, no provider, no network.
@@ -108,13 +107,13 @@ async def propose(
             policy=POLICY,
             trail=trail,
         )
-        print(f"  ALLOWED — the agent acted on its own authority.")
+        print("  ALLOWED — the agent acted on its own authority.")
         print(f"  Applied: {result}")
     except AdmissionError as exc:
         decision = exc.decision
         print(f"  HELD ({decision.outcome}) — nothing was applied.")
         print(f"  Reason: {decision.reason}")
-        print(f"  Next: route to the on-call human for sign-off.")
+        print("  Next: route to the on-call human for sign-off.")
 
 
 async def main() -> None:

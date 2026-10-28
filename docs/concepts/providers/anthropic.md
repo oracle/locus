@@ -130,7 +130,7 @@ the same code as `complete()`, so streaming turns hit the cache too.
 
 ```python
 from locus.agent import Agent
-from locus.models.native.anthropic import AnthropicModel
+from locus.models import AnthropicModel
 
 agent = Agent(
     model=AnthropicModel(

@@ -24,14 +24,14 @@ upgrades to a live provider by setting one env var.
 
 | | Workflow | One line | Code |
 |---|---|---|---|
-| **29** | DeepAgent — research factory | `create_deepagent` with reflexion + grounding + subagent dispatch + `deepagent.*` SSE events. | [`notebook_31_deepagent.py`](https://github.com/oracle/locus/blob/main/examples/notebook_31_deepagent.py) |
-| **30** | Customer-support triage at scale | Scatter 3 tickets × 3 lenses (sentiment, routing, resolution) to 9 analyst agents via `Send`, reduce into one triage summary. | [`notebook_20_map_reduce_code_review.py`](https://github.com/oracle/locus/blob/main/examples/notebook_20_map_reduce_code_review.py) |
-| **31** | Supervisor + critic loop | Recon → Report author → Skeptical reviewer, loop back to the author until the reviewer approves (cap'd revisions). | [`notebook_21_supervisor_critic_loop.py`](https://github.com/oracle/locus/blob/main/examples/notebook_21_supervisor_critic_loop.py) |
-| **32** | Adversarial debate + judge | One agent argues the finding is a true positive, another argues benign, across N rounds; Judge emits a typed `Verdict` via `output_schema`. | [`notebook_26_debate_with_judge.py`](https://github.com/oracle/locus/blob/main/examples/notebook_26_debate_with_judge.py) |
-| **33** | Multi-agent + human-in-the-loop | Three patterns in one file: approval gate, human-as-tool, long-pause snapshot/resume. | [`notebook_27_multiagent_human_in_loop.py`](https://github.com/oracle/locus/blob/main/examples/notebook_27_multiagent_human_in_loop.py) |
-| **63** | IR (incident-response) war-room | Triage → 3 parallel investigators (SIEM — a security team's log platform — EDR, and threat intel) → severity gate → page-the-responder → contain → typed `Postmortem`. | [`notebook_77_incident_response.py`](https://github.com/oracle/locus/blob/main/examples/notebook_77_incident_response.py) |
-| **64** | Customer-support concession approval | Ticket analyst → Impact analyst → risk-tier router (auto / support manager / +billing / +director) → typed `ConcessionDecision`. Stacked `interrupt()` gates on the top tiers. | [`notebook_78_procurement_approval.py`](https://github.com/oracle/locus/blob/main/examples/notebook_78_procurement_approval.py) |
-| **65** | DPA & security-addendum review | Parser → 3 parallel reviewers (privacy / security / compliance) → revision gate → human analyst → `Command(goto="sign_off")` short-circuits when resolved. Cycles enabled. | [`notebook_79_contract_review.py`](https://github.com/oracle/locus/blob/main/examples/notebook_79_contract_review.py) |
+| **31** | DeepAgent — research factory | `create_deepagent` with reflexion + grounding + subagent dispatch + `deepagent.*` SSE events. | [`notebook_31_deepagent.py`](https://github.com/oracle/locus/blob/main/examples/notebook_31_deepagent.py) |
+| **20** | Customer-support triage at scale | Scatter 3 tickets × 3 lenses (sentiment, routing, resolution) to 9 analyst agents via `Send`, reduce into one triage summary. | [`notebook_20_map_reduce_support_triage.py`](https://github.com/oracle/locus/blob/main/examples/notebook_20_map_reduce_support_triage.py) |
+| **21** | Supervisor + critic loop | Recon → Report author → Skeptical reviewer, loop back to the author until the reviewer approves (cap'd revisions). | [`notebook_21_supervisor_critic_loop.py`](https://github.com/oracle/locus/blob/main/examples/notebook_21_supervisor_critic_loop.py) |
+| **26** | Adversarial debate + judge | One agent argues the finding is a true positive, another argues benign, across N rounds; Judge emits a typed `Verdict` via `output_schema`. | [`notebook_26_debate_with_judge.py`](https://github.com/oracle/locus/blob/main/examples/notebook_26_debate_with_judge.py) |
+| **27** | Multi-agent + human-in-the-loop | Three patterns in one file: approval gate, human-as-tool, long-pause snapshot/resume. | [`notebook_27_multiagent_human_in_loop.py`](https://github.com/oracle/locus/blob/main/examples/notebook_27_multiagent_human_in_loop.py) |
+| **77** | IR (incident-response) war-room | Triage → 3 parallel investigators (SIEM — a security team's log platform — EDR, and threat intel) → severity gate → page-the-responder → contain → typed `Postmortem`. | [`notebook_77_incident_response.py`](https://github.com/oracle/locus/blob/main/examples/notebook_77_incident_response.py) |
+| **78** | Customer-support concession approval | Ticket analyst → Impact analyst → risk-tier router (auto / support manager / +billing / +director) → typed `ConcessionDecision`. Stacked `interrupt()` gates on the top tiers. | [`notebook_78_concession_approval.py`](https://github.com/oracle/locus/blob/main/examples/notebook_78_concession_approval.py) |
+| **79** | DPA & security-addendum review | Parser → 3 parallel reviewers (privacy / security / compliance) → revision gate → human analyst → `Command(goto="sign_off")` short-circuits when resolved. Cycles enabled. | [`notebook_79_contract_review.py`](https://github.com/oracle/locus/blob/main/examples/notebook_79_contract_review.py) |
 
 ## Pick a shape
 
@@ -80,13 +80,19 @@ The pieces every shape is built from. Drop them into any graph node.
 
 ```python
 from locus.core.send import Send
+
 async def split(state):
-    return [Send("worker", {"task": t}) for t in state["tasks"]]
+    return [Send(node="worker", payload={"task": t}) for t in state["tasks"]]
+
+async def reduce(state):
+    results = [v for k, v in state.items() if k.startswith("send_")]
+    return {"summary": "\n".join(r["output"] for r in results)}
 ```
 
 Returning a list of `Send` from a node spawns parallel executions —
-no `asyncio.gather`, no shared mutable state. Each result lands in
-`state[send.send_id]` keyed by the send id.
+no `asyncio.gather`, no shared mutable state. Each worker's return value
+lands in `state[send.send_id]` (ids start with `send_`), which is what the
+reduce node above collects.
 
 ### `interrupt()` — pause for a human
 
@@ -109,7 +115,7 @@ from locus.core import goto
 
 async def smart_router(state):
     if state["urgent"]:
-        return goto("emergency", priority=10)   # skip ahead
+        return goto("emergency", escalated=True)   # skip ahead; kwargs are state updates
     return {"score": compute_score(state)}      # normal flow
 ```
 

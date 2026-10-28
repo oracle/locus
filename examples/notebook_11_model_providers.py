@@ -19,8 +19,8 @@ Provider matrix:
   Anthropic — Claude models (fable / opus / sonnet / haiku).
   Registry  — get_model("provider:model_name") returns the right client.
 
-Run it
-    # Default: the bundled mock model (set LOCUS_MODEL_PROVIDER for a live provider)
+Run it:
+    # Default: OCI GenAI if ~/.oci/config has a usable profile, else the bundled mock model
     python examples/notebook_11_model_providers.py
 
     # Offline / no credentials:
@@ -31,160 +31,184 @@ Run it
 """
 
 import asyncio
-import time
+import functools
+import os
 
 from config import get_model as get_configured_model
+from config import print_config
 
 from locus.agent import Agent
-from locus.models.registry import get_model, list_providers
+from locus.models.registry import list_providers
+
+
+@functools.lru_cache(maxsize=1)
+def _model():
+    """One configured model client, shared by every part.
+
+    Each part wants its own system prompt, so each builds a cheap Agent;
+    the provider client underneath (credentials, HTTP pool) is built once.
+    """
+    return get_configured_model(max_tokens=80)
+
+
+def _banner(result) -> None:
+    m = result.metrics
+    print(
+        f"  [model call: {m.duration_ms / 1000.0:.2f}s · "
+        f"{m.prompt_tokens}→{m.completion_tokens} tokens]"
+    )
 
 
 async def _llm_call(
-    prompt: str, *, system: str = "Reply in one short sentence.", max_tokens: int = 80
+    prompt: str,
+    *,
+    system: str = "You are a concise cloud operations assistant. Reply with one short sentence.",
+    model_kwargs: dict | None = None,
 ) -> str:
-    """One model call with a timing/token banner — used by every part."""
-    agent = Agent(model=get_configured_model(max_tokens=max_tokens), system_prompt=system)
-    t0 = time.perf_counter()
-    res = await agent.arun(prompt)
-    dt = time.perf_counter() - t0
-    print(
-        f"  [model call: {dt:.2f}s · {res.metrics.prompt_tokens}→{res.metrics.completion_tokens} tokens]"
-    )
+    """One model call on the shared client, with a timing/token banner."""
+    agent = Agent(model=_model(), system_prompt=system)
+    res = await agent.arun(prompt, model_kwargs=model_kwargs)
+    _banner(res)
     return res.message.strip()
 
 
-# Part 1: list every provider the registry knows about.
+# =============================================================================
+# Part 1: the registry — every provider Locus knows about
+# =============================================================================
 
 
 async def example_providers():
     """List available model providers."""
-    print("=== Available providers ===\n")
+    print("=== Part 1: Available providers ===\n")
 
     providers = list_providers()
     print(f"Registered providers: {providers}")
-    print(
-        f"AI rationale: {await _llm_call('In one sentence, why does a cloud platform team want a model registry instead of hard-coding one provider?')}"
-    )
 
     print("\nUsage:")
+    print('  model = get_model("oci:openai.gpt-5.5")')
     print('  model = get_model("openai:gpt-4o")')
     print('  model = get_model("anthropic:claude-sonnet-5-5")')
     print()
     print("The provider prefix before the colon selects the client; the rest")
     print("is the model id that provider expects. See docs/concepts/models.md.")
+    print()
 
 
-# Part 2: instantiate each provider directly, without the registry.
+# =============================================================================
+# Part 2: instantiate each provider class directly, without the registry
+# =============================================================================
+
+
+def _build_oci():
+    from locus.models.providers.oci import OCIChatCompletionsModel
+
+    return OCIChatCompletionsModel(
+        model="openai.gpt-5.5", profile=os.environ.get("OCI_PROFILE", "DEFAULT")
+    )
+
+
+def _build_openai():
+    from locus.models import OpenAIModel
+
+    return OpenAIModel(model="gpt-4o")
+
+
+def _build_anthropic():
+    from locus.models.native.anthropic import AnthropicModel
+
+    return AnthropicModel(model="claude-sonnet-5-5")
 
 
 async def example_direct():
     """Use providers directly without the registry."""
-    print("\n=== Direct provider usage ===\n")
-    print(
-        f"AI rationale: {await _llm_call('In one sentence, when would a cloud operations team instantiate a model class directly instead of via the registry?')}"
-    )
+    print("=== Part 2: Direct provider usage ===\n")
 
-    print("OpenAI (direct API, requires OPENAI_API_KEY):")
-    print("  from locus.models import OpenAIModel")
-    print('  model = OpenAIModel(model="gpt-4o")')
+    # Constructing a client does not call the provider, so this runs
+    # offline. A missing SDK extra or an unusable OCI profile surfaces here
+    # as the class's own error; a missing API key surfaces on the first
+    # request, so "ready" below means "built", not "authenticated".
+    attempts = [
+        ("OCI GenAI — OCIChatCompletionsModel (profile from OCI_PROFILE)", _build_oci),
+        ("OpenAI — OpenAIModel (OPENAI_API_KEY read at call time)", _build_openai),
+        ("Anthropic — AnthropicModel (ANTHROPIC_API_KEY read at call time)", _build_anthropic),
+    ]
+    for label, build in attempts:
+        print(f"  {label}")
+        try:
+            model = build()
+            print(f"    -> {type(model).__name__} ready")
+        except Exception as e:  # noqa: BLE001 — the point is to show what each class needs
+            print(f"    -> {type(e).__name__}: {str(e)[:70]}")
+    print()
 
-    print("\nAnthropic (requires ANTHROPIC_API_KEY):")
-    print("  from locus.models.native.anthropic import AnthropicModel")
-    print('  model = AnthropicModel(model="claude-sonnet-5-5")')
+
+# =============================================================================
+# Part 3: run the cloud-ops agent on whichever provider the environment picks
+# =============================================================================
 
 
 async def example_live_call() -> None:
     """Run the cloud-ops agent on whichever provider the environment configures."""
-    print("\n=== Live provider call ===\n")
-    model = get_configured_model(max_tokens=80)
-    agent = Agent(
-        model=model,
-        system_prompt="You are a concise cloud operations assistant. Reply with one short sentence.",
-    )
-    import time as _t
+    print("=== Part 3: Live provider call ===\n")
 
-    t0 = _t.perf_counter()
-    result = await agent.arun(
+    print(f"  Model class: {type(_model()).__name__}")
+    reply = await _llm_call(
         "Name two reasons a cloud platform team routes every model through one Gateway "
         "rather than letting each agent call a provider directly."
     )
-    dt = _t.perf_counter() - t0
-    print(f"  Model class: {type(model).__name__}")
-    print(f"  Reply:       {result.message.strip()}")
-    print(
-        f"  [model call:   {dt:.2f}s · {result.metrics.prompt_tokens}→{result.metrics.completion_tokens} tokens]"
-    )
+    print(f"  Reply:       {reply}")
+    print()
+
+
+# =============================================================================
+# Part 4: request parameters — model config vs per-run model_kwargs
+# =============================================================================
 
 
 async def example_request_parameters() -> None:
-    """Configuring a model, and reaching the parts of the API that need it.
+    """Two places to set request parameters, and the difference matters.
 
-    Two distinct places, and the difference matters:
-
-      model config  — fixed for the model's lifetime (temperature, top_p,
-                      penalties, extra_body)
-      model_kwargs  — per run, passed to ``agent.run(...)``; wins over the
-                      above, and is the only workable home for anything that
-                      changes between runs, ``tool_choice`` above all
-
-    Any Chat Completions parameter the caller passes is forwarded, so
-    ``tool_choice``, ``parallel_tool_calls``, ``logprobs``, ``n``,
-    ``stream_options`` and the rest are reachable without leaving the SDK.
+    model config  — fixed for the model's lifetime (temperature, top_p,
+                    penalties, extra_body), set when the class is built.
+    model_kwargs  — per run, passed to ``agent.arun(...)``; wins over the
+                    above for that run only, and is the only workable home
+                    for anything that changes between runs, ``tool_choice``
+                    above all. Any Chat Completions parameter is forwarded.
     """
-    print("\n=== Request parameters ===\n")
+    print("=== Part 4: Request parameters ===\n")
 
-    print("Model configuration (fixed for the model's lifetime):")
-    print(
-        """    model = get_model(
-        "openai:qwen3.6-35b",
-        base_url="http://localhost:8000/v1",
-        temperature=1.0,
-        top_p=0.95,
-        presence_penalty=1.5,
-    )"""
-    )
+    prompt = "In one sentence, why pin temperature to 0 for runbook automation?"
 
-    print("\nPer-run parameters (win over the above):")
-    print(
-        """    async for event in agent.run(
-        "Book a flight to Tokyo",
-        model_kwargs={
-            "tool_choice": {"type": "function", "function": {"name": "search_flights"}},
-            "logprobs": True,
-        },
-    ):
-        ...
-    # tool_choice applies to every iteration of that run, not just the first"""
-    )
+    print("Model's own temperature:")
+    default = await _llm_call(prompt)
+    print(f"  {default}")
 
-    print("\nSelf-hosted / OpenAI-compatible servers (vLLM, Ollama, LM Studio):")
-    print(
-        """    # Pass None to omit a parameter entirely, so the server's own
-    # generation_config.json applies. A value sent unasked overrides what
-    # the model publishes as its recommended sampling.
-    model = get_model("openai:qwen3.6-35b", base_url=..., temperature=None, top_p=None)
+    print("\nSame agent, model_kwargs={'temperature': 0} for this run only:")
+    pinned = await _llm_call(prompt, model_kwargs={"temperature": 0})
+    print(f"  {pinned}")
 
-    # extra_body carries fields outside the OpenAI schema
-    model_kwargs={"extra_body": {
-        "top_k": 20,
-        "repetition_penalty": 1.05,
-        "chat_template_kwargs": {"enable_thinking": False},
-    }}"""
-    )
-
-    print(
-        "\nNote: a server may reject a parameter depending on how it was\n"
-        "launched. vLLM with speculative decoding enabled returns\n"
-        "'The min_p and logit_bias sampling parameters are not yet supported\n"
-        "with speculative decoding' — a server constraint, not an SDK one.\n"
-    )
+    print("\nThe mock answers identically either way; on a live model the second")
+    print("reply is the deterministic one. Nothing about the agent or its model changed.")
+    print()
 
 
 async def main() -> None:
+    print("=" * 60)
+    print("Notebook 11: Model Providers — Swap Models with a String")
+    print("=" * 60)
+    print()
+
+    print_config()
+    print()
+
     await example_providers()
     await example_direct()
-    await example_request_parameters()
     await example_live_call()
+    await example_request_parameters()
+
+    print("=" * 60)
+    print("Next: Notebook 12 — Data-subject-request triage pipeline as a graph")
+    print("=" * 60)
 
 
 if __name__ == "__main__":

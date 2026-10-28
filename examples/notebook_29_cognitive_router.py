@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -17,6 +16,7 @@ answer; a HIGH-risk "drain a prod node and restart the payments
 deployment" compiles behind an approval interrupt and does not execute
 until a human says so.
 
+Key ideas:
 - Define a small infra/devops capability set as annotated tools.
 - Register all 8 built-in protocols.
 - Load SKILL.md packages from examples/skills/ and tag them by domain
@@ -28,8 +28,8 @@ until a human says so.
   and the runtime shape; the sixth is HIGH risk and PolicyGate holds
   it for approval instead of executing.
 
-Run it
-    # Default: the bundled mock model (set LOCUS_MODEL_PROVIDER for a live provider)
+Run it:
+    # Default: OCI GenAI if ~/.oci/config has a usable profile, else the bundled mock model
     python examples/notebook_29_cognitive_router.py
 
     # Offline / no credentials (uses fallback frames):
@@ -42,7 +42,7 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-from config import get_model
+from config import get_model, print_config
 
 from locus.agent import Agent
 from locus.router import (
@@ -66,7 +66,6 @@ from locus.tools.registry import create_registry
 
 
 # Per-protocol-id description of the runtime shape the builder emits.
-# One description per protocol id, so the printed shape matches the builder.
 RUNTIME_SHAPES: dict[str, str] = {
     "direct_response": "Agent (single call)",
     "plan_execute_validate": "SequentialPipeline of 3 Agents (planner → executor → validator)",
@@ -300,7 +299,15 @@ async def _dispatch_with_fallback(
         return result.protocol_id, result.text
 
 
-async def run_demo() -> None:
+async def main() -> None:
+    print("=" * 60)
+    print("Notebook 29: Cognitive router — risk-gated routing for infra/devops requests")
+    print("=" * 60)
+    print()
+
+    print_config()
+    print()
+
     router, model = build_router()
     fired: dict[str, int] = {}
     try:
@@ -332,6 +339,10 @@ async def run_demo() -> None:
         if close is not None:
             await close()
 
+    print("\n" + "=" * 60)
+    print("Next: Notebook 30 — A2A — cross-org payment-intel sharing between spec-compliant peers")
+    print("=" * 60)
+
 
 if __name__ == "__main__":
-    asyncio.run(run_demo())
+    asyncio.run(main())

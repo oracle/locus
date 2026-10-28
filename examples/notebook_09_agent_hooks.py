@@ -4,33 +4,34 @@
 """
 Notebook 09: audit hooks — every agent action on the record.
 
-A ``HookProvider`` plugs into four lifecycle points: before/after the
-whole invocation, and before/after each tool call. For a cloud-ops
+A ``HookProvider`` exposes nine lifecycle callbacks; this notebook uses
+the four most-used of them: before/after the whole invocation, and
+before/after each tool call. For a cloud-ops
 agent that's an audit trail for free — every scaling action it takes
 can be logged, timed, validated, or blocked without touching the agent
 or the tools themselves.
 
 Key ideas:
 - Subclass ``HookProvider`` and override only the callbacks you need.
-- Each hook declares a ``priority``; lower runs earlier. ``HookPriority``
-  exposes named constants for the common bands (SECURITY, OBSERVABILITY,
-  BUSINESS).
+- Each hook declares a ``priority`` band (``HookPriority`` names the
+  common ones: SECURITY, OBSERVABILITY, BUSINESS). A ``HookRegistry``
+  sorts on it; an ``Agent`` runs hooks in the order you list them.
 - ``on_before_tool_call(event)`` can mutate ``event.arguments`` — handy
   for clamping or sanitising values before the tool actually runs.
-- Multiple hooks compose. Locus iterates them in priority order.
+- Multiple hooks compose. Locus runs them in list order on the way in
+  and in reverse on the way out.
 
 The Part 5 guardrail watches untrusted manifest text for secrets before
 they flow onward — the control behind OWASP LLM02 (Sensitive Information
-Disclosure). Notebook 10 builds on this with a deploy-gating agent that
-risk-scores each change before it lands.
+Disclosure). Notebook 10 builds on this with RELEASE GUARD, a hook that
+cancels destructive tool calls before they run.
 
 Run it:
     .venv/bin/python examples/notebook_09_agent_hooks.py
 
-The default provider is the mock model; set LOCUS_MODEL_PROVIDER for a live one (e.g.
-``openai`` or ``anthropic``). Set
-``LOCUS_MODEL_PROVIDER=mock`` for offline runs; OpenAI and Anthropic
-also work.
+The default provider is OCI GenAI when ``~/.oci/config`` holds a usable profile,
+otherwise the bundled mock model; set ``LOCUS_MODEL_PROVIDER`` (``oci``,
+``openai``, ``anthropic``, ``mock``) to choose.
 
 Prerequisite: notebook 06.
 """
@@ -38,7 +39,6 @@ Prerequisite: notebook 06.
 import asyncio
 from datetime import datetime
 
-# Import shared config
 from config import get_model, print_config
 
 from locus.agent import Agent
@@ -52,7 +52,7 @@ from locus.tools import tool
 
 
 class AuditTrailHook(HookProvider):
-    """Print an audit line at each of the four lifecycle points."""
+    """Print an audit line at each of the four lifecycle points this notebook uses."""
 
     @property
     def priority(self) -> int:
@@ -110,7 +110,8 @@ class TimingHook(HookProvider):
 
     def __init__(self):
         self.start_time = None
-        self.tool_times = {}
+        self.started: dict[str, float] = {}  # tool_call_id -> start (ms)
+        self.tool_times: list[tuple[str, float]] = []  # (tool_name, duration ms)
 
     @property
     def priority(self) -> int:
@@ -118,22 +119,27 @@ class TimingHook(HookProvider):
 
     async def on_before_invocation(self, prompt, state):
         self.start_time = datetime.now()
-        self.tool_times = {}
+        self.started = {}
+        self.tool_times = []
         return state
 
     async def on_after_invocation(self, state, success):
         elapsed = (datetime.now() - self.start_time).total_seconds() * 1000
         print("\n  Timing Report:")
         print(f"    Total: {elapsed:.1f}ms")
-        for name, ms in self.tool_times.items():
+        for name, ms in self.tool_times:
             print(f"    {name}: {ms:.1f}ms")
 
     async def on_before_tool_call(self, event):
-        self.tool_times[event.tool_name] = datetime.now().timestamp() * 1000
+        # Keyed by tool_call_id, not tool_name: the same tool called twice in
+        # one run would otherwise overwrite its own start time and report a
+        # duration that belongs to neither call.
+        self.started[event.tool_call_id] = datetime.now().timestamp() * 1000
 
     async def on_after_tool_call(self, event):
-        start = self.tool_times.get(event.tool_name, 0)
-        self.tool_times[event.tool_name] = (datetime.now().timestamp() * 1000) - start
+        start = self.started.pop(event.tool_call_id, None)
+        if start is not None:
+            self.tool_times.append((event.tool_name, datetime.now().timestamp() * 1000 - start))
 
 
 async def example_timing_hook():
@@ -245,7 +251,7 @@ class AuditHook(HookProvider):
 
 
 async def example_multiple_hooks():
-    """Two hooks on one agent — priority decides who runs first."""
+    """Two hooks on one agent — list order decides who runs first."""
     print("=== Part 4: Multiple Hooks ===\n")
 
     model = get_model(max_tokens=100)
@@ -253,7 +259,9 @@ async def example_multiple_hooks():
     timing = TimingHook()
     audit = AuditHook()
 
-    # Lower priority value runs earlier: timing (100) then audit (200).
+    # The Agent runs hooks in the order given: timing first, then audit. The
+    # priority bands (OBSERVABILITY_MIN 100, BUSINESS_DEFAULT 250) only order
+    # hooks that arrive through a HookRegistry.
     agent = Agent(
         model=model,
         tools=[adjust_capacity],
@@ -354,11 +362,6 @@ async def example_guardrails_hook():
     print()
 
 
-# =============================================================================
-# Main
-# =============================================================================
-
-
 async def main():
     """Run all notebook parts."""
     print("=" * 60)
@@ -376,7 +379,7 @@ async def main():
     await example_guardrails_hook()
 
     print("=" * 60)
-    print("Next: Notebook 64 — Cloud Ops Dashboard SSE Streaming")
+    print("Next: Notebook 10 — RELEASE GUARD: guardrails around a deploy-ops agent")
     print("=" * 60)
 
 

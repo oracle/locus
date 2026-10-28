@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -9,11 +8,12 @@ The earlier notebooks used inline mock tools to keep the focus on agent
 mechanics. Real privacy work calls real systems: a data-classification
 feed to score an identifier, a data catalog to pull the records behind a
 subject request, a scanning cloud to run a PII-discovery probe over a
-data store. This notebook wires three *worked* vendor integrations into a
+data store. This notebook wires three vendor-shaped integrations into a
 data-subject-request (DSAR) triage agent.
 
 Every integration follows one convention: read the vendor credential from
-the environment and call the live API when it's set; otherwise return a
+the environment and take the live path when it's set — the live path is a
+stub you fill in with your vendor's client; otherwise return a
 deterministic, synthetic sample so the cookbook runs offline with no
 account. The return shape is identical either way, so the agent's
 reasoning doesn't change between this offline demo and a live deployment.
@@ -22,16 +22,18 @@ reasoning doesn't change between this offline demo and a live deployment.
   (``DATAMAP_API_KEY``).
 - ``query_data_map`` — Collibra/Atlan-shaped data-catalog search
   (``DATAMAP_URL`` + ``DATAMAP_TOKEN``).
-- ``scan_dataset_reference`` — the *offline reference* PII discovery scan;
+- ``scan_dataset_reference`` — PII discovery scan over a named data store;
   the live version dispatches the scan to a classification cloud
   (``SCANNER_API_KEY``). It returns the same category map either way.
 
 Run it:
     .venv/bin/python examples/notebook_80_vendor_integrations.py
 
-The default provider is the bundled mock model, and every vendor tool falls
-back to its offline sample, so this runs end-to-end with no credentials.
-Set the matching credential to swap any offline sample for the live API.
+Every vendor tool falls back to its offline sample, so this runs end-to-end
+with no credentials. The default provider is OCI GenAI when ``~/.oci/config``
+holds a usable profile, otherwise the bundled mock model; set
+``LOCUS_MODEL_PROVIDER`` to choose. Set the matching vendor credential to
+route a tool to its live stub.
 
 Prerequisites:
 - Notebook 03 (Agent with tools).
@@ -113,12 +115,19 @@ def query_data_map(term: str, scope: str = "all") -> dict:
 
 
 def scan_dataset_reference(target: str) -> dict:
-    """Offline reference PII-discovery scan over a named data store.
+    """PII-discovery scan over a named data store.
 
-    Returns the category->sample-value map a live classification scan would
-    produce. The live version dispatches the scan to a cloud classifier
-    (``SCANNER_API_KEY``); this reference path is fully deterministic.
+    Live path (``SCANNER_API_KEY`` set) dispatches the scan to a cloud
+    classifier; otherwise returns the deterministic category->sample-value
+    map a live scan of ``target`` would produce.
     """
+    if os.getenv("SCANNER_API_KEY"):  # pragma: no cover - live path
+        raise NotImplementedError(
+            f"Live classification-cloud scan of {target!r} goes here; this demo runs the sample path."
+        )
+    # Offline sample: the catalog table we know about; anything else is clean.
+    if target != "crm.customers":
+        return {}
     return {
         "email": "1 column (customers.email)",
         "phone": "1 column (customers.phone)",
@@ -167,7 +176,7 @@ async def main() -> None:
     for rec in hits["records"]:
         print(f"    [{rec['sensitivity']}] {rec['system']}: {rec['detail']}")
 
-    print("\nPII-discovery scan dispatch (offline reference):")
+    print("\nPII-discovery scan dispatch (offline sample path):")
     feats = scan_dataset_reference("crm.customers")
     observed = sum(1 for k in PII_CATEGORIES if k in feats)
     print(f"  categories ({observed}/{len(PII_CATEGORIES)} found): {feats}")
@@ -176,8 +185,6 @@ async def main() -> None:
     # Part 2: hand the tools to a DSAR triage agent
     # =========================================================================
     # The same integrations, this time as Locus @tools the agent can call.
-    # Under the mock model the agent narrates rather than truly tool-calls;
-    # point LOCUS_MODEL_PROVIDER at a live model to see it drive the tools.
     print("\n=== Part 2: A DSAR triage agent with vendor tools ===\n")
 
     steward = Specialist(
@@ -216,7 +223,7 @@ async def main() -> None:
 
     print("\n" + "=" * 60)
     print("Each vendor tool reads its credential from the environment — set")
-    print("the matching credential to swap any offline sample for the live API.")
+    print("the matching credential to route it to the live stub you fill in.")
     print("=" * 60)
 
 

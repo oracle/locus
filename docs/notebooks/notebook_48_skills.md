@@ -32,11 +32,11 @@ LOCUS_MODEL_PROVIDER=mock python examples/notebook_48_skills.py
 
 ## Prerequisites
 
-- An OpenAI or Anthropic API key, or `LOCUS_MODEL_PROVIDER` set to
-  `openai` / `anthropic` / `mock`.
-- Optional: an `examples/skills/` directory with one or more
-  `SKILL.md` files for Part 2 to find (e.g. dispute-triage,
-  refund-policy, fraud-scoring, ledger-query).
+- An OCI profile in `~/.oci/config` (picked up automatically), or
+  `LOCUS_MODEL_PROVIDER` set to `openai` / `anthropic` / `mock` with the
+  matching key.
+- The bundled `examples/skills/` directory (`code-review`,
+  `incident-triage`, `ioc-enrichment`, `siem-query`) for Part 2 to load.
 
 ## Source
 

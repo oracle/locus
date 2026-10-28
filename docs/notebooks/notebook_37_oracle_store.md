@@ -50,7 +50,7 @@ python examples/notebook_37_oracle_store.py
 
 ## Schema hygiene
 
-The notebook writes to `locus_notebook_06_store` (overridable via
+The notebook writes to `locus_notebook_37_store` (overridable via
 `table_name=`) and drops the table at the end so the demo is
 re-runnable. For production, pre-create the table out-of-band as a
 least-privileged app schema owner and pass `auto_create_table=False`

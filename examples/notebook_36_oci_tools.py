@@ -45,15 +45,14 @@ Key concepts:
   on an OCI compute instance with a dynamic group), or
   ``resource_principal`` (running as an OCI Function).
 
-Run it::
-
+Run it:
     # 1. Pick a tenancy-side profile for the OCI control-plane calls
-    export OCI_USE_PROFILE=API_FREE_TIER         # or any other profile in ~/.oci/config
-    export OCI_USE_REGION=ca-toronto-1           # whichever region you have resources in
-    export OCI_USE_TENANCY=ocid1.tenancy.oc1...  # your tenancy OCID (for compartment-scoped reads)
+    export OCI_USE_PROFILE=<your-profile>          # any profile in ~/.oci/config
+    export OCI_USE_REGION=us-ashburn-1             # whichever region you have resources in
+    export OCI_USE_TENANCY=ocid1.tenancy.oc1...    # tenancy OCID for compartment-scoped reads
 
     # 2. Pick a GenAI-side profile for the model driving the agent
-    export OCI_GENAI_PROFILE=LUIGI_FRA_API       # any profile with OCI GenAI access
+    export OCI_GENAI_PROFILE=<your-genai-profile>  # any profile with OCI GenAI access
     export OCI_GENAI_REGION=us-chicago-1
 
     python examples/notebook_36_oci_tools.py
@@ -303,27 +302,15 @@ async def part3_agent() -> None:
 
 
 # =============================================================================
-# Why this is a great primitive
+# Why two generic tools beat one wrapper per operation
 # =============================================================================
 #
-# Adding a new OCI resource type to your agent normally means:
-#
-#   1. Read the OCI Python SDK docs.
-#   2. Write a thin @tool wrapper around the right ``oci.<service>.<Client>``
-#      method, with the right ``compartment_id`` plumbing, the right
-#      paginator, the right serialiser.
-#   3. Register that tool with the agent.
-#   4. Repeat for every operation you want to expose (~190 services x N ops).
-#
-# With ``use_oci`` + ``describe_oci``:
-#
-#   1. Hand the model the two tools. Done.
-#
-# The model uses ``describe_oci`` like a man page — discovers what
-# operations exist, what parameters they need — and then calls
-# ``use_oci`` to execute. There is exactly one execution path, with one
-# auth code-path, one serialiser, one mutation-safety gate. Adding
-# coverage for a new service does not require writing any new code.
+# Without them, every OCI operation the agent should reach needs its own
+# @tool — the right ``oci.<service>.<Client>`` method, compartment plumbing,
+# paginator and serialiser — across ~190 services. With ``describe_oci`` as
+# the man page and ``use_oci`` as the single execution path, the model
+# discovers operations and parameters at runtime, and there is one auth
+# path, one serialiser and one mutation-safety gate to maintain.
 # =============================================================================
 
 

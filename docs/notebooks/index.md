@@ -79,7 +79,7 @@ The series runs 01 to 89 (81–89 live in `locus-sdk-security`), ordered by topi
 - **17 · [Resilient graphs](notebook_17_graph_advanced.md)** — Resilient cloud-provisioning workflows
 - **18 · [Functional API](notebook_18_functional_api.md)** — Payment dispute triage with the functional API
 - **19 · [Composition — pipelines](notebook_19_composition.md)** — Composing data-privacy agents into pipelines
-- **20 · [Scatter-gather with Send](notebook_20_map_reduce_code_review.md)** — customer-support triage at scale — scatter-gather with Send
+- **20 · [Scatter-gather with Send](notebook_20_map_reduce_support_triage.md)** — customer-support triage at scale — scatter-gather with Send
 - **21 · [Supervisor and critic loop](notebook_21_supervisor_critic_loop.md)** — PII-exposure report vs skeptical reviewer — kill unproven claims
 - **22 · [Orchestrator](notebook_22_orchestrator_pattern.md)** — STEWARD — one privacy officer, many data-privacy specialists
 - **23 · [Specialist agents](notebook_23_specialist_agents.md)** — RIGHTSIZER — the cloud-rightsizing specialist
@@ -152,7 +152,7 @@ The series runs 01 to 89 (81–89 live in `locus-sdk-security`), ordered by topi
 ## Real-world workflows
 
 - **77 · [Incident response runbook](notebook_77_incident_response.md)** — SRE on-call incident runbook
-- **78 · [Procurement approval](notebook_78_procurement_approval.md)** — Customer-support concession approval with risk-tiered gates
+- **78 · [Concession approval](notebook_78_concession_approval.md)** — Customer-support concession approval with risk-tiered gates
 - **79 · [Contract review](notebook_79_contract_review.md)** — Vendor DPA review — data-subject rights, retention, transfer gaps
 - **80 · [Vendor integrations](notebook_80_vendor_integrations.md)** — Live vendor integrations — PII discovery, data map, scan dispatch
 

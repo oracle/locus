@@ -7,8 +7,8 @@ Retrieval-Augmented Generation (RAG) grounds an agent's answers in your
 own documents. For a cloud-platform team that means the AWS
 Well-Architected best-practice catalogue, mapped to your internal
 runbooks — not whatever the model half-remembers about ``REL`` or
-``COST`` ids. This notebook builds the Index that the cloud-ops agent
-(STRATUS, notebook 53) reads from. The pipeline has four steps:
+``COST`` ids. This notebook builds that Index. The pipeline has four
+steps:
 
 - **Embed** — turn text into vectors with ``OpenAIEmbeddings``
   (``text-embedding-3-small``, 1536 dims).
@@ -24,16 +24,13 @@ runbooks — not whatever the model half-remembers about ``REL`` or
 
 The corpus is Well-Architected best practices (``REL-xx``, ``COST-xx``,
 ``SEC-xx``, ``OPS-xx``); the retrieval quality of this Index directly
-bounds how grounded STRATUS's answers can be. A low-coverage or stale
-Index leaves the ops agent guessing instead of citing your runbooks —
-the failure mode notebook 53 hardens against.
+bounds how grounded an agent's answers over it can be. A low-coverage or
+stale Index leaves the ops agent guessing instead of citing your runbooks.
 
 Run it:
-    # Embeddings need an OpenAI api key:
+    # Embeddings need an OpenAI api key; without it the notebook prints
+    # what's missing and exits cleanly.
     export OPENAI_API_KEY=sk-...
-    python examples/notebook_51_rag_basics.py
-
-    # Offline (skips the live demo cleanly when the key is missing):
     python examples/notebook_51_rag_basics.py
 """
 
@@ -44,7 +41,7 @@ import sys
 
 from config import get_embedder
 
-from locus.rag import InMemoryVectorStore, OpenAIEmbeddings, RAGRetriever
+from locus.rag import InMemoryVectorStore, RAGRetriever
 from locus.rag.stores.base import Document
 
 
@@ -52,13 +49,7 @@ def _missing_env() -> list[str]:
     return [name for name in ("OPENAI_API_KEY",) if not os.environ.get(name)]
 
 
-def _get_embedder() -> OpenAIEmbeddings:
-    # id comes from LOCUS_EMBEDDING_MODEL so this runs against a
-    # self-hosted embedding endpoint too, not only api.openai.com
-    return get_embedder()
-
-
-def _get_store(dimension: int = 1536) -> InMemoryVectorStore:
+def _get_store(dimension: int) -> InMemoryVectorStore:
     return InMemoryVectorStore(dimension=dimension)
 
 
@@ -72,7 +63,7 @@ async def understand_embeddings():
     print("Step 1: Embeddings (OpenAI · text-embedding-3-small)")
     print("=" * 60)
 
-    embedder = _get_embedder()
+    embedder = get_embedder()
     print(f"Embedder: {embedder.__class__.__name__}")
     print(f"Embedding dimension: {embedder.config.dimension}")
 
@@ -112,7 +103,7 @@ async def using_vector_store():
     print("Step 2: InMemoryVectorStore (cosine)")
     print("=" * 60)
 
-    embedder = _get_embedder()
+    embedder = get_embedder()
     store = _get_store(dimension=embedder.config.dimension)
     print(f"Created InMemoryVectorStore dim={store.config.dimension}")
 
@@ -131,18 +122,23 @@ async def using_vector_store():
         "templates for repeatable, reviewable, auditable provisioning.",
     ]
 
+    # One embedding request for the whole batch, then one store write:
+    # per-document round trips are what make a real ingest slow.
     print("\nEmbedding and inserting Well-Architected best practices…")
-    for i, text in enumerate(docs_text):
-        result = await embedder.embed(text)
-        await store.add(
-            Document(
-                id=f"practice_{i}",
-                content=text,
-                embedding=result.embedding,
-                metadata={"source": "well_architected_kb", "index": i},
-            )
+    results = await embedder.embed_batch(docs_text)
+    docs = [
+        Document(
+            id=f"practice_{i}",
+            content=text,
+            embedding=result.embedding,
+            metadata={"source": "well_architected_kb", "index": i},
         )
+        for i, (text, result) in enumerate(zip(docs_text, results, strict=True))
+    ]
+    ids = await store.add_batch(docs)
+    for text in docs_text:
         print(f"  inserted: {text[:50]}…")
+    print(f"  add_batch → {len(ids)} ids")
 
     print("\nSearching for 'surviving a datacenter zone outage'…")
     q = await embedder.embed("surviving a datacenter zone outage")
@@ -164,7 +160,7 @@ async def using_rag_retriever():
     print("Step 3: RAGRetriever")
     print("=" * 60)
 
-    embedder = _get_embedder()
+    embedder = get_embedder()
     store = _get_store(dimension=embedder.config.dimension)
 
     retriever = RAGRetriever(
@@ -216,9 +212,9 @@ async def using_rag_retriever():
 
 
 # =============================================================================
-# Step 4: Metadata-tagged retrieval — store Well-Architected pillar/practice
-#         tags alongside the vector and use them to narrow results beyond
-#         similarity alone.
+# Step 4: Metadata-filtered retrieval — store Well-Architected pillar/practice
+#         tags alongside the vector and pass a metadata_filter so the search
+#         only ranks the pillar you asked about.
 # =============================================================================
 
 
@@ -227,7 +223,7 @@ async def rag_with_metadata():
     print("Step 4: RAG with metadata")
     print("=" * 60)
 
-    embedder = _get_embedder()
+    embedder = get_embedder()
     store = _get_store(dimension=embedder.config.dimension)
     retriever = RAGRetriever(embedder=embedder, store=store)
 
@@ -258,16 +254,25 @@ async def rag_with_metadata():
         await retriever.add_document(content, metadata=metadata)
         print(f"  inserted: {content[:40]}… {metadata}")
 
-    print("\nQuerying 'scaling compute out when load increases'…")
-    result = await retriever.retrieve("scaling compute out when load increases", limit=3)
+    query = "keeping spend and capacity in line with demand"
+    print(f"\nQuerying {query!r} with no filter…")
+    result = await retriever.retrieve(query, limit=3)
     for r in result.documents:
-        print(f"  score={r.score:.4f}  {r.document.content[:60]}…")
-        print(f"    metadata: {r.document.metadata}")
+        print(
+            f"  score={r.score:.4f}  {r.document.metadata['practice']}  {r.document.content[:50]}…"
+        )
 
-
-# =============================================================================
-# Main
-# =============================================================================
+    # The filter is applied before ranking, so a cost question answered
+    # from the cost-optimization pillar can't be outscored by a
+    # reliability practice that merely sounds similar.
+    print("\nSame query, metadata_filter={'pillar': 'cost-optimization'}…")
+    filtered = await retriever.retrieve(
+        query, limit=3, metadata_filter={"pillar": "cost-optimization"}
+    )
+    for r in filtered.documents:
+        print(
+            f"  score={r.score:.4f}  {r.document.metadata['practice']}  {r.document.content[:50]}…"
+        )
 
 
 async def main():

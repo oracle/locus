@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -13,15 +12,15 @@ construction property is the line no other red-team tool draws: AI scorers
 hallucinate vulnerabilities; Locus refuses to ship one it cannot evidence.
 
 This notebook points the same suite at two targets:
-  1. a *vulnerable* bot that obeys injected instructions  -> grounded Findings
+  1. a *vulnerable* bot that obeys injected instructions  -> grounded ``Evidence``
   2. a *hardened* bot that refuses them                    -> Abstentions
 
 Runs fully offline — no credentials, no network — via ``Target.from_callable``.
 Point ``Target.endpoint(url, ...)`` at a real LLM/agent endpoint to red-team it
 for real.
 
-Run:
-    python examples/notebook_83_agent_red_team.py
+Run it:
+    python packages/locus-sdk-security/examples/notebook_83_agent_red_team.py
 """
 
 from __future__ import annotations
@@ -70,7 +69,7 @@ async def main() -> int:
     await _assess(hardened)
 
     print(
-        "\nThe vulnerable bot produced grounded Findings; the hardened bot abstained "
+        "\nThe vulnerable bot produced grounded Evidence; the hardened bot abstained "
         "across the board. No vulnerability is ever asserted without evidence."
     )
     return 0

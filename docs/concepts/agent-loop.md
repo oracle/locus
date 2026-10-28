@@ -289,7 +289,8 @@ satisfied condition. The named reasons you'll see:
 Note that `result.stop_reason` is **normalized** to a fixed set of
 literals (`complete`, `terminal_tool`, `confidence_met`,
 `max_iterations`, `tool_loop`, `no_tools`, `grounding_failed`,
-`token_budget`, `time_budget`, `interrupted`, `error`, `cancelled`),
+`token_budget`, `cost_budget`, `time_budget`, `context_exhausted`,
+`interrupted`, `error`, `cancelled`),
 while `TerminateEvent.reason` carries the finer branch-level string.
 Composite conditions (`OrCondition`, `AndCondition`) report the
 underlying satisfied leaf token(s), so the event reason always points
@@ -310,10 +311,10 @@ same family of callbacks to vote on each tool call before it fires.
 ```python
 from locus.hooks.provider import HookProvider
 
-class CostGuardHook(HookProvider):
+class BudgetGuard(HookProvider):
     async def on_iteration_start(self, iteration: int, state) -> None:
         if state.total_tokens_used > 100_000:
-            raise RuntimeError(f"token budget exhausted at {state.total_tokens_used}")
+            raise RuntimeError(f"token budget exceeded at {state.total_tokens_used} tokens")
 ```
 
 ### From the caller
@@ -393,8 +394,8 @@ distinct arguments.
 ## Putting it together
 
 ```python
-from locus.agent import Agent
-from locus.tools.decorator import tool
+from locus.agent import Agent, ReflexionConfig
+from locus.tools import tool
 from locus.memory.backends import S3Backend
 from locus.core.termination import (
     MaxIterations, ToolCalled, ConfidenceMet,
@@ -409,13 +410,13 @@ agent = Agent(
     model="{{ locus_example_model }}",
     tools=[lookup_order, issue_refund],
     system_prompt="You are a customer-support agent.",
-    reflexion=True,                    # turn Reflect on
+    reflexion=ReflexionConfig(evaluate_every_n_iterations=2),  # Reflect every 2nd iteration, as in the walkthrough
     grounding=True,                    # claim verification
     checkpointer=S3Backend(...),
     hooks=[StructuredLoggingHook()],     # logs at INFO by default
     termination=(
         ToolCalled("issue_refund") & ConfidenceMet(0.9)
-    ) | MaxIterations(10),
+    ) | MaxIterations(8),
 )
 
 async for event in agent.run("Process refund request R-42: verify the order, refund if eligible.",

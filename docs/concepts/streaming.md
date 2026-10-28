@@ -12,18 +12,8 @@ route them through the [`AuditTrail`](agentic-ai-security.md).)
 
 The events are frozen Pydantic classes — not strings, not
 `dict[str, Any]` blobs — designed to drop into a `match` statement that
-your type checker can verify exhaustively:
-
-```python
-async for event in agent.run("Resolve the duplicate charge on ord-4821."):
-    match event:
-        case ThinkEvent(reasoning=r) if r:
-            print(f"💭 {r}")
-        case ToolStartEvent(tool_name=n, arguments=a):
-            print(f"🔧 {n}({a})")
-        case TerminateEvent(final_message=m):
-            print(f"\n✅ {m}")
-```
+your type checker can verify exhaustively (see
+[step 2](#2-pattern-match-on-the-event-types) below).
 
 This is the surface an operations console consumes — a support desk, a
 deploy dashboard, a SOC console — with live token rendering,

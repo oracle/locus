@@ -26,7 +26,6 @@ Requires:
 from __future__ import annotations
 
 import asyncio
-import os
 import sys
 from pathlib import Path
 
@@ -39,7 +38,6 @@ from locus.core.events import (
     TerminateEvent,
     ThinkEvent,
     ToolCompleteEvent,
-    ToolStartEvent,
 )
 from locus.tools.decorator import tool
 
@@ -176,11 +174,11 @@ async def main():
     )
 
     print(f"\n{'=' * 60}")
-    print(f"  LOCUS SECURE-CODING ASSISTANT")
+    print("  LOCUS SECURE-CODING ASSISTANT")
     print(f"{'=' * 60}")
     print(f"  Task: {task}")
-    print(f"  Mode: explicit (agent runs until task_complete)")
-    print(f"  Max iterations: 20 | Time budget: 5min")
+    print("  Mode: explicit (agent runs until task_complete)")
+    print("  Max iterations: 20 | Time budget: 5min")
     print(f"{'=' * 60}\n")
 
     events_iter = agent.run(task)
@@ -194,7 +192,7 @@ async def main():
         if isinstance(event, ThinkEvent):
             reasoning = event.reasoning or ""
             lines = [ln for ln in reasoning.split("\n") if ln.strip()][:3]
-            print(f"\n💭 Thinking...")
+            print("\n💭 Thinking...")
             for line in lines:
                 print(f"   {line.strip()[:80]}")
             if event.tool_calls:
@@ -207,9 +205,9 @@ async def main():
                         cmd = tc.arguments.get("command", "?")[:50]
                         print(f"     ⚡ run: {cmd}")
                     elif tc.name == "ask_user":
-                        print(f"     ❓ asking user...")
+                        print("     ❓ asking user...")
                     elif tc.name == "task_complete":
-                        print(f"     ✅ signaling done")
+                        print("     ✅ signaling done")
                     else:
                         print(f"     🔧 {tc.name}")
 
@@ -263,7 +261,7 @@ async def main():
                     "id and endpoint — LOCUS_MODEL_ID / OPENAI_BASE_URL)"
                 )
             if event.final_message:
-                print(f"\n  Final report:")
+                print("\n  Final report:")
                 for line in event.final_message.split("\n")[:10]:
                     print(f"     {line}")
             print(f"{'=' * 60}")

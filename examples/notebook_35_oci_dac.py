@@ -28,13 +28,13 @@ Part-by-part:
 - Part 4 — SSE ``stream()`` with deltas printed inline.
 - Part 5 — tool-using ``Agent`` on top of the DAC.
 
-Run it::
-
+Run it:
     pip install -e ".[oci]"
     export OCI_DAC_ENDPOINT_OCID=ocid1.generativeaiendpoint.oc1.uk-london-1....
     export OCI_DAC_COMPARTMENT_ID=ocid1.compartment.oc1....
     export OCI_DAC_REGION=uk-london-1
     export OCI_PROFILE=MY_DAC_PROFILE
+    export OCI_AUTH_TYPE=api_key                 # or security_token
     python examples/notebook_35_oci_dac.py
 
 Without the DAC env vars Parts 2-5 print the wiring snippet and skip,
@@ -47,6 +47,20 @@ from __future__ import annotations
 
 import asyncio
 import os
+from typing import TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from locus.models.providers.oci import OCIModel
+
+
+# Every live Part addresses the same endpoint, so resolve it once.
+REGION = os.environ.get("OCI_DAC_REGION", "us-chicago-1")
+ENDPOINT = f"https://inference.generativeai.{REGION}.oci.oraclecloud.com"
+# OCIModel defaults to API-key auth. Reading the type from the environment
+# lets a session-token profile (``oci session authenticate``) drive every
+# Part below — the same variable notebooks 38 and 45 honour.
+AUTH_TYPE = os.environ.get("OCI_AUTH_TYPE", "api_key")
 
 
 # =============================================================================
@@ -85,6 +99,20 @@ def _dac_env_ready() -> bool:
     )
 
 
+def _dac_model(max_tokens: int) -> OCIModel:
+    """The OCI SDK client Parts 3 and 4 call directly; one place to wire it."""
+    from locus.models.providers.oci import OCIModel
+
+    return OCIModel(
+        model_id=os.environ["OCI_DAC_ENDPOINT_OCID"],
+        compartment_id=os.environ["OCI_DAC_COMPARTMENT_ID"],
+        profile_name=os.environ.get("OCI_PROFILE", "DEFAULT"),
+        auth_type=AUTH_TYPE,
+        service_endpoint=ENDPOINT,
+        max_tokens=max_tokens,
+    )
+
+
 def example_configure_agent() -> None:
     """Build an Agent pointed at a DAC. Same shape as any other model."""
     print("\n=== Part 2: configure Agent against a DAC ===\n")
@@ -118,20 +146,20 @@ def example_configure_agent() -> None:
     from locus.agent import Agent
     from locus.models import get_model
 
-    region = os.environ.get("OCI_DAC_REGION", "us-chicago-1")
     model = get_model(
         f"oci:{os.environ['OCI_DAC_ENDPOINT_OCID']}",
         compartment_id=os.environ["OCI_DAC_COMPARTMENT_ID"],
         profile_name=os.environ.get("OCI_PROFILE", "DEFAULT"),
-        service_endpoint=f"https://inference.generativeai.{region}.oci.oraclecloud.com",
+        auth_type=AUTH_TYPE,
+        service_endpoint=ENDPOINT,
     )
     agent = Agent(
         model=model,
         system_prompt="You are a concise assistant. Reply briefly.",
         max_iterations=2,
     )
-    print(f"Agent configured against DAC endpoint in {region}.")
-    print(f"  underlying model class:  {type(agent._model).__name__}")
+    print(f"Agent configured against DAC endpoint in {REGION}.")
+    print(f"  underlying model class:  {type(agent.config.model).__name__}")
     print("  serving mode:             DedicatedServingMode")
 
 
@@ -149,17 +177,8 @@ async def example_complete() -> None:
         return
 
     from locus.core.messages import Message
-    from locus.models.providers.oci import OCIAuthType, OCIModel
 
-    region = os.environ.get("OCI_DAC_REGION", "us-chicago-1")
-    model = OCIModel(
-        model_id=os.environ["OCI_DAC_ENDPOINT_OCID"],
-        compartment_id=os.environ["OCI_DAC_COMPARTMENT_ID"],
-        profile_name=os.environ.get("OCI_PROFILE", "DEFAULT"),
-        auth_type=OCIAuthType.API_KEY,
-        service_endpoint=f"https://inference.generativeai.{region}.oci.oraclecloud.com",
-        max_tokens=128,
-    )
+    model = _dac_model(max_tokens=128)
 
     response = await model.complete(
         messages=[
@@ -187,17 +206,8 @@ async def example_stream() -> None:
         return
 
     from locus.core.messages import Message
-    from locus.models.providers.oci import OCIAuthType, OCIModel
 
-    region = os.environ.get("OCI_DAC_REGION", "us-chicago-1")
-    model = OCIModel(
-        model_id=os.environ["OCI_DAC_ENDPOINT_OCID"],
-        compartment_id=os.environ["OCI_DAC_COMPARTMENT_ID"],
-        profile_name=os.environ.get("OCI_PROFILE", "DEFAULT"),
-        auth_type=OCIAuthType.API_KEY,
-        service_endpoint=f"https://inference.generativeai.{region}.oci.oraclecloud.com",
-        max_tokens=64,
-    )
+    model = _dac_model(max_tokens=64)
 
     print("Streaming reply (chunks shown inline):")
     print("  ", end="", flush=True)
@@ -253,12 +263,12 @@ async def example_agent_with_tool() -> None:
         """Return the sum of two integers."""
         return a + b
 
-    region = os.environ.get("OCI_DAC_REGION", "us-chicago-1")
     model = get_model(
         f"oci:{os.environ['OCI_DAC_ENDPOINT_OCID']}",
         compartment_id=os.environ["OCI_DAC_COMPARTMENT_ID"],
         profile_name=os.environ.get("OCI_PROFILE", "DEFAULT"),
-        service_endpoint=f"https://inference.generativeai.{region}.oci.oraclecloud.com",
+        auth_type=AUTH_TYPE,
+        service_endpoint=ENDPOINT,
     )
     agent = Agent(
         model=model,
@@ -267,9 +277,8 @@ async def example_agent_with_tool() -> None:
         max_iterations=4,
     )
 
-    result = await asyncio.to_thread(
-        agent.run_sync,
-        "Use the add_two_numbers tool to add 7 and 35, then state the result in one sentence.",
+    result = await agent.arun(
+        "Use the add_two_numbers tool to add 7 and 35, then state the result in one sentence."
     )
     print(f"final message:        {result.message.strip()[:200]}")
     print(f"iterations:           {result.metrics.iterations}")
@@ -279,11 +288,6 @@ async def example_agent_with_tool() -> None:
         print("Note: the model emitted a <tool_call> text block instead of a")
         print("structured tool_call. See the docstring for how to handle this")
         print("(deployment flag or post-processing parser).")
-
-
-# =============================================================================
-# Main
-# =============================================================================
 
 
 async def _async_main() -> None:

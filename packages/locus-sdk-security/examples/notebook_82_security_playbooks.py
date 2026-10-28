@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -21,9 +20,9 @@ This notebook:
 Runs offline on the bundled mock model — no credentials, no network. Set
 ``LOCUS_MODEL_PROVIDER`` (+ key) for a live provider.
 
-Run:
-    python examples/notebook_82_security_playbooks.py
-    LOCUS_MODEL_PROVIDER=mock python examples/notebook_82_security_playbooks.py
+Run it:
+    python packages/locus-sdk-security/examples/notebook_82_security_playbooks.py
+    LOCUS_MODEL_PROVIDER=mock python packages/locus-sdk-security/examples/notebook_82_security_playbooks.py
 """
 
 from __future__ import annotations
@@ -45,7 +44,7 @@ async def main() -> int:
         print(f"  {pid:24s} {steps}")
     print()
 
-    # 2. Wire a playbook + the read-only triage toolset onto an agent.
+    # 2. Wire a playbook + the triage toolset plus the opt-in containment tool onto an agent.
     playbook = phishing_triage()
     tools = security_toolset(allow_containment=True)  # triage loop + isolate_host
     print(f"== Running '{playbook.name}' with {len(tools)} security tools (mock model) ==")

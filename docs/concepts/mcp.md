@@ -66,7 +66,7 @@ mcp_tools = ti.to_locus_tools(await ti.list_tools())
 
 agent = Agent(
     model="{{ locus_example_model }}",
-    tools=[*mcp_tools],           # MCP tools become SDK tools
+    tools=mcp_tools,
     system_prompt="Triage the alert. Enrich every indicator before you act.",
 )
 result = agent.run_sync("Is 198.51.100.23 a known malicious endpoint?")
@@ -86,34 +86,17 @@ returns a string to the model. The instinct is to wrap each MCP tool
 with a per-tool `@tool` that calls `_case_log().append(...)` before
 returning.
 
-Don't. Use a single `HookProvider` instead — one log over every
-tool, so a post-hoc review can replay exactly what the agent did:
+Don't. Use a single `HookProvider` instead — the `ActionQueueHook`
+from [Hooks](hooks.md#on_after_tool_call-what-the-event-carries) mirrors
+every tool call into a host-side list, so a post-hoc review can replay
+exactly what the agent did:
 
 ```python
-from locus.hooks.provider import HookPriority, HookProvider
-
-class MCPCallLogHook(HookProvider):
-    """Mirror every tool call into a case log, keyed by call id."""
-
-    priority = HookPriority.BUSINESS_DEFAULT
-
-    def __init__(self, call_log: list[dict]) -> None:
-        self._call_log = call_log
-
-    async def on_after_tool_call(self, event):
-        if event.error is None:
-            self._call_log.append({
-                "id": event.tool_call_id,
-                "tool": event.tool_name,
-                "args": event.arguments,
-                "result": event.result,
-            })
-
+call_log: list[dict] = []
 agent = Agent(
-    model=...,
-    # every MCP-sourced tool, untouched
-    tools=[*mcp_client.to_locus_tools(await mcp_client.list_tools())],
-    hooks=[MCPCallLogHook(call_log)],
+    model="{{ locus_example_model }}",
+    tools=mcp_client.to_locus_tools(await mcp_client.list_tools()),  # every MCP-sourced tool, untouched
+    hooks=[ActionQueueHook(call_log)],
 )
 ```
 

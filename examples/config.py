@@ -87,7 +87,9 @@ Examples:
     python examples/notebook_02_basic_agent.py
 """
 
+import ast
 import configparser
+import operator
 import os
 import re
 import sys
@@ -312,23 +314,31 @@ class MockModel(BaseModel):
         yield ModelChunkEvent(done=True)
 
 
+def resolved_provider() -> str:
+    """The provider ``get_model()`` will actually use.
+
+    ``LOCUS_MODEL_PROVIDER`` wins when set; otherwise the same auto-detection
+    ``get_model()`` runs (OCI when a usable profile exists, else ``mock``).
+    Notebooks that behave differently under the mock model must ask this,
+    not read the environment variable, or they misreport a live OCI run.
+    """
+    return os.environ.get("LOCUS_MODEL_PROVIDER", "").lower() or _auto_detect_provider()
+
+
 def check_structured_output_capable() -> None:
     """Exit cleanly with guidance if the current model cannot produce JSON.
 
     Guards against MockModel (plain text).
     """
-    provider = os.environ.get("LOCUS_MODEL_PROVIDER", "mock").lower()
-
-    if provider != "mock":
+    if resolved_provider() != "mock":
         return
 
     print(
         "\n⚠  This notebook requires structured-output (JSON schema) support.\n"
         "   MockModel returns plain text and cannot demonstrate these features.\n\n"
-        "   Run with a model that supports constrained decoding:\n\n"
-        "     export LOCUS_MODEL_PROVIDER=openai\n"
-        "     export OPENAI_API_KEY=sk-...\n"
-        "     export LOCUS_MODEL_ID=gpt-4o\n"
+        "   Run with a model that supports constrained decoding, for example:\n\n"
+        "     export LOCUS_MODEL_PROVIDER=oci LOCUS_MODEL_ID=openai.gpt-4o   # an OCI profile\n"
+        "     export LOCUS_MODEL_PROVIDER=openai LOCUS_MODEL_ID=gpt-4o      # OPENAI_API_KEY\n"
         f"     python {Path(sys.argv[0]).name}\n"
     )
     sys.exit(0)
@@ -673,6 +683,42 @@ def get_embedding_dimension(default: int = 1536) -> int:
     store and the embedder in agreement when either is swapped.
     """
     return int(os.environ.get("LOCUS_EMBEDDING_DIM", default))
+
+
+_SAFE_MATH_BIN_OPS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.FloorDiv: operator.floordiv,
+    ast.Mod: operator.mod,
+    ast.Pow: operator.pow,
+}
+_SAFE_MATH_UNARY_OPS = {ast.USub: operator.neg, ast.UAdd: operator.pos}
+
+
+def safe_math_eval(expression: str) -> float:
+    """Evaluate plain arithmetic for the notebooks' ``calculate`` tools.
+
+    AST-only: numbers and the arithmetic operators above, no names, calls,
+    or attribute access, so a model-supplied expression cannot turn the
+    calculator into a sandbox escape. Raises ``ValueError`` (or
+    ``SyntaxError`` / ``ZeroDivisionError``) on anything else.
+    """
+    tree = ast.parse(expression, mode="eval")
+
+    def _eval(node: ast.AST) -> float:
+        if isinstance(node, ast.Expression):
+            return _eval(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return node.value
+        if isinstance(node, ast.BinOp) and type(node.op) in _SAFE_MATH_BIN_OPS:
+            return _SAFE_MATH_BIN_OPS[type(node.op)](_eval(node.left), _eval(node.right))
+        if isinstance(node, ast.UnaryOp) and type(node.op) in _SAFE_MATH_UNARY_OPS:
+            return _SAFE_MATH_UNARY_OPS[type(node.op)](_eval(node.operand))
+        raise ValueError("Unsupported expression")
+
+    return _eval(tree)
 
 
 def print_config():

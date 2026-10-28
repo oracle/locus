@@ -24,10 +24,9 @@ This notebook covers:
   `ground_finding(...)` scores the evidence `Partition` of typed
   `Claim`s and returns an `Evidence` or an `Abstention`;
   `is_finding(...)` narrows the union.
-- `stream(mode=StreamMode.NODES)` emits one event per node completion
-  for live UI updates.
-- `execute(...)` returns the authoritative final state plus a
-  `GraphResult` with timing and iteration metrics.
+- `stream(mode=StreamMode.VALUES)` emits one event per node completion
+  for live UI updates; the terminal event carries the final state, so
+  the graph runs once.
 
 {{ locus_diagram supervisor-critic-loop }}
 

@@ -90,9 +90,9 @@ case = sorted(
 for e in case:
     if e["event"] == "tool_call_completed":
         print(f'{e["timestamp"]}  {e["tool_name"]:<20} success={e["success"]}')
-# 2026-05-02T01:30:58.1Z  lookup_order         success=True
-# 2026-05-02T01:31:01.4Z  check_refund_policy  success=True
-# 2026-05-02T01:31:02.4Z  issue_refund         success=True
+# 2026-05-02T01:30:58.117402+00:00  lookup_order         success=True
+# 2026-05-02T01:31:01.390115+00:00  check_refund_policy  success=True
+# 2026-05-02T01:31:02.481923+00:00  issue_refund         success=True
 ```
 
 Because the stamped `thread_id` is stable across a multi-turn
@@ -264,7 +264,7 @@ bus as a canonical `agent.*` event — no hook registration, no config flag:
 | `ReflectEvent` | `agent.reflect` |
 | `GroundingEvent` | `agent.grounding` |
 | `ModelChunkEvent` | `agent.model.chunk` (only with `run(..., stream_tokens=True)`) |
-| `ModelCompleteEvent` | `agent.model.completed` + `agent.tokens.used` |
+| `ModelCompleteEvent` | `agent.model.completed` + `agent.tokens.used` — mapped, but never fires: the loop does not yield `ModelCompleteEvent` (see [Events](events.md#modelcompleteevent)) |
 | `InterruptEvent` | `agent.interrupt` (human-in-the-loop pause) |
 | `TerminateEvent` | `agent.terminate` |
 

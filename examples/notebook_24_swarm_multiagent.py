@@ -18,6 +18,7 @@ is also where agentic failure modes concentrate: a mis-tagged or buggy
 responder can claim work it should not, and one bad rollback can cascade
 across services. Keep capability tags tight and the blackboard auditable.
 
+Key ideas:
 - Each agent advertises ``capabilities`` (free-form string tags).
 - Tasks carry ``required_tags`` (hard filter) and ``preferred_tags``
   (priority boost). Tagless tasks fall back to substring matching against
@@ -30,9 +31,7 @@ across services. Keep capability tags tight and the blackboard auditable.
 Run it:
     .venv/bin/python examples/notebook_24_swarm_multiagent.py
 
-The default provider is the bundled mock model. Set LOCUS_MODEL_PROVIDER=openai
-(or anthropic) and the matching credentials so the swarm talks to a live
-model. Set ``LOCUS_MODEL_PROVIDER=mock`` for offline runs.
+The default provider is OCI GenAI when ``~/.oci/config`` holds a usable profile, otherwise the bundled mock model; set ``LOCUS_MODEL_PROVIDER`` (``oci``, ``openai``, ``anthropic``, ``mock``) to choose. Set ``LOCUS_MODEL_PROVIDER=mock`` for offline runs.
 
 Prerequisites:
 - Notebook 02 (Agent basics).
@@ -40,11 +39,9 @@ Prerequisites:
 """
 
 import asyncio
-import time
 
 from config import get_model, print_config
 
-from locus.agent import Agent
 from locus.multiagent.swarm import (
     SharedContext,
     Swarm,
@@ -52,20 +49,6 @@ from locus.multiagent.swarm import (
     create_swarm,
     create_swarm_agent,
 )
-
-
-async def _llm_call(
-    prompt: str, *, system: str = "Reply in one short sentence.", max_tokens: int = 80
-) -> str:
-    """One model call with a timing/token banner so each Part shows its work."""
-    agent = Agent(model=get_model(max_tokens=max_tokens), system_prompt=system)
-    t0 = time.perf_counter()
-    res = await agent.arun(prompt)
-    dt = time.perf_counter() - t0
-    print(
-        f"  [model call: {dt:.2f}s · {res.metrics.prompt_tokens}→{res.metrics.completion_tokens} tokens]"
-    )
-    return res.message.strip()
 
 
 # =============================================================================
@@ -76,10 +59,6 @@ async def _llm_call(
 async def example_create_agents():
     """Create three specialist incident responders."""
     print("=== Part 1: Creating Swarm Agents ===\n")
-    _ai_note = await _llm_call(
-        "In one sentence, when is a swarm of small specialised responders a better fit than one generalist SRE agent?"
-    )
-    print(f"AI rationale: {_ai_note}")
 
     mitigation = create_swarm_agent(
         name="Mitigation",
@@ -104,8 +83,6 @@ async def example_create_agents():
         print(f"  - {agent.name}: capabilities = {agent.capabilities}")
     print()
 
-    return mitigation, diagnostics, comms
-
 
 # =============================================================================
 # Part 2: the blackboard
@@ -115,10 +92,6 @@ async def example_create_agents():
 async def example_shared_context():
     """SharedContext — the blackboard responders use to leave notes for each other."""
     print("=== Part 2: Shared Context ===\n")
-    _ai_note = await _llm_call(
-        "In one sentence, why does an outage war room need a SharedContext for findings and blackboard notes?"
-    )
-    print(f"AI rationale: {_ai_note}")
 
     context = SharedContext()
 
@@ -152,24 +125,18 @@ async def example_shared_context():
 async def example_task_queue():
     """Tasks are pulled in priority order — highest first."""
     print("=== Part 3: Task Queue ===\n")
-    _ai_note = await _llm_call(
-        "In one sentence, why is priority-queue task routing useful during a production incident?"
-    )
-    print(f"AI rationale: {_ai_note}")
 
     swarm = Swarm(name="Outage War Room")
 
-    task1 = swarm.add_task("Collect logs from the api-gateway pods", priority=5)
-    task2 = swarm.add_task("Draft the status page update", priority=3)
-    task3 = swarm.add_task("Review the proposed rollback plan", priority=2)
-    task4 = swarm.add_task("Scale up the overloaded api-gateway service", priority=10)
+    swarm.add_task("Collect logs from the api-gateway pods", priority=5)
+    swarm.add_task("Draft the status page update", priority=3)
+    swarm.add_task("Review the proposed rollback plan", priority=2)
+    swarm.add_task("Scale up the overloaded api-gateway service", priority=10)
 
     print("Task queue (sorted by priority):")
     for task in swarm.task_queue:
         print(f"  [{task.priority}] {task.description} (status: {task.status})")
     print()
-
-    return swarm
 
 
 # =============================================================================
@@ -180,10 +147,6 @@ async def example_task_queue():
 async def example_capability_matching():
     """How tasks are scored against agent capabilities."""
     print("=== Part 4: Capability-Based Assignment ===\n")
-    _ai_note = await _llm_call(
-        "In one sentence, why is capability-based agent selection better than random round-robin in an on-call team?"
-    )
-    print(f"AI rationale: {_ai_note}")
 
     diagnostics = create_swarm_agent(
         name="Diagnostics",
@@ -195,10 +158,8 @@ async def example_capability_matching():
         capabilities=["notify", "document"],
     )
 
-    # required_tags are a hard filter (set membership). preferred_tags
-    # only boost the score. Tasks without any tags fall back to substring
-    # matching against the description — so older tagless swarms still
-    # route correctly.
+    # required_tags are a hard filter (set membership); preferred_tags
+    # only boost the score. The last task is tagless on purpose.
     tasks = [
         SwarmTask(
             description="Analyze the elevated error rate on api-gateway",
@@ -225,57 +186,13 @@ async def example_capability_matching():
 
 
 # =============================================================================
-# Part 5: a swarm without a model — just the shape
-# =============================================================================
-
-
-async def example_simple_swarm():
-    """Stand up a swarm without a model — useful when you only want the shape."""
-    print("=== Part 5: Simple Swarm Execution ===\n")
-    rationale_prompt = (
-        "In one sentence, what does 'simple swarm execution' mean "
-        "and when is it enough for an incident drill?"
-    )
-    _ai_note = await _llm_call(rationale_prompt)
-    print(f"AI rationale: {_ai_note}")
-
-    swarm = Swarm(name="Drill Swarm")
-
-    agent1 = create_swarm_agent(
-        name="Mitigation Lead",
-        capabilities=["rollback"],
-        system_prompt="You roll back bad deploys.",
-    )
-
-    agent2 = create_swarm_agent(
-        name="Scribe",
-        capabilities=["report"],
-        system_prompt="You write incident reports.",
-    )
-
-    swarm.add_agent(agent1)
-    swarm.add_agent(agent2)
-
-    swarm.add_task("Roll back the bad deploy on api-gateway", priority=5)
-    swarm.add_task("Report on the mitigation status", priority=3)
-
-    print(f"Swarm '{swarm.name}' configured:")
-    print(f"  Agents: {[a.name for a in swarm.agents]}")
-    print(f"  Tasks: {len(swarm.task_queue)}")
-    print()
-
-    print("Note: full execution requires a configured model. See Part 6.")
-    print()
-
-
-# =============================================================================
-# Part 6: live run against a real model
+# Part 5: run the war-room swarm end-to-end
 # =============================================================================
 
 
 async def example_full_swarm():
-    """Run the war-room swarm end-to-end against a real model."""
-    print("=== Part 6: Full Swarm with Model ===\n")
+    """Build the war-room swarm and run it end-to-end against the configured model."""
+    print("=== Part 5: Full Swarm with Model ===\n")
 
     # Each agent emits a structured `### Findings / ### Analysis /
     # ### Blackboard` block — leave enough completion budget for it.
@@ -302,6 +219,10 @@ async def example_full_swarm():
         ],
         model=model,
     )
+
+    print(f"Swarm '{swarm.name}' configured:")
+    print(f"  Agents: {[a.name for a in swarm.agents]}")
+    print()
 
     print("Executing swarm on: 'Production outage on the api-gateway service'")
     print("This may take a moment...\n")
@@ -340,61 +261,60 @@ async def example_full_swarm():
 
 
 # =============================================================================
-# Part 7: three common swarm shapes
+# Part 6: three common swarm shapes
 # =============================================================================
 
 
 async def example_swarm_patterns():
     """Three common swarm shapes: specialist team, redundant team, pipeline."""
-    print("=== Part 7: Swarm Patterns ===\n")
-    _ai_note = await _llm_call(
-        "In one sentence, when is a Specialist Team swarm preferable to a Pipeline swarm for incident response?"
-    )
-    print(f"AI rationale: {_ai_note}")
+    print("=== Part 6: Swarm Patterns ===\n")
 
-    print("Pattern 1: Specialist Team")
-    print("-" * 40)
-    specialist_team = create_swarm(
-        name="Specialist Team",
-        agents=[
-            create_swarm_agent("Mitigation", ["rollback", "scale", "failover"]),
-            create_swarm_agent("Diagnostics", ["diagnose", "metrics", "logs"]),
-            create_swarm_agent("Comms", ["notify", "report", "document"]),
-        ],
-    )
-    print("  Distinct, non-overlapping capabilities; each task goes to its expert.")
-    print()
+    # The shape is entirely in the capability tags: disjoint tags give each
+    # task one expert, identical tags fan a backlog out, and a chain of
+    # tags turns the board into a pipeline.
+    shapes = [
+        (
+            "Distinct, non-overlapping capabilities; each task goes to its expert.",
+            create_swarm(
+                name="Specialist Team",
+                agents=[
+                    create_swarm_agent("Mitigation", ["rollback", "scale", "failover"]),
+                    create_swarm_agent("Diagnostics", ["diagnose", "metrics", "logs"]),
+                    create_swarm_agent("Comms", ["notify", "report", "document"]),
+                ],
+            ),
+        ),
+        (
+            "Overlapping capabilities; alert backlogs fan out for parallel triage.",
+            create_swarm(
+                name="Redundant Team",
+                agents=[
+                    create_swarm_agent("Triage SRE A", ["triage", "investigate"]),
+                    create_swarm_agent("Triage SRE B", ["triage", "investigate"]),
+                    create_swarm_agent("Triage SRE C", ["triage", "investigate"]),
+                ],
+            ),
+        ),
+        (
+            "Signals flow through a chain; output of one feeds the next.",
+            create_swarm(
+                name="Pipeline Team",
+                agents=[
+                    create_swarm_agent("Collector", ["collect", "acquire", "fetch"]),
+                    create_swarm_agent("Examiner", ["examine", "correlate", "enrich"]),
+                    create_swarm_agent("Reporter", ["report", "summarize", "present"]),
+                ],
+            ),
+        ),
+    ]
 
-    print("Pattern 2: Redundant Team")
-    print("-" * 40)
-    redundant_team = create_swarm(
-        name="Redundant Team",
-        agents=[
-            create_swarm_agent("Triage SRE A", ["triage", "investigate"]),
-            create_swarm_agent("Triage SRE B", ["triage", "investigate"]),
-            create_swarm_agent("Triage SRE C", ["triage", "investigate"]),
-        ],
-    )
-    print("  Overlapping capabilities; alert backlogs fan out for parallel triage.")
-    print()
-
-    print("Pattern 3: Pipeline Team")
-    print("-" * 40)
-    pipeline_team = create_swarm(
-        name="Pipeline Team",
-        agents=[
-            create_swarm_agent("Collector", ["collect", "acquire", "fetch"]),
-            create_swarm_agent("Examiner", ["examine", "correlate", "enrich"]),
-            create_swarm_agent("Reporter", ["report", "summarize", "present"]),
-        ],
-    )
-    print("  Signals flow through a chain; output of one feeds the next.")
-    print()
-
-
-# =============================================================================
-# Main
-# =============================================================================
+    for note, team in shapes:
+        print(f"{team.name}")
+        print("-" * 40)
+        for agent in team.agents:
+            print(f"  {agent.name}: {agent.capabilities}")
+        print(f"  {note}")
+        print()
 
 
 async def main():
@@ -410,12 +330,11 @@ async def main():
     await example_shared_context()
     await example_task_queue()
     await example_capability_matching()
-    await example_simple_swarm()
     await example_full_swarm()
     await example_swarm_patterns()
 
     print("=" * 60)
-    print("Next: Notebook 25 — Agent Handoff")
+    print("Next: Notebook 25 — Support tier escalation — L1 → L2 → L3 handoff with typed context")
     print("=" * 60)
 
 

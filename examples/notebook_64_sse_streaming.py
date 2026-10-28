@@ -26,8 +26,9 @@ Run it:
     .venv/bin/python examples/notebook_64_sse_streaming.py
 
 This notebook does not call an LLM — it only exercises the SSE
-plumbing, so no provider configuration is needed. The mock provider is
-still a fine default if you set ``LOCUS_MODEL_PROVIDER=mock``.
+plumbing, so no provider configuration is needed. For wiring the
+handlers into a FastAPI route and the production checklist see
+``docs/concepts/sse-events.md`` and ``docs/concepts/server.md``.
 """
 
 import asyncio
@@ -200,9 +201,9 @@ async def main():
 
     async def consume_events():
         count = 0
-        async for sse_text in async_handler.stream():
+        async for _sse_text in async_handler.stream():
             count += 1
-            # A real app would yield sse_text from a StreamingResponse here.
+            # A real app would yield each chunk from a StreamingResponse here.
         return count
 
     producer = asyncio.create_task(produce_events())
@@ -246,91 +247,25 @@ async def main():
     print(f"  {msg.data}")
 
     # =========================================================================
-    # Part 9: drop it into FastAPI
+    # Part 9: every Locus event type the handlers know how to render
     # =========================================================================
-    print("\n=== Part 9: Web Framework Integration ===\n")
+    print("\n=== Part 9: Supported Event Types ===\n")
 
-    print("FastAPI Example:")
-    print("-" * 40)
-    print("""
-from fastapi import FastAPI
-from fastapi.responses import StreamingResponse
-from locus.streaming.sse import AsyncSSEHandler, create_sse_response_headers
-
-app = FastAPI()
-
-@app.get("/payments/stream")
-async def stream_events():
-    handler = AsyncSSEHandler()
-
-    async def generate():
-        # Start the payment-review agent in the background
-        task = asyncio.create_task(run_agent(handler))
-
-        # Stream events to the dashboard
-        async for sse_text in handler.stream():
-            yield sse_text
-
-        await task
-
-    return StreamingResponse(
-        generate(),
-        media_type="text/event-stream",
-        headers=create_sse_response_headers(),
-    )
-
-async def run_agent(handler):
-    # Your payment-review logic
-    await handler.on_event(ThinkEvent(iteration=1, reasoning="Reviewing..."))
-    await handler.on_complete()
-""")
-    print("-" * 40)
-
-    # =========================================================================
-    # Part 10: every Locus event type the handlers know how to render
-    # =========================================================================
-    print("\n=== Part 10: Supported Event Types ===\n")
-
-    supported_events = [
-        # Loop events
-        ("think", "Agent thinking/reasoning"),
-        ("tool_start", "Tool execution started"),
-        ("tool_complete", "Tool execution completed"),
-        ("reflect", "Self-reflection result"),
-        ("grounding", "Grounding evaluation"),
-        ("terminate", "Agent terminated"),
-        # Model events
-        ("model_chunk", "Streaming model output"),
-        ("model_complete", "Model generation complete"),
-        # Multi-agent events
-        ("specialist_start", "Specialist started"),
-        ("specialist_complete", "Specialist completed"),
-        ("orchestrator_decision", "Orchestrator routing decision"),
-        # Hook events
-        ("before_invocation", "Before agent invocation"),
-        ("after_invocation", "After agent invocation"),
-    ]
-
+    # Read the set off the handler class so this list cannot drift from
+    # what the SDK actually renders.
     print("Event types a payments dashboard can subscribe to:")
-    for event_type, description in supported_events:
-        print(f"  {event_type}: {description}")
+    for event_type in sorted(SSEHandler.SUPPORTED_EVENTS):
+        print(f"  {event_type}")
 
     # =========================================================================
-    # Part 11: production checklist
+    # Part 10: heartbeats keep long batch-settlement streams alive
     # =========================================================================
-    print("\n=== Part 11: Best Practices ===\n")
+    print("\n=== Part 10: Heartbeat ===\n")
 
-    print("1. Always set proper SSE headers")
-    print("2. Include event IDs so dashboards can reconnect with Last-Event-ID")
-    print("3. Send a 'done' event when the payment review terminates")
-    print("4. Send error events on failure — never leave the reviewer's stream hanging")
-    print("5. Use AsyncSSEHandler for real streaming, not the buffered one")
-    print("6. Keep individual event payloads small (< 65KB)")
-    print("7. Implement client-side reconnection")
-    print("8. Send periodic heartbeats during long-running batch settlements")
-
+    # Proxies drop idle connections; a periodic heartbeat is just another
+    # SSEMessage the dashboard ignores.
     heartbeat = SSEMessage(event="heartbeat", data='{"status": "alive"}')
-    print(f"\nHeartbeat message:\n{heartbeat.format()}")
+    print(f"Heartbeat message:\n{heartbeat.format()}")
 
     print("\n" + "=" * 60)
     print("Notebook 64 complete.")

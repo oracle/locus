@@ -1,41 +1,23 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
 
 """Notebook 76: Incident response with a tamper-evident audit chain.
 
-Scenario
-────────
-A production outage pages the on-call at 2 AM.  A ``GovernedAgent`` runs the
-``sre_incident_runbook`` (detect → triage → mitigate → recover).  Every tool
-call — metrics query, log tail, deploy rollback — is logged to an immutable
-``AuditTrail`` via ``AuditHook``.
+A production outage pages the on-call at 2 AM. A ``GovernedAgent`` runs the
+``sre_incident_runbook`` defined below (detect → triage → mitigate → recover),
+and every tool call — metrics query, log tail, deploy rollback — lands on an
+immutable ``AuditTrail`` through ``AuditHook``.
 
-After the incident concludes, ``trail.verify()`` confirms the chain has not
-been tampered with, and ``trail.export_jsonl()`` produces a portable,
-defensible record of the response for:
-  - SOC 2 / ISO 27001 change management (immutable log of mitigation actions)
-  - Blameless postmortem (timeline of response decisions)
-  - Compliance / audit hold (every action timestamped and hash-chained)
+When the incident closes, ``trail.verify()`` proves the chain was not tampered
+with and ``trail.export_jsonl()`` writes a portable record for the postmortem,
+the change-management log, and any audit hold. That record is the answer to
+"why was this release rolled back at 2 AM?" — "the AI decided" is not one.
 
-Why this is not a toy
-─────────────────────
-AI agents making remediation decisions (rolling back a deploy, draining a
-node) without an immutable audit log are a liability.  If the agent is later
-questioned — "why was this release rolled back at 2 AM?" — "the AI decided" is
-not a defensible answer.  This demo shows that the SDK provides:
+``ops_toolset(allow_mitigation=True)`` opts in to the write-capable
+``rollback_deploy``; without it the agent is read-only.
 
-  1. ``GovernanceProfile(audit=True)`` — all tool calls go through ``AuditHook``
-  2. ``AuditTrail.verify()`` — cryptographic integrity before export
-  3. ``AuditTrail.export_jsonl()`` — portable output for postmortem / audit hold
-
-The local ``sre_incident_runbook`` pins the agent to the four response phases;
-``ops_toolset(allow_mitigation=True)`` opts in to write-capable tools
-(``rollback_deploy``).  Without ``allow_mitigation=True``, mitigation tools are
-absent and the agent operates read-only.
-
-Run:
+Run it:
     python examples/notebook_76_ir_audit_trail.py
 
     # With a live provider (OpenAI):
@@ -46,17 +28,12 @@ Run:
 from __future__ import annotations
 
 import asyncio
-import sys
+import json
 from dataclasses import dataclass, field
-from pathlib import Path
 
-
-# Allow running from repo root: python examples/notebook_76_ir_audit_trail.py
-sys.path.insert(0, str(Path(__file__).parent))
-from config import get_model  # noqa: E402
+from config import get_model
 
 from locus.control import (
-    AuditHook,
     AuditTrail,
     GovernanceProfile,
     Severity,
@@ -139,9 +116,8 @@ def sre_incident_runbook() -> Runbook:
 # Every tool here is a deterministic offline stub returning canned data, so the
 # notebook runs with no cluster, no creds, and no network. The stubs share one
 # piece of state — the release checkout-api is running — so a rollback shows up
-# in the telemetry. Static stubs left it degraded after a "successful"
-# rollback, and a careful model kept re-verifying the mitigation that the
-# simulated cluster never applied.
+# in the telemetry; with static stubs the model kept re-verifying a mitigation
+# the simulated cluster never applied.
 # ---------------------------------------------------------------------------
 
 _BAD_RELEASE = "checkout-api:1.9.0"
@@ -223,23 +199,17 @@ def ops_toolset(*, allow_mitigation: bool = False) -> list[object]:
 
 
 # ---------------------------------------------------------------------------
-# Model — uses get_model() from config.py (MockModel by default, or live
-# provider via LOCUS_MODEL_PROVIDER env var)
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
 # Incident-response runner
 # ---------------------------------------------------------------------------
 
 
 async def run_incident_response(incident: str) -> None:
     trail = AuditTrail()
-    # Input guardrails are off here because the incident brief arrives from
-    # Alertmanager (trusted internal source), not from an untrusted user.
-    # Output guardrails (PII, injection in model output) remain on via grounding.
+    # Guardrails off: the incident brief arrives from Alertmanager (trusted
+    # internal source), not from an untrusted user. Grounding stays on so the
+    # agent's claims must cite tool evidence. audit=True makes governed_agent
+    # attach its own AuditHook to `trail` — no need to pass one explicitly.
     profile = GovernanceProfile(grounding=True, guardrails=False, audit=True)
-    hook = AuditHook(trail)
 
     runbook = sre_incident_runbook()
     tools = ops_toolset(allow_mitigation=True)  # opt-in: enables rollback_deploy
@@ -255,7 +225,6 @@ async def run_incident_response(incident: str) -> None:
         ),
         profile=profile,
         audit_trail=trail,
-        hooks=[hook],
     )
 
     trail.record(
@@ -274,10 +243,10 @@ async def run_incident_response(incident: str) -> None:
     for step in runbook.steps:
         print(f"--- Phase: {step.id} ---")
         prompt = f"{incident}\n\nExecute phase: {step.id}\n{step.description}"
-        result = await agent.agent.arun(prompt)
-        text = result.text if hasattr(result, "text") else str(result)
+        result = await agent.arun(prompt)
+        text = result.text
         print(text[:400] + ("..." if len(text) > 400 else ""))
-        trail.record(f"phase-{step.id}", {"output_preview": str(result)[:200]})
+        trail.record(f"phase-{step.id}", {"output_preview": text[:200]})
         print()
 
     trail.record("incident-end", {"incident_id": "INC-20260615-0042", "outcome": "recovered"})
@@ -298,8 +267,6 @@ async def run_incident_response(incident: str) -> None:
     print()
 
     # Show first and last records as sample
-    import json
-
     first = json.loads(lines[0])
     last = json.loads(lines[-1])
     print(f"   First record: seq={first['seq']}  type={first['event_type']}  ts={first['ts']}")

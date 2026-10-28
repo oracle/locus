@@ -12,15 +12,16 @@ composition primitives that take a list of Agent instances and
 orchestrate them for you. Scenario: a Data Protection Impact Assessment
 (DPIA) over a new customer-analytics dataset.
 
+Key ideas:
 - SequentialPipeline — each agent's output becomes the next agent's input.
 - ParallelPipeline — run agents concurrently, then merge their results.
 - LoopAgent — run one agent repeatedly until a stop condition fires.
-- Helpers sequential() / parallel() / loop() exist for one-liners.
+- Helpers sequential() / parallel() / loop() build the same three classes in one line each.
 
 Run it:
     LOCUS_MODEL_PROVIDER=mock python examples/notebook_19_composition.py
 
-The default provider is the bundled mock model; set LOCUS_MODEL_PROVIDER for a live provider.
+The default provider is OCI GenAI when ``~/.oci/config`` holds a usable profile, otherwise the bundled mock model; set ``LOCUS_MODEL_PROVIDER`` (``oci``, ``openai``, ``anthropic``, ``mock``) to choose.
 Set LOCUS_MODEL_PROVIDER=mock for offline runs. Pick a live provider with
 LOCUS_MODEL_PROVIDER=openai LOCUS_MODEL_ID=gpt-4o
 (or LOCUS_MODEL_PROVIDER=anthropic, or any OpenAI-compatible
@@ -37,6 +38,9 @@ from locus.agent import (
     LoopAgent,
     ParallelPipeline,
     SequentialPipeline,
+    loop,
+    parallel,
+    sequential,
 )
 
 
@@ -158,7 +162,35 @@ async def example_loop():
     print(f"Final: {result.final_output[:100]}...")
 
 
+# =============================================================================
+# Part 4: the one-liner helpers
+# =============================================================================
+
+
+def example_helpers() -> None:
+    """sequential() / parallel() / loop() return the same classes Parts 1-3 built by hand."""
+    print("\n=== Part 4: One-liner helpers ===\n")
+
+    model = get_model()
+    reviewer = Agent(config=AgentConfig(system_prompt="Review the DPIA draft.", model=model))
+    editor = Agent(config=AgentConfig(system_prompt="Tighten the DPIA draft.", model=model))
+
+    # Same objects as the constructors above — the helpers only save the
+    # ``agents=[...]`` boilerplate when the pipeline is a throwaway.
+    print(f"sequential(reviewer, editor) -> {type(sequential(reviewer, editor)).__name__}")
+    print(f"parallel(reviewer, editor)   -> {type(parallel(reviewer, editor)).__name__}")
+    print(
+        "loop(editor, condition, max_loops=3) -> "
+        f"{type(loop(editor, lambda out: 'APPROVED' in out, max_loops=3)).__name__}"
+    )
+
+
+async def main() -> None:
+    await example_sequential()
+    await example_parallel()
+    await example_loop()
+    example_helpers()
+
+
 if __name__ == "__main__":
-    asyncio.run(example_sequential())
-    asyncio.run(example_parallel())
-    asyncio.run(example_loop())
+    asyncio.run(main())

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -81,7 +80,7 @@ IAM: dict[str, list[str]] = {
 
 
 # The side effects. Each is a zero-arg async callable — exactly what admit()
-# expects for `perform`. In a real agent these would call boto3 / the Azure SDK /
+# expects for `perform`. In a real agent these would call the OCI SDK, boto3, or
 # gcloud; here they just edit the dicts above and return a short receipt.
 
 
@@ -109,7 +108,7 @@ def grant_iam(principal: str, permission: str):
     return _perform
 
 
-# Driver.
+# One gated attempt: run the Action through admit() and narrate the outcome.
 
 
 async def attempt(action: Action, perform, *, policy: ControlPolicy, trail: AuditTrail) -> None:
@@ -176,15 +175,35 @@ async def main() -> None:
         trail=trail,
     )
 
-    # Show the account state. The dev box changed; the prod DB is exactly as it
-    # was, because its terminate call was blocked before it could run.
-    print("\nCloud account after both attempts:")
+    # 3) Human-held: widen an IAM grant. Not production and blast radius 1,
+    #    but the policy lists `iam` as a label that always needs a person —
+    #    handing out permissions is how a confused agent escalates itself.
+    await attempt(
+        Action(
+            name="grant_iam",
+            asset="svc-deploy",
+            blast_radius=1,
+            environment="staging",
+            kind="iam",
+            tags=frozenset({"iam"}),
+        ),
+        grant_iam("svc-deploy", "iam:PassRole"),
+        policy=policy,
+        trail=trail,
+    )
+
+    # Show the account state. The dev box changed; the prod DB and the IAM
+    # policy are exactly as they were, because those calls were blocked before
+    # they could run.
+    print("\nCloud account after all three attempts:")
     print("-" * 60)
     for iid, row in INVENTORY.items():
         print(f"  {iid:12}  env={row['env']:10}  state={row['state']:10}  size={row['size']}")
+    for principal, perms in IAM.items():
+        print(f"  {principal:12}  permissions={perms}")
 
-    # The audit trail recorded BOTH attempts — the one that ran and the one that
-    # was held. The hash chain is intact, so the record is tamper-evident.
+    # The audit trail recorded ALL three attempts — the one that ran and the two
+    # that were held. The hash chain is intact, so the record is tamper-evident.
     print("\nAudit trail:")
     print("-" * 60)
     for rec in trail.records():
@@ -193,16 +212,20 @@ async def main() -> None:
         )
     print(f"  chain intact (tamper-evident): {trail.verify()}")
 
-    # Hard assertions: both decisions are on the trail, the chain verifies, the
-    # staging box was resized, and the production DB was left untouched.
-    assert len(trail) == 2, f"expected 2 audit records, got {len(trail)}"
+    # Hard assertions: all three decisions are on the trail, the chain verifies,
+    # the staging box was resized, and the production DB and IAM were untouched.
+    assert len(trail) == 3, f"expected 3 audit records, got {len(trail)}"
     assert trail.records()[0].payload["outcome"] == "allow"
     assert trail.records()[1].payload["outcome"] == "require_human"
+    assert trail.records()[2].payload["outcome"] == "require_human"
     assert trail.verify(), "audit chain failed integrity check"
     assert INVENTORY["i-dev-7a3"]["size"] == "t3.medium", "staging resize should have run"
     assert INVENTORY["i-prod-db1"]["state"] == "running", "prod DB must be untouched"
+    assert "iam:PassRole" not in IAM["svc-deploy"], "IAM grant must not have run"
 
-    print("\nAll assertions passed: low-risk action ran, production change held, both audited.")
+    print(
+        "\nAll assertions passed: low-risk action ran, production and IAM changes held, all audited."
+    )
 
 
 if __name__ == "__main__":

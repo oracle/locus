@@ -39,8 +39,9 @@ LOCUS_MODEL_PROVIDER=mock python examples/notebook_68_steering.py
 
 ## Prerequisites
 
-- An OpenAI or Anthropic API key, or `LOCUS_MODEL_PROVIDER` set to
-  `openai` / `anthropic` / `mock`.
+- An OCI profile in `~/.oci/config` (picked up automatically), or
+  `LOCUS_MODEL_PROVIDER` set to `openai` / `anthropic` / `mock` with the
+  matching key.
 
 ## Source
 

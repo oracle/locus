@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -21,8 +20,8 @@ completion payload.
 - Token usage from result.metrics — the canonical source for cost
   meters and budget enforcers on always-on privacy-review automation.
 
-Run it
-    # Default: the bundled mock model (set LOCUS_MODEL_PROVIDER for a live provider)
+Run it:
+    # Default: OCI GenAI if ~/.oci/config has a usable profile, else the bundled mock model
     python examples/notebook_61_agent_yield_bridge.py
 
     # Offline / no credentials:
@@ -36,6 +35,7 @@ import asyncio
 from config import get_model
 
 from locus.agent import Agent
+from locus.core.events import TerminateEvent
 from locus.observability import get_event_bus, run_context
 from locus.tools import tool
 
@@ -84,6 +84,8 @@ async def part1_full_lifecycle() -> None:
                     return
 
         consumer_task = asyncio.create_task(consumer())
+        # Yield once so the subscriber attaches before the first event is
+        # published; otherwise the earliest agent.* events are missed.
         await asyncio.sleep(0)
 
         result = None
@@ -91,8 +93,6 @@ async def part1_full_lifecycle() -> None:
             "Classify the sensitivity of the 'national_id' field, count PII records in "
             "the 'customers' dataset, and report both."
         ):
-            from locus.core.events import TerminateEvent
-
             if isinstance(event, TerminateEvent):
                 result = event
         print(f"agent reply: {result.final_message[:160] if result else '(no reply)'}")
@@ -117,8 +117,8 @@ async def part2_token_meter() -> None:
         "In one sentence: what is data minimization?",
     ]
 
+    agent = Agent(model=get_model(), max_iterations=2)
     for prompt in prompts:
-        agent = Agent(model=get_model(), max_iterations=2)
         result = await agent.arun(prompt)
         m = result.metrics
         running_prompt += m.prompt_tokens

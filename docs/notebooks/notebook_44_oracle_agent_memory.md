@@ -5,13 +5,13 @@ Wires Locus's [`OracleAgentMemoryManager`](../api/memory.md) to
 [`oracleagentmemory`](https://pypi.org/project/oracleagentmemory/) —
 Oracle's official AI-agent-memory client backed by Oracle AI Database.
 
-Compared with [notebook 06's](notebook_37_oracle_store.md)
+Compared with [notebook 37's](notebook_37_oracle_store.md)
 `LLMMemoryManager + OracleStore` (which is the portable path that
 works against any `BaseStore` — InMemory, Redis, Postgres,
 OpenSearch, Oracle), this notebook brings in:
 
 - **LLM-backed memory extraction** tuned on LongMemEval — 94.4 %
-  recall on GPT-5.5 xhigh, vs. notebook 06's regex-based extractor.
+  recall on GPT-5.5 xhigh, vs. notebook 37's regex-based extractor.
 - **Prompt-ready context cards** that combine a summary of the
   current thread + the most relevant retrieved memories.
 - **Scoped retrieval** by `user_id` / `agent_id` / `thread_id` —
@@ -21,7 +21,7 @@ OpenSearch, Oracle), this notebook brings in:
 The trade-off: it's Oracle-only and the upstream is currently alpha
 (`oracleagentmemory` 26.4.0, Dev Status 3). When you need a portable
 backend or a fully-deterministic LLM-free extractor, fall back to
-notebook 06.
+notebook 37.
 
 ## What this covers
 

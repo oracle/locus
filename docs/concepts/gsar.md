@@ -84,7 +84,7 @@ synthesis is loose" mode that dominates real production logs.
 ## Wiring
 
 ```python
-from locus.models.native.openai import OpenAIModel
+from locus.models import OpenAIModel
 from locus.reasoning.gsar import GSARThresholds
 from locus.reasoning.gsar_evaluator import GSAREvaluator
 from locus.reasoning.gsar_judge import JudgeOutput, StructuredOutputGSARJudge

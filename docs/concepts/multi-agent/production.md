@@ -29,8 +29,8 @@ schema. The workflow's terminal node returns a typed object — `Verdict`,
 `Postmortem`, `ConcessionDecision`, `ContractDecision` — that the rest of
 your system can consume without a brittle JSON re-parse.
 
-Used by notebooks [32 (debate)][t44], [63 (incident)][t46],
-[64 (concession approval)][t47], [65 (DPA review)][t48].
+Used by notebooks [26 (debate)][t44], [77 (incident)][t46],
+[78 (concession approval)][t47], [79 (DPA review)][t48].
 
 → See [Structured output](../structured-output.md).
 
@@ -54,7 +54,7 @@ receipt is durably recorded.
 
 ```python
 from locus.agent import Agent, AgentConfig
-from locus.memory.backends.s3 import S3Backend
+from locus.memory.backends import S3Backend
 
 agent = Agent(config=AgentConfig(
     model="{{ locus_example_model }}",
@@ -62,9 +62,10 @@ agent = Agent(config=AgentConfig(
 ))
 ```
 
-Eight backend implementations, one `Checkpointer` Protocol — S3,
-Postgres, MySQL, Redis, OpenSearch, HTTP, file, and in-memory. The
-graph snapshots state at every `interrupt()` boundary; you can pause
+One `BaseCheckpointer` contract across every backend — S3, file, HTTP
+and in-memory natively; Postgres, MySQL, Redis, OpenSearch and Oracle
+through their `*_checkpointer()` factories (see the
+[Checkpointers](../checkpointers.md) table). The graph snapshots state at every `interrupt()` boundary; you can pause
 for a human Friday afternoon and resume Monday morning from a
 different process, region, or runtime.
 
@@ -99,22 +100,19 @@ attribution), use [GSAR](../gsar.md).
 ## Streaming events — every node visible
 
 ```python
-from locus.core.events import ToolStartEvent, TerminateEvent
 from locus.multiagent import StreamMode
 
-async for event in graph.stream(initial, mode=StreamMode.NODES):
-    match event:
-        case ToolStartEvent(tool_name=n, agent_name=a):
-            print(f"{a} → {n}")
-        case TerminateEvent(final_message=m, agent_name=a):
-            print(f"{a} done: {m}")
+async for event in graph.stream(initial, mode=StreamMode.UPDATES):
+    print(event.node_id, event.data)   # which node ran, what it wrote to state
 ```
 
-Every shape in the framework emits the same typed event taxonomy.
-`agent_name` is set on every event, so you can attribute output back to
-the specialist that produced it. SSE-ready, match-statement friendly,
-identical shape whether the back-end is a single agent, an
-orchestrator, a swarm, or an A2A mesh.
+`graph.stream()` yields `StreamEvent(mode, node_id, data)`; pick the
+mode for the granularity you need (`UPDATES` for each node's output
+dict, `NODES` for the full `NodeResult` with status and duration). The
+agents inside the nodes keep their own typed event stream, and the
+opt-in `EventBus` carries both layers as SSE events with the same shape
+whether the back-end is a single agent, an orchestrator, a swarm, or an
+A2A mesh.
 
 → See [Streaming](../streaming.md) · [Events](../events.md) ·
 [Graph streaming](../graph-streaming.md).
@@ -163,28 +161,29 @@ and no orchestration path bypasses it.
 ## Evaluation
 
 ```python
-from locus.evaluation import EvalCase, EvalRunner
+from locus.evaluation import EvalCase, EvalRunner, GraphEvalTarget
 
 cases = [
     EvalCase(name="terminates", prompt="...", expected_output_contains=["resolved"]),
     EvalCase(name="uses_siem", prompt="...", expected_tools=["query_siem"]),
 ]
-report = EvalRunner(agent=graph).run(cases)
+report = EvalRunner(agent=GraphEvalTarget(graph, input_key="prompt")).run(cases)
 ```
 
-Run regression suites against any agent or graph. Failures point at the
-specific node and event that diverged.
+Run regression suites against any agent; a `StateGraph` is wrapped in
+`GraphEvalTarget`, which maps each case prompt onto the named input
+field. Failures point at the specific node and event that diverged.
 
 → See [Evaluation](../evaluation.md).
 
 ## Putting it together
 
-A notebook-63-style incident-response graph in production looks like:
+A notebook-77-style incident-response graph in production looks like:
 
 ```python
 from locus.agent import Agent, AgentConfig
 from locus.multiagent.graph import StateGraph, GraphConfig
-from locus.memory.backends.s3 import S3Backend
+from locus.memory.backends import S3Backend
 
 graph = StateGraph(config=GraphConfig(
     allow_cycles=True,
@@ -203,5 +202,5 @@ it and ship it.
 
 [t44]: https://github.com/oracle/locus/blob/main/examples/notebook_26_debate_with_judge.py
 [t46]: https://github.com/oracle/locus/blob/main/examples/notebook_77_incident_response.py
-[t47]: https://github.com/oracle/locus/blob/main/examples/notebook_78_procurement_approval.py
+[t47]: https://github.com/oracle/locus/blob/main/examples/notebook_78_concession_approval.py
 [t48]: https://github.com/oracle/locus/blob/main/examples/notebook_79_contract_review.py

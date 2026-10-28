@@ -42,7 +42,7 @@ from pydantic import SecretStr
 
 from locus.agent import Agent
 from locus.models.credentials import Credential, CredentialPool
-from locus.models.native.anthropic import AnthropicModel
+from locus.models import AnthropicModel
 from locus.models.pooled import CredentialPoolModel
 
 pool = CredentialPool(

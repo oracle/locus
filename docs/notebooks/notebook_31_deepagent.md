@@ -29,7 +29,7 @@ This notebook covers:
 6. **RAG grounding** — `datastores={name: {retriever, description, top_k}}`
    auto-wires a `search_<name>` tool from any `RAGRetriever` and
    prepends a routing block to the system prompt. The path exercised
-   here is `QdrantVectorStore` + `OpenAIEmbeddings` over prior incident
+   here is `QdrantVectorStore` + the shared `get_embedder()` over prior incident
    notes; absent an embedding key, Part 5 exits cleanly.
 
 The factory is convenience-only: the returned Agent has nothing

@@ -14,8 +14,7 @@ bill. Issues virtual keys for two payments teams, drives traffic on
 each, then walks the spend surface — per-request rows, per-key rollups,
 per-model rollups, and per-team filtering via metadata.
 
-Run it::
-
+Run it:
     # 1. Bring the gateway + Postgres up (see notebook 66 for the
     #    provider env vars and master key setup).
     cd examples/litellm-gateway/
@@ -96,6 +95,13 @@ def _admin(master_key: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {master_key}", "Content-Type": "application/json"}
 
 
+def _admin_get(url: str, master_key: str, path: str, params: dict[str, str] | None = None) -> Any:
+    """One master-key GET against the gateway's admin surface. Returns the parsed body."""
+    resp = httpx.get(f"{url}{path}", headers=_admin(master_key), params=params, timeout=15.0)
+    resp.raise_for_status()
+    return resp.json()
+
+
 def issue_virtual_key(
     url: str,
     master_key: str,
@@ -112,7 +118,7 @@ def issue_virtual_key(
             "models": models,
             "max_budget": max_budget_usd,
             "duration": "1h",
-            "metadata": {"team": team, "owner": "notebook-72", "run": uuid.uuid4().hex[:8]},
+            "metadata": {"team": team, "owner": "notebook-67", "run": uuid.uuid4().hex[:8]},
         },
         timeout=15.0,
     )
@@ -142,35 +148,16 @@ def chat(url: str, virtual_key: str, model_alias: str, prompt: str) -> dict[str,
 def fetch_spend_logs(
     url: str, master_key: str, *, virtual_key: str | None = None
 ) -> list[dict[str, Any]]:
-    params = {"api_key": virtual_key} if virtual_key else {}
-    resp = httpx.get(
-        f"{url}/spend/logs",
-        headers={"Authorization": f"Bearer {master_key}"},
-        params=params,
-        timeout=15.0,
-    )
-    resp.raise_for_status()
-    return resp.json()
+    params = {"api_key": virtual_key} if virtual_key else None
+    return _admin_get(url, master_key, "/spend/logs", params)
 
 
 def fetch_spend_by_key(url: str, master_key: str) -> list[dict[str, Any]]:
-    resp = httpx.get(
-        f"{url}/global/spend/keys",
-        headers={"Authorization": f"Bearer {master_key}"},
-        timeout=15.0,
-    )
-    resp.raise_for_status()
-    return resp.json()
+    return _admin_get(url, master_key, "/global/spend/keys")
 
 
 def fetch_spend_by_model(url: str, master_key: str) -> list[dict[str, Any]]:
-    resp = httpx.get(
-        f"{url}/global/spend/models",
-        headers={"Authorization": f"Bearer {master_key}"},
-        timeout=15.0,
-    )
-    resp.raise_for_status()
-    return resp.json()
+    return _admin_get(url, master_key, "/global/spend/models")
 
 
 # ---------------------------------------------------------------------------
@@ -255,7 +242,7 @@ def main() -> None:
     print("=" * 72)
     print(" Done. Payments platform owners can answer:")
     print("   · 'What did fraud-ops spend last month?'  → /spend/logs + metadata.team")
-    print("   · 'What does the claude alias cost across teams?' → /global/spend/models")
+    print("   · 'What does each model alias cost across teams?' → /global/spend/models")
     print("   · 'Which automation key is over budget right now?' → /global/spend/keys")
     print(" — all from one SQL-backed surface. No Locus integration glue.")
     print("=" * 72)

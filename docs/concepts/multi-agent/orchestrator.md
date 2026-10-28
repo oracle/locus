@@ -147,7 +147,7 @@ Specialist(
   — router over three specialists run in parallel, results correlated and summarized.
 - [`notebook_23_specialist_agents.py`](https://github.com/oracle/locus/blob/main/examples/notebook_23_specialist_agents.py)
   — confidence thresholds and per-specialist playbooks.
-- [`notebook_78_procurement_approval.py`](https://github.com/oracle/locus/blob/main/examples/notebook_78_procurement_approval.py)
+- [`notebook_78_concession_approval.py`](https://github.com/oracle/locus/blob/main/examples/notebook_78_concession_approval.py)
   — customer-support concession approval with risk-tiered approval gates
   and a typed `ConcessionDecision` artifact (built on a `StateGraph`, not
   the orchestrator).

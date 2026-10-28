@@ -24,9 +24,9 @@ When to use AgentServer vs A2AServer:
   scoping, bearer auth. Use when Locus is the system of record and
   clients are yours (PagerDuty webhook, deploy dashboard).
 - A2AServer: cross-framework interop with the A2A message spec. Use
-  when another framework (Strands, ADK) needs to call your Locus agent.
+  when an agent built on another framework needs to call your Locus agent.
 
-Run it
+Run it:
     # Smoke test against a TestClient (no live server, no live model):
     LOCUS_MODEL_PROVIDER=mock python examples/notebook_65_agent_server.py
 
@@ -58,11 +58,11 @@ def _missing_env() -> list[str]:
 
 
 def _build_checkpointer():
-    # The key namespace is ``prefix``; RedisBackend takes **kwargs, so a wrong
-    # name is swallowed silently and every notebook shares one keyspace.
+    # ``prefix`` is the key namespace; RedisConfig forbids unknown kwargs, so
+    # a typo fails fast instead of silently sharing one keyspace.
     backend = RedisBackend(
         url=os.environ["REDIS_URL"],
-        prefix="locus_notebook_68:",
+        prefix="locus_notebook_65:",
     )
     # A backend is raw key/value storage; StorageBackendAdapter is what gives it
     # the Checkpointer contract the agent loop expects.
@@ -76,6 +76,25 @@ _TRIAGE_PROMPT = (
 )
 
 
+def _build_server() -> AgentServer:
+    """Wrap the triage agent in an AgentServer (shared by the smoke test and the live boot)."""
+    agent = Agent(
+        config=AgentConfig(
+            system_prompt=_TRIAGE_PROMPT,
+            max_iterations=5,
+            model=get_model(),
+            # Redis checkpointer so /threads/{id} survives restarts —
+            # an incident outlives any one server process.
+            checkpointer=_build_checkpointer(),
+        )
+    )
+    return AgentServer(
+        agent=agent,
+        title="On-Call Incident Triage Copilot API",
+        description="An incident-triage copilot exposed as an HTTP API",
+    )
+
+
 # Smoke test the server with FastAPI's TestClient. No port is bound.
 
 
@@ -83,24 +102,7 @@ def example_server():
     """Create an incident-triage copilot server with health, invoke, and stream endpoints."""
     print("=== On-Call Incident Triage Copilot Server ===\n")
 
-    model = get_model()
-
-    agent = Agent(
-        config=AgentConfig(
-            system_prompt=_TRIAGE_PROMPT,
-            max_iterations=5,
-            model=model,
-            # Redis checkpointer so /threads/{id} survives restarts —
-            # an incident outlives any one server process.
-            checkpointer=_build_checkpointer(),
-        )
-    )
-
-    server = AgentServer(
-        agent=agent,
-        title="On-Call Incident Triage Copilot API",
-        description="An incident-triage copilot exposed as an HTTP API",
-    )
+    server = _build_server()
 
     from fastapi.testclient import TestClient
 
@@ -165,20 +167,7 @@ def boot_live_server() -> None:
     Gated behind LOCUS_NOTEBOOK_BOOT=1 so the integration runner that
     imports every notebook doesn't hang on a blocking server.
     """
-    model = get_model()
-    agent = Agent(
-        config=AgentConfig(
-            system_prompt=_TRIAGE_PROMPT,
-            max_iterations=5,
-            model=model,
-            checkpointer=_build_checkpointer(),
-        )
-    )
-    server = AgentServer(
-        agent=agent,
-        title="On-Call Incident Triage Copilot API",
-        description="An incident-triage copilot exposed as an HTTP API",
-    )
+    server = _build_server()
     print("Booting AgentServer on http://127.0.0.1:8000 — Ctrl-C to stop.")
     print("Try: curl -X POST http://127.0.0.1:8000/invoke \\")
     print("          -H 'Content-Type: application/json' \\")

@@ -29,7 +29,6 @@ Run:
 from __future__ import annotations
 
 import asyncio
-import os
 import sys
 
 from locus.deepagent import create_deepagent

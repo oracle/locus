@@ -30,15 +30,14 @@ Key ideas:
 Run it:
     .venv/bin/python examples/notebook_08_termination.py
 
-The default provider is the mock model; set LOCUS_MODEL_PROVIDER for a live one (e.g.
-``openai`` or ``anthropic``). Set
-``LOCUS_MODEL_PROVIDER=mock`` for offline runs; OpenAI and Anthropic
-also work.
+The default provider is OCI GenAI when ``~/.oci/config`` holds a usable profile,
+otherwise the bundled mock model; set ``LOCUS_MODEL_PROVIDER`` (``oci``,
+``openai``, ``anthropic``, ``mock``) to choose.
 """
 
 import asyncio
 
-from config import get_model
+from config import get_model, print_config
 
 from locus.agent import Agent, AgentConfig
 from locus.core.termination import (
@@ -90,24 +89,29 @@ async def example_termination():
     print(f"  Both met: stop={stop4}, reason={reason4}")
 
     # Roll your own predicate with CustomCondition.
-    custom = CustomCondition(lambda state, **ctx: (state.iteration > 10, "reply_budget_exhausted"))
+    custom = CustomCondition(lambda state, **_ctx: (state.iteration > 10, "reply_budget_exhausted"))
     print(f"\nCustomCondition: {custom.check(AgentState(agent_id='s').with_iteration(11))}")
 
-    import time as _t
+    # Two more off-the-shelf predicates, probed the same way. TimeLimit starts
+    # its clock on the first check, so a fresh one with an hour to spare says no.
+    confident = AgentState(agent_id="support").with_confidence(0.92)
+    print(f"ConfidenceMet(0.9) at confidence 0.92: {ConfidenceMet(0.9).check(confident)}")
+    print(f"TimeLimit(3600) on a fresh run: {TimeLimit(3600).check(confident)}")
 
-    agent = Agent(model=get_model(max_tokens=80), system_prompt="Reply in one short sentence.")
-    t0 = _t.perf_counter()
-    res = await agent.arun(
-        "In one sentence, why should a customer-support agent compose stop "
-        "conditions (MaxIterations | TextMention) instead of hard-coding a single "
-        "stop check inside the Agent?"
+    # The same composed condition attached to a real agent. Locus evaluates
+    # it after every iteration and reports which predicate ended the run.
+    agent = Agent(
+        model=get_model(max_tokens=80),
+        system_prompt=(
+            "You are a support triage agent. When a ticket is fully handled, end "
+            "your reply with the word TICKET_RESOLVED."
+        ),
+        termination=MaxIterations(5) | TextMention("TICKET_RESOLVED"),
     )
-    dt = _t.perf_counter() - t0
-    print(
-        f"  [model call: {dt:.2f}s · "
-        f"{res.metrics.prompt_tokens}→{res.metrics.completion_tokens} tokens]"
-    )
-    print(f"  AI rationale: {res.message.strip()}")
+    result = await agent.arun("Ticket #4471: refund issued and confirmation emailed. Close it out.")
+    print(f"\nAgent reply: {result.message.strip()[:80]}")
+    print(f"Stop reason: {result.stop_reason}")
+    print()
 
 
 # =============================================================================
@@ -117,7 +121,7 @@ async def example_termination():
 
 async def example_output_key():
     """Set output_key='resolution' and the final message lands in state.metadata['resolution']."""
-    print("\n=== Part 2: output_key ===\n")
+    print("=== Part 2: output_key ===\n")
 
     model = get_model()
 
@@ -136,6 +140,7 @@ async def example_output_key():
     print(f"Response: {result.message}")
     print(f"State metadata['resolution']: {result.state.metadata.get('resolution')}")
     print("Downstream agents read state.metadata['resolution'] directly — no parsing.")
+    print()
 
 
 # =============================================================================
@@ -145,7 +150,7 @@ async def example_output_key():
 
 async def example_dynamic_prompt():
     """System prompt is a function of runtime context.metadata."""
-    print("\n=== Part 3: Dynamic System Prompt ===\n")
+    print("=== Part 3: Dynamic System Prompt ===\n")
 
     model = get_model()
 
@@ -174,13 +179,26 @@ async def example_dynamic_prompt():
         metadata={"role": "billing specialist", "audience": "non-technical customers"},
     )
     print(f"Billing specialist (for customers): {r2.message[:100]}")
+    print()
 
 
 async def main():
     """Run all notebook parts."""
+    print("=" * 60)
+    print("Notebook 08: Bounded Resolution — When the Support Loop Stops")
+    print("=" * 60)
+    print()
+
+    print_config()
+    print()
+
     await example_termination()
     await example_output_key()
     await example_dynamic_prompt()
+
+    print("=" * 60)
+    print("Next: Notebook 09 — Audit hooks: every agent action on the record")
+    print("=" * 60)
 
 
 if __name__ == "__main__":

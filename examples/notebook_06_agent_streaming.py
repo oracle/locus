@@ -34,19 +34,20 @@ domains and 555-01xx phone numbers.
 Run it:
     .venv/bin/python examples/notebook_06_agent_streaming.py
 
-The default provider is the mock model; set LOCUS_MODEL_PROVIDER for a live one (e.g.
-``openai`` or ``anthropic``). For an offline
-run set ``LOCUS_MODEL_PROVIDER=mock``; OpenAI, Anthropic
-work too.
+The default provider is OCI GenAI when ``~/.oci/config`` holds a usable profile,
+otherwise the bundled mock model; set ``LOCUS_MODEL_PROVIDER`` (``oci``,
+``openai``, ``anthropic``, ``mock``) to choose.
 
 Prerequisite: notebook 03.
 """
 
 import asyncio
+import hashlib
+import json
 import re
+import time
 from datetime import datetime
 
-# Import shared config
 from config import get_model, print_config
 
 from locus.agent import Agent
@@ -88,49 +89,6 @@ def extract_pii(text: str) -> str:
     if not any(found.values()):
         return "No PII or sensitive-data cues found"
     return f"emails={found['emails']} phones={found['phones']} cues={found['cues']}"
-
-
-async def example_token_streaming():
-    """Render text as the model produces it, not after the turn finishes.
-
-    ``agent.run(...)`` is event-level by default: you learn what the agent
-    decided, one step at a time, but the assistant's text arrives in one piece
-    when the step completes. Pass ``stream_tokens=True`` and the loop also
-    yields ``ModelChunkEvent`` as the model emits them — which is what a chat
-    UI needs to show a reply landing word by word.
-
-    Tool and termination events are unchanged, so the ReAct loop, the tool-loop
-    guard and audit all still apply. This is the difference between building a
-    streaming UI *on* the harness and abandoning it for a raw client.
-    """
-    print("=== Part 6: Token-level streaming ===\n")
-
-    model = get_model(max_tokens=200)
-    agent = Agent(
-        model=model,
-        tools=[extract_pii],
-        system_prompt="You are a data-privacy analyst. Always run extract_pii on the record.",
-    )
-
-    record = "Subject record: contact jane.doe@example.com or 555-0142."
-    print("Streaming the reply as it is generated:\n")
-
-    reasoning_chars = 0
-    print("  ", end="", flush=True)
-    async for event in agent.run(f"Analyze this record: {record}", stream_tokens=True):
-        if isinstance(event, ModelChunkEvent):
-            # Chain-of-thought arrives on its own channel, so a UI can show it
-            # in a collapsed panel instead of mixing it into the answer.
-            if event.reasoning:
-                reasoning_chars += len(event.reasoning)
-            if event.content:
-                print(event.content, end="", flush=True)
-        elif isinstance(event, ToolStartEvent):
-            print(f"\n  [tool: {event.tool_name}]\n  ", end="", flush=True)
-        elif isinstance(event, TerminateEvent):
-            print(f"\n\n  stop reason: {event.reason}")
-
-    print(f"  chain-of-thought streamed separately: {reasoning_chars} chars\n")
 
 
 async def example_all_events():
@@ -196,10 +154,7 @@ async def example_console_ui():
     @tool
     def fetch_record(subject_id: str) -> str:
         """Fetch a data-subject record by subject id."""
-        # Sleep so the UI has visible work to show.
-        import time
-
-        time.sleep(0.5)
+        time.sleep(0.5)  # give the progress UI visible work
         return f"{subject_id}: jane.doe@example.com, marketing profile, last updated 2026-01-12"
 
     @tool
@@ -359,8 +314,9 @@ async def example_progress_tracking():
     model = get_model(max_tokens=300)
 
     # Deterministic tool bodies: fetch_records returns a real summary of
-    # an in-memory subject store, scan_records hashes its input. No canned
-    # strings, no network — all subject data below is invented.
+    # an in-memory subject store, scan_records hashes its input, and only
+    # file_report answers with a fixed acknowledgement. Nothing touches the
+    # network — all subject data below is invented.
     sources = {
         "pending": [
             {"id": "DSR-1042", "subject": "jane.doe@example.com", "type": "access"},
@@ -376,9 +332,6 @@ async def example_progress_tracking():
     @tool
     def fetch_records(source: str) -> str:
         """Fetch requests from a named queue (pending, escalated, ...)."""
-        import json
-        import time
-
         time.sleep(0.3)
         rows = sources.get(source.lower())
         if rows is None:
@@ -388,9 +341,6 @@ async def example_progress_tracking():
     @tool
     def scan_records(data: str) -> str:
         """Scan fetched records — counts bytes and emits a checksum for the case file."""
-        import hashlib
-        import time
-
         time.sleep(0.2)
         digest = hashlib.sha256(data.encode()).hexdigest()[:12]
         return f"scanned {len(data)} bytes, sha256:{digest}"
@@ -398,26 +348,27 @@ async def example_progress_tracking():
     @tool
     def file_report(results: str) -> str:
         """File the triage report in the case system."""
-        import time
-
         time.sleep(0.1)
         return "Triage report filed successfully"
 
+    tools = [fetch_records, scan_records, file_report]
     agent = Agent(
         model=model,
-        tools=[fetch_records, scan_records, file_report],
+        tools=tools,
         system_prompt="Fetch requests from 'pending', scan them, and file a report.",
     )
 
     steps_done = 0
-    total_steps = 3  # we expect three tool calls: fetch, scan, file
+    # The brief asks for each tool exactly once, so the bar's denominator is
+    # the tool count; the clamp below keeps a retry from pushing it past 100%.
+    total_steps = len(tools)
 
     print("Processing pending queue...")
 
     async for event in agent.run("Fetch, scan, and report on the pending queue"):
         if isinstance(event, ToolCompleteEvent):
             steps_done += 1
-            progress = (steps_done / total_steps) * 100
+            progress = min(100.0, (steps_done / total_steps) * 100)
             bar = "#" * int(progress / 10) + "-" * (10 - int(progress / 10))
             print(f"  [{bar}] {progress:.0f}% - {event.tool_name} complete")
 
@@ -428,11 +379,54 @@ async def example_progress_tracking():
 
 
 # =============================================================================
-# Main
+# Part 6: token-level streaming with stream_tokens=True
 # =============================================================================
 
 
-def main():
+async def example_token_streaming():
+    """Render text as the model produces it, not after the turn finishes.
+
+    ``agent.run(...)`` is event-level by default: you learn what the agent
+    decided, one step at a time, but the assistant's text arrives in one piece
+    when the step completes. Pass ``stream_tokens=True`` and the loop also
+    yields ``ModelChunkEvent`` as the model emits them — which is what a chat
+    UI needs to show a reply landing word by word.
+
+    Tool and termination events are unchanged, so the ReAct loop, the tool-loop
+    guard and audit all still apply. This is the difference between building a
+    streaming UI *on* the harness and abandoning it for a raw client.
+    """
+    print("=== Part 6: Token-level streaming ===\n")
+
+    model = get_model(max_tokens=200)
+    agent = Agent(
+        model=model,
+        tools=[extract_pii],
+        system_prompt="You are a data-privacy analyst. Always run extract_pii on the record.",
+    )
+
+    record = "Subject record: contact jane.doe@example.com or 555-0142."
+    print("Streaming the reply as it is generated:\n")
+
+    reasoning_chars = 0
+    print("  ", end="", flush=True)
+    async for event in agent.run(f"Analyze this record: {record}", stream_tokens=True):
+        if isinstance(event, ModelChunkEvent):
+            # Chain-of-thought arrives on its own channel, so a UI can show it
+            # in a collapsed panel instead of mixing it into the answer.
+            if event.reasoning:
+                reasoning_chars += len(event.reasoning)
+            if event.content:
+                print(event.content, end="", flush=True)
+        elif isinstance(event, ToolStartEvent):
+            print(f"\n  [tool: {event.tool_name}]\n  ", end="", flush=True)
+        elif isinstance(event, TerminateEvent):
+            print(f"\n\n  stop reason: {event.reason}")
+
+    print(f"  chain-of-thought streamed separately: {reasoning_chars} chars\n")
+
+
+async def main():
     """Run all notebook parts."""
     print("=" * 60)
     print("Notebook 06: Streaming a Data-Subject-Request Analysis")
@@ -442,12 +436,12 @@ def main():
     print_config()
     print()
 
-    asyncio.run(example_all_events())
-    asyncio.run(example_console_ui())
-    asyncio.run(example_event_filtering())
-    asyncio.run(example_collect_metrics())
-    asyncio.run(example_progress_tracking())
-    asyncio.run(example_token_streaming())
+    await example_all_events()
+    await example_console_ui()
+    await example_event_filtering()
+    await example_collect_metrics()
+    await example_progress_tracking()
+    await example_token_streaming()
 
     # =========================================================================
     # See also: structured streaming
@@ -474,9 +468,9 @@ def main():
     )
 
     print("=" * 60)
-    print("Next: Notebook 09 — Audit Hooks")
+    print("Next: Notebook 07 — Structured output: typed support schemas a help desk can consume")
     print("=" * 60)
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

@@ -13,8 +13,9 @@ What you'll learn:
 - The right HTTP response headers
   (`create_sse_response_headers()`).
 - Shaping the wire payload with a custom serializer.
-- A drop-in FastAPI `StreamingResponse` example.
-- Production checklist: IDs, heartbeats, reconnection, error events.
+- Every event type the handlers render, read from
+  `SSEHandler.SUPPORTED_EVENTS`.
+- Heartbeats that keep long batch-settlement streams alive.
 
 Run it:
 

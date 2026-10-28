@@ -3,8 +3,8 @@
 Walks the Locus reasoning toolkit one piece at a time against a
 data-privacy postmortem: a privacy-team exercise seeded a synthetic PII
 canary (a fake SSN) into a data export and the redaction pipeline never
-flagged it. Each part fires a real model call and prints `[model call:
-X.XXs · prompt→completion tokens]` so you can see the round-trip.
+flagged it. The parts that call a model print `[model call: X.XXs ·
+prompt→completion tokens]` so you can see the round-trip.
 
 The thesis the reasoning layer enforces: an ungrounded claim in a
 postmortem is how a false root cause gets written into a runbook, so each
@@ -39,8 +39,9 @@ LOCUS_MODEL_PROVIDER=mock python examples/notebook_54_reasoning_patterns.py
 
 ## Prerequisites
 
-- An OpenAI or Anthropic API key, or `LOCUS_MODEL_PROVIDER` set to
-  `openai` / `anthropic` / `mock`.
+- An OCI profile in `~/.oci/config` (picked up automatically), or
+  `LOCUS_MODEL_PROVIDER` set to `openai` / `anthropic` / `mock` with the
+  matching key.
 - A model that supports constrained JSON decoding for the
   `output_schema=` parts. The `check_structured_output_capable()` helper
   exits cleanly under mock.

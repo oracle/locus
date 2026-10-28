@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -17,11 +16,11 @@ spreadsheet that drifts out of date the day after it's signed.
 
 - List every EV_* constant and its category prefix (always in sync with
   the codebase because it's read at import time — no stale spreadsheet).
-- Drive a two-stage dispute-triage pipeline (SequentialPipeline +
-  LoopAgent machinery) that surfaces composition.* events end-to-end.
+- Drive a two-stage dispute-triage SequentialPipeline that surfaces
+  composition.* events end-to-end.
 
-Run it
-    # Default: the bundled mock model (set LOCUS_MODEL_PROVIDER for a live provider)
+Run it:
+    # Default: OCI GenAI if ~/.oci/config has a usable profile, else the bundled mock model
     python examples/notebook_63_event_catalogue.py
 
     # Offline / no credentials:
@@ -37,7 +36,7 @@ from collections import defaultdict
 from config import get_model
 
 from locus.agent import Agent
-from locus.agent.composition import LoopAgent, SequentialPipeline
+from locus.agent.composition import SequentialPipeline
 from locus.observability import get_event_bus, run_context
 
 
@@ -65,9 +64,9 @@ def part1_catalogue_tour() -> None:
             print(f"    - {ev}")
 
 
-# Part 2: SequentialPipeline and LoopAgent emit composition.* events
-# at every stage / iteration boundary — each stage of the dispute-triage
-# pipeline leaves its own entry in the audit trail.
+# Part 2: SequentialPipeline emits composition.* events at every stage
+# boundary — each stage of the dispute-triage pipeline leaves its own
+# entry in the audit trail.
 
 
 async def part2_composition() -> None:
@@ -86,13 +85,14 @@ async def part2_composition() -> None:
             async for ev in bus.subscribe(rid):
                 if ev.event_type.startswith("composition."):
                     seen.append(ev.event_type)
-                if ev.event_type == "composition.fanout.completed":
-                    break
+                # Stages are 0-indexed, so stage 1 is the last of our two.
                 if ev.event_type == "composition.stage.completed" and ev.data.get("stage") == 1:
                     print("composition events seen so far:", seen)
                     return
 
         consumer_task = asyncio.create_task(consumer())
+        # Yield once so the subscriber attaches before the first event is
+        # published; otherwise the first stage's events are missed.
         await asyncio.sleep(0)
 
         await pipeline.run(

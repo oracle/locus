@@ -33,7 +33,6 @@ Set ``LOCUS_MODEL_PROVIDER=mock`` to bypass the model for offline runs.
 """
 
 import asyncio
-import sys
 
 from config import get_model, print_config
 
@@ -233,9 +232,10 @@ async def example_multiple_threads():
 async def example_inspect_checkpoint():
     """Load the persisted AgentState directly and look at every field.
 
-    Reflexion's confidence score only moves when tools succeed, so the
-    inspector gets a ``record_detail`` tool. After two turns that each
-    fire a tool call, ``state.confidence`` should be > 0.
+    Reflexion's confidence score rises on successful tool calls and falls
+    on errors and loops, so the inspector gets a ``record_detail`` tool.
+    After two turns that each fire a successful tool call,
+    ``state.confidence`` should be > 0.
     """
     print("=== Part 5: Inspecting a saved checkpoint ===\n")
 
@@ -303,11 +303,6 @@ async def example_inspect_checkpoint():
     print()
 
 
-# =============================================================================
-# Main
-# =============================================================================
-
-
 async def main():
     """Run all notebook parts."""
     print("=" * 60)
@@ -330,7 +325,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        sys.exit(130)
+    asyncio.run(main())

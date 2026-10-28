@@ -10,24 +10,28 @@ into an agent without bundling them. Locus speaks both sides of it.
 
 - Publish a Locus support agent as an MCP server — tools and the
   agent's own ``run_agent`` become MCP methods.
-- Connect a Locus agent to an external MCP server (an order system, a
-  knowledge base) and use its tools as ordinary ``@tool``-decorated
-  callables.
 - Convert tool schemas in both directions
-  (``locus_tool_to_mcp`` / ``mcp_tool_to_locus``).
-- Handle ``tools/list`` and ``tools/call`` requests programmatically.
-- A **refund-eligibility probe** exposed as an MCP tool: it reads order
-  signals (days since delivery, item condition, order value), a
-  deterministic classifier returns an ``EligibilityVerdict``, and a
-  grounding step either ships a grounded eligibility decision or abstains
-  when signal coverage is too low.
+  (``locus_tool_to_mcp`` / ``mcp_tool_to_locus``) and call the
+  round-tripped tool.
+- Handle ``tools/list`` and ``tools/call`` requests programmatically,
+  including a ``run_agent`` call that drives the whole agent loop.
+- A **refund-eligibility probe**: it reads order signals (days since
+  delivery, item condition, order value), a deterministic classifier
+  returns an ``EligibilityVerdict``, and a GSAR grounding step either
+  ships a grounded eligibility decision or abstains when signal coverage
+  is too low.
+
+Consuming an external MCP server (an order system, a knowledge base)
+from a Locus agent is the other half of the story — ``MCPClient`` and the
+hooks pattern are covered in ``docs/concepts/mcp.md``, along with the
+tool-design, error-handling, and safety notes for tools exposed over MCP.
 
 The configured provider drives the agent. The MCP layer is transport-only
 — the same agent works against any provider. All tool outputs here are
 mock data (invented orders, fixed signals) — no live order system.
 
 Run it:
-    # The bundled mock model is the default; set LOCUS_MODEL_PROVIDER for a live provider.
+    # Default: OCI GenAI if ~/.oci/config has a usable profile, else the bundled mock model
     LOCUS_MODEL_PROVIDER=openai LOCUS_MODEL_ID=gpt-4o python examples/notebook_46_mcp_integration.py
 
     # Offline:
@@ -41,14 +45,11 @@ Prerequisites:
 See https://modelcontextprotocol.io for the MCP specification.
 """
 
-import ast
 import asyncio
 import json
-import operator as _op
 from collections.abc import Mapping
 
-# Import shared config for model
-from config import get_model, print_config
+from config import get_model, print_config, safe_math_eval
 from pydantic import BaseModel
 
 from locus.agent import Agent
@@ -56,6 +57,7 @@ from locus.integrations.fastmcp import (
     LocusMCPServer,
     create_mcp_server,
     locus_tool_to_mcp,
+    mcp_tool_to_locus,
 )
 from locus.reasoning.gsar import (
     Claim,
@@ -68,35 +70,14 @@ from locus.reasoning.gsar import (
 from locus.tools import tool
 
 
-_SAFE_MATH_BIN_OPS = {
-    ast.Add: _op.add,
-    ast.Sub: _op.sub,
-    ast.Mult: _op.mul,
-    ast.Div: _op.truediv,
-    ast.FloorDiv: _op.floordiv,
-    ast.Mod: _op.mod,
-    ast.Pow: _op.pow,
-}
-_SAFE_MATH_UNARY_OPS = {ast.USub: _op.neg, ast.UAdd: _op.pos}
-
-
-def _safe_math_eval(expression: str) -> float:
-    # AST-only arithmetic — no names, calls, or attribute access so the
-    # calculator tool can't be turned into a sandbox escape.
-    tree = ast.parse(expression, mode="eval")
-
-    def _eval(node: ast.AST) -> float:
-        if isinstance(node, ast.Expression):
-            return _eval(node.body)
-        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
-            return node.value
-        if isinstance(node, ast.BinOp) and type(node.op) in _SAFE_MATH_BIN_OPS:
-            return _SAFE_MATH_BIN_OPS[type(node.op)](_eval(node.left), _eval(node.right))
-        if isinstance(node, ast.UnaryOp) and type(node.op) in _SAFE_MATH_UNARY_OPS:
-            return _SAFE_MATH_UNARY_OPS[type(node.op)](_eval(node.operand))
-        raise ValueError("Unsupported expression")
-
-    return _eval(tree)
+def _has_fastmcp() -> bool:
+    # Request handling needs the fastmcp package; the schema and server
+    # construction below do not, so the notebook degrades instead of failing.
+    try:
+        import fastmcp  # noqa: F401
+    except ImportError:
+        return False
+    return True
 
 
 # =============================================================================
@@ -130,7 +111,7 @@ def search_help_articles(query: str, limit: int = 5) -> list[dict]:
 def calculate(expression: str) -> str:
     """Evaluate a mathematical expression (e.g. a prorated-refund formula)."""
     try:
-        return str(_safe_math_eval(expression))
+        return str(safe_math_eval(expression))
     except (ValueError, SyntaxError, ZeroDivisionError):
         return "Error: Invalid expression"
 
@@ -208,11 +189,11 @@ def example_locus_tools():
 
 
 # =============================================================================
-# Part 2: Schema conversion — Locus tool -> MCP shape and back.
+# Part 2: Schema conversion — Locus tool -> MCP shape -> Locus tool again.
 # =============================================================================
 
 
-def example_tool_conversion():
+async def example_tool_conversion():
     print("=== Part 2: Tool Conversion ===\n")
 
     mcp_schema = locus_tool_to_mcp(order_status)
@@ -221,9 +202,25 @@ def example_tool_conversion():
     print(json.dumps(mcp_schema, indent=2))
     print()
 
-    print("MCP tools can be converted to Locus tools using mcp_tool_to_locus()")
-    print("This lets a Locus agent use tools from external MCP servers —")
-    print("an order system, a returns service, a knowledge base — without bundling them.")
+    # The reverse direction is what an external MCP server's tools go
+    # through: name, description, and inputSchema come off the wire, and
+    # the callable is whatever actually talks to that server. Here the
+    # callable is the original tool, so the round trip can be checked
+    # end-to-end — same name, same flat parameter schema, same answer.
+    async def _call_order_system(**kwargs):
+        return order_status(**kwargs)
+
+    round_tripped = mcp_tool_to_locus(
+        name=mcp_schema["name"],
+        description=mcp_schema["description"],
+        func=_call_order_system,
+        parameters=mcp_schema["inputSchema"],
+    )
+    print("MCP schema converted back to a Locus tool:")
+    print(f"  name={round_tripped.name!r}")
+    print(f"  parameters preserved: {round_tripped.parameters == order_status.parameters}")
+    answer = await round_tripped.execute(order_id="ORD-1003")
+    print(f"  execute(order_id='ORD-1003') = {answer}")
     print()
 
 
@@ -233,7 +230,7 @@ def example_tool_conversion():
 # =============================================================================
 
 
-def example_mcp_server():
+def example_mcp_server() -> LocusMCPServer:
     print("=== Part 3: MCP Server ===\n")
 
     model = get_model(max_tokens=200)
@@ -274,16 +271,16 @@ def example_mcp_server():
 
 
 # =============================================================================
-# Part 4: Handle MCP requests programmatically — no full transport needed.
+# Part 4: Handle MCP requests programmatically — no transport needed.
+#         tools/list, a direct tools/call, and a run_agent call that drives
+#         the whole agent loop through the server.
 # =============================================================================
 
 
-async def example_mcp_requests():
+async def example_mcp_requests(server: LocusMCPServer):
     print("=== Part 4: MCP Requests ===\n")
 
-    try:
-        import fastmcp  # noqa: F401
-    except ImportError:
+    if not _has_fastmcp():
         print("Note: fastmcp package not installed.")
         print("Install with: pip install fastmcp")
         print()
@@ -292,131 +289,24 @@ async def example_mcp_requests():
         print()
         return
 
-    model = get_model(max_tokens=200)
-
-    agent = Agent(
-        model=model,
-        tools=[order_status, calculate],
-        system_prompt="You are a customer-support assistant.",
-    )
-
-    server = LocusMCPServer(agent=agent, name="test-support-server")
-
-    list_request = {"method": "tools/list", "params": {}}
-    list_response = await server.handle_request(list_request)
-
+    list_response = await server.handle_request({"method": "tools/list", "params": {}})
+    tool_names = [t["name"] for t in list_response.get("tools", [])]
     print("Request: tools/list")
-    print(f"Response: {json.dumps(list_response, indent=2)[:500]}...")
+    print(f"Available tools: {tool_names}")
     print()
 
-    call_request = {
-        "method": "tools/call",
-        "params": {
-            "name": "order_status",
-            "arguments": {"order_id": "ORD-1002"},
-        },
-    }
-    call_response = await server.handle_request(call_request)
-
+    call_response = await server.handle_request(
+        {
+            "method": "tools/call",
+            "params": {"name": "order_status", "arguments": {"order_id": "ORD-1002"}},
+        }
+    )
     print("Request: tools/call (order_status)")
     print(f"Response: {json.dumps(call_response, indent=2)}")
     print()
 
-
-# =============================================================================
-# Part 5: Consume an external MCP server's tools as Locus tools.
-# =============================================================================
-
-
-def example_mcp_client():
-    print("=== Part 5: MCP Client ===\n")
-
-    print("MCPClient lets Locus agents use tools from external MCP servers —")
-    print("e.g. your team's order system or returns service running out of process.")
-    print()
-
-    print("Example usage:")
-    print("""
-    # Connect to a support-tools MCP server
-    client = MCPClient(server_command=["python", "orders_server.py"])
-    await client.connect()
-
-    # List available tools
-    tools = await client.list_tools()
-    print(f"Available tools: {tools}")
-
-    # Call a tool
-    result = await client.call_tool("order_status", {"order_id": "ORD-1001"})
-    print(f"Result: {result}")
-
-    # Convert MCP tools to Locus tools
-    locus_tools = client.to_locus_tools(tools)
-
-    # Use in a Locus agent
-    agent = Agent(
-        model=model,
-        tools=locus_tools,  # Tools from the MCP server!
-        system_prompt="Resolve tickets with the available tools.",
-    )
-
-    # Close connection
-    await client.close()
-    """)
-    print()
-
-
-# =============================================================================
-# Part 6: End-to-end — build agent, expose it, hit it with tools/list and
-#         a run_agent call that goes through the whole loop.
-# =============================================================================
-
-
-async def example_complete_integration():
-    print("=== Part 6: Complete Integration ===\n")
-
-    try:
-        import fastmcp  # noqa: F401
-
-        has_fastmcp = True
-    except ImportError:
-        has_fastmcp = False
-
-    model = get_model(max_tokens=300)
-
-    agent = Agent(
-        model=model,
-        tools=[order_status, search_help_articles, calculate],
-        system_prompt="""You are a customer-support assistant.
-Use the available tools to answer questions:
-- order_status: Check the shipping status of an order
-- search_help_articles: Search help-center articles
-- calculate: Do prorated-refund math""",
-    )
-
-    server = create_mcp_server(agent, name="support-desk-assistant")
-
-    print(f"Created MCP server: {server.name}")
-    print(f"Agent tools: {[t.name for t in [order_status, search_help_articles, calculate]]}")
-    print()
-
-    if not has_fastmcp:
-        print("Note: fastmcp not installed - showing structure only.")
-        print("Install with: pip install fastmcp")
-        print()
-        print("With fastmcp installed, the server can:")
-        print("  - Handle tools/list requests")
-        print("  - Handle tools/call requests")
-        print("  - Run as stdio or SSE transport")
-        print()
-        return
-
-    print("Testing MCP server with simulated requests:\n")
-
-    tools_response = await server.handle_request({"method": "tools/list"})
-    tool_names = [t["name"] for t in tools_response.get("tools", [])]
-    print(f"Available tools: {tool_names}")
-
-    # run_agent exercises a full agent loop through MCP.
+    # run_agent exercises a full agent loop through MCP — the model picks
+    # the tool, the server runs it, the answer comes back as one response.
     run_response = await server.handle_request(
         {
             "method": "tools/call",
@@ -426,18 +316,16 @@ Use the available tools to answer questions:
             },
         }
     )
-    print(f"\nAgent response: {run_response}")
-
-    print()
-    print("This server can now be used by any MCP-compatible client!")
+    print("Request: tools/call (run_agent)")
+    print(f"Agent response: {run_response}")
     print()
 
 
 # =============================================================================
-# Part 7: The eligibility probe over MCP — read order signals, classify, then
-#         ground the verdict (or abstain on low coverage). The grounding step
-#         only "ships" a refund decision when it rests on tool evidence; thin
-#         inference abstains. All numbers are mock.
+# Part 5: GSAR gate on the probe's verdict — read order signals, classify,
+#         then ground the verdict (or abstain on low coverage). The grounding
+#         step only "ships" a refund decision when it rests on tool evidence;
+#         thin inference abstains. All numbers are mock.
 # =============================================================================
 
 
@@ -447,10 +335,9 @@ def _ground_eligibility(partition: Partition) -> tuple[float, Decision]:
     return score, decide(score)
 
 
-async def example_eligibility_probe():
-    print("=== Part 7: Refund-Eligibility Probe ===\n")
+def example_eligibility_gate():
+    print("=== Part 5: GSAR gate on the refund-eligibility verdict ===\n")
 
-    # Expose the probe as an MCP tool alongside the support tools.
     print("Tool:", check_refund_eligibility.name)
     print(f"  Description: {check_refund_eligibility.description}\n")
 
@@ -515,50 +402,6 @@ async def example_eligibility_probe():
     print()
 
 
-# =============================================================================
-# Part 8: Practical notes — tool design, errors, safety, performance.
-# =============================================================================
-
-
-def example_best_practices():
-    print("=== Part 8: Best Practices ===\n")
-
-    print("1. Tool Design")
-    print("-" * 40)
-    print("   - Use clear, descriptive tool names (order_status, not lookup)")
-    print("   - Write detailed docstrings (they become descriptions)")
-    print("   - Use type hints for parameters")
-    print("   - Return strings or JSON-serializable data")
-    print()
-
-    print("2. Error Handling")
-    print("-" * 40)
-    print("   - Return error messages as strings, don't raise exceptions")
-    print("   - Validate inputs before processing")
-    print("   - Include helpful error messages")
-    print()
-
-    print("3. Safety")
-    print("-" * 40)
-    print("   - Validate all inputs — tool output from an order system is untrusted")
-    print("   - Limit what tools can access; read-only lookups by default")
-    print("   - Use hooks for additional validation and audit logging")
-    print("   - Don't expose refund or account-mutating operations over MCP")
-    print()
-
-    print("4. Performance")
-    print("-" * 40)
-    print("   - Keep tools focused and fast")
-    print("   - Use async for I/O operations")
-    print("   - Consider caching for repeated order lookups")
-    print()
-
-
-# =============================================================================
-# Main
-# =============================================================================
-
-
 async def main():
     print("=" * 60)
     print("Notebook 46: MCP Integration")
@@ -569,16 +412,13 @@ async def main():
     print()
 
     example_locus_tools()
-    example_tool_conversion()
-    example_mcp_server()
-    await example_mcp_requests()
-    example_mcp_client()
-    await example_complete_integration()
-    await example_eligibility_probe()
-    example_best_practices()
+    await example_tool_conversion()
+    server = example_mcp_server()
+    await example_mcp_requests(server)
+    example_eligibility_gate()
 
     print("=" * 60)
-    print("Done. Next: notebook 49 — playbooks.")
+    print("Done. Next: notebook 47 — plugins.")
     print("=" * 60)
 
 

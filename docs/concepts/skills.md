@@ -189,12 +189,12 @@ refund_triage = Skill(
 agent = Agent(config=AgentConfig(
     model="{{ locus_example_model }}",
     system_prompt="You are a support agent. Cite evidence; escalate without it.",
-    # register the full toolset; the skill narrows it while active
+    # full toolset registered; the skill only steers away from issue_refund
     tools=[lookup_order, lookup_customer, check_refund_policy, issue_refund],
     skills=[refund_triage],
 ))
 
-result = agent.run("Customer on ord-4821 reports a duplicate charge — triage it.")
+result = agent.run_sync("Customer on ord-4821 reports a duplicate charge — triage it.")
 ```
 
 `issue_refund` is registered on the agent, and the skill's

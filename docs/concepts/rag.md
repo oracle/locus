@@ -195,17 +195,14 @@ Two rerankers ship:
 - `CohereReranker` — Cohere's direct rerank API (`rerank-v3.5`).
 
 ```python
-from locus.rag import (
-    CrossEncoderReranker, InMemoryVectorStore, OpenAIEmbeddings, RAGRetriever,
-)
+from locus.rag import CrossEncoderReranker
 
-reranker = CrossEncoderReranker(top_n=5)   # offline; or CohereReranker(model="rerank-v3.5", top_n=5)
-
+# The retriever from step 3, plus the two reranking kwargs:
 retriever = RAGRetriever(
-    embedder=OpenAIEmbeddings(model="text-embedding-3-small"),
+    embedder=embedder,
     store=store,
-    reranker=reranker,            # opt-in; ``None`` keeps semantic-only order
-    rerank_candidate_pool=50,     # over-fetch from the store; default 50
+    reranker=CrossEncoderReranker(top_n=5),   # opt-in; or CohereReranker(model="rerank-v3.5", top_n=5)
+    rerank_candidate_pool=50,                 # over-fetch from the store; default 50
 )
 
 # Same call as without a reranker — over-fetch happens behind the scenes.
@@ -219,7 +216,7 @@ relevance score on `.score` and the original embedding score on
 Standalone use (no retriever):
 
 ```python
-top_5 = await reranker.rerank(query, candidates)
+top_5 = await retriever.reranker.rerank(query, candidates)
 ```
 
 ## Multimodal ingestion
@@ -278,24 +275,18 @@ Cross-check the claim against a direct API fact (`enrich_indicator`,
 *contradicted* claim abstain.
 
 ```python
-from locus_security import ground_finding, Severity, is_finding, enrich_indicator
+from locus_security import ground_finding, Severity, is_finding
 from locus.reasoning.gsar import Claim, EvidenceType, Partition
 
 ioc = "198.51.100.7"
-corpus_hits = await retriever.retrieve(f"reputation of {ioc}", limit=3)
-live = enrich_indicator(ioc)                # direct API fact, not corpus
-
-# Corpus says "benign"; the live feed says malicious → contradiction.
-contradicted = [
-    Claim(text=h.document.content, type=EvidenceType.DOMAIN,
-          evidence_refs=[f"rag:{h.score:.2f}"])
-    for h in corpus_hits.documents if "benign" in h.document.content.lower()
-]
-grounded = [
-    Claim(text=f"{ioc} flagged malicious by threat-intel feed",
-          type=EvidenceType.TOOL_MATCH,
-          evidence_refs=[f"tool:enrich_indicator:{ioc}:malicious"]),
-] if live["malicious"] else []
+partition = Partition(
+    grounded=[Claim(text=f"{ioc} flagged malicious by threat-intel feed",       # direct API fact
+                    type=EvidenceType.TOOL_MATCH,
+                    evidence_refs=[f"tool:enrich_indicator:{ioc}:malicious"])],
+    contradicted=[Claim(text=f"{ioc} is a benign Akamai CDN edge node",        # the planted corpus chunk
+                        type=EvidenceType.DOMAIN,
+                        evidence_refs=["rag:0.91"])],
+)
 
 result = ground_finding(
     title=f"Active C2 beacon to {ioc}",
@@ -303,14 +294,13 @@ result = ground_finding(
     severity=Severity.HIGH,
     asset=ioc,
     remediation="Block the indicator; hunt for the implant that beacons to it.",
-    partition=Partition(grounded=grounded, contradicted=contradicted),
+    partition=partition,
 )
 
 if is_finding(result):
     print(f"[{result.severity.value}] {result.title}  (gsar {result.gsar_score:.2f})")
 else:
-    # Corpus-only / contradicted → no shippable claim. Route to a human.
-    print(f"[abstain] {result.reason}")
+    print(f"[abstain] {result.reason}")   # corpus-only / contradicted → route to a human
 ```
 
 GSAR weights `TOOL_MATCH` (a direct API observation) above `DOMAIN`

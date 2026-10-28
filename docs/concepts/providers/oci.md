@@ -101,6 +101,11 @@ agent = Agent(model=OCIResponsesModel(
 ))
 ```
 
+`store=True` (the default) has OCI persist each response so the next
+turn continues it through `previous_response_id`; with `store=False`
+nothing is retained server-side and the runtime sends the full history
+on every request.
+
 The only SDK primitive that bypasses on this path is
 `ConversationManager`. Memory, Reflexion, GSAR, grounding, tool
 hooks, idempotency, checkpointing, output schema, streaming, and
@@ -139,6 +144,10 @@ agent = Agent(
 [Full DAC how-to →](../../how-to/oci-dac.md) — covers Qwen-on-DAC,
 streaming, tool-call quirks per model.
 
+Note the spelling: `OCIModel` (and the `oci:` string factory) takes
+`profile_name=` (with `profile=` accepted as an alias), while
+`OCIResponsesModel` takes `profile=` only.
+
 ## Transport selection — by the `oci:` prefix
 
 When you use the `oci:<model-id>` string factory, the SDK looks at the
@@ -155,7 +164,7 @@ Need to override? Set `LOCUS_OCI_TRANSPORT=v1` or `LOCUS_OCI_TRANSPORT=sdk`.
 For the **Responses transport**, instantiate `OCIResponsesModel`
 explicitly — it's opt-in, not selected by prefix. See the
 [Responses concept page](../oci-responses.md) and
-[notebook 29](../../notebooks/notebook_34_oci_responses.md).
+[notebook 34](../../notebooks/notebook_34_oci_responses.md).
 
 ## One auth surface — laptop, CI, OCI workloads
 
@@ -226,18 +235,18 @@ The agent doesn't care. That's the OCI provider's whole pitch.
 
 | | |
 |---|---|
-| `OCIChatCompletionsModel` (V1) | [`src/locus/models/providers/oci/openai_compat.py`](https://github.com/oracle-samples/locus/blob/main/src/locus/models/providers/oci/openai_compat.py) |
-| `OCIModel` (SDK + DAC) | [`src/locus/models/providers/oci/__init__.py`](https://github.com/oracle-samples/locus/blob/main/src/locus/models/providers/oci/__init__.py) |
-| Per-family request builders | [`src/locus/models/providers/oci/models/`](https://github.com/oracle-samples/locus/tree/main/src/locus/models/providers/oci/models) |
-| Routing | [`src/locus/models/registry.py`](https://github.com/oracle-samples/locus/blob/main/src/locus/models/registry.py) — `_make_oci()` |
+| `OCIChatCompletionsModel` (V1) | [`src/locus/models/providers/oci/openai_compat.py`](https://github.com/oracle/locus/blob/main/src/locus/models/providers/oci/openai_compat.py) |
+| `OCIModel` (SDK + DAC) | [`src/locus/models/providers/oci/__init__.py`](https://github.com/oracle/locus/blob/main/src/locus/models/providers/oci/__init__.py) |
+| Per-family request builders | [`src/locus/models/providers/oci/models/`](https://github.com/oracle/locus/tree/main/src/locus/models/providers/oci/models) |
+| Routing | [`src/locus/models/registry.py`](https://github.com/oracle/locus/blob/main/src/locus/models/registry.py) — `_make_oci()` |
 
 ## See also
 
 - [Models overview](../models.md) — the full provider tree.
 - [OCI Responses transport](../oci-responses.md) — when to opt in, ZDR mode, server-stateful continuation.
-- [Notebook 00 — three OCI transports side-by-side](../../notebooks/notebook_01_oci_transports.md).
-- [Notebook 29 — `OCIChatCompletionsModel` deep dive](../../notebooks/notebook_33_oci_openai_chat.md).
-- [Notebook 60 — `OCIResponsesModel` deep dive](../../notebooks/notebook_34_oci_responses.md).
+- [Notebook 01 — three OCI transports side-by-side](../../notebooks/notebook_01_oci_transports.md).
+- [Notebook 33 — `OCIChatCompletionsModel` deep dive](../../notebooks/notebook_33_oci_openai_chat.md).
+- [Notebook 34 — `OCIResponsesModel` deep dive](../../notebooks/notebook_34_oci_responses.md).
 - [OCI GenAI models how-to](../../how-to/oci-models.md) — auth setup, region selection, debugging.
 - [OCI Dedicated AI Cluster (DAC)](../../how-to/oci-dac.md) — provisioned-capacity endpoints.
 - [OpenAI](openai.md) — direct OpenAI when OCI lags.

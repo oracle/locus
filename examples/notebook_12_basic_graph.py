@@ -11,6 +11,7 @@ pipeline (parse → enrich → verdict) plus the fan-out and streaming
 shapes a data-protection workflow needs. Scenario: data subject access
 request (DSAR) intake under GDPR Article 15.
 
+Key ideas:
 - Nodes and edges: nodes do triage work, edges describe order.
 - START and END: the two sentinel node ids that frame execution.
 - Sequential, parallel, and conditional flow on the same primitives.
@@ -20,7 +21,7 @@ request (DSAR) intake under GDPR Article 15.
 Run it:
     LOCUS_MODEL_PROVIDER=mock python examples/notebook_12_basic_graph.py
 
-The default provider is the bundled mock model; set LOCUS_MODEL_PROVIDER for a live provider.
+The default provider is OCI GenAI when ``~/.oci/config`` holds a usable profile, otherwise the bundled mock model; set ``LOCUS_MODEL_PROVIDER`` (``oci``, ``openai``, ``anthropic``, ``mock``) to choose.
 Set LOCUS_MODEL_PROVIDER=mock for offline runs. Pick a live provider with
 LOCUS_MODEL_PROVIDER=openai LOCUS_MODEL_ID=gpt-4o
 (or LOCUS_MODEL_PROVIDER=anthropic, or any OpenAI-compatible
@@ -28,25 +29,36 @@ provider: ollama, vllm, groq, together, openrouter, ...).
 """
 
 import asyncio
+import functools
 import time
 
-from config import get_model
+from config import get_model, print_config
 
 from locus.agent import Agent
-from locus.multiagent import END, START, StateGraph
+from locus.multiagent import END, START, StateGraph, StreamMode, emit_custom
+
+
+@functools.lru_cache(maxsize=1)
+def _model():
+    """One model client for the whole notebook; the per-node knobs live on the Agent."""
+    return get_model()
+
+
+def _banner(result) -> None:
+    m = result.metrics
+    print(
+        f"  [model call: {m.duration_ms / 1000.0:.2f}s · "
+        f"{m.prompt_tokens}→{m.completion_tokens} tokens]"
+    )
 
 
 async def _llm_call(
     prompt: str, *, system: str = "Reply in one short sentence.", max_tokens: int = 80
 ) -> str:
-    """Run a one-shot Agent and print a timing/token banner. Used by every part."""
-    agent = Agent(model=get_model(max_tokens=max_tokens), system_prompt=system)
-    t0 = time.perf_counter()
+    """Run a one-shot Agent on the shared model and print a timing/token banner."""
+    agent = Agent(model=_model(), system_prompt=system, max_tokens=max_tokens)
     res = await agent.arun(prompt)
-    dt = time.perf_counter() - t0
-    print(
-        f"  [model call: {dt:.2f}s · {res.metrics.prompt_tokens}→{res.metrics.completion_tokens} tokens]"
-    )
+    _banner(res)
     return res.message.strip()
 
 
@@ -136,7 +148,7 @@ async def example_sequence():
     print(
         f"Enriched: mentions_special_category = {result.final_state.get('mentions_special_category')}"
     )
-    print(f"VerificationResult:  {result.final_state.get('verdict')}")
+    print(f"Verdict:  {result.final_state.get('verdict')}")
     print()
 
 
@@ -164,14 +176,7 @@ async def example_state_flow():
     async def score(inputs):
         print(f"  Score receives:     {list(inputs.keys())}")
         combined = inputs.get("combined_exposure", 0)
-        ai = await _llm_call(
-            f"Comment on a triage pipeline that raised a request's exposure score to {combined}.",
-        )
-        return {
-            "score_note": "final score issued",
-            "final_exposure": combined + 5,
-            "ai_comment": ai,
-        }
+        return {"score_note": "final score issued", "final_exposure": combined + 5}
 
     graph.add_node("intake", intake)
     graph.add_node("correlate", correlate)
@@ -216,11 +221,14 @@ async def example_parallel():
 
     async def count_identifiers(inputs):
         record = inputs.get("record", "")
+        # Simulated lookup latency. With graph.config.parallel = True the two
+        # sleeps overlap, which is what makes the wall-clock print below
+        # meaningful: three nodes, well under three nodes' worth of waiting.
         await asyncio.sleep(0.1)
         return {"identifier_count": record.count("@") + record.count("id:")}
 
     async def check_consent(inputs):
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.1)  # same simulated latency as above
         # Mock consent-ledger lookup — invented data, clearly fake.
         return {"consent_status": "withdrawn-no-active-basis"}
 
@@ -248,8 +256,6 @@ async def example_parallel():
 
     graph.add_edge("combine", END)
 
-    import time
-
     start = time.time()
     result = await graph.execute(
         {"record": "subject id:8842 email jordan@example.com phone +1-555-0100"}
@@ -275,10 +281,7 @@ async def example_results():
 
     async def normalize(inputs):
         v = inputs.get("raw_score", 0)
-        comment = await _llm_call(
-            f"In one sentence, comment on normalizing a raw exposure score of {v}."
-        )
-        return {"normalized": True, "exposure_score": v * 2, "comment": comment}
+        return {"normalized": True, "exposure_score": v * 2}
 
     graph.add_node("normalize", normalize)
     graph.add_edge(START, "normalize")
@@ -304,10 +307,14 @@ async def example_results():
     print()
 
 
+# =============================================================================
+# Part 6: Streaming with emit_custom
+# =============================================================================
+
+
 async def example_streaming():
     """Stream node updates and push custom progress events from inside a node."""
     print("=== Part 6: Streaming with emit_custom ===\n")
-    from locus.multiagent import StreamMode, emit_custom
 
     graph = StateGraph()
 
@@ -315,19 +322,12 @@ async def example_streaming():
         # emit_custom — push an arbitrary payload onto the event stream
         # while the node is still running. Useful for long-running lookups.
         await emit_custom({"phase": "starting", "record_count": inputs.get("records", 0)})
-        ai = await _llm_call(
-            f"In one sentence, narrate a discovery pass that grew the matched-record list "
-            f"to {inputs.get('records', 0) * 2} entries.",
-        )
-        await emit_custom({"phase": "halfway"})
-        return {"matched_records": inputs.get("records", 0) * 2, "ai": ai}
+        matched = inputs.get("records", 0) * 2
+        await emit_custom({"phase": "halfway", "matched_so_far": matched})
+        return {"matched_records": matched}
 
     async def report(inputs):
-        ai = await _llm_call(
-            f"In one short sentence, narrate adding 10 redaction notes to "
-            f"{inputs.get('matched_records', 0)} records in a DSAR response pack.",
-        )
-        return {"report_entries": inputs.get("matched_records", 0) + 10, "ai": ai}
+        return {"report_entries": inputs.get("matched_records", 0) + 10}
 
     graph.add_node("enrich", enrich)
     graph.add_node("report", report)
@@ -356,21 +356,16 @@ async def example_graph_with_llm():
     graph = StateGraph()
 
     async def ai_summarize(inputs):
-        import time as _t
-
         activity = inputs.get("activity", "")
         agent = Agent(
-            model=get_model(max_tokens=80),
+            model=_model(),
+            max_tokens=80,
             system_prompt="You write one-sentence factual summaries for DPO handover notes.",
         )
-        t0 = _t.perf_counter()
         result = await agent.arun(
             f"Summarize the processing activity '{activity}' in one sentence."
         )
-        dt = _t.perf_counter() - t0
-        print(
-            f"  [model call: {dt:.2f}s · {result.metrics.prompt_tokens}→{result.metrics.completion_tokens} tokens]"
-        )
+        _banner(result)
         return {"summary": result.message}
 
     graph.add_node("summarize", ai_summarize)
@@ -384,15 +379,13 @@ async def example_graph_with_llm():
     print()
 
 
-# =============================================================================
-# Main
-# =============================================================================
-
-
 async def main():
     print("=" * 60)
     print("Notebook 12: Data-subject-request triage pipeline as a graph")
     print("=" * 60)
+    print()
+
+    print_config()
     print()
 
     await example_first_graph()

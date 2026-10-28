@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -44,12 +43,13 @@ officer — writes the typed sign-off.
 
 - Send: three reviewers run concurrently.
 - add_conditional_edges with cycles enabled: negotiation can loop back
-  to re-review when terms change. Hard cap of 3 rounds.
+  to re-review when terms change. Hard cap of 4 review rounds (three
+  negotiation passes).
 - interrupt(): negotiation step pauses for human counsel to edit terms.
 - output_schema=ContractDecision: the DPO's typed terminal artifact.
 
-Run it
-    # Default: the bundled mock model (set LOCUS_MODEL_PROVIDER for a live provider)
+Run it:
+    # Default: OCI GenAI if ~/.oci/config has a usable profile, else the bundled mock model
     python examples/notebook_79_contract_review.py
 
     # Offline / no credentials:
@@ -120,239 +120,8 @@ PROMPTS = {
 }
 
 
-def _make_agent(role: str, model: Any) -> Agent:
-    return Agent(
-        config=AgentConfig(
-            agent_id=f"dpa-{role}",
-            model=model,
-            system_prompt=PROMPTS[role],
-            max_iterations=2,
-            max_tokens=400,
-        )
-    )
-
-
-async def _run(agent: Agent, prompt: str) -> str:
-    final = ""
-    async for event in agent.run(prompt):
-        if isinstance(event, TerminateEvent):
-            final = event.final_message or ""
-    return final.strip()
-
-
-# Graph nodes.
-
-
-async def parse_contract(state: dict[str, Any]) -> dict[str, Any]:
-    """In production this would chunk the signed PDF; here we normalise text."""
-    return {"clauses": state.get("contract_text", "").strip()}
-
-
-async def scatter_reviewers(state: dict[str, Any]) -> list[Send]:
-    perspectives = ("legal", "governance", "compliance")
-    return [
-        Send(node="review_one", payload={"perspective": p}, metadata={"perspective": p})
-        for p in perspectives
-    ]
-
-
-async def review_one(state: dict[str, Any]) -> dict[str, Any]:
-    perspective = state["perspective"]
-    agent = _make_agent(perspective, state["__model__"])
-    text = await _run(
-        agent,
-        f"DPA clauses:\n{state.get('clauses', '')}\n\nGive your {perspective} review.",
-    )
-    # Heuristic: any bulleted line is a finding; first half are blockers,
-    # the rest are recommended changes.
-    bullets = [
-        b.lstrip("- *•").strip() for b in text.splitlines() if b.strip().startswith(("-", "*", "•"))
-    ]
-    half = max(1, len(bullets) // 2)
-    return {
-        "finding": ReviewerFinding(
-            perspective=perspective,
-            blockers=bullets[:half] if bullets else [text or "(no findings)"],
-            recommended_changes=bullets[half:],
-            risk_score=0.5,
-        )
-    }
-
-
-async def synthesize(state: dict[str, Any]) -> dict[str, Any]:
-    findings = [v["finding"] for v in state.values() if isinstance(v, dict) and "finding" in v]
-    blockers = [b for f in findings for b in f.blockers]
-    return {
-        "findings": findings,
-        "open_blockers": blockers,
-        "rounds": state.get("rounds", 0) + 1,
-    }
-
-
-def negotiation_gate(state: dict[str, Any]) -> str:
-    """Loop back to re-review if compliance gaps exist and we're under the cap."""
-    if not state.get("open_blockers"):
-        return "sign_off"
-    if state.get("rounds", 0) >= 3:
-        # Cap at 3 rounds; sign-off decides reject vs sign.
-        return "sign_off"
-    return "negotiate"
-
-
-async def negotiate(state: dict[str, Any]) -> Command:
-    """Pause for counsel to redline a clause; always return a Command.
-
-    Three outcomes:
-
-    - ``RESOLVED``: vendor accepted our terms. Route to sign-off.
-    - ``WALK``: vendor refused; route to sign-off as 'abandoned'.
-    - Custom redline text: route back to ``parse`` with the new clauses
-      so the parallel reviewers re-evaluate.
-    """
-    open_blockers = state.get("open_blockers", [])
-    response = interrupt(
-        {
-            "type": "negotiation",
-            "round": state.get("rounds"),
-            "question": "Vendor redlined the DPA — what's the new clause language?",
-            "open_blockers": open_blockers,
-            "options": [
-                "RESOLVED: vendor agreed to our terms",
-                "WALK: vendor refused; abandon",
-                "<custom redline text>",
-            ],
-        }
-    )
-    if response.startswith("WALK"):
-        return Command(
-            goto="sign_off",
-            update={"walk_away": True, "open_blockers": open_blockers},
-        )
-    if response.startswith("RESOLVED"):
-        return Command(
-            goto="sign_off",
-            update={
-                "blockers_resolved": list(state.get("blockers_resolved", [])) + open_blockers,
-                "open_blockers": [],
-                "clauses": state.get("clauses", "") + "\n[All blockers resolved per redline.]",
-            },
-        )
-    # Vendor redlined — re-parse the new text and re-run reviewers.
-    return Command(
-        goto="parse",
-        update={
-            "contract_text": response,
-            "blockers_resolved": list(state.get("blockers_resolved", [])) + open_blockers,
-            "open_blockers": [],
-        },
-    )
-
-
-async def sign_off(state: dict[str, Any]) -> dict[str, Any]:
-    """SCRIBE emits ContractDecision via Agent.output_schema=ContractDecision.
-
-    The Agent reads accumulated state and produces the typed Pydantic
-    instance. If the model can't honour the JSON schema we surface a
-    hard error rather than fabricating a record.
-    """
-    import asyncio as _asyncio
-
-    if state.get("walk_away"):
-        outcome = "abandoned"
-    elif state.get("open_blockers"):
-        outcome = "rejected"
-    else:
-        outcome = "signed"
-
-    # Trim the prompt so the model focuses on the structured fields
-    # rather than long reviewer prose.
-    open_blockers = state.get("open_blockers", []) or []
-    resolved = state.get("blockers_resolved", []) or []
-
-    def _trim(items: list[str], n: int = 5, w: int = 80) -> list[str]:
-        out = [s[:w] for s in items[:n]]
-        if len(items) > n:
-            out.append(f"... and {len(items) - n} more")
-        return out
-
-    agent = Agent(
-        config=AgentConfig(
-            agent_id="dpo-dpa-signoff",
-            model=state["__model__"],
-            system_prompt=(
-                "You are a data-protection officer writing the final ContractDecision. "
-                "Use the supplied fields. Summarise the final terms in one sentence."
-            ),
-            output_schema=ContractDecision,
-            max_iterations=2,
-            max_tokens=400,
-        )
-    )
-    prompt = (
-        f"Contract: {state.get('contract_id')}\n"
-        f"Counterparty: {state.get('counterparty')}\n"
-        f"Decision: {outcome}\n"
-        f"Rounds: {state.get('rounds', 0)}\n"
-        f"Resolved blockers ({len(resolved)}): {_trim(resolved)}\n"
-        f"Open blockers ({len(open_blockers)}): {_trim(open_blockers)}\n\n"
-        "Emit the ContractDecision."
-    )
-    last_exc: BaseException | None = None
-    result = None
-    for attempt in range(3):
-        try:
-            result = await agent.arun(prompt)
-            break
-        except Exception as exc:  # noqa: BLE001 — retry transient provider flakiness
-            last_exc = exc
-            await _asyncio.sleep(0.5 * (attempt + 1))
-    if result is None:
-        raise RuntimeError(
-            f"Sign-off agent failed after 3 attempts. Last error: {last_exc!r}"
-        ) from last_exc
-    decision = result.parsed
-    if decision is None:
-        raise RuntimeError(
-            "Sign-off agent returned no parsed ContractDecision. The configured "
-            "model could not honor the JSON schema. Use a stronger model "
-            "(e.g. openai.gpt-4o, openai.gpt-5, anthropic.claude-3-5-sonnet) "
-            f"for notebook 79. Raw output: {result.message!r}"
-        )
-    return {"decision": decision}
-
-
-# Build the review graph.
-
-
-def build_review_graph() -> StateGraph:
-    g = StateGraph(
-        name="dpa-review",
-        # parse → scatter → synthesize → negotiate → parse is a real cycle,
-        # so we have to opt in.
-        config=GraphConfig(allow_cycles=True, max_iterations=20),
-    )
-    g.add_node("parse", parse_contract)
-    g.add_node("scatter", scatter_reviewers)
-    g.add_node("review_one", review_one)
-    g.add_node("synthesize", synthesize)
-    g.add_node("negotiate", negotiate)
-    g.add_node("sign_off", sign_off)
-
-    g.add_edge(START, "parse")
-    g.add_edge("parse", "scatter")
-    g.add_edge("scatter", "synthesize")
-    g.add_conditional_edges(
-        "synthesize",
-        negotiation_gate,
-        targets={"negotiate": "negotiate", "sign_off": "sign_off"},
-    )
-    g.add_edge("negotiate", "parse")  # loop back: re-review the new terms
-    g.add_edge("sign_off", END)
-    return g
-
-
-# Driver and sample DPA text (invented for this notebook — deliberately
-# full of compliance gaps for the reviewers to catch).
+# Sample DPA text (invented for this notebook — deliberately full of
+# compliance gaps for the reviewers to catch) and the vendor's two redlines.
 
 
 SAMPLE_CONTRACT = """\
@@ -484,6 +253,242 @@ request.
 """
 
 
+def _make_agent(role: str, model: Any) -> Agent:
+    return Agent(
+        config=AgentConfig(
+            agent_id=f"dpa-{role}",
+            model=model,
+            system_prompt=PROMPTS[role],
+            max_iterations=2,
+            max_tokens=400,
+        )
+    )
+
+
+async def _run(agent: Agent, prompt: str) -> str:
+    final = ""
+    async for event in agent.run(prompt):
+        if isinstance(event, TerminateEvent):
+            final = event.final_message or ""
+    return final.strip()
+
+
+# Graph nodes.
+
+
+async def parse_contract(state: dict[str, Any]) -> dict[str, Any]:
+    """In production this would chunk the signed PDF; here we normalise text."""
+    return {"clauses": state.get("contract_text", "").strip()}
+
+
+async def scatter_reviewers(state: dict[str, Any]) -> list[Send]:
+    perspectives = ("legal", "governance", "compliance")
+    return [
+        Send(node="review_one", payload={"perspective": p}, metadata={"perspective": p})
+        for p in perspectives
+    ]
+
+
+async def review_one(state: dict[str, Any]) -> dict[str, Any]:
+    perspective = state["perspective"]
+    agent = _make_agent(perspective, state["__model__"])
+    text = await _run(
+        agent,
+        f"DPA clauses:\n{state.get('clauses', '')}\n\nGive your {perspective} review.",
+    )
+    # Heuristic: any bulleted line is a finding; first half are blockers,
+    # the rest are recommended changes.
+    bullets = [
+        b.lstrip("- *•").strip() for b in text.splitlines() if b.strip().startswith(("-", "*", "•"))
+    ]
+    half = max(1, len(bullets) // 2)
+    return {
+        "finding": ReviewerFinding(
+            perspective=perspective,
+            blockers=bullets[:half] if bullets else [text or "(no findings)"],
+            recommended_changes=bullets[half:],
+            risk_score=0.5,  # placeholder score; a real reviewer would self-rate
+        )
+    }
+
+
+async def synthesize(state: dict[str, Any]) -> dict[str, Any]:
+    # Each Send's output is merged into state under its auto-generated
+    # send_id, so the reviewer findings are collected by shape, not by key.
+    findings = [v["finding"] for v in state.values() if isinstance(v, dict) and "finding" in v]
+    blockers = [b for f in findings for b in f.blockers]
+    return {
+        "findings": findings,
+        "open_blockers": blockers,
+        "rounds": state.get("rounds", 0) + 1,
+    }
+
+
+def negotiation_gate(state: dict[str, Any]) -> str:
+    """Loop back to re-review if compliance gaps exist and we're under the cap."""
+    if not state.get("open_blockers"):
+        return "sign_off"
+    if state.get("rounds", 0) >= 4:
+        # Cap at 4 review rounds (three negotiation passes); sign-off then
+        # decides reject vs sign on whatever is still open.
+        return "sign_off"
+    return "negotiate"
+
+
+async def negotiate(state: dict[str, Any]) -> Command:
+    """Pause for counsel to redline a clause; always return a Command.
+
+    Three outcomes:
+
+    - ``RESOLVED``: vendor accepted our terms. Route to sign-off.
+    - ``WALK``: vendor refused; route to sign-off as 'abandoned'.
+    - Custom redline text: route back to ``parse`` with the new clauses
+      so the parallel reviewers re-evaluate.
+    """
+    open_blockers = state.get("open_blockers", [])
+    response = interrupt(
+        {
+            "type": "negotiation",
+            "round": state.get("rounds"),
+            "question": "Vendor redlined the DPA — what's the new clause language?",
+            "open_blockers": open_blockers,
+            "options": [
+                "RESOLVED: vendor agreed to our terms",
+                "WALK: vendor refused; abandon",
+                "<custom redline text>",
+            ],
+        }
+    )
+    if response.startswith("WALK"):
+        return Command(
+            goto="sign_off",
+            update={"walk_away": True, "open_blockers": open_blockers},
+        )
+    if response.startswith("RESOLVED"):
+        return Command(
+            goto="sign_off",
+            update={
+                "blockers_resolved": list(state.get("blockers_resolved", [])) + open_blockers,
+                "open_blockers": [],
+                "clauses": state.get("clauses", "") + "\n[All blockers resolved per redline.]",
+            },
+        )
+    # Vendor redlined — re-parse the new text and re-run reviewers.
+    return Command(
+        goto="parse",
+        update={
+            "contract_text": response,
+            "blockers_resolved": list(state.get("blockers_resolved", [])) + open_blockers,
+            "open_blockers": [],
+        },
+    )
+
+
+async def sign_off(state: dict[str, Any]) -> dict[str, Any]:
+    """The DPO emits ContractDecision via Agent.output_schema=ContractDecision.
+
+    The Agent reads accumulated state and produces the typed Pydantic
+    instance. If the model can't honour the JSON schema we surface a
+    hard error rather than fabricating a record.
+    """
+    if state.get("walk_away"):
+        outcome = "abandoned"
+    elif state.get("open_blockers"):
+        outcome = "rejected"
+    else:
+        outcome = "signed"
+
+    # Trim the prompt so the model focuses on the structured fields
+    # rather than long reviewer prose.
+    open_blockers = state.get("open_blockers", []) or []
+    resolved = state.get("blockers_resolved", []) or []
+
+    def _trim(items: list[str], n: int = 5, w: int = 80) -> list[str]:
+        out = [s[:w] for s in items[:n]]
+        if len(items) > n:
+            out.append(f"... and {len(items) - n} more")
+        return out
+
+    agent = Agent(
+        config=AgentConfig(
+            agent_id="dpo-dpa-signoff",
+            model=state["__model__"],
+            system_prompt=(
+                "You are a data-protection officer writing the final ContractDecision. "
+                "Use the supplied fields. Summarise the final terms in one sentence."
+            ),
+            output_schema=ContractDecision,
+            max_iterations=2,
+            max_tokens=400,
+        )
+    )
+    prompt = (
+        f"Contract: {state.get('contract_id')}\n"
+        f"Counterparty: {state.get('counterparty')}\n"
+        f"Decision: {outcome}\n"
+        f"Rounds: {state.get('rounds', 0)}\n"
+        f"Resolved blockers ({len(resolved)}): {_trim(resolved)}\n"
+        f"Open blockers ({len(open_blockers)}): {_trim(open_blockers)}\n\n"
+        "Emit the ContractDecision."
+    )
+    last_exc: BaseException | None = None
+    result = None
+    for attempt in range(3):
+        try:
+            result = await agent.arun(prompt)
+            break
+        except Exception as exc:  # noqa: BLE001 — retry transient provider flakiness
+            last_exc = exc
+            await asyncio.sleep(0.5 * (attempt + 1))
+    if result is None:
+        raise RuntimeError(
+            f"Sign-off agent failed after 3 attempts. Last error: {last_exc!r}"
+        ) from last_exc
+    decision = result.parsed
+    if decision is None:
+        raise RuntimeError(
+            "Sign-off agent returned no parsed ContractDecision. The configured "
+            "model could not honor the JSON schema. Set LOCUS_MODEL_PROVIDER / "
+            "LOCUS_MODEL_ID to a provider and model that support structured "
+            f"output. Raw output: {result.message!r}"
+        )
+    return {"decision": decision}
+
+
+# Build the review graph.
+
+
+def build_review_graph() -> StateGraph:
+    g = StateGraph(
+        name="dpa-review",
+        # parse → scatter → synthesize → negotiate → parse is a real cycle,
+        # so we have to opt in.
+        config=GraphConfig(allow_cycles=True, max_iterations=20),
+    )
+    g.add_node("parse", parse_contract)
+    g.add_node("scatter", scatter_reviewers)
+    g.add_node("review_one", review_one)
+    g.add_node("synthesize", synthesize)
+    g.add_node("negotiate", negotiate)
+    g.add_node("sign_off", sign_off)
+
+    g.add_edge(START, "parse")
+    g.add_edge("parse", "scatter")
+    g.add_edge("scatter", "synthesize")
+    g.add_conditional_edges(
+        "synthesize",
+        negotiation_gate,
+        targets={"negotiate": "negotiate", "sign_off": "sign_off"},
+    )
+    g.add_edge("negotiate", "parse")  # loop back: re-review the new terms
+    g.add_edge("sign_off", END)
+    return g
+
+
+# Run the review once, feeding counsel's scripted answers to each negotiation
+# interrupt, and print the DPO's typed decision.
+
+
 def _print_decision(d: ContractDecision | None) -> None:
     print("\nDPA decision:")
     print("-" * 60)
@@ -498,28 +503,8 @@ def _print_decision(d: ContractDecision | None) -> None:
     print(f"  Open blockers:      {len(d.open_blockers)}")
 
 
-async def main() -> None:
-    print("Notebook 79: Vendor DPA / data-processing-agreement review")
-    print("=" * 60)
-
-    model = get_model()
-    graph = build_review_graph()
-    initial = {
-        "contract_id": "DPA-2026-0815",
-        "counterparty": "PixelPulse Analytics",
-        "contract_text": SAMPLE_CONTRACT,
-        "__model__": model,
-    }
-
-    print(f"\nReviewing: {initial['counterparty']} ({initial['contract_id']})")
-
-    # Drive two negotiation rounds: vendor redlines, redlines again,
-    # then accepts our terms on the third pass.
-    answers = [
-        REDLINE_ROUND_1,
-        REDLINE_ROUND_2,
-        "RESOLVED: vendor agreed to our terms",
-    ]
+async def _drive(graph: StateGraph, initial: dict[str, Any], answers: list[str]) -> Any:
+    """Run the graph, auto-resuming negotiation interrupts with the supplied answers."""
     result = await graph.execute(initial)
     answer_idx = 0
     while result.interrupt:
@@ -533,9 +518,42 @@ async def main() -> None:
             print(f"      - {b[:80]}")
         preview = answer if len(answer) <= 80 else answer[:77] + "..."
         print(f"  ▶  Counsel responds: {preview!r}")
+        # A resumed run starts from the checkpointed state, so the model
+        # object has to be re-injected alongside counsel's answer.
         result = await graph.execute(
-            Command(resume=answer, update={**result.final_state, "__model__": model})
+            Command(
+                resume=answer,
+                update={**result.final_state, "__model__": initial["__model__"]},
+            )
         )
+    return result
+
+
+async def main() -> None:
+    print("Notebook 79: Vendor DPA / data-processing-agreement review")
+    print("=" * 60)
+
+    model = get_model()
+    graph = build_review_graph()
+    initial = {
+        "contract_id": "DPA-2026-0815",
+        "counterparty": "PixelPulse Analytics",
+        "contract_text": SAMPLE_CONTRACT,
+        # The model rides along in graph state so every node can build its
+        # agent from it (see _drive for why it is re-injected on resume).
+        "__model__": model,
+    }
+
+    print(f"\nReviewing: {initial['counterparty']} ({initial['contract_id']})")
+
+    # Drive three negotiation passes: vendor redlines, redlines again,
+    # then accepts our terms on the third pass.
+    answers = [
+        REDLINE_ROUND_1,
+        REDLINE_ROUND_2,
+        "RESOLVED: vendor agreed to our terms",
+    ]
+    result = await _drive(graph, initial, answers)
 
     print(f"\nWorkflow finished in {result.duration_ms:.0f} ms")
     _print_decision(result.final_state.get("decision"))

@@ -1,11 +1,10 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
 
 """Notebook 87: SOC alert triage with SIEM-grounded verdicts.
 
-Demonstrates the grounded/abstain differentiation in the Pillar A (SOC) context.
+Demonstrates the grounded/abstain differentiation in the SOC-triage setting.
 
 The core idea
 ─────────────
@@ -32,8 +31,8 @@ This runs fully offline using mock SIEM/EDR/intel adapters.  Swap the mocks
 for ``security_toolset(siem=True, edr=True, threat_intel=True)`` and a real
 model to run against a live environment.
 
-Run:
-    python examples/notebook_87_soc_alert_triage.py
+Run it:
+    python packages/locus-sdk-security/examples/notebook_87_soc_alert_triage.py
 """
 
 from __future__ import annotations
@@ -42,14 +41,12 @@ import asyncio
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from locus.control.taxonomy import OwaspLLM
 from locus_security import (
     PostureEvidence,
     PostureFinding,
     PostureReport,
     SecurityControls,
     Severity,
-    create_soc_analyst,
     ground_report,
     is_finding,
 )
@@ -120,135 +117,81 @@ _ALERTS: list[Alert] = [
 # and returns actual API responses as evidence refs.
 # ---------------------------------------------------------------------------
 
+# The grounding bar is the same for every alert, so build it once.
+_CONTROLS = SecurityControls(siem=True, edr=True, threat_intel=True)
 
-def _build_mock_evidence(alert: Alert) -> tuple[list[PostureFinding], SecurityControls]:
+
+def _build_mock_evidence(alert: Alert) -> list[PostureFinding]:
     """
     In production this is where the SOC analyst agent runs:
       tools = security_toolset(siem=True, edr=True, threat_intel=True)
       agent = create_soc_analyst(model=get_model(), tools=tools)
       response = await agent.arun(f"Investigate alert: {alert.title}\n{alert.raw}")
 
-    For this offline demo we hand-craft the proposed findings and evidence
-    that a real agent would produce from tool call results.
+    For this offline demo the proposed finding is derived from the alert's
+    raw fields — each corroboration flag stands in for one tool result the
+    agent would have cited. No flag set means nothing to cite.
     """
     raw = alert.raw
-    proposed: list[PostureFinding] = []
-    controls = SecurityControls(siem=True, edr=True, threat_intel=True)
+    evidence: list[PostureEvidence] = []
 
-    if alert.id == "ALT-001":
-        proposed.append(
-            PostureFinding(
-                asset=alert.id,
-                title="User clicked confirmed phishing URL",
-                description=(
-                    "User jsmith clicked http://login.phish.example.net/reset. "
-                    "SIEM corroborates 3 follow-on DNS lookups to the same domain. "
-                    "URL not in allowlist."
-                ),
-                severity=Severity.HIGH,
-                evidence=[
-                    PostureEvidence(
-                        ref="siem:ALT-001:dns_lookups=3",
-                        statement="3 DNS lookups to phish.example.net post-click",
-                        grounded=True,
-                    ),
-                    PostureEvidence(
-                        ref="siem:ALT-001:url_not_in_allowlist",
-                        statement="URL absent from approved domain list",
-                        grounded=True,
-                    ),
-                ],
-                remediation="Reset jsmith credentials; block phish.example.net at DNS filter.",
-                taxonomy=[OwaspLLM.PROMPT_INJECTION],
+    if raw.get("siem_corroboration"):
+        evidence.append(
+            PostureEvidence(
+                ref=f"siem:{alert.id}:related_events",
+                statement="SIEM shows related events in the alert window",
+                grounded=True,
+            )
+        )
+    if raw.get("edr_corroboration"):
+        evidence.append(
+            PostureEvidence(
+                ref=f"edr:{raw.get('src_host', alert.id)}:process_tree",
+                statement="EDR timeline shows the execution chain behind the alert",
+                grounded=True,
+            )
+        )
+    if raw.get("intel_verdict") == "malicious":
+        evidence.append(
+            PostureEvidence(
+                ref=f"intel:{raw.get('dst_ip', alert.id)}:malicious",
+                statement="Threat intel classifies the indicator as malicious",
+                grounded=True,
+            )
+        )
+    if not evidence:
+        # Nothing corroborates: the agent still writes down what it saw, but
+        # cannot mark it grounded — this is the row that should abstain.
+        evidence.append(
+            PostureEvidence(
+                ref=f"edr:{alert.id}:no_ioc",
+                statement="EDR shows a benign path; no corroborating IOCs",
+                grounded=False,
             )
         )
 
-    elif alert.id == "ALT-002":
-        proposed.append(
-            PostureFinding(
-                asset=alert.id,
-                title="PsExec lateral movement: WKSTN-04 → SRV-FINANCE",
-                description=(
-                    "PsExec executed on WKSTN-04 targeting SRV-FINANCE. "
-                    "EDR timeline shows process tree: explorer.exe → cmd.exe → psexec.exe. "
-                    "SIEM corroborates SMB admin share access within same minute."
-                ),
-                severity=Severity.CRITICAL,
-                evidence=[
-                    PostureEvidence(
-                        ref="edr:WKSTN-04:process_tree:psexec",
-                        statement="EDR process tree shows psexec spawned from cmd.exe",
-                        grounded=True,
-                    ),
-                    PostureEvidence(
-                        ref="siem:ALT-002:smb_admin_share_access",
-                        statement="SMB admin share WKSTN-04→SRV-FINANCE within 60s of psexec",
-                        grounded=True,
-                    ),
-                ],
-                remediation="Isolate WKSTN-04 and SRV-FINANCE; rotate all service account credentials.",
-                taxonomy=[],
-            )
-        )
+    grounded_count = sum(1 for e in evidence if e.grounded)
+    if raw.get("known_fp") or grounded_count == 0:
+        severity = Severity.INFO
+        remediation = "No action required. Monitor for recurrence with unexpected network IOCs."
+    elif grounded_count >= 2 and raw.get("edr_corroboration"):
+        severity = Severity.CRITICAL
+        remediation = "Isolate the affected hosts; rotate exposed credentials; open an IR case."
+    else:
+        severity = Severity.HIGH
+        remediation = "Contain per playbook: block the indicator and reset affected credentials."
 
-    elif alert.id == "ALT-003":
-        proposed.append(
-            PostureFinding(
-                asset=alert.id,
-                title="Outbound C2 beacon to 203.0.113.99 (threat-intel confirmed malicious)",
-                description=(
-                    "Three hosts beaconed to 203.0.113.99 over 90 minutes. "
-                    "Threat intel: IP listed in Emerging Threats + VirusTotal 47/72. "
-                    "SIEM shows beaconing pattern (60-second intervals)."
-                ),
-                severity=Severity.HIGH,
-                evidence=[
-                    PostureEvidence(
-                        ref="intel:203.0.113.99:emerging_threats",
-                        statement="IP listed in Emerging Threats ruleset",
-                        grounded=True,
-                    ),
-                    PostureEvidence(
-                        ref="intel:203.0.113.99:vt_score=47/72",
-                        statement="VirusTotal: 47/72 engines flagged as malicious",
-                        grounded=True,
-                    ),
-                    PostureEvidence(
-                        ref="siem:ALT-003:beacon_pattern_60s",
-                        statement="60-second beaconing interval observed over 90 min",
-                        grounded=True,
-                    ),
-                ],
-                remediation="Block 203.0.113.99 at perimeter; image affected hosts; rotate keys.",
-                taxonomy=[],
-            )
+    return [
+        PostureFinding(
+            asset=alert.id,
+            title=alert.title,
+            description="; ".join(e.statement for e in evidence) + ".",
+            severity=severity,
+            evidence=evidence,
+            remediation=remediation,
+            taxonomy=[],
         )
-
-    elif alert.id == "ALT-004":
-        # No corroboration — the agent correctly finds nothing to cite
-        proposed.append(
-            PostureFinding(
-                asset=alert.id,
-                title="msiexec.exe spawned by Teams.exe — possible software update",
-                description=(
-                    "msiexec.exe observed as child of Teams.exe. "
-                    "No SIEM corroboration; EDR shows standard Microsoft Teams auto-update path. "
-                    "No network IOCs observed."
-                ),
-                severity=Severity.INFO,
-                evidence=[
-                    PostureEvidence(
-                        ref="edr:WKSTN-06:msiexec-teams-no-ioc",
-                        statement="EDR shows standard Teams auto-update path; no network IOCs",
-                        grounded=False,  # agent found no corroborating evidence
-                    ),
-                ],
-                remediation="No action required. Monitor for recurrence with unexpected network IOCs.",
-                taxonomy=[],
-            )
-        )
-
-    return proposed, controls  # noqa: RET504
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -264,7 +207,7 @@ def triage_alerts(alerts: Sequence[Alert]) -> None:
         print(f"\n{'─' * 60}")
         print(f"Alert {alert.id}: {alert.title}")
 
-        proposed_findings, controls = _build_mock_evidence(alert)
+        proposed_findings = _build_mock_evidence(alert)
 
         report = PostureReport(
             summary=f"SOC triage: {alert.title}",
@@ -274,7 +217,7 @@ def triage_alerts(alerts: Sequence[Alert]) -> None:
 
         # ground_report applies the GSAR grounding decision to each proposed
         # finding: evidence-backed ones become Evidence; ungrounded ones abstain.
-        grounded = ground_report(report, controls)
+        grounded = ground_report(report, _CONTROLS)
 
         for result in grounded:
             if is_finding(result):

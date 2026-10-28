@@ -79,7 +79,7 @@ fact under the same key **updates** the record, not duplicates it.
 ```python
 import asyncio
 from locus.agent import Agent
-from locus.memory.manager import LLMMemoryManager, Memory, MemoryType
+from locus.memory import LLMMemoryManager, Memory, MemoryType
 from locus.memory.store import InMemoryStore
 
 
@@ -111,23 +111,24 @@ for demos.  For production, pass an async `extract_fn` that calls a
 cheap model to identify what is worth remembering:
 
 ```python
-from locus.memory.manager import LLMMemoryManager, Memory, MemoryType
+from locus.core.messages import Message
+from locus.memory import LLMMemoryManager, Memory, MemoryType
 
-async def my_extractor(messages: list) -> list[Memory]:
-    # Call a fast auxiliary model.
-    # The model receives the conversation; it returns structured memory entries.
-    raw = await auxiliary_model.complete(
-        messages=[
-            {"role": "system", "content": EXTRACTION_PROMPT},
-            {"role": "user",   "content": format_conversation(messages)},
-        ]
+async def my_extractor(messages: list[Message]) -> list[Memory]:
+    transcript = "\n".join(f"{m.role.value}: {m.content}" for m in messages)
+    response = await auxiliary_model.complete(
+        messages=[Message.system(EXTRACTION_PROMPT), Message.user(transcript)],
     )
-    return parse_memories(raw.message.content)
+    # Parse the model's JSON into Memory objects; one shown literally:
+    return [
+        Memory(
+            type=MemoryType.FEEDBACK,
+            key="refund_approval",
+            content="Refunds over $500 need manager approval. Why: prior chargeback.",
+        )
+    ]
 
-manager = LLMMemoryManager(
-    store=store,
-    extract_fn=my_extractor,
-)
+manager = LLMMemoryManager(store=store, extract_fn=my_extractor)
 ```
 
 A minimal extraction prompt:
@@ -229,7 +230,7 @@ store = OracleStore(
     wallet_location=os.environ["ORACLE_WALLET"],
     wallet_password=os.environ.get("ORACLE_WALLET_PASSWORD", ""),
 )
-agent = Agent(model="oci:openai.gpt-5.5", memory_manager=LLMMemoryManager(store=store))
+agent = Agent(model="{{ locus_example_model }}", memory_manager=LLMMemoryManager(store=store))
 ```
 
 Notebooks [37](../notebooks/notebook_37_oracle_store.md) and

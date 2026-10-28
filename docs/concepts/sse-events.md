@@ -35,32 +35,9 @@ they are handed). When no run id is bound (no active `run_context()`,
 and not inside a `Router.dispatch`), `emit()` returns immediately —
 **zero allocations, zero bus instantiation**. SDK users who never bind a run id pay one contextvar read per call site.
 
-```python
-import asyncio
-
-from locus.observability import run_context, get_event_bus
-
-
-async def main():
-    async with run_context() as rid:
-        bus = get_event_bus()
-
-        async def consumer():
-            # Subscribe — replays the run's timeline, then live events.
-            async for event in bus.subscribe(rid):
-                # e.g. agent.tool.completed {tool_name: "issue_refund", ...}
-                forward_to_analytics(event.event_type, event.data)
-
-        task = asyncio.create_task(consumer())
-        await asyncio.sleep(0)  # let the subscriber register
-        await agent.arun("Refund the duplicate charge on ord-4821.")
-        await bus.close_stream(rid)  # delivers the end-of-stream sentinel
-        await task                   # the iterator ends only after close_stream
-
-
-asyncio.run(main())
-```
-
+The `run_context()` / `bus.subscribe(rid)` / `close_stream(rid)` shape
+is shown once, in
+[Observability — In-process SSE](observability.md#in-process-sse-eventbus).
 The subscriber's iterator ends only when `close_stream(rid)` is called —
 `run_context` does not close the stream for you.
 
@@ -118,7 +95,7 @@ run id is bound, either by an active `run_context()` or by
 | `multiagent.orchestrator.specialists_invoked` | `orchestrator_id`, `specialists_invoked`, `specialists_succeeded`, `specialists_failed` |
 | `multiagent.orchestrator.summary` | `orchestrator_id`, `summary_length` |
 | `multiagent.specialist.started` | `specialist_id`, `specialist_type`, `task_preview` |
-| `multiagent.specialist.completed` | `specialist_id`, `specialist_type`, `success`, `confidence`, `duration_ms`, `output_length`, `error` |
+| `multiagent.specialist.completed` | `specialist_id`, `specialist_type`, `success`, `confidence`, `duration_ms`, `output_preview`, `error` |
 | `multiagent.handoff.initiated` | `source_agent_id`, `target_agent_id`, `reason`, `context_summary` |
 | `multiagent.handoff.completed` | `source_agent_id`, `target_agent_id`, `success`, `output_length` |
 | `multiagent.graph.node.started` | `graph_id`, `node_id`, `iteration`, `span_id`, `parallel`, `is_resuming` |

@@ -31,14 +31,15 @@ Key ideas:
 
 The data is fictional throughout — ``example.com`` hostnames, placeholder
 digests, and made-up service names — so the notebook runs the same way
-every time and reaches nothing on the network.
+every time and reaches nothing on the network. The one exception is
+``utc_now``, which reads the live clock to stamp the decision.
 
 Run it:
     .venv/bin/python examples/notebook_03_agent_with_tools.py
 
-The default provider is the bundled deterministic mock model, so this
-runs offline with no credentials. Set ``LOCUS_MODEL_PROVIDER=openai`` (or
-``anthropic``) and the matching key for a live model.
+The default provider is OCI GenAI when ``~/.oci/config`` holds a usable profile,
+otherwise the bundled mock model; set ``LOCUS_MODEL_PROVIDER`` (``oci``,
+``openai``, ``anthropic``, ``mock``) to choose.
 
 Prerequisite: notebook 02.
 """
@@ -46,7 +47,6 @@ Prerequisite: notebook 02.
 import asyncio
 from datetime import UTC, datetime
 
-# Import shared config
 from config import get_model, print_config
 
 from locus.agent import Agent
@@ -203,6 +203,8 @@ def rollback_target(service: str, versions_back: int = 1) -> str:
 @tool
 def utc_now() -> str:
     """Get the current UTC time, for stamping a go/no-go decision."""
+    # The one deliberately clock-dependent tool in the file: a decision
+    # stamp that never changes would be worse than no stamp at all.
     return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
@@ -302,9 +304,9 @@ async def example_structured_tools():
     """A dict comes back as a dict, not as a string the model has to parse."""
     print("=== Part 5: Structured Return Types ===\n")
 
-    # ``.func`` is the undecorated function, so this is the real dict. The
-    # agent sees ``.execute()``'s output instead — the same data as JSON,
-    # because that is what crosses the wire to a model.
+    # ``.func`` is the undecorated function, so this is the real dict.
+    # ``.execute()`` returns the same dict; the agent loop serialises it to
+    # JSON afterwards, because that is what crosses the wire to a model.
     for service in ("checkout", "search"):
         report = readiness_report.func(service=service)
         blockers = report["blockers"] or ["none"]
@@ -327,11 +329,6 @@ async def example_structured_tools():
     print()
 
 
-# =============================================================================
-# Main
-# =============================================================================
-
-
 async def main():
     """Run all notebook parts."""
     print("=" * 60)
@@ -349,7 +346,7 @@ async def main():
     await example_structured_tools()
 
     print("=" * 60)
-    print("Next: Notebook 05 — Giving an Agent Memory")
+    print("Next: Notebook 04 — A chat loop: actually talking to your agent")
     print("=" * 60)
 
 

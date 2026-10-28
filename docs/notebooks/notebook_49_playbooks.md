@@ -16,9 +16,9 @@ any privacy procedure where you want auditability over agent freedom.
 - `Agent(playbook=...)` — bind a playbook to an agent and watch it
   execute against real tools.
 
-Each part fires a real model call so you can see live behaviour next
-to the structured execution mechanics — every section prints
-`[model call: X.XXs · prompt→completion tokens]`.
+Parts 1–8 are deterministic Python over the playbook objects; Part 9
+binds the playbook to a live agent and prints
+`[model call: X.XXs · prompt→completion tokens]` for the round-trip.
 
 ## Run it
 
@@ -36,8 +36,9 @@ LOCUS_MODEL_PROVIDER=mock python examples/notebook_49_playbooks.py
 
 ## Prerequisites
 
-- An OpenAI or Anthropic API key, or `LOCUS_MODEL_PROVIDER` set to
-  `openai` / `anthropic` / `mock`.
+- An OCI profile in `~/.oci/config` (picked up automatically), or
+  `LOCUS_MODEL_PROVIDER` set to `openai` / `anthropic` / `mock` with the
+  matching key.
 
 ## Source
 

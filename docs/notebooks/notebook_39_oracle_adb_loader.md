@@ -13,13 +13,13 @@ Two production-shape details earn their keep:
   the SQL template itself is fixed at construction time. SQL
   injection through the query text isn't possible.
 - **Async connection pool.** One pool, kwargs-shared with the rest of
-  the 26ai surface (vector store from notebook 02, in-DB chunker from
-  09, in-DB embeddings from 10, checkpointer from 07) — same wallet,
+  the 26ai surface (vector store from notebook 38, in-DB chunker from
+  40, in-DB embeddings from 41, checkpointer from 42) — same wallet,
   same DSN, one connection envelope for the whole stack.
 
 To show the loader doing real work, the notebook wraps it as a `@tool`
 on a Locus `Agent`. The agent decides which topic to pull from a
-disposable `locus_notebook_05_articles` table, the loader's `SELECT`
+disposable `locus_notebook_39_articles` table, the loader's `SELECT`
 fires inside a `ToolStartEvent` / `ToolCompleteEvent` pair, and the
 agent grounds its summary in the returned rows. The agent is the
 harness; the loader is the subject.
@@ -37,7 +37,7 @@ harness; the loader is the subject.
   agent can decide what to fetch.
 
 The notebook is self-contained: it creates a disposable demo table
-`locus_notebook_05_articles`, populates a few rows, hands the loader
+`locus_notebook_39_articles`, populates a few rows, hands the loader
 to an `Agent` as a tool, asks the agent two domain questions, and
 drops the table on the way out.
 

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -40,20 +39,18 @@ The ``AuditTrail`` records the probe and its grounding decision, exportable
 as JSONL for vendor SLA disputes or procurement audit evidence.
 
 Run (offline, no credentials):
-    python examples/notebook_88_model_fingerprint.py
+    python packages/locus-sdk-security/examples/notebook_88_model_fingerprint.py
 
 Run against a real OpenAI-compatible endpoint:
     OPENAI_API_KEY=sk-... TIMING_BASE_URL=https://vendor-api.example.com/v1 \\
-    python examples/notebook_88_model_fingerprint.py
+    python packages/locus-sdk-security/examples/notebook_88_model_fingerprint.py
 """
 
 from __future__ import annotations
 
-import asyncio
 import os
 
 from locus.control import AuditTrail
-from locus.control.taxonomy import AtlasTechnique
 from locus_security import (
     FEATURE_KEYS,
     fingerprint_to_finding,
@@ -78,11 +75,6 @@ _SAMPLES = int(os.environ.get("FINGERPRINT_SAMPLES", "10"))
 _ASSET = os.environ.get("FINGERPRINT_ASSET", "vendor-inference-api")
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
-
-
 def run_fingerprint() -> None:
     """
     Measure timing features, classify, and ground.
@@ -91,7 +83,7 @@ def run_fingerprint() -> None:
     Offline path: no credentials needed — deterministic sample used instead.
     """
     using_live = bool(os.environ.get("OPENAI_API_KEY"))
-    print(f"== Model / hardware fingerprinting via timing side-channels ==")
+    print("== Model / hardware fingerprinting via timing side-channels ==")
     print(f"   model  : {_MODEL!r}")
     print(f"   samples: {_SAMPLES}")
     print(f"   path   : {'live API stream' if using_live else 'offline deterministic sample'}")
@@ -132,7 +124,7 @@ def run_fingerprint() -> None:
     print()
     if is_finding(result):
         v = result.verdict
-        print(f"  [FINDING ] Grounded FingerprintFinding")
+        print("  [FINDING ] Grounded FingerprintFinding")
         print(f"             gsar_score : {result.gsar_score:.2f}")
         print(f"             model      : {v.model}")
         print(f"             engine     : {v.engine}")
@@ -144,14 +136,14 @@ def run_fingerprint() -> None:
         print(f"             taxonomy   : {taxonomy_str}")
         print()
         print("  Interpretation:")
-        print(f"    Vendor claims 'GPT-4o on H100 clusters'.")
+        print("    Vendor claims 'GPT-4o on H100 clusters'.")
         print(f"    Timing fingerprint identifies: {v.model} / {v.engine} / {v.hardware}.")
-        if "H100" in v.hardware or "A100" in v.hardware:
+        if "H100" in v.hardware:
             print("    Hardware class CONSISTENT with H100 claim.")
         else:
             print(f"    Hardware class {v.hardware!r} may DIVERGE from H100 claim — investigate.")
     else:
-        print(f"  [ABSTAIN ] Insufficient timing evidence — cannot ground a finding")
+        print("  [ABSTAIN ] Insufficient timing evidence — cannot ground a finding")
         print(f"             reason     : {result.reason}")
         print(f"             gsar_score : {result.gsar_score:.2f}")
         print()
@@ -173,12 +165,12 @@ def run_fingerprint() -> None:
     if not using_live:
         print(
             "To probe a real vendor endpoint, run:\n"
-            f"  OPENAI_API_KEY=sk-... \\\n"
-            f"  TIMING_BASE_URL=https://vendor-api.example.com/v1 \\\n"
-            f"  FINGERPRINT_MODEL=gpt-4o \\\n"
-            f"  FINGERPRINT_SAMPLES=20 \\\n"
-            f"  FINGERPRINT_ASSET='VendorCo-contract-2026' \\\n"
-            f"  python examples/notebook_88_model_fingerprint.py"
+            "  OPENAI_API_KEY=sk-... \\\n"
+            "  TIMING_BASE_URL=https://vendor-api.example.com/v1 \\\n"
+            "  FINGERPRINT_MODEL=gpt-4o \\\n"
+            "  FINGERPRINT_SAMPLES=20 \\\n"
+            "  FINGERPRINT_ASSET='VendorCo-contract-2026' \\\n"
+            "  python packages/locus-sdk-security/examples/notebook_88_model_fingerprint.py"
         )
 
 

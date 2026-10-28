@@ -44,7 +44,7 @@ Findings here carry MITRE ATLAS (``AML.Txxxx``) / OWASP LLM
 without a translation layer.
 
 Run it:
-    # The bundled mock model is the default; set LOCUS_MODEL_PROVIDER for a live provider.
+    # Default: OCI GenAI if ~/.oci/config has a usable profile, else the bundled mock model
     LOCUS_MODEL_PROVIDER=openai LOCUS_MODEL_ID=gpt-4o python examples/notebook_55_gsar_typed_grounding.py
 
     # Offline:
@@ -66,11 +66,9 @@ Provider notes:
 from __future__ import annotations
 
 import asyncio
-import time
 
 from config import get_model
 
-from locus.agent import Agent
 from locus.control import (
     AtlasTechnique,
     Evidence,
@@ -84,27 +82,13 @@ from locus.control import (
 from locus.reasoning.gsar import (
     DEFAULT_WEIGHT_MAP,
     Claim,
+    Decision,
     EvidenceType,
     GSARThresholds,
     Partition,
     decide,
     gsar_score,
 )
-
-
-async def _llm_call(
-    prompt: str, *, system: str = "Reply in one short sentence.", max_tokens: int = 80
-) -> str:
-    """Fire one model call and print a timing/token banner."""
-    agent = Agent(model=get_model(max_tokens=max_tokens), system_prompt=system)
-    t0 = time.perf_counter()
-    res = await agent.arun(prompt)
-    dt = time.perf_counter() - t0
-    print(
-        f"  [model call: {dt:.2f}s · "
-        f"{res.metrics.prompt_tokens}→{res.metrics.completion_tokens} tokens]"
-    )
-    return res.message.strip()
 
 
 def _report(result) -> None:
@@ -122,23 +106,12 @@ def _report(result) -> None:
 
 
 # =============================================================================
-# Part 1: A grounded finding ships.
-#         Every sentence traces to a scanner row, a TLS-handshake field, or
-#         the originating signal. One model-internal aside lands in U but does
-#         not sink the score. ground_finding() returns a typed Evidence.
+# Part 1: A grounded finding ships — every claim traces to tool output.
 # =============================================================================
 
 
-async def example_grounded_ships() -> None:
+def example_grounded_ships() -> None:
     print("=== Part 1: A grounded finding ships ===\n")
-    print(
-        "AI rationale: "
-        + await _llm_call(
-            "In one sentence, why should a security finding be withheld unless every "
-            "claim in it traces back to evidence?"
-        )
-    )
-    print()
 
     # Each claim carries its provenance type and the opaque evidence ref it
     # was lifted from — the audit trail a SOC reviews after the fact.
@@ -204,25 +177,12 @@ async def example_grounded_ships() -> None:
 
 
 # =============================================================================
-# Part 2: An ungrounded finding never ships — it abstains.
-#         A suspected indirect prompt injection (LLM01 / AML.T0051) backed only
-#         by a hunch and a textbook prior. No tool row, no signal field. GSAR
-#         scores it at the floor and ground_finding() returns an Abstention.
-#         This is the thesis: an ungrounded finding is a false positive by
-#         construction, and the API will not hand you one.
+# Part 2: An ungrounded finding never ships — a hunch plus a prior abstains.
 # =============================================================================
 
 
-async def example_ungrounded_abstains() -> None:
+def example_ungrounded_abstains() -> None:
     print("\n=== Part 2: An ungrounded finding abstains ===\n")
-    print(
-        "AI rationale: "
-        + await _llm_call(
-            "In one sentence, why is 'the agent was probably prompt-injected' a false "
-            "positive until you can point to the injected content in a tool output?"
-        )
-    )
-    print()
 
     partition = Partition(
         # Nothing grounded: the analyst suspects an indirect prompt injection
@@ -260,23 +220,12 @@ async def example_ungrounded_abstains() -> None:
 
 
 # =============================================================================
-# Part 3: Evidence that refutes a claim is worse than evidence that's missing.
-#         A contradicted claim pulls the score down via the ρ penalty and is
-#         called out explicitly in the abstention reason — so a finding that
-#         the evidence actively disputes is never quietly shipped.
+# Part 3: A contradicted claim withholds the finding via the ρ penalty.
 # =============================================================================
 
 
-async def example_contradiction_withholds() -> None:
+def example_contradiction_withholds() -> None:
     print("\n=== Part 3: Contradicted evidence withholds the finding ===\n")
-    print(
-        "AI rationale: "
-        + await _llm_call(
-            "In one sentence, why must a finding be withheld when one of its claims is "
-            "directly contradicted by the evidence, even if other claims hold?"
-        )
-    )
-    print()
 
     partition = Partition(
         grounded=[
@@ -312,22 +261,12 @@ async def example_contradiction_withholds() -> None:
 
 
 # =============================================================================
-# Part 4: Threshold sensitivity — a SOC re-calibrates the bar for its risk
-#         appetite. Auto-filed tickets warrant a stricter τ_proceed than a
-#         human-in-the-loop queue. Same finding, different proceed/withhold.
+# Part 4: Threshold sensitivity — same finding, different risk appetites.
 # =============================================================================
 
 
-async def example_threshold_recalibration() -> None:
+def example_threshold_recalibration() -> None:
     print("\n=== Part 4: Re-calibrating the proceed bar ===\n")
-    print(
-        "AI rationale: "
-        + await _llm_call(
-            "In one sentence, why would a SOC that auto-files tickets raise the GSAR "
-            "proceed threshold above the research default?"
-        )
-    )
-    print()
 
     # A borderline finding: two grounded scanner observations, one ungrounded
     # inference. S lands between the lenient and default proceed bars, so the
@@ -378,12 +317,7 @@ async def example_threshold_recalibration() -> None:
 
 
 # =============================================================================
-# Part 5: Algorithm-1 outer loop — bounded replan budget, an LLM judge, and
-#         regenerate / replan callables. The judge partitions the report
-#         against the evidence corpus; the loop proceeds only when the
-#         synthesis clears the bar, else regenerates, replans up to K_max, or
-#         returns degraded-but-honest. The grounded finding from Part 1, end
-#         to end through the loop the framework is built around.
+# Part 5: Algorithm-1 outer loop — LLM judge, bounded K_max replan budget.
 # =============================================================================
 
 
@@ -433,7 +367,7 @@ async def example_outer_loop() -> None:
     # The loop never silently ships an ungrounded report: a degraded result is
     # flagged, not hidden. Convert a proceed into a typed Evidence for the queue.
     print()
-    if result.final_decision.value == "proceed":
+    if result.final_decision is Decision.PROCEED:
         shipped = Evidence(
             title="Expired TLS certificate and TLS 1.0 negotiation on 192.0.2.10:443",
             description=report,
@@ -448,16 +382,11 @@ async def example_outer_loop() -> None:
         print("  Loop did not proceed → no finding emitted; degraded result flagged for review.")
 
 
-# =============================================================================
-# Main
-# =============================================================================
-
-
 async def main() -> None:
-    await example_grounded_ships()
-    await example_ungrounded_abstains()
-    await example_contradiction_withholds()
-    await example_threshold_recalibration()
+    example_grounded_ships()
+    example_ungrounded_abstains()
+    example_contradiction_withholds()
+    example_threshold_recalibration()
     await example_outer_loop()
 
 

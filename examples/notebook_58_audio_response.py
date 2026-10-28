@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -8,11 +7,13 @@
 A cloud platform team often needs to talk, not just type — recorded
 advisories for the on-call hotline, status-page audio, IVR announcements
 about a region degradation. This notebook pairs a regular
-chat-completions agent (text in, text out) with OpenAI's audio.speech
-endpoint so an incident advisory can be spoken aloud. A regional
-degradation — say an availability zone losing capacity while autoscaling
-backs off — is exactly the kind of fast-moving event a recorded spoken
-advisory is meant to keep on-call engineers ahead of.
+chat-completions agent (text in, text out) with the
+``OpenAISpeechProvider`` from notebook 57 — the same provider an agent
+would get a ``speak`` tool from — so an incident advisory can be spoken
+aloud. A regional degradation — say an availability domain losing
+capacity while autoscaling backs off — is exactly the kind of fast-moving
+event a recorded spoken advisory is meant to keep on-call engineers ahead
+of.
 
 Pipeline::
 
@@ -20,8 +21,8 @@ Pipeline::
                             │
                             │  advisory text
                             ▼
-                      OpenAI /v1/audio/speech
-                      (gpt-4o-mini-tts)
+                      OpenAISpeechProvider.speak()
+                      (OpenAI /v1/audio/speech, gpt-4o-mini-tts)
                             │
                             │  mp3 bytes
                             ▼
@@ -35,7 +36,7 @@ Pipeline::
 Prerequisites for live speech: an OpenAI API key with access to a TTS
 model. The notebook uses gpt-4o-mini-tts for synthesis.
 
-Run it
+Run it:
     LOCUS_MODEL_PROVIDER=openai \\
     OPENAI_API_KEY=sk-... \\
     python examples/notebook_58_audio_response.py
@@ -58,36 +59,33 @@ from pathlib import Path
 from config import get_model
 
 from locus.agent import Agent, AgentConfig
+from locus.providers.speech import OpenAISpeechProvider
 
 
 PROMPT = (
     "Write a 60-word spoken cloud status advisory for on-call engineers about "
-    "an ongoing degradation in the us-east-1 region: one availability zone is "
-    "losing compute capacity and autoscaling is backing off, so new instance "
-    "launches are failing. Tell them to fail workloads over to us-west-2 and "
-    "to watch the status page for the next update."
+    "an ongoing degradation in the us-ashburn-1 region: one availability "
+    "domain is losing compute capacity and autoscaling is backing off, so new "
+    "instance launches are failing. Tell them to fail workloads over to "
+    "us-phoenix-1 and to watch the status page for the next update."
 )
 TTS_MODEL = "gpt-4o-mini-tts"
 TTS_VOICE = "alloy"
 OUT_PATH = Path(__file__).resolve().parent / "notebook_58_response.mp3"
 
 
-def _audio_client():
-    """An OpenAI async client for /v1/audio/speech, or None if offline.
+def _speech_provider() -> OpenAISpeechProvider | None:
+    """The TTS provider, or None if offline.
 
-    Locus's chat model wraps chat completions; for audio.speech.create
-    we use a plain ``openai.AsyncOpenAI`` against the same key. When no
-    ``OPENAI_API_KEY`` is set (e.g. the mock-model walkthrough) we return
-    None so the caller can describe the synthesis step without a network
-    call.
+    The provider takes the TTS model and default voice up front, so the
+    synthesis call below is just ``speak(text)``. When no ``OPENAI_API_KEY``
+    is set (e.g. the mock-model walkthrough) we return None so the caller
+    can describe the synthesis step without a network call.
     """
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         return None
-
-    import openai
-
-    return openai.AsyncOpenAI(api_key=api_key)
+    return OpenAISpeechProvider(tts_model=TTS_MODEL, default_voice=TTS_VOICE, api_key=api_key)
 
 
 async def main() -> None:
@@ -115,24 +113,19 @@ async def main() -> None:
         raise RuntimeError(msg)
     print(f"\n← advisory text ({len(reply)} chars):\n{reply}\n")
 
-    # Step 2: synthesise speech through the audio.speech endpoint.
-    client = _audio_client()
-    if client is None:
+    # Step 2: synthesise speech through the speech provider.
+    speech = _speech_provider()
+    if speech is None:
         print(
             "→ offline: skipping synthesis (no OPENAI_API_KEY). Would call "
-            f"audio.speech.create model={TTS_MODEL!r} voice={TTS_VOICE!r}"
+            f"OpenAISpeechProvider(tts_model={TTS_MODEL!r}, default_voice={TTS_VOICE!r}).speak()"
         )
         print("  Set OPENAI_API_KEY to write a real mp3 to", OUT_PATH)
         return
 
     print(f"→ synthesising speech with model={TTS_MODEL!r} voice={TTS_VOICE!r}")
-    speech = await client.audio.speech.create(
-        model=TTS_MODEL,
-        voice=TTS_VOICE,
-        input=reply,
-        response_format="mp3",
-    )
-    audio_bytes = await speech.aread()
+    synthesized = await speech.speak(reply, response_format="mp3")
+    audio_bytes = synthesized.audio_bytes
     OUT_PATH.write_bytes(audio_bytes)
 
     print(f"\n✓ wrote {len(audio_bytes):,} bytes of mp3 → {OUT_PATH}")

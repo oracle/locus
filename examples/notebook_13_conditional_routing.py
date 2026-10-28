@@ -11,6 +11,7 @@ low-severity monitoring alerts auto-resolve, high-severity ones page an
 on-call SRE, and an LLM can sort raw alerts into families (compute,
 storage, network).
 
+Key ideas:
 - Binary and multi-way branching with `add_conditional_edges`.
 - Router function — receives state, returns a node name.
 - Optional `targets` mapping to translate router output to node ids.
@@ -20,7 +21,7 @@ storage, network).
 Run it:
     LOCUS_MODEL_PROVIDER=mock python examples/notebook_13_conditional_routing.py
 
-The default provider is the bundled mock model; set LOCUS_MODEL_PROVIDER for a live provider.
+The default provider is OCI GenAI when ``~/.oci/config`` holds a usable profile, otherwise the bundled mock model; set ``LOCUS_MODEL_PROVIDER`` (``oci``, ``openai``, ``anthropic``, ``mock``) to choose.
 Set LOCUS_MODEL_PROVIDER=mock for offline runs. Pick a live provider with
 LOCUS_MODEL_PROVIDER=openai LOCUS_MODEL_ID=gpt-4o
 (or LOCUS_MODEL_PROVIDER=anthropic, or any OpenAI-compatible
@@ -28,26 +29,25 @@ provider: ollama, vllm, groq, together, openrouter, ...).
 """
 
 import asyncio
-import time
 
-from config import get_model
+from config import get_model, print_config
 
 from locus.agent import Agent
 from locus.multiagent import END, START, StateGraph
 
 
-async def _llm_call(
-    prompt: str, *, system: str = "Reply in one short sentence.", max_tokens: int = 80
-) -> str:
-    """Run a one-shot Agent and print a timing/token banner. Used by every part."""
-    agent = Agent(model=get_model(max_tokens=max_tokens), system_prompt=system)
-    t0 = time.perf_counter()
-    res = await agent.arun(prompt)
-    dt = time.perf_counter() - t0
+# Parts 1-5 are deterministic on purpose: the lesson is the router, and a
+# handler that spends a model round-trip to say "paged on-call" would bury
+# it. The one model call in this file is Part 6, where the model *is* the
+# router.
+
+
+def _banner(result) -> None:
+    m = result.metrics
     print(
-        f"  [model call: {dt:.2f}s · {res.metrics.prompt_tokens}→{res.metrics.completion_tokens} tokens]"
+        f"  [model call: {m.duration_ms / 1000.0:.2f}s · "
+        f"{m.prompt_tokens}→{m.completion_tokens} tokens]"
     )
-    return res.message.strip()
 
 
 # =============================================================================
@@ -66,18 +66,19 @@ async def example_binary_routing():
         return {"confidence": confidence, "needs_human": confidence >= 80}
 
     async def escalate_path(inputs):
-        msg = await _llm_call(
-            f"Write a one-line escalation note for a cloud monitoring alert with "
-            f"{inputs.get('confidence')}% anomaly confidence that needs on-call SRE review.",
-        )
-        return {"disposition": msg}
+        return {
+            "disposition": (
+                f"Escalated: {inputs.get('confidence')}% anomaly confidence — paging on-call SRE."
+            )
+        }
 
     async def auto_close_path(inputs):
-        msg = await _llm_call(
-            f"Write a one-line auto-resolve note for a cloud monitoring alert with only "
-            f"{inputs.get('confidence')}% anomaly confidence, mentioning it stays on record.",
-        )
-        return {"disposition": msg}
+        return {
+            "disposition": (
+                f"Auto-resolved: {inputs.get('confidence')}% anomaly confidence is below the "
+                "paging threshold; alert kept on record."
+            )
+        }
 
     graph.add_node("check", check_confidence)
     graph.add_node("escalate", escalate_path)
@@ -119,26 +120,16 @@ async def example_multiway_routing():
         return {"severity": severity}
 
     async def handle_critical(inputs):
-        line = await _llm_call(
-            "In one short line, page the on-call SRE for a CRITICAL outage. SLA 15 min."
-        )
-        return {"response": line, "sla": "15 minutes"}
+        return {"response": "Paging on-call SRE — CRITICAL outage", "sla": "15 minutes"}
 
     async def handle_high(inputs):
-        line = await _llm_call(
-            "In one short line, assign a HIGH alert to the platform team. SLA 1 hour."
-        )
-        return {"response": line, "sla": "1 hour"}
+        return {"response": "Assigned to the platform team", "sla": "1 hour"}
 
     async def handle_medium(inputs):
-        line = await _llm_call("In one short line, queue a MEDIUM alert for triage. SLA 24 hours.")
-        return {"response": line, "sla": "24 hours"}
+        return {"response": "Queued for triage", "sla": "24 hours"}
 
     async def handle_low(inputs):
-        line = await _llm_call(
-            "In one short line, batch a LOW alert for weekly review. SLA 1 week."
-        )
-        return {"response": line, "sla": "1 week"}
+        return {"response": "Batched for weekly review", "sla": "1 week"}
 
     graph.add_node("classify", classify_alert)
     graph.add_node("critical", handle_critical)
@@ -168,7 +159,8 @@ async def example_multiway_routing():
 
     for severity in ["critical", "high", "medium", "low"]:
         result = await graph.execute({"severity": severity})
-        print(f"{severity.upper()}: {result.final_state.get('response')}")
+        state = result.final_state
+        print(f"{severity.upper()}: {state.get('response')} (SLA {state.get('sla')})")
     print()
 
 
@@ -193,22 +185,13 @@ async def example_chained_conditions():
         return {"is_operator": role == "operator"}
 
     async def rollback_action(inputs):
-        line = await _llm_call(
-            "In one line, log that an operator rolled back the affected service."
-        )
-        return {"result": line}
+        return {"result": "Operator rolled back the affected service"}
 
     async def ticket_action(inputs):
-        line = await _llm_call(
-            "In one line, log that a read-only viewer opened a remediation ticket."
-        )
-        return {"result": line}
+        return {"result": "Read-only viewer opened a remediation ticket"}
 
     async def discard_alert(inputs):
-        line = await _llm_call(
-            "In one line, log that an alert from an untrusted webhook was discarded."
-        )
-        return {"result": line}
+        return {"result": "Alert from untrusted webhook discarded"}
 
     graph.add_node("source", validate_source)
     graph.add_node("role", check_role)
@@ -256,22 +239,16 @@ async def example_default_route():
         return {"family": family}
 
     async def handle_compute(inputs):
-        line = await _llm_call("In one short line, name the team that handles compute alerts.")
-        return {"handler": line}
+        return {"handler": "Compute Platform Team"}
 
     async def handle_storage(inputs):
-        line = await _llm_call("In one short line, name the team that handles storage alerts.")
-        return {"handler": line}
+        return {"handler": "Storage Platform Team"}
 
     async def handle_network(inputs):
-        line = await _llm_call("In one short line, name the team that handles network alerts.")
-        return {"handler": line}
+        return {"handler": "Network Platform Team"}
 
     async def handle_other(inputs):
-        line = await _llm_call(
-            "In one short line, name a generic on-call queue for unmatched alerts."
-        )
-        return {"handler": line}
+        return {"handler": "General on-call queue (unmatched family)"}
 
     graph.add_node("categorize", categorize)
     graph.add_node("compute", handle_compute)
@@ -329,22 +306,13 @@ async def example_complex_routing():
         }
 
     async def page_oncall(inputs):
-        line = await _llm_call(
-            "In one short line, confirm the on-call incident commander was paged."
-        )
-        return {"routing": line, "response_window": "Immediate"}
+        return {"routing": "Paged the incident commander", "response_window": "Immediate"}
 
     async def priority_queue(inputs):
-        line = await _llm_call(
-            "In one short line, confirm the incident entered the priority queue."
-        )
-        return {"routing": line, "response_window": "4 hours"}
+        return {"routing": "Priority queue", "response_window": "4 hours"}
 
     async def standard_queue(inputs):
-        line = await _llm_call(
-            "In one short line, confirm the incident entered the standard queue."
-        )
-        return {"routing": line, "response_window": "24 hours"}
+        return {"routing": "Standard queue", "response_window": "24 hours"}
 
     graph.add_node("evaluate", evaluate_incident)
     graph.add_node("page", page_oncall)
@@ -401,23 +369,19 @@ async def example_llm_router():
 
     graph = StateGraph()
 
-    async def classify_with_llm(inputs):
-        import time as _t
+    # One classifier agent for every alert the graph sees. Built outside the
+    # node so the three executions below share a single model client.
+    classifier = Agent(
+        model=get_model(max_tokens=10),
+        system_prompt=(
+            "Classify the cloud alert into exactly one of: "
+            "compute, storage, network. Reply with just the single word."
+        ),
+    )
 
-        alert = inputs.get("alert", "")
-        agent = Agent(
-            model=get_model(max_tokens=10),
-            system_prompt=(
-                "Classify the cloud alert into exactly one of: "
-                "compute, storage, network. Reply with just the single word."
-            ),
-        )
-        t0 = _t.perf_counter()
-        result = await agent.arun(alert)
-        dt = _t.perf_counter() - t0
-        print(
-            f"  [model call: {dt:.2f}s · {result.metrics.prompt_tokens}→{result.metrics.completion_tokens} tokens]"
-        )
+    async def classify_with_llm(inputs):
+        result = await classifier.arun(inputs.get("alert", ""))
+        _banner(result)
         label = result.message.strip().lower()
         # Defensive: clamp anything unexpected back onto a known label
         # so the conditional edge always finds a target.
@@ -456,15 +420,13 @@ async def example_llm_router():
     print()
 
 
-# =============================================================================
-# Main
-# =============================================================================
-
-
 async def main():
     print("=" * 60)
     print("Notebook 13: Severity-based cloud incident escalation routing")
     print("=" * 60)
+    print()
+
+    print_config()
     print()
 
     await example_binary_routing()
@@ -475,7 +437,7 @@ async def main():
     await example_llm_router()
 
     print("=" * 60)
-    print("Next: Notebook 14 — Merging telemetry findings with state reducers")
+    print("Next: Notebook 14 — Merging multi-check payment signals with state reducers")
     print("=" * 60)
 
 

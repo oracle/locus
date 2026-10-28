@@ -11,6 +11,7 @@ triage as ordinary Python: decorate the units of work with
 tracks timing, retries, and caching for you behind the scenes. Scenario:
 payments operations — fetch transaction, look up risk score, assess dispute.
 
+Key ideas:
 - @task — a unit of work; can declare retry_attempts and cache.
 - @entrypoint — the top-level coroutine; tracks every task it awaits.
 - pipeline.get_result() returns an EntrypointResult with per-task metadata.
@@ -19,7 +20,7 @@ payments operations — fetch transaction, look up risk score, assess dispute.
 Run it:
     LOCUS_MODEL_PROVIDER=mock python examples/notebook_18_functional_api.py
 
-The default provider is the bundled mock model; set LOCUS_MODEL_PROVIDER for a live provider.
+The default provider is OCI GenAI when ``~/.oci/config`` holds a usable profile, otherwise the bundled mock model; set ``LOCUS_MODEL_PROVIDER`` (``oci``, ``openai``, ``anthropic``, ``mock``) to choose.
 Set LOCUS_MODEL_PROVIDER=mock for offline runs. Pick a live provider with
 LOCUS_MODEL_PROVIDER=openai LOCUS_MODEL_ID=gpt-4o
 (or LOCUS_MODEL_PROVIDER=anthropic, or any OpenAI-compatible
@@ -29,24 +30,10 @@ provider: ollama, vllm, groq, together, openrouter, ...).
 import asyncio
 import time
 
-from config import get_model
+from config import get_model, print_config
 
 from locus.agent import Agent
 from locus.multiagent.functional import entrypoint, task
-
-
-async def _llm_call(
-    prompt: str, *, system: str = "Reply in one short sentence.", max_tokens: int = 80
-) -> str:
-    """Run a one-shot Agent and print a timing/token banner. Used by every part."""
-    agent = Agent(model=get_model(max_tokens=max_tokens), system_prompt=system)
-    t0 = time.perf_counter()
-    res = await agent.arun(prompt)
-    dt = time.perf_counter() - t0
-    print(
-        f"  [model call: {dt:.2f}s · {res.metrics.prompt_tokens}→{res.metrics.completion_tokens} tokens]"
-    )
-    return res.message.strip()
 
 
 # =============================================================================
@@ -57,10 +44,6 @@ async def _llm_call(
 async def example_basic():
     """Two @task functions wired together inside an @entrypoint."""
     print("=== Part 1: A two-task pipeline ===\n")
-    _ai_note = await _llm_call(
-        "In one sentence, when is the Locus functional API a better choice than StateGraph?"
-    )
-    print(f"AI rationale: {_ai_note}")
 
     @task
     async def fetch_transaction(txn_id: str) -> dict:
@@ -95,10 +78,6 @@ async def example_basic():
 async def example_retry():
     """retry_attempts on the decorator handles a flaky payment processor feed."""
     print("\n=== Part 2: @task(retry_attempts=3) ===\n")
-    _ai_note = await _llm_call(
-        "In one sentence, why does @task(retry_attempts=3) belong on the task and not in caller code?"
-    )
-    print(f"AI rationale: {_ai_note}")
 
     attempt = 0
 
@@ -127,10 +106,6 @@ async def example_retry():
 async def example_cache():
     """Same transaction id returns the cached score without re-running the lookup."""
     print("\n=== Part 3: @task(cache=True) ===\n")
-    _ai_note = await _llm_call(
-        "In one sentence, when should you turn @task(cache=True) ON for a transaction-enrichment pipeline?"
-    )
-    print(f"AI rationale: {_ai_note}")
 
     call_count = 0
 
@@ -152,9 +127,21 @@ async def example_cache():
     print(f"Actual calls: {call_count}")  # 2, not 3
 
 
+# =============================================================================
+# Part 4: @task wrapping an LLM call
+# =============================================================================
+
+
 async def example_with_llm():
     """A @task can wrap a full Agent call just like a node would."""
     print("\n=== Part 4: @task wrapping an LLM call ===\n")
+
+    # Built once, outside the task: the task body is what the functional
+    # API tracks, so keep the model client out of it.
+    analyst = Agent(
+        model=get_model(max_tokens=80),
+        system_prompt="Answer in one factual sentence for a payments fraud analyst.",
+    )
 
     @task
     async def build_question(txn_id: str) -> str:
@@ -162,15 +149,9 @@ async def example_with_llm():
 
     @task
     async def assess_risk(prompt: str) -> str:
-        import time as _t
-
-        agent = Agent(
-            model=get_model(max_tokens=80),
-            system_prompt="Answer in one factual sentence for a payments fraud analyst.",
-        )
-        t0 = _t.perf_counter()
-        result = await agent.arun(prompt)
-        dt = _t.perf_counter() - t0
+        t0 = time.perf_counter()
+        result = await analyst.arun(prompt)
+        dt = time.perf_counter() - t0
         print(
             f"  [model call: {dt:.2f}s · {result.metrics.prompt_tokens}→{result.metrics.completion_tokens} tokens]"
         )
@@ -187,10 +168,22 @@ async def example_with_llm():
 
 async def main():
     """Run all notebook parts."""
+    print("=" * 60)
+    print("Notebook 18: Payment dispute triage with the functional API")
+    print("=" * 60)
+    print()
+
+    print_config()
+    print()
+
     await example_basic()
     await example_retry()
     await example_cache()
     await example_with_llm()
+
+    print("\n" + "=" * 60)
+    print("Next: Notebook 19 — Composing data-privacy agents into pipelines")
+    print("=" * 60)
 
 
 if __name__ == "__main__":

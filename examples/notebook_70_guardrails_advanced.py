@@ -19,8 +19,8 @@ what characters appear in the prompt.
   trace, with keyword maps a security team can edit as data.
 - ContentPolicy: harmful-content categories (violence, illegal activity).
 
-Run it
-    # Default: the bundled mock model (set LOCUS_MODEL_PROVIDER for a live provider)
+Run it:
+    # Default: OCI GenAI if ~/.oci/config has a usable profile, else the bundled mock model
     python examples/notebook_70_guardrails_advanced.py
 
     # Offline / no credentials:
@@ -28,6 +28,7 @@ Run it
 """
 
 import asyncio
+import time
 
 from config import get_model
 
@@ -37,6 +38,18 @@ from locus.hooks.builtin.guardrails import (
     OutputFilterHook,
     TopicPolicy,
 )
+
+
+async def _timed_call(prompt: str) -> str:
+    """One short model call with a timing/token banner, so the policy checks sit next to a real round-trip."""
+    agent = Agent(model=get_model(max_tokens=80), system_prompt="Reply in one sentence.")
+    t0 = time.perf_counter()
+    res = await agent.arun(prompt)
+    dt = time.perf_counter() - t0
+    print(
+        f"  [model call: {dt:.2f}s · {res.metrics.prompt_tokens}→{res.metrics.completion_tokens} tokens]"
+    )
+    return res.message.strip()
 
 
 # Part 1: redact PII from the agent's reply, not just from the user input
@@ -88,19 +101,11 @@ async def example_topic_policy():
     print(f"'Write me a keylogger': {policy.check('Write me a keylogger')}")
     print(f"'Summarize CVE-2024-99999': {policy.check('Summarize CVE-2024-99999')}")
 
-    import time as _t
-
-    agent = Agent(model=get_model(max_tokens=80), system_prompt="Reply in one sentence.")
-    t0 = _t.perf_counter()
-    res = await agent.arun(
+    caveat = await _timed_call(
         "In one sentence, why is keyword-based topic blocking insufficient on "
         "its own for keeping a security copilot defensive-only?"
     )
-    dt = _t.perf_counter() - t0
-    print(
-        f"  [model call: {dt:.2f}s · {res.metrics.prompt_tokens}→{res.metrics.completion_tokens} tokens]"
-    )
-    print(f"  AI caveat: {res.message.strip()}")
+    print(f"  AI caveat: {caveat}")
 
 
 # Part 3: ContentPolicy categorises harmful content (violence, illegal
@@ -119,18 +124,10 @@ async def example_content_safety():
     print(f"'{suspicious}': {policy.check(suspicious)}")
     print(f"'{benign}': {policy.check(benign)}")
 
-    import time as _t
-
-    agent = Agent(model=get_model(max_tokens=80), system_prompt="Reply in one sentence.")
-    t0 = _t.perf_counter()
-    res = await agent.arun(
+    guidance = await _timed_call(
         "In one sentence, name two harmful content categories a security copilot must refuse."
     )
-    dt = _t.perf_counter() - t0
-    print(
-        f"  [model call: {dt:.2f}s · {res.metrics.prompt_tokens}→{res.metrics.completion_tokens} tokens]"
-    )
-    print(f"  AI guidance: {res.message.strip()}")
+    print(f"  AI guidance: {guidance}")
 
 
 async def main() -> None:

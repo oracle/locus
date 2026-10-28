@@ -245,7 +245,7 @@ nav:
     - 17 · Resilient graphs: notebooks/notebook_17_graph_advanced.md
     - 18 · Functional API: notebooks/notebook_18_functional_api.md
     - 19 · Composition — pipelines: notebooks/notebook_19_composition.md
-    - 20 · Scatter-gather with Send: notebooks/notebook_20_map_reduce_code_review.md
+    - 20 · Scatter-gather with Send: notebooks/notebook_20_map_reduce_support_triage.md
     - 21 · Supervisor and critic loop: notebooks/notebook_21_supervisor_critic_loop.md
     - 22 · Orchestrator: notebooks/notebook_22_orchestrator_pattern.md
     - 23 · Specialist agents: notebooks/notebook_23_specialist_agents.md
@@ -308,7 +308,7 @@ nav:
     - 76 · Incident response with an audit chain: notebooks/notebook_76_ir_audit_trail.md
   - Real-world workflows:
     - 77 · Incident response runbook: notebooks/notebook_77_incident_response.md
-    - 78 · Procurement approval: notebooks/notebook_78_procurement_approval.md
+    - 78 · Concession approval: notebooks/notebook_78_concession_approval.md
     - 79 · Contract review: notebooks/notebook_79_contract_review.md
     - 80 · Vendor integrations: notebooks/notebook_80_vendor_integrations.md
   - Security operations (locus-sdk-security):

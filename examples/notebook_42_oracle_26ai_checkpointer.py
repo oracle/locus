@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -36,8 +35,7 @@ up a brand-new ``Agent`` instance — different Python object, same
 ``thread_id``, same Oracle pool — and the agent recalls turn 1 without
 being told what was said.
 
-Run it::
-
+Run it:
     export ORACLE_DSN=mydb_low                   # tnsnames alias
     export ORACLE_USER=locus_app                 # least-privileged app schema
     export ORACLE_PASSWORD='<app-password>'
@@ -127,14 +125,8 @@ def _build_checkpointer():
 
 
 def _build_agent():
-    """Fresh ``Agent`` instance, fresh checkpointer pool — same Oracle table.
-
-    Returning a new ``Agent`` per call is the whole point: it proves the
-    durability lives in 26ai, not in the Python object. The two agents
-    below share nothing in memory; the conversation survives because
-    the Locus agent loop loaded state from Oracle before its first
-    model call.
-    """
+    """Fresh ``Agent`` and checkpointer pool per call — the two sessions share
+    nothing in memory, so continuity can only come from Oracle 26ai."""
     return Agent(
         model=get_model(max_tokens=120),
         system_prompt=(
@@ -154,20 +146,20 @@ async def first_session() -> None:
     """Session 1 — operator starts a conversation; agent persists turn 1."""
     print("\n--- Session 1: agent persists turn 1 to Oracle 26ai ---")
     agent = _build_agent()
+    cp = agent.config.checkpointer
+    try:
+        prompt = "p99 on checkout-api spiked at 14:02. The deploy at 13:58 looks suspicious."
+        result = agent.run_sync(prompt, thread_id=THREAD_ID)
+        print(f"User : {prompt}")
+        print(f"Agent: {result.message.strip()}")
+        print(f"  state size after this turn: {len(result.state.messages)} messages")
 
-    result = agent.run_sync(
-        "p99 on checkout-api spiked at 14:02. The deploy at 13:58 looks suspicious.",
-        thread_id=THREAD_ID,
-    )
-    print(f"User : p99 on checkout-api spiked at 14:02 (after the 13:58 deploy).")
-    print(f"Agent: {result.message.strip()}")
-    print(f"  state size after this turn: {len(result.state.messages)} messages")
-
-    # The state hit Oracle, not just memory. Confirm via the
-    # checkpointer's admin surface — the same one a dashboard would use.
-    cp = _build_checkpointer()
-    threads = await cp.list_threads()
-    print(f"  threads currently in {TABLE_NAME}: {threads}")
+        # The state hit Oracle, not just memory. Confirm through the agent's
+        # own checkpointer — its admin surface is the one a dashboard would use.
+        threads = await cp.list_threads()
+        print(f"  threads currently in {TABLE_NAME}: {threads}")
+    finally:
+        await cp.close()
 
 
 async def second_session() -> None:
@@ -180,14 +172,15 @@ async def second_session() -> None:
     """
     print("\n--- Session 2: a brand-new Agent resumes the thread ---")
     agent = _build_agent()
-
-    result = agent.run_sync(
-        "Has anything like that happened in the last fortnight?",
-        thread_id=THREAD_ID,
-    )
-    print("User : Has anything like that happened in the last fortnight?")
-    print(f"Agent: {result.message.strip()}")
-    print(f"  state size after this turn: {len(result.state.messages)} messages")
+    cp = agent.config.checkpointer
+    try:
+        prompt = "Has anything like that happened in the last fortnight?"
+        result = agent.run_sync(prompt, thread_id=THREAD_ID)
+        print(f"User : {prompt}")
+        print(f"Agent: {result.message.strip()}")
+        print(f"  state size after this turn: {len(result.state.messages)} messages")
+    finally:
+        await cp.close()
 
     print(
         "\nThe second Agent loaded prior turns from Oracle 26ai before "

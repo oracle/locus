@@ -2,8 +2,10 @@
 
 A checkpointer is the contract for **persisting agent state** between
 runs. Pass one to `Agent(checkpointer=...)` and the agent saves
-`AgentState` after every iteration; resume a thread by re-running with
-the same `thread_id`. Same code, same case context, different process,
+`AgentState` when the run finishes or raises and before it pauses on an
+interrupt (add `checkpoint_every_n_iterations=1` to also save after each
+tool-calling iteration); resume a thread by re-running with the same
+`thread_id`. Same code, same case context, different process,
 different day.
 
 This is the continuity story for production agents. A case outlives a
@@ -29,7 +31,6 @@ from locus_security import security_toolset
 agent = Agent(
     model="{{ locus_example_model }}",
     tools=security_toolset(),   # query_siem, enrich_indicator, isolate_host, ...
-    # S3Backend is a native checkpointer — pass it straight to the agent.
     checkpointer=S3Backend(
         bucket="soc-case-checkpoints",
         endpoint_url="https://s3.amazonaws.com",
@@ -156,7 +157,8 @@ agent = Agent(
     tools=[...],
     checkpointer=postgresql_checkpointer(
         dsn="postgresql://user:pass@host:5432/locus",
-        schema_name="locus_threads",
+        schema_name="locus_threads",        # default "public"
+        table_name="locus_checkpoints",     # default "checkpoints"
     ),
 )
 ```
@@ -212,21 +214,8 @@ updated in place. `list_threads` and `vacuum` work over those rows, and
 `search_data` matches against the JSON `data` column. These are
 **storage backends**, not native checkpointers, so go
 through the `postgresql_checkpointer` / `mysql_checkpointer` factories
-(which wrap the backend in a `StorageBackendAdapter`):
-
-```python
-from locus.memory.backends import postgresql_checkpointer
-
-agent = Agent(
-    model=...,
-    tools=[...],
-    checkpointer=postgresql_checkpointer(
-        dsn="postgresql://locus_app:pass@host:5432/locus",
-        table_name="locus_checkpoints",
-    ),
-)
-```
-
+(which wrap the backend in a `StorageBackendAdapter`) — see the
+[Postgres block above](#postgres-postgresql_checkpointer) for the call.
 `mysql_checkpointer` mirrors the same shape on the official MySQL
 Connector/Python asyncio driver.
 
@@ -324,6 +313,8 @@ async def main():
     store = InMemoryStore()
     await store.put(("locus_memory", "support"), "refund_policy", {"content": "Refunds over $500 need manager approval"})
     hit = await store.get(("locus_memory", "support"), "refund_policy")
+    hits = await store.search(("locus_memory", "support"), query=None, limit=5)
+    # -> [StoreItem(namespace=("locus_memory", "support"), key="refund_policy", value={...}, ...)]
 
 
 asyncio.run(main())
@@ -348,20 +339,6 @@ external infrastructure; give it a file `path`, since the default is
 `:memory:`) and `PgMemory` (Postgres + pgvector with per-tenant
 row-level security), both in `locus.memory.store_backends`; subclass
 `BaseStore` only if neither fits — see [Memory API](../api/memory.md).
-
-```python
-import asyncio
-from locus.memory.store import InMemoryStore
-
-
-async def main():
-    store = InMemoryStore()
-    await store.put(("memory", "cust-4821"), "fact-1", {"note": "cust-4821 prefers store credit over card refunds"})
-    hits = await store.search(("memory", "cust-4821"), query=None, limit=5)
-
-
-asyncio.run(main())
-```
 
 ## Common gotchas
 

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -35,8 +34,7 @@ This notebook is self-contained: it creates a disposable demo table
 to an Agent as a tool, asks the agent two domain questions, and drops
 the table on the way out.
 
-Run it::
-
+Run it:
     export ORACLE_DSN=mydb_low                   # tnsnames alias in the wallet
     export ORACLE_USER=locus_app                 # least-privileged app schema
     export ORACLE_PASSWORD='<app-password>'
@@ -58,12 +56,17 @@ import asyncio
 import json
 import os
 import sys
+from typing import TYPE_CHECKING
 
 from config import get_model, print_config
 
 from locus.agent import Agent
 from locus.rag.loaders import OracleADBLoader
 from locus.tools import tool
+
+
+if TYPE_CHECKING:
+    import oracledb
 
 
 _REQUIRED_ENV = (
@@ -167,7 +170,8 @@ def _conn_kwargs() -> dict[str, str]:
     }
 
 
-async def _setup_demo_table() -> None:
+async def _connect() -> oracledb.AsyncConnection:
+    """One async connection on the same wallet envelope the loader uses."""
     import oracledb
 
     kw = _conn_kwargs()
@@ -177,13 +181,13 @@ async def _setup_demo_table() -> None:
         params["wallet_location"] = kw["wallet_location"]
         if kw["wallet_password"]:
             params["wallet_password"] = kw["wallet_password"]
-
-    conn = await oracledb.connect_async(
-        user=kw["user"],
-        password=kw["password"],
-        dsn=kw["dsn"],
-        **params,
+    return await oracledb.connect_async(
+        user=kw["user"], password=kw["password"], dsn=kw["dsn"], **params
     )
+
+
+async def _setup_demo_table() -> None:
+    conn = await _connect()
     try:
         cursor = conn.cursor()
         try:
@@ -210,22 +214,7 @@ async def _setup_demo_table() -> None:
 
 
 async def _drop_demo_table() -> None:
-    import oracledb
-
-    kw = _conn_kwargs()
-    params: dict[str, str] = {}
-    if kw["wallet_location"]:
-        params["config_dir"] = kw["wallet_location"]
-        params["wallet_location"] = kw["wallet_location"]
-        if kw["wallet_password"]:
-            params["wallet_password"] = kw["wallet_password"]
-
-    conn = await oracledb.connect_async(
-        user=kw["user"],
-        password=kw["password"],
-        dsn=kw["dsn"],
-        **params,
-    )
+    conn = await _connect()
     try:
         cursor = conn.cursor()
         try:
@@ -235,6 +224,44 @@ async def _drop_demo_table() -> None:
         await conn.commit()
     finally:
         await conn.close()
+
+
+@tool
+async def fetch_articles_by_topic(topic: str) -> list[dict]:
+    """Fetch every article tagged with the given topic from the
+    content store.
+
+    Args:
+        topic: Exact topic label. Known values include 'AI Vector
+            Search' and 'Autonomous Database'.
+
+    Returns:
+        A list of articles, each with id (slug), body (text), and
+        topic. Empty list if no rows match.
+    """
+    # Fresh loader per call so the SELECT is parameter-bound — the
+    # ``topic`` arg goes through ``bind_params``, not string
+    # interpolation, even though the agent picked it.
+    loader = OracleADBLoader(
+        **_conn_kwargs(),
+        sql=(f"SELECT id, slug, body, topic FROM {_TABLE} WHERE topic = :topic ORDER BY id"),
+        bind_params={"topic": topic},
+        content_column="body",
+        id_column="slug",
+        metadata_columns=["topic"],
+    )
+    try:
+        docs = await loader.load()
+        return [
+            {
+                "id": d.id,
+                "body": d.content,
+                "topic": d.metadata.get("topic"),
+            }
+            for d in docs
+        ]
+    finally:
+        await loader.close()
 
 
 async def _drive_agent(agent: Agent, prompt: str) -> None:
@@ -275,43 +302,6 @@ async def main() -> None:
     print(f"\nCreating disposable demo table {_TABLE}…")
     await _setup_demo_table()
 
-    @tool
-    async def fetch_articles_by_topic(topic: str) -> list[dict]:
-        """Fetch every article tagged with the given topic from the
-        content store.
-
-        Args:
-            topic: Exact topic label. Known values include 'AI Vector
-                Search' and 'Autonomous Database'.
-
-        Returns:
-            A list of articles, each with id (slug), body (text), and
-            topic. Empty list if no rows match.
-        """
-        # Fresh loader per call so the SELECT is parameter-bound — the
-        # ``topic`` arg goes through ``bind_params``, not string
-        # interpolation, even though the agent picked it.
-        loader = OracleADBLoader(
-            **_conn_kwargs(),
-            sql=(f"SELECT id, slug, body, topic FROM {_TABLE} WHERE topic = :topic ORDER BY id"),
-            bind_params={"topic": topic},
-            content_column="body",
-            id_column="slug",
-            metadata_columns=["topic"],
-        )
-        try:
-            docs = await loader.load()
-            return [
-                {
-                    "id": d.id,
-                    "body": d.content,
-                    "topic": d.metadata.get("topic"),
-                }
-                for d in docs
-            ]
-        finally:
-            await loader.close()
-
     agent = Agent(
         model=get_model(max_tokens=300),
         tools=[fetch_articles_by_topic],
@@ -331,8 +321,7 @@ async def main() -> None:
         print(
             "\nThe agent drove every ADB round-trip itself — picking the "
             "topic, running the parameter-bound SELECT, grounding the "
-            "answer in the returned rows. Locus + Oracle 26ai, no "
-            "langchain glue."
+            "answer in the returned rows. Locus + Oracle 26ai, no glue code."
         )
     finally:
         print(f"\nDropping demo table {_TABLE}…")

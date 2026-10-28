@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -42,15 +41,15 @@ against the cost of the make-good and the downside of a denial.
   easy to swap a human gate for an automated rule.
 - output_schema=ConcessionDecision keeps SCRIBE's terminal artifact typed.
 
-Run it
-    # Default: the bundled mock model (set LOCUS_MODEL_PROVIDER for a live provider)
-    python examples/notebook_78_procurement_approval.py
+Run it:
+    # Default: OCI GenAI if ~/.oci/config has a usable profile, else the bundled mock model
+    python examples/notebook_78_concession_approval.py
 
     # Offline / no credentials:
-    LOCUS_MODEL_PROVIDER=mock python examples/notebook_78_procurement_approval.py
+    LOCUS_MODEL_PROVIDER=mock python examples/notebook_78_concession_approval.py
 
     # Pin a strong-enough model for the structured ConcessionDecision schema:
-    LOCUS_MODEL_PROVIDER=openai LOCUS_MODEL_ID=gpt-4o python examples/notebook_78_procurement_approval.py
+    LOCUS_MODEL_PROVIDER=openai LOCUS_MODEL_ID=gpt-4o python examples/notebook_78_concession_approval.py
 """
 
 from __future__ import annotations
@@ -156,59 +155,43 @@ def risk_tier_router(state: dict[str, Any]) -> str:
     return "director"
 
 
-async def approve_manager(state: dict[str, Any]) -> dict[str, Any]:
-    decision = interrupt(
-        {
-            "type": "approval",
-            "tier": "manager",
-            "question": (
-                f"Support-manager approval needed at risk score "
-                f"{state['risk_score']:.0f}/100 "
-                f"({state['customer']} — {state['concession']}). Approve?"
-            ),
-            "options": ["yes", "no"],
-        }
-    )
-    return _record_decision(state, "Support Manager", decision)
-
-
-async def approve_billing(state: dict[str, Any]) -> dict[str, Any]:
-    decision = interrupt(
-        {
-            "type": "approval",
-            "tier": "billing",
-            "question": (
-                f"Billing approval needed at risk score {state['risk_score']:.0f}/100 "
-                f"({state['customer']}). Approve?"
-            ),
-            "options": ["yes", "no"],
-        }
-    )
-    return _record_decision(state, "Billing Lead", decision)
-
-
-async def approve_director(state: dict[str, Any]) -> dict[str, Any]:
-    decision = interrupt(
-        {
-            "type": "approval",
-            "tier": "director",
-            "question": (
-                f"Support-director approval needed at risk score "
-                f"{state['risk_score']:.0f}/100 "
-                f"({state['customer']}). Approve?"
-            ),
-            "options": ["yes", "no"],
-        }
-    )
-    return _record_decision(state, "Support Director", decision)
-
-
 def _record_decision(state: dict[str, Any], role: str, decision: str) -> dict[str, Any]:
     approvals: list[str] = list(state.get("approvals", []))
     if decision == "yes":
         approvals.append(role)
         return {"approvals": approvals, "status": "pending"}
     return {"approvals": approvals, "status": "denied"}
+
+
+def _approval_node(tier: str, title: str):
+    """Build one human-approval gate.
+
+    The three tiers differ only in label, but each stays its own graph node
+    so a reviewer can come back to exactly that gate later.
+    """
+
+    async def approve(state: dict[str, Any]) -> dict[str, Any]:
+        decision = interrupt(
+            {
+                "type": "approval",
+                "tier": tier,
+                "question": (
+                    f"{title} approval needed at risk score "
+                    f"{state['risk_score']:.0f}/100 "
+                    f"({state['customer']} — {state['concession']}). Approve?"
+                ),
+                "options": ["yes", "no"],
+            }
+        )
+        return _record_decision(state, title, decision)
+
+    approve.__name__ = f"approve_{tier}"
+    return approve
+
+
+approve_manager = _approval_node("manager", "Support Manager")
+approve_billing = _approval_node("billing", "Billing Lead")
+approve_director = _approval_node("director", "Support Director")
 
 
 def gate_after_manager(state: dict[str, Any]) -> str:
@@ -241,8 +224,6 @@ async def record_decision(state: dict[str, Any]) -> dict[str, Any]:
     typed Pydantic instance — the workflow can POST it directly to the
     concessions ledger without parsing.
     """
-    import asyncio as _asyncio
-
     final_status = "approved" if state.get("status") != "denied" else "denied"
     agent = Agent(
         config=AgentConfig(
@@ -277,7 +258,7 @@ async def record_decision(state: dict[str, Any]) -> dict[str, Any]:
             break
         except Exception as exc:  # noqa: BLE001 — retry transient provider flakiness
             last_exc = exc
-            await _asyncio.sleep(0.5 * (attempt + 1))
+            await asyncio.sleep(0.5 * (attempt + 1))
     if result is None:
         raise RuntimeError(
             f"Decision recorder failed after 3 attempts. Last error: {last_exc!r}"
@@ -286,9 +267,9 @@ async def record_decision(state: dict[str, Any]) -> dict[str, Any]:
     if decision is None:
         raise RuntimeError(
             "Decision recorder returned no parsed ConcessionDecision. The "
-            "configured model could not honor the JSON schema. Use a stronger "
-            "model (e.g. openai.gpt-4o, openai.gpt-5, anthropic.claude-3-5-sonnet) "
-            f"for notebook 78. Raw output: {result.message!r}"
+            "configured model could not honor the JSON schema. Set "
+            "LOCUS_MODEL_PROVIDER / LOCUS_MODEL_ID to a provider and model that "
+            f"support structured output. Raw output: {result.message!r}"
         )
     return {"concession_decision": decision}
 
@@ -340,7 +321,8 @@ def build_review_graph() -> StateGraph:
     return g
 
 
-# Driver.
+# Run four tickets of rising risk through the graph, answering each
+# approval interrupt from a scripted list, and print the typed decision.
 
 
 def _print_decision(d: ConcessionDecision | None) -> None:
@@ -354,7 +336,7 @@ def _print_decision(d: ConcessionDecision | None) -> None:
     print(f"  Customer:       {d.customer}")
     print(f"  Concession:     {d.concession}")
     print(f"  Risk score:     {d.risk_score:.0f}/100")
-    print(f"  Approvals:      " + (" → ".join(d.approvals) if d.approvals else "(none)"))
+    print("  Approvals:      " + (" → ".join(d.approvals) if d.approvals else "(none)"))
     print(f"  Ticket:         {d.ticket_summary[:120]}")
 
 
@@ -368,6 +350,8 @@ async def _drive(graph: StateGraph, initial: dict[str, Any], answers: list[str])
         payload = result.interrupt.interrupt.payload
         print(f"  ⏸  [{payload.get('tier', '?')}] {payload.get('question')}")
         print(f"  ▶  Reviewer responds: {answer!r}")
+        # A resumed run starts from the checkpointed state, so the model
+        # object has to be re-injected alongside the reviewer's answer.
         result = await graph.execute(
             Command(
                 resume=answer,
@@ -384,7 +368,9 @@ async def main() -> None:
     model = get_model()
     graph = build_review_graph()
 
-    # (request, customer, concession, risk score, ticket excerpt)
+    # (request, customer, concession, risk score, ticket excerpt, reviewer answers)
+    # CS-1003 is denied at the billing tier to show a "no" skipping straight
+    # to the decision node with status=denied.
     scenarios = [
         (
             "CS-1001",
@@ -392,6 +378,7 @@ async def main() -> None:
             "$15 account credit for a late shipping notification",
             12.0,
             "Polite first-time complaint; order arrived two days late; asks for a small credit.",
+            [],
         ),
         (
             "CS-1002",
@@ -399,6 +386,7 @@ async def main() -> None:
             "one-month subscription refund after a billing double-charge",
             38.0,
             "Charged twice this cycle; wants the duplicate month refunded; otherwise happy customer.",
+            ["yes"],
         ),
         (
             "CS-1003",
@@ -406,6 +394,7 @@ async def main() -> None:
             "full annual refund plus a goodwill credit after repeated outages",
             62.0,
             "Three outages this quarter; threatening to switch; asking to unwind the annual contract.",
+            ["yes", "no"],
         ),
         (
             "CS-1004",
@@ -413,10 +402,11 @@ async def main() -> None:
             "SLA-breach service credit and a contract make-good after a data-export failure",
             88.0,
             "Missed an SLA-bound export during their fiscal close; legal CC'd; demanding a contract concession.",
+            ["yes", "yes", "yes"],
         ),
     ]
 
-    for req_id, customer, concession, score, ticket in scenarios:
+    for req_id, customer, concession, score, ticket, answers in scenarios:
         print(f"\n--- {req_id}: risk {score:.0f}/100 — {customer} — {concession} ---")
         initial = {
             "request_id": req_id,
@@ -424,9 +414,11 @@ async def main() -> None:
             "concession": concession,
             "risk_score": score,
             "ticket": ticket,
+            # The model rides along in graph state so every node can build its
+            # agent from it (see _drive for why it is re-injected on resume).
             "__model__": model,
         }
-        result = await _drive(graph, initial, ["yes", "yes", "yes"])
+        result = await _drive(graph, initial, answers)
         _print_decision(result.final_state.get("concession_decision"))
 
 

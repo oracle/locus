@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -11,7 +10,7 @@ goes live: can someone **inject instructions** into it (directly, or via a
 poisoned KB doc), and can they make it **leak data** it was told to protect?
 
 This notebook points Locus at a support bot and runs the OWASP-ASI / MITRE-ATLAS
-suite, then prints graded results — a `Evidence` (the attack worked, here's the
+suite, then prints graded results — an ``Evidence`` (the attack worked, here's the
 evidence) or an `Abstention` (no proof, so no claim). It assesses two versions:
 a *naive* bot with no trust boundary, and a *hardened* one.
 
@@ -22,8 +21,8 @@ production you would not simulate it — you would point at the real thing:
                              build_payload=lambda p: {"message": p},
                              response_path="reply")
 
-Run:
-    python examples/notebook_84_redteam_support_bot.py
+Run it:
+    python packages/locus-sdk-security/examples/notebook_84_redteam_support_bot.py
 """
 
 from __future__ import annotations

@@ -91,9 +91,10 @@ await checkpointer.delete("case-7731-triage-replay")
 ```
 
 For S3-compatible object storage, retention is enforced by the bucket's
-lifecycle policy — *not* by locus. Configure
-`days_until_archive` / `days_until_delete` once at the bucket
-level and the store handles the cleanup.
+lifecycle policy — *not* by locus. Configure an S3 lifecycle rule
+(transition/expiration) once at the bucket level and the store handles
+the cleanup; `OCIBucketBackend` relies on the equivalent OCI Object
+Storage lifecycle policy.
 
 ## Concurrent updates to the same thread
 
@@ -162,14 +163,14 @@ The reference `AgentServer` (`POST /invoke`, `POST /stream`,
 and returns the message list — useful for rendering chat history on
 page load.
 
-```python
+```http
 GET /threads/case-7731-triage
 # → { "messages": [...], "iterations": 9, ... }
 ```
 
 ## See also
 
-- [Checkpointers](checkpointers.md) — the eight native backends and
-  their tradeoffs.
+- [Checkpointers](checkpointers.md) — every backend (four native, the
+  rest through `*_checkpointer()` factories) and their tradeoffs.
 - [Streaming & Server](server.md) — `AgentServer` and SSE.
 - [Hooks](hooks.md) — observe save/load events.

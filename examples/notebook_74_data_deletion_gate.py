@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -45,7 +44,7 @@ Why this shape:
   :meth:`AuditTrail.verify` returns ``False``. That makes it the artifact you
   hand a regulator to show the erasure happened with human authorization.
 
-Run it
+Run it:
     # Fully offline — no network, no credentials. The "perform" steps mutate
     # a local in-memory datastore.
     python examples/notebook_74_data_deletion_gate.py

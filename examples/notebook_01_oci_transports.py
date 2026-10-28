@@ -9,7 +9,7 @@ and whether you want OCI to hold the conversation history. This file
 builds an agent against each, runs the same prompt, and prints a
 decision table.
 
-Key concepts:
+Key ideas:
 
 - ``OCIChatCompletionsModel`` is the default. It targets the OpenAI-compatible
   endpoint at ``/openai/v1/chat/completions`` and covers OpenAI, Meta,
@@ -23,14 +23,18 @@ Key concepts:
   ``openai.gpt-5.5-pro`` or to push conversation state to the server.
 - The runtime reads ``model.server_stateful``: when it is ``True``,
   Locus sends only the latest turn and threads OCI's continuation id
-  via ``AgentState.provider_state``.
+  via ``AgentState.provider_state``. ``OCIResponsesModel`` reports
+  ``True`` unless built with ``store=False`` (Zero Data Retention
+  tenancies), in which case it sends the full history like the other
+  two. Resuming that OCI-side thread on a later run needs a
+  checkpointer attached, so the continuation id is reloaded with the
+  rest of the state.
 - ``ConversationManager`` is the one Locus primitive that bypasses on
   the Responses path (no client-side history to trim). Memory, hooks,
   tool calling, streaming, structured output, and checkpointing all
   apply identically across the three classes.
 
-Run it::
-
+Run it:
     export OCI_PROFILE=<your-profile>
     export OCI_REGION=us-chicago-1                   # or your region
     export OCI_COMPARTMENT=ocid1.compartment.oc1..…  # GenAI access
@@ -46,7 +50,6 @@ import argparse
 import asyncio
 import os
 import sys
-from typing import Any
 
 
 def _env(name: str) -> str:
@@ -85,9 +88,12 @@ def example_responses_transport() -> None:
     result = agent.run_sync("What is the largest mammal on Earth?")
     print(f"  reply:           {result.message.strip()}")
     print(f"  iterations:      {result.metrics.iterations}")
-    # After turn 1, AgentState carries the continuation id, so a follow-up
-    # agent.run(...) on the same thread_id resumes the OCI-side thread.
-    print(f"  server_stateful: {type(model).server_stateful}")
+    # After turn 1, AgentState carries the continuation id. Give the agent a
+    # checkpointer and a follow-up run on the same thread_id reloads that
+    # state and resumes the OCI-side thread; without one, every run starts
+    # a fresh thread. server_stateful is False when the model was built with
+    # store=False (ZDR tenancies) — then the full history travels each turn.
+    print(f"  server_stateful: {model.server_stateful}")
     print()
 
 
@@ -119,7 +125,7 @@ def example_sdk_transport() -> None:
     result = agent.run_sync("What is the largest mammal on Earth?")
     print(f"  reply:           {result.message.strip()}")
     print(f"  iterations:      {result.metrics.iterations}")
-    print(f"  server_stateful: {getattr(type(model), 'server_stateful', False)}")
+    print(f"  server_stateful: {getattr(model, 'server_stateful', False)}")
     print()
 
 
@@ -146,7 +152,7 @@ def example_v1_transport() -> None:
     result = agent.run_sync("What is the largest mammal on Earth?")
     print(f"  reply:           {result.message.strip()}")
     print(f"  iterations:      {result.metrics.iterations}")
-    print(f"  server_stateful: {getattr(type(model), 'server_stateful', False)}")
+    print(f"  server_stateful: {getattr(model, 'server_stateful', False)}")
     print()
 
 
@@ -192,11 +198,6 @@ def print_comparison() -> None:
     for r in rows:
         print(" ".join(f"{c:<{w}}" for c, w in zip(r, cols, strict=False)))
     print()
-
-
-# =============================================================================
-# Main
-# =============================================================================
 
 
 async def _amain(which: str) -> None:

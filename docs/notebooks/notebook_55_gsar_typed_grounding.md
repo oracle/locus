@@ -49,8 +49,9 @@ LOCUS_MODEL_PROVIDER=mock python examples/notebook_55_gsar_typed_grounding.py
 
 ## Prerequisites
 
-- An OpenAI or Anthropic API key, or `LOCUS_MODEL_PROVIDER` set to
-  `openai` / `anthropic` / `mock`.
+- An OCI profile in `~/.oci/config` (picked up automatically), or
+  `LOCUS_MODEL_PROVIDER` set to `openai` / `anthropic` / `mock` with the
+  matching key.
 - Part 5 (Algorithm 1) needs a model that supports constrained JSON
   decoding for the structured-output judge.
 

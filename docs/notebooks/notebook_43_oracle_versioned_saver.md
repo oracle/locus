@@ -7,7 +7,7 @@ saver with a monotonic `checkpoint_id` and a parent link. The result:
 an auditable lineage of the agent's life inside Oracle 26ai, queryable
 by `list_checkpoints` / `get(checkpoint_id=...)`.
 
-Contrast with the simpler `oracle_checkpointer` from notebook 03:
+Contrast with the simpler `oracle_checkpointer` from notebook 42:
 that one MERGEs a single row per thread (latest wins). Reach for
 `OracleCheckpointSaver` when you need history (time-travel, fork) or
 intra-step durability (`put_writes` / `get_writes`). This notebook

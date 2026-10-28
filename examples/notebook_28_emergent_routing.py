@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -19,6 +18,7 @@ records its rationale on the ``router.protocol.selected`` event. Moving
 trail intact, which matters when the router itself can fan work out to
 agents that touch production infrastructure.
 
+Key ideas:
 - Filtering, policy gating, capability binding, and builder dispatch
   stay rule-based. Only the disambiguation step moves to the model.
 - The picker short-circuits when only one candidate survives the
@@ -49,7 +49,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from config import check_structured_output_capable, get_model
+from config import check_structured_output_capable, get_model, print_config
 
 from locus.agent import Agent
 from locus.router import (
@@ -126,7 +126,7 @@ def _build_extractor(model) -> Agent:
 
 
 def build_routers() -> tuple[Router, Router, Any]:
-    """Return (default, emergent) — same registry, only the picker differs."""
+    """Return (default, emergent, model) — same registry, only the picker differs."""
     model = get_model()
 
     tools = create_registry(runbook_search, get_slo_metric, list_incidents)
@@ -197,12 +197,20 @@ async def _selected(router: Router, prompt: str, frame: GoalFrame) -> str:
 
 
 async def main() -> None:
+    print("=" * 60)
+    print("Notebook 28: emergent incident routing — the model picks the specialist protocol")
+    print("=" * 60)
+    print()
+
+    print_config()
+    print()
+
     check_structured_output_capable()
     default, emergent, model = build_routers()
 
-    print(f"{'─' * 90}")
-    print(f"  REQUEST                                         | DEFAULT             | EMERGENT")
-    print(f"{'─' * 90}")
+    print("─" * 90)
+    print("  REQUEST                                         | DEFAULT             | EMERGENT")
+    print("─" * 90)
 
     for prompt in PROMPTS:
         # Routing is the subject here, so compile() — choose and build the
@@ -221,7 +229,7 @@ async def main() -> None:
         marker = "  " if d_pid == e_pid else "≠ "
         print(f"{marker}{prompt[:48]:<48} | {d_pid:<19} | {e_pid}")
 
-    print(f"{'─' * 90}")
+    print("─" * 90)
     print(
         "Read each row left-to-right: on-call request → default protocol → emergent\n"
         "protocol. When the two columns differ (≠), the picker's rationale field on\n"
@@ -233,6 +241,10 @@ async def main() -> None:
     close = getattr(model, "close", None)
     if close is not None:
         await close()
+
+    print("\n" + "=" * 60)
+    print("Next: Notebook 29 — Cognitive router — risk-gated routing for infra/devops requests")
+    print("=" * 60)
 
 
 if __name__ == "__main__":

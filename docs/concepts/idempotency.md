@@ -85,12 +85,6 @@ again "to be sure". Sometimes the network glitches and the model
 believes the call failed. Without idempotency, the customer is refunded
 twice and finance opens a ticket for the duplicate.
 
-```python
-@tool(idempotent=True)
-def issue_refund(order_id: str, amount: float) -> dict:
-    return billing.refund(order_id, amount)
-```
-
 Within the active run, an identical second call reuses the first result. The
 same mechanism applies to a deploy (`deploy_service`), a page (`page_oncall`),
 and the security-operations variant (`isolate_host`).

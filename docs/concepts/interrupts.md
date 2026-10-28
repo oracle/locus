@@ -31,7 +31,7 @@ continue.
 ```python
 from locus.agent import Agent
 from locus.core.events import InterruptEvent
-from locus.tools.decorator import tool
+from locus.tools import tool
 
 @tool(idempotent=True)
 def issue_refund(order_id: str, amount: float) -> dict:
@@ -101,7 +101,7 @@ Not strictly human-in-the-loop, but lives in the same family. The
 fires:
 
 ```python
-from locus.hooks.builtin.steering import SteeringHook
+from locus.hooks.builtin import SteeringHook
 from locus.models import get_model
 
 agent = Agent(
@@ -198,11 +198,9 @@ termination algebra to fire:
 
    ```python
    class BudgetGuard(HookProvider):
-       async def on_iteration_start(
-           self, iteration: int, state: AgentState
-       ) -> None:
+       async def on_iteration_start(self, iteration: int, state: AgentState) -> None:
            if state.total_tokens_used > 100_000:
-               raise RuntimeError("token budget exceeded")
+               raise RuntimeError(f"token budget exceeded at {state.total_tokens_used} tokens")
    ```
 
 2. **Caller cancels the task.** Standard `asyncio` cancellation:
@@ -245,7 +243,7 @@ debugging, or branch off a new thread from the partial conversation.
 - [Incident response](https://github.com/oracle/locus/blob/main/examples/notebook_77_incident_response.py)
   — `interrupt()` as the page-the-human gate after severity
   classification.
-- [Support concession approval](https://github.com/oracle/locus/blob/main/examples/notebook_78_procurement_approval.py)
+- [Support concession approval](https://github.com/oracle/locus/blob/main/examples/notebook_78_concession_approval.py)
   — three stacked `interrupt()` gates on the top tier.
 - [Contract review](https://github.com/oracle/locus/blob/main/examples/notebook_79_contract_review.py)
   — `interrupt()` for human counsel inside a refinement loop.

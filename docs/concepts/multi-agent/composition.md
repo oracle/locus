@@ -74,7 +74,7 @@ answers = await parallel.run(
 )
 
 # Loop: revise the draft until the review clears, max 5 loops
-revise = LoopAgent(agent=reviser_agent, max_loops=5)
+revise = LoopAgent(agent=reviser_agent, condition=lambda out: "APPROVED" in out, max_loops=5)
 final = await revise.run(initial_draft)
 ```
 
@@ -82,7 +82,7 @@ final = await revise.run(initial_draft)
 
 - [`notebook_19_composition.py`](https://github.com/oracle/locus/blob/main/examples/notebook_19_composition.py)
   — `SequentialPipeline`, `ParallelPipeline`, `LoopAgent`.
-- [`notebook_20_map_reduce_code_review.py`](https://github.com/oracle/locus/blob/main/examples/notebook_20_map_reduce_code_review.py)
+- [`notebook_20_map_reduce_support_triage.py`](https://github.com/oracle/locus/blob/main/examples/notebook_20_map_reduce_support_triage.py)
   — same fan-out shape with `Send` inside a graph (use this when you
   need state-aware fan-out beyond what `ParallelPipeline` gives you).
 - [`notebook_21_supervisor_critic_loop.py`](https://github.com/oracle/locus/blob/main/examples/notebook_21_supervisor_critic_loop.py)

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -39,7 +38,7 @@ ticket: a change tagged ``high_value`` always holds, and any change that
 touches more than ``max_blast_radius`` accounts holds too. Everything
 else auto-allows.
 
-Run it
+Run it:
     # Fully offline — no network, no credentials. The "perform" is a
     # local stub that mutates an in-memory account dict.
     python examples/notebook_73_support_account_gate.py
@@ -76,7 +75,7 @@ async def apply_account_change(account: str, field: str, value: object) -> str:
     return f"{account}: set {field} = {value!r}"
 
 
-# Driver.
+# Run the two account changes through the gate and show the trail.
 
 
 async def main() -> None:

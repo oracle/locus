@@ -119,7 +119,7 @@ behind the same `Policy.check(text) -> str | None` shape.
 
 ```python
 from locus.models import AnthropicModel
-from locus.hooks.builtin.steering import SteeringHook
+from locus.hooks.builtin import SteeringHook
 
 # The steering model is a model instance — it can be a smaller/cheaper
 # model than the agent's main one.

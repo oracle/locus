@@ -537,8 +537,6 @@ ignore = [
 "examples/checkpointer_examples.py" = ["ALL"]
 "examples/config.py" = ["F821", "RET503"]
 "packages/*/examples/config.py" = ["F821", "RET503"]
-"examples/notebook_06_swarm_multiagent.py" = ["F821"]
-"examples/notebook_45_agent_hooks.py" = ["PLE2510"]
 "examples/projects/**/*.py" = ["PLE2510"]
 # ``**/`` so the workspace packages' tests/ and examples/ get the same rules.
 "**/tests/**/*.py" = [
@@ -584,11 +582,6 @@ ignore = [
     "A002",     # builtin arg shadowing — pedagogical clarity
     "B007",     # unused loop variable — counter patterns are pedagogical
     "SLF001",   # private-member access — examples illustrate internals
-    "F401",     # unused imports — notebooks show available API surface
-    "F541",     # f-string without placeholders — pedagogical scaffolding
-    "F841",     # unused local — notebooks demonstrate APIs that return
-                # values for inspection even when they're not consumed
-                # downstream.
     "ARG005",   # unused lambda arg — demo lambda signatures
     "ASYNC210", # blocking HTTP — notebooks may demo sync libs alongside async
     "ASYNC240", # os.path in async — examples favor stdlib readability

@@ -15,11 +15,11 @@ relevant hook method runs automatically. Three pieces:
   ``on_before_tool_call`` for auto-discovery.
 - ``callback_handler`` — a plain function that receives every event;
   the lighter-weight alternative when you don't need a class.
-- ``Agent.cancel()`` — stop a running agent from another thread; the
-  next step returns ``stop_reason="cancelled"``.
+- ``Agent.cancel()`` — stop a running agent from another task or
+  thread; the next loop step returns ``stop_reason="cancelled"``.
 
 Run it:
-    # The bundled mock model is the default; set LOCUS_MODEL_PROVIDER for a live provider.
+    # Default: OCI GenAI if ~/.oci/config has a usable profile, else the bundled mock model
     LOCUS_MODEL_PROVIDER=openai LOCUS_MODEL_ID=gpt-4o python examples/notebook_47_plugins.py
 
     # Offline:
@@ -31,8 +31,6 @@ Prerequisites:
 """
 
 import asyncio
-import threading
-import time
 
 from config import get_model
 
@@ -71,10 +69,10 @@ async def example_plugin():
     @tool
     def check_instance_utilization(instance_id: str) -> str:
         """Check an instance's utilization against the metrics service (mock data)."""
-        if "idle" in instance_id or "i-0badcafe" in instance_id:
+        if "idle" in instance_id or "badcafe" in instance_id:
             return (
                 f"Utilization for {instance_id}: IDLE — 2% avg CPU over 30 days, "
-                "over-provisioned (m5.4xlarge)"
+                "over-provisioned (VM.Standard.E4.Flex, 16 OCPUs)"
             )
         return f"Utilization for {instance_id}: healthy — 55% avg CPU, right-sized"
 
@@ -93,8 +91,8 @@ async def example_plugin():
     )
 
     result = await agent.arun(
-        "Triage this alert: 'Monthly bill spiked — instance i-0badcafe in "
-        "us-east-1 is the top line item'"
+        "Triage this alert: 'Monthly bill spiked — instance "
+        "ocid1.instance.oc1.iad.0badcafe in us-ashburn-1 is the top line item'"
     )
     print(f"Response: {result.message[:100]}...")
     print(f"Audit log: {plugin.log}")
@@ -120,50 +118,47 @@ async def example_callback():
         )
     )
 
-    await agent.arun("Is a 't3.nano' a sensible size for a production database?")
+    await agent.arun("Is a 1-OCPU VM.Standard.A1.Flex a sensible size for a production database?")
     print(f"Events received: {events}")
 
 
 # =============================================================================
-# Part 3: Agent.cancel() — stop a run from another thread.
+# Part 3: Agent.cancel() — stop an in-flight run from another task.
 # =============================================================================
 
 
 async def example_cancel():
     print("\n=== Part 3: Cancel Signal ===\n")
 
-    model = get_model(max_tokens=80)
+    @tool
+    async def terminate_instance(instance_id: str) -> str:
+        """Terminate a compute instance (mock: slow, so the run is still in flight)."""
+        # A real control-plane call takes a while; the pause is what gives
+        # the cancel below a running loop to interrupt, under any provider.
+        await asyncio.sleep(0.5)
+        return f"{instance_id}: termination requested"
 
-    # Run one normal call first so this part still exercises the provider.
-    live_agent = Agent(
-        config=AgentConfig(
-            system_prompt="Answer in one sentence.",
-            max_iterations=3,
-            model=model,
-        )
-    )
-    t0 = time.perf_counter()
-    live_result = await live_agent.arun(
-        "In one sentence, why does a cloud automation agent need a cancel signal?"
-    )
-    dt = time.perf_counter() - t0
-    print(
-        f"  [model call: {dt:.2f}s · "
-        f"{live_result.metrics.prompt_tokens}→{live_result.metrics.completion_tokens} tokens]"
-    )
-    print(f"  AI rationale: {live_result.message.strip()}")
-
-    # Cancel a fresh agent before it starts — the run returns immediately.
     agent = Agent(
         config=AgentConfig(
-            system_prompt="Answer concisely.",
-            max_iterations=3,
-            model=model,
+            system_prompt="You operate the fleet. Use terminate_instance when asked.",
+            max_iterations=5,
+            model=get_model(max_tokens=80),
+            tools=[terminate_instance],
         )
     )
-    agent.cancel()
-    result = await agent.arun("Terminate every instance in the fleet — this should be cancelled")
+
+    # The run goes into the background; the cancel comes from this task a
+    # moment later — the shape of an operator hitting "stop" mid-run.
+    run = asyncio.create_task(
+        agent.arun("Terminate every instance in the fleet, starting with web-01.")
+    )
+    await asyncio.sleep(0.05)
+    signalled = agent.cancel()
+    print(f"cancel() signalled {signalled} in-flight run(s)")
+
+    result = await run
     print(f"Stop reason: {result.stop_reason}")
+    print(f"Tool calls completed before the stop: {len(result.tool_executions)}")
 
 
 async def main() -> None:

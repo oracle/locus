@@ -11,9 +11,9 @@ Out of the box, an `Agent(...)` with **no retry hook does not retry
 model calls**. Model retries are hook-driven (a hook sets
 `event.retry = True` on the after-model-call event to trigger a
 re-invocation), so without `ModelRetryHook` a provider exception
-propagates: the loop exits and `result.stop_reason == "error"` (the
-underlying exception is re-raised). The error detail lands on
-`result.error`.
+propagates: the loop emits `TerminateEvent(reason="error")` and
+re-raises, so `arun()` / `run_sync()` raise instead of returning a
+result.
 
 So if you want resilience to transient model failures, add the hook
 below — it's opt-in, not automatic.
@@ -57,14 +57,7 @@ to `max_retries` times.
 
 Tools fail too, and the failure mode is usually different — a
 downstream HTTP call, a transient DB error, a JSON-decode glitch.
-Three options:
-
-```python
-@tool
-def fetch_alert(alert_id: str) -> dict:
-    """Fetch the details of an alert."""
-    return alerts.get(alert_id)
-```
+Three options for a tool such as `fetch_alert(alert_id: str) -> dict`:
 
 1. **Let the loop handle it.** When `fetch_alert` raises, the SDK
    captures the exception, emits a `ToolCompleteEvent` with its `error`
@@ -113,7 +106,8 @@ See [Idempotency](idempotency.md) for the full contract.
 ## Termination interactions
 
 Retries don't bypass `termination=`. The retry hook re-runs Think;
-the router checks the termination algebra after every node. If
+the loop checks the termination algebra once per iteration, before
+Think. If
 your composite includes `MaxIterations(10)`, ten iterations is
 ten iterations whether or not Think retried inside one of them.
 

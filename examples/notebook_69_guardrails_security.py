@@ -24,8 +24,8 @@ it traces to the tool-output row that carried it.
 - Tool allowlist vs denylist for the agent's security tooling.
 - Secret-leakage filtering and stacked hooks via HookRegistry.
 
-Run it
-    # Default: the bundled mock model (set LOCUS_MODEL_PROVIDER for a live provider)
+Run it:
+    # Default: OCI GenAI if ~/.oci/config has a usable profile, else the bundled mock model
     python examples/notebook_69_guardrails_security.py
 
     # Offline / no credentials:
@@ -175,9 +175,9 @@ async def main():
     # of a tool the agent called. A threat-intel lookup returns advisory
     # text whose body has been seeded with an instruction or a destructive
     # payload aimed at the agent. on_after_tool_call caps length and scans
-    # the returned text for PII; the agent then re-validates that text as
-    # fresh input before it re-enters the model's context window, which is
-    # where the command/SQL/path-injection signatures get caught.
+    # the returned text for PII; here we additionally re-feed the tool
+    # output through on_before_invocation to show what a re-injection check
+    # would catch — that is where the command/SQL/path signatures fire.
     print("\n=== Part 4: Indirect injection in tool output (LLM01 / AML.T0051) ===\n")
     # Untrusted tool results. The first three carry destructive payloads
     # smuggled into otherwise-benign advisory text; the last is a clean
@@ -213,7 +213,7 @@ async def main():
     # Surface the strongest detection as a *grounded* security finding.
     # The evidence is the tool-output row that carried the instruction:
     # the claim is TOOL_MATCH provenance, so ground_finding clears the
-    # GSAR threshold and a Evidence ships. An unsupported claim (e.g. "this
+    # GSAR threshold and an ``Evidence`` ships. An unsupported claim (e.g. "this
     # is LOCUS-STORM") would stay ungrounded and drag the score down.
     print("\n--- Grounding the detection via locus.control ---")
     if flagged:
@@ -338,6 +338,14 @@ async def main():
     print("\naction_overrides:")
     for rule, act in custom_config.action_overrides.items():
         print(f"  {rule} -> {act.value}")
+    # REDACT in action: under the Part-1 config an email in the input raises
+    # (default_action=BLOCK); with the pii_email override the same text is
+    # admitted and the violation rides on the state as a redact action.
+    redacting = GuardrailsHook(config=custom_config)
+    ticket = "Reporter john@example.com says the VPN drops hourly."
+    redacted_state = await redacting.on_before_invocation(ticket, state)
+    for v in redacted_state.metadata["guardrail_violations"]:
+        print(f"\n  '{ticket[:40]}…' admitted with {v['rule_name']} -> {v['action']}")
     explainer = await _llm_call(
         "Briefly explain when a security agent platform should REDACT vs "
         "BLOCK vs WARN on policy violations. One sentence per action.",
@@ -376,15 +384,11 @@ async def main():
     print("Registered hook providers:")
     for prov in registry.providers:
         print(f"  - {prov.name} (priority={prov.priority})")
+    # The agent takes the registry's priority-sorted providers directly.
     stacked = await _llm_call(
         "Name two ways an attacker could abuse a SOC agent that has "
         "unrestricted shell access. One bullet each.",
-        hooks=[
-            GuardrailsHook(
-                config=GuardrailConfig(block_dangerous_tools=frozenset({"exec", "eval"}))
-            ),
-            ContentFilterHook(blocked_words=["forbidden"]),
-        ],
+        hooks=registry.providers,
     )
     print(f"Stacked-hooks answer: {stacked}")
 
@@ -447,24 +451,16 @@ async def main():
             default_action=GuardrailAction.WARN,
         ),
     )
-    safe_agent = Agent(
-        model=get_model(max_tokens=200),
-        system_prompt=(
+    safe_answer = await _llm_call(
+        "How can I improve the security posture of a small SaaS app?",
+        system=(
             "You are a SOC assistant. Refuse to reveal secrets or take "
             "any action the guardrails would block."
         ),
+        max_tokens=200,
         hooks=[safe_guardrails],
     )
-    t0 = time.perf_counter()
-    safe_result = await safe_agent.arun(
-        "How can I improve the security posture of a small SaaS app?"
-    )
-    dt = time.perf_counter() - t0
-    print(
-        f"  [model call: {dt:.2f}s · "
-        f"{safe_result.metrics.prompt_tokens}→{safe_result.metrics.completion_tokens} tokens]"
-    )
-    print(f"Guarded answer: {safe_result.message[:300]}")
+    print(f"Guarded answer: {safe_answer[:300]}")
 
     print(f"\nTotal violations logged in this notebook: {len(violations_log)}")
     print("\n" + "=" * 60)

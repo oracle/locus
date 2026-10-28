@@ -26,8 +26,7 @@ Key concepts:
   the cloud-ops agent host at all — one less secret to leak when an
   agent workload is compromised.
 
-Run it::
-
+Run it:
     # 1. Start the gateway. The sample ships at examples/litellm-gateway/.
     cd examples/litellm-gateway/
     export OPENAI_API_KEY="sk-..."          # upstream provider key
@@ -54,7 +53,10 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-from typing import Any
+
+from locus.agent import Agent
+from locus.core.events import ModelChunkEvent
+from locus.models.native.openai import OpenAIModel
 
 
 # ---------------------------------------------------------------------------
@@ -147,9 +149,6 @@ def _print_gateway_health(url: str, key: str) -> None:
 
 async def _run_agent(url: str, key: str, model_alias: str) -> None:
     """Build a Locus cloud-ops agent pointed at the gateway and run basic prompts."""
-    from locus.agent import Agent
-    from locus.models.native.openai import OpenAIModel
-
     print(f"=== Cloud-ops agent vs. {model_alias} (via gateway) ===\n")
 
     # The OPENAI-COMPATIBLE client. ``base_url`` is the gateway endpoint;
@@ -181,10 +180,6 @@ async def _run_agent(url: str, key: str, model_alias: str) -> None:
 
 
 async def _run_streaming(url: str, key: str, model_alias: str) -> None:
-    from locus.agent import Agent
-    from locus.core.events import ModelChunkEvent
-    from locus.models.native.openai import OpenAIModel
-
     print(f"=== Streaming vs. {model_alias} (via gateway) ===\n")
 
     model = OpenAIModel(model=model_alias, api_key=key, base_url=url)
@@ -203,11 +198,6 @@ async def _run_streaming(url: str, key: str, model_alias: str) -> None:
             print(ev.content, end="", flush=True)
             full.append(ev.content)
     print(f"\n    [{len(full)} streamed chunks]\n")
-
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 
 
 async def main() -> None:

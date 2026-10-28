@@ -13,10 +13,9 @@ into an agent without bundling them. Locus speaks both sides of it.
 - Convert tool schemas in both directions
   (`locus_tool_to_mcp` / `mcp_tool_to_locus`).
 - Handle `tools/list` and `tools/call` requests programmatically.
-- Expose a **refund-eligibility probe** as an MCP tool: a deterministic
-  classifier returns an `EligibilityVerdict`, and a GSAR grounding step
-  (`gsar_score` / `decide`) either ships the refund decision or abstains
-  when signal coverage is too low.
+- Gate a deterministic **refund-eligibility probe** with GSAR grounding
+  (`gsar_score` / `decide`): ship the refund decision only when the
+  evidence partition clears the threshold, abstain otherwise.
 
 The configured provider drives the agent. The MCP layer is transport-only
 — the same agent works against any provider. All tool outputs are mock
@@ -38,8 +37,9 @@ LOCUS_MODEL_PROVIDER=mock python examples/notebook_46_mcp_integration.py
 
 ## Prerequisites
 
-- An OpenAI or Anthropic API key, or `LOCUS_MODEL_PROVIDER` set to
-  `openai` / `anthropic` / `mock`.
+- An OCI profile in `~/.oci/config` (picked up automatically), or
+  `LOCUS_MODEL_PROVIDER` set to `openai` / `anthropic` / `mock` with the
+  matching key.
 - Optional: `pip install fastmcp` to exercise live request handling.
 
 See <https://modelcontextprotocol.io> for the MCP specification.

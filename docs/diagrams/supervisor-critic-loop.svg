@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   The supervisor + critic loop, as wired by build_supervisor_graph in
-  examples/notebook_31_supervisor_critic_loop.py on locus.multiagent.graph.StateGraph:
+  examples/notebook_21_supervisor_critic_loop.py on locus.multiagent.graph.StateGraph:
     START  -> gather
     gather -> draft                (the analyst agent writes state["notes"])
     draft  -> review               (the author agent writes state["draft"])

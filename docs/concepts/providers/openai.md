@@ -108,7 +108,7 @@ deltas, the SDK turns them into `ModelChunkEvent`s, your `async for`
 loop reads them as they arrive — no buffering, no fake chunking.
 
 ```python
-async for event in agent.run("Summarise the history of order ord-4821."):
+async for event in agent.run("Summarise the history of order ord-4821.", stream_tokens=True):
     if isinstance(event, ModelChunkEvent) and event.content:
         print(event.content, end="", flush=True)
 ```
@@ -161,7 +161,7 @@ hand it to the agent:
 
 ```python
 from locus.agent import Agent
-from locus.models.native.openai import OpenAIModel
+from locus.models import OpenAIModel
 
 agent = Agent(
     model=OpenAIModel(model="gpt-4o", base_url="https://api.portkey.ai/v1"),

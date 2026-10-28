@@ -50,8 +50,9 @@ model real-world actions: run them through the [admission gate](#admission-contr
     In the current build the bundled reference adapters **and** the vendor
     templates (Entra/Okta/Auth0 `disable`, CrowdStrike `isolate`) return a
     **simulated offline-sample receipt** — they record the decision but do
-    **not** lock an account out or quarantine a host. Wire and verify the live
-    vendor write path before treating these as enforcement.
+    **not** lock an account out or quarantine a host — that includes the
+    `disable` in step 4 below. Wire and verify the live vendor write path
+    before treating these as enforcement.
 
 ## Zero-config by default
 
@@ -102,17 +103,12 @@ from locus_security import Evidence, SecurityContext, Severity
 
 
 async def main():
-    # Offline reference providers; inject your own per domain to go live.
-    # ctx.actions defaults to ControlPolicy(), which sends production
-    # account-disables to a human.
-    ctx = SecurityContext()
+    ctx = SecurityContext()   # offline reference providers; ControlPolicy() holds production disables for a human
 
-    # 1. INVESTIGATE — by domain.
-    risk = await ctx.identity.risk("mallory@example.com")
-    # -> {'user': ..., 'risk': 'high', 'impossible_travel': True}
+    # 1. Investigate by domain.
+    risk = await ctx.identity.risk("mallory@example.com")   # -> {'risk': 'high', 'impossible_travel': True, ...}
 
-    # 2. FORM A FINDING, then VERIFY it. An independent skeptic challenges the
-    #    evidence and re-scores confidence — a thin claim is refuted, not acted on.
+    # 2. Form a finding and verify it; a thin claim is refuted, not acted on.
     finding = Evidence(
         title="Account compromise: impossible-travel sign-ins",
         description="High-risk user with impossible travel between two sign-ins.",
@@ -124,19 +120,16 @@ async def main():
     )
     verdict = await verify(finding)
     if not verdict.survives:
-        return  # abstain — no hallucinated containment
+        return  # abstain
 
-    # 3. PROPOSE CONTAINMENT — gated by policy through ctx.actions.
+    # 3. Propose containment through the policy gate.
     decision = ctx.actions.request_approval(
         Action(name="disable_user", asset="mallory@example.com", environment="production"),
         finding=finding,
         verdict=verdict,
-    )
-    # decision.outcome -> "require_human": a person decides, with the evidence
-    # and the verdict attached. The agent never disables a prod account on its own.
+    )   # decision.outcome -> "require_human"
 
-    # 4. ON APPROVAL, ACT. NB: in the current build `disable` returns a simulated
-    #    offline-sample receipt — it does not yet lock the account out.
+    # 4. Act only on approval.
     if decision.allowed:
         await ctx.identity.disable("mallory@example.com")
 

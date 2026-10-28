@@ -60,10 +60,14 @@ class ResearchState(BaseModel):
 graph = StateGraph(state_schema=ResearchState)
 
 # Each node is a function that takes the state dict and returns the fields it updates.
-graph.add_node("plan", plan_agent)
-graph.add_node("investigate", investigate_agent)
-graph.add_node("report", report_agent)
-graph.add_node("review", review_agent)
+# An Agent is not callable; await it inside the function.
+async def plan(state):
+    return {"findings": [(await planner.arun(state["prompt"])).message]}
+
+graph.add_node("plan", plan)
+graph.add_node("investigate", investigate)   # same shape, wrapping its own agent
+graph.add_node("report", report)
+graph.add_node("review", review)
 
 graph.add_edge(START, "plan")
 graph.add_edge("plan", "investigate")
@@ -86,7 +90,7 @@ from locus.multiagent.graph import RetryPolicy, CachePolicy
 
 graph.add_node(
     "investigate",
-    investigate_agent,
+    investigate,
     retry_policy=RetryPolicy(max_attempts=3, backoff_factor=2.0),
     cache_policy=CachePolicy(ttl_seconds=3600),
 )
@@ -146,14 +150,14 @@ so that graph's review loop is missing from the output. Pass a
   — custom state reducers.
 - [`notebook_17_graph_advanced.py`](https://github.com/oracle/locus/blob/main/examples/notebook_17_graph_advanced.py)
   — `RetryPolicy`, `CachePolicy`, Mermaid output, streaming with `emit_custom`.
-- [`notebook_20_map_reduce_code_review.py`](https://github.com/oracle/locus/blob/main/examples/notebook_20_map_reduce_code_review.py)
+- [`notebook_20_map_reduce_support_triage.py`](https://github.com/oracle/locus/blob/main/examples/notebook_20_map_reduce_support_triage.py)
   — `Send` fan-out / reduce in a graph.
 - [`notebook_21_supervisor_critic_loop.py`](https://github.com/oracle/locus/blob/main/examples/notebook_21_supervisor_critic_loop.py)
   — a draft → review loop on `add_conditional_edges`, capped at two
   revisions by a counter in state.
 - [`notebook_77_incident_response.py`](https://github.com/oracle/locus/blob/main/examples/notebook_77_incident_response.py)
   — triage → parallel investigators → severity gate → page-the-human.
-- [`notebook_78_procurement_approval.py`](https://github.com/oracle/locus/blob/main/examples/notebook_78_procurement_approval.py)
+- [`notebook_78_concession_approval.py`](https://github.com/oracle/locus/blob/main/examples/notebook_78_concession_approval.py)
   — stacked `interrupt()` gates with tier routing.
 - [`notebook_79_contract_review.py`](https://github.com/oracle/locus/blob/main/examples/notebook_79_contract_review.py)
   — parallel reviewers + `Command(goto=...)` to short-circuit a loop.

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -25,16 +24,16 @@ Key concepts:
   rerank_candidate_pool=N)`` is the one wiring change — the retriever
   fetches ``N`` candidates from the store, reranks them, then returns
   ``limit`` to the caller.
-- The lift is visible: the canonical hepcidin passage ranks 4th by
-  embedding similarity and 1st after reranking.
+- The lift is visible: the canonical hepcidin passage typically ranks
+  low on raw embedding similarity and first after reranking; the run
+  prints both positions.
 
-Run it::
-
+Run it:
     export OCI_PROFILE=DEFAULT       # or your locus_app-typed profile
     export OCI_AUTH_TYPE=api_key     # or security_token
     export OCI_REGION=us-chicago-1
     export OCI_COMPARTMENT=ocid1.compartment.oc1..xxx
-    # Plus the Oracle 26ai wallet (see notebook 45):
+    # Plus the Oracle 26ai wallet (see notebook 38):
     export ORACLE_DSN=mydb_low
     export ORACLE_USER=locus_app
     export ORACLE_PASSWORD='<app-password>'
@@ -131,71 +130,81 @@ async def main() -> None:
         password=os.environ["ORACLE_PASSWORD"],
         wallet_location=os.path.expanduser(os.environ["ORACLE_WALLET"]),
         wallet_password=os.environ.get("ORACLE_WALLET_PASSWORD", ""),
-        table_name="locus_notebook_05",
-        dimension=1536,
+        table_name="locus_notebook_45",
+        dimension=1536,  # embed-v4.0 width
         distance_metric="COSINE",
     )
-    print(f"Embedding {len(CORPUS)} passages and seeding OracleVectorStore…")
-    baseline = RAGRetriever(embedder=embedder, store=store)
-    await baseline.add_documents(CORPUS)
+    try:
+        print(f"Embedding {len(CORPUS)} passages and seeding OracleVectorStore…")
+        baseline = RAGRetriever(embedder=embedder, store=store)
+        await baseline.add_documents(CORPUS)
 
-    # Baseline retrieval — embedding similarity only.
-    print(f"\nQuery: {QUERY!r}")
-    baseline_hits = await baseline.retrieve(QUERY, limit=4)
-    _print_table(
-        "Baseline (embedding similarity)",
-        [(i + 1, h.score, h.document.content) for i, h in enumerate(baseline_hits.documents)],
-    )
+        # Baseline retrieval — embedding similarity only.
+        print(f"\nQuery: {QUERY!r}")
+        baseline_hits = await baseline.retrieve(QUERY, limit=4)
+        _print_table(
+            "Baseline (embedding similarity)",
+            [(i + 1, h.score, h.document.content) for i, h in enumerate(baseline_hits.documents)],
+        )
 
-    # Retrieve-then-rerank — over-fetch + Cohere V4 cross-encoder.
-    reranker = OCICohereReranker(
-        # Cohere Reranker V4 fast on OCI GenAI on-demand.
-        model="cohere.rerank-v4.0-fast",
-        compartment_id=compartment,
-        profile_name=profile,
-        auth_type=auth_type,
-        region=region,
-        top_n=4,
-    )
-    reranked_retriever = RAGRetriever(
-        embedder=embedder,
-        store=store,
-        reranker=reranker,
-        # Toy corpus: rerank everything. In production, over-fetch
-        # ~50-200 from the store and rerank that pool.
-        rerank_candidate_pool=len(CORPUS),
-    )
-    reranked_hits = await reranked_retriever.retrieve(QUERY, limit=4)
-    _print_table(
-        "Reranked (Cohere V4 cross-encoder)",
-        [(i + 1, h.score, h.document.content) for i, h in enumerate(reranked_hits.documents)],
-    )
+        # Retrieve-then-rerank — over-fetch + Cohere V4 cross-encoder.
+        reranker = OCICohereReranker(
+            # Cohere Reranker V4 fast on OCI GenAI on-demand.
+            model="cohere.rerank-v4.0-fast",
+            compartment_id=compartment,
+            profile_name=profile,
+            auth_type=auth_type,
+            region=region,
+            top_n=4,
+        )
+        reranked_retriever = RAGRetriever(
+            embedder=embedder,
+            store=store,
+            reranker=reranker,
+            # Toy corpus: rerank everything. In production, over-fetch
+            # ~50-200 from the store and rerank that pool.
+            rerank_candidate_pool=len(CORPUS),
+        )
+        reranked_hits = await reranked_retriever.retrieve(QUERY, limit=4)
+        _print_table(
+            "Reranked (Cohere V4 cross-encoder)",
+            [(i + 1, h.score, h.document.content) for i, h in enumerate(reranked_hits.documents)],
+        )
 
-    # Lift summary — where did the canonical answer land in each pass?
-    canonical_marker = "Hepcidin, produced by the liver"
-    baseline_rank = next(
-        (
-            i + 1
-            for i, h in enumerate(baseline_hits.documents)
-            if h.document.content.startswith(canonical_marker)
-        ),
-        None,
-    )
-    reranked_rank = next(
-        (
-            i + 1
-            for i, h in enumerate(reranked_hits.documents)
-            if h.document.content.startswith(canonical_marker)
-        ),
-        None,
-    )
-    print(
-        f"\nCanonical hepcidin passage rank: baseline = {baseline_rank}, reranked = {reranked_rank}"
-    )
-    print(
-        "Reranking promoted the canonical answer to the top position even though "
-        "embedding similarity placed less-relevant passages above it.\n"
-    )
+        # Lift summary — where did the canonical answer land in each pass?
+        canonical_marker = "Hepcidin, produced by the liver"
+        baseline_rank = next(
+            (
+                i + 1
+                for i, h in enumerate(baseline_hits.documents)
+                if h.document.content.startswith(canonical_marker)
+            ),
+            None,
+        )
+        reranked_rank = next(
+            (
+                i + 1
+                for i, h in enumerate(reranked_hits.documents)
+                if h.document.content.startswith(canonical_marker)
+            ),
+            None,
+        )
+        print(
+            f"\nCanonical hepcidin passage rank: baseline = {baseline_rank}, reranked = {reranked_rank}"
+        )
+        if reranked_rank == 1 and baseline_rank != 1:
+            print(
+                "Reranking promoted the canonical answer to the top position even though "
+                "embedding similarity placed less-relevant passages above it.\n"
+            )
+        else:
+            print(
+                "No lift to report on this run: the canonical passage ranked "
+                f"{baseline_rank} by embedding similarity and {reranked_rank} after reranking.\n"
+            )
+
+    finally:
+        await store.close()
 
 
 if __name__ == "__main__":

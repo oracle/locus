@@ -129,7 +129,7 @@ agent = Agent(
         StructuredLoggingHook(),       # JSON logs at every phase
         TelemetryHook(),               # OTel spans + metrics + histograms
         ModelRetryHook(max_retries=3), # backoff on empty model responses
-        GuardrailsHook(),              # PII / SQL / XSS / command-injection
+        GuardrailsHook(),              # PII / SQL / path-traversal / command-injection
         SteeringHook(model=judge_model),  # LLM-as-judge tool approval
     ],
 )
@@ -186,9 +186,11 @@ agent = Agent(
 
 ## Priorities — the ordering rules
 
-Hooks run in priority order. Lower numbers run first on `before_*`
-phases; the order reverses for `after_*` so teardown pairs with
-setup.
+An `Agent` runs its hooks in the order you list them on `before_*`
+phases and reverses that order for `after_*`, so teardown pairs with
+setup. `priority` is what a `HookRegistry` sorts on before handing a
+provider list over (lower numbers first); list security hooks first
+when you pass them to the `Agent` directly.
 
 Reach for the named constants in `HookPriority` —
 `HookPriority.SECURITY_MAX`, `HookPriority.OBSERVABILITY_MIN`,
@@ -227,7 +229,7 @@ any field; this is intentionally tight.
 | Symptom | Likely cause |
 |---|---|
 | Hook never fires | Forgot to pass it on `Agent(hooks=[...])`. The `HookRegistry` only sees what you register. |
-| Hook fires in the wrong order | Set `priority` explicitly. The default priority is intentionally mid-range so security hooks always come before yours. |
+| Hook fires in the wrong order | Reorder the list you pass to `Agent(hooks=[...])`; when the hooks come through a `HookRegistry`, set `priority` explicitly — its default is mid-range so security hooks sort first. |
 | `AttributeError: Cannot set 'foo' … read-only` | You tried to write a non-writable field. Only the documented steering fields are assignable (`arguments`/`cancel` on before-tool, `result`/`retry` on after-tool); everything else is observe-only. |
 | `on_after_tool_call` doesn't see the result | The tool raised. Check `event.error` instead of `event.result`. |
 | Telemetry spans aren't exported | `TelemetryHook` needs an OTel exporter configured upstream — see [Observability](observability.md). |

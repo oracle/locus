@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -13,8 +12,8 @@ code does not change.
 
 Runs offline on the bundled reference providers.
 
-Run:
-    python examples/notebook_89_investigate_with_ctx.py
+Run it:
+    python packages/locus-sdk-security/examples/notebook_89_investigate_with_ctx.py
 """
 
 from __future__ import annotations
@@ -57,7 +56,7 @@ async def main() -> int:
     print(f"5. actions.request_approval -> {decision.outcome.upper()}: {decision.reason}")
 
     print(
-        "\nOne investigation, six domains, zero vendor names. The same code runs "
+        "\nOne investigation, five domains, zero vendor names. The same code runs "
         "against real Splunk / Okta / CrowdStrike once you inject those providers."
     )
     return 0

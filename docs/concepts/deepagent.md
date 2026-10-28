@@ -99,13 +99,14 @@ report: ResearchResult = result.parsed  # Pydantic-typed structured output
 
 ## Capability layers
 
-All are opt-in — add only what the task needs.
+All are opt-in — add only what the task needs. Each block below extends
+the Quickstart call; the `model=`, `tools=`, and `system_prompt=`
+arguments are elided.
 
 ### Filesystem scratchspace
 
 ```python
 agent = create_deepagent(
-    # model=..., tools=..., system_prompt=... (required)
     enable_filesystem=True,  # adds write_file, read_file, ls, edit_file, glob, grep
 )
 ```
@@ -121,7 +122,6 @@ from locus.deepagent import TodoState
 
 todo_state = TodoState()
 agent = create_deepagent(
-    # model=..., tools=..., system_prompt=... (required)
     enable_todos=True,
     todo_state=todo_state,   # inspect after the run
 )
@@ -149,7 +149,6 @@ competitor_analyst = SubAgentDef(
 )
 
 agent = create_deepagent(
-    # model=..., tools=..., system_prompt=... (required)
     subagents=[competitor_analyst],
 )
 ```
@@ -162,7 +161,6 @@ context, not the full subagent trajectory.
 
 ```python
 agent = create_deepagent(
-    # model=..., tools=..., system_prompt=... (required)
     memory_files=["~/AGENTS.md", "./project-notes.md"],
 )
 ```
@@ -174,8 +172,7 @@ Missing paths are silently skipped so defaults like
 ### Datastore auto-wiring
 
 ```python
-from locus.rag import OpenAIEmbeddings, RAGRetriever
-from locus.rag.stores.qdrant import QdrantVectorStore
+from locus.rag import OpenAIEmbeddings, QdrantVectorStore, RAGRetriever
 
 retriever = RAGRetriever(
     embedder=OpenAIEmbeddings(model="text-embedding-3-small"),
@@ -183,7 +180,6 @@ retriever = RAGRetriever(
 )
 
 agent = create_deepagent(
-    # model=..., tools=..., system_prompt=... (required)
     datastores={
         "industry_reports": {
             "retriever": retriever,
@@ -226,7 +222,6 @@ A few interop notes:
 
 ```python
 agent = create_deepagent(
-    # model=..., tools=..., system_prompt=... (required)
     summarize_after_messages=40,  # trigger threshold
     summarize_keep_recent=10,     # always preserve last 10 verbatim
 )
@@ -285,24 +280,39 @@ For research that iterates over a discoverable surface (e.g. every host
 in an asset inventory), implement `KnowledgeProvider`:
 
 ```python
-from locus.deepagent import KnowledgeProvider, KnowledgeRow, ItemRef
+from locus.deepagent import Grounding, ItemRef, KnowledgeProvider, KnowledgeRow
+
 
 class AssetInventoryProvider(KnowledgeProvider):
-    def list_items(self) -> list[ItemRef]:
-        return [
-            ItemRef(name=h, provider="asset_inventory")
-            for h in inventory.list_hosts()
-        ]
+    async def open(self) -> None: ...
+    async def close(self) -> None: ...
 
-    def describe_item(self, ref: ItemRef) -> str:
-        return inventory.describe_host(ref.name)
+    async def discover(self, query: str | None = None) -> list[ItemRef]:
+        return [ItemRef(name=h, provider="asset_inventory") for h in inventory.list_hosts(query)]
 
-    def to_row(self, ref: ItemRef, result: ResearchResult) -> KnowledgeRow:
-        return KnowledgeRow(id=ref.name, data=result.model_dump())
+    async def ground(self, item: ItemRef) -> Grounding:
+        return Grounding(summary=inventory.describe_host(item.name))
+
+    def tools_for_agent(self) -> list:
+        return [probe_service]
+
+    def output_schema(self) -> type[ResearchResult]:
+        return ResearchResult
+
+    def merge_to_row(self, item, grounding, research, *, model_id, prompt_hash) -> KnowledgeRow:
+        return KnowledgeRow(
+            name=item.name,
+            provider=item.provider,
+            short_description=research["summary"],
+            confidence=research["confidence"],
+        )
 ```
 
-Feed the provider into your scan loop. Each item gets its own agent
-run; results are collected as typed rows.
+The scan loop drives it in this order: `open()` once, `discover()` for
+the item list, then per item `ground()` → an agent run with
+`tools_for_agent()` that submits `output_schema()` → `merge_to_row()`,
+and `close()` at the end. `KnowledgeRow` needs `name` and `provider`;
+subclass it for typed extra fields.
 
 ---
 
@@ -326,7 +336,7 @@ class Report(BaseModel):
     confidence: float
 
 workflow = create_research_workflow(
-    model=get_model(),
+    model="{{ locus_example_model }}",
     tools=[search_kb, enrich_indicator, submit_research],
     output_schema=Report,
     grounding_threshold=0.65,   # accept summary when ≥ 65% claims grounded

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -35,8 +34,7 @@ Key concepts:
 - For deterministic demos we pass an explicit ``extract_fn``; in
   production point it at an LLM-backed extractor.
 
-Run it::
-
+Run it:
     export ORACLE_DSN=mydb_low                   # tnsnames alias
     export ORACLE_USER=locus_app                 # least-privileged app schema
     export ORACLE_PASSWORD='<app-password>'
@@ -128,8 +126,9 @@ def _build_store() -> OracleStore:
         wallet_location=os.path.expanduser(os.environ["ORACLE_WALLET"]),
         wallet_password=os.environ.get("ORACLE_WALLET_PASSWORD", ""),
         table_name=TABLE_NAME,
-        # K/V mode is fine for this demo — no vector embedding required
-        # for the manager's recall surface, which uses list_keys / get.
+        # K/V mode is fine for this demo — the manager recalls through
+        # store.search(query=None) and only falls back to list_keys / get
+        # when a backend cannot search, so no vector embedding is needed.
         dimension=None,
     )
 
@@ -199,16 +198,11 @@ def _build_manager(store: OracleStore) -> LLMMemoryManager:
 
 
 async def _drive_agent(agent: Agent, prompt: str, *, thread_id: str) -> None:
-    """Async-friendly driver — we're already inside an event loop, so we
-    can't call ``agent.run_sync`` (it spins up its own loop). ``agent.run``
-    is the async generator that powers run_sync under the hood.
-    """
+    """One turn on ``thread_id`` — ``arun`` is the awaitable form of
+    ``run_sync`` for code that is already inside an event loop."""
     print(f"\n[{thread_id}] User : {prompt}")
-    final = ""
-    async for event in agent.run(prompt, thread_id=thread_id):
-        if event.event_type == "terminate":
-            final = getattr(event, "final_message", "") or ""
-    print(f"[{thread_id}] Agent: {final.strip()}")
+    result = await agent.arun(prompt, thread_id=thread_id)
+    print(f"[{thread_id}] Agent: {result.message.strip()}")
 
 
 async def thread_a(manager: LLMMemoryManager) -> None:
@@ -233,10 +227,10 @@ async def thread_a(manager: LLMMemoryManager) -> None:
 async def show_persisted(store: OracleStore) -> None:
     """Inspect what the manager wrote to Oracle after thread A.
 
-    Uses ``store.search`` instead of ``list_keys``/``get`` because the
-    BaseStore's ``StoreItem`` wrapper makes the (namespace, key, value)
-    triple available in one call — the same surface the LLM memory
-    manager reaches for at session start.
+    Uses ``store.search`` — the same call the LLM memory manager makes at
+    session start (it only falls back to ``list_keys``/``get`` when a
+    backend cannot search). The ``StoreItem`` wrapper hands back the
+    (namespace, key, value) triple in one call.
     """
     print("\n--- What's in OracleStore now (admin view) ---")
     for memory_type in MemoryType:
@@ -293,8 +287,8 @@ async def main() -> None:
             "\nThread B's agent never saw thread A's messages. It loaded "
             "Alice's preference from OracleStore at session start and "
             "answered from there. Same wallet, same pool kwargs as the "
-            "RAG store (06), the checkpointer (07), and the versioned "
-            "saver (12)."
+            "RAG store (notebook 38), the checkpointer (notebook 42), and "
+            "the versioned saver (notebook 43)."
         )
     finally:
         print("\n--- Cleanup: drop the demo table ---")

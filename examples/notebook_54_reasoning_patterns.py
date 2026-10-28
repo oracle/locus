@@ -10,7 +10,7 @@ classifier model and a saturated scan queue amount to an unintended
 privacy gap (the kind that ships personal data in the clear — a
 data-protection-by-design failure under GDPR Art. 25 / Art. 32). Each
 part exercises one piece of the Locus reasoning toolkit against that
-postmortem with a live model and prints a
+postmortem; the parts that run an agent print a
 ``[model call: X.XXs · prompt→completion tokens]`` banner.
 
 The thesis the reasoning layer enforces here: an ungrounded claim in a
@@ -30,8 +30,12 @@ claim is scored against tool evidence before it is allowed to stand.
 - ``CausalChain`` / ``build_causal_chain`` — build and walk a graph of
   cause/effect relationships from canary seed to shipped-in-the-clear PII.
 
+Read end to end, the parts form one pipeline — typed claims → grounding
+score → replan guidance → causal chain → reflexion over the run — which
+``docs/concepts/reasoning.md`` describes piece by piece.
+
 Run it:
-    # The bundled mock model is the default; set LOCUS_MODEL_PROVIDER for a live provider.
+    # Default: OCI GenAI if ~/.oci/config has a usable profile, else the bundled mock model
     LOCUS_MODEL_PROVIDER=openai LOCUS_MODEL_ID=gpt-4o python examples/notebook_54_reasoning_patterns.py
 
     # Offline:
@@ -46,9 +50,8 @@ Prerequisites:
 """
 
 import asyncio
-import time
 
-from config import get_model
+from config import check_structured_output_capable, get_model
 from pydantic import BaseModel, Field
 
 from locus.agent import Agent
@@ -64,12 +67,6 @@ from locus.reasoning import (
 from locus.tools import tool
 
 
-# ---------------------------------------------------------------------------
-# Helpers — every section uses these to fire one model call and print a
-# timing/token banner.
-# ---------------------------------------------------------------------------
-
-
 def _banner(result, label: str = "") -> None:
     m = result.metrics
     tag = f" {label}" if label else ""
@@ -77,20 +74,6 @@ def _banner(result, label: str = "") -> None:
         f"  [model call{tag}: {m.duration_ms / 1000.0:.2f}s · "
         f"{m.prompt_tokens}→{m.completion_tokens} tokens · iters={m.iterations}]"
     )
-
-
-async def _llm_call(
-    prompt: str, *, system: str = "Reply in one sentence.", max_tokens: int = 80
-) -> str:
-    agent = Agent(model=get_model(max_tokens=max_tokens), system_prompt=system)
-    t0 = time.perf_counter()
-    result = await agent.arun(prompt)
-    dt = time.perf_counter() - t0
-    print(
-        f"  [model call: {dt:.2f}s · "
-        f"{result.metrics.prompt_tokens}→{result.metrics.completion_tokens} tokens]"
-    )
-    return result.message.strip()
 
 
 # ---------------------------------------------------------------------------
@@ -134,22 +117,12 @@ def query_dlp(dataset: str) -> str:
     )
 
 
-# ---------------------------------------------------------------------------
-# main()
-# ---------------------------------------------------------------------------
+# =============================================================================
+# Part 1: Reflexion — self-critique on a real agent trajectory.
+# =============================================================================
 
 
-async def main():
-    from config import check_structured_output_capable
-
-    check_structured_output_capable()
-    print("=" * 60)
-    print("Notebook 54: reasoning patterns — missed-redaction postmortem")
-    print("=" * 60)
-
-    # =========================================================================
-    # Part 1: Reflexion — self-critique on a real agent trajectory.
-    # =========================================================================
+async def part1_reflexion() -> tuple[Reflector, AgentState]:
     print("\n=== Part 1: Reflexion on a real Agent run (Agent + tool) ===\n")
     postmortem_agent = Agent(
         model=get_model(max_tokens=300),
@@ -166,24 +139,25 @@ async def main():
     _banner(postmortem_result, "Part 1")
     print(f"Agent verdict: {postmortem_result.message[:200]}")
 
+    # These are the library defaults, spelled out so the knobs are visible:
+    # three identical tool calls count as a loop, each successful call adds
+    # 0.15 confidence, each failed one subtracts 0.2.
     reflector = Reflector(loop_threshold=3, success_weight=0.15, error_penalty=0.2)
     reflection = reflector.reflect(postmortem_result.state)
     print(f"Reflexion assessment: {reflection.assessment.value}")
     print(f"Confidence delta: {reflection.confidence_delta:+.2f}")
     if reflection.guidance:
         print(f"Guidance: {reflection.guidance}")
+    return reflector, postmortem_result.state
 
-    # =========================================================================
-    # Part 2: Loop detection — Reflector flags the same tool called repeatedly.
-    # =========================================================================
-    print("\n=== Part 2: Loop detection (model explains, SDK detects) ===\n")
-    rationale = await _llm_call(
-        "In one sentence, why does an autonomous privacy agent need to detect "
-        "when it's stuck calling the same tool over and over?",
-        system="Explain like a data protection officer.",
-    )
-    print(f"AI rationale: {rationale}")
 
+# =============================================================================
+# Part 2: Loop detection — Reflector flags the same tool called repeatedly.
+# =============================================================================
+
+
+def part2_loop_detection(reflector: Reflector) -> None:
+    print("\n=== Part 2: Loop detection ===\n")
     loop_state = AgentState(
         agent_id="looping_agent",
         tool_history=("query_dlp",) * 4,
@@ -193,24 +167,26 @@ async def main():
     if loop_reflection.loop_pattern:
         print(f"Loop pattern: {loop_reflection.loop_pattern}")
 
-    # =========================================================================
-    # Part 3: evaluate_progress — one-shot progress check, no Reflector instance.
-    # =========================================================================
-    print("\n=== Part 3: Quick progress evaluation ===\n")
-    quick = evaluate_progress(state=postmortem_result.state, loop_threshold=3, success_weight=0.2)
-    print(f"Quick assessment: {quick.assessment.value}")
-    suggestion = await _llm_call(
-        f"An agent's reflexion module says it is '{quick.assessment.value}' "
-        "after one tool call. Suggest the privacy engineer's next step in one sentence.",
-        max_tokens=80,
-    )
-    print(f"AI next step: {suggestion}")
 
-    # =========================================================================
-    # Part 4: Typed claims plus tool-gathered evidence. Two agents:
-    #   (4a) one fetches evidence, (4b) one produces claims as JSON,
-    #   (4c) GroundingEvaluator scores claims against evidence.
-    # =========================================================================
+# =============================================================================
+# Part 3: evaluate_progress — one-shot progress check, no Reflector instance.
+# =============================================================================
+
+
+def part3_quick_progress(state: AgentState) -> None:
+    print("\n=== Part 3: Quick progress evaluation ===\n")
+    quick = evaluate_progress(state=state, loop_threshold=3, success_weight=0.2)
+    print(f"Quick assessment: {quick.assessment.value}")
+
+
+# =============================================================================
+# Part 4: Typed claims plus tool-gathered evidence. Two agents:
+#   (4a) one fetches evidence, (4b) one produces claims as JSON,
+#   (4c) GroundingEvaluator scores claims against evidence.
+# =============================================================================
+
+
+async def part4_grounding() -> tuple[GroundingEvaluator, object]:
     print("\n=== Part 4: Structured claims (output_schema) + tool-fetched evidence ===\n")
 
     evidence_agent = Agent(
@@ -223,11 +199,17 @@ async def main():
     )
     evidence_result = await evidence_agent.arun("Pull the redaction stats for ds-0231 right now.")
     _banner(evidence_result, "Part 4a")
-    evidence_line = evidence_result.message
-    evidence_pieces = [chunk.strip() for chunk in evidence_line.split() if "=" in chunk]
-    if not evidence_pieces:
-        evidence_pieces = [evidence_line.strip()]
-    print("Tool-gathered evidence:")
+
+    # Ground against what the tool actually returned, not the model's
+    # paraphrase of it — a paraphrase can drop or round the very field a
+    # claim hangs on. A model that answered from memory gives us nothing to
+    # ground against, so in that case read the probe directly.
+    tool_runs = evidence_result.tool_executions
+    evidence_line = (
+        tool_runs[0].result if tool_runs and tool_runs[0].result else query_dlp("ds-0231")
+    )
+    evidence_pieces = [chunk for chunk in evidence_line.split() if "=" in chunk]
+    print(f"Tool-gathered evidence ({len(tool_runs)} tool call(s)):")
     for e in evidence_pieces:
         print(f"  - {e}")
 
@@ -259,6 +241,9 @@ async def main():
     for c in claims:
         print(f"  - {c}")
 
+    # Library defaults again: a run whose overall grounding falls under 0.65
+    # is sent back to replan, a single claim needs 0.5 to count as grounded,
+    # and a claim with no evidence behind it is penalised rather than ignored.
     evaluator = GroundingEvaluator(
         replan_threshold=0.65, claim_threshold=0.5, require_evidence=True
     )
@@ -268,31 +253,29 @@ async def main():
     for ce in grounding.claims:
         status = "grounded" if ce.is_grounded else "UNGROUNDED"
         print(f"  [{status}] {ce.claim}  (score={ce.score:.2f})")
+    return evaluator, grounding
 
-    # =========================================================================
-    # Part 5: Replan guidance — when grounding is low, ask for a new plan.
-    # =========================================================================
+
+# =============================================================================
+# Part 5: Replan guidance — when grounding is low, the evaluator says what
+#         to go and fetch.
+# =============================================================================
+
+
+def part5_replan_guidance(evaluator: GroundingEvaluator, grounding) -> None:
     print("\n=== Part 5: Replan guidance ===\n")
     if evaluator.should_replan(grounding):
-        guidance = evaluator.get_replan_guidance(grounding)
-        print(guidance)
-        plan = await _llm_call(
-            f"The grounding evaluator gave this guidance:\n{guidance}\n"
-            "List two concrete tools the privacy analyst should call next, one per line.",
-            max_tokens=120,
-        )
-        print(f"\nAI replan plan:\n{plan}")
+        print(evaluator.get_replan_guidance(grounding))
     else:
-        observation = await _llm_call(
-            "All postmortem claims are sufficiently grounded. In one sentence, "
-            "what does the privacy engineer do next?",
-            max_tokens=80,
-        )
-        print(f"AI says: {observation}")
+        print("All postmortem claims are sufficiently grounded — no replan needed.")
 
-    # =========================================================================
-    # Part 6: CausalChain — wire typed events into a cause/effect graph.
-    # =========================================================================
+
+# =============================================================================
+# Part 6: CausalChain — wire typed events into a cause/effect graph.
+# =============================================================================
+
+
+async def part6_causal_chain() -> CausalChain:
     print("\n=== Part 6: Causal chain from typed events (output_schema) ===\n")
     event_agent = Agent(
         model=get_model(max_tokens=300),
@@ -334,80 +317,54 @@ async def main():
     for node_id, node_type in chain.classify_nodes().items():
         node = chain.get_node(node_id)
         print(f"  [{node_type.value:12}] {node.label}")
+    return chain
 
-    # =========================================================================
-    # Part 7: Walk the chain — get the path from a root cause to a symptom.
-    # =========================================================================
+
+# =============================================================================
+# Part 7: Walk the chain — get the path from a root cause to a symptom.
+# =============================================================================
+
+
+def part7_causal_path(chain: CausalChain) -> None:
     print("\n=== Part 7: Causal path analysis ===\n")
     roots = chain.identify_root_causes()
     symptoms = chain.identify_symptoms()
-    path: list = []
-    if roots and symptoms:
-        path = chain.get_causal_path(roots[0].id, symptoms[0].id) or []
-        if path:
-            print("Causal path from root cause to symptom:")
-            for i, n in enumerate(path):
-                prefix = "  " * i + ("-> " if i > 0 else "")
-                print(f"{prefix}{n.label}")
-    walkthrough = await _llm_call(
-        f"Briefly summarise this causal path in one sentence: {' -> '.join(p.label for p in path)}",
-        max_tokens=120,
-    )
-    print(f"AI summary: {walkthrough}")
+    if not (roots and symptoms):
+        print("No root→symptom path: the chain has no distinct root and symptom nodes.")
+        return
+    path = chain.get_causal_path(roots[0].id, symptoms[0].id) or []
+    print("Causal path from root cause to symptom:")
+    for i, n in enumerate(path):
+        prefix = "  " * i + ("-> " if i > 0 else "")
+        print(f"{prefix}{n.label}")
 
-    # =========================================================================
-    # Part 8: Conflict detection — flag cycles in the causal graph.
-    # =========================================================================
+
+# =============================================================================
+# Part 8: Conflict detection — flag cycles in the causal graph.
+# =============================================================================
+
+
+def part8_conflicts() -> None:
     print("\n=== Part 8: Conflict detection ===\n")
     conflict_chain = CausalChain()
     a = conflict_chain.create_node(label="Event A")
     b = conflict_chain.create_node(label="Event B")
     conflict_chain.link(a.id, b.id, relationship=RelationshipType.CAUSES)
     conflict_chain.link(b.id, a.id, relationship=RelationshipType.CAUSES)
-    conflicts = conflict_chain.detect_conflicts()
-    for c in conflicts:
+    for c in conflict_chain.detect_conflicts():
         print(f"  Type: {c.conflict_type}")
         print(f"  Description: {c.description}")
         if c.resolution_hint:
             print(f"  Built-in hint: {c.resolution_hint}")
-        ai_fix = await _llm_call(
-            f"A causal chain has this conflict: {c.description}. Suggest a "
-            "one-sentence resolution a privacy engineer could apply.",
-            max_tokens=80,
-        )
-        print(f"  AI resolution: {ai_fix}\n")
 
-    # =========================================================================
-    # Part 9: Narrate the chain — the model writes a short summary.
-    # =========================================================================
-    print("\n=== Part 9: AI chain narration ===\n")
-    summary_text = await _llm_call(
-        f"Summarise this causal chain in two short sentences: {' -> '.join(event_phrases)}",
-        max_tokens=160,
-    )
-    print(summary_text)
 
-    # =========================================================================
-    # Part 10: End-to-end pipeline narration — claims → grounding → replan
-    #          → causal chain → reflexion.
-    # =========================================================================
-    print("\n=== Part 10: Full reasoning pipeline ===\n")
-    pipeline_paragraph = await _llm_call(
-        "Walk through this reasoning pipeline as one short paragraph: "
-        "(1) the agent makes claims about a missed redaction, "
-        "(2) the grounding evaluator checks each claim against DLP evidence, "
-        "(3) replan guidance fires if grounding is too low, "
-        "(4) a causal chain is built from the timeline events, "
-        "(5) reflexion monitors the agent for loops. "
-        "Mention how each step ties to the next.",
-        max_tokens=320,
-    )
-    print(pipeline_paragraph)
+# =============================================================================
+# Part 9: Agent(reflexion=True) — the reflexion loop wired into a live run.
+# =============================================================================
 
-    # =========================================================================
-    # Part 11: Agent(reflexion=True) — the reflexion loop wired into a live run.
-    # =========================================================================
-    print("\n=== Part 11: Live Agent with Reflexion ===\n")
+
+async def part9_live_reflexion() -> None:
+    print("\n=== Part 9: Live Agent with Reflexion ===\n")
     reflexive_agent = Agent(
         model=get_model(max_tokens=300),
         system_prompt=(
@@ -421,8 +378,25 @@ async def main():
         "The PII classifier is two major versions behind and the scan queue sat "
         "at 98% capacity. What's the most likely root cause?"
     )
-    _banner(live, "Part 11")
+    _banner(live, "Part 9")
     print(f"Conclusion: {live.message[:400]}")
+
+
+async def main():
+    check_structured_output_capable()
+    print("=" * 60)
+    print("Notebook 54: reasoning patterns — missed-redaction postmortem")
+    print("=" * 60)
+
+    reflector, state = await part1_reflexion()
+    part2_loop_detection(reflector)
+    part3_quick_progress(state)
+    evaluator, grounding = await part4_grounding()
+    part5_replan_guidance(evaluator, grounding)
+    chain = await part6_causal_chain()
+    part7_causal_path(chain)
+    part8_conflicts()
+    await part9_live_reflexion()
 
     print("\n" + "=" * 60)
     print("Done. Next: notebook 55 — GSAR typed grounding.")

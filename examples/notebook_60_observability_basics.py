@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -29,8 +28,8 @@ allocations.
 - Read the per-run history buffer after the fact (replay semantics for
   late subscribers — i.e. reconstruct the ticket timeline after the run).
 
-Run it
-    # Default: the bundled mock model (set LOCUS_MODEL_PROVIDER for a live provider)
+Run it:
+    # Default: OCI GenAI if ~/.oci/config has a usable profile, else the bundled mock model
     python examples/notebook_60_observability_basics.py
 
     # Offline / no credentials:
@@ -45,6 +44,13 @@ from config import get_model
 
 from locus.agent import Agent
 from locus.observability import get_event_bus, run_context
+from locus.tools import tool
+
+
+@tool
+def lookup_order(order_id: str) -> str:
+    """Look up an order's shipping and claim status (mock data)."""
+    return f"{order_id}: delivered 2026-10-20, damage claim open, replacement eligible"
 
 
 # Part 1: no telemetry. The bus singleton never gets built.
@@ -60,7 +66,8 @@ async def part1_no_telemetry() -> None:
     )
     print("agent reply:", result.message[:120])
 
-    # Probe the module-level singleton to prove it was never built.
+    # get_event_bus() builds the singleton on first call, so the only way to
+    # observe "never built" is to read the module attribute directly.
     from locus.observability import event_bus as _bus_mod
 
     assert _bus_mod._event_bus is None, (
@@ -77,7 +84,9 @@ async def part2_subscribe() -> None:
     """Same Agent.run, this time inside a run_context — the timeline is live."""
     print("\n--- Part 2: run_context active — subscribe to the ticket timeline ---")
 
-    agent = Agent(model=get_model(), max_iterations=2)
+    # A tool on the agent is what puts agent.tool.started/completed on the
+    # timeline — the events a QA reviewer actually wants to see.
+    agent = Agent(model=get_model(), tools=[lookup_order], max_iterations=3)
     seen: list[str] = []
 
     async with run_context() as rid:
@@ -95,7 +104,7 @@ async def part2_subscribe() -> None:
         # The contextvar set by run_context() means the @_bus_bridge
         # decorator on Agent.run forwards every yielded LocusEvent to
         # the bus automatically — nothing the agent does goes unrecorded.
-        result = await agent.arun("Reply with the single word: resolved")
+        result = await agent.arun("Look up order CS-1042 and reply with its status in one line.")
         print("agent reply:", result.message[:120])
 
         await asyncio.wait_for(consumer_task, timeout=10.0)

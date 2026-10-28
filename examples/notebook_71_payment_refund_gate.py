@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -21,7 +20,7 @@ the paid refund and the held one — lands on a tamper-evident
     Support agent proposes a refund
        │
        ▼
-    Build an Action  (amount → blast_radius, large → "high_value" tag)
+    Build an Action  (ledger entries → blast_radius, large amount → "high_value" tag)
        │
        ▼
     admit(action, pay_out, policy, trail)
@@ -36,9 +35,7 @@ the paid refund and the held one — lands on a tamper-evident
     AuditTrail records every decision — paid or held
 
 The policy here is deliberately small: auto-allow a single-ledger-entry refund
-that carries no ``high_value`` tag; hold anything bigger. ``require_verification_score``
-is set to 0 because a refund is a business action, not a security finding — there
-is no threat to verify, so the gate reasons purely over amount and scope.
+that carries no ``high_value`` tag; hold anything bigger.
 
 Run it (fully offline — no network, no credentials; the payout is a local stub):
     python examples/notebook_71_payment_refund_gate.py
@@ -69,20 +66,24 @@ class Ledger:
     paid: list[tuple[str, float]] = field(default_factory=list)
     held: list[tuple[str, float]] = field(default_factory=list)
 
-    def pay_out(self, customer: str, amount: float) -> str:
-        """Actually move the money. Only ever reached after admit() allows it."""
+    async def pay_out(self, customer: str, amount: float) -> str:
+        """Actually move the money. Only ever reached after admit() allows it.
+
+        Async because admit() awaits the perform() callable it is handed.
+        """
         self.paid.append((customer, amount))
         return f"refunded ${amount:,.2f} to {customer}"
 
 
-# How a proposed refund becomes an Action the policy can reason over. The dollar
-# amount drives two policy-visible attributes: how many ledger entries the refund
-# touches (blast_radius) and whether it crosses the human-review line (a tag).
+# How a proposed refund becomes an Action the policy can reason over. Two
+# independent inputs become policy-visible attributes: the number of ledger
+# entries the refund touches is the blast_radius, and the dollar amount decides
+# whether it crosses the human-review line (the "high_value" tag).
 
 LARGE_REFUND_THRESHOLD = 200.0
 
 
-def refund_action(customer: str, amount: float, ledger_entries: int, reason: str) -> Action:
+def refund_action(customer: str, amount: float, ledger_entries: int) -> Action:
     tags = {"refund"}
     if amount >= LARGE_REFUND_THRESHOLD:
         tags.add("high_value")
@@ -107,7 +108,7 @@ async def propose_refund(
     reason: str,
 ) -> None:
     """Run one refund through the gate and narrate what happened."""
-    action = refund_action(customer, amount, ledger_entries, reason)
+    action = refund_action(customer, amount, ledger_entries)
     print(f"\n--- Support agent proposes: refund ${amount:,.2f} to {customer} ---")
     print(f"    reason: {reason}")
     print(
@@ -118,7 +119,7 @@ async def propose_refund(
     try:
         result = await admit(
             action,
-            lambda: _pay_out(ledger, customer, amount),
+            lambda: ledger.pay_out(customer, amount),
             policy=policy,
             trail=trail,
         )
@@ -128,11 +129,6 @@ async def propose_refund(
         print(f"  HELD    not admitted ({exc.decision.outcome}) — queued for a human")
         for check in exc.decision.checks:
             print(f"            · {check}")
-
-
-async def _pay_out(ledger: Ledger, customer: str, amount: float) -> str:
-    # admit() awaits this; keep it async to match the perform() contract.
-    return ledger.pay_out(customer, amount)
 
 
 async def main() -> None:

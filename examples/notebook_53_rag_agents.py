@@ -3,7 +3,7 @@
 # https://oss.oracle.com/licenses/upl/
 """Notebook 53: RAG agents — ATLAS, an on-call SRE copilot over the Index.
 
-Once you have a vector store full of runbooks (notebook 51 / 39), the
+Once you have a vector store full of runbooks (notebook 51 / 52), the
 next step is to let an agent reach into it — so an incident answer cites
 your internal runbooks instead of model memory. ATLAS is the platform
 team's on-call copilot; it reads the Index. ``RAGRetriever.as_tool()``
@@ -22,8 +22,9 @@ alongside any other ``@tool`` you define.
   retrieved runbook chunk, it proceeds; when it is speculation, the same
   call replans rather than guess — a hallucinated fix by construction
   withheld.
-- Best-practice notes on chunk size, prompt design, and metadata
-  filters for ops corpora.
+
+Chunk-size, prompt-design, and metadata-filter notes for ops corpora are
+in ``docs/concepts/rag.md``.
 
 Backend: the pure-Python ``InMemoryVectorStore`` keeps the demo dependency-free
 and runnable anywhere (even in a browser). Swap ``_make_store`` for any other
@@ -39,54 +40,27 @@ Run it:
     python examples/notebook_53_rag_agents.py
 """
 
-import ast
 import asyncio
-import operator as _op
+import json
 import os
-import sys
+from datetime import datetime
 
-from locus.rag import InMemoryVectorStore
+from config import get_embedder, get_model, safe_math_eval
+
+from locus.agent import Agent
+from locus.core.events import ThinkEvent, ToolCompleteEvent, ToolStartEvent
+from locus.rag import InMemoryVectorStore, RAGRetriever
 from locus.reasoning.gsar import Claim, Decision, EvidenceType, Partition, decide, gsar_score
+from locus.tools import tool
 
 
 def _missing_env() -> list[str]:
     return [name for name in ("OPENAI_API_KEY",) if not os.environ.get(name)]
 
 
-def _make_store(suffix: str, dim: int) -> InMemoryVectorStore:
+def _make_store(dim: int) -> InMemoryVectorStore:
     # A fresh store per section so sections don't stomp on each other.
     return InMemoryVectorStore(dimension=dim, distance_metric="cosine")
-
-
-_SAFE_MATH_BIN_OPS = {
-    ast.Add: _op.add,
-    ast.Sub: _op.sub,
-    ast.Mult: _op.mul,
-    ast.Div: _op.truediv,
-    ast.FloorDiv: _op.floordiv,
-    ast.Mod: _op.mod,
-    ast.Pow: _op.pow,
-}
-_SAFE_MATH_UNARY_OPS = {ast.USub: _op.neg, ast.UAdd: _op.pos}
-
-
-def _safe_math_eval(expression: str) -> float:
-    # AST-only arithmetic — disallows names, calls, attribute access, etc.
-    # so the calculator tool can't be turned into a sandbox escape.
-    tree = ast.parse(expression, mode="eval")
-
-    def _eval(node: ast.AST) -> float:
-        if isinstance(node, ast.Expression):
-            return _eval(node.body)
-        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
-            return node.value
-        if isinstance(node, ast.BinOp) and type(node.op) in _SAFE_MATH_BIN_OPS:
-            return _SAFE_MATH_BIN_OPS[type(node.op)](_eval(node.left), _eval(node.right))
-        if isinstance(node, ast.UnaryOp) and type(node.op) in _SAFE_MATH_UNARY_OPS:
-            return _SAFE_MATH_UNARY_OPS[type(node.op)](_eval(node.operand))
-        raise ValueError("Unsupported expression")
-
-    return _eval(tree)
 
 
 # =============================================================================
@@ -99,13 +73,8 @@ async def rag_as_tool():
     print("Notebook 53: RAG as a Tool")
     print("=" * 60)
 
-    from locus.rag import RAGRetriever
-
     embedder = get_embedder()
-    if not embedder:
-        return
-
-    store = _make_store(suffix="as_tool", dim=embedder.config.dimension)
+    store = _make_store(dim=embedder.config.dimension)
     retriever = RAGRetriever(embedder=embedder, store=store)
 
     # Internal runbook one-liners. All runbook ids and services are fictitious.
@@ -151,15 +120,8 @@ async def simple_rag_agent():
     print("Notebook 53: ATLAS — On-Call SRE Copilot")
     print("=" * 60)
 
-    from locus.agent import Agent
-    from locus.rag import RAGRetriever
-
     embedder = get_embedder()
-    model = get_model()
-    if not embedder or not model:
-        return
-
-    store = _make_store(suffix="simple", dim=embedder.config.dimension)
+    store = _make_store(dim=embedder.config.dimension)
     retriever = RAGRetriever(embedder=embedder, store=store)
 
     runbook_docs = [
@@ -182,7 +144,7 @@ async def simple_rag_agent():
         """
         Detection: watch p99 latency on the checkout-api Grafana board.
         The SLO alert fires above 800ms for 5 minutes. Regressed pods
-        first appeared in us-east since 2026-01-15; treat them as the
+        first appeared in us-ashburn-1 since 2026-01-15; treat them as the
         canary cohort to drain first.
         """,
     ]
@@ -196,7 +158,7 @@ async def simple_rag_agent():
     )
 
     agent = Agent(
-        model=model,
+        model=get_model(max_tokens=512),
         tools=[search_tool],
         system_prompt="""You are ATLAS, the platform team's on-call SRE
 copilot. You answer over the Index — the internal runbook knowledge base.
@@ -228,23 +190,28 @@ Always cite the runbook text you relied on.""",
 # =============================================================================
 
 
+@tool
+def calculate(expression: str) -> str:
+    """Evaluate a mathematical expression. Example: calculate('350 / 1200 * 100')"""
+    try:
+        return f"Result: {safe_math_eval(expression)}"
+    except (ValueError, SyntaxError, ZeroDivisionError) as e:
+        return f"Error: {e}"
+
+
+@tool
+def get_current_date() -> str:
+    """Get the current date and time."""
+    return f"Current date: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+
+
 async def multi_tool_rag_agent():
     print("\n" + "=" * 60)
     print("Notebook 53: ATLAS — Multi-Tool Rollout Copilot")
     print("=" * 60)
 
-    from datetime import datetime
-
-    from locus.agent import Agent
-    from locus.rag import RAGRetriever
-    from locus.tools import tool
-
     embedder = get_embedder()
-    model = get_model()
-    if not embedder or not model:
-        return
-
-    store = _make_store(suffix="multi_tool", dim=embedder.config.dimension)
+    store = _make_store(dim=embedder.config.dimension)
     retriever = RAGRetriever(embedder=embedder, store=store)
 
     rollout_docs = [
@@ -257,26 +224,13 @@ async def multi_tool_rag_agent():
 
     await retriever.add_documents(rollout_docs)
 
-    @tool
-    def calculate(expression: str) -> str:
-        """Evaluate a mathematical expression. Example: calculate('350 / 1200 * 100')"""
-        try:
-            return f"Result: {_safe_math_eval(expression)}"
-        except (ValueError, SyntaxError, ZeroDivisionError) as e:
-            return f"Error: {e}"
-
-    @tool
-    def get_current_date() -> str:
-        """Get the current date and time."""
-        return f"Current date: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-
     search_tool = retriever.as_tool(
         name="search_rollout_data",
         description="Search rollout data for runbook RB-014 including pod counts, canary progress, and mitigations.",
     )
 
     agent = Agent(
-        model=model,
+        model=get_model(max_tokens=512),
         tools=[search_tool, calculate, get_current_date],
         system_prompt="""You are a release-engineering analyst assistant.
 
@@ -312,20 +266,12 @@ async def rag_with_streaming():
     print("Notebook 53: ATLAS with Streaming")
     print("=" * 60)
 
-    from locus.agent import Agent
-    from locus.core.events import ThinkEvent, ToolCompleteEvent, ToolStartEvent
-    from locus.rag import RAGRetriever
-
     embedder = get_embedder()
-    model = get_model()
-    if not embedder or not model:
-        return
-
-    store = _make_store(suffix="streaming", dim=embedder.config.dimension)
+    store = _make_store(dim=embedder.config.dimension)
     retriever = RAGRetriever(embedder=embedder, store=store)
 
     docs = [
-        "The AURORA migration moves stateful services onto the new us-east cluster.",
+        "The AURORA migration moves stateful services onto the new us-ashburn-1 cluster.",
         "AURORA cutover proceeds region by region inside the weekly freeze window.",
         "In scope so far are the gateway and cache tiers; no customer-facing impact observed.",
     ]
@@ -336,7 +282,7 @@ async def rag_with_streaming():
     )
 
     agent = Agent(
-        model=model,
+        model=get_model(max_tokens=512),
         tools=[search_tool],
         system_prompt="Search the change notes and answer the responder's question.",
         max_iterations=2,
@@ -348,9 +294,10 @@ async def rag_with_streaming():
         if isinstance(event, ToolStartEvent):
             print(f"[Tool] Searching: {event.tool_name}...")
         elif isinstance(event, ToolCompleteEvent):
-            res = event.result
-            n = len(res.get("results", [])) if isinstance(res, dict) else len(str(res).splitlines())
-            print(f"[Tool] Found {n} result(s)")
+            # The retriever tool returns a dict; the loop hands it to the
+            # model (and to us) as its JSON text, so decode it to count hits.
+            payload = json.loads(event.result) if event.result else {}
+            print(f"[Tool] Found {payload.get('total', 0)} result(s)")
         elif isinstance(event, ThinkEvent):
             reasoning = event.reasoning or ""
             print(f"[Agent] {reasoning[:100]}...")
@@ -432,104 +379,6 @@ def answer_grounding_gate():
         print("  HOLD  — replanning: cross-incident claim has no runbook support.")
 
 
-# =============================================================================
-# Step 6: Best-practice notes — chunking, prompt design, metadata filters.
-# =============================================================================
-
-
-async def rag_best_practices():
-    print("\n" + "=" * 60)
-    print("Notebook 53: RAG Best Practices for Ops KBs")
-    print("=" * 60)
-
-    print("""
-Best Practices for On-Call RAG Copilots:
-
-1. CHUNK SIZE MATTERS
-   - Too small: a runbook's affected-versions table loses its context
-   - Too large: dilute relevance across unrelated incidents
-   - Recommended: 500-1000 characters with 50-100 overlap
-
-2. QUALITY OVER QUANTITY
-   - Clean runbooks before indexing
-   - Remove boilerplate, headers, footers
-   - Keep source metadata (runbook id, incident id) for citations
-
-3. PROMPT ENGINEERING
-   - Tell the agent when to search
-   - Instruct it to cite runbook ids
-   - Handle "no runbook covers this" gracefully — never guess
-
-4. HYBRID APPROACHES
-   - Combine keyword (service name) + semantic search
-   - Use metadata filters (severity, service) to narrow scope
-   - Rerank results for better precision
-
-5. EVALUATION
-   - Test with real on-call questions
-   - Measure retrieval relevance
-   - Track answer quality over time
-
-6. PRODUCTION CONSIDERATIONS
-   - Use persistent vector stores (pgvector, OpenSearch, Qdrant, Chroma)
-   - Implement caching for embeddings
-   - Monitor latency and costs
-""")
-
-    # Example of good prompt engineering
-    print("-" * 40)
-    print("Example System Prompt for an Ops RAG Agent:")
-    print("-" * 40)
-    print("""
-You are an on-call SRE copilot with access to the runbook knowledge base.
-
-INSTRUCTIONS:
-1. When asked a question, ALWAYS search the knowledge base first
-2. Base your answers ONLY on the search results
-3. If search returns no relevant results, say "No runbook covers that"
-4. Quote relevant runbook passages when helpful
-5. If multiple runbooks are relevant, synthesize the information
-
-RESPONSE FORMAT:
-- Start with a direct answer
-- Provide supporting details from the runbooks
-- End with "Source: [runbook id]" if applicable
-""")
-
-
-# =============================================================================
-# Helpers — picks the embedder and model implementation based on env.
-# =============================================================================
-
-
-def get_embedder():
-    """Pick an embedder from whichever credentials are present."""
-    if os.environ.get("OPENAI_API_KEY"):
-        from config import get_embedder
-
-        return get_embedder()
-
-    if os.environ.get("COHERE_API_KEY"):
-        from locus.rag.embeddings import CohereEmbeddings
-
-        return CohereEmbeddings(model="embed-english-v3.0")
-
-    print("No embedding credentials found")
-    return None
-
-
-def get_model():
-    """LLM model from the shared notebook config — honours every env var."""
-    from config import get_model as _get_model
-
-    return _get_model(max_tokens=512)
-
-
-# =============================================================================
-# Main
-# =============================================================================
-
-
 async def main():
     missing = _missing_env()
     if missing:
@@ -547,13 +396,12 @@ async def main():
         await simple_rag_agent()
         await multi_tool_rag_agent()
         await rag_with_streaming()
-        await rag_best_practices()
 
     # Always run — the grounding gate needs no embeddings or model.
     answer_grounding_gate()
 
     print("\n" + "=" * 60)
-    print("Done. Next: notebook 46 — MCP integration.")
+    print("Done. Next: notebook 54 — reasoning patterns.")
     print("=" * 60)
 
 

@@ -41,7 +41,7 @@ def main() -> int:
 
     print("== locus hello-world deepagent ==")
     print(f"   model      : {model_id}")
-    print(f"   tools      : lookup_cve, fetch_advisory")
+    print("   tools      : lookup_cve, fetch_advisory")
     print()
 
     chat = get_model(model_id)

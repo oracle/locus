@@ -15,6 +15,7 @@ the payments agent focused on the procedure that matters right now.
   YAML front-matter.
 - ``Skill.from_directory(path)`` — load every skill under a directory
   (your team's reviewed, versioned procedure library).
+- ``Skill.from_file(path)`` — load one skill directory or ``SKILL.md``.
 - ``Agent(skills=[...])`` — wires up the SkillsPlugin and the
   ``skills`` tool that the agent calls to activate one.
 - The ``SKILL.md`` format itself — front-matter for ``name``,
@@ -23,7 +24,7 @@ the payments agent focused on the procedure that matters right now.
   ``assets/`` directories.
 
 Run it:
-    # The bundled mock model is the default; set LOCUS_MODEL_PROVIDER for a live provider.
+    # Default: OCI GenAI if ~/.oci/config has a usable profile, else the bundled mock model
     LOCUS_MODEL_PROVIDER=openai LOCUS_MODEL_ID=gpt-4o python examples/notebook_48_skills.py
 
     # Offline:
@@ -33,17 +34,26 @@ Prerequisites:
 - An OpenAI or Anthropic API key, or set ``LOCUS_MODEL_PROVIDER`` to
   ``openai`` / ``anthropic`` / ``mock``.
 - Optional: an ``examples/skills/`` directory with one or more
-  ``SKILL.md`` files for Part 2 to find (the bundled ones include
-  dispute-triage and a refund-policy review checklist).
+  ``SKILL.md`` files for Part 2 to find. The bundled ones are
+  ``code-review``, ``incident-triage``, ``ioc-enrichment`` and
+  ``siem-query``.
 """
 
 import asyncio
+import tempfile
 from pathlib import Path
 
 from config import get_model
 
 from locus.agent import Agent, AgentConfig
 from locus.skills import Skill
+
+
+def _banner(result) -> None:
+    m = result.metrics
+    print(
+        f"  [model call: {m.duration_ms / 1000.0:.2f}s · {m.prompt_tokens}→{m.completion_tokens} tokens]"
+    )
 
 
 # =============================================================================
@@ -89,7 +99,8 @@ async def example_programmatic():
 
 # =============================================================================
 # Part 2: Load every SKILL.md under a directory — the team's vetted
-#         procedure library (dispute-triage, refund-policy, fraud-scoring, ledger-query, …).
+#         procedure library (code-review, incident-triage, ioc-enrichment,
+#         siem-query) — and hand the whole catalog to one agent.
 # =============================================================================
 
 
@@ -97,38 +108,41 @@ async def example_filesystem():
     print("\n=== Part 2: Filesystem Skills ===\n")
 
     skills_dir = Path(__file__).parent / "skills"
-    if skills_dir.exists():
-        skills = Skill.from_directory(skills_dir)
-        print(f"Loaded {len(skills)} skills:")
-        for s in skills:
-            print(f"  - {s.name}: {s.description[:60]}...")
-    else:
+    if not skills_dir.exists():
         print("No skills directory found. Create examples/skills/my-skill/SKILL.md")
+        return
 
-    import time as _t
+    skills = Skill.from_directory(skills_dir)
+    print(f"Loaded {len(skills)} skills:")
+    for s in skills:
+        print(f"  - {s.name}: {s.description[:60]}...")
 
-    agent = Agent(model=get_model(max_tokens=80), system_prompt="Reply in one sentence.")
-    t0 = _t.perf_counter()
-    res = await agent.arun(
-        "In one sentence, why should a payments team version its operations procedures as "
-        "reviewable SKILL.md files instead of hard-coding prompts in source?"
+    # The agent sees only the catalog (names + descriptions) up front; the
+    # full instructions arrive when it activates one — so four procedures
+    # cost the system prompt four lines, not four runbooks.
+    agent = Agent(
+        model=get_model(max_tokens=200),
+        system_prompt="You are the on-call operations agent. Use available skills.",
+        skills=skills,
+        max_iterations=4,
     )
-    dt = _t.perf_counter() - t0
-    print(
-        f"  [model call: {dt:.2f}s · {res.metrics.prompt_tokens}→{res.metrics.completion_tokens} tokens]"
+    result = await agent.arun(
+        "Diagnose: the checkout-api p99 latency alert has been firing for 10 minutes "
+        "in us-ashburn-1 and error rate is climbing."
     )
-    print(f"  AI rationale: {res.message.strip()}")
+    _banner(result)
+    print(f"Response: {result.message[:200]}...")
+    skills_used = [te for te in result.tool_executions if te.tool_name == "skills"]
+    print(f"Skills activated: {len(skills_used)}")
 
 
 # =============================================================================
-# Part 3: SKILL.md file format — YAML front-matter + instruction body.
+# Part 3: SKILL.md file format — YAML front-matter + instruction body,
+#         written to disk and read back through the SDK's loader.
 # =============================================================================
 
 
-async def example_format():
-    print("\n=== Part 3: SKILL.md Format ===\n")
-
-    print("""
+SKILL_MD = """\
 ---
 name: bin-enrichment
 description: Use when the user provides a card indicator (BIN, PAN prefix, issuer) to enrich.
@@ -149,22 +163,28 @@ Place additional files in:
 - scripts/   — executable code
 - references/ — documentation
 - assets/    — templates, data
-    """)
+"""
 
-    import time as _t
 
-    agent = Agent(model=get_model(max_tokens=120), system_prompt="Reply in one short paragraph.")
-    t0 = _t.perf_counter()
-    res = await agent.arun(
-        "Write a one-paragraph SKILL.md description for a skill named "
-        "'ledger-forensics' that helps an agent reconstruct a transaction's "
-        "settlement timeline from authorization and clearing logs."
-    )
-    dt = _t.perf_counter() - t0
-    print(
-        f"  [model call: {dt:.2f}s · {res.metrics.prompt_tokens}→{res.metrics.completion_tokens} tokens]"
-    )
-    print(f"  AI-authored sample description:\n  {res.message.strip()}")
+async def example_format():
+    print("\n=== Part 3: SKILL.md Format ===\n")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        skill_dir = Path(tmp) / "bin-enrichment"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(SKILL_MD, encoding="utf-8")
+        (skill_dir / "references").mkdir()
+        (skill_dir / "references" / "bin-ranges.md").write_text("# BIN ranges\n")
+
+        # Same parser the directory loader uses: front-matter becomes typed
+        # fields, the body becomes the instructions injected on activation.
+        skill = Skill.from_file(skill_dir)
+        print(f"name:          {skill.name}")
+        print(f"description:   {skill.description}")
+        print(f"allowed_tools: {skill.allowed_tools}")
+        print(f"metadata:      {skill.metadata}")
+        print(f"resources:     {skill.list_resources()}")
+        print(f"instructions:  {skill.instructions.splitlines()[0]} …")
 
 
 async def main() -> None:

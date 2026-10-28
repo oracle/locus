@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -34,13 +33,12 @@ Key concepts:
   grounding, idempotency, checkpointing, output schema, streaming, and
   termination conditions all apply.
 
-Run it::
-
+Run it:
     export OCI_PROFILE=<your-profile>
     export OCI_REGION=us-chicago-1
     export OCI_COMPARTMENT=ocid1.compartment.…
     # Optional: also exercise store=True (skip if your tenant has ZDR).
-    export OCI_RESPONSES_STORE=0
+    export OCI_RESPONSES_STORE=1
     python examples/notebook_34_oci_responses.py
 
 Difficulty: Intermediate
@@ -213,11 +211,6 @@ async def part4_streaming() -> None:
             chunks += 1
     print(f"\n  ({chunks} chunks)\n")
     await model.aclose()
-
-
-# =============================================================================
-# Main
-# =============================================================================
 
 
 async def _amain() -> None:

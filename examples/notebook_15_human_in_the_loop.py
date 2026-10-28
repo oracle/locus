@@ -14,6 +14,7 @@ then calls `graph.execute(Command(update=..., resume=...))` to continue.
 The same node restarts; its `interrupt()` call now returns the supplied
 response.
 
+Key ideas:
 - `interrupt(payload)` — pause and surface a payload to the caller.
 - `Command(update=..., resume=...)` — resume execution with a response.
 - Multiple interrupts in one workflow.
@@ -21,10 +22,9 @@ response.
 - `graph.config.interrupt_before = [...]` — pause before specific nodes.
 
 Run it:
-    LOCUS_MODEL_PROVIDER=mock python examples/notebook_15_human_in_the_loop.py
+    python examples/notebook_15_human_in_the_loop.py
 
-This notebook doesn't call any LLM, so the model provider doesn't
-matter. The default is the bundled mock model unless LOCUS_MODEL_PROVIDER is set.
+This notebook calls no model, so no provider configuration is needed.
 """
 
 import asyncio
@@ -48,9 +48,6 @@ async def example_basic_interrupt():
         return {"action": "deploy", "target": inputs.get("service", "checkout-api")}
 
     async def request_approval(inputs):
-        # interrupt() pauses the node, surfaces `payload` to the caller via
-        # result.interrupt, and returns the value passed to resume= when the
-        # graph is re-executed.
         response = interrupt(
             {
                 "question": f"Approve {inputs['action']} to {inputs['target']}?",
@@ -254,7 +251,13 @@ async def example_interrupt_before():
     if result.is_interrupted:
         print(f"PAUSED before: {result.interrupt.node_id}")
         print(f"Current state: backed_up={result.final_state.get('backed_up')}")
-        print("\nResume with graph.execute(Command(update=..., resume=...)).")
+
+        # A gate like this asks no question, so resume= is just the go-ahead
+        # token; the paused node runs next against the state we hand back.
+        print("DBA confirms the snapshot is good — resuming.")
+        result = await graph.execute(Command(update=result.final_state, resume="proceed"))
+        state = result.final_state
+        print(f"Result: migrated={state.get('migrated')}, verified={state.get('verified')}")
     print()
 
 
@@ -351,11 +354,6 @@ async def example_complete_workflow():
 
     print(f"\nResult: {result.final_state.get('message')}")
     print()
-
-
-# =============================================================================
-# Main
-# =============================================================================
 
 
 async def main():

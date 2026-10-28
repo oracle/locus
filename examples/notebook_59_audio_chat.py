@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -14,7 +13,7 @@ spoken guidance back.
 
 Pipeline::
 
-                         (synth via notebook 58 if absent)
+              (synthesised here with gpt-4o-mini-tts on first run)
                                        │
                                        ▼
                           ./notebook_59_question.wav
@@ -40,7 +39,7 @@ Prerequisites: an OpenAI API key with access to an audio-capable model
 (gpt-audio for chat, gpt-4o-mini-tts to synthesise the cardholder's
 question on first run).
 
-Run it
+Run it:
     LOCUS_MODEL_PROVIDER=openai \\
     OPENAI_API_KEY=sk-... \\
     python examples/notebook_59_audio_chat.py
@@ -70,7 +69,7 @@ TTS_VOICE = "alloy"
 
 ROOT = Path(__file__).resolve().parent
 QUESTION_WAV = ROOT / "notebook_59_question.wav"
-ANSWER_MP3 = ROOT / "notebook_59_answer.mp3"
+ANSWER_WAV = ROOT / "notebook_59_answer.wav"
 
 SAMPLE_RATE = 24000  # gpt-audio returns mono PCM-16 at 24 kHz
 
@@ -174,7 +173,7 @@ async def _voice_reply(client, audio_b64: str) -> tuple[str, str]:
     response = await client.chat.completions.create(
         model=CHAT_MODEL,
         modalities=["text", "audio"],
-        audio={"voice": "alloy", "format": "pcm16"},
+        audio={"voice": TTS_VOICE, "format": "pcm16"},
         messages=[
             {"role": "system", "content": SUPPORT_SYSTEM},
             {
@@ -216,9 +215,8 @@ async def main() -> None:
     print(f"\n← support transcript:\n{transcript.strip()}\n")
 
     # Step 3: write the spoken advice (PCM16 in a WAV wrapper).
-    out_wav = ANSWER_MP3.with_suffix(".wav")
-    out_size = _write_wav_pcm16(base64.b64decode(pcm_b64), out_wav)
-    print(f"✓ wrote {out_size:,} bytes → {out_wav}")
+    out_size = _write_wav_pcm16(base64.b64decode(pcm_b64), ANSWER_WAV)
+    print(f"✓ wrote {out_size:,} bytes → {ANSWER_WAV}")
     print("  Play it on macOS:        afplay notebook_59_answer.wav")
     print("  Linux (aplay):           aplay notebook_59_answer.wav")
     print("  Re-encode to mp3:        ffmpeg -i notebook_59_answer.wav notebook_59_answer.mp3")

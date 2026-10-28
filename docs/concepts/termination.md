@@ -88,7 +88,8 @@ print(result.stop_reason)
 `result.stop_reason` is **normalized** to one of a fixed set of
 `StopReason` literals (`complete`, `terminal_tool`, `confidence_met`,
 `max_iterations`, `tool_loop`, `no_tools`, `grounding_failed`,
-`token_budget`, `time_budget`, `interrupted`, `error`, `cancelled`).
+`token_budget`, `cost_budget`, `time_budget`, `context_exhausted`,
+`interrupted`, `error`, `cancelled`).
 The fuller, branch-level string is on the `TerminateEvent.reason` event
 field — each condition's `check()` returns a short reason token
 (e.g. `tool_called:isolate_host`, `confidence_met`), and a composite
@@ -110,8 +111,9 @@ and control flow on the normalized `result.stop_reason`.
 | `CustomCondition(fn)` | `fn(state, **ctx) -> (stop, reason)` — anything you can write in Python. |
 
 Every condition takes `AgentState` and its `check()` returns a
-`(stop: bool, reason: str | None)` tuple. They run after each
-iteration; the first one that stops wins.
+`(stop: bool, reason: str | None)` tuple. The loop evaluates the
+algebra once per iteration, at the start, before Think; the first one
+that stops wins.
 
 ## Custom conditions
 

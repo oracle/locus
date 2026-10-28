@@ -17,16 +17,9 @@ agent = Agent(
 ## Concurrent execution (default)
 
 When Think returns multiple tool calls, Execute dispatches all of
-them at once and gathers their results before the next Think:
-
-```python
-# Think emits this:
-[lookup_order(...), fetch_customer_history(...), shipping_status(...)]
-
-# Execute fires all three concurrently
-# Each emits its own ToolStartEvent / ToolCompleteEvent
-# State accumulates all three results before the next Think
-```
+them at once — each emitting its own `ToolStartEvent` /
+`ToolCompleteEvent` — and gathers every result into state before the
+next Think.
 
 When parallelism helps:
 
@@ -44,16 +37,7 @@ When parallelism helps:
 Some workloads must run **one tool at a time** — a write that depends
 on a read, an external service that rate-limits to one request at a
 time, or any flow where ordering matters. Set `tool_execution="sequential"`
-on the `Agent`:
-
-```python
-agent = Agent(
-    ...,
-    tool_execution="sequential",
-)
-```
-
-Tools then fire in the order Think returned them. This is global per
+on the `Agent` (as in the block above). Tools then fire in the order Think returned them. This is global per
 agent.
 
 ## Idempotent dedup runs *before* dispatch

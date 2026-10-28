@@ -187,22 +187,29 @@ running.
 | `SpecialistCompleteEvent` | Specialist returned a result |
 | `OrchestratorDecisionEvent` | Orchestrator picked its next step (`invoke_specialist`, `correlate`, `summarize`, `finalize`) |
 
-`SpecialistStartEvent`/`SpecialistCompleteEvent` pair on
-`specialist_id`, so you can attribute each phase to the agent that
-ran it:
+`Orchestrator.execute(task)` returns a result rather than yielding
+events, so these arrive on the opt-in `EventBus` as
+`multiagent.specialist.started` / `.completed`. Both carry
+`specialist_id`, so you can attribute each phase to the agent that ran
+it:
 
 ```python
+from locus.observability import run_context, get_event_bus
+
 phase = {}  # specialist id → wall-clock ms
 
-async for event in orchestrator.run("Order dispute on ord-4821: verify the order, reprice, refund if owed."):
-    match event:
-        case SpecialistStartEvent(specialist_id=s, task=t):
-            print(f"→ {s}: {t}")
-        case SpecialistCompleteEvent(specialist_id=s, duration_ms=d):
-            phase[s] = d
-        case ToolCompleteEvent(tool_name="issue_refund", error=None):
-            print("   ↳ refund fired")  # which specialist? the last Start was 'refund'
+async with run_context() as rid:
+    result = await orchestrator.execute("Order dispute on ord-4821: verify the order, reprice, refund if owed.")
+    await get_event_bus().close_stream(rid)  # replay the recorded history, then stop
 
+    async for ev in get_event_bus().subscribe(rid):
+        match ev.event_type:
+            case "multiagent.specialist.started":
+                print("→", ev.data["specialist_id"], ev.data["task_preview"])
+            case "multiagent.specialist.completed":
+                phase[ev.data["specialist_id"]] = round(ev.data["duration_ms"])
+
+print(phase)
 # {'verify': 1840, 'pricing': 6120, 'refund': 410}
 ```
 

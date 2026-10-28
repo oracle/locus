@@ -30,7 +30,8 @@ see its section below.
 | All three apply — production triage agent, audit-sensitive finding | reflexion + grounding on the agent, causal chain over its events |
 | Quick prototype, low-stakes lookup | leave them off — extra model calls are wasted |
 
-The cost is more model round-trips. The win is fewer wrong answers.
+Grounding costs an extra judge call per answer; reflexion is an
+in-process heuristic with no model call. The win is fewer wrong answers.
 For short tasks the math doesn't pencil out. For runs of 5+ tool calls
 or anything that ships to an analyst, it almost always does.
 
@@ -52,11 +53,13 @@ result = agent.run_sync("Find the lateral-movement events for INC-92 and explain
 print(result.metrics.reflexion_evaluations)
 ```
 
-After each tool result, the agent is asked: *given this, was the last
-step right?* If the answer is "no", the next turn rewrites the plan
-instead of stacking another tool call on top. Streamed as
-`ReflectEvent` — render it in your UI and the user can literally watch
-the agent change its mind.
+After each tool-calling iteration the `Reflector` scores the turn
+without a model call: it looks for a repeating tool pattern, counts the
+iteration's successful and failed calls, and nudges a confidence score.
+A `stuck` or `loop_detected` assessment adds guidance to the next
+Think, so the plan is rewritten instead of stacking another tool call
+on top. Streamed as `ReflectEvent` — render it in your UI and the user
+can literally watch the agent change its mind.
 
 ### Grounding
 
@@ -132,9 +135,13 @@ agent = Agent(
 
 result = agent.run_sync("Why did checkout latency double after deploy 412?")
 
-# Build the cause-effect graph from the events the agent extracted.
+# Two events lifted from the run's tool trail; the second names the first as its cause.
 from locus.reasoning.causal import build_causal_chain
-chain = build_causal_chain(events_from(result))   # your event extractor
+deploy, cache = result.state.tool_executions[:2]
+chain = build_causal_chain([
+    {"label": deploy.result},                            # "deploy 412 changed the cache TTL"
+    {"label": cache.result, "causes": [deploy.result]},  # "cache hit-rate dropped to 40%"
+])
 ```
 
 The order is fixed for the in-loop add-ons: reflect first, ground last.
@@ -152,7 +159,7 @@ the causal chain is built after the fact from the run's events.
 | Reflexion loops forever | The model can't agree with itself. Cap with `MaxIterations` in your termination condition. |
 | Grounding flags everything as unsupported | The judge model is stricter than the answerer. Use the same model for both, or lower the threshold. |
 | Causal graph has many disconnected nodes | The model isn't naming entities consistently across turns. Sharpen the system prompt to name entities the same way each time. |
-| Reasoning add-ons feel slow | They're extra model calls — that's the trade. Keep them for runs that ship to a human, drop them for hot paths. |
+| Grounding feels slow | It is an extra judge call per answer — that's the trade. Keep it for runs that ship to a human, drop it for hot paths. |
 
 ## Source and notebook
 
@@ -160,7 +167,7 @@ the causal chain is built after the fact from the run's events.
 - [`locus.reasoning.reflexion`](https://github.com/oracle/locus/blob/main/src/locus/reasoning/reflexion.py)
 - [`locus.reasoning.grounding`](https://github.com/oracle/locus/blob/main/src/locus/reasoning/grounding.py)
 - [`locus.reasoning.causal`](https://github.com/oracle/locus/blob/main/src/locus/reasoning/causal.py)
-- [`ReflectNode`](https://github.com/oracle/locus/blob/main/src/locus/loop/nodes.py) in the ReAct loop — where reflection plugs in.
+- [Reflexion in the ReAct loop](https://github.com/oracle/locus/blob/main/src/locus/agent/runtime_loop.py) — where the `Reflector` plugs in.
 
 Reflexion: [Shinn et al., 2023](https://arxiv.org/abs/2303.11366).
 Typed grounding: see [GSAR](gsar.md) for the

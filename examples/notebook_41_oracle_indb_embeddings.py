@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -73,18 +72,19 @@ And the schema running this notebook needs the grants::
     GRANT MINING MODEL SELECT ON ALL_MINILM_L12_V2 TO locus_app;
 
 The notebook accepts ``OCI_INDB_MODEL`` as an env override for the
-model name (default ``ALL_MINILM_L12_V2``). If the model isn't loaded
+model name (default ``ALL_MINILM_L12_V2``) and ``OCI_INDB_DIM`` for its
+output width (default 384) — change both together. If the model isn't loaded
 in the target DB, the live path catches the resulting ``ORA-…``,
 prints a skip banner, and exits cleanly.
 
-Run it::
-
+Run it:
     export ORACLE_DSN=mydb_low                   # tnsnames alias in the wallet
     export ORACLE_USER=locus_app                 # least-privileged app schema
     export ORACLE_PASSWORD='<app-password>'
     export ORACLE_WALLET=~/.oci/wallets/mydb     # directory holding tnsnames.ora
     export ORACLE_WALLET_PASSWORD='<wallet-pw>'  # if the wallet is encrypted
     export OCI_INDB_MODEL=ALL_MINILM_L12_V2      # optional — defaults to this
+    export OCI_INDB_DIM=384                      # optional — must match the model
 
     python examples/notebook_41_oracle_indb_embeddings.py
 
@@ -114,6 +114,8 @@ _REQUIRED_ENV = (
 
 
 _DEFAULT_MODEL = "ALL_MINILM_L12_V2"
+# 384 is the all-MiniLM-L12-v2 output width; a different OCI_INDB_MODEL needs
+# OCI_INDB_DIM set to its width, or the VECTOR column and the embedder disagree.
 _DEFAULT_DIM = 384
 
 
@@ -157,10 +159,8 @@ def _print_skip_banner(missing: list[str]) -> None:
         "$ORACLE_WALLET, then set the variables above and re-run."
     )
     print(
-        "\nPrerequisite: the ONNX model must be loaded into the DB once via "
-        "DBMS_VECTOR.LOAD_ONNX_MODEL, and the schema needs:\n"
-        "    GRANT EXECUTE ON DBMS_VECTOR_CHAIN TO locus_app;\n"
-        "    GRANT MINING MODEL SELECT ON ALL_MINILM_L12_V2 TO locus_app;"
+        "\nPrerequisite: the ONNX model must be loaded into the DB once and the "
+        "schema granted access — see the Prerequisites section of this file."
     )
     print("\nMinimal wiring (what the live path below builds):")
     print(
@@ -189,10 +189,9 @@ def _print_model_skip_banner(model: str, exc: Exception) -> None:
     )
     print(f"Driver / DB reported:\n  {type(exc).__name__}: {exc}")
     print(
-        "\nLoad the model once via DBMS_VECTOR.LOAD_ONNX_MODEL "
-        "and grant 'MINING MODEL SELECT' on it to the runtime user, "
-        "then re-run. Or set OCI_INDB_MODEL to a model that's already "
-        "loaded in your DB."
+        "\nLoad the model and grant access as described in the Prerequisites "
+        "section of this file, then re-run. Or point OCI_INDB_MODEL (and "
+        "OCI_INDB_DIM) at a model that's already loaded in your DB."
     )
 
 
@@ -201,7 +200,12 @@ def _is_missing_model_error(exc: BaseException) -> bool:
     text = str(exc)
     return any(
         marker in text
-        for marker in ("ORA-29024", "ORA-20100", "ORA-04063", "ORA-20000", "ORA-40284")
+        for marker in (
+            "ORA-40284",  # mining model does not exist
+            "ORA-04063",  # the model's wrapper object is invalid / has errors
+            "ORA-20000",  # raise_application_error envelopes DBMS_VECTOR_CHAIN
+            "ORA-20100",  # wraps around a model it cannot find or execute
+        )
     )
 
 
@@ -242,10 +246,11 @@ async def main() -> None:
 
     print_config()
     model_name = os.environ.get("OCI_INDB_MODEL", _DEFAULT_MODEL)
+    dimension = int(os.environ.get("OCI_INDB_DIM", _DEFAULT_DIM))
 
     embedder = OracleInDBEmbeddings(
         model_name=model_name,
-        dimension=_DEFAULT_DIM,
+        dimension=dimension,
         dsn=os.environ["ORACLE_DSN"],
         user=os.environ["ORACLE_USER"],
         password=os.environ["ORACLE_PASSWORD"],
@@ -274,7 +279,7 @@ async def main() -> None:
         wallet_location=os.path.expanduser(os.environ["ORACLE_WALLET"]),
         wallet_password=os.environ.get("ORACLE_WALLET_PASSWORD", ""),
         table_name="locus_notebook_41",
-        dimension=_DEFAULT_DIM,
+        dimension=dimension,
         distance_metric="COSINE",
     )
 

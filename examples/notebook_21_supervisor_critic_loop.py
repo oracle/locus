@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
@@ -8,16 +7,19 @@
 An analyst gathers evidence, an author drafts a data-exposure report, and
 a skeptical reviewer (MIRROR — the privacy team's adversarial review role)
 either signs off or sends it back because a claim isn't backed by evidence.
-The revise loop caps at two passes to bound runtime.
+There is no supervisor agent deciding who runs next: the graph's
+conditional edge after ``review`` routes to the author again (REVISE) or
+to END (APPROVE, or the two-pass revision cap).
 
 The point of the notebook is the *last* step, not the loop: a report that
 reads well is not the same as a report that is grounded. Before anything
-ships, the reviewer runs the drafted finding through ``ground_finding`` —
-the GSAR grounding gate from ``locus.control``. A finding is emitted only
-when its evidence partition clears the proceed threshold; otherwise the
-call returns an ``Abstention`` and nothing reaches the privacy queue. An
-unproven exposure claim is a false positive *by construction* and never ships.
+ships, the reviewer node runs ``ground_finding`` — the GSAR grounding gate
+from ``locus.control`` — over the evidence partition for the finding. A
+finding is emitted only when that partition clears the proceed threshold;
+otherwise the call returns an ``Abstention`` and nothing reaches the
+privacy queue.
 
+Key ideas:
 - The control flow is a ``StateGraph`` with conditional edges — no
   hand-rolled ``while True`` plus message passing.
 - Each role is its own ``Agent`` with a role-specific system prompt.
@@ -26,11 +28,10 @@ unproven exposure claim is a false positive *by construction* and never ships.
 - The reviewer node is where prose review meets mechanical grounding:
   ``ground_finding(...)`` scores the evidence partition and returns a
   ``Evidence`` or an ``Abstention``. ``is_finding(...)`` narrows the union.
-- ``stream(mode=StreamMode.NODES)`` emits one event per node completion,
-  so a UI can show "Evidence gathered / Author drafting / Reviewer
-  adjudicating…" with no extra code.
-- ``execute(...)`` returns the authoritative final state plus a
-  ``GraphResult`` with timing and iteration metrics.
+- ``stream(mode=StreamMode.VALUES)`` emits one event per node completion
+  (so a UI can show "Evidence gathered / Author drafting / Reviewer
+  adjudicating…") and a terminal event carrying the final state — one
+  run drives both the live view and the result.
 
 ```text
 START → gather → draft → review → END (ship grounded Evidence | abstain)
@@ -41,8 +42,7 @@ START → gather → draft → review → END (ship grounded Evidence | abstain)
 Run it:
     .venv/bin/python examples/notebook_21_supervisor_critic_loop.py
 
-The default provider is the bundled mock model. Set LOCUS_MODEL_PROVIDER=openai
-(or anthropic) and the matching credentials to use a live model. Set
+The default provider is OCI GenAI when ``~/.oci/config`` holds a usable profile, otherwise the bundled mock model; set ``LOCUS_MODEL_PROVIDER`` (``oci``, ``openai``, ``anthropic``, ``mock``) to choose. Set
 ``LOCUS_MODEL_PROVIDER=mock`` for offline runs — the grounding gate is
 deterministic and exercises the same admit/abstain path either way.
 
@@ -55,6 +55,7 @@ Prerequisites:
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any
 
 from config import get_model
@@ -69,8 +70,7 @@ from locus.control import (
     ground_finding,
     is_finding,
 )
-from locus.core.events import TerminateEvent
-from locus.multiagent.graph import END, START, StateGraph
+from locus.multiagent.graph import END, START, StateGraph, StreamMode
 from locus.reasoning.gsar import Claim, EvidenceType, Partition
 
 
@@ -90,12 +90,6 @@ def _make_agent(role: str, system_prompt: str, model: Any, max_iterations: int =
         )
     )
 
-
-SUPERVISOR_PROMPT = (
-    "You are the privacy-review team lead. Given the suspected PII exposure "
-    "and the current state, decide whether the Analyst, Author, or Reviewer "
-    "should run next. Respond with ONE word: gather, draft, or review."
-)
 
 ANALYST_PROMPT = (
     "You are a data-privacy analyst. Given a suspected PII exposure, return "
@@ -131,8 +125,8 @@ REVIEWER_PROMPT = (
 # ---------------------------------------------------------------------------
 
 
-def _evidence_partition(state: dict[str, Any]) -> Partition:
-    """Build the GSAR partition for the drafted finding.
+def _evidence_partition() -> Partition:
+    """Build the GSAR partition for the finding under review.
 
     The grounded claims trace to DLP scan rows and the data-lineage graph;
     the lone unproven claim ("records were accessed by a third party") sits
@@ -174,11 +168,7 @@ def _evidence_partition(state: dict[str, Any]) -> Partition:
 
 
 async def _run_agent(agent: Agent, prompt: str) -> str:
-    final = ""
-    async for event in agent.run(prompt):
-        if isinstance(event, TerminateEvent):
-            final = event.final_message or ""
-    return final.strip()
+    return ((await agent.arun(prompt)).message or "").strip()
 
 
 # ---------------------------------------------------------------------------
@@ -208,12 +198,14 @@ async def draft_node(state: dict[str, Any]) -> dict[str, Any]:
 async def review_node(state: dict[str, Any]) -> dict[str, Any]:
     """Prose review, then the mechanical grounding gate.
 
-    First the reviewer Agent gives a prose verdict (APPROVE / REVISE). Then
-    — regardless of how persuasive the prose is — the drafted finding is
-    run through ``ground_finding``. The function returns a ``Evidence`` only
-    when the evidence partition clears the GSAR proceed threshold; below it
-    the caller gets an ``Abstention`` and nothing ships. That is what makes
-    "kill unproven claims" a guarantee rather than a hope.
+    First the reviewer Agent gives a prose verdict (APPROVE / REVISE) on
+    the draft. Then — independently of how persuasive the prose is —
+    ``ground_finding`` scores the finding's evidence partition. Note what
+    is scored: the typed claims seeded from the DLP scan and lineage
+    facts, not the draft text itself. The function returns ``Evidence``
+    only when that partition clears the GSAR proceed threshold; below it
+    the caller gets an ``Abstention`` and nothing ships, however well the
+    report reads.
     """
     agent = _make_agent("reviewer", REVIEWER_PROMPT, state["__model__"])
     verdict = await _run_agent(agent, f"Draft report to review:\n{state.get('draft', '')}")
@@ -236,7 +228,7 @@ async def review_node(state: dict[str, Any]) -> dict[str, Any]:
         severity=Severity.HIGH,
         asset="analytics-export:customer_export",
         remediation="Mask or hash the 'email' column, or drop it from the dashboard feed.",
-        partition=_evidence_partition(state),
+        partition=_evidence_partition(),
         indicators=[Indicator(type=IndicatorType.HOST, value="analytics.corp.example")],
         taxonomy=[
             OwaspLLM.SENSITIVE_INFORMATION_DISCLOSURE,
@@ -270,7 +262,7 @@ def route_after_review(state: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def build_supervisor_graph() -> StateGraph:
+def build_review_loop_graph() -> StateGraph:
     graph = StateGraph(name="pii-exposure-review-loop")
     graph.add_node("gather", gather_node)
     graph.add_node("draft", draft_node)
@@ -297,7 +289,7 @@ async def main() -> None:
     print("=" * 60)
 
     model = get_model()
-    graph = build_supervisor_graph()
+    graph = build_review_loop_graph()
 
     initial = {
         "finding": (
@@ -310,22 +302,24 @@ async def main() -> None:
 
     print(f"\nFinding: {initial['finding']!r}\n")
 
-    # Stream node-completion events for live UI feedback, then call
-    # execute() for the authoritative final state with metrics.
-    from locus.multiagent.graph import StreamMode
-
-    async for event in graph.stream(initial, mode=StreamMode.NODES):
+    # One run: VALUES mode yields a state snapshot per node completion
+    # (node_id set) and, last, the final state (node_id None). Running
+    # execute() afterwards would pay for every LLM call a second time.
+    final_state: dict[str, Any] = {}
+    node_completions = 0
+    t0 = time.perf_counter()
+    async for event in graph.stream(initial, mode=StreamMode.VALUES):
         if event.node_id:
+            node_completions += 1
             print(f"  ✓ {event.node_id}", flush=True)
-
-    final = await graph.execute(initial)
-    final_state = final.final_state
+        final_state = event.data
+    elapsed_ms = (time.perf_counter() - t0) * 1000
 
     print()
     print(f"Revisions:    {final_state.get('revisions_done', 0)}")
     verdict = final_state.get("reviewer_verdict") or "(unknown)"
     print(f"Reviewer:     {verdict[:80]}")
-    print(f"Total time:   ~{final.duration_ms:.0f} ms across {final.iterations} graph iterations")
+    print(f"Total time:   ~{elapsed_ms:.0f} ms across {node_completions} node completions")
 
     # The grounding gate decides what actually ships.
     print()

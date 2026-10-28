@@ -35,18 +35,18 @@ denial (churn, escalation, public complaint).
 
 Run it (defaults to the bundled mock model; set `LOCUS_MODEL_PROVIDER` to `openai` / `anthropic` for a live model):
 
-    python examples/notebook_78_procurement_approval.py
+    python examples/notebook_78_concession_approval.py
 
 Offline:
 
-    LOCUS_MODEL_PROVIDER=mock python examples/notebook_78_procurement_approval.py
+    LOCUS_MODEL_PROVIDER=mock python examples/notebook_78_concession_approval.py
 
 Pin a strong-enough model for the structured ConcessionDecision schema:
 
-    LOCUS_MODEL_PROVIDER=openai LOCUS_MODEL_ID=gpt-4o python examples/notebook_78_procurement_approval.py
+    LOCUS_MODEL_PROVIDER=openai LOCUS_MODEL_ID=gpt-4o python examples/notebook_78_concession_approval.py
 
 ## Source
 
 ````python
---8<-- "examples/notebook_78_procurement_approval.py"
+--8<-- "examples/notebook_78_concession_approval.py"
 ````

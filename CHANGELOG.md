@@ -8,6 +8,27 @@ policy.
 
 ## [Unreleased]
 
+### Changed
+
+- **Notebooks 01–89 and the concept pages were reviewed for clean, didactic
+  code.** Every notebook now runs offline on the bundled mock model with the
+  OCI GenAI auto-detect described accurately, one function per part with
+  `main()` last, imports at the top, no private attributes, no unused
+  imports or dead branches, and comments that explain a decision rather than
+  restate the next line. Model calls that only asked the model to comment on
+  a feature were removed; the remaining calls exercise the primitive being
+  shown. Stale cross-references, old table names and wrong claims about the
+  SDK (hook ordering, `run_sync` inside a running loop, checkpoint cadence,
+  event payloads) were corrected, and two notebooks were renamed to match
+  their content: `notebook_20_map_reduce_support_triage.py` and
+  `notebook_78_concession_approval.py`. The concept pages' code blocks were
+  checked against the SDK: snippets calling non-existent APIs
+  (`Orchestrator.run`, `EvalRunner(agent=graph)`, the `KnowledgeProvider`
+  example, `Agent.run` used synchronously) were fixed, duplicated blocks were
+  merged, and import paths were standardised on the public modules. The
+  `examples/` lint exemptions for unused imports, unused locals and
+  placeholder-free f-strings were dropped.
+
 ### Removed
 
 - **Amazon Bedrock and Azure OpenAI providers.** The `bedrock:` and `azure:`
