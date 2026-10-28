@@ -16,14 +16,7 @@ account entitlements it touches (``blast_radius``) and whether it crosses the
 human-review line (a ``high_value`` tag). The policy auto-allows a
 single-field change that carries no ``high_value`` tag and holds anything bigger.
 
-    Support agent proposes an account change (an Action)
-       │
-       ▼
-    admit(action, perform, policy, trail)
-       │
-       ├─ small credit, single account, routine ──── allow ──────> perform() runs, the account is updated
-       │
-       └─ plan upgrade / large credit (high_value) ── require_human ──> AdmissionError, nothing runs
+{{ locus_diagram gate-support-account }}
 
 The rule lives in one ``ControlPolicy``. ``require_human_for={"high_value"}``
 means any change carrying the ``high_value`` label always stops for a person —
@@ -33,15 +26,15 @@ blast radius alone, capped by ``max_blast_radius=1``.
 is a business action, not a security finding — there is no threat to verify, so
 the gate reasons purely over scope and labels.
 
-``admit()`` is the single enforcement point. It asks the policy, records the
-decision to the ``AuditTrail`` whether or not it allows, and only then awaits
-``perform``. There is no path to the write that skips the log — the held plan
-upgrade lands on the trail next to the small credit that actually ran, and
-``trail.verify()`` confirms the SHA-256 chain is internally consistent: an edit,
-a reorder, or a deletion from the middle fails it. On its own it cannot catch
-records dropped off the end, or a chain rewritten and re-hashed from an edited
-record onward; the bare call this script makes returns ``True`` for both. Anchor
-``trail.head`` where the agent cannot reach it and pass it back as
+``admit()`` is the single enforcement point. It asks the policy (``approve()``),
+records the decision to the ``AuditTrail`` whether or not it allows, and only
+then awaits ``perform``. There is no path to the write that skips the log — the
+held plan upgrade lands on the trail next to the small credit that actually ran,
+and ``trail.verify()`` confirms the SHA-256 chain is internally consistent: an
+edit, a reorder, or a deletion from the middle fails it. On its own it cannot
+catch records dropped off the end, or a chain rewritten and re-hashed from an
+edited record onward; the bare call this script makes returns ``True`` for both.
+Anchor ``trail.head`` where the agent cannot reach it and pass it back as
 ``verify(expected_head=…)``, and sign the trail, before treating it as evidence
 — see
 [what `verify()` catches](../api/control.md#what-verify-catches-and-the-one-thing-it-cannot).
@@ -54,16 +47,17 @@ it raises an ``AdmissionError(require_human)``, the upgrade never runs, and the
 account is left untouched. Both decisions are recorded on the trail.
 
 ``apply_account_change`` here is a local stub: it mutates an in-memory account
-dict instead of calling the billing/account API, so the script runs offline with
-no service, no creds, no network. Swap that one function for a real account-API
-call and the gate is unchanged.
+dict instead of calling the billing/account API, so no account service is needed
+to run the script. Swap that one function for a real account-API call and the
+gate is unchanged.
 
 Run it (fully offline — no model, no provider, no network):
+
     python examples/notebook_73_support_account_gate.py
 
 ## Output
 
-Running it offline — no model and no credentials — prints the account action that needed a human:
+Running it offline — no model and no credentials — prints a small credit applied, a plan upgrade held, and the trail that records both:
 
 ```text
 Notebook 73: A support agent changes a customer account — admit() holds the big ones

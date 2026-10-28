@@ -30,9 +30,10 @@ Run it:
 .venv/bin/python examples/notebook_10_hooks_advanced.py
 ```
 
-Uses the bundled mock model by default. Set `LOCUS_MODEL_PROVIDER` to
-openai / anthropic for a live model; keep `LOCUS_MODEL_PROVIDER=mock`
-for offline runs.
+Model choice comes from `examples/config.py`: OCI Generative AI when
+`~/.oci/config` has a usable profile, otherwise the bundled mock model, so the
+example also runs offline with no credentials. Set `LOCUS_MODEL_PROVIDER`
+(`oci`, `openai`, `anthropic` or `mock`) to force one.
 
 Prerequisite: the agent-hooks notebook.
 

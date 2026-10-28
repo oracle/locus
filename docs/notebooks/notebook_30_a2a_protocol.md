@@ -41,9 +41,10 @@ on it.
 python examples/notebook_30_a2a_protocol.py
 ```
 
-The default provider is the bundled mock model. Set `LOCUS_MODEL_PROVIDER`
-(openai / anthropic) and credentials to use a live model. Set
-`LOCUS_MODEL_PROVIDER=mock` for offline runs.
+Model choice comes from `examples/config.py`: OCI Generative AI when
+`~/.oci/config` has a usable profile, otherwise the bundled mock model, so the
+example also runs offline with no credentials. Set `LOCUS_MODEL_PROVIDER`
+(`oci`, `openai`, `anthropic` or `mock`) to force one.
 
 The notebook starts an in-process uvicorn server and drives a client
 against it; expect a few seconds of warm-up before the first

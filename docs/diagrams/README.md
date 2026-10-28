@@ -47,8 +47,9 @@ the old diagrams sat on a white card in dark mode. The hook also prefixes every
 | Decision outcome | `g.node.allow` · `.hold` · `.deny` · `.abstain` |
 | Edge | `<path class="edge" marker-end="url(#ah)" d="…"/>`, add `.dashed` for conditional, `.allow`/`.hold`/`.deny` to colour an outcome path |
 | Edge label | `<rect class="label-bg" …/>` then `<text class="label">` centred on it |
+| Edge label on a lane | the same, with `class="label-bg on-lane"` so the knockout matches the band |
 | Datastore | `<g class="store"><path d="cylinder"/></g>` |
-| Decision | `<g class="decision"><polygon/></g>` |
+| Decision | `<g class="decision node"><polygon/><text>Name</text><text class="sub">question?</text></g>` — `decision` styles the polygon, `node` styles and centres the text; a bare question is a single `text.sub` at the polygon's centre |
 | Grouping band | `<g class="lane"><rect/><text class="lane-title">NAME</text></g>` |
 | Footnote | `<text class="note">` |
 

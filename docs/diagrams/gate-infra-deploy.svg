@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The deploy gate of examples/notebook_72_infra_deploy_gate.py, enforced by locus.control.admit:
+    ops agent -> admit()        propose() hands each Action to admit(action, make_rollout(...), policy=POLICY, trail=trail)  (notebook_72:104-109)
+                                deploy checkout-api, environment staging, blast_radius 3  (:128-136)
+                                rollback checkout-api, environment production, blast_radius 2  (:140-148)
+    POLICY                      ControlPolicy(require_verification_score=0.0, max_blast_radius=4, require_human_for={"production"})  (:86-90)
+                                ControlPolicy is a frozen dataclass of knobs with no methods; approve is the module-level
+                                function approve(action, *, policy=...)  (src/locus/control/policy.py:47-79, :143-151)
+    allow                       staging: no label in require_human_for and 3 <= 4 -> perform() runs the rollout (the kubectl stand-in, :63-72)
+    hold                        production is in require_human_for -> require_human at any blast radius (2 <= 4 would have cleared);
+                                AdmissionError, nothing applied  (:112-116)
+    trail                       both decisions recorded, outcomes ["allow", "require_human"], trail.verify() True  (:153-172)
+    admit()   -> approve()      _decide() calls approve(action, policy=...) before anything else  (src/locus/control/admission.py:131-142, :203-210)
+    approve() -> allow          no rule fired: approve() returns allow when nothing triggered  (policy.py:249-250)
+                                labels() = {environment, kind, *tags}  (policy.py:95-97)
+    approve() -> hold           a label in require_human_for -> require_human  (policy.py:243-247);
+                                blast_radius > max_blast_radius -> require_human  (policy.py:214-220); strongest outcome wins (:256)
+    allow -> perform()          admit() awaits perform only after _decide() returned  (admission.py:143)
+    hold  -> AdmissionError     raised when the decision is not allowed and no approved_by was given  (admission.py:233-234);
+                                it carries the ApprovalDecision (admission.py:62-73)
+    both  -> AuditTrail         trail.record("action-admission", {action, asset, outcome, reason}) runs before the raise
+                                and before perform  (admission.py:212-232); each record is SHA-256 over seq, ts, event_type,
+                                payload, prev_hash  (audit.py:82-102, :297-329); trail.verify() walks the chain  (audit.py:344-446)
+  Styled by the .tl-dia classes in docs/stylesheets/locus.css; see docs/diagrams/README.md.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 486" role="img" aria-labelledby="title desc">
+  <title id="title">The deploy gate</title>
+  <desc id="desc">The ops agent proposes an Action, a deploy or a rollback, and hands it to admit() together with the side effect, the ControlPolicy and the AuditTrail. admit() calls approve(action, policy=...), which weighs the action's labels and blast radius against the policy. The staging deploy, blast radius 3 under the cap of 4 and carrying no label from require_human_for, is allowed: perform() runs the rollout. The production rollback is held even though its blast radius 2 is under the cap, because production is in require_human_for: admit() raises AdmissionError, nothing runs, and the rollback waits for the on-call human. Both decisions, allow and require_human, are recorded on the hash-chained AuditTrail before perform() is awaited or the error is raised, and trail.verify() checks the chain.</desc>
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="arrowhead" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+
+  <!-- agent -> admit() -->
+  <path class="edge" marker-end="url(#ah)" d="M184,59 L350,59"/>
+  <rect class="label-bg" x="200" y="70" width="134" height="20" rx="4"/>
+  <text class="label" x="267" y="80">deploy or rollback</text>
+
+  <!-- admit() -> approve(action, policy=...) -->
+  <path class="edge" marker-end="url(#ah)" d="M470,88 L470,122"/>
+
+  <!-- approve() -> allow -->
+  <path class="edge allow" marker-end="url(#ah)" d="M358,172 L156,172 Q144,172 144,184 L144,256"/>
+  <rect class="label-bg" x="137" y="128" width="228" height="20" rx="4"/>
+  <text class="label" x="251" y="138">allow: deploy, environment staging</text>
+  <rect class="label-bg" x="171" y="148" width="160" height="20" rx="4"/>
+  <text class="label" x="251" y="158">blast radius 3 ≤ max 4</text>
+
+  <!-- approve() -> hold (require_human) -->
+  <path class="edge hold" marker-end="url(#ah)" d="M582,172 L784,172 Q796,172 796,184 L796,256"/>
+  <rect class="label-bg" x="564" y="128" width="250" height="20" rx="4"/>
+  <text class="label" x="689" y="138">hold: rollback, environment production</text>
+  <rect class="label-bg" x="599" y="148" width="180" height="20" rx="4"/>
+  <text class="label" x="689" y="158">blast radius 2 ≤ 4, still held</text>
+
+  <!-- allow -> AuditTrail -->
+  <path class="edge" marker-end="url(#ah)" d="M264,287 L368,287 Q380,287 380,299 L380,356"/>
+  <rect class="label-bg" x="323" y="318" width="114" height="20" rx="4"/>
+  <text class="label" x="380" y="328">recorded: allow</text>
+
+  <!-- hold -> AuditTrail -->
+  <path class="edge" marker-end="url(#ah)" d="M676,287 L572,287 Q560,287 560,299 L560,356"/>
+  <rect class="label-bg" x="477" y="318" width="166" height="20" rx="4"/>
+  <text class="label" x="560" y="328">recorded: require_human</text>
+
+  <g class="node">
+    <rect x="24" y="30" width="160" height="58" rx="12"/>
+    <text x="104" y="49">Ops agent</text>
+    <text class="sub" x="104" y="70">proposes an Action</text>
+  </g>
+  <g class="node primary">
+    <rect x="352" y="30" width="236" height="58" rx="12"/>
+    <text x="470" y="49">admit()</text>
+    <text class="sub" x="470" y="70">action, perform, policy, trail</text>
+  </g>
+  <g class="decision node">
+    <polygon points="470,124 582,172 470,220 358,172"/>
+    <text x="470" y="162">approve()</text>
+    <text class="sub" x="470" y="183">action, policy</text>
+  </g>
+  <g class="node allow">
+    <rect x="24" y="258" width="240" height="58" rx="12"/>
+    <text x="144" y="277">allow</text>
+    <text class="sub" x="144" y="298">perform() runs the rollout</text>
+  </g>
+  <g class="node hold">
+    <rect x="676" y="258" width="240" height="58" rx="12"/>
+    <text x="796" y="277">hold</text>
+    <text class="sub" x="796" y="298">AdmissionError, nothing runs</text>
+  </g>
+  <g class="store node">
+    <path d="M350,364 A120,9 0 0 1 590,364 V416 A120,9 0 0 1 350,416 Z M350,364 A120,9 0 0 0 590,364"/>
+    <text x="470" y="383">AuditTrail</text>
+    <text class="sub" x="470" y="404">every decision, hash-chained</text>
+  </g>
+
+  <text class="note" x="470" y="452">ControlPolicy(require_verification_score=0.0, max_blast_radius=4, require_human_for={"production"})</text>
+  <text class="note" x="470" y="472">admit() records the decision before it awaits perform() or raises; trail.verify() checks the SHA-256 chain.</text>
+</svg>

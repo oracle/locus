@@ -32,8 +32,7 @@ openrouter_agent = Agent(model="openrouter:provider/model-id")
 together_agent = Agent(model="together:organization/model-id")
 ```
 
-Run the notebook (it defaults to the bundled mock model; set
-`LOCUS_MODEL_PROVIDER` to `openai` or `anthropic` for a live run):
+Run the notebook (OCI Generative AI with an OCI profile, otherwise the bundled mock model; set `LOCUS_MODEL_PROVIDER` to force a provider):
 
     python examples/notebook_11_model_providers.py
 

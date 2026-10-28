@@ -17,7 +17,8 @@ grounded (refuted).
 Runs fully offline.
 
 Run it:
-    python examples/notebook_86_verify_findings.py
+
+    python packages/locus-sdk-security/examples/notebook_86_verify_findings.py
 
 See also: [Agentic AI-security](../concepts/agentic-ai-security.md) ·
 [SecurityContext](../concepts/security-context.md).

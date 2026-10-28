@@ -20,7 +20,8 @@ This notebook runs offline and shows the gate catching a regression: a "previous
 build that passes and a "candidate" that fails the bar.
 
 Run it:
-    python examples/notebook_85_ci_security_gate.py
+
+    python packages/locus-sdk-security/examples/notebook_85_ci_security_gate.py
 
 ## Source
 

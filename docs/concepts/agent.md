@@ -9,12 +9,12 @@ typed events as it runs, and returns a typed `AgentResult` when it
 stops.
 
 The same class is what multi-agent shapes (orchestrators, swarms,
-handoff desks) instantiate under
-the hood — there's one agent abstraction, not five.
+handoff desks) instantiate: Locus has a single agent abstraction.
 
 ```python
 from locus.agent import Agent
 from locus.tools import tool
+
 @tool
 def lookup_order(order_id: str) -> str:
     """Look up an order's status, items, and payment history."""
@@ -63,7 +63,8 @@ Each iteration has three phases:
 The loop terminates with one of these `stop_reason` literals on
 `AgentResult`: `complete`, `terminal_tool`, `confidence_met`,
 `max_iterations`, `tool_loop`, `no_tools`, `grounding_failed`,
-`token_budget`, `cost_budget`, `time_budget`, `interrupted`, `error`, `cancelled`.
+`token_budget`, `cost_budget`, `time_budget`, `context_exhausted`, `interrupted`,
+`error`, `cancelled`.
 Triggers:
 
 - The model produces a response with no tool calls (`complete` / `no_tools`).
@@ -104,16 +105,16 @@ See the [API reference](../api/agent.md) for every field.
 
 ## Headline kwargs
 
-Six knobs cover ~95% of agent configurations. All accept either a
-keyword on the `Agent(...)` constructor (sugar) or a field on
-`AgentConfig` (when you build the config explicitly).
+Six keyword arguments cover most agent configurations. Each is accepted as a
+keyword on the `Agent(...)` constructor or as a field on `AgentConfig` when you
+build the config explicitly.
 
 | Kwarg | What it does |
 |---|---|
 | `output_schema=Foo` | Pydantic schema. Final assistant message is parsed into an instance of `Foo` and surfaced on `result.parsed` / `result.parsed_as(Foo)`. Provider-strict `response_format` on OpenAI; tool-use translation on Anthropic; prompted fallback elsewhere. See [structured-output](structured-output.md). |
-| `termination=cond` | Composable stop algebra: `MaxIterations(10) \| TextMention("DONE") & ConfidenceMet(0.9)` is real Python. Eight built-in conditions; `\|` and `&` operator overloads. |
+| `termination=cond` | Composable stop algebra: conditions combine through the `__or__` and `__and__` operators (either condition, or both), so a rule such as "ten iterations, or the text DONE together with a confidence threshold" is plain Python. Eight built-in conditions; the example below composes two. |
 | `playbook=plan` | A `locus.playbooks.Playbook`. Auto-installs `PlaybookEnforcerHook` so each tool call is validated against the current step's `expected_tools` and the plan auto-advances. Out-of-sequence calls are cancelled with a hint. |
-| `auxiliary_model="{{ locus_example_model }}"` | Cheap-tier model for non-primary calls (max-iterations summary, grounding eval, conversation compactor). String or `ModelProtocol` instance. Falls back to `model=` when unset. |
+| `auxiliary_model=...` | Lower-cost model for secondary calls (max-iterations summary, grounding evaluation, conversation compaction). String or `ModelProtocol` instance. Falls back to `model=` when unset. |
 | `reflexion=True` / `ReflexionConfig(...)` | Reflexion self-evaluation node in the loop. |
 | `grounding=True` / `GroundingConfig(...)` | LLM-as-judge grounding evaluation against retrieved evidence. |
 

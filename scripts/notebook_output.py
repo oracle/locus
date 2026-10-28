@@ -48,9 +48,9 @@ PAGES: dict[str, str] = {
     "notebook_87_soc_alert_triage": "the triage an analyst would otherwise do",
     "notebook_71_payment_refund_gate": "a small refund paid, a large one held",
     "notebook_72_infra_deploy_gate": "a staging deploy allowed and a production rollback held",
-    "notebook_73_support_account_gate": "the account action that needed a human",
+    "notebook_73_support_account_gate": "a small credit applied, a plan upgrade held, and the trail that records both",
     "notebook_74_data_deletion_gate": "a GDPR erasure, and the chain that proves it",
-    "notebook_75_cloud_resource_gate": "a staging resize allowed and a production terminate held",
+    "notebook_75_cloud_resource_gate": "a staging resize allowed, then a production terminate and an IAM grant held",
 }
 
 _MARKER = "## Output"

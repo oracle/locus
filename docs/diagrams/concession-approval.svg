@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The concession-review graph built by examples/notebook_78_concession_approval.py
+  build_review_graph (:280-321); the state it routes on arrives in the initial state (:411-420).
+    START -> summarize_ticket            (:290)  ticket, customer, concession and risk_score come in with the request
+    summarize_ticket -> assess_impact    (:291)  one Agent each, PROMPTS["ticket"] / PROMPTS["impact"] (:89-103, :129-143)
+    assess_impact -> risk_tier_router    (:292-301) conditional edge on state["risk_score"] (:146-155):
+        score < 25   -> auto_approve     (:149-150, :296)  approvals=["AUTO (low cost tier)"], no interrupt (:216-217)
+        score >= 25  -> approve_manager  (:151-155, :297-299)  "manager", "billing" and "director" all target approve_manager
+    approve_manager, approve_billing, approve_director: one interrupt() each with options yes/no (:166-194);
+        approver titles "Support Manager", "Billing Lead", "Support Director" (:192-194);
+        yes appends the title to approvals, no sets status=denied (:158-163)
+    approve_manager -> approve_billing   yes and score >= 50, otherwise record_decision (gate_after_manager :197-204, :303-310)
+    approve_billing -> approve_director  yes and score >= 75, otherwise record_decision (gate_after_billing :207-213, :311-318)
+    approve_director -> record_decision  (:319)
+    auto_approve -> record_decision      (:302)
+    record_decision -> END               (:320)  SCRIBE Agent with output_schema=ConcessionDecision (:220-274);
+                                                 status is approved unless a gate said no (:227), ConcessionDecision (:72-83)
+  Styled by the .tl-dia classes in docs/stylesheets/locus.css; see docs/diagrams/README.md.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 430" role="img" aria-labelledby="title desc">
+  <title id="title">Risk-tiered concession approval</title>
+  <desc id="desc">A support ticket arrives together with a risk score. The ticket analyst summarizes what the customer asks for, the impact analyst assesses cost, precedent and churn risk, and the risk-tier router then routes on the score. Below 25 the concession is auto-approved with no interrupt. At 25 or above a Support Manager must answer yes or no at an interrupt; if the answer is yes and the score is 50 or above, a Billing Lead is asked next; if that is yes and the score is 75 or above, a Support Director is asked last. A no at any gate, or a yes at the last gate the score requires, goes to the decision recorder, which emits a typed ConcessionDecision marked approved or denied.</desc>
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="arrowhead" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+
+  <!-- intake -> ticket analyst -> impact analyst -->
+  <path class="edge" marker-end="url(#ah)" d="M174,53 L212,53"/>
+  <path class="edge" marker-end="url(#ah)" d="M374,53 L412,53"/>
+
+  <!-- impact analyst -> risk tier (next row) -->
+  <path class="edge" marker-end="url(#ah)" d="M494,82 C494,126 99,96 99,138"/>
+
+  <!-- risk tier -> support manager -->
+  <path class="edge" marker-end="url(#ah)" d="M174,182 L272,182"/>
+  <rect class="label-bg" x="186" y="172" width="74" height="20" rx="4"/>
+  <text class="label" x="223" y="182">score ≥ 25</text>
+
+  <!-- risk tier -> auto-approve -->
+  <path class="edge" marker-end="url(#ah)" d="M99,224 L99,298"/>
+  <rect class="label-bg" x="62" y="248" width="74" height="20" rx="4"/>
+  <text class="label" x="99" y="258">score &lt; 25</text>
+
+  <!-- support manager -> billing lead -->
+  <path class="edge" marker-end="url(#ah)" d="M428,182 L516,182"/>
+  <rect class="label-bg" x="440" y="172" width="64" height="20" rx="4"/>
+  <text class="label" x="472" y="182">yes, ≥ 50</text>
+
+  <!-- billing lead -> support director -->
+  <path class="edge" marker-end="url(#ah)" d="M672,182 L760,182"/>
+  <rect class="label-bg" x="684" y="172" width="64" height="20" rx="4"/>
+  <text class="label" x="716" y="182">yes, ≥ 75</text>
+
+  <!-- gates -> decision recorder -->
+  <path class="edge" marker-end="url(#ah)" d="M351,211 C351,262 515,248 515,298"/>
+  <rect class="label-bg" x="368" y="245" width="130" height="20" rx="4"/>
+  <text class="label" x="433" y="255">yes if 25–49, or no</text>
+
+  <path class="edge" marker-end="url(#ah)" d="M595,211 L595,298"/>
+  <rect class="label-bg" x="530" y="245" width="130" height="20" rx="4"/>
+  <text class="label" x="595" y="255">yes if 50–74, or no</text>
+
+  <path class="edge" marker-end="url(#ah)" d="M839,211 C839,262 675,248 675,298"/>
+  <rect class="label-bg" x="725" y="245" width="64" height="20" rx="4"/>
+  <text class="label" x="757" y="255">yes or no</text>
+
+  <!-- auto-approve -> decision recorder -->
+  <path class="edge" marker-end="url(#ah)" d="M174,329 L453,329"/>
+
+  <g class="node">
+    <rect x="24" y="24" width="150" height="58" rx="12"/>
+    <text x="99" y="43">Ticket intake</text>
+    <text class="sub" x="99" y="64">ticket, risk_score</text>
+  </g>
+  <g class="node">
+    <rect x="214" y="24" width="160" height="58" rx="12"/>
+    <text x="294" y="43">Ticket analyst</text>
+    <text class="sub" x="294" y="64">summarize_ticket</text>
+  </g>
+  <g class="node">
+    <rect x="414" y="24" width="160" height="58" rx="12"/>
+    <text x="494" y="43">Impact analyst</text>
+    <text class="sub" x="494" y="64">assess_impact</text>
+  </g>
+
+  <g class="decision node">
+    <polygon points="99,140 174,182 99,224 24,182"/>
+    <text x="99" y="172">Risk tier</text>
+    <text class="sub" x="99" y="193">risk_score</text>
+  </g>
+  <g class="node hold">
+    <rect x="274" y="153" width="154" height="58" rx="12"/>
+    <text x="351" y="172">Support Manager</text>
+    <text class="sub" x="351" y="193">waits for a human</text>
+  </g>
+  <g class="node hold">
+    <rect x="518" y="153" width="154" height="58" rx="12"/>
+    <text x="595" y="172">Billing Lead</text>
+    <text class="sub" x="595" y="193">waits for a human</text>
+  </g>
+  <g class="node hold">
+    <rect x="762" y="153" width="154" height="58" rx="12"/>
+    <text x="839" y="172">Support Director</text>
+    <text class="sub" x="839" y="193">waits for a human</text>
+  </g>
+
+  <g class="node allow">
+    <rect x="24" y="300" width="150" height="58" rx="12"/>
+    <text x="99" y="319">Auto-approve</text>
+    <text class="sub" x="99" y="340">allowed, no review</text>
+  </g>
+  <g class="node end">
+    <rect x="455" y="300" width="280" height="58" rx="29"/>
+    <text x="595" y="319">Decision recorder</text>
+    <text class="sub" x="595" y="340">ConcessionDecision</text>
+  </g>
+
+  <text class="note" x="470" y="392">The risk score arrives with the ticket. Each gate is its own graph node, so a reviewer can come back to exactly that gate.</text>
+  <text class="note" x="470" y="412">A yes adds that approver to the approvals list; a no at any gate ends in the recorder with status denied.</text>
+</svg>

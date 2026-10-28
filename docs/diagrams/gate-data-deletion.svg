@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The privacy gate of examples/notebook_74_data_deletion_gate.py, enforced by locus.control.admit:
+    privacy agent -> admit()    each data-subject request becomes an Action handed to admit(action, perform, policy=..., trail=trail)
+                                export_subject_data, Article 15/20, blast_radius 4, tags {reversible, pii}  (notebook_74:145-158)
+                                erase_subject_records, Article 17, blast_radius 4, tags {irreversible, pii}  (:163-177)
+    policy                      ControlPolicy(require_verification_score=0.0, max_blast_radius=5, require_human_for={"irreversible"})  (:135-139)
+                                ControlPolicy is a frozen dataclass of knobs with no methods; approve is the module-level
+                                function approve(action, *, policy=...)  (src/locus/control/policy.py:47-79, :143-151)
+    allow                       the export: no irreversible label and 4 <= 5 -> perform() runs export_subject_data  (:88-95)
+    hold                        the erasure: irreversible is in require_human_for -> require_human; AdmissionError, the subject is still in the datastore  (:179-183)
+    hold -> DPO                 dpo_signs_off(erase) stands in for the Data Protection Officer resolving the held ticket  (:113-117, :187-188)
+    DPO -> admit()              a second pass: admit(approved_erase, ..., policy=signed_off_policy, trail=trail). The action still carries
+                                the irreversible tag (:207); what flips the decision is signed_off_policy.require_human_for=frozenset()
+                                (:196-200), so the require_human_for test fires on nothing and the erasure runs  (:201-216)
+    trail                       three records on one trail: export allow, erasure require_human, erasure allow; trail.verify() True  (:220-231)
+    admit()   -> approve()      _decide() calls approve(action, policy=...) before anything else  (src/locus/control/admission.py:131-142, :203-210)
+    approve() -> allow          no rule fired: approve() returns allow when nothing triggered  (policy.py:249-250)
+                                labels() = {environment, kind, *tags}  (policy.py:95-97)
+    approve() -> hold           a label in require_human_for -> require_human  (policy.py:243-247);
+                                blast_radius > max_blast_radius -> require_human  (policy.py:214-220); strongest outcome wins (:256)
+    allow -> perform()          admit() awaits perform only after _decide() returned  (admission.py:143)
+    hold  -> AdmissionError     raised when the decision is not allowed and no approved_by was given  (admission.py:233-234);
+                                it carries the ApprovalDecision (admission.py:62-73)
+    both  -> AuditTrail         trail.record("action-admission", {action, asset, outcome, reason}) runs before the raise
+                                and before perform  (admission.py:212-232); each record is SHA-256 over seq, ts, event_type,
+                                payload, prev_hash  (audit.py:82-102, :297-329); trail.verify() walks the chain  (audit.py:344-446)
+  Styled by the .tl-dia classes in docs/stylesheets/locus.css; see docs/diagrams/README.md.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 506" role="img" aria-labelledby="title desc">
+  <title id="title">The privacy gate</title>
+  <desc id="desc">The privacy agent proposes an Action for each data-subject request and hands it to admit() together with the side effect, the ControlPolicy and the AuditTrail. admit() calls approve(action, policy=...), which weighs the action's labels and blast radius against the policy. An Article 15/20 export, reversible and touching 4 data categories under the cap of 5, is allowed: perform() runs the export. An Article 17 erasure is held because its irreversible tag is in require_human_for: admit() raises AdmissionError and nothing is deleted. The Data Protection Officer reviews the held request and signs off, and the erasure is re-admitted under a signed-off policy whose require_human_for is empty; the action still carries the irreversible tag, but the test now matches nothing, so this second pass is allowed and perform() erases the records. Every decision, the export allow, the erasure require_human and the erasure allow, is recorded on the same hash-chained AuditTrail before perform() is awaited or the error is raised, and trail.verify() checks the chain.</desc>
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="arrowhead" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+
+  <!-- agent -> admit() -->
+  <path class="edge" marker-end="url(#ah)" d="M184,59 L350,59"/>
+  <rect class="label-bg" x="194" y="70" width="146" height="20" rx="4"/>
+  <text class="label" x="267" y="80">data-subject request</text>
+
+  <!-- admit() -> approve(action, policy=...) -->
+  <path class="edge" marker-end="url(#ah)" d="M470,88 L470,122"/>
+
+  <!-- approve() -> allow -->
+  <path class="edge allow" marker-end="url(#ah)" d="M358,172 L156,172 Q144,172 144,184 L144,256"/>
+  <rect class="label-bg" x="163" y="128" width="176" height="20" rx="4"/>
+  <text class="label" x="251" y="138">allow: Article 15/20 export</text>
+  <rect class="label-bg" x="156" y="148" width="190" height="20" rx="4"/>
+  <text class="label" x="251" y="158">reversible, blast radius 4 ≤ 5</text>
+
+  <!-- approve() -> hold (require_human) -->
+  <path class="edge hold" marker-end="url(#ah)" d="M582,172 L784,172 Q796,172 796,184 L796,256"/>
+  <rect class="label-bg" x="610" y="128" width="158" height="20" rx="4"/>
+  <text class="label" x="689" y="138">hold: Article 17 erasure</text>
+  <rect class="label-bg" x="581" y="148" width="216" height="20" rx="4"/>
+  <text class="label" x="689" y="158">irreversible in require_human_for</text>
+
+  <!-- allow -> AuditTrail -->
+  <path class="edge" marker-end="url(#ah)" d="M264,287 L368,287 Q380,287 380,299 L380,356"/>
+  <rect class="label-bg" x="323" y="318" width="114" height="20" rx="4"/>
+  <text class="label" x="380" y="328">recorded: allow</text>
+
+  <!-- hold -> AuditTrail -->
+  <path class="edge" marker-end="url(#ah)" d="M676,287 L572,287 Q560,287 560,299 L560,356"/>
+  <rect class="label-bg" x="477" y="318" width="166" height="20" rx="4"/>
+  <text class="label" x="560" y="328">recorded: require_human</text>
+
+  <!-- hold -> the human -->
+  <path class="edge" marker-end="url(#ah)" d="M796,316 L796,356"/>
+
+  <!-- the human -> admit(), a second pass under signed_off_policy -->
+  <path class="edge dashed" marker-end="url(#ah)" d="M916,387 L920,387 Q928,387 928,379 L928,67 Q928,59 920,59 L590,59"/>
+  <rect class="label-bg" x="623" y="35" width="264" height="20" rx="4"/>
+  <text class="label" x="755" y="45">re-admitted: require_human_for is empty</text>
+
+  <g class="node">
+    <rect x="24" y="30" width="160" height="58" rx="12"/>
+    <text x="104" y="49">Privacy agent</text>
+    <text class="sub" x="104" y="70">proposes an Action</text>
+  </g>
+  <g class="node primary">
+    <rect x="352" y="30" width="236" height="58" rx="12"/>
+    <text x="470" y="49">admit()</text>
+    <text class="sub" x="470" y="70">action, perform, policy, trail</text>
+  </g>
+  <g class="decision node">
+    <polygon points="470,124 582,172 470,220 358,172"/>
+    <text x="470" y="162">approve()</text>
+    <text class="sub" x="470" y="183">action, policy</text>
+  </g>
+  <g class="node allow">
+    <rect x="24" y="258" width="240" height="58" rx="12"/>
+    <text x="144" y="277">allow</text>
+    <text class="sub" x="144" y="298">perform() runs</text>
+  </g>
+  <g class="node hold">
+    <rect x="676" y="258" width="240" height="58" rx="12"/>
+    <text x="796" y="277">hold</text>
+    <text class="sub" x="796" y="298">AdmissionError, nothing deleted</text>
+  </g>
+  <g class="store node">
+    <path d="M350,364 A120,9 0 0 1 590,364 V416 A120,9 0 0 1 350,416 Z M350,364 A120,9 0 0 0 590,364"/>
+    <text x="470" y="383">AuditTrail</text>
+    <text class="sub" x="470" y="404">every decision, hash-chained</text>
+  </g>
+  <g class="node">
+    <rect x="676" y="358" width="240" height="58" rx="12"/>
+    <text x="796" y="377">DPO signs off</text>
+    <text class="sub" x="796" y="398">Data Protection Officer</text>
+  </g>
+
+  <text class="note" x="470" y="452">ControlPolicy(require_verification_score=0.0, max_blast_radius=5, require_human_for={"irreversible"})</text>
+  <text class="note" x="470" y="472">admit() records the decision before it awaits perform() or raises; trail.verify() checks the SHA-256 chain.</text>
+  <text class="note" x="470" y="492">The signed-off policy has require_human_for=frozenset(), so the re-admitted erasure is allowed and runs: three records on one trail.</text>
+</svg>

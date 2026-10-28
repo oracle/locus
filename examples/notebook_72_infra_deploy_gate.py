@@ -19,9 +19,9 @@ change to the production environment stops and waits for a named human.
        ▼
     admit(action, perform, policy, trail)
        │
-       ├─ environment == "staging"     ──> ALLOW: perform() runs, kubectl applies
+       ├─ staging, blast_radius <= max_blast_radius  ──> ALLOW: perform() runs, kubectl applies
        │
-       └─ environment == "production"  ──> require_human: AdmissionError, nothing runs
+       └─ environment == "production"                ──> require_human: AdmissionError, nothing runs
 
 The rule lives in one `ControlPolicy`. `require_human_for={"production"}`
 means any action carrying the `production` label always stops for a person —

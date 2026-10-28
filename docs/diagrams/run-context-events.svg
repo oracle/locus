@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  What run_context() switches on, per locus/observability (context.py, emit.py, event_bus.py,
+  agent_bridge.py) and the agent loop in locus/agent/runtime_loop.py:
+    run_context()        mints a uuid4 hex run_id when none is passed and binds it to the asyncio
+                         context; the previous value is restored on exit             (context.py:120-137)
+    agent.arun(...)      drives Agent.run (agent.py:365). run is decorated with @_bus_bridge
+                         (runtime_loop.py:721), which hands every yielded LocusEvent to
+                         bridge_locus_event before passing it on to the caller       (runtime_loop.py:282-338)
+    bridged events       ThinkEvent         -> agent.think, once per loop iteration           (runtime_loop.py:838, 1119; agent_bridge.py:95-102)
+                         ToolStartEvent     -> agent.tool.started, span_id = tool_call_id    (runtime_loop.py:1401; agent_bridge.py:103-109)
+                         ToolCompleteEvent  -> agent.tool.completed, the same span_id        (runtime_loop.py:1573-1831 via _complete_event; agent_bridge.py:110-119)
+                         ModelCompleteEvent -> agent.tokens.used, only when it carries usage (agent_bridge.py:144-159)
+                                               dashed: Agent.run has no yield site for ModelCompleteEvent, so the
+                                               agent path records the other four and not this one
+                         TerminateEvent     -> agent.terminate with reason + iterations_used (runtime_loop.py:857-1909; agent_bridge.py:177-185)
+    emit()               returns after one ContextVar.get() when no run_id is bound; otherwise
+                         awaits bus.publish(StreamEvent(run_id, event_type, data))    (emit.py:150-182; context.py:73-80)
+    EventBus.publish     appends to the per-run history deque, then delivers to the run's and the
+                         global subscribers' queues                                   (event_bus.py:122-150)
+    bus.subscribe(rid)   pre-loads the queue with the run's history, then registers it for live
+                         events; a closed run gets the history plus an immediate sentinel (event_bus.py:169-184, 218-245)
+    close_stream(rid)    sends the sentinel that ends every subscriber's iterator and keeps the
+                         history; run_context itself never closes the stream          (event_bus.py:265-288; context.py:114-118)
+  Styled by the .tl-dia classes in docs/stylesheets/locus.css; see docs/diagrams/README.md.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 436" role="img" aria-labelledby="title desc">
+  <title id="title">What run_context() switches on</title>
+  <desc id="desc">Entering run_context() mints a run_id and binds it to the asyncio context; agent.arun() is called inside that block. The agent loop yields LocusEvents, and the bus bridge turns them into the canonical events agent.think (once per iteration), agent.tool.started and agent.tool.completed (a pair sharing one span_id, the tool_call_id), agent.tokens.used (only when a ModelCompleteEvent carrying usage is bridged) and agent.terminate (stop reason and iterations used). Each is published through emit() onto the EventBus, which appends it to a per-run history deque and fans it out to subscribers. bus.subscribe(rid) replays that history first, then streams live events until close_stream(rid) ends the iterator. Outside run_context(), emit() returns after a single ContextVar lookup: no bus is built and no event is created.</desc>
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="arrowhead" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+
+  <!-- the canonical events the bridge publishes, in the order a run produces them -->
+  <g class="lane">
+    <rect x="310" y="24" width="280" height="348" rx="12"/>
+    <text class="lane-title" x="330" y="48">Canonical events</text>
+  </g>
+  <g class="node">
+    <rect x="330" y="66" width="240" height="50" rx="12"/>
+    <text x="450" y="81">agent.think</text>
+    <text class="sub" x="450" y="102">once per iteration</text>
+  </g>
+  <g class="node">
+    <rect x="330" y="126" width="240" height="50" rx="12"/>
+    <text x="450" y="141">agent.tool.started</text>
+    <text class="sub" x="450" y="162">span_id = tool_call_id</text>
+  </g>
+  <g class="node">
+    <rect x="330" y="186" width="240" height="50" rx="12"/>
+    <text x="450" y="201">agent.tool.completed</text>
+    <text class="sub" x="450" y="222">same span_id</text>
+  </g>
+  <g class="node optional">
+    <rect x="330" y="246" width="240" height="50" rx="12"/>
+    <text x="450" y="261">agent.tokens.used</text>
+    <text class="sub" x="450" y="282">from ModelCompleteEvent usage</text>
+  </g>
+  <g class="node">
+    <rect x="330" y="306" width="240" height="50" rx="12"/>
+    <text x="450" y="321">agent.terminate</text>
+    <text class="sub" x="450" y="342">reason, iterations_used</text>
+  </g>
+
+  <!-- run_context -> arun: the call sits inside the async with block -->
+  <path class="edge" marker-end="url(#ah)" d="M135,114 L135,167"/>
+  <rect class="label-bg" x="75" y="130" width="120" height="20" rx="4"/>
+  <text class="label" x="135" y="140">inside the block</text>
+
+  <!-- arun -> canonical events: @_bus_bridge maps each yielded LocusEvent -->
+  <path class="edge" marker-end="url(#ah)" d="M230,198 L308,198"/>
+  <rect class="label-bg" x="240" y="206" width="58" height="20" rx="4"/>
+  <text class="label" x="269" y="216">bridged</text>
+
+  <!-- canonical events -> bus: emit() publishes a StreamEvent -->
+  <path class="edge" marker-end="url(#ah)" d="M590,198 L658,198"/>
+  <rect class="label-bg" x="598" y="206" width="52" height="20" rx="4"/>
+  <text class="label" x="624" y="216">emit()</text>
+
+  <!-- bus -> history: publish appends to the run's deque -->
+  <path class="edge" marker-end="url(#ah)" d="M750,169 L750,119"/>
+  <rect class="label-bg" x="721" y="134" width="58" height="20" rx="4"/>
+  <text class="label" x="750" y="144">appends</text>
+
+  <!-- bus -> subscriber: history replay, then the live stream -->
+  <path class="edge" marker-end="url(#ah)" d="M750,227 L750,298"/>
+  <rect class="label-bg" x="664" y="252" width="172" height="20" rx="4"/>
+  <text class="label" x="750" y="262">history first, then live</text>
+
+  <g class="node">
+    <rect x="40" y="56" width="190" height="58" rx="12"/>
+    <text x="135" y="75">run_context()</text>
+    <text class="sub" x="135" y="96">mints and binds run_id</text>
+  </g>
+  <g class="node">
+    <rect x="40" y="169" width="190" height="58" rx="12"/>
+    <text x="135" y="188">agent.arun(…)</text>
+    <text class="sub" x="135" y="209">Agent.run yields events</text>
+  </g>
+  <g class="node primary">
+    <rect x="660" y="169" width="180" height="58" rx="12"/>
+    <text x="750" y="188">EventBus</text>
+    <text class="sub" x="750" y="209">publish(StreamEvent)</text>
+  </g>
+  <g class="store">
+    <path d="M660,60 A90,9 0 0 1 840,60 V108 A90,9 0 0 1 660,108 Z M660,60 A90,9 0 0 0 840,60"/>
+    <g class="node">
+      <text x="750" y="78">history</text>
+      <text class="sub" x="750" y="99">a deque per run_id</text>
+    </g>
+  </g>
+  <g class="node">
+    <rect x="650" y="300" width="200" height="58" rx="12"/>
+    <text x="750" y="319">bus.subscribe(rid)</text>
+    <text class="sub" x="750" y="340">ends on close_stream(rid)</text>
+  </g>
+
+  <text class="note" x="450" y="400">Outside run_context(), emit() returns after one ContextVar.get(): no bus, no StreamEvent, no allocation.</text>
+  <text class="note" x="450" y="418">Dashed: agent.tokens.used is bridged only from a ModelCompleteEvent that carries usage.</text>
+</svg>

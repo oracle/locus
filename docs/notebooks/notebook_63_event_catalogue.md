@@ -28,7 +28,7 @@ Prefix map::
 - Drive a two-stage dispute-triage `SequentialPipeline`
   that surfaces `composition.*` events end-to-end.
 
-Run it (defaults to the bundled mock model; set `LOCUS_MODEL_PROVIDER` to `openai` / `anthropic` for a live model):
+Run it (OCI Generative AI with an OCI profile, otherwise the bundled mock model; set `LOCUS_MODEL_PROVIDER` to force a provider):
 
     python examples/notebook_63_event_catalogue.py
 

@@ -26,8 +26,8 @@ the pieces look unfamiliar.
 ## Run it
 
 ```bash
-# Default: the bundled mock model. Set LOCUS_MODEL_PROVIDER=openai
-# (or anthropic ) and the matching credentials for a live model.
+# OCI Generative AI with an OCI profile, otherwise the bundled mock model;
+# set LOCUS_MODEL_PROVIDER to force a provider.
 python examples/notebook_32_research_workflow.py
 
 # Offline, no credentials:

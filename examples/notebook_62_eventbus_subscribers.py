@@ -16,8 +16,9 @@ in a cloud-ops pipeline:
 
 - Per-deployment subscriber alongside an observability-style global
   subscriber on two concurrent rollouts.
-- bus.stats() snapshot — queue sizes, history depth, drop counter,
-  retained-run count: the health metrics of your event pipeline.
+- bus.stats() snapshot — counts of active runs, global subscribers and
+  retained runs, the drop counter, and per-run queue depths: the health
+  metrics of your event pipeline.
 
 Run it:
     # Default: OCI GenAI if ~/.oci/config has a usable profile, else the bundled mock model

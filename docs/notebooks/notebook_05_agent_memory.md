@@ -30,9 +30,10 @@ Run it:
 python examples/notebook_05_agent_memory.py
 ```
 
-With `LOCUS_MODEL_PROVIDER` unset it uses the bundled mock model, so it
-needs no credentials. The agent's model goes through whichever
-provider you configure via `LOCUS_MODEL_PROVIDER` (`openai` / `anthropic`) for a live model; set `LOCUS_MODEL_PROVIDER=mock` for offline runs.
+Model choice comes from `examples/config.py`: OCI Generative AI when
+`~/.oci/config` has a usable profile, otherwise the bundled mock model, so the
+example also runs offline with no credentials. Set `LOCUS_MODEL_PROVIDER`
+(`oci`, `openai`, `anthropic` or `mock`) to force one.
 
 ## Source
 

@@ -8,6 +8,28 @@ policy.
 
 ## [Unreleased]
 
+### Changed
+
+- **Documentation site: diagrams instead of ASCII, and a Markdown twin of
+  every page.** The sixteen diagrams the site drew as text inside code blocks
+  (the provider tree, the OCI transports, the memory layers, the admission
+  gates in notebooks 72–75, the incident-response, concession and contract
+  workflows, the EventBus, the audio pipelines, in-database embeddings and
+  scatter-gather) are SVGs drawn from the SDK source, themed with the page,
+  and checked against the code. The Memory page's five-column table that
+  wrapped class names mid-token is a diagram plus a prose table, and
+  identifiers in any table no longer break mid-token. Build facts and
+  requirements show as a row of tiles rather than key/value tables. The
+  colour scheme follows the operating system on first visit, with a
+  three-way toggle; pages carry previous/next links, edit and view-source
+  actions, and a **Copy page** button that copies the page as Markdown.
+  Every page is also published as Markdown at `<page>/index.md`, with
+  `/llms.txt` and `/llms-full.txt` for tools that read the site that way
+  (`hooks/llms_txt.py`). The captured output on the cloud-resource gate,
+  red-team and SOC-triage notebook pages is refreshed to what the examples
+  print today, and the cloud-resource gate page now describes all three
+  attempts its example runs.
+
 ## [4.0.0] - 2026-10-28
 
 ### Removed

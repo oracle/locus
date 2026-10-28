@@ -29,8 +29,7 @@ Run it:
 .venv/bin/python examples/notebook_80_vendor_integrations.py
 ```
 
-The default provider is the bundled mock model, and every vendor tool falls
-back to its offline sample, so this runs end-to-end with no credentials.
+Without an OCI profile the model falls back to the bundled mock, and every vendor tool falls back to its offline sample, so this runs end-to-end with no credentials.
 Set ``DATAMAP_API_KEY``, or ``DATAMAP_URL`` + ``DATAMAP_TOKEN``, to move the
 classification or data-map tool onto its live path; in this notebook that
 path is a stub that raises ``NotImplementedError`` until you add the vendor

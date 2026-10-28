@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  How a model string becomes a client, as routed by locus.models.registry.get_model (src/locus/models):
+    "prefix:model-id" -> get_model      registry.py:52-63  the string must contain a colon, is split at the
+                                        first one, and the factory registered for the prefix gets the id;
+                                        an unknown prefix raises ValueError (:60-61)
+    oci:        -> model id?            registry.py:132-153  _make_oci picks the transport from the id:
+                   -> OCIModel            an id starting with "ocid1.generativeaiendpoint." (a Dedicated AI
+                                          Cluster endpoint OCID, :135-136) or with "cohere." (:140-143);
+                                          class providers/oci/__init__.py:68, OCI SDK transport
+                   -> OCIChatCompletionsModel  (the V1 transport, the default) every other id (:147-151); class providers/oci/openai_compat.py:387,
+                                          an OpenAIModel subclass on the region's /openai/v1 endpoint (:76-78)
+                   OCIResponsesModel      providers/oci/responses.py:119; never returned by _make_oci, you construct
+                                          it and pass the instance to Agent(model=...) (:127-134). Server-stateful:
+                                          each turn sends only the new input and threads previous_response_id
+                                          through provider_state (:122-125); the server_stateful property reflects
+                                          store, which defaults to True (:160, :241-252)
+    openai:     -> OpenAIModel          registry.py:74-86 (class native/openai.py:614)
+    anthropic:  -> AnthropicModel       registry.py:89-97 (class native/anthropic.py:302). Prompt caching is opt-in:
+                                        AnthropicConfig.prompt_cache defaults to False (:275-284); when True,
+                                        _request_params (:604) marks the system prompt, the tool catalog and the
+                                        end of the conversation with cache_control (:651-699), and both complete
+                                        (:725) and stream (:776) build their request through it
+    OpenAI-compatible prefixes          registry.py:105-110 registers COMPATIBLE_PROVIDERS, providers/__init__.py:140-272,
+                                        each as OpenAIModel(model, api_key, base_url) (_build :275-297) at the base_url
+                                        CompatibleProvider.resolve_base_url returns (:115-125: an explicit base_url,
+                                        then the LOCUS_<PREFIX>_BASE_URL and vendor env vars, then the id template,
+                                        then the table default):
+                   self-hosted            ollama :142, vllm :150, lmstudio :158, llamacpp :166
+                   gateway                litellm :174
+                   managed                groq :182, together :188, runpod :194, openrouter :203, deepseek :209,
+                                          mistral :215, xai :221, fireworks :227, cerebras :233, perplexity :239,
+                                          nvidia :245, gemini :257
+                                          runpod* is the one managed entry with base_url=None (:196): its endpoint
+                                          comes from RUNPOD_ENDPOINT_ID through the template (:200-201) or from a
+                                          base_url you pass; with neither, _build raises (:280-286)
+                   openai-compatible      :265, base_url=None: you supply it or _build raises (:280-286)
+    your prefix -> your class           registry.py:21-29 register_provider(prefix, factory); the class implements
+                                        ModelProtocol (complete, stream)
+  Layout: the vertical trunk at x=180 is a bus. get_model joins it with a stub at y=232, between the anthropic:
+  and your-prefix rows, and every branch leaves it as a T junction, so no edge crosses another.
+  Styled by the .tl-dia classes in docs/stylesheets/locus.css; see docs/diagrams/README.md.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 610" role="img" aria-labelledby="title desc">
+  <title id="title">How a model string picks its provider class</title>
+  <desc id="desc">A model string of the form prefix:model-id goes to get_model(), which splits it at the first colon and hands the id to the factory registered for the prefix. The oci: prefix enters OCI Generative AI, where the model id picks the transport: an id that starts with cohere. or that is a Dedicated AI Cluster endpoint OCID goes to OCIModel over the OCI SDK; every other id goes to OCIChatCompletionsModel, the V1 transport on the /openai/v1 endpoint and the default. OCIResponsesModel, the server-stateful Responses API transport, is opt-in: you construct it directly, the prefix never picks it. openai: builds OpenAIModel against the OpenAI API. anthropic: builds AnthropicModel against the Anthropic API, with prompt caching opt-in through prompt_cache=True. The OpenAI-compatible prefixes all build OpenAIModel pointed at the base_url the routing table resolves for them: the self-hosted servers ollama, vllm, lmstudio and llamacpp; the litellm gateway; the managed services groq, together, runpod, openrouter, deepseek, mistral, xai, fireworks, cerebras, perplexity, nvidia and gemini, of which runpod has no default endpoint and takes it from RUNPOD_ENDPOINT_ID or a base_url you pass; and openai-compatible, for which you supply the base_url. Any other prefix is added with register_provider(), which maps your prefix to a class of your own that implements ModelProtocol. An unknown prefix raises ValueError.</desc>
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="arrowhead" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+
+  <g class="lane">
+    <rect x="490" y="14" width="434" height="250" rx="14"/>
+    <text class="lane-title" x="506" y="38">OCI Generative AI</text>
+  </g>
+  <g class="lane">
+    <rect x="272" y="314" width="652" height="198" rx="14"/>
+    <text class="lane-title" x="288" y="338">OpenAI-compatible prefixes</text>
+  </g>
+
+  <!-- get_model joins the trunk as a T, between the anthropic: and your-prefix rows -->
+  <path class="edge" d="M162,232 H180"/>
+  <!-- trunk: one branch per registered prefix family, each leaving as a T -->
+  <path class="edge" d="M180,89 V403"/>
+
+  <!-- oci: -> the model-id decision inside the OCI lane -->
+  <path class="edge" marker-end="url(#ah)" d="M180,89 Q180,79 190,79 H506"/>
+  <rect class="label-bg" x="206" y="53" width="40" height="20" rx="4"/>
+  <text class="label" x="226" y="63">oci:</text>
+
+  <!-- openai: -> OpenAIModel -->
+  <path class="edge" marker-end="url(#ah)" d="M180,121 H272"/>
+  <rect class="label-bg" x="199" y="95" width="54" height="20" rx="4"/>
+  <text class="label" x="226" y="105">openai:</text>
+
+  <!-- anthropic: -> AnthropicModel -->
+  <path class="edge" marker-end="url(#ah)" d="M180,195 H272"/>
+  <rect class="label-bg" x="191" y="169" width="70" height="20" rx="4"/>
+  <text class="label" x="226" y="179">anthropic:</text>
+
+  <!-- your prefix -> the class you registered -->
+  <path class="edge dashed" marker-end="url(#ah)" d="M180,269 H272"/>
+  <rect class="label-bg" x="189" y="243" width="74" height="20" rx="4"/>
+  <text class="label" x="226" y="253">your prefix</text>
+
+  <!-- every prefix in the routing table -> the OpenAI-compatible lane -->
+  <path class="edge" marker-end="url(#ah)" d="M180,403 Q180,413 190,413 H272"/>
+  <rect class="label-bg" x="184" y="387" width="84" height="20" rx="4"/>
+  <text class="label" x="226" y="397">routing table</text>
+
+  <!-- model id? -> OCIChatCompletionsModel: every other id -->
+  <path class="edge" marker-end="url(#ah)" d="M602,79 H682"/>
+  <rect class="label-bg on-lane" x="604" y="87" width="66" height="20" rx="4"/>
+  <text class="label" x="637" y="97">otherwise</text>
+
+  <!-- model id? -> OCIModel: cohere.* ids and Dedicated AI Cluster endpoint OCIDs -->
+  <path class="edge" marker-end="url(#ah)" d="M554,109 V139 Q554,149 564,149 H764"/>
+  <rect class="label-bg on-lane" x="550" y="157" width="200" height="20" rx="4"/>
+  <text class="label" x="650" y="167">cohere.* · DAC endpoint OCID</text>
+
+  <g class="node primary">
+    <rect x="12" y="203" width="150" height="58" rx="12"/>
+    <text x="87" y="222">prefix:model-id</text>
+    <text class="sub" x="87" y="243">get_model()</text>
+  </g>
+
+  <g class="node">
+    <rect x="272" y="92" width="196" height="58" rx="12"/>
+    <text x="370" y="111">OpenAIModel</text>
+    <text class="sub" x="370" y="132">the OpenAI API</text>
+  </g>
+  <g class="node">
+    <rect x="272" y="166" width="196" height="58" rx="12"/>
+    <text x="370" y="185">AnthropicModel</text>
+    <text class="sub" x="370" y="206">prompt_cache=True opt-in</text>
+  </g>
+  <g class="node optional">
+    <rect x="272" y="240" width="196" height="58" rx="12"/>
+    <text x="370" y="259">Custom provider</text>
+    <text class="sub" x="370" y="280">register_provider()</text>
+  </g>
+
+  <g class="decision node">
+    <polygon points="506,79 554,49 602,79 554,109"/>
+    <text class="sub" x="554" y="79">model id?</text>
+  </g>
+  <g class="node">
+    <rect x="682" y="50" width="226" height="58" rx="12"/>
+    <text x="795" y="69">OCIChatCompletionsModel</text>
+    <text class="sub" x="795" y="90">V1 · default · /openai/v1</text>
+  </g>
+  <g class="node">
+    <rect x="764" y="120" width="144" height="58" rx="12"/>
+    <text x="836" y="139">OCIModel</text>
+    <text class="sub" x="836" y="160">OCI SDK transport</text>
+  </g>
+  <g class="node optional">
+    <rect x="708" y="190" width="200" height="58" rx="12"/>
+    <text x="808" y="209">OCIResponsesModel</text>
+    <text class="sub" x="808" y="230">opt-in · server-stateful</text>
+  </g>
+
+  <g class="node">
+    <rect x="288" y="350" width="270" height="58" rx="12"/>
+    <text x="423" y="369">self-hosted</text>
+    <text class="sub" x="423" y="390">ollama · vllm · lmstudio · llamacpp</text>
+  </g>
+  <g class="node">
+    <rect x="580" y="350" width="118" height="58" rx="12"/>
+    <text x="639" y="369">gateway</text>
+    <text class="sub" x="639" y="390">litellm</text>
+  </g>
+  <g class="node">
+    <rect x="720" y="350" width="188" height="58" rx="12"/>
+    <text x="814" y="369">openai-compatible:</text>
+    <text class="sub" x="814" y="390">you supply base_url</text>
+  </g>
+  <g class="node">
+    <rect x="288" y="420" width="620" height="76" rx="12"/>
+    <text x="598" y="439">managed</text>
+    <text class="sub" x="598" y="459">groq · together · runpod* · openrouter · deepseek · mistral</text>
+    <text class="sub" x="598" y="477">xai · fireworks · cerebras · perplexity · nvidia · gemini</text>
+  </g>
+
+  <text class="note" x="470" y="538">get_model() splits the string at the first colon and calls the factory registered for that prefix; an unknown prefix raises ValueError.</text>
+  <text class="note" x="470" y="558">OCIResponsesModel is never picked by the oci: prefix: construct it yourself and pass the instance to Agent(model=...).</text>
+  <text class="note" x="470" y="578">Each OpenAI-compatible prefix builds OpenAIModel at the base_url the routing table resolves for it.</text>
+  <text class="note" x="470" y="598">* runpod has no default endpoint: set RUNPOD_ENDPOINT_ID or pass base_url.</text>
+</svg>

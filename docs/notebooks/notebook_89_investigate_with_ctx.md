@@ -14,7 +14,8 @@ investigation, six domains, zero vendor names.
 Runs offline on the bundled reference providers.
 
 Run it:
-    python examples/notebook_89_investigate_with_ctx.py
+
+    python packages/locus-sdk-security/examples/notebook_89_investigate_with_ctx.py
 
 See also: [SecurityContext](../concepts/security-context.md).
 

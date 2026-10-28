@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The event bus capacity model, as EventBus implements it in locus/observability/event_bus.py.
+  Constructor parameters: max_queue_size, history_per_run, max_runs_retained  (event_bus.py:75-84).
+    publisher -> history       publish() appends the event to _history[run_id], a deque(maxlen=history_per_run),
+                               then _evict_old_runs_locked() drops the oldest runs past max_runs_retained
+                               (:139-142, :331-343; eviction is in insertion order, oldest run first)
+    publisher -> run queue     every queue registered for event.run_id gets the event  (:144, :147-148); each
+                               bus.subscribe(run_id) call owns one asyncio.Queue(maxsize=max_queue_size) and
+                               there is no other per-run queue kind, so one box stands for all of them  (:218-245)
+    publisher -> global queue  every global subscriber queue gets it too, whatever the run_id  (:145, :149-150)
+    queue full -> dropped      _deliver() waits _PUBLISH_TIMEOUT_SECONDS on queue.put(); on TimeoutError or
+                               QueueFull the event is dropped for that subscriber only and _dropped_events += 1,
+                               the publish continues for everyone else  (:152-163); stats() reports the counter
+                               as dropped_events_total  (:315-329), the name the drawing uses
+    history -> run queue       subscribe(run_id) -> _register(): the new queue is pre-loaded with the run's
+                               history, then registered for live events  (:218-245); a run that is already
+                               closed gets the sentinel instead of registering  (:236-243)
+    global cap                 subscribe_global(): asyncio.Queue(maxsize=max_queue_size)  (:194); at
+                               _max_global_subscribers the new subscriber ends at once  (:95, :197-202);
+                               no history replay  (:189-190)
+  Not drawn: an event with an empty run_id is logged and discarded before any of this  (:132-137);
+  close_stream() keeps the history and sends the sentinel  (:265-288); drop_history() forgets a run  (:290-298).
+  Styled by the .tl-dia classes in docs/stylesheets/locus.css; see docs/diagrams/README.md.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 526" role="img" aria-labelledby="title desc">
+  <title id="title">The event bus capacity model</title>
+  <desc id="desc">A publisher calls bus.publish(event). The event is appended to the run's history, a per-run buffer bounded by history_per_run; the bus keeps history for at most max_runs_retained runs and evicts the oldest run first. The event is then delivered to every subscriber queue registered for that run_id and to every global subscriber queue, each an asyncio queue bounded by max_queue_size. Each bus.subscribe(run_id) call owns one such queue: the run's history is replayed into it on connect, then live events follow. When a subscriber's queue is full, the event is dropped for that subscriber only and the dropped_events_total counter in bus.stats() increments; everyone else still receives it. Global subscribers, created with bus.subscribe_global(), are capped in number and receive live events from every run, never a history replay.</desc>
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="arrowhead" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+
+  <!-- lanes -->
+  <g class="lane">
+    <rect x="300" y="16" width="580" height="320" rx="12"/>
+    <text class="lane-title" x="320" y="40">Per-run channel</text>
+  </g>
+  <g class="lane">
+    <rect x="300" y="354" width="580" height="110" rx="12"/>
+    <text class="lane-title" x="320" y="378">Global subscribers</text>
+  </g>
+
+  <!-- publisher stem and the fan-out trunk -->
+  <path class="edge" d="M170,250 H196 M196,151 V419"/>
+
+  <!-- trunk -> subscriber queue -->
+  <path class="edge" marker-end="url(#ah)" d="M196,151 H318"/>
+  <rect class="label-bg" x="208" y="162" width="88" height="20" rx="4"/>
+  <text class="label" x="252" y="172">same run_id</text>
+
+  <!-- trunk -> history -->
+  <path class="edge" marker-end="url(#ah)" d="M196,280 H318"/>
+
+  <!-- trunk -> global queue -->
+  <path class="edge" marker-end="url(#ah)" d="M196,419 H318"/>
+  <rect class="label-bg" x="216" y="430" width="72" height="20" rx="4"/>
+  <text class="label" x="252" y="440">every run</text>
+
+  <!-- subscriber queue -> subscriber -->
+  <path class="edge" marker-end="url(#ah)" d="M540,151 H648"/>
+
+  <!-- subscriber queue, full -> dropped -->
+  <path class="edge dashed" marker-end="url(#ah)" d="M430,122 V81 H648"/>
+  <rect class="label-bg on-lane" x="499" y="71" width="80" height="20" rx="4"/>
+  <text class="label" x="539" y="81">queue full</text>
+
+  <!-- history -> subscriber queue -->
+  <path class="edge dashed" marker-end="url(#ah)" d="M430,241 V182"/>
+  <rect class="label-bg on-lane" x="360" y="201" width="140" height="20" rx="4"/>
+  <text class="label" x="430" y="211">replayed on connect</text>
+
+  <!-- global queue -> global subscriber -->
+  <path class="edge" marker-end="url(#ah)" d="M540,419 H648"/>
+
+  <g class="node primary">
+    <rect x="20" y="221" width="150" height="58" rx="12"/>
+    <text x="95" y="240">Publisher</text>
+    <text class="sub" x="95" y="261">bus.publish(event)</text>
+  </g>
+
+  <g class="node optional">
+    <rect x="650" y="52" width="210" height="58" rx="12"/>
+    <text x="755" y="71">Dropped</text>
+    <text class="sub" x="755" y="92">dropped_events_total += 1</text>
+  </g>
+
+  <g class="node">
+    <rect x="320" y="122" width="220" height="58" rx="12"/>
+    <text x="430" y="141">Subscriber queue</text>
+    <text class="sub" x="430" y="162">maxsize=max_queue_size</text>
+  </g>
+  <g class="node">
+    <rect x="650" y="122" width="210" height="58" rx="12"/>
+    <text x="755" y="141">Subscriber</text>
+    <text class="sub" x="755" y="162">bus.subscribe(run_id)</text>
+  </g>
+
+  <g class="store">
+    <path d="M320,249 A270,9 0 0 1 860,249 V311 A270,9 0 0 1 320,311 Z M320,249 A270,9 0 0 0 860,249"/>
+    <g class="node">
+      <text x="590" y="275">History per run_id</text>
+      <text class="sub" x="590" y="296">maxlen=history_per_run · max_runs_retained runs · oldest evicted first</text>
+    </g>
+  </g>
+
+  <g class="node">
+    <rect x="320" y="390" width="220" height="58" rx="12"/>
+    <text x="430" y="409">Global queue</text>
+    <text class="sub" x="430" y="430">maxsize=max_queue_size</text>
+  </g>
+  <g class="node">
+    <rect x="650" y="390" width="210" height="58" rx="12"/>
+    <text x="755" y="409">Global subscriber</text>
+    <text class="sub" x="755" y="430">bus.subscribe_global()</text>
+  </g>
+
+  <text class="note" x="450" y="490">A put still blocked after the publish timeout drops the event for that subscriber only; the rest still receive it.</text>
+  <text class="note" x="450" y="511">Global subscribers are capped; one over the cap ends at once, and none gets a history replay.</text>
+</svg>

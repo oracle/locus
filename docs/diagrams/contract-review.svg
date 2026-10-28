@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The DPA review graph, as build_review_graph wires it in examples/notebook_79_contract_review.py
+  on locus.multiagent.graph.StateGraph with GraphConfig(allow_cycles=True) (:461-485):
+    START      -> parse       add_edge (:475); parse_contract reads contract_text and writes clauses (:279-281)
+    parse      -> scatter     add_edge (:476); scatter_reviewers returns one Send per perspective,
+                              legal, governance and compliance, each running review_one (:284-289)
+    review_one                one Agent per perspective, prompted by PROMPTS[perspective] (:100-120, :292-312):
+                                legal       lawful basis, data-subject rights, consent, purpose limitation
+                                governance  minimisation, retention and deletion, residency, sub-processors
+                                compliance  GDPR/CCPA, DPIA, transfer mechanisms, Art. 28, liability for fines
+                              each returns a ReviewerFinding: blockers, recommended_changes, risk_score (:80-84)
+    scatter    -> synthesize  add_edge (:477); synthesize collects the findings by shape, lists open_blockers
+                              and adds one to rounds (:315-324). The drawing shows this fan-in from the three
+                              reviewers, since their findings are what synthesize receives.
+    synthesize -> negotiate   add_conditional_edges via negotiation_gate (:478-482): open blockers and rounds < 4 (:327-335)
+    synthesize -> sign_off    no open blockers, or rounds >= 4: the cap of four review rounds, three negotiation
+                              passes; sign_off then decides on whatever is still open (:329-334)
+    negotiate                 interrupt() asks counsel for the new clause language (:349-361); every answer is a Command:
+      -> sign_off             WALK sets walk_away, RESOLVED clears open_blockers (:362-375)
+      -> parse                any other text is a redline: it becomes contract_text and the reviewers run again (:377-384);
+                              add_edge("negotiate", "parse") declares the same loop (:483)
+    sign_off   -> END         add_edge (:484); the DPO Agent with output_schema=ContractDecision emits the typed decision,
+                              signed, rejected or abandoned (:387-455, :87-94)
+  Styled by the .tl-dia classes in docs/stylesheets/locus.css; see docs/diagrams/README.md.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 634" role="img" aria-labelledby="title desc">
+  <title id="title">The DPA review graph</title>
+  <desc id="desc">A Data Processing Agreement arrives as contract_text and Parse extracts its clauses. The scatter node returns one Send per reviewer, so three reviewers run in parallel, each with its own focus: Legal on lawful basis, data-subject rights, consent and purpose limitation; Governance on data minimisation, retention and deletion, data residency and sub-processors; Compliance on GDPR and CCPA obligations, DPIAs, cross-border transfer mechanisms, Article 28 terms and liability for fines. Synthesize consolidates their findings into one report, and the negotiation gate asks whether any blockers remain. No: Sign-off, where the DPO agent emits a typed ContractDecision of signed, rejected or abandoned, and the run ends. Yes: Negotiate pauses the graph with interrupt() for counsel. Revised terms go back to Parse and the reviewers run again; a resolved or walk-away answer goes straight to Sign-off. The gate also sends the review to Sign-off once four review rounds are done, whatever is still open.</desc>
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="arrowhead" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+
+  <!-- the scatter node: one Send per reviewer -->
+  <g class="lane">
+    <rect x="380" y="36" width="318" height="294" rx="14"/>
+    <text class="lane-title" x="394" y="56">scatter · three Sends in parallel</text>
+  </g>
+
+  <!-- intake -> parse -->
+  <path class="edge" marker-end="url(#ah)" d="M140,192 L176,192"/>
+
+  <!-- parse -> reviewers (Send fan-out) -->
+  <path class="edge" marker-end="url(#ah)" d="M312,178 C352,178 352,106 394,106"/>
+  <path class="edge" marker-end="url(#ah)" d="M312,192 L394,192"/>
+  <path class="edge" marker-end="url(#ah)" d="M312,206 C352,206 352,278 394,278"/>
+
+  <!-- reviewers -> synthesize (fan-in) -->
+  <path class="edge" marker-end="url(#ah)" d="M684,106 C718,106 718,178 752,178"/>
+  <path class="edge" marker-end="url(#ah)" d="M684,192 L752,192"/>
+  <path class="edge" marker-end="url(#ah)" d="M684,278 C718,278 718,206 752,206"/>
+
+  <!-- synthesize -> gate -->
+  <path class="edge" marker-end="url(#ah)" d="M832,221 L832,344"/>
+
+  <!-- gate -> sign-off: no blockers, or the round cap -->
+  <path class="edge dashed" marker-end="url(#ah)" d="M762,377 L712,377"/>
+  <rect class="label-bg" x="723" y="354" width="28" height="20" rx="4"/>
+  <text class="label" x="737" y="364">no</text>
+
+  <!-- gate -> negotiate: blockers, under the cap -->
+  <path class="edge dashed" marker-end="url(#ah)" d="M832,410 L832,454"/>
+  <rect class="label-bg" x="844" y="422" width="32" height="20" rx="4"/>
+  <text class="label" x="860" y="432">yes</text>
+
+  <!-- sign-off -> end -->
+  <path class="edge" marker-end="url(#ah)" d="M552,377 L512,377"/>
+
+  <!-- negotiate -> sign-off: Command(goto="sign_off") on RESOLVED or WALK -->
+  <path class="edge dashed" marker-end="url(#ah)" d="M739,483 L644,483 Q632,483 632,471 L632,406"/>
+  <rect class="label-bg" x="557" y="430" width="150" height="20" rx="4"/>
+  <text class="label" x="632" y="440">resolved or walk away</text>
+
+  <!-- negotiate -> parse: Command(goto="parse") with the redlined text -->
+  <path class="edge dashed" marker-end="url(#ah)" d="M832,512 L832,542 Q832,554 820,554 L256,554 Q244,554 244,542 L244,221"/>
+  <rect class="label-bg" x="450" y="544" width="176" height="20" rx="4"/>
+  <text class="label" x="538" y="554">revised terms · re-review</text>
+
+  <g class="node">
+    <rect x="20" y="163" width="120" height="58" rx="29"/>
+    <text x="80" y="182">DPA intake</text>
+    <text class="sub" x="80" y="203">contract_text</text>
+  </g>
+  <g class="node">
+    <rect x="176" y="163" width="136" height="58" rx="12"/>
+    <text x="244" y="182">Parse</text>
+    <text class="sub" x="244" y="203">extracts clauses</text>
+  </g>
+
+  <g class="node">
+    <rect x="394" y="68" width="290" height="76" rx="12"/>
+    <text x="539" y="87">Legal</text>
+    <text class="sub" x="539" y="107">lawful basis, data-subject rights,</text>
+    <text class="sub" x="539" y="125">consent, purpose limitation</text>
+  </g>
+  <g class="node">
+    <rect x="394" y="154" width="290" height="76" rx="12"/>
+    <text x="539" y="173">Governance</text>
+    <text class="sub" x="539" y="193">minimisation, retention and deletion,</text>
+    <text class="sub" x="539" y="211">residency, sub-processors</text>
+  </g>
+  <g class="node">
+    <rect x="394" y="240" width="290" height="76" rx="12"/>
+    <text x="539" y="259">Compliance</text>
+    <text class="sub" x="539" y="279">GDPR/CCPA, DPIA, transfer mechanisms,</text>
+    <text class="sub" x="539" y="297">Art. 28 terms, liability for fines</text>
+  </g>
+
+  <g class="node">
+    <rect x="752" y="163" width="160" height="58" rx="12"/>
+    <text x="832" y="182">Synthesize</text>
+    <text class="sub" x="832" y="203">consolidated report</text>
+  </g>
+
+  <g class="decision node">
+    <polygon points="832,344 902,377 832,410 762,377"/>
+    <text class="sub" x="832" y="377">any blockers?</text>
+  </g>
+
+  <g class="node">
+    <rect x="552" y="348" width="160" height="58" rx="12"/>
+    <text x="632" y="367">Sign-off</text>
+    <text class="sub" x="632" y="388">DPO · output_schema</text>
+  </g>
+  <g class="node end">
+    <rect x="282" y="348" width="230" height="58" rx="29"/>
+    <text x="397" y="367">ContractDecision</text>
+    <text class="sub" x="397" y="388">signed · rejected · abandoned</text>
+  </g>
+
+  <g class="node primary">
+    <rect x="739" y="454" width="186" height="58" rx="12"/>
+    <text x="832" y="473">Negotiate</text>
+    <text class="sub" x="832" y="494">interrupt() for counsel</text>
+  </g>
+
+  <text class="note" x="470" y="592">Dashed edges are chosen at run time: by negotiation_gate after Synthesize, and by the Command that Negotiate returns.</text>
+  <text class="note" x="470" y="613">Hard cap: after four review rounds (three negotiation passes) the gate goes to Sign-off with whatever is still open.</text>
+</svg>

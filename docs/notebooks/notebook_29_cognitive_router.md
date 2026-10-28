@@ -24,7 +24,7 @@ until a human says so.
   it for approval instead of executing.
 
 Run it
-    # Default: the bundled mock model (set LOCUS_MODEL_PROVIDER for a live provider)
+    # OCI Generative AI with an OCI profile, otherwise the bundled mock model
     python examples/notebook_29_cognitive_router.py
 
     # Offline / no credentials (uses fallback frames):

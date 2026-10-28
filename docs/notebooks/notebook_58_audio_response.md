@@ -1,27 +1,20 @@
 # Voice Output
 
-A real agent often needs to talk, not just type. This notebook pairs a
-regular chat-completions agent (text in, text out) with OpenAI's
-audio.speech endpoint so a cloud status advisory can be spoken aloud —
-ready for the on-call hotline, a status-page audio feed, or an IVR
-announcement about a region degradation.
+An agent often needs to speak as well as write. This notebook pairs a
+regular chat-completions agent (text in, text out) with the SDK's OpenAI
+speech provider (`OpenAISpeechProvider`), which calls OpenAI's
+`/v1/audio/speech` endpoint so a cloud status advisory can be spoken
+aloud — ready for the on-call hotline, a status-page audio feed, or an
+IVR announcement about a region degradation. The provider is a plain
+OpenAI client, so there is no separate audio service to configure.
 
-Pipeline::
+{{ locus_diagram audio-response }}
 
-    advisory request ──▶ Agent (chat model)
-                            │
-                            │  advisory text
-                            ▼
-                      OpenAI /v1/audio/speech
-                      (gpt-4o-mini-tts)
-                            │
-                            │  mp3 bytes
-                            ▼
-                      ./notebook_58_response.mp3
+Two details of the speech step:
 
-- A plain OpenAI client — no separate audio service to configure.
-- Bring-your-own-voice via the `voice=` parameter (alloy, ash, ballad,
-  coral, echo, sage, shimmer, verse).
+- Select the voice with `default_voice=` on the provider, or per call
+  with `speak(..., voice=...)` (alloy, ash, ballad, coral, echo, sage,
+  shimmer, verse).
 - Output is a normal MP3 you can pipe into a frontend `<audio>`
   element, the on-call IVR, or a status-page audio feed.
 
@@ -36,10 +29,12 @@ Run it:
 
     afplay notebook_58_response.mp3   # macOS
 
-Offline, under `LOCUS_MODEL_PROVIDER=mock` (or with no `OPENAI_API_KEY`),
-the agent still drafts the advisory text against the mock model and the
-notebook prints the synthesis step it *would* run instead of calling the
-real TTS endpoint — so it runs end-to-end with zero credentials.
+Under `LOCUS_MODEL_PROVIDER=mock`, or with a chat provider other than
+OpenAI (for example the OCI Generative AI default) and no
+`OPENAI_API_KEY`, the agent still drafts the advisory text and the
+notebook prints the synthesis step it would run instead of calling the
+TTS endpoint; with the mock model it therefore runs end-to-end without
+any credentials.
 
 ## Source
 

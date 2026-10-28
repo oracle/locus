@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The incident runbook that examples/notebook_77_incident_response.py builds in
+  build_runbook() (:278-299), as StateGraph routes it:
+    START -> triage               add_edge (:288). triage asks the triage agent for one word and
+                                  keeps info, warn or critical; anything else becomes warn (:142-150)
+    triage -> scatter             add_edge (:289)
+    scatter => investigate x3     scatter returns three Sends to the investigate node, one per
+                                  source: logs, metrics, traces (:153-158); each Send builds that
+                                  source's analyst agent and returns an InvestigatorReport (:161-174)
+    scatter -> synthesize         add_edge (:290). The Sends' outputs are merged into state under
+                                  their send ids; synthesize collects every report and asks the
+                                  incident-commander agent for one root-cause hypothesis (:177-186)
+    synthesize -> page_human      add_conditional_edges with severity_gate (:291-295), which returns
+                                  "page_human" when state.severity == "critical" (:189-190). Note that
+                                  severity was written by triage, not by synthesize.
+    synthesize -> auto_mitigate   severity_gate returns "auto_mitigate" otherwise (info or warn):
+                                  no human is paged (:190)
+    page_human -> auto_mitigate   add_edge (:296). page_human calls interrupt() with options yes / no
+                                  and records human_approved = (response == "yes") (:193-206). The
+                                  edge is fixed: both answers continue to auto_mitigate.
+    auto_mitigate -> postmortem   add_edge (:297). mitigate() runs the remediation agent for one
+                                  mitigation step, except when severity is critical and the human did
+                                  not approve: then it records "(skipped — human declined)" and runs
+                                  no agent (:209-216)
+    postmortem -> END             add_edge (:298). write_postmortem runs an Agent with
+                                  output_schema=Postmortem and returns result.parsed, raising if the
+                                  model did not honour the schema (:219-272)
+  main() executes the graph once and, if the run paused, resumes it with
+  Command(resume="yes") (:351-361).
+  The diamond is a g.decision; it also carries the node class so its label takes
+  the node typography (the stylesheet styles only the decision's polygon).
+  Styled by the .tl-dia classes in docs/stylesheets/locus.css; see docs/diagrams/README.md.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 570" role="img" aria-labelledby="title desc">
+  <title id="title">The incident runbook graph</title>
+  <desc id="desc">The incident runbook as a StateGraph. START, when a page fires, hands the incident to triage, which classifies its severity as info, warn or critical. scatter returns three Sends, so investigate runs three times in parallel, once each for the logs, metrics and traces sources, and all three reports feed synthesize, which names one root-cause hypothesis. The severity_gate router then reads the severity triage wrote: on critical it routes to page_human, a hold where interrupt() pauses the run until a human answers yes or no; on info or warn it routes straight to auto_mitigate. page_human always continues to auto_mitigate, which proposes one mitigation step, or records the mitigation as skipped when the human declined. The run ends at postmortem, an Agent with output_schema=Postmortem that returns the typed report.</desc>
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="arrowhead" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+
+  <!-- the three parallel Sends -->
+  <g class="lane">
+    <rect x="526" y="24" width="180" height="238" rx="12"/>
+    <text class="lane-title" x="546" y="48">In parallel</text>
+  </g>
+
+  <!-- START -> triage -> scatter -->
+  <path class="edge" marker-end="url(#ah)" d="M122,156 L152,156"/>
+  <path class="edge" marker-end="url(#ah)" d="M304,156 L334,156"/>
+
+  <!-- scatter => investigate, one Send per source -->
+  <path class="edge" marker-end="url(#ah)" d="M476,142 C510,142 510,88 544,88"/>
+  <path class="edge" marker-end="url(#ah)" d="M476,156 L544,156"/>
+  <path class="edge" marker-end="url(#ah)" d="M476,170 C510,170 510,224 544,224"/>
+
+  <!-- investigate -> synthesize: the reports merge into state -->
+  <path class="edge" marker-end="url(#ah)" d="M686,88 C720,88 720,142 754,142"/>
+  <path class="edge" marker-end="url(#ah)" d="M686,156 L754,156"/>
+  <path class="edge" marker-end="url(#ah)" d="M686,224 C720,224 720,170 754,170"/>
+
+  <!-- synthesize -> severity_gate -->
+  <path class="edge" marker-end="url(#ah)" d="M839,185 L839,276 Q839,288 827,288 L612,288 Q600,288 600,300 L600,316"/>
+
+  <!-- severity_gate -> page_human: critical -->
+  <path class="edge dashed hold" marker-end="url(#ah)" d="M520,356 L352,356 Q340,356 340,368 L340,436"/>
+  <rect class="label-bg" x="403" y="346" width="66" height="20" rx="4"/>
+  <text class="label" x="436" y="356">critical</text>
+
+  <!-- severity_gate -> auto_mitigate: info or warn -->
+  <path class="edge dashed" marker-end="url(#ah)" d="M600,394 L600,436"/>
+  <rect class="label-bg" x="608" y="405" width="90" height="20" rx="4"/>
+  <text class="label" x="653" y="415">info or warn</text>
+
+  <!-- page_human -> auto_mitigate: the human's answer rides along in state -->
+  <path class="edge" marker-end="url(#ah)" d="M415,467 L518,467"/>
+  <rect class="label-bg" x="432" y="457" width="70" height="20" rx="4"/>
+  <text class="label" x="467" y="467">yes or no</text>
+
+  <!-- auto_mitigate -> postmortem -->
+  <path class="edge" marker-end="url(#ah)" d="M680,467 L730,467"/>
+
+  <g class="node">
+    <rect x="18" y="127" width="104" height="58" rx="29"/>
+    <text x="70" y="146">START</text>
+    <text class="sub" x="70" y="167">page fires</text>
+  </g>
+  <g class="node primary">
+    <rect x="154" y="127" width="150" height="58" rx="12"/>
+    <text x="229" y="146">triage</text>
+    <text class="sub" x="229" y="167">classifies severity</text>
+  </g>
+  <g class="node">
+    <rect x="336" y="127" width="140" height="58" rx="12"/>
+    <text x="406" y="146">scatter</text>
+    <text class="sub" x="406" y="167">three Sends</text>
+  </g>
+  <g class="node">
+    <rect x="546" y="62" width="140" height="52" rx="12"/>
+    <text x="616" y="78">investigate</text>
+    <text class="sub" x="616" y="99">source=logs</text>
+  </g>
+  <g class="node">
+    <rect x="546" y="130" width="140" height="52" rx="12"/>
+    <text x="616" y="146">investigate</text>
+    <text class="sub" x="616" y="167">source=metrics</text>
+  </g>
+  <g class="node">
+    <rect x="546" y="198" width="140" height="52" rx="12"/>
+    <text x="616" y="214">investigate</text>
+    <text class="sub" x="616" y="235">source=traces</text>
+  </g>
+  <g class="node">
+    <rect x="756" y="127" width="166" height="58" rx="12"/>
+    <text x="839" y="146">synthesize</text>
+    <text class="sub" x="839" y="167">root-cause hypothesis</text>
+  </g>
+
+  <g class="decision node">
+    <polygon points="600,318 680,356 600,394 520,356"/>
+    <text x="600" y="356">severity_gate</text>
+  </g>
+
+  <g class="node hold">
+    <rect x="265" y="438" width="150" height="58" rx="12"/>
+    <text x="340" y="457">page_human</text>
+    <text class="sub" x="340" y="478">hold · interrupt()</text>
+  </g>
+  <g class="node">
+    <rect x="520" y="438" width="160" height="58" rx="12"/>
+    <text x="600" y="457">auto_mitigate</text>
+    <text class="sub" x="600" y="478">skipped if declined</text>
+  </g>
+  <g class="node end">
+    <rect x="732" y="438" width="190" height="58" rx="29"/>
+    <text x="827" y="457">postmortem</text>
+    <text class="sub" x="827" y="478">output_schema=Postmortem</text>
+  </g>
+
+  <text class="note" x="470" y="530">severity_gate routes on the severity triage classified; synthesize adds the root-cause hypothesis.</text>
+  <text class="note" x="470" y="550">If the human answers no, auto_mitigate records the mitigation as skipped and postmortem still runs.</text>
+</svg>

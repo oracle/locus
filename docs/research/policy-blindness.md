@@ -394,7 +394,7 @@ almost never gets it.
 
     ```bash
     git clone https://github.com/oracle/locus.git
-    cd locus-sdk
+    cd locus
     git checkout 4601064413dc925f748f6ad8f6b31adba827af74
     python examples/research/family_eval.py http://127.0.0.1:8010
     ```

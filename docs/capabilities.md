@@ -13,9 +13,11 @@ does, and where to find it.
 | `SecurityContext` reference adapters | Offline simulation | No credentials | Vendor write templates return simulated receipts unless replaced and verified |
 | Published research and evaluation artifacts | Research-only | See each research page | Some source datasets and evaluated model artifacts are not publicly available |
 
-This build targets `locus-sdk` {{ locus_sdk_version }} on Python 3.11–3.14. See the
-[compatibility policy](compatibility.md) for label definitions and upgrade
-guidance.
+<dl class="locus-facts" markdown="block">
+<div markdown="block"><dt>This build</dt><dd markdown="span">`locus-sdk` {{ locus_sdk_version }}</dd></div>
+<div markdown="block"><dt>Python</dt><dd>3.11–3.14</dd></div>
+<div markdown="block"><dt>Status labels</dt><dd markdown="span">Defined in the [compatibility policy](compatibility.md), with upgrade guidance</dd></div>
+</dl>
 
 {{ locus_diagram trust-chain }}
 

@@ -1,7 +1,7 @@
 # Map-Reduce Support Triage
 
-Three inbound tickets, three triage lenses (sentiment, routing,
-resolution) = nine analyst agents running in parallel, then one
+Three inbound tickets and three triage lenses (sentiment, routing,
+resolution) give nine analyst agents running in parallel, then one
 synthesizer collapses everything into a single Markdown triage summary.
 
 This notebook covers:
@@ -14,11 +14,10 @@ This notebook covers:
 - The synthesizer reads each Send's output back from merged state and
   renders the final Markdown summary.
 - The whole pipeline is one `StateGraph.execute` call — streaming,
-  cancellation, checkpointing, and GSAR judgment all attach for free.
+  cancellation, checkpointing, and GSAR judgment attach to it without
+  extra code.
 
-```text
-Ticket splitter ──> N analysts (parallel via Send) ──> Synthesizer
-```
+{{ locus_diagram scatter-gather }}
 
 ## Prerequisites
 
@@ -31,10 +30,10 @@ Ticket splitter ──> N analysts (parallel via Send) ──> Synthesizer
 python examples/notebook_20_map_reduce_support_triage.py
 ```
 
-The default provider is the bundled mock model. Set
-`LOCUS_MODEL_PROVIDER` (openai / anthropic) and credentials to use a
-live model. Set
-`LOCUS_MODEL_PROVIDER=mock` for offline runs.
+Model choice comes from `examples/config.py`: OCI Generative AI when
+`~/.oci/config` has a usable profile, otherwise the bundled mock model, so the
+example also runs offline with no credentials. Set `LOCUS_MODEL_PROVIDER`
+(`oci`, `openai`, `anthropic` or `mock`) to force one.
 
 ## Source
 

@@ -11,24 +11,26 @@ phase, then sign-off::
     DPA intake
        │
        ▼
-    Parser  (extracts clauses)
-       │
-       ▼
-    Scatter to 3 parallel reviewers
-       ├── Legal       (lawful basis, data-subject rights, consent, purpose)
-       ├── Governance  (minimisation, retention/deletion, residency, sub-processors)
-       └── Compliance  (GDPR/CCPA, DPIA, transfer mechanisms, liability for fines)
-       ▼
-    Synthesizer  (consolidated review report)
-       │
-       ▼
-    Negotiation gate ── any blockers? ── yes ──> Negotiate (interrupt; loop)
+    Parser  (extracts clauses)  <────────────────────────────────────────────────────┐
+       │                                                                             │
+       ▼                                                                             │
+    Scatter to 3 parallel reviewers                                                  │
+       ├── Legal       (lawful basis, data-subject rights, consent, purpose)         │
+       ├── Governance  (minimisation, retention/deletion, residency, sub-processors) │
+       └── Compliance  (GDPR/CCPA, DPIA, transfer mechanisms, liability for fines)   │
+       ▼                                                                             │
+    Synthesizer  (consolidated review report)                                        │
+       │                                                                             │
+       ▼                                                                             │
+    Negotiation gate ── any blockers? ── yes ──> Negotiate (interrupt; loop)         │
+                                       │            │                                │
+                                       │            ├── revised terms (re-review) ───┘
                                        │            │
-                                       │            └── revised terms ──┐
-                                       │                                │
-                                       └── no ──┐                       │
-                                                ▼                       │
-                                          Sign-off  <───────────────────┘
+                                       │            └── resolved / walk away ──┐
+                                       │                                       │
+                                       └── no ──┐                              │
+                                                ▼                              │
+                                          Sign-off  <──────────────────────────┘
                                                 ▼
                                           ContractDecision (typed)
 

@@ -48,8 +48,8 @@ Run it:
 
 Note: with LOCUS_MODEL_PROVIDER=mock (or no OPENAI_API_KEY) the
 notebook runs fully offline — it skips the network and produces a
-short simulated PCM-16 reply so you can read the event flow before
-wiring real credentials.
+short simulated PCM-16 reply, so you can follow the three steps and
+check the output file before adding real credentials.
 """
 
 from __future__ import annotations

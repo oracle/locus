@@ -29,9 +29,10 @@ Run it:
 .venv/bin/python examples/notebook_06_agent_streaming.py
 ```
 
-The default provider is the bundled mock model. Set `LOCUS_MODEL_PROVIDER`
-to openai / anthropic for a live model. For offline runs keep
-`LOCUS_MODEL_PROVIDER=mock`.
+Model choice comes from `examples/config.py`: OCI Generative AI when
+`~/.oci/config` has a usable profile, otherwise the bundled mock model, so the
+example also runs offline with no credentials. Set `LOCUS_MODEL_PROVIDER`
+(`oci`, `openai`, `anthropic` or `mock`) to force one.
 
 Prerequisite: the agent-basics notebook.
 

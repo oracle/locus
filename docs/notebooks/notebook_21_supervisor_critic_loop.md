@@ -52,11 +52,10 @@ register or DPIA.
 python examples/notebook_21_supervisor_critic_loop.py
 ```
 
-The default provider is the bundled mock model. Set
-`LOCUS_MODEL_PROVIDER` (openai / anthropic) and credentials to use a
-live model. Set `LOCUS_MODEL_PROVIDER=mock` for offline runs — the
-grounding gate is deterministic and exercises the same admit/abstain
-path either way.
+Model choice comes from `examples/config.py`: OCI Generative AI when
+`~/.oci/config` has a usable profile, otherwise the bundled mock model, so the
+example also runs offline with no credentials. Set `LOCUS_MODEL_PROVIDER`
+(`oci`, `openai`, `anthropic` or `mock`) to force one. The grounding gate is deterministic and exercises the same admit/abstain path on either.
 
 ## Source
 

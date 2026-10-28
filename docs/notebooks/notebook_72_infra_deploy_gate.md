@@ -1,8 +1,8 @@
 # A deploy gate that ships to staging on its own and waits for a human in production
 
-A deploy agent watches CI. When a build goes green it proposes the next move:
+An ops agent watches CI. When a build goes green it proposes the next move:
 roll the new image onto staging, or promote / roll back production. Letting it
-act freely is how a 3 AM agent takes the checkout API down. Blocking everything
+act freely is how a 3 a.m. agent takes the checkout API down. Blocking everything
 for a human is how you stop shipping. The middle path is a gate: cheap,
 reversible staging changes go through automatically; any change to the
 production environment stops and waits for a named human.
@@ -12,17 +12,7 @@ It lives in ``admit``, a gate that runs before ``kubectl`` touches the cluster.
 The agent can be confused, jailbroken, or wrong about the blast radius; the
 rollout still only happens if the ``ControlPolicy`` admits it.
 
-    Build is green
-       │
-       ▼
-    Ops agent proposes an Action  (deploy / rollback, with environment + blast radius)
-       │
-       ▼
-    admit(action, perform, policy, trail)
-       │
-       ├─ environment == "staging"     ── policy allows ──> perform() runs, kubectl applies
-       │
-       └─ environment == "production"  ── require_human ──> AdmissionError, nothing runs
+{{ locus_diagram gate-infra-deploy }}
 
 The rule lives in one ``ControlPolicy``. ``require_human_for={"production"}``
 means any action carrying the ``production`` label always stops for a person —
@@ -38,11 +28,12 @@ production rollback lands on the trail next to the staging deploy that actually
 ran, and ``trail.verify()`` confirms the SHA-256 chain is intact.
 
 ``perform`` here is a local stub: it appends to an in-memory list instead of
-calling ``kubectl``, so the script runs offline with no cluster, no creds, no
-network. Swap that one function for a real ``kubectl rollout`` call and the gate
-is unchanged.
+calling ``kubectl``, so the script runs offline with no cluster, no credentials,
+no network. Swap that one function for a real ``kubectl rollout`` call and the
+gate is unchanged.
 
-Run it (fully offline — no model, no provider, no network):
+Run it (fully offline — no model and no credentials):
+
     python examples/notebook_72_infra_deploy_gate.py
 
 ## Output

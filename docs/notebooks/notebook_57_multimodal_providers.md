@@ -17,7 +17,7 @@ voicemail to transcribe. Each modality is one provider kwarg away.
   method — here, an internal transaction-ledger search.
 - Optional OpenAI-backed providers (image, speech, web search).
 
-Run it (defaults to the bundled mock model; set `LOCUS_MODEL_PROVIDER` to `openai` / `anthropic` for a live model):
+Run it (OCI Generative AI with an OCI profile, otherwise the bundled mock model; set `LOCUS_MODEL_PROVIDER` to force a provider):
 
     python examples/notebook_57_multimodal_providers.py
 

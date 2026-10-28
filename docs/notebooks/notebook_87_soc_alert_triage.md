@@ -1,24 +1,29 @@
 # SOC alert triage with SIEM-grounded verdicts
 
-A commodity AI SOC agent emits a verdict for every alert it sees, whether or not
-it can back that verdict with evidence. Here, the SOC analyst grounds every
-verdict through ``ground_report``: a proposed ``Evidence`` ships only if the
-evidence the agent actually cited clears the GSAR threshold. When the agent
-opines without evidence, the result is an ``Abstention`` — nothing is filed, and
-the analyst knows to review it manually.
+Every verdict the triage agent in this notebook proposes goes through
+``ground_report``: a proposed finding is filed as an ``Evidence`` only if the
+evidence the agent cited clears the [GSAR](../concepts/gsar.md) threshold. When
+the agent proposes a finding without grounded evidence, the result is an
+``Abstention`` — nothing is filed, and the alert is left for an analyst to
+review manually.
 
 The false-positive case matters most. When the agent sees benign noise and
 correctly finds no corroborating evidence, an ``Abstention`` is the right output:
-don't file a finding you can't prove. Four SIEM alerts arrive in a one-hour
+a finding without evidence is not filed. Four SIEM alerts arrive in a one-hour
 window — a phishing click, lateral movement, a C2 beacon, and benign process
 noise — yielding three grounded ``Evidence`` results and one ``Abstention``.
 
-Runs fully offline on mock SIEM / EDR / intel adapters. Swap them for
-``security_toolset(siem=True, edr=True, threat_intel=True)`` and a real model to
-run against a live environment.
+Runs fully offline on mock SIEM, EDR, and threat-intelligence adapters. Swap
+them for ``security_toolset(siem=True, edr=True, threat_intel=True)`` and a real
+model to run against a live environment.
 
 Run it:
-    python examples/notebook_87_soc_alert_triage.py
+
+    python packages/locus-sdk-security/examples/notebook_87_soc_alert_triage.py
+
+See also: [GSAR — typed grounding](../concepts/gsar.md) ·
+[``ground_report``](../concepts/cloud-posture.md#the-grounding-split) ·
+[Agentic AI-security](../concepts/agentic-ai-security.md).
 
 ## Output
 
@@ -28,28 +33,28 @@ Running it offline — no credentials, bundled mock model — prints the triage 
 
 ────────────────────────────────────────────────────────────
 Alert ALT-001: Phishing link clicked by user jsmith
-  [FINDING ] HIGH     User clicked confirmed phishing URL
+  [FINDING ] HIGH     Phishing link clicked by user jsmith
              grounded @ 1.00
-             evidence : ['siem:ALT-001:dns_lookups=3', 'siem:ALT-001:url_not_in_allowlist']
-             taxonomy : LLM01
+             evidence : ['siem:ALT-001:related_events']
+             taxonomy : —
 
 ────────────────────────────────────────────────────────────
 Alert ALT-002: PsExec lateral movement from WKSTN-04 to SRV-FINANCE
-  [FINDING ] CRITICAL PsExec lateral movement: WKSTN-04 → SRV-FINANCE
+  [FINDING ] CRITICAL PsExec lateral movement from WKSTN-04 to SRV-FINANCE
              grounded @ 1.00
-             evidence : ['edr:WKSTN-04:process_tree:psexec', 'siem:ALT-002:smb_admin_share_access']
+             evidence : ['siem:ALT-002:related_events', 'edr:WKSTN-04:process_tree']
              taxonomy : —
 
 ────────────────────────────────────────────────────────────
 Alert ALT-003: Outbound connection to known C2 IP 203.0.113.99
-  [FINDING ] HIGH     Outbound C2 beacon to 203.0.113.99 (threat-intel confirmed malicious)
+  [FINDING ] HIGH     Outbound connection to known C2 IP 203.0.113.99
              grounded @ 1.00
-             evidence : ['intel:203.0.113.99:emerging_threats', 'intel:203.0.113.99:vt_score=47/72', 'siem:ALT-003:beacon_pattern_60s']
+             evidence : ['siem:ALT-003:related_events', 'intel:203.0.113.99:malicious']
              taxonomy : —
 
 ────────────────────────────────────────────────────────────
 Alert ALT-004: Unusual process: msiexec.exe spawned by Teams.exe
-  [ABSTAIN ] msiexec.exe spawned by Teams.exe — possible software update
+  [ABSTAIN ] Unusual process: msiexec.exe spawned by Teams.exe
              reason   : withheld (replan): grounding below the proceed threshold (1 ungrounded of 1 claims)
              gsar     : 0.00 (below threshold)
 

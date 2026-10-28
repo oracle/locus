@@ -20,7 +20,8 @@ Runs offline by default. Set ``OPENAI_API_KEY`` (and optional ``TIMING_BASE_URL`
 for any OpenAI-compatible endpoint) to use the live streaming path.
 
 Run it:
-    python examples/notebook_88_model_fingerprint.py
+
+    python packages/locus-sdk-security/examples/notebook_88_model_fingerprint.py
 
 ## Source
 

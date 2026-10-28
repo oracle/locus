@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Voice chat, as run by examples/notebook_59_audio_chat.py with a plain openai.AsyncOpenAI client (:107-115):
+    tts      -> question wav   _ensure_question_audio(): an existing QUESTION_WAV is read as is  (:141-142); only when it is
+                               absent does an online run call client.audio.speech.create(input=QUESTION_TEXT, response_format="wav")
+                               and write it once  (:147-157); an offline run writes a placeholder PCM-16 tone in its place  (:143-146)
+    question -> chat           one client.chat.completions.create(modalities=["text","audio"], audio={voice, format: "pcm16"},
+                               messages=[system, user{content: [{type: "input_audio", input_audio: {data, format: "wav"}}]}])  (:173-189)
+    chat     -> answer         choices[0].message.audio carries .transcript and .data (base64 PCM-16)  (:190-196); the transcript
+                               is printed  (:215) and the PCM-16 written to ANSWER_WAV inside a WAV wrapper  (:218)
+    offline                    _is_offline(): LOCUS_MODEL_PROVIDER=mock (the default) or no OPENAI_API_KEY  (:101-104);
+                               _voice_reply() then returns OFFLINE_TRANSCRIPT plus a tone without a network call  (:167-170)
+  Styled by the .tl-dia classes in docs/stylesheets/locus.css; see docs/diagrams/README.md.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 770 276" role="img" aria-labelledby="title desc">
+  <title id="title">Voice chat: one multimodal call</title>
+  <desc id="desc">The caller's question is a wav file. Only when it is not already on disk does the notebook first synthesise it through the /v1/audio/speech endpoint. The wav then goes into a single /v1/chat/completions request as an input_audio content part, with modalities text and audio so the reply carries both. The reply's message.audio block holds the spoken answer and its transcript; the notebook writes the audio to a wav file and prints the transcript. Offline, with the mock provider or no OPENAI_API_KEY, nothing is sent: a question wav not yet on disk is written as a placeholder tone, and the answer is a canned transcript plus a tone.</desc>
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="arrowhead" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+
+  <!-- text to speech -> question wav, only while the file does not exist yet -->
+  <path class="edge dashed" marker-end="url(#ah)" d="M90,82 L90,138"/>
+  <rect class="label-bg" x="57" y="100" width="66" height="20" rx="4"/>
+  <text class="label" x="90" y="110">if absent</text>
+
+  <!-- question wav -> chat completions: the wav is an input_audio content part; modalities asks for text and audio back -->
+  <path class="edge" marker-end="url(#ah)" d="M154,169 L322,169"/>
+  <rect class="label-bg" x="163" y="138" width="150" height="20" rx="4"/>
+  <text class="label" x="238" y="148">modalities: text + audio</text>
+  <rect class="label-bg" x="182" y="180" width="112" height="20" rx="4"/>
+  <text class="label" x="238" y="190">input_audio part</text>
+
+  <!-- chat completions -> spoken answer: the reply's message.audio holds the data and the transcript -->
+  <path class="edge" marker-end="url(#ah)" d="M490,169 L608,169"/>
+  <rect class="label-bg" x="496" y="180" width="106" height="20" rx="4"/>
+  <text class="label" x="549" y="190">message.audio</text>
+
+  <g class="node optional">
+    <rect x="20" y="24" width="140" height="58" rx="12"/>
+    <text x="90" y="43">Text to speech</text>
+    <text class="sub" x="90" y="64">/v1/audio/speech</text>
+  </g>
+  <g class="node">
+    <rect x="26" y="140" width="128" height="58" rx="12"/>
+    <text x="90" y="159">Question wav</text>
+    <text class="sub" x="90" y="180">caller's audio</text>
+  </g>
+  <g class="node primary">
+    <rect x="324" y="140" width="166" height="58" rx="12"/>
+    <text x="407" y="159">Chat completions</text>
+    <text class="sub" x="407" y="180">/v1/chat/completions</text>
+  </g>
+  <g class="node end">
+    <rect x="610" y="140" width="140" height="58" rx="29"/>
+    <text x="680" y="159">Spoken answer</text>
+    <text class="sub" x="680" y="180">wav + transcript</text>
+  </g>
+
+  <text class="note" x="385" y="236">Offline (mock provider or no OPENAI_API_KEY) nothing is sent.</text>
+  <text class="note" x="385" y="256">A question wav not yet on disk is written as a placeholder tone; the answer is a canned transcript plus a tone.</text>
+</svg>

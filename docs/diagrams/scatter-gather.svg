@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Scatter-gather with Send, as run by examples/notebook_20_map_reduce_support_triage.py
+  on locus.multiagent.graph.StateGraph:
+    splitter -> analysts      split_tickets returns one Send(node="analyze_one", payload={ticket_id, message, role})
+                              per ticket and lens, so the fan-out is as wide as tickets x lenses (example :120-132);
+                              Send fields: node, payload, send_id, metadata (core/send.py:73-76). The executor
+                              recognises a list of Sends in a node's output (graph.py:370-371), lays each payload
+                              over the state and runs every target concurrently with asyncio.gather
+                              (graph.py:1419-1424). No edge split -> analyze_one is declared (example :197-200).
+    analysts                  the three boxes are the lenses: sentiment, routing, resolution (example :78-99);
+                              each box stands for one Agent per ticket, because analyze_one builds a fresh Agent
+                              for its (ticket, lens) and awaits arun (example :102-112, :135-152). What runs in
+                              parallel is the analysts' node.execute; the "In parallel" caption sits on that column.
+    analysts -> merged state  after gather returns, each successful SendResult lands at state[send_id] = result
+                              in a sequential loop (graph.py:1309-1313); a failed Send is skipped, not merged
+                              (graph.py:1312, :1429-1436)
+    merged state -> synth     once the Sends are done the next nodes come from the splitter's adjacency,
+                              i.e. the declared edge split -> synthesize (graph.py:1316-1317, :953; example :200)
+                              synthesize collects every "analysis" in state and renders the report (example :163-177)
+    the whole pipeline is one graph.execute(initial) call (example :224)
+  Styled by the .tl-dia classes in docs/stylesheets/locus.css; see docs/diagrams/README.md.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 372" role="img" aria-labelledby="title desc">
+  <title id="title">Scatter-gather with Send</title>
+  <desc id="desc">Inside one StateGraph.execute call, the ticket splitter returns a list of Send directives, one per ticket and lens, each naming the analyst node and carrying its payload. The executor runs all of those analysts concurrently; the lenses are sentiment, routing and resolution, each run by a distinct Agent for every ticket. Every successful result is merged into the graph state under its Send's id. When all the Sends have finished, control moves to the synthesizer, the splitter's declared successor, which reads the merged state and renders the summary.</desc>
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="arrowhead" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+
+  <!-- the one execute call -->
+  <g class="lane">
+    <rect x="6" y="18" width="908" height="292" rx="12"/>
+    <text class="lane-title" x="22" y="42">One execute call</text>
+  </g>
+
+  <!-- the analyst column runs concurrently -->
+  <text class="lane-title" x="397" y="42">In parallel</text>
+
+  <!-- splitter -> analysts: a Send per ticket and lens -->
+  <path class="edge" marker-end="url(#ah)" d="M164,151 C214,138 290,89 350,89"/>
+  <path class="edge" marker-end="url(#ah)" d="M164,169 L350,169"/>
+  <path class="edge" marker-end="url(#ah)" d="M164,187 C214,200 290,249 350,249"/>
+  <rect class="label-bg on-lane" x="176" y="159" width="154" height="20" rx="4"/>
+  <text class="label" x="253" y="169">a Send per ticket × lens</text>
+
+  <!-- analysts -> merged state -->
+  <path class="edge" marker-end="url(#ah)" d="M524,89 C557,89 557,151 590,151"/>
+  <path class="edge" marker-end="url(#ah)" d="M524,169 L590,169"/>
+  <path class="edge" marker-end="url(#ah)" d="M524,249 C557,249 557,187 590,187"/>
+
+  <!-- merged state -> synthesizer -->
+  <path class="edge" marker-end="url(#ah)" d="M716,169 L746,169"/>
+
+  <g class="node primary">
+    <rect x="14" y="140" width="150" height="58" rx="12"/>
+    <text x="89" y="159">Ticket splitter</text>
+    <text class="sub" x="89" y="180">returns list[Send]</text>
+  </g>
+  <g class="node">
+    <rect x="352" y="60" width="172" height="58" rx="12"/>
+    <text x="438" y="79">Sentiment analyst</text>
+    <text class="sub" x="438" y="100">one Agent per ticket</text>
+  </g>
+  <g class="node">
+    <rect x="352" y="140" width="172" height="58" rx="12"/>
+    <text x="438" y="159">Routing analyst</text>
+    <text class="sub" x="438" y="180">one Agent per ticket</text>
+  </g>
+  <g class="node">
+    <rect x="352" y="220" width="172" height="58" rx="12"/>
+    <text x="438" y="239">Resolution analyst</text>
+    <text class="sub" x="438" y="260">one Agent per ticket</text>
+  </g>
+  <g class="store">
+    <path d="M592,140 A62,9 0 0 1 716,140 V198 A62,9 0 0 1 592,198 Z M592,140 A62,9 0 0 0 716,140"/>
+    <g class="node">
+      <text x="654" y="163">Merged state</text>
+      <text class="sub" x="654" y="184">state[send_id]</text>
+    </g>
+  </g>
+  <g class="node">
+    <rect x="748" y="140" width="158" height="58" rx="12"/>
+    <text x="827" y="159">Synthesizer</text>
+    <text class="sub" x="827" y="180">renders the summary</text>
+  </g>
+
+  <text class="note" x="460" y="338">No edge is declared from the splitter to the analysts: each Send names its target node and carries its payload.</text>
+  <text class="note" x="460" y="356">When every Send has finished, control moves to the synthesizer, the splitter's declared successor, which reads the merged state.</text>
+</svg>

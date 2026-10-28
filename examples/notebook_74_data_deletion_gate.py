@@ -25,7 +25,7 @@ holds the irreversible erasure for a person to approve.
     Data Protection Officer reviews the held request and signs off
        │
        ▼
-    admit() runs the erasure under the DPO's recorded authority
+    admit() re-admits the erasure under a signed-off policy
        │
        ▼
     AuditTrail = the compliance record (every decision, hash-chained)
@@ -187,7 +187,7 @@ async def main() -> None:
     approved = dpo_signs_off(erase)
     assert approved
 
-    # The erasure now runs under the DPO's recorded authority. We re-admit with
+    # The erasure now runs after the DPO's sign-off. We re-admit with
     # a policy that no longer auto-holds irreversible actions, because a human
     # is now the one authorizing this specific signed-off ticket. The second
     # admission lands on the same trail, so the record shows the erasure ran

@@ -38,10 +38,7 @@ false certainty about an ambiguous alert.
 python examples/notebook_26_debate_with_judge.py
 ```
 
-The default provider is the bundled mock model. For this notebook pick a
-provider that supports constrained JSON decoding (e.g. `openai:gpt-4o`).
-Under `LOCUS_MODEL_PROVIDER=mock` the notebook exits cleanly with setup
-instructions.
+This notebook needs a model that supports constrained JSON decoding. Without an OCI profile or `LOCUS_MODEL_PROVIDER`, the harness falls back to the bundled mock model and the notebook exits cleanly with setup instructions.
 
 ## Source
 

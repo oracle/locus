@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The cloud-ops gate of examples/notebook_75_cloud_resource_gate.py, enforced by locus.control.admit:
+    cloud-ops agent -> admit()  attempt() runs each Action through admit(action, perform, policy=policy, trail=trail)  (notebook_75:114-126)
+                                resize_instance i-dev-7a3, environment staging, blast_radius 1, tags {ci}  (:147-159)
+                                terminate_instance i-prod-db1, environment production, blast_radius 1  (:164-176)
+                                grant_iam svc-deploy, environment staging, kind iam, tags {iam}  (:181-193)
+    policy                      ControlPolicy(require_verification_score=0.0, max_blast_radius=1, require_human_for={"production", "iam"})  (:137-141)
+                                ControlPolicy is a frozen dataclass of knobs with no methods; approve is the module-level
+                                function approve(action, *, policy=...)  (src/locus/control/policy.py:47-79, :143-151)
+    allow                       the resize: no production or iam label and 1 <= 1 -> perform() resizes the CI runner  (:87-92)
+    hold                        the terminate (production) and the IAM grant (iam) -> require_human; AdmissionError, the cloud call never fires  (:123-126)
+                                blast_radius > 1 would hold too  (policy.py:214-220); the drawing names both held actions on the hold branch
+    trail                       every attempt recorded: allow, require_human, require_human; trail.verify() True  (:209-221)
+    admit()   -> approve()      _decide() calls approve(action, policy=...) before anything else  (src/locus/control/admission.py:131-142, :203-210)
+    approve() -> allow          no rule fired: approve() returns allow when nothing triggered  (policy.py:249-250)
+                                labels() = {environment, kind, *tags}  (policy.py:95-97)
+    approve() -> hold           a label in require_human_for -> require_human  (policy.py:243-247);
+                                blast_radius > max_blast_radius -> require_human  (policy.py:214-220); strongest outcome wins (:256)
+    allow -> perform()          admit() awaits perform only after _decide() returned  (admission.py:143)
+    hold  -> AdmissionError     raised when the decision is not allowed and no approved_by was given  (admission.py:233-234);
+                                it carries the ApprovalDecision (admission.py:62-73)
+    both  -> AuditTrail         trail.record("action-admission", {action, asset, outcome, reason}) runs before the raise
+                                and before perform  (admission.py:212-232); each record is SHA-256 over seq, ts, event_type,
+                                payload, prev_hash  (audit.py:82-102, :297-329); trail.verify() walks the chain  (audit.py:344-446)
+  Styled by the .tl-dia classes in docs/stylesheets/locus.css; see docs/diagrams/README.md.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 486" role="img" aria-labelledby="title desc">
+  <title id="title">The cloud-ops gate</title>
+  <desc id="desc">The cloud-ops agent proposes a cloud mutation as an Action and hands it to admit() together with the side effect, the ControlPolicy and the AuditTrail. admit() calls approve(action, policy=...), which weighs the action's labels and blast radius against the policy. Resizing a staging CI runner, blast radius 1 with no production or iam label, is allowed: perform() resizes it. Terminating the production database, labelled production, and widening an IAM grant, labelled iam, are both held, as anything with a blast radius above 1 would be: admit() raises AdmissionError, the cloud call never fires, and the change waits for a human. Every decision, allow or require_human, is recorded on the hash-chained AuditTrail before perform() is awaited or the error is raised, and trail.verify() checks the chain.</desc>
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="arrowhead" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+
+  <!-- agent -> admit() -->
+  <path class="edge" marker-end="url(#ah)" d="M184,59 L350,59"/>
+  <rect class="label-bg" x="213" y="70" width="108" height="20" rx="4"/>
+  <text class="label" x="267" y="80">cloud mutation</text>
+
+  <!-- admit() -> approve(action, policy=...) -->
+  <path class="edge" marker-end="url(#ah)" d="M470,88 L470,122"/>
+
+  <!-- approve() -> allow -->
+  <path class="edge allow" marker-end="url(#ah)" d="M358,172 L156,172 Q144,172 144,184 L144,256"/>
+  <rect class="label-bg" x="141" y="128" width="220" height="20" rx="4"/>
+  <text class="label" x="251" y="138">allow: resize a staging CI runner</text>
+  <rect class="label-bg" x="138" y="148" width="226" height="20" rx="4"/>
+  <text class="label" x="251" y="158">blast radius 1, not production or iam</text>
+
+  <!-- approve() -> hold (require_human) -->
+  <path class="edge hold" marker-end="url(#ah)" d="M582,172 L784,172 Q796,172 796,184 L796,256"/>
+  <rect class="label-bg" x="569" y="128" width="240" height="20" rx="4"/>
+  <text class="label" x="689" y="138">hold: terminate prod DB or grant IAM</text>
+  <rect class="label-bg" x="577" y="148" width="224" height="20" rx="4"/>
+  <text class="label" x="689" y="158">production, iam, or blast radius > 1</text>
+
+  <!-- allow -> AuditTrail -->
+  <path class="edge" marker-end="url(#ah)" d="M264,287 L368,287 Q380,287 380,299 L380,356"/>
+  <rect class="label-bg" x="323" y="318" width="114" height="20" rx="4"/>
+  <text class="label" x="380" y="328">recorded: allow</text>
+
+  <!-- hold -> AuditTrail -->
+  <path class="edge" marker-end="url(#ah)" d="M676,287 L572,287 Q560,287 560,299 L560,356"/>
+  <rect class="label-bg" x="477" y="318" width="166" height="20" rx="4"/>
+  <text class="label" x="560" y="328">recorded: require_human</text>
+
+  <g class="node">
+    <rect x="24" y="30" width="160" height="58" rx="12"/>
+    <text x="104" y="49">Cloud-ops agent</text>
+    <text class="sub" x="104" y="70">proposes an Action</text>
+  </g>
+  <g class="node primary">
+    <rect x="352" y="30" width="236" height="58" rx="12"/>
+    <text x="470" y="49">admit()</text>
+    <text class="sub" x="470" y="70">action, perform, policy, trail</text>
+  </g>
+  <g class="decision node">
+    <polygon points="470,124 582,172 470,220 358,172"/>
+    <text x="470" y="162">approve()</text>
+    <text class="sub" x="470" y="183">action, policy</text>
+  </g>
+  <g class="node allow">
+    <rect x="24" y="258" width="240" height="58" rx="12"/>
+    <text x="144" y="277">allow</text>
+    <text class="sub" x="144" y="298">perform() resizes the CI runner</text>
+  </g>
+  <g class="node hold">
+    <rect x="676" y="258" width="240" height="58" rx="12"/>
+    <text x="796" y="277">hold</text>
+    <text class="sub" x="796" y="298">AdmissionError, nothing runs</text>
+  </g>
+  <g class="store node">
+    <path d="M350,364 A120,9 0 0 1 590,364 V416 A120,9 0 0 1 350,416 Z M350,364 A120,9 0 0 0 590,364"/>
+    <text x="470" y="383">AuditTrail</text>
+    <text class="sub" x="470" y="404">every decision, hash-chained</text>
+  </g>
+
+  <text class="note" x="470" y="452">ControlPolicy(require_verification_score=0.0, max_blast_radius=1, require_human_for={"production", "iam"})</text>
+  <text class="note" x="470" y="472">admit() records the decision before it awaits perform() or raises; trail.verify() checks the SHA-256 chain.</text>
+</svg>

@@ -89,6 +89,9 @@ html {
   /* Surface and text, beyond the four already declared above. */
   --tl-surface:        #FFFFFF;
   --tl-surface-raised: #FFFFFF;
+  /* Diagram lane bands. Light keeps the soft background; dark needs its own
+     step above the figure surface, which --tl-bg-soft equals there. */
+  --tl-lane-bg:        #F4F4F5;
   --tl-text-soft:      #52525B;
   --tl-text-mute:      #71717A;
   --tl-text-inverse:   #FFFFFF;
@@ -239,6 +242,7 @@ html {
 
   --tl-surface:        #1B1E26;
   --tl-surface-raised: #252932;
+  --tl-lane-bg:        #252932;
   --tl-text-soft:      #D3D3DB;
   --tl-text-mute:      #A1A1AA;
   --tl-text-inverse:   #18181B;
@@ -811,7 +815,7 @@ form.md-header__option {
     margin-left: 0.25rem;
   }
   .md-header__sdk-badge { font-size: 0.5rem; }
-  /* Drop the dark/light palette toggle on mobile (dark is the default now)
+  /* Drop the palette toggle on mobile (the scheme follows the system there)
      to free the width the brand title needs. */
   .md-header__option { display: none !important; }
   /* The palette form used to carry margin-left:auto (it right-aligned the
@@ -1539,7 +1543,7 @@ form.md-header__option {
   --md-code-hl-variable-color:    #4A434C;
   --md-code-hl-operator-color:    #78716C;
   --md-code-hl-punctuation-color: #99938D;
-  --md-code-hl-comment-color:     #948D86;
+  --md-code-hl-comment-color:     #6B6560; /* 5.2:1 on --tl-bg-soft (WCAG AA) */
   --md-code-hl-generic-color:     #4A434C;
 }
 [data-md-color-scheme="slate"] {
@@ -1729,16 +1733,19 @@ form.md-header__option {
   font-size: 1.08rem;
 }
 
-/* Dark-theme contrast: raise secondary copy, syntax comments, and code-action
-   icons above the subdued palette used by decorative chrome. */
+/* Dark-theme contrast: raise secondary copy, syntax comments (including
+   docstrings and hashbang lines), and code-action icons above the subdued
+   palette used by decorative chrome. */
 [data-md-color-scheme="slate"] {
   --locus-mute: #B4B4BC;
   --md-default-fg-color--lighter: #A1A1AA;
 }
 [data-md-color-scheme="slate"] .highlight .c,
 [data-md-color-scheme="slate"] .highlight .c1,
+[data-md-color-scheme="slate"] .highlight .ch,
 [data-md-color-scheme="slate"] .highlight .cm,
-[data-md-color-scheme="slate"] .highlight .cs {
+[data-md-color-scheme="slate"] .highlight .cs,
+[data-md-color-scheme="slate"] .highlight .sd {
   color: #B4B4BC;
 }
 [data-md-color-scheme="slate"] .md-code__button,
@@ -1922,11 +1929,14 @@ form.md-header__option {
 .md-typeset .tl-dia {
   /* Material sizes <figure> to fit-content; an SVG that is width:100% of a
      fit-content parent has nothing to resolve against and falls back to the
-     browser's 300px default. Give the figure the column width instead. */
+     browser's 300px default. Give the figure the column width instead.
+     Padding is kept small: every pixel of it is taken from the drawing, whose
+     labels are already at the small end of legible in a 48rem column. */
+  position: relative;
   width: 100%;
   margin: var(--tl-space-xl) auto;
-  max-width: 860px;
-  padding: var(--tl-space-lg);
+  max-width: 960px;
+  padding: var(--tl-space-md) var(--tl-space-sm);
   border: 1px solid var(--tl-rule);
   border-radius: var(--tl-radius-lg);
   background: var(--tl-surface);
@@ -1947,7 +1957,11 @@ form.md-header__option {
   fill: var(--tl-text-mute);
 }
 .tl-dia .node.primary rect { fill: var(--tl-accent-subtle); stroke: var(--tl-accent); stroke-width: 2; }
-.tl-dia .node.primary text { fill: var(--tl-accent); }
+/* --tl-link rather than --tl-accent: on the --tl-accent-subtle fill the light
+   accent measures 4.23:1, under the 4.5:1 floor for text this small. The link
+   token is the same hue at 5.95:1 in light and resolves to the accent in dark
+   (4.96:1), so the dark scheme is unchanged. */
+.tl-dia .node.primary text { fill: var(--tl-link); }
 .tl-dia .node.primary text.sub { fill: var(--tl-text-soft); }
 .tl-dia .node.optional rect { stroke-dasharray: 6 4; }
 .tl-dia .node.end rect { fill: var(--tl-text); stroke: var(--tl-text); }
@@ -1967,13 +1981,19 @@ form.md-header__option {
 .tl-dia .edge.allow { stroke: var(--tl-allow-fg); }
 .tl-dia .edge.hold  { stroke: var(--tl-hold-fg); }
 .tl-dia .edge.deny  { stroke: var(--tl-deny-fg); }
-.tl-dia .arrowhead { fill: var(--tl-text-mute); }
+/* An arrowhead takes the colour of the edge it ends (context-stroke), so an
+   allow/hold/deny path stays coloured right up to its node. The first fill is
+   the fallback for engines without marker context paint. */
+.tl-dia .arrowhead { fill: var(--tl-text-mute); fill: context-stroke; }
 .tl-dia .label { font-size: 12.5px; font-weight: 500; fill: var(--tl-text-soft); text-anchor: middle; dominant-baseline: middle; }
 .tl-dia .label-bg { fill: var(--tl-surface); }
+/* A label that sits on a lane band takes the band's colour, so the knockout
+   hides the edge under it without showing as a lighter rectangle. */
+.tl-dia .label-bg.on-lane { fill: var(--tl-lane-bg); }
 
 .tl-dia .store path { fill: var(--tl-bg); stroke: var(--tl-rule-strong); stroke-width: 1.5; }
 .tl-dia .decision polygon { fill: var(--tl-bg); stroke: var(--tl-rule-strong); stroke-width: 1.5; }
-.tl-dia .lane rect { fill: var(--tl-bg-soft); stroke: var(--tl-rule-subtle); }
+.tl-dia .lane rect { fill: var(--tl-lane-bg); stroke: var(--tl-rule-subtle); }
 .tl-dia .lane-title {
   font-family: var(--locus-mono); font-size: 11px; font-weight: 500;
   letter-spacing: 0.08em; text-transform: uppercase; fill: var(--tl-text-mute);
@@ -2390,3 +2410,215 @@ form.md-header__option {
   text-transform: uppercase;
   color: var(--locus-mute);
 }
+
+/* ===================================================================
+   Facts row — build facts, requirements and catalogue status as a row of
+   small tiles instead of a two-column key/value table. Markup:
+     <dl class="locus-facts" markdown="block">
+       <div markdown="block"><dt>Label</dt><dd markdown="span">Value</dd></div>
+     </dl>
+   Tiles wrap on narrow screens; labels are the tagline pattern, values are
+   body text. Status colours are not used here: these are facts, not decisions.
+   =================================================================== */
+.md-typeset dl.locus-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--tl-space-xs) var(--tl-space-sm);
+  margin: var(--tl-space-md) 0 var(--tl-space-lg);
+}
+.md-typeset dl.locus-facts > div {
+  flex: 1 1 11rem;
+  min-width: 0;
+  margin: 0;
+  padding: var(--tl-space-xs) var(--tl-space-sm);
+  border: 1px solid var(--tl-rule);
+  border-radius: var(--tl-radius-md);
+  background: var(--tl-surface);
+}
+.md-typeset dl.locus-facts dt {
+  margin: 0 0 2px;
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--tl-text-mute);
+}
+.md-typeset dl.locus-facts dd {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--tl-text);
+}
+.md-typeset dl.locus-facts dd code { font-size: 0.66rem; }
+
+/* ===================================================================
+   Copy page — the button docs/javascripts/copy-page.js adds beside the
+   page title. It copies the page's Markdown twin (…/index.md, written by
+   hooks/llms_txt.py) and offers the raw file and llms.txt in a menu. Floats
+   right next to Material's edit/view icons.
+   =================================================================== */
+.md-content__inner .locus-copy-page {
+  position: relative;
+  float: right;
+  display: inline-flex;
+  align-items: stretch;
+  margin: 0.45rem 0 0.4rem 0.6rem;
+  font-family: var(--locus-sans);
+}
+.locus-copy-page__btn,
+.locus-copy-page__more {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0.28rem 0.6rem;
+  border: 1px solid var(--tl-rule);
+  background: var(--tl-surface);
+  color: var(--tl-text-soft);
+  font: 600 0.62rem/1.2 var(--locus-sans);
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.locus-copy-page__btn { border-radius: var(--tl-radius-pill) 0 0 var(--tl-radius-pill); }
+.locus-copy-page__more { border-left: 0; border-radius: 0 var(--tl-radius-pill) var(--tl-radius-pill) 0; padding: 0.28rem 0.45rem; }
+.locus-copy-page__btn:hover, .locus-copy-page__more:hover,
+.locus-copy-page__btn:focus-visible, .locus-copy-page__more:focus-visible {
+  border-color: var(--tl-accent);
+  color: var(--tl-accent);
+  outline: none;
+}
+.locus-copy-page__btn svg, .locus-copy-page__more svg { width: 0.8rem; height: 0.8rem; fill: currentColor; }
+.locus-copy-page__btn.is-done { border-color: var(--tl-allow-border); color: var(--tl-allow-fg); background: var(--tl-allow-bg); }
+.locus-copy-page__btn.is-failed { border-color: var(--tl-deny-border); color: var(--tl-deny-fg); background: var(--tl-deny-bg); }
+.md-typeset .locus-copy-page__menu {
+  position: absolute;
+  top: calc(100% + 0.3rem);
+  right: 0;
+  z-index: 4;
+  min-width: 11rem;
+  margin: 0;
+  padding: 0.3rem;
+  list-style: none;
+  border: 1px solid var(--tl-rule);
+  border-radius: var(--tl-radius-md);
+  background: var(--tl-surface);
+  box-shadow: 0 12px 32px -12px rgba(20, 16, 24, 0.35);
+}
+.md-typeset .locus-copy-page__menu[hidden] { display: none; }
+.md-typeset .locus-copy-page__menu li { margin: 0; padding: 0; }
+.md-typeset .locus-copy-page__menu a {
+  display: block;
+  padding: 0.4rem 0.7rem;
+  border-radius: var(--tl-radius-sm);
+  color: var(--tl-text);
+  font-size: 0.66rem;
+  text-decoration: none;
+}
+.md-typeset .locus-copy-page__menu a:hover,
+.md-typeset .locus-copy-page__menu a:focus-visible { background: var(--tl-accent-subtle); color: var(--tl-accent); outline: none; }
+/* Material's own content buttons float right too; keep the cluster aligned. */
+.md-content__inner > .md-content__button { margin-top: 0.45rem; }
+
+/* Identifiers in table cells never break mid-token. Material's code spans use
+   word-break: break-word, which turned `SlidingWindowManager` into four
+   fragments in a narrow column; a table that needs the width scrolls inside
+   Material's scroll wrapper instead. */
+.md-typeset table:not([class]) code { white-space: nowrap; }
+
+/* The landing page is a marketing page: no edit/view-source icons over the hero. */
+.md-content__inner:has(> .locus-hero) > .md-content__button,
+.md-content__inner:has(> div > .locus-hero) > .md-content__button { display: none; }
+
+/* ===================================================================
+   Page width. Material's 61rem grid leaves a 43rem article column once both
+   sidebars are open, which rendered a 940-unit diagram at two-thirds scale and
+   pushed four-column tables into horizontal scroll. 68rem fits a 1280px laptop
+   with room to spare and gives the column about 50rem.
+   =================================================================== */
+.md-grid { max-width: 68rem; }
+
+/* ===================================================================
+   Diagram expand. docs/javascripts/diagram-zoom.js adds an "Expand" button to
+   every inlined diagram and opens a copy of the SVG in a full-width overlay on
+   click, so a dense drawing can be read at full size without widening the page.
+   The overlay reuses the figure styling, so it themes with the scheme.
+   =================================================================== */
+.md-typeset .tl-dia__expand {
+  position: absolute;
+  top: 0.45rem;
+  right: 0.45rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.22rem 0.5rem;
+  border: 1px solid var(--tl-rule);
+  border-radius: var(--tl-radius-pill);
+  background: var(--tl-surface);
+  color: var(--tl-text-mute);
+  font: 600 0.6rem/1.2 var(--locus-sans);
+  cursor: zoom-in;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.md-typeset .tl-dia:hover .tl-dia__expand,
+.md-typeset .tl-dia__expand:focus-visible { opacity: 1; outline: none; }
+.md-typeset .tl-dia__expand:hover, .md-typeset .tl-dia__expand:focus-visible { color: var(--tl-accent); border-color: var(--tl-accent); }
+.md-typeset .tl-dia__expand svg { width: 0.75rem; height: 0.75rem; fill: currentColor; }
+@media (hover: none) { .md-typeset .tl-dia__expand { opacity: 1; } }
+
+.tl-dia-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  background: rgba(17, 19, 24, 0.72);
+  backdrop-filter: blur(2px);
+  cursor: zoom-out;
+}
+.tl-dia-overlay__panel {
+  width: min(96vw, 1480px);
+  max-height: 92vh;
+  overflow: auto;
+  padding: var(--tl-space-lg);
+  border: 1px solid var(--tl-rule);
+  border-radius: var(--tl-radius-lg);
+  background: var(--tl-surface);
+  box-shadow: 0 24px 80px -24px rgba(0, 0, 0, 0.6);
+  cursor: default;
+}
+.tl-dia-overlay__panel svg { display: block; width: 100%; height: auto; }
+.tl-dia-overlay__panel svg text { font-family: var(--locus-sans); fill: var(--tl-text); text-rendering: geometricPrecision; }
+.tl-dia-overlay__close {
+  position: fixed;
+  top: 1rem;
+  right: 1.25rem;
+  padding: 0.4rem 0.8rem;
+  border: 1px solid var(--tl-rule);
+  border-radius: var(--tl-radius-pill);
+  background: var(--tl-surface);
+  color: var(--tl-text);
+  font: 600 0.68rem/1.2 var(--locus-sans);
+  cursor: pointer;
+}
+/* The overlay panel is outside .tl-dia, so give it the same diagram classes. */
+.tl-dia-overlay__panel .node rect { fill: var(--tl-bg); stroke: var(--tl-rule-strong); stroke-width: 1.5; }
+
+/* Inside the expand overlay the figure rules still apply (the panel carries
+   .tl-dia and .md-typeset); lift the inline width cap so the drawing fills it. */
+.md-typeset.tl-dia-overlay__panel { max-width: none; margin: 0; }
+
+/* Feature-card grids stay three across. Material sizes grid cards from a 16rem
+   minimum, which on the wider page grid flows nine cards as 4 + 4 + 1 and
+   leaves one card alone on its row; a 19rem minimum gives three columns on a
+   desktop landing page and still collapses to two and one on narrow screens. */
+.md-typeset .grid.cards.locus-feature-cards {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr));
+}
+
+/* The H1 permalink is the page's own URL and is invisible until hover, but it
+   still takes a slot at the end of the title line; on a title that fills the
+   column it wraps alone onto a second, empty-looking line. Drop it on H1 only. */
+.md-typeset h1 .headerlink { display: none; }

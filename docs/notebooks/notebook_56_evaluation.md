@@ -15,7 +15,7 @@ negative case that guards against the agent inventing a regulation
 citation no facts support (OWASP LLM09, Misinformation). Run it on every
 prompt or model change before it reaches production.
 
-Run it (defaults to the bundled mock model; set `LOCUS_MODEL_PROVIDER` to `openai` / `anthropic` for a live model):
+Run it (OCI Generative AI with an OCI profile, otherwise the bundled mock model; set `LOCUS_MODEL_PROVIDER` to force a provider):
 
     python examples/notebook_56_evaluation.py
 

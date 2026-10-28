@@ -38,6 +38,7 @@ for a human approver. Both decisions are recorded on the trail.
 The payout is a local ledger stub, so the script needs no credentials.
 
 Run it (fully offline — no model, no provider, no network):
+
     python examples/notebook_71_payment_refund_gate.py
 
 ## Output

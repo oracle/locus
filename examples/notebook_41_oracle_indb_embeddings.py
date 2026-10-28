@@ -69,7 +69,7 @@ On-premises, copy the file to a directory object and load it from there::
 And the schema running this notebook needs the grants::
 
     GRANT EXECUTE ON DBMS_VECTOR_CHAIN TO locus_app;
-    GRANT MINING MODEL SELECT ON ALL_MINILM_L12_V2 TO locus_app;
+    GRANT SELECT ON MINING MODEL ALL_MINILM_L12_V2 TO locus_app;
 
 The notebook accepts ``OCI_INDB_MODEL`` as an env override for the
 model name (default ``ALL_MINILM_L12_V2``) and ``OCI_INDB_DIM`` for its

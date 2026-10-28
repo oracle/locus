@@ -1,18 +1,18 @@
 # OCI Generative AI
 
-OCI Generative AI is Locus's **day-1 target** and the most capable provider
-in the Oracle Generative AI Agentic Harness. It exposes
-90+ models — OpenAI commercial families, Meta Llama, Anthropic Claude,
-Google Gemini, xAI Grok, Mistral, and Cohere — through Oracle's hosted
-inference service. **When OCI ships a new model id, the SDK already
-supports it** — you just pass the new id.
+OCI Generative AI is the primary provider in Locus, the Oracle
+Generative AI Agentic Harness. It exposes OpenAI commercial families,
+Meta Llama, Anthropic Claude, Google Gemini, xAI Grok, Mistral, and
+Cohere through Oracle's hosted inference service. New OCI model ids work
+without an SDK update: pass the new id as the model string.
 
 The headline value over the direct providers:
 
 - **One auth surface.** Same `OCI_PROFILE` mechanism on a laptop, in
   CI, or running on OCI Compute / OKE / Functions.
-- **Day-0 model coverage.** New OpenAI / Anthropic / Llama models
-  reach OCI on the day they're released.
+- **New models as OCI lists them.** New OpenAI, Anthropic and Llama
+  model ids are usable as soon as OCI publishes them; no SDK update is
+  needed.
 - **No per-provider API keys.** GPT, Claude, Llama all bill through
   your OCI tenancy.
 - **Dedicated AI Cluster (DAC) endpoints** for predictable latency
@@ -27,44 +27,31 @@ The headline value over the direct providers:
 | One auth surface across laptop, CI, OCI workloads | ✓ |
 | Provisioned-capacity inference via [DAC](../../how-to/oci-dac.md) | ✓ |
 | To avoid managing per-provider API keys | ✓ |
-| Bleeding-edge OpenAI features the day they ship | use [OpenAI](openai.md) direct — OCI sometimes lags by hours/days |
+| Latest OpenAI features on release day | use [OpenAI](openai.md) direct; OCI may lag the OpenAI release |
 | Local development without auth setup | use [Ollama or another OpenAI-compatible endpoint](openai-compatible.md) instead |
 
-## Two transports under one prefix
+## Three transports under one prefix
 
-OCI Generative AI exposes its inference service in three ways. The SDK
-speaks all three and **picks the right one from the model id** — you
-don't have to know which transport a model uses to call it (the
-`oci:` prefix routes by family), and you can also pick a specific
-transport explicitly when you instantiate the model class yourself.
+OCI Generative AI exposes its inference service in three ways: the
+OpenAI-compatible chat completions API, the OpenAI-compatible Responses
+API, and the native OCI Generative AI Python SDK. Locus speaks all
+three. The `oci:` prefix **picks the transport from the model id** —
+Dedicated AI Cluster endpoints and Cohere models go through the SDK,
+every other id through the OpenAI-compatible chat API — so you don't
+have to know which transport a model uses to call it. The Responses
+transport is opt-in: the prefix never selects it. You can also pick any
+transport explicitly by instantiating its model class yourself.
 
-```text
-oci:                                 (one prefix · three transports)
-│
-├── V1 transport       · OCIChatCompletionsModel       /openai/v1/chat/completions
-│   ├─ openai.*       — OpenAI commercial chat + reasoning
-│   ├─ meta.*         — Meta Llama family
-│   ├─ xai.*          — xAI Grok family
-│   ├─ mistral.*      — Mistral family
-│   ├─ google.*       — Google Gemini family
-│   └─ anthropic.*    — Anthropic Claude on OCI (no separate API key)
-│
-├── Responses          · OCIResponsesModel     /openai/v1/responses    (opt-in)
-│   ├─ openai.gpt-5.5-pro  — Responses-only on OCI today
-│   └─ any v1 model        — when you want server-side continuation
-│                            or need ZDR-safe stateless mode (store=False)
-│
-├── SDK transport      · OCIModel              OCI Generative AI Python SDK
-│   └─ cohere.command-*    — Cohere Command R and Command A (native API only)
-│
-└── DAC endpoints      · OCIModel              DedicatedServingMode
-    └─ ocid1.generativeaiendpoint....          — provisioned capacity
-```
+{{ locus_diagram oci-transports }}
 
 ### V1 transport — `/openai/v1` (OpenAI-compatible)
 
-`OCIChatCompletionsModel` calls
-`https://inference.generativeai.<region>.oci.oraclecloud.com/openai/v1/chat/completions`.
+`OCIChatCompletionsModel` calls the OpenAI-compatible chat completions
+endpoint:
+
+```text
+https://inference.generativeai.<region>.oci.oraclecloud.com/openai/v1/chat/completions
+```
 
 This is the **default path for the majority of OCI models**:
 OpenAI commercial, Meta Llama, xAI Grok, Mistral, Google Gemini, and
@@ -75,13 +62,16 @@ OpenAI-style function calling, structured output, vision input.
 ```python
 agent = Agent(model="oci:openai.gpt-5.5")           # OpenAI commercial
 agent = Agent(model="oci:meta.llama-3.3-70b-instruct")  # Meta Llama
-agent = Agent(model="oci:anthropic.claude-sonnet")  # Claude — no Anthropic key needed
+agent = Agent(model="oci:anthropic.claude-sonnet")  # Claude, no Anthropic key
 ```
 
 ### Responses transport — `/openai/v1/responses` (opt-in)
 
-`OCIResponsesModel` calls
-`https://inference.generativeai.<region>.oci.oraclecloud.com/openai/v1/responses`.
+`OCIResponsesModel` calls the OpenAI-compatible Responses endpoint:
+
+```text
+https://inference.generativeai.<region>.oci.oraclecloud.com/openai/v1/responses
+```
 
 This is the **opt-in path** for Responses-only models
 (`openai.gpt-5.5-pro` today) and for runs where you want OCI to hold
@@ -115,11 +105,12 @@ trade-off matrix.
 
 ### SDK transport — OCI native API
 
-`OCIModel` calls the OCI Generative AI Python SDK directly. It's
-used **only for Cohere** (`cohere.command-r-*` and `cohere.command-a-*`),
-which OCI exposes through the native API rather than the OpenAI-compatible
-gateway. Cohere has its own request shape (separate `message` +
-`chat_history` instead of a flat `messages` array).
+`OCIModel` calls the OCI Generative AI Python SDK directly. It's used
+for Cohere (`cohere.command-r-*` and `cohere.command-a-*`), which OCI
+exposes through the native API rather than the OpenAI-compatible
+gateway, and for Dedicated AI Cluster endpoints (next section). Cohere
+has its own request shape (separate `message` + `chat_history` instead
+of a flat `messages` array).
 
 ```python
 agent = Agent(model="oci:cohere.command-r-plus-08-2024")  # SDK transport
@@ -141,8 +132,8 @@ agent = Agent(
 )
 ```
 
-[Full DAC how-to →](../../how-to/oci-dac.md) — covers Qwen-on-DAC,
-streaming, tool-call quirks per model.
+The [DAC how-to](../../how-to/oci-dac.md) covers Qwen on a DAC,
+streaming, and per-model tool-call differences.
 
 Note the spelling: `OCIModel` (and the `oci:` string factory) takes
 `profile_name=` (with `profile=` accepted as an alias), while
@@ -155,11 +146,14 @@ model id and chooses for you:
 
 | Model id pattern | Transport |
 |---|---|
-| `ocid1.generativeaiendpoint....` | SDK + `DedicatedServingMode` (DAC) |
-| `cohere.command-r-*` | SDK + `OnDemandServingMode` |
+| `ocid1.generativeaiendpoint....` | SDK, `DedicatedServingMode` (DAC) |
+| `cohere.*` | SDK, `OnDemandServingMode` |
 | `openai.*` / `meta.*` / `xai.*` / `mistral.*` / `google.*` / `anthropic.*` | V1 (OpenAI-compatible) |
 
-Need to override? Set `LOCUS_OCI_TRANSPORT=v1` or `LOCUS_OCI_TRANSPORT=sdk`.
+Need to override? Instantiate the transport class directly —
+`OCIChatCompletionsModel` for V1, `OCIModel` for the SDK — instead of the
+`oci:` prefix. The notebook harness (`examples/config.py`) also honours
+`LOCUS_OCI_TRANSPORT=v1|sdk`.
 
 For the **Responses transport**, instantiate `OCIResponsesModel`
 explicitly — it's opt-in, not selected by prefix. See the
@@ -171,12 +165,12 @@ explicitly — it's opt-in, not selected by prefix. See the
 Same `OCI_PROFILE` env var everywhere. `OCI_AUTH_TYPE` selects the
 signer:
 
-| Auth type | Where it works | What you set |
+| `OCI_AUTH_TYPE` | Where it works | Notes |
 |---|---|---|
-| `api_key` | Laptop with `~/.oci/config` profile | `OCI_AUTH_TYPE=api_key`, `OCI_PROFILE=DEFAULT` |
-| `session_token` | Federated SSO laptop | `oci session authenticate` first; then `OCI_AUTH_TYPE=session_token` |
-| `instance_principal` | OCI Compute · OKE pods | `OCI_AUTH_TYPE=instance_principal` (no key file needed) |
-| `resource_principal` | OCI Functions · serverless | `OCI_AUTH_TYPE=resource_principal` (provider-injected) |
+| `api_key` | Laptop with a `~/.oci/config` profile | Also set `OCI_PROFILE` to the profile name |
+| `session_token` | Federated SSO laptop | Run `oci session authenticate` first |
+| `instance_principal` | OCI Compute, OKE pods | No key file needed |
+| `resource_principal` | OCI Functions, serverless | Provider-injected |
 
 ```bash
 export OCI_PROFILE=DEFAULT
@@ -184,21 +178,26 @@ export OCI_AUTH_TYPE=api_key
 ```
 
 **No code change between environments — only the env var differs.**
-That's the value: prototype on your laptop, deploy to OKE, route
-through Compute. Same `Agent` instance, same model id, three
-different signers.
+The same `Agent` code and model id run on a laptop, on OKE, and on
+Compute; the environment selects the signer.
 
 ## Region
 
-OCI Generative AI is offered in `us-chicago-1`, `eu-frankfurt-1`,
-`uk-london-1`, `sa-saopaulo-1`, and a growing list. The region baked
-into your profile is the default; override with `OCI_REGION`:
+OCI Generative AI is offered in a growing list of regions, including:
+
+- `us-chicago-1`
+- `eu-frankfurt-1`
+- `uk-london-1`
+- `sa-saopaulo-1`
+
+The region baked into your profile is the default; override with
+`OCI_REGION`:
 
 ```bash
 export OCI_REGION=us-chicago-1
 ```
 
-## Practical wiring — laptop dev → OKE production
+## Practical wiring: laptop to OKE
 
 ```python
 # Same code on your laptop and on OKE:
@@ -219,26 +218,33 @@ export OCI_AUTH_TYPE=instance_principal
 # (no profile / key file — OKE injects the principal at runtime)
 ```
 
-The agent doesn't care. That's the OCI provider's whole pitch.
+The application code is unchanged; only the signer differs.
 
 ## Common gotchas
 
 | Symptom | Likely cause |
 |---|---|
-| `404 Not Authorized` (yes, 404 not 403) | OCI's standard permission-denied disguise. Your principal lacks `inspect generative-ai-endpoints` policy in the compartment. |
-| `model_id not found` | Model id doesn't exist in your tenancy's region. Check `oci generative-ai model list --region <region>`. |
+| `404 Not Authorized` | OCI returns 404 rather than 403 for authorization failures. The principal lacks the `inspect generative-ai-endpoints` policy in the compartment. |
+| `model_id not found` | Model id doesn't exist in your tenancy's region. List the models available in the region with the OCI CLI (below). |
 | `compartment_id is required` | DAC endpoints enforce it even when on-demand wouldn't. Pass `compartment_id=` on the model. |
 | Streaming yields one big chunk | DAC endpoint rejected `is_stream`. The fall-back path swallows the failure and emits the full response as one chunk; check `OCI_LOG_REQUESTS=1`. |
-| Cohere R model fails on V1 | Force the SDK transport: `LOCUS_OCI_TRANSPORT=sdk`. |
+| Cohere model fails on V1 | The `oci:` prefix already routes `cohere.*` ids to the SDK transport; if you built `OCIChatCompletionsModel` yourself, use `OCIModel` (in the notebooks, `LOCUS_OCI_TRANSPORT=sdk`). |
+
+To list the models available in a region:
+
+```bash
+oci generative-ai model-collection list-models \
+  --compartment-id <compartment-ocid> --region <region>
+```
 
 ## Source
 
-| | |
+| Component | File |
 |---|---|
-| `OCIChatCompletionsModel` (V1) | [`src/locus/models/providers/oci/openai_compat.py`](https://github.com/oracle/locus/blob/main/src/locus/models/providers/oci/openai_compat.py) |
-| `OCIModel` (SDK + DAC) | [`src/locus/models/providers/oci/__init__.py`](https://github.com/oracle/locus/blob/main/src/locus/models/providers/oci/__init__.py) |
-| Per-family request builders | [`src/locus/models/providers/oci/models/`](https://github.com/oracle/locus/tree/main/src/locus/models/providers/oci/models) |
-| Routing | [`src/locus/models/registry.py`](https://github.com/oracle/locus/blob/main/src/locus/models/registry.py) — `_make_oci()` |
+| `OCIChatCompletionsModel` (V1) | [`oci/openai_compat.py`](https://github.com/oracle/locus/blob/main/src/locus/models/providers/oci/openai_compat.py) |
+| `OCIModel` (SDK + DAC) | [`oci/__init__.py`](https://github.com/oracle/locus/blob/main/src/locus/models/providers/oci/__init__.py) |
+| Per-family request builders | [`oci/models/`](https://github.com/oracle/locus/tree/main/src/locus/models/providers/oci/models) |
+| Routing | [`registry.py`](https://github.com/oracle/locus/blob/main/src/locus/models/registry.py), `_make_oci()` |
 
 ## See also
 
@@ -251,7 +257,7 @@ The agent doesn't care. That's the OCI provider's whole pitch.
 - [OCI Dedicated AI Cluster (DAC)](../../how-to/oci-dac.md) — provisioned-capacity endpoints.
 - [OpenAI](openai.md) — direct OpenAI when OCI lags.
 - [Anthropic](anthropic.md) — Claude direct when OCI lags.
-- [OpenAI-compatible endpoints](openai-compatible.md) — Ollama, vLLM and friends for local development before swapping to OCI.
+- [OpenAI-compatible endpoints](openai-compatible.md) — Ollama, vLLM and other OpenAI-compatible servers for local development before moving to OCI.
 
 ### Oracle reference docs
 

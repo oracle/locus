@@ -68,7 +68,7 @@ We welcome:
 ```bash
 # Clone the repository
 git clone https://github.com/oracle/locus.git
-cd locus-sdk
+cd locus
 
 # Install Hatch if needed
 pip install hatch

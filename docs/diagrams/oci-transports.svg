@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  How the oci: prefix picks an OCI Generative AI transport, per the string
+  factory _make_oci in locus/models/registry.py (:132-151), rules read top-down:
+    oci: -> DAC endpoint    id.lower().startswith("ocid1.generativeaiendpoint.") -> OCIModel(model_id=…)   (:135-136)
+    oci: -> SDK transport   id.lower().startswith("cohere.")                     -> OCIModel(model_id=…)   (:140-143)
+    oci: -> V1 transport    everything else; the source names OpenAI / Meta / xAI / Mistral / Gemini, and
+                            anthropic.* ids take the same path (no rule matches them)
+                            -> OCIChatCompletionsModel(model=…)                                            (:123, :151)
+    Responses transport     never returned by _make_oci: OCIResponsesModel is constructed directly, opt-in
+                            (locus/models/__init__.py:16, locus/models/providers/oci/responses.py:119)
+    OCIModel                -> GenerativeAiInferenceClient.chat() with ChatDetails.serving_mode from
+                            OCIClient.get_serving_mode: id starts with "ocid" -> DedicatedServingMode(endpoint_id=…),
+                            otherwise OnDemandServingMode(model_id=…)
+                            (providers/oci/client.py:284-300, :311; providers/oci/__init__.py:268-270, :370-372)
+    OCIChatCompletionsModel -> /openai/v1/chat/completions on inference.generativeai.<region>.oci.oraclecloud.com
+                            (providers/oci/openai_compat.py:22, :76-78, :387)
+    OCIResponsesModel       -> /openai/v1/responses, same /openai/v1 base URL
+                            (providers/oci/responses.py:233, :350, :414)
+  Styled by the .tl-dia classes in docs/stylesheets/locus.css; see docs/diagrams/README.md.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 936 456" role="img" aria-labelledby="title desc">
+  <title id="title">How the oci: prefix picks a transport</title>
+  <desc id="desc">The oci: prefix reads the model id and routes it to one of three transports. An id that starts with ocid1.generativeaiendpoint, a Dedicated AI Cluster endpoint, goes to OCIModel over the OCI Generative AI Python SDK with DedicatedServingMode. An id that starts with cohere. also goes to OCIModel over the Python SDK, with OnDemandServingMode. Any other id, such as openai, meta, xai, mistral, google or anthropic models, goes to OCIChatCompletionsModel, which calls the OpenAI-compatible /openai/v1/chat/completions endpoint. The fourth transport, OCIResponsesModel against /openai/v1/responses, is opt-in: the prefix never selects it, you construct the class yourself.</desc>
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="arrowhead" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+
+  <g class="lane">
+    <rect x="436" y="24" width="476" height="188" rx="14"/>
+    <text class="lane-title" x="456" y="48">OCI Generative AI Python SDK</text>
+  </g>
+  <g class="lane">
+    <rect x="436" y="226" width="476" height="188" rx="14"/>
+    <text class="lane-title" x="456" y="250">OpenAI-compatible API</text>
+  </g>
+
+  <!-- oci: -> DAC endpoint -->
+  <path class="edge" marker-end="url(#ah)" d="M174,169 C312,169 312,91 448,91"/>
+  <rect class="label-bg" x="220" y="120" width="182" height="20" rx="4"/>
+  <text class="label" x="311" y="130">ocid1.generativeaiendpoint…</text>
+
+  <!-- oci: -> SDK transport -->
+  <path class="edge" marker-end="url(#ah)" d="M174,169 L448,169"/>
+  <rect class="label-bg" x="362" y="180" width="64" height="20" rx="4"/>
+  <text class="label" x="394" y="190">cohere.*</text>
+
+  <!-- oci: -> V1 transport -->
+  <path class="edge" marker-end="url(#ah)" d="M174,169 C312,169 312,293 448,293"/>
+  <rect class="label-bg" x="270" y="216" width="82" height="20" rx="4"/>
+  <text class="label" x="311" y="226">any other id</text>
+  <rect class="label-bg" x="217" y="236" width="188" height="20" rx="4"/>
+  <text class="label" x="311" y="246">openai.* meta.* xai.* mistral.*</text>
+  <rect class="label-bg" x="245" y="256" width="132" height="20" rx="4"/>
+  <text class="label" x="311" y="266">google.* anthropic.*</text>
+
+  <!-- explicit class -> Responses transport -->
+  <path class="edge dashed" marker-end="url(#ah)" d="M174,371 L448,371"/>
+  <rect class="label-bg" x="287" y="382" width="48" height="20" rx="4"/>
+  <text class="label" x="311" y="392">opt-in</text>
+
+  <!-- transport -> what it calls -->
+  <path class="edge" marker-end="url(#ah)" d="M650,91 L688,91"/>
+  <path class="edge" marker-end="url(#ah)" d="M650,169 L688,169"/>
+  <path class="edge" marker-end="url(#ah)" d="M650,293 L688,293"/>
+  <path class="edge" marker-end="url(#ah)" d="M650,371 L688,371"/>
+
+  <g class="node primary">
+    <rect x="24" y="140" width="150" height="58" rx="12"/>
+    <text x="99" y="159">oci: prefix</text>
+    <text class="sub" x="99" y="180">model="oci:&lt;id&gt;"</text>
+  </g>
+  <g class="node optional">
+    <rect x="24" y="342" width="150" height="58" rx="12"/>
+    <text x="99" y="361">Explicit class</text>
+    <text class="sub" x="99" y="382">OCIResponsesModel</text>
+  </g>
+
+  <g class="node">
+    <rect x="450" y="62" width="200" height="58" rx="12"/>
+    <text x="550" y="81">DAC endpoint</text>
+    <text class="sub" x="550" y="102">OCIModel</text>
+  </g>
+  <g class="node">
+    <rect x="450" y="140" width="200" height="58" rx="12"/>
+    <text x="550" y="159">SDK transport</text>
+    <text class="sub" x="550" y="180">OCIModel</text>
+  </g>
+  <g class="node">
+    <rect x="450" y="264" width="200" height="58" rx="12"/>
+    <text x="550" y="283">V1 transport</text>
+    <text class="sub" x="550" y="304">OCIChatCompletionsModel</text>
+  </g>
+  <g class="node optional">
+    <rect x="450" y="342" width="200" height="58" rx="12"/>
+    <text x="550" y="361">Responses transport</text>
+    <text class="sub" x="550" y="382">OCIResponsesModel</text>
+  </g>
+
+  <g class="node"><rect x="690" y="77" width="212" height="28" rx="8"/><text class="sub" x="796" y="91">DedicatedServingMode</text></g>
+  <g class="node"><rect x="690" y="155" width="212" height="28" rx="8"/><text class="sub" x="796" y="169">OnDemandServingMode</text></g>
+  <g class="node"><rect x="690" y="279" width="212" height="28" rx="8"/><text class="sub" x="796" y="293">/openai/v1/chat/completions</text></g>
+  <g class="node"><rect x="690" y="357" width="212" height="28" rx="8"/><text class="sub" x="796" y="371">/openai/v1/responses</text></g>
+
+  <text class="note" x="468" y="440">The prefix never selects Responses: construct OCIResponsesModel yourself. Any transport can also be built directly from its class.</text>
+</svg>

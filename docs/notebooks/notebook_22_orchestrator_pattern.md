@@ -41,9 +41,10 @@ This notebook covers:
 python examples/notebook_22_orchestrator_pattern.py
 ```
 
-The default provider is the bundled mock model. Set `LOCUS_MODEL_PROVIDER`
-(openai / anthropic) and credentials to use a live model. Set
-`LOCUS_MODEL_PROVIDER=mock` for offline runs.
+Model choice comes from `examples/config.py`: OCI Generative AI when
+`~/.oci/config` has a usable profile, otherwise the bundled mock model, so the
+example also runs offline with no credentials. Set `LOCUS_MODEL_PROVIDER`
+(`oci`, `openai`, `anthropic` or `mock`) to force one.
 
 ## Source
 

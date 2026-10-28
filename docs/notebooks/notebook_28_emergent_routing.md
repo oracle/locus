@@ -26,13 +26,10 @@ agents that touch production infrastructure.
   side. Rows marked ``≠`` are where the two modes disagreed.
 
 Run it:
+
     .venv/bin/python examples/notebook_28_emergent_routing.py
 
-It needs a live model: the router's first step fills a structured
-``GoalFrame``, which the bundled mock model cannot produce, so under mock the
-notebook explains that and exits. Set LOCUS_MODEL_PROVIDER=openai (or
-anthropic, or any registry provider with LOCUS_MODEL_ID) and the matching
-credentials.
+It needs a live model: the router's first step fills a structured ``GoalFrame``, which the bundled mock model cannot produce, so without an OCI profile or ``LOCUS_MODEL_PROVIDER`` the notebook explains that and exits. An OCI profile is enough; ``LOCUS_MODEL_PROVIDER`` with ``LOCUS_MODEL_ID`` and the matching credentials forces another provider.
 
 Prerequisites:
 

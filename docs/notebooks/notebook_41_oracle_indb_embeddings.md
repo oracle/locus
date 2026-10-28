@@ -1,31 +1,28 @@
-# Oracle In-DB Embeddings — `DBMS_VECTOR_CHAIN.UTL_TO_EMBEDDING`
+# Oracle in-DB embeddings
 
-Oracle Database 26ai can run the **entire** embed + search step
+Oracle Database 26ai can run the entire embedding and search step
 without leaving the database. An ONNX model loaded once via
 `DBMS_VECTOR.LOAD_ONNX_MODEL` produces vectors server-side through
 `DBMS_VECTOR_CHAIN.UTL_TO_EMBEDDING`, and `VECTOR_DISTANCE` does the
-cosine search in the same SQL round-trip. Text-in-flight never leaves
-the database at embedding time — the data-residency story is "the
-data never crossed the boundary," not "we encrypted it on the way
-out."
+cosine search in a second SQL statement against the same database.
+Text sent for embedding never leaves the database: the data-residency
+guarantee is that the data never crossed the boundary, not that it
+was encrypted on the way out.
 
 `OracleInDBEmbeddings` is the Locus adapter. Pair it with
 `OracleVectorStore` (sharing one wallet, one pool kwargs envelope)
-and you have a complete in-DB retrieval pipeline:
+and you have a complete in-DB retrieval pipeline. One agent
+retrieval, from the tool call to the ranked rows:
 
-```text
-text  ──▶  UTL_TO_EMBEDDING (server-side ONNX)  ──▶  VECTOR(384, FLOAT32)
-                                                            │
-                                                            ▼
-                                                VECTOR_DISTANCE COSINE
-```
+{{ locus_diagram indb-embeddings }}
 
 To drive the pipeline the notebook hands a `RAGRetriever(embedder=
 OracleInDBEmbeddings, store=OracleVectorStore)` to a Locus `Agent` via
-`create_rag_tool(retriever)`. Each retrieval is one SQL round-trip —
-no external embedding endpoint, no Python embedding library. The
-agent is the harness; the in-DB embedder + `VECTOR_DISTANCE` are the
-subject.
+`create_rag_tool(retriever)`. Each retrieval is two SQL statements,
+both executed inside the database: the query text goes in once, and
+only the vector and the ranked rows come back — no external embedding
+endpoint, no Python embedding library. The agent is the harness; the
+in-DB embedder and `VECTOR_DISTANCE` are the subject.
 
 ## What this covers
 
@@ -36,10 +33,10 @@ subject.
   `VECTOR_DISTANCE` search.
 - `DBMS_VECTOR.LOAD_ONNX_MODEL` as the one-time bootstrap to register
   the ONNX model inside the database.
-- `RAGRetriever(embedder=indb, store=store)` glued together, then
+- `RAGRetriever(embedder=indb, store=store)` combining the two, then
   exposed to an `Agent` via `create_rag_tool(retriever)` — each
-  agent retrieval = one SQL round-trip that embeds + searches inside
-  26ai.
+  agent retrieval runs two SQL statements inside 26ai, one to embed
+  the query and one to search.
 
 ## Prerequisites
 
@@ -65,14 +62,15 @@ END;
 /
 
 GRANT EXECUTE ON DBMS_VECTOR_CHAIN TO locus_app;
-GRANT MINING MODEL SELECT ON ALL_MINILM_L12_V2 TO locus_app;
+GRANT SELECT ON MINING MODEL ALL_MINILM_L12_V2 TO locus_app;
 ```
 
-If `ORACLE_DSN` / `ORACLE_PASSWORD` / `ORACLE_WALLET` aren't set the
-notebook prints the wiring snippet and exits cleanly. If the model
-isn't loaded the notebook catches `ORA-29024` / `ORA-20100` / similar
-from the SQL call and prints a friendly skip — no traceback in either
-case.
+If any of `ORACLE_DSN`, `ORACLE_USER`, `ORACLE_PASSWORD` or
+`ORACLE_WALLET` is unset, the notebook prints the wiring snippet and
+exits cleanly. If the model is not loaded, the notebook detects
+`ORA-40284` / `ORA-20100` (and the related `ORA-04063` / `ORA-20000`)
+from the initial embedding call and prints a skip notice instead of a
+traceback.
 
 ## Run
 
@@ -82,11 +80,11 @@ python examples/notebook_41_oracle_indb_embeddings.py
 
 ## See also
 
-- [Notebook 02 — Oracle 26ai RAG](notebook_38_oracle_26ai_rag.md)
-- [Notebook 05 — Oracle ADB document loader](notebook_39_oracle_adb_loader.md)
-- [Notebook 04 — Oracle in-DB chunker](notebook_40_oracle_indb_chunker.md)
-- [Oracle AI Database 26ai — AI Vector Search User's Guide](https://docs.oracle.com/en/database/oracle/oracle-database/23/vecse/index.html)
-- [`DBMS_VECTOR_CHAIN` PL/SQL package reference](https://docs.oracle.com/en/database/oracle/oracle-database/23/arpls/dbms_vector_chain1.html)
+- [Notebook 38 — Oracle 26ai RAG](notebook_38_oracle_26ai_rag.md)
+- [Notebook 39 — Oracle ADB document loader](notebook_39_oracle_adb_loader.md)
+- [Notebook 40 — Oracle in-DB chunker](notebook_40_oracle_indb_chunker.md)
+- [Oracle AI Database 26ai — AI Vector Search User's Guide](https://docs.oracle.com/en/database/oracle/oracle-database/26/vecse/index.html)
+- [`DBMS_VECTOR_CHAIN` PL/SQL package reference](https://docs.oracle.com/en/database/oracle/oracle-database/26/arpls/dbms_vector_chain1.html)
 - [python-oracledb driver](https://python-oracledb.readthedocs.io/en/latest/index.html)
 
 ## Source

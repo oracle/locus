@@ -1,26 +1,27 @@
 # Agentic AI red-teaming
 
-The centerpiece of ``locus_security`` (the `locus-sdk-security` package): point a ``Target`` at an AI system
+``locus_security`` (the `locus-sdk-security` package) is built around one operation: point a ``Target`` at an AI system
 and run the OWASP-ASI probe suite (``suite="owasp-asi"``, or ``"owasp-llm"``
 for the LLM-application subset). Every result is a grounded
 ``Evidence`` (the attack landed, with tool-backed evidence) or an ``Abstention``
 (no evidence — so nothing is asserted). Each ``Evidence`` carries the taxonomy
-tags its probe assigns — one or more OWASP LLM, OWASP ASI or MITRE ATLAS ids (for
+tags its probe assigns — one or more OWASP LLM, OWASP ASI, or MITRE ATLAS IDs (for
 example ``LLM01``, ``ASI02``, ``AML.T0054``) — so findings map onto the framework
 your reviewers use.
 
 That abstain-by-construction property matters because AI scorers can
 hallucinate vulnerabilities; Locus does not ship a finding it cannot
-evidence. The notebook points the same suite at two targets — a *vulnerable* bot
-that obeys injected instructions (→ grounded ``Evidence``) and a *hardened* one that
-refuses them (→ Abstentions).
+evidence. The notebook points the same suite at two targets: a *vulnerable* bot
+that obeys injected instructions, which yields grounded ``Evidence``, and a
+*hardened* one that refuses them, which yields Abstentions.
 
-Runs fully offline via ``Target.from_callable``. Point
-``Target.endpoint(url, ...)`` at a real LLM / agent endpoint to red-team it for
-real.
+The notebook runs fully offline via ``Target.from_callable``. Point
+``Target.endpoint(url, ...)`` at a live LLM or agent endpoint to run the same
+suite against it.
 
 Run it:
-    python examples/notebook_83_agent_red_team.py
+
+    python packages/locus-sdk-security/examples/notebook_83_agent_red_team.py
 
 ## Output
 
@@ -59,7 +60,7 @@ Agentic AI red-team — grounded findings or abstentions (offline demo)
    [ABSTAIN ] Unsandboxed code execution on hardened-bot
               withheld (replan): grounding below the proceed threshold (1 ungrounded of 1 claims)
 
-The vulnerable bot produced grounded Findings; the hardened bot abstained across the board. No vulnerability is ever asserted without evidence.
+The vulnerable bot produced grounded Evidence; the hardened bot abstained across the board. No vulnerability is ever asserted without evidence.
 ```
 <!-- notebook-output:end -->
 

@@ -24,7 +24,8 @@ finding); the read-only-by-construction tooling is the control that keeps the
 auditor itself from becoming a liability.
 
 Run it:
-    python examples/notebook_81_cloud_posture_agent.py
+
+    python packages/locus-sdk-security/examples/notebook_81_cloud_posture_agent.py
 
 Part 1 (the grounding decision) runs fully offline and deterministically — no
 model, no cloud account. Part 2 builds the live agent; it runs against a real

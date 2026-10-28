@@ -2,7 +2,7 @@
 
 A privacy agent works a queue of GDPR data-subject requests. Some are safe to
 run on the agent's own authority — assembling a portable copy of someone's data
-under Article 15/20 copies, it does not change anything. One is not: a
+under Article 15/20 only copies; it does not change anything. One is not: a
 right-to-erasure delete under Article 17 permanently destroys every record tied
 to a person. The middle path is a gate: the reversible export goes through
 automatically; the irreversible erasure stops and waits for a named human.
@@ -13,22 +13,7 @@ the datastore. The agent can be confused, prompt-injected, or simply wrong about
 which request it is processing; the erasure still only happens if the
 ``ControlPolicy`` admits it.
 
-    Data-subject request arrives
-       │
-       ▼
-    Agent proposes an Action  ──>  admit(action, perform, policy, trail)
-       │                                │
-       │                                ├─ Article 15/20 export (reversible)
-       │                                │     → policy ALLOWs → export runs
-       │                                │
-       │                                └─ Article 17 erasure (irreversible)
-       │                                      → policy holds for a human
-       │                                      → AdmissionError, nothing deleted
-       ▼
-    Data Protection Officer reviews the held request and signs off
-       │
-       ▼
-    admit() re-admits the erasure under a signed-off policy
+{{ locus_diagram gate-data-deletion }}
 
 Two plain fields on one ``ControlPolicy`` do the gating — no DSL, no rules
 engine. ``require_human_for={"irreversible"}`` means any action carrying the
@@ -44,7 +29,7 @@ decision to the ``AuditTrail`` whether or not it allows, and only then awaits
 ``perform``. There is no path to the side effect that skips the log. When the
 erasure is held, the script asserts the subject is still present in the
 datastore — proof the gate blocked the delete in code that runs *before* the
-side effect, not somewhere the model could talk its way around.
+side effect, not in a prompt instruction the model could circumvent.
 
 After the hold, a human-in-the-loop step stands in for the Data Protection
 Officer resolving the ticket. The erasure is then re-admitted under a policy that
@@ -69,10 +54,11 @@ re-hashed from an edited record onward; the bare call this script makes returns
 
 ``perform`` here is a local stub: ``export`` reads from and ``erase`` pops from an
 in-memory dict instead of mutating Postgres, S3, or a search index, so the script
-runs offline with no datastore, no creds, no network. Swap those two functions
-for real deletes and the gate is unchanged.
+runs offline with no datastore, no credentials, no network. Swap those two
+functions for real deletes and the gate is unchanged.
 
 Run it (fully offline — no model, no provider, no network):
+
     python examples/notebook_74_data_deletion_gate.py
 
 ## Output

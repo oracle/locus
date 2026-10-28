@@ -17,7 +17,8 @@ production you would not simulate it — you would point ``Target.endpoint`` at 
 real chat API.
 
 Run it:
-    python examples/notebook_84_redteam_support_bot.py
+
+    python packages/locus-sdk-security/examples/notebook_84_redteam_support_bot.py
 
 ## Source
 

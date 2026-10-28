@@ -20,7 +20,7 @@ API or a classifier behind them for anything adversarial.
 - `TopicPolicy`: declarative topic blocking with keyword maps.
 - `ContentPolicy`: harmful-content categories (violence, illegal activity).
 
-Run it (defaults to the bundled mock model; set `LOCUS_MODEL_PROVIDER` to `openai` / `anthropic` for a live model):
+Run it (OCI Generative AI with an OCI profile, otherwise the bundled mock model; set `LOCUS_MODEL_PROVIDER` to force a provider):
 
     python examples/notebook_70_guardrails_advanced.py
 

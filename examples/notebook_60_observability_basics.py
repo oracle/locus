@@ -23,8 +23,9 @@ allocations.
 
 - Run an Agent with no telemetry: the SDK-default path.
 - Wrap the same ticket reply in run_context() and subscribe to the bus.
-- The canonical events: agent.think, agent.tool.started/completed,
-  agent.tokens.used, agent.terminate.
+- The canonical events on the agent path: agent.think,
+  agent.tool.started/completed, agent.terminate. agent.tokens.used is
+  emitted only when a ModelCompleteEvent that carries usage is bridged.
 - Read the per-run history buffer after the fact (replay semantics for
   late subscribers — i.e. reconstruct the ticket timeline after the run).
 

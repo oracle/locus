@@ -59,9 +59,10 @@ name outside the deploy window.
 python examples/notebook_31_deepagent.py
 ```
 
-The default provider is the bundled mock model. Set
-`LOCUS_MODEL_PROVIDER` (openai / anthropic) and credentials to
-use a live model. Keep `LOCUS_MODEL_PROVIDER=mock` for offline runs.
+Model choice comes from `examples/config.py`: OCI Generative AI when
+`~/.oci/config` has a usable profile, otherwise the bundled mock model, so the
+example also runs offline with no credentials. Set `LOCUS_MODEL_PROVIDER`
+(`oci`, `openai`, `anthropic` or `mock`) to force one.
 
 Multi-backend ports (in-memory + OpenSearch) live in
 [`examples/projects/deep-research`](https://github.com/oracle/locus/tree/main/examples/projects/deep-research).

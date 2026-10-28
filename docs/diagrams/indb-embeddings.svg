@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  One retrieval through RAGRetriever(embedder=OracleInDBEmbeddings, store=OracleVectorStore),
+  as the SDK runs it (locus-sdk 3.0.x). Both SQL statements execute inside the database:
+  the query text goes in, only a vector and ranked rows come back out.
+    Agent        -> RAGRetriever   the model calls the tool create_rag_tool(retriever) built
+                                   (rag/tools.py:36-84, example notebook_41:291-308; as_tool()
+                                   delegates to it, rag/retriever.py:585-614); the tool body calls
+                                   retriever.retrieve(query, limit, threshold)   rag/tools.py:99-103
+    RAGRetriever -> ONNX model     retrieve() first calls embedder.embed_query(query)   rag/retriever.py:488
+                                   OracleInDBEmbeddings.embed_query is embed()   rag/embeddings/oracle_indb.py:494-500
+                                   which executes, binding only :text,
+                                   SELECT TO_CLOB(VECTOR_SERIALIZE(DBMS_VECTOR_CHAIN.UTL_TO_EMBEDDING(
+                                     :text, JSON('{"provider":"database","model":"<model_name>"}')))) FROM dual
+                                                                       rag/embeddings/oracle_indb.py:342-357, :430-441
+                                   model_name is the ONNX model loaded into the database once with
+                                   DBMS_VECTOR.LOAD_ONNX_MODEL   rag/embeddings/oracle_indb.py:15-16, :33-41, :142-145
+    ONNX model   -> RAGRetriever   the serialized vector is parsed into list[float]   rag/embeddings/oracle_indb.py:388-407, :445-453
+    RAGRetriever -> VECTOR column  retrieve() then calls store.search(query_embedding=...)   rag/retriever.py:497-502
+                                   OracleVectorStore.search executes
+                                   SELECT ... VECTOR_DISTANCE(<embedding_column>, TO_VECTOR(:query_vec), COSINE) AS distance_
+                                   FROM <table> ORDER BY distance_ ASC FETCH FIRST :limit ROWS ONLY
+                                                                       rag/stores/oracle.py:743-744, :756-759, :771-782
+                                   the column is VECTOR(<dim>, FLOAT32), created by _ensure_table   rag/stores/oracle.py:382-391
+                                   distance_metric defaults to COSINE   rag/stores/oracle.py:114, example notebook_41:283
+    VECTOR column -> RAGRetriever  rows come back ranked; score = 1 - distance/2 for COSINE   rag/stores/oracle.py:784-837
+    RAGRetriever -> Agent          the tool returns {"results": [{content, score, metadata, id}], total, query}   rag/tools.py:105-122
+  Ingest takes the same path: add_documents embeds each passage with the same embedder and
+  stores it with INSERT ... TO_VECTOR(:embedding)   rag/retriever.py:227, :318-328; rag/stores/oracle.py:521-531
+  Styled by the .tl-dia classes in docs/stylesheets/locus.css; see docs/diagrams/README.md.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 500" role="img" aria-labelledby="title desc">
+  <title id="title">A retrieval that embeds and searches inside Oracle Database 26ai</title>
+  <desc id="desc">Two lanes: your process, holding the Agent and a RAGRetriever whose embedder is OracleInDBEmbeddings and whose store is OracleVectorStore, and Oracle Database 26ai, holding the ONNX model, loaded once with LOAD_ONNX_MODEL, and the corpus table with its VECTOR column. The Agent calls the retriever as a tool with a query. The retriever sends the query text to the database as a bind of UTL_TO_EMBEDDING, the ONNX model embeds it there, and the database returns the query vector serialized. The retriever then sends that vector back into a VECTOR_DISTANCE cosine search over the VECTOR column, ordered by distance and limited to the top rows, and gets ranked rows back. The tool returns the results, each with its content and score, to the Agent. The text is embedded where it is stored; nothing goes to an external embedding endpoint.</desc>
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="arrowhead" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+
+  <!-- the two lanes: the text is embedded where it is stored -->
+  <g class="lane">
+    <rect x="16" y="16" width="426" height="440" rx="12"/>
+    <text class="lane-title" x="32" y="40">Your process</text>
+  </g>
+  <g class="lane">
+    <rect x="490" y="16" width="414" height="440" rx="12"/>
+    <text class="lane-title" x="506" y="40">Oracle Database 26ai</text>
+  </g>
+  <text class="lane-title" x="454" y="40">SQL</text>
+
+  <!-- lifelines, each to its participant's last message -->
+  <path class="edge dashed" d="M97,136 L97,440"/>
+  <path class="edge dashed" d="M311,136 L311,440"/>
+  <path class="edge dashed" d="M601,136 L601,294"/>
+  <path class="edge dashed" d="M800,136 L800,390"/>
+
+  <!-- 1. the agent calls the tool -->
+  <path class="edge" marker-end="url(#ah)" d="M97,176 L311,176"/>
+  <rect class="label-bg" x="146" y="166" width="116" height="20" rx="4"/>
+  <text class="label" x="204" y="176">tool call · query</text>
+
+  <!-- 2. embed: the text goes into the database -->
+  <path class="edge" marker-end="url(#ah)" d="M311,226 L601,226"/>
+  <rect class="label-bg" x="340" y="216" width="232" height="20" rx="4"/>
+  <text class="label" x="456" y="226">UTL_TO_EMBEDDING(:text, model)</text>
+
+  <!-- 3. the vector comes back -->
+  <path class="edge" marker-end="url(#ah)" d="M601,268 L311,268"/>
+  <rect class="label-bg" x="342" y="258" width="228" height="20" rx="4"/>
+  <text class="label" x="456" y="268">query vector · VECTOR_SERIALIZE</text>
+
+  <!-- 4. search: the vector goes back in -->
+  <path class="edge" marker-end="url(#ah)" d="M311,322 L800,322"/>
+  <rect class="label-bg" x="372" y="312" width="368" height="20" rx="4"/>
+  <text class="label" x="556" y="322">VECTOR_DISTANCE(…, TO_VECTOR(:query_vec), COSINE)</text>
+
+  <!-- 5. ranked rows come back -->
+  <path class="edge" marker-end="url(#ah)" d="M800,364 L311,364"/>
+  <rect class="label-bg" x="384" y="354" width="344" height="20" rx="4"/>
+  <text class="label" x="556" y="364">ranked rows · ORDER BY distance, FETCH FIRST :limit</text>
+
+  <!-- 6. the tool result -->
+  <path class="edge" marker-end="url(#ah)" d="M311,414 L97,414"/>
+  <rect class="label-bg" x="124" y="404" width="160" height="20" rx="4"/>
+  <text class="label" x="204" y="414">results · content, score</text>
+
+  <!-- participants -->
+  <g class="node">
+    <rect x="32" y="60" width="130" height="76" rx="12"/>
+    <text x="97" y="88">Agent</text>
+    <text class="sub" x="97" y="109">the harness</text>
+  </g>
+  <g class="node primary">
+    <rect x="196" y="60" width="230" height="76" rx="12"/>
+    <text x="311" y="81">RAGRetriever</text>
+    <text class="sub" x="311" y="101">embedder=OracleInDBEmbeddings</text>
+    <text class="sub" x="311" y="119">store=OracleVectorStore</text>
+  </g>
+  <g class="node">
+    <rect x="506" y="60" width="190" height="76" rx="12"/>
+    <text x="601" y="88">ONNX model</text>
+    <text class="sub" x="601" y="109">LOAD_ONNX_MODEL, once</text>
+  </g>
+  <g class="store">
+    <path d="M712,69 A88,9 0 0 1 888,69 V127 A88,9 0 0 1 712,127 Z M712,69 A88,9 0 0 0 888,69"/>
+    <g class="node">
+      <text x="800" y="92">VECTOR column</text>
+      <text class="sub" x="800" y="113">corpus text + vectors</text>
+    </g>
+  </g>
+
+  <text class="note" x="460" y="478">The query text enters the database and is embedded there; only the vector and the ranked rows cross back out.</text>
+  <text class="note" x="460" y="494">LOAD_ONNX_MODEL runs once, out of band. add_documents embeds each passage the same way and stores it with TO_VECTOR.</text>
+</svg>

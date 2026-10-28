@@ -25,20 +25,27 @@ theme:
     text: Inter
     code: JetBrains Mono
   palette:
-  # Each scheme advertises the icon for the OTHER mode — clicking it
-  # switches to that mode: slate (dark) shows a sun, default (light) a moon.
-  - scheme: slate
+  # First visit follows the operating system (the first entry has no scheme,
+  # so Material resolves it from prefers-color-scheme); the toggle then cycles
+  # system → light → dark and the choice is remembered per browser.
+  - media: "(prefers-color-scheme)"
+    toggle:
+      icon: material/brightness-auto
+      name: Switch to light mode
+  - media: "(prefers-color-scheme: light)"
+    scheme: default
     primary: custom
     accent: custom
     toggle:
       icon: material/brightness-7
-      name: Switch to light mode
-  - scheme: default
+      name: Switch to dark mode
+  - media: "(prefers-color-scheme: dark)"
+    scheme: slate
     primary: custom
     accent: custom
     toggle:
       icon: material/brightness-4
-      name: Switch to dark mode
+      name: Switch to system preference
   features:
   - navigation.instant
   - navigation.sections
@@ -46,6 +53,10 @@ theme:
   - navigation.tabs.sticky
   - navigation.indexes
   - navigation.top
+  - navigation.footer
+  - toc.follow
+  - content.action.edit
+  - content.action.view
   - content.code.copy
   - content.code.annotate
   - content.tabs.link
@@ -56,12 +67,16 @@ theme:
 hooks:
 - hooks/cache_bust.py
 - hooks/build_metadata.py
+# After build_metadata so the Markdown twins carry the expanded build facts.
+- hooks/llms_txt.py
 
 extra_css:
 - stylesheets/locus.css
 
 extra_javascript:
 - javascripts/header-home.js
+- javascripts/copy-page.js
+- javascripts/diagram-zoom.js
 - javascripts/notebook-filter.js
 - javascripts/sidebar-filter.js
 
@@ -235,7 +250,7 @@ nav:
   - Deploy: how-to/deploy.md
   - The box runner: runner.md
 - Notebooks:
-  - Overview: notebooks/index.md
+  - Examples: notebooks/index.md
   - Start here:
     - 01 · OCI transports — start here: notebooks/notebook_01_oci_transports.md
     - 02 · Basic agent: notebooks/notebook_02_basic_agent.md

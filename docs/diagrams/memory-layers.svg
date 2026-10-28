@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The four memory layers an Agent can be given, per locus-sdk 3.0.1. Each lane is one
+  layer; the three persisted lanes connect to one Oracle Database 26ai.
+    working memory   Agent(conversation_manager=…)   agent/agent.py:195, agent/config.py:638
+                     applied to the message list before a model call, in-process, never saved
+                                                     agent/runtime_loop.py:929-933, :1202-1206
+                     SlidingWindowManager   memory/conversation.py:65
+                     SummarizingManager     memory/conversation.py:220
+                     ContextCompactor       memory/compaction.py:248 (the default when the
+                                            context window is known: agent/initializer.py:216-228)
+    the thread       Agent(checkpointer=…)           agent/agent.py:196, agent/config.py:706
+                     state loaded by thread_id when a run starts   agent/runtime_loop.py:2689-2690
+                     saved under thread_id when the run ends       agent/runtime_loop.py:2472-2475
+                     oracle_checkpointer()  memory/backends/adapters.py:694 (latest state per thread)
+                     OracleCheckpointSaver  memory/backends/oracle_versioned.py:87 (every version)
+    long-term        Agent(memory_manager=…)         agent/config.py:695
+                     on_session_start injects memories before the first model call
+                                                     agent/runtime_loop.py:817-818
+                     on_session_end extracts and persists after the run
+                                                     agent/runtime_loop.py:1954-1957
+                     LLMMemoryManager(store=…)  memory/manager.py:476, over any BaseStore
+                     OracleStore                memory/store_backends/oracle.py:184
+                     OracleAgentMemoryManager   memory/managers/oracle_agent_memory.py:162
+    knowledge        RAGRetriever(…).as_tool()       rag/retriever.py:72, :585
+                     OracleADBLoader        rag/loaders/oracle.py:98
+                     OracleInDBChunker      rag/chunkers/oracle_indb.py:65
+                     OracleInDBEmbeddings   rag/embeddings/oracle_indb.py:191
+                     OracleVectorStore      rag/stores/oracle.py:175
+  Styled by the .tl-dia classes in docs/stylesheets/locus.css; see docs/diagrams/README.md.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 914 504" role="img" aria-labelledby="title desc">
+  <title id="title">The memory layers of a Locus agent</title>
+  <desc id="desc">Four layers, top to bottom. Working memory is the context window of one run: a conversation manager, SlidingWindowManager, SummarizingManager or ContextCompactor, prunes it in-process and nothing is persisted. Short-term memory is the thread: a checkpointer saves the agent state under a thread_id and loads it back on the next call; on Oracle Database 26ai that is oracle_checkpointer() or the versioned OracleCheckpointSaver. Long-term memory lives until you delete it: a memory manager, LLMMemoryManager over an OracleStore or OracleAgentMemoryManager, injects memories before the run and extracts and persists new ones after it. Knowledge is your corpus, retrieved rather than remembered: RAGRetriever(…).as_tool() searches it, and OracleADBLoader, OracleInDBChunker, OracleInDBEmbeddings and OracleVectorStore run the pipeline inside the database. The three persisted layers all connect to one Oracle Database 26ai.</desc>
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="arrowhead" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+
+  <!-- lane 1: working memory. No edge to the database: it is pruned in-process. -->
+  <g class="lane">
+    <rect x="16" y="16" width="590" height="104" rx="12"/>
+    <text class="lane-title" x="32" y="38">Working memory</text>
+  </g>
+  <text class="note" x="546" y="38">lifetime: one run</text>
+  <g class="node">
+    <rect x="28" y="52" width="228" height="58" rx="12"/>
+    <text x="142" y="71">Conversation manager</text>
+    <text class="sub" x="142" y="92">Agent(conversation_manager=…)</text>
+  </g>
+  <g class="node"><rect x="268" y="52" width="164" height="26" rx="8"/><text class="sub" x="350" y="65">SlidingWindowManager</text></g>
+  <g class="node"><rect x="438" y="52" width="150" height="26" rx="8"/><text class="sub" x="513" y="65">SummarizingManager</text></g>
+  <g class="node"><rect x="268" y="84" width="136" height="26" rx="8"/><text class="sub" x="336" y="97">ContextCompactor</text></g>
+  <text class="note" x="752" y="81">in-process, nothing persisted</text>
+
+  <!-- lane 2: short-term memory, the thread -->
+  <g class="lane">
+    <rect x="16" y="130" width="590" height="104" rx="12"/>
+    <text class="lane-title" x="32" y="152">Short-term memory · the thread</text>
+  </g>
+  <text class="note" x="539" y="152">lifetime: the thread</text>
+  <g class="node">
+    <rect x="28" y="166" width="228" height="58" rx="12"/>
+    <text x="142" y="185">Checkpointer</text>
+    <text class="sub" x="142" y="206">Agent(checkpointer=…)</text>
+  </g>
+  <g class="node"><rect x="268" y="166" width="170" height="26" rx="8"/><text class="sub" x="353" y="179">oracle_checkpointer()</text></g>
+  <g class="node"><rect x="268" y="198" width="170" height="26" rx="8"/><text class="sub" x="353" y="211">OracleCheckpointSaver</text></g>
+  <path class="edge" d="M438,179 H450 V211 H438"/>
+  <path class="edge" marker-end="url(#ah)" d="M450,195 L744,195"/>
+  <rect class="label-bg" x="633" y="204" width="86" height="20" rx="4"/>
+  <text class="label" x="676" y="214">by thread_id</text>
+
+  <!-- lane 3: long-term memory -->
+  <g class="lane">
+    <rect x="16" y="244" width="590" height="104" rx="12"/>
+    <text class="lane-title" x="32" y="266">Long-term memory</text>
+  </g>
+  <text class="note" x="519" y="266">lifetime: until you delete it</text>
+  <g class="node">
+    <rect x="28" y="280" width="228" height="58" rx="12"/>
+    <text x="142" y="299">Memory manager</text>
+    <text class="sub" x="142" y="320">Agent(memory_manager=…)</text>
+  </g>
+  <g class="node"><rect x="268" y="280" width="268" height="26" rx="8"/><text class="sub" x="402" y="293">LLMMemoryManager(store=OracleStore)</text></g>
+  <g class="node"><rect x="268" y="312" width="192" height="26" rx="8"/><text class="sub" x="364" y="325">OracleAgentMemoryManager</text></g>
+  <path class="edge" d="M536,293 H548 V325 H460"/>
+  <path class="edge" marker-end="url(#ah)" d="M548,309 L744,309"/>
+  <rect class="label-bg" x="641" y="318" width="70" height="20" rx="4"/>
+  <text class="label" x="676" y="328">memories</text>
+
+  <!-- lane 4: knowledge, RAG -->
+  <g class="lane">
+    <rect x="16" y="358" width="590" height="104" rx="12"/>
+    <text class="lane-title" x="32" y="380">Knowledge · RAG</text>
+  </g>
+  <text class="note" x="533" y="380">lifetime: your corpus</text>
+  <g class="node">
+    <rect x="28" y="394" width="228" height="58" rx="12"/>
+    <text x="142" y="413">Retriever tool</text>
+    <text class="sub" x="142" y="434">RAGRetriever(…).as_tool()</text>
+  </g>
+  <g class="node"><rect x="268" y="394" width="164" height="26" rx="8"/><text class="sub" x="350" y="407">OracleADBLoader</text></g>
+  <g class="node"><rect x="438" y="394" width="142" height="26" rx="8"/><text class="sub" x="509" y="407">OracleInDBChunker</text></g>
+  <g class="node"><rect x="268" y="426" width="164" height="26" rx="8"/><text class="sub" x="350" y="439">OracleInDBEmbeddings</text></g>
+  <g class="node"><rect x="438" y="426" width="142" height="26" rx="8"/><text class="sub" x="509" y="439">OracleVectorStore</text></g>
+  <path class="edge" d="M580,407 H592 V439 H580"/>
+  <path class="edge" marker-end="url(#ah)" d="M592,423 L744,423"/>
+  <rect class="label-bg" x="620" y="432" width="112" height="20" rx="4"/>
+  <text class="label" x="676" y="442">chunks + vectors</text>
+
+  <!-- the one database behind the three persisted lanes -->
+  <g class="store">
+    <path d="M746,139 A76,9 0 0 1 898,139 V453 A76,9 0 0 1 746,453 Z M746,139 A76,9 0 0 0 898,139"/>
+    <g class="node">
+      <text x="822" y="299">Oracle Database</text>
+      <text class="sub" x="822" y="320">26ai</text>
+    </g>
+  </g>
+
+  <text class="note" x="457" y="488">Each of the three persisted layers takes its own backend; Oracle Database 26ai can hold them all, next to the data the agent acts on.</text>
+</svg>
