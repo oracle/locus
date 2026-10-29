@@ -2928,7 +2928,9 @@ html.tl-dia-open body {
      name in a code span has to break rather than push the page sideways. */
   .md-typeset table[data-stack] td code {
     white-space: normal;
-    overflow-wrap: anywhere;
+    /* break-word: a chip breaks at its <wbr> separators first and only
+       mid-token when a segment has none. */
+    overflow-wrap: break-word;
   }
   .md-typeset table[data-stack] td:empty {
     display: none;
@@ -3055,8 +3057,14 @@ html.tl-dia-open body {
     width: 2em;
     height: 2em;
   }
-  /* Wrapped signatures wrap against the code box edge, under the button;
-     reserve its column so the wrap happens before it. */
+  /* Code ends before the button's column: a line that fits the block is
+     never under the holder (the opaque holder would otherwise hide the end
+     of a short command for good), a wrapped output or signature line wraps
+     before it, and a line longer than the block still scrolls under the
+     fade and comes out when panned. */
+  .md-typeset pre > code {
+    padding-right: 2.6rem;
+  }
   .md-typeset .doc-signature pre > code {
     padding-right: 3rem;
   }
@@ -3103,7 +3111,9 @@ html.tl-dia-open body {
   }
   .md-typeset table[data-wrap-code]:not([data-stack]) td code {
     white-space: normal;
-    overflow-wrap: anywhere;
+    /* break-word, so a chip breaks at the <wbr> separators the build hook
+       inserts and only mid-token when a segment has none. */
+    overflow-wrap: break-word;
   }
 }
 
@@ -3220,6 +3230,9 @@ html.tl-dia-open body {
 @media (max-width: 48em) {
   .md-main__inner {
     margin-top: 0.6rem;
+  }
+  .md-content__inner {
+    padding-top: 0;
   }
   .md-content__inner .locus-copy-page {
     margin-bottom: 0.5rem;
