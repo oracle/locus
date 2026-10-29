@@ -71,7 +71,9 @@
     table.dataset.matrix = longest <= MATRIX_MAX_CHARS ? "1" : "";
     table.dataset.prose = longest > PROSE_CELL_CHARS ? "1" : "";
     table.dataset.firstLong = medianFirst > FIRST_COLUMN_LABEL_CHARS ? "1" : "";
-    if (firstLengths.length && longestFirst <= 2 && heads.length >= 3) table.dataset.indexCol = "1";
+    // Recorded under its own name: data-index-col is the applied state and
+    // is cleared on every run.
+    if (firstLengths.length && longestFirst <= 2 && heads.length >= 3) table.dataset.indexFirst = "1";
   }
 
   function wrapper(table) {
@@ -83,6 +85,15 @@
     return table.scrollWidth > table.clientWidth + 1 ||
       table.scrollWidth > wrap.clientWidth + 1 ||
       wrap.scrollWidth > wrap.clientWidth + 1;
+  }
+
+  // A two-column table with prose whose narrower column is a ribbon.
+  function squeezed(table) {
+    if (Number(table.dataset.cols) !== 2 || !table.dataset.prose) return false;
+    const row = table.querySelector(":scope > tbody > tr");
+    if (!row) return false;
+    const widths = Array.from(row.children, function (td) { return td.getBoundingClientRect().width; });
+    return widths.length === 2 && Math.min.apply(null, widths) < SQUEEZED_COLUMN_PX;
   }
 
   function apply() {
@@ -104,15 +115,7 @@
       const available = wrapper(table).clientWidth;
       const cols = Number(table.dataset.cols);
       const crowded = cols >= 3 && !table.dataset.matrix && cols * MIN_COLUMN_PX > available;
-      let squeezed = false;
-      if (cols === 2 && table.dataset.prose) {
-        const row = table.querySelector(":scope > tbody > tr");
-        if (row) {
-          const widths = Array.from(row.children, function (td) { return td.getBoundingClientRect().width; });
-          squeezed = widths.length === 2 && Math.min.apply(null, widths) < SQUEEZED_COLUMN_PX;
-        }
-      }
-      if (crowded || squeezed || (cols === 2 && table.dataset.firstLong === "1")) {
+      if (crowded || squeezed(table) || (cols === 2 && table.dataset.firstLong === "1")) {
         decision.set(table, true);
       } else if (overflows(table)) {
         retry.push(table);
@@ -122,10 +125,11 @@
     });
 
     // Pass 2: a table that only overflows because of a code chip gets its
-    // code allowed to wrap; it stacks only if that is not enough.
+    // code allowed to wrap; it stacks if that is not enough, or if wrapping
+    // the chips left one of two columns a ribbon.
     if (retry.length) {
       retry.forEach(function (table) { table.setAttribute("data-wrap-code", ""); });
-      retry.forEach(function (table) { decision.set(table, overflows(table)); });
+      retry.forEach(function (table) { decision.set(table, overflows(table) || squeezed(table)); });
     }
 
     // Same headers on one page: stack all or none.
@@ -137,7 +141,7 @@
     live.forEach(function (table) {
       if (byKey.get(table.dataset.key)) {
         table.setAttribute("data-stack", "");
-        if (table.dataset.indexCol === "1") table.setAttribute("data-index-col", "");
+        if (table.dataset.indexFirst === "1") table.setAttribute("data-index-col", "");
       }
     });
   }
