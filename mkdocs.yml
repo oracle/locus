@@ -213,7 +213,10 @@ nav:
     - Executors: concepts/executors.md
     - MCP: concepts/mcp.md
     - Multi-modal providers: concepts/multi-modal-providers.md
-    - The coding harness: harness.md
+  - The coding harness:
+    - Overview: harness.md
+    - OCI GenAI Sandboxes: harness/oci-sandbox.md
+    - NVIDIA OpenShell: harness/openshell.md
   - Memory and RAG:
     - Memory — short-term and long-term: concepts/memory.md
     - Checkpointers & Store: concepts/checkpointers.md

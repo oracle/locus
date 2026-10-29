@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The coding harness inside a sandbox, per locus/harness.
+    Agent(tools=harness.tools)            locus/agent/agent.py
+    build_harness(backend, wrap=...)      locus/harness/toolset.py: wrap is applied to every tool
+    SessionBackend -> SessionLike         locus/harness/session.py: exec, upload_file, download_file
+      OCISandboxBackend                   locus/harness/oci_sandbox.py: commands stream, files over the file API
+      OpenShellBackend                    locus/harness/openshell.py: commands and files over exec
+    ExecRecord                            locus/harness/evidence.py: emitted as harness.exec, handed to on_exec
+  Styled by the .tl-dia classes in docs/stylesheets/locus.css; see docs/diagrams/README.md.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 300" role="img" aria-labelledby="title desc">
+  <title id="title">The coding harness inside a sandbox</title>
+  <desc id="desc">The agent calls the harness tools: read, edit, grep, bash. Every call passes through wrap, the one gate, before it reaches the sandbox backend. The backend sends commands to a shell inside the sandbox, each under a timeout, and moves files to and from the workspace. Every command also produces an ExecRecord, the evidence of what ran.</desc>
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="arrowhead" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+  <!-- the sandbox band -->
+  <g class="lane"><rect x="720" y="40" width="146" height="236" rx="12"/><text class="lane-title" x="732" y="62">SANDBOX</text></g>
+  <!-- agent -> tools -->
+  <path class="edge" marker-end="url(#ah)" d="M154,148 L194,148"/>
+  <!-- tools -> backend, through the gate -->
+  <path class="edge" marker-end="url(#ah)" d="M396,148 L436,148"/>
+  <rect class="label-bg" x="366" y="88" width="100" height="20" rx="4"/>
+  <text class="label" x="416" y="98">wrap: the gate</text>
+  <!-- backend -> shell -->
+  <path class="edge" marker-end="url(#ah)" d="M700,136 L730,124"/>
+  <rect class="label-bg" x="640" y="84" width="76" height="20" rx="4"/>
+  <text class="label" x="678" y="94">commands</text>
+  <!-- backend -> files -->
+  <path class="edge" marker-end="url(#ah)" d="M700,160 L761,221"/>
+  <rect class="label-bg" x="650" y="196" width="52" height="20" rx="4"/>
+  <text class="label" x="676" y="206">files</text>
+  <!-- backend -> evidence -->
+  <path class="edge" marker-end="url(#ah)" d="M569,176 L569,234"/>
+  <rect class="label-bg" x="578" y="196" width="66" height="20" rx="4"/>
+  <text class="label" x="611" y="206">evidence</text>
+  <!-- nodes -->
+  <g class="node"><rect x="24" y="120" width="130" height="56" rx="12"/><text x="89" y="138">Agent</text><text class="sub" x="89" y="159">model + tools</text></g>
+  <g class="node"><rect x="196" y="120" width="200" height="56" rx="12"/><text x="296" y="138">Harness tools</text><text class="sub" x="296" y="159">read · edit · grep · bash</text></g>
+  <g class="node primary"><rect x="438" y="120" width="262" height="56" rx="12"/><text x="569" y="138">Sandbox backend</text><text class="sub" x="569" y="159">OCISandboxBackend · OpenShellBackend</text></g>
+  <g class="node"><rect x="732" y="96" width="122" height="56" rx="12"/><text x="793" y="114">Shell</text><text class="sub" x="793" y="135">with a timeout</text></g>
+  <g class="store"><path d="M763,200 C763,192 823,192 823,200 L823,242 C823,250 763,250 763,242 Z M763,200 C763,208 823,208 823,200"/></g>
+  <rect class="label-bg" x="757" y="256" width="72" height="20" rx="4"/>
+  <text class="label" x="793" y="266">/workspace</text>
+  <g class="node end"><rect x="494" y="236" width="150" height="40" rx="20"/><text x="569" y="260">ExecRecord</text></g>
+</svg>

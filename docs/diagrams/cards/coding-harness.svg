@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Coding harness card: the harness tools (the subject) run every call through
+  the one gate, wrap, before it reaches the workspace band: a shell and the
+  files of the workspace. The band is the backend: the host, memory, or a
+  sandbox (OCI GenAI Sandboxes, NVIDIA OpenShell).
+  locus/harness/toolset.py: build_harness (wrap applies to every tool);
+  locus/harness/backend.py: WorkspaceBackend; locus/harness/session.py: SessionBackend
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 56">
+  <title>The harness tools pass through one gate into a workspace band that holds a shell and the files</title>
+  <defs><marker id="ah" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path class="arrowhead" d="M0,0 L6,3 L0,6 z"/></marker></defs>
+  <g class="node primary"><rect x="4" y="21" width="22" height="14" rx="3"/></g>
+  <path class="edge" marker-end="url(#ah)" d="M26,28 L32,28"/>
+  <g class="decision"><polygon points="34,28 40,22 46,28 40,34"/></g>
+  <path class="edge" marker-end="url(#ah)" d="M46,28 L54,28"/>
+  <g class="lane"><rect x="56" y="6" width="36" height="44" rx="4"/></g>
+  <g class="node"><rect x="62" y="12" width="24" height="12" rx="3"/></g>
+  <g class="store"><path d="M66,32 C66,29.5 82,29.5 82,32 L82,42 C82,44.5 66,44.5 66,42 Z M66,32 C66,34.5 82,34.5 82,32"/></g>
+</svg>
