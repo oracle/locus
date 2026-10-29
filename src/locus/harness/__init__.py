@@ -10,7 +10,8 @@ list — written once against :class:`WorkspaceBackend` and run unchanged on
 the host (:class:`LocalBackend`), in memory (:class:`MemoryBackend`), in any
 sandbox that can run a command and move a file (:class:`SessionBackend`), or
 in an NVIDIA OpenShell sandbox (:class:`OpenShellBackend`, the
-``openshell`` extra).
+``openshell`` extra), or in an OCI GenAI Sandbox (:class:`OCISandboxBackend`,
+the ``oci-sandbox`` extra).
 
 The tool bodies never gate. :func:`build_harness` pairs each tool with the
 action spec that labels its calls (:mod:`locus.harness.labels`) and applies
@@ -51,6 +52,7 @@ from locus.harness.labels import (
 )
 from locus.harness.ledger import ReadLedger
 from locus.harness.local import LocalBackend
+from locus.harness.oci_sandbox import OCISandboxBackend, OCISandboxSession
 from locus.harness.openshell import OpenShellBackend, OpenShellSession
 from locus.harness.session import SessionBackend, SessionLike
 from locus.harness.state import MemoryBackend
@@ -90,6 +92,8 @@ __all__ = [
     "LineWindow",
     "LocalBackend",
     "MemoryBackend",
+    "OCISandboxBackend",
+    "OCISandboxSession",
     "OpenShellBackend",
     "OpenShellSession",
     "ReadLedger",

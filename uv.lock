@@ -3014,6 +3014,9 @@ oci = [
     { name = "openai" },
     { name = "requests" },
 ]
+oci-sandbox = [
+    { name = "oci" },
+]
 openai = [
     { name = "openai" },
 ]
@@ -3146,6 +3149,7 @@ requires-dist = [
     { name = "oci", marker = "extra == 'checkpoints'", specifier = ">=2.173.0" },
     { name = "oci", marker = "extra == 'llm'", specifier = ">=2.173.0" },
     { name = "oci", marker = "extra == 'oci'", specifier = ">=2.173.0" },
+    { name = "oci", marker = "extra == 'oci-sandbox'", specifier = ">=2.189.0" },
     { name = "oci", marker = "extra == 'rag'", specifier = ">=2.173.0" },
     { name = "oci", marker = "extra == 'sdk'", specifier = ">=2.173.0" },
     { name = "openai", marker = "extra == 'llm'", specifier = ">=1.50,<3" },
@@ -3206,7 +3210,7 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'sdk'", specifier = ">=0.27" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'server'", specifier = ">=0.27" },
 ]
-provides-extras = ["openai", "anthropic", "oci", "llm", "telemetry", "mcp", "server", "redis", "postgresql", "mysql", "opensearch", "s3", "browser", "audit", "temporal", "gemini", "dbos", "openshell", "mem0", "oracledb", "agentmemory", "checkpoints", "pgvector", "qdrant", "chroma", "cohere", "rerank-local", "rerank", "rag", "sdk", "docs", "dev"]
+provides-extras = ["openai", "anthropic", "oci", "llm", "telemetry", "mcp", "server", "redis", "postgresql", "mysql", "opensearch", "s3", "browser", "audit", "temporal", "gemini", "dbos", "openshell", "oci-sandbox", "mem0", "oracledb", "agentmemory", "checkpoints", "pgvector", "qdrant", "chroma", "cohere", "rerank-local", "rerank", "rag", "sdk", "docs", "dev"]
 
 [[package]]
 name = "locus-sdk-security"

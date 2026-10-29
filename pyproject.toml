@@ -154,6 +154,11 @@ dbos = ["dbos>=2.0"]
 # caller that passes its own client needs nothing from it.
 openshell = ["openshell>=0.1.2,<0.2"]
 
+# OCI GenAI Sandboxes as a coding-harness workspace
+# (src/locus/harness/oci_sandbox.py). The sandbox client ships in the OCI
+# SDK from 2.189.0, imported lazily (``import locus.harness`` does not need it).
+oci-sandbox = ["oci>=2.189.0"]
+
 # Mem0 agent-memory manager (src/locus/memory/managers/mem0.py) — the
 # portable, self-hostable long-term memory backend.
 mem0 = ["mem0ai>=0.1"]
@@ -320,7 +325,7 @@ include = [
 # ``locus.server.*``, ``locus.a2a.*``, and ``locus.integrations.*``.
 # Without these, mypy reports "Untyped decorator makes function ..."
 # on every FastAPI ``@app.get/.post`` and on MCP imports.
-features = ["dev", "server", "mcp", "openai", "anthropic", "oci", "oracledb", "rag", "s3", "mem0"]
+features = ["dev", "server", "mcp", "openai", "anthropic", "oci", "oci-sandbox", "oracledb", "rag", "s3", "mem0"]
 
 # The security-domain tooling is its own distribution in this repo. Install it
 # into the dev environment (editable) so one ``hatch run check`` lints, types

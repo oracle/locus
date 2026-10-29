@@ -81,7 +81,19 @@ MAX_LINE_CHARS = 2_000
 
 #: Directories never worth walking. Saves minutes on a real repository.
 SKIP_DIRS = frozenset(
-    {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".mypy_cache"}
+    {
+        ".git",
+        "node_modules",
+        "__pycache__",
+        ".venv",
+        "venv",
+        "dist",
+        "build",
+        ".mypy_cache",
+        # Background-command state of a backend whose only writable place is
+        # the workspace itself (``OCISandboxBackend``).
+        ".locus-harness",
+    }
 )
 
 
