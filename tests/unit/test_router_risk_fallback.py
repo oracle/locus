@@ -245,3 +245,9 @@ def test_dispatch_reports_a_runnable_failure_on_the_bus(monkeypatch):
     with pytest.raises(RuntimeError, match="boom"):
         asyncio.run(router.dispatch("What is RAG?", run_id="r1"))
     failed.assert_awaited_once_with("r1", "direct_response", "RuntimeError: boom")
+
+
+def test_a_capability_listed_twice_binds_once():
+    compiler = _compiler()
+    runnable = asyncio.run(compiler.compile(_frame(required_capabilities=["c1", "c1"])))
+    assert len(runnable.agent.config.tools) == 1

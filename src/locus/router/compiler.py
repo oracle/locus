@@ -367,7 +367,9 @@ class CognitiveCompiler:
         # protocol registry's selection step has *already* checked that
         # every protocol-required capability is available, so the only
         # things being dropped here are extractor-suggested extras.
-        requested = list(frame.required_capabilities)
+        # Also de-duplicated: an extractor that lists the same id twice must
+        # not bind the same tool twice (the agent's registry rejects that).
+        requested = list(dict.fromkeys(frame.required_capabilities))
         valid = [cid for cid in requested if cid in available]
         caps = self.capabilities.lookup(valid) if valid else []
         runnable = protocol.builder(frame, caps, self._build_context())

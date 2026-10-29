@@ -219,6 +219,29 @@ def wrap_tool_results_as_objects(messages: list[Message]) -> list[Message]:
     return out
 
 
+def blank_null_assistant_content(messages: list[Message]) -> list[Message]:
+    """Return ``messages`` with every text-less assistant turn carrying ``""``.
+
+    An assistant turn that only made tool calls has ``content=None``; OpenAI
+    accepts ``"content": null`` for it, OCI's V1 endpoint does not: ``400
+    Invalid type for 'messages[n].content': expected an object, but got null
+    instead``. The history is replayed on every turn after a tool call, so one
+    such message breaks the whole conversation. Other roles are untouched;
+    the input is never mutated and is returned as the same object when
+    nothing needed changing.
+    """
+    from locus.core.messages import Role
+
+    if not any(m.role == Role.ASSISTANT and m.content is None for m in messages):
+        return messages
+    return [
+        m.model_copy(update={"content": ""})
+        if m.role == Role.ASSISTANT and m.content is None
+        else m
+        for m in messages
+    ]
+
+
 def fold_leading_system_into_first_user(messages: list[Message]) -> list[Message]:
     """Return ``messages`` with leading system messages merged into the first user turn.
 
@@ -588,6 +611,10 @@ class OCIChatCompletionsModel(OpenAIModel):
     ) -> list[Message]:
         """Apply vendor quirks of OCI's V1 endpoint to the message list.
 
+        All vendors: an assistant turn with ``content=None`` (tool calls only)
+        is sent with ``""``; the endpoint rejects ``null`` where OpenAI accepts
+        it.
+
         Meta Llama with tools: OCI rejects the request with ``400 Tool
         calling for this Llama model requires the first message to be a
         user message`` whenever a system message leads the conversation —
@@ -597,6 +624,9 @@ class OCIChatCompletionsModel(OpenAIModel):
         does too, so the rewrite is scoped to exactly that case.
         """
         model = (self.config.model or "").lower()
+        # Every vendor on OCI: a tool-call-only assistant turn must not carry
+        # a null content (see the helper).
+        messages = blank_null_assistant_content(messages)
         if tools and model.startswith("meta.llama"):
             messages = fold_leading_system_into_first_user(messages)
         if model.startswith("google."):
