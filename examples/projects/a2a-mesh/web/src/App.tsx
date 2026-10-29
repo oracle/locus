@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Peer, StreamedEvent } from "./types";
-import { fetchCard, invoke, stream } from "./api";
+import { fetchCard, send, stream } from "./api";
 
 const PEERS: Peer[] = [
   {
@@ -86,7 +86,7 @@ export default function App() {
       );
     } else {
       try {
-        const answer = await invoke(peer.proxy, query);
+        const answer = await send(peer.proxy, query);
         setReply(answer);
       } catch (err) {
         setError((err as Error).message);
@@ -151,9 +151,9 @@ export default function App() {
         <div className="page__crumbs">Workflows · Multi-agent · A2A Console</div>
         <h1 className="page__title">A2A mesh console</h1>
         <p className="page__lede">
-          Discover Locus agents over HTTP+SSE, route a query by capability tag, and
-          watch the remote agent's typed event stream — the same shape your
-          back-end emits for a single in-process agent.
+          Discover Locus agents by their A2A v1.0 Agent Card, route a query by
+          skill, and send it with <code>SendMessage</code> — or stream the task's
+          status and artifact updates with <code>SendStreamingMessage</code>.
         </p>
 
         <div className="split">
@@ -163,7 +163,7 @@ export default function App() {
                 <div>
                   <h2 className="card__title">Peers</h2>
                   <div className="card__sub">
-                    Auto-discovered via <code>GET /agent-card</code>
+                    Auto-discovered via <code>GET /.well-known/agent-card.json</code>
                   </div>
                 </div>
                 <span
@@ -201,6 +201,12 @@ export default function App() {
                     <div style={{ flex: 1 }}>
                       <div className="peer__name">{card?.name ?? p.fallbackName}</div>
                       <div className="peer__url">{p.url}</div>
+                      {card?.protocolVersion && (
+                        <div className="peer__url">
+                          A2A v{card.protocolVersion}
+                          {card.interfaces.length > 0 && ` · ${card.interfaces.join(", ")}`}
+                        </div>
+                      )}
                       {card && (
                         <div className="peer__skills">
                           {card.skills.map((s) => (
@@ -264,7 +270,7 @@ export default function App() {
                     checked={streaming}
                     onChange={(e) => setStreaming(e.target.checked)}
                   />
-                  Stream events (SSE)
+                  Stream task events (SSE)
                 </label>
                 <div style={{ flex: 1 }} />
                 <button
@@ -314,14 +320,16 @@ export default function App() {
 
               {events.map((e) => {
                 const css =
-                  e.kind === "TerminateEvent"
+                  e.kind === "ArtifactUpdate"
                     ? "event__kind--terminate"
-                    : e.kind.startsWith("Tool")
-                      ? "event__kind--tool"
-                      : "";
+                    : e.kind === "Error"
+                      ? "event__kind--error"
+                      : e.kind === "StatusUpdate" || e.kind === "Task"
+                        ? "event__kind--tool"
+                        : "";
                 return (
                   <div key={e.id} className="event">
-                    <span className={"event__kind " + css}>{e.kind.replace("Event", "")}</span>
+                    <span className={"event__kind " + css}>{e.kind}</span>
                     <span className="event__body">{e.text}</span>
                   </div>
                 );
