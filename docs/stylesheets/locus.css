@@ -2379,15 +2379,8 @@ form.md-header__option {
   transform: translateY(-1px);
 }
 
-.md-header__pypi-badge {
-  height: 20px;
-  width: auto;
-  display: block;
-}
-
 @media (max-width: 60em) {
   .md-header__source.md-header__pypi { margin-left: 0.25rem; }
-  .md-header__pypi-badge { height: 16px; }
 }
 
 .md-nav--primary .md-header__source.md-header__github:hover {
