@@ -13,7 +13,7 @@ description: "Oracle Generative AI Agentic Harness. Locus is a Python agent harn
 One `Agent` class, eight ways to combine agents, Oracle Cloud underneath, and the runtime around the model: tools, memory, RAG, observability, guardrails, an admission gate.
 
 - **Eight multi-agent shapes.** Pipelines, fan-out, orchestrator, swarm, handoff, graphs, debate, A2A. A cognitive router picks one from the task.
-- **Oracle Cloud, native.** OCI Generative AI on day 0, Dedicated AI Clusters, and Oracle Database 26ai for vectors, threads and memory.
+- **Oracle Cloud, native.** OCI Generative AI on day 0, Dedicated AI Clusters, OCI GenAI Sandboxes for the coding harness, and Oracle Database 26ai for vectors, threads and memory.
 - **Production from the first line.** Durable threads, typed events, grounded answers, and `admit()` in front of every consequential action.
 
 [Quickstart](how-to/quickstart.md){ .md-button .md-button--primary }
@@ -328,6 +328,13 @@ same `Agent`, same events, same admission gate.
     `OracleStore` for cross-thread memory and `OracleAgentMemoryManager`
     over Oracle's official agent-memory client.
 
+- {{ locus_glyph oci-sandbox }} **[OCI GenAI Sandboxes](harness/oci-sandbox.md)**
+
+    ---
+    `OCISandboxBackend` runs the coding harness inside an isolated, expiring
+    Linux workspace in your tenancy: the model's shell commands and file
+    edits never touch the host, and every call still clears the gate.
+
 </div>
 
 OCI Generative AI first: `oci:` reaches the whole catalog (OpenAI, Google, Meta,
@@ -364,6 +371,13 @@ agent = Agent(model="oci:openai.gpt-5.5", tools=[retriever.as_tool()])
 ## The harness
 
 <div class="grid cards locus-feature-cards" markdown>
+
+- {{ locus_glyph coding-harness }} **[The coding harness](harness.md)**
+
+    ---
+    Read, write, edit, grep and a shell over one workspace protocol, run on
+    the host, in an [OCI GenAI Sandbox](harness/oci-sandbox.md) or in
+    [NVIDIA OpenShell](harness/openshell.md); one `wrap` gates every call.
 
 - {{ locus_glyph tools-mcp }} **[Tools and MCP](concepts/tools.md)**
 
@@ -406,6 +420,30 @@ agent = Agent(model="oci:openai.gpt-5.5", tools=[retriever.as_tool()])
     suites with `EvalRunner` so behaviour does not drift.
 
 </div>
+
+A coding agent in an OCI GenAI Sandbox is one backend away from the same
+harness that runs on your laptop:
+
+```python
+from locus.agent import Agent
+from locus.control import ControlPolicy, gate_tool
+from locus.harness import OCISandboxBackend, build_harness
+
+backend = OCISandboxBackend.create("ocid1.generativeaiproject.oc1...", expiration="PT1H")
+policy = ControlPolicy(require_human_for=frozenset({"workspace.exec"}))
+harness = build_harness(
+    backend, wrap=lambda tool, spec: gate_tool(tool, policy=policy, action=spec)
+)
+agent = Agent(
+    model="oci:openai.gpt-5.5", tools=harness.tools, system_prompt=harness.prompt_fragment
+)
+print(agent.run_sync("Add pytest tests for calc/ and run them.").message)
+backend.close()   # the sandbox is stopped and deleted
+```
+
+[The coding harness →](harness.md) ·
+[OCI GenAI Sandboxes →](harness/oci-sandbox.md) ·
+[NVIDIA OpenShell →](harness/openshell.md)
 
 ## Control, when you need it
 

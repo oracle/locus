@@ -2,9 +2,10 @@
 
 `locus.harness` is the toolset a coding agent works with — read, write,
 edit, search, a shell — written once against a workspace protocol and run
-unchanged on the host, in memory, or inside a sandbox. locus-code is a UI
-over it; the Locus gateway runs the same tools inside NVIDIA OpenShell
-sandboxes.
+unchanged on the host, in memory, or inside a sandbox:
+[OCI GenAI Sandboxes](harness/oci-sandbox.md) in your tenancy, or
+[NVIDIA OpenShell](harness/openshell.md) behind a gateway. locus-code is a UI
+over it; the Locus gateway runs the same tools inside OpenShell sandboxes.
 
 ## Build a harness
 
@@ -116,103 +117,16 @@ with `setsid`, with their output in a file and their input on a FIFO, so
 nothing has to stay connected while they run. The sandbox needs `sh`,
 coreutils or busybox, `find`, `grep` and `awk`.
 
-### OpenShell
+### OCI GenAI Sandboxes and NVIDIA OpenShell
 
-```bash
-pip install "locus-sdk[openshell]"
-```
+Two sandboxes ship ready to use, each on its own page:
 
-```python
-from locus.harness import OpenShellBackend, build_harness
-
-backend = OpenShellBackend.connect("my-sandbox", workspace="team-a", endpoint="gateway:443")
-# or: OpenShellBackend.create(workspace="team-a") — creates one, deletes it on close()
-harness = build_harness(backend, wrap=gateway_gate)
-```
-
-No gateway yet? `examples/openshell-gateway/` starts one with `docker compose up -d`
-(loopback, Docker-outside-of-Docker) and `LOCUS_OPENSHELL_ENDPOINT=127.0.0.1:8080`
-points the harness and the live tests at it.
-
-`create()` also takes `image=`, the container image the sandbox runs, and
-`providers=`, OpenShell providers to attach. A provider keeps a credential at
-the gateway; the sandbox sees a placeholder that the sandbox proxy swaps for
-the real value only at the provider's endpoints, so a command inside the
-sandbox can call a model without ever holding the key. OpenShell's `oci-genai`
-profile does this for the OCI Generative AI OpenAI-compatible endpoint:
-
-```python
-backend = OpenShellBackend.create(
-    workspace="team-a",
-    image="docker.io/library/buildpack-deps:noble-curl",   # the default image has no curl
-    providers=["oci-genai"],
-)
-backend.exec(
-    "curl -sS https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/openai/v1/chat/completions"
-    ' -H "Authorization: Bearer $OCI_GENAI_API_KEY" -H "Content-Type: application/json" --data @body.json',
-    timeout=120,
-)
-```
-
-OpenShell has no file RPC, so files move over `exec`: downloads are a `tar`
-of the one file on standard output, uploads are `cat >` with the bytes on
-standard input (so an executable keeps its mode), in chunks for large files.
-Commands run with `execution_timeout`, so the gateway stops one that runs
-too long. The `openshell` package is imported only by `connect` and
-`create`; pass a client of your own to the constructor and nothing from it
-is imported.
-
-### OCI GenAI Sandboxes
-
-```bash
-pip install "locus-sdk[oci-sandbox]"
-```
-
-```python
-from locus.harness import OCISandboxBackend, build_harness
-
-backend = OCISandboxBackend.create(
-    "ocid1.generativeaiproject.oc1...",  # a project with sandboxes enabled
-    region="eu-frankfurt-1",
-    expiration="PT1H",
-)
-# or: OCISandboxBackend.connect("sbx-...", region="eu-frankfurt-1") — never deleted
-harness = build_harness(backend, wrap=my_gate)
-...
-backend.close()  # a sandbox create() made is stopped and deleted
-```
-
-An OCI Enterprise AI sandbox is an isolated Linux runtime (gVisor) that
-belongs to a Generative AI project; the project fixes its outbound network.
-`create` makes one (`runtime`, `shape`, `expiration` as an ISO 8601 duration
-of up to 48 hours, sent as `expiresInMinutes`,
-`warmpool_name`), waits until it runs, and owns it; `connect` attaches to
-one that exists and needs only `use generative-ai-sandbox`. `extend("PT30M")`
-adds lifetime. Auth is an `~/.oci/config` profile (API key or session
-token) or instance or resource principals.
-
-What the service is like, and what the backend does about it:
-
-- Commands go through `run_sandbox_command_and_stream`, whose events carry
-  a sequence number, so standard output and standard error keep their
-  order. Each command runs under `timeout` inside the sandbox: the
-  service's own timeout does not end the stream until the command would
-  have finished.
-- A command's output goes to a file in the sandbox and at most
-  `max_output_bytes` (900 kB) come back, head and tail: the service returns
-  nothing for output much above a megabyte.
-- Only `/workspace` is writable, so background commands keep their state in
-  `/workspace/.locus-harness`, which recursive walks skip.
-- Files move with the file API (`write_sandbox_file` with a base64
-  SHA-256, `read_sandbox_file`); writes above 8 MB go in parts joined in
-  the sandbox.
-
-The backend needs the `oci` package (2.189.0 or later) installed, because
-every command builds one of the SDK's request models. It is imported
-lazily, so `import locus.harness` does not need it. `connect` and `create`
-also build the client and its authentication; to configure the client
-yourself, pass a `GenerativeAiSandboxClient` of your own to the
-constructor.
+- **[OCI GenAI Sandboxes](harness/oci-sandbox.md)**: `OCISandboxBackend`, an
+  isolated, expiring Linux workspace in your OCI tenancy, created from a
+  Generative AI project. `pip install "locus-sdk[oci-sandbox]"`.
+- **[NVIDIA OpenShell](harness/openshell.md)**: `OpenShellBackend`, a sandbox
+  behind an OpenShell gateway, with provider credentials the sandbox never
+  holds. `pip install "locus-sdk[openshell]"`.
 
 ## Evidence
 

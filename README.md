@@ -150,6 +150,7 @@ agent = Agent(model="oci:openai.gpt-5.5", tools=[retriever.as_tool()])
 
 | | |
 |---|---|
+| **[The coding harness](https://locusagents.ai/harness/)** | Read, write, edit, grep and a shell over one workspace protocol, run on the host, inside an [OCI GenAI Sandbox](https://locusagents.ai/harness/oci-sandbox/) in your tenancy or inside [NVIDIA OpenShell](https://locusagents.ai/harness/openshell/); one `wrap` gates every call. |
 | **[Tools and MCP](https://locusagents.ai/concepts/tools/)** | `@tool` on any function; arguments coerced to the declared types whatever the model sends; `@tool(idempotent=True)` dedupes on `(name, args)`; `MCPClient` consumes MCP servers and `LocusMCPServer` exposes yours. |
 | **[Memory](https://locusagents.ai/concepts/memory/)** | 10 checkpoint backends (Oracle Database 26ai and its versioned saver, OCI Object Storage, PostgreSQL, MySQL, Redis, OpenSearch, S3-compatible, in-memory, file, HTTP); `OracleStore`, Oracle agent memory and the portable `LLMMemoryManager` for long-term memory. |
 | **[RAG](https://locusagents.ai/concepts/rag/)** | Six vector stores (Oracle 26ai, pgvector, Qdrant, Chroma, OpenSearch, in-memory); OCI, in-database, OpenAI and Cohere embeddings; OCI Cohere, local and Cohere rerankers; `retriever.as_tool()`. |
