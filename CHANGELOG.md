@@ -8,27 +8,6 @@ policy.
 
 ## [Unreleased]
 
-### Fixed
-
-- **OCI Generative AI, OpenAI-compatible transport: a tool-call-only
-  assistant turn no longer breaks the conversation.** Such a turn has no
-  text; OpenAI accepts `"content": null` for it, OCI's endpoint answers
-  `400 Invalid type for 'messages[n].content': expected an object, but got
-  null`, and since the history is replayed on every later turn one tool call
-  ended the run. The transport now sends `""` for every vendor on OCI.
-- **Cognitive router: a capability listed twice compiles once.** An
-  extractor that repeats a capability id made the compiler bind the same tool
-  twice and the agent's registry rejected it (`Tool already registered`).
-  Ids are de-duplicated before binding.
-
-### Changed
-
-- **`locus-sdk-security` ships from the repository, not from PyPI.** The
-  5.1.0 notes said the release workflow publishes it; the upload needs a
-  PyPI project that does not exist, and the package is one install line
-  from the repository at the matching tag, so the workflow publishes
-  `locus-sdk` alone again and the install instructions say so.
-
 ### Added
 
 - **OCI GenAI Sandboxes as a coding-harness workspace.**
@@ -42,8 +21,26 @@ policy.
   `/workspace/.locus-harness` (`/tmp` is read-only there), now in
   `SKIP_DIRS`.
 
+### Changed
+
+- **`locus-sdk-security` ships from the repository, not from PyPI.** The
+  5.1.0 notes said the release workflow publishes it; the upload needs a
+  PyPI project that does not exist, and the package is one install line
+  from the repository at the matching tag, so the workflow publishes
+  `locus-sdk` alone again and the install instructions say so.
+
 ### Fixed
 
+- **OCI Generative AI, OpenAI-compatible transport: a tool-call-only
+  assistant turn no longer breaks the conversation.** Such a turn has no
+  text; OpenAI accepts `"content": null` for it, OCI's endpoint answers
+  `400 Invalid type for 'messages[n].content': expected an object, but got
+  null`, and since the history is replayed on every later turn one tool call
+  ended the run. The transport now sends `""` for every vendor on OCI.
+- **Cognitive router: a capability listed twice compiles once.** An
+  extractor that repeats a capability id made the compiler bind the same tool
+  twice and the agent's registry rejected it (`Tool already registered`).
+  Ids are de-duplicated before binding.
 - **The `a2a-mesh` example routed no requests, and spoke only the pre-v1.0
   surface.** `A2AClient.get_agent_card()` returns v1.0 cards whose skills
   are `AgentSkill` objects, but the orchestrator matched them as strings, so
