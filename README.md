@@ -8,9 +8,10 @@
 </p>
 
 <p align="center">
-  <strong>One <code>Agent</code> class, eight ways to combine agents, Oracle Cloud underneath, and the runtime around the model.</strong><br>
-  <em>Pipelines, fan-out, orchestrator, swarm, handoff, graphs, debate, A2A. OCI Generative AI on day 0, Dedicated AI Clusters,
-  Oracle Database 26ai. Tools, memory, RAG, observability, guardrails, and <code>admit()</code> in front of every consequential action.</em>
+  <strong>One <code>Agent</code> class, eight ways to combine agents, Oracle Cloud underneath. Around the model, an agentic harness.</strong><br>
+  <em>Tools, memory, RAG, observability, guardrails, <code>admit()</code> in front of every consequential action. A coding harness whose
+  workspace can be an OCI GenAI Sandbox in your tenancy. Pipelines, fan-out, orchestrator, swarm, handoff, graphs, debate, A2A.
+  OCI Generative AI on day 0, Dedicated AI Clusters, Oracle Database 26ai.</em>
 </p>
 
 <p align="center">
