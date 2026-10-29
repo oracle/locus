@@ -286,8 +286,8 @@ print(result.text)          # findings from 3 parallel probes
 
 ## Oracle Cloud, native
 
-The OCI and Oracle Database primitives are first-class classes, not adapters:
-same `Agent`, same events, same admission gate.
+OCI Generative AI and Oracle Database are built into the runtime: same `Agent`,
+same events, same admission gate.
 
 <div class="grid cards locus-feature-cards" markdown>
 
@@ -412,7 +412,8 @@ agent = Agent(model="oci:openai.gpt-5.5", tools=[retriever.as_tool()])
 
     ---
     `locus serve` puts an agent behind FastAPI with bearer auth and thread
-    persistence; a runner image ships for OCI Kubernetes Engine (OKE).
+    persistence; a multi-stage `Dockerfile` for OCI Kubernetes Engine (OKE) or any
+    container host.
 
 - {{ locus_glyph skills-eval }} **[Skills, playbooks, evaluation](concepts/skills.md)**
 
