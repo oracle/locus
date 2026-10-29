@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import pytest
 
+
 pytest.importorskip("oci")
 
 from locus.core.messages import Message, Role, ToolCall  # noqa: E402
@@ -43,7 +44,8 @@ class TestBlankNullAssistantContent:
         out = blank_null_assistant_content([Message.user("Q"), _tool_call_turn()])
         assert out[1].role is Role.ASSISTANT
         assert out[1].content == ""
-        assert out[1].tool_calls and out[1].tool_calls[0].name == "add"
+        assert out[1].tool_calls
+        assert out[1].tool_calls[0].name == "add"
 
     def test_text_turns_and_other_roles_are_untouched(self) -> None:
         msgs = [
