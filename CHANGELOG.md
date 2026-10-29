@@ -8,6 +8,19 @@ policy.
 
 ## [Unreleased]
 
+### Fixed
+
+- **OCI Generative AI, OpenAI-compatible transport: a tool-call-only
+  assistant turn no longer breaks the conversation.** Such a turn has no
+  text; OpenAI accepts `"content": null` for it, OCI's endpoint answers
+  `400 Invalid type for 'messages[n].content': expected an object, but got
+  null`, and since the history is replayed on every later turn one tool call
+  ended the run. The transport now sends `""` for every vendor on OCI.
+- **Cognitive router: a capability listed twice compiles once.** An
+  extractor that repeats a capability id made the compiler bind the same tool
+  twice and the agent's registry rejected it (`Tool already registered`).
+  Ids are de-duplicated before binding.
+
 ### Changed
 
 - **`locus-sdk-security` ships from the repository, not from PyPI.** The

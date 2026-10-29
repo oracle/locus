@@ -749,6 +749,11 @@ async def _run_router_corpus(router: Router, score: AblationScore) -> None:
         except FrameExtractionError as exc:
             score.record_router(entry, None, None, REGISTERED_IDS, str(exc))
             continue
+        except Exception as exc:  # noqa: BLE001 — a provider error on one prompt is a data point
+            score.record_router(
+                entry, None, None, REGISTERED_IDS, f"{type(exc).__name__}: {str(exc)[:120]}"
+            )
+            continue
         # Resolve which protocol the registry *would* pick — independent
         # of whether the builder succeeds. This lets us count
         # selection accuracy even when an opt-in builder (e.g.
@@ -782,7 +787,13 @@ async def _run_router_corpus(router: Router, score: AblationScore) -> None:
 
 async def _run_freeform_corpus(extractor: Agent, score: AblationScore) -> None:
     for entry in CORPUS:
-        result = await asyncio.to_thread(extractor.invoke, entry.prompt)
+        try:
+            result = await asyncio.to_thread(extractor.invoke, entry.prompt)
+        except Exception as exc:  # noqa: BLE001 — see _run_router_corpus
+            score.record_freeform(
+                entry, None, REGISTERED_IDS, f"{type(exc).__name__}: {str(exc)[:120]}"
+            )
+            continue
         parsed = result.parsed
         if not isinstance(parsed, FreeFormChoice):
             score.record_freeform(entry, None, REGISTERED_IDS, result.parse_error or "no parse")
@@ -898,7 +909,7 @@ async def _run_router_adversarial(router: Router, score: RobustnessScore) -> Non
     for entry in ADVERSARIAL_CORPUS:
         try:
             frame = await router.extract(entry.prompt)
-        except FrameExtractionError:
+        except Exception:  # noqa: BLE001 — a rejected frame or a provider error is a refusal
             score.record(entry, None, REGISTERED_IDS)
             continue
         # The compiler's own selection, so the risk fallback counts the way a
@@ -908,7 +919,11 @@ async def _run_router_adversarial(router: Router, score: RobustnessScore) -> Non
 
 async def _run_freeform_adversarial(extractor: Agent, score: RobustnessScore) -> None:
     for entry in ADVERSARIAL_CORPUS:
-        result = await asyncio.to_thread(extractor.invoke, entry.prompt)
+        try:
+            result = await asyncio.to_thread(extractor.invoke, entry.prompt)
+        except Exception:  # noqa: BLE001 — see _run_router_adversarial
+            score.record(entry, None, REGISTERED_IDS)
+            continue
         parsed = result.parsed
         if not isinstance(parsed, FreeFormChoice):
             score.record(entry, None, REGISTERED_IDS)
