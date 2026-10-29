@@ -22,6 +22,7 @@
   const SQUEEZED_COLUMN_PX = 150;
   const MATRIX_MAX_CHARS = 14;
   const FIRST_COLUMN_LABEL_CHARS = 28;
+  const PHONE_COLUMN_PX = 500;
   const PROSE_CELL_CHARS = 40;
   const DASH = /^[—–-]$/;
 
@@ -50,6 +51,7 @@
     });
     let longest = 0;
     let longestFirst = 0;
+    let firstAllNumbers = true;
     const firstLengths = [];
     table.querySelectorAll(":scope > tbody > tr").forEach(function (tr) {
       Array.from(tr.children).forEach(function (td, i) {
@@ -61,6 +63,7 @@
         if (i === 0) {
           firstLengths.push(t.length);
           longestFirst = Math.max(longestFirst, t.length);
+          if (!/^\d{1,2}$/.test(t)) firstAllNumbers = false;
         }
       });
     });
@@ -73,23 +76,34 @@
     table.dataset.firstLong = medianFirst > FIRST_COLUMN_LABEL_CHARS ? "1" : "";
     // Recorded under its own name: data-index-col is the applied state and
     // is cleared on every run.
-    if (firstLengths.length && longestFirst <= 2 && heads.length >= 3) table.dataset.indexFirst = "1";
+    if (firstLengths.length && firstAllNumbers && longestFirst <= 2 && heads.length >= 3) table.dataset.indexFirst = "1";
   }
 
   function wrapper(table) {
     return table.closest(".md-typeset__scrollwrap") || table.parentElement;
   }
 
+  // The width a table may take without running past the text column: the
+  // scroll wrapper bleeds 0.4rem into each margin, so its own width is too
+  // generous by that padding.
+  function columnWidth(table) {
+    const inner = table.closest(".md-typeset__table") || table.parentElement;
+    const style = getComputedStyle(inner);
+    return inner.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+  }
+
   function overflows(table) {
     const wrap = wrapper(table);
     return table.scrollWidth > table.clientWidth + 1 ||
-      table.scrollWidth > wrap.clientWidth + 1 ||
+      table.getBoundingClientRect().width > columnWidth(table) + 1 ||
       wrap.scrollWidth > wrap.clientWidth + 1;
   }
 
-  // A two-column table with prose whose narrower column is a ribbon.
+  // A two-column table with prose whose narrower column is a ribbon. Only a
+  // phone-width column counts: at tablet width the other column is wide.
   function squeezed(table) {
     if (Number(table.dataset.cols) !== 2 || !table.dataset.prose) return false;
+    if (columnWidth(table) >= PHONE_COLUMN_PX) return false;
     const row = table.querySelector(":scope > tbody > tr");
     if (!row) return false;
     const widths = Array.from(row.children, function (td) { return td.getBoundingClientRect().width; });
@@ -112,10 +126,13 @@
     const decision = new Map();
     const retry = [];
     live.forEach(function (table) {
-      const available = wrapper(table).clientWidth;
+      const available = columnWidth(table);
       const cols = Number(table.dataset.cols);
       const crowded = cols >= 3 && !table.dataset.matrix && cols * MIN_COLUMN_PX > available;
-      if (crowded || squeezed(table) || (cols === 2 && table.dataset.firstLong === "1")) {
+      // A sentence-length first column only forces cards on a phone-width
+      // column; at tablet width the two columns read fine as a table.
+      const firstLong = cols === 2 && table.dataset.firstLong === "1" && available < PHONE_COLUMN_PX;
+      if (crowded || squeezed(table) || firstLong) {
         decision.set(table, true);
       } else if (overflows(table)) {
         retry.push(table);

@@ -9,7 +9,7 @@ A phone column is about forty characters wide. An inline code span such as
 break opportunity the browser cuts it at an arbitrary letter, leaving a lone
 ``y`` in its own chip on the next line. This inserts ``<wbr>`` after each
 ``/``, ``.``, ``_``, ``-`` and ``,`` inside inline ``<code>`` spans (and
-mkdocstrings member names) of twenty or more characters, so a wrap lands on a
+mkdocstrings member names) of thirty-six or more characters, so a wrap lands on a
 separator. Code inside ``<pre>`` blocks is left alone: it scrolls or wraps on
 its own rules. ``<wbr>`` has no visible width and is dropped by the Markdown
 twins that hooks/llms_txt.py writes, which read the Markdown, not this HTML.
@@ -21,7 +21,10 @@ import re
 from typing import Any
 
 
-MIN_CHARS = 20
+# A chip shorter than this fits a phone line on its own, so it moves to the
+# next line whole; only longer chips get break opportunities (36 characters is
+# about 300px in the inline code face, against a 328px column at 360px).
+MIN_CHARS = 36
 _SEPARATORS = re.compile(r"([/._,-])(?=\S)")
 _PRE = re.compile(r"<pre\b.*?</pre>", re.DOTALL)
 _INLINE_CODE = re.compile(r"(<code(?:\s[^>]*)?>)([^<]{" + str(MIN_CHARS) + r",})(</code>)")

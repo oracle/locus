@@ -18,7 +18,7 @@ def test_long_path_gets_breaks_after_separators() -> None:
 
 
 def test_short_code_is_untouched() -> None:
-    html = "<p><code>agent.run</code> and <code>max_iterations</code></p>"
+    html = "<p><code>agent.run</code>, <code>Agent(output_schema=...)</code> and <code>execute_handoff(...)</code></p>"
     assert add_break_opportunities(html) == html
 
 
