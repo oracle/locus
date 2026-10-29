@@ -10,11 +10,12 @@ description: "Oracle Generative AI Agentic Harness. Locus is a Python agent harn
 
 # Multi-agent workflows built for <span class="accent">production.</span>
 
-One `Agent` class, eight ways to combine agents, Oracle Cloud underneath, and the runtime around the model: tools, memory, RAG, observability, guardrails, an admission gate.
+One `Agent` class, eight ways to combine agents, Oracle Cloud underneath. Around the model, the agentic harness; around the code an agent writes, an OCI GenAI Sandbox in your tenancy.
 
-- **Eight multi-agent shapes.** Pipelines, fan-out, orchestrator, swarm, handoff, graphs, debate, A2A. A cognitive router picks one from the task.
-- **Oracle Cloud, native.** OCI Generative AI on day 0, Dedicated AI Clusters, OCI GenAI Sandboxes for the coding harness, and Oracle Database 26ai for vectors, threads and memory.
-- **Production from the first line.** Durable threads, typed events, grounded answers, and `admit()` in front of every consequential action.
+- **The agentic harness.** Tools, memory, RAG, observability, guardrails. Durable threads, typed events, claims checked against evidence. `admit()` in front of every consequential action: allow, hold for a person, deny, on a hash-chained audit trail.
+- **The coding harness, sandboxed.** Read, write, edit, search, a shell, on the host or inside an OCI GenAI Sandbox: isolated Linux, created in seconds, expiring on its own. Every call gated, every command recorded.
+- **Eight multi-agent shapes.** Pipelines, fan-out, orchestrator, swarm, handoff, graphs, debate, A2A, each running the same `Agent`. A cognitive router picks one from the task.
+- **Oracle Cloud, native.** OCI Generative AI on day 0, Dedicated AI Clusters, Oracle Database 26ai for vectors, threads, memory.
 
 [Quickstart](how-to/quickstart.md){ .md-button .md-button--primary }
 [Multi-agent shapes](concepts/multi-agent.md){ .md-button }
