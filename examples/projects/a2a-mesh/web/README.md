@@ -2,8 +2,9 @@
 
 A React + Vite + TypeScript front-end for the locus
 [a2a-mesh](../README.md) backend. Discovers running A2A (Agent-to-Agent)
-peers via their `AgentCard`, routes a query by capability tag, and renders
-the typed event stream from `POST /a2a/stream` in real time.
+peers via their A2A v1.0 `AgentCard`, routes a query by skill, and sends
+it over JSON-RPC (`SendMessage`), or streams the task's events
+(`SendStreamingMessage`) in real time.
 
 Styled in a clean console design language — global header with a thin
 red rule, sidebar workspace nav, white surface cards on a warm
@@ -29,25 +30,29 @@ talks to both peers without CORS drama.
 
 ## What the UI does
 
-1. **Discovers peers.** On mount, hits `GET /agent-card` on each
-   configured proxy. Reachable peers turn green, unreachable ones turn
-   red.
+1. **Discovers peers.** On mount, fetches
+   `GET /.well-known/agent-card.json` on each configured proxy (falling
+   back to the legacy `GET /agent-card` for pre-v1.0 peers). Reachable
+   peers turn green, unreachable ones turn red; each card shows its skill
+   ids and its A2A protocol version and interfaces.
 2. **Suggests a skill** based on the prompt. A query like
    `Is alert A-101 a true positive?` matches `alert_triage`; a query
    like `Enrich 198.51.100.7` matches `threat_intel`. The matching skill
    tag is highlighted on the peer card.
 3. **Auto-selects** the first reachable peer that advertises the
    suggested skill — you can override by clicking another peer.
-4. **Sends the query.** Either via `POST /a2a/invoke` (one shot) or
-   `POST /a2a/stream` (SSE). Streamed events render as a typed log:
-   `Tool`, `Think`, `ModelChunk`, `Terminate`, `Error`.
+4. **Sends the query** as A2A v1.0 JSON-RPC on `POST /`, with the
+   `A2A-Version: 1.0` header. One shot uses `SendMessage` and shows the
+   text of the task's last artifact. With streaming on,
+   `SendStreamingMessage` frames render as a log: `Task`,
+   `StatusUpdate`, `ArtifactUpdate`, `Error`.
 
 ## File map
 
 | File | Role |
 |---|---|
 | `src/App.tsx` | Single-page console — discovery + form + reply panel |
-| `src/api.ts` | Wrappers around `GET /agent-card`, `POST /a2a/invoke`, SSE stream |
+| `src/api.ts` | A2A v1.0 client: Agent Card, `SendMessage`, `SendStreamingMessage` (SSE) |
 | `src/types.ts` | `AgentCard`, `Peer`, `StreamedEvent` |
 | `src/styles/locus.css` | locus palette + console layout primitives |
 | `vite.config.ts` | Dev-server proxies to the two A2A services |

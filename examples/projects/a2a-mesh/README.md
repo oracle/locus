@@ -1,8 +1,9 @@
 # a2a-mesh — multi-process Locus security agents over A2A
 
-A runnable example of three Locus agents talking to each other across
-process boundaries via the Agent-to-Agent (A2A) protocol — HTTP + SSE
-with capability-based discovery via `AgentCard`. The mesh models a SOC
+A runnable example of Locus agents talking to each other across
+process boundaries via the Agent-to-Agent (A2A) protocol v1.0 —
+JSON-RPC over HTTP + SSE, with capability-based discovery via the
+`AgentCard`. The mesh models a SOC
 where a threat-intel service and an alert-triage service run as separate
 peers, and an orchestrator routes each request to the right one.
 
@@ -16,11 +17,11 @@ integration test.
                  │  orchestrator (CLI)                          │
                  │  src/a2a_mesh/orchestrator.py                │
                  │                                              │
-                 │  1. GET /agent-card on each peer             │
-                 │  2. pick by skill tag                        │
-                 │  3. POST /a2a/invoke or /a2a/stream          │
+                 │  1. GET /.well-known/agent-card.json         │
+                 │  2. pick by skill id                         │
+                 │  3. SendMessage / SendStreamingMessage       │
                  └────────┬───────────────────────┬─────────────┘
-                          │ HTTP+SSE              │ HTTP+SSE
+                          │ JSON-RPC + SSE        │ JSON-RPC + SSE
                           ▼                       ▼
         ┌──────────────────────────┐  ┌──────────────────────────┐
         │  threat-intel agent      │  │  soc-triage agent        │
@@ -67,18 +68,27 @@ ANTHROPIC_API_KEY=...`). The model factory is in
 `make demo` runs `python -m a2a_mesh.orchestrator "Is alert A-101 a true positive?"`
 which:
 
-1. Calls `GET http://localhost:8001/agent-card` and
-   `GET http://localhost:8002/agent-card` to discover both peers.
+1. Fetches the Agent Card of both peers
+   (`GET /.well-known/agent-card.json` on `:8001` and `:8002`) and prints
+   each one's skills, A2A `protocolVersion` and `supportedInterfaces`.
 2. Picks the SOC-triage agent because the query names an alert id — the
-   `alert_triage` skill matches.
-3. Calls `POST /a2a/invoke` on the triage agent and prints the verdict.
-4. As a follow-up, calls the threat-intel agent with `ioc_enrichment` to
-   enrich the indicators behind the alert.
+   `alert_triage` skill id matches.
+3. Sends the query with the A2A v1.0 `SendMessage` JSON-RPC method and
+   prints the verdict, read from the returned task's artifacts.
 
-Both calls use `A2AClient`, so the wire format is the typed JSON
-envelope from [`locus.a2a.protocol`][a2a]. Streaming is also
-demonstrated — pass `--stream` to `python -m a2a_mesh.orchestrator` and
-events from the remote agent stream over SSE in real time.
+Every call goes through `A2AClient` from [`locus.a2a.protocol`][a2a].
+Pass `--stream` to use `SendStreamingMessage` instead: the task's
+lifecycle (`task`, `status-update`, `artifact-update`) streams over SSE
+as it happens. `--skill <id>` forces the route.
+
+The peers still serve the pre-v1.0 flat endpoints for older clients.
+Pass `--legacy` (with or without `--stream`) to call `/a2a/invoke` and
+`/a2a/stream` instead, which shows the backwards compatibility:
+
+```bash
+python -m a2a_mesh.orchestrator --legacy "Is alert A-101 a true positive?"
+python -m a2a_mesh.orchestrator --legacy --stream "Enrich 198.51.100.7."
+```
 
 ## Why this isn't just `asyncio.gather`
 
@@ -96,8 +106,9 @@ make test
 ```
 
 `tests/test_mesh.py` boots both `A2AServer`s in-process via FastAPI's
-`TestClient`, runs the orchestrator's discovery + delegation logic
-against them, and asserts the reply round-trips. No real network.
+`TestClient` and checks the v1.0 Agent Card, `SendMessage` and
+`SendStreamingMessage`, the legacy endpoints, and the orchestrator's
+routing on the skill ids of a v1.0 card. No real network.
 
 ## Files
 
@@ -106,7 +117,7 @@ against them, and asserts the reply round-trips. No real network.
 | `src/a2a_mesh/_model.py` | Shared model factory (mock by default, OpenAI / Anthropic via env) |
 | `src/a2a_mesh/threat_intel.py` | Threat-intel `A2AServer` on `:8001` |
 | `src/a2a_mesh/soc_triage.py` | SOC-triage `A2AServer` on `:8002` |
-| `src/a2a_mesh/orchestrator.py` | CLI client — discovers + delegates by skill tag |
+| `src/a2a_mesh/orchestrator.py` | CLI client — discovers + delegates by skill id (A2A v1.0, `--legacy` for the flat endpoints) |
 | `web/` | React + Vite UI — console-styled A2A dashboard (see [`web/README.md`](web/README.md)) |
 | `pyproject.toml` | Hatch env — deps and the `sdk`/`intel`/`triage`/`demo`/`test` scripts |
 | `Makefile` | `install`, `intel`, `triage`, `demo`, `test`, `mesh` (tmux) |
@@ -116,9 +127,10 @@ against them, and asserts the reply round-trips. No real network.
 
 A React + Vite UI ships in [`web/`](web/), styled in a clean console
 design language — global header with a thin red rule, sidebar workspace
-nav, white cards on warm off-white. Discovers both peers, auto-suggests
-a skill from the prompt, and streams the typed event log from
-`/a2a/stream`.
+nav, white cards on warm off-white. Discovers both peers from their
+v1.0 Agent Cards, auto-suggests a skill from the prompt, and sends it
+with `SendMessage` or streams the task events of
+`SendStreamingMessage`.
 
 ```bash
 cd web
