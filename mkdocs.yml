@@ -151,13 +151,10 @@ markdown_extensions:
 
 plugins:
 - search
-# Self-hosts the web fonts the theme loads from Google Fonts (and any other
-# external asset the built pages reference), so a page load makes no
-# third-party request. The PyPI badge stays live: it is excluded because
-# the build would freeze the version it shows.
-- privacy:
-    assets_exclude:
-    - img.shields.io/*
+# The privacy plugin self-hosts every external asset. The header's version
+# pill is rendered by hooks/build_metadata.py from the SDK this build was made
+# with (config.extra.sdk_version), so nothing in the header is fetched live.
+- privacy
 - mkdocstrings:
     default_handler: python
     handlers:
