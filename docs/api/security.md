@@ -5,7 +5,7 @@ The security domain ships as the separate `locus-sdk-security` package
 repository at the tag matching your `locus-sdk` version:
 
 ```bash
-pip install "git+https://github.com/oracle/locus@v5.1.0#subdirectory=packages/locus-sdk-security"
+pip install "git+https://github.com/oracle/locus@v5.2.0#subdirectory=packages/locus-sdk-security"
 ```
 
 The core `locus-sdk` package does not include it. It covers three separable
