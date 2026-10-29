@@ -2923,7 +2923,7 @@ wheels = [
 
 [[package]]
 name = "locus-sdk"
-version = "5.1.0"
+version = "5.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
@@ -3214,7 +3214,7 @@ provides-extras = ["openai", "anthropic", "oci", "llm", "telemetry", "mcp", "ser
 
 [[package]]
 name = "locus-sdk-security"
-version = "5.1.0"
+version = "5.2.0"
 source = { editable = "packages/locus-sdk-security" }
 dependencies = [
     { name = "locus-sdk" },
