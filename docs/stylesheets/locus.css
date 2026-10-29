@@ -2958,6 +2958,19 @@ html.tl-dia-open body {
   .md-typeset table[data-stack] td:first-child code {
     font-size: 0.85em;
   }
+  /* A table whose first column is sentences (a comparison, a symptom list)
+     has no name column: both cells keep their captions and neither is the
+     title, so the first header is not lost. */
+  .md-typeset table[data-stack][data-first-long="1"] td:first-child {
+    padding: 0.2rem 0 0;
+    margin-bottom: 0;
+    border-bottom: 0;
+    font-size: inherit;
+    font-weight: inherit;
+  }
+  .md-typeset table[data-stack][data-first-long="1"] td:first-child::before {
+    display: block;
+  }
 }
 
 /* Admonitions and details are 12.8px in Material at every width, which on a
