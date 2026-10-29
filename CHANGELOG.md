@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [5.2.0] - 2026-10-29
+
 ### Added
 
 - **OCI GenAI Sandboxes as a coding-harness workspace.**
@@ -28,6 +30,18 @@ policy.
   PyPI project that does not exist, and the package is one install line
   from the repository at the matching tag, so the workflow publishes
   `locus-sdk` alone again and the install instructions say so.
+
+- **Documentation site: the coding harness has its own section, and the
+  site reads on a phone.** Concepts gains a "The coding harness" group with
+  an overview and one page each for OCI GenAI Sandboxes and NVIDIA OpenShell;
+  the home page names the sandbox in its hero, in the Oracle Cloud grid and
+  in the harness grid with an end-to-end snippet. Every page was re-laid for
+  360 to 768 px: the title gets the full column with the page actions on
+  their own row, diagrams fit the column and expand full-screen at their
+  design width, tables that cannot be read at phone width render as cards,
+  filter inputs are 16 px so iPhone Safari does not zoom, and touch targets
+  are finger-sized. The header shows the released version from the build
+  instead of a badge image that could be served stale from a cache.
 
 ### Fixed
 

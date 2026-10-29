@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "locus-sdk-security"
 # Released in lockstep with locus-sdk: bump this, and the locus-sdk floor
 # below, together with the core version.
-version = "5.1.0"
+version = "5.2.0"
 description = "Security-domain tooling for Locus agents — AI red-team probes, SOC triage, threat-intel / SIEM / EDR / scanner / fingerprint adapters, OCI cloud posture, and IR playbooks, all grounded through the locus-sdk control core."
 readme = "README.md"
 license = "UPL-1.0"
@@ -51,7 +51,7 @@ classifiers = [
 # nothing). Cloud posture runs on the core describe_oci / use_oci tools,
 # which need the ``oci`` SDK from ``locus-sdk[oci]``.
 dependencies = [
-    "locus-sdk>=5.1.0",
+    "locus-sdk>=5.2.0",
 ]
 
 [project.urls]
