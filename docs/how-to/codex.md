@@ -27,19 +27,7 @@ checkpoint a person can follow by hand.
 
 ## How the pieces fit
 
-```text
-you ── locus codex run "Build …" ──▶ Codex ──reads──▶ .agents/skills/locus/  (the Locus skill)
-                                      │              AGENTS.md              (the house rules)
-                                      │ Codex's own model: OpenAI, or OCI Generative AI
-                                      │ through examples/codex-on-oci (a loopback gateway)
-                                      ▼
-                              your project: the agent, its tests, a run script
-                                      ▼
-                              Locus ──▶ oci: / openai: / anthropic: model, gated tools, audit trail
-
-codex/scenarios/run.py ── twelve such tasks, each with an automatic check ──▶ PASS / FAIL table
-codex/PROMPT.md + SPEC.md ── in a clone: a first agent, a controlled action, the rogue challenge
-```
+{{ locus_diagram codex-on-locus }}
 
 | You want to | Use |
 |---|---|
