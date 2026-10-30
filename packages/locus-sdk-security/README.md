@@ -9,7 +9,7 @@ It is not published to PyPI. Install it from the repository; its version
 tracks `locus-sdk` release for release, so pin the tag you run:
 
 ```bash
-pip install "git+https://github.com/oracle/locus@v5.2.0#subdirectory=packages/locus-sdk-security"
+pip install "git+https://github.com/oracle/locus@v5.3.0#subdirectory=packages/locus-sdk-security"
 # + the OCI SDK for the cloud-posture tools (core describe_oci / use_oci):
 pip install "locus-sdk[oci]"
 ```
