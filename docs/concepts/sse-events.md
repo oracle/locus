@@ -9,8 +9,8 @@ Locus publishes a single canonical stream of events on its in-process
 component-visible action (see [Observability](observability.md) for the
 hooks that ship it). Every event carries a stable `event_type` string
 keyed by the component that produced it (`agent.*`, `multiagent.*`,
-`composition.*`, `router.*`, `rag.*`, `memory.*`, `a2a.*`, `skills.*`,
-`deepagent.*`, `research.*`, `tool.*`).
+`composition.*`, `router.*`, `rag.*`, `memory.*`, `model.*`, `a2a.*`,
+`skills.*`, `deepagent.*`, `research.*`, `tool.*`, `harness.*`).
 
 Each action — every `lookup_order`, `issue_refund`, `isolate_host` —
 surfaces as a timestamped, span-tied event you can render live or replay
@@ -65,6 +65,7 @@ for every iteration of the inner loop.
 | `agent.model.completed` | `content_preview`, `tool_call_count`, `stop_reason` | Not emitted by the `Agent.run` bridge (the loop never yields `ModelCompleteEvent`); `EventBusHook` publishes its own `agent.model.completed` with `stop_reason`, `content_length` |
 | `agent.tokens.used` | `prompt_tokens`, `completion_tokens`, `total_tokens` | Not currently emitted: bridged only from `ModelCompleteEvent`, which the loop never yields |
 | `agent.interrupt` | `interrupt_id`, `question_preview`, `options` | Human-in-the-loop (HITL) pause |
+| `agent.context.compacted` | `iteration`, `stage` (`"prune"` \| `"summarize"` \| `"truncate"`), `tokens_before`, `tokens_after`, `threshold`, `exhausted` | Context compaction; `exhausted` means the run ends with `context_exhausted` |
 | `agent.terminate` | `reason`, `iterations_used`, `final_confidence`, `total_tool_calls`, `final_message_preview` | One per dispatch |
 | `agent.model.retry` | `attempt`, `max_retries`, `delay_seconds`, `reason` | `ModelRetryHook` only |
 | `agent.steering.applied` | `action`, `tool_name`, `reason` | `SteeringHook` only |
@@ -105,7 +106,6 @@ run id is bound, either by an active `run_context()` or by
 | `multiagent.handoff.completed` | `source_agent_id`, `target_agent_id`, `success`, `output_length` |
 | `multiagent.graph.node.started` | `graph_id`, `node_id`, `iteration`, `span_id`, `parallel`, `is_resuming` |
 | `multiagent.graph.node.completed` | `graph_id`, `node_id`, `span_id`, `status`, `duration_ms`, `parallel` |
-| `multiagent.graph.node.routed` | `from_node`, `to_nodes`, `condition_result` |
 
 ### `composition.*` — pipelines
 
@@ -151,7 +151,7 @@ a hold for human approval, and `allow: true` alone is an allow.
 | `rag.query.started` | `query_preview`, `limit`, `store_type`, `threshold` |
 | `rag.query.completed` | `hit_count`, `top_score`, `duration_ms`, `store_type` |
 
-### `memory.*` — checkpointing + conversation management
+### `memory.*` — checkpointing, conversation management, long-term memory
 
 | Event | Payload |
 |---|---|
@@ -160,13 +160,30 @@ a hold for human approval, and `allow: true` alone is an allow.
 | `memory.conversation.pruned` | `strategy="sliding_window"`, `window_size`, `removed_count` |
 | `memory.compactor.triggered` | `strategy="summarizing"`, `messages_before`, `threshold` |
 | `memory.compactor.completed` | `strategy`, `messages_before`, `messages_after`, `summarized_count`, `duration_ms` |
+| `memory.manager.injected` | `memory_count`, `types`; `OracleAgentMemoryManager` adds `source="oracleagentmemory"` |
+| `memory.manager.extracted` | `memory_count`, `types`, `keys`; `Mem0MemoryManager` sends `backend="mem0"`, `message_count` instead |
+| `memory.manager.extract_failed` | `error_type`, `error`, `mode` (`"inline"` \| `"background"`) |
+
+The three `memory.manager.*` events come from the long-term
+[memory managers](memory-manager.md): memories injected into the state
+before the model runs, and extraction at session end succeeding or failing.
+
+### `model.*` — model failover
+
+Emitted by `FallbackChain` (`locus.models.fallback`) for every tier switch
+and circuit-breaker transition, published once the call that caused them
+returns. Like every `emit()` site, a no-op without a bound run id.
+
+| Event | Payload |
+|---|---|
+| `model.fallback` | `kind` (the `FallbackEvent.kind`, anything but `"breaker"`), `tier`, `model`, `next_tier`, `reason`, `error`, `state`, `previous_state` |
+| `model.fallback.breaker` | same fields; `kind="breaker"`, with `state` and `previous_state` naming the breaker transition |
 
 ### `a2a.*` — Agent-to-Agent protocol
 
 | Event | Payload |
 |---|---|
 | `a2a.task.received` | `method`, `rpc_id` |
-| `a2a.task.processing` | `task_id`, `agent_name` |
 | `a2a.task.completed` | `method`, `success`, `error_code` (on error), `duration_ms` |
 | `a2a.client.send` | `target_url`, `method` |
 | `a2a.client.received` | `target_url`, `method`, `status_code`, `duration_ms`, `content_length` |
@@ -203,7 +220,6 @@ Emitted by `create_research_workflow` / individual node primitives from
 | `research.regenerate.started` | `ungrounded_count` |
 | `research.regenerate.completed` | `regeneration` (attempt index) |
 | `research.replan` | `replan` (iteration), `ungrounded_count`, `prompt_preview` |
-| `research.completed` | emitted by caller via `close_stream` |
 
 ### `tool.*` — sandboxed tool execution
 
@@ -217,6 +233,30 @@ but has no sandbox, and the hook then cancels that call.
 | `tool.sandbox.started` | `tool`, `provider`, `timeout` |
 | `tool.sandbox.completed` | `tool`, `ok`, `exit_code`, `timed_out`, `duration_ms` |
 | `tool.sandbox.denied` | `tool`, `labels` (the labels that required a sandbox) |
+
+### `harness.*` — coding-harness commands
+
+Published by the harness shell tool through `locus.harness.evidence.publish`
+(`emit_sync`) for every command it runs; a no-op outside a run. The payload
+is the `ExecRecord`: hashes of the command and of the kept output rather
+than the text itself, so a transcript can be checked against the record
+without storing either.
+
+| Event | Payload |
+|---|---|
+| `harness.exec` | `command_sha256`, `exit_code` (`None` when it did not finish or was left in the background), `duration_s`, `timed_out`, `output_sha256`, `output_bytes`, `truncated`, `backend_label`, `background` |
+
+## Declared but not emitted
+
+Seven constants in `src/locus/observability/emit.py` have no emission site
+today, so a subscriber never sees them: `EV_A2A_TASK_PROCESSING`
+(`a2a.task.processing`), `EV_GRAPH_NODE_ROUTED`
+(`multiagent.graph.node.routed`), `EV_MEMORY_CONVERSATION_ADDED`
+(`memory.conversation.added`), `EV_RAG_EMBEDDING_GENERATED`
+(`rag.embedding.generated`), `EV_RAG_STORE_SEARCH` (`rag.store.search`),
+`EV_RAG_STORE_UPSERT` (`rag.store.upsert`) and `EV_RESEARCH_COMPLETED`
+(`research.completed`). The end of a research run is signalled by
+`close_stream(rid)`, not by an event.
 
 ## Span discipline
 
