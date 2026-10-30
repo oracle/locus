@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [5.3.0] - 2026-10-30
+
 ### Added
 
 - **Codex scenarios.** `codex/scenarios/` is a series of twelve tasks Codex

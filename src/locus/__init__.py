@@ -193,7 +193,7 @@ def __getattr__(name: str) -> object:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-__version__ = "5.2.0"
+__version__ = "5.3.0"
 __all__ = [
     "Agent",
     "ApprovalPendingError",
