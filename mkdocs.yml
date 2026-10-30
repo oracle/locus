@@ -1,5 +1,5 @@
 site_name: locus
-site_description: Oracle Generative AI Agentic Harness. Locus is a fully assembled agent harness for Python with an admission gate in front of every consequential action — built first-class for OCI Generative AI and Oracle Database 26ai, open to every provider.
+site_description: 'Oracle Generative AI Agentic Harness. Locus is a Python agent harness: one Agent class, eight ways to combine agents, Oracle Cloud underneath, an admission gate in front of every consequential action, open to every provider.'
 site_url: https://locusagents.ai/
 repo_url: https://github.com/oracle/locus
 repo_name: oracle/locus

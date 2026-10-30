@@ -24,8 +24,8 @@ unused.
 
 See [Observability](../concepts/observability.md) for usage patterns and
 the [Server-Sent Events (SSE) event catalogue](../concepts/sse-events.md)
-for the full wire-format reference (40+ `event_type` strings across 9
-prefixes).
+for the full wire-format reference: every `event_type` string the SDK
+emits, grouped by prefix, with its payload fields.
 
 ::: locus.observability.event_bus.EventBus
 ::: locus.observability.event_bus.StreamEvent
