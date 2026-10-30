@@ -35,6 +35,8 @@ RUN ${PYTHON} -m venv /app/.venv
 
 COPY pyproject.toml README.md LICENSE.txt ./
 COPY src ./src
+# The Codex skill the wheel carries (pyproject force-include); `locus codex` needs it in the image.
+COPY .agents ./.agents
 
 # locus + the OpenAI provider + AgentServer + checkpoint backends.
 # Add [telemetry,rag,anthropic] to taste.

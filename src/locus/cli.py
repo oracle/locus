@@ -13,6 +13,8 @@ or a zero-argument function that returns one::
     locus resume app.py:agent --thread t1 --answer approved --perform
     locus audit verify trail.jsonl --key audit-1=audit-1.pub.pem --head 9c2e...
     locus serve app.py:agent --port 8000
+    locus codex init                 # the Locus skill for Codex, in this project
+    locus codex run "build an agent that triages tickets with a gated refund tool"
 
 Exit codes: 0 success, 1 a check or decision failed, 2 usage error, 3 the run is
 paused waiting for a person.
@@ -232,6 +234,40 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_codex(args: argparse.Namespace) -> int:
+    from locus import codex  # noqa: PLC0415
+
+    try:
+        if args.action == "path":
+            print(codex.skill_source())
+            return 0
+        if args.action == "init":
+            project = Path(args.dir)
+            dest = Path.home() / codex.SKILL_DIR if args.home else project / codex.SKILL_DIR
+            written = codex.install(dest)
+            print(
+                f"{len(written)} file(s) written to {dest}" if written else f"{dest} is up to date"
+            )
+            if not args.home and codex.add_agents_section(project):
+                print(f"Locus section added to {project / 'AGENTS.md'}")
+            return 0
+        project = Path.cwd()
+        if not (Path.home() / codex.SKILL_DIR / "SKILL.md").is_file():
+            codex.install(project / codex.SKILL_DIR)
+            codex.add_agents_section(project)
+        codex.launch(
+            codex.codex_argv(
+                args.prompt,
+                exec_mode=args.exec_,
+                codex_profile=args.codex_profile,
+                extra=args.codex_args,
+            )
+        )
+    except codex.CodexError as exc:
+        raise CLIError(str(exc)) from exc
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """The argument parser for ``locus``."""
     from locus import __version__  # noqa: PLC0415
@@ -293,6 +329,37 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--port", type=int, default=8000)
     serve.add_argument("--api-key", help="bearer key; or set LOCUS_SERVER_API_KEY")
     serve.set_defaults(handler=_cmd_serve)
+    codex = commands.add_parser(
+        "codex", help="install the Locus skill for Codex and start Codex with it"
+    )
+    codex_actions = codex.add_subparsers(dest="action", required=True)
+    init = codex_actions.add_parser(
+        "init",
+        help="put the skill in DIR/.agents/skills/locus and a Locus section in DIR/AGENTS.md",
+    )
+    init.add_argument("dir", nargs="?", default=".", help="the project root (default: here)")
+    init.add_argument(
+        "--home", action="store_true", help="install for every project, in ~/.agents/skills/locus"
+    )
+    run_codex = codex_actions.add_parser(
+        "run",
+        help="install the skill here if it is missing, then start Codex with the sandbox settings it needs",
+    )
+    run_codex.add_argument(
+        "prompt", nargs="?", help="what to build; omit for an interactive session"
+    )
+    run_codex.add_argument(
+        "--exec", dest="exec_", action="store_true", help="non-interactive (`codex exec`)"
+    )
+    run_codex.add_argument(
+        "--codex-profile",
+        help="a [profiles.<name>] from ~/.codex/config.toml, such as one that points Codex at OCI Generative AI",
+    )
+    run_codex.add_argument(
+        "codex_args", nargs=argparse.REMAINDER, help="arguments after -- are passed to codex"
+    )
+    codex_actions.add_parser("path", help="print where the bundled skill is")
+    codex.set_defaults(handler=_cmd_codex)
     return parser
 
 

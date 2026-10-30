@@ -1,0 +1,20 @@
+# Codex profile for the gateway in this directory. Copy it next to your Codex
+# config and select it with `codex -p oci` (Codex layers
+# ~/.codex/<name>.config.toml on top of config.toml for `--profile <name>`):
+#
+#   cp oci.config.toml ~/.codex/
+#   export LITELLM_MASTER_KEY=...        # the key the gateway was started with
+#   codex -p oci "..."                   # or: locus codex run --codex-profile oci "..."
+
+model_provider = "oci"
+model = "openai.gpt-5.5"                 # any chat model id the region serves; -m overrides it
+
+[model_providers.oci]
+name = "OCI Generative AI"
+base_url = "http://127.0.0.1:4000/v1"
+env_key = "LITELLM_MASTER_KEY"           # sent as the bearer token; the gateway checks it
+wire_api = "responses"
+requires_openai_auth = false
+
+[sandbox_workspace_write]
+network_access = true                    # pip, the model, and the gateway on loopback

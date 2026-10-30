@@ -8,6 +8,39 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **Codex builds on Locus.** The repository ships a Codex skill,
+  `.agents/skills/locus/`: a `SKILL.md` that gives a coding agent the shape
+  of the SDK (the agent and its tools, the admission gate, the shapes,
+  memory and RAG, the harness, the providers, offline tests) and four
+  reference files with every option, each snippet checked against the
+  installed SDK by `tests/docs/test_codex_skill.py`. The wheel carries the
+  skill, and `locus codex` places and uses it: `init` puts it in a
+  project's `.agents/skills/locus` with a Locus section in `AGENTS.md`, or
+  in `~/.agents/skills` with `--home`; `run` installs it where it is missing
+  and starts Codex with the sandbox settings its recipes need (`--exec`,
+  `--codex-profile`, and anything after `--` go to Codex); `path` prints
+  the bundled copy. `examples/codex-on-oci/` is a loopback LiteLLM gateway
+  that signs Codex's own model calls with an OCI profile, so Codex runs on
+  OCI Generative AI and needs no account elsewhere. The how-to page and the
+  README section describe all three.
+
+### Fixed
+
+- **`OCI_REGION` selects the region for `oci:` model strings.** The provider
+  guide and the environment-variables page said so; the factory behind
+  `Agent(model="oci:...")` only read `OCI_PROFILE` and sent every request
+  to the default region. It now takes `LOCUS_OCI_REGION`, then
+  `OCI_REGION`, when neither `region=` nor `base_url=` is given; the
+  default stays `us-chicago-1`.
+
+- **The harness examples decide by label.** The `ControlPolicy` shown with
+  `build_harness(..., wrap=gate_tool)` on the README, the landing page and the
+  harness pages now sets `require_verification_score=0.0`; with the default
+  score every harness call, reads included, was held for a person because no
+  verification verdict accompanies a workspace tool call.
+
 ## [5.2.0] - 2026-10-29
 
 ### Added

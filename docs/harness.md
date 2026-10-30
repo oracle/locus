@@ -14,7 +14,9 @@ from locus import Agent
 from locus.control import ControlPolicy, gate_tool
 from locus.harness import LocalBackend, build_harness
 
-policy = ControlPolicy(require_human_for=frozenset({"workspace.exec"}))
+policy = ControlPolicy(
+    require_verification_score=0.0, require_human_for=frozenset({"workspace.exec"})
+)
 harness = build_harness(
     LocalBackend("."),
     wrap=lambda tool, spec: gate_tool(tool, policy=policy, action=spec),

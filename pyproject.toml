@@ -307,8 +307,14 @@ Issues = "https://github.com/oracle/locus/issues"
 [tool.hatch.build.targets.wheel]
 packages = ["src/locus"]
 
+# The Locus skill for Codex is the repository's ``.agents/skills/locus``; the
+# wheel carries it as ``locus/codex/skill`` so ``locus codex init`` can place it.
+[tool.hatch.build.targets.wheel.force-include]
+".agents/skills/locus" = "locus/codex/skill"
+
 [tool.hatch.build.targets.sdist]
 include = [
+    "/.agents",
     "/src",
     "/tests",
     "/README.md",

@@ -87,6 +87,32 @@ setup.
 [Notebook 03 — Agent with tools →](notebooks/notebook_03_agent_with_tools.md)
 { .locus-links }
 
+## Build it with Codex
+
+[OpenAI Codex](https://developers.openai.com/codex) builds on Locus. The
+repository ships a Codex skill that teaches it the SDK: the `Agent` and its
+tools, the admission gate, the multi-agent shapes, memory and RAG on Oracle
+Database 26ai, the coding harness, the model providers, offline tests with
+model doubles. `locus codex` puts the skill where Codex looks and starts
+Codex with the sandbox settings it needs. Codex itself can run on OCI
+Generative AI through a loopback gateway in the repository, so neither Codex
+nor the agent it builds needs an account outside Oracle Cloud.
+
+```bash
+pip install "locus-sdk[oci]"
+locus codex run "Build a support agent with an order lookup and a gated refund tool, with tests"
+```
+
+In a clone, `codex/PROMPT.md` walks Codex through a first agent with a typed
+tool, an admission gate allowing, holding and denying, and the rogue-agent
+challenge, each step with a checkpoint a person can follow by hand.
+
+[Build it with Codex →](how-to/codex.md) ·
+[The Locus skill →](https://github.com/oracle/locus/tree/HEAD/.agents/skills/locus) ·
+[Codex on OCI Generative AI →](how-to/codex.md#codex-on-oci-generative-ai) ·
+[`codex/` in the repository →](https://github.com/oracle/locus/tree/HEAD/codex)
+{ .locus-links }
+
 ## What are you building?
 
 Each tab shows one workload in a few lines and links to the notebook that
@@ -432,7 +458,9 @@ from locus.control import ControlPolicy, gate_tool
 from locus.harness import OCISandboxBackend, build_harness
 
 backend = OCISandboxBackend.create("ocid1.generativeaiproject.oc1...", expiration="PT1H")
-policy = ControlPolicy(require_human_for=frozenset({"workspace.exec"}))
+policy = ControlPolicy(
+    require_verification_score=0.0, require_human_for=frozenset({"workspace.exec"})
+)
 harness = build_harness(
     backend, wrap=lambda tool, spec: gate_tool(tool, policy=policy, action=spec)
 )
@@ -473,6 +501,7 @@ pip install locus-sdk && python -m locus.rogue
 ## Where next
 
 [All notebooks →](notebooks/index.md) ·
+[Build it with Codex →](how-to/codex.md) ·
 [Capabilities →](capabilities.md) ·
 [API reference →](api/index.md) ·
 [Deploy →](how-to/deploy.md)
