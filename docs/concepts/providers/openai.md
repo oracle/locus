@@ -23,7 +23,8 @@ code, you're talking to GPT-5 or the o-series reasoning models.
 export OPENAI_API_KEY=sk-...
 ```
 
-That's the only setup. The SDK reads the env var on import.
+That's the only setup. The key is read when the model's client is first
+built, so export it any time before the first call.
 
 ### 2. Pick a model
 
@@ -52,9 +53,9 @@ without further configuration.
 ### Chat completions across the GPT family
 
 Every chat-shaped OpenAI model: `gpt-4o`, `gpt-4.1`, `gpt-5`, `gpt-5.5`.
-Vision input (image URLs / base64), audio input, and
-function calling work the same way you'd use them on the OpenAI SDK
-directly — the SDK just normalises the events the model emits.
+Vision input (image URLs / base64) and function calling work the same
+way you'd use them on the OpenAI SDK directly — the SDK just normalises
+the events the model emits.
 
 Image *generation* (`gpt-image-2`) is a separate provider, not a chat
 model — see [Multi-modal providers](../multi-modal-providers.md).

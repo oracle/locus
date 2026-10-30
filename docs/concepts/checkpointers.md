@@ -34,7 +34,8 @@ from locus_security import security_toolset
 
 agent = Agent(
     model="{{ locus_model }}",
-    tools=security_toolset(),   # query_siem, enrich_indicator, isolate_host, ...
+    # query_siem, enrich_indicator, isolate_host, ...
+    tools=security_toolset(allow_containment=True),
     checkpointer=S3Backend(
         bucket="soc-case-checkpoints",
         endpoint_url="https://<namespace>.compat.objectstorage.<region>.oraclecloud.com",

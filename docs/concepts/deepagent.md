@@ -55,8 +55,9 @@ mode enforce the Pydantic schema before the result reaches the caller.
 **Loop detection is argument-aware.** Calling the same tool with
 *different* arguments — paged discovery, sweeping a list of inputs,
 inspecting 29 metrics one at a time — is forward progress and does not
-trigger the loop detector. Only identical `(name, args)` pairs repeated
-across consecutive iterations count as a loop.
+trigger the loop detector. Only identical `(name, args)` calls that also
+return identical results, repeated across consecutive iterations, count
+as a loop.
 
 ## Quickstart
 

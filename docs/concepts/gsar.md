@@ -170,5 +170,5 @@ production you'd map your tool taxonomy onto these.
 - [`tests/integration/test_gsar_live.py`](https://github.com/oracle/locus/blob/main/tests/integration/test_gsar_live.py)
   — live LLM judge driving the full loop.
 - [`examples/notebook_55_gsar_typed_grounding.py`](https://github.com/oracle/locus/blob/main/examples/notebook_55_gsar_typed_grounding.py)
-  — a runnable walkthrough of the four parts.
+  — a runnable walkthrough, part by part.
 - Paper: [arXiv:2604.23366 (2026)](https://arxiv.org/abs/2604.23366).

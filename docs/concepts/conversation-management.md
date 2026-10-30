@@ -36,14 +36,18 @@ agent.run_sync("What did we conclude?",                           thread_id="tic
 ```
 
 The `thread_id` is the unit of conversation. With `checkpointer=`
-alone, state is saved when the run finishes or raises, and before the
-agent pauses on an interrupt; pass `checkpoint_every_n_iterations=1`
-to also save at the end of each loop iteration that executes tool
-calls, so a process that dies mid-run keeps its progress up to the
-last such save. A run continued with `agent.resume(...)` does not save
-per iteration: it is saved when it finishes, raises, or pauses again.
-Every fresh `agent.run_sync(..., thread_id=...)` call rehydrates state
-before the first Think.
+alone, state is saved when the run finishes or raises, before the
+agent pauses on an interrupt and — for a run with a `thread_id` on a
+checkpointer that can delete a single checkpoint, as every backend on
+the [Checkpointers](checkpointers.md) page can — at the end of each
+loop iteration that executes tool calls, so a process that dies
+mid-run keeps its progress up to the last such save; pass
+`checkpoint_every_n_iterations=0` to keep only the end-of-turn and
+interrupt saves. A run continued with `agent.resume(...)` or
+`agent.continue_turn(...)` saves on the same schedule as a fresh run:
+after each tool-calling iteration, and when it finishes, raises, or
+pauses again. Every fresh `agent.run_sync(..., thread_id=...)` call
+rehydrates state before the first Think.
 
 ## Threads, not sessions
 
@@ -67,12 +71,15 @@ The checkpointer saves the full `AgentState`:
   message, every tool result.
 - **`tool_executions`** — the dedup history Execute walks for
   idempotent calls.
-- **`iterations`** — the running counter (so termination conditions
+- **`iteration`** — the running counter (so termination conditions
   resume correctly).
 - **`metadata`** — your application's per-thread state.
 
-Hooks see frozen events on save and load. Custom application data
-goes in `metadata`.
+Hooks are not called on save or load; saves and loads are published
+on the event bus as `memory.checkpoint.saved` /
+`memory.checkpoint.loaded` instead (see
+[Observability](observability.md#in-process-sse-eventbus)). Custom
+application data goes in `metadata`.
 
 ## Thread lifecycle
 
@@ -176,12 +183,17 @@ page load.
 
 ```http
 GET /threads/case-7731-triage
-# → { "messages": [...], "iterations": 9, ... }
+# → { "thread_id": "case-7731-triage", "iteration": 9, "messages": [...],
+#     "tool_executions": [...], "metadata": {...} }
 ```
 
 ## See also
 
-- [Checkpointers](checkpointers.md) — every backend (four native, the
-  rest through `*_checkpointer()` factories) and their tradeoffs.
+- [Checkpointers](checkpointers.md) — every backend (the native
+  checkpointers, and the rest through `*_checkpointer()` factories)
+  and their tradeoffs.
 - [Streaming & Server](server.md) — `AgentServer` and SSE.
-- [Hooks](hooks.md) — observe save/load events.
+- [Hooks](hooks.md) — observe and steer the loop between saves; the
+  saves and loads themselves reach the
+  [event bus](observability.md#in-process-sse-eventbus) as
+  `memory.checkpoint.saved` / `memory.checkpoint.loaded`.

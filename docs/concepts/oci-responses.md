@@ -15,9 +15,10 @@ Use it for:
 - **Long conversations** where re-sending the full history per turn is
   wasteful and you trust OCI to retain it server-side for ~30 days.
 
-If those don't apply, use `OCIChatCompletionsModel` — it covers every OCI model
-family (Cohere, Llama, Mistral, GPT, Grok, Gemini) in one transport with
-no Project OCID, no server-state lock-in.
+If those don't apply, use `OCIChatCompletionsModel` — it covers every OCI
+model family served on `/openai/v1` (Llama, Mistral, GPT, Grok, Gemini;
+Cohere goes through `OCIModel`) in one transport with no Project OCID, no
+server-state lock-in.
 
 ## Quick start
 

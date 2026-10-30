@@ -133,7 +133,7 @@ provider reported no usage).
 |---|---|
 | `content` | The complete text |
 | `tool_calls` | All tool calls in this turn |
-| `usage` | `{"input_tokens": ..., "output_tokens": ...}` |
+| `usage` | `{"prompt_tokens": ..., "completion_tokens": ..., "total_tokens": ...}` |
 | `stop_reason` | Provider-specific stop reason |
 
 For cost tracking from the event stream, read `TerminateEvent.usage` instead.
@@ -184,7 +184,7 @@ The run finished.
 
 | Field | Meaning |
 |---|---|
-| `reason` | Which termination condition fired (its `repr`) |
+| `reason` | Which termination condition fired, as a short token — `complete`, `max_iterations`, `no_tools`, `confidence_met`, `terminal_tool`, `tool_loop`, `token_budget`, `cost_budget`, `time_budget`, `context_exhausted`, `cancelled`, `error` — or the reason string a user-supplied condition returns (for example `text_mention:DONE`) |
 | `iterations_used` | How many ReAct turns ran |
 | `final_confidence` | Reflexion confidence at end of run |
 | `total_tool_calls` | Distinct tool invocations |
@@ -211,8 +211,15 @@ no bridge branch and stay on the stream. Each is defined in
 
 ## Multi-agent events
 
-These appear when an `Orchestrator`, `Swarm`, or `StateGraph` is
-running.
+These typed events are defined in `locus.core.events` and rendered by
+the console handler, but nothing yields them today: `Orchestrator`,
+`Swarm` and `StateGraph` return results rather than event streams.
+Their activity reaches the
+[event bus](observability.md#in-process-sse-eventbus) instead —
+`multiagent.specialist.started` / `.completed` from each specialist,
+`multiagent.orchestrator.routing` / `.decision` / `.specialists_invoked`
+/ `.summary` from the orchestrator, and `multiagent.graph.node.*` from a
+`StateGraph`; `Swarm` publishes nothing.
 
 | Event | Fired when |
 |---|---|

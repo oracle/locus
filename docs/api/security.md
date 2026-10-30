@@ -19,9 +19,10 @@ jobs:
   threat-intel feed, and the OCI control plane, plus playbooks that sequence
   them.
 
-The admission gate also lives under this package for historical reasons. Import
-it from [`locus.control`](control.md) instead — that is the domain-neutral
-surface and the path that will keep working.
+The admission gate's old import path, `locus.security`, is a compatibility shim
+inside core `locus-sdk`, not part of this package. Import it from
+[`locus.control`](control.md) — that is the domain-neutral surface and the path
+that will keep working.
 
 For the concepts, start with [The control layer](../concepts/security-context.md).
 
@@ -187,9 +188,10 @@ and `security_toolset(oci=True)` all drive the core
 [`describe_oci` / `use_oci`](tools.md#oci-tools) tools. `use_oci()` refuses any
 operation whose name does not start with a read prefix (`list_`, `get_`,
 `summarize_`, …) before any call is made, returning `{"status": "error", ...}`
-to the agent; the only override is the explicit `allow_mutations` opt-in, which
-nothing in this package sets. This name check is defence-in-depth: run as a
-profile whose IAM group grants only `inspect` / `read` verbs
+to the agent; the only overrides are the explicit `allow_mutations` opt-in and
+the `LOCUS_USE_OCI_ALLOW_MUTATIONS=1` environment variable; nothing in this
+package sets either. This name check is defence-in-depth: run as a profile
+whose IAM group grants only `inspect` / `read` verbs
 (`SecurityControls(profile=..., auth_type=...)`), because that policy is what
 actually enforces read-only access. Writes belong behind `admit()` or a gated
 tool of your own.

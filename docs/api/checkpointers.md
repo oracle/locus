@@ -21,8 +21,9 @@ For the concepts, start with [Checkpointers](../concepts/checkpointers.md).
 Three flavours, depending on how you want state stored (all need the
 `oracledb` extra):
 
-- **`OracleBackend`** — async, JSON-column storage; the default
-  full-checkpointer interface, usually built through `oracle_checkpointer()`.
+- **`OracleBackend`** — async, JSON-column key-value backend;
+  `oracle_checkpointer()` wraps it in `StorageBackendAdapter` to give
+  the full checkpointer interface.
 - **`OracleCheckpointSaver`** — versioned saver with explicit checkpoint
   versions, parent IDs and pending writes for time-travel.
 - **`OracleSyncBackend` / `OracleSyncCheckpointSaver`** — sync

@@ -33,7 +33,7 @@ declares, and folds one `EvalResult` per case into an `EvalReport`:
 |---|---|
 | You changed a tool's signature, default args, or system prompt | **yes — every commit that touches it** |
 | You're swapping models (gpt-4o → gpt-5, llama-3.3 → llama-4) | **yes — same suite, two providers, diff the report** |
-| You're debating "is the agent better than last week?" | **yes — nightly soak with `n=20` per case to see variance** |
+| You're debating "is the agent better than last week?" | **yes — nightly soak that runs each case 20 times to see variance** |
 | One-shot exploration, scratch agent | no — overhead's not worth it |
 | Heavy LLM-as-judge needed (open-ended quality) | **yes — set a `rubric` on the case and give the runner an `LLMJudge` ([below](#llm-as-judge-for-open-ended-quality))** |
 
@@ -172,7 +172,7 @@ output is measuring self-consistency, not correctness. `LLMJudge` and
 
 | Symptom | Likely cause |
 |---|---|
-| Case passes locally, fails in CI | Model output varies between runs. Pin the model id, lower `temperature`, run with `n=5` and look at variance. |
+| Case passes locally, fails in CI | Model output varies between runs. Pin the model id, lower `temperature`, run the case five times and look at variance. |
 | `max_duration_ms` flakes | Cold-start network latency. Use a wall-clock budget at the suite level, not per-case, or bump the per-case budget by 2×. |
 | `expected_tools` reports failure even though the tool ran | Case-sensitive name match — `issue_refund` != `Issue_Refund`. |
 | Score is 0.5 every time | One of two checks is consistently failing. Read `result.checks` — it carries the full pass/fail map. |

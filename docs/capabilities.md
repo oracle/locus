@@ -152,7 +152,7 @@ so see [Guarantees and boundaries](why-locus.md).
 | **Admission gate** | Run a side-effecting action only if it clears the chain; `admit(trail=...)` records the decision to the audit trail you pass; else raises `AdmissionError` | `admit(...)` · `ctx.actions.execute(...)` · [SecurityContext](concepts/security-context.md) |
 | **SecurityContext** | Investigate by domain (logs / endpoint / identity / cloud / threat-intel / actions), not by vendor | `SecurityContext()` · [SecurityContext](concepts/security-context.md) |
 | **Audit trail** | Hash-chained, tamper-evident record of every entry written to it, including each decision `admit(trail=...)` makes; exports JSONL for a SIEM | `AuditTrail` · [Observability](concepts/observability.md) |
-| **Cloud posture (read-only)** | Spec-driven OCI auditing — `describe_oci` introspects the OCI SDK; `use_oci` runs read-only calls, writes refused by default; `create_soc_analyst` grounds the findings | `locus.tools.oci` · [Cloud posture](concepts/cloud-posture.md) |
+| **Cloud posture (read-only)** | Spec-driven OCI auditing — `describe_oci` introspects the OCI SDK; `use_oci` runs read-only calls, writes refused by default; `create_soc_analyst` grounds the findings | `locus.tools.oci` (`describe_oci`, `use_oci`) · `locus_security` (`create_soc_analyst`) · [Cloud posture](concepts/cloud-posture.md) |
 | **Inference fingerprinting** | Timing side-channel model/hardware fingerprint → grounded `FingerprintFinding` or abstention | `fingerprint_to_finding` · [Grounded findings](concepts/security.md) |
 | **Governed agent** | An `Agent` with grounding + guardrails + audit trail on by default | `governed_agent(...)` · [Agentic AI-security](concepts/agentic-ai-security.md) |
 
@@ -247,6 +247,7 @@ answer and reports the decision.
 | `PostgreSQLBackend` | Production DB with metadata queries | `locus.memory.backends.postgresql` |
 | `MySQLBackend` | Production MySQL with official async Connector/Python | `locus.memory.backends.mysql` |
 | `OpenSearchBackend` | Full-text search across past runs | `locus.memory.backends.opensearch` |
+| `OracleCheckpointSaver` / `oracle_checkpointer()` | Oracle Database 26ai — durable threads, versioned history and time travel | `locus.memory.backends.oracle_versioned` · `locus.memory.backends.adapters` |
 
 ## Memory — context management
 
@@ -274,8 +275,8 @@ answer and reports the decision.
 | Feature | What it does | Surface |
 |---|---|---|
 | **Typed events** | Frozen Pydantic events for `match`-statement consumers | `locus.core.events` · [Events](concepts/events.md) |
-| `StructuredStream` | Incremental Pydantic-partial parsing during streaming | `locus.core.structured` |
-| Console + SSE handlers | Render to terminal or stream over Server-Sent Events | `locus.core.events` · [Streaming](concepts/streaming.md) |
+| `StructuredStream` | Incremental Pydantic-partial parsing during streaming | `locus.streaming.structured` |
+| Console + SSE handlers | Render to terminal or stream over Server-Sent Events | `locus.streaming` (`ConsoleHandler`, `SSEHandler`, `AsyncSSEHandler`) · [Streaming](concepts/streaming.md) |
 | **`AgentServer`** | Drop-in FastAPI app: `/invoke`, `/stream`, `/threads/{id}`, `/health` | `locus.server` · [Agent Server](concepts/server.md) |
 | Thread scoping | Bearer-token auth + thread-id namespacing; one shared `api_key` per instance (single-principal — run one keyed instance per tenant for isolation) | `AgentServer(api_key=...)` · [Agent Server](concepts/server.md) |
 | Graph streaming | Multi-agent state-graph event streams | `locus.multiagent.graph` · [Graph streaming](concepts/graph-streaming.md) |
@@ -284,8 +285,8 @@ answer and reports the decision.
 
 | Component | Options | Surface |
 |---|---|---|
-| Vector stores | pgvector · OpenSearch · Qdrant · Chroma · in-memory | `locus.rag.stores` · [RAG](concepts/rag.md) |
-| Embeddings | `OpenAIEmbeddings` · `CohereEmbeddings` | `locus.rag.embeddings` |
+| Vector stores | Oracle Database 26ai (`OracleVectorStore`) · pgvector · OpenSearch · Qdrant · Chroma · in-memory | `locus.rag.stores` · [RAG](concepts/rag.md) |
+| Embeddings | `OCIEmbeddings` · `OracleInDBEmbeddings` · `OpenAIEmbeddings` · `CohereEmbeddings` | `locus.rag.embeddings` |
 | Multimodal processors | Text · PDF (text + OCR) · Image (OCR) · Audio (transcription) | `locus.rag.multimodal` |
 | Tool wiring | `create_rag_tool(retriever)` exposes the retriever as a `@tool` | `locus.rag.tools` |
 

@@ -21,7 +21,7 @@ async for event in graph.stream(order, mode=StreamMode.UPDATES):
 | `StreamMode.VALUES` *(default)* | A snapshot of full state after the node completes | `StreamEvent(mode=VALUES, data=final_state)` |
 | `StreamMode.UPDATES` | Just the node's own output dict | — |
 | `StreamMode.NODES` | The full `NodeResult` with status / duration / error | — |
-| `StreamMode.DEBUG` | `{"result": NodeResult, "state": dict}` | — |
+| `StreamMode.DEBUG` | `{"result": <the NodeResult as a JSON dict, via model_dump(mode="json")>, "state": dict}` | — |
 | `StreamMode.CUSTOM` | Whatever `emit_custom(...)` pushes from inside a node body | — |
 
 ## Custom events from inside a node

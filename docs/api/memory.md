@@ -57,7 +57,7 @@ backend for one is not a backend for the other.
 
 ### Durable store backends
 
-Both shipped in 2.2.0.
+`HolographicStore` and `PgMemory` shipped in 2.2.0; `OracleStore` in 3.0.0.
 
 ::: locus.memory.store_backends.holographic.HolographicStore
 ::: locus.memory.store_backends.postgresql.PgMemory
@@ -66,9 +66,10 @@ Both shipped in 2.2.0.
 
 ## Long-term memory manager
 
-`LLMMemoryManager` is the default — it uses an auxiliary model to
-extract and categorize memories at session end and retrieves the
-top-k relevant entries at session start. `NoopMemoryManager` is the
+`LLMMemoryManager` is the default — with no `extract_fn` it uses a
+built-in keyword heuristic to extract and categorize memories at
+session end (pass an async `extract_fn` to use a model) and retrieves
+the top-k relevant entries at session start. `NoopMemoryManager` is the
 pass-through used in tests. `Mem0MemoryManager` (behind the `mem0`
 extra, `pip install "locus-sdk[mem0]"`) hands the finished
 conversation to the open-source mem0 library, which does its own

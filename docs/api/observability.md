@@ -44,7 +44,9 @@ coroutine.
 
 ## Hook bridge
 
-`EventBusHook` mirrors the agent's `LocusEvent` stream onto the bus
-without changing existing hook code.
+`EventBusHook` publishes the agent's hook lifecycle — invocation, iteration,
+model-call and tool-call phases — onto the bus as `agent.<phase>` events
+without changing existing hook code. The `LocusEvent` stream itself is
+mirrored by the runtime whenever a `run_context()` is active.
 
 ::: locus.observability.bus_hook.EventBusHook

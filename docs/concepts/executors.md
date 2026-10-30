@@ -77,9 +77,11 @@ Within the tool body, you choose how cooperative to be:
   worker thread so it doesn't block the event loop.
 - **Async function (`async def my_tool`).** Awaited directly by the
   executor.
-- **Long-running tool that needs a stream of partial results.** Pair
-  with the streaming events — emit progress via the agent's hook
-  registry rather than blocking until the whole job finishes.
+- **Long-running tool that needs a stream of partial results.** Declare
+  it with `@tool(emits_progress=True)` and call `report_progress()` from
+  `locus.tools.context` inside the body; each call surfaces as a
+  `ToolProgressEvent` between the tool's start and complete events
+  instead of blocking until the whole job finishes.
 
 ## Per-tool retry inside the body
 

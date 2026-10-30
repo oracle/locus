@@ -1,9 +1,10 @@
 # Testing agents
 
 Testing an agent means controlling the one part you do not own: the model.
-`locus.testing` ships two model doubles for that, so a test is deterministic,
-needs no API key, and never touches the network — plus a client that runs the
-agent and hands back a trace you can assert on.
+`locus.testing` ships two model doubles for that (plus `CompromisedModel`, for
+a rogue-agent suite), so a test is deterministic, needs no API key, and never
+touches the network — plus a client that runs the agent and hands back a trace
+you can assert on.
 
 ```python
 from locus.agent import Agent
