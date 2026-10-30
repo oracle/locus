@@ -49,12 +49,15 @@ Reads are plain domain calls. **Writes** — `endpoint.isolate`, `identity.disab
 model real-world actions: run them through the [admission gate](#admission-control-the-enforcement-point) so they fire only after the chain clears.
 
 !!! note "Writes are simulated today"
-    In the current build the bundled reference adapters **and** the vendor
-    templates (Entra/Okta/Auth0 `disable`, CrowdStrike `isolate`) return a
-    **simulated offline-sample receipt** — they record the decision but do
-    **not** lock an account out or quarantine a host — that includes the
-    `disable` in step 4 below. Wire and verify the live vendor write path
-    before treating these as enforcement.
+    In the current build the bundled reference adapters — the
+    Okta/Entra-shaped identity reference's `disable` always, and the
+    CrowdStrike/Defender-shaped EDR reference's `isolate` unless `EDR_URL`
+    and `EDR_TOKEN` are set (an unverified live path that POSTs a
+    containment action) — return a **simulated offline-sample receipt** —
+    they record the decision but do **not** lock an account out or
+    quarantine a host — that includes the `disable` in step 4 below. Wire
+    and verify the live vendor write path before treating these as
+    enforcement.
 
 ## Zero-config by default
 

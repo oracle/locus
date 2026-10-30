@@ -20,8 +20,10 @@ pass a model id:
 from locus.agent import Agent
 agent = Agent(
     model="oci:ocid1.generativeaiendpoint.oc1.<region>....<id>",
-    compartment_id="ocid1.compartment.oc1...",   # required for DAC
-    profile_name="DEFAULT",                      # any profile in ~/.oci/config
+    model_kwargs={
+        "compartment_id": "ocid1.compartment.oc1...",   # required for DAC
+        "profile_name": "DEFAULT",                      # any profile in ~/.oci/config
+    },
     system_prompt="...",
 )
 ```
@@ -40,7 +42,7 @@ get_model("oci:ocid1.generativeaiendpoint....")
 
 Live-tested against a `uk-london-1` DAC endpoint running Qwen
 (Alibaba Cloud) on 2026-05-01. End-to-end results from the live run
-(see [`examples/notebook_35_oci_dac.py`](https://github.com/oracle-samples/locus/blob/main/examples/notebook_35_oci_dac.py)):
+(see [`examples/notebook_35_oci_dac.py`](https://github.com/oracle/locus/blob/main/examples/notebook_35_oci_dac.py)):
 
 ```text
 === Part 3: complete() against the DAC ===
@@ -73,10 +75,11 @@ provisioned by Luigi's tenancy):
   1. **Deploy-side**: configure the DAC with a Qwen3-family flag like
      `--enable-auto-tool-choice` so the model emits OpenAI-style
      `tool_calls`. The SDK picks them up natively.
-  2. **Caller-side**: post-process `result.message` for
-     `<tool_call>{...}</tool_call>` blocks and re-issue them via
-     `agent.run_sync(...)` with the parsed call. A small regex
-     extraction; not built into the SDK today.
+  2. **Caller-side**: set `Agent(..., text_tool_calls="on")` — the
+     runtime (`locus.agent.text_tool_calls`) parses Hermes-style
+     `<tool_call>{...}</tool_call>` blocks in the message body into
+     tool calls whenever the block names a registered tool, and runs
+     them like structured calls.
 
 ## Streaming
 
@@ -136,22 +139,22 @@ DAC endpoint.
 | Symptom | Likely cause |
 |---|---|
 | `404 Not Found` on chat | Endpoint OCID is from a different region than the SDK is talking to. Pass the right `service_endpoint=` (or set `LOCUS_OCI_REGION`) to match the endpoint's region. |
-| `compartment_id is required` | Pass `compartment_id=` on `Agent()` — DAC enforces it even when on-demand wouldn't. |
-| Stream yields one big chunk instead of deltas | The endpoint rejected `is_stream`. The fall-back path swallows the failure and emits the full response as one chunk; check `OCI_LOG_REQUESTS=1` to see the API error. |
+| `compartment_id is required` | Pass `model_kwargs={"compartment_id": ...}` on `Agent()` (or `compartment_id=` on `OCIModel`) — DAC enforces it even when on-demand wouldn't. |
+| Stream yields one big chunk instead of deltas | The endpoint rejected `is_stream`. The fall-back path swallows the failure and emits the full response as one chunk; nothing is logged, so reproduce the call with the OCI SDK client directly (`is_stream=True`) to see the API error. |
 | `You are not authorized to perform this request` | The principal you're authenticating with doesn't have the `inspect generative-ai-endpoints` policy in the endpoint's compartment. |
 
 ## Where the wiring lives
 
-- [`src/locus/models/registry.py`](https://github.com/oracle-samples/locus/blob/main/src/locus/models/registry.py)
+- [`src/locus/models/registry.py`](https://github.com/oracle/locus/blob/main/src/locus/models/registry.py)
   — DAC OCIDs are detected by `lowered.startswith("ocid1.generativeaiendpoint.")`
   and routed to `OCIModel`.
-- [`src/locus/models/providers/oci/client.py`](https://github.com/oracle-samples/locus/blob/main/src/locus/models/providers/oci/client.py)
+- [`src/locus/models/providers/oci/client.py`](https://github.com/oracle/locus/blob/main/src/locus/models/providers/oci/client.py)
   — `OCIClient.get_serving_mode()` returns `DedicatedServingMode(endpoint_id=...)`
   for OCID-shaped model ids.
-- [`src/locus/models/providers/oci/__init__.py`](https://github.com/oracle-samples/locus/blob/main/src/locus/models/providers/oci/__init__.py)
+- [`src/locus/models/providers/oci/__init__.py`](https://github.com/oracle/locus/blob/main/src/locus/models/providers/oci/__init__.py)
   — `OCIModel.stream()` does the real SSE iteration.
-- [`tests/unit/test_oci_dac.py`](https://github.com/oracle-samples/locus/blob/main/tests/unit/test_oci_dac.py)
-  — 12 unit tests covering routing, serving-mode selection, and stream-chunk parsing.
+- [`tests/unit/test_oci_dac.py`](https://github.com/oracle/locus/blob/main/tests/unit/test_oci_dac.py)
+  — unit tests covering routing, serving-mode selection, and stream-chunk parsing.
 
 ## Related
 

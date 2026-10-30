@@ -52,9 +52,10 @@ override defaults.
 
 ### Result sub-types
 
-`AgentResult.metrics` is an `ExecutionMetrics`, `AgentResult.stop_reason` is a
-`StopReason` literal, and the streaming entry point yields `StreamingResult`
-between events.
+`AgentResult.metrics` is an `ExecutionMetrics` and `AgentResult.stop_reason`
+is a `StopReason` literal. `StreamingResult` is a partial-result model
+exported from `locus.agent`; the streaming entry point (`agent.run()`) yields
+`LocusEvent`s, not `StreamingResult`.
 
 ::: locus.agent.result.ExecutionMetrics
 ::: locus.agent.result.StopReason

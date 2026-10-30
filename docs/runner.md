@@ -87,9 +87,11 @@ not be able to make one:
 
 - commands inherit the runner's environment **without** `LOCUS_ADMIT_TOKEN`
   and without any credential placeholder;
-- the runner marks itself non-dumpable (`prctl(PR_SET_DUMPABLE, 0)`), so a
-  command running as the same user cannot read them out of
-  `/proc/<runner>/environ` or its memory.
+- once its runtime is built, the runner wipes the token and every placeholder
+  out of its initial environment block (`/proc/<pid>/environ`) and
+  `os.environ`, so a command running as the same user finds only empty values
+  there; `LOCUS_RUNNER_HARDEN=non-dumpable` adds `prctl(PR_SET_DUMPABLE, 0)`
+  for a sandbox that does not identify processes through `/proc` (see below).
 
 The image runs as uid 10001 with no capabilities. The box guard still meters
 every model call per run, whoever sends it.

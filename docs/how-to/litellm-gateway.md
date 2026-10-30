@@ -71,7 +71,7 @@ if any of them is unset.
 
 The gateway listens on `http://localhost:4000` and exposes the model
 aliases declared in `config.yaml`. The sample ships six:
-`gpt-4o`, `gpt-4o-mini`, `gpt-5-mini`, `claude-sonnet-5-5`,
+`gpt-4o`, `gpt-4o-mini`, `gpt-5-mini`, `claude-sonnet-4-6`,
 `claude-haiku`, and `text-embedding-3-small`. Add more by extending
 `model_list`.
 
@@ -281,7 +281,7 @@ Highlights:
 - **`general_settings.master_key`** — the admin key that creates
   per-team virtual keys via `/key/generate`.
 - **`router_settings.fallbacks`** — fallback chains across model
-  aliases (e.g. `[{"gpt-5-mini": ["claude-sonnet-5-5"]}]`).
+  aliases (e.g. `[{"gpt-5-mini": ["claude-sonnet-4-6", "gpt-4o"]}]`).
 - **`litellm_settings.callbacks`** — observability hooks (Langfuse,
   OTel, Datadog, …).
 - **`litellm_settings.cache`** — Redis / S3 / Qdrant caching config.

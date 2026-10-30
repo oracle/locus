@@ -108,10 +108,12 @@ control goes straight back to Think:
 
 That interval is the only trigger. Tool errors and repeating tool
 patterns are what the Reflector looks at once it runs, not reasons to
-run it. Separately, in the default `completion_mode="auto"`, the loop
-ends the run with `tool_loop` when the same tool calls with the same
-arguments repeat across `tool_loop_threshold` (default 3) consecutive
-iterations, whether or not Reflexion is on.
+run it. Separately, when the same tool calls with the same arguments and
+results repeat across `tool_loop_threshold` (default 3) consecutive
+iterations the loop first warns the model (a `tool_loop_warning` custom
+event plus a system message); if the loop persists past that warning the
+run ends with `tool_loop` in the default `completion_mode="auto"`,
+whether or not Reflexion is on.
 
 The Reflector itself
 ([`Reflector` class — `reasoning/reflexion.py:70`](https://github.com/oracle/locus/blob/main/src/locus/reasoning/reflexion.py#L70))
@@ -360,10 +362,12 @@ result in `state.messages`. Eventually the next Think exceeds the
 provider's context window and fails. Three remedies:
 
 1. **Tune the conversation manager** — an agent with no
-   `conversation_manager=` already gets one: `LLMCompactor(context_length=...)`
-   when the model has registered metadata (it prunes stale tool output
-   and keeps a token-budgeted tail, with no extra model calls), and a
-   `SlidingWindowManager` otherwise. Override that default with
+   `conversation_manager=` already gets one: `ContextCompactor` when the
+   model's context window is known (it clears old tool output first and,
+   when that is not enough, summarises older turns with the agent's own
+   model or `compaction.summary_model`), `LLMCompactor(context_length=<window>)`
+   with no summariser when you pass `compaction=False`, and a
+   `SlidingWindowManager` when the window is unknown. Override that default with
    `Agent(conversation_manager=LLMCompactor(summarize_fn=..., context_length=...))`
    to protect the system prompt and the most recent turns, then summarise
    the middle on demand. Pass the model's window as `context_length=`:
@@ -455,7 +459,7 @@ async for event in agent.run(prompt, thread_id="th-q3-2026"):
 | `system_prompt=` | prepended to the message list before the first Think |
 | `reflexion=True` | enables Reflect on every iteration; `ReflexionConfig(evaluate_every_n_iterations=N)` for every Nth |
 | `grounding=True` | checks the final answer's claims against tool results before it returns |
-| `checkpointer=` | persists state at the end of a run and before an interrupt (for a run with a `thread_id`), so the run can resume after restart; pair with `checkpoint_every_n_iterations=` to also save inside the loop |
+| `checkpointer=` | persists state at the end of a run, before an interrupt and — for a run with a `thread_id` on a checkpointer that can delete a single checkpoint — after each tool-calling iteration (the turn's final save deletes those iteration saves); `checkpoint_every_n_iterations=` changes that interval (0 keeps only the end-of-turn and interrupt saves) |
 | `conversation_manager=` | summarises / prunes long histories before they exceed the context window |
 | `hooks=` | observe and steer every event |
 | `termination=` | the algebra the loop checks at the start of each iteration |

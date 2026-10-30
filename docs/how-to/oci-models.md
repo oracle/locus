@@ -134,7 +134,7 @@ when the server owns the history). Memory, Reflexion, GSAR,
 grounding, tool hooks, idempotency, checkpointing, output schema,
 streaming, and termination conditions all work identically. See the
 [OCI Responses concept page](../concepts/oci-responses.md) and
-[notebook 29](../notebooks/notebook_34_oci_responses.md).
+[notebook 34](../notebooks/notebook_34_oci_responses.md).
 
 ## Cohere (Command R and Command A) — `OCIModel`
 
@@ -156,9 +156,10 @@ model`. It supports the
 same five auth modes (`api_key`, `security_token`, `session_token`,
 `instance_principal`, `resource_principal`) but its argument names are
 different from `OCIChatCompletionsModel` — `model_id=`, `profile_name=`,
-`compartment_id=`, `auth_type=` as an enum / string. Streaming on this
-transport is faked (the full response is chunked client-side) — that's
-an OCI-side limitation of the legacy endpoint, not an SDK issue.
+`compartment_id=`, `auth_type=` as an enum / string. `stream()` on this
+transport requests SSE (`is_stream=True` on the chat request) and
+iterates the events; if the endpoint rejects the streaming request it
+falls back to `complete()` and yields the full response as one chunk.
 
 ## String factory (`get_model("oci:...")`) auto-routes
 
@@ -173,7 +174,8 @@ m2 = get_model("oci:cohere.command-r-plus", profile_name="DEFAULT", auth_type="a
 ```
 
 The string-form factory in `locus.models.registry` picks `OCIModel` for
-any id starting with `cohere.` and `OCIChatCompletionsModel` otherwise.
+any id starting with `cohere.` or `ocid1.generativeaiendpoint.` (a
+Dedicated AI Cluster endpoint) and `OCIChatCompletionsModel` otherwise.
 You pass kwargs in the shape the picked class expects.
 
 ## Notebooks and `examples/config.py`

@@ -42,7 +42,7 @@ the offline demo and a live deployment.
 | Tool | Vendor shape | Credential |
 |------|--------------|------------|
 | [`measure_endpoint_timing`][rt] | Streaming time-to-first-token / cadence probe | none (uses any reachable endpoint) |
-| [`dispatch_timing_probe`][gpu] | RunPod / Lambda inference-fingerprint probe | `RUNPOD_API_KEY`, `LAMBDA_API_KEY` |
+| [`dispatch_timing_probe`][gpu] | Offline reference GPU timing-probe dispatch (returns the sample feature vector; a live RunPod / Lambda probe is an integration you write) | none |
 | [`enrich_indicator`][ti] | VirusTotal / GreyNoise indicator-of-compromise (IOC) reputation | `VT_API_KEY` |
 | [`query_siem`][siem] | Splunk / Elastic log/alert search (a SIEM) | `SIEM_URL`, `SIEM_TOKEN` |
 

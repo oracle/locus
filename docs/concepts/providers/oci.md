@@ -135,9 +135,12 @@ agent = Agent(
 The [DAC how-to](../../how-to/oci-dac.md) covers Qwen on a DAC,
 streaming, and per-model tool-call differences.
 
-Note the spelling: `OCIModel` (and the `oci:` string factory) takes
-`profile_name=` (with `profile=` accepted as an alias), while
-`OCIResponsesModel` takes `profile=` only.
+Note the spelling: `OCIModel` takes `profile_name=` (with `profile=`
+accepted as an alias), while `OCIChatCompletionsModel` and
+`OCIResponsesModel` take `profile=` only. Through the `oci:` factory use
+`profile=` — it reaches every transport; `profile_name=` is honoured only
+when the id routes to `OCIModel` (Cohere ids and DAC OCIDs) and is
+silently ignored on the V1 path.
 
 ## Transport selection — by the `oci:` prefix
 
@@ -162,8 +165,15 @@ explicitly — it's opt-in, not selected by prefix. See the
 
 ## One auth surface — laptop, CI, OCI workloads
 
-Same `OCI_PROFILE` env var everywhere. `OCI_AUTH_TYPE` selects the
-signer:
+`OCI_PROFILE` is read by the `oci:` factory for the V1 transport (every
+id that is not `cohere.*` or a DAC OCID), and a profile with
+`security_token_file` is signed with a session token automatically, so
+the API-key and session-token paths need no code. The SDK transport
+(`OCIModel`) takes `profile_name=` instead (default `DEFAULT`) and is the
+only one that reads `OCI_AUTH_TYPE`; on the V1 and Responses transports
+pass the principal on the model —
+`get_model("oci:openai.gpt-5.5", auth_type="instance_principal", compartment_id=...)`
+or `Agent(model="oci:...", model_kwargs={"auth_type": "instance_principal", "compartment_id": ...})`:
 
 | `OCI_AUTH_TYPE` | Where it works | Notes |
 |---|---|---|
@@ -177,9 +187,10 @@ export OCI_PROFILE=DEFAULT
 export OCI_AUTH_TYPE=api_key
 ```
 
-**No code change between environments — only the env var differs.**
-The same `Agent` code and model id run on a laptop, on OKE, and on
-Compute; the environment selects the signer.
+**The same `Agent` code and model id run on a laptop, on OKE, and on
+Compute; only the auth arguments differ** — `OCI_PROFILE` on a laptop or
+in CI, `auth_type=` plus `compartment_id=` on the model under a
+principal.
 
 ## Region
 
@@ -190,8 +201,12 @@ OCI Generative AI is offered in a growing list of regions, including:
 - `uk-london-1`
 - `sa-saopaulo-1`
 
-The region baked into your profile is the default; override with
-`OCI_REGION`:
+On the `oci:` factory the V1 transport (every id that is not `cohere.*`
+or a Dedicated AI Cluster OCID) defaults to `us-chicago-1`;
+`LOCUS_OCI_REGION`, then `OCI_REGION`, overrides that, as does `region=`
+on the model. The SDK transport behind Cohere ids and DAC endpoints takes
+the region from the profile unless `region=` or `service_endpoint=` is
+given:
 
 ```bash
 export OCI_REGION=us-chicago-1
@@ -213,12 +228,16 @@ agent = Agent(
 export OCI_PROFILE=DEFAULT
 export OCI_AUTH_TYPE=api_key
 
-# OKE pod:
-export OCI_AUTH_TYPE=instance_principal
+# OKE pod — the V1 transport takes the principal as model kwargs:
+# agent = Agent(
+#     model="oci:openai.gpt-5.5",
+#     model_kwargs={"auth_type": "instance_principal", "compartment_id": "ocid1.compartment.oc1..…"},
+# )
 # (no profile / key file — OKE injects the principal at runtime)
 ```
 
-The application code is unchanged; only the signer differs.
+The model id and the agent code are unchanged; only the auth arguments
+differ.
 
 ## Common gotchas
 
@@ -226,8 +245,8 @@ The application code is unchanged; only the signer differs.
 |---|---|
 | `404 Not Authorized` | OCI returns 404 rather than 403 for authorization failures. The principal lacks the `inspect generative-ai-endpoints` policy in the compartment. |
 | `model_id not found` | Model id doesn't exist in your tenancy's region. List the models available in the region with the OCI CLI (below). |
-| `compartment_id is required` | DAC endpoints enforce it even when on-demand wouldn't. Pass `compartment_id=` on the model. |
-| Streaming yields one big chunk | DAC endpoint rejected `is_stream`. The fall-back path swallows the failure and emits the full response as one chunk; check `OCI_LOG_REQUESTS=1`. |
+| `compartment_id is required when auth_type= is set` | Principal auth on the V1/Responses transports cannot derive a compartment from a profile. Pass `compartment_id=` on the model (the SDK transport falls back to the profile's tenancy). |
+| Streaming yields one big chunk | DAC endpoint rejected `is_stream`. The fall-back path in `OCIModel.stream()` swallows the failure and emits the full response as one chunk. |
 | Cohere model fails on V1 | The `oci:` prefix already routes `cohere.*` ids to the SDK transport; if you built `OCIChatCompletionsModel` yourself, use `OCIModel` (in the notebooks, `LOCUS_OCI_TRANSPORT=sdk`). |
 
 To list the models available in a region:

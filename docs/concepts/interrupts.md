@@ -209,6 +209,8 @@ termination algebra to fire:
 
     ```python
     class BudgetGuard(HookProvider):
+        priority = HookPriority.SECURITY_DEFAULT
+
         async def on_iteration_start(self, iteration: int, state: AgentState) -> None:
             if state.total_tokens_used > 100_000:
                 raise RuntimeError(f"token budget exceeded at {state.total_tokens_used} tokens")
@@ -217,7 +219,11 @@ termination algebra to fire:
 2. **Caller cancels the task.** Standard `asyncio` cancellation:
 
     ```python
-    run = asyncio.create_task(agent.run(prompt))
+    async def drive():
+        async for event in agent.run(prompt):
+            handle(event)
+
+    run = asyncio.create_task(drive())
     # ... later
     run.cancel()
     ```

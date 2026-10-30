@@ -16,8 +16,9 @@ and the JSON Schema is generated automatically.
 
 ## Tool context
 
-Inject per-call context (the agent's state, custom metadata, the
-hook orchestrator) into a tool by declaring a `ToolContext` parameter.
+Inject per-call context (the agent's state, the run and call
+identifiers, invocation metadata and per-tool config) into a tool by
+declaring a `ToolContext` parameter.
 
 ::: locus.tools.context.ToolContext
 
@@ -56,8 +57,9 @@ need a schema for an external system (e.g. an MCP server).
 ### OCI tools
 
 Agents that drive Oracle Cloud Infrastructure: `use_oci` runs a read-only
-OCI CLI / SDK operation and `describe_oci` explains a resource. Both need
-the `oci` extra. See the [OCI tools notebook](../notebooks/notebook_36_oci_tools.md).
+OCI Python SDK operation and `describe_oci` lists the SDK's services, client
+classes and operations. Both need the `oci` extra. See the
+[OCI tools notebook](../notebooks/notebook_36_oci_tools.md).
 
 ::: locus.tools.oci.use_oci
 ::: locus.tools.oci.describe_oci

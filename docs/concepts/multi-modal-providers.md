@@ -66,9 +66,12 @@ The shared Pydantic types live in `locus.providers.types` (`SearchResult`,
   policy pages, vendor docs, and status pages.
 - `OpenAISearchPreviewProvider` — wraps an OpenAI search model
   (`gpt-5-search-api`) on chat-completions. The model performs the
-  retrieval itself; the provider pins its results to a strict
-  JSON schema and returns a list of `SearchResult` — handy for a quick
-  open-web pivot before you commit to a hard API call.
+  retrieval itself and cites its sources as `url_citation` annotations;
+  the provider turns those citations into a list of `SearchResult`,
+  and when a reply carries none it asks for the hits as a JSON object
+  described in the prompt (the search models reject `response_format`)
+  and parses the reply leniently — handy for a quick open-web pivot
+  before you commit to a hard API call.
 - `OpenAIImageProvider` — `images.generate`, defaulting to
   `gpt-image-2` (`gpt-image-1` is retired). `dall-e-3` / `dall-e-2` are deprecated by OpenAI; pass
   one explicitly only if you still need it. Surfaces hosted URLs when

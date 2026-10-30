@@ -12,7 +12,7 @@ description: A measured study of consequence-family blind spots in admission pol
 | Evaluation unit | Reported per table: rows or deduplicated distinct items |
 | Held-out evaluation | 8,989 rows; 3,139 distinct items |
 | Frontier comparison | 638 rows; 456 distinct items after deduplication |
-| Evaluation-code revision | [`4601064`](https://github.com/oracle/locus/tree/4601064413dc925f748f6ad8f6b31adba827af74/examples/research) |
+| Evaluation-code revision | [`fb275b7`](https://github.com/oracle/locus/tree/fb275b74a820b4ca0738977c565457e8566a9cc8/examples/research), the evaluation scripts as last changed before the move into `oracle/locus`; the revision the paper cites, `4601064`, belongs to the predecessor repository and is not in this one |
 | Model under study | Clusiana-Admit-4B, research-only and not generally available |
 | Dataset availability | Family probe is included; the full held-out corpus is not redistributed |
 | Compute and accounts | The authors' own accounts, API keys and rented GPUs, for every evaluation and for training Clusiana-Admit-4B |
@@ -395,20 +395,22 @@ almost never gets it.
     ```bash
     git clone https://github.com/oracle/locus.git
     cd locus
-    git checkout 4601064413dc925f748f6ad8f6b31adba827af74
+    git checkout fb275b74a820b4ca0738977c565457e8566a9cc8
     python examples/research/family_eval.py http://127.0.0.1:8010
     ```
 
     `family_eval.py` contains 64 hand-written cases and can use any
-    OpenAI-chat-compatible endpoint. The held-out and frontier scripts require
-    `sample600.json`; the source corpus used for the published run is not
+    OpenAI-chat-compatible endpoint. The frontier scripts
+    (`frontier_eval.py`, `anthropic_eval.py`) require `sample600.json` and
+    `heldout_eval.py` takes the path of the held-out split as its first
+    argument; the source corpus used for the published run is not
     redistributed. Clusiana-Admit-4B is also not publicly available, so the
     full published tables cannot currently be reproduced independently from
     public artifacts. The scripts reproduce the scoring procedure, not access
     to the original model and dataset.
 
 - **The family dataset and eval** —
-  [`examples/research/family_eval.py`](https://github.com/oracle/locus/blob/4601064413dc925f748f6ad8f6b31adba827af74/examples/research/family_eval.py),
+  [`examples/research/family_eval.py`](https://github.com/oracle/locus/blob/fb275b74a820b4ca0738977c565457e8566a9cc8/examples/research/family_eval.py),
   runnable against any OpenAI-compatible endpoint.
 - **The method, with a runnable coverage probe** —
   [Writing a policy that holds](../concepts/policy-authoring.md)

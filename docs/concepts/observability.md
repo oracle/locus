@@ -129,8 +129,8 @@ agent = Agent(
 )
 ```
 
-Spans are emitted for every agent invocation, every ReAct iteration,
-every tool call, and every model call. Metrics include:
+Spans are emitted for every agent invocation, every ReAct iteration and
+every tool call; model calls are not spanned. Metrics include:
 
 | Counter | What it counts |
 |---|---|
@@ -282,6 +282,7 @@ bus as a canonical `agent.*` event — no hook registration, no config flag:
 | `ModelCompleteEvent` | `agent.model.completed` + `agent.tokens.used` — mapped, but never fires: the loop does not yield `ModelCompleteEvent` (see [Events](events.md#modelcompleteevent)) |
 | `InterruptEvent` | `agent.interrupt` (human-in-the-loop pause) |
 | `TerminateEvent` | `agent.terminate` |
+| `CompactionEvent` | `agent.context.compacted` (stage, tokens before/after) |
 
 `span_id` on started/completed pairs lets consumers compute durations and
 survive interleaved events from concurrent runs without subtracting timestamps.

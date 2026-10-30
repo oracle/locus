@@ -37,9 +37,12 @@ Agent(model="oci:ocid1.generativeaiendpoint.oc1...")    # your Dedicated AI Clus
 
 The profile decides the auth: an API-key profile, or a session-token profile
 from `oci session authenticate` (Locus detects `security_token_file`). On OCI
-compute, OKE or Functions set `OCI_AUTH_TYPE=instance_principal` or
-`resource_principal` and drop the profile. Details, regions and the
-transports: [OCI Generative AI](../concepts/providers/oci.md),
+compute, OKE or Functions pass the principal through `model_kwargs` and drop
+the profile:
+`Agent(model="oci:openai.gpt-5.5", model_kwargs={"auth_type": "instance_principal", "compartment_id": os.environ["OCI_COMPARTMENT_ID"]})`
+(`OCI_AUTH_TYPE` in the environment is honoured only by the SDK transport,
+`OCIModel`). Details, regions and the transports:
+[OCI Generative AI](../concepts/providers/oci.md),
 [model support on OCI](oci-models.md), [Dedicated AI Clusters](oci-dac.md).
 
 ## OpenAI
@@ -53,9 +56,10 @@ Agent(model="openai:gpt-5.5")
 Agent(model="openai:gpt-6.1-sol")     # gpt-6 and gpt-5*-pro go to /v1/responses automatically
 ```
 
-`OPENAI_BASE_URL` points the client at a proxy; with a custom endpoint the
-request stays on chat-completions. Model families, caching and the Responses
-API: [OpenAI](../concepts/providers/openai.md).
+`OPENAI_BASE_URL` points the client at a proxy; an explicit `base_url=` (or
+`api="chat_completions"`) keeps the Responses-only families on
+chat-completions — the environment variable alone does not. Model families,
+caching and the Responses API: [OpenAI](../concepts/providers/openai.md).
 
 ## Anthropic
 

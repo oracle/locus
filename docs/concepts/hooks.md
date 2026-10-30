@@ -22,7 +22,7 @@ subclass with the methods it cares about.
 | Retry model calls with backoff | ✓ — `ModelRetryHook` |
 | Reject tool calls that look dangerous | ✓ — `GuardrailsHook`, `ContentFilterHook`, `SteeringHook` |
 | Add a tool to the registry | use [`tools=[...]` on Agent](tools.md) |
-| Change the system prompt mid-run | hooks can read state but not mutate the prompt; use a [skill](skills.md) instead |
+| Change the system prompt mid-run | ✓ for one call — `on_before_model_call` can rewrite `event.messages`, including the leading system message; for a durable change use a [skill](skills.md) |
 
 ## The lifecycle phases
 

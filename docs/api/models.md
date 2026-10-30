@@ -46,8 +46,8 @@ picks the transport automatically.
 
 `OCIChatCompletionsModel` targets the `/openai/v1` transport — real SSE
 streaming, day-0 support for new OpenAI / Meta / xAI / Mistral / Gemini
-releases. Use this for everything except Cohere R-series and Dedicated AI
-Cluster endpoints.
+releases. Use this for everything except Cohere models (any `cohere.*`
+id) and Dedicated AI Cluster endpoints.
 
 ::: locus.models.providers.oci.openai_compat.OCIChatCompletionsModel
 ::: locus.models.providers.oci.OCIChatCompletionsConfig

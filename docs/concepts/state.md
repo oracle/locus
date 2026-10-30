@@ -43,7 +43,7 @@ for you. Reach for it when:
 | You're persisting a run and rehydrating later | `state.to_checkpoint()` / `AgentState.from_checkpoint(d)` — every checkpointer does this internally |
 | You're writing a custom termination predicate | `CustomCondition(lambda s, **ctx: (..., "reason"))` — `s` is `AgentState` |
 | You're building a multi-agent graph | Reducers compose new `AgentState` from parallel branches (see below) |
-| You want to seed a run from a previous transcript | Construct `AgentState(messages=(...))` and pass to `agent.run(...)` |
+| You want to seed a run from a previous transcript | Save it through the agent's checkpointer — `await checkpointer.save(state, thread_id)` — then call `agent.run(prompt, thread_id=...)`; `run()` takes a prompt, not a state |
 
 ## Fields
 
@@ -63,7 +63,7 @@ for you. Reach for it when:
 | `tool_loop_threshold` | `int` | How many identical consecutive calls qualify as a loop. |
 | `terminal_tools` | `frozenset[str]` | Tool names that auto-end the run when called. |
 | `total_tokens_used` | `int` | Running total. `prompt_tokens_used` + `completion_tokens_used`. |
-| `token_budget` | <code>int &#124; None</code> | Optional cap; `TokenLimit` reads this. |
+| `token_budget` | <code>int &#124; None</code> | Optional cap set from `AgentConfig.token_budget`; `should_terminate` stops the run with `token_budget` once `total_tokens_used` reaches it. `TokenLimit(n)` carries its own limit and does not read this field. |
 | `errors` | `tuple[str, ...]` | Tool/model error messages encountered this run. |
 | `metadata` | `dict[str, Any]` | Free-form context you can attach. |
 | `started_at`, `updated_at` | `datetime` | UTC timestamps. |

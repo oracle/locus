@@ -29,7 +29,7 @@ The above copyright notice and either this complete permission notice or at a mi
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
 
-Full text: [LICENSE](https://github.com/oracle-samples/locus/blob/main/LICENSE)
+Full text: [LICENSE](https://github.com/oracle/locus/blob/main/LICENSE)
 
 ---
 

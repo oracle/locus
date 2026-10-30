@@ -33,7 +33,8 @@ operator's desktop.
 ### 1. Install the MCP extras
 
 ```bash
-pip install "locus-sdk[mcp]"
+pip install "locus-sdk[mcp]"   # MCPClient (consumer side)
+pip install fastmcp            # also required by LocusMCPServer (producer side)
 ```
 
 ### 2. Spawn the server and wrap it with `MCPClient`
@@ -234,9 +235,9 @@ audit trail.
 
 | Symptom | Likely cause |
 |---|---|
-| `MCP server failed to start` | The MCP server subprocess crashed before establishing the session. Run the command manually to see the error. |
-| `Tool 'X' not found in MCP discovery` | The server exposes a different name than you expected. Print `[t["name"] for t in await ti.list_tools()]` to see the actual list. |
-| `Schema validation failed on call` | MCP tool returned an arg type that doesn't match its declared schema. Common with hand-written MCP servers. |
+| `MCPConnectionError: timed out after Ns connecting to MCP server …` / `… is unreachable` | The MCP server subprocess crashed or never completed the handshake. Run the command manually to see the error. |
+| `MCP tool 'X' is not allowed on …`, or the tool is missing from `await ti.list_tools()` | The server exposes a different name than you expected, or `allowed_tools` / `tool_filter` excludes it. Print `[t["name"] for t in await ti.list_tools()]` to see the actual list. |
+| The tool call returns an error about argument types | The MCP tool returned an arg type that doesn't match its declared schema. Common with hand-written MCP servers. |
 | Claude Desktop doesn't show your SDK tools | `claude_desktop_config.json` not picked up — check the file lives at the right path and Claude has been restarted. |
 | Hangs on `await ti.connect()` | The MCP subprocess is waiting for input on stdin (some servers expect a handshake) or never finished its init. Run the `server_command` manually to see what it prints, and wrap `connect()` in `asyncio.wait_for(..., timeout=...)`. |
 
