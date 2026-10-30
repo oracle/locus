@@ -273,16 +273,26 @@ Use when an action responds to a claim and the policy should weigh its support.
 - `Evidence` (Pydantic, frozen): `title`, `description`, `severity: Severity`,
   `asset`, `remediation`, `gsar_score` (0..1, required), `confidence=1.0`,
   `indicators: list[Indicator]`, `taxonomy: list[TaxonomyTag]`, `evidence_refs: list[str]`.
+  Every score is typed `Confidence` (`Annotated[float, Field(ge=0.0, le=1.0)]`); reuse it
+  in your own finding models.
   `ground_finding(*, title, description, severity, asset, remediation, partition, ...)`
-  returns `Evidence` only when the GSAR `Partition` clears the proceed threshold,
-  else an `Abstention` (`decision`, `gsar_score`, `candidate_title`, `reason`);
-  `is_finding(result)` narrows; `ground_fingerprint(...)` returns a `FingerprintFinding`.
+  returns a `GroundedFinding` (`Evidence | Abstention`): `Evidence` only when the GSAR
+  `Partition` clears the proceed threshold, else an `Abstention` (`decision`,
+  `gsar_score`, `candidate_title`, `reason`); `is_finding(result)` narrows it.
+- Endpoint fingerprinting: a `FingerprintClassifier` is any callable
+  `(features: Mapping[str, float]) -> FingerprintVerdict` (`model`, `engine`, `hardware`,
+  `confidence`, `feature_coverage`). `ground_fingerprint(*, verdict, asset, partition,
+  severity=Severity.MEDIUM, title=None, description=None, remediation=..., indicators=None,
+  taxonomy=None)` returns a `FingerprintFinding` (an `Evidence` carrying `verdict`) or an
+  `Abstention`; low feature coverage weakens the partition, so it abstains.
 - `await verify(finding, *, skeptics=None, threshold=0.6) -> VerificationResult`
   (`survives`, `confidence`, `evidence_quality`, `refutations` of `Refutation(reason, weight)`
   with weight `weak` / `concern` / `fatal`, `alternatives`, `notes`). Default
   panel `EvidenceQualitySkeptic()`: offline, fatal when `evidence_refs` is empty.
   `AdversarialSkeptic(model, strict=True)` adds a model-backed refutation (a model
-  instance or `"oci:openai.gpt-5.5"`), failing safe with a weak refutation. `finding`
+  instance or `"oci:openai.gpt-5.5"`), failing safe with a weak refutation. A `Skeptic` is
+  any object with a `name` property and `async challenge(finding) -> list[Refutation]`;
+  pass a panel as `skeptics=[EvidenceQualitySkeptic(), yours]`. `finding`
   may also be a mapping with `title`, `severity`, `gsar_score`, `evidence_refs`, `confidence`.
 - `gsar_score=0.9` with two `evidence_refs` verifies to `survives == True`,
   `confidence == 0.9`; `ControlPolicy()` then allows on `environment="staging"`

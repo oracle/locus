@@ -369,6 +369,7 @@ usage, 3 paused for a person.
 | `references/control-layer.md` | `ControlPolicy`, `Action`, `admit`, `gate_tool`, approvals and authorities, interrupt and resume, `AuditTrail` and signed exports, permission rules, shell parsing, spend ledgers, the governed wrapper |
 | `references/multi-agent-harness-deploy.md` | each shape with code, `StateGraph` primitives, A2A, DeepAgent, the harness and its backends, the box runner, `AgentServer`, the command line, observability |
 | `references/providers-memory-rag.md` | every provider prefix and its environment, OCI transports and errors, checkpointers and backends, memory managers, Oracle Database 26ai, embeddings, vector stores, rerankers |
+| `references/extending-and-advanced.md` | subagents, voice sessions, external hooks, tool sandboxes, writing a model provider, the ReAct loop, core protocols, settings, events and errors, DeepAgent internals, graph evaluation, decision providers, router runnables, delta checkpointers, the runner, rogue and codex modules |
 
 The documentation site is <https://locusagents.ai/>; <https://locusagents.ai/llms.txt>
 lists every page and <https://locusagents.ai/llms-full.txt> holds the guides
