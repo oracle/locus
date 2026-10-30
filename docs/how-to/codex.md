@@ -27,6 +27,8 @@ checkpoint a person can follow by hand.
 
 ## How the pieces fit
 
+{{ locus_diagram codex-on-locus }}
+
 | You want to | Use |
 |---|---|
 | Codex to build or change something with Locus in your own project | [`locus codex run "…"`](#in-your-project); the skill is placed for you |
