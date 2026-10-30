@@ -20,12 +20,8 @@ guide adds a policy-controlled action.
 </dl>
 
 For a credential-free run, skip to [try Locus offline](#try-locus-offline).
-
-!!! tip "OpenRouter and Together.ai"
-    The same installation works. Set `OPENROUTER_API_KEY` and use
-    `model="openrouter:provider/model-id"`, or set `TOGETHER_API_KEY` and use
-    `model="together:organization/model-id"`. The suffix must match the exact
-    id in the provider's catalog. See [OpenAI-compatible providers](../concepts/providers/openai-compatible.md#openrouter-and-togetherai).
+Any other provider works with the same steps and its own prefix and key; see
+[Configure a model provider](configure-providers.md).
 
 ## 1. Create an environment
 
