@@ -285,6 +285,11 @@ Codex itself can run on OCI Generative AI:
 loopback gateway that signs Codex's calls with your OCI profile, so neither Codex nor the agent it
 builds needs an account outside Oracle Cloud.
 
+[`codex/scenarios/`](https://github.com/oracle/locus/tree/main/codex/scenarios) is a series of twelve
+tasks Codex builds from the skill alone, each with an automatic check, and the runner that executes
+them: the proof that the skill produces correct applications, and the way a change to the SDK or to
+the skill is tried before a release.
+
 → [Build it with Codex](https://locusagents.ai/how-to/codex/)
 
 ---

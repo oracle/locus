@@ -103,13 +103,17 @@ pip install "locus-sdk[oci]"
 locus codex run "Build a support agent with an order lookup and a gated refund tool, with tests"
 ```
 
-In a clone, `codex/PROMPT.md` walks Codex through a first agent with a typed
-tool, an admission gate allowing, holding and denying, and the rogue-agent
-challenge, each step with a checkpoint a person can follow by hand.
+A scenario series proves it: twelve tasks Codex builds from the skill alone,
+from a gated refund with its audit trail to an agent served over HTTP, each
+with an automatic check. In a clone, `codex/PROMPT.md` walks Codex through a
+first agent with a typed tool, an admission gate allowing, holding and
+denying, and the rogue-agent challenge, each step with a checkpoint a person
+can follow by hand.
 
 [Build it with Codex →](how-to/codex.md) ·
 [The Locus skill →](https://github.com/oracle/locus/tree/HEAD/.agents/skills/locus) ·
 [Codex on OCI Generative AI →](how-to/codex.md#codex-on-oci-generative-ai) ·
+[The scenarios →](how-to/codex.md#scenarios) ·
 [`codex/` in the repository →](https://github.com/oracle/locus/tree/HEAD/codex)
 { .locus-links }
 
