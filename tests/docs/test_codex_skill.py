@@ -12,6 +12,7 @@ class fails here before it misleads an agent.
 
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
@@ -64,3 +65,53 @@ def test_the_skill_carries_no_credential_shaped_text() -> None:
             assert re.search(pattern, text) is None, (
                 f"{path.name} holds a value that looks like a credential"
             )
+
+
+PACKAGES = ROOT / "src" / "locus"
+#: The compatibility shim for the old ``locus.security`` path; nothing to teach.
+NOT_TAUGHT = {"security"}
+#: Public names that are protocol wire types or process constants, not something
+#: a builder calls: the A2A v1 schema mirror and the box runner's environment.
+WIRE_TYPES = re.compile(r"^(A2AV1|[A-Z][A-Z0-9_]+$)")
+#: The share of every package's ``__all__`` the skill has to name.
+COVERAGE_FLOOR = 0.90
+
+
+def _exports(init: Path) -> list[str]:
+    tree = ast.parse(init.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == "__all__" for t in node.targets
+        ):
+            value = node.value
+            if isinstance(value, ast.List | ast.Tuple):
+                return [
+                    e.value
+                    for e in value.elts
+                    if isinstance(e, ast.Constant) and isinstance(e.value, str)
+                ]
+    return []
+
+
+def test_the_skill_names_the_public_surface() -> None:
+    """Every package is taught, and most of what the packages export is named somewhere in the skill."""
+    text = "\n".join(p.read_text(encoding="utf-8") for p in SKILL.rglob("*.md"))
+    tokens = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]+", text))
+    named = total = 0
+    unnamed_packages: list[str] = []
+    for package in sorted(
+        p for p in PACKAGES.iterdir() if p.is_dir() and (p / "__init__.py").is_file()
+    ):
+        if package.name.startswith("_") or package.name in NOT_TAUGHT:
+            continue
+        if package.name not in tokens:
+            unnamed_packages.append(package.name)
+        exports = [n for n in _exports(package / "__init__.py") if not WIRE_TYPES.match(n)]
+        total += len(exports)
+        named += sum(n in tokens for n in exports)
+    assert unnamed_packages == [], f"packages the skill never names: {unnamed_packages}"
+    assert total > 0
+    share = named / total
+    assert share >= COVERAGE_FLOOR, (
+        f"the skill names {named} of {total} exported names ({share:.0%})"
+    )

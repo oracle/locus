@@ -10,7 +10,7 @@ pieces make that work, and this page covers each:
 
 - **The Locus skill.** [`.agents/skills/locus/`](https://github.com/oracle/locus/tree/HEAD/.agents/skills/locus)
   is what Codex reads to use the SDK in any project: a `SKILL.md` with the
-  shape of Locus and the rules, and four reference files with every option.
+  shape of Locus and the rules, and five reference files with every option.
 - **`locus codex`.** The command puts the skill where Codex looks and starts
   Codex with the sandbox settings the skill's recipes need.
 - **Codex on OCI Generative AI.** [`examples/codex-on-oci/`](https://github.com/oracle/locus/tree/HEAD/examples/codex-on-oci)
@@ -78,6 +78,7 @@ known behaviour, and the rules. The references carry the depth:
 | `control-layer.md` | `ControlPolicy`, `Action`, `admit`, `gate_tool`, approvals and authorities, interrupt and resume, `AuditTrail` and signed exports, permission rules, shell parsing, spend ledgers, the governed wrapper |
 | `multi-agent-harness-deploy.md` | each shape with code, `StateGraph` primitives, A2A, DeepAgent, the harness and its backends, the box runner, `AgentServer`, the command line, observability |
 | `providers-memory-rag.md` | every provider prefix and its environment, OCI transports and errors, checkpointers and backends, memory managers, Oracle Database 26ai, embeddings, vector stores, rerankers |
+| `extending-and-advanced.md` | subagents, voice sessions, external hooks, tool sandboxes, writing a model provider, the ReAct loop, core protocols and settings, DeepAgent internals, graph evaluation, the rest of the router, memory and observability surface |
 
 Every Python snippet in the skill is checked against the installed SDK by
 the repository's tests, the same check the documentation pages get, so the
@@ -118,6 +119,7 @@ tells you what to run in your own terminal and waits for `done`.
 | `.agents/skills/locus/` | The skill, discovered from the repository root like in any project |
 | `codex/SPEC.md` | The specification: inputs, preflight, every step with its checkpoint, acceptance, known behaviour, the report |
 | `codex/PROMPT.md` | The prompt: read the files above, run the steps, report |
+| `codex/scenarios/` | The scenario series: a task and a check per directory, and the runner |
 
 Without a conversation, put your answers in an operator-context block and
 pipe both into a non-interactive session:
@@ -195,6 +197,31 @@ does not go through the gateway: it calls OCI Generative AI directly with
 `model="oci:<id>"` and the same profile, as every Locus program does. The
 example's README has the files, a `curl` to check the gateway, and what to
 change for a shared deployment.
+
+## Scenarios
+
+[`codex/scenarios/`](https://github.com/oracle/locus/tree/HEAD/codex/scenarios)
+is a series of tasks Codex builds from the skill alone, each with an
+automatic check: a gated tool and its audit trail, a hold a person approves
+and a run that resumes, a `StateGraph` fan-out, a retrieval tool, the coding
+harness behind the gate, a checkpointed conversation, an agent served over
+HTTP, an orchestrator with specialists, a typed answer with a termination rule
+and an evaluation, an agent on OCI Generative AI, the permission rules of a
+coding agent, and a playbook with a custom hook.
+
+```bash
+python codex/scenarios/run.py --skip-live            # the offline series
+python codex/scenarios/run.py --codex-profile oci    # Codex itself on OCI Generative AI
+```
+
+The runner gives each scenario an empty directory, starts
+`locus codex run --exec` with the task, and when Codex returns runs the
+scenario's checks there: the tests Codex wrote must pass, and the behaviour
+the task asked for is exercised once more from outside. Transcripts, reports
+and a summary table land under `out/scenarios/`. The series is how a change
+to the SDK or to the skill is tried before a release:
+`--locus-install "/path/to/checkout[oci]"` makes Codex install from the
+checkout.
 
 ## What the agent never does
 

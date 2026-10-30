@@ -11,6 +11,7 @@ The specification is written for a person to follow by hand as well.
 | [`../AGENTS.md`](../AGENTS.md) | what Codex loads automatically in this repository: the credential rule, what the agent may write, where things are |
 | [`../.agents/skills/locus/`](../.agents/skills/locus/) | the Codex skill for building with Locus in any project: `SKILL.md` and its references; `locus codex init` places it |
 | [`../examples/codex-on-oci/`](../examples/codex-on-oci/) | a loopback gateway so that Codex itself runs on OCI Generative AI |
+| [`scenarios/`](scenarios/) | a series of tasks Codex builds from the skill, each with an automatic check, and the runner (`python codex/scenarios/run.py`) |
 
 ## Use it
 

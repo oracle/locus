@@ -83,9 +83,10 @@ result = asyncio.run(orchestrator.execute("Why are checkout requests failing?"))
 print(result.success, [r.output for r in result.specialist_results.values()], result.summary)
 ```
 
+`execute` returns an `OrchestratorResult` (`success`, `summary`, `specialist_results`, `decisions`, `duration_ms`, `error`).
 Check: `success` stays `True` when one specialist fails (read `result.specialist_results[<id>].error`);
-`result.decisions` records routing, correlation and summary. Factories: `create_log_analyst`, `create_metrics_analyst`,
-`create_trace_analyst`, `create_code_analyst`.
+`result.decisions` lists `RoutingDecision`s (`decision_type` in `invoke`, `correlate`, `summarize`; `specialists`,
+`reasoning`, `context`). Factories: `create_log_analyst`, `create_metrics_analyst`, `create_trace_analyst`, `create_code_analyst`.
 
 ## Swarm
 
@@ -96,6 +97,11 @@ answers a task once, in `### Findings`, `### Analysis`, `### Blackboard` section
 (`findings`, `blackboard`, `task_results`), so a double must answer in that format. `await swarm.execute(initial_task=None,
 decompose_tasks=True)` asks the swarm model to split the task; seed the queue yourself with `swarm.add_task(description,
 priority=0)` and `decompose_tasks=False`. It stops when nothing is pending or `max_iterations` (default 10) is hit.
+`create_swarm_agent` returns a `SwarmAgent` (`name`, `capabilities`, `system_prompt`, `model`, `tasks_completed`;
+`can_handle(task)`, `priority_for_task(task)`); `add_task` returns the `SwarmTask` (`id`, `description`, `priority`,
+`required_tags`, `preferred_tags`, `status: TaskStatus` in `pending`, `claimed`, `in_progress`, `completed`, `failed`;
+`claimed_by`, `result`, `error`); set `required_tags` on it and only an agent advertising every tag may claim it.
+`execute` returns a `SwarmResult` (`success`, `completed_tasks`, `failed_tasks`, `context`, `summary`, `duration_ms`, `error`).
 
 ## Handoff
 
@@ -106,6 +112,8 @@ description="", system_prompt="", tools=None, model=None)` returns a `HandoffAge
 `DELEGATION`, `COMPLETION`, `FAILURE`; `chain_handoff(agent_chain=, task=)` runs several in order. The target reads a
 rendered `HandoffContext` (`original_task`, `findings`, `conversation_summary` from `state`, `handoff_chain`; key
 messages too when `manager.preserve_full_history`). An unknown target or exhausted chain gives `success=False`, `error`.
+`HandoffEvent` (`source_agent_id`, `target_agent_id`, `reason`, `context_summary`) is the typed shape of a handoff; the
+live publication is `multiagent.handoff.initiated` on the event bus with those fields, then `multiagent.handoff.completed`.
 
 ```python
 import asyncio
@@ -139,7 +147,12 @@ Use for cycles, conditional routing, `Send` fan-out, human interrupts and checkp
 
 State is a dict; a node receives the whole state and its updates merge through reducers (`locus.core.reducers`). Cycles
 are refused unless `allow_cycles=True`. An `Agent` is not callable: `async def plan(state): return {"plan": (await
-planner.arun(state["prompt"])).message}`.
+planner.arun(state["prompt"])).message}`. The topology is data: `graph.nodes` is `dict[str, Node]` (`id`, `name`,
+`executor`, `condition`, `retry_policy`, `cache_policy`, `timeout_ms`, `defer`), `graph.edges` is `list[Edge]` (`source`,
+`target`) and `graph.conditional_edges` is `list[ConditionalEdge]` (`source_id`, `router`, `targets`, `default_target`);
+`NodeResult.status` is a `NodeStatus` (`pending`, `running`, `completed`, `failed`, `skipped`, `interrupted`).
+`create_graph(name="", description="", allow_cycles=False)` is a `StateGraph` with that `GraphConfig`; `Graph` is the
+older DAG-only subclass, kept for existing code.
 
 ```python
 from locus.multiagent import END, START, GraphConfig, StateGraph
@@ -276,7 +289,9 @@ a model wants). Shell tools are dropped from the default set, and refused by nam
 
 `HarnessConfig` (frozen dataclass): `require_read=True`, `bash_timeout=120`, `bash_max_timeout=600`,
 `on_timeout="background"` or `"kill"`, `output_chars=30_000`, `output_head_chars=8_000`, `vision=False`,
-`result_store=None`, `on_exec=None`, `on_change=None`, `environment="unknown"`.
+`result_store=None`, `on_exec=None`, `on_change=None`, `environment="unknown"`; `on_exec` receives each `ExecRecord`,
+`on_change` each `FileChange` (`path`, `shown`, `before`, `after`, `action`). `context.ledger` is the `ReadLedger`
+(`require_read=True`) that refuses a change to a file not read in this session, or changed since it was read.
 
 ### The single gate
 
@@ -322,7 +337,8 @@ and the path or command as `asset`.
 | `workspace.exec` | every other `bash` line, `write_stdin`, `kill_shell` |
 | `network` | reserved for web tools; a fetching shell line is `workspace.exec` tagged `exec:network` |
 
-`classify_command(line)` reads the programs a shell line runs (behind `sudo`, `env`, `xargs`, `sh -c`, `$(...)`) and
+`classify_command(line) -> CommandClass` (`kind`, `tags`, `reasons`, `.never`; kinds are the constants `KIND_READ`,
+`KIND_WRITE`, `KIND_EXEC`, `KIND_NETWORK`) reads the programs a shell line runs (behind `sudo`, `env`, `xargs`, `sh -c`, `$(...)`) and
 tags it: `exec:destructive`, `exec:vcs-push`, `exec:force-push`, `exec:network`, `exec:remote-code`, `exec:shutdown`,
 `exec:check` (tests, linters), `exec:never` (the never-allow floor), `exec:unparsed` (fails closed), `exec:stdin`,
 `exec:background`; `rm -rf build` is `exec:destructive` + `exec:never`. Gate by label:
@@ -343,7 +359,18 @@ tags it: `exec:destructive`, `exec:vcs-push`, `exec:force-push`, `exec:network`,
 `close()` deletes it (call it in a `finally`); `connect()` never deletes. OCI: `auth_type` is `api_key`,
 `security_token`, `instance_principal` or `resource_principal`; `profile` names an `~/.oci/config` entry; `expiration`
 is an ISO 8601 duration up to 48 hours; `backend.extend("PT30M")`. OpenShell: without `endpoint` the client comes from
-the active gateway configuration; `providers=` attaches credentials the sandbox sees only as placeholders.
+the active gateway configuration; `providers=` attaches credentials the sandbox sees only as placeholders. With a client
+of your own, `OCISandboxBackend(client, sandbox_id, region=, owns_sandbox=False)` and `OpenShellBackend(client, sandbox,
+workspace=)` wrap it in the `SessionLike` adapters they build internally, `OCISandboxSession` and `OpenShellSession`.
+
+The `WorkspaceBackend` surface: `capabilities` is a `BackendCapabilities` (`isolated`, `label`, `has_rg`, `root`,
+`can_exec`); `stat(path)` returns a `FileStat` (`size`, `mtime`, `sha256`, `is_dir`), `read_lines(path, offset=, limit=)`
+a `LineWindow` (`lines`, `total`, `first`); `ls`, `glob` and `grep` skip `SKIP_DIRS` (`.git`, `node_modules`, `.venv`,
+`dist`, `build`, ...); file errors raise `BackendError` (`code` in `file_not_found`, `permission_denied`, `is_directory`,
+`invalid_path`). `exec(command, *, timeout, env=None, cwd=None, on_output=None)` returns an `ExecResult` (`exit_code`,
+`output` bytes, `truncated`, `timed_out`, `duration_s`), or raises `ExecUnsupportedError` where there is no shell; the
+`*_background` methods return a `JobStatus` (`handle`, `command`, `running`, `exit_code`, `elapsed_s`) or, for
+`read_background(handle, since=0)`, a `JobOutput` (`status`, `data`, `offset`, `lost`); a bad handle raises `JobError`.
 
 ### Evidence and the box runner
 
@@ -393,7 +420,8 @@ Exit codes: `0` success, `1` a check or decision failed, `2` usage error, `3` pa
 ## Observability
 
 `locus.observability`: `EventBus` (`get_event_bus()`), `StreamEvent(run_id, event_type, data, timestamp, event_id)`,
-`run_context(run_id=None)`, `emit(event_type, **data)`, `emit_sync`, `EventBusHook(run_id=None)`. Nothing publishes
+`run_context(run_id=None)`, `emit(event_type, **data)`, `emit_sync`, `EventBusHook(run_id=None)`; `current_run_id()`
+reads the bound id (or `None`) from a tool or hook, `set_run_id(run_id)` pins it in a subprocess. Nothing publishes
 outside an active `run_context`; inside one every `Agent.run` event is mirrored as `agent.*` (`agent.think`,
 `agent.tool.started` / `.completed` paired by `span_id`, `agent.interrupt`, `agent.terminate`) and each shape emits its
 `EV_*` constants from `locus.observability.emit` (`multiagent.orchestrator.*`, `multiagent.specialist.*`,

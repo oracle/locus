@@ -10,6 +10,25 @@ policy.
 
 ### Added
 
+- **Codex scenarios.** `codex/scenarios/` is a series of twelve tasks Codex
+  builds from the Locus skill alone, each with a `PROMPT.md` and a `check.sh`
+  that runs in the project Codex built: a gated refund with its audit trail,
+  a hold a person approves and a resumed run, a `StateGraph` fan-out, a
+  retrieval tool, the coding harness behind the gate, a checkpointed
+  conversation, an agent served over HTTP, an orchestrator with specialists,
+  a typed answer with a termination rule and an evaluation, an agent on OCI
+  Generative AI, the permission rules of a coding agent, and a playbook with
+  a custom hook. `python codex/scenarios/run.py` runs them in empty
+  directories through `locus codex run --exec` and prints a summary table;
+  `--locus-install` points Codex at a checkout, so a change to the SDK or the
+  skill is tried the way an application would use it. The skill gains a fifth
+  reference, `extending-and-advanced.md` (subagents, voice sessions, external
+  hooks, tool sandboxes, custom model providers, the ReAct loop, core
+  protocols and settings, DeepAgent internals, graph evaluation, the remaining
+  router, memory and observability surface), the four existing references
+  name the rest of each package's public surface, and
+  `tests/docs/test_codex_skill.py` measures that coverage against every
+  package's `__all__` so it cannot regress.
 - **Codex builds on Locus.** The repository ships a Codex skill,
   `.agents/skills/locus/`: a `SKILL.md` that gives a coding agent the shape
   of the SDK (the agent and its tools, the admission gate, the shapes,
