@@ -148,6 +148,13 @@ def _register_defaults() -> None:
                 env_profile = os.environ.get("OCI_PROFILE")
                 if env_profile:
                     kw["profile"] = env_profile
+            # The region the same way, as the provider guide documents:
+            # LOCUS_OCI_REGION, then OCI_REGION, else the class default.
+            # An explicit region= or base_url= is left alone.
+            if "region" not in kw and "base_url" not in kw:
+                env_region = os.environ.get("LOCUS_OCI_REGION") or os.environ.get("OCI_REGION")
+                if env_region:
+                    kw["region"] = env_region
             return cast("ModelProtocol", OCIChatCompletionsModel(model=m, **kw))
 
         register_provider("oci", _make_oci)

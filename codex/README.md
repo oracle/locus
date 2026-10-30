@@ -9,6 +9,8 @@ The specification is written for a person to follow by hand as well.
 | [`SPEC.md`](SPEC.md) | the specification: inputs, preflight, every step with its checkpoint, acceptance, the rules the agent follows, known behaviour, the report |
 | [`PROMPT.md`](PROMPT.md) | the prompt that drives OpenAI Codex through the specification; plain text, pass it as the argument or pipe it |
 | [`../AGENTS.md`](../AGENTS.md) | what Codex loads automatically in this repository: the credential rule, what the agent may write, where things are |
+| [`../.agents/skills/locus/`](../.agents/skills/locus/) | the Codex skill for building with Locus in any project: `SKILL.md` and its references; `locus codex init` places it |
+| [`../examples/codex-on-oci/`](../examples/codex-on-oci/) | a loopback gateway so that Codex itself runs on OCI Generative AI |
 
 ## Use it
 
@@ -33,6 +35,20 @@ On OCI no secret enters the environment: Locus reads the profile you name
 from `~/.oci/config`. For OpenAI or Anthropic, export the key in the shell
 that starts Codex; Codex passes its environment to the commands it runs, and
 the specification forbids any command whose output would show it.
+
+## In your own project
+
+Outside a clone, Locus is a package and Codex learns it from the skill:
+
+```shell
+pip install "locus-sdk[oci]"
+locus codex init          # .agents/skills/locus here, and a Locus section in AGENTS.md
+locus codex run "Build a support agent with an order lookup and a gated refund tool, with tests"
+```
+
+`locus codex init --home` installs the skill once for every project, in
+`~/.agents/skills/locus`. `locus codex run` adds the two sandbox settings
+below and passes anything after `--` to Codex.
 
 ## The Codex sandbox
 

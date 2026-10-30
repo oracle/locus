@@ -1,0 +1,32 @@
+# LiteLLM gateway that lets OpenAI Codex run on OCI Generative AI.
+#
+# Codex speaks the Responses API. OCI's OpenAI-compatible endpoint serves chat
+# completions, signed with an OCI request signature. This gateway sits between
+# the two on loopback: it accepts /v1/responses from Codex, translates to chat
+# completions, and signs each call with the OCI CLI profile named by
+# OCI_PROFILE (oci_signer.py). No credential leaves ~/.oci.
+#
+#   cd examples/codex-on-oci
+#   python3 -m venv .venv && .venv/bin/pip install "litellm[proxy]" oci
+#   export LITELLM_MASTER_KEY="sk-$(openssl rand -hex 32)"   # the gateway's own key
+#   OCI_PROFILE=DEFAULT OCI_REGION=us-chicago-1 \
+#     .venv/bin/litellm --config config.yaml --host 127.0.0.1 --port 4000
+#
+# Any chat model id OCI serves in that region works: Codex asks for
+# `openai.gpt-5.5` and the gateway forwards `oci/openai.gpt-5.5`. See README.md.
+
+model_list:
+- model_name: '*'
+  litellm_params:
+    model: oci/*
+    oci_region: os.environ/OCI_REGION
+
+litellm_settings:
+  callbacks: [oci_signer.handler]
+  drop_params: true
+  request_timeout: 300
+
+general_settings:
+  # Required: the gateway refuses to start without a key. Codex sends it as
+  # the bearer token (`env_key = "LITELLM_MASTER_KEY"` in codex-config.toml).
+  master_key: os.environ/LITELLM_MASTER_KEY

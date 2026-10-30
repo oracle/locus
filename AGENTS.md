@@ -7,7 +7,10 @@ instructions are for a coding agent working in this checkout. Two kinds of
 task arrive here: building an application with Locus, driven by
 `codex/PROMPT.md` and specified in `codex/SPEC.md`; and changing Locus
 itself, governed by `CONTRIBUTING.md`. Read the one that applies before
-running anything.
+running anything. The `locus` skill in `.agents/skills/locus/` is what a
+coding agent reads to use the SDK in any project; in this checkout it is the
+source of that skill, and a change to the SDK's public surface is reflected
+there.
 
 ## Hard rules
 
@@ -40,6 +43,8 @@ running anything.
 | `docs/`, `mkdocs.yml`, `hooks/`, `overrides/` | the documentation site, published at [locusagents.ai](https://locusagents.ai/) |
 | `tests/unit/`, `tests/integration/`, `tests/docs/` | unit tests (no credentials), integration tests (gated on credentials and services), site build tests |
 | `codex/` | the specification and prompt for building a first agent with Codex |
+| `.agents/skills/locus/` | the Codex skill for building with Locus (`SKILL.md` and `references/`); shipped in the wheel, placed by `locus codex init` |
+| `examples/codex-on-oci/` | a loopback gateway that runs Codex itself on OCI Generative AI |
 | `out/` | run output, git-ignored |
 
 ## Changing Locus

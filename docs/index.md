@@ -87,6 +87,18 @@ setup.
 [Notebook 03 — Agent with tools →](notebooks/notebook_03_agent_with_tools.md)
 { .locus-links }
 
+Or have OpenAI Codex build it. The repository ships a Codex skill that
+teaches it the SDK, and `locus codex` starts Codex with it; Codex itself can
+run on OCI Generative AI.
+
+```bash
+pip install "locus-sdk[oci]"
+locus codex run "Build a support agent with an order lookup and a gated refund tool, with tests"
+```
+
+[Build it with Codex →](how-to/codex.md)
+{ .locus-links }
+
 ## What are you building?
 
 Each tab shows one workload in a few lines and links to the notebook that
@@ -432,7 +444,9 @@ from locus.control import ControlPolicy, gate_tool
 from locus.harness import OCISandboxBackend, build_harness
 
 backend = OCISandboxBackend.create("ocid1.generativeaiproject.oc1...", expiration="PT1H")
-policy = ControlPolicy(require_human_for=frozenset({"workspace.exec"}))
+policy = ControlPolicy(
+    require_verification_score=0.0, require_human_for=frozenset({"workspace.exec"})
+)
 harness = build_harness(
     backend, wrap=lambda tool, spec: gate_tool(tool, policy=policy, action=spec)
 )
@@ -473,6 +487,7 @@ pip install locus-sdk && python -m locus.rogue
 ## Where next
 
 [All notebooks →](notebooks/index.md) ·
+[Build it with Codex →](how-to/codex.md) ·
 [Capabilities →](capabilities.md) ·
 [API reference →](api/index.md) ·
 [Deploy →](how-to/deploy.md)

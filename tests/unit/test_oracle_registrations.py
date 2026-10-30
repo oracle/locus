@@ -78,6 +78,30 @@ def test_oci_routes_everything_else_to_the_v1_transport(monkeypatch: pytest.Monk
     assert explicit.config.profile == "EXPLICIT"
 
 
+def test_oci_v1_region_comes_from_the_environment_when_not_given(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from locus.models.providers.oci import OCIChatCompletionsModel
+
+    monkeypatch.setenv("OCI_PROFILE", "FROM_ENV")
+    monkeypatch.delenv("LOCUS_OCI_REGION", raising=False)
+    monkeypatch.delenv("OCI_REGION", raising=False)
+    default = get_model("oci:openai.gpt-5.5")
+    assert isinstance(default, OCIChatCompletionsModel)
+    assert default.config.region == "us-chicago-1"
+
+    monkeypatch.setenv("OCI_REGION", "eu-frankfurt-1")
+    model = get_model("oci:openai.gpt-5.5")
+    assert isinstance(model, OCIChatCompletionsModel)
+    assert model.config.region == "eu-frankfurt-1"
+    assert "eu-frankfurt-1" in str(model.config.base_url)
+
+    # LOCUS_OCI_REGION wins over OCI_REGION, and an explicit region= wins over both.
+    monkeypatch.setenv("LOCUS_OCI_REGION", "uk-london-1")
+    assert get_model("oci:openai.gpt-5.5").config.region == "uk-london-1"
+    assert get_model("oci:openai.gpt-5.5", region="sa-saopaulo-1").config.region == "sa-saopaulo-1"
+
+
 def test_the_provider_table_lists_oci() -> None:
     from locus.models.providers import provider_table
 

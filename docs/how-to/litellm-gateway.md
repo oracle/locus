@@ -338,6 +338,9 @@ covers each surface (callbacks, cache, guardrails, audit) in depth.
   single-tenant deployments.
 - [`examples/litellm-gateway/`](https://github.com/oracle/locus/tree/main/examples/litellm-gateway)
   — working `config.yaml`, `docker-compose.yml`, and `helm-values.yaml`.
+- [`examples/codex-on-oci/`](https://github.com/oracle/locus/tree/HEAD/examples/codex-on-oci)
+  — the same gateway in front of OCI Generative AI, signed with an OCI
+  profile, so that [Codex runs on OCI](codex.md#codex-on-oci-generative-ai).
 - [LiteLLM AI Gateway quickstart](https://docs.litellm.ai/docs/proxy/quick_start)
 - [LiteLLM `config.yaml` reference](https://docs.litellm.ai/docs/proxy/configs)
 - [LiteLLM Helm chart](https://github.com/BerriAI/litellm/tree/main/helm/litellm-helm)

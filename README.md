@@ -175,7 +175,9 @@ from locus.control import ControlPolicy, gate_tool
 from locus.harness import OCISandboxBackend, build_harness
 
 backend = OCISandboxBackend.create("ocid1.generativeaiproject.oc1...", expiration="PT1H")
-policy = ControlPolicy(require_human_for=frozenset({"workspace.exec"}))
+policy = ControlPolicy(
+    require_verification_score=0.0, require_human_for=frozenset({"workspace.exec"})
+)
 harness = build_harness(
     backend, wrap=lambda tool, spec: gate_tool(tool, policy=policy, action=spec)
 )
@@ -256,17 +258,32 @@ AgentServer(agent=my_agent, api_key=os.environ["API_KEY"]).run(host="0.0.0.0", p
 
 ## Build it with Codex
 
-Hand [OpenAI Codex](https://developers.openai.com/codex) the prompt in [`codex/`](https://github.com/oracle/locus/tree/main/codex).
-It installs Locus in a fresh environment, writes a first agent with a typed tool, puts an admission
-gate in front of a payment, runs the rogue-agent challenge and reports. You name the provider: OCI
-Generative AI from a profile in `~/.oci/config`, OpenAI or Anthropic from a key in the environment,
-or none for the offline parts. [`AGENTS.md`](https://github.com/oracle/locus/blob/main/AGENTS.md) carries the rules it follows;
-[`codex/SPEC.md`](https://github.com/oracle/locus/blob/main/codex/SPEC.md) is written for a person to follow by hand as well.
+[OpenAI Codex](https://developers.openai.com/codex) builds on Locus. The repository ships a Codex
+skill, [`.agents/skills/locus/`](https://github.com/oracle/locus/tree/main/.agents/skills/locus), that
+teaches it the SDK: `Agent` and `@tool`, the admission gate, the multi-agent shapes, memory and RAG,
+the coding harness, the providers, and how to test an agent offline. `locus codex` puts the skill
+where Codex looks and starts Codex with the sandbox settings it needs:
+
+```bash
+pip install "locus-sdk[oci]"
+locus codex run "Build a support agent with an order lookup and a gated refund tool, with tests"
+```
+
+In a clone, [`codex/PROMPT.md`](https://github.com/oracle/locus/blob/main/codex/PROMPT.md) drives
+Codex through a first agent with a typed tool, an admission gate allowing, holding and denying, and
+the rogue-agent challenge, on OCI Generative AI, OpenAI, Anthropic or offline;
+[`codex/SPEC.md`](https://github.com/oracle/locus/blob/main/codex/SPEC.md) is written for a person
+to follow by hand as well:
 
 ```bash
 git clone https://github.com/oracle/locus.git && cd locus
 codex -s workspace-write -c sandbox_workspace_write.network_access=true "$(cat codex/PROMPT.md)"
 ```
+
+Codex itself can run on OCI Generative AI:
+[`examples/codex-on-oci/`](https://github.com/oracle/locus/tree/main/examples/codex-on-oci) is a
+loopback gateway that signs Codex's calls with your OCI profile, so neither Codex nor the agent it
+builds needs an account outside Oracle Cloud.
 
 → [Build it with Codex](https://locusagents.ai/how-to/codex/)
 

@@ -111,7 +111,9 @@ from locus.control import ControlPolicy, gate_tool
 from locus.harness import OCISandboxBackend, build_harness
 
 backend = OCISandboxBackend.create("ocid1.generativeaiproject.oc1...", expiration="PT1H")
-policy = ControlPolicy(require_human_for=frozenset({"workspace.exec"}))
+policy = ControlPolicy(
+    require_verification_score=0.0, require_human_for=frozenset({"workspace.exec"})
+)
 harness = build_harness(
     backend,
     wrap=lambda tool, spec: gate_tool(tool, policy=policy, action=spec),
