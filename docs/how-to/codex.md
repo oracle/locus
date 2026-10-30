@@ -5,7 +5,7 @@ description: OpenAI Codex builds on Locus. A skill teaches it the SDK, `locus co
 
 # Build it with Codex
 
-[OpenAI Codex](https://developers.openai.com/codex) builds on Locus. Three
+[OpenAI Codex](https://developers.openai.com/codex) builds on Locus. Four
 pieces make that work, and this page covers each:
 
 - **The Locus skill.** [`.agents/skills/locus/`](https://github.com/oracle/locus/tree/HEAD/.agents/skills/locus)
@@ -16,11 +16,45 @@ pieces make that work, and this page covers each:
 - **Codex on OCI Generative AI.** [`examples/codex-on-oci/`](https://github.com/oracle/locus/tree/HEAD/examples/codex-on-oci)
   runs Codex's own model on OCI, so neither Codex nor the agent it builds
   needs an account outside Oracle Cloud.
+- **The scenarios.** [`codex/scenarios/`](https://github.com/oracle/locus/tree/HEAD/codex/scenarios)
+  is a series of tasks Codex builds from the skill alone, each with an
+  automatic check: the proof that the skill produces correct applications.
 
-In a clone of the repository there is a fourth: [`codex/`](https://github.com/oracle/locus/tree/HEAD/codex)
+In a clone of the repository there is a fifth: [`codex/`](https://github.com/oracle/locus/tree/HEAD/codex)
 holds a specification and the prompt that drives Codex through a first agent,
 a controlled action and the rogue-agent challenge, each step with a
 checkpoint a person can follow by hand.
+
+## How the pieces fit
+
+```text
+you ── locus codex run "Build …" ──▶ Codex ──reads──▶ .agents/skills/locus/  (the Locus skill)
+                                      │              AGENTS.md              (the house rules)
+                                      │ Codex's own model: OpenAI, or OCI Generative AI
+                                      │ through examples/codex-on-oci (a loopback gateway)
+                                      ▼
+                              your project: the agent, its tests, a run script
+                                      ▼
+                              Locus ──▶ oci: / openai: / anthropic: model, gated tools, audit trail
+
+codex/scenarios/run.py ── twelve such tasks, each with an automatic check ──▶ PASS / FAIL table
+codex/PROMPT.md + SPEC.md ── in a clone: a first agent, a controlled action, the rogue challenge
+```
+
+| You want to | Use |
+|---|---|
+| Codex to build or change something with Locus in your own project | [`locus codex run "…"`](#in-your-project); the skill is placed for you |
+| Codex itself to run on OCI Generative AI, with no other account | [the gateway](#codex-on-oci-generative-ai), then `locus codex run --codex-profile oci "…"` |
+| proof that Codex builds correct Locus applications from the skill | [`python codex/scenarios/run.py`](#scenarios) |
+| to watch Codex do the Quickstart and the first controlled action | [a clone and `codex/PROMPT.md`](#a-first-agent-in-a-clone) |
+
+Codex learns Locus from the skill, not from the web: the skill is in the
+wheel, placed next to the project, and checked against the installed SDK by
+the repository's tests. The model Codex thinks with and the model the agent
+it writes calls are separate choices: Codex's own model is OpenAI or OCI
+through the gateway; the agent's model is whatever `oci:`, `openai:` or
+`anthropic:` id the task names, with the credential read from the
+environment or from `~/.oci/config`, never from code.
 
 ## Requirements
 
