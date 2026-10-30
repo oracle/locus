@@ -1484,12 +1484,13 @@ form.md-header__option {
 .md-typeset a { color: var(--tl-link); }
 .md-nav__link--active, .md-nav__item .md-nav__link--active { color: var(--tl-link); }
 
-/* Primary CTA → rose, hover → warm orange. */
+/* Primary CTA in the brand red; hover deepens the same red, never shifts hue. */
 .md-typeset .md-button--primary {
-  background-color: #C74634; border-color: #C74634; color: #FFFFFF;
+  background-color: var(--tl-red); border-color: var(--tl-red); color: #FFFFFF;
 }
-.md-typeset .md-button--primary:hover {
-  background-color: #AD2E5C; border-color: #AD2E5C; color: #FFFFFF;
+.md-typeset .md-button--primary:hover,
+.md-typeset .md-button--primary:focus {
+  background-color: var(--tl-red-deep); border-color: var(--tl-red-deep); color: #FFFFFF;
 }
 
 /* Gradient garnish: hero accent word + footer wordmark. */
