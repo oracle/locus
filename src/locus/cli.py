@@ -344,6 +344,9 @@ def build_parser() -> argparse.ArgumentParser:
     run_codex = codex_actions.add_parser(
         "run",
         help="install the skill here if it is missing, then start Codex with the sandbox settings it needs",
+        usage="%(prog)s [-h] [--exec] [--codex-profile NAME] [PROMPT] [-- CODEX_ARGS ...]",
+        epilog="Arguments after -- go to codex unchanged, before the prompt: "
+        'locus codex run "build it" -- -m gpt-5.5',
     )
     run_codex.add_argument(
         "prompt", nargs="?", help="what to build; omit for an interactive session"
@@ -353,20 +356,29 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_codex.add_argument(
         "--codex-profile",
-        help="a [profiles.<name>] from ~/.codex/config.toml, such as one that points Codex at OCI Generative AI",
+        help="a Codex profile, ~/.codex/<name>.config.toml, such as one that points Codex at OCI Generative AI",
     )
-    run_codex.add_argument(
-        "codex_args", nargs=argparse.REMAINDER, help="arguments after -- are passed to codex"
-    )
+    run_codex.set_defaults(codex_args=[])
     codex_actions.add_parser("path", help="print where the bundled skill is")
     codex.set_defaults(handler=_cmd_codex)
     return parser
 
 
+def _split_codex_args(argv: list[str]) -> tuple[list[str], list[str]]:
+    """``locus codex run ... -- <args>``: what follows ``--`` goes to codex unchanged, in order."""
+    if argv[:2] == ["codex", "run"] and "--" in argv:
+        cut = argv.index("--")
+        return argv[:cut], argv[cut + 1 :]
+    return argv, []
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Entry point for the ``locus`` command."""
     parser = build_parser()
-    args = parser.parse_args(argv)
+    own, codex_args = _split_codex_args(list(sys.argv[1:] if argv is None else argv))
+    args = parser.parse_args(own)
+    if codex_args:
+        args.codex_args = codex_args
     try:
         code: int = args.handler(args)
     except CLIError as exc:

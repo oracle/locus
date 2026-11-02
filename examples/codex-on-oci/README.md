@@ -58,13 +58,11 @@ the `model` line in `oci.config.toml` sets the default.
 
 ## How it fits
 
-```text
-codex ──Responses API, bearer LITELLM_MASTER_KEY──▶ 127.0.0.1:4000 (LiteLLM)
-                                                      │ chat completions, OCI request signature
-                                                      │ from the profile in ~/.oci/config
-                                                      ▼
-                             inference.generativeai.<region>.oci.oraclecloud.com
-```
+Codex speaks the Responses API to the gateway on loopback, with
+`LITELLM_MASTER_KEY` as its bearer token. The gateway turns each request into
+a chat completion for OCI Generative AI, signs it with the profile from
+`~/.oci/config`, and sends it to the inference endpoint of the region in
+`OCI_REGION`.
 
 The Locus agent that Codex writes does not go through the gateway: it calls
 OCI Generative AI directly with `model="oci:<id>"` and the same profile, as
