@@ -8,6 +8,13 @@ policy.
 
 ## [Unreleased]
 
+### Fixed
+
+- `locus codex run` passes the arguments after `--` to Codex in the order
+  typed, whichever side of `--` the prompt is on; `-- -m <model> "task"`
+  used to reach Codex scrambled. `--help` names the Codex profile file
+  (`~/.codex/<name>.config.toml`) correctly.
+
 ## [5.3.0] - 2026-10-30
 
 ### Added

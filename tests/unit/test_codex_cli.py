@@ -173,3 +173,27 @@ def test_a_missing_skill_is_reported(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     monkeypatch.setattr(codex.resources, "files", lambda name: tmp_path / "nothing")
     with pytest.raises(codex.CodexError, match="missing"):
         codex.skill_source()
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["codex", "run", "build it", "--", "-m", "x", "--skip-git-repo-check"],
+        ["codex", "run", "--", "-m", "x", "--skip-git-repo-check", "build it"],
+        ["codex", "run", "--exec", "--", "-m", "x", "--skip-git-repo-check", "build it"],
+    ],
+)
+def test_arguments_after_the_double_dash_reach_codex_in_order(
+    argv: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Whichever side of ``--`` the prompt is on, codex gets its own arguments as typed, then the prompt."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "nohome"))
+    calls: list[Sequence[str]] = []
+    monkeypatch.setattr(codex.shutil, "which", lambda name: f"/opt/bin/{name}")
+    monkeypatch.setattr(codex.os, "execv", lambda exe, argv: calls.append(argv))
+
+    assert main(argv) == 0
+
+    head = ["codex", "exec"] if "--exec" in argv else ["codex"]
+    assert calls == [[*head, *codex.CODEX_FLAGS, "-m", "x", "--skip-git-repo-check", "build it"]]
