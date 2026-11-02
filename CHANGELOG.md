@@ -8,6 +8,14 @@ policy.
 
 ## [Unreleased]
 
+### Fixed
+
+- The `locus.testing` doubles report a context window, so an agent built on
+  `ScriptedModel`, `FunctionModel` or `CompromisedModel` counts tokens as it
+  does for a provider instead of warning that no window is known for model
+  `<unnamed>`. `context_window=` shrinks it for a compaction test; `None`
+  keeps the message-window path.
+
 ## [5.3.1] - 2026-11-02
 
 ### Fixed

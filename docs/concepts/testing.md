@@ -58,6 +58,15 @@ never depend on a value that changes per run.
     When the number of turns genuinely is not the point, pass
     `repeat_last=True` and the final turn is returned indefinitely.
 
+!!! note "The doubles report a context window"
+    An agent counts tokens against its model's window and compacts the
+    conversation as it fills; a model with no known window gets a message
+    window and a warning. The doubles report a window large enough that a test
+    never compacts by accident. Pass `context_window=` to shrink it when
+    compaction is what you are testing — the summary request then reaches the
+    double as a model call — or `context_window=None` for a model whose window
+    is unknown.
+
 ## `FunctionModel` — decide per turn
 
 A fixed script cannot express "call the tool, then answer using its result",

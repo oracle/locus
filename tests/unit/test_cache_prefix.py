@@ -78,7 +78,9 @@ def _scripted(
             usage={"prompt_tokens": 1_000, "completion_tokens": 10},
         )
 
-    model = FunctionModel(handler)
+    # No window from the double: a test here names one on the agent or wants
+    # the message window.
+    model = FunctionModel(handler, context_window=None)
     model.config = SimpleNamespace(model="locus-test-cache-prefix")  # type: ignore[attr-defined]
     return model, requests
 

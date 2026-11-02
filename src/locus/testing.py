@@ -78,6 +78,12 @@ __all__ = [
 #: test asserting on cost is clearly asserting on a fixture.
 _USAGE = {"prompt_tokens": 10, "completion_tokens": 20}
 
+#: Context window, in tokens, the doubles report. An agent counts tokens
+#: against its model's window and compacts as it fills; a model with none gets
+#: a message window and a warning. Large enough that a test never compacts by
+#: accident — a compaction test names a small one.
+_CONTEXT_WINDOW = 1_000_000
+
 
 def text(content: str, *, stop_reason: str = "end_turn") -> ModelResponse:
     """A plain assistant turn.
@@ -136,7 +142,11 @@ def tool_call(
 class _RecordingModel:
     """Shared recording surface for the doubles."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, context_window: int | None = _CONTEXT_WINDOW) -> None:
+        if context_window is not None and context_window < 1:
+            raise ValueError(f"context_window must be positive or None, got {context_window}")
+        #: The window the agent counts tokens against; ``None`` reports none.
+        self.context_window = context_window
         #: Every ``messages`` list this model was called with, in order.
         self.received_messages: list[list[Message]] = []
         #: Tool names offered on each call — ``[]`` when the agent bound none.
@@ -208,6 +218,13 @@ class ScriptedModel(_RecordingModel):
         repeat_last: When the script runs out, keep returning the final turn
             instead of raising. Useful for a loop whose length you do not want
             the test to depend on.
+        context_window: The window, in tokens, the double reports, which the
+            agent counts tokens against as it would for a provider. The
+            default is large enough that a test never compacts by accident.
+            Pass a small one when compaction is what the test is about — the
+            summary request then reaches the double as a model call — or
+            ``None`` for a model whose window is unknown, where the agent
+            keeps a message window and says so.
 
     Raises:
         AssertionError: If the agent asks for more turns than were scripted
@@ -221,8 +238,9 @@ class ScriptedModel(_RecordingModel):
         turns: Sequence[ModelResponse | str],
         *,
         repeat_last: bool = False,
+        context_window: int | None = _CONTEXT_WINDOW,
     ) -> None:
-        super().__init__()
+        super().__init__(context_window=context_window)
         self._turns: list[ModelResponse] = [text(t) if isinstance(t, str) else t for t in turns]
         self._repeat_last = repeat_last
 
@@ -263,13 +281,16 @@ class FunctionModel(_RecordingModel):
     Args:
         handler: Called with ``(messages, tools)`` and returning a
             ``ModelResponse`` — or a plain string, wrapped with :func:`text`.
+        context_window: As for :class:`ScriptedModel`.
     """
 
     def __init__(
         self,
         handler: Callable[[list[Message], list[dict[str, Any]]], ModelResponse | str],
+        *,
+        context_window: int | None = _CONTEXT_WINDOW,
     ) -> None:
-        super().__init__()
+        super().__init__(context_window=context_window)
         self._handler = handler
 
     async def complete(
@@ -343,6 +364,7 @@ class CompromisedModel(_RecordingModel):
         offered_only: Call the attack only when the agent offers that tool.
             Off by default, because an owned model will also try a tool it was
             never given, and a suite should prove the agent refuses it.
+        context_window: As for :class:`ScriptedModel`.
 
     Rounds are counted from the conversation (tool calls since the last user
     message), not on the instance, so one model serves concurrent runs. Each
@@ -358,8 +380,9 @@ class CompromisedModel(_RecordingModel):
         content: str | None = "Running {name} now.",
         after: str = "Done, it's all yours.",
         offered_only: bool = False,
+        context_window: int | None = _CONTEXT_WINDOW,
     ) -> None:
-        super().__init__()
+        super().__init__(context_window=context_window)
         if rounds is not None and rounds < 0:
             raise ValueError(f"rounds must be >= 0 or None, got {rounds}")
         if callable(attack) and arguments is not None:
