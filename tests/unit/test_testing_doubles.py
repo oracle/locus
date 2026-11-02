@@ -17,7 +17,7 @@ import pytest
 from locus.agent import Agent
 from locus.core.messages import Message
 from locus.core.protocols import ModelProtocol
-from locus.testing import FunctionModel, ScriptedModel, text, tool_call
+from locus.testing import CompromisedModel, FunctionModel, ScriptedModel, text, tool_call
 from locus.tools.decorator import tool
 
 
@@ -222,3 +222,54 @@ async def test_streamed_doubles_carry_their_tool_calls() -> None:
             "would make no call at all and nothing would report it"
         )
         assert chunks[-1].done is True
+
+
+# --------------------------------------------------------------------------
+# Context window
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        lambda: ScriptedModel([text("ok")]),
+        lambda: FunctionModel(lambda m, t: text("ok")),
+        lambda: CompromisedModel("wipe_database"),
+    ],
+    ids=["scripted", "function", "compromised"],
+)
+def test_doubles_report_a_window_so_the_agent_counts_tokens_without_warning(
+    make, caplog: pytest.LogCaptureFixture
+) -> None:
+    from locus.agent import initializer
+    from locus.memory.compaction import ContextCompactor
+
+    initializer._warned_unknown.discard("<unnamed>")
+    with caplog.at_level("WARNING", logger="locus.agent.initializer"):
+        agent = Agent(model=make(), tools=[get_weather])
+
+    assert isinstance(agent._conversation_manager, ContextCompactor)
+    assert not [r for r in caplog.records if "No context window known" in r.getMessage()]
+
+
+def test_a_small_window_is_what_the_agent_compacts_against() -> None:
+    from locus.memory.compaction import ContextCompactor
+
+    model = FunctionModel(lambda m, t: text("ok"), context_window=2_000)
+    agent = Agent(model=model, tools=[])
+
+    assert isinstance(agent._conversation_manager, ContextCompactor)
+    assert agent._conversation_manager.context_length == 2_000
+
+
+def test_no_window_keeps_the_message_window_path_testable() -> None:
+    from locus.memory.conversation import SlidingWindowManager
+
+    agent = Agent(model=ScriptedModel([text("ok")], context_window=None), tools=[])
+
+    assert isinstance(agent._conversation_manager, SlidingWindowManager)
+
+
+def test_a_window_must_be_positive_or_none() -> None:
+    with pytest.raises(ValueError):
+        ScriptedModel([text("ok")], context_window=0)

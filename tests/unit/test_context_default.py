@@ -111,7 +111,7 @@ def test_compaction_off_keeps_the_token_counting_window_without_model_calls() ->
 
 def test_an_unknown_window_gets_a_message_window_at_any_iteration_count() -> None:
     agent = Agent(
-        model=FunctionModel(lambda m, t: text("ok")),
+        model=FunctionModel(lambda m, t: text("ok"), context_window=None),
         tools=[],
         max_iterations=5,
         reflexion=False,
@@ -225,7 +225,9 @@ def test_the_final_held_call_is_kept_without_a_result() -> None:
 
 
 def _unknown_model(**reported: Any) -> FunctionModel:
-    model = FunctionModel(lambda m, t: text("ok"))
+    # The double itself reports no window: what the agent finds is what the
+    # test puts on the model's config, as a gateway binding would carry it.
+    model = FunctionModel(lambda m, t: text("ok"), context_window=None)
     model.config = SimpleNamespace(model="vllm:locus-test-unlisted", **reported)  # type: ignore[attr-defined]
     return model
 
