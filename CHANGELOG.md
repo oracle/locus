@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [5.3.2] - 2026-11-02
+
 ### Fixed
 
 - The `locus.testing` doubles report a context window, so an agent built on
