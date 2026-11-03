@@ -11,8 +11,8 @@ complements `NOTICE` and the `LICENSES/` directory.
 - From 2026-06-08 to 2026-10-10 the project continued outside Oracle as
   `tulip-agents` (github.com/tuliplabs-ai/tulip-agents). Those releases —
   `1.0.0` through `2.28.0` — were published under the Apache License,
-  Version 2.0, by the same maintainer. They remain available under that
-  licence from their git tags and from PyPI.
+  Version 2.0, by the same maintainer. `tulip-agents` is retired and
+  receives no further releases.
 - With `3.0.0` (2026-10-22) the development line returned to
   github.com/oracle/locus with its full commit history. Everything in this
   repository from `3.0.0` on is licensed under the UPL-1.0 with Oracle

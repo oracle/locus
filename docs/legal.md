@@ -35,7 +35,7 @@ Full text: [LICENSE](https://github.com/oracle/locus/blob/main/LICENSE)
 
 ### Provenance
 
-Locus started at Oracle under the **Universal Permissive License v1.0 (UPL-1.0)** (the `0.x` line, `locus-sdk` on PyPI). From June to October 2026 the project continued outside Oracle as `tulip-agents` (releases `1.0.0` – `2.28.0`, Apache License 2.0). With `3.0.0` the project returned to [oracle/locus](https://github.com/oracle/locus), under Oracle copyright and the UPL-1.0. The intermediate Apache-2.0 releases remain available under that licence from their tags; everything in this repository from `3.0.0` on is UPL-1.0. [`PROVENANCE.md`](https://github.com/oracle/locus/blob/main/PROVENANCE.md) records the detail.
+Locus started at Oracle under the **Universal Permissive License v1.0 (UPL-1.0)** (the `0.x` line, `locus-sdk` on PyPI). From June to October 2026 the project continued outside Oracle as `tulip-agents` (releases `1.0.0` – `2.28.0`, Apache License 2.0). With `3.0.0` the project returned to [oracle/locus](https://github.com/oracle/locus), under Oracle copyright and the UPL-1.0. The intermediate releases were published under Apache-2.0; everything in this repository from `3.0.0` on is UPL-1.0. [`PROVENANCE.md`](https://github.com/oracle/locus/blob/main/PROVENANCE.md) records the detail.
 
 Full text: [LICENSE](https://github.com/oracle/locus/blob/main/LICENSE) · [THIRD_PARTY_LICENSES.txt](https://github.com/oracle/locus/blob/main/THIRD_PARTY_LICENSES.txt)
 
