@@ -382,5 +382,5 @@ Copyright (c) 2025, 2026 Oracle and/or its affiliates.
 Released under the **Universal Permissive License v1.0** — see [LICENSE](https://github.com/oracle/locus/blob/main/LICENSE) and
 [THIRD_PARTY_LICENSES.txt](https://github.com/oracle/locus/blob/main/THIRD_PARTY_LICENSES.txt). Releases `1.0.0` – `2.28.0` were
 published as `tulip-agents` under the Apache License 2.0 while the project was developed
-outside Oracle; they remain available under that license from their tags. See
+outside Oracle; that distribution is retired. See
 [PROVENANCE.md](https://github.com/oracle/locus/blob/main/PROVENANCE.md).
