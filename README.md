@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://locusagents.ai/img/og-card.png" alt="Oracle Generative AI Multi-Agent Reasoning Orchestrator SDK · pip install locus-sdk · Built inside Oracle · github.com/oracle/locus" width="720">
+  <img src="https://raw.githubusercontent.com/oracle/locus/main/docs/img/og-card.png" alt="Oracle Generative AI Multi-Agent Reasoning Orchestrator SDK · pip install locus-sdk · Built inside Oracle · github.com/oracle/locus" width="720">
 </p>
 
 <p align="center">
