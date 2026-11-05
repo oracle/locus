@@ -5,10 +5,10 @@ Generative AI's provisioned-capacity serving mode: instead of
 pay-per-token inference against a shared model id, you address a
 dedicated endpoint by its OCID
 (`ocid1.generativeaiendpoint.oc1.<region>....`) and OCI routes
-inference to your cluster. This notebook wires Locus to one.
+inference to your cluster. This notebook wires the SDK to one.
 
 The shape is the same as any other OCI model — only the model id
-changes. Pass the endpoint OCID and Locus routes it through `OCIModel`,
+changes. Pass the endpoint OCID and the SDK routes it through `OCIModel`,
 the transport built on the OCI Generative AI Python SDK, because the
 OpenAI-compatible transport does not support `DedicatedServingMode`,
 which is what a DAC requires. Both `complete()` and `stream()` work

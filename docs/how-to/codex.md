@@ -1,16 +1,16 @@
 ---
 title: Build it with Codex
-description: OpenAI Codex builds on Locus. A skill teaches it the SDK, `locus codex` starts Codex with that skill and the sandbox settings it needs, a specification walks it through a first agent in a clone, and a gateway lets Codex itself run on OCI Generative AI.
+description: OpenAI Codex builds on the SDK. A skill teaches it the SDK, `locus codex` starts Codex with that skill and the sandbox settings it needs, a specification walks it through a first agent in a clone, and a gateway lets Codex itself run on OCI Generative AI.
 ---
 
 # Build it with Codex
 
-[OpenAI Codex](https://developers.openai.com/codex) builds on Locus. Four
+[OpenAI Codex](https://developers.openai.com/codex) builds on the SDK. Four
 pieces make that work, and this page covers each:
 
-- **The Locus skill.** [`.agents/skills/locus/`](https://github.com/oracle/locus/tree/HEAD/.agents/skills/locus)
+- **The skill.** [`.agents/skills/locus/`](https://github.com/oracle/locus/tree/HEAD/.agents/skills/locus)
   is what Codex reads to use the SDK in any project: a `SKILL.md` with the
-  shape of Locus and the rules, and five reference files with every option.
+  shape of the SDK and the rules, and five reference files with every option.
 - **`locus codex`.** The command puts the skill where Codex looks and starts
   Codex with the sandbox settings the skill's recipes need.
 - **Codex on OCI Generative AI.** [`examples/codex-on-oci/`](https://github.com/oracle/locus/tree/HEAD/examples/codex-on-oci)
@@ -31,12 +31,12 @@ checkpoint a person can follow by hand.
 
 | You want to | Use |
 |---|---|
-| Codex to build or change something with Locus in your own project | [`locus codex run "…"`](#in-your-project); the skill is placed for you |
+| Codex to build or change something with the SDK in your own project | [`locus codex run "…"`](#in-your-project); the skill is placed for you |
 | Codex itself to run on OCI Generative AI, with no other account | [the gateway](#codex-on-oci-generative-ai), then `locus codex run --codex-profile oci "…"` |
-| proof that Codex builds correct Locus applications from the skill | [`python codex/scenarios/run.py`](#scenarios) |
+| proof that Codex builds correct applications on the SDK from the skill | [`python codex/scenarios/run.py`](#scenarios) |
 | to watch Codex do the Quickstart and the first controlled action | [a clone and `codex/PROMPT.md`](#a-first-agent-in-a-clone) |
 
-Codex learns Locus from the skill, not from the web: the skill is in the
+Codex learns the SDK from the skill, not from the web: the skill is in the
 wheel, placed next to the project, and checked against the installed SDK by
 the repository's tests. The model Codex thinks with and the model the agent
 it writes calls are separate choices: Codex's own model is OpenAI or OCI
@@ -49,7 +49,7 @@ environment or from `~/.oci/config`, never from code.
 <dl class="locus-facts" markdown="block">
 <div markdown="block"><dt>Codex</dt><dd>The Codex CLI (<code>npm install -g @openai/codex</code>), signed in or pointed at OCI below</dd></div>
 <div markdown="block"><dt>Python</dt><dd>3.11–3.14</dd></div>
-<div markdown="block"><dt>Locus</dt><dd><code>pip install "locus-sdk[oci]"</code>, or the extra for your provider</dd></div>
+<div markdown="block"><dt>SDK</dt><dd><code>pip install "locus-sdk[oci]"</code>, or the extra for your provider</dd></div>
 <div markdown="block"><dt>Provider</dt><dd>OCI Generative AI, OpenAI, Anthropic, or none</dd></div>
 <div markdown="block"><dt>Credential</dt><dd>An OCI profile, a key in the environment, or none</dd></div>
 </dl>
@@ -63,7 +63,7 @@ locus codex run "Build a support agent with an order lookup and a gated refund t
 
 `locus codex run` installs the skill into `.agents/skills/locus` of the
 current directory, unless `~/.agents/skills/locus` already holds it, adds a
-Locus section to `AGENTS.md`, and starts Codex with `-s workspace-write`
+section to `AGENTS.md`, and starts Codex with `-s workspace-write`
 and `-c sandbox_workspace_write.network_access=true`: writes inside the
 project, network for `pip` and the model. Without a prompt it opens an
 interactive session. `--exec` runs non-interactively, `--codex-profile NAME`
@@ -74,7 +74,7 @@ To place the skill without starting Codex:
 
 | Command | Effect |
 |---|---|
-| `locus codex init` | `.agents/skills/locus` in the current project and a Locus section in its `AGENTS.md` |
+| `locus codex init` | `.agents/skills/locus` in the current project and a section about the SDK in its `AGENTS.md` |
 | `locus codex init DIR` | the same, in `DIR` |
 | `locus codex init --home` | `~/.agents/skills/locus`, for every project on the machine |
 | `locus codex path` | where the bundled copy is, for a copy or a symlink by hand |
@@ -85,7 +85,7 @@ not need; files of yours in the skill directory are kept.
 
 ## What the skill teaches
 
-`SKILL.md` is the spine: what Locus is, the working procedure (confirm the
+`SKILL.md` is the spine: what the SDK is, the working procedure (confirm the
 install, find the provider from the environment, read the reference, write
 the agent and an offline test, gate every side effect, never show a
 credential), the install matrix, a first agent, the gate with
@@ -122,7 +122,7 @@ Codex then:
    otherwise OpenAI or Anthropic from the key in the environment, otherwise
    offline; and asks, in one message, for anything it could not detect, such
    as which OCI profile to use;
-3. creates `.venv`, installs Locus from the clone with the provider's extra,
+3. creates `.venv`, installs the SDK from the clone with the provider's extra,
    and writes `first_agent.py` and `controlled_refund.py` under
    `out/first-agent/`, the files from the [Quickstart](quickstart.md) and the
    [first controlled action](first-controlled-action.md);
@@ -162,12 +162,12 @@ above are enough for every command the specification issues.
 
 ## Credentials
 
-On OCI no secret enters the environment. Locus reads the profile you name
+On OCI no secret enters the environment. The SDK reads the profile you name
 from `~/.oci/config`, the OCI SDK signs each request with the key file that
 profile points to, and the skill tells the agent to list the file's section
 names and read nothing else from it. For OpenAI or Anthropic, export the key
 in the shell that starts Codex: Codex passes its environment to the commands
-it runs, which is how a Locus program finds `OPENAI_API_KEY`, and the skill
+it runs, which is how a program finds `OPENAI_API_KEY`, and the skill
 forbids any command whose output would show it.
 
 ## The Codex sandbox
@@ -212,11 +212,11 @@ cp examples/codex-on-oci/oci.config.toml ~/.codex/
 locus codex run --codex-profile oci "Build a support agent with a gated refund tool, with tests"
 ```
 
-`codex -p oci` is the same without the Locus command. The profile sets
+`codex -p oci` is the same without the `locus` wrapper. The profile sets
 `openai.gpt-5.5` as the model; `-m` picks any other chat model id the region
 serves, because the gateway's one route is a wildcard. The agent Codex writes
 does not go through the gateway: it calls OCI Generative AI directly with
-`model="oci:<id>"` and the same profile, as every Locus program does. The
+`model="oci:<id>"` and the same profile, as every program built with the SDK does. The
 example's README has the files, a `curl` to check the gateway, and what to
 change for a shared deployment.
 

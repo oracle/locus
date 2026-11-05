@@ -1,11 +1,11 @@
 ---
 title: Quickstart
-description: Install Locus, run one complete Python agent, and verify the result before adding tools or policy controls.
+description: Install the SDK, run one complete Python agent, and verify the result before adding tools or policy controls.
 ---
 
 # Quickstart
 
-This path does one thing: install Locus and run a complete agent. It uses
+This path does one thing: install the SDK and run a complete agent. It uses
 OpenAI throughout and ends after the first successful response. The next
 guide adds a policy-controlled action.
 
@@ -13,13 +13,13 @@ guide adds a policy-controlled action.
 
 <dl class="locus-facts" markdown="block">
 <div markdown="block"><dt>Python</dt><dd>3.11–3.14</dd></div>
-<div markdown="block"><dt>Locus</dt><dd markdown="span">`locus-sdk` {{ locus_sdk_version }}</dd></div>
+<div markdown="block"><dt>SDK</dt><dd markdown="span">`locus-sdk` {{ locus_sdk_version }}</dd></div>
 <div markdown="block"><dt>Provider</dt><dd>OpenAI</dd></div>
 <div markdown="block"><dt>Credential</dt><dd>Provider-specific API key</dd></div>
 <div markdown="block"><dt>Execution mode</dt><dd>Live model call</dd></div>
 </dl>
 
-For a credential-free run, skip to [try Locus offline](#try-locus-offline).
+For a credential-free run, skip to [try the SDK offline](#try-the-sdk-offline).
 Any other provider works with the same steps and its own prefix and key; see
 [Configure a model provider](configure-providers.md).
 
@@ -84,10 +84,10 @@ The wording varies because this is a live model call. A successful result
 should mention order `ORD-7842`, its `delivered` status, and usually the
 `$42.50` amount returned by the tool.
 
-The run is complete: the model chose a typed Python tool, Locus executed it,
+The run is complete: the model chose a typed Python tool, the SDK executed it,
 and `AgentResult.message` returned the final answer.
 
-## Try Locus offline
+## Try the SDK offline
 
 The repository examples use deterministic test doubles and local stubs. Their
 printed results are simulations of control flow, not evidence of live-model

@@ -1,6 +1,6 @@
 # OCI GenAI models
 
-Locus, the Oracle Generative AI Agentic Harness, connects to OCI Generative
+The Oracle Generative AI – Multi-Agent Locus SDK connects to OCI Generative
 AI through **three transports**.
 The `oci:` string factory picks V1 or SDK by model family; the
 Responses transport is opt-in.
@@ -12,9 +12,9 @@ Responses transport is opt-in.
     per-team budgets, fallback chains across regions or providers,
     centralised observability (Langfuse / OTel / Datadog), or
     cross-provider routing, see the
-    [LiteLLM AI Gateway guide](litellm-gateway.md) instead** — Locus
+    [LiteLLM AI Gateway guide](litellm-gateway.md) instead** — the SDK
     connects to that via its existing `OpenAIModel(base_url=...)`
-    client, no new Locus class needed.
+    client, no new class needed.
 
 | Model family | Transport | Class | Endpoint |
 |---|---|---|---|

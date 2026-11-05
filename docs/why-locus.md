@@ -1,11 +1,11 @@
 ---
-title: Why Locus — guarantees and boundaries
-description: What Locus's policy gate, grounding, idempotency, and audit trail enforce; what developers configure; and what remains model-dependent.
+title: Guarantees and boundaries
+description: What the SDK's policy gate, grounding, idempotency, and audit trail enforce; what developers configure; and what remains model-dependent.
 ---
 
-# Why Locus
+# Why the Oracle Generative AI – Multi-Agent Locus SDK
 
-Locus is the Oracle Generative AI Agentic Harness: one `Agent` class, eight
+The SDK is an agentic harness: one `Agent` class, eight
 multi-agent shapes, and the runtime around the model (tools, memory, RAG,
 observability, guardrails), built first-class for OCI Generative AI and
 Oracle Database 26ai and open to every other provider. The [home page](index.md)
@@ -24,7 +24,7 @@ classifies actions and whether all side-effecting paths use the gate.
 
 ## Control at three moments
 
-| Moment | Locus surface | What it does |
+| Moment | SDK surface | What it does |
 |---|---|---|
 | Decide what happens next | [Agent loop](concepts/agent-loop.md) | Runs bounded reasoning, tool calls, observations, and termination |
 | Assess what may be asserted | [GSAR](concepts/gsar.md) | Scores a judge-produced, typed evidence partition and supports proceed, regenerate, replan, or abstain behavior |
@@ -71,7 +71,7 @@ an agent, but application code and review must still prevent bypass paths.
 
 ## Compared with prompt rules and filters
 
-| | Prompt instruction | Input/output filter | Locus admission gate |
+| | Prompt instruction | Input/output filter | The SDK's admission gate |
 |---|---|---|---|
 | Evaluated where | Model context | Around model text | Around a specific callable |
 | Can block the side effect itself | No | Only if application wiring makes it authoritative | Yes, for calls routed through `admit()` |
@@ -103,9 +103,9 @@ external service succeeds and the local result has not yet been durably
 recorded. For payments, deploys, and messages, also send a stable idempotency
 key to the downstream API.
 
-## When Locus is a good fit
+## When the SDK is a good fit
 
-Locus earns its control layer when an agent can move money, change
+The SDK earns its control layer when an agent can move money, change
 infrastructure, alter access, contact a third party, or create another durable
 effect. A read-only summarizer may need grounding and evaluation without an
 admission gate.

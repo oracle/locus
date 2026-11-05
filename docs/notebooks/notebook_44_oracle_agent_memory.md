@@ -1,7 +1,7 @@
 # Oracle agent memory
 
-An Oracle-backed memory manager for a Locus `Agent`. The example wires
-Locus's [`OracleAgentMemoryManager`](../api/memory.md) to
+An Oracle-backed memory manager for an `Agent`. The example wires
+the SDK's [`OracleAgentMemoryManager`](../api/memory.md) to
 [`oracleagentmemory`](https://pypi.org/project/oracleagentmemory/),
 Oracle's client for AI-agent memory held in Oracle Database 26ai, and
 shows a fact learned in one thread being recalled by a new agent in
@@ -21,14 +21,14 @@ manager brings in:
 - Time-to-live retention: a store built with `MemoryRetentionConfig`
   gives records an expiry.
 
-The trade-off is that it is Oracle-only; Locus pins
+The trade-off is that it is Oracle-only; the SDK pins
 `oracleagentmemory>=26.4.0,<27`. When you need a portable backend or a
 deterministic, LLM-free extractor, use notebook 37.
 
 What this notebook covers:
 
 - `OracleAgentMemoryManager(connection=..., embedder=..., llm=...)`,
-  the adapter that implements Locus's `BaseMemoryManager` contract on
+  the adapter that implements the SDK's `BaseMemoryManager` contract on
   top of `oracleagentmemory.core.OracleAgentMemory`. Pass it as
   `Agent(memory_manager=...)`.
 - A two-session demo on the same `user_id` ("alice") but different

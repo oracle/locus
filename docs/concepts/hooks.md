@@ -6,10 +6,10 @@ iteration, before / after each model call, before / after each tool
 call, and before the context is compacted.
 Everything that should happen *around* the
 agent's primary task — logging, OpenTelemetry traces, retry, guardrails,
-PII redaction, an LLM-as-judge approval gate on tool calls — lives in
+PII redaction, a LLM-as-judge approval gate on tool calls — lives in
 a hook.
 
-You can use the hooks Locus ships — logging, telemetry, retry,
+You can use the hooks the SDK ships — logging, telemetry, retry,
 guardrails and steering — or write your own: a hook is a small
 subclass with the methods it cares about.
 

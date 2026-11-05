@@ -1,7 +1,7 @@
 # Reasoning
 
 A model that loops without thinking just pays you to be wrong faster.
-Locus ships three reasoning
+The SDK ships three reasoning
 add-ons. Each catches a different class of mistake *before* the next
 tool call:
 

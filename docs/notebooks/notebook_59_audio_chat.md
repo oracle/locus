@@ -1,7 +1,7 @@
 # Audio chat
 
 The previous notebook, [Audio response](notebook_58_audio_response.md), is
-text in, voice out: a Locus `Agent` drafts the reply and the SDK's
+text in, voice out: an `Agent` drafts the reply and the SDK's
 `OpenAISpeechProvider` speaks it through a separate text-to-speech (TTS)
 call. This notebook takes the next step: a single multimodal chat call to
 an audio-capable OpenAI model that takes a `.wav` as the user message and
@@ -14,7 +14,7 @@ What this notebook covers:
 - One model call replaces three (transcribe → chat → synthesize), cutting
   latency for a payments line that must answer in seconds.
 - A plain OpenAI client (`openai.AsyncOpenAI`) is all the notebook uses:
-  no realtime WebSocket connection and no Locus model class are involved.
+  no realtime WebSocket connection and no model class are involved.
 - The call asks for 16-bit pulse-code modulation (PCM-16) audio, and the
   notebook wraps the returned block in a WAV header for portability
   (re-encode to MP3 with ffmpeg when needed).
@@ -101,12 +101,12 @@ afplay examples/notebook_59_answer.wav   # macOS
 ## See also
 
 - [Audio response](notebook_58_audio_response.md) — the preceding step: a
-  Locus `Agent` drafts the text and `OpenAISpeechProvider` speaks it
+  `Agent` drafts the text and `OpenAISpeechProvider` speaks it
   (notebook 58).
 - [Concepts: Multi-modal providers](../concepts/multi-modal-providers.md) —
   the `BaseSpeechProvider` protocol and the built-in `OpenAISpeechProvider`
   (`speak` and `transcribe`); the audio-in, audio-out chat call made here
-  has no Locus wrapper and goes through the OpenAI client directly.
+  has no wrapper and goes through the OpenAI client directly.
 
 ## Source
 

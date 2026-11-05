@@ -28,7 +28,7 @@ from locus_security import SecurityAdapter, ToolAdapter  # the protocol + a conc
 2. **An `async @tool`** wrapper that returns `locus_security.as_json(...)`.
 3. **A `*_adapter()` factory** returning a `ToolAdapter`
    (`name`, `vendor`, `_tools=[…]`).
-4. **(If it asserts about an asset)** build a GSAR partition — GSAR is Locus's
+4. **(If it asserts about an asset)** build a GSAR partition — GSAR is the SDK's
    evidence check: a claim must be backed by tool output, otherwise the agent
    abstains — with `locus_security.tool_match` / `inference_claim` and route it
    through `locus.control.ground_finding`, so an ungrounded result abstains. (For

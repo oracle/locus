@@ -1,7 +1,7 @@
 # GSAR typed grounding
 
 GSAR (Grounding-Stratified Adaptive Replanning) is the typed-grounding
-layer of Locus, described on the [GSAR — typed grounding](../concepts/gsar.md)
+layer of the SDK, described on the [GSAR — typed grounding](../concepts/gsar.md)
 concept page and in [arXiv:2604.23366 (2026)](https://arxiv.org/abs/2604.23366).
 It partitions an answer's claims into four buckets (grounded, ungrounded,
 contradicted and complementary), weights every claim by the type of evidence

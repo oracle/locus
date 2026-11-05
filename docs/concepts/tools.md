@@ -4,11 +4,11 @@ title: Tools
 
 # Tools
 
-Tools are how a Locus agent
+Tools are how an agent
 affects the world. The model decides *"call `lookup_order` with order_id='ord-4821'"*;
 the SDK runs your `lookup_order` function, captures the return value, and
 feeds it back. From your side, a tool is **a regular Python function
-with a `@tool` decorator** — the SDK introspects the signature and
+with an `@tool` decorator** — the SDK introspects the signature and
 docstring to build the schema the model sees. The drawing follows that
 round trip: `@tool` reads the signature and docstring into a `Tool` with
 a JSON schema, the `ToolRegistry` offers it to the model, and a call

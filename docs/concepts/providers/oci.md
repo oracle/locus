@@ -1,7 +1,6 @@
 # OCI Generative AI
 
-OCI Generative AI is the primary provider in Locus, the Oracle
-Generative AI Agentic Harness. It exposes OpenAI commercial families,
+OCI Generative AI is the primary provider in the Oracle Generative AI – Multi-Agent Locus SDK. It exposes OpenAI commercial families,
 Meta Llama, Anthropic Claude, Google Gemini, xAI Grok, Mistral, and
 Cohere through Oracle's hosted inference service. New OCI model ids work
 without an SDK update: pass the new id as the model string.
@@ -34,7 +33,7 @@ The headline value over the direct providers:
 
 OCI Generative AI exposes its inference service in three ways: the
 OpenAI-compatible chat completions API, the OpenAI-compatible Responses
-API, and the native OCI Generative AI Python SDK. Locus speaks all
+API, and the native OCI Generative AI Python SDK. The SDK speaks all
 three. The `oci:` prefix **picks the transport from the model id** —
 Dedicated AI Cluster endpoints and Cohere models go through the SDK,
 every other id through the OpenAI-compatible chat API — so you don't

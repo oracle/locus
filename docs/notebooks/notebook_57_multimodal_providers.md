@@ -10,7 +10,7 @@ writes and maintains for every modality.
 
 Set a provider on `AgentConfig` (`web_search`, `web_fetch`,
 `image_generator`, `speech_provider`; the same names work as `Agent`
-keyword arguments) and Locus registers a matching `@tool` while the agent
+keyword arguments) and the SDK registers a matching `@tool` while the agent
 initializes: `web_search`, `web_fetch`, `generate_image`, and `speak`
 and/or `transcribe` for a speech provider, according to its
 `capabilities`. The model calls them the same way it calls a hand-written

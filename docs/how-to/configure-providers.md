@@ -36,7 +36,7 @@ Agent(model="oci:ocid1.generativeaiendpoint.oc1...")    # your Dedicated AI Clus
 ```
 
 The profile decides the auth: an API-key profile, or a session-token profile
-from `oci session authenticate` (Locus detects `security_token_file`). On OCI
+from `oci session authenticate` (the SDK detects `security_token_file`). On OCI
 compute, OKE or Functions pass the principal through `model_kwargs` and drop
 the profile:
 `Agent(model="oci:openai.gpt-5.5", model_kwargs={"auth_type": "instance_principal", "compartment_id": os.environ["OCI_COMPARTMENT_ID"]})`
@@ -87,7 +87,7 @@ Agent(model="openrouter:x-ai/grok-4.7")
 ```
 
 The model id is the one in OpenRouter's catalog (`vendor/model`). Rate limits
-and 429s are the provider's; Locus's retry policy absorbs transient ones.
+and 429s are the provider's; the SDK's retry policy absorbs transient ones.
 
 ## Together
 
@@ -102,11 +102,11 @@ Agent(model="together:openai/gpt-oss-120b")
 Use the exact id from Together's catalog. Many ids there are
 dedicated-endpoint only; an account without a dedicated endpoint gets
 "Unable to access non-serverless model" for them, which is an account limit,
-not a Locus one.
+not one of the SDK's.
 
 ## RunPod
 
-RunPod's OpenAI-compatible URL embeds the endpoint id, so give Locus the id
+RunPod's OpenAI-compatible URL embeds the endpoint id, so give the SDK the id
 and it builds the URL:
 
 ```bash
@@ -192,7 +192,7 @@ Agent(model=model)
 
 ## Check a route in ten lines
 
-The same two calls Locus's own live tests make: a completion and a tool call.
+The same two calls the SDK's own live tests make: a completion and a tool call.
 
 ```python
 from locus.agent import Agent

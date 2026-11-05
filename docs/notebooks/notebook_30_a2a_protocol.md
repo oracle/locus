@@ -1,7 +1,7 @@
 # A2A protocol
 
 A2A (Agent-to-Agent) is the public cross-framework protocol at
-[a2aproject.github.io/A2A](https://a2aproject.github.io/A2A/), and Locus
+[a2aproject.github.io/A2A](https://a2aproject.github.io/A2A/), and the SDK
 implements both sides of its **v1.0** wire format (see the
 [A2A concept page](../concepts/multi-agent/a2a.md)). This notebook
 publishes an `Agent` behind `A2AServer` as a payment network's risk agent
@@ -29,7 +29,7 @@ What this notebook covers:
   for pre-v1.0 peers.
 - `A2AClient.invoke`: the backwards-compatible flat shape for non-spec
   peers.
-- `A2AClient.as_tool(...)`: wrap a remote agent as a Locus `@tool`. The
+- `A2AClient.as_tool(...)`: wrap a remote agent as an `@tool`. The
   notebook builds and inspects the tool but does not call it: the
   generated function runs `asyncio.run` over the flat `invoke` path, so
   calling it directly inside `main`'s running event loop would raise. An

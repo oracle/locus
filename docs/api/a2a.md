@@ -14,7 +14,7 @@ and the [walkthrough notebook](../notebooks/notebook_30_a2a_protocol.md).
 ## Client and server
 
 `A2AServer` exposes an agent over the protocol; `A2AClient` calls one. Neither
-requires the other side to be built with Locus.
+requires the other side to be built with the SDK.
 
 To publish a compiled `StateGraph` instead of an agent, wrap it in
 `locus.server.GraphRunnable` and pass that as `agent=` — see

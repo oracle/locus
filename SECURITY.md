@@ -2,7 +2,7 @@
 
 ## Reporting a Vulnerability
 
-If you believe you have found a security vulnerability in Locus (the Oracle Generative AI Agentic Harness), please report it to us through coordinated disclosure.
+If you believe you have found a security vulnerability in the Oracle Generative AI – Multi-Agent Locus SDK, please report it to us through coordinated disclosure.
 
 **Please do not report security vulnerabilities through public GitHub issues.**
 

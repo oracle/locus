@@ -1,7 +1,7 @@
 # Evaluation
 
 An agent that worked yesterday may not work today — the model
-changed, a tool was renamed, the prompt got a one-line tweak. Locus ships a small evaluation harness
+changed, a tool was renamed, the prompt got an one-line tweak. The SDK ships a small evaluation harness
 so regressions become **failing tests**, not silent failures in production.
 
 ```python

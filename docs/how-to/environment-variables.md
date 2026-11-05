@@ -4,7 +4,7 @@ table_filter: true
 
 # Environment variables
 
-Locus configures itself from environment variables. The notebook harness in
+The SDK configures itself from environment variables. The notebook harness in
 `examples/config.py` reads them with a consistent fallback chain; the SDK
 itself reads provider API keys directly.
 

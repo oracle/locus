@@ -2,7 +2,7 @@
 
 Production model calls fail. Rate limits, gateway timeouts, transient
 5xx, occasional content-policy refusals on retryable inputs.
-Locus's retry posture is:
+The SDK's retry posture is:
 **automate what's transient; surface what's not.**
 
 ## The default behaviour

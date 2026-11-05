@@ -1,11 +1,11 @@
 ---
 title: Control-layer architecture
-description: How Locus's agent loop, grounding, admission policy, approvals, persistence, and audit records fit together—and where each guarantee stops.
+description: How the SDK's agent loop, grounding, admission policy, approvals, persistence, and audit records fit together—and where each guarantee stops.
 ---
 
 # Control-layer architecture
 
-Locus separates deciding what to do from deciding whether a consequential
+The SDK separates deciding what to do from deciding whether a consequential
 action may execute. This page is the domain-neutral map. `SecurityContext` is
 one worked application of the same control primitives.
 

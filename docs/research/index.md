@@ -1,6 +1,6 @@
 # Research
 
-Findings from building Locus's control layer — the policy gate, approvals and
+Findings from building the SDK's control layer — the policy gate, approvals and
 audit trail that decide which of an agent's actions may run.
 Everything here comes from running code against real catalogs, real tools and
 real models. The method and the scoring code are public and runnable against
@@ -12,7 +12,7 @@ GPUs.
 
 ## Related work
 
-Locus's grounding layer draws on **[GSAR: Typed Grounding for Hallucination
+The SDK's grounding layer draws on **[GSAR: Typed Grounding for Hallucination
 Detection and Recovery in Multi-Agent LLMs](https://arxiv.org/abs/2604.23366)**
 (F. A. Kamelhar, 2026), a paper separate from this project. It uses a judge to
 partition claims into grounded / ungrounded / contradicted / complementary

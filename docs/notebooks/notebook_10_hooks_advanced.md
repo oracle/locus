@@ -1,7 +1,7 @@
 # Advanced Hooks
 
 The [agent-hooks notebook](notebook_09_agent_hooks.md) covered hook basics.
-This one focuses on the safety properties Locus enforces on the event objects
+This one focuses on the safety properties the SDK enforces on the event objects
 hooks see, and on the control lever a hook pulls during a run: `event.cancel`
 to block a destructive tool call. A second lever, `event.retry`, is writable
 on the after-events (`on_after_model_call`, `on_after_tool_call`) and is not

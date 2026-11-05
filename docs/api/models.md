@@ -26,7 +26,7 @@ String factory — routes `"openai:gpt-4o"`,
 
 Every model provider implements `ModelProtocol`. `RequestBuilder` and
 `ResponseParser` are the per-provider seams for translating between
-Locus's `ModelConfig` / `Message` types and the provider's wire
+the SDK's `ModelConfig` / `Message` types and the provider's wire
 format.
 
 ::: locus.models.base.ModelProtocol

@@ -1,6 +1,6 @@
 # OpenAI
 
-The OpenAI provider connects Locus directly to OpenAI's API (`api.openai.com`). It's what you reach
+The OpenAI provider connects the SDK directly to OpenAI's API (`api.openai.com`). It's what you reach
 for when you want **the latest OpenAI model the day it ships** without
 going through any gateway, translation layer, or middleware.
 
@@ -85,7 +85,7 @@ chat-completions for everything except the families that chat-completions
 cannot serve: ids starting with `gpt-5.6` or `gpt-6` (`gpt-5.6-sol`,
 `gpt-6-sol`, `gpt-6.1-terra`, …) reject function tools whenever reasoning is
 active, and the `gpt-5*-pro` models (`gpt-5-pro`, `gpt-5.4-pro`,
-`gpt-5.5-pro`, …) are not chat models at all. Locus routes all of them to
+`gpt-5.5-pro`, …) are not chat models at all. The SDK routes all of them to
 `/v1/responses`. Auto-routing fires only when no `base_url` is passed to the
 model. With a custom `base_url` the request stays on chat-completions, because
 an OpenAI-compatible gateway typically does not serve the Responses path. A

@@ -1,6 +1,6 @@
 ---
 title: Compatibility and release policy
-description: Supported Python versions, documentation versioning, API stability, deprecations, and integration status for Locus.
+description: Supported Python versions, documentation versioning, API stability, deprecations, and integration status for the SDK.
 ---
 
 # Compatibility and release policy
@@ -27,7 +27,7 @@ specific experiment rather than the current documentation.
 
 ## Changes and deprecations
 
-Locus uses semantic versioning as the intended public contract. Deprecations
+The SDK uses semantic versioning as the intended public contract. Deprecations
 are announced in the [changelog](https://github.com/oracle/locus/blob/main/CHANGELOG.md)
 and [deprecation policy](https://github.com/oracle/locus/blob/main/DEPRECATION.md).
 Before upgrading a production deployment, read both and run your policy,

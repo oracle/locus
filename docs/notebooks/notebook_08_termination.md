@@ -4,7 +4,7 @@ Every agent loop needs to know when to stop. A customer-support agent
 that keeps talking to itself wastes budget and leaves the customer
 waiting, so a ticket-resolution loop must end after a fixed number of
 turns, a time limit, or as soon as the agent declares the issue
-resolved. Locus ships small predicates you compose with `|` (OR) and
+resolved. The SDK ships small predicates you compose with `|` (OR) and
 `&` (AND) to describe the exit condition exactly. This notebook also
 covers two related conveniences: `output_key` and a callable
 `system_prompt`.

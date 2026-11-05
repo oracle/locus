@@ -443,6 +443,17 @@ html {
 .md-typeset .locus-hero__copy {
   padding-left: 1.75rem;
 }
+/* Full product name above the hero headline (PR Legal 2026-11-05): the same
+   small red tracked line as the header slogan. */
+.md-typeset .locus-hero__kicker {
+  font-family: var(--locus-sans);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--tl-red);
+  margin: 0 0 0.8rem;
+}
 .md-typeset .locus-hero h1 .accent {
   color: var(--tl-red);
 }
@@ -689,9 +700,9 @@ form.md-header__option {
   margin-left: auto;
 }
 /* Stack the first topic vertically: "locus" wordmark + the slogan
-   beneath ('Oracle Agentic Harness SDK'), matching the wordmark+tagline
-   lockup the SVG logo carries. One short line, so it fits alongside the
-   dark-mode toggle and the search slot at common viewport widths. */
+   beneath (the full product name, PR Legal 2026-11-05). One line, so it fits
+   alongside the dark-mode toggle and the search slot at desktop widths; the
+   mobile block below hides it. */
 .md-header__ellipsis > .md-header__topic:first-of-type {
   display: flex;
   flex-direction: column;
@@ -709,7 +720,7 @@ form.md-header__option {
   color: var(--locus-ink);
 }
 .md-header__ellipsis > .md-header__topic:first-of-type::after {
-  content: "Oracle Agentic Harness SDK";
+  content: "Oracle Generative AI Multi-Agent Reasoning Orchestrator SDK";
   font-family: var(--locus-sans);
   font-size: 0.55rem;
   font-weight: 600;
@@ -722,10 +733,10 @@ form.md-header__option {
   padding-right: 1rem;
 }
 @media (max-width: 56em) {
-  /* Mobile: same slogan, slightly tighter tracking to fit. */
+  /* Mobile: the full product name does not fit beside the controls, so the
+     slogan line is hidden; the tab title still carries the short name. */
   .md-header__ellipsis > .md-header__topic:first-of-type::after {
-    font-size: 0.5rem;
-    letter-spacing: 0.06em;
+    display: none;
   }
   /* Always show "locus" (site title) in the mobile header — suppress
      Material's page-title swap so users always see the brand name. */
@@ -855,10 +866,8 @@ form.md-header__option {
   .md-header__button.md-icon[for="__search"] { margin-left: auto !important; }
   /* Show the brand title ("locus" wordmark + the slogan line) on mobile
      — small and hard-clamped so it stays clear of the right-aligned
-     controls. The clamp must fit the slogan ("Oracle Agentic Harness SDK",
-     ~180px at 0.55rem/0.12em plus the 1rem right padding); below 30em
-     the slogan is dropped, so the clamp only ever bites on the wordmark
-     there. Target the REAL title span (.md-header__title .md-ellipsis)
+     controls. The slogan line is hidden on mobile, so the clamp only ever bites on
+     the wordmark. Target the REAL title span (.md-header__title .md-ellipsis)
      directly. */
   .md-header__title {
     display: flex !important;

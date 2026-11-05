@@ -1,7 +1,7 @@
 # Oracle 26ai RAG agent
 
-A Locus `Agent` that answers questions with retrieval-augmented generation
-(RAG) over Oracle Database 26ai. The subject is the Locus agent runtime;
+An `Agent` that answers questions with retrieval-augmented generation
+(RAG) over Oracle Database 26ai. The subject is the agent runtime;
 Oracle Database 26ai is the storage layer. Embeddings live in a native
 `VECTOR(1536, FLOAT32)` column, similarity is the `VECTOR_DISTANCE` SQL
 function, and on first use the store creates the table together with a
@@ -20,7 +20,7 @@ What this notebook covers:
   a native `VECTOR(1536, FLOAT32)` column and its HNSW index on first use,
   and serving cosine similarity queries with `VECTOR_DISTANCE`.
 - `create_rag_tool(retriever, ...)` turning the `RAGRetriever` into a
-  Locus `@tool` that the `Agent` calls on its own. Each retrieval surfaces
+  `@tool` that the `Agent` calls on its own. Each retrieval surfaces
   as a `ToolStartEvent` / `ToolCompleteEvent` pair, so the agent's
   decision to search is visible in the event stream.
 - The same retriever, tool and agent loop over any backend: swap

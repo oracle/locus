@@ -3,10 +3,10 @@
 MCP (Model Context Protocol) is the open standard that lets AI
 assistants call tools running in a different process — the way a
 support desk wires its order system, help center and billing services
-into an agent without bundling them. Locus speaks both sides of the
+into an agent without bundling them. The SDK speaks both sides of the
 protocol. This notebook builds the publishing side: a support agent
 whose tools, and the agent itself, can be served to any MCP client.
-Consuming an external MCP server from a Locus agent (`MCPClient`, and
+Consuming an external MCP server from an agent (`MCPClient`, and
 the hooks pattern for side effects in the host process) is the other
 half, covered in
 [MCP](../concepts/mcp.md#getting-started-consume-an-mcp-server).
@@ -18,7 +18,7 @@ involved.
 
 What this notebook covers:
 
-- Publish a Locus support agent as an MCP server with
+- Publish a support agent as a MCP server with
   `create_mcp_server`: the agent's tools, plus `run_agent` and
   `run_agent_stream`, are registered as MCP tools.
 - Convert tool schemas in both directions (`locus_tool_to_mcp` /
@@ -41,7 +41,7 @@ What this notebook covers:
 
 ## Key lines
 
-`locus_tool_to_mcp` gives a Locus tool its MCP shape (`name`,
+`locus_tool_to_mcp` gives a tool its MCP shape (`name`,
 `description`, `inputSchema`); `mcp_tool_to_locus` is the reverse path an
 external server's tools take, and because the schema it is handed is kept
 as-is, the round trip keeps the same name, the same parameter schema and
@@ -90,7 +90,7 @@ LOCUS_MODEL_PROVIDER=mock python examples/notebook_46_mcp_integration.py
 
 ## Output
 
-Running it offline — no credentials, bundled mock model — prints the MCP schema derived from a Locus tool and its round trip back with parameters preserved, the `tools/list` catalogue and a `tools/call` result (Part 4 ran because the optional `fastmcp` package was installed for this capture; without it the script prints an install note there instead), then the GSAR ship/abstain trail (SHIP at S=1.0000 on full refund signals, ABSTAIN/REPLAN at S=0.0000 on sparse ones):
+Running it offline — no credentials, bundled mock model — prints the MCP schema derived from a tool and its round trip back with parameters preserved, the `tools/list` catalogue and a `tools/call` result (Part 4 ran because the optional `fastmcp` package was installed for this capture; without it the script prints an install note there instead), then the GSAR ship/abstain trail (SHIP at S=1.0000 on full refund signals, ABSTAIN/REPLAN at S=0.0000 on sparse ones):
 
 ```text
 ============================================================

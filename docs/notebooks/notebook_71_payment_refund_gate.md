@@ -87,7 +87,7 @@ python examples/notebook_71_payment_refund_gate.py
 ```
 
 The payout is a local ledger stub and the script builds no model — its only
-Locus import is `locus.control` — so it runs fully offline with no provider, no
+import is `locus.control` — so it runs fully offline with no provider, no
 credentials and no network. `LOCUS_MODEL_PROVIDER` has no effect here.
 
 ## Output

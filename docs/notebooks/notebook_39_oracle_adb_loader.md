@@ -6,7 +6,7 @@ getting the source rows out of the database. `OracleADBLoader` runs a
 `SELECT` against Oracle Autonomous Database (ADB) over its own small async
 connection pool and yields one `Document` per row, ready for chunking,
 embedding or direct use by an agent. This notebook puts the loader behind
-a Locus `@tool` so that an `Agent` decides which rows to fetch.
+an `@tool` so that an `Agent` decides which rows to fetch.
 
 Two properties shape how the loader is used. The SQL text is fixed when
 the loader is constructed and is handed to the driver verbatim, so the
@@ -36,7 +36,7 @@ What this notebook covers:
 - One set of connection arguments — DSN (data source name), user,
   wallet — accepted by the loader, the vector store, the in-DB chunker,
   the in-DB embedder and the checkpointer alike.
-- A `@tool fetch_articles_by_topic(topic)` wrapping the loader so an
+- An `@tool fetch_articles_by_topic(topic)` wrapping the loader so an
   agent can decide what to fetch.
 
 ## Prerequisites

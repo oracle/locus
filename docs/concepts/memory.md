@@ -1,12 +1,12 @@
 ---
 title: Memory — short-term and long-term
-description: "The three memories of a Locus agent — working memory, thread memory and long-term memory — plus knowledge retrieval, and how Oracle Database 26ai backs the ones that persist."
+description: "The three memories of an agent — working memory, thread memory and long-term memory — plus knowledge retrieval, and how Oracle Database 26ai backs the ones that persist."
 ---
 
 # Memory — short-term and long-term
 
 An agent remembers at three time scales — the run, the thread, and across
-threads — and retrieves knowledge it does not remember. Locus keeps each as
+threads — and retrieves knowledge it does not remember. The SDK keeps each as
 its own surface so you can choose how it is kept; everything that persists
 can live in Oracle Database 26ai, in the same database as the business data
 the agent acts on.

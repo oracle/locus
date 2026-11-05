@@ -1,26 +1,26 @@
-# Running Locus behind the LiteLLM AI Gateway
+# Running the Oracle Generative AI – Multi-Agent Locus SDK behind the LiteLLM AI Gateway
 
 [LiteLLM](https://litellm.ai) ships an open-source proxy — variously
 branded the **LiteLLM Proxy Server** and the **LiteLLM AI Gateway** —
 that fronts 100+ model providers behind one OpenAI-shaped HTTP API.
 
-When you route your agents' model traffic through it, Locus consumes it
+When you route your agents' model traffic through it, the SDK consumes it
 through its existing
-[`OpenAIModel`](../concepts/providers/openai.md) with no Locus-side code
+[`OpenAIModel`](../concepts/providers/openai.md) with no SDK-side code
 change. The gateway carries the parts of the integration that genuinely
 belong in a gateway: virtual keys, per-team budgets, fallback chains,
 centralised observability, cost reporting, caching, and guardrails.
 
 {{ locus_diagram litellm-gateway }}
 
-!!! note "Locus has zero `litellm` dependency"
+!!! note "The SDK has zero `litellm` dependency"
     The `litellm` package only lives inside the gateway's Docker
-    container. Your Locus services only need `openai` (already pulled by
+    container. Your services only need `openai` (already pulled by
     `OpenAIModel`).
 
 ## When to choose this over direct providers
 
-Locus's [direct model providers](../concepts/models.md) remain the right
+The SDK's [direct model providers](../concepts/models.md) remain the right
 default for **single-tenant production, dev / CI** — they're simpler,
 in-process, lower-latency, and have no extra service to operate.
 
@@ -30,13 +30,12 @@ in-process, lower-latency, and have no extra service to operate.
   agent / tenant with per-key budgets, RPM/TPM (requests/tokens per
   minute) limits, expiry, and model allowlists.
 - **Fallback chains across regions or providers** — "OpenAI →
-  Anthropic" defined in `config.yaml`, no Locus restart.
+  Anthropic" defined in `config.yaml`, no restart.
 - **Centralised observability** — one Langfuse / OpenTelemetry /
-  Datadog / Helicone hook configured in the gateway, every Locus
-  service feeds it.
+  Datadog / Helicone hook configured in the gateway, every service feeds it.
 - **Centralised cost tracking** — Postgres-backed per-key / per-team /
   per-model spend reporting across every consumer.
-- **Polyglot consumers** — Python Locus agents, a JS web console,
+- **Polyglot consumers** — Python agents built with the SDK, a JS web console,
   Ruby / Go enrichment services all talk OpenAI to the same gateway.
 - **Caching across services** — Redis / S3 / Qdrant in-flight, shared
   across every consumer.
@@ -89,8 +88,7 @@ model allowlist.
 ## Issuing per-team virtual keys
 
 The gateway's master key (`LITELLM_MASTER_KEY`) is the admin token —
-treat it as a high-value secret and **never hand it to a Locus
-agent**. Locus services should each carry a scoped **virtual key**
+treat it as a high-value secret and **never hand it to an agent**. Each service built on the SDK should carry a scoped **virtual key**
 issued via the gateway's `/key/generate` endpoint:
 
 ```bash
@@ -189,7 +187,7 @@ is keyed by `api_key`, `user`, `team_id`, and any custom field in
 `metadata`, so the same SQL surface answers "what did team X spend
 this week?" and "what did model Y cost across all teams?".
 
-## Pointing Locus at the gateway
+## Pointing the SDK at the gateway
 
 Use the existing `OpenAIModel` — that's the LiteLLM-compatible client:
 
@@ -209,9 +207,9 @@ agent = Agent(model=model, system_prompt="You are a concise support assistant.")
 print(agent.run_sync("Summarise ticket T-4821.").message)
 ```
 
-No new Locus class is needed. The gateway handles provider auth,
+No new class is needed. The gateway handles provider auth,
 vendor adapters, fallback, budgets, and observability internally.
-Locus only ever sees the OpenAI-shaped HTTP contract.
+The SDK only ever sees the OpenAI-shaped HTTP contract.
 
 ## Running existing notebooks through the gateway
 
@@ -246,7 +244,7 @@ The recommended deployment shape is:
   workload-identity binding if your platform supports keyless cloud
   auth — see "Authentication" below).
 - Postgres for virtual-key state and spend logs.
-- Service exposed cluster-internal only — Locus services hit it via
+- Service exposed cluster-internal only — services built on the SDK hit it via
   the in-cluster DNS name (`litellm-gateway.litellm.svc.cluster.local:4000`).
 
 Don't expose the gateway publicly — issuing virtual keys is your
@@ -258,10 +256,10 @@ The gateway changes the credential boundary:
 
 | Without gateway | With gateway |
 |---|---|
-| Locus → provider directly. Locus carries the provider API key. | Locus → gateway with a **virtual key**. Gateway → provider with the provider API key. |
+| SDK → provider directly. The SDK carries the provider API key. | SDK → gateway with a **virtual key**. Gateway → provider with the provider API key. |
 
-So **Locus no longer needs provider credentials at all** — the gateway
-is the only thing that does. Locus only needs the virtual API key the
+So **the SDK no longer needs provider credentials at all** — the gateway
+is the only thing that does. The SDK only needs the virtual API key the
 gateway issued it. This is the central reason to deploy the gateway
 on a multi-tenant platform: agents from different teams use different
 virtual keys with different budgets, all hitting the same underlying
@@ -277,7 +275,7 @@ The full schema is documented at
 Highlights:
 
 - **`model_list`** — every model alias the gateway exposes. The same
-  alias is what Locus passes as `model=` to `OpenAIModel`.
+  alias is what the SDK passes as `model=` to `OpenAIModel`.
 - **`general_settings.master_key`** — the admin key that creates
   per-team virtual keys via `/key/generate`.
 - **`router_settings.fallbacks`** — fallback chains across model
@@ -311,7 +309,7 @@ The platform-grade pieces it earns them:
 - **Cost optimisation that compounds** — cache identical prompts,
   route cheap requests to cheap models, identify top-spend prompts
   and rewrite them. All require centralised visibility.
-- **Polyglot consumers** — Python Locus, JS clients, Go / Ruby /
+- **Polyglot consumers** — Python services on the SDK, JS clients, Go / Ruby /
   Java services all talk the same OpenAI-shaped HTTP.
 
 ### Deployment-shape table
@@ -322,7 +320,7 @@ The platform-grade pieces it earns them:
 | Gateway pod + Postgres + Redis + obs backends | Platform / SRE team | Kubernetes, one deployment per env |
 | Gateway `config.yaml` (model catalog, fallbacks, callbacks, guardrails) | Platform team | GitOps repo, change-controlled |
 | Virtual keys + per-team budgets | Platform team issues; security reviews | Postgres; admin UI for issuance |
-| Locus agents / other consumers | Application teams | Their own services, talking to `litellm-gateway.<env>.svc.cluster.local:4000` |
+| Agents built with the SDK / other consumers | Application teams | Their own services, talking to `litellm-gateway.<env>.svc.cluster.local:4000` |
 | Spend reports + audit + alerts | Finance + security | SQL on the gateway's Postgres; obs dashboards |
 
 The pattern lets the platform team **set policy once** and application

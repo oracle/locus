@@ -1,7 +1,7 @@
 # RAG providers
 
 Production [retrieval-augmented generation (RAG)](../concepts/rag.md) is
-two pluggable pieces, both behind one Locus interface.
+two pluggable pieces, both behind one interface.
 
 - **Embeddings** — `OpenAIEmbeddings` (`text-embedding-3-small` /
   `-3-large`), `CohereEmbeddings` (Cohere's direct API), `OCIEmbeddings`

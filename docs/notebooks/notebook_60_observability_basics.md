@@ -1,6 +1,6 @@
 # Observability basics
 
-Locus ships an in-process publish/subscribe (pub/sub) `EventBus` that
+The SDK ships an in-process publish/subscribe (pub/sub) `EventBus` that
 publishes typed `StreamEvent` objects for the meaningful steps of
 execution: agent thinking, tool calls, multi-agent fan-outs,
 checkpoints — each under a canonical `event_type` whose prefix names

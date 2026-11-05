@@ -5,7 +5,7 @@ complements `NOTICE` and the `LICENSES/` directory.
 
 ## Licensing history
 
-- Locus started at Oracle in 2025 under the Universal Permissive License
+- The project started at Oracle in 2025 under the Universal Permissive License
   v1.0 (UPL-1.0): the `0.x` line, published to PyPI as `locus-sdk`, with
   copyright held by Oracle and/or its affiliates.
 - From 2026-06-08 to 2026-10-10 the project continued outside Oracle as

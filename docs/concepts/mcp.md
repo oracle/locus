@@ -4,8 +4,7 @@ Build a tool once — issue a refund, roll out a deploy, enrich an
 IOC (indicator of compromise — an IP, domain, or file hash) — and let
 any agent call it. [MCP](https://modelcontextprotocol.io)
 is the protocol for that: wrap a function like `lookup_order` or `issue_refund`
-in an MCP server, and any MCP client (Claude Desktop, Cline, a Locus
-agent, your own tooling) invokes it without bespoke glue. The same SDK
+in a MCP server, and any MCP client (Claude Desktop, Cline, an agent, your own tooling) invokes it without bespoke glue. The same SDK
 also *consumes* existing MCP servers — a billing service, a
 case-management server, a threat-intel feed — so your agent can reach
 tools it didn't ship.
@@ -14,7 +13,7 @@ tools it didn't ship.
 server's tools into SDK tools, and `LocusMCPServer` publishes every
 tool on an agent (plus `run_agent` / `run_agent_stream`) over stdio
 or HTTP (streamable HTTP, plus the older SSE transport). Round-trip
-means a Locus-built agent can be either side: pull data from a
+means an SDK-built agent can be either side: pull data from a
 billing server *and* serve its own refund tools back to the
 operator's desktop.
 
@@ -117,7 +116,7 @@ before it, so editing any record breaks verification).
 
 ### 1. Wrap an agent in `LocusMCPServer`
 
-`LocusMCPServer` exposes a Locus **agent** (and the tools registered on
+`LocusMCPServer` exposes an **agent** (and the tools registered on
 it) over MCP. Build the agent with the tools you want to publish:
 
 ```python

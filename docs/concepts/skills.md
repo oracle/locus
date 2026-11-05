@@ -12,7 +12,7 @@ many domain skills) without exhausting the context budget on
 capabilities the run will not use.
 
 Each skill is a folder with a `SKILL.md`. Point your agent at the
-parent directory and Locus handles the disclosure tiers. The drawing
+parent directory and the SDK handles the disclosure tiers. The drawing
 follows one skill folder from disk through the three levels the model
 sees:
 

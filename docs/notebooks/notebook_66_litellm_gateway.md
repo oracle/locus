@@ -1,15 +1,14 @@
 # LiteLLM AI Gateway
 
 This notebook is the runnable companion to the
-[LiteLLM AI Gateway how-to](../how-to/litellm-gateway.md). A Locus
-cloud-operations agent talks to a LiteLLM AI Gateway through the existing
+[LiteLLM AI Gateway how-to](../how-to/litellm-gateway.md). A cloud-operations agent talks to a LiteLLM AI Gateway through the existing
 `OpenAIModel(base_url=...)`, and the gateway takes on the concerns the
 how-to assigns to it: provider authentication, vendor adapters, fallbacks,
 virtual keys, budgets, observability, cost tracking, caching and
 guardrails.
 
-No new Locus model class is involved. The gateway exposes the OpenAI API,
-so the client Locus already has is sufficient, and the agent host holds
+No new model class is involved. The gateway exposes the OpenAI API,
+so the client the SDK already has is sufficient, and the agent host holds
 only a gateway-issued key, never a provider key.
 
 What this notebook covers:

@@ -1,7 +1,7 @@
 # Agent Hooks
 
 Hooks are middleware for agents. Subclass `HookProvider`, override the
-callbacks you need, and Locus invokes them at nine lifecycle points:
+callbacks you need, and the SDK invokes them at nine lifecycle points:
 before/after the invocation, at the start/end of each loop iteration,
 before context compaction, before/after each model call, and
 before/after each tool call. Use them to add logging, timing,

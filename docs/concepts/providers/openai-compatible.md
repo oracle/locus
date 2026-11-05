@@ -4,7 +4,7 @@ Most of the model ecosystem speaks the OpenAI wire protocol. Managed
 services (Groq, Together, OpenRouter, DeepSeek, Mistral, xAI, Fireworks,
 Cerebras, Perplexity, NVIDIA NIM) and self-hosted servers (Ollama, vLLM,
 LM Studio, llama.cpp, LiteLLM) differ only in **base URL** and **which
-environment variable holds the key** — so Locus reaches all of them through
+environment variable holds the key** — so the SDK reaches all of them through
 the same `OpenAIModel`, with no extra client dependency.
 
 Address one by prefix (per-provider variables and examples:
@@ -52,7 +52,7 @@ catalog:
     result = agent.run_sync("Explain the control decision.")
     ```
 
-The prefix selects the endpoint and credential variable; Locus passes the part
+The prefix selects the endpoint and credential variable; the SDK passes the part
 after the colon through as the provider's model id. No OpenAI account or
 `OPENAI_API_KEY` is required for these two routes. Tool calling, structured
 output, vision, context size, pricing, and availability remain properties of
@@ -112,11 +112,11 @@ export LOCUS_OLLAMA_BASE_URL=http://gpu-box:11434/v1
 - **Capability still varies by model.** A prefix makes an endpoint
   reachable; it does not promise that the model behind it supports tool
   calling, structured output, or vision. See
-  [Structured output](../structured-output.md) for the fallbacks Locus
+  [Structured output](../structured-output.md) for the fallbacks the SDK
   applies when a model cannot constrain its own decoding.
 - **Sampling defaults are sent.** `temperature` and `top_p` default to
   `0.7` / `0.9` on the model config and go out with chat-completions
-  requests (model ids Locus treats as reasoning or search-preview models
+  requests (model ids the SDK treats as reasoning or search-preview models
   are the exception). `AgentConfig.temperature` defaults to `None` and is
   forwarded on the agent's regular turns only when set, so it does not
   override them there. (The iteration-limit summary, empty-answer recovery

@@ -4,7 +4,7 @@ table_filter: true
 
 # SSE event catalogue
 
-Locus publishes a single canonical stream of events on its in-process
+The SDK publishes a single canonical stream of events on its in-process
 `EventBus` — an observability/telemetry stream, one event per
 component-visible action (see [Observability](observability.md) for the
 hooks that ship it). Every event carries a stable `event_type` string

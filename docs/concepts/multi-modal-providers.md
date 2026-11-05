@@ -3,7 +3,7 @@
 The model is only one provider an agent depends on. A support agent
 may also need web search for order lookups, a fetcher for policy
 pages, image generation for report figures, and transcription for
-call recordings. Locus exposes those as a small set of **Protocol**
+call recordings. The SDK exposes those as a small set of **Protocol**
 types under `locus.providers` and an opt-in auto-registration step
 that turns each one into a model-callable tool.
 

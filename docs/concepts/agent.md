@@ -1,7 +1,7 @@
 # Agent
 
 `Agent` is the unit you build everything else from in
-Locus. Hand it a model, a
+the SDK. Hand it a model, a
 list of tools, a system prompt, and any optional features (reflexion,
 grounding, checkpointing) — the SDK drives the
 [Think → Execute → Reflect → Terminate](agent-loop.md) loop, streams
@@ -9,7 +9,7 @@ typed events as it runs, and returns a typed `AgentResult` when it
 stops.
 
 The same class is what multi-agent shapes (orchestrators, swarms,
-handoff desks) instantiate: Locus has a single agent abstraction.
+handoff desks) instantiate: the SDK has a single agent abstraction.
 
 {{ locus_model_tabs }}
 

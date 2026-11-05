@@ -1,6 +1,6 @@
 # Security layer — evidence-grounded findings
 
-The separate `locus-sdk-security` package (`locus_security`) applies Locus's
+The separate `locus-sdk-security` package (`locus_security`) applies the SDK's
 runtime to cybersecurity. **A security finding can only be built from
 evidence that clears the [GSAR](gsar.md) grounding threshold.** Below the
 bar, the agent abstains and records why. An ungrounded finding would be a
@@ -171,7 +171,7 @@ p50, mean inter-token latency, its coefficient of variation, and mean
 tokens/sec; with no key set it returns the deterministic sample vector
 described below. The example keeps an explicit OpenAI model id, the
 function's default, because the measurement calls the OpenAI-compatible
-streaming API directly rather than a Locus provider.
+streaming API directly rather than an SDK provider class.
 
 ```python
 from locus_security import measure_endpoint_timing, fingerprint_to_finding

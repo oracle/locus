@@ -8,7 +8,7 @@ records do. For such a corpus this collapses the chunking stage of a
 retrieval-augmented generation (RAG) pipeline into a single SQL
 statement.
 
-`OracleInDBChunker` is the Locus wrapper. Two shapes:
+`OracleInDBChunker` is the wrapper. Two shapes:
 
 - **`chunk_text(passage)`** — chunks a single string the application
   passed in. Suited to ad-hoc material the user supplied.
@@ -16,8 +16,7 @@ statement.
   out of every row of a CLOB column. Suited to ingesting an entire
   table without round-tripping the documents through the application.
 
-To exercise both shapes the notebook drives the chunker from a Locus
-`Agent`. Each chunker call is wrapped as a `@tool`; the agent picks
+To exercise both shapes the notebook drives the chunker from an `Agent`. Each chunker call is wrapped as an `@tool`; the agent picks
 which one to invoke from the prompt, and the SQL runs between the
 `ToolStartEvent` and `ToolCompleteEvent` the agent emits around the
 call, so the moment the database does the work is visible in the event
@@ -53,7 +52,7 @@ GRANT EXECUTE ON DBMS_VECTOR_CHAIN TO locus_app;
 ```
 
 In the drawing, `OracleInDBChunker` sits in the vectors group of the
-primitives Locus runs on one Oracle Database 26ai, beside the loader
+primitives the SDK runs on one Oracle Database 26ai, beside the loader
 that reads rows (notebook 39) and the embeddings and vector store that
 take the chunks on (notebooks 41 and 38), on the ingest path called
 from your code; this notebook moves that same `UTL_TO_CHUNKS` call

@@ -1,7 +1,7 @@
 # Structured output
 
 When you need a typed object rather than free text, set `output_schema=`
-to a Pydantic model and Locus parses the agent's final answer into a
+to a Pydantic model and the SDK parses the agent's final answer into a
 typed instance.
 
 {{ locus_model_tabs }}
@@ -109,7 +109,7 @@ When `output_schema_retries=0`, the first response is the final attempt.
 which inherits OpenAI's native mode, so the model in the examples above
 receives the strict `response_format`. The exceptions are `cohere.*` ids
 and dedicated AI cluster endpoint OCIDs (`ocid1.generativeaiendpoint…`):
-Locus serves those through the OCI SDK transport (`OCIModel`), which
+the SDK serves those through the OCI SDK transport (`OCIModel`), which
 declares no native mode, so they get the prompted schema and the
 client-side repair loop only. See
 [OCI Generative AI models](../how-to/oci-models.md) and

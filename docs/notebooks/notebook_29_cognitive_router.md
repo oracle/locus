@@ -1,7 +1,7 @@
 # Cognitive router
 
 The `locus.router` package compiles a natural-language operations
-request onto existing Locus primitives. The large language model (LLM)
+request onto existing primitives. The large language model (LLM)
 never chooses the topology: it fills a typed `GoalFrame`, the router
 selects a protocol deterministically from a `ProtocolRegistry`, and the
 `CognitiveCompiler` emits a real `Agent`, `SequentialPipeline`,

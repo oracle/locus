@@ -1,6 +1,6 @@
 # Capabilities
 
-Everything Locus ships, what it
+Everything the SDK ships, what it
 does, and where to find it.
 
 ## Status at a glance
@@ -288,7 +288,7 @@ answer and reports the decision.
 | Vector stores | Oracle Database 26ai (`OracleVectorStore`) · pgvector · OpenSearch · Qdrant · Chroma · in-memory | `locus.rag.stores` · [RAG](concepts/rag.md) |
 | Embeddings | `OCIEmbeddings` · `OracleInDBEmbeddings` · `OpenAIEmbeddings` · `CohereEmbeddings` | `locus.rag.embeddings` |
 | Multimodal processors | Text · PDF (text + OCR) · Image (OCR) · Audio (transcription) | `locus.rag.multimodal` |
-| Tool wiring | `create_rag_tool(retriever)` exposes the retriever as a `@tool` | `locus.rag.tools` |
+| Tool wiring | `create_rag_tool(retriever)` exposes the retriever as an `@tool` | `locus.rag.tools` |
 
 ## Models
 

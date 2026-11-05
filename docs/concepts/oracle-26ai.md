@@ -1,14 +1,14 @@
 ---
 title: Oracle Database 26ai
-description: "Every Oracle Database 26ai primitive in Locus — vector search, in-database chunking and embeddings, table ingestion, durable and versioned threads, long-term memory and Oracle agent memory — with the notebook that runs each one."
+description: "Every Oracle Database 26ai primitive in the SDK — vector search, in-database chunking and embeddings, table ingestion, durable and versioned threads, long-term memory and Oracle agent memory — with the notebook that runs each one."
 ---
 
 # Oracle Database 26ai
 
-Locus treats Oracle Database 26ai as the place where an agent's state lives:
+The SDK treats Oracle Database 26ai as the place where an agent's state lives:
 vectors for retrieval, threads for continuity, memories for what it has
 learned, in the same database as the data it acts on. Each primitive is a
-first-class Locus class directly on the `oracledb` driver, with no
+first-class class directly on the `oracledb` driver, with no
 third-party adapter in between (`OracleAgentMemoryManager` alone sits on
 Oracle's own agent-memory client), and it works with the same `Agent` as
 everything else. The drawing groups them by what the database does for the

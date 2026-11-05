@@ -1,6 +1,6 @@
 # OCI Responses API — when to use it, what changes
 
-Locus, the Oracle Generative AI Agentic Harness, exposes the OCI Generative
+The Oracle Generative AI – Multi-Agent Locus SDK exposes the OCI Generative
 AI **Responses** endpoint as a separate transport, `OCIResponsesModel`,
 alongside the default `OCIChatCompletionsModel` (which speaks
 `/openai/v1/chat/completions`). Picking it means opting into server-side

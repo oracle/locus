@@ -1,10 +1,10 @@
 <p align="center">
-  <img src="https://locusagents.ai/img/og-card.png" alt="Oracle Generative AI Agentic Harness · Locus SDK · pip install locus-sdk · Built inside Oracle · github.com/oracle/locus" width="720">
+  <img src="https://raw.githubusercontent.com/oracle/locus/main/docs/img/og-card.png" alt="Oracle Generative AI Multi-Agent Reasoning Orchestrator SDK · pip install locus-sdk · Built inside Oracle · github.com/oracle/locus" width="720">
 </p>
 
 <p align="center">
-  <strong>Oracle Generative AI Agentic Harness</strong> · Locus, the <code>locus-sdk</code> package<br>
-  <em>Multi-agent workflows built for production · Built inside Oracle · Open source (UPL-1.0)</em>
+  <strong>Oracle Generative AI Multi-Agent Reasoning Orchestrator SDK</strong> · the <code>locus-sdk</code> package<br>
+  <em>Oracle Generative AI – Multi-Agent Locus SDK · Multi-agent workflows built for production · Built inside Oracle · Open source (UPL-1.0)</em>
 </p>
 
 <p align="center">
@@ -47,7 +47,7 @@ print(agent.run_sync("What is the capital of France?").text)
 # → Paris
 ```
 
-Locus runs on Python 3.11 to 3.14. Swap `oci:openai.gpt-5.5` for `openai:gpt-5.5`,
+The SDK runs on Python 3.11 to 3.14. Swap `oci:openai.gpt-5.5` for `openai:gpt-5.5`,
 `anthropic:claude-sonnet-5-5` or `openrouter:x-ai/grok-4.7`, each reading its key from the
 environment; the call stays the same. With an OCI profile in `~/.oci/config`, the notebooks in
 `examples/` run against OCI Generative AI with no further setup.
@@ -113,7 +113,7 @@ admission gate.
 
 | Primitive | What it gives you |
 |---|---|
-| **OCI Generative AI** | `model="oci:…"` picks the transport from the model id: the OpenAI-compatible V1 endpoint for the OpenAI, Meta, xAI, Mistral and Google families, the OCI SDK for Cohere and for Dedicated AI Cluster endpoints; the Responses transport is opt-in through `OCIResponsesModel`. A model OCI adds is a new string, with no Locus release needed (day 0). Auth from your OCI profile, a session token, or instance / resource principals. |
+| **OCI Generative AI** | `model="oci:…"` picks the transport from the model id: the OpenAI-compatible V1 endpoint for the OpenAI, Meta, xAI, Mistral and Google families, the OCI SDK for Cohere and for Dedicated AI Cluster endpoints; the Responses transport is opt-in through `OCIResponsesModel`. A model OCI adds is a new string, with no SDK release needed (day 0). Auth from your OCI profile, a session token, or instance / resource principals. |
 | **Dedicated AI Clusters** | `model="oci:ocid1.generativeaiendpoint…"` targets your own Dedicated AI Cluster (DAC) endpoint. |
 | **OCI GenAI Sandboxes** | `OCISandboxBackend` runs the coding harness inside an isolated, expiring Linux workspace in your tenancy: the model's shell commands and file edits never touch the host, and every call still clears the gate. `pip install "locus-sdk[oci-sandbox]"`. |
 | **OCI tools** | `use_oci()` / `describe_oci()` put the OCI control plane behind tools, so an agent can list, inspect and act on your tenancy. |
@@ -159,7 +159,7 @@ agent = Agent(model="oci:openai.gpt-5.5", tools=[retriever.as_tool()])
 | **[Grounded reasoning](https://locusagents.ai/concepts/gsar/)** | Grounding-Stratified Adaptive Replanning (GSAR) partitions every claim as grounded, ungrounded, contradicted or complementary against typed evidence; below threshold the agent regenerates, replans or abstains. Reflexion, when enabled, scores every turn: the agent assesses its own progress from the tool results and adjusts. |
 | **[Guardrails](https://locusagents.ai/concepts/safety/) and [the admission gate](https://locusagents.ai/concepts/control-layer/)** | Input, output and tool-call guardrails, steering (LLM-as-judge), trace hygiene, and `admit()` / `approve()`: allow, hold for a human, or deny, on a hash-chained audit trail. |
 | **[Observability and streaming](https://locusagents.ai/concepts/observability/)** | Opt-in `EventBus`; one `run_context()` streams typed events from every layer; Server-Sent Events (SSE) and token streaming; OpenTelemetry hook. |
-| **[Server](https://locusagents.ai/concepts/server/) and [deploy](https://locusagents.ai/how-to/deploy/)** | `locus serve` / `AgentServer` (FastAPI, bearer auth, `POST /invoke`, `POST /stream`, threads); a multi-stage `Dockerfile` for OCI Kubernetes Engine (OKE) or any container host; the [box runner](https://locusagents.ai/runner/) (`python -m locus.runner`) runs one agent's loop inside an NVIDIA OpenShell sandbox for a Locus gateway. |
+| **[Server](https://locusagents.ai/concepts/server/) and [deploy](https://locusagents.ai/how-to/deploy/)** | `locus serve` / `AgentServer` (FastAPI, bearer auth, `POST /invoke`, `POST /stream`, threads); a multi-stage `Dockerfile` for OCI Kubernetes Engine (OKE) or any container host; the [box runner](https://locusagents.ai/runner/) (`python -m locus.runner`) runs one agent's loop inside an NVIDIA OpenShell sandbox for a gateway built with the SDK. |
 | **[Skills](https://locusagents.ai/concepts/skills/), [playbooks](https://locusagents.ai/concepts/playbooks/), [evaluation](https://locusagents.ai/concepts/evaluation/), [testing](https://locusagents.ai/concepts/testing/)** | Progressive-disclosure skills, enforced playbooks, `EvalCase` / `EvalRunner` / `EvalReport` regression suites; `locus.testing` model doubles (`ScriptedModel`, `FunctionModel`) and `AgentTestClient` for deterministic tests with no API key. |
 | **[Model providers](https://locusagents.ai/how-to/configure-providers/)** | `oci:`, `openai:`, `anthropic:` native; `gemini:`, `openrouter:`, `together:`, `runpod:`, `groq:`, `ollama:`, `vllm:` and 11 more OpenAI-compatible routes; failover chains, credential pooling, prompt-cache breakpoints. |
 
@@ -258,7 +258,7 @@ AgentServer(agent=my_agent, api_key=os.environ["API_KEY"]).run(host="0.0.0.0", p
 
 ## Build it with Codex
 
-[OpenAI Codex](https://developers.openai.com/codex) builds on Locus. The repository ships a Codex
+[OpenAI Codex](https://developers.openai.com/codex) builds on the SDK. The repository ships a Codex
 skill, [`.agents/skills/locus/`](https://github.com/oracle/locus/tree/main/.agents/skills/locus), that
 teaches it the SDK: `Agent` and `@tool`, the admission gate, the multi-agent shapes, memory and RAG,
 the coding harness, the providers, and how to test an agent offline. `locus codex` puts the skill
@@ -358,7 +358,7 @@ disclosure.
 
 ## GSAR reference
 
-Locus's GSAR layer is based on the method described in F. A. Kamelhar,
+The SDK's GSAR layer is based on the method described in F. A. Kamelhar,
 [GSAR: Typed Grounding for Hallucination Detection and Recovery in Multi-Agent LLMs](https://arxiv.org/abs/2604.23366)
 ([PDF](https://arxiv.org/pdf/2604.23366)), arXiv:2604.23366, 2026. The paper is separate from this
 project; if you use the method, cite it directly:
