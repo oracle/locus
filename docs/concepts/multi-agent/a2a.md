@@ -6,7 +6,7 @@ Each agent runs as its own service, advertises an Agent Card
 (capabilities + skills + endpoint URL) at a well-known URL, and other
 agents discover and call it over HTTP.
 
-Locus implements the public
+The SDK implements the public
 [A2A protocol](https://a2aproject.github.io/A2A/) — an open wire
 format that any conforming runtime can speak — so an
 SDK-built agent can call a non-SDK A2A peer (or be called by one)
@@ -16,8 +16,7 @@ without an adapter.
 
 ## Wire surface
 
-`A2AServer` is v1.0-first while preserving the older Locus/pre-v1
-surface. Clients that request v1.0 send `A2A-Version: 1.0`; clients
+`A2AServer` is v1.0-first while preserving the older pre-v1 surface. Clients that request v1.0 send `A2A-Version: 1.0`; clients
 that use the old method names continue to hit the legacy dispatcher. A
 JSON-RPC request to `POST /` that names any other `A2A-Version` is
 rejected with a version-not-supported error.
@@ -29,11 +28,11 @@ rejected with a version-not-supported error.
 | `GET /.well-known/agent-card.json` | Public Agent Card — name, description, skills, capabilities, modes, `protocolVersion`, and `supportedInterfaces`. |
 | `POST /` + `A2A-Version: 1.0` | A2A v1.0 JSON-RPC dispatch — `SendMessage`, `SendStreamingMessage`, `GetTask`, `CancelTask`. |
 | `POST /` with old methods | Legacy JSON-RPC dispatch — `message/send`, `message/stream`, `tasks/get`, `tasks/cancel`. |
-| `GET /agent-card`, `POST /a2a/{invoke,stream}` | Backwards-compat aliases for peers using the original Locus shape. |
+| `GET /agent-card`, `POST /a2a/{invoke,stream}` | Backwards-compat aliases for peers using the original shape. |
 
 The v1.0 Task lifecycle uses protocol enum values such as
 `TASK_STATE_SUBMITTED`, `TASK_STATE_WORKING`, and
-`TASK_STATE_COMPLETED`. Locus still maps those to the Python-facing
+`TASK_STATE_COMPLETED`. The SDK still maps those to the Python-facing
 `TaskState` enum (`submitted`, `working`, `completed`, ...) for SDK
 callers. Streaming responses on `SendStreamingMessage` arrive as SSE
 JSON-RPC envelopes whose `result` is a v1.0 `StreamResponse`, containing

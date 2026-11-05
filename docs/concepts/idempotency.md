@@ -1,6 +1,6 @@
 # Idempotency
 
-> Locus deduplicates identical tool calls within a documented execution scope.
+> The SDK deduplicates identical tool calls within a documented execution scope.
 
 The model may retry. With `idempotent=True`, an identical call later in the
 same `agent.run()` reuses the recorded result instead of invoking the tool body
@@ -142,7 +142,7 @@ keeps the side effect from repeating.
 There is an unavoidable boundary between two systems:
 
 1. the payment, deploy, or message succeeds in the external service;
-2. the process stops before Locus durably records the returned receipt;
+2. the process stops before the SDK durably records the returned receipt;
 3. the run resumes and cannot prove locally that the external call succeeded;
 4. the call may be attempted again.
 

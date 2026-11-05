@@ -1,6 +1,6 @@
 # Conversation management
 
-A Locus agent holds one user's
+An agent holds one user's
 conversation in `state.messages`. To make that conversation **survive
 across requests** — across deploys, restarts, and "I'll come back
 tomorrow" gaps — you wire a checkpointer and a `thread_id`. Within a

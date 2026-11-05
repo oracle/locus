@@ -1,6 +1,6 @@
 # OCI transports
 
-Locus ships three model classes for Oracle Cloud Infrastructure (OCI)
+The SDK ships three model classes for Oracle Cloud Infrastructure (OCI)
 Generative AI. They are not interchangeable: the right one depends on
 which model family you call and whether you want OCI to hold the
 conversation history. This notebook builds an agent against each class,
@@ -14,7 +14,7 @@ Read top to bottom; the first match wins.
 | A Responses-only model (for example `openai.gpt-5.5-pro`), or OCI to hold the thread | `OCIResponsesModel` |
 | Everything else (OpenAI, Meta, Mistral, xAI, Gemini) | `OCIChatCompletionsModel` (default) |
 
-The runtime reads `model.server_stateful`. When it is `True`, Locus
+The runtime reads `model.server_stateful`. When it is `True`, the SDK
 sends only the messages added since the last assistant turn and threads
 OCI's continuation id through `AgentState.provider_state`. On that path
 the runtime skips `ConversationManager` and the observation pack: both

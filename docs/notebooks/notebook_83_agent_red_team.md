@@ -16,7 +16,7 @@ Systems), for example `LLM01`, `ASI02` or `AML.T0054`, so findings map onto the
 framework your reviewers use.
 
 That abstain-by-construction property matters because AI scorers can
-hallucinate vulnerabilities; Locus does not ship a finding it cannot evidence.
+hallucinate vulnerabilities; the SDK does not ship a finding it cannot evidence.
 The notebook points the same suite at two targets: a *vulnerable* bot that
 obeys injected instructions and a *hardened* one that refuses them. Five of the
 six probes plant a benign canary token, a string the target should never emit,

@@ -2,12 +2,11 @@
 
 {#
   Decouples the browser tab / HTML <title> from `site_name`. `site_name`
-  drives the header wordmark; the tab carries the approved short product
-  name so it survives tab-bar truncation and shows the full string on
-  hover.
+  drives the header wordmark (the logo); the header slogan carries the full
+  product name and the tab the approved short name (PR Legal, 2026-11-05).
 #}
 {% block htmltitle %}
-  {% set tab_title = "Oracle Generative AI Agentic Harness" %}
+  {% set tab_title = "Oracle Generative AI – Multi-Agent Locus SDK" %}
   {% if page and page.title and not page.is_homepage %}
     <title>{{ page.title | striptags }} - {{ tab_title }}</title>
   {% else %}
@@ -40,18 +39,18 @@
   <meta name="theme-color" content="#111318" media="(prefers-color-scheme: dark)">
   <link rel="apple-touch-icon" sizes="180x180" href="{{ 'img/apple-touch-icon.png' | url }}">
   <meta property="og:type" content="website">
-  <meta property="og:site_name" content="Oracle Generative AI Agentic Harness">
+  <meta property="og:site_name" content="Oracle Generative AI Multi-Agent Reasoning Orchestrator SDK">
   <meta property="og:title" content="{{ page_title }}">
   <meta property="og:description" content="{{ page_desc }}">
   <meta property="og:url" content="{{ page_url }}">
   <meta property="og:image" content="{{ og_image }}">
   <meta property="og:image:width" content="1280">
   <meta property="og:image:height" content="640">
-  <meta property="og:image:alt" content="Oracle Generative AI Agentic Harness · Locus SDK · pip install locus-sdk · Built inside Oracle · github.com/oracle/locus">
+  <meta property="og:image:alt" content="Oracle Generative AI Multi-Agent Reasoning Orchestrator SDK · pip install locus-sdk · Built inside Oracle · github.com/oracle/locus">
 
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="{{ page_title }}">
   <meta name="twitter:description" content="{{ page_desc }}">
   <meta name="twitter:image" content="{{ og_image }}">
-  <meta name="twitter:image:alt" content="Oracle Generative AI Agentic Harness · Locus SDK · pip install locus-sdk · Built inside Oracle · github.com/oracle/locus">
+  <meta name="twitter:image:alt" content="Oracle Generative AI Multi-Agent Reasoning Orchestrator SDK · pip install locus-sdk · Built inside Oracle · github.com/oracle/locus">
 {% endblock %}

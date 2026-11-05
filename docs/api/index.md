@@ -36,7 +36,7 @@ from locus.core.termination import MaxIterations, ToolCalled
 |---|---|---|
 | [Tools](tools.md) | The `@tool` decorator, which builds a tool's schema from the function's type hints and docstring; `ToolContext`, the registry and the executors | [Tools](../concepts/tools.md) |
 | [Capability providers](providers.md) | Web search, web fetch, image generation and speech providers. Set one on `AgentConfig` and the agent registers a matching tool | [Multi-modal providers](../concepts/multi-modal-providers.md), [Tools](../concepts/tools.md) |
-| [Integrations](integrations.md) | MCP in both directions: serve a Locus agent to any MCP client, or turn MCP tools into Locus tools. Cloud posture runs on the core `use_oci`, which refuses any OCI operation whose name does not start with a read prefix such as `list_`, `get_` or `summarize_` | [MCP](../concepts/mcp.md) |
+| [Integrations](integrations.md) | MCP in both directions: serve an agent to any MCP client, or turn MCP tools into native tools. Cloud posture runs on the core `use_oci`, which refuses any OCI operation whose name does not start with a read prefix such as `list_`, `get_` or `summarize_` | [MCP](../concepts/mcp.md) |
 | [Skills](skills.md) | `Skill` and `SkillsPlugin`: `SKILL.md` instruction bundles the agent loads on demand, attached with `AgentConfig.skills` | [Skills](../concepts/skills.md) |
 | [Playbooks](playbooks.md) | Declared step sequences with expected tools. Set `AgentConfig.playbook` and a `PlaybookEnforcerHook` checks each tool call against the current step | [Playbooks](../concepts/playbooks.md) |
 

@@ -3,7 +3,7 @@
 # https://oss.oracle.com/licenses/upl/
 
 """
-Locus - the Oracle Generative AI Agentic Harness: the agent framework where the model never holds the trigger.
+The Oracle Generative AI – Multi-Agent Locus SDK: the agent framework where the model never holds the trigger.
 
 Every consequential action clears a policy check first: real code, outside the
 model, before the side effect, on a record you can verify. Around that gate sits

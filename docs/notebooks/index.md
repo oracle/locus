@@ -38,7 +38,7 @@ python -m pip install -e ".[oci,oracledb]"
 python examples/<file>.py
 ```
 
-!!! tip "New to Locus?"
+!!! tip "New to the SDK?"
     Begin with [Start here](#start-here) (the agent loop, tools, memory,
     streaming, hooks, and termination), then [Multi-agent shapes](#multi-agent-shapes)
     and [Oracle Cloud and Database 26ai](#oracle-cloud-and-database-26ai). The
@@ -102,14 +102,14 @@ The series runs 01 to 89, ordered by topic: start here, the multi-agent shapes, 
 - **34 · [OCI Responses](notebook_34_oci_responses.md)** — reach Responses-only OCI GenAI models with ``OCIResponsesModel``
 - **35 · [OCI Dedicated AI Cluster](notebook_35_oci_dac.md)** — target an Oracle Cloud Infrastructure (OCI) Dedicated AI Cluster endpoint
 - **36 · [OCI tools — drive the control plane](notebook_36_oci_tools.md)** — drive the OCI control plane from natural language with `use_oci` and `describe_oci`
-- **37 · [Oracle 26ai store](notebook_37_oracle_store.md)** — a Locus agent with cross-thread memory on Oracle 26ai
-- **38 · [Oracle 26ai RAG](notebook_38_oracle_26ai_rag.md)** — a Locus agent that retrieves over Oracle Database 26ai
-- **39 · [Oracle ADB loader](notebook_39_oracle_adb_loader.md)** — a Locus agent that pulls rows from Autonomous Database
-- **40 · [Oracle in-DB chunker](notebook_40_oracle_indb_chunker.md)** — a Locus agent driving an in-database chunker
-- **41 · [Oracle in-DB embeddings](notebook_41_oracle_indb_embeddings.md)** — a Locus agent doing data-residency-aware RAG in-database
+- **37 · [Oracle 26ai store](notebook_37_oracle_store.md)** — an agent with cross-thread memory on Oracle 26ai
+- **38 · [Oracle 26ai RAG](notebook_38_oracle_26ai_rag.md)** — an agent that retrieves over Oracle Database 26ai
+- **39 · [Oracle ADB loader](notebook_39_oracle_adb_loader.md)** — an agent that pulls rows from Autonomous Database
+- **40 · [Oracle in-DB chunker](notebook_40_oracle_indb_chunker.md)** — an agent driving an in-database chunker
+- **41 · [Oracle in-DB embeddings](notebook_41_oracle_indb_embeddings.md)** — an agent doing data-residency-aware RAG in-database
 - **42 · [Oracle 26ai checkpointer](notebook_42_oracle_26ai_checkpointer.md)** — durable agent threads on Oracle Database 26ai
 - **43 · [Oracle versioned saver](notebook_43_oracle_versioned_saver.md)** — versioned agent history on Oracle Database 26ai
-- **44 · [Oracle agent memory](notebook_44_oracle_agent_memory.md)** — a Locus agent with Oracle's official agent-memory client
+- **44 · [Oracle agent memory](notebook_44_oracle_agent_memory.md)** — an agent with Oracle's official agent-memory client
 - **45 · [Cohere reranker on Oracle 26ai](notebook_45_cohere_reranker.md)** — retrieve-then-rerank on Oracle 26ai with Cohere Reranker V4
 
 ## The harness — tools, skills, memory, RAG, reasoning

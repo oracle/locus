@@ -1,6 +1,6 @@
 # Model providers
 
-Locus supports OCI Generative AI, OpenAI and Anthropic directly, and
+The SDK supports OCI Generative AI, OpenAI and Anthropic directly, and
 OpenRouter, Together.ai and other hosted or self-hosted services through
 named OpenAI-compatible prefixes. The same `Agent` code works against any of
 them; only the model object changes. This notebook builds one
@@ -11,7 +11,7 @@ residency or an outage failover) without rewriting the agent.
 The model object is the seam. Fleet-wide controls such as virtual keys,
 per-team budgets, fallback chains and shared observability belong at an AI
 gateway in front of the providers rather than in each agent; the
-[LiteLLM AI Gateway](notebook_66_litellm_gateway.md) notebook runs Locus
+[LiteLLM AI Gateway](notebook_66_litellm_gateway.md) notebook runs the SDK
 behind one.
 
 Provider matrix:
@@ -103,7 +103,7 @@ LOCUS_MODEL_PROVIDER=openai LOCUS_MODEL_ID=gpt-4o python examples/notebook_11_mo
 
 - [Notebook 01 — OCI transports](notebook_01_oci_transports.md) — the three
   OCI model classes and the transport the `oci:` prefix picks
-- [Notebook 66 — LiteLLM AI Gateway](notebook_66_litellm_gateway.md) — Locus
+- [Notebook 66 — LiteLLM AI Gateway](notebook_66_litellm_gateway.md) — the SDK
   behind a gateway that carries keys, budgets and fallbacks
 - [Concepts: Model providers](../concepts/models.md) — the provider tree,
   self-hosted prefixes and custom providers

@@ -15,7 +15,7 @@ the subject is the Specialist API itself.
 
 What this notebook covers:
 
-- `Specialist` — a Locus agent role: a Pydantic model that pairs role metadata
+- `Specialist` — an agent role: a Pydantic model that pairs role metadata
   (`specialist_type`, `description`) with a system prompt, a tool list, an
   iteration budget and a `confidence_threshold`.
 - `Playbook` + `PlaybookStep` — encode a procedure as typed data: preconditions,

@@ -10,7 +10,7 @@ OCI GenAI exposes two serving modes:
   (`ocid1.generativeaiendpoint.oc1.<region>....`). Inference is routed
   to your cluster, with predictable latency and isolation guarantees.
 
-Locus, the Oracle Generative AI Agentic Harness, auto-routes DAC endpoint
+The Oracle Generative AI – Multi-Agent Locus SDK auto-routes DAC endpoint
 OCIDs to the SDK transport (`OCIModel`)
 because the V1 OpenAI-compatible endpoint doesn't speak
 `DedicatedServingMode`. Pass the endpoint OCID exactly the way you'd

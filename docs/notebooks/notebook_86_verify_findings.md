@@ -1,6 +1,6 @@
 # Verify findings before you act on them
 
-A Locus `Evidence` is a *claim*. Before you act on it, `verify()` puts it through
+An `Evidence` is a *claim*. Before you act on it, `verify()` puts it through
 an independent skeptic that challenges the evidence and re-grades confidence. A
 well-grounded finding **survives**; an unsupported one is **refuted**, with the
 objections listed. `verify()` only returns the verdict: gate the action on
@@ -8,10 +8,10 @@ objections listed. `verify()` only returns the verdict: gate the action on
 `EvidenceQualitySkeptic`, is deterministic and offline: it grades the evidence a
 finding carries and does not check that the references are real.
 
-`verify()` takes a Locus `Evidence` *or* a finding-shaped mapping (a plain
+`verify()` takes an `Evidence` *or* a finding-shaped mapping (a plain
 `dict` in this notebook), read through the keys `title`, `severity`,
 `gsar_score`, `evidence_refs` and `confidence`, so a finding produced outside
-Locus goes through the same challenge. A key the mapping lacks counts as
+the SDK goes through the same challenge. A key the mapping lacks counts as
 absent: no `evidence_refs` means no references, and no `gsar_score` means a
 grounding score of 0.00. The notebook verifies three findings: the first
 `Evidence` that `red_team` reports against a deliberately naive bot (survives),
@@ -20,7 +20,7 @@ carries one reference but was never grounded (refuted).
 
 What this notebook covers:
 
-- `verify(finding)` on a Locus `Evidence` and on two finding-shaped dicts, with
+- `verify(finding)` on an `Evidence` and on two finding-shaped dicts, with
   the default panel of a single `EvidenceQualitySkeptic`.
 - The `VerificationResult` fields the script reads: `survives`, `confidence`
   and the `refutations` list, where each `Refutation` pairs a `weight` (`weak`,

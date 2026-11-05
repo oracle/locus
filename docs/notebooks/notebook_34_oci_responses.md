@@ -1,6 +1,6 @@
 # OCIResponsesModel
 
-`OCIResponsesModel` is the Locus client for Oracle Cloud Infrastructure
+`OCIResponsesModel` is the client for Oracle Cloud Infrastructure
 (OCI) Generative AI's Responses endpoint
 (`/openai/v1/responses`). Use it to reach Responses-only OCI models
 (such as `openai.gpt-5.5-pro`) or to let OCI hold the conversation
@@ -10,7 +10,7 @@ thread so multi-turn payloads stay small. Two modes:
   out on every request, the agent sends the full history each turn and
   OCI keeps nothing. Works in every tenancy, including those with ZDR
   enforced.
-- **`store=True`** — the class default. OCI holds the thread; Locus
+- **`store=True`** — the class default. OCI holds the thread; the SDK
   passes `previous_response_id` between turns and only the latest turn
   goes on the wire. Requires a non-ZDR tenancy.
 
@@ -35,7 +35,7 @@ What this notebook covers:
 
 - Part 1: stateless multi-turn (`store=False`)
 - Part 2: server-stateful multi-turn with continuation id (`store=True`)
-- Part 3: tool round-trip — model emits `function_call`, Locus posts
+- Part 3: tool round-trip — model emits `function_call`, the SDK posts
   back `function_call_output`
 - Part 4: streaming through `OCIResponsesModel.stream`
 
@@ -71,7 +71,7 @@ new user message and hands the continuation id back through
 {{ locus_source examples/notebook_34_oci_responses.py::part2_server_state_multiturn }}
 
 The tool round-trip runs through a plain `Agent`: the model emits a
-`function_call` item, Locus runs the tool client-side and posts back a
+`function_call` item, the SDK runs the tool client-side and posts back a
 `function_call_output`, and the agent code is the same as with any other
 model:
 

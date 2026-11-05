@@ -55,7 +55,7 @@ agent, and every call still passes through the harness's single gate.
     [permissions page](https://docs.oracle.com/en-us/iaas/Content/generative-ai/sandbox-permissions.htm)
     lists the operation behind each verb.
 
-3. **Authentication**, the same choices as the rest of Locus: an
+3. **Authentication**, the same choices as the rest of the SDK: an
    `~/.oci/config` profile with an API key or a session token, an instance
    principal, or a resource principal.
 4. **The SDK with the sandbox client.** The `oci-sandbox` extra pins an

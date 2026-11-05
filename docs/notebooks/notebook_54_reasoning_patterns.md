@@ -1,6 +1,6 @@
 # Reasoning Patterns
 
-Walks the Locus reasoning toolkit one piece at a time against a
+Walks the reasoning toolkit one piece at a time against a
 data-privacy postmortem: a privacy-team exercise seeded a synthetic
 personally identifiable information (PII) canary, a fabricated Social
 Security number, into a data export and the redaction pipeline never

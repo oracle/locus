@@ -1,7 +1,7 @@
 # Termination
 
 When does an agent stop — the refund resolved, the deploy verified,
-the incident contained? Locus
+the incident contained? The SDK
 answers that with a typed, composable **algebra of stop conditions** —
 small classes that each return `True` when the run should end, combined
 with `&` (and) and `|` (or).

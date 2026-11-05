@@ -1,12 +1,12 @@
 # Threat scenarios — the coverage matrix
 
-Locus encodes three published threat catalogues as typed enums in
+The SDK encodes three published threat catalogues as typed enums in
 [`locus.control.taxonomy`](security.md#threat-taxonomy): the **OWASP Top 10
 for LLM Applications (2025)**, the **OWASP Top 10 for Agentic Applications
 (2026)**, and **MITRE ATLAS**. For each item there is a small, standalone
 **scenario gist** — it states one threat, shows an agent hitting it, and shows
-the Locus defense stopping it. This page is the security-domain application of
-the same general policy/audit machinery every Locus agent uses — the catalogues
+the defense stopping it. This page is the security-domain application of
+the same general policy/audit machinery every agent uses — the catalogues
 just name the threats. (For developers outside security: OWASP publishes
 community-standard top-10 risk lists for web and AI applications; MITRE ATLAS
 catalogues real-world attack techniques against AI systems.)
@@ -14,7 +14,7 @@ catalogues real-world attack techniques against AI systems.)
 {{ locus_diagram threat-coverage }}
 
 Every gist is **runnable offline with no credentials**. Together they map
-*every* ID encoded in Locus's three taxonomy enums (`OwaspLLM`, `OwaspASI`,
+*every* ID encoded in the SDK's three taxonomy enums (`OwaspLLM`, `OwaspASI`,
 and `AtlasTechnique`) to at least one runnable example, and a single runner
 checks that mapping on every run. The OWASP LLM/ASI enums encode their full
 published top-10s; `AtlasTechnique` encodes a representative subset of MITRE

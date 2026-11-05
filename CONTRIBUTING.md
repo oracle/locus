@@ -1,6 +1,6 @@
 # Contributing
 
-Locus is open to everyone. The bar everywhere: *a result ships on evidence or
+The Oracle Generative AI – Multi-Agent Locus SDK is open to everyone. The bar everywhere: *a result ships on evidence or
 it abstains; a side effect runs only gated and audited.* New probes prove their
 success with an observable effect, and new actions go through `admit()`.
 

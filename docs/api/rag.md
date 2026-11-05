@@ -1,6 +1,6 @@
 # RAG
 
-Retrieval-augmented generation (RAG): Locus's RAG stack is built
+Retrieval-augmented generation (RAG): the SDK's RAG stack is built
 around pluggable embedders and vector stores behind one interface. The `BaseVectorStore` / `BaseEmbedding`
 contracts are identical across backends so you can swap stores with a
 one-line import change.

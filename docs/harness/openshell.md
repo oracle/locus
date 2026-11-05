@@ -4,7 +4,7 @@
 behind a gateway, scoped to a workspace: each sandbox is a container the
 gateway starts and confines, and a client reaches it only through the
 gateway. `OpenShellBackend` makes one the workspace of the
-[coding harness](../harness.md); the Locus gateway and the
+[coding harness](../harness.md); the gateway and the
 [box runner](../runner.md) run the same tools in the same sandboxes.
 
 <dl class="locus-facts" markdown="block">

@@ -1,6 +1,6 @@
 # Anthropic
 
-The Anthropic provider connects Locus directly to Anthropic's API (`api.anthropic.com`). Use it when you want **the Claude family** —
+The Anthropic provider connects the SDK directly to Anthropic's API (`api.anthropic.com`). Use it when you want **the Claude family** —
 Opus for the hardest problems, Sonnet as the everyday workhorse,
 Haiku for high-volume cheap calls — and want to talk to Anthropic
 without going through an intermediary.

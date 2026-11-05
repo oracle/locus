@@ -4,8 +4,8 @@
 edit, search, a shell — written once against a workspace protocol and run
 unchanged on the host, in memory, or inside a sandbox:
 [OCI GenAI Sandboxes](harness/oci-sandbox.md) in your tenancy, or
-[NVIDIA OpenShell](harness/openshell.md) behind a gateway. locus-code is a UI
-over it; the Locus gateway runs the same tools inside OpenShell sandboxes.
+[NVIDIA OpenShell](harness/openshell.md) behind a gateway. locus-code is an UI
+over it; the gateway runs the same tools inside OpenShell sandboxes.
 
 ## Build a harness
 

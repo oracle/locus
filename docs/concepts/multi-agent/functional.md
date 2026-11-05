@@ -1,6 +1,6 @@
 # Functional API
 
-The functional API is the Locus's "agent as a task" shape — `@task` and `@entrypoint` decorators
+The functional API is the SDK's "agent as a task" shape — `@task` and `@entrypoint` decorators
 that bring agent runs into the regular asyncio universe.
 
 {{ locus_diagram functional }}

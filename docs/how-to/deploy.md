@@ -15,7 +15,7 @@ secret.
 | Secrets | The provider credential for your tab (table below); `LOCUS_SERVER_API_KEY` for callers |
 
 Those two credentials serve different trust boundaries. The provider
-credential lets the application call its model. The Locus server key is the
+credential lets the application call its model. The server key is the
 bearer token clients send to `/invoke`, `/stream`, and thread routes.
 
 ## The shape you ship

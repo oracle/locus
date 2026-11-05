@@ -1,6 +1,6 @@
 # Prompts
 
-The model in a Locus agent
+The model in an agent
 sees three sources of prompt content, in this order, every iteration:
 
 1. The **system prompt** — `Agent(system_prompt=...)`. Stable across

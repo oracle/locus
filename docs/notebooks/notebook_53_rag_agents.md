@@ -4,14 +4,13 @@ Once your runbooks are in a vector store (the [RAG basics](notebook_51_rag_basic
 and [RAG providers](notebook_52_rag_providers.md) notebooks), the next step is to
 let an agent reach into it, so that an incident answer cites your runbooks instead
 of model memory. This is Retrieval-Augmented Generation (RAG) as an agent tool:
-`RAGRetriever.as_tool()` turns the retriever into an ordinary Locus tool that the
+`RAGRetriever.as_tool()` turns the retriever into an ordinary tool that the
 agent picks up alongside any other `@tool` you define. ATLAS is the platform
 team's on-call Site Reliability Engineering (SRE) copilot; it reads the Index,
 the internal runbook knowledge base.
 
 Backend: the pure-Python `InMemoryVectorStore` keeps the vectors in process,
-so the example needs no database. Swap `_make_store` for any other Locus
-vector store (`OracleVectorStore` for Oracle Database 26ai, `PgVectorStore`,
+so the example needs no database. Swap `_make_store` for any other vector store (`OracleVectorStore` for Oracle Database 26ai, `PgVectorStore`,
 `OpenSearchVectorStore`, `QdrantVectorStore`, `ChromaVectorStore`) for a
 durable backend.
 
@@ -55,7 +54,7 @@ and metadata, as the text the agent answers from:
 ## Key lines
 
 `RAGRetriever` pairs the embedder with the store, `add_documents()` fills the
-Index, and `as_tool(name, description)` returns a Locus tool. The example
+Index, and `as_tool(name, description)` returns a tool. The example
 calls that tool directly, before any agent is involved, to show the result
 shape it hands back: a `results` list of chunks, each with `content`, `score`,
 `metadata` and `id`, alongside `total`:

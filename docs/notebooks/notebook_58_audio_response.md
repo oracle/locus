@@ -3,7 +3,7 @@
 An agent often needs to speak as well as write: a recorded advisory for
 the on-call hotline, a status-page audio feed, or an interactive voice
 response (IVR) announcement about a region degradation. This notebook
-pairs a regular Locus `Agent` (text in, text out) with the SDK's
+pairs a regular `Agent` (text in, text out) with the SDK's
 `OpenAISpeechProvider`, which calls OpenAI's `/v1/audio/speech` endpoint,
 so a cloud status advisory drafted by the agent is spoken aloud.
 
@@ -89,7 +89,7 @@ afplay examples/notebook_58_response.mp3   # macOS
   the four provider protocols, the tools they register, and why the
   `speak` tool returns a summary string rather than audio.
 - [Multi-modal providers](notebook_57_multimodal_providers.md) — the four
-  provider protocols and the tools Locus registers for them on
+  provider protocols and the tools the SDK registers for them on
   `AgentConfig`; the speech provider is shown there in a wiring snippet
   (notebook 57).
 - [Audio chat](notebook_59_audio_chat.md) — one audio-capable chat call

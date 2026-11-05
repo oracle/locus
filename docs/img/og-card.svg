@@ -14,7 +14,7 @@
 
   <!-- Tagline -->
   <text x="438" y="372" font-size="30" font-weight="600" fill="#C74634" letter-spacing="0.01em">Oracle Generative AI</text>
-  <text x="438" y="408" font-size="30" font-weight="600" fill="#C74634" letter-spacing="0.01em">Agentic Harness</text>
+  <text x="438" y="408" font-size="30" font-weight="600" fill="#C74634" letter-spacing="0.01em">Multi-Agent Reasoning Orchestrator SDK</text>
 
   <!-- Install line -->
   <text x="438" y="464" font-size="28" font-weight="500" fill="#A8A29E" font-family="'JetBrains Mono', 'Menlo', monospace">$ pip install locus-sdk</text>

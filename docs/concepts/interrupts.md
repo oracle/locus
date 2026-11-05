@@ -9,7 +9,7 @@ $4,000 refund. A release manager signs off before the deploy goes
 out. Policy requires a named person between recommendation and
 action.
 
-Locus treats human approval as
+The SDK treats human approval as
 **a tool the model can call** — same shape as any other tool, except
 it surfaces a question to your app and resumes when the human
 responds.

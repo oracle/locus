@@ -1,7 +1,7 @@
 # Oracle 26ai checkpointer
 
 In-memory and on-disk checkpointers suit local development: when the
-process restarts, the conversation is gone. This notebook wires Locus's
+process restarts, the conversation is gone. This notebook wires the SDK's
 `oracle_checkpointer` into an `Agent` so the agent loop itself writes
 `AgentState` to Oracle Database 26ai on every iteration. A second
 `Agent` instance, built fresh to simulate a different process, loads

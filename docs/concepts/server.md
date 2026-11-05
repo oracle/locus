@@ -1,6 +1,6 @@
 # Agent Server
 
-`AgentServer` is the reference way to run any Locus `Agent` as a
+`AgentServer` is the reference way to run any `Agent` as a
 service — drop in an `Agent` (a refund bot, a deploy operator, an
 access-grant approver, or a SOC triage agent), and get a FastAPI app
 with `/invoke`, `/stream`, and per-thread management out of the box. It
@@ -326,7 +326,7 @@ Set `api_key` (or `LOCUS_SERVER_API_KEY`) explicitly, or put an
 auth-terminating proxy in front and pass `allow_unauthenticated=True`.
 
 Auth, rate-limiting, and request logging are FastAPI middleware
-concerns — Locus does not own
+concerns — the SDK does not own
 them. Add `slowapi`, `prometheus-fastapi-instrumentator`, or whatever
 your platform expects.
 

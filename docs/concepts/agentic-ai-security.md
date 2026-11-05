@@ -1,6 +1,6 @@
 # Agentic AI-security
 
-This page covers the separate `locus-sdk-security` package (`locus_security`), Locus's security domain — one of
+This page covers the separate `locus-sdk-security` package (`locus_security`), the SDK's security domain — one of
 several action domains (refunds, deployments, records) built on the same
 harness. It lets you build agents that test and assess other AI systems.
 
@@ -12,7 +12,7 @@ automatically and continuously, and reports only the flaws it can actually
 
 **How it works, in three steps:**
 
-1. **Point** Locus at a target AI — `Target.endpoint("https://bot.example/chat")`.
+1. **Point** the SDK at a target AI — `Target.endpoint("https://bot.example/chat")`.
 2. **Run** a job — `red_team(target)` attacks it; `assure(target)` scores its defenses.
 3. **Get evidence** — each result is an `Evidence` finding (the attack worked, here's the proof)
    or an `Abstention` (no proof, so no claim). Never a guess.
@@ -103,7 +103,7 @@ coverage = posture[0]                   # today assure runs a single assessment:
 ```
 
 Each item in that list is a *grounded finding*, not a compliance attestation.
-`assure` never asserts posture it cannot evidence — it abstains. Locus deliberately does not
+`assure` never asserts posture it cannot evidence — it abstains. The SDK deliberately does not
 do compliance attestation; its governance acts on the action itself: the
 [admission gate](#enforce-it-before-it-acts) — enforced policy, a human on
 the actions that warrant one, and a tamper-evident record.

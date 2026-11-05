@@ -1,6 +1,6 @@
 # DeepAgent
 
-Locus ships two primitives for
+The SDK ships two primitives for
 long-horizon research:
 
 | | `create_deepagent` | `create_research_workflow` |

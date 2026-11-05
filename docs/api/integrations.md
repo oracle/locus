@@ -1,14 +1,14 @@
 # Integrations
 
-Adapters that bridge Locus to external frameworks, clouds, and vendor APIs.
+Adapters that bridge the SDK to external frameworks, clouds, and vendor APIs.
 Cloud posture is one worked example domain — the same adapter pattern
 applies to any vendor API.
 
 ## FastMCP
 
-Expose a Locus agent (or any of its tools) as a Model Context Protocol
+Expose an agent (or any of its tools) as a Model Context Protocol
 server, and consume MCP tools from any compliant client as native
-Locus `Tool`s.
+`Tool`s.
 
 ::: locus.integrations.fastmcp.LocusMCPServer
 ::: locus.integrations.fastmcp.create_mcp_server
@@ -32,7 +32,7 @@ Install the extra: `pip install 'locus-sdk[oci]'`.
 ## Vendor integration examples
 
 The notebooks ship *worked* vendor integrations in
-[`examples/integrations/`][int]. Each is an ordinary Locus `@tool` following
+[`examples/integrations/`][int]. Each is an ordinary `@tool` following
 one convention — **bring your own credentials**: read the vendor key from the
 environment and call the live API when it's set, otherwise return a
 deterministic offline sample so the example runs with no account. The return

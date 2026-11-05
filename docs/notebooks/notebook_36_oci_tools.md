@@ -1,6 +1,6 @@
 # OCI tools
 
-Locus ships two built-in tools that together expose every operation of
+The SDK ships two built-in tools that together expose every operation of
 the Oracle Cloud Infrastructure (OCI) Python SDK to an agent without a
 wrapper per service. `describe_oci(service?, client?, operation?)` is
 the reference: it narrows progressively through the installed SDK,

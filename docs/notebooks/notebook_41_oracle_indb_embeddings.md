@@ -15,12 +15,11 @@ chat model the agent is configured with, so pair the pipeline with an
 OCI Generative AI model in the same region when end-to-end residency is
 required.
 
-`OracleInDBEmbeddings` is the Locus adapter. Pair it with
+`OracleInDBEmbeddings` is the adapter. Pair it with
 `OracleVectorStore`, sharing one wallet and one set of connection
 settings, and the result is a complete in-database retrieval pipeline.
 To drive it the notebook builds a `RAGRetriever` over
-`OracleInDBEmbeddings` and `OracleVectorStore` and hands it to a Locus
-`Agent` through `create_rag_tool(retriever, ..., limit=3)`. Each
+`OracleInDBEmbeddings` and `OracleVectorStore` and hands it to an `Agent` through `create_rag_tool(retriever, ..., limit=3)`. Each
 retrieval is two SQL statements, both executed inside the database: the
 query text goes in once, and only its vector and the ranked rows come
 back; there is no external embedding endpoint and no Python embedding

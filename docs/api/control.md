@@ -86,7 +86,7 @@ the agent to wait for a decision that is not coming.
 
 `ApprovalBridge` is a structural `Protocol` with no import-time dependency, so
 any approval queue with `submit` and `state` methods satisfies it. The two
-stores Locus ships, `InMemoryApprovals` and `FileApprovals`, satisfy it too;
+stores the SDK ships, `InMemoryApprovals` and `FileApprovals`, satisfy it too;
 see [Pausing until someone decides](#pausing-until-someone-decides).
 
 ::: locus.control.gate.ApprovalBridge

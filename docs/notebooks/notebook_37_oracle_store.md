@@ -1,6 +1,6 @@
 # Oracle 26ai cross-thread memory agent
 
-A Locus `Agent` with cross-thread long-term memory backed by
+An `Agent` with cross-thread long-term memory backed by
 `OracleStore`. Where the [Oracle 26ai checkpointer](notebook_42_oracle_26ai_checkpointer.md)
 persists *per-thread* state, `OracleStore` persists *cross-thread*
 facts. The agent reaches it through `LLMMemoryManager`, which extracts

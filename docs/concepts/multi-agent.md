@@ -4,7 +4,7 @@ title: Multi-agent workflows
 
 # Multi-agent workflows
 
-Multi-agent workflows are first-class in Locus: eight shapes you compose
+Multi-agent workflows are first-class in the SDK: eight shapes you compose
 in one process or scale across a mesh, plus the Functional API for
 hand-written asyncio glue, every one backed by the same `Agent` class, the
 same event stream, and the same primitives. Compose the shape that fits

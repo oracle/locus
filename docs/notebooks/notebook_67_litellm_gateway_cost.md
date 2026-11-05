@@ -5,7 +5,7 @@ notebook](notebook_66_litellm_gateway.md) for the question a platform
 owner asks once agents run unattended: who spent what on which model. It
 issues budget-capped virtual keys for two sample payments teams, drives
 traffic on each, and reads the gateway's spend records back. None of it
-needs Locus integration code: the gateway is the source of truth.
+needs SDK integration code: the gateway is the source of truth.
 
 The gateway prices every request a virtual key makes and writes it to its
 Postgres store, and it enforces the `max_budget` on each key from the same
@@ -54,7 +54,7 @@ export LITELLM_GATEWAY_URL="http://localhost:4000"
 ```
 
 The drawing is shared with the LiteLLM AI Gateway notebook, so it accents
-the Locus agent. The callers in this notebook are the "Other services"
+the agent. The callers in this notebook are the "Other services"
 box above it in the "Your services" lane: plain OpenAI-shaped requests
 from `httpx` that carry only a team's virtual key. The element to look at
 is the Postgres store beneath the gateway. The gateway resolves the
@@ -98,8 +98,7 @@ python examples/notebook_67_litellm_gateway_cost.py
 ```
 
 The script talks to a running LiteLLM AI Gateway over HTTP with `httpx`
-and does not use the shared `examples/config.py` harness or any Locus
-model class, so `LOCUS_MODEL_PROVIDER` plays no part and there is no mock
+and does not use the shared `examples/config.py` harness or any model class, so `LOCUS_MODEL_PROVIDER` plays no part and there is no mock
 fallback. It reads `LITELLM_GATEWAY_URL` and `LITELLM_MASTER_KEY` from the
 Prerequisites; the master key is required because `/key/generate` and the
 spend endpoints are admin calls. The upstream provider keys are read by
@@ -112,7 +111,7 @@ logger to flush, and then prints the three spend views.
 ## See also
 
 - [LiteLLM AI Gateway](notebook_66_litellm_gateway.md) — the gateway
-  integration Locus consumers see: `OpenAIModel(base_url=...)` against
+  integration SDK consumers see: `OpenAIModel(base_url=...)` against
   the same gateway.
 - [LiteLLM AI Gateway how-to](../how-to/litellm-gateway.md) — when to
   use the gateway, the authentication boundary, the

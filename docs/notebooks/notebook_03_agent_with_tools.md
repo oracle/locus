@@ -1,7 +1,7 @@
 # Agent with Tools
 
 Plain Python functions, decorated with `@tool`, become tools the agent
-can call. The model decides when to use them; Locus runs them and feeds
+can call. The model decides when to use them; the SDK runs them and feeds
 the result back into the next model call. This is what turns a language
 model into an agent.
 

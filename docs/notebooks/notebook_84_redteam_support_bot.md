@@ -6,7 +6,7 @@ before it goes live: can someone **inject instructions** into it (directly, or
 via a poisoned knowledge-base document), and can they make it **leak data** it
 was told to protect?
 
-This notebook points Locus at a support bot and runs the `owasp-asi` probe
+This notebook points the SDK at a support bot and runs the `owasp-asi` probe
 suite (`suite="owasp-asi"`, all six bundled probes; `suite="owasp-llm"` runs
 the four-probe LLM-application subset), then prints graded results — an
 `Evidence` (the attack landed, carrying its grounding score and evidence

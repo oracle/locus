@@ -1,6 +1,6 @@
 # Oracle 26ai versioned checkpoint agent
 
-A Locus `Agent` paired with the versioned `OracleCheckpointSaver`. The
+An `Agent` paired with the versioned `OracleCheckpointSaver`. The
 agent runs three turns; after each one, the post-turn `AgentState` is
 serialised with `AgentState.to_checkpoint` and written to the saver
 with a monotonic `checkpoint_id` and a parent link. The result is an

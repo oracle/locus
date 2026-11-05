@@ -21,7 +21,7 @@ neither the orchestrator nor the specialist calls it for you.
 What this notebook covers:
 
 - `Specialist` — a domain-focused agent with tools, a system prompt and a
-  confidence threshold. Locus ships pre-built ones for logs, metrics,
+  confidence threshold. The SDK ships pre-built ones for logs, metrics,
   traces and code (`create_log_analyst`, `create_metrics_analyst`,
   `create_trace_analyst`, `create_code_analyst`), useful evidence
   sources when tracing where personal data flows.

@@ -2,11 +2,13 @@
 hide:
   - navigation
   - toc
-description: "Oracle Generative AI Agentic Harness. One Agent class, eight ways to combine agents, Oracle Cloud underneath: OCI Generative AI, Oracle Database 26ai, OCI GenAI Sandboxes, an admission gate in front of every consequential action."
+description: "Oracle Generative AI Multi-Agent Reasoning Orchestrator SDK. One Agent class, eight ways to combine agents, Oracle Cloud underneath: OCI Generative AI, Oracle Database 26ai, OCI GenAI Sandboxes, an admission gate in front of every consequential action."
 ---
 
 <div class="locus-hero" markdown>
 <div class="locus-hero__copy" markdown>
+
+<p class="locus-hero__kicker">Oracle Generative AI Multi-Agent Reasoning Orchestrator SDK</p>
 
 # Multi-agent workflows built for <span class="accent">production.</span>
 
@@ -89,7 +91,7 @@ setup.
 
 ## Build it with Codex
 
-[OpenAI Codex](https://developers.openai.com/codex) builds on Locus. The
+[OpenAI Codex](https://developers.openai.com/codex) builds on the SDK. The
 repository ships a Codex skill that teaches it the SDK: the `Agent` and its
 tools, the admission gate, the multi-agent shapes, memory and RAG on Oracle
 Database 26ai, the coding harness, the model providers, offline tests with
@@ -111,7 +113,7 @@ denying, and the rogue-agent challenge, each step with a checkpoint a person
 can follow by hand.
 
 [Build it with Codex →](how-to/codex.md) ·
-[The Locus skill →](https://github.com/oracle/locus/tree/HEAD/.agents/skills/locus) ·
+[The Codex skill →](https://github.com/oracle/locus/tree/HEAD/.agents/skills/locus) ·
 [Codex on OCI Generative AI →](how-to/codex.md#codex-on-oci-generative-ai) ·
 [The scenarios →](how-to/codex.md#scenarios) ·
 [`codex/` in the repository →](https://github.com/oracle/locus/tree/HEAD/codex)
@@ -187,7 +189,7 @@ runs the full example.
 
     Reviewers read a vendor data-processing agreement, a gate rule pauses for
     human counsel while any blocker is open and re-reviews the redline, and
-    the sign-off is a `ContractDecision`: Locus validates it against the
+    the sign-off is a `ContractDecision`: the SDK validates it against the
     schema, feeds validation errors back to the model for repair, and
     otherwise returns `parsed=None` with the parse error, never an
     unvalidated record.

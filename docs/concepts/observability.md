@@ -6,7 +6,7 @@ title: Observability
 
 What the agent did, how long each step took, and what it cost — two
 built-in hooks plus the standard OpenTelemetry stack cover logs, traces
-and metrics, and every result carries its token and cost totals. Locus
+and metrics, and every result carries its token and cost totals. The SDK
 emits OTLP (the OpenTelemetry wire protocol), so any OpenTelemetry
 backend works.
 
@@ -167,12 +167,12 @@ print(f"cost_usd:   {result.metrics.cost_usd}")
 ```
 
 `cost_usd` is the spend in USD, computed from the model's
-per-million-token prices in Locus's model metadata. Like the token
+per-million-token prices in the SDK's model metadata. Like the token
 counts, it adds up across turns when you resume a checkpointed
 `thread_id`, so on a resumed thread it is the thread's total so far,
 not just the latest turn's. It is `None` —
 unpriced, never free — when those prices are unknown. The built-in
-table prices only some models. Lookup strips Locus's own provider
+table prices only some models. Lookup strips the SDK's own provider
 prefixes (`openai:`, `anthropic:` and the OpenAI-compatible routing
 prefixes such as `vllm:` or `openrouter:`) and then needs an entry for
 the slug that remains: a dated snapshot or `-latest` suffix resolves to

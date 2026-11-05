@@ -1,6 +1,6 @@
 # Streaming
 
-Every Locus agent emits a typed event stream as it runs — a live,
+Every agent emits a typed event stream as it runs — a live,
 ordered trace of what the agent is doing. Each step (every model call,
 every tool call such as `issue_refund` or `deploy_service`) lands as a
 timestamped event the instant it happens, in the order it happened. The

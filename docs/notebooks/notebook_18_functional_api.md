@@ -4,7 +4,7 @@ Express a payment dispute triage workflow as decorated async functions
 instead of a graph. When `StateGraph` is more than a straight-line
 dispute pipeline needs, the functional API lets you write the same
 workflow as ordinary Python: decorate the units of work with `@task`,
-decorate the orchestrator with `@entrypoint`, and Locus records timing
+decorate the orchestrator with `@entrypoint`, and the SDK records timing
 and applies retries and caching without a graph object. The scenario
 here is payments operations: fetch the transaction, look up a risk
 score, and assess the dispute.

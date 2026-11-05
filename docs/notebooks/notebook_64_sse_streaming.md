@@ -2,7 +2,7 @@
 
 Server-Sent Events (SSE) push live payment-review updates from a Python
 backend to a payments operations dashboard over a single HTTP response, one
-frame per event. Locus ships two handlers that turn the agent event stream
+frame per event. The SDK ships two handlers that turn the agent event stream
 into SSE wire format: a buffered `SSEHandler` for short runs and tests, and a
 queue-based `AsyncSSEHandler` for production streaming.
 

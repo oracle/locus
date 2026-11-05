@@ -3,7 +3,7 @@
 When a Payment Card Industry Data Security Standard (PCI DSS) assessor
 asks "what can your payment agents do, and how would you know they did
 it?", the answer is the event catalogue, generated from the code itself
-rather than from a spreadsheet that drifts out of date. Locus components
+rather than from a spreadsheet that drifts out of date. SDK components
 emit typed events under a stable prefix per subsystem, and most of the
 names are declared as `EV_*` constants in `locus.observability.emit`, so
 changing a constant propagates to every emission site that imports it.

@@ -1,6 +1,6 @@
 # The agent loop
 
-Every Locus agent runs the same
+Every agent runs the same
 loop. Three nodes (`Think → Execute → Reflect`), a termination check at
 the top of every iteration, an optional grounding pass on the final
 answer, one router that decides what runs next, one typed event stream,

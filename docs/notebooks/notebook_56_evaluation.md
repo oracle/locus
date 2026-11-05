@@ -4,7 +4,7 @@ Treat WARDEN, the tier-1 data-access reviewer, like any other piece of
 code: declare cases, run them, read the report. A prompt or model change
 that quietly starts approving exports of raw customer data, or asserting
 findings no facts support, fails the suite before it reaches production.
-Locus ships a small evaluation harness as part of the SDK, so you do not
+The SDK ships a small evaluation harness as part of the SDK, so you do not
 need an external evaluation framework for the common cases.
 
 WARDEN classifies each data-handling request as `ALLOW` or `BLOCK`. The

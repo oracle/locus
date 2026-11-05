@@ -1,6 +1,6 @@
 # Basic agent
 
-The smallest end-to-end Locus example. Build LEDGER, a tier-1
+The smallest end-to-end example. Build LEDGER, a tier-1
 transaction-triage agent for a payments team, send it a prompt two ways
 (blocking and streaming), and look at what comes back.
 

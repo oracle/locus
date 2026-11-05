@@ -1,9 +1,9 @@
 # Long-term memory
 
-A Locus SDK agent is stateless
+An agent built with the SDK is stateless
 between sessions by default. Checkpointing preserves the full message
 history for one thread, but the pricing exceptions learned handling
-customer A are invisible when helping customer B — and when a thread is
+customer An are invisible when helping customer B — and when a thread is
 deleted, everything the agent learned goes with it.
 
 `MemoryManager` fills that gap. It runs two lifecycle hooks

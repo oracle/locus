@@ -1,7 +1,7 @@
 # Agent server
 
 This notebook deploys an on-call incident triage copilot as an HTTP API.
-`AgentServer` wraps a Locus `Agent` in a FastAPI app with a synchronous
+`AgentServer` wraps an `Agent` in a FastAPI app with a synchronous
 `/invoke` route, a `/stream` route that returns Server-Sent Events (SSE),
 and `/threads` routes that read the agent's checkpointer directly. Here the
 checkpointer is Redis-backed, so an incident thread outlives any one server
@@ -43,12 +43,12 @@ concept page).
 When to use `AgentServer` vs `A2AServer`:
 
 - **AgentServer**: first-party HTTP API with bearer-token authentication
-  and persisted threads. Use it when Locus is the system of record and the
+  and persisted threads. Use it when the SDK is the system of record and the
   clients are yours (a PagerDuty webhook or a deploy dashboard).
 - **A2AServer**: cross-framework interoperability over the
   [A2A (Agent-to-Agent)](../concepts/multi-agent/a2a.md) message
   specification. Use it when an agent runtime that speaks A2A needs to
-  call your Locus agent.
+  call your agent.
 
 ## Prerequisites
 
@@ -126,7 +126,7 @@ LOCUS_NOTEBOOK_BOOT=1 python examples/notebook_65_agent_server.py
 - [Checkpointers](../concepts/checkpointers.md) — the backends an
   incident thread can be persisted in, Redis among them.
 - [SSE streaming](notebook_64_sse_streaming.md) — the SSE wire format and
-  the Locus handlers for it.
+  the handlers for it.
 - [A2A protocol](notebook_30_a2a_protocol.md) — `A2AServer`, the
   cross-framework alternative.
 

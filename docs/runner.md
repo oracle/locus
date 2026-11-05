@@ -1,7 +1,7 @@
 # The box runner
 
 `python -m locus.runner` (also installed as `locus-runner`) is one agent's loop,
-running inside an NVIDIA OpenShell sandbox for one run. A Locus gateway starts
+running inside a NVIDIA OpenShell sandbox for one run. A gateway starts
 it as the sandbox's command. The gateway stays the control plane: it decides
 every call, performs the tools a box must not, keeps the run's checkpoints and
 writes every record. The runner holds no policy, no model key and no audit

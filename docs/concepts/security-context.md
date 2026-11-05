@@ -168,7 +168,7 @@ lists every field. To enforce a custom policy, call `approve(action, policy=…,
 finding=…, verdict=…)` directly — `ctx.actions.request_approval` is the
 convenience wrapper around it.
 
-`verify()` does not need a finding built by Locus: it accepts a Locus `Evidence`
+`verify()` does not need a finding built by the SDK: it accepts an `Evidence`
 **or any finding-shaped dict** (it reads `title`, `severity`, `gsar_score`,
 `evidence_refs` and `confidence`), so you can verify results that another part of
 your pipeline produced.
@@ -202,7 +202,7 @@ This is what turns this call path from *advisory* into *enforced*: `execute()`
 does not invoke its supplied side effect until the configured checks clear.
 Other direct call paths remain the application's responsibility. It's the
 admission-controller pattern (think Kubernetes admission webhooks) applied to
-agent actions, and it's what makes Locus a *runtime* rather than a library of
+agent actions, and it's what makes the SDK a *runtime* rather than a library of
 trust functions.
 
 ### A policy matches labels, not names
@@ -213,7 +213,7 @@ of the action or the tool performing it — it reasons about what the action **i
 its `environment`, its `kind`, its `blast_radius`, and any `tags`.
 
 This has a consequence worth stating plainly: **an action that declares nothing
-cannot be gated by label.** Rather than guess a plausible-looking default, Locus
+cannot be gated by label.** Rather than guess a plausible-looking default, the SDK
 labels it `environment: "unknown"` — a deliberate default that matches no rule
 written for `production`. Writing `require_human_for={"production"}` and
 expecting it to catch an undeclared action is the mistake to avoid.

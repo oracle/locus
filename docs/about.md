@@ -1,11 +1,11 @@
 ---
-title: About Locus — maintainers, history, and project health
-description: Who maintains Locus, where it came from, and how releases, security reports, and contributions are managed.
+title: About the SDK — maintainers, history, and project health
+description: Who maintains the Oracle Generative AI – Multi-Agent Locus SDK, where it came from, and how releases, security reports, and contributions are managed.
 ---
 
-# About Locus
+# About the Oracle Generative AI – Multi-Agent Locus SDK
 
-Locus is the Oracle Generative AI Agentic Harness: one `Agent` class, eight
+The SDK is an agentic harness: one `Agent` class, eight
 multi-agent shapes, and the runtime around the model — tools, memory, RAG,
 observability, guardrails and an admission gate with a signed audit trail —
 built first-class for **OCI Generative AI** (including Dedicated AI Clusters)
@@ -17,7 +17,7 @@ visible in the repository's
 
 ## Project history
 
-Locus began at Oracle as `locus-sdk` (the `0.x` line, UPL-1.0). From June to
+The project began at Oracle as `locus-sdk` (the `0.x` line, UPL-1.0). From June to
 October 2026 development continued outside Oracle as `tulip-agents` under the
 tuliplabs-ai GitHub organisation (`1.0.0` – `2.28.0`, Apache-2.0), where the
 admission gate, the control layer, playbooks, the coding harness and most of

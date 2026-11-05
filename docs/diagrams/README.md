@@ -28,7 +28,7 @@ the old diagrams sat on a white card in dark mode. The hook also prefixes every
    depicts in a comment at the top (see `agent-loop.svg`).
 4. **Colour is never the only cue.** A status node or edge also carries its
    word: allow, hold, deny, abstain.
-5. **Pink means Locus or "look here".** Use `.primary` for the one node the
+5. **Pink means the SDK or "look here".** Use `.primary` for the one node the
    diagram is about, not for every box.
 6. **Nothing overlaps or clips.** Labels sit in clear space on a `label-bg`
    knockout, never on a node or another label; text stays inside its node and
