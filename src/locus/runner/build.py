@@ -116,8 +116,14 @@ class Runtime:
         return self.manifest.run_id
 
     def drain_execs(self) -> list[ExecRecord]:
-        """Take the exec records gathered so far."""
-        taken, self.execs = self.execs, []
+        """Take the exec records gathered so far.
+
+        The harness appends to this very list (``HarnessConfig(on_exec=execs.append)``),
+        so it is emptied in place rather than replaced: a new list would leave the sink
+        writing to the old one, and every record after the first drain would be lost.
+        """
+        taken = list(self.execs)
+        self.execs.clear()
         return taken
 
 
