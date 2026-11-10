@@ -32,6 +32,11 @@ Grading rules (see :class:`EvalRunner` for the reasons):
   them, by code where the figures line up and by the judge otherwise;
   ``forbidden_tools`` and ``expected_refusals`` read what the control layer
   did; ``max_total_tokens`` and ``max_cost_usd`` read the run's metrics.
+- One reading is one opinion. ``repeats=`` runs every case several times
+  and a case passes only when every graded reading passed (pass^k), with a
+  ``consistency`` report saying whether the judge or the agent varied;
+  ``judges=`` grades every answer with a panel and records their agreement
+  and a trust decision between the first two.
 - A judge that answers with something that is not a verdict has not graded
   the case. The result carries ``not_graded_reason``, counts in
   ``EvalReport.not_graded``, and is left out of ``failed`` and ``avg_score``:
@@ -45,7 +50,7 @@ import contextvars
 import threading
 import time
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -59,6 +64,14 @@ from locus.evaluation.evidence import (
     settle_receipts,
 )
 from locus.evaluation.judge import JudgeUnavailableError, Verdict, check_trajectory, model_id_of
+from locus.evaluation.reliability import (
+    Consistency,
+    PanelAgreement,
+    TrustDecision,
+    consistency,
+    panel_agreement,
+    trust_decision,
+)
 from locus.evaluation.rubric import Rubric
 
 
@@ -176,6 +189,18 @@ class EvalCase(BaseModel):
     )
 
 
+class EvalSample(BaseModel):
+    """One reading of a case when it was run more than once."""
+
+    passed: bool
+    score: float = Field(default=0.0, ge=0.0, le=1.0)
+    grade: str | None = None
+    checks: dict[str, bool] = Field(default_factory=dict)
+    not_graded_reason: str | None = None
+    duration_ms: float = 0.0
+    verdict: Verdict | None = None
+
+
 class EvalResult(BaseModel):
     """Result from evaluating a single case."""
 
@@ -213,6 +238,25 @@ class EvalResult(BaseModel):
     grounding_score: float | None = Field(
         default=None, description="GSAR score of the answer against the ledger, when audited"
     )
+    samples: list[EvalSample] = Field(
+        default_factory=list,
+        description="Every reading when the case ran more than once; empty for a single run",
+    )
+    pass_rate: float | None = Field(
+        default=None, description="Share of graded readings that passed, with repeats"
+    )
+    consistency: Consistency | None = Field(
+        default=None, description="How much the readings disagreed, with repeats"
+    )
+    panel: PanelAgreement | None = Field(
+        default=None, description="Agreement of the judge panel on this answer, with judges"
+    )
+    trust: TrustDecision | None = Field(
+        default=None, description="Primary verdict against the second judge's, with judges"
+    )
+    panel_verdicts: list[Verdict] = Field(
+        default_factory=list, description="Every judge's verdict, primary first, with judges"
+    )
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -236,6 +280,10 @@ class EvalReport(BaseModel):
     self_graded: bool = Field(
         default=False, description="The judge model was the model under test on some case"
     )
+    repeats: int = Field(default=1, description="Readings per case")
+    unstable: int = Field(
+        default=0, description="Cases whose readings disagreed enough to flag the judge"
+    )
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -247,6 +295,10 @@ class EvalReport(BaseModel):
         )
         if self.not_graded:
             head += f", {self.not_graded} not graded"
+        if self.repeats > 1:
+            head += f", {self.repeats} readings per case"
+            if self.unstable:
+                head += f", {self.unstable} unstable"
         lines = [head, f"Total duration: {self.total_duration_ms:.0f}ms", ""]
         for r in self.results:
             if r.not_graded_reason:
@@ -256,8 +308,17 @@ class EvalReport(BaseModel):
             else:
                 status = "TIMEOUT" if r.timed_out else "FAIL"
             grade = f", grade {r.grade}" if r.grade else ""
+            extra = ""
+            if r.samples:
+                graded = [s for s in r.samples if not s.not_graded_reason]
+                extra = f", pass {sum(1 for s in graded if s.passed)}/{len(graded)}"
+                if r.consistency is not None and r.consistency.flagged_unstable:
+                    extra += ", unstable"
+            if r.trust is not None:
+                extra += f", {r.trust.decision}"
             lines.append(
-                f"  [{status}] {r.case_name} (score: {r.score:.2f}{grade}, {r.duration_ms:.0f}ms)"
+                f"  [{status}] {r.case_name} "
+                f"(score: {r.score:.2f}{grade}{extra}, {r.duration_ms:.0f}ms)"
             )
             if r.not_graded_reason:
                 lines.append(f"         - not graded: {r.not_graded_reason}")
@@ -340,10 +401,27 @@ class EvalRunner:
         >>> print(report.summary())
     """
 
-    def __init__(self, agent: Any, *, judge: Any = None, concurrency: int = 4) -> None:
+    def __init__(
+        self,
+        agent: Any,
+        *,
+        judge: Any = None,
+        judges: Sequence[Any] | None = None,
+        concurrency: int = 4,
+        repeats: int = 1,
+    ) -> None:
         """
         Args:
             agent: The agent under test.
+            judges: A panel. Every judged answer is graded by each of them;
+                the first is the primary whose verdict scores the case, and
+                the others feed ``EvalResult.panel`` and a ``trust``
+                decision between the primary and the second. ``judge`` and
+                ``judges`` may be combined; the single judge comes first.
+            repeats: Readings per case in :meth:`arun`. With more than one,
+                a case passes only when every graded reading passed, its
+                score is the lowest graded reading's, and
+                ``EvalResult.consistency`` says whether the readings agreed.
             judge: Optional :class:`~locus.evaluation.judge.LLMJudge`.
                 Cases carrying a ``rubric`` are graded by it in
                 :meth:`arun`; without one those cases fail rather than
@@ -358,8 +436,10 @@ class EvalRunner:
                 that have nothing to do with the agent.
         """
         self.agent = agent
-        self.judge = judge
+        self.judges: list[Any] = ([judge] if judge is not None else []) + list(judges or [])
+        self.judge = self.judges[0] if self.judges else None
         self.concurrency = max(1, concurrency)
+        self.repeats = max(1, repeats)
 
     def run(self, cases: list[EvalCase]) -> EvalReport:
         """Run all eval cases, one after another, and produce a report.
@@ -370,7 +450,7 @@ class EvalRunner:
         results = [self._run_case(case) for case in cases]
         return self._report(results, len(cases))
 
-    async def arun(self, cases: list[EvalCase]) -> EvalReport:
+    async def arun(self, cases: list[EvalCase], *, repeats: int | None = None) -> EvalReport:
         """Run every case concurrently, then report.
 
         The async path is the one that can grade with a judge: scoring is
@@ -380,15 +460,16 @@ class EvalRunner:
             JudgeUnavailableError: The judge could not be reached. The
                 cases still in flight are cancelled first.
         """
+        readings = max(1, repeats if repeats is not None else self.repeats)
         semaphore = asyncio.Semaphore(self.concurrency)
 
         async def one(case: EvalCase) -> EvalResult:
             async with semaphore:
                 return await self._arun_case(case)
 
-        tasks = [asyncio.ensure_future(one(c)) for c in cases]
+        tasks = [asyncio.ensure_future(one(c)) for c in cases for _ in range(readings)]
         try:
-            results = list(await asyncio.gather(*tasks))
+            flat = list(await asyncio.gather(*tasks))
         except BaseException:
             # gather() does not cancel the siblings of a task that raised;
             # left alone they would keep calling the model after the suite
@@ -397,9 +478,64 @@ class EvalRunner:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
             raise
-        return self._report(results, len(cases))
+        results = [
+            self._combine(flat[index * readings : (index + 1) * readings])
+            for index in range(len(cases))
+        ]
+        return self._report(results, len(cases), repeats=readings)
 
-    def _report(self, results: list[EvalResult], total: int) -> EvalReport:
+    @staticmethod
+    def _combine(readings: list[EvalResult]) -> EvalResult:
+        """Fold the readings of one case into one result.
+
+        One reading is returned as it is. Several are pass^k: the case
+        passes only when every graded reading passed, and the result shown
+        is the most pessimistic graded reading (a failure before a pass,
+        then the lowest score), with every reading kept under ``samples``
+        and :func:`~locus.evaluation.reliability.consistency` saying how
+        much they disagreed. A case with no graded reading is not graded.
+        """
+        if len(readings) == 1:
+            return readings[0]
+        graded = [r for r in readings if not r.not_graded_reason]
+        if graded:
+            shown = min(graded, key=lambda r: (r.passed, r.score)).model_copy()
+            shown.passed = all(r.passed for r in graded)
+            shown.pass_rate = sum(1 for r in graded if r.passed) / len(graded)
+        else:
+            shown = readings[0].model_copy()
+            shown.not_graded_reason = (
+                f"no graded reading in {len(readings)}: {readings[0].not_graded_reason}"
+            )
+        shown.samples = [
+            EvalSample(
+                passed=r.passed,
+                score=r.score,
+                grade=r.grade,
+                checks=r.checks,
+                not_graded_reason=r.not_graded_reason,
+                duration_ms=r.duration_ms,
+                verdict=r.verdict,
+            )
+            for r in readings
+        ]
+        shown.consistency = consistency(
+            [
+                r.verdict
+                if r.verdict is not None
+                else {
+                    "passed": r.passed,
+                    "score": r.score,
+                    "grade": r.grade,
+                    "abstained": bool(r.not_graded_reason),
+                }
+                for r in readings
+            ]
+        )
+        shown.duration_ms = sum(r.duration_ms for r in readings)
+        return shown
+
+    def _report(self, results: list[EvalResult], total: int, *, repeats: int = 1) -> EvalReport:
         """Aggregate results into a report.
 
         A case the judge abstained on is counted in ``not_graded`` and left
@@ -425,7 +561,25 @@ class EvalRunner:
                 and r.verdict.provenance.self_graded is True
                 for r in results
             ),
+            repeats=repeats,
+            unstable=sum(
+                1 for r in results if r.consistency is not None and r.consistency.flagged_unstable
+            ),
         )
+
+    async def _judge_panel(
+        self, case: EvalCase, *, output: str, primary: Verdict
+    ) -> tuple[list[Verdict], PanelAgreement | None, TrustDecision | None]:
+        """Grade the answer with every other judge; agreement and trust against the primary."""
+        others = [judge for judge in self.judges if judge is not self.judge]
+        if not others:
+            return [], None, None
+        verdicts = [primary]
+        for judge in others:
+            second = await judge.score(prompt=case.prompt, output=output, rubric=case.rubric)
+            self._stamp_self_graded(second)
+            verdicts.append(second)
+        return verdicts, panel_agreement(verdicts), trust_decision(primary, verdicts[1])
 
     def _stamp_self_graded(self, verdict: Verdict) -> None:
         """Record whether the judge is the model under test, when both ids are known."""
@@ -819,6 +973,9 @@ class EvalRunner:
 
         judged_score: float | None = None
         verdict: Verdict | None = None
+        panel_verdicts: list[Verdict] = []
+        panel: PanelAgreement | None = None
+        trust: TrustDecision | None = None
         if case.rubric and self.judge is not None:
             verdict = await self.judge.score(prompt=case.prompt, output=output, rubric=case.rubric)
             self._stamp_self_graded(verdict)
@@ -841,6 +998,9 @@ class EvalRunner:
                     )
                 checks[f"rubric:{verdict.reason[:60] or 'graded'}"] = verdict.passed
                 judged_score = verdict.score
+                panel_verdicts, panel, trust = await self._judge_panel(
+                    case, output=output, primary=verdict
+                )
 
         # A graded case reports the judge's score rather than the fraction
         # of boxes ticked -- "0.5 because one of two checks failed" says
@@ -865,4 +1025,7 @@ class EvalRunner:
             receipts=receipts,
             claim_checks=claim_checks,
             grounding_score=grounding_score,
+            panel=panel,
+            trust=trust,
+            panel_verdicts=panel_verdicts,
         )

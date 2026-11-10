@@ -358,6 +358,88 @@ was the model under test. Keep it with the report. Without it a change in
 the numbers cannot be told apart from a change in the measuring
 instrument.
 
+## One verdict is one opinion
+
+A judge grading the same answer twice can land a whole letter apart, and
+a suite that reads each case once reports that variance as the agent's.
+Three readings tell the two apart.
+
+### Repeats
+
+`repeats=` runs every case several times. A case passes only when every
+graded reading passed, the reading shown is the most pessimistic one, and
+`EvalResult.samples` keeps them all. `EvalResult.consistency` summarises
+the readings: pass rate, score spread, the letters they landed on, and
+`flagged_unstable` when enough readings disagree by enough. An unstable
+case says the judge, or the agent's sampling, is what moved; it is not a
+quieter way of failing.
+
+```python
+import asyncio
+
+from locus.evaluation import EvalRunner
+
+report = asyncio.run(EvalRunner(agent=agent, judge=judge).arun(cases, repeats=5))
+for result in report.results:
+    if result.consistency and result.consistency.flagged_unstable:
+        print(result.case_name, result.consistency.grade_distribution)
+```
+
+The summary prints `pass 4/5, unstable` on such a case and counts them in
+the header. A reading the judge abstained on counts for neither side.
+
+### Panels and second opinions
+
+`judges=` grades every judged answer with each judge in the list. The
+first is the primary and its verdict scores the case; the others fill
+`EvalResult.panel` (consensus letter, its share, the correlation of the
+judges' dimension scores) and `EvalResult.trust`, a decision between the
+primary and the second judge: `trusted` when the letters match,
+`calibration_required` when they differ by one or when nothing checked
+the primary, `rejected` when they differ by two or more. A verdict the
+judge gave its own model's work is never trusted on its own.
+
+```python
+from locus.evaluation import EvalRunner, LLMJudge
+from locus.models import get_model
+
+runner = EvalRunner(
+    agent=agent,
+    judges=[LLMJudge(get_model("{{ locus_example_model }}")), LLMJudge(other_model)],
+)
+```
+
+The same arithmetic is available on its own in `locus.evaluation.reliability`
+for verdicts you collected elsewhere: `consistency`, `panel_agreement`,
+`trust_decision`, Cohen's `cohen_kappa` across a dataset, `calibration_drift`
+against human letters, `wilson_interval`, `bootstrap_ci`, and
+`publication_gates`, which names every reason a cell of numbers is not yet
+a result.
+
+### Comparing two answers
+
+`LLMJudge.compare` asks which of two answers better satisfies the rubric,
+and asks twice, once in each order. A judge shown the same pair with the
+positions swapped often picks the first one both times; only a preference
+that survives the swap is a result, and one that flips is a `tie` with
+`consistent=False`.
+
+```python
+import asyncio
+
+from locus.evaluation import LLMJudge
+
+comparison = asyncio.run(
+    judge.compare(
+        prompt="Why did db-07 page?",
+        output_a=answer_from_model_a,
+        output_b=answer_from_model_b,
+        rubric="Prefer the answer whose root cause is backed by a cited reading.",
+    )
+)
+print(comparison.winner, comparison.consistent)
+```
+
 ## When the judge cannot grade
 
 A judge that answers with an empty reply, prose without a verdict, a call
@@ -379,6 +461,7 @@ than being recorded against any case.
 | Case passes locally, fails in CI | Model output varies between runs. Pin the model id, lower `temperature`, run the case five times and look at variance. |
 | Report shows `NOT GRADED` | The judge answered without a verdict, most often a reasoning model out of tokens. Raise `LLMJudge(max_tokens=...)`; the case is excluded from `avg_score` until it is graded. |
 | Two reports disagree after a rubric edit | They are different measurements. Compare `verdict.provenance.rubric_revision`; it moves with the dimensions, the weights, the thresholds and the judge prompt. |
+| A case is `unstable` with `repeats` | The readings disagreed by more than the gate. Read `result.consistency.grade_distribution`; if the agent's answers were the same, the judge is what varied. Pin its temperature, widen `max_tokens`, or add a second judge. |
 | `max_duration_ms` flakes | Cold-start network latency. Use a wall-clock budget at the suite level, not per-case, or bump the per-case budget by 2×. |
 | `expected_tools` reports failure even though the tool ran | Case-sensitive name match — `issue_refund` != `Issue_Refund`. |
 | Score is 0.5 every time | One of two checks is consistently failing. Read `result.checks` — it carries the full pass/fail map. |
@@ -403,6 +486,7 @@ leaves the case not graded rather than failed.
 - [`locus.evaluation.rubric`](https://github.com/oracle/locus/blob/main/src/locus/evaluation/rubric.py) — `Rubric`, `Dimension`, `Cap`.
 - [`locus.evaluation.judge`](https://github.com/oracle/locus/blob/main/src/locus/evaluation/judge.py) — `LLMJudge`, `Verdict`, `JudgeProvenance`.
 - [`locus.evaluation.evidence`](https://github.com/oracle/locus/blob/main/src/locus/evaluation/evidence.py) — `EvidenceLedger`, `ReceiptCheck`, `ClaimCheck`.
+- [`locus.evaluation.reliability`](https://github.com/oracle/locus/blob/main/src/locus/evaluation/reliability.py) — `consistency`, `panel_agreement`, `trust_decision`, `cohen_kappa`, `calibration_drift`.
 
 ## See also
 
