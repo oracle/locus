@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [5.4.0] - 2026-11-10
+
 ### Added
 
 - **The rubric as data.** `locus.evaluation.Rubric` names the dimensions a
