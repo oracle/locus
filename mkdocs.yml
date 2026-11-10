@@ -272,6 +272,7 @@ nav:
   - OCI Generative AI models: how-to/oci-models.md
   - Dedicated AI Clusters: how-to/oci-dac.md
   - LiteLLM gateway: how-to/litellm-gateway.md
+  - Evaluate an agent in CI: how-to/evaluate-in-ci.md
   - Deploy: how-to/deploy.md
   - The box runner: runner.md
 - Notebooks:

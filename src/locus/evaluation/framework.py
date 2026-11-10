@@ -47,10 +47,14 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import hashlib
+import json
 import threading
 import time
 from collections import Counter
 from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -189,6 +193,35 @@ class EvalCase(BaseModel):
     )
 
 
+def suite_fingerprint(cases: Sequence[EvalCase]) -> str:
+    """A short hash of what a suite asks, so two reports are known to be comparable.
+
+    Covers every case's name, prompt and expectations, in name order; a
+    :class:`~locus.evaluation.rubric.Rubric` enters as its revision. Free-form
+    ``metadata`` is left out. Editing a prompt, adding a case or retuning a
+    weight moves the fingerprint, and :func:`~locus.evaluation.report.diff_reports`
+    refuses two reports whose fingerprints differ.
+    """
+    payload = []
+    for case in sorted(cases, key=lambda c: c.name):
+        data = case.model_dump(mode="json", exclude={"metadata"})
+        if isinstance(case.rubric, Rubric):
+            data["rubric"] = {"revision": case.rubric.revision()}
+        payload.append(data)
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
+
+
+class TagSummary(BaseModel):
+    """Counts for the cases carrying one tag."""
+
+    total: int = 0
+    passed: int = 0
+    failed: int = 0
+    not_graded: int = 0
+    avg_score: float = 0.0
+
+
 class EvalSample(BaseModel):
     """One reading of a case when it was run more than once."""
 
@@ -284,6 +317,22 @@ class EvalReport(BaseModel):
     unstable: int = Field(
         default=0, description="Cases whose readings disagreed enough to flag the judge"
     )
+    fingerprint: str | None = Field(
+        default=None, description="suite_fingerprint() of the cases this report measured"
+    )
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    by_tag: dict[str, TagSummary] = Field(
+        default_factory=dict, description="Counts per case tag, for a CI matrix"
+    )
+    check_failures: dict[str, int] = Field(
+        default_factory=dict, description="How often each check label failed across cases"
+    )
+    judge_models: list[str] = Field(
+        default_factory=list, description="Judge model ids seen on the verdicts"
+    )
+    rubric_revisions: list[str] = Field(
+        default_factory=list, description="Rubric revisions seen on the verdicts"
+    )
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -336,6 +385,44 @@ class EvalReport(BaseModel):
                 "it measures self-consistency, not correctness"
             )
         return "\n".join(lines)
+
+    def to_markdown(self) -> str:
+        """The report as a Markdown table, for a pull-request comment or a CI summary."""
+        head = (
+            f"**{self.passed}/{self.total_cases} passed**, avg score {self.avg_score:.2f}"
+            + (f", {self.not_graded} not graded" if self.not_graded else "")
+            + (f", {self.unstable} unstable" if self.unstable else "")
+            + (f" · suite `{self.fingerprint}`" if self.fingerprint else "")
+        )
+        rows = [
+            head,
+            "",
+            "| Case | Result | Score | Grade | Failed checks |",
+            "|---|---|---|---|---|",
+        ]
+        for r in self.results:
+            if r.not_graded_reason:
+                status = "not graded"
+            elif r.passed:
+                status = "pass"
+            else:
+                status = "timeout" if r.timed_out else "fail"
+            failed = ", ".join(k for k, ok in r.checks.items() if not ok)
+            rows.append(
+                f"| {r.case_name} | {status} | {r.score:.2f} | {r.grade or ''} | {failed} |"
+            )
+        return "\n".join(rows)
+
+    def save(self, path: str | Path) -> Path:
+        """Write the report as JSON; :meth:`load` reads it back."""
+        file = Path(path)
+        file.write_text(self.model_dump_json(indent=2) + "\n", encoding="utf-8")
+        return file
+
+    @classmethod
+    def load(cls, path: str | Path) -> EvalReport:
+        """Read a report :meth:`save` wrote."""
+        return cls.model_validate_json(Path(path).read_text(encoding="utf-8"))
 
 
 #: Check recorded for a case that asserts nothing. It exists so the failure
@@ -448,7 +535,7 @@ class EvalRunner:
         ``rubric:requires_arun``. Use :meth:`arun` for judged suites.
         """
         results = [self._run_case(case) for case in cases]
-        return self._report(results, len(cases))
+        return self._report(results, len(cases), cases=cases)
 
     async def arun(self, cases: list[EvalCase], *, repeats: int | None = None) -> EvalReport:
         """Run every case concurrently, then report.
@@ -482,7 +569,7 @@ class EvalRunner:
             self._combine(flat[index * readings : (index + 1) * readings])
             for index in range(len(cases))
         ]
-        return self._report(results, len(cases), repeats=readings)
+        return self._report(results, len(cases), repeats=readings, cases=cases)
 
     @staticmethod
     def _combine(readings: list[EvalResult]) -> EvalResult:
@@ -535,7 +622,14 @@ class EvalRunner:
         shown.duration_ms = sum(r.duration_ms for r in readings)
         return shown
 
-    def _report(self, results: list[EvalResult], total: int, *, repeats: int = 1) -> EvalReport:
+    def _report(
+        self,
+        results: list[EvalResult],
+        total: int,
+        *,
+        repeats: int = 1,
+        cases: Sequence[EvalCase] | None = None,
+    ) -> EvalReport:
         """Aggregate results into a report.
 
         A case the judge abstained on is counted in ``not_graded`` and left
@@ -565,7 +659,51 @@ class EvalRunner:
             unstable=sum(
                 1 for r in results if r.consistency is not None and r.consistency.flagged_unstable
             ),
+            fingerprint=suite_fingerprint(cases) if cases else None,
+            by_tag=self._by_tag(results, cases or []),
+            check_failures=dict(
+                Counter(label for r in results for label, ok in r.checks.items() if not ok)
+            ),
+            judge_models=sorted(
+                {
+                    r.verdict.provenance.judge_model
+                    for r in results
+                    if r.verdict is not None
+                    and r.verdict.provenance is not None
+                    and r.verdict.provenance.judge_model
+                }
+            ),
+            rubric_revisions=sorted(
+                {
+                    r.verdict.provenance.rubric_revision
+                    for r in results
+                    if r.verdict is not None
+                    and r.verdict.provenance is not None
+                    and r.verdict.provenance.rubric_revision
+                }
+            ),
         )
+
+    @staticmethod
+    def _by_tag(results: list[EvalResult], cases: Sequence[EvalCase]) -> dict[str, TagSummary]:
+        """Fold the results under every tag their case carries."""
+        tags_of = {case.name: case.tags for case in cases}
+        buckets: dict[str, list[EvalResult]] = {}
+        for result in results:
+            for tag in tags_of.get(result.case_name, []):
+                buckets.setdefault(tag, []).append(result)
+        summaries: dict[str, TagSummary] = {}
+        for tag, members in sorted(buckets.items()):
+            graded = [r for r in members if not r.not_graded_reason]
+            passed = sum(1 for r in graded if r.passed)
+            summaries[tag] = TagSummary(
+                total=len(members),
+                passed=passed,
+                failed=len(graded) - passed,
+                not_graded=len(members) - len(graded),
+                avg_score=sum(r.score for r in graded) / len(graded) if graded else 0.0,
+            )
+        return summaries
 
     async def _judge_panel(
         self, case: EvalCase, *, output: str, primary: Verdict

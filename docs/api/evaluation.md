@@ -66,6 +66,21 @@ result) is what `forbidden_tools` and `expected_refusals` read.
 ::: locus.evaluation.evidence.settle_receipts
 ::: locus.evaluation.evidence.settle_claims
 
+## Comparable reports, a diff and a gate
+
+::: locus.evaluation.framework.suite_fingerprint
+::: locus.evaluation.framework.TagSummary
+::: locus.evaluation.report.diff_reports
+::: locus.evaluation.report.ReportDiff
+::: locus.evaluation.report.CaseDiff
+::: locus.evaluation.report.EvalGate
+::: locus.evaluation.report.GateResult
+
+## Cases as data
+
+::: locus.evaluation.datasets.load_cases
+::: locus.evaluation.datasets.dump_cases
+
 ## How far to trust a verdict
 
 Pure functions over verdicts and grade pairs. `EvalRunner` calls

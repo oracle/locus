@@ -86,14 +86,19 @@ duration. JSON-serialisable, drop into CI artifacts.
 
 ```python
 # tests/test_agent_evals.py
-import pytest
-from locus.evaluation import EvalRunner
+from locus.evaluation import EvalGate, EvalRunner, load_cases
+
 
 def test_agent_passes_eval_suite(agent):
-    report = EvalRunner(agent=agent).run(load_cases())
-    failures = [r for r in report.results if not r.passed]
-    assert not failures, report.summary()
+    report = EvalRunner(agent=agent).run(load_cases("evals/cases.json"))
+    verdict = EvalGate().check(report)
+    assert verdict.passed, report.summary() + "\n" + verdict.summary()
 ```
+
+Or without a Python harness around it, `locus eval run evals/cases.json
+--agent app:agent` prints the report and exits with the gate's verdict; the
+how-to [Evaluate an agent in CI](../how-to/evaluate-in-ci.md) has the full
+flow with a saved baseline and a diff.
 
 ## Built-in checks
 
@@ -440,6 +445,41 @@ comparison = asyncio.run(
 print(comparison.winner, comparison.consistent)
 ```
 
+## Comparable reports and a gate for CI
+
+Every report carries a `fingerprint` of the cases it measured, so two
+reports are known to be of the same suite before they are compared, and
+`EvalReport.save` and `EvalReport.load` round-trip it through JSON.
+`diff_reports` compares two reports case by case: what passed and now
+fails, what failed and now passes, how the scores and the rubric dimensions
+moved, what was added and removed. It refuses two different suites unless
+told to.
+
+```python
+from locus.evaluation import EvalGate, EvalReport, diff_reports
+
+baseline = EvalReport.load("reports/main.json")
+candidate = EvalReport.load("reports/candidate.json")
+print(diff_reports(baseline, candidate).summary())
+
+verdict = EvalGate(min_pass_rate=0.95, max_unstable=0).check(candidate, baseline=baseline)
+assert verdict.passed, verdict.summary()
+```
+
+`EvalGate` is the rule a build applies: a pass rate to clear, an average
+to hold, how many cases may be left not graded, how many may be unstable,
+and, given a baseline, whether any case may regress or the average may
+drop. It returns every reason it failed. The report also carries `by_tag`
+counts for a CI matrix, `check_failures` (which check fails most often),
+the judge models and rubric revisions seen, and a `to_markdown()` table
+for a pull-request comment.
+
+Cases can live in a file (`load_cases` reads JSON, JSONL or YAML, with a
+top-level rubric applied to cases that name none), and the whole flow runs
+from the command line as `locus eval run`, `diff`, `gate` and `summary`.
+The how-to [Evaluate an agent in CI](../how-to/evaluate-in-ci.md) walks
+through it.
+
 ## When the judge cannot grade
 
 A judge that answers with an empty reply, prose without a verdict, a call
@@ -487,6 +527,8 @@ leaves the case not graded rather than failed.
 - [`locus.evaluation.judge`](https://github.com/oracle/locus/blob/main/src/locus/evaluation/judge.py) — `LLMJudge`, `Verdict`, `JudgeProvenance`.
 - [`locus.evaluation.evidence`](https://github.com/oracle/locus/blob/main/src/locus/evaluation/evidence.py) — `EvidenceLedger`, `ReceiptCheck`, `ClaimCheck`.
 - [`locus.evaluation.reliability`](https://github.com/oracle/locus/blob/main/src/locus/evaluation/reliability.py) — `consistency`, `panel_agreement`, `trust_decision`, `cohen_kappa`, `calibration_drift`.
+- [`locus.evaluation.report`](https://github.com/oracle/locus/blob/main/src/locus/evaluation/report.py) — `diff_reports`, `EvalGate`.
+- [`locus.evaluation.datasets`](https://github.com/oracle/locus/blob/main/src/locus/evaluation/datasets.py) — `load_cases`, `dump_cases`.
 
 ## See also
 
