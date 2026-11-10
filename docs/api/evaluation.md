@@ -18,19 +18,36 @@ in particular fails in both directions: it passes on an answer that happens to
 contain the word, and fails on a correct answer phrased differently. Where the
 right answer is not one exact string, something has to read it.
 
-`LLMJudge` grades against a written rubric and returns a typed `Verdict`. Two
+`LLMJudge` grades against a rubric and returns a typed `Verdict`. Three
 things it deliberately does not do:
 
 - **It does not retry until it passes.** A judge you re-roll is not a judge.
 - **It does not score zero when it cannot be reached.** An unusable judge
   raises, because a "failing" eval that actually means *the judge was down* is
   worse than no eval.
+- **It does not turn a reply it cannot read into a number.** That verdict is
+  `abstained`, and the runner reports the case as not graded.
 
 Use a different model from the one under test where you can — a model grading
-its own output is measuring self-consistency, not correctness.
+its own output is measuring self-consistency, not correctness. The runner
+stamps `provenance.self_graded` when it can tell.
 
 ::: locus.evaluation.judge.LLMJudge
 ::: locus.evaluation.judge.Verdict
+::: locus.evaluation.judge.JudgeProvenance
+::: locus.evaluation.judge.model_id_of
+
+## The rubric as data
+
+A string rubric is one pass criterion the judge answers. A `Rubric` names
+dimensions the judge scores 0–100; the composite, the letter and the pass are
+then computed here, from the weights and thresholds, and the judge's own
+overall call survives only as `judge_reported_passed`. `revision()` identifies
+the rubric and prompt a verdict was measured under.
+
+::: locus.evaluation.rubric.Rubric
+::: locus.evaluation.rubric.Dimension
+::: locus.evaluation.rubric.Cap
 
 ## Asserting the order, not just the membership
 

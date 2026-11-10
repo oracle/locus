@@ -160,19 +160,103 @@ with no judge configured fails loudly too, under a
 
 On a graded case, `EvalResult.score` is the judge's 0–1 score, capped by
 the fraction of checks passed, so a case with a failed structural check
-never scores 1.0. A judge reply that cannot be parsed yields
-`Verdict(unparseable=True)` and is recorded as a failing
-`judge_unparseable:...` check rather than a silent pass. Use a different
+never scores 1.0. Use a different
 model from the one under test where you can — a model grading its own
-output is measuring self-consistency, not correctness. `LLMJudge` and
+output is measuring self-consistency, not correctness. When the runner can
+tell that the judge model is the model under test, it stamps
+`provenance.self_graded` on the verdict and the report ends with a warning;
+the case is not failed for it. `LLMJudge` and
 `Verdict` are documented in the
 [evaluation API reference](../api/evaluation.md#grading-an-answer-that-has-no-single-right-string).
+
+## A rubric with dimensions and grades
+
+A one-sentence rubric asks the judge for one boolean and one number, and
+the judge's number becomes the score. For anything you want to compare
+across time, models or prompt edits, write the rubric as data instead: a
+`Rubric` names the dimensions the judge scores 0–100, with a weight and a
+line of guidance each, and optional letter bands.
+
+```python
+from locus.evaluation import Dimension, EvalCase, Rubric
+
+triage = Rubric(
+    dimensions=[
+        Dimension(
+            key="root_cause",
+            weight=0.5,
+            guidance="Names the failing component and the mechanism. 90+ cites both.",
+        ),
+        Dimension(key="evidence", weight=0.3, guidance="Every figure appears in a tool result."),
+        Dimension(key="actionable", weight=0.2, guidance="The fix can be executed as written."),
+    ],
+    grade_thresholds=Rubric.default_grades(),  # A 90 · B 75 · C 60 · D 45 · F 0
+)
+
+case = EvalCase(
+    name="sound_triage",
+    prompt="Explain why alert SOC-4821 is a false positive.",
+    rubric=triage,
+)
+```
+
+The split is deliberate. The judge does the part only a reader can do:
+one score per dimension, with a sentence citing the response. Code does
+the arithmetic: the weighted composite (missing dimensions count as zero,
+not as absent), the letter, and whether the composite clears
+`pass_score`. The judge's own overall call is kept on the verdict as
+`judge_reported_passed`, for comparison, and never decides. A string
+rubric keeps the original contract: the judge's `passed` and `score` are
+the verdict.
+
+On the result, `EvalResult.grade` carries the letter and
+`EvalResult.verdict.dimensions` the scores; the report adds a
+`grade_distribution`. `Rubric.revision()` is a short hash of the
+dimensions, weights and thresholds together with the judge prompt. It is
+stamped on every verdict, so two reports whose revisions differ are two
+different measurements, not a regression.
+
+Rubrics load from a file too (`Rubric.load("rubric.json")`, YAML with
+`pyyaml` installed), so the rubric can live beside the cases and be
+reviewed like code.
+
+## Pinned sampling and provenance
+
+A judge is a measurement, and a measurement should not vary between two
+readings of the same answer. `LLMJudge` sends `temperature=0.0` by
+default and takes an optional `seed`; the verdict travels through a
+`submit_verdict` tool call on models that take tools, with a plain JSON
+reply as the fallback, so no number is scraped out of prose when the model
+can hand it over typed.
+
+Every `Verdict` carries a `JudgeProvenance`: the judge model id, the rubric
+revision, a hash of the judge prompt, the temperature and seed, which
+channel the verdict arrived through, token usage, and whether the judge
+was the model under test. Keep it with the report. Without it a change in
+the numbers cannot be told apart from a change in the measuring
+instrument.
+
+## When the judge cannot grade
+
+A judge that answers with an empty reply, prose without a verdict, a call
+to some other tool, or dimension scores for none of the rubric's
+dimensions has not graded the case. The verdict is `abstained`, the result
+carries `not_graded_reason`, and the report counts it under `not_graded`
+instead of `failed` and leaves it out of `avg_score`. A dead judge must
+neither lower the agent's average nor let a case through. The summary
+prints such a case as `[NOT GRADED]` with the reason, which is usually a
+reasoning model that spent its token budget before answering; raise
+`LLMJudge(max_tokens=...)`. A judge that cannot be reached at all, or runs
+past `timeout_s`, raises `JudgeUnavailableError` out of `arun()` rather
+than being recorded against any case.
 
 ## Common gotchas
 
 | Symptom | Likely cause |
 |---|---|
 | Case passes locally, fails in CI | Model output varies between runs. Pin the model id, lower `temperature`, run the case five times and look at variance. |
+| Report shows `NOT GRADED` | The judge answered without a verdict, most often a reasoning model out of tokens. Raise `LLMJudge(max_tokens=...)`; the case is excluded from `avg_score` until it is graded. |
+| Two reports disagree after a rubric edit | They are different measurements. Compare `verdict.provenance.rubric_revision`; it moves with the dimensions, the weights, the thresholds and the judge prompt. |
 | `max_duration_ms` flakes | Cold-start network latency. Use a wall-clock budget at the suite level, not per-case, or bump the per-case budget by 2×. |
 | `expected_tools` reports failure even though the tool ran | Case-sensitive name match — `issue_refund` != `Issue_Refund`. |
 | Score is 0.5 every time | One of two checks is consistently failing. Read `result.checks` — it carries the full pass/fail map. |
@@ -192,6 +276,8 @@ evidence? — pair the structural checks here with the
 
 - [`notebook_56_evaluation.py`](https://github.com/oracle/locus/blob/main/examples/notebook_56_evaluation.py) — runnable end-to-end suite.
 - [`locus.evaluation.framework`](https://github.com/oracle/locus/blob/main/src/locus/evaluation/framework.py) — `EvalCase`, `EvalRunner`, `EvalReport`.
+- [`locus.evaluation.rubric`](https://github.com/oracle/locus/blob/main/src/locus/evaluation/rubric.py) — `Rubric`, `Dimension`, `Cap`.
+- [`locus.evaluation.judge`](https://github.com/oracle/locus/blob/main/src/locus/evaluation/judge.py) — `LLMJudge`, `Verdict`, `JudgeProvenance`.
 
 ## See also
 

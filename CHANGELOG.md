@@ -8,6 +8,43 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **The rubric as data.** `locus.evaluation.Rubric` names the dimensions a
+  judge scores 0-100, each with a weight and a line of guidance, plus
+  optional letter bands (`Rubric.default_grades()` offers A 90 / B 75 / C 60
+  / D 45 / F 0) and a `pass_score`. The weighted composite, the letter and
+  the pass are computed by code; missing dimensions count as zero rather
+  than vanishing from the average. `Rubric.revision()` hashes the rubric
+  and the judge prompt so two reports are comparable only when it matches.
+  Rubrics load from JSON or YAML (`Rubric.load`). An `EvalCase.rubric` may
+  be a string, as before, or a `Rubric`.
+- **Typed verdicts with provenance.** `Verdict` carries `grade`,
+  `dimensions`, `issues`, the judge's advisory `judge_reported_passed` /
+  `judge_reported_score`, and a `JudgeProvenance` (judge model id, rubric
+  revision, prompt hash, temperature, seed, channel, token usage,
+  `self_graded`). `EvalResult` exposes `grade` and the full `verdict`;
+  `EvalReport` adds `grade_distribution`.
+- **A structured judge channel with pinned sampling.** `LLMJudge` sends
+  `temperature=0.0` by default, takes an optional `seed` and `timeout_s`,
+  and receives the verdict through a `submit_verdict` tool call where the
+  model takes tools (`channel="auto"`), falling back to a plain-JSON reply;
+  `channel="text"` never offers the tool. The response under grading is
+  delimited and declared as data in the prompt.
+
+### Changed
+
+- **A judge that returns no verdict leaves the case not graded.** An empty
+  reply, prose without JSON, a call to another tool or no scored dimension
+  is `Verdict(abstained=True)`. The result carries `not_graded_reason`, the
+  report counts it under `EvalReport.not_graded` and leaves it out of
+  `failed` and `avg_score`, and the summary prints `[NOT GRADED]` with the
+  reason. The `judge_unparseable:...` check is still recorded, so nothing
+  that used to be visible is hidden.
+- **Self-graded suites are named.** When the judge model id equals the
+  model under test, `provenance.self_graded` is stamped and the report
+  summary ends with a warning. The case is not failed for it.
+
 ## [5.3.2] - 2026-11-02
 
 ### Fixed

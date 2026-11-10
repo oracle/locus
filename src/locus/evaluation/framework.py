@@ -9,8 +9,11 @@ Test agents systematically with defined expectations:
 - Output content requirements
 - Iteration and performance budgets
 - Tool-call *ordering*, not just membership (``expected_tool_sequence``)
-- LLM-as-judge scoring against a written rubric (``rubric``, and an
-  ``EvalRunner(judge=...)``); see :mod:`locus.evaluation.judge`
+- LLM-as-judge scoring against a rubric (``rubric``, and an
+  ``EvalRunner(judge=...)``); see :mod:`locus.evaluation.judge`. A string
+  rubric is one pass criterion the judge answers; a
+  :class:`~locus.evaluation.rubric.Rubric` names dimensions the judge scores
+  and code composes into a score and a letter.
 
 Grading rules (see :class:`EvalRunner` for the reasons):
 
@@ -24,6 +27,10 @@ Grading rules (see :class:`EvalRunner` for the reasons):
   cancelled and reported ``timed_out``.
 - An unreachable judge raises :class:`~locus.evaluation.judge.JudgeUnavailableError`
   out of :meth:`EvalRunner.arun` instead of being recorded as a failed case.
+- A judge that answers with something that is not a verdict has not graded
+  the case. The result carries ``not_graded_reason``, counts in
+  ``EvalReport.not_graded``, and is left out of ``failed`` and ``avg_score``:
+  a dead judge must neither lower the agent's average nor pass it.
 """
 
 from __future__ import annotations
@@ -32,10 +39,14 @@ import asyncio
 import contextvars
 import threading
 import time
+from collections import Counter
 from collections.abc import Callable
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+from locus.evaluation.judge import Verdict, check_trajectory, model_id_of
+from locus.evaluation.rubric import Rubric
 
 
 class EvalCase(BaseModel):
@@ -89,12 +100,15 @@ class EvalCase(BaseModel):
         "default allows extra calls around it, so a retry does not fail a "
         "test about ordering.",
     )
-    rubric: str | None = Field(
+    rubric: str | Rubric | None = Field(
         default=None,
         description="Graded by an LLM judge in EvalRunner.arun when the "
         "runner has one. Use it where the right answer is not one exact "
-        "string, which substring matching cannot express. The synchronous "
-        "run() cannot call a judge and fails a case that carries a rubric.",
+        "string, which substring matching cannot express. A string is one "
+        "pass criterion the judge answers; a Rubric names dimensions the "
+        "judge scores and code composes into a score and a letter. The "
+        "synchronous run() cannot call a judge and fails a case that carries "
+        "a rubric.",
     )
     tags: list[str] = Field(
         default_factory=list,
@@ -123,6 +137,17 @@ class EvalResult(BaseModel):
         description="The run hit max_duration_ms and was cancelled; the case "
         "failed with score 0.0 and there is no output to grade.",
     )
+    grade: str | None = Field(
+        default=None, description="Letter from the rubric's bands, when the case had a Rubric"
+    )
+    verdict: Verdict | None = Field(
+        default=None, description="The judge's full verdict, with its provenance"
+    )
+    not_graded_reason: str | None = Field(
+        default=None,
+        description="Set when the judge abstained: the case was neither passed nor "
+        "failed, and is left out of avg_score.",
+    )
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -135,30 +160,55 @@ class EvalReport(BaseModel):
     passed: int = 0
     failed: int = 0
     timed_out: int = Field(default=0, description="Failed cases that hit their budget")
-    avg_score: float = 0.0
+    not_graded: int = Field(
+        default=0, description="Cases the judge abstained on; neither passed nor failed"
+    )
+    avg_score: float = Field(default=0.0, description="Mean score over the graded cases")
     total_duration_ms: float = 0.0
+    grade_distribution: dict[str, int] = Field(
+        default_factory=dict, description="How many graded cases landed on each letter"
+    )
+    self_graded: bool = Field(
+        default=False, description="The judge model was the model under test on some case"
+    )
 
     model_config = {"arbitrary_types_allowed": True}
 
     def summary(self) -> str:
         """Generate a human-readable summary."""
-        lines = [
+        head = (
             f"Eval Report: {self.passed}/{self.total_cases} passed "
-            f"(avg score: {self.avg_score:.2f})",
-            f"Total duration: {self.total_duration_ms:.0f}ms",
-            "",
-        ]
+            f"(avg score: {self.avg_score:.2f})"
+        )
+        if self.not_graded:
+            head += f", {self.not_graded} not graded"
+        lines = [head, f"Total duration: {self.total_duration_ms:.0f}ms", ""]
         for r in self.results:
-            status = "PASS" if r.passed else ("TIMEOUT" if r.timed_out else "FAIL")
+            if r.not_graded_reason:
+                status = "NOT GRADED"
+            elif r.passed:
+                status = "PASS"
+            else:
+                status = "TIMEOUT" if r.timed_out else "FAIL"
+            grade = f", grade {r.grade}" if r.grade else ""
             lines.append(
-                f"  [{status}] {r.case_name} (score: {r.score:.2f}, {r.duration_ms:.0f}ms)"
+                f"  [{status}] {r.case_name} (score: {r.score:.2f}{grade}, {r.duration_ms:.0f}ms)"
             )
+            if r.not_graded_reason:
+                lines.append(f"         - not graded: {r.not_graded_reason}")
+                continue
             if not r.passed:
                 for check_name, check_passed in r.checks.items():
                     if not check_passed:
                         lines.append(f"         - {check_name}: FAILED")
                 if r.error:
                     lines.append(f"         - error: {r.error}")
+        if self.self_graded:
+            lines.append("")
+            lines.append(
+                "warning: the judge is the model under test (self-graded); "
+                "it measures self-consistency, not correctness"
+            )
         return "\n".join(lines)
 
 
@@ -285,18 +335,41 @@ class EvalRunner:
         return self._report(results, len(cases))
 
     def _report(self, results: list[EvalResult], total: int) -> EvalReport:
-        """Aggregate results into a report."""
+        """Aggregate results into a report.
+
+        A case the judge abstained on is counted in ``not_graded`` and left
+        out of ``failed`` and ``avg_score``: it says nothing about the agent.
+        """
         passed = sum(1 for r in results if r.passed)
-        scores = [r.score for r in results]
+        graded = [r for r in results if not r.not_graded_reason]
+        not_graded = len(results) - len(graded)
+        scores = [r.score for r in graded]
         return EvalReport(
             results=results,
             total_cases=total,
             passed=passed,
-            failed=total - passed,
+            failed=total - passed - not_graded,
             timed_out=sum(1 for r in results if r.timed_out),
+            not_graded=not_graded,
             avg_score=sum(scores) / len(scores) if scores else 0.0,
             total_duration_ms=sum(r.duration_ms for r in results),
+            grade_distribution=dict(Counter(r.grade for r in graded if r.grade)),
+            self_graded=any(
+                r.verdict is not None
+                and r.verdict.provenance is not None
+                and r.verdict.provenance.self_graded is True
+                for r in results
+            ),
         )
+
+    def _stamp_self_graded(self, verdict: Verdict) -> None:
+        """Record whether the judge is the model under test, when both ids are known."""
+        if verdict.provenance is None:
+            return
+        agent_model = model_id_of(getattr(self.agent, "model", None))
+        judge_model = verdict.provenance.judge_model
+        if agent_model and judge_model:
+            verdict.provenance.self_graded = agent_model == judge_model
 
     @staticmethod
     def _grade(checks: dict[str, bool], judged: float | None) -> tuple[bool, float]:
@@ -472,8 +545,6 @@ class EvalRunner:
             checks["within_duration_budget"] = duration_ms <= case.max_duration_ms
 
         if case.expected_tool_sequence:
-            from locus.evaluation.judge import check_trajectory  # noqa: PLC0415
-
             ok, _reason = check_trajectory(
                 tools_called, case.expected_tool_sequence, exact=case.exact_tool_sequence
             )
@@ -516,6 +587,8 @@ class EvalRunner:
             )
 
         judged: float | None = None
+        verdict: Verdict | None = None
+        not_graded_reason: str | None = None
         if case.rubric:
             if self.judge is None:
                 # Not silently passed: a suite must not look green because
@@ -528,15 +601,24 @@ class EvalRunner:
                 verdict = await self.judge.score(
                     prompt=case.prompt, output=output, rubric=case.rubric
                 )
-                label = "judge_unparseable" if verdict.unparseable else "rubric"
-                checks[f"{label}:{verdict.reason[:60] or 'graded'}"] = verdict.passed
-                judged = verdict.score
+                self._stamp_self_graded(verdict)
+                if verdict.abstained or verdict.unparseable:
+                    # The judge answered, but not with a verdict. That is a
+                    # finding about the judge, so the case is not graded
+                    # rather than failed; the check keeps the failure visible.
+                    checks[f"judge_unparseable:{verdict.reason[:60] or 'no verdict'}"] = False
+                    not_graded_reason = verdict.reason or "the judge returned no verdict"
+                else:
+                    checks[f"rubric:{verdict.reason[:60] or 'graded'}"] = verdict.passed
+                    judged = verdict.score
 
         # A graded case reports the judge's score rather than the fraction
         # of boxes ticked -- "0.5 because one of two checks failed" says
         # much less than "0.2, the answer named no policy" -- but capped by
         # that fraction, so a failed case never reports 1.0.
         passed, score = self._grade(checks, judged)
+        if not_graded_reason:
+            passed, score = False, 0.0
 
         return EvalResult(
             case_name=case.name,
@@ -547,4 +629,7 @@ class EvalRunner:
             iterations=iterations,
             duration_ms=duration_ms,
             checks=checks,
+            grade=verdict.grade if verdict is not None and not not_graded_reason else None,
+            verdict=verdict,
+            not_graded_reason=not_graded_reason,
         )
