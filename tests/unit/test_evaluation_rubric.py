@@ -8,7 +8,7 @@ Each test pins a reading of the rubric that the judge used to own — the
 composite, the letter, the band a cap moves to, the revision that says which
 rubric produced a number — and one way each used to go wrong when a model did
 it: a forgotten dimension renormalised away, a half rounded differently per
-platform, a retuned weight leaving two reports looking comparable.
+platform, a reweighted weight leaving two reports looking comparable.
 """
 
 from __future__ import annotations
@@ -171,14 +171,14 @@ def test_the_revision_is_stable_for_the_same_rubric() -> None:
 
 def test_the_revision_moves_when_a_weight_or_the_prompt_changes() -> None:
     base = _rubric().revision()
-    retuned = _rubric(
+    reweighted = _rubric(
         dimensions=[
             Dimension(key="root_cause", weight=0.6, guidance="Names the component."),
             Dimension(key="evidence", weight=0.2),
             Dimension(key="actionable", weight=0.2),
         ]
     ).revision()
-    assert retuned != base
+    assert reweighted != base
     assert _rubric().revision("prompt v2") != base
 
 
