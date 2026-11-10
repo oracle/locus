@@ -61,7 +61,7 @@ _REVISION_CHARS = 12
 class Dimension(BaseModel):
     """One axis the judge scores 0-100.
 
-    Args:
+    Attributes:
         key: Identifier the judge returns the score under. Stable across
             rubric edits so reports stay comparable.
         label: Human-readable name for reports. Defaults to the key.
@@ -108,7 +108,7 @@ class Cap(BaseModel):
 class Rubric(BaseModel):
     """Dimensions, weights and grade bands, with the arithmetic that reads them.
 
-    Args:
+    Attributes:
         dimensions: At least one :class:`Dimension`; keys must be unique.
         grade_thresholds: ``{letter: minimum composite}``. The letter with the
             highest threshold at or below the composite wins; a composite
