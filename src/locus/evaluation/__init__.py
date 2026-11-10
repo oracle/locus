@@ -13,6 +13,8 @@ Provides systematic testing of agent quality:
   grade bands, with the composite and the letter computed by code
 - Settle figures and claims against the run's own tool results with
   :class:`EvidenceLedger`, and assert what the control layer did
+- Read how far to trust a verdict with :mod:`locus.evaluation.reliability`:
+  repeats, judge panels, second opinions, kappa and calibration
 - Run the same suite against a ``StateGraph`` via :func:`as_eval_target`
 """
 
@@ -33,6 +35,7 @@ from locus.evaluation.framework import (
 )
 from locus.evaluation.graph import GraphEvalTarget, as_eval_target
 from locus.evaluation.judge import (
+    Comparison,
     JudgeProvenance,
     JudgeUnavailableError,
     LLMJudge,
@@ -40,12 +43,30 @@ from locus.evaluation.judge import (
     check_trajectory,
     model_id_of,
 )
+from locus.evaluation.reliability import (
+    CalibrationDrift,
+    Consistency,
+    Kappa,
+    PanelAgreement,
+    TrustDecision,
+    TrustGates,
+    bootstrap_ci,
+    calibration_drift,
+    cohen_kappa,
+    consistency,
+    panel_agreement,
+    trust_decision,
+    wilson_interval,
+)
 from locus.evaluation.rubric import Cap, Dimension, Rubric
 
 
 __all__ = [
+    "CalibrationDrift",
     "Cap",
     "ClaimCheck",
+    "Comparison",
+    "Consistency",
     "Dimension",
     "EvalCase",
     "EvalReport",
@@ -56,14 +77,25 @@ __all__ = [
     "GraphEvalTarget",
     "JudgeProvenance",
     "JudgeUnavailableError",
+    "Kappa",
     "LLMJudge",
+    "PanelAgreement",
     "ReceiptCheck",
     "Rubric",
     "ToolCallExpectation",
+    "TrustDecision",
+    "TrustGates",
     "Verdict",
     "as_eval_target",
+    "bootstrap_ci",
+    "calibration_drift",
     "check_trajectory",
+    "cohen_kappa",
+    "consistency",
     "model_id_of",
+    "panel_agreement",
     "settle_claims",
     "settle_receipts",
+    "trust_decision",
+    "wilson_interval",
 ]

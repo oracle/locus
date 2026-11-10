@@ -35,6 +35,7 @@ stamps `provenance.self_graded` when it can tell.
 ::: locus.evaluation.judge.LLMJudge
 ::: locus.evaluation.judge.Verdict
 ::: locus.evaluation.judge.JudgeProvenance
+::: locus.evaluation.judge.Comparison
 ::: locus.evaluation.judge.model_id_of
 
 ## The rubric as data
@@ -64,6 +65,29 @@ result) is what `forbidden_tools` and `expected_refusals` read.
 ::: locus.evaluation.evidence.ToolCallExpectation
 ::: locus.evaluation.evidence.settle_receipts
 ::: locus.evaluation.evidence.settle_claims
+
+## How far to trust a verdict
+
+Pure functions over verdicts and grade pairs. `EvalRunner` calls
+`consistency` with `repeats=` and `panel_agreement` / `trust_decision` with
+`judges=`; the rest read verdicts you collected elsewhere.
+
+::: locus.evaluation.reliability.consistency
+::: locus.evaluation.reliability.Consistency
+::: locus.evaluation.reliability.panel_agreement
+::: locus.evaluation.reliability.PanelAgreement
+::: locus.evaluation.reliability.trust_decision
+::: locus.evaluation.reliability.TrustDecision
+::: locus.evaluation.reliability.TrustGates
+::: locus.evaluation.reliability.cohen_kappa
+::: locus.evaluation.reliability.Kappa
+::: locus.evaluation.reliability.calibration_drift
+::: locus.evaluation.reliability.CalibrationDrift
+::: locus.evaluation.reliability.wilson_interval
+::: locus.evaluation.reliability.bootstrap_ci
+::: locus.evaluation.reliability.publication_gates
+::: locus.evaluation.reliability.ReliabilityGates
+::: locus.evaluation.reliability.HoldReason
 
 ## Asserting the order, not just the membership
 

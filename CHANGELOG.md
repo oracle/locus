@@ -51,6 +51,24 @@ policy.
 - **Rubric caps.** `Rubric.caps` drop the grade to a ceiling when a
   contradicted claim, a missing receipt or an ungrounded answer is found;
   the runner applies them after the verdict and records `caps_applied`.
+- **Repeats.** `EvalRunner(repeats=)` or `arun(cases, repeats=)` reads every
+  case several times. A case passes only when every graded reading passed
+  (pass^k), the reading shown is the most pessimistic, `EvalResult.samples`
+  keeps them all, and `EvalResult.consistency` flags a case whose readings
+  disagreed by more than the gate; the report counts `unstable` cases and
+  the summary prints `pass k/n`.
+- **Judge panels and second opinions.** `EvalRunner(judges=[...])` grades
+  every judged answer with each judge; the first scores the case,
+  `EvalResult.panel` records the panel's agreement and `EvalResult.trust`
+  the decision between the first two judges (`trusted`,
+  `calibration_required`, `rejected`), which the summary prints.
+- **Pairwise comparison in both orders.** `LLMJudge.compare` asks which of
+  two answers better satisfies the rubric, once in each order; a preference
+  that flips with the position is a `tie` with `consistent=False`.
+- **`locus.evaluation.reliability`.** Pure functions over verdicts and grade
+  pairs: `consistency`, `panel_agreement`, `trust_decision`, `cohen_kappa`,
+  `calibration_drift`, `wilson_interval`, `bootstrap_ci` and
+  `publication_gates`.
 
 ### Changed
 
