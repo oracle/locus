@@ -92,7 +92,7 @@ def test_the_fingerprint_moves_with_a_prompt_a_case_or_a_rubric_weight() -> None
     assert suite_fingerprint(edited) != base
     assert suite_fingerprint(CASES[:2]) != base
     with_rubric = [CASES[0].model_copy(update={"rubric": RUBRIC}), *CASES[1:]]
-    retuned = RUBRIC.model_copy(
+    reweighted = RUBRIC.model_copy(
         update={
             "dimensions": [
                 Dimension(key="root_cause", weight=0.7),
@@ -100,8 +100,8 @@ def test_the_fingerprint_moves_with_a_prompt_a_case_or_a_rubric_weight() -> None
             ]
         }
     )
-    with_retuned = [CASES[0].model_copy(update={"rubric": retuned}), *CASES[1:]]
-    assert suite_fingerprint(with_rubric) != suite_fingerprint(with_retuned)
+    with_reweighted = [CASES[0].model_copy(update={"rubric": reweighted}), *CASES[1:]]
+    assert suite_fingerprint(with_rubric) != suite_fingerprint(with_reweighted)
 
 
 def test_metadata_does_not_move_the_fingerprint() -> None:
