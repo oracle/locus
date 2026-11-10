@@ -27,6 +27,11 @@ Grading rules (see :class:`EvalRunner` for the reasons):
   cancelled and reported ``timed_out``.
 - An unreachable judge raises :class:`~locus.evaluation.judge.JudgeUnavailableError`
   out of :meth:`EvalRunner.arun` instead of being recorded as a failed case.
+- The run's own tool results are evidence. ``require_receipts`` asks that
+  every figure in the answer appear in one; ``claims`` are settled against
+  them, by code where the figures line up and by the judge otherwise;
+  ``forbidden_tools`` and ``expected_refusals`` read what the control layer
+  did; ``max_total_tokens`` and ``max_cost_usd`` read the run's metrics.
 - A judge that answers with something that is not a verdict has not graded
   the case. The result carries ``not_graded_reason``, counts in
   ``EvalReport.not_graded``, and is left out of ``failed`` and ``avg_score``:
@@ -45,7 +50,15 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from locus.evaluation.judge import Verdict, check_trajectory, model_id_of
+from locus.evaluation.evidence import (
+    ClaimCheck,
+    EvidenceLedger,
+    ReceiptCheck,
+    ToolCallExpectation,
+    settle_claims,
+    settle_receipts,
+)
+from locus.evaluation.judge import JudgeUnavailableError, Verdict, check_trajectory, model_id_of
 from locus.evaluation.rubric import Rubric
 
 
@@ -110,6 +123,49 @@ class EvalCase(BaseModel):
         "synchronous run() cannot call a judge and fails a case that carries "
         "a rubric.",
     )
+    expected_tool_calls: list[ToolCallExpectation] = Field(
+        default_factory=list,
+        description="Tool calls the run must have made, with the arguments that "
+        "matter: every argument given must match, others are not checked. A call "
+        "the gate refused did not happen.",
+    )
+    forbidden_tools: list[str] = Field(
+        default_factory=list,
+        description="Tools that must not have executed. A call the gate refused "
+        "(denied or held for approval) or that errored did not execute.",
+    )
+    expected_refusals: list[str] = Field(
+        default_factory=list,
+        description="Tools the gate must have refused at least once: the call's "
+        "result carried the gate's denied or held_for_approval status.",
+    )
+    max_total_tokens: int | None = Field(
+        default=None,
+        description="Token budget for the run, read from the result's metrics. A "
+        "target that reports no metrics fails the check rather than passing it.",
+    )
+    max_cost_usd: float | None = Field(
+        default=None,
+        description="Spend budget for the run, read from metrics.cost_usd. An "
+        "unknown cost fails the check.",
+    )
+    require_receipts: bool = Field(
+        default=False,
+        description="Every figure and identifier in the answer must appear in a "
+        "tool result or in the prompt. Deterministic; no model call.",
+    )
+    claims: list[str] = Field(
+        default_factory=list,
+        description="Claims about the run to settle against its evidence. Code "
+        "confirms a claim whose figures all sit in one tool result; the judge "
+        "settles the rest in arun(), citing rows and quoting them.",
+    )
+    grounding: float | None = Field(
+        default=None,
+        description="Minimum GSAR grounding score of the answer against the run's "
+        "evidence, audited by the runner's judge model in arun(). An abstaining "
+        "audit leaves the case not graded.",
+    )
     tags: list[str] = Field(
         default_factory=list,
         description="Tags for filtering/grouping eval cases",
@@ -147,6 +203,15 @@ class EvalResult(BaseModel):
         default=None,
         description="Set when the judge abstained: the case was neither passed nor "
         "failed, and is left out of avg_score.",
+    )
+    receipts: ReceiptCheck | None = Field(
+        default=None, description="Where each figure in the answer was found, when asked"
+    )
+    claim_checks: list[ClaimCheck] = Field(
+        default_factory=list, description="The case's claims, each settled by code or judge"
+    )
+    grounding_score: float | None = Field(
+        default=None, description="GSAR score of the answer against the ledger, when audited"
     )
 
     model_config = {"arbitrary_types_allowed": True}
@@ -466,10 +531,8 @@ class EvalRunner:
 
             output = agent_result.message or ""
             iterations = agent_result.iterations
-
-            # Collect tool names from execution
-            tools_called = [te.tool_name for te in agent_result.tool_executions]
-
+            ledger = EvidenceLedger.from_result(agent_result, prompt=case.prompt)
+            tools_called = [row.tool_name for row in ledger.tool_rows]
             duration_ms = (time.perf_counter() - start_time) * 1000
 
             # Shared with the async path on purpose. This used to be a
@@ -481,14 +544,23 @@ class EvalRunner:
             checks = self._structural_checks(
                 case,
                 output=output,
-                tools_called=tools_called,
+                ledger=ledger,
                 iterations=iterations,
                 duration_ms=duration_ms,
+                metrics=getattr(agent_result, "metrics", None),
             )
+            receipts, claim_checks, open_claims = self._evidence_checks(
+                case, output=output, ledger=ledger, checks=checks
+            )
+            # No judge can be awaited here. Ignoring a rubric, an open claim
+            # or a grounding floor would report a graded case green without
+            # anyone reading it.
             if case.rubric:
-                # No judge can be awaited here. Ignoring the rubric would
-                # report a graded case green without anyone reading it.
                 checks["rubric:requires_arun"] = False
+            if open_claims:
+                checks["claims:requires_arun"] = False
+            if case.grounding is not None:
+                checks["grounding:requires_arun"] = False
 
             passed, score = self._grade(checks, None)
 
@@ -501,6 +573,8 @@ class EvalRunner:
                 iterations=iterations,
                 duration_ms=duration_ms,
                 checks=checks,
+                receipts=receipts,
+                claim_checks=claim_checks,
             )
 
         except Exception as e:  # noqa: BLE001
@@ -519,9 +593,10 @@ class EvalRunner:
         case: EvalCase,
         *,
         output: str,
-        tools_called: list[str],
+        ledger: EvidenceLedger,
         iterations: int,
         duration_ms: float,
+        metrics: Any = None,
     ) -> dict[str, bool]:
         """Every check that needs no model call.
 
@@ -530,6 +605,7 @@ class EvalRunner:
         """
         checks: dict[str, bool] = {}
         lowered = output.lower()
+        tools_called = [row.tool_name for row in ledger.tool_rows]
 
         for tool_name in case.expected_tools:
             checks[f"tool_called:{tool_name}"] = tool_name in tools_called
@@ -550,7 +626,114 @@ class EvalRunner:
             )
             checks["tool_sequence"] = ok
 
+        for expectation in case.expected_tool_calls:
+            label = f"tool_call:{expectation.name}"
+            if expectation.arguments:
+                args = ", ".join(f"{k}={v!r}" for k, v in expectation.arguments.items())
+                label = f"{label}({args})"
+            checks[label] = any(
+                expectation.matches(row.tool_name, row.arguments)
+                for row in ledger.tool_rows
+                if row.executed
+            )
+        for tool_name in case.forbidden_tools:
+            # A refused or errored call did not execute; that is the point of
+            # the gate, and the point of asserting it.
+            checks[f"forbidden_tool:{tool_name}"] = not ledger.executions_of(tool_name)
+        for tool_name in case.expected_refusals:
+            checks[f"refused:{tool_name}"] = bool(ledger.refusals_of(tool_name))
+
+        if case.max_total_tokens is not None:
+            total = getattr(metrics, "total_tokens", None)
+            checks["within_token_budget"] = (
+                isinstance(total, int | float) and total <= case.max_total_tokens
+            )
+        if case.max_cost_usd is not None:
+            cost = getattr(metrics, "cost_usd", None)
+            checks["within_cost_budget"] = (
+                isinstance(cost, int | float) and cost <= case.max_cost_usd
+            )
+
         return checks
+
+    @staticmethod
+    def _evidence_checks(
+        case: EvalCase, *, output: str, ledger: EvidenceLedger, checks: dict[str, bool]
+    ) -> tuple[ReceiptCheck | None, list[ClaimCheck], list[str]]:
+        """Receipts and code-settled claims. Returns what the judge still has to settle.
+
+        Both are deterministic. ``checks`` gains ``receipts:<found>/<total>``
+        and one ``claim:<i>`` per claim code could confirm; the open claims
+        get their check once the judge has looked (``arun``) or are marked
+        as needing it (``run``).
+        """
+        receipts: ReceiptCheck | None = None
+        if case.require_receipts:
+            receipts = settle_receipts(output, ledger)
+            checks[f"receipts:{receipts.summary}"] = receipts.passed
+
+        claim_checks: list[ClaimCheck] = []
+        open_claims: list[str] = []
+        if case.claims:
+            claim_checks, open_claims = settle_claims(case.claims, ledger)
+            for check in claim_checks:
+                checks[f"claim:{case.claims.index(check.claim)}"] = True
+        return receipts, claim_checks, open_claims
+
+    async def _judge_claims(
+        self, case: EvalCase, *, open_claims: list[str], ledger: EvidenceLedger
+    ) -> list[ClaimCheck] | None:
+        """The judge settles the claims code could not. ``None`` when it abstained."""
+        check_claims = getattr(self.judge, "check_claims", None)
+        if check_claims is None:
+            return []
+        judged: list[ClaimCheck] | None = await check_claims(
+            prompt=case.prompt, claims=open_claims, ledger=ledger
+        )
+        return judged
+
+    async def _audit_grounding(self, *, output: str, ledger: EvidenceLedger) -> Any:
+        """Run the GSAR judge over the answer and the ledger with the runner's judge model."""
+        from locus.reasoning.gsar_judge import StructuredOutputGSARJudge
+
+        model = getattr(self.judge, "model", None)
+        audit = await StructuredOutputGSARJudge(model=model, strict=False).judge(
+            report_synthesis=output, evidence_corpus=ledger.corpus()
+        )
+        reason = audit.abstain_reason or ""
+        if audit.decision_status == "abstain" and reason.startswith("judge model call failed"):
+            # The GSAR judge folds transport failures into an abstention; for
+            # the suite that is the judge being down, not a finding.
+            raise JudgeUnavailableError(f"grounding audit could not reach the judge: {reason}")
+        return audit
+
+    @staticmethod
+    def _apply_caps(
+        verdict: Verdict,
+        rubric: Rubric,
+        *,
+        contradicted: bool,
+        receipts_failed: bool,
+        ungrounded: bool,
+    ) -> None:
+        """Drop the verdict's grade to each fired cap's ceiling, and say so."""
+        if verdict.grade is None:
+            return
+        fired = {
+            "contradicted_claim": contradicted,
+            "receipts_failed": receipts_failed,
+            "ungrounded": ungrounded,
+        }
+        for cap in rubric.caps:
+            if not fired.get(cap.when, False):
+                continue
+            verdict.caps_applied.append(f"{cap.when}->{cap.grade}")
+            current = rubric.rank(verdict.grade)
+            ceiling = rubric.rank(cap.grade)
+            if current is not None and ceiling is not None and ceiling > current:
+                verdict.grade = cap.grade
+                verdict.score = min(verdict.score, rubric.band_top(cap.grade) / 100)
+                verdict.passed = round(verdict.score * 100) >= rubric.pass_score
 
     async def _arun_case(self, case: EvalCase) -> EvalResult:
         """Run one case asynchronously, grading with the judge when asked.
@@ -565,16 +748,21 @@ class EvalRunner:
             if agent_result is _BUDGET_EXCEEDED:
                 return self._timed_out_result(case, (time.perf_counter() - started) * 1000)
             output = agent_result.message or ""
-            tools_called = [te.tool_name for te in agent_result.tool_executions]
             iterations = agent_result.iterations
+            ledger = EvidenceLedger.from_result(agent_result, prompt=case.prompt)
+            tools_called = [row.tool_name for row in ledger.tool_rows]
             duration_ms = (time.perf_counter() - started) * 1000
 
             checks = self._structural_checks(
                 case,
                 output=output,
-                tools_called=tools_called,
+                ledger=ledger,
                 iterations=iterations,
                 duration_ms=duration_ms,
+                metrics=getattr(agent_result, "metrics", None),
+            )
+            receipts, claim_checks, open_claims = self._evidence_checks(
+                case, output=output, ledger=ledger, checks=checks
             )
         except Exception as e:  # noqa: BLE001
             return EvalResult(
@@ -586,37 +774,79 @@ class EvalRunner:
                 error=str(e),
             )
 
-        judged: float | None = None
-        verdict: Verdict | None = None
         not_graded_reason: str | None = None
-        if case.rubric:
-            if self.judge is None:
-                # Not silently passed: a suite must not look green because
-                # nobody supplied the judge its cases asked for.
-                checks["rubric:no_judge_configured"] = False
+        needs_judge = bool(case.rubric) or bool(open_claims) or case.grounding is not None
+        if needs_judge and self.judge is None:
+            # Not silently passed: a suite must not look green because
+            # nobody supplied the judge its cases asked for.
+            for label, wanted in (
+                ("rubric", bool(case.rubric)),
+                ("claims", bool(open_claims)),
+                ("grounding", case.grounding is not None),
+            ):
+                if wanted:
+                    checks[f"{label}:no_judge_configured"] = False
+
+        # Judge calls below are deliberately not caught: an unreachable judge
+        # raises (JudgeUnavailableError). Recording it as a failed case would
+        # blame the agent for the judge being down.
+        if open_claims and self.judge is not None:
+            judged = await self._judge_claims(case, open_claims=open_claims, ledger=ledger)
+            if judged is None:
+                checks["judge_unparseable:claim checks"] = False
+                not_graded_reason = "the judge returned no claim checks"
             else:
-                # Deliberately not caught: an unreachable judge raises
-                # (JudgeUnavailableError). Recording it as a failed case
-                # would blame the agent for the judge being down.
-                verdict = await self.judge.score(
-                    prompt=case.prompt, output=output, rubric=case.rubric
+                claim_checks.extend(judged)
+        for check in claim_checks:
+            if check.settled_by == "judge":
+                checks[f"claim:{case.claims.index(check.claim)}"] = check.verdict == "confirmed"
+
+        grounding_score: float | None = None
+        grounding_ok: bool | None = None
+        if case.grounding is not None and self.judge is not None:
+            from locus.reasoning.gsar import gsar_score
+
+            audit = await self._audit_grounding(output=output, ledger=ledger)
+            if audit.decision_status == "abstain":
+                checks["judge_unparseable:grounding audit"] = False
+                not_graded_reason = not_graded_reason or (
+                    f"grounding audit abstained: {audit.abstain_reason or 'no reason given'}"
                 )
-                self._stamp_self_graded(verdict)
-                if verdict.abstained or verdict.unparseable:
-                    # The judge answered, but not with a verdict. That is a
-                    # finding about the judge, so the case is not graded
-                    # rather than failed; the check keeps the failure visible.
-                    checks[f"judge_unparseable:{verdict.reason[:60] or 'no verdict'}"] = False
-                    not_graded_reason = verdict.reason or "the judge returned no verdict"
-                else:
-                    checks[f"rubric:{verdict.reason[:60] or 'graded'}"] = verdict.passed
-                    judged = verdict.score
+            else:
+                grounding_score = gsar_score(audit.to_partition())
+                grounding_ok = grounding_score >= case.grounding
+                checks[f"grounding:S>={case.grounding:g}"] = grounding_ok
+
+        judged_score: float | None = None
+        verdict: Verdict | None = None
+        if case.rubric and self.judge is not None:
+            verdict = await self.judge.score(prompt=case.prompt, output=output, rubric=case.rubric)
+            self._stamp_self_graded(verdict)
+            if verdict.abstained or verdict.unparseable:
+                # The judge answered, but not with a verdict. That is a
+                # finding about the judge, so the case is not graded
+                # rather than failed; the check keeps the failure visible.
+                checks[f"judge_unparseable:{verdict.reason[:60] or 'no verdict'}"] = False
+                not_graded_reason = not_graded_reason or (
+                    verdict.reason or "the judge returned no verdict"
+                )
+            else:
+                if isinstance(case.rubric, Rubric):
+                    self._apply_caps(
+                        verdict,
+                        case.rubric,
+                        contradicted=any(c.verdict == "contradicted" for c in claim_checks),
+                        receipts_failed=receipts is not None and not receipts.passed,
+                        ungrounded=grounding_ok is False,
+                    )
+                checks[f"rubric:{verdict.reason[:60] or 'graded'}"] = verdict.passed
+                judged_score = verdict.score
 
         # A graded case reports the judge's score rather than the fraction
         # of boxes ticked -- "0.5 because one of two checks failed" says
         # much less than "0.2, the answer named no policy" -- but capped by
         # that fraction, so a failed case never reports 1.0.
-        passed, score = self._grade(checks, judged)
+        passed, score = self._grade(checks, judged_score)
         if not_graded_reason:
             passed, score = False, 0.0
 
@@ -632,4 +862,7 @@ class EvalRunner:
             grade=verdict.grade if verdict is not None and not not_graded_reason else None,
             verdict=verdict,
             not_graded_reason=not_graded_reason,
+            receipts=receipts,
+            claim_checks=claim_checks,
+            grounding_score=grounding_score,
         )

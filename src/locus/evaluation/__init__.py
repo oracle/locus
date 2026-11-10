@@ -11,9 +11,20 @@ Provides systematic testing of agent quality:
 - Grade free-form answers against a rubric with :class:`LLMJudge`
 - Write the rubric as data with :class:`Rubric`: dimensions, weights and
   grade bands, with the composite and the letter computed by code
+- Settle figures and claims against the run's own tool results with
+  :class:`EvidenceLedger`, and assert what the control layer did
 - Run the same suite against a ``StateGraph`` via :func:`as_eval_target`
 """
 
+from locus.evaluation.evidence import (
+    ClaimCheck,
+    EvidenceLedger,
+    EvidenceRow,
+    ReceiptCheck,
+    ToolCallExpectation,
+    settle_claims,
+    settle_receipts,
+)
 from locus.evaluation.framework import (
     EvalCase,
     EvalReport,
@@ -34,18 +45,25 @@ from locus.evaluation.rubric import Cap, Dimension, Rubric
 
 __all__ = [
     "Cap",
+    "ClaimCheck",
     "Dimension",
     "EvalCase",
     "EvalReport",
     "EvalResult",
     "EvalRunner",
+    "EvidenceLedger",
+    "EvidenceRow",
     "GraphEvalTarget",
     "JudgeProvenance",
     "JudgeUnavailableError",
     "LLMJudge",
+    "ReceiptCheck",
     "Rubric",
+    "ToolCallExpectation",
     "Verdict",
     "as_eval_target",
     "check_trajectory",
     "model_id_of",
+    "settle_claims",
+    "settle_receipts",
 ]

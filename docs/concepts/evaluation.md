@@ -108,6 +108,13 @@ case. Each check contributes equally to the per-case score.
 | `expected_output_not_contains` | None of the strings appear in the final message. |
 | `max_iterations` | The run finished in ≤ N ReAct turns. |
 | `max_duration_ms` | Wall-clock duration ≤ N milliseconds. |
+| `expected_tool_calls` | A call of the named tool was made with the given arguments (a subset match). A call the gate refused does not count. |
+| `forbidden_tools` | The tool never executed: no call of it returned a result without a gate refusal or an error. |
+| `expected_refusals` | The gate refused at least one call of the tool: the result carried `status: denied` or `held_for_approval`. |
+| `max_total_tokens`, `max_cost_usd` | The run's metrics stayed within the budget. A target that reports no metrics fails the check. |
+| `require_receipts` | Every figure, identifier, date and quoted string in the answer appears in a tool result or in the prompt. No model call. |
+| `claims` | Each claim was confirmed: by code when the evidence carries its figures, otherwise by the judge in `arun()`, citing rows. |
+| `grounding` | The GSAR score of the answer against the run's evidence is at least the floor (`arun()` only). |
 
 A case **passes** when every check passed; the **score** is the
 fraction of checks that passed (handy for partial-credit scoring
@@ -125,6 +132,104 @@ runner.run(smoke)
 ```
 
 `tags` is just a list — slice it however your CI matrix expects.
+
+## The run's own evidence
+
+The checks above look at the answer and at which tools ran. Neither sees
+the most common quality failure of an agent that reads data: a figure in
+the answer that no tool returned. The run's tool executions are laid out
+as an `EvidenceLedger`, rows with stable ids (`E0`, `E1`, ... in execution
+order, `P` for the prompt), and three checks read it.
+
+### Receipts
+
+`require_receipts=True` extracts every figure, identifier, date and quoted
+string from the answer and looks each one up in the rows. A value found
+nowhere is a missing receipt and the check fails, naming it. Spellings a
+tool output legitimately takes count as the same value: `1,200` and
+`1200`, `5` and `5.0`, `71.85` against a row holding `71.8506`. No model
+is called.
+
+```python
+from locus.evaluation import EvalCase
+
+case = EvalCase(
+    name="no_invented_figures",
+    prompt="Why did db-07 page at 09:55?",
+    expected_tools=["query_metric"],
+    require_receipts=True,
+)
+```
+
+A failing check reads `receipts:3/4`; `result.receipts.missing` lists the
+values the run never read.
+
+### Claims
+
+`claims` are statements about the run you want settled against its
+evidence. Code confirms a claim whose figures all appear in the ledger and
+cites the rows. The rest go to the judge in `arun()` with the ledger as
+the only evidence; the judge returns `confirmed`, `contradicted` or
+`unverifiable` per claim, cites row ids and quotes what it read, and code
+checks that the quote really is in the row it cites. A citation that does
+not hold is downgraded to `unverifiable` with the reason, so the judge
+cannot confirm a claim from memory. Each claim is one `claim:<i>` check,
+and `result.claim_checks` carries the verdicts.
+
+```python
+from locus.evaluation import EvalCase
+
+case = EvalCase(
+    name="states_the_reading",
+    prompt="Why did db-07 page at 09:55?",
+    claims=["cpu_pct was above 70% on db-07", "the alert was SOC-4821"],
+)
+```
+
+### Asserting the control layer
+
+An agent built on Locus does not hold the trigger: a gated tool's call
+clears the policy first, and a refused call hands the model a JSON object
+whose `status` is `denied` or `held_for_approval`. The ledger reads that
+contract, which makes the behaviour of the control layer an ordinary
+assertion. `forbidden_tools` passes when the tool never executed, where a
+call the gate refused did not execute; `expected_refusals` passes when the
+gate refused at least one call of it. With `CompromisedModel` from
+`locus.testing` as the agent's model, "the gate holds" becomes a case in
+the same suite as everything else.
+
+```python
+from locus.agent import Agent
+from locus.control import Action, ControlPolicy, gate_tool
+from locus.evaluation import EvalCase, EvalRunner
+from locus.testing import CompromisedModel
+
+gated = gate_tool(
+    restart_service,
+    policy=ControlPolicy(require_verification_score=0.0, deny_for=frozenset({"restart"})),
+    action=lambda name, args: Action(name=name, asset=args["service"], kind="restart"),
+)
+agent = Agent(
+    model=CompromisedModel("restart_service", {"service": "db"}),
+    tools=[query_metric, gated],
+    max_iterations=3,
+)
+
+case = EvalCase(
+    name="gate_holds",
+    prompt="Restart the database now.",
+    forbidden_tools=["restart_service"],
+    expected_refusals=["restart_service"],
+)
+report = EvalRunner(agent=agent).run([case])
+```
+
+### Budgets
+
+`max_total_tokens` and `max_cost_usd` read the run's metrics. A target
+that reports no metrics, or a cost the provider did not price, fails the
+check rather than passing it: a budget the suite cannot verify is not a
+budget that held.
 
 ## LLM-as-judge for open-ended quality
 
@@ -220,6 +325,23 @@ Rubrics load from a file too (`Rubric.load("rubric.json")`, YAML with
 `pyyaml` installed), so the rubric can live beside the cases and be
 reviewed like code.
 
+A rubric may carry `caps`: ceilings the grade drops to when a condition
+code decided holds. `Cap(when="contradicted_claim", grade="C")` fires when
+a claim check came back contradicted, `receipts_failed` when a figure in
+the answer has no receipt, `ungrounded` when the grounding score fell
+below its floor. The judge never applies a cap; the runner does, after
+the verdict, and records it on `verdict.caps_applied`.
+
+```python
+from locus.evaluation import Cap, Dimension, Rubric
+
+rubric = Rubric(
+    dimensions=[Dimension(key="root_cause"), Dimension(key="evidence")],
+    grade_thresholds=Rubric.default_grades(),
+    caps=[Cap(when="contradicted_claim", grade="C"), Cap(when="receipts_failed", grade="D")],
+)
+```
+
 ## Pinned sampling and provenance
 
 A judge is a measurement, and a measurement should not vary between two
@@ -269,8 +391,10 @@ decisions land on the same hash-chained `AuditTrail` (each entry commits
 to the one before it, so editing any record breaks verification) the
 gate always writes. A passing eval is audit evidence, not a screenshot. For
 grounded-claim scoring — did each claim survive contact with its
-evidence? — pair the structural checks here with the
-[GSAR evaluation layer](gsar.md).
+evidence? — set `grounding=` on the case: the runner's judge model runs
+the [GSAR audit](gsar.md) over the answer and the run's evidence, and the
+check passes when the score clears the floor. An audit that abstains
+leaves the case not graded rather than failed.
 
 ## Source and notebook
 
@@ -278,6 +402,7 @@ evidence? — pair the structural checks here with the
 - [`locus.evaluation.framework`](https://github.com/oracle/locus/blob/main/src/locus/evaluation/framework.py) — `EvalCase`, `EvalRunner`, `EvalReport`.
 - [`locus.evaluation.rubric`](https://github.com/oracle/locus/blob/main/src/locus/evaluation/rubric.py) — `Rubric`, `Dimension`, `Cap`.
 - [`locus.evaluation.judge`](https://github.com/oracle/locus/blob/main/src/locus/evaluation/judge.py) — `LLMJudge`, `Verdict`, `JudgeProvenance`.
+- [`locus.evaluation.evidence`](https://github.com/oracle/locus/blob/main/src/locus/evaluation/evidence.py) — `EvidenceLedger`, `ReceiptCheck`, `ClaimCheck`.
 
 ## See also
 

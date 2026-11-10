@@ -31,6 +31,26 @@ policy.
   model takes tools (`channel="auto"`), falling back to a plain-JSON reply;
   `channel="text"` never offers the tool. The response under grading is
   delimited and declared as data in the prompt.
+- **The run's own evidence as checks.** `EvidenceLedger` lays the run's tool
+  executions out as rows with stable ids (`E0`, `E1`, ..., `P` for the
+  prompt). `EvalCase.require_receipts` fails when a figure, identifier, date
+  or quoted string in the answer appears in no row; `EvalCase.claims` are
+  confirmed by code when the evidence carries their figures and settled by
+  the judge otherwise, through a `submit_claim_checks` tool call whose
+  citations are verified against the rows (a quote not in the cited row
+  downgrades the check to `unverifiable`); `EvalCase.grounding` runs the
+  GSAR audit over the answer and the ledger with the judge model. Results
+  carry `receipts`, `claim_checks` and `grounding_score`.
+- **Control-layer assertions.** `EvalCase.forbidden_tools` passes when the
+  tool never executed, where a call the gate refused did not execute;
+  `EvalCase.expected_refusals` passes when the gate answered `denied` or
+  `held_for_approval` at least once. `EvalCase.expected_tool_calls` matches
+  a call on its arguments (`ToolCallExpectation`).
+- **Budgets.** `EvalCase.max_total_tokens` and `max_cost_usd` read the run's
+  metrics; a target that reports none fails the check.
+- **Rubric caps.** `Rubric.caps` drop the grade to a ceiling when a
+  contradicted claim, a missing receipt or an ungrounded answer is found;
+  the runner applies them after the verdict and records `caps_applied`.
 
 ### Changed
 

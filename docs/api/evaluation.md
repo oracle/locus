@@ -49,6 +49,22 @@ the rubric and prompt a verdict was measured under.
 ::: locus.evaluation.rubric.Dimension
 ::: locus.evaluation.rubric.Cap
 
+## The run's own evidence
+
+The run's tool executions, as rows with stable ids a claim can cite. Receipts
+and the claims whose figures the evidence carries are settled by code; the
+judge settles the rest and its citations are verified against the rows. The
+gate's refusal contract (`status: denied` or `held_for_approval` on a tool
+result) is what `forbidden_tools` and `expected_refusals` read.
+
+::: locus.evaluation.evidence.EvidenceLedger
+::: locus.evaluation.evidence.EvidenceRow
+::: locus.evaluation.evidence.ReceiptCheck
+::: locus.evaluation.evidence.ClaimCheck
+::: locus.evaluation.evidence.ToolCallExpectation
+::: locus.evaluation.evidence.settle_receipts
+::: locus.evaluation.evidence.settle_claims
+
 ## Asserting the order, not just the membership
 
 `expected_tools` asks whether a tool appeared *somewhere* in the run. It cannot
