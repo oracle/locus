@@ -268,6 +268,99 @@ def _cmd_codex(args: argparse.Namespace) -> int:
     return 0
 
 
+def _load_judge(spec: str) -> Any:
+    """An ``LLMJudge`` from ``spec``: a judge, a model to wrap, or a factory for either."""
+    from locus.evaluation import LLMJudge  # noqa: PLC0415
+
+    obj = load_object(spec)
+    if callable(obj) and not hasattr(obj, "score") and not hasattr(obj, "complete"):
+        obj = obj()
+    if hasattr(obj, "score"):
+        return obj
+    if hasattr(obj, "complete"):
+        return LLMJudge(obj)
+    raise CLIError(f"{spec} is not a judge, a model, or a function returning one")
+
+
+def _gate_from_args(args: argparse.Namespace) -> Any:
+    from locus.evaluation import EvalGate  # noqa: PLC0415
+
+    return EvalGate(
+        min_pass_rate=args.min_pass_rate,
+        min_avg_score=args.min_avg_score,
+        max_not_graded=args.max_not_graded,
+        max_unstable=args.max_unstable,
+        no_regressions=not args.allow_regressions,
+        max_avg_score_drop=args.max_avg_score_drop,
+    )
+
+
+def _cmd_eval(args: argparse.Namespace) -> int:
+    from locus.evaluation import (  # noqa: PLC0415
+        EvalReport,
+        EvalRunner,
+        JudgeUnavailableError,
+        Rubric,
+        diff_reports,
+        load_cases,
+    )
+
+    def read(path: str) -> Any:
+        try:
+            return EvalReport.load(path)
+        except (OSError, ValueError) as exc:
+            raise CLIError(f"cannot read report {path}: {exc}") from exc
+
+    if args.action == "summary":
+        report = read(args.report)
+        print(report.to_markdown() if args.markdown else report.summary())
+        return 0
+    if args.action == "diff":
+        try:
+            diff = diff_reports(read(args.baseline), read(args.candidate), force=args.force)
+        except ValueError as exc:
+            raise CLIError(str(exc)) from exc
+        print(diff.to_markdown() if args.markdown else diff.summary())
+        return 1 if diff.regressed else 0
+    if args.action == "gate":
+        report = read(args.report)
+        baseline = read(args.baseline) if args.baseline else None
+        result = _gate_from_args(args).check(report, baseline=baseline, force=args.force)
+        print(result.summary())
+        return 0 if result.passed else 1
+
+    agent = load_agent(args.agent)
+    judge = _load_judge(args.judge) if args.judge else None
+    rubric = None
+    if args.rubric:
+        try:
+            rubric = Rubric.load(args.rubric)
+        except (OSError, ValueError, TypeError) as exc:
+            raise CLIError(f"cannot read rubric {args.rubric}: {exc}") from exc
+    try:
+        cases = load_cases(args.cases, rubric=rubric)
+    except (OSError, ValueError, TypeError) as exc:
+        raise CLIError(f"cannot read cases {args.cases}: {exc}") from exc
+    if args.tags:
+        wanted = set(args.tags)
+        cases = [case for case in cases if wanted & set(case.tags)]
+    if not cases:
+        raise CLIError("no cases to run")
+
+    runner = EvalRunner(agent, judge=judge, concurrency=args.concurrency, repeats=args.repeats)
+    try:
+        report = asyncio.run(runner.arun(cases))
+    except JudgeUnavailableError as exc:
+        raise CLIError(f"the judge was unavailable, nothing was graded: {exc}") from exc
+    print(report.summary())
+    if args.report:
+        print(f"report written to {report.save(args.report)}")
+    baseline = read(args.baseline) if args.baseline else None
+    result = _gate_from_args(args).check(report, baseline=baseline)
+    print(result.summary())
+    return 0 if result.passed else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     """The argument parser for ``locus``."""
     from locus import __version__  # noqa: PLC0415
@@ -361,7 +454,71 @@ def build_parser() -> argparse.ArgumentParser:
     run_codex.set_defaults(codex_args=[])
     codex_actions.add_parser("path", help="print where the bundled skill is")
     codex.set_defaults(handler=_cmd_codex)
+
+    evaluate = commands.add_parser(
+        "eval", help="run an evaluation suite, diff two reports, or gate a build on one"
+    )
+    eval_actions = evaluate.add_subparsers(dest="action", required=True)
+    eval_run = eval_actions.add_parser(
+        "run", help="run the cases in a file against an agent and print the report"
+    )
+    eval_run.add_argument("cases", help="a .json, .jsonl or .yaml file of EvalCase objects")
+    eval_run.add_argument(
+        "--agent", required=True, help="MODULE:ATTR or FILE.py:ATTR naming an Agent or a factory"
+    )
+    eval_run.add_argument(
+        "--judge",
+        help="MODULE:ATTR naming an LLMJudge, a model to wrap in one, or a factory for either",
+    )
+    eval_run.add_argument("--rubric", help="a rubric file applied to cases that name none")
+    eval_run.add_argument("--repeats", type=int, default=1, help="readings per case")
+    eval_run.add_argument("--concurrency", type=int, default=4, help="cases run at once")
+    eval_run.add_argument("--tags", nargs="*", default=[], help="only cases carrying one of these")
+    eval_run.add_argument("--report", help="write the report as JSON here")
+    eval_run.add_argument("--baseline", help="a saved report to gate regressions against")
+    _add_gate_arguments(eval_run)
+    eval_run.set_defaults(handler=_cmd_eval)
+
+    eval_diff = eval_actions.add_parser("diff", help="compare two saved reports case by case")
+    eval_diff.add_argument("baseline")
+    eval_diff.add_argument("candidate")
+    eval_diff.add_argument(
+        "--force", action="store_true", help="diff even when the suites' fingerprints differ"
+    )
+    eval_diff.add_argument("--markdown", action="store_true", help="print a Markdown table")
+    eval_diff.set_defaults(handler=_cmd_eval)
+
+    eval_gate = eval_actions.add_parser("gate", help="apply the gate to a saved report")
+    eval_gate.add_argument("report")
+    eval_gate.add_argument("--baseline", help="a saved report to gate regressions against")
+    eval_gate.add_argument(
+        "--force", action="store_true", help="gate even when the suites' fingerprints differ"
+    )
+    _add_gate_arguments(eval_gate)
+    eval_gate.set_defaults(handler=_cmd_eval)
+
+    eval_summary = eval_actions.add_parser("summary", help="print a saved report")
+    eval_summary.add_argument("report")
+    eval_summary.add_argument("--markdown", action="store_true", help="print a Markdown table")
+    eval_summary.set_defaults(handler=_cmd_eval)
     return parser
+
+
+def _add_gate_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--min-pass-rate", type=float, default=1.0, help="over graded cases (default 1.0)"
+    )
+    parser.add_argument("--min-avg-score", type=float, help="0-1")
+    parser.add_argument("--max-not-graded", type=int, default=0, help="default 0")
+    parser.add_argument("--max-unstable", type=int, help="with --repeats")
+    parser.add_argument(
+        "--allow-regressions",
+        action="store_true",
+        help="with --baseline: do not fail on a case that passed before and fails now",
+    )
+    parser.add_argument(
+        "--max-avg-score-drop", type=float, help="with --baseline: the average may not drop by more"
+    )
 
 
 def _split_codex_args(argv: list[str]) -> tuple[list[str], list[str]]:

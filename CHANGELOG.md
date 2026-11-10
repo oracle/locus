@@ -69,6 +69,25 @@ policy.
   pairs: `consistency`, `panel_agreement`, `trust_decision`, `cohen_kappa`,
   `calibration_drift`, `wilson_interval`, `bootstrap_ci` and
   `publication_gates`.
+- **Comparable reports.** Every `EvalReport` carries a `fingerprint` of the
+  cases it measured (`suite_fingerprint`), `by_tag` counts, `check_failures`,
+  the judge models and rubric revisions seen, and `save` / `load` /
+  `to_markdown`. `diff_reports` compares two reports case by case (regressed,
+  improved, added, removed, score and dimension deltas, newly failing
+  checks) and refuses two different suites unless forced. `EvalGate` is the
+  rule a build applies (pass rate, average, not graded, unstable, and
+  against a baseline no regressions or a bounded average drop), reporting
+  every reason it failed.
+- **Cases as data.** `load_cases` reads a JSON, JSONL or YAML file of cases,
+  with a top-level rubric applied to cases that name none; `dump_cases`
+  writes one back.
+- **`locus eval`.** `run` loads cases and an agent (and optionally a judge
+  and a rubric), prints the report, saves it and exits with the gate's
+  verdict; `diff`, `gate` and `summary` work on saved reports, with
+  `--markdown` tables for pull-request comments. How-to: *Evaluate an agent
+  in CI*.
+- **Notebook 56** now covers the rubric with a judge, receipts, repeats and
+  a saved, diffed, gated pair of reports.
 
 ### Changed
 
