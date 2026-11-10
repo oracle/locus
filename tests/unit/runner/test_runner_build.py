@@ -19,6 +19,7 @@ from typing import Any
 import httpx
 import pytest
 
+import locus.runner.main as runner_main
 from locus.core.events import ModelChunkEvent, ThinkEvent, ToolCompleteEvent, ToolStartEvent
 from locus.core.messages import ToolCall
 from locus.harness import LocalBackend
@@ -1069,3 +1070,24 @@ def test_the_module_entry_point_exits_with_the_runners_code(
     with pytest.raises(SystemExit) as stopped:
         runpy.run_module("locus.runner", run_name="__main__")
     assert stopped.value.code == EXIT_ERROR
+
+
+def test_main_takes_the_workspace_from_the_environment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # ``python -m locus.runner`` works on /sandbox. A runner started outside OpenShell (a
+    # gateway's local box driver, a CI job) names its directory in LOCUS_WORKSPACE.
+    seen: dict[str, object] = {}
+
+    async def fake_run_box(env: object = None, **kwargs: object) -> int:
+        seen.update(kwargs)
+        return EXIT_DONE
+
+    monkeypatch.setattr(runner_main, "run_box", fake_run_box)
+    monkeypatch.setenv(runner_main.WORKSPACE_VAR, str(tmp_path))
+    assert runner_main.main([]) == EXIT_DONE
+    assert seen["workspace"] == str(tmp_path)
+
+    monkeypatch.delenv(runner_main.WORKSPACE_VAR)
+    assert runner_main.main([]) == EXIT_DONE
+    assert seen["workspace"] == runner_main.DEFAULT_WORKSPACE

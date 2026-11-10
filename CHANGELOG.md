@@ -8,6 +8,12 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- `python -m locus.runner` takes its workspace from `LOCUS_WORKSPACE` when
+  set, for a runner started outside an OpenShell sandbox (a gateway's local
+  box driver, a CI job); unset, it works on `/sandbox` as before.
+
 ## [5.3.2] - 2026-11-02
 
 ### Fixed
