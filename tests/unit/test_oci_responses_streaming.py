@@ -492,3 +492,60 @@ async def test_stream_skips_non_data_lines_and_malformed_json() -> None:
     # Only the completion event reaches us; the rest are silently dropped.
     assert any(c.done for c in chunks)
     await model.aclose()
+
+
+# =============================================================================
+# reasoning_effort on the streaming path
+# =============================================================================
+
+
+def _capture_stream_body(captured: dict[str, Any]) -> None:
+    def _handler(request: httpx.Request) -> httpx.Response:
+        import json as _json
+
+        captured["body"] = _json.loads(request.content)
+        return httpx.Response(
+            200,
+            content=_sse(['{"type": "response.completed", "response": {"id": "resp_r"}}']),
+        )
+
+    respx.post("https://fake-oci.test/openai/v1/responses").mock(side_effect=_handler)
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_stream_sends_no_reasoning_by_default() -> None:
+    model = _make_model()
+    captured: dict[str, Any] = {}
+    _capture_stream_body(captured)
+
+    async for _ in model.stream([Message.user("hi")]):
+        pass
+    assert "reasoning" not in captured["body"]
+    await model.aclose()
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_stream_sends_configured_reasoning_effort() -> None:
+    model = _make_model(reasoning_effort="low")
+    captured: dict[str, Any] = {}
+    _capture_stream_body(captured)
+
+    async for _ in model.stream([Message.user("hi")]):
+        pass
+    assert captured["body"]["reasoning"] == {"effort": "low"}
+    await model.aclose()
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_stream_reasoning_effort_kwarg_overrides_config() -> None:
+    model = _make_model(reasoning_effort="low")
+    captured: dict[str, Any] = {}
+    _capture_stream_body(captured)
+
+    async for _ in model.stream([Message.user("hi")], reasoning_effort="high"):
+        pass
+    assert captured["body"]["reasoning"] == {"effort": "high"}
+    await model.aclose()

@@ -100,6 +100,17 @@ class OCIResponsesConfig(BaseModel):
     max_output_tokens: int = 4096
     temperature: float = 0.7
     request_timeout: float = 600.0
+    reasoning_effort: str | None = Field(
+        default=None,
+        description=(
+            "Reasoning effort for reasoning models (e.g. ``low``, "
+            "``medium``, ``high``), sent as ``reasoning={'effort': ...}``. "
+            "The accepted values depend on the model and are validated by "
+            "the server. None (default) sends no ``reasoning`` field, so "
+            "the server's default applies. A ``reasoning_effort`` call "
+            "kwarg overrides it for that call."
+        ),
+    )
     store: bool = Field(
         default=True,
         description=(
@@ -158,6 +169,7 @@ class OCIResponsesModel(BaseModel):
         temperature: float = 0.7,
         request_timeout: float = 600.0,
         store: bool = True,
+        reasoning_effort: str | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize the OCI Responses model.
@@ -192,6 +204,12 @@ class OCIResponsesModel(BaseModel):
                 each turn (like chat/completions) but still uses the
                 Responses endpoint — useful for Responses-only models
                 in ZDR tenants.
+            reasoning_effort: Reasoning effort for reasoning models (e.g.
+                ``"low"``, ``"medium"``, ``"high"``), sent as
+                ``reasoning={"effort": ...}``. The accepted values depend on
+                the model and are validated by the server. ``None`` (default)
+                sends no ``reasoning`` field. A ``reasoning_effort`` kwarg on
+                a call, such as an agent's ``model_kwargs``, overrides it.
 
         Raises:
             ValueError: If zero or both auth modes are set, if
@@ -234,6 +252,7 @@ class OCIResponsesModel(BaseModel):
             max_output_tokens=max_output_tokens,
             temperature=temperature,
             request_timeout=request_timeout,
+            reasoning_effort=reasoning_effort,
             **kwargs,
         )
         super().__init__(config=config)
@@ -327,9 +346,7 @@ class OCIResponsesModel(BaseModel):
         # ``temperature`` on the Responses endpoint. The Agent loop
         # always passes ``temperature=self.config.temperature`` as a
         # kwarg, so a "pop unless explicit" guard isn't enough — drop
-        # it unconditionally on the Responses path. Callers who need
-        # explicit sampling control can opt back in via the ``extra``
-        # request-body escape hatch.
+        # it unconditionally on the Responses path.
         kwargs.pop("temperature", None)
         body = build_request_body(
             messages,
@@ -342,6 +359,7 @@ class OCIResponsesModel(BaseModel):
             stream=False,
             response_format=kwargs.pop("response_format", None),
             store=self.config.store,
+            reasoning_effort=kwargs.pop("reasoning_effort", None) or self.config.reasoning_effort,
         )
 
         client = self._http_client()
@@ -404,6 +422,7 @@ class OCIResponsesModel(BaseModel):
             stream=True,
             response_format=kwargs.pop("response_format", None),
             store=self.config.store,
+            reasoning_effort=kwargs.pop("reasoning_effort", None) or self.config.reasoning_effort,
         )
 
         client = self._http_client()
