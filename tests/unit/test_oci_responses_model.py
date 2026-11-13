@@ -416,3 +416,71 @@ async def test_complete_drops_temperature_even_when_kwarg_passed() -> None:
     await model.complete([Message.user("hi")], temperature=0.3)
     assert "temperature" not in captured["body"]
     await model.aclose()
+
+
+# =============================================================================
+# reasoning_effort
+# =============================================================================
+
+
+def _capture_body(captured: dict[str, Any]) -> None:
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"id": "r", "output": [], "usage": {}})
+
+    respx.post("https://fake-oci.test/openai/v1/responses").mock(side_effect=_handler)
+
+
+def test_reasoning_effort_is_kept_on_the_config() -> None:
+    assert _make_model().config.reasoning_effort is None
+    assert _make_model(reasoning_effort="high").config.reasoning_effort == "high"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_complete_sends_no_reasoning_by_default() -> None:
+    """Unset, the body is unchanged: the server's default effort applies."""
+    model = _make_model()
+    captured: dict[str, Any] = {}
+    _capture_body(captured)
+
+    await model.complete([Message.user("hi")])
+    assert "reasoning" not in captured["body"]
+    await model.aclose()
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_complete_sends_configured_reasoning_effort() -> None:
+    model = _make_model(reasoning_effort="low")
+    captured: dict[str, Any] = {}
+    _capture_body(captured)
+
+    await model.complete([Message.user("hi")])
+    assert captured["body"]["reasoning"] == {"effort": "low"}
+    await model.aclose()
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_complete_reasoning_effort_kwarg_overrides_config() -> None:
+    """A per-call kwarg (an agent's ``model_kwargs``) beats the config."""
+    model = _make_model(reasoning_effort="low")
+    captured: dict[str, Any] = {}
+    _capture_body(captured)
+
+    await model.complete([Message.user("hi")], reasoning_effort="high")
+    assert captured["body"]["reasoning"] == {"effort": "high"}
+    await model.aclose()
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_complete_reasoning_effort_kwarg_without_config() -> None:
+    model = _make_model()
+    captured: dict[str, Any] = {}
+    _capture_body(captured)
+
+    await model.complete([Message.user("hi")], reasoning_effort="medium")
+    assert captured["body"]["reasoning"] == {"effort": "medium"}
+    await model.aclose()
