@@ -8,6 +8,16 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **Reasoning effort on `OCIResponsesModel`.** `OCIResponsesConfig` takes
+  `reasoning_effort` (also a constructor argument), sent as
+  `reasoning={"effort": ...}` on both `complete()` and `stream()`. A
+  `reasoning_effort` call kwarg, such as an agent's `model_kwargs`,
+  overrides it for that call. Unset, no `reasoning` field is sent, so the
+  request body is unchanged. Before, `reasoning_effort` passed to the
+  constructor or in `model_kwargs` was dropped without a warning.
+
 ## [5.4.0] - 2026-11-10
 
 ### Added

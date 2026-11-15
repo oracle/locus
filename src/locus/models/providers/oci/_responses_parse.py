@@ -42,6 +42,7 @@ def build_request_body(
     stream: bool = False,
     response_format: dict[str, Any] | None = None,
     store: bool = True,
+    reasoning_effort: str | None = None,
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a Responses API POST body from Locus messages.
@@ -59,6 +60,9 @@ def build_request_body(
         max_output_tokens: Optional output token cap.
         stream: True to request SSE streaming.
         response_format: Optional structured-output schema.
+        reasoning_effort: Optional reasoning effort for reasoning models,
+            sent as ``reasoning={"effort": ...}``. ``None`` sends nothing,
+            so the server's default applies.
         extra: Extra fields merged into the request body (escape hatch
             for caller-specific knobs).
 
@@ -155,6 +159,8 @@ def build_request_body(
         # nested under ``text.format`` in newer revisions. Keep the
         # chat/completions shape — OCI normalizes both per the spec.
         body["response_format"] = response_format
+    if reasoning_effort is not None:
+        body["reasoning"] = {"effort": reasoning_effort}
     if extra:
         body.update(extra)
 

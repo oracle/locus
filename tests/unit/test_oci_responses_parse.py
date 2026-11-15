@@ -111,6 +111,25 @@ class TestBuildRequestBody:
         assert body["temperature"] == 0.3
         assert body["max_output_tokens"] == 512
 
+    def test_reasoning_effort_becomes_reasoning_object(self) -> None:
+        body = build_request_body(
+            [Message.user("hi")], model="openai.gpt-5", reasoning_effort="high"
+        )
+        assert body["reasoning"] == {"effort": "high"}
+
+    def test_no_reasoning_field_by_default(self) -> None:
+        body = build_request_body([Message.user("hi")], model="openai.gpt-5")
+        assert "reasoning" not in body
+
+    def test_extra_overrides_reasoning_effort(self) -> None:
+        body = build_request_body(
+            [Message.user("hi")],
+            model="openai.gpt-5",
+            reasoning_effort="low",
+            extra={"reasoning": {"effort": "high", "summary": "auto"}},
+        )
+        assert body["reasoning"] == {"effort": "high", "summary": "auto"}
+
 
 # =============================================================================
 # parse_response

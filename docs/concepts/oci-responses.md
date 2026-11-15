@@ -47,6 +47,34 @@ Auth surface is identical to `OCIChatCompletionsModel`:
 feature needs one; the model raises `OCIProjectRequiredError` at request
 time if the endpoint signals that requirement.
 
+## Reasoning effort
+
+Reasoning models take an effort level. Set it once on the model with
+`reasoning_effort=`, or per run through the agent's `model_kwargs`; the
+per-run value wins. It goes on the wire as `reasoning={"effort": ...}`.
+
+```python
+from locus.agent import Agent
+from locus.models.providers.oci import OCIResponsesModel
+
+model = OCIResponsesModel(
+    model="openai.gpt-5.5",
+    profile="MY_PROFILE",
+    region="us-chicago-1",
+    reasoning_effort="low",
+)
+agent = Agent(model=model)
+quick = agent.run_sync("Summarise the incident in one line.")
+careful = agent.run_sync(
+    "Find the root cause of the incident.",
+    model_kwargs={"reasoning_effort": "high"},
+)
+```
+
+Left unset, no `reasoning` field is sent and the server's default applies.
+The accepted values depend on the model and the server validates them; a
+model that does not reason rejects the field.
+
 ## What changes vs `OCIChatCompletionsModel`
 
 **One thing only:** `ConversationManager` strategies (window,
