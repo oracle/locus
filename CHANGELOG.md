@@ -18,6 +18,24 @@ policy.
   request body is unchanged. Before, `reasoning_effort` passed to the
   constructor or in `model_kwargs` was dropped without a warning.
 
+### Fixed
+
+- **`OCIResponsesModel.stream()` error bodies.** A non-2xx on the streaming
+  path was raised as `httpx.ResponseNotRead`, because the error body had not
+  been read when it was classified. The body is read first now, so the typed
+  exceptions and the server's message surface exactly as on `complete()`.
+  Classification also reads the error's `param` field, so an envelope that
+  names `previous_response_id` there rather than in the message still maps
+  to `OCIResponsesStateLostError`.
+- **`OCIProjectRequiredError` on a 400.** The Responses endpoint signals the
+  project requirement for non-OpenAI models with a 400 naming the
+  `OpenAI-Project` / `opc-conversation-store-id` header. That is now mapped to
+  `OCIProjectRequiredError` instead of a plain `RuntimeError`.
+- **`project_ocid` reaches the Responses endpoint.** It was sent only as
+  `opc-project-id`, which the endpoint does not read for this requirement, so
+  following the exception's advice changed nothing. The OCID now also goes out
+  as `OpenAI-Project`; with it a non-OpenAI model answers on `/responses`.
+
 ## [5.4.0] - 2026-11-10
 
 ### Added

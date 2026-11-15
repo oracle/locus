@@ -45,7 +45,9 @@ Auth surface is identical to `OCIChatCompletionsModel`:
 
 `project_ocid=` is **optional**. Pass it only if a specific Responses
 feature needs one; the model raises `OCIProjectRequiredError` at request
-time if the endpoint signals that requirement.
+time if the endpoint signals that requirement. Non-OpenAI models served
+through the Responses endpoint are one such case. The OCID is sent as the
+`OpenAI-Project` header (and as `opc-project-id`).
 
 ## Reasoning effort
 
@@ -137,7 +139,7 @@ if you need different behavior.
 
 | Exception | When |
 |---|---|
-| `OCIProjectRequiredError` | OCI returned 403/404 with a project-related error body. Pass `project_ocid=` to the constructor. |
+| `OCIProjectRequiredError` | OCI returned 403/404 with a project-related error body, or 400 saying the model needs the `OpenAI-Project` / `opc-conversation-store-id` header. Pass `project_ocid=` to the constructor. |
 | `OCIResponsesStateLostError` | `previous_response_id` is unknown or expired. Restart the run. |
 | `RuntimeError` | Generic 5xx / non-JSON body / transport error. Status code + first 300 chars of body included in the message. |
 
