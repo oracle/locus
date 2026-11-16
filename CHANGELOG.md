@@ -77,7 +77,85 @@ policy.
   an interrupted segment by replaying it. The checkpointers page has an
   overhead table for each mode on the in-memory and PostgreSQL
   checkpointers. (`locus.memory.ledger`; #453)
+- **A2A: every binding the specification defines.** Next to JSON-RPC,
+  `A2AServer` serves the HTTP+JSON binding (`POST /message:send`,
+  `GET /tasks/{id}`, `POST /tasks/{id}:cancel`, the push-config resources,
+  server-sent events for `message:stream` and `tasks/{id}:subscribe`) on the
+  same app, and the gRPC binding (`lf.a2a.v1.A2AService`, all eleven RPCs)
+  on `grpc_port`, behind the new `a2a-grpc` extra. The card's
+  `supportedInterfaces` lists what is on (`transports=`); every binding lands
+  in one set of handlers and reports the same `ErrorInfo` reason on a
+  failure. `A2AClient.connect(url, prefer=[...])` / `from_card(card, ...)`
+  pick a binding from the card in preference order and move to the next one
+  when an interface is unreachable; `binding=` selects one outright.
+  `SubscribeToTask` now streams a task's live events after the snapshot.
+- **A2A push notifications.** `A2AServer(push_notifications=
+  PushNotificationSettings(...))` delivers every status and artifact change
+  to the webhooks a task registers (in `SendMessage`'s configuration or with
+  the `*TaskPushNotificationConfig` methods), with the token and
+  `Authorization` the config asks for, retries, and a URL policy that refuses
+  private addresses unless told otherwise. `PushNotificationSigner` signs
+  each body (Ed25519) and publishes the key at `/.well-known/jwks.json`;
+  `PushNotificationReceiver` is the client-side webhook that checks the token
+  and the signature. `send_message(..., push_notification_config=...,
+  blocking=False)` returns the task at once and runs it in the background.
+- **A2A interrupt mapping.** A run that pauses for a person — `ask_user`, or
+  an approval hold from `gate_tool(on_refusal="interrupt")` — surfaces as the
+  task state `input-required` with the question (or the hold summary) as the
+  status message. The peer's next message on the task resumes the run through
+  `Agent.resume()`; for a hold its first word decides (`approve` / `deny`),
+  recorded on the approval store passed as `A2AServer(approvals=...)`. An
+  approved hold performs the call once; a denied hold ends the task
+  `rejected`.
+- **`locus a2a card AGENT`** writes a v1.0 agent card from the agent's tools,
+  skills, streaming capability and the transports named (`--transport`,
+  `--grpc-port`, `--push`); `--serve` runs the server with that card.
+  `card_from_agent()` is the same in code.
 
+- **Evaluators over the run's path.** `TrajectoryMatch` (`strict`,
+  `unordered` or `subset`), `ToolSelection` (recall and precision over the
+  tools chosen, with `forbidden` tools) and `ArgumentCorrectness` (one tool's
+  arguments against the expected ones, compared under the tool's parameter
+  schema with absolute, per-argument and relative tolerances) read the
+  evidence ledger with no model call. Each lives on an `EvalCase` under
+  `evaluators`, is one check named by its label, loads from a case file by
+  `kind`, enters the suite fingerprint, and leaves a typed
+  `EvaluatorVerdict` with its provenance in `EvalResult.evaluations`. The
+  runner fills an `ArgumentCorrectness` schema in from the tool on the agent
+  under test.
+- **A simulated user for multi-turn cases.** `EvalCase(simulated_user=
+  SimulatedUser(persona=..., goal=..., max_turns=..., stop_on=[...]))` has a
+  model play that user against the agent in `arun()`, opening with the case
+  prompt, until the goal is met, a stop phrase appears or the turn budget
+  runs out. `EvalRunner(simulator=UserSimulator(model))` names the model; the
+  judge's is used otherwise. The whole conversation is graded: every reply
+  and tool call for the checks and evaluators, the full transcript for the
+  judge; `EvalResult.transcript` and `stopped_by` keep what happened, and a
+  conversation that hit the budget fails `simulated_user:goal_met`. With a
+  checkpointer on the agent each turn continues one thread; without one the
+  transcript is carried in the prompt.
+- **Online evaluation.** `OnlineEvaluator(template, judge=, sampler=,
+  budget=)` subscribes to the event bus, rebuilds each run from its `agent.*`
+  events, keeps the runs `every_nth(n)` or `fraction(share)` pick within an
+  `OnlineBudget` (total, per minute, in flight), and grades them in the
+  background with the same checks and judge as a suite through the new
+  `EvalRunner.agrade(case, result)`. `attach(run_id, prompt=, output=,
+  arguments=)` supplies what the bus does not carry; `submit(prompt, result)`
+  grades a result the application holds. `report()` is an `EvalReport` whose
+  fingerprint is the template's, so online reports diff and trend as one
+  suite.
+- **Persisted reports and `locus eval trend`.** `report_store(spec)` opens a
+  `ReportStore`: a directory, an Oracle AI Database table
+  (`OracleReportStore`, headline figures in columns and the report as JSON),
+  an OCI Object Storage bucket (`OCIBucketReportStore`) or an S3-compatible
+  bucket (`S3ReportStore`), from `file://`, `oracle://`, `oci://` and `s3://`
+  specs or `LOCUS_EVAL_STORE`. `trend(store, suite=, last=)` reads the last
+  reports of a suite back with the pass and average deltas between them and
+  marks a fingerprint change rather than reading it as a regression.
+  `locus eval run --store <spec> --suite <name>` keeps the report after a run
+  and `locus eval trend --store <spec> --suite <name>` prints the trend,
+  exiting 1 when the newest report is worse than the one before it. Notebook
+  56 gains a trajectory case and a simulated-user case.
 - **`OracleAuditTrail`.** The audit trail on an Oracle AI Database immutable
   table (`CREATE IMMUTABLE TABLE … NO DROP UNTIL n DAYS IDLE NO DELETE UNTIL
   n DAYS AFTER INSERT`), or a blockchain table with `table_kind="blockchain"`.
