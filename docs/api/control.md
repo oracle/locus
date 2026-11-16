@@ -392,12 +392,40 @@ keep the key they were signed with, so give the verifier both public keys.
 Signing needs the `cryptography` package (`pip install "locus-sdk[audit]"`);
 an unsigned trail needs nothing and exports exactly as before.
 
+### Keeping the trail out of the agent's reach
+
+`OracleAuditTrail` writes each record as a row of an Oracle AI Database
+immutable table — or a blockchain table, whose row hashes the database
+re-verifies on `verify()` — and `anchor_trail()` keeps the chain head in an
+OCI Object Storage or S3-compatible bucket with a retention rule. Both are
+described on the [observability page](../concepts/observability.md#where-the-audit-trail-lives).
+
+```python
+from locus.control import OracleAuditTrail, S3AnchorStore, anchor_trail, verify_anchor
+
+trail = OracleAuditTrail(dsn="audit_low", user="AUDIT", password=pw, table_kind="blockchain")
+...
+store = S3AnchorStore("audit-anchors", endpoint_url="https://objectstorage.example")
+anchor_trail(trail, store, require_retention_rule=True)
+verify_anchor(trail, store).ok
+```
+
 ::: locus.control.audit.AuditTrail
 ::: locus.control.audit.AuditRecord
 ::: locus.control.audit.AuditSigner
 ::: locus.control.audit.Ed25519Signer
 ::: locus.control.audit.verify_jsonl
 ::: locus.control.governed.AuditHook
+::: locus.control.audit_oracle.OracleAuditTrail
+::: locus.control.audit_anchor.anchor_trail
+::: locus.control.audit_anchor.verify_anchor
+::: locus.control.audit_anchor.anchor_periodically
+::: locus.control.audit_anchor.latest_anchor
+::: locus.control.audit_anchor.Anchor
+::: locus.control.audit_anchor.AnchorReport
+::: locus.control.audit_anchor.AnchorStore
+::: locus.control.audit_anchor.OCIBucketAnchorStore
+::: locus.control.audit_anchor.S3AnchorStore
 
 ## Governed agents
 
