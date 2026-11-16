@@ -5,7 +5,10 @@
 """OpenSearch vector store with k-NN plugin.
 
 Uses OpenSearch's k-NN plugin for efficient vector similarity search.
-Supports hybrid search combining vector similarity with BM25 text search.
+:meth:`OpenSearchVectorStore.hybrid_search` blends it with BM25 relevance
+on ``content``: the two legs run as separate requests and the normalised
+scores are combined client-side (see :mod:`locus.rag.stores._hybrid`), so
+no search pipeline has to be configured on the cluster.
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 
 from locus.core.loop_bound import loop_bound
+from locus.rag.stores._hybrid import blend_hybrid
 from locus.rag.stores.base import (
     BaseVectorStore,
     Document,
@@ -363,6 +367,68 @@ class OpenSearchVectorStore(BaseModel, BaseVectorStore):
             )
 
         return results
+
+    async def hybrid_search(
+        self,
+        query_text: str,
+        query_embedding: list[float],
+        *,
+        limit: int = 10,
+        alpha: float = 0.5,
+        threshold: float | None = None,
+        metadata_filter: dict[str, Any] | None = None,
+    ) -> list[SearchResult]:
+        """Blend k-NN similarity with BM25 ``match`` relevance on ``content``.
+
+        Both legs fetch ``max(limit * 3, 20)`` candidates with the same
+        metadata filter; scores are normalised to ``[0, 1]`` and combined as
+        ``alpha * vector + (1 - alpha) * lexical``. ``alpha=1.0`` is pure
+        vector search, ``alpha=0.0`` pure BM25. An empty ``query_text`` is
+        answered by :meth:`search`.
+        """
+        if not 0.0 <= alpha <= 1.0:
+            raise ValueError(f"alpha must be in [0.0, 1.0], got {alpha}")
+        if not query_text.strip():
+            return await self.search(
+                query_embedding, limit=limit, threshold=threshold, metadata_filter=metadata_filter
+            )
+        pool = max(limit * 3, 20)
+        vector_hits = await self.search(
+            query_embedding, limit=pool, metadata_filter=metadata_filter
+        )
+
+        await self._ensure_index()
+        client = await self._get_client()
+        must: list[dict[str, Any]] = [{"match": {"content": query_text}}]
+        query: dict[str, Any] = {"bool": {"must": must}}
+        if metadata_filter:
+            query["bool"]["filter"] = [
+                {"term": {f"metadata.{key}": value}} for key, value in metadata_filter.items()
+            ]
+        result = await client.search(
+            index=self.os_config.index_name,
+            body={
+                "size": pool,
+                "query": query,
+                "_source": ["id", "content", "embedding", "metadata", "created_at"],
+            },
+        )
+        lexical_hits: list[tuple[Document, float]] = []
+        for hit in result["hits"]["hits"]:
+            source = hit["_source"]
+            doc = Document(
+                id=source["id"],
+                content=source["content"],
+                embedding=source.get("embedding"),
+                metadata=source.get("metadata", {}),
+                created_at=datetime.fromisoformat(source["created_at"])
+                if source.get("created_at")
+                else datetime.now(UTC),
+            )
+            lexical_hits.append((doc, float(hit.get("_score") or 0.0)))
+        return blend_hybrid(
+            vector_hits, lexical_hits, alpha=alpha, limit=limit, threshold=threshold
+        )
 
     async def count(self) -> int:
         """Count documents."""

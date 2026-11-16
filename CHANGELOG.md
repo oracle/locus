@@ -10,6 +10,42 @@ policy.
 
 ### Added
 
+- **Six more vector stores.** `MilvusVectorStore` (Milvus server, Zilliz
+  Cloud, or embedded Milvus Lite from a local file), `WeaviateVectorStore`
+  (local, Weaviate Cloud or embedded), `ElasticsearchVectorStore`
+  (`dense_vector` k-NN with a `flattened` metadata field),
+  `RedisVectorStore` (Redis Query Engine `VECTOR` fields with `TAG`
+  filters on declared metadata keys), `MongoDBAtlasVectorStore`
+  (`$vectorSearch`, `ensure_index()` creates the Atlas index) and
+  `PineconeVectorStore` (serverless indexes). Each sits behind the existing
+  `VectorStore` protocol with `metadata_filter`, passes the shared
+  conformance suite (`tests/unit/rag/store_conformance.py`, also run
+  against the served backends behind environment gates) and has its own
+  extra: `[milvus]`, `[weaviate]`, `[elasticsearch]`, `[redis-vector]`,
+  `[mongodb]`, `[pinecone]`; `[rag]` includes them all. Closes #460.
+- **Three more rerankers.** `LLMReranker` has any registered chat model
+  (`"oci:openai.gpt-4.1"`, or a model object) grade the candidates in
+  batches from a fenced prompt, so reranking needs no dedicated endpoint;
+  `JinaReranker` and `VoyageReranker` call the hosted rerank APIs over
+  `httpx` with `JINA_API_KEY` / `VOYAGE_API_KEY`.
+- **Hybrid search, one switch.** `RAGRetriever(hybrid=True, hybrid_alpha=…)`
+  calls `store.hybrid_search(query_text, query_embedding, alpha=…)` on
+  stores implementing the new `HybridSearchable` protocol — Oracle
+  Database 26ai, OpenSearch, Elasticsearch, Weaviate and Milvus
+  (`enable_hybrid=True`) — with the same `alpha` meaning everywhere
+  (`1.0` vector only, `0.0` lexical only). Stores without hybrid search
+  fall back to vector-only search with one logged warning;
+  `supports_hybrid_search(store)` and `retriever.hybrid_supported` report
+  the capability, `retrieve(..., hybrid=…)` overrides it per call and
+  `hybrid_kwargs` passes store-specific options such as Oracle's
+  `use_text_index`. `OpenSearchVectorStore` gains `hybrid_search`
+  (k-NN and BM25 legs blended client-side, no search pipeline needed).
+- **Notebook 52** adds the keyless Milvus Lite path with hybrid search and
+  the LLM reranker, and `examples/config.get_embedder()` builds
+  `OCIEmbeddings` when `LOCUS_EMBEDDING_PROVIDER=oci` (or when only an OCI
+  profile is configured), so the RAG notebooks run on OCI Generative AI
+  without an OpenAI key.
+
 - **`OracleAuditTrail`.** The audit trail on an Oracle AI Database immutable
   table (`CREATE IMMUTABLE TABLE … NO DROP UNTIL n DAYS IDLE NO DELETE UNTIL
   n DAYS AFTER INSERT`), or a blockchain table with `table_kind="blockchain"`.

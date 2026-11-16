@@ -92,6 +92,12 @@ embedder = OpenAIEmbeddings(model="text-embedding-3-small")
 | Qdrant | `QdrantVectorStore` | Purpose-built vector DB; in-memory or server. |
 | Chroma | `ChromaVectorStore` | Lightweight embedded / server vector DB. |
 | Oracle Database 26ai | `OracleVectorStore` | Native `VECTOR(N, FLOAT32)` column, `VECTOR_DISTANCE` SQL, HNSW / IVF indexes, hybrid search, Mongo-style metadata filters. |
+| Milvus | `MilvusVectorStore` | Milvus server, Zilliz Cloud, or embedded Milvus Lite (a local file, no server); BM25 hybrid search with `enable_hybrid=True`. |
+| Weaviate | `WeaviateVectorStore` | Local, Weaviate Cloud or embedded; native hybrid search. |
+| Elasticsearch | `ElasticsearchVectorStore` | `dense_vector` k-NN plus BM25; hybrid search blended client-side. |
+| Redis | `RedisVectorStore` | Redis Query Engine (Redis Stack / Redis 8 bundle) HNSW `VECTOR` fields; `TAG` filters on declared metadata keys. |
+| MongoDB Atlas | `MongoDBAtlasVectorStore` | `$vectorSearch` on an Atlas Vector Search index; filter paths declared up front. |
+| Pinecone | `PineconeVectorStore` | Serverless indexes; content and metadata ride in the vector's metadata map. |
 
 ```python
 from locus.rag import QdrantVectorStore
@@ -99,9 +105,14 @@ from locus.rag import QdrantVectorStore
 store = QdrantVectorStore(location=":memory:", dimension=1536)
 ```
 
-A durable backend (pgvector, OpenSearch, Qdrant, Chroma) takes the same
-shape — pass its connection settings and a `dimension` that matches your
-embedder.
+A durable backend takes the same shape — pass its connection settings
+and a `dimension` that matches your embedder. The free, in-process
+options for tests and small corpora are `InMemoryVectorStore`,
+`QdrantVectorStore(location=":memory:")`, `ChromaVectorStore()` and
+`MilvusVectorStore(uri="./kb.db")` (Milvus Lite). Each served backend
+has its own extra: `[pgvector]`, `[opensearch]`, `[qdrant]`, `[chroma]`,
+`[oracledb]`, `[milvus]`, `[weaviate]`, `[elasticsearch]`,
+`[redis-vector]`, `[mongodb]`, `[pinecone]`; `[rag]` installs them all.
 
 ### 3. Wire the retriever
 
@@ -222,13 +233,18 @@ catches relevance signals embeddings miss. The pattern:
    to the top-N (e.g. 5).
 4. Feed the top-N to the LLM.
 
-Three rerankers ship:
+Six rerankers ship:
 
 - `CrossEncoderReranker` — local sentence-transformers cross-encoder,
   fully offline.
 - `CohereReranker` — Cohere's direct rerank API (`rerank-v3.5`).
 - `OCICohereReranker` — the same Cohere rerank models served by OCI
   Generative AI, authenticated with your OCI profile.
+- `LLMReranker` — any chat model Locus can address grades the candidates
+  (`"oci:openai.gpt-4.1"`, or a model object). No rerank endpoint needed;
+  one completion per `batch_size` candidates.
+- `JinaReranker` — Jina AI's hosted rerank API (`JINA_API_KEY`).
+- `VoyageReranker` — Voyage AI's hosted rerank API (`VOYAGE_API_KEY`).
 
 ```python
 from locus.rag import CrossEncoderReranker
@@ -258,6 +274,18 @@ reranker = CrossEncoderReranker(top_n=5)
 top_5 = await reranker.rerank(query, candidates)
 ```
 
+The LLM reranker takes the model the rest of your agent uses. It fences
+every passage in a `<passage>` element and tells the model to grade the
+text inside, never to follow it, so a poisoned chunk cannot talk its way
+to the top:
+
+```python
+from locus.rag import LLMReranker
+
+reranker = LLMReranker("oci:openai.gpt-4.1", top_n=5, batch_size=20)
+retriever = RAGRetriever(embedder=embedder, store=store, reranker=reranker)
+```
+
 ## Multimodal ingestion
 
 `retriever.add_file(path)` dispatches by file type:
@@ -284,19 +312,40 @@ embedded chunks back.
     installed and spot-check ingested chunks before trusting multimodal
     corpora.
 
-## Retrieval is vector similarity only
+## Hybrid search — vector plus lexical
 
-`retrieve()` is a pure vector-similarity search: it embeds the query
-and asks the store for the nearest documents. There is **no
-`retrieval_mode` parameter and no built-in hybrid (semantic + keyword)
-mode** — `OpenSearchVectorStore` uses its k-NN plugin, not BM25, for the SDK's retrieval.
+By default `retrieve()` is a vector-similarity search: it embeds the
+query and asks the store for the nearest documents. For corpora where
+keyword precision matters (proper nouns, error codes, version strings)
+turn on `hybrid=True` and the retriever asks the store to blend vector
+similarity with lexical (BM25 / full-text) relevance:
 
-For corpora where keyword precision matters (proper nouns, error codes,
-version strings), the practical levers are: tighten `chunk_size` so each
-chunk is about one fact, filter by `metadata_filter` on `retrieve()`,
-and add a reranker (`CrossEncoderReranker`, `CohereReranker` or
-`OCICohereReranker`) to rescore
-the over-fetched candidate pool.
+```python
+retriever = RAGRetriever(
+    embedder=embedder,
+    store=store,
+    hybrid=True,        # one switch, same retrieve() call
+    hybrid_alpha=0.5,   # 1.0 = vector only, 0.0 = lexical only
+)
+result = await retriever.retrieve("decline code 05", limit=5)
+```
+
+`hybrid_alpha` means the same thing on every store. The stores that
+blend are the ones implementing `HybridSearchable`: `OracleVectorStore`
+(Oracle Text or a `LIKE` leg; pass `hybrid_kwargs={"use_text_index": True}`
+after `ensure_text_index()`), `OpenSearchVectorStore`,
+`ElasticsearchVectorStore`, `WeaviateVectorStore` and
+`MilvusVectorStore(enable_hybrid=True)`. OpenSearch and Elasticsearch run
+the k-NN and `match` legs as two requests and blend the normalised scores
+client-side, so no cluster-side pipeline is needed; Weaviate and Milvus
+use their native fused queries.
+
+Any other store — or a Milvus collection created without the BM25
+function — is searched by vector alone when `hybrid=True`; the retriever
+logs one warning per instance naming the store. `retriever.hybrid_supported`
+and `supports_hybrid_search(store)` tell you up front, and
+`retrieve(..., hybrid=False)` overrides the switch for one call. A reranker
+composes with either mode: the blended pool is what gets reranked.
 
 ## RAG poisoning — GSAR grounding as the backstop {#rag-poisoning-gsar-grounding-as-the-backstop}
 

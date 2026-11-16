@@ -103,8 +103,8 @@ the script has no offline run.
   model and distance metric, and swapping in another vector store.
 - [RAG agents](notebook_53_rag_agents.md) — `RAGRetriever.as_tool()`
   gives ATLAS a search tool over this Index.
-- [Concepts: RAG](../concepts/rag.md) — the pipeline end to end, and why
-  [retrieval is vector similarity only](../concepts/rag.md#retrieval-is-vector-similarity-only),
+- [Concepts: RAG](../concepts/rag.md) — the pipeline end to end, and when
+  to turn on [hybrid search](../concepts/rag.md#hybrid-search-vector-plus-lexical),
   with `metadata_filter` as one of the precision levers.
 - [API: RAG](../api/rag.md)
 

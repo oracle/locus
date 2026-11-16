@@ -18,15 +18,19 @@ Supports multimodal content:
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
-from locus.rag.stores.base import Document, SearchResult
+from locus.rag.stores.base import Document, SearchResult, supports_hybrid_search
+
+
+logger = logging.getLogger(__name__)
 
 
 # Pattern that neutralises literal occurrences of the spotlight tag inside
@@ -130,8 +134,43 @@ class RAGRetriever(BaseModel):
             "``reranker`` is set. Ignored when the reranker is ``None``."
         ),
     )
+    hybrid: bool = Field(
+        default=False,
+        description=(
+            "Blend vector similarity with lexical (BM25 / full-text) relevance. "
+            "Calls ``store.hybrid_search(query_text, query_embedding, alpha=…)`` "
+            "on stores that implement ``locus.rag.stores.HybridSearchable`` "
+            "(Oracle Database 26ai, OpenSearch, Elasticsearch, Weaviate, Milvus "
+            "with ``enable_hybrid=True``). A store without hybrid search is "
+            "searched by vector only, and the fallback is logged once per "
+            "retriever."
+        ),
+    )
+    hybrid_alpha: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Weight of the vector leg when ``hybrid`` is on: ``1.0`` is pure "
+            "vector search, ``0.0`` pure lexical, ``0.5`` an even blend."
+        ),
+    )
+    hybrid_kwargs: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Extra keyword arguments for ``store.hybrid_search`` — e.g. "
+            '``{"use_text_index": True}`` for ``OracleVectorStore``.'
+        ),
+    )
 
     model_config = {"arbitrary_types_allowed": True}
+
+    _hybrid_fallback_logged: bool = PrivateAttr(default=False)
+
+    @property
+    def hybrid_supported(self) -> bool:
+        """True when the store can answer ``hybrid=True`` with a blended search."""
+        return supports_hybrid_search(self.store)
 
     def _chunk_text(self, text: str, separator: str = "\n\n") -> list[str]:
         """Split text into chunks with overlap."""
@@ -441,6 +480,8 @@ class RAGRetriever(BaseModel):
         limit: int = 5,
         threshold: float | None = None,
         metadata_filter: dict[str, Any] | None = None,
+        *,
+        hybrid: bool | None = None,
     ) -> RetrievalResult:
         """
         Retrieve relevant documents for a query.
@@ -450,6 +491,8 @@ class RAGRetriever(BaseModel):
             limit: Maximum documents to return
             threshold: Minimum similarity score (0.0-1.0)
             metadata_filter: Filter by metadata fields
+            hybrid: Override the retriever's ``hybrid`` setting for this call.
+                ``None`` (default) uses the retriever's setting.
 
         Returns:
             RetrievalResult with ranked documents
@@ -493,13 +536,33 @@ class RAGRetriever(BaseModel):
         # but materially more accurate). Trim back to ``limit`` after.
         store_limit = max(limit, self.rerank_candidate_pool) if self.reranker is not None else limit
 
-        # Search the store
-        results = await self.store.search(
-            query_embedding=query_result.embedding,
-            limit=store_limit,
-            threshold=threshold,
-            metadata_filter=metadata_filter,
-        )
+        # Search the store — blended when asked for and the store can do it,
+        # otherwise by vector alone (logged once so the fallback is visible).
+        use_hybrid = self.hybrid if hybrid is None else hybrid
+        if use_hybrid and self.hybrid_supported:
+            results = await self.store.hybrid_search(
+                query,
+                query_result.embedding,
+                limit=store_limit,
+                alpha=self.hybrid_alpha,
+                threshold=threshold,
+                metadata_filter=metadata_filter,
+                **self.hybrid_kwargs,
+            )
+        else:
+            if use_hybrid and not self._hybrid_fallback_logged:
+                logger.warning(
+                    "RAGRetriever(hybrid=True) but %s has no hybrid search; "
+                    "falling back to vector-only search",
+                    type(self.store).__name__,
+                )
+                self._hybrid_fallback_logged = True
+            results = await self.store.search(
+                query_embedding=query_result.embedding,
+                limit=store_limit,
+                threshold=threshold,
+                metadata_filter=metadata_filter,
+            )
 
         if self.reranker is not None and results:
             results = await self.reranker.rerank(query, results)

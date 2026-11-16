@@ -188,6 +188,18 @@ checkpoints = [
 pgvector = ["asyncpg>=0.29", "numpy>=1.26"]
 qdrant = ["qdrant-client>=1.9"]
 chroma = ["chromadb>=0.5"]
+# Milvus Lite (embedded, file-backed) rides the pymilvus extra; a Milvus
+# server or Zilliz Cloud needs only pymilvus itself.
+milvus = ["pymilvus[milvus-lite]>=2.5"]
+# 4.16 introduced ``Configure.Vectors.self_provided`` (the collection config
+# the store creates); embedded Weaviate downloads its binary on first use.
+weaviate = ["weaviate-client>=4.16"]
+elasticsearch = ["elasticsearch>=8.12"]
+# Redis Query Engine (Redis Stack / Redis 8) vector fields over redis-py.
+redis-vector = ["redis>=5.0"]
+pinecone = ["pinecone>=5"]
+# ``pymongo.AsyncMongoClient`` is GA from 4.13.
+mongodb = ["pymongo>=4.13"]
 
 # Cohere direct API (rerank + embeddings) and a local cross-encoder
 # reranker. Neither requires any cloud vendor SDK.
@@ -197,6 +209,7 @@ rerank = ["cohere>=5.0", "sentence-transformers>=3.0"]
 
 # Full RAG stack — every vector store + embedder + reranker Locus ships.
 # Use this if you want to pick a store at runtime rather than up front.
+# (The Jina, Voyage and LLM rerankers need nothing beyond the core install.)
 rag = [
     "asyncpg>=0.29",
     "opensearch-py>=2.4",
@@ -205,6 +218,12 @@ rag = [
     "requests>=2.31",
     "qdrant-client>=1.9",
     "chromadb>=0.5",
+    "pymilvus[milvus-lite]>=2.5",
+    "weaviate-client>=4.16",
+    "elasticsearch>=8.12",
+    "redis>=5.0",
+    "pinecone>=5",
+    "pymongo>=4.13",
     "openai>=1.50,<3",
     "cohere>=5.0",
     "sentence-transformers>=3.0",
@@ -744,6 +763,11 @@ module = [
     "botocore.*",
     "qdrant_client.*",
     "chromadb.*",
+    "pymilvus.*",
+    "weaviate.*",
+    "elasticsearch.*",
+    "pinecone.*",
+    "pymongo.*",
     "cohere.*",
     "sentence_transformers.*",
     "mem0.*",
