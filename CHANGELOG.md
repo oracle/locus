@@ -70,6 +70,26 @@ policy.
   `PolicyDocument` are the same from Python.
 - Notebook 71 loads its policy from `examples/notebook_71_refund_policy.yaml`;
   the policy authoring guide shows the file form first and a CI lint job.
+- **A model-based tool-call judge that feeds the gate.**
+  `locus.control.ToolCallJudge` shows a model the proposed tool call, name
+  and arguments, with the policy's intent and optional per-tool guidance,
+  and returns a typed `allow` / `hold` / `deny` verdict with a one-line
+  reason, parsed through the structured-output path. `gate_tool(judge=...)`
+  hands the verdict to `admit(judgement=...)`, where `tighten()` keeps the
+  stricter of the policy's outcome and the judge's: an allow can become a
+  hold or a deny, never the reverse. The verdict is on the audit entry under
+  `judge` (model, verdict, reason, cache hit, and the error when it failed
+  closed) and emitted as `control.judge.decided`. Installed as a hook it
+  judges every call and cancels a held or denied one; with no model of its
+  own it borrows the agent's. Read-only tools are skipped, verdicts are
+  cached per (tool, canonical arguments) within a run, and `budget=` caps
+  model calls per run; a model error, an off-schema reply or a spent budget
+  is a hold. (#448)
+- **`@tool(read_only=True)`.** Declares a tool that only observes, so the
+  judge does not spend a model call on it. Off by default.
+- **Notebook 72** gains the judge as an optional step on the scripted test
+  double: a staging rollout to an unpinned image, which the policy allows, is
+  held by the judge, and the page shows the audit entry that records both.
 
 ### Removed
 

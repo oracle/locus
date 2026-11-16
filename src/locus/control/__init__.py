@@ -101,6 +101,7 @@ from locus.control.grounded import (
     ground_fingerprint,
     is_finding,
 )
+from locus.control.judge import JudgeVerdict, ToolCallJudge
 from locus.control.permissions import (
     VERDICT_POLICY,
     PermissionMatch,
@@ -181,6 +182,9 @@ __all__ = [
     "admit",
     "admit_sync",
     "AdmissionError",
+    # A model that reads the proposed call and can tighten the decision
+    "ToolCallJudge",
+    "JudgeVerdict",
     # Operator-written allow / ask / deny rules, fed to admission as labels
     "PermissionRule",
     "PermissionRules",
