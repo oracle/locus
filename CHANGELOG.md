@@ -32,6 +32,44 @@ policy.
   Lock (S3). `anchor_periodically()` is the loop a server or runner calls.
   The observability, control-layer and guarantees pages describe when to use
   each backend.
+- **`ControlPolicy` as data.** `ControlPolicy.load(path_or_text)` reads a
+  policy from a YAML or JSON document and `policy.dump(path, format=...)`
+  writes one; every key is a field of the same name, type and default, so
+  the file form and the Python form round-trip and a file can never say
+  what the API cannot. An unknown key, a wrong type or a bad value is a
+  `PolicyFileError` that names the key and its path
+  (`require_human_for[2]`). Reading YAML needs the optional `pyyaml`
+  package; JSON and writing need nothing. `policy.content_hash()` is the
+  SHA-256 of the rules, equal for equal policies however they were built.
+- **The policy hash on the audit trail.** `admit()` and `admit_sync()`
+  record `policy_hash` on every `action-admission` entry, so a reader knows
+  which rules each decision was made under. The key lives in the entry's
+  payload: trails written before it exists verify unchanged, and readers
+  that do not know it are unaffected.
+- **Hot reload.** `PolicyWatcher(path, interval=...)` follows a policy file
+  by modification time and is accepted wherever `admit()`, `admit_sync()`
+  and `gate_tool()` take a `policy` (any `PolicySource` with a `current()`
+  method is). Each decision asks it once, so the swap is atomic between
+  admissions; a rewrite that no longer parses keeps the last good policy in
+  force and reports why on `last_error`; `on_reload` is called with the old
+  and new policy when the rules change.
+- **`locus policy lint <file>`** reports `unreachable-rule` (a hold label
+  that `deny_for` pre-empts, a cost hold at or above the spend limit, a
+  verification bar above 1.0, a denied `sandboxed` tag, a zero blast-radius
+  cap), `uncovered-environment` and `kind-never-held` for the environments
+  and kinds the file's `governs:` block or `--environments` / `--kinds`
+  declare. Exit 1 on a finding; `--format json` for CI. The last two are
+  found by weighing probe actions with `approve()`, so lint agrees with the
+  gate by construction.
+- **`locus policy explain <file> --action '{...}'`** prints every rule,
+  fired or not, the outcome and whether a person can approve it;
+  `--expect allow|require_human|deny` turns it into a check with the exit
+  code, `--spent-usd` and `--verification` supply what the gate would read
+  from a ledger and a verdict. `evaluate_rules()` is the one evaluation
+  `approve()` and `explain()` share; `lint_policy()`, `explain()` and
+  `PolicyDocument` are the same from Python.
+- Notebook 71 loads its policy from `examples/notebook_71_refund_policy.yaml`;
+  the policy authoring guide shows the file form first and a CI lint job.
 - **A model-based tool-call judge that feeds the gate.**
   `locus.control.ToolCallJudge` shows a model the proposed tool call, name
   and arguments, with the policy's intent and optional per-tool guidance,
