@@ -32,6 +32,11 @@ def _after(tool_name: str, *, result, error: str | None) -> AfterToolCallEvent:
     return AfterToolCallEvent(tool_name=tool_name, result=result, error=error)
 
 
+def _open_tools(hook: TelemetryHook) -> set[str]:
+    """Names of the tool spans the hook still has open (keyed by call id)."""
+    return {name for _, _, name in hook._tool_spans.values()}
+
+
 class TestNoOpTelemetryHook:
     """Tests for NoOpTelemetryHook."""
 
@@ -153,7 +158,7 @@ class TestTelemetryHook:
 
         # Hook is observe-only — event.arguments is unmodified.
         assert event.arguments == args
-        assert "search" in hook._tool_spans
+        assert "search" in _open_tools(hook)
 
     @pytest.mark.asyncio
     async def test_on_before_tool_call_no_record_args(self):
@@ -164,7 +169,7 @@ class TestTelemetryHook:
         await hook.on_before_tool_call(event)
 
         assert event.arguments == args
-        assert "search" in hook._tool_spans
+        assert "search" in _open_tools(hook)
 
     @pytest.mark.asyncio
     async def test_on_after_tool_call_success(self, hook):
@@ -175,7 +180,7 @@ class TestTelemetryHook:
         # End tool span
         await hook.on_after_tool_call(_after("search", result="Found 5 items", error=None))
 
-        assert "search" not in hook._tool_spans
+        assert "search" not in _open_tools(hook)
 
     @pytest.mark.asyncio
     async def test_on_after_tool_call_with_error(self, hook):
@@ -183,7 +188,7 @@ class TestTelemetryHook:
         await hook.on_before_tool_call(_before("search", {}))
         await hook.on_after_tool_call(_after("search", result=None, error="Connection failed"))
 
-        assert "search" not in hook._tool_spans
+        assert "search" not in _open_tools(hook)
 
     @pytest.mark.asyncio
     async def test_on_after_tool_call_no_span(self, hook):
@@ -199,7 +204,7 @@ class TestTelemetryHook:
         await hook.on_before_tool_call(_before("search", {}))
         await hook.on_after_tool_call(_after("search", result="Result data", error=None))
 
-        assert "search" not in hook._tool_spans
+        assert "search" not in _open_tools(hook)
 
     @pytest.mark.asyncio
     async def test_on_iteration_start(self, hook, mock_state):
@@ -287,12 +292,12 @@ class TestCreateTelemetryHook:
 
 @pytest.mark.skipif(not OTEL_AVAILABLE, reason="OpenTelemetry not installed")
 class TestTelemetryHookMetrics:
-    """Tests for telemetry hook metrics."""
+    """Tests for telemetry hook metrics (legacy instrument set)."""
 
     @pytest.fixture
     def hook(self):
         """Create telemetry hook."""
-        return TelemetryHook()
+        return TelemetryHook(semconv="locus-legacy")
 
     def test_metrics_created(self, hook):
         """Test that metrics are created."""
@@ -340,6 +345,9 @@ def _otel_sdk_available() -> bool:
 )
 class TestTraceContextPropagation:
     """Regression tests for issue #244 — every span must share a trace tree.
+
+    Pinned to the legacy convention names; the GenAI shape is covered in
+    ``test_telemetry_semconv.py``.
 
     Before the fix, ``TelemetryHook`` used ``tracer.start_span`` without
     attaching the span to OTel's current context, so each invocation /
@@ -394,7 +402,7 @@ class TestTraceContextPropagation:
     @pytest.mark.asyncio
     async def test_all_spans_share_one_trace_id(self, exporter, mock_state):
         """invocation + iteration + tool spans must share a single trace_id."""
-        hook = TelemetryHook(tracer_name="locus.telemetry.test-244")
+        hook = TelemetryHook(tracer_name="locus.telemetry.test-244", semconv="locus-legacy")
 
         await hook.on_before_invocation("Question?", mock_state)
         await hook.on_iteration_start(0, mock_state)
@@ -420,7 +428,7 @@ class TestTraceContextPropagation:
     @pytest.mark.asyncio
     async def test_tool_span_is_child_of_iteration_span(self, exporter, mock_state):
         """Tool span's parent must be the iteration span (not the invocation)."""
-        hook = TelemetryHook(tracer_name="locus.telemetry.test-244-parent")
+        hook = TelemetryHook(tracer_name="locus.telemetry.test-244-parent", semconv="locus-legacy")
 
         await hook.on_before_invocation("Q", mock_state)
         await hook.on_iteration_start(0, mock_state)
@@ -463,7 +471,7 @@ class TestTraceContextPropagation:
         """
         from opentelemetry import trace as otel_trace
 
-        hook = TelemetryHook(tracer_name="locus.telemetry.test-244-detach")
+        hook = TelemetryHook(tracer_name="locus.telemetry.test-244-detach", semconv="locus-legacy")
         await hook.on_before_invocation("Q", mock_state)
         await hook.on_after_invocation(mock_state, success=True)
 

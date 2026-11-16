@@ -49,7 +49,7 @@ import json
 import logging
 import os
 import uuid
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -124,6 +124,16 @@ from locus.a2a.transports import (
     normalise_binding,
     select_interfaces,
 )
+from locus.observability.propagation import inject_trace_headers, trace_scope
+
+
+# FastAPI resolves a handler's (string) annotations from this module's globals,
+# so the request type the trace-context handlers take must live here; the
+# server itself stays optional, hence the guard.
+try:
+    from starlette.requests import Request
+except ImportError:  # pragma: no cover - exercised where the server extra is absent
+    Request = Any  # type: ignore[assignment,misc]
 
 
 if TYPE_CHECKING:
@@ -1186,11 +1196,12 @@ class A2AServer(A2AV1ServerMixin):
 
             @app.post("/")
             async def jsonrpc(
+                request: Request,
                 body: dict[str, Any] = Body(...),  # noqa: B008 — FastAPI dep injection
                 a2a_version: str | None = Header(default=None, alias=A2A_VERSION_HEADER),
                 _: str = auth_dep,
             ) -> Any:
-                return await self._jsonrpc(body, a2a_version)
+                return await self._jsonrpc(body, a2a_version, carrier=request.headers)
 
         # ----- HTTP+JSON binding ------------------------------------------
         if BINDING_HTTP_JSON in self._transports:
@@ -1200,19 +1211,46 @@ class A2AServer(A2AV1ServerMixin):
 
         # ----- backwards-compat invoke + stream ----------------------------
         @app.post("/a2a/invoke")
-        async def legacy_invoke(req: A2ARequest, _: str = auth_dep) -> dict[str, Any]:
-            resp = await self._legacy_invoke(req)
+        async def legacy_invoke(
+            request: Request, req: A2ARequest, _: str = auth_dep
+        ) -> dict[str, Any]:
+            # Run under the caller's trace, if its headers carry one.
+            with trace_scope(request.headers):
+                resp = await self._legacy_invoke(req)
             return resp.model_dump()
 
         @app.post("/a2a/stream")
-        async def legacy_stream(req: A2ARequest, _: str = auth_dep) -> StreamingResponse:
-            response: StreamingResponse = await self._legacy_stream(req)
+        async def legacy_stream(
+            request: Request, req: A2ARequest, _: str = auth_dep
+        ) -> StreamingResponse:
+            response: StreamingResponse = await self._legacy_stream(
+                req, carrier=dict(request.headers)
+            )
             return response
 
         return app
 
-    async def _jsonrpc(self, body: dict[str, Any], a2a_version: str | None) -> Any:
-        """Dispatch one JSON-RPC request body (``POST /``)."""
+    async def _jsonrpc(
+        self,
+        body: dict[str, Any],
+        a2a_version: str | None,
+        *,
+        carrier: Mapping[str, Any] | None = None,
+    ) -> Any:
+        """Dispatch one JSON-RPC request body (``POST /``).
+
+        ``carrier`` is the request's headers; a ``traceparent`` in them puts
+        the dispatch — and the agent run it starts — under the caller's trace.
+        """
+        with trace_scope(carrier):
+            return await self._dispatch_jsonrpc(body, a2a_version, carrier)
+
+    async def _dispatch_jsonrpc(
+        self,
+        body: dict[str, Any],
+        a2a_version: str | None,
+        carrier: Mapping[str, Any] | None,
+    ) -> Any:
         from fastapi.responses import JSONResponse
 
         try:
@@ -1258,7 +1296,7 @@ class A2AServer(A2AV1ServerMixin):
             if use_v1 and req.method in A2AV1_STREAMING_METHODS:
                 if req.method == "SubscribeToTask":
                     self._preflight_v1_task_subscription(params)
-                return await self._stream_response(req, v1=True)
+                return await self._stream_response(req, v1=True, carrier=carrier)
             if use_v1 and req.method in A2AV1_JSONRPC_METHODS:
                 result = await self.handle_v1(req.method, params)
             elif req.method == "message/send":
@@ -1281,7 +1319,7 @@ class A2AServer(A2AV1ServerMixin):
                 )
             elif req.method == "message/stream":
                 # SSE — peer must POST with Accept: text/event-stream.
-                return await self._stream_response(req)
+                return await self._stream_response(req, carrier=carrier)
             else:
                 raise _RpcError(METHOD_NOT_FOUND, f"unknown method {req.method!r}")
         except A2AV1ProtocolError as e:
@@ -1304,12 +1342,25 @@ class A2AServer(A2AV1ServerMixin):
             JsonRpcSuccessResponse(id=req.id, result=result).model_dump(exclude_none=True)
         )
 
-    async def _stream_response(self, req: JsonRpcRequest, *, v1: bool = False) -> Any:
+    async def _stream_response(
+        self,
+        req: JsonRpcRequest,
+        *,
+        v1: bool = False,
+        carrier: Mapping[str, Any] | None = None,
+    ) -> Any:
         from fastapi.responses import StreamingResponse
 
         params = req.params if isinstance(req.params, dict) else {}
 
         async def gen() -> AsyncIterator[str]:
+            # The generator runs after the handler returned, so the caller's
+            # trace is re-attached here for the run it drives.
+            with trace_scope(carrier):
+                async for chunk in produce():
+                    yield chunk
+
+        async def produce() -> AsyncIterator[str]:
             try:
                 stream = (
                     self.handle_v1_stream(req.method, params)
@@ -1339,7 +1390,9 @@ class A2AServer(A2AV1ServerMixin):
 
         return StreamingResponse(gen(), media_type="text/event-stream")
 
-    async def _legacy_stream(self, request: A2ARequest) -> Any:
+    async def _legacy_stream(
+        self, request: A2ARequest, *, carrier: Mapping[str, Any] | None = None
+    ) -> Any:
         from fastapi.responses import StreamingResponse
 
         from locus.core.events import TerminateEvent, ThinkEvent
@@ -1348,6 +1401,11 @@ class A2AServer(A2AV1ServerMixin):
         prompt = user_msgs[-1].content if user_msgs else ""
 
         async def event_generator() -> AsyncIterator[str]:
+            with trace_scope(carrier):
+                async for chunk in produce():
+                    yield chunk
+
+        async def produce() -> AsyncIterator[str]:
             try:
                 async for event in self._agent.run(prompt):
                     if isinstance(event, ThinkEvent):
@@ -1653,7 +1711,9 @@ class A2AClient:
         try:
             for path in ("/.well-known/agent-card.json", "/agent-card"):
                 try:
-                    resp = await client.get(f"{self._url}{path}", headers=self._headers())
+                    resp = await client.get(
+                        f"{self._url}{path}", headers=inject_trace_headers(self._headers())
+                    )
                     if resp.status_code == 200:
                         data = resp.json()
                         # Legacy peers serve flat string skills — promote.
@@ -1706,7 +1766,7 @@ class A2AClient:
             resp = await client.post(
                 f"{self._url}/",
                 json=body,
-                headers=self._headers(),
+                headers=inject_trace_headers(self._headers()),
                 timeout=self._timeout if timeout is None else timeout,
             )
             resp.raise_for_status()
@@ -1808,7 +1868,7 @@ class A2AClient:
             "method": "message/stream",
             "params": {"message": message.model_dump(exclude_none=True)},
         }
-        headers = self._headers() | {"Accept": "text/event-stream"}
+        headers = inject_trace_headers(self._headers() | {"Accept": "text/event-stream"})
         effective_timeout = self._timeout if timeout is None else timeout
         client = await self._http()
         try:
@@ -1976,7 +2036,7 @@ class A2AClient:
             resp = await client.post(
                 f"{self._url}/a2a/invoke",
                 json=request.model_dump(),
-                headers=self._auth_headers(),
+                headers=inject_trace_headers(self._auth_headers()),
                 timeout=self._timeout if timeout is None else timeout,
             )
             resp.raise_for_status()

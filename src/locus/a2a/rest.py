@@ -50,6 +50,7 @@ from locus.a2a.protocol_v1 import (
 )
 from locus.a2a.spec import INTERNAL_ERROR, INVALID_REQUEST, PARSE_ERROR, VERSION_NOT_SUPPORTED
 from locus.a2a.spec_v1 import A2A_JSON_MEDIA_TYPE, A2A_V1_PROTOCOL_VERSION
+from locus.observability.propagation import trace_scope
 
 
 if TYPE_CHECKING:
@@ -117,10 +118,14 @@ def mount_http_json(app: FastAPI, server: A2AServer, auth_dep: Any) -> None:
             raise A2AV1ProtocolError(INVALID_REQUEST, "request body must be a JSON object")
         return data
 
-    async def unary(method: str, params: dict[str, Any], version: str | None) -> JSONResponse:
+    async def unary(
+        method: str, params: dict[str, Any], version: str | None, request: Request
+    ) -> JSONResponse:
         try:
             check_version(version)
-            return ok(await server.handle_v1(method, params))
+            # Run under the caller's trace, if its headers carry one.
+            with trace_scope(request.headers):
+                return ok(await server.handle_v1(method, params))
         except A2AV1ProtocolError as e:
             return error_response(e.code, e.message)
         except Exception:
@@ -130,8 +135,17 @@ def mount_http_json(app: FastAPI, server: A2AServer, auth_dep: Any) -> None:
                 INTERNAL_ERROR, f"internal error (correlation_id={correlation_id})"
             )
 
-    def sse(method: str, params: dict[str, Any], version: str | None) -> Any:
+    def sse(method: str, params: dict[str, Any], version: str | None, request: Request) -> Any:
+        carrier = dict(request.headers)
+
         async def gen() -> AsyncIterator[str]:
+            # The generator runs after the handler returned, so the caller's
+            # trace is re-attached here for the run it drives.
+            with trace_scope(carrier):
+                async for chunk in produce():
+                    yield chunk
+
+        async def produce() -> AsyncIterator[str]:
             try:
                 check_version(version)
                 async for frame in server.handle_v1_stream(method, params):
@@ -170,7 +184,7 @@ def mount_http_json(app: FastAPI, server: A2AServer, auth_dep: Any) -> None:
             params = await body_of(request)
         except A2AV1ProtocolError as e:
             return error_response(e.code, e.message)
-        return await unary("SendMessage", params, a2a_version)
+        return await unary("SendMessage", params, a2a_version, request)
 
     @app.post("/message:stream")
     async def rest_stream_message(
@@ -182,7 +196,7 @@ def mount_http_json(app: FastAPI, server: A2AServer, auth_dep: Any) -> None:
             params = await body_of(request)
         except A2AV1ProtocolError as e:
             return error_response(e.code, e.message)
-        return sse("SendStreamingMessage", params, a2a_version)
+        return sse("SendStreamingMessage", params, a2a_version, request)
 
     @app.post("/tasks/{task_id}:cancel")
     async def rest_cancel_task(
@@ -196,16 +210,17 @@ def mount_http_json(app: FastAPI, server: A2AServer, auth_dep: Any) -> None:
         except A2AV1ProtocolError as e:
             return error_response(e.code, e.message)
         params["id"] = task_id
-        return await unary("CancelTask", params, a2a_version)
+        return await unary("CancelTask", params, a2a_version, request)
 
     @app.get("/tasks/{task_id}:subscribe")
     @app.post("/tasks/{task_id}:subscribe")
     async def rest_subscribe_task(
         task_id: str,
+        request: Request,
         a2a_version: str | None = Header(default=None, alias=A2A_VERSION_HEADER),
         _: str = auth_dep,
     ) -> Any:
-        return sse("SubscribeToTask", {"id": task_id}, a2a_version)
+        return sse("SubscribeToTask", {"id": task_id}, a2a_version, request)
 
     @app.post("/tasks/{task_id}/pushNotificationConfigs")
     async def rest_create_push_config(
@@ -219,17 +234,21 @@ def mount_http_json(app: FastAPI, server: A2AServer, auth_dep: Any) -> None:
         except A2AV1ProtocolError as e:
             return error_response(e.code, e.message)
         params["taskId"] = task_id
-        return await unary("CreateTaskPushNotificationConfig", params, a2a_version)
+        return await unary("CreateTaskPushNotificationConfig", params, a2a_version, request)
 
     @app.get("/tasks/{task_id}/pushNotificationConfigs/{config_id}")
     async def rest_get_push_config(
         task_id: str,
         config_id: str,
+        request: Request,
         a2a_version: str | None = Header(default=None, alias=A2A_VERSION_HEADER),
         _: str = auth_dep,
     ) -> Any:
         return await unary(
-            "GetTaskPushNotificationConfig", {"taskId": task_id, "id": config_id}, a2a_version
+            "GetTaskPushNotificationConfig",
+            {"taskId": task_id, "id": config_id},
+            a2a_version,
+            request,
         )
 
     @app.get("/tasks/{task_id}/pushNotificationConfigs")
@@ -244,17 +263,21 @@ def mount_http_json(app: FastAPI, server: A2AServer, auth_dep: Any) -> None:
         except A2AV1ProtocolError as e:
             return error_response(e.code, e.message)
         params["taskId"] = task_id
-        return await unary("ListTaskPushNotificationConfigs", params, a2a_version)
+        return await unary("ListTaskPushNotificationConfigs", params, a2a_version, request)
 
     @app.delete("/tasks/{task_id}/pushNotificationConfigs/{config_id}")
     async def rest_delete_push_config(
         task_id: str,
         config_id: str,
+        request: Request,
         a2a_version: str | None = Header(default=None, alias=A2A_VERSION_HEADER),
         _: str = auth_dep,
     ) -> Any:
         return await unary(
-            "DeleteTaskPushNotificationConfig", {"taskId": task_id, "id": config_id}, a2a_version
+            "DeleteTaskPushNotificationConfig",
+            {"taskId": task_id, "id": config_id},
+            a2a_version,
+            request,
         )
 
     @app.get("/tasks/{task_id}")
@@ -269,7 +292,7 @@ def mount_http_json(app: FastAPI, server: A2AServer, auth_dep: Any) -> None:
         except A2AV1ProtocolError as e:
             return error_response(e.code, e.message)
         params["id"] = task_id
-        return await unary("GetTask", params, a2a_version)
+        return await unary("GetTask", params, a2a_version, request)
 
     @app.get("/tasks")
     async def rest_list_tasks(
@@ -281,14 +304,15 @@ def mount_http_json(app: FastAPI, server: A2AServer, auth_dep: Any) -> None:
             params = query_to_params(dict(request.query_params))
         except A2AV1ProtocolError as e:
             return error_response(e.code, e.message)
-        return await unary("ListTasks", params, a2a_version)
+        return await unary("ListTasks", params, a2a_version, request)
 
     @app.get("/extendedAgentCard")
     async def rest_extended_card(
+        request: Request,
         a2a_version: str | None = Header(default=None, alias=A2A_VERSION_HEADER),
         _: str = auth_dep,
     ) -> Any:
-        return await unary("GetExtendedAgentCard", {}, a2a_version)
+        return await unary("GetExtendedAgentCard", {}, a2a_version, request)
 
 
 __all__ = ["mount_http_json", "query_to_params"]
