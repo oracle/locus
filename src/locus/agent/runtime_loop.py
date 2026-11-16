@@ -76,6 +76,7 @@ from locus.models.base import ModelResponse
 from locus.observability.mechanisms import LEAKED_TOOL_CALLS, record_mechanism
 from locus.tools.context import _progress_sink
 from locus.tools.executor import ToolContextFactory, ToolExecutor
+from locus.tools.integrity import signer_for
 from locus.tools.registry import ToolRegistry
 
 
@@ -460,6 +461,22 @@ def _durable(state: AgentState) -> AgentState:
     return state
 
 
+def _with_pending_hold(
+    state: AgentState, result: ToolResult, payload: dict[str, Any]
+) -> AgentState:
+    """``state`` carrying the approval hold ``payload`` describes, if it is one.
+
+    A gated tool's interrupt marker names its approval; ``ask_user``'s does not
+    and leaves the state as it was. The hold rides in the checkpoint, so the
+    process that resumes the thread can find what it waits on
+    (:mod:`locus.control.holds`).
+    """
+    from locus.control.holds import hold_from_interrupt, with_hold  # noqa: PLC0415
+
+    hold = hold_from_interrupt(result.tool_call_id, result.name, payload)
+    return with_hold(state, hold) if hold is not None else state
+
+
 #: State metadata naming the turn's per-iteration checkpoints. It rides in the
 #: saved state itself, so a process killed mid-turn hands the list to whatever
 #: finishes the turn — ``continue_turn`` or the next ``run`` — and that final
@@ -586,6 +603,11 @@ class AgentRuntimeMixin:
             agent_name=self.config.name or self.config.agent_id,
             termination=self.config.termination,
             ephemeral={**found, **(ephemeral or {})},
+        )
+        # The run's tool-call signer: a fresh key per run, in memory only.
+        rc.integrity = signer_for(
+            self.config.tool_call_integrity,
+            [*self.config.hooks, *getattr(self, "_hooks", ())],
         )
         with self._runs_lock:
             self._active_runs[id(rc)] = rc
@@ -1125,7 +1147,7 @@ class AgentRuntimeMixin:
                 # No structured tool calls: the model may have written its call
                 # in the body — its own markup leaked as text, or, for a model
                 # without native tool calling, a plain text call.
-                recovered = self._recover_text_tool_calls(response, state)
+                recovered = self._recover_text_tool_calls(response, state, run=rc)
                 if recovered is not None:
                     response, state = recovered
                     _last_assistant_content = response.message.content
@@ -1230,7 +1252,7 @@ class AgentRuntimeMixin:
                     # the model is not shown again if it is sent back on.
                     without_note = state.model_copy(update={"messages": before_note.messages})
                     as_call = (
-                        self._summary_as_tool_step(summary_resp, without_note)
+                        self._summary_as_tool_step(summary_resp, without_note, run=rc)
                         if summary_resp is not None
                         else None
                     )
@@ -1539,6 +1561,7 @@ class AgentRuntimeMixin:
                         state=state,
                         invocation_metadata=metadata or {},
                         ephemeral_metadata=rc.ephemeral,
+                        integrity=rc.integrity,
                     )
                     batch_start = time.perf_counter()
                     interrupted_slot_idx: int | None = None
@@ -1631,6 +1654,11 @@ class AgentRuntimeMixin:
                             slot["execution"] = cancelled_execution
                             slot["kind"] = "cancel"
 
+                # ``tool_call_integrity="abort"``: a refused call ends the run
+                # once its siblings have finished.
+                if rc.integrity is not None:
+                    rc.integrity.raise_pending_abort()
+
                 # Phase 3 — per-result fold, in tool_call order.
                 for slot in slots:
                     tool_call = slot["tool_call"]
@@ -1692,6 +1720,7 @@ class AgentRuntimeMixin:
                         try:
                             interrupt_data = _json.loads(result.content)
                             if interrupt_data.get("__interrupt__"):
+                                state = _with_pending_hold(state, result, interrupt_data)
                                 self._park_interrupt(rc, state)
                                 # Checkpoint BEFORE yielding: a consumer that
                                 # stops iterating on the interrupt (an HTTP
@@ -1783,6 +1812,7 @@ class AgentRuntimeMixin:
                                 state=state,
                                 invocation_metadata=metadata or {},
                                 ephemeral_metadata=rc.ephemeral,
+                                integrity=rc.integrity,
                             )
                             [result] = await self._executor.execute(
                                 [
@@ -2159,7 +2189,7 @@ class AgentRuntimeMixin:
 
                 # The same recovery as the first pass: a resumed turn on the
                 # same model leaks the same markup.
-                recovered = self._recover_text_tool_calls(response, state)
+                recovered = self._recover_text_tool_calls(response, state, run=rc)
                 if recovered is not None:
                     response, state = recovered
                     _last_assistant_content = response.message.content
@@ -2278,6 +2308,7 @@ class AgentRuntimeMixin:
                             state=state,
                             invocation_metadata=metadata or {},
                             ephemeral_metadata=rc.ephemeral,
+                            integrity=rc.integrity,
                         )
                         call = tc.model_copy(update={"arguments": invoke_args})
                         if self._emits_progress([call]):
@@ -2337,6 +2368,9 @@ class AgentRuntimeMixin:
                             duration_ms=(time.perf_counter() - start_time) * 1000,
                         )
 
+                    if rc.integrity is not None:
+                        rc.integrity.raise_pending_abort()
+
                     # Interrupt marker from a marker-returning tool (``ask_user``)
                     # on the RESUME path. The first-pass loop catches this at the
                     # ``'"__interrupt__": true'`` site above; this resume loop
@@ -2354,6 +2388,7 @@ class AgentRuntimeMixin:
                         except (ValueError, KeyError):
                             interrupt_data = None
                         if interrupt_data and interrupt_data.get("__interrupt__"):
+                            state = _with_pending_hold(state, result, interrupt_data)
                             self._park_interrupt(rc, state)
                             if self.config.checkpointer and thread_id:
                                 await self.config.checkpointer.save(_durable(state), thread_id)
@@ -2384,6 +2419,7 @@ class AgentRuntimeMixin:
                                 state=state,
                                 invocation_metadata=metadata or {},
                                 ephemeral_metadata=rc.ephemeral,
+                                integrity=rc.integrity,
                             )
                             [result] = await self._executor.execute(
                                 [tc.model_copy(update={"arguments": invoke_args})],
@@ -2910,7 +2946,7 @@ class AgentRuntimeMixin:
         return self._leaked_formats
 
     def _recover_text_tool_calls(
-        self, response: ModelResponse, state: AgentState
+        self, response: ModelResponse, state: AgentState, *, run: RunContext | None = None
     ) -> tuple[ModelResponse, AgentState] | None:
         """``response`` and ``state`` with the calls written in the body made structured.
 
@@ -2963,6 +2999,8 @@ class AgentRuntimeMixin:
             calls = self._parse_text_tool_calls(content)
         if not calls:
             return None
+        if run is not None and run.integrity is not None:
+            run.integrity.sign_all(calls)
         response = response.model_copy(
             update={
                 "message": Message(
@@ -3031,7 +3069,7 @@ class AgentRuntimeMixin:
         return found is not None or self._unfinished_text_tool_call(text) is not None
 
     def _summary_as_tool_step(
-        self, summary: ModelResponse, state: AgentState
+        self, summary: ModelResponse, state: AgentState, *, run: RunContext | None = None
     ) -> tuple[ModelResponse, AgentState] | UnfinishedToolCall | None:
         """What a reply to the no-tools final-answer request is, when it is not an answer.
 
@@ -3041,7 +3079,9 @@ class AgentRuntimeMixin:
         it never closes is an unfinished call; anything else (``None``) is the
         answer.
         """
-        recovered = self._recover_text_tool_calls(summary, state.with_message(summary.message))
+        recovered = self._recover_text_tool_calls(
+            summary, state.with_message(summary.message), run=run
+        )
         if recovered is not None:
             return recovered
         return self._unfinished_text_tool_call(summary.message.content)
@@ -3183,33 +3223,7 @@ class AgentRuntimeMixin:
         if server_stateful:
             messages = self._messages_since_last_assistant(state)
         else:
-            # Apply conversation manager if present
-            messages = list(state.messages)
-            if self._conversation_manager:
-                if hasattr(self._conversation_manager, "async_apply"):
-                    messages = await self._conversation_manager.async_apply(messages)
-                else:
-                    messages = self._conversation_manager.apply(messages)
-
-            # Validate message pairs (remove orphaned tool calls/results)
-            messages = self._validate_messages(messages)
-
-            # Large old tool outputs go as recallable placeholders. Only this
-            # request's list changes: the state and its checkpoints keep them.
-            pack = self._observation_pack
-            if pack is not None:
-                session = self._observation_session(state, run)
-
-                def _announce(data: dict[str, Any]) -> None:
-                    if run is not None:
-                        run.emit(CustomEvent(name="observation_pack", data=data))
-
-                messages = pack.project(
-                    messages,
-                    session=session,
-                    on_event=_announce,
-                    context_limit=self._compaction_limit(),
-                )
+            messages = await self._client_side_request_messages(state, run)
 
         # Get tool schemas
         tool_schemas = self._tool_registry.to_openai_schemas()
@@ -3275,9 +3289,41 @@ class AgentRuntimeMixin:
             streaming = (
                 chunk_queue is not None and not server_stateful and hasattr(self._model, "stream")
             )
-            response = await self._call_model(
-                complete_kwargs, chunk_queue, streaming=streaming, run=run
-            )
+            try:
+                response = await self._call_model(
+                    complete_kwargs, chunk_queue, streaming=streaming, run=run
+                )
+            except Exception as exc:
+                # A transport that stops being server-stateful during the call
+                # (OCIResponsesModel under ``store="auto"`` meeting a Zero Data
+                # Retention tenancy) has lost the thread it was sent a slice
+                # for. This loop still holds the whole history, so the turn is
+                # replayed client-side and the run completes as if the model
+                # had been stateless from the start.
+                if not server_stateful or getattr(self._model, "server_stateful", False) is True:
+                    raise
+                server_stateful = False
+                state = state.with_provider_state(None)
+                messages = await self._client_side_request_messages(state, run)
+                messages = await self._run_before_model_hooks(
+                    messages, tool_schemas or None, run=run
+                )
+                complete_kwargs["messages"] = messages
+                complete_kwargs.pop("provider_state", None)
+                if run is not None:
+                    run.emit(
+                        CustomEvent(
+                            name="server_state_fallback",
+                            data={"error": f"{type(exc).__name__}: {exc}"[:500]},
+                        )
+                    )
+                response = await self._call_model(
+                    complete_kwargs, chunk_queue, streaming=False, run=run
+                )
+            # Sign the calls as parsed — streamed or not — before any hook
+            # sees them (locus.tools.integrity).
+            if run is not None and run.integrity is not None:
+                run.integrity.sign_all(response.message.tool_calls)
 
             # Post-model hooks: event.retry = True to re-call
             after_event = await self._run_after_model_hooks(response, messages, run=run)
@@ -3375,6 +3421,7 @@ class AgentRuntimeMixin:
             tokens_before=tokens,
             instructions=hook.instructions,
             archive=pack.archive_for(session) if pack is not None else None,
+            model=self._model,
         )
         if outcome is None:
             return state, None
@@ -3478,6 +3525,45 @@ class AgentRuntimeMixin:
         if run is not None:
             return ObservationPack.session_key(run.thread_id, run.run_id)
         return ObservationPack.session_key(None, state.run_id)
+
+    async def _client_side_request_messages(
+        self, state: AgentState, run: RunContext | None
+    ) -> list[Message]:
+        """Shape the full history into this request's message list.
+
+        The stateless path: the conversation manager, message-pair
+        validation and the observation pack all work on the client-side
+        history. Server-stateful transports skip this and send only the
+        slice since the last assistant turn.
+        """
+        # Apply conversation manager if present
+        messages = list(state.messages)
+        if self._conversation_manager:
+            if hasattr(self._conversation_manager, "async_apply"):
+                messages = await self._conversation_manager.async_apply(messages)
+            else:
+                messages = self._conversation_manager.apply(messages)
+
+        # Validate message pairs (remove orphaned tool calls/results)
+        messages = self._validate_messages(messages)
+
+        # Large old tool outputs go as recallable placeholders. Only this
+        # request's list changes: the state and its checkpoints keep them.
+        pack = self._observation_pack
+        if pack is not None:
+            session = self._observation_session(state, run)
+
+            def _announce(data: dict[str, Any]) -> None:
+                if run is not None:
+                    run.emit(CustomEvent(name="observation_pack", data=data))
+
+            messages = pack.project(
+                messages,
+                session=session,
+                on_event=_announce,
+                context_limit=self._compaction_limit(),
+            )
+        return messages
 
     def _messages_since_last_assistant(self, state: AgentState) -> list[Message]:
         """Return the slice of state.messages that the model hasn't seen yet.

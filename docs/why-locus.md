@@ -68,6 +68,7 @@ an agent, but application code and review must still prevent bypass paths.
 | Typed findings | Carries an explicit score, references, and provenance fields | Criteria for emitting or accepting the finding | Whether source evidence is complete and correctly interpreted |
 | Idempotent tools | Reuses a cached result for an identical call in the documented scope | Tool annotation, checkpoints, downstream operation key | Semantic equivalence of differently encoded calls |
 | Audit trail | Hash-chains appended records and detects later edits to that chain; `OracleAuditTrail` writes them to an immutable or blockchain table, `anchor_trail()` keeps the head in a retention-locked bucket | Which backend, the table's retention window, the bucket's retention rule, access controls | Whether all relevant events were sent to the trail |
+| Tool-call integrity | Signs each tool call as parsed and refuses one changed before execution, naming the hook when known | Turning it on (`tool_call_integrity`), re-signing in hooks that rewrite arguments, the audit trail that receives refusals | Whether a rewrite a hook signed for was the right one |
 
 ## Compared with prompt rules and filters
 

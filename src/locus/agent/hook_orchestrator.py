@@ -20,6 +20,7 @@ method signatures, same ordering, same write-through of
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import TYPE_CHECKING, Any
 
 
@@ -183,9 +184,16 @@ class HookOrchestrator:
             arguments=arguments,
             run=run,
         )
+        # With ``tool_call_integrity`` on, the run's signer attributes every
+        # argument change to the hook that made it (locus.tools.integrity).
+        signer = getattr(run, "integrity", None)
+        custody = signer.watch(event) if signer is not None else None
         for hook in self._hooks:
             if hasattr(hook, "on_before_tool_call"):
-                await hook.on_before_tool_call(event)
+                with custody.around(hook) if custody is not None else nullcontext():
+                    await hook.on_before_tool_call(event)
+        if custody is not None:
+            custody.close()
         return event
 
     async def run_after_tool(

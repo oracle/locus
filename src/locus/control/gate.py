@@ -55,6 +55,7 @@ from typing import (
 from locus.control.action import ActionSpec, resolve_action
 from locus.control.admission import AdmissionError, admit
 from locus.control.approvals import ApprovalStore
+from locus.control.approvals_spec import store_spec
 from locus.control.policy import ApprovalDecision, ApprovalOutcome, current_policy
 
 
@@ -502,6 +503,9 @@ def gate_tool(
                     "arguments": dict(kwargs),
                     "approvers": record.approvers if record is not None else [],
                     "context": context,
+                    # Where the record is, so the hold the checkpoint carries
+                    # can be re-checked by a process that never saw this store.
+                    "store": store_spec(store),
                 },
             },
             default=str,

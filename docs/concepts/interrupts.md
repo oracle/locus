@@ -172,9 +172,15 @@ async for event in agent.resume("approved", thread_id="t1", perform_dangling=Tru
 What it does, and where it stops:
 
 - **A restart is survived only by durable parts.** `FileApprovals` keeps
-  approvals in one JSON file; `InMemoryApprovals` lives in this process and
-  is gone on restart, so use it for tests and demos. Resuming in a new
-  process also needs the checkpointer and the same `thread_id`.
+  approvals in one JSON file; `PostgresApprovals`, `RedisApprovals` and
+  `OracleApprovals` keep them in a database replicas can share;
+  `InMemoryApprovals` lives in this process and is gone on restart, so use it
+  for tests and demos. Resuming in a new process also needs the checkpointer
+  and the same `thread_id`. The checkpoint carries the hold itself
+  (`pending_holds(checkpointer, thread_id)`: the approval id and the store's
+  spec), so the new process knows what the thread waits on, and
+  `locus approvals --store <spec> approve <id> --by <who>` decides it from
+  the command line.
 - **`perform_dangling=True` is what performs the action.** It re-invokes the
   held call, which finds the decision. Without it, `resume` folds
   `"approved"` in as the call's text result. Nothing re-invokes the call,

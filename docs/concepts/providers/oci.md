@@ -90,10 +90,11 @@ agent = Agent(model=OCIResponsesModel(
 ))
 ```
 
-`store=True` (the default) has OCI persist each response so the next
-turn continues it through `previous_response_id`; with `store=False`
-nothing is retained server-side and the runtime sends the full history
-on every request.
+`store=True` has OCI persist each response so the next turn continues it
+through `previous_response_id`; with `store=False` nothing is retained
+server-side and the runtime sends the full history on every request. The
+default, `store="auto"`, starts stateful and switches to the stateless
+path when the endpoint reports a Zero Data Retention tenancy.
 
 The only SDK primitive that bypasses on this path is
 `ConversationManager`. Memory, Reflexion, GSAR, grounding, tool
