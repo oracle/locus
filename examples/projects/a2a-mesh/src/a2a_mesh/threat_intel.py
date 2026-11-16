@@ -9,9 +9,10 @@ Skills: ``threat_intel``, ``ioc_enrichment``.
 from __future__ import annotations
 
 import argparse
+from typing import Any
 
 from a2a_mesh._model import get_model
-from locus.a2a import A2AServer
+from locus.a2a import A2AServer, PushNotificationSettings
 from locus.agent import Agent, AgentConfig
 from locus.tools import tool
 
@@ -31,7 +32,15 @@ def enrich_domain(domain: str) -> str:
     return f"{domain}: registered 2 days ago, category 'newly observed', reputation 'suspicious'."
 
 
-def build_server() -> A2AServer:
+def build_server(push_client: Any | None = None) -> A2AServer:
+    """The peer's ``A2AServer``.
+
+    Serves the JSON-RPC and HTTP+JSON bindings and delivers push
+    notifications; ``allow_private_urls`` lets the demo post to a receiver on
+    this machine (a production peer would leave it off). ``push_client`` is
+    an ``httpx.AsyncClient`` for the webhook calls, which the in-process test
+    binds to its receiver.
+    """
     agent = Agent(
         config=AgentConfig(
             model=get_model(),
@@ -48,6 +57,10 @@ def build_server() -> A2AServer:
         name="threat-intel-agent",
         description="Enriches indicators of compromise and summarises the intel.",
         skills=["threat_intel", "ioc_enrichment"],
+        transports=("JSONRPC", "HTTP+JSON"),
+        push_notifications=PushNotificationSettings(
+            allow_private_urls=True, http_client=push_client
+        ),
     )
 
 

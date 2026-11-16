@@ -157,6 +157,12 @@ oci-sandbox = ["oci>=2.189.0"]
 # portable, self-hostable long-term memory backend.
 mem0 = ["mem0ai>=0.1"]
 
+# The A2A gRPC binding (src/locus/a2a/grpc_binding.py). The JSON-RPC and
+# HTTP+JSON bindings ride the ``server`` extra; gRPC is opt-in. Imported
+# lazily: ``import locus.a2a`` needs none of it. ``grpcio-status`` carries
+# the ``google.rpc`` error-detail messages the binding puts on a failed call.
+a2a-grpc = ["grpcio>=1.60", "grpcio-status>=1.60", "protobuf>=5.26"]
+
 # All checkpoint backends. `pip install locus-sdk[checkpoints]` is the
 # one-shot install for durable thread state across every backend.
 # Oracle Database 26ai: checkpointers, versioned saver, store, vector store,
@@ -282,6 +288,8 @@ dev = [
     "cryptography>=42",   # signed audit trail tests in tests/unit/test_signed_audit.py
     "temporalio>=1.7",    # durable run tests in tests/unit/test_temporal_durable.py
     "dbos>=2.0",          # durable run tests in tests/unit/test_dbos_durable.py
+    "grpcio>=1.60",       # A2A gRPC binding tests in tests/unit/test_a2a_grpc.py
+    "grpcio-status>=1.60",
 ]
 
 [project.scripts]
@@ -590,6 +598,8 @@ ignore = [
 "src/locus/cli.py" = [
     "T201",    # print — the locus command's output is its interface
 ]
+# ``locus a2a card``: the same command, registered from the a2a package.
+"src/locus/a2a/cli.py" = ["T201"]
 "src/locus/memory/backends/**/*.py" = [
     "S608",    # SQL built from validated identifiers (regex-checked at init)
     "PYI063",  # PEP 570 positional-only — `__context` is Pydantic's spelling
@@ -762,6 +772,12 @@ module = [
     # The coding harness's OpenShell backend imports it lazily.
     "openshell",
     "openshell.*",
+    # The A2A gRPC binding (``locus.a2a.grpc_binding``) imports these lazily;
+    # grpcio ships no type stubs.
+    "grpc",
+    "grpc.*",
+    "grpc_status",
+    "grpc_status.*",
 ]
 ignore_missing_imports = true
 

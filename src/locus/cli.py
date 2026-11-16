@@ -16,6 +16,7 @@ or a zero-argument function that returns one::
     locus policy explain policy.yaml --action '{"name": "refund", "kind": "payment"}'
     locus serve app.py:agent --port 8000
     locus mcp serve app.py:agent     # the agent as an MCP server over stdio
+    locus a2a card app.py:agent --url https://agent.example.com -o agent-card.json
     locus codex init                 # the Locus skill for Codex, in this project
     locus codex run "build an agent that triages tickets with a gated refund tool"
 
@@ -567,6 +568,9 @@ def build_parser() -> argparse.ArgumentParser:
     mcp_serve.add_argument("--name", help="the server name clients see")
     mcp.set_defaults(handler=_cmd_mcp)
 
+    from locus.a2a.cli import register_a2a_commands  # noqa: PLC0415
+
+    register_a2a_commands(commands, load_agent)
     codex = commands.add_parser(
         "codex", help="install the Locus skill for Codex and start Codex with it"
     )
