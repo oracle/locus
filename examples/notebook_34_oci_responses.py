@@ -115,7 +115,7 @@ async def part1_stateless_multiturn() -> None:
 
 
 # =============================================================================
-# Part 2 — Server-side state (store=True, default; non-ZDR only)
+# Part 2 — Server-side state (store=True; non-ZDR only)
 # =============================================================================
 
 
