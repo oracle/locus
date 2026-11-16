@@ -33,22 +33,40 @@ then awaits `perform`. There is no path to the side effect that skips the
 log — the held production rollback is on the trail next to the staging
 deploy that actually ran.
 
+An optional third part adds a `ToolCallJudge`: a model that reads the
+proposed call itself — tool name and arguments — against the intent in plain
+words, and can turn the policy's allow into a hold. It can never loosen a
+policy decision, and its verdict lands on the same audit entry.
+
 `perform` here is a local stub: it appends to an in-memory list instead of
 calling kubectl, so the script runs offline with no cluster, no credentials,
 no network. Swap that one function for a real `kubectl rollout` call and the
-gate is unchanged.
+gate is unchanged. The judge runs on the SDK's scripted test double, so that
+part is offline too.
 
 Run it:
     python examples/notebook_72_infra_deploy_gate.py
 
-    # Fully offline — this example needs no model, no provider, no network.
+    # Fully offline — the gate needs no model; the judge step uses the
+    # bundled scripted double. No provider, no network.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 
-from locus.control import Action, AdmissionError, AuditTrail, ControlPolicy, admit
+from locus.control import (
+    Action,
+    AdmissionError,
+    AuditTrail,
+    ControlPolicy,
+    ToolCallJudge,
+    admit,
+    gate_tool,
+)
+from locus.testing import ScriptedModel, text
+from locus.tools.decorator import tool
 
 
 # The side effect — a local stub standing in for `kubectl rollout`.
@@ -117,6 +135,91 @@ async def propose(
         print("  Next: route to the on-call human for sign-off.")
 
 
+# Optional: a model that reads the call.
+#
+# Everything above is deterministic. The policy weighs the labels an Action
+# carries, and labels are all it can see: a staging rollout pinned to 1.8.2
+# and one to the floating `latest` tag carry the same labels, so the gate
+# allows both. A `ToolCallJudge` reads the tool call itself — name and
+# arguments — against the intent written in words plus a line of guidance for
+# this tool, and returns allow / hold / deny with a reason. It is folded into
+# the admission decision so that it can only tighten it: the policy's allow may
+# become a hold or a deny; a policy hold or deny stands whatever the judge
+# says. The verdict rides on the same audit entry.
+#
+# The judge model is the SDK's scripted test double, so this step is offline
+# too. Replace it with any model (a small one is the usual choice), or leave
+# `model=` unset on an agent and the judge borrows the agent's.
+
+
+@tool
+def rollout(asset: str, image: str, environment: str = "staging") -> str:
+    """Roll `image` onto the `asset` deployment in `environment`."""
+    record = f"deploy {asset} -> {image} ({environment})"
+    APPLIED.append(record)
+    return record
+
+
+JUDGE_MODEL = ScriptedModel(
+    [
+        text(json.dumps({"verdict": "allow", "reason": "staging rollout to a pinned image"})),
+        text(
+            json.dumps(
+                {
+                    "verdict": "hold",
+                    "reason": "image tag 'latest' is not pinned; a person should confirm",
+                }
+            )
+        ),
+    ]
+)
+
+JUDGE = ToolCallJudge(
+    JUDGE_MODEL,
+    intent=(
+        "Ship CI-green builds to staging without waiting. Never change production without a person."
+    ),
+    guidance={"rollout": "Hold any image that is not pinned to a version, such as `latest`."},
+    budget=10,
+)
+
+
+def deploy_action(name: str, args: dict) -> Action:
+    """The Action the policy weighs, derived from the call's arguments."""
+    return Action(
+        name="deploy",
+        asset=str(args["asset"]),
+        blast_radius=3,
+        environment=str(args.get("environment", "staging")),
+        kind="deploy",
+        tags=frozenset({"rollout"}),
+    )
+
+
+async def propose_judged(trail: AuditTrail, asset: str, image: str, environment: str) -> None:
+    """Send one rollout through the gate with the judge reading the call."""
+    gated = gate_tool(
+        rollout,
+        policy=POLICY,
+        action=deploy_action,
+        trail=trail,
+        judge=JUDGE,
+        on_refusal="raise",
+    )
+    print(f"\n--- judged: deploy {asset} -> {image} ({environment}) ---")
+    try:
+        result = await gated.execute(asset=asset, image=image, environment=environment)
+        print("  ALLOWED — policy allow, judge allow.")
+        print(f"  Applied: {result}")
+    except AdmissionError as exc:
+        decision = exc.decision
+        print(
+            f"  HELD ({decision.outcome}) — the policy said {decision.policy_outcome}; "
+            "the judge tightened it. Nothing was applied."
+        )
+        print(f"  Reason: {decision.reason}")
+
+
 async def main() -> None:
     print(
         "Notebook 72: An ops agent that ships to staging on its own and waits for a human in production"
@@ -148,30 +251,54 @@ async def main() -> None:
     )
     await propose(trail, prod_rollback, image="checkout-api:1.8.1")
 
-    # The audit trail — both decisions are on it, allowed or not.
+    # 3) Optional: the same staging rollout twice over, with the judge reading
+    #    the call. Both carry the labels the policy allows; only the pinned
+    #    image gets through.
+    await propose_judged(trail, "checkout-api", "checkout-api:1.8.2", "staging")
+    await propose_judged(trail, "checkout-api", "checkout-api:latest", "staging")
+
+    # The audit trail — every decision is on it, allowed or not, and the two
+    # judged entries carry the verdict next to the policy outcome.
     print("\nAudit trail")
     print("-" * 60)
     records = trail.records()
     for rec in records:
         payload = rec.payload
-        print(f"  {rec.event_type}: {payload['action']} {payload['asset']} -> {payload['outcome']}")
+        line = f"  {rec.event_type}: {payload['action']} {payload['asset']} -> {payload['outcome']}"
+        judge = payload.get("judge")
+        if judge is not None:
+            line += (
+                f"  [judge {judge['model']}: {judge['verdict']}, cache_hit={judge['cache_hit']}]"
+            )
+        print(line)
     print(f"  chain intact: {trail.verify()}")
 
-    # What actually touched the cluster: only the staging deploy.
+    # What actually touched the cluster: the staging deploy, and the pinned
+    # staging rollout the judge let through.
     print(f"\nSide effects applied: {APPLIED}")
 
     # Assertions — the contract this example demonstrates.
     #
     # Both the allowed staging deploy and the held production rollback were
-    # recorded. Only the staging deploy ran. The hash chain still verifies.
+    # recorded. The judge let the pinned image through and held `latest`,
+    # which the policy alone had allowed. Only the two allowed rollouts ran.
+    # The hash chain still verifies.
     outcomes = [rec.payload["outcome"] for rec in records]
-    assert len(records) == 2, f"expected 2 audit records, got {len(records)}"
-    assert outcomes == ["allow", "require_human"], f"unexpected outcomes: {outcomes}"
-    assert APPLIED == ["deploy checkout-api -> checkout-api:1.8.2 (staging)"], (
-        f"only the staging deploy should have run, got: {APPLIED}"
+    assert len(records) == 4, f"expected 4 audit records, got {len(records)}"
+    assert outcomes == ["allow", "require_human", "allow", "require_human"], (
+        f"unexpected outcomes: {outcomes}"
     )
+    assert records[3].payload["judge"]["verdict"] == "hold"
+    assert records[3].payload["judge"]["source"] == "model"
+    assert APPLIED == [
+        "deploy checkout-api -> checkout-api:1.8.2 (staging)",
+        "deploy checkout-api -> checkout-api:1.8.2 (staging)",
+    ], f"only the two allowed rollouts should have run, got: {APPLIED}"
+    assert JUDGE_MODEL.call_count == 2, "the judge was asked once per judged call"
     assert trail.verify(), "audit trail hash chain failed to verify"
-    print("\nOK — staging shipped, production held, both on the trail.")
+    print(
+        "\nOK — staging shipped, production held, the unpinned image held by the judge; all on the trail."
+    )
 
 
 if __name__ == "__main__":

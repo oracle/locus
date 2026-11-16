@@ -35,9 +35,13 @@ the paid refund and the held one — lands on a tamper-evident
     AuditTrail records every decision — paid or held
 
 The policy here is deliberately small: auto-allow a single-ledger-entry refund
-that carries no ``high_value`` tag; hold anything bigger.
+that carries no ``high_value`` tag; hold anything bigger. It is not written in
+Python: it lives in the sibling file ``notebook_71_refund_policy.yaml`` and
+:meth:`ControlPolicy.load` reads it, so the people who own the rules review and
+change a document, and the gate picks the change up without a code change.
 
-Run it (fully offline — no network, no credentials; the payout is a local stub):
+Run it (fully offline — no network, no credentials; the payout is a local stub;
+reading the YAML needs the ``pyyaml`` package):
     python examples/notebook_71_payment_refund_gate.py
 """
 
@@ -45,6 +49,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from locus.control import (
     Action,
@@ -81,6 +86,10 @@ class Ledger:
 # whether it crosses the human-review line (the "high_value" tag).
 
 LARGE_REFUND_THRESHOLD = 200.0
+
+# The policy, as a document next to this script. Every key is a ControlPolicy
+# field; `locus policy lint` and `locus policy explain` read the same file.
+POLICY_FILE = Path(__file__).with_name("notebook_71_refund_policy.yaml")
 
 
 def refund_action(customer: str, amount: float, ledger_entries: int) -> Action:
@@ -135,15 +144,14 @@ async def main() -> None:
     print("Notebook 71: A refund gate that pays out small refunds and holds big ones")
     print("=" * 60)
 
-    # The CISO/finance knobs. require_verification_score=0 because a refund is a
-    # business action, not a security finding — there is nothing to "verify".
-    # max_blast_radius=1: a refund may touch one ledger entry to auto-pay.
-    # require_human_for={"high_value"}: any refund tagged high_value waits for a person.
-    policy = ControlPolicy(
-        require_verification_score=0.0,
-        max_blast_radius=1,
-        require_human_for=frozenset({"high_value"}),
-    )
+    # The CISO/finance knobs, read from the YAML file: require_verification_score
+    # 0 because a refund is a business action, not a security finding — there is
+    # nothing to "verify"; max_blast_radius 1, so a refund may touch one ledger
+    # entry to auto-pay; require_human_for [high_value], so any refund tagged
+    # high_value waits for a person. The same policy in Python would be
+    # ControlPolicy(require_verification_score=0.0, max_blast_radius=1,
+    # require_human_for=frozenset({"high_value"})); policy.dump() writes it back.
+    policy = ControlPolicy.load(POLICY_FILE)
     trail = AuditTrail()
     ledger = Ledger()
 

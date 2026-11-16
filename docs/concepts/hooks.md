@@ -195,6 +195,13 @@ agent = Agent(
 )
 ```
 
+A steering verdict is advisory: a judge that does not intervene looks the same
+as one that approved. For a second model whose verdict is typed
+(`allow` / `hold` / `deny`), can only tighten the admission gate, holds rather
+than allows when the model fails or its budget is spent, and lands on the
+audit trail, use
+[`ToolCallJudge`](control-layer.md#a-second-check-that-reads-the-call).
+
 ## Priorities — the ordering rules
 
 An `Agent` runs its hooks in the order you list them on `before_*`

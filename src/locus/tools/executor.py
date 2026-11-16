@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field, PrivateAttr
 
 from locus.core.messages import ToolCall, ToolResult
 from locus.tools.context import ToolContext, bind_tool_context
+from locus.tools.integrity import ToolCallSigner
 from locus.tools.output import ToolOutput
 
 
@@ -249,6 +250,21 @@ def _bound_context(
     )
 
 
+async def _integrity_refusal(
+    tool_call: ToolCall, ctx_factory: ToolContextFactory | None
+) -> ToolResult | None:
+    """The refusal for a call that fails the run's integrity check, else ``None``.
+
+    Only when the factory carries the run's :class:`ToolCallSigner`
+    (``tool_call_integrity`` on the agent). A call the signer never signed is
+    not refused — see :mod:`locus.tools.integrity`.
+    """
+    signer = ctx_factory.integrity if ctx_factory is not None else None
+    if signer is None:
+        return None
+    return await signer.enforce(tool_call)
+
+
 if TYPE_CHECKING:
     from locus.tools.registry import ToolRegistry
 
@@ -271,6 +287,9 @@ class ToolContextFactory(BaseModel):
     state: Any = None
     invocation_metadata: dict[str, Any] = Field(default_factory=dict)
     ephemeral_metadata: dict[str, Any] = Field(default_factory=dict, exclude=True, repr=False)
+    #: The run's tool-call signer (``AgentConfig.tool_call_integrity``). When
+    #: set, every call is verified against it before it runs.
+    integrity: ToolCallSigner | None = Field(default=None, exclude=True, repr=False)
 
     def create(self, tool_call: ToolCall, tool_name: str) -> ToolContext:
         """Create a context for a tool call."""
@@ -394,6 +413,9 @@ class SequentialExecutor(ToolExecutor):
         start = time.perf_counter()
         if tool_call.malformed_arguments is not None:
             return _malformed_arguments_result(tool_call)
+        refusal = await _integrity_refusal(tool_call, ctx_factory)
+        if refusal is not None:
+            return refusal
 
         try:
             tool = registry.get(tool_call.name)
@@ -530,6 +552,9 @@ class ConcurrentExecutor(ToolExecutor):
         start = time.perf_counter()
         if tool_call.malformed_arguments is not None:
             return _malformed_arguments_result(tool_call)
+        refusal = await _integrity_refusal(tool_call, ctx_factory)
+        if refusal is not None:
+            return refusal
 
         try:
             tool = registry.get(tool_call.name)
