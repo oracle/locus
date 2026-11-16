@@ -733,6 +733,7 @@ module = [
     "mcp.*",
     "anthropic.*",
     "opensearchpy.*",
+    "opentelemetry.exporter.*",
     "redis.*",
     "asyncpg.*",
     "mysql.*",
