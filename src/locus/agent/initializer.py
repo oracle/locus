@@ -54,6 +54,10 @@ def initialize_agent(agent: Agent) -> None:
 
     get_model = _agent_module.get_model
 
+    # --- Checkpointer ------------------------------------------------------
+    # Refused here, not on the first run's ``load``.
+    _require_checkpointer(agent.config.checkpointer)
+
     # --- Model -------------------------------------------------------------
     if isinstance(agent.config.model, str):
         agent._model = get_model(agent.config.model, **agent.config.model_kwargs)
@@ -387,6 +391,35 @@ def _context_window(agent: Agent, metadata_window: int | None) -> int | None:
             if isinstance(reported, int) and not isinstance(reported, bool) and reported > 0:
                 return reported
     return None
+
+
+def _require_checkpointer(checkpointer: Any) -> None:
+    """A checkpointer the agent can drive: ``load`` and ``save``.
+
+    Checked at construction so the mistake surfaces before the first run.
+    ``OracleCheckpointSaver`` is the usual case: a versioned history that
+    application code drives through ``put()`` / ``get()``, not a
+    ``BaseCheckpointer``; ``oracle_checkpointer()`` is the Oracle
+    checkpointer an agent takes.
+    """
+    if checkpointer is None:
+        return
+    if callable(getattr(checkpointer, "load", None)) and callable(
+        getattr(checkpointer, "save", None)
+    ):
+        return
+    name = type(checkpointer).__name__
+    hint = (
+        " OracleCheckpointSaver is a versioned history your code drives with put()/get(); "
+        "give the agent locus.memory.backends.adapters.oracle_checkpointer() instead and "
+        "keep the saver beside it."
+        if name == "OracleCheckpointSaver"
+        else ""
+    )
+    raise TypeError(
+        f"Agent(checkpointer=...) needs a checkpointer with async load(thread_id) and "
+        f"save(thread_id, state) methods (a locus.memory.BaseCheckpointer); got {name}.{hint}"
+    )
 
 
 def _warn_unknown_window(model_id: str | None) -> None:

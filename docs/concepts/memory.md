@@ -75,7 +75,9 @@ agent.run_sync("What is my name?", thread_id="case-100")
 
 `oracle_checkpointer()` keeps the latest state of each thread.
 `OracleCheckpointSaver` keeps every version, so you can list a thread's
-history and resume from any earlier checkpoint. Other backends are included;
+history and resume from any earlier checkpoint; your code drives it with
+`put()` / `get()`, and an `Agent(checkpointer=...)` takes
+`oracle_checkpointer()`, not the saver. Other backends are included;
 [Checkpointers](checkpointers.md) compares them.
 
 ## Long-term memory

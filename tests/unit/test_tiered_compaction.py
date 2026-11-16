@@ -416,6 +416,62 @@ async def test_a_summary_needed_again_too_soon_ends_the_run() -> None:
     assert "thrashing" in (second.detail or "")
 
 
+async def test_a_held_back_summary_lets_the_cheaper_tiers_after_it_run() -> None:
+    # Summarize first, the cheap tiers after it. A summary needed again within
+    # the guard window used to end the run with most of the window free, the
+    # tiers after it never consulted.
+    summariser = Summariser()
+    compactor = _tiered(
+        [Summarize(0.45), ClearToolResults(0.7, keep_tokens=0), SlidingWindow(0.9, keep_turns=4)],
+        summary_model=summariser,
+    )
+    tracker = CompactionTracker()
+    messages = _conversation(12, said=800, output=1_200)  # about 6k tokens: over the 0.7 line
+
+    first = await _compact(compactor, messages, iteration=12, tracker=tracker)
+    assert first is not None
+    assert [t.tier for t in first.tiers] == ["summarize"]
+    assert tracker.last_summary_iteration == 12
+    summary_calls = len(summariser.prompts)
+
+    second = await _compact(compactor, messages, iteration=13, tracker=tracker)
+
+    assert second is not None
+    assert not second.exhausted
+    assert [t.tier for t in second.tiers] == ["clear_tool_results"]
+    assert second.tokens_after < int(8_000 * 0.7)
+    assert len(summariser.prompts) == summary_calls, "no summary call within the guard window"
+
+
+async def test_a_held_back_summary_under_the_other_lines_is_not_exhaustion() -> None:
+    compactor = _tiered(
+        [Summarize(0.45), ClearToolResults(0.7), SlidingWindow(0.9)], summary_model=Summariser()
+    )
+    tracker = CompactionTracker(last_summary_iteration=12)
+    messages = _conversation(12, said=800, output=800)  # about 4.8k tokens: between the lines
+
+    outcome = await _compact(compactor, messages, iteration=13, tracker=tracker)
+
+    assert outcome is None, "the context fits the window; the model is called with it"
+
+
+async def test_exhaustion_after_a_held_back_summary_names_both_causes() -> None:
+    compactor = _tiered(
+        [Summarize(0.5), ClearToolResults(0.6, keep_tokens=0)], summary_model=Summariser()
+    )
+    tracker = CompactionTracker(last_summary_iteration=12)
+    messages = _conversation(12, said=2_400, output=100)  # text the clearing cannot touch
+
+    outcome = await _compact(compactor, messages, iteration=13, tracker=tracker)
+
+    assert outcome is not None
+    assert outcome.exhausted
+    assert outcome.tiers == ()
+    assert "thrashing" in (outcome.detail or "")
+    assert "summarize tier was needed again" in (outcome.detail or "")
+    assert "no longer fit the window" in (outcome.detail or "")
+
+
 # --- tier: native -------------------------------------------------------------
 
 
@@ -727,6 +783,69 @@ async def test_the_agent_yields_one_event_per_tier_and_the_run_completes() -> No
             assert earlier.messages_after == later.messages_before
             assert not earlier.exhausted
         assert chain[-1].messages_after > 0
+    for request in agent._model.received_messages:  # type: ignore[attr-defined]
+        assert sum(len(m.content or "") for m in request) // 4 < 8_000
+        _assert_pairs(request)
+
+
+@tool
+def page(offset: int) -> str:
+    """Read one large page of a document."""
+    return f"page at {offset}: " + "p" * 6_000
+
+
+def _paging_handler(total: int) -> Any:
+    calls: list[int] = []
+
+    def handler(messages: list[Message], tools: list[dict[str, Any]]) -> Any:
+        if _is_summary_call(messages):
+            return "## Decisions made\n- DECISION: use PostgreSQL"
+        calls.append(1)
+        step = len(calls)
+        if step > total:
+            seen = "\n".join(m.content or "" for m in messages)
+            return text("Final: " + ("PostgreSQL" if "PostgreSQL" in seen else "unknown"))
+        said = "DECISION: use PostgreSQL" if step == 1 else f"reading page {step}"
+        return tool_call("page", call_id=f"p{step}", content=said, offset=step * 8_000)
+
+    return handler
+
+
+async def test_the_run_completes_when_a_summary_is_held_back_and_a_cheaper_tier_runs() -> None:
+    # The live shape: large tool pages arrive faster than the guard allows a
+    # second summary, and the cheap tiers sit after the summarising one.
+    agent = Agent(
+        model=FunctionModel(_paging_handler(10)),
+        tools=[page],
+        system_prompt="You are a document assistant.",
+        reflexion=False,
+        grounding=False,
+        context_window=8_000,
+        max_iterations=40,
+        conversation_manager=TieredCompaction(
+            [
+                Summarize(0.45),
+                ClearToolResults(0.7, keep_tokens=0),
+                SlidingWindow(0.9, keep_turns=4),
+            ]
+        ),
+    )
+
+    events = [e async for e in agent.run("find the access code in the document")]
+
+    terminate = next(e for e in events if isinstance(e, TerminateEvent))
+    assert terminate.reason == "complete", terminate.final_message
+    assert "PostgreSQL" in (terminate.final_message or "")
+    compactions = [e for e in events if isinstance(e, CompactionEvent)]
+    assert not any(e.exhausted for e in compactions)
+    summaries = [e.iteration for e in compactions if e.tier == "summarize"]
+    assert summaries, "the summarising tier ran"
+    cheap = [e for e in compactions if e.tier in ("clear_tool_results", "sliding_window")]
+    guard = agent._conversation_manager.min_iterations_between_summaries  # type: ignore[union-attr]
+    assert any(0 < e.iteration - s < guard for e in cheap for s in summaries), (
+        "a cheaper tier ran in a pass where the summary was held back"
+    )
+    assert all(s2 - s1 >= guard for s1, s2 in pairwise(summaries)), "the guard still holds"
     for request in agent._model.received_messages:  # type: ignore[attr-defined]
         assert sum(len(m.content or "") for m in request) // 4 < 8_000
         _assert_pairs(request)

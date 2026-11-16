@@ -73,7 +73,7 @@ this module.
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
@@ -98,6 +98,25 @@ from locus.memory.time_travel import (
 
 if TYPE_CHECKING:
     import oracledb
+
+
+def _aware_utc(value: Any) -> Any:
+    """A row's ``created_at`` as an aware UTC datetime.
+
+    The column is ``TIMESTAMP WITH TIME ZONE`` and holds UTC wall-clock
+    time, but the driver hands it back naive (or as its ISO string without
+    an offset), so the zone is put back: the infos then compare with the
+    ones every other backend returns. Anything else passes through.
+    """
+    moment: Any = value
+    if isinstance(value, str):
+        try:
+            moment = datetime.fromisoformat(value)
+        except ValueError:
+            return value
+    if isinstance(moment, datetime):
+        return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
+    return value
 
 
 class OracleCheckpointSaver(BaseModel):
@@ -876,7 +895,7 @@ class OracleCheckpointSaver(BaseModel):
                 info_from(
                     str(row["checkpoint_id"]),
                     thread_id,
-                    created_at=row["created_at"],
+                    created_at=_aware_utc(row["created_at"]),
                     metadata=metadata,
                     iteration=data.get("iteration"),
                     size=checkpoint_size(data),

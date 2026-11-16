@@ -39,6 +39,7 @@ from typing import Any
 import pytest
 
 from locus.memory.backends.oracle_versioned import OracleCheckpointSaver
+from locus.testing import ScriptedModel
 
 
 # ---------------------------------------------------------------------------
@@ -807,6 +808,50 @@ class TestTimeTravel:
         assert infos[0].metadata == {"note": 3, "parent_checkpoint_id": "c2"}
         assert all(i.size and i.created_at == ts for i in infos)
         assert all(i.thread_id == "t1" for i in infos)
+
+    @pytest.mark.asyncio
+    async def test_list_returns_aware_utc_times_for_naive_rows(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The driver hands a TIMESTAMP WITH TIME ZONE column back naive; the
+        # infos must compare with the aware ones every other backend returns.
+        naive = datetime(2026, 5, 18, 7, 30)  # noqa: DTZ001 — as the driver returns it
+        cursor = _StubCursor(
+            fetchone_queue=[(1,), (1,)],
+            fetchall_queue=[
+                [
+                    ("c2", "c1", '{"iteration": 2}', "{}", naive),
+                    ("c1", None, '{"iteration": 1}', "{}", "2026-05-18T07:00:00"),
+                ]
+            ],
+        )
+        _install_oracledb_stub(monkeypatch, cursor)
+
+        infos = await _make_saver().list("t1")
+
+        assert [i.created_at for i in infos] == [
+            datetime(2026, 5, 18, 7, 30, tzinfo=UTC),
+            datetime(2026, 5, 18, 7, 0, tzinfo=UTC),
+        ]
+        assert all(i.created_at is not None and i.created_at.tzinfo is UTC for i in infos)
+        assert sorted(infos, key=lambda i: i.created_at or datetime.min.replace(tzinfo=UTC))
+
+    def test_a_created_at_that_is_not_a_time_passes_through(self) -> None:
+        from locus.memory.backends.oracle_versioned import _aware_utc
+
+        assert _aware_utc("not a time") == "not a time"
+        assert _aware_utc(None) is None
+        aware = datetime(2026, 5, 18, tzinfo=UTC)
+        assert _aware_utc(aware) == aware
+        assert _aware_utc("2026-05-18T00:00:00+02:00") == datetime(2026, 5, 17, 22, tzinfo=UTC)
+
+    def test_the_saver_is_refused_as_an_agents_checkpointer(self) -> None:
+        from locus.agent import Agent
+
+        with pytest.raises(TypeError, match="oracle_checkpointer"):
+            Agent(model=ScriptedModel([]), checkpointer=_make_saver())
+        with pytest.raises(TypeError, match=r"load\(thread_id\)"):
+            Agent(model=ScriptedModel([]), checkpointer=object())
 
     @pytest.mark.asyncio
     async def test_list_describes_a_row_whose_data_is_not_a_document(

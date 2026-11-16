@@ -667,6 +667,53 @@ policy.
   now reads `response.output_item.added` and `.done` for `function_call` items
   and the accumulator keys by the call id, so streamed and non-streamed turns
   are identical and a streaming agent on the stateless path executes its tools.
+- **Report stores read back a report stored under a caller's id.** `put(report,
+  suite=..., report_id="build-42")` on the file, OCI Object Storage and S3
+  stores wrote the object and then `get()`, `list()` and `trend()` never found
+  it, because the object-name parser accepted only the generated 32-hex ids.
+  The id is now encoded in the object name and read back exactly, whatever the
+  string, and reports already stored under generated ids read as before.
+- **A held-back summary tier no longer ends the run before the cheaper tiers
+  run.** With a `TieredCompaction` whose `Summarize` tier sat before
+  `ClearToolResults` or `SlidingWindow`, a summary needed again within
+  `min_iterations_between_summaries` iterations ended the turn
+  `context_exhausted` with most of the window still free and the turn's task
+  lost. The guard now holds that tier back for the pass and the tiers after it
+  still run; the pass is exhausted only when the context is still over the
+  highest trigger after the last tier.
+- **OCI model ids have a context window.** `metadata_for("oci:openai.gpt-4.1")`
+  and the bare `openai.gpt-4.1` an `OCIChatCompletionsModel` carries returned
+  `None`, so every agent on an `oci:` model logged "No context window known"
+  and fell back to a message window instead of the default `ContextCompactor`.
+  An OCI `<vendor>.<model>` id now resolves the entry of the model it serves,
+  the `oci:` prefix is recognised, and the models only OCI serves this way
+  (`meta.llama-3.3-70b-instruct`,
+  `meta.llama-4-maverick-17b-128e-instruct-fp8`, `cohere.command-a-03-2025`,
+  `cohere.command-r-plus-08-2024`, `google.gemini-2.5-pro`,
+  `google.gemini-2.5-flash`, `xai.grok-4`) and `gpt-5.1` have entries with the
+  windows their documentation states.
+- **`OracleCheckpointSaver.list()` returns aware UTC times.** Its
+  `CheckpointInfo.created_at` came back timezone-naive (the driver drops the
+  zone of the `TIMESTAMP WITH TIME ZONE` column), while the adapter, PostgreSQL
+  and object-store backends return aware UTC datetimes, so comparing or sorting
+  infos across backends raised `TypeError`. The saver attaches UTC, and
+  `parse_time` reads a naive value as UTC wall-clock time, so every backend
+  agrees.
+- **`Agent(checkpointer=OracleCheckpointSaver(...))` is refused at
+  construction.** It was accepted and failed on the first run with
+  `AttributeError: ... has no attribute 'load'`. The agent now raises
+  `TypeError` when the checkpointer has no `load` / `save`, naming
+  `BaseCheckpointer` and, for the saver, `oracle_checkpointer()` as the Oracle
+  checkpointer an agent takes; the saver stays the versioned history your code
+  drives.
+- **`MilvusVectorStore.close()` stops the embedded Milvus Lite server.**
+  `MilvusClient.close()` only drops the connection; the in-process server kept
+  running until interpreter exit, flushed then, and recreated the database
+  directory a caller had removed after `close()` (notebook 52 Part 5 left a
+  `locus-nb52-*` directory behind). `close()` on a local `.db` uri now releases
+  the server for that file, so the directory stays removed, and the store loads
+  an existing collection when it opens one, so a file reopened after `close()`
+  or in a new process is searchable.
 
 ### Deprecated
 
