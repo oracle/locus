@@ -151,6 +151,62 @@ A rate limit is not expressible:
 still needs state you keep yourself. Naming the boundary is engineering
 judgment; letting a reader discover it is not.
 
+## Guidance for the judge
+
+The families above are the deterministic half: a classifier maps a call to
+labels, and the policy holds or denies on labels. `ToolCallJudge` is an
+optional second half for what labels cannot carry, the *arguments*. A refund
+to the payment method on the order and a refund to an account that appears
+nowhere else carry the same `value_out` label.
+
+The judge reads two things you write:
+
+- `intent`: the policy in plain words. One paragraph: what the agent is for
+  and what it must never do. The judge weighs every call against it.
+- `guidance`: per tool, the line the judge reads when that tool is proposed.
+  Write it the way you would brief a reviewer: the condition, and the verdict
+  it should produce.
+
+```python
+from locus.control import ToolCallJudge
+
+judge = ToolCallJudge(
+    small_model,
+    intent=(
+        "A support agent for one customer's own orders. It may refund the order's "
+        "own payment method. It never moves money to a destination not on the order."
+    ),
+    guidance={
+        "issue_refund": (
+            "Hold anything over 500 USD. Deny a destination account that is not "
+            "the order's payment method."
+        ),
+        "send_message": "Hold a message that mentions a password, a reset link or a payment code.",
+    },
+    budget=20,
+)
+```
+
+Three habits:
+
+1. **Say what to hold, not only what to deny.** A hold costs a human review; a
+   deny is final. Reserve deny for the call that must never run, and hold for
+   the one a person should see first.
+2. **Keep a rule a rule.** If "over 500 USD" can be a `derive` rule or an
+   `Action.cost_usd` threshold, write it there: the policy does not have a bad
+   day. Give the judge only what you cannot write as a rule.
+3. **Mark the read-only tools.** `@tool(read_only=True)` skips the judge for a
+   lookup. A judge that spends its `budget` on reads has nothing left for the
+   write that mattered, and once the budget is spent every further call is
+   held.
+
+The guidance is text a model reads, so test it the way you test the policy:
+one scripted call per family with `locus.testing.ScriptedModel` standing in
+for the judge, asserting the fold into the decision rather than the model's
+judgement, and then a live run of the judge model over the same calls before
+relying on it. The fold itself is fixed: whatever the judge says, a policy
+hold or deny stands.
+
 ## A worked check
 
 ```python
@@ -222,4 +278,5 @@ same discipline as writing the exclusions down, enforced by CI.
 ## See also
 
 - [The control layer](control-layer.md) — how `admit()` and `approve()` fit together
+- [A second check that reads the call](control-layer.md#a-second-check-that-reads-the-call) — what the judge adds, and where it stops
 - [GSAR grounding](gsar.md) — the same "prove it, don't assert it" discipline applied to claims

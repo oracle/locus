@@ -257,6 +257,38 @@ and demos. `admit()` takes `ledger=` and a string `spend_scope=` directly.
 ::: locus.control.spend.InMemorySpendLedger
 ::: locus.control.spend.FileSpendLedger
 
+### Judging the call
+
+The policy sees labels. `ToolCallJudge` reads the call, the tool's name and
+the arguments the model sent, against an intent written in words and optional
+per-tool guidance, and returns a typed `allow` / `hold` / `deny` with a
+one-line reason. Pass it to `gate_tool(judge=...)` and the verdict reaches
+`admit()` as `judgement`, where `tighten()` keeps the stricter of the policy's
+outcome and the judge's: an allow can become a hold or a deny, never the
+reverse. The verdict is on the audit entry under `judge`; a model error, an
+off-schema reply or a spent `budget` is a hold.
+
+```python
+from locus.control import ControlPolicy, ToolCallJudge, gate_tool
+
+judge = ToolCallJudge(
+    small_model,
+    intent="Refund a customer's own order; never move money elsewhere.",
+    guidance={"issue_refund": "Hold anything over 500 USD."},
+    budget=20,
+)
+refund = gate_tool(issue_refund, policy=ControlPolicy(), trail=trail, judge=judge)
+```
+
+Installed as a hook (`hooks=[judge]`) it judges every call and cancels a held
+or denied one with a refusal the model can read; with no `model=` it borrows
+the agent's. Tools declared `@tool(read_only=True)` are not judged, and
+verdicts are cached per (tool, canonical arguments) within a run.
+
+::: locus.control.judge.ToolCallJudge
+::: locus.control.judge.JudgeVerdict
+::: locus.control.judge.tighten
+
 ## Deriving action labels
 
 Turn a tool call into an `Action` using declarative rules, so the labels a

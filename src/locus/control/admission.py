@@ -41,6 +41,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from locus.control.audit import AuditTrail
 from locus.control.findings import Evidence
+from locus.control.judge import JudgeVerdict, tighten
 from locus.control.policy import (
     Action,
     ApprovalDecision,
@@ -86,6 +87,7 @@ async def admit(
     spend_scope: str = "default",
     context: Mapping[str, Any] | None = None,
     advisor: ControlAdvisor | None = None,
+    judgement: JudgeVerdict | None = None,
 ) -> T:
     """Run ``perform`` only if ``action`` clears the trust chain; else reject.
 
@@ -120,6 +122,12 @@ async def admit(
             policy's decision as it was. When one is given the trail entry also
             carries ``policy_outcome`` and ``model_outcome``, so a reviewer sees
             what the model changed.
+        judgement: A :class:`~locus.control.judge.ToolCallJudge` verdict on
+            the call this action stands for, as further evidence. Folded in
+            through :func:`~locus.control.judge.tighten`: it can turn an
+            allow into a hold or a deny and can never do the reverse. The
+            verdict is written on the trail entry under ``judge`` (model,
+            verdict, reason, cache hit, and the error when it failed closed).
 
     Returns:
         Whatever ``perform`` returns.
@@ -139,6 +147,7 @@ async def admit(
         spend_scope=spend_scope,
         context=context,
         advisor=advisor,
+        judgement=judgement,
     )
     result = await perform()
     _spend(action, ledger, spend_scope)
@@ -158,6 +167,7 @@ def admit_sync(
     spend_scope: str = "default",
     context: Mapping[str, Any] | None = None,
     advisor: ControlAdvisor | None = None,
+    judgement: JudgeVerdict | None = None,
 ) -> T:
     """:func:`admit` for a synchronous side effect.
 
@@ -179,6 +189,7 @@ def admit_sync(
         spend_scope=spend_scope,
         context=context,
         advisor=advisor,
+        judgement=judgement,
     )
     result = perform()
     _spend(action, ledger, spend_scope)
@@ -197,6 +208,7 @@ def _decide(  # noqa: PLR0913 — admit()'s arguments, minus the side effect
     spend_scope: str,
     context: Mapping[str, Any] | None,
     advisor: ControlAdvisor | None = None,
+    judgement: JudgeVerdict | None = None,
 ) -> ApprovalDecision:
     """Decide, record, and raise unless admitted. The one path both gates share."""
     spent = ledger.spent(spend_scope) if ledger is not None else 0.0
@@ -208,6 +220,10 @@ def _decide(  # noqa: PLR0913 — admit()'s arguments, minus the side effect
         advisor=advisor,
         spent_usd=spent,
     )
+    if judgement is not None:
+        # After approve(), never instead of it: the policy's decision is the
+        # floor and the judge can only raise it (see judge.tighten).
+        decision = tighten(decision, judgement)
     human = approved_by is not None and decision.outcome == ApprovalOutcome.REQUIRE_HUMAN
     if trail is not None:
         entry: dict[str, Any] = {
@@ -225,6 +241,8 @@ def _decide(  # noqa: PLR0913 — admit()'s arguments, minus the side effect
             # written without one keep exactly the shape they always had.
             entry["policy_outcome"] = decision.policy_outcome
             entry["model_outcome"] = decision.model_outcome
+        if judgement is not None:
+            entry["judge"] = judgement.audit()
         if human:
             entry["approved_by"] = approved_by
         if context:
