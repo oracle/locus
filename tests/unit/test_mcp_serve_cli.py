@@ -255,3 +255,89 @@ async def test_serve_an_agent_over_stdio_relays_its_questions(agent_file: Path) 
         await client.close()
     assert reply == "deployed to eu-frankfurt-1"
     assert asked[0].message == "Which region?"
+
+
+# ---------------------------------------------------------------------------
+# serve(): the transports, without binding anything
+# ---------------------------------------------------------------------------
+
+
+class _FakeServer:
+    def __init__(self) -> None:
+        self.runs: list[dict[str, Any]] = []
+
+    def run(self, **kwargs: Any) -> None:
+        self.runs.append(kwargs)
+
+
+def test_serve_picks_the_transport(monkeypatch: pytest.MonkeyPatch) -> None:
+    from locus.integrations import mcp_serve
+
+    fake = _FakeServer()
+    built: list[tuple[str, str | None]] = []
+
+    def build(spec: str, *, name: str | None = None, version: str = "1.0.0") -> _FakeServer:
+        built.append((spec, name))
+        return fake
+
+    monkeypatch.setattr(mcp_serve, "build_server", build)
+    mcp_serve.serve("app.py:agent", name="support")
+    mcp_serve.serve("tools", transport="http", host="0.0.0.0", port=9000, path="/tools")  # noqa: S104
+    assert built == [("app.py:agent", "support"), ("tools", None)]
+    assert fake.runs == [
+        {"transport": "stdio", "show_banner": False},
+        {
+            "transport": "http",
+            "host": "0.0.0.0",  # noqa: S104
+            "port": 9000,
+            "path": "/tools",
+            "show_banner": False,
+        },
+    ]
+
+
+def test_serve_names_the_missing_server_package(monkeypatch: pytest.MonkeyPatch) -> None:
+    from locus.integrations import mcp_serve
+
+    monkeypatch.setitem(sys.modules, "fastmcp", None)
+    with pytest.raises(MCPServeError, match="pip install fastmcp"):
+        mcp_serve.serve("app.py:agent")
+
+
+def test_the_cli_reports_a_serve_error(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from locus.integrations import mcp_serve
+
+    def refuse(*args: Any, **kwargs: Any) -> None:
+        raise ImportError("fastmcp is not installed")
+
+    monkeypatch.setattr(mcp_serve, "serve", refuse)
+    assert main(["mcp", "serve", "app.py:agent"]) == 2
+    assert "fastmcp is not installed" in capsys.readouterr().err
+
+
+def test_load_target_when_a_file_has_no_loader(
+    tools_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import importlib.util
+
+    monkeypatch.setattr(importlib.util, "spec_from_file_location", lambda *a, **k: None)
+    with pytest.raises(MCPServeError, match="cannot load"):
+        load_target(str(tools_file))
+
+
+def test_load_target_imports_a_module_by_name_from_the_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    name = "locus_mcp_serve_cwd_tools"
+    (tmp_path / f"{name}.py").write_text(textwrap.dedent(_TOOLS_MODULE))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "path", [p for p in sys.path if p != str(tmp_path)])
+    try:
+        agent, tools, default_name = load_target(name)
+    finally:
+        sys.modules.pop(name, None)
+    assert agent is None
+    assert [t.name for t in tools] == ["add", "shout"]
+    assert default_name == name

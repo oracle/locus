@@ -235,7 +235,7 @@ metadata is sent as given and wins over everything; a static
 against the server; per-user headers remain the way to carry an end
 user's token through a shared agent.
 
-## Shaping the toolset — `include`, `exclude`, `prefix`
+## Shaping the toolset: include, exclude, prefix
 
 A server publishes what it publishes; the agent should see what it
 needs, under names that do not collide with another server's.
