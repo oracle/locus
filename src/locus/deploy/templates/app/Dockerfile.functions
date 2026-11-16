@@ -1,0 +1,42 @@
+# syntax=docker/dockerfile:1.7
+#
+# The agent server as an OCI Function. The Fn FDK is the entrypoint; func.py
+# hands every invocation to locus.deploy.functions, which runs it against the
+# AgentServer ASGI app (__LOCUS_APP__). Build with --platform matching the
+# application's shape: linux/amd64 for GENERIC_X86, linux/arm64 for GENERIC_ARM.
+
+ARG BASE_IMAGE=container-registry.oracle.com/os/oraclelinux:9-slim
+
+FROM ${BASE_IMAGE} AS builder
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1
+
+RUN microdnf -y install python3.12 python3.12-pip \
+    && microdnf clean all
+
+WORKDIR /function
+COPY app/ /function/
+RUN python3.12 -m venv /opt/venv \
+    && if ls /function/wheels/*.whl >/dev/null 2>&1; then /opt/venv/bin/pip install /function/wheels/*.whl; fi \
+    && /opt/venv/bin/pip install -r requirements.txt "fdk>=0.1.80"
+
+FROM ${BASE_IMAGE}
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/opt/venv/bin:$PATH" \
+    HOME=/tmp \
+    PYTHONPATH=/function
+
+RUN microdnf -y install python3.12 ca-certificates shadow-utils \
+    && groupadd -g 10001 fn \
+    && useradd -u 10001 -g 10001 -M -s /sbin/nologin fn \
+    && microdnf -y remove shadow-utils \
+    && microdnf clean all
+
+WORKDIR /function
+COPY --from=builder --chown=10001:10001 /opt/venv /opt/venv
+COPY --from=builder --chown=10001:10001 /function /function
+
+USER 10001
+ENTRYPOINT ["/opt/venv/bin/fdk", "/function/func.py", "handler"]

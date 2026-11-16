@@ -50,7 +50,7 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import Field
 
@@ -69,8 +69,12 @@ if TYPE_CHECKING:
 
 DEFAULT_OCI_GENAI_REGION = "us-chicago-1"
 
-AuthType = Literal["instance_principal", "resource_principal"]
-_VALID_AUTH_TYPES: tuple[str, ...] = ("instance_principal", "resource_principal")
+AuthType = Literal["instance_principal", "resource_principal", "oke_workload_identity"]
+_VALID_AUTH_TYPES: tuple[str, ...] = (
+    "instance_principal",
+    "resource_principal",
+    "oke_workload_identity",
+)
 
 
 def build_oci_openai_base_url(region: str) -> str:
@@ -96,7 +100,7 @@ class OCIChatCompletionsConfig(OpenAIConfig):
     )
     auth_type: str | None = Field(
         default=None,
-        description='"instance_principal" or "resource_principal"',
+        description='"instance_principal", "resource_principal" or "oke_workload_identity"',
     )
     config_file: str = Field(
         default="~/.oci/config",
@@ -312,9 +316,15 @@ def _build_instance_principal_signer() -> AbstractBaseSigner:
 
 
 def _build_resource_principal_signer() -> AbstractBaseSigner:
-    from oci.auth.signers import get_resource_principals_signer
+    from locus._oci_auth import resource_principal_signer
 
-    return get_resource_principals_signer()
+    return cast("AbstractBaseSigner", resource_principal_signer("resource_principal"))
+
+
+def _build_oke_workload_identity_signer() -> AbstractBaseSigner:
+    from locus._oci_auth import resource_principal_signer
+
+    return cast("AbstractBaseSigner", resource_principal_signer("oke_workload_identity"))
 
 
 def _refresh_callable_for(
@@ -370,6 +380,8 @@ def _refresh_callable_for(
         return _build_instance_principal_signer
     if auth_type == "resource_principal":
         return _build_resource_principal_signer
+    if auth_type == "oke_workload_identity":
+        return _build_oke_workload_identity_signer
 
     # Case 2: SecurityTokenSigner rebuilt from disk.
     if profile is not None and config_file is not None:
@@ -470,7 +482,7 @@ class OCIChatCompletionsModel(OpenAIModel):
                 "Either profile='<section_from_~/.oci/config>' (api-key path; "
                 "use profile='DEFAULT' for the default section), "
                 "or auth_type='instance_principal'|'resource_principal'|"
-                "'security_token'|'delegation_token' together with compartment_id=. "
+                "'oke_workload_identity' together with compartment_id=. "
                 f"Got profile={profile!r}, auth_type={auth_type!r}."
             )
             raise ValueError(msg)
@@ -716,6 +728,8 @@ class OCIChatCompletionsModel(OpenAIModel):
             return _build_instance_principal_signer()
         if self.config.auth_type == "resource_principal":
             return _build_resource_principal_signer()
+        if self.config.auth_type == "oke_workload_identity":
+            return _build_oke_workload_identity_signer()
         # Validation in __init__ guarantees profile is set if we got here.
         assert self.config.profile is not None  # noqa: S101 — invariant
         return _build_signer_from_profile(self.config.profile, self.config.config_file)
