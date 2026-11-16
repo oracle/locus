@@ -1047,26 +1047,61 @@ async def test_error_envelope_that_is_not_an_object_falls_back_to_the_body_text(
 # =============================================================================
 
 
+def _fc_item(call_id: str, item_id: str, name: str, arguments: str) -> dict[str, Any]:
+    return {
+        "type": "function_call",
+        "id": item_id,
+        "call_id": call_id,
+        "name": name,
+        "arguments": arguments,
+    }
+
+
+def _events(*events: dict[str, Any]) -> bytes:
+    import json as _json
+
+    return _sse([_json.dumps(e) for e in events])
+
+
 @respx.mock
 @pytest.mark.asyncio
 async def test_streamed_tool_call_has_the_name_and_call_id_complete_would_return() -> None:
     """The deltas only carry the item id; the call id and the name come from the
     ``output_item`` events, and the emitted ToolCall must match ``complete()``."""
     model = _make_model()
-    events = [
-        '{"type": "response.created", "response": {"id": "resp_1"}}',
-        '{"type": "response.output_item.added", "output_index": 0, "item": {"type": "function_call", '
-        '"id": "fc_1", "call_id": "call_1", "name": "add_numbers", "arguments": ""}}',
-        '{"type": "response.function_call_arguments.delta", "item_id": "fc_1", "delta": "{"a": 2, "}',
-        '{"type": "response.function_call_arguments.delta", "item_id": "fc_1", "delta": ""b": 3}"}',
-        '{"type": "response.function_call_arguments.done", "item_id": "fc_1", '
-        '"arguments": "{"a": 2, "b": 3}"}',
-        '{"type": "response.output_item.done", "output_index": 0, "item": {"type": "function_call", '
-        '"id": "fc_1", "call_id": "call_1", "name": "add_numbers", "arguments": "{"a": 2, "b": 3}"}}',
-        '{"type": "response.completed", "response": {"id": "resp_1"}}',
-    ]
     respx.post("https://fake-oci.test/openai/v1/responses").mock(
-        return_value=httpx.Response(200, content=_sse(events))
+        return_value=httpx.Response(
+            200,
+            content=_events(
+                {"type": "response.created", "response": {"id": "resp_1"}},
+                {
+                    "type": "response.output_item.added",
+                    "output_index": 0,
+                    "item": _fc_item("call_1", "fc_1", "add_numbers", ""),
+                },
+                {
+                    "type": "response.function_call_arguments.delta",
+                    "item_id": "fc_1",
+                    "delta": '{"a": 2, ',
+                },
+                {
+                    "type": "response.function_call_arguments.delta",
+                    "item_id": "fc_1",
+                    "delta": '"b": 3}',
+                },
+                {
+                    "type": "response.function_call_arguments.done",
+                    "item_id": "fc_1",
+                    "arguments": '{"a": 2, "b": 3}',
+                },
+                {
+                    "type": "response.output_item.done",
+                    "output_index": 0,
+                    "item": _fc_item("call_1", "fc_1", "add_numbers", '{"a": 2, "b": 3}'),
+                },
+                {"type": "response.completed", "response": {"id": "resp_1"}},
+            ),
+        )
     )
 
     calls = []
@@ -1083,16 +1118,25 @@ async def test_streamed_tool_call_has_the_name_and_call_id_complete_would_return
 @pytest.mark.asyncio
 async def test_streamed_deltas_before_the_added_event_still_land_on_the_call_id() -> None:
     """Out-of-order delivery: deltas keyed by the item id are moved under the
-    call id once ``output_item.added`` names it."""
+    call id once ``output_item.added`` names it; no ``done`` item is needed."""
     model = _make_model()
-    events = [
-        '{"type": "response.function_call_arguments.delta", "item_id": "fc_9", "delta": "{"x": 1}"}',
-        '{"type": "response.output_item.added", "output_index": 0, "item": {"type": "function_call", '
-        '"id": "fc_9", "call_id": "call_9", "name": "noop", "arguments": ""}}',
-        '{"type": "response.completed", "response": {"id": "resp_9"}}',
-    ]
     respx.post("https://fake-oci.test/openai/v1/responses").mock(
-        return_value=httpx.Response(200, content=_sse(events))
+        return_value=httpx.Response(
+            200,
+            content=_events(
+                {
+                    "type": "response.function_call_arguments.delta",
+                    "item_id": "fc_9",
+                    "delta": '{"x": 1}',
+                },
+                {
+                    "type": "response.output_item.added",
+                    "output_index": 0,
+                    "item": _fc_item("call_9", "fc_9", "noop", ""),
+                },
+                {"type": "response.completed", "response": {"id": "resp_9"}},
+            ),
+        )
     )
     calls = []
     async for chunk in model.stream([Message.user("go")]):
