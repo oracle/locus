@@ -10,6 +10,39 @@ policy.
 
 ### Added
 
+- **OpenTelemetry GenAI semantic conventions.** `TelemetryHook` now files a
+  run as one `invoke_agent` span, each model call as a `chat` span (CLIENT)
+  and each tool call as an `execute_tool` span, with the `gen_ai.*`
+  attributes (`gen_ai.operation.name`, `gen_ai.provider.name`,
+  `gen_ai.request.model`, `gen_ai.usage.input_tokens` / `output_tokens`,
+  `gen_ai.response.finish_reasons`, `gen_ai.response.id`,
+  `gen_ai.tool.name`, `gen_ai.tool.call.id`, `gen_ai.conversation.id`,
+  `error.type`) and the conventions' metrics
+  (`gen_ai.client.inference.usage.input_tokens` / `output_tokens`,
+  `gen_ai.client.inference.duration`, `gen_ai.invoke_agent.duration` /
+  `inference_calls` / `tool_calls`, `gen_ai.execute_tool.duration`, in
+  seconds with the recommended buckets). The agent lends the hook its model
+  and tools, so the model, provider and tool descriptions need no
+  configuration; `model=`, `provider_name=` and `agent_name=` override.
+  `TelemetryHook(semconv="locus-legacy")` keeps the previous
+  `agent.invocation` / `agent.iteration.<n>` / `tool.<name>` spans and
+  `locus.*` metrics. `locus.observability.semconv` holds the names and a
+  `validate_spans()` check for recorded traces.
+- **W3C trace context across A2A.** `A2AClient` sends `traceparent` (the
+  agent's tool span when called from a tool) on every request, and
+  `A2AServer` runs a served request under the caller's trace, so a
+  multi-agent call is one trace end to end. `locus.observability.propagation`
+  (`inject_trace_headers`, `trace_scope`, `current_traceparent`) does the
+  same for any other carrier; MCP `_meta` already carried it.
+- **OCI Application Performance Monitoring exporter.**
+  `locus.observability.exporters.oci_apm(endpoint, private_data_key)` builds
+  the OTLP/HTTP span and metric exporters for an APM domain (data upload
+  endpoint, `dataKey` authorization) and `install()` sets the providers;
+  `examples/observability/` carries an importable APM dashboard for agent
+  runs, tool latency and token spend. The observability page gains an
+  "Export" section with recipes for OCI APM and three open-source backends,
+  and the SSE catalogue maps every bus event to the span it belongs to.
+
 - **`OracleAuditTrail`.** The audit trail on an Oracle AI Database immutable
   table (`CREATE IMMUTABLE TABLE … NO DROP UNTIL n DAYS IDLE NO DELETE UNTIL
   n DAYS AFTER INSERT`), or a blockchain table with `table_kind="blockchain"`.
@@ -211,6 +244,12 @@ policy.
   runs as well.
 
 ### Changed
+
+- **`TelemetryHook` default span and metric names.** The GenAI conventions
+  are the default; dashboards and alerts built on `agent.invocation`,
+  `tool.<name>` or the `locus.*` metrics keep working with
+  `TelemetryHook(semconv="locus-legacy")`. Tool spans are now keyed by
+  `tool_call_id`, so parallel calls to one tool each get their own span.
 
 - **`OCIResponsesModel` defaults to `store="auto"`.** Before, the default was
   `store=True` and the first tool-call continuation on a ZDR tenancy failed the

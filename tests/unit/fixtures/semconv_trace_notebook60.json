@@ -1,0 +1,121 @@
+[
+  {
+    "attributes": {
+      "gen_ai.operation.name": "chat",
+      "gen_ai.provider.name": "oci.generative_ai",
+      "gen_ai.request.model": "openai.gpt-4.1",
+      "gen_ai.response.finish_reasons": [
+        "tool_calls"
+      ],
+      "gen_ai.usage.input_tokens": 74,
+      "gen_ai.usage.output_tokens": 18,
+      "locus.messages": 2,
+      "locus.tools": 1,
+      "server.address": "inference.generativeai.eu-frankfurt-1.oci.oraclecloud.com"
+    },
+    "kind": "CLIENT",
+    "name": "chat openai.gpt-4.1",
+    "parent_span_id": "df8dceeac5131b53",
+    "span_id": "bc57431f052fafbd",
+    "status": "OK",
+    "status_description": null,
+    "trace_id": "d1f797b18895b15d12a9ec1e10c4a5a4"
+  },
+  {
+    "attributes": {
+      "gen_ai.agent.name": "support-desk",
+      "gen_ai.operation.name": "execute_tool",
+      "gen_ai.tool.call.id": "call_PBGgoRJIP6Gw6YH4yepxDN4H",
+      "gen_ai.tool.description": "Look up an order's shipping and claim status (mock data).",
+      "gen_ai.tool.name": "lookup_order",
+      "gen_ai.tool.type": "function",
+      "locus.duration_ms": 0.4770000232383609
+    },
+    "kind": "INTERNAL",
+    "name": "execute_tool lookup_order",
+    "parent_span_id": "df8dceeac5131b53",
+    "span_id": "f449dcfb1725e962",
+    "status": "OK",
+    "status_description": null,
+    "trace_id": "d1f797b18895b15d12a9ec1e10c4a5a4"
+  },
+  {
+    "attributes": {
+      "locus.confidence": 0.0,
+      "locus.confidence_after": 0.0,
+      "locus.iteration": 0,
+      "locus.messages": 2,
+      "locus.messages_after": 4
+    },
+    "kind": "INTERNAL",
+    "name": "locus.iteration",
+    "parent_span_id": "e1650a56b571c2d2",
+    "span_id": "df8dceeac5131b53",
+    "status": "OK",
+    "status_description": null,
+    "trace_id": "d1f797b18895b15d12a9ec1e10c4a5a4"
+  },
+  {
+    "attributes": {
+      "gen_ai.operation.name": "chat",
+      "gen_ai.provider.name": "oci.generative_ai",
+      "gen_ai.request.model": "openai.gpt-4.1",
+      "gen_ai.response.finish_reasons": [
+        "stop"
+      ],
+      "gen_ai.usage.input_tokens": 120,
+      "gen_ai.usage.output_tokens": 30,
+      "locus.messages": 4,
+      "locus.tools": 1,
+      "server.address": "inference.generativeai.eu-frankfurt-1.oci.oraclecloud.com"
+    },
+    "kind": "CLIENT",
+    "name": "chat openai.gpt-4.1",
+    "parent_span_id": "3101e8c631f74b59",
+    "span_id": "8d4b1e9e49c959bd",
+    "status": "OK",
+    "status_description": null,
+    "trace_id": "d1f797b18895b15d12a9ec1e10c4a5a4"
+  },
+  {
+    "attributes": {
+      "locus.confidence": 0.0,
+      "locus.confidence_after": 0.0,
+      "locus.iteration": 1,
+      "locus.messages": 4,
+      "locus.messages_after": 5
+    },
+    "kind": "INTERNAL",
+    "name": "locus.iteration",
+    "parent_span_id": "e1650a56b571c2d2",
+    "span_id": "3101e8c631f74b59",
+    "status": "OK",
+    "status_description": null,
+    "trace_id": "d1f797b18895b15d12a9ec1e10c4a5a4"
+  },
+  {
+    "attributes": {
+      "gen_ai.agent.name": "support-desk",
+      "gen_ai.operation.name": "invoke_agent",
+      "gen_ai.request.model": "openai.gpt-4.1",
+      "gen_ai.usage.input_tokens": 194,
+      "gen_ai.usage.output_tokens": 48,
+      "locus.confidence": 0.0,
+      "locus.errors": 0,
+      "locus.inference_calls": 2,
+      "locus.iterations": 2,
+      "locus.max_iterations": 3,
+      "locus.prompt_length": 60,
+      "locus.run_id": "a3a089882722463bb64e29179ef93af0",
+      "locus.success": true,
+      "locus.tool_calls": 1
+    },
+    "kind": "INTERNAL",
+    "name": "invoke_agent support-desk",
+    "parent_span_id": null,
+    "span_id": "e1650a56b571c2d2",
+    "status": "OK",
+    "status_description": null,
+    "trace_id": "d1f797b18895b15d12a9ec1e10c4a5a4"
+  }
+]

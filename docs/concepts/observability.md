@@ -7,18 +7,22 @@ title: Observability
 What the agent did, how long each step took, and what it cost — two
 built-in hooks plus the standard OpenTelemetry stack cover logs, traces
 and metrics, and every result carries its token and cost totals. The SDK
-emits OTLP (the OpenTelemetry wire protocol), so any OpenTelemetry
-backend works.
+emits OTLP (the OpenTelemetry wire protocol) under the OpenTelemetry GenAI
+semantic conventions, so any OpenTelemetry backend works and its GenAI
+views find the agent, model and tool spans where they expect them; the
+[Export](#export) section has the recipe for OCI Application Performance
+Monitoring and three open-source backends.
 
 ## When to wire what
 
 | Need | Add |
 |---|---|
 | Structured per-event lines for log aggregators (Loki, Splunk) | `StructuredLoggingHook` |
-| OTLP traces and metrics for dashboards (Grafana, Honeycomb) | `TelemetryHook` |
+| OTLP traces and metrics for dashboards (OCI APM, Grafana, Honeycomb), named per the GenAI semantic conventions | `TelemetryHook` |
 | Live per-run event stream for a browser or dashboard, without an OTLP stack | `run_context()` + `bus.subscribe(run_id)`, or `EventBusHook` — see [In-process SSE](#in-process-sse-eventbus) |
 | Token and cost totals on every result (a resumed `thread_id` reports the thread's running total) | nothing — `AgentResult.metrics` already has it |
-| Per-run trace ID surfaced to the user (for support tickets) | telemetry hook + log the active span's trace ID |
+| Per-run trace ID surfaced to the user (for support tickets) | telemetry hook + `current_traceparent()` from `locus.observability.propagation` |
+| One trace across agents calling agents over A2A or MCP | nothing — the A2A client and server and the MCP client carry W3C `traceparent` |
 
 ## Getting started
 
@@ -163,10 +167,10 @@ from locus.hooks.builtin import TelemetryHook
 
 agent = Agent(
     model="{{ locus_example_model }}",
+    name="support-agent",
     tools=[lookup_order, issue_refund],
     hooks=[
         TelemetryHook(
-            service_name="support-agent",
             record_arguments=False,    # set True to attach tool args to spans
             record_results=False,      # set True for results (watch PII)
         ),
@@ -174,31 +178,122 @@ agent = Agent(
 )
 ```
 
-Spans are emitted for every agent invocation, every ReAct iteration and
-every tool call; model calls are not spanned. Metrics include:
+One run is one trace. The hook names spans and attributes per the
+OpenTelemetry GenAI semantic conventions — the names published alongside
+semantic-conventions 1.45, still marked *Development* upstream — so a
+backend's GenAI view shows the agent, its model calls and its tool calls
+without a mapping layer:
 
-| Counter | What it counts |
-|---|---|
-| `locus.invocations` | Calls to `agent.run(...)` |
-| `locus.iterations` | ReAct iterations across all runs |
-| `locus.tool_calls` | Tool invocations |
-| `locus.tool_errors` | Tool calls that raised |
+| Span | Kind | One per | Attributes |
+|---|---|---|---|
+| `invoke_agent <name>` (`invoke_agent` when the agent has no name) | INTERNAL | `agent.run(...)`, `arun`, `run_sync` | `gen_ai.operation.name=invoke_agent`, `gen_ai.agent.name`, `gen_ai.agent.id`, `gen_ai.request.model`, `gen_ai.conversation.id` (the `thread_id`), `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens` (run totals), `error.type` when the run failed; `locus.run_id`, `locus.iterations`, `locus.inference_calls`, `locus.tool_calls`, `locus.confidence` |
+| `locus.iteration` | INTERNAL | ReAct iteration (the SDK's own span; the conventions have no iteration) | `locus.iteration` (the index), `locus.confidence`, `locus.messages` |
+| `chat <model>` | CLIENT | model call | `gen_ai.operation.name=chat`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.conversation.id`, `gen_ai.usage.input_tokens` / `output_tokens` (and `gen_ai.usage.cache_read.input_tokens` / `cache_write.input_tokens` when the provider reports them), `gen_ai.response.finish_reasons`, `gen_ai.response.id` (server-stateful transports), `server.address` / `server.port` (the endpoint host), `error.type` when the call never returned |
+| `execute_tool <tool>` | INTERNAL | tool call | `gen_ai.operation.name=execute_tool`, `gen_ai.tool.name`, `gen_ai.tool.call.id`, `gen_ai.tool.type=function`, `gen_ai.tool.description`, `gen_ai.agent.name`, `gen_ai.conversation.id`, `error.type` on failure; `gen_ai.tool.call.arguments` and `gen_ai.tool.call.result` only with `record_arguments` / `record_results` |
 
-| Histogram | What it measures |
-|---|---|
-| `locus.invocation.duration` | Wall-clock per `agent.run(...)` |
-| `locus.tool_call.duration` | Wall-clock per tool body |
+Iterations nest under the run; model and tool spans nest under their
+iteration. The root span is a child of whatever OpenTelemetry context is
+current when the run starts, so a run served behind an HTTP handler, an
+A2A request or an MCP call files under the caller's trace (see
+[Trace context in and out](#trace-context-in-and-out)).
 
-Configure the exporter the standard OpenTelemetry way — set
-`OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_RESOURCE_ATTRIBUTES`, etc.
-before constructing the agent. Anything OTLP works: Honeycomb, Tempo,
-Grafana Cloud.
-
-Install the optional extra:
+The `Agent` lends the hook its model and tools when it is constructed, so
+`gen_ai.request.model` is the model id (`openai.gpt-4.1` for
+`oci:openai.gpt-4.1`), `gen_ai.provider.name` the provider
+(`oci.generative_ai`, `openai`, `anthropic`; for an OpenAI-compatible
+endpoint the SDK's provider table knows by host and port — Groq, DeepSeek,
+Mistral, xAI, Perplexity, or a local vLLM, Ollama or LM Studio on its
+default port — that provider's value, for any other `openai`, with
+`server.address` naming the host) and `gen_ai.tool.description` each
+tool's docstring. `gen_ai.agent.name` is the agent's `name` (or
+`agent_id`). `TelemetryHook(model=..., provider_name=..., agent_name=...)`
+sets any of them by hand — a `FallbackChain`, say, has no single model
+id. The `telemetry` extra is the OpenTelemetry API, SDK and OTLP
+exporters:
 
 ```bash
 pip install "locus-sdk[telemetry]"
 ```
+
+Metrics follow the same conventions. Durations are in seconds and the
+histograms carry the conventions' bucket boundaries as an advisory, which
+the Python SDK honours:
+
+| Instrument | Type | Unit | Attributes |
+|---|---|---|---|
+| `gen_ai.client.inference.usage.input_tokens` | counter | `{token}` | `gen_ai.operation.name=chat`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.token.modality=text` |
+| `gen_ai.client.inference.usage.output_tokens` | counter | `{token}` | same |
+| `gen_ai.client.inference.duration` | histogram | `s` | `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model` |
+| `gen_ai.invoke_agent.duration` | histogram | `s` | `gen_ai.operation.name=invoke_agent`, `gen_ai.agent.name`, `gen_ai.request.model`, `error.type` |
+| `gen_ai.invoke_agent.inference_calls` | histogram | `{inference_call}` | `gen_ai.operation.name`, `gen_ai.agent.name` |
+| `gen_ai.invoke_agent.tool_calls` | histogram | `{tool_call}` | same |
+| `gen_ai.execute_tool.duration` | histogram | `s` | `gen_ai.tool.name`, `gen_ai.tool.type`, `gen_ai.agent.name`, `error.type` |
+
+Token counters record only what the provider reported, so a self-hosted
+endpoint that returns no usage adds nothing rather than zeros.
+
+#### The previous names
+
+`TelemetryHook(semconv="locus-legacy")` emits what the SDK emitted before
+the conventions: `agent.invocation`, `agent.iteration.<n>` and
+`tool.<name>` spans with `locus.*` attributes, the `locus.invocations`,
+`locus.iterations`, `locus.tool_calls` and `locus.tool_errors` counters,
+the `locus.invocation.duration` and `locus.tool_call.duration` histograms
+in milliseconds, and no model-call spans. Keep it while dashboards and
+alerts built on those names move over. `semconv` takes `"genai/1.45"`
+(alias `"genai"`) or `"locus-legacy"`; when the conventions change
+upstream, a new `genai/<version>` value will carry the new names and the
+earlier one stays selectable.
+
+#### Checking a trace
+
+`locus.observability.semconv.validate_spans(spans)` checks finished spans —
+from the SDK's in-memory exporter, or a recorded trace — against the
+conventions: one trace, one `invoke_agent` root, the kind and name each
+operation requires, the required attributes present and typed, `error.type`
+on every failed span, and no misspelled `gen_ai.*` key. It returns the
+problems, one line each; `assert_valid_spans` raises with them. Notebook
+60 runs it on the trace of its ticket reply:
+
+```python
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+from locus.observability.semconv import assert_valid_spans
+
+exporter = InMemorySpanExporter()
+provider = TracerProvider()
+provider.add_span_processor(SimpleSpanProcessor(exporter))
+trace.set_tracer_provider(provider)
+
+result = agent.run_sync("Resolve the duplicate charge on ord-4821.")
+assert_valid_spans(exporter.get_finished_spans())
+```
+
+#### Trace context in and out
+
+Two helpers in `locus.observability.propagation` carry the W3C `traceparent`
+across a process boundary; both are no-ops without OpenTelemetry installed.
+
+- **In.** `trace_scope(headers)` runs a block under the trace a request's
+  headers carry, so the `invoke_agent` span the block starts is a child of
+  the caller's span. `A2AServer` does this for every request it serves and
+  `LocusMCPServer` reads the pair off MCP `_meta`; a FastAPI or Flask
+  handler of your own wraps the agent call the same way. When the web
+  framework has already picked the headers up (FastAPI does when
+  OpenTelemetry is installed), the scope leaves the framework's span in
+  place and the run files under it.
+- **Out.** `inject_trace_headers(headers)` adds `traceparent` for the tool
+  call in flight — the hook's `execute_tool` span — else for the current
+  span. `A2AClient` adds it to every request and `MCPClient` writes it into
+  `_meta`; a tool that calls another service over HTTP adds it to its own
+  headers.
+
+`current_traceparent()` returns the header value for the current span, the
+string to put in a support ticket or a log line so the run can be found in
+the backend.
 
 ### Token cost — already on every result
 
@@ -234,6 +329,135 @@ a budget on an unpriced model and the `Agent` constructor raises
 For dashboards, key on `agent_id` plus the same metrics the
 `TelemetryHook` already emits — no glue code needed.
 
+## Export
+
+The hook emits standard OpenTelemetry spans and metrics through the
+global providers, so exporting is the OpenTelemetry SDK's business: set a
+`TracerProvider` and a `MeterProvider` with the exporter for your backend
+**before** constructing the agent. The OTLP/HTTP exporters read
+`OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_EXPORTER_OTLP_HEADERS` when not
+given an endpoint, and `OTEL_SERVICE_NAME` sets the Resource's
+`service.name`, which is what every backend groups by:
+
+```python
+from opentelemetry import metrics, trace
+from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+resource = Resource.create({"service.name": "support-agent"})
+tracer_provider = TracerProvider(resource=resource)
+tracer_provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
+trace.set_tracer_provider(tracer_provider)
+metrics.set_meter_provider(
+    MeterProvider(
+        resource=resource,
+        metric_readers=[PeriodicExportingMetricReader(OTLPMetricExporter())],
+    )
+)
+```
+
+Call `tracer_provider.shutdown()` (and the meter provider's) before the
+process exits so the last batch is flushed. Nothing below adds a
+dependency beyond the `telemetry` extra.
+
+### OCI Application Performance Monitoring
+
+An APM domain receives OTLP over HTTP on its *data upload endpoint* with a
+*private data key* as the `dataKey` authorization; both are on the
+domain's page in the console (Administration → Data keys). `oci_apm`
+builds the two exporters from them and `install()` sets the providers:
+
+```python
+from locus.observability.exporters import oci_apm
+
+apm = oci_apm(
+    data_upload_endpoint="https://<domain>.apm-agt.<region>.oci.oraclecloud.com",
+    private_data_key="<private data key>",
+)
+tracer_provider, meter_provider = apm.install(service_name="support-agent")
+
+agent = Agent(model="{{ locus_example_model }}", tools=[lookup_order], hooks=[TelemetryHook()])
+result = agent.run_sync("Resolve the duplicate charge on ord-4821.")
+
+tracer_provider.shutdown()
+meter_provider.shutdown()
+```
+
+Both arguments default to the `OCI_APM_DATA_UPLOAD_ENDPOINT` and
+`OCI_APM_PRIVATE_DATA_KEY` environment variables, so `oci_apm().install()`
+is the deployment form; `apm.span_processor()` and `apm.metric_reader()`
+plug into providers you already own. The exporters post to
+`<endpoint>/20200101/opentelemetry/private/v1/traces` and `/v1/metrics`
+with `Authorization: dataKey <key>`. In Trace Explorer the run is the
+`invoke_agent <name>` span under the service you named, with its `chat`
+and `execute_tool` children; the `gen_ai.*` attributes are span
+dimensions, so `show (spans) gen_ai.request.model,
+sum(gen_ai.usage.input_tokens) where OperationName like 'chat%' group by
+gen_ai.request.model` is the token bill by model.
+
+[`examples/observability/oci_apm_dashboard.json`](https://github.com/oracle/locus/blob/main/examples/observability/oci_apm_dashboard.json)
+is a Management Dashboard definition — agent runs and latency, tool
+latency and errors, token spend by model and over time — built on those
+queries. Set `compartmentId` in the file to the compartment that holds
+the APM domain and import it:
+
+```bash
+oci management-dashboard dashboard import \
+    --from-json file://examples/observability/oci_apm_dashboard.json
+```
+
+The same directory's README walks through the setup. A public data key
+(for browser and mobile agents) is not what a server-side SDK should
+carry; `oci_apm` takes private keys only.
+
+### Open-source backends
+
+Each of these speaks OTLP natively; the generic snippet above with the
+endpoint set is the whole recipe.
+
+**Jaeger** (traces). Jaeger v2 listens for OTLP on 4317 (gRPC) and 4318
+(HTTP):
+
+```bash
+docker run --rm -p 16686:16686 -p 4318:4318 jaegertracing/jaeger:2
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+export OTEL_SERVICE_NAME=support-agent
+```
+
+Jaeger stores traces only; leave the `MeterProvider` out, or point the
+metric exporter elsewhere.
+
+**Grafana Tempo and Prometheus** (traces and metrics). Tempo takes OTLP on
+4318; Prometheus takes OTLP metrics on its own endpoint once started with
+`--web.enable-otlp-receiver`:
+
+```bash
+export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://tempo:4318/v1/traces
+export OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://prometheus:9090/api/v1/otlp/v1/metrics
+export OTEL_SERVICE_NAME=support-agent
+```
+
+In Grafana, `gen_ai_client_inference_usage_input_tokens_total` (the
+counter, in Prometheus naming) summed by `gen_ai_request_model` is the
+token bill, and the trace view shows the `invoke_agent` tree from Tempo.
+
+**SigNoz** (traces and metrics). Its collector takes both signals on one
+OTLP endpoint:
+
+```bash
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+export OTEL_SERVICE_NAME=support-agent
+```
+
+Any other OTLP backend — Honeycomb, Grafana Cloud, an OpenTelemetry
+Collector in front of anything — is the same two variables, plus
+`OTEL_EXPORTER_OTLP_HEADERS` for its credentials.
+
 ## PII and tool arguments
 
 `record_arguments=True` and `record_results=True` are off by default
@@ -252,6 +476,10 @@ the agent before anything leaves, see [Safety](safety.md).
 | Spans land but metrics don't | Some OTLP receivers reject metrics on the trace endpoint. Set `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` separately if needed. |
 | Token totals are zero | The provider isn't returning usage in the response (some self-hosted endpoints). The SDK's loop can't make up the numbers. |
 | Tool args land in your logs unintentionally | Either `record_arguments=True` or your structured logger is dumping the full event dict. Configure either explicitly. |
+| A dashboard expects `agent.invocation` / `tool.<name>` spans or `locus.*` metrics | The hook now emits the GenAI semantic conventions. `TelemetryHook(semconv="locus-legacy")` restores the previous names. |
+| `chat` spans have no `gen_ai.provider.name` or `gen_ai.request.model` | The model class is one the SDK cannot place (a `FallbackChain`, a custom model). Pass `TelemetryHook(model="oci:openai.gpt-4.1")` or `provider_name=...`. |
+| A run served over A2A or MCP is its own trace, not part of the caller's | The caller sent no `traceparent`. `A2AClient` and `MCPClient` send it; another client must add it to the request headers or MCP `_meta`. |
+| The `invoke_agent` span sits under a `fastapi.endpoint` span | FastAPI emits its own spans when OpenTelemetry is installed; the run files under the request's span, which carries the caller's trace. Nothing to fix. |
 
 ## Source and notebooks
 
@@ -259,6 +487,11 @@ the agent before anything leaves, see [Safety](safety.md).
 - [`notebook_10_hooks_advanced.py`](https://github.com/oracle/locus/blob/main/examples/notebook_10_hooks_advanced.py) — telemetry pipelines.
 - [`locus.hooks.builtin.logging`](https://github.com/oracle/locus/blob/main/src/locus/hooks/builtin/logging.py) — `LoggingHook`, `StructuredLoggingHook`.
 - [`locus.hooks.builtin.telemetry`](https://github.com/oracle/locus/blob/main/src/locus/hooks/builtin/telemetry.py) — `TelemetryHook`, `NoOpTelemetryHook`.
+- [`notebook_60_observability_basics.py`](https://github.com/oracle/locus/blob/main/examples/notebook_60_observability_basics.py) — the bus timeline, then the same reply as GenAI-convention spans with the in-memory exporter.
+- [`locus.observability.semconv`](https://github.com/oracle/locus/blob/main/src/locus/observability/semconv.py) — the convention names, `validate_spans`.
+- [`locus.observability.propagation`](https://github.com/oracle/locus/blob/main/src/locus/observability/propagation.py) — `inject_trace_headers`, `trace_scope`, `current_traceparent`.
+- [`locus.observability.exporters`](https://github.com/oracle/locus/blob/main/src/locus/observability/exporters.py) — `oci_apm`.
+- [`examples/observability/`](https://github.com/oracle/locus/tree/main/examples/observability) — the OCI APM dashboard and its README.
 
 ---
 
@@ -402,7 +635,9 @@ Default limits (all configurable at `EventBus(...)` construction time):
 
 See [SSE event catalogue](sse-events.md) for the complete wire-format
 reference — all `EV_*` constants, payload fields, span discipline, and
-the cost table for every subscription scenario.
+the cost table for every subscription scenario. Its
+[Events and spans](sse-events.md#events-and-spans) section says, event by
+event, which `TelemetryHook` span each one falls in.
 
 ---
 

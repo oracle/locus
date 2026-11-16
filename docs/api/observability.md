@@ -50,3 +50,33 @@ without changing existing hook code. The `LocusEvent` stream itself is
 mirrored by the runtime whenever a `run_context()` is active.
 
 ::: locus.observability.bus_hook.EventBusHook
+
+## Semantic conventions
+
+The names `TelemetryHook` emits under the OpenTelemetry GenAI semantic
+conventions, the `semconv=` switch, and a check for recorded traces. See
+[Observability — Traces and metrics over OTLP](../concepts/observability.md#traces-and-metrics-over-otlp).
+
+::: locus.observability.semconv.resolve_semconv
+::: locus.observability.semconv.validate_spans
+::: locus.observability.semconv.assert_valid_spans
+::: locus.observability.semconv.SpanRecord
+::: locus.observability.semconv.dump_spans
+::: locus.observability.semconv.load_spans
+::: locus.observability.semconv.provider_name
+::: locus.observability.semconv.request_model
+
+## Trace context on the wire
+
+W3C `traceparent` in and out of the process. `A2AClient` / `A2AServer` and
+the MCP client and server use these; a handler or tool of your own can too.
+
+::: locus.observability.propagation.inject_trace_headers
+::: locus.observability.propagation.trace_scope
+::: locus.observability.propagation.extract_trace_context
+::: locus.observability.propagation.current_traceparent
+
+## Exporters
+
+::: locus.observability.exporters.oci_apm
+::: locus.observability.exporters.OCIAPMExport

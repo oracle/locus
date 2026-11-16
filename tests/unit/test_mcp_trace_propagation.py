@@ -120,8 +120,8 @@ async def test_a_call_carries_the_tool_span_as_its_parent(
     assert int(flags, 16) & 0x01  # sampled
 
     spans = _spans(exporter)
-    tool_span = spans["tool.echo_meta"]
-    invocation = spans["agent.invocation"]
+    tool_span = spans["execute_tool echo_meta"]
+    invocation = spans["invoke_agent"]
     assert trace_id == format(tool_span.context.trace_id, "032x")
     assert tool_span.context.trace_id == invocation.context.trace_id
     # What the server received names either the tool span itself (an SDK
@@ -151,7 +151,7 @@ async def test_propagation_can_be_turned_off(server: _LoopbackServer, exporter: 
     # Nothing of the agent's trace left the process: either no traceparent
     # at all, or (an SDK that always opens a client span) one from a trace
     # that is not the agent's.
-    invocation = _spans(exporter)["agent.invocation"]
+    invocation = _spans(exporter)["invoke_agent"]
     if "traceparent" in meta:
         assert meta["traceparent"].split("-")[1] != format(invocation.context.trace_id, "032x")
 
@@ -252,7 +252,7 @@ async def test_an_agent_served_over_mcp_files_its_run_under_the_caller(exporter:
                 "run_agent_stream", {"prompt": "go"}, meta={"traceparent": remote}
             )
     assert result.content[0].text == "served"
-    invocation = _spans(exporter)["agent.invocation"]
+    invocation = _spans(exporter)["invoke_agent"]
     assert format(invocation.context.trace_id, "032x") == "4bf92f3577b34da6a3ce929d0e0e4736"
     assert invocation.parent is not None
     assert invocation.parent.trace_id == invocation.context.trace_id

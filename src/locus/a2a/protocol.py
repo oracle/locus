@@ -37,7 +37,7 @@ import logging
 import os
 import time
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from typing import TYPE_CHECKING, Any
 
 
@@ -91,6 +91,16 @@ from locus.a2a.spec import (
     TaskStatusUpdateEvent,
     TextPart,
 )
+from locus.observability.propagation import inject_trace_headers, trace_scope
+
+
+# FastAPI resolves a handler's (string) annotations from this module's globals,
+# so the request type the trace-context handlers take must live here; the
+# server itself stays optional, hence the guard.
+try:
+    from starlette.requests import Request
+except ImportError:  # pragma: no cover - exercised where the server extra is absent
+    Request = Any  # type: ignore[assignment,misc]
 
 
 _logger = logging.getLogger(__name__)
@@ -757,137 +767,160 @@ class A2AServer(A2AV1ServerMixin):
         # ----- JSON-RPC root -----------------------------------------------
         @app.post("/")
         async def jsonrpc(
+            request: Request,
             body: dict[str, Any] = Body(...),  # noqa: B008 — FastAPI dep injection
             a2a_version: str | None = Header(default=None, alias=A2A_VERSION_HEADER),
             _: str = auth_dep,
         ) -> Any:
-            try:
-                req = JsonRpcRequest.model_validate(body)
-            except Exception:  # noqa: BLE001
-                return JSONResponse(
-                    _jsonrpc_error_response(
-                        body.get("id") if isinstance(body, dict) else None,
-                        INVALID_REQUEST,
-                        "Invalid Request",
+            # Run under the caller's trace, if its headers carry one.
+            with trace_scope(request.headers):
+                try:
+                    req = JsonRpcRequest.model_validate(body)
+                except Exception:  # noqa: BLE001
+                    return JSONResponse(
+                        _jsonrpc_error_response(
+                            body.get("id") if isinstance(body, dict) else None,
+                            INVALID_REQUEST,
+                            "Invalid Request",
+                        )
                     )
+
+                params = req.params if isinstance(req.params, dict) else {}
+
+                # Lazy import — observability is opt-in.
+                import time as _time  # noqa: PLC0415
+
+                from locus.observability.emit import (  # noqa: PLC0415
+                    EV_A2A_TASK_COMPLETED,
+                    EV_A2A_TASK_RECEIVED,
+                    emit,
                 )
 
-            params = req.params if isinstance(req.params, dict) else {}
-
-            # Lazy import — observability is opt-in.
-            import time as _time  # noqa: PLC0415
-
-            from locus.observability.emit import (  # noqa: PLC0415
-                EV_A2A_TASK_COMPLETED,
-                EV_A2A_TASK_RECEIVED,
-                emit,
-            )
-
-            await emit(
-                EV_A2A_TASK_RECEIVED,
-                method=req.method,
-                rpc_id=str(req.id) if req.id is not None else None,
-            )
-            _started = _time.perf_counter()
-
-            try:
-                if a2a_version not in (None, A2A_V1_PROTOCOL_VERSION):
-                    raise _RpcError(
-                        VERSION_NOT_SUPPORTED,
-                        f"A2A version {a2a_version!r} is not supported",
-                    )
-                # Some v1 clients omit the version header; route known v1
-                # method names to the v1 handlers to preserve interoperability.
-                use_v1 = a2a_version == A2A_V1_PROTOCOL_VERSION or (
-                    a2a_version is None and req.method in A2AV1_JSONRPC_METHODS
+                await emit(
+                    EV_A2A_TASK_RECEIVED,
+                    method=req.method,
+                    rpc_id=str(req.id) if req.id is not None else None,
                 )
-                if use_v1 and req.method == "SendMessage":
-                    result = await self._handle_v1_send_message(params)
-                elif use_v1 and req.method == "GetTask":
-                    result = await self._handle_v1_get_task(params)
-                elif use_v1 and req.method == "ListTasks":
-                    result = await self._handle_v1_list_tasks(params)
-                elif use_v1 and req.method == "CancelTask":
-                    result = await self._handle_v1_cancel_task(params)
-                elif use_v1 and req.method in {
-                    "CreateTaskPushNotificationConfig",
-                    "GetTaskPushNotificationConfig",
-                    "ListTaskPushNotificationConfigs",
-                    "DeleteTaskPushNotificationConfig",
-                }:
-                    raise _RpcError(
-                        PUSH_NOTIFICATION_NOT_SUPPORTED,
-                        "push notifications are not enabled on this agent",
+                _started = _time.perf_counter()
+
+                try:
+                    if a2a_version not in (None, A2A_V1_PROTOCOL_VERSION):
+                        raise _RpcError(
+                            VERSION_NOT_SUPPORTED,
+                            f"A2A version {a2a_version!r} is not supported",
+                        )
+                    # Some v1 clients omit the version header; route known v1
+                    # method names to the v1 handlers to preserve interoperability.
+                    use_v1 = a2a_version == A2A_V1_PROTOCOL_VERSION or (
+                        a2a_version is None and req.method in A2AV1_JSONRPC_METHODS
                     )
-                elif use_v1 and req.method in {"SendStreamingMessage", "SubscribeToTask"}:
-                    if req.method == "SubscribeToTask":
-                        self._preflight_v1_task_subscription(params)
-                    return await self._stream_response(req, v1=True)
-                elif use_v1 and req.method == "GetExtendedAgentCard":
-                    raise _RpcError(
-                        UNSUPPORTED_OPERATION,
-                        "authenticated extended agent cards are not enabled on this agent",
+                    if use_v1 and req.method == "SendMessage":
+                        result = await self._handle_v1_send_message(params)
+                    elif use_v1 and req.method == "GetTask":
+                        result = await self._handle_v1_get_task(params)
+                    elif use_v1 and req.method == "ListTasks":
+                        result = await self._handle_v1_list_tasks(params)
+                    elif use_v1 and req.method == "CancelTask":
+                        result = await self._handle_v1_cancel_task(params)
+                    elif use_v1 and req.method in {
+                        "CreateTaskPushNotificationConfig",
+                        "GetTaskPushNotificationConfig",
+                        "ListTaskPushNotificationConfigs",
+                        "DeleteTaskPushNotificationConfig",
+                    }:
+                        raise _RpcError(
+                            PUSH_NOTIFICATION_NOT_SUPPORTED,
+                            "push notifications are not enabled on this agent",
+                        )
+                    elif use_v1 and req.method in {"SendStreamingMessage", "SubscribeToTask"}:
+                        if req.method == "SubscribeToTask":
+                            self._preflight_v1_task_subscription(params)
+                        return await self._stream_response(
+                            req, v1=True, carrier=dict(request.headers)
+                        )
+                    elif use_v1 and req.method == "GetExtendedAgentCard":
+                        raise _RpcError(
+                            UNSUPPORTED_OPERATION,
+                            "authenticated extended agent cards are not enabled on this agent",
+                        )
+                    elif req.method == "message/send":
+                        result = await self._handle_message_send(params)
+                    elif req.method == "tasks/get":
+                        result = await self._handle_tasks_get(params)
+                    elif req.method == "tasks/cancel":
+                        result = await self._handle_tasks_cancel(params)
+                    elif req.method in {
+                        "tasks/pushNotificationConfig/set",
+                        "tasks/pushNotificationConfig/get",
+                        "tasks/pushNotificationConfig/list",
+                        "tasks/pushNotificationConfig/delete",
+                    }:
+                        raise _RpcError(
+                            PUSH_NOTIFICATION_NOT_SUPPORTED,
+                            "push notifications are not enabled on this agent",
+                        )
+                    elif req.method == "message/stream":
+                        # SSE — peer must POST with Accept: text/event-stream.
+                        return await self._stream_response(req, carrier=dict(request.headers))
+                    else:
+                        raise _RpcError(METHOD_NOT_FOUND, f"unknown method {req.method!r}")
+                except (_RpcError, A2AV1ProtocolError) as e:
+                    await emit(
+                        EV_A2A_TASK_COMPLETED,
+                        method=req.method,
+                        success=False,
+                        error_code=e.code,
+                        duration_ms=(_time.perf_counter() - _started) * 1000,
                     )
-                elif req.method == "message/send":
-                    result = await self._handle_message_send(params)
-                elif req.method == "tasks/get":
-                    result = await self._handle_tasks_get(params)
-                elif req.method == "tasks/cancel":
-                    result = await self._handle_tasks_cancel(params)
-                elif req.method in {
-                    "tasks/pushNotificationConfig/set",
-                    "tasks/pushNotificationConfig/get",
-                    "tasks/pushNotificationConfig/list",
-                    "tasks/pushNotificationConfig/delete",
-                }:
-                    raise _RpcError(
-                        PUSH_NOTIFICATION_NOT_SUPPORTED,
-                        "push notifications are not enabled on this agent",
-                    )
-                elif req.method == "message/stream":
-                    # SSE — peer must POST with Accept: text/event-stream.
-                    return await self._stream_response(req)
-                else:
-                    raise _RpcError(METHOD_NOT_FOUND, f"unknown method {req.method!r}")
-            except (_RpcError, A2AV1ProtocolError) as e:
+                    return JSONResponse(_jsonrpc_error_response(req.id, e.code, e.message))
+
                 await emit(
                     EV_A2A_TASK_COMPLETED,
                     method=req.method,
-                    success=False,
-                    error_code=e.code,
+                    success=True,
                     duration_ms=(_time.perf_counter() - _started) * 1000,
                 )
-                return JSONResponse(_jsonrpc_error_response(req.id, e.code, e.message))
-
-            await emit(
-                EV_A2A_TASK_COMPLETED,
-                method=req.method,
-                success=True,
-                duration_ms=(_time.perf_counter() - _started) * 1000,
-            )
-            return JSONResponse(
-                JsonRpcSuccessResponse(id=req.id, result=result).model_dump(exclude_none=True)
-            )
+                return JSONResponse(
+                    JsonRpcSuccessResponse(id=req.id, result=result).model_dump(exclude_none=True)
+                )
 
         # ----- backwards-compat invoke + stream ----------------------------
         @app.post("/a2a/invoke")
-        async def legacy_invoke(req: A2ARequest, _: str = auth_dep) -> dict[str, Any]:
-            resp = await self._legacy_invoke(req)
+        async def legacy_invoke(
+            request: Request, req: A2ARequest, _: str = auth_dep
+        ) -> dict[str, Any]:
+            with trace_scope(request.headers):
+                resp = await self._legacy_invoke(req)
             return resp.model_dump()
 
         @app.post("/a2a/stream")
-        async def legacy_stream(req: A2ARequest, _: str = auth_dep) -> StreamingResponse:
-            response: StreamingResponse = await self._legacy_stream(req)
+        async def legacy_stream(
+            request: Request, req: A2ARequest, _: str = auth_dep
+        ) -> StreamingResponse:
+            response: StreamingResponse = await self._legacy_stream(
+                req, carrier=dict(request.headers)
+            )
             return response
 
         return app
 
-    async def _stream_response(self, req: JsonRpcRequest, *, v1: bool = False) -> Any:
+    async def _stream_response(
+        self,
+        req: JsonRpcRequest,
+        *,
+        v1: bool = False,
+        carrier: Mapping[str, Any] | None = None,
+    ) -> Any:
         from fastapi.responses import StreamingResponse
 
         params = req.params if isinstance(req.params, dict) else {}
 
         async def gen() -> AsyncIterator[str]:
+            with trace_scope(carrier):
+                async for chunk in produce():
+                    yield chunk
+
+        async def produce() -> AsyncIterator[str]:
             try:
                 if v1 and req.method == "SubscribeToTask":
                     stream = self._stream_v1_task_subscription(params)
@@ -916,7 +949,9 @@ class A2AServer(A2AV1ServerMixin):
 
         return StreamingResponse(gen(), media_type="text/event-stream")
 
-    async def _legacy_stream(self, request: A2ARequest) -> Any:
+    async def _legacy_stream(
+        self, request: A2ARequest, *, carrier: Mapping[str, Any] | None = None
+    ) -> Any:
         from fastapi.responses import StreamingResponse
 
         from locus.core.events import TerminateEvent, ThinkEvent
@@ -925,6 +960,11 @@ class A2AServer(A2AV1ServerMixin):
         prompt = user_msgs[-1].content if user_msgs else ""
 
         async def event_generator() -> AsyncIterator[str]:
+            with trace_scope(carrier):
+                async for chunk in produce():
+                    yield chunk
+
+        async def produce() -> AsyncIterator[str]:
             try:
                 async for event in self._agent.run(prompt):
                     if isinstance(event, ThinkEvent):
@@ -1094,7 +1134,9 @@ class A2AClient:
         async with httpx.AsyncClient(
             timeout=self._timeout if timeout is None else timeout
         ) as client:
-            resp = await client.post(f"{self._url}/", json=body, headers=self._headers())
+            resp = await client.post(
+                f"{self._url}/", json=body, headers=inject_trace_headers(self._headers())
+            )
             resp.raise_for_status()
             data = resp.json()
         await emit(
@@ -1154,7 +1196,7 @@ class A2AClient:
             "method": method,
             "params": {"message": message_payload},
         }
-        headers = self._headers() | {"Accept": "text/event-stream"}
+        headers = inject_trace_headers(self._headers() | {"Accept": "text/event-stream"})
         effective_timeout = self._timeout if timeout is None else timeout
         async with (
             httpx.AsyncClient(timeout=effective_timeout) as client,
@@ -1267,7 +1309,7 @@ class A2AClient:
             resp = await client.post(
                 f"{self._url}/a2a/invoke",
                 json=request.model_dump(),
-                headers=self._auth_headers(),
+                headers=inject_trace_headers(self._auth_headers()),
             )
             resp.raise_for_status()
             response = A2AResponse.model_validate(resp.json())
