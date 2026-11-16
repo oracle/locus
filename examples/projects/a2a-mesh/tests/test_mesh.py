@@ -23,11 +23,19 @@ from fastapi.testclient import TestClient
 # Force MockModel for the test even if the user has env vars set.
 os.environ["LOCUS_MODEL_PROVIDER"] = "mock"
 
+import httpx  # noqa: E402
 from a2a_mesh.orchestrator import pick, reply_text, skill_ids  # noqa: E402
 from a2a_mesh.soc_triage import build_server as build_triage  # noqa: E402
 from a2a_mesh.threat_intel import build_server as build_intel  # noqa: E402
 
-from locus.a2a import AgentCard, Task  # noqa: E402
+from locus.a2a import (  # noqa: E402
+    A2AClient,
+    AgentCard,
+    Message,
+    PushNotificationReceiver,
+    Task,
+    TextPart,
+)
 
 
 @pytest.fixture
@@ -110,8 +118,48 @@ def _rpc(method: str, text: str) -> dict:
 def test_v1_card_carries_skill_objects_and_interfaces(intel_client: TestClient) -> None:
     card = intel_client.get("/.well-known/agent-card.json", headers=V1_HEADERS).json()
     assert card["protocolVersion"] == "1.0"
-    assert card["supportedInterfaces"][0]["protocolBinding"] == "JSONRPC"
+    assert [i["protocolBinding"] for i in card["supportedInterfaces"]] == ["JSONRPC", "HTTP+JSON"]
+    assert card["capabilities"]["pushNotifications"] is True
     assert {s["id"] for s in card["skills"]} == {"threat_intel", "ioc_enrichment"}
+
+
+def test_http_json_binding_answers_the_same_send(triage_client: TestClient) -> None:
+    body = {"message": {"role": "ROLE_USER", "parts": [{"text": "A-101"}], "messageId": "m-1"}}
+    resp = triage_client.post("/message:send", json=body, headers=V1_HEADERS)
+    assert resp.status_code == 200
+    task = resp.json()["task"]
+    assert task["status"]["state"] == "TASK_STATE_COMPLETED"
+    assert triage_client.get(f"/tasks/{task['id']}").json()["id"] == task["id"]
+
+
+async def test_push_notifications_reach_a_local_receiver() -> None:
+    """The peer posts each task update to the webhook the orchestrator registers."""
+    receiver = PushNotificationReceiver(token="demo-token")  # noqa: S106
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=receiver.app), base_url="http://receiver"
+    ) as hooks:
+        server = build_intel(push_client=hooks)
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=server.app), base_url="http://intel"
+        ) as http:
+            client = await A2AClient.connect("http://intel", prefer=["http+json"], http_client=http)
+            assert client.binding == "HTTP+JSON"
+            task = await client.send_message(
+                Message(role="user", parts=[TextPart(text="Enrich 198.51.100.7")], messageId="m-1"),
+                push_notification_config={
+                    "url": "http://127.0.0.1:1/a2a/push",
+                    "token": "demo-token",
+                },
+                blocking=False,
+            )
+            await server.drain()
+            final = await client.get_task(task.id)
+    assert final.status.state.value == "completed"
+    states = [n.state for n in receiver.received if n.kind == "statusUpdate"]
+    assert states[0] == "TASK_STATE_WORKING"
+    assert states[-1] == "TASK_STATE_COMPLETED"
+    assert any(n.kind == "artifactUpdate" for n in receiver.received)
+    assert all(n.task_id == task.id for n in receiver.received)
 
 
 def test_routing_works_on_the_skill_ids_of_v1_cards(

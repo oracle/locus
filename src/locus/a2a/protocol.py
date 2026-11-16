@@ -10,12 +10,24 @@ This module exposes a Locus Agent over the public A2A protocol
 
 Wire surface served by :class:`A2AServer`:
 
-- ``GET  /.well-known/agent-card.json`` — public Agent Card (spec §5.5).
+- ``GET  /.well-known/agent-card.json`` — public Agent Card (spec §5.5),
+  whose ``supportedInterfaces`` lists every binding below that is on.
 - ``POST /``                            — JSON-RPC 2.0 method dispatch
   with A2A v1.0 methods when ``A2A-Version: 1.0`` is requested.
+- The HTTP+JSON binding (``POST /message:send``, ``GET /tasks/{id}``, ...;
+  see :mod:`locus.a2a.rest`) on the same app.
+- The gRPC binding (``lf.a2a.v1.A2AService``; see
+  :mod:`locus.a2a.grpc_binding`) on ``grpc_port`` when one is given.
+- Push notifications to the webhooks a task registers (see
+  :mod:`locus.a2a.push`) when ``push_notifications`` is configured.
 - Backwards-compat aliases preserved from the pre-spec implementation:
   ``message/send``, ``message/stream``, ``tasks/get``, ``tasks/cancel``,
   ``GET /agent-card``, ``POST /a2a/invoke``, ``POST /a2a/stream``.
+
+A run that pauses for a person — ``ask_user``, or an approval hold from
+:func:`locus.control.gate_tool` — surfaces as the task state
+``input-required`` with the question as the status message; the peer's
+next message on the same task resumes the run through ``Agent.resume``.
 
 Security model
 --------------
@@ -31,33 +43,40 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import inspect
 import ipaddress
 import json
 import logging
 import os
-import time
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable, Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
-
-
-if TYPE_CHECKING:
-    import httpx
 
 from pydantic import BaseModel, Field
 
+from locus.a2a.card import interfaces_for
 from locus.a2a.protocol_v1 import (
     A2A_V1_PROTOCOL_VERSION,
     A2A_VERSION_HEADER,
     A2AV1_JSONRPC_METHODS,
+    A2AV1_STREAMING_METHODS,
     A2AV1ProtocolError,
     A2AV1ServerMixin,
+    error_details,
+    legacy_event_to_v1_stream_response,
     legacy_message_to_v1,
     task_result_to_legacy_payload,
     v1_stream_response_to_legacy_payload,
 )
+from locus.a2a.push import (
+    JWKS_PATH,
+    PushNotificationDispatcher,
+    PushNotificationError,
+    PushNotificationSettings,
+    PushNotificationStore,
+)
 from locus.a2a.spec import (
-    CONTENT_TYPE_NOT_SUPPORTED,
     INTERNAL_ERROR,
     INVALID_PARAMS,
     INVALID_REQUEST,
@@ -69,7 +88,6 @@ from locus.a2a.spec import (
     VERSION_NOT_SUPPORTED,
     AgentCapabilities,
     AgentCard,
-    AgentInterface,
     AgentProvider,
     AgentSkill,
     Artifact,
@@ -91,11 +109,43 @@ from locus.a2a.spec import (
     TaskStatusUpdateEvent,
     TextPart,
 )
+from locus.a2a.spec_v1 import (
+    BINDING_GRPC,
+    BINDING_HTTP_JSON,
+    BINDING_JSONRPC,
+    A2AV1TaskPushNotificationConfig,
+)
+from locus.a2a.transports import (
+    DEFAULT_BINDING_PREFERENCE,
+    A2AClientError,
+    A2ATransportUnavailableError,
+    ClientTransport,
+    make_transport,
+    normalise_binding,
+    select_interfaces,
+)
+
+
+if TYPE_CHECKING:
+    import httpx
 
 
 _logger = logging.getLogger(__name__)
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+_TERMINAL_STATES = frozenset(
+    {TaskState.completed, TaskState.canceled, TaskState.failed, TaskState.rejected}
+)
+_INTERRUPTED_STATES = frozenset({TaskState.input_required, TaskState.auth_required})
+
+#: Words a peer's reply may open with to decide an approval hold.
+_APPROVE_WORDS = frozenset(
+    {"approve", "approved", "yes", "y", "allow", "allowed", "ok", "accept", "accepted", "proceed"}
+)
+_DENY_WORDS = frozenset(
+    {"deny", "denied", "reject", "rejected", "no", "n", "refuse", "refused", "decline", "declined"}
+)
 
 
 def _is_loopback(host: str) -> bool:
@@ -112,6 +162,19 @@ def _now_iso() -> str:
     from datetime import UTC, datetime
 
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _verdict_of(text: str) -> str | None:
+    """``"approved"`` / ``"denied"`` from the first word of a reply, else ``None``."""
+    words = text.strip().split()
+    if not words:
+        return None
+    first = words[0].lower().strip(".,;:!")
+    if first in _APPROVE_WORDS:
+        return "approved"
+    if first in _DENY_WORDS:
+        return "denied"
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -170,7 +233,13 @@ def _extract_user_text(parts: list[Part]) -> str:
     return "\n".join(chunks)
 
 
-def _agent_text_message(text: str, *, context_id: str, task_id: str | None) -> Message:
+def _agent_text_message(
+    text: str,
+    *,
+    context_id: str,
+    task_id: str | None,
+    metadata: dict[str, Any] | None = None,
+) -> Message:
     """Build a spec ``Message`` from an agent's plain-text reply."""
     return Message(
         role="agent",
@@ -178,6 +247,7 @@ def _agent_text_message(text: str, *, context_id: str, task_id: str | None) -> M
         messageId=uuid.uuid4().hex,
         contextId=context_id,
         taskId=task_id,
+        metadata=metadata,
     )
 
 
@@ -190,40 +260,18 @@ def _agent_artifact(text: str) -> Artifact:
     )
 
 
-_A2A_ERROR_REASONS = {
-    TASK_NOT_FOUND: "TASK_NOT_FOUND",
-    TASK_NOT_CANCELABLE: "TASK_NOT_CANCELABLE",
-    PUSH_NOTIFICATION_NOT_SUPPORTED: "PUSH_NOTIFICATION_NOT_SUPPORTED",
-    UNSUPPORTED_OPERATION: "UNSUPPORTED_OPERATION",
-    CONTENT_TYPE_NOT_SUPPORTED: "CONTENT_TYPE_NOT_SUPPORTED",
-    VERSION_NOT_SUPPORTED: "VERSION_NOT_SUPPORTED",
-}
-
-
-def _jsonrpc_error_data(code: int, message: str) -> list[dict[str, Any]] | None:
-    reason = _A2A_ERROR_REASONS.get(code)
-    if reason is None:
-        return None
-    return [
-        {
-            "@type": "type.googleapis.com/google.rpc.ErrorInfo",
-            "reason": reason,
-            "domain": "a2a-protocol.org",
-            "metadata": {
-                "message": message,
-                "timestamp": _now_iso(),
-            },
-        }
-    ]
-
-
 def _jsonrpc_error_response(rpc_id: str | int | None, code: int, message: str) -> dict[str, Any]:
     error = JsonRpcError(
         code=code,
         message=message,
-        data=_jsonrpc_error_data(code, message),
+        data=error_details(code, message),
     )
     return JsonRpcErrorResponse(id=rpc_id, error=error).model_dump(exclude_none=True)
+
+
+class _RpcError(A2AV1ProtocolError):
+    """Internal sentinel — a JSON-RPC method handler raises this to
+    short-circuit to a structured error response with the right code."""
 
 
 # ---------------------------------------------------------------------------
@@ -235,14 +283,16 @@ class _TaskStore:
     """In-process task store for non-persistent A2A deployments.
 
     Production deployments behind a load balancer should swap this out
-    for a shared store (Redis / SQL / S3) — the
-    ``A2AServer`` accepts a ``store`` parameter that follows this
-    duck-typed protocol: ``get``, ``put``, ``cancel``.
+    for a shared store (Redis / SQL / S3) that follows the same
+    duck-typed protocol: ``get``, ``put``, ``list``, ``cancel``,
+    ``is_cancel_requested``, plus ``subscribe`` / ``unsubscribe`` /
+    ``publish`` for the live event feed ``SubscribeToTask`` reads.
     """
 
     def __init__(self) -> None:
         self._tasks: dict[str, Task] = {}
         self._cancel_flags: dict[str, bool] = {}
+        self._subscribers: dict[str, list[asyncio.Queue[dict[str, Any]]]] = {}
 
     def put(self, task: Task) -> None:
         self._tasks[task.id] = task
@@ -263,12 +313,7 @@ class _TaskStore:
         task = self._tasks.get(task_id)
         if task is None:
             return False
-        if task.status.state in {
-            TaskState.completed,
-            TaskState.canceled,
-            TaskState.failed,
-            TaskState.rejected,
-        }:
+        if task.status.state in _TERMINAL_STATES:
             return False
         self._cancel_flags[task_id] = True
         # Eagerly flip status so a subsequent tasks/get reflects the
@@ -279,6 +324,34 @@ class _TaskStore:
 
     def is_cancel_requested(self, task_id: str) -> bool:
         return self._cancel_flags.get(task_id, False)
+
+    def subscribe(self, task_id: str) -> asyncio.Queue[dict[str, Any]]:
+        """A queue that receives every event published for ``task_id``."""
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        self._subscribers.setdefault(task_id, []).append(queue)
+        return queue
+
+    def unsubscribe(self, task_id: str, queue: asyncio.Queue[dict[str, Any]]) -> None:
+        queues = self._subscribers.get(task_id)
+        if queues and queue in queues:
+            queues.remove(queue)
+        if not queues:
+            self._subscribers.pop(task_id, None)
+
+    def publish(self, task_id: str, event: dict[str, Any]) -> None:
+        for queue in list(self._subscribers.get(task_id, [])):
+            queue.put_nowait(event)
+
+
+@dataclass
+class _PendingInput:
+    """A task paused on a question or an approval hold, waiting for the peer."""
+
+    thread_id: str
+    interrupt_id: str
+    question: str
+    approval_id: str | None = None
+    status: TaskStatus | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -304,6 +377,22 @@ class A2AServer(A2AV1ServerMixin):
             falls back to ``LOCUS_A2A_API_KEY``.
         allow_unauthenticated: Bind to non-loopback without a key.
             Use only behind an upstream proxy that terminates auth.
+        transports: The protocol bindings to serve and advertise:
+            ``"JSONRPC"``, ``"HTTP+JSON"`` (both on the FastAPI app) and
+            ``"GRPC"`` (on ``grpc_port``; needs the ``a2a-grpc`` extra).
+            Defaults to the two HTTP bindings.
+        grpc_port: Port for the gRPC binding; setting it adds ``"GRPC"``
+            to ``transports``. ``run()`` then serves HTTP and gRPC together.
+        grpc_url: The address advertised for the gRPC interface, when
+            it differs from the HTTP host plus ``grpc_port``.
+        push_notifications: :class:`~locus.a2a.push.PushNotificationSettings`
+            (or ``True`` for the defaults) to deliver task updates to the
+            webhooks peers register; ``None`` answers push-config methods
+            with ``PushNotificationNotSupported``.
+        approvals: The agent's approval store (``InMemoryApprovals``,
+            ``FileApprovals``, ...). With it, a peer's ``approve`` / ``deny``
+            reply to an ``input-required`` task that holds a gated call is
+            recorded as the decision before the run resumes.
 
     Example::
 
@@ -340,6 +429,12 @@ class A2AServer(A2AV1ServerMixin):
         version: str = "0.1.0",
         api_key: str | None = None,
         allow_unauthenticated: bool = False,
+        *,
+        transports: Sequence[str] = (BINDING_JSONRPC, BINDING_HTTP_JSON),
+        grpc_port: int | None = None,
+        grpc_url: str | None = None,
+        push_notifications: PushNotificationSettings | bool | None = None,
+        approvals: Any | None = None,
     ) -> None:
         self._agent = agent
         self._name = name
@@ -352,6 +447,46 @@ class A2AServer(A2AV1ServerMixin):
         self._allow_unauthenticated = allow_unauthenticated
         self._app: Any = None
         self._store = _TaskStore()
+
+        bindings = [normalise_binding(t) for t in transports]
+        if (grpc_port is not None or grpc_url) and BINDING_GRPC not in bindings:
+            bindings.append(BINDING_GRPC)
+        if BINDING_GRPC in bindings and grpc_port is None and not grpc_url:
+            raise ValueError("the GRPC transport needs grpc_port (or grpc_url)")
+        self._transports: tuple[str, ...] = tuple(dict.fromkeys(bindings))
+        self._grpc_port = grpc_port
+        self._grpc_url = grpc_url
+
+        settings: PushNotificationSettings | None
+        if push_notifications is True:
+            settings = PushNotificationSettings()
+        elif isinstance(push_notifications, PushNotificationSettings):
+            settings = push_notifications
+        else:
+            settings = None
+        self._push_store = PushNotificationStore()
+        self._push: PushNotificationDispatcher | None = (
+            PushNotificationDispatcher(self._push_store, settings) if settings else None
+        )
+        self._approvals = approvals
+        self._pending: dict[str, _PendingInput] = {}
+        self._background: set[asyncio.Task[Any]] = set()
+        #: Tasks with a run in flight in this process: the ones whose live
+        #: event feed ``SubscribeToTask`` can wait on.
+        self._active: set[str] = set()
+        self._run_accepts_thread_id = self._accepts_keyword(
+            getattr(agent, "run", None), "thread_id"
+        )
+        self._can_resume = callable(getattr(agent, "resume", None))
+
+    @staticmethod
+    def _accepts_keyword(fn: Any, keyword: str) -> bool:
+        if fn is None:
+            return False
+        try:
+            return keyword in inspect.signature(fn).parameters
+        except (TypeError, ValueError):
+            return False
 
     @staticmethod
     def _normalise_skills(
@@ -368,6 +503,26 @@ class A2AServer(A2AV1ServerMixin):
                 # id == name == description so the wire shape is valid.
                 out.append(AgentSkill(id=s, name=s, description=s))
         return out
+
+    # ----- public facts ------------------------------------------------
+
+    @property
+    def api_key(self) -> str | None:
+        """The bearer token every binding requires, or ``None``."""
+        return self._api_key
+
+    @property
+    def transports(self) -> tuple[str, ...]:
+        """The protocol bindings this server serves, as advertised on the card."""
+        return self._transports
+
+    @property
+    def push_notifications(self) -> PushNotificationDispatcher | None:
+        """The push dispatcher, or ``None`` when push notifications are off."""
+        return self._push
+
+    def _push_registry(self) -> PushNotificationDispatcher | None:
+        return self._push
 
     def _build_card(self) -> AgentCard:
         # When the server enforces bearer auth on every route (the default
@@ -412,19 +567,18 @@ class A2AServer(A2AV1ServerMixin):
             protocolVersion=A2A_V1_PROTOCOL_VERSION,
             capabilities=AgentCapabilities(
                 streaming=True,
-                pushNotifications=False,
+                pushNotifications=self._push is not None,
                 stateTransitionHistory=False,
             ),
             securitySchemes=security_schemes,
             security=security,
             securityRequirements=security_requirements,
-            supportedInterfaces=[
-                AgentInterface(
-                    protocolBinding="JSONRPC",
-                    url=(self._url or "http://localhost").rstrip("/") + "/",
-                    protocolVersion=A2A_V1_PROTOCOL_VERSION,
-                )
-            ],
+            supportedInterfaces=interfaces_for(
+                self._url or "http://localhost",
+                self._transports,
+                grpc_port=self._grpc_port,
+                grpc_url=self._grpc_url,
+            ),
             defaultInputModes=["text/plain"],
             defaultOutputModes=["text/plain"],
             skills=skills,
@@ -471,14 +625,55 @@ class A2AServer(A2AV1ServerMixin):
 
         return dependency
 
+    # ----- event fan-out ---------------------------------------------------
+
+    def _emit(self, task: Task, event: BaseModel, on_event: Callable[[Any], None] | None) -> None:
+        """Hand a task event to the streaming consumer, live subscribers and webhooks."""
+        if on_event is not None:
+            on_event(event)
+        payload = event.model_dump()
+        self._store.publish(task.id, payload)
+        if self._push is not None:
+            self._push.notify(task.id, legacy_event_to_v1_stream_response(payload))
+
+    async def _task_events(self, task_id: str) -> AsyncIterator[dict[str, Any]]:
+        """Live events for ``task_id`` until it reaches a terminal or interrupted state.
+
+        A task with no run in flight in this process (finished, paused, or
+        stored by someone else) yields nothing: there is no one to wait on.
+        """
+        queue = self._store.subscribe(task_id)
+        try:
+            task = self._store.get(task_id)
+            if (
+                task is None
+                or task_id not in self._active
+                or task.status.state in _TERMINAL_STATES | _INTERRUPTED_STATES
+            ):
+                return
+            while True:
+                event = await queue.get()
+                yield event
+                if event.get("kind") == "status-update":
+                    state = event.get("status", {}).get("state")
+                    if state in {s.value for s in _TERMINAL_STATES | _INTERRUPTED_STATES}:
+                        return
+        finally:
+            self._store.unsubscribe(task_id, queue)
+
     # ----- agent driver -------------------------------------------------
+
+    def _start_run(self, prompt: str, task: Task) -> AsyncIterator[Any]:
+        kwargs: dict[str, Any] = {"thread_id": task.id} if self._run_accepts_thread_id else {}
+        events: AsyncIterator[Any] = self._agent.run(prompt, **kwargs)
+        return events
 
     async def _drive_agent(
         self,
         prompt: str,
         *,
         task: Task,
-        on_event: Any | None = None,
+        on_event: Callable[[Any], None] | None = None,
     ) -> str:
         """Run the wrapped agent and stream events into the task.
 
@@ -487,108 +682,321 @@ class A2AServer(A2AV1ServerMixin):
         ``message/stream`` path uses this; ``message/send`` ignores).
         Returns the agent's final text reply.
         """
-        from locus.core.events import TerminateEvent, ThinkEvent
+        return await self._consume(self._start_run(prompt, task), task=task, on_event=on_event)
+
+    async def _consume(
+        self,
+        events: AsyncIterator[Any],
+        *,
+        task: Task,
+        on_event: Callable[[Any], None] | None,
+        completion: tuple[TaskState, str | None] = (TaskState.completed, None),
+    ) -> str:
+        """Drive ``events`` into ``task`` until the run ends, pauses or is cancelled."""
+        from locus.core.events import InterruptEvent, TerminateEvent, ThinkEvent
 
         final = ""
-        # Mark task as working.
         task.status = TaskStatus(state=TaskState.working, timestamp=_now_iso())
-        if on_event is not None:
-            on_event(
-                TaskStatusUpdateEvent(
-                    taskId=task.id,
-                    contextId=task.contextId,
-                    status=task.status,
-                )
-            )
+        self._emit(
+            task,
+            TaskStatusUpdateEvent(taskId=task.id, contextId=task.contextId, status=task.status),
+            on_event,
+        )
 
-        async for event in self._agent.run(prompt):
-            if self._store.is_cancel_requested(task.id):
-                task.status = TaskStatus(state=TaskState.canceled, timestamp=_now_iso())
-                if on_event is not None:
-                    on_event(
+        try:
+            async for event in events:
+                if self._store.is_cancel_requested(task.id):
+                    task.status = TaskStatus(state=TaskState.canceled, timestamp=_now_iso())
+                    self._emit(
+                        task,
+                        TaskStatusUpdateEvent(
+                            taskId=task.id, contextId=task.contextId, status=task.status, final=True
+                        ),
+                        on_event,
+                    )
+                    aclose = getattr(events, "aclose", None)
+                    if aclose is not None:
+                        await aclose()
+                    return final
+                if isinstance(event, InterruptEvent):
+                    self._pause(task, event, on_event)
+                    return final
+                if isinstance(event, ThinkEvent) and event.reasoning:
+                    # Surface intermediate reasoning as a working-state
+                    # status update; spec peers can ignore or render it.
+                    self._emit(
+                        task,
                         TaskStatusUpdateEvent(
                             taskId=task.id,
                             contextId=task.contextId,
-                            status=task.status,
-                            final=True,
-                        )
-                    )
-                return final
-            if isinstance(event, ThinkEvent) and event.reasoning and on_event is not None:
-                # Surface intermediate reasoning as a working-state
-                # status update; spec peers can ignore or render it.
-                on_event(
-                    TaskStatusUpdateEvent(
-                        taskId=task.id,
-                        contextId=task.contextId,
-                        status=TaskStatus(
-                            state=TaskState.working,
-                            message=_agent_text_message(
-                                event.reasoning,
-                                context_id=task.contextId,
-                                task_id=task.id,
+                            status=TaskStatus(
+                                state=TaskState.working,
+                                message=_agent_text_message(
+                                    event.reasoning,
+                                    context_id=task.contextId,
+                                    task_id=task.id,
+                                ),
+                                timestamp=_now_iso(),
                             ),
-                            timestamp=_now_iso(),
                         ),
+                        on_event,
                     )
-                )
-            elif isinstance(event, TerminateEvent):
-                final = event.final_message or final
+                elif isinstance(event, TerminateEvent):
+                    final = event.final_message or final
+        except Exception:
+            # Subscribers and webhooks hear about the failure; the caller's
+            # own handling (the error response) follows from the re-raise.
+            task.status = TaskStatus(state=TaskState.failed, timestamp=_now_iso())
+            self._emit(
+                task,
+                TaskStatusUpdateEvent(
+                    taskId=task.id, contextId=task.contextId, status=task.status, final=True
+                ),
+                None,
+            )
+            raise
 
         artifact = _agent_artifact(final)
         task.artifacts.append(artifact)
-        task.status = TaskStatus(state=TaskState.completed, timestamp=_now_iso())
-        if on_event is not None:
-            on_event(
-                TaskArtifactUpdateEvent(
-                    taskId=task.id,
-                    contextId=task.contextId,
-                    artifact=artifact,
-                    lastChunk=True,
-                )
-            )
-            on_event(
-                TaskStatusUpdateEvent(
-                    taskId=task.id,
-                    contextId=task.contextId,
-                    status=task.status,
-                    final=True,
-                )
-            )
+        state, note = completion
+        task.status = TaskStatus(
+            state=state,
+            timestamp=_now_iso(),
+            message=(
+                _agent_text_message(note, context_id=task.contextId, task_id=task.id)
+                if note
+                else None
+            ),
+        )
+        self._emit(
+            task,
+            TaskArtifactUpdateEvent(
+                taskId=task.id, contextId=task.contextId, artifact=artifact, lastChunk=True
+            ),
+            on_event,
+        )
+        self._emit(
+            task,
+            TaskStatusUpdateEvent(
+                taskId=task.id, contextId=task.contextId, status=task.status, final=True
+            ),
+            on_event,
+        )
         return final
 
-    # ----- JSON-RPC method handlers ------------------------------------
+    def _pause(self, task: Task, event: Any, on_event: Callable[[Any], None] | None) -> None:
+        """Map a paused run onto ``input-required`` with the question as the status message."""
+        event_metadata = event.metadata if isinstance(event.metadata, dict) else {}
+        approval_id = event_metadata.get("approval_id")
+        metadata: dict[str, Any] = {
+            "interruptId": event.interrupt_id,
+            "kind": "approval" if approval_id else "question",
+        }
+        if event.options:
+            metadata["options"] = list(event.options)
+        if event.fields:
+            metadata["fields"] = list(event.fields)
+        if approval_id:
+            metadata["approvalId"] = approval_id
+            metadata["hold"] = {
+                key: event_metadata[key]
+                for key in ("action", "asset", "principal", "reason", "arguments", "approvers")
+                if key in event_metadata
+            }
+            metadata["replies"] = ["approve", "deny"]
+        question = _agent_text_message(
+            event.question or "The agent needs your input to continue.",
+            context_id=task.contextId,
+            task_id=task.id,
+            metadata=metadata,
+        )
+        task.history.append(question)
+        task.status = TaskStatus(
+            state=TaskState.input_required, message=question, timestamp=_now_iso()
+        )
+        self._pending[task.id] = _PendingInput(
+            thread_id=task.id,
+            interrupt_id=event.interrupt_id,
+            question=event.question or "",
+            approval_id=str(approval_id) if approval_id else None,
+            status=task.status,
+        )
+        self._emit(
+            task,
+            TaskStatusUpdateEvent(
+                taskId=task.id, contextId=task.contextId, status=task.status, final=True
+            ),
+            on_event,
+        )
 
-    async def _handle_message_send(self, params: dict[str, Any]) -> dict[str, Any]:
+    async def _resume_run(
+        self, task: Task, message: Message, *, on_event: Callable[[Any], None] | None
+    ) -> str:
+        """Continue a paused run with the peer's reply."""
+        pending = self._pending.pop(task.id)
+        answer = _extract_user_text(message.parts)
+        perform = False
+        completion: tuple[TaskState, str | None] = (TaskState.completed, None)
+        if pending.approval_id:
+            verdict = _verdict_of(answer)
+            if verdict is None:
+                self._pending[task.id] = pending
+                raise _RpcError(
+                    INVALID_PARAMS,
+                    "the reply to an approval hold must start with approve or deny",
+                )
+            decided_by = str((message.metadata or {}).get("decidedBy") or f"a2a:{task.contextId}")
+            if self._approvals is not None:
+                try:
+                    self._approvals.decide(pending.approval_id, verdict, by=decided_by)
+                except Exception as e:  # noqa: BLE001 — authority refusals, unknown ids
+                    self._pending[task.id] = pending
+                    raise _RpcError(
+                        UNSUPPORTED_OPERATION,
+                        f"approval {pending.approval_id} could not be decided: {e}",
+                    ) from e
+            # The gated call is re-issued under the recorded decision: approve
+            # performs it, deny refuses it, and the model sees what happened.
+            perform = True
+            if verdict == "denied":
+                completion = (TaskState.rejected, f"Denied by {decided_by}: {pending.question}")
+        from locus.core.errors import ApprovalPendingError
+
+        events: AsyncIterator[Any] = self._agent.resume(
+            answer, thread_id=pending.thread_id, perform_dangling=perform
+        )
         try:
-            send = MessageSendParams.model_validate(params)
-        except Exception as e:  # noqa: BLE001
-            raise _RpcError(INVALID_PARAMS, f"invalid params: {e}") from e
-        prompt = _extract_user_text(send.message.parts)
+            return await self._consume(events, task=task, on_event=on_event, completion=completion)
+        except ApprovalPendingError as e:
+            # The run paused again on the same undecided hold: put the task
+            # back where it was so the next reply can decide it.
+            self._pending[task.id] = pending
+            if pending.status is not None:
+                task.status = pending.status
+            raise _RpcError(
+                UNSUPPORTED_OPERATION,
+                f"approval {pending.approval_id} has not been decided; reply approve or deny",
+            ) from e
+
+    async def _run_or_resume(
+        self,
+        task: Task,
+        message: Message,
+        *,
+        resume: bool,
+        on_event: Callable[[Any], None] | None = None,
+    ) -> str:
+        self._active.add(task.id)
+        try:
+            if resume:
+                return await self._resume_run(task, message, on_event=on_event)
+            return await self._drive_agent(
+                _extract_user_text(message.parts), task=task, on_event=on_event
+            )
+        finally:
+            self._active.discard(task.id)
+
+    def _open_task(self, send: MessageSendParams, *, terminal_error: int) -> tuple[Task, bool]:
+        """The task a message addresses (new, or existing) and whether it resumes a pause."""
         if send.message.taskId:
             task = self._store.get(send.message.taskId)
             if task is None:
                 raise _RpcError(TASK_NOT_FOUND, f"task {send.message.taskId} not found")
-            if task.status.state in {
-                TaskState.completed,
-                TaskState.canceled,
-                TaskState.failed,
-                TaskState.rejected,
-            }:
-                raise _RpcError(TASK_NOT_CANCELABLE, "task is in a terminal state")
+            if task.status.state in _TERMINAL_STATES:
+                raise _RpcError(terminal_error, "task is in a terminal state")
             send.message.contextId = send.message.contextId or task.contextId
             task.history.append(send.message)
-        else:
-            context_id = send.message.contextId or uuid.uuid4().hex
-            task = Task(
-                id=uuid.uuid4().hex,
-                contextId=context_id,
-                status=TaskStatus(state=TaskState.submitted, timestamp=_now_iso()),
-                history=[send.message],
+            resume = (
+                task.status.state == TaskState.input_required
+                and task.id in self._pending
+                and self._can_resume
             )
-            self._store.put(task)
+            return task, resume
+        context_id = send.message.contextId or uuid.uuid4().hex
+        task = Task(
+            id=uuid.uuid4().hex,
+            contextId=context_id,
+            status=TaskStatus(state=TaskState.submitted, timestamp=_now_iso()),
+            history=[send.message],
+        )
+        self._store.put(task)
+        return task, False
+
+    def _register_push_from_configuration(self, task: Task, params: dict[str, Any]) -> None:
+        configuration = params.get("configuration") or {}
+        raw = configuration.get("taskPushNotificationConfig") or configuration.get(
+            "pushNotificationConfig"
+        )
+        if not raw:
+            return
+        if self._push is None:
+            raise _RpcError(
+                PUSH_NOTIFICATION_NOT_SUPPORTED, "push notifications are not enabled on this agent"
+            )
         try:
-            await self._drive_agent(prompt, task=task)
+            config = A2AV1TaskPushNotificationConfig.model_validate(raw)
+            self._push.register(task.id, config)
+        except PushNotificationError as e:
+            raise _RpcError(INVALID_PARAMS, str(e)) from e
+        except Exception as e:  # noqa: BLE001
+            raise _RpcError(INVALID_PARAMS, f"invalid push notification config: {e}") from e
+
+    def _in_background(self, coro: Any, task: Task) -> None:
+        async def runner() -> None:
+            try:
+                await coro
+            except A2AV1ProtocolError as e:
+                _logger.warning("A2A background run for task %s refused: %s", task.id, e.message)
+            except Exception:
+                _logger.exception("A2A background run failed for task %s", task.id)
+            finally:
+                self._active.discard(task.id)
+
+        handle = asyncio.ensure_future(runner())
+        self._background.add(handle)
+        handle.add_done_callback(self._background.discard)
+
+    async def drain(self) -> None:
+        """Wait for background runs and push deliveries to finish (tests, shutdown)."""
+        while True:
+            self._background.difference_update([t for t in self._background if t.done()])
+            pending = list(self._background)
+            if not pending:
+                break
+            await asyncio.gather(*pending, return_exceptions=True)
+        if self._push is not None:
+            await self._push.drain()
+
+    async def aclose(self) -> None:
+        """Finish background work and release the push dispatcher's connections."""
+        await self.drain()
+        if self._push is not None:
+            await self._push.aclose()
+
+    # ----- JSON-RPC method handlers ------------------------------------
+
+    async def _handle_message_send(
+        self, params: dict[str, Any], *, terminal_error: int = TASK_NOT_CANCELABLE
+    ) -> dict[str, Any]:
+        try:
+            send = MessageSendParams.model_validate(params)
+        except Exception as e:  # noqa: BLE001
+            raise _RpcError(INVALID_PARAMS, f"invalid params: {e}") from e
+        task, resume = self._open_task(send, terminal_error=terminal_error)
+        self._register_push_from_configuration(task, params)
+        configuration = params.get("configuration") or {}
+        detached = configuration.get("returnImmediately") is True or (
+            configuration.get("blocking") is False
+        )
+        work = self._run_or_resume(task, send.message, resume=resume)
+        if detached:
+            self._active.add(task.id)
+            self._in_background(work, task)
+            return task.model_dump()
+        try:
+            await work
+        except A2AV1ProtocolError:
+            raise
         except Exception as e:  # noqa: BLE001
             task.status = TaskStatus(
                 state=TaskState.failed,
@@ -629,39 +1037,46 @@ class A2AServer(A2AV1ServerMixin):
             )
         task = self._store.get(ident.id)
         assert task is not None
+        self._pending.pop(task.id, None)
+        self._emit(
+            task,
+            TaskStatusUpdateEvent(
+                taskId=task.id, contextId=task.contextId, status=task.status, final=True
+            ),
+            None,
+        )
         return task.model_dump()
 
-    async def _stream_message(self, params: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
+    async def _stream_message(
+        self, params: dict[str, Any], *, terminal_error: int = TASK_NOT_CANCELABLE
+    ) -> AsyncIterator[dict[str, Any]]:
         """Stream a message run as JSON-RPC responses (one per SSE event)."""
         try:
             send = MessageSendParams.model_validate(params)
         except Exception as e:  # noqa: BLE001
             raise _RpcError(INVALID_PARAMS, f"invalid params: {e}") from e
-        prompt = _extract_user_text(send.message.parts)
-        context_id = send.message.contextId or uuid.uuid4().hex
-        task = Task(
-            id=uuid.uuid4().hex,
-            contextId=context_id,
-            status=TaskStatus(state=TaskState.submitted, timestamp=_now_iso()),
-            history=[send.message],
-        )
-        self._store.put(task)
+        task, resume = self._open_task(send, terminal_error=terminal_error)
+        self._register_push_from_configuration(task, params)
 
-        # Initial event: the task as it sits in the submitted state.
+        # Initial event: the task as it sits now (submitted, or paused).
         yield task.model_dump()
 
         # Bridge the synchronous on_event callback to an async queue so
         # SSE consumers see updates as they happen.
         queue: asyncio.Queue[Any] = asyncio.Queue()
         sentinel = object()
+        refused: list[A2AV1ProtocolError] = []
 
         def emit(ev: Any) -> None:
             queue.put_nowait(ev)
 
         async def runner() -> None:
             try:
-                await self._drive_agent(prompt, task=task, on_event=emit)
+                await self._run_or_resume(task, send.message, resume=resume, on_event=emit)
+            except A2AV1ProtocolError as e:
+                refused.append(e)
             except Exception:  # noqa: BLE001
+                _logger.exception("A2A message/stream failed for task %s", task.id)
                 task.status = TaskStatus(state=TaskState.failed, timestamp=_now_iso())
                 emit(
                     TaskStatusUpdateEvent(
@@ -683,6 +1098,8 @@ class A2AServer(A2AV1ServerMixin):
                 yield ev.model_dump() if hasattr(ev, "model_dump") else dict(ev)
         finally:
             await run_task
+        if refused:
+            raise refused[0]
 
     # ----- backward-compat: the legacy A2ARequest invoke shape --------
 
@@ -710,7 +1127,7 @@ class A2AServer(A2AV1ServerMixin):
     def _create_app(self) -> Any:
         try:
             from fastapi import Body, Depends, FastAPI, Header
-            from fastapi.responses import JSONResponse, StreamingResponse
+            from fastapi.responses import StreamingResponse
         except ImportError as e:
             msg = "FastAPI required. Install with: pip install fastapi uvicorn"
             raise ImportError(msg) from e
@@ -754,120 +1171,32 @@ class A2AServer(A2AV1ServerMixin):
             payload["skills"] = [s.name for s in card.skills]
             return payload
 
+        # The signing keys for push notifications are public by design: a
+        # receiver fetches them to verify a notification, before it has any
+        # credential of ours.
+        if self._push is not None and self._push.settings.signer is not None:
+            signer = self._push.settings.signer
+
+            @app.get(JWKS_PATH)
+            async def jwks() -> dict[str, Any]:
+                return signer.jwks()
+
         # ----- JSON-RPC root -----------------------------------------------
-        @app.post("/")
-        async def jsonrpc(
-            body: dict[str, Any] = Body(...),  # noqa: B008 — FastAPI dep injection
-            a2a_version: str | None = Header(default=None, alias=A2A_VERSION_HEADER),
-            _: str = auth_dep,
-        ) -> Any:
-            try:
-                req = JsonRpcRequest.model_validate(body)
-            except Exception:  # noqa: BLE001
-                return JSONResponse(
-                    _jsonrpc_error_response(
-                        body.get("id") if isinstance(body, dict) else None,
-                        INVALID_REQUEST,
-                        "Invalid Request",
-                    )
-                )
+        if BINDING_JSONRPC in self._transports:
 
-            params = req.params if isinstance(req.params, dict) else {}
+            @app.post("/")
+            async def jsonrpc(
+                body: dict[str, Any] = Body(...),  # noqa: B008 — FastAPI dep injection
+                a2a_version: str | None = Header(default=None, alias=A2A_VERSION_HEADER),
+                _: str = auth_dep,
+            ) -> Any:
+                return await self._jsonrpc(body, a2a_version)
 
-            # Lazy import — observability is opt-in.
-            import time as _time  # noqa: PLC0415
+        # ----- HTTP+JSON binding ------------------------------------------
+        if BINDING_HTTP_JSON in self._transports:
+            from locus.a2a.rest import mount_http_json
 
-            from locus.observability.emit import (  # noqa: PLC0415
-                EV_A2A_TASK_COMPLETED,
-                EV_A2A_TASK_RECEIVED,
-                emit,
-            )
-
-            await emit(
-                EV_A2A_TASK_RECEIVED,
-                method=req.method,
-                rpc_id=str(req.id) if req.id is not None else None,
-            )
-            _started = _time.perf_counter()
-
-            try:
-                if a2a_version not in (None, A2A_V1_PROTOCOL_VERSION):
-                    raise _RpcError(
-                        VERSION_NOT_SUPPORTED,
-                        f"A2A version {a2a_version!r} is not supported",
-                    )
-                # Some v1 clients omit the version header; route known v1
-                # method names to the v1 handlers to preserve interoperability.
-                use_v1 = a2a_version == A2A_V1_PROTOCOL_VERSION or (
-                    a2a_version is None and req.method in A2AV1_JSONRPC_METHODS
-                )
-                if use_v1 and req.method == "SendMessage":
-                    result = await self._handle_v1_send_message(params)
-                elif use_v1 and req.method == "GetTask":
-                    result = await self._handle_v1_get_task(params)
-                elif use_v1 and req.method == "ListTasks":
-                    result = await self._handle_v1_list_tasks(params)
-                elif use_v1 and req.method == "CancelTask":
-                    result = await self._handle_v1_cancel_task(params)
-                elif use_v1 and req.method in {
-                    "CreateTaskPushNotificationConfig",
-                    "GetTaskPushNotificationConfig",
-                    "ListTaskPushNotificationConfigs",
-                    "DeleteTaskPushNotificationConfig",
-                }:
-                    raise _RpcError(
-                        PUSH_NOTIFICATION_NOT_SUPPORTED,
-                        "push notifications are not enabled on this agent",
-                    )
-                elif use_v1 and req.method in {"SendStreamingMessage", "SubscribeToTask"}:
-                    if req.method == "SubscribeToTask":
-                        self._preflight_v1_task_subscription(params)
-                    return await self._stream_response(req, v1=True)
-                elif use_v1 and req.method == "GetExtendedAgentCard":
-                    raise _RpcError(
-                        UNSUPPORTED_OPERATION,
-                        "authenticated extended agent cards are not enabled on this agent",
-                    )
-                elif req.method == "message/send":
-                    result = await self._handle_message_send(params)
-                elif req.method == "tasks/get":
-                    result = await self._handle_tasks_get(params)
-                elif req.method == "tasks/cancel":
-                    result = await self._handle_tasks_cancel(params)
-                elif req.method in {
-                    "tasks/pushNotificationConfig/set",
-                    "tasks/pushNotificationConfig/get",
-                    "tasks/pushNotificationConfig/list",
-                    "tasks/pushNotificationConfig/delete",
-                }:
-                    raise _RpcError(
-                        PUSH_NOTIFICATION_NOT_SUPPORTED,
-                        "push notifications are not enabled on this agent",
-                    )
-                elif req.method == "message/stream":
-                    # SSE — peer must POST with Accept: text/event-stream.
-                    return await self._stream_response(req)
-                else:
-                    raise _RpcError(METHOD_NOT_FOUND, f"unknown method {req.method!r}")
-            except (_RpcError, A2AV1ProtocolError) as e:
-                await emit(
-                    EV_A2A_TASK_COMPLETED,
-                    method=req.method,
-                    success=False,
-                    error_code=e.code,
-                    duration_ms=(_time.perf_counter() - _started) * 1000,
-                )
-                return JSONResponse(_jsonrpc_error_response(req.id, e.code, e.message))
-
-            await emit(
-                EV_A2A_TASK_COMPLETED,
-                method=req.method,
-                success=True,
-                duration_ms=(_time.perf_counter() - _started) * 1000,
-            )
-            return JSONResponse(
-                JsonRpcSuccessResponse(id=req.id, result=result).model_dump(exclude_none=True)
-            )
+            mount_http_json(app, self, auth_dep)
 
         # ----- backwards-compat invoke + stream ----------------------------
         @app.post("/a2a/invoke")
@@ -882,6 +1211,99 @@ class A2AServer(A2AV1ServerMixin):
 
         return app
 
+    async def _jsonrpc(self, body: dict[str, Any], a2a_version: str | None) -> Any:
+        """Dispatch one JSON-RPC request body (``POST /``)."""
+        from fastapi.responses import JSONResponse
+
+        try:
+            req = JsonRpcRequest.model_validate(body)
+        except Exception:  # noqa: BLE001
+            return JSONResponse(
+                _jsonrpc_error_response(
+                    body.get("id") if isinstance(body, dict) else None,
+                    INVALID_REQUEST,
+                    "Invalid Request",
+                )
+            )
+
+        params = req.params if isinstance(req.params, dict) else {}
+
+        # Lazy import — observability is opt-in.
+        import time as _time  # noqa: PLC0415
+
+        from locus.observability.emit import (  # noqa: PLC0415
+            EV_A2A_TASK_COMPLETED,
+            EV_A2A_TASK_RECEIVED,
+            emit,
+        )
+
+        await emit(
+            EV_A2A_TASK_RECEIVED,
+            method=req.method,
+            rpc_id=str(req.id) if req.id is not None else None,
+        )
+        _started = _time.perf_counter()
+
+        try:
+            if a2a_version not in (None, A2A_V1_PROTOCOL_VERSION):
+                raise _RpcError(
+                    VERSION_NOT_SUPPORTED,
+                    f"A2A version {a2a_version!r} is not supported",
+                )
+            # Some v1 clients omit the version header; route known v1
+            # method names to the v1 handlers to preserve interoperability.
+            use_v1 = a2a_version == A2A_V1_PROTOCOL_VERSION or (
+                a2a_version is None and req.method in A2AV1_JSONRPC_METHODS
+            )
+            if use_v1 and req.method in A2AV1_STREAMING_METHODS:
+                if req.method == "SubscribeToTask":
+                    self._preflight_v1_task_subscription(params)
+                return await self._stream_response(req, v1=True)
+            if use_v1 and req.method in A2AV1_JSONRPC_METHODS:
+                result = await self.handle_v1(req.method, params)
+            elif req.method == "message/send":
+                result = await self._handle_message_send(params)
+            elif req.method == "tasks/get":
+                result = await self._handle_tasks_get(params)
+            elif req.method == "tasks/cancel":
+                result = await self._handle_tasks_cancel(params)
+            elif req.method in {
+                "tasks/pushNotificationConfig/set",
+                "tasks/pushNotificationConfig/get",
+                "tasks/pushNotificationConfig/list",
+                "tasks/pushNotificationConfig/delete",
+            }:
+                # The pre-1.0 method names; peers on 1.0 use the
+                # ``*TaskPushNotificationConfig`` methods above.
+                raise _RpcError(
+                    PUSH_NOTIFICATION_NOT_SUPPORTED,
+                    "push notifications use the A2A 1.0 methods on this agent",
+                )
+            elif req.method == "message/stream":
+                # SSE — peer must POST with Accept: text/event-stream.
+                return await self._stream_response(req)
+            else:
+                raise _RpcError(METHOD_NOT_FOUND, f"unknown method {req.method!r}")
+        except A2AV1ProtocolError as e:
+            await emit(
+                EV_A2A_TASK_COMPLETED,
+                method=req.method,
+                success=False,
+                error_code=e.code,
+                duration_ms=(_time.perf_counter() - _started) * 1000,
+            )
+            return JSONResponse(_jsonrpc_error_response(req.id, e.code, e.message))
+
+        await emit(
+            EV_A2A_TASK_COMPLETED,
+            method=req.method,
+            success=True,
+            duration_ms=(_time.perf_counter() - _started) * 1000,
+        )
+        return JSONResponse(
+            JsonRpcSuccessResponse(id=req.id, result=result).model_dump(exclude_none=True)
+        )
+
     async def _stream_response(self, req: JsonRpcRequest, *, v1: bool = False) -> Any:
         from fastapi.responses import StreamingResponse
 
@@ -889,16 +1311,17 @@ class A2AServer(A2AV1ServerMixin):
 
         async def gen() -> AsyncIterator[str]:
             try:
-                if v1 and req.method == "SubscribeToTask":
-                    stream = self._stream_v1_task_subscription(params)
-                else:
-                    stream = self._stream_v1_message(params) if v1 else self._stream_message(params)
+                stream = (
+                    self.handle_v1_stream(req.method, params)
+                    if v1
+                    else self._stream_message(params)
+                )
                 async for result in stream:
                     payload = JsonRpcSuccessResponse(id=req.id, result=result).model_dump(
                         exclude_none=True
                     )
                     yield f"data: {json.dumps(payload)}\n\n"
-            except (_RpcError, A2AV1ProtocolError) as e:
+            except A2AV1ProtocolError as e:
                 payload = _jsonrpc_error_response(req.id, e.code, e.message)
                 yield f"data: {json.dumps(payload)}\n\n"
             except Exception:  # noqa: BLE001 — sanitise stream errors
@@ -953,11 +1376,43 @@ class A2AServer(A2AV1ServerMixin):
 
         return StreamingResponse(event_generator(), media_type="text/event-stream")
 
+    # ----- gRPC ----------------------------------------------------------
+
+    def grpc_server(
+        self, host: str = "127.0.0.1", port: int | None = None, *, credentials: Any | None = None
+    ) -> tuple[Any, int]:
+        """A ``grpc.aio`` server with ``lf.a2a.v1.A2AService`` bound; ``(server, port)``.
+
+        Not started: call ``await server.start()``. ``port`` defaults to
+        ``grpc_port``; ``0`` picks a free port (the bound one is returned).
+        Needs the ``a2a-grpc`` extra.
+        """
+        from locus.a2a.grpc_binding import build_grpc_server
+
+        chosen = self._grpc_port if port is None else port
+        if chosen is None:
+            raise ValueError("no gRPC port: pass port= or construct A2AServer(grpc_port=...)")
+        return build_grpc_server(self, host, chosen, credentials=credentials)
+
+    async def _serve_with_grpc(self, host: str, port: int, **kwargs: Any) -> None:
+        import uvicorn
+
+        http = uvicorn.Server(uvicorn.Config(self.app, host=host, port=port, **kwargs))
+        grpc_server, bound = self.grpc_server(host)
+        await grpc_server.start()
+        _logger.info("A2A gRPC binding listening on %s:%d", host, bound)
+        try:
+            await http.serve()
+        finally:
+            await grpc_server.stop(grace=1.0)
+            await self.aclose()
+
     def run(self, host: str = "127.0.0.1", port: int = 8001, **kwargs: Any) -> None:
         """Run the A2A server.
 
         Defaults to loopback binding. Non-loopback bindings require
         either ``api_key`` to be set or ``allow_unauthenticated=True``.
+        With ``grpc_port`` set, the gRPC binding is served alongside HTTP.
         """
         if self._api_key is None and not self._allow_unauthenticated and not _is_loopback(host):
             msg = (
@@ -973,17 +1428,10 @@ class A2AServer(A2AV1ServerMixin):
         except ImportError as e:
             msg = "uvicorn required. Install with: pip install uvicorn"
             raise ImportError(msg) from e
+        if BINDING_GRPC in self._transports and self._grpc_port is not None:
+            asyncio.run(self._serve_with_grpc(host, port, **kwargs))
+            return
         uvicorn.run(self.app, host=host, port=port, **kwargs)
-
-
-class _RpcError(Exception):
-    """Internal sentinel — a JSON-RPC method handler raises this to
-    short-circuit to a structured error response with the right code."""
-
-    def __init__(self, code: int, message: str) -> None:
-        super().__init__(message)
-        self.code = code
-        self.message = message
 
 
 # ---------------------------------------------------------------------------
@@ -998,11 +1446,19 @@ class A2AClient:
 
     - :meth:`get_agent_card` — fetches ``/.well-known/agent-card.json``,
       falling back to the legacy ``/agent-card`` endpoint.
-    - :meth:`send_message` — JSON-RPC ``message/send``; returns a
-      :class:`Task` you can poll with :meth:`get_task`.
-    - :meth:`send_message_streaming` — JSON-RPC ``message/stream``;
-      yields events from the SSE stream.
-    - :meth:`get_task`, :meth:`cancel_task` — task lifecycle.
+    - :meth:`send_message` — ``SendMessage``; returns a :class:`Task` you
+      can poll with :meth:`get_task` or follow with :meth:`subscribe`.
+    - :meth:`send_message_streaming` — ``SendStreamingMessage``; yields
+      events from the stream.
+    - :meth:`get_task`, :meth:`list_tasks`, :meth:`cancel_task` — task
+      lifecycle.
+    - :meth:`set_push_notification_config` and friends — webhooks.
+
+    Transports: a client built with the constructor speaks one binding
+    (``binding=``, JSON-RPC by default) at ``url``. :meth:`from_card` and
+    :meth:`connect` read the peer's ``supportedInterfaces`` and order them
+    by ``prefer``; when an interface proves unreachable the client moves on
+    to the next one and stays there.
 
     Plus the legacy convenience APIs preserved from the pre-spec
     implementation:
@@ -1020,11 +1476,154 @@ class A2AClient:
         api_key: str | None = None,
         timeout: float | httpx.Timeout | None = None,
         protocol_version: str | None = A2A_V1_PROTOCOL_VERSION,
+        *,
+        binding: str | None = None,
+        prefer: Sequence[str] | None = None,
+        http_client: httpx.AsyncClient | None = None,
+        grpc_channel: Any | None = None,
     ) -> None:
         self._url = url.rstrip("/")
         self._api_key = api_key
         self._timeout: Any = self.DEFAULT_TIMEOUT if timeout is None else timeout
         self._protocol_version = protocol_version
+        self._prefer: tuple[str, ...] = tuple(prefer) if prefer else DEFAULT_BINDING_PREFERENCE
+        self._http_client = http_client
+        self._grpc_channel = grpc_channel
+        self._card: AgentCard | None = None
+        self._transports: list[ClientTransport] = [
+            self._make_transport(normalise_binding(binding) if binding else BINDING_JSONRPC, url)
+        ]
+
+    # ---- transports -----------------------------------------------------
+
+    def _make_transport(self, binding: str, url: str) -> ClientTransport:
+        return make_transport(
+            binding,
+            url,
+            api_key=self._api_key,
+            timeout=self._timeout,
+            http_client=self._http_client,
+            grpc_channel=self._grpc_channel if binding == BINDING_GRPC else None,
+        )
+
+    def _use_card(self, card: AgentCard) -> None:
+        self._card = card
+        transports: list[ClientTransport] = []
+        for binding, url in select_interfaces(card, prefer=self._prefer, fallback_url=self._url):
+            try:
+                transports.append(self._make_transport(binding, url))
+            except ImportError as e:
+                _logger.info("A2A %s interface at %s skipped: %s", binding, url, e)
+        self._transports = transports or [self._make_transport(BINDING_JSONRPC, self._url)]
+
+    @classmethod
+    def from_card(
+        cls,
+        card: AgentCard,
+        *,
+        api_key: str | None = None,
+        timeout: float | httpx.Timeout | None = None,
+        prefer: Sequence[str] | None = None,
+        http_client: httpx.AsyncClient | None = None,
+        grpc_channel: Any | None = None,
+    ) -> A2AClient:
+        """A client on the binding ``card`` advertises first in ``prefer`` order."""
+        client = cls(
+            card.url,
+            api_key,
+            timeout,
+            prefer=prefer,
+            http_client=http_client,
+            grpc_channel=grpc_channel,
+        )
+        client._use_card(card)
+        return client
+
+    @classmethod
+    async def connect(
+        cls,
+        url: str,
+        *,
+        api_key: str | None = None,
+        timeout: float | httpx.Timeout | None = None,  # noqa: ASYNC109 — the transports' httpx timeout
+        prefer: Sequence[str] | None = None,
+        http_client: httpx.AsyncClient | None = None,
+        grpc_channel: Any | None = None,
+    ) -> A2AClient:
+        """Fetch the card at ``url`` and pick a binding from it."""
+        client = cls(
+            url,
+            api_key,
+            timeout,
+            prefer=prefer,
+            http_client=http_client,
+            grpc_channel=grpc_channel,
+        )
+        client._use_card(await client.get_agent_card())
+        return client
+
+    @property
+    def binding(self) -> str:
+        """The protocol binding the next call uses."""
+        return self._transports[0].binding
+
+    @property
+    def transports(self) -> tuple[ClientTransport, ...]:
+        """The transports left to try, preferred first."""
+        return tuple(self._transports)
+
+    @property
+    def card(self) -> AgentCard | None:
+        """The card the transports were chosen from, when there was one."""
+        return self._card
+
+    def _advance(self, failed: ClientTransport, error: A2ATransportUnavailableError) -> None:
+        if len(self._transports) == 1:
+            raise error
+        self._transports.pop(0)
+        _logger.warning(
+            "A2A %s interface at %s unavailable (%s); using %s at %s",
+            failed.binding,
+            failed.url,
+            error.message,
+            self._transports[0].binding,
+            self._transports[0].url,
+        )
+
+    async def _call(
+        self,
+        method: str,
+        params: dict[str, Any],
+        *,
+        timeout: Any = None,  # noqa: ASYNC109 — forwarded to the transport, not an asyncio timer
+    ) -> dict[str, Any]:
+        while True:
+            transport = self._transports[0]
+            try:
+                return await transport.call(method, params, timeout=timeout)
+            except A2ATransportUnavailableError as e:
+                self._advance(transport, e)
+
+    async def _stream(
+        self,
+        method: str,
+        params: dict[str, Any],
+        *,
+        timeout: Any = None,  # noqa: ASYNC109 — forwarded to the transport, not an asyncio timer
+    ) -> AsyncIterator[dict[str, Any]]:
+        while True:
+            transport = self._transports[0]
+            try:
+                async for frame in transport.stream(method, params, timeout=timeout):
+                    yield frame
+                return
+            except A2ATransportUnavailableError as e:
+                self._advance(transport, e)
+
+    async def aclose(self) -> None:
+        """Release every transport's connection."""
+        for transport in self._transports:
+            await transport.aclose()
 
     def _auth_headers(self) -> dict[str, str]:
         if self._api_key:
@@ -1037,6 +1636,11 @@ class A2AClient:
             headers[A2A_VERSION_HEADER] = self._protocol_version
         return headers
 
+    async def _http(self) -> httpx.AsyncClient:
+        import httpx
+
+        return self._http_client or httpx.AsyncClient(timeout=self._timeout)
+
     async def get_agent_card(self) -> AgentCard:
         """Fetch the remote agent's capability card.
 
@@ -1045,7 +1649,8 @@ class A2AClient:
         """
         import httpx
 
-        async with httpx.AsyncClient() as client:
+        client = await self._http()
+        try:
             for path in ("/.well-known/agent-card.json", "/agent-card"):
                 try:
                     resp = await client.get(f"{self._url}{path}", headers=self._headers())
@@ -1061,6 +1666,9 @@ class A2AClient:
                         return AgentCard.model_validate(data)
                 except httpx.HTTPError:
                     continue
+        finally:
+            if client is not self._http_client:
+                await client.aclose()
         msg = f"Could not fetch Agent Card from {self._url}"
         raise RuntimeError(msg)
 
@@ -1073,9 +1681,11 @@ class A2AClient:
         *,
         timeout: float | httpx.Timeout | None = None,  # noqa: ASYNC109 — forwarded to httpx, not an asyncio timer
     ) -> Any:
-        import time as _time
+        """One method call; on the v1.0 path through the chosen transport."""
+        if self._protocol_version == A2A_V1_PROTOCOL_VERSION:
+            return await self._call(method, params, timeout=timeout)
 
-        import httpx
+        import time as _time
 
         from locus.observability.emit import (  # noqa: PLC0415
             EV_A2A_CLIENT_RECEIVED,
@@ -1091,12 +1701,19 @@ class A2AClient:
         }
         await emit(EV_A2A_CLIENT_SEND, target_url=self._url, method=method)
         _started = _time.perf_counter()
-        async with httpx.AsyncClient(
-            timeout=self._timeout if timeout is None else timeout
-        ) as client:
-            resp = await client.post(f"{self._url}/", json=body, headers=self._headers())
+        client = await self._http()
+        try:
+            resp = await client.post(
+                f"{self._url}/",
+                json=body,
+                headers=self._headers(),
+                timeout=self._timeout if timeout is None else timeout,
+            )
             resp.raise_for_status()
             data = resp.json()
+        finally:
+            if client is not self._http_client:
+                await client.aclose()
         await emit(
             EV_A2A_CLIENT_RECEIVED,
             target_url=self._url,
@@ -1107,30 +1724,60 @@ class A2AClient:
         )
         if "error" in data:
             err = data["error"]
-            msg = f"A2A error {err.get('code')}: {err.get('message')}"
-            raise RuntimeError(msg)
+            raise A2AClientError(
+                int(err.get("code", INTERNAL_ERROR)),
+                str(err.get("message", "")),
+                data=err.get("data"),
+            )
         return data["result"]
+
+    @staticmethod
+    def _configuration(
+        push_notification_config: A2AV1TaskPushNotificationConfig | dict[str, Any] | None,
+        blocking: bool | None,
+    ) -> dict[str, Any] | None:
+        configuration: dict[str, Any] = {}
+        if push_notification_config is not None:
+            config = (
+                push_notification_config
+                if isinstance(push_notification_config, A2AV1TaskPushNotificationConfig)
+                else A2AV1TaskPushNotificationConfig.model_validate(push_notification_config)
+            )
+            configuration["taskPushNotificationConfig"] = config.model_dump(exclude_none=True)
+        if blocking is not None:
+            configuration["blocking"] = blocking
+            if not blocking:
+                configuration["returnImmediately"] = True
+        return configuration or None
 
     async def send_message(
         self,
         message: Message,
         *,
         timeout: float | httpx.Timeout | None = None,  # noqa: ASYNC109 — forwarded to httpx, not an asyncio timer
+        push_notification_config: A2AV1TaskPushNotificationConfig | dict[str, Any] | None = None,
+        blocking: bool | None = None,
     ) -> Task:
-        """Send a message via JSON-RPC ``message/send`` and return the Task."""
+        """Send a message (``SendMessage``) and return the Task.
+
+        ``push_notification_config`` registers a webhook for the new task in
+        the same call. ``blocking=False`` asks the peer to return the task as
+        soon as it is created and run it in the background; follow it with
+        :meth:`get_task`, :meth:`subscribe` or push notifications.
+        """
+        configuration = self._configuration(push_notification_config, blocking)
         if self._protocol_version == A2A_V1_PROTOCOL_VERSION:
-            v1_message = legacy_message_to_v1(message)
-            result = await self._rpc(
-                "SendMessage",
-                {"message": v1_message.model_dump(exclude_none=True)},
-                timeout=timeout,
-            )
+            params: dict[str, Any] = {
+                "message": legacy_message_to_v1(message).model_dump(exclude_none=True)
+            }
+            if configuration:
+                params["configuration"] = configuration
+            result = await self._rpc("SendMessage", params, timeout=timeout)
             return Task.model_validate(task_result_to_legacy_payload(result))
-        result = await self._rpc(
-            "message/send",
-            {"message": message.model_dump(exclude_none=True)},
-            timeout=timeout,
-        )
+        legacy_params: dict[str, Any] = {"message": message.model_dump(exclude_none=True)}
+        if configuration:
+            legacy_params["configuration"] = configuration
+        result = await self._rpc("message/send", legacy_params, timeout=timeout)
         return Task.model_validate(result)
 
     async def send_message_streaming(
@@ -1138,51 +1785,67 @@ class A2AClient:
         message: Message,
         *,
         timeout: float | httpx.Timeout | None = None,  # noqa: ASYNC109 — forwarded to httpx, not an asyncio timer
+        push_notification_config: A2AV1TaskPushNotificationConfig | dict[str, Any] | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
-        """Send a message via JSON-RPC streaming and yield events."""
-        import httpx
-
+        """Send a message on the streaming method and yield events."""
+        configuration = self._configuration(push_notification_config, None)
         if self._protocol_version == A2A_V1_PROTOCOL_VERSION:
-            method = "SendStreamingMessage"
-            message_payload = legacy_message_to_v1(message).model_dump(exclude_none=True)
-        else:
-            method = "message/stream"
-            message_payload = message.model_dump(exclude_none=True)
+            params: dict[str, Any] = {
+                "message": legacy_message_to_v1(message).model_dump(exclude_none=True)
+            }
+            if configuration:
+                params["configuration"] = configuration
+            async for frame in self._stream("SendStreamingMessage", params, timeout=timeout):
+                if "error" in frame:
+                    yield frame  # surface error envelope to caller
+                    break
+                yield v1_stream_response_to_legacy_payload(frame)
+            return
+
         body = {
             "jsonrpc": "2.0",
             "id": uuid.uuid4().hex,
-            "method": method,
-            "params": {"message": message_payload},
+            "method": "message/stream",
+            "params": {"message": message.model_dump(exclude_none=True)},
         }
         headers = self._headers() | {"Accept": "text/event-stream"}
         effective_timeout = self._timeout if timeout is None else timeout
-        async with (
-            httpx.AsyncClient(timeout=effective_timeout) as client,
-            client.stream("POST", f"{self._url}/", json=body, headers=headers) as resp,
-        ):
-            resp.raise_for_status()
-            async for raw in resp.aiter_lines():
-                if not raw or not raw.startswith("data: "):
-                    continue
-                payload = raw[len("data: ") :]
-                if payload.strip() == "[DONE]":
-                    break
-                try:
-                    env = json.loads(payload)
-                except json.JSONDecodeError:
-                    continue
-                if "error" in env:
-                    yield env  # surface error envelope to caller
-                    break
-                result = env.get("result", env)
-                yield (
-                    v1_stream_response_to_legacy_payload(result)
-                    if method == "SendStreamingMessage"
-                    else result
-                )
+        client = await self._http()
+        try:
+            async with client.stream(
+                "POST", f"{self._url}/", json=body, headers=headers, timeout=effective_timeout
+            ) as resp:
+                resp.raise_for_status()
+                async for raw in resp.aiter_lines():
+                    if not raw or not raw.startswith("data: "):
+                        continue
+                    payload = raw[len("data: ") :]
+                    if payload.strip() == "[DONE]":
+                        break
+                    try:
+                        env = json.loads(payload)
+                    except json.JSONDecodeError:
+                        continue
+                    if "error" in env:
+                        yield env  # surface error envelope to caller
+                        break
+                    yield env.get("result", env)
+        finally:
+            if client is not self._http_client:
+                await client.aclose()
+
+    async def subscribe(self, task_id: str) -> AsyncIterator[dict[str, Any]]:
+        """Follow a running task (``SubscribeToTask``): the snapshot, then live events."""
+        if self._protocol_version != A2A_V1_PROTOCOL_VERSION:
+            raise RuntimeError("subscribe requires A2A v1.0 protocol_version")
+        async for frame in self._stream("SubscribeToTask", {"id": task_id}):
+            if "error" in frame:
+                yield frame
+                break
+            yield v1_stream_response_to_legacy_payload(frame)
 
     async def get_task(self, task_id: str, history_length: int | None = None) -> Task:
-        """Fetch a task by id (JSON-RPC ``tasks/get``)."""
+        """Fetch a task by id (``GetTask``)."""
         params: dict[str, Any] = {"id": task_id}
         if history_length is not None:
             params["historyLength"] = history_length
@@ -1237,12 +1900,61 @@ class A2AClient:
         raise RuntimeError("list_tasks requires A2A v1.0 protocol_version")
 
     async def cancel_task(self, task_id: str) -> Task:
-        """Cancel a task (JSON-RPC ``tasks/cancel``)."""
+        """Cancel a task (``CancelTask``)."""
         if self._protocol_version == A2A_V1_PROTOCOL_VERSION:
             result = await self._rpc("CancelTask", {"id": task_id})
             return Task.model_validate(task_result_to_legacy_payload(result))
         result = await self._rpc("tasks/cancel", {"id": task_id})
         return Task.model_validate(result)
+
+    # ---- push notifications -------------------------------------------
+
+    def _require_v1(self, what: str) -> None:
+        if self._protocol_version != A2A_V1_PROTOCOL_VERSION:
+            raise RuntimeError(f"{what} requires A2A v1.0 protocol_version")
+
+    async def set_push_notification_config(
+        self,
+        task_id: str,
+        config: A2AV1TaskPushNotificationConfig | dict[str, Any],
+    ) -> A2AV1TaskPushNotificationConfig:
+        """Register a webhook for ``task_id`` (``CreateTaskPushNotificationConfig``)."""
+        self._require_v1("push notification configs")
+        model = (
+            config
+            if isinstance(config, A2AV1TaskPushNotificationConfig)
+            else A2AV1TaskPushNotificationConfig.model_validate(config)
+        )
+        params = model.model_dump(exclude_none=True)
+        params["taskId"] = task_id
+        result = await self._rpc("CreateTaskPushNotificationConfig", params)
+        return A2AV1TaskPushNotificationConfig.model_validate(result)
+
+    async def get_push_notification_config(
+        self, task_id: str, config_id: str
+    ) -> A2AV1TaskPushNotificationConfig:
+        """One registered webhook (``GetTaskPushNotificationConfig``)."""
+        self._require_v1("push notification configs")
+        result = await self._rpc(
+            "GetTaskPushNotificationConfig", {"taskId": task_id, "id": config_id}
+        )
+        return A2AV1TaskPushNotificationConfig.model_validate(result)
+
+    async def list_push_notification_configs(
+        self, task_id: str
+    ) -> list[A2AV1TaskPushNotificationConfig]:
+        """Every webhook registered on ``task_id`` (``ListTaskPushNotificationConfigs``)."""
+        self._require_v1("push notification configs")
+        result = await self._rpc("ListTaskPushNotificationConfigs", {"taskId": task_id})
+        return [
+            A2AV1TaskPushNotificationConfig.model_validate(item)
+            for item in result.get("configs", [])
+        ]
+
+    async def delete_push_notification_config(self, task_id: str, config_id: str) -> None:
+        """Remove a webhook (``DeleteTaskPushNotificationConfig``); a repeat is a no-op."""
+        self._require_v1("push notification configs")
+        await self._rpc("DeleteTaskPushNotificationConfig", {"taskId": task_id, "id": config_id})
 
     # ---- legacy convenience APIs --------------------------------------
 
@@ -1258,19 +1970,20 @@ class A2AClient:
         round-trip; spec-compliant peers should prefer
         :meth:`send_message` so they can read the full :class:`Task`.
         """
-        import httpx
-
         request = A2ARequest(messages=[A2AMessage(role="user", content=prompt)])
-        async with httpx.AsyncClient(
-            timeout=self._timeout if timeout is None else timeout
-        ) as client:
+        client = await self._http()
+        try:
             resp = await client.post(
                 f"{self._url}/a2a/invoke",
                 json=request.model_dump(),
                 headers=self._auth_headers(),
+                timeout=self._timeout if timeout is None else timeout,
             )
             resp.raise_for_status()
             response = A2AResponse.model_validate(resp.json())
+        finally:
+            if client is not self._http_client:
+                await client.aclose()
         agent_msgs = [m for m in response.messages if m.role == "agent"]
         return agent_msgs[-1].content if agent_msgs else ""
 
@@ -1297,14 +2010,10 @@ class A2AClient:
 # is ``locus.a2a`` after this change).
 __all__ = [
     "A2AClient",
+    "A2AClientError",
     "A2AMessage",
     "A2ARequest",
     "A2AResponse",
     "A2AServer",
     "AgentCard",
 ]
-
-
-# Force time module reference so ruff/mypy don't drop it on cleanup —
-# we reference it from the legacy stream path's correlation handling.
-_ = time

@@ -35,6 +35,32 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 A2A_V1_PROTOCOL_VERSION = "1.0"
 
+#: ``AgentInterface.protocolBinding`` values for the three bindings the
+#: specification defines. The field is an open string; these are the core ones.
+BINDING_JSONRPC = "JSONRPC"
+BINDING_HTTP_JSON = "HTTP+JSON"
+BINDING_GRPC = "GRPC"
+A2A_PROTOCOL_BINDINGS: tuple[str, ...] = (BINDING_JSONRPC, BINDING_HTTP_JSON, BINDING_GRPC)
+
+#: The media type the HTTP+JSON binding and push-notification webhooks use.
+A2A_JSON_MEDIA_TYPE = "application/a2a+json"
+
+#: The fully qualified gRPC service the v1.0 proto defines.
+A2A_GRPC_SERVICE = "lf.a2a.v1.A2AService"
+
+#: Task states the specification calls terminal: no further transitions.
+A2A_V1_TERMINAL_STATES = frozenset(
+    {
+        "TASK_STATE_COMPLETED",
+        "TASK_STATE_FAILED",
+        "TASK_STATE_CANCELED",
+        "TASK_STATE_REJECTED",
+    }
+)
+#: Task states the specification calls interrupted: the task waits on the
+#: client (an answer, or credentials) and a follow-up message continues it.
+A2A_V1_INTERRUPTED_STATES = frozenset({"TASK_STATE_INPUT_REQUIRED", "TASK_STATE_AUTH_REQUIRED"})
+
 
 class A2AV1Role(StrEnum):
     """A2A v1.0 message role enum names."""
@@ -144,8 +170,92 @@ class A2AV1TaskArtifactUpdateEvent(BaseModel):
     metadata: dict[str, Any] | None = None
 
 
+class A2AV1AuthenticationInfo(BaseModel):
+    """A2A v1.0 AuthenticationInfo: how the agent authenticates to a webhook.
+
+    ``scheme`` is an HTTP authentication scheme name (``Bearer``, ``Basic``,
+    ...); ``credentials`` is the value sent after it in the
+    ``Authorization`` header of every push notification.
+    """
+
+    scheme: str
+    credentials: str | None = None
+
+
+class A2AV1TaskPushNotificationConfig(BaseModel):
+    """A2A v1.0 TaskPushNotificationConfig: where to post a task's updates.
+
+    ``url`` is the webhook. ``token`` is echoed back on every notification in
+    the ``X-A2A-Notification-Token`` header so the receiver can tell the
+    notification belongs to the task it registered. ``id`` names the config
+    within the task; the server assigns one when the client sends none.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    tenant: str | None = None
+    id: str | None = None
+    taskId: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("taskId", "task_id"),
+    )
+    url: str
+    token: str | None = None
+    authentication: A2AV1AuthenticationInfo | None = None
+
+
+class A2AV1GetTaskPushNotificationConfigRequest(BaseModel):
+    """A2A v1.0 GetTaskPushNotificationConfig request params."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    tenant: str | None = None
+    taskId: str = Field(validation_alias=AliasChoices("taskId", "task_id"))
+    id: str
+
+
+class A2AV1ListTaskPushNotificationConfigsRequest(BaseModel):
+    """A2A v1.0 ListTaskPushNotificationConfigs request params."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    tenant: str | None = None
+    taskId: str = Field(validation_alias=AliasChoices("taskId", "task_id"))
+    pageSize: int | None = Field(
+        default=None,
+        validation_alias=AliasChoices("pageSize", "page_size"),
+    )
+    pageToken: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("pageToken", "page_token"),
+    )
+
+
+class A2AV1ListTaskPushNotificationConfigsResponse(BaseModel):
+    """A2A v1.0 ListTaskPushNotificationConfigs response."""
+
+    configs: list[A2AV1TaskPushNotificationConfig]
+    nextPageToken: str = ""
+
+
+class A2AV1DeleteTaskPushNotificationConfigRequest(BaseModel):
+    """A2A v1.0 DeleteTaskPushNotificationConfig request params."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    tenant: str | None = None
+    taskId: str = Field(validation_alias=AliasChoices("taskId", "task_id"))
+    id: str
+
+
 class A2AV1SendMessageConfiguration(BaseModel):
-    """A2A v1.0 SendMessage configuration."""
+    """A2A v1.0 SendMessage configuration.
+
+    ``taskPushNotificationConfig`` registers a webhook for the task the
+    message creates, so a client that cannot hold a connection open still
+    hears about every status change (``pushNotificationConfig`` is accepted
+    as the pre-1.0 spelling of the same field).
+    """
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -156,6 +266,15 @@ class A2AV1SendMessageConfiguration(BaseModel):
     )
     blocking: bool | None = None
     returnImmediately: bool | None = None
+    taskPushNotificationConfig: A2AV1TaskPushNotificationConfig | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "taskPushNotificationConfig",
+            "task_push_notification_config",
+            "pushNotificationConfig",
+            "push_notification_config",
+        ),
+    )
 
 
 class A2AV1SendMessageRequest(BaseModel):
@@ -257,10 +376,23 @@ class A2AV1StreamResponse(BaseModel):
 
 
 __all__ = [
+    "A2A_GRPC_SERVICE",
+    "A2A_JSON_MEDIA_TYPE",
+    "A2A_PROTOCOL_BINDINGS",
+    "A2A_V1_INTERRUPTED_STATES",
     "A2A_V1_PROTOCOL_VERSION",
+    "A2A_V1_TERMINAL_STATES",
+    "BINDING_GRPC",
+    "BINDING_HTTP_JSON",
+    "BINDING_JSONRPC",
     "A2AV1Artifact",
+    "A2AV1AuthenticationInfo",
     "A2AV1CancelTaskRequest",
+    "A2AV1DeleteTaskPushNotificationConfigRequest",
+    "A2AV1GetTaskPushNotificationConfigRequest",
     "A2AV1GetTaskRequest",
+    "A2AV1ListTaskPushNotificationConfigsRequest",
+    "A2AV1ListTaskPushNotificationConfigsResponse",
     "A2AV1ListTasksRequest",
     "A2AV1ListTasksResponse",
     "A2AV1Message",
@@ -273,6 +405,7 @@ __all__ = [
     "A2AV1StreamResponse",
     "A2AV1Task",
     "A2AV1TaskArtifactUpdateEvent",
+    "A2AV1TaskPushNotificationConfig",
     "A2AV1TaskState",
     "A2AV1TaskStatus",
     "A2AV1TaskStatusUpdateEvent",
