@@ -16,6 +16,8 @@ Conversation Management:
 Checkpointing:
 - BaseCheckpointer: Abstract base for checkpointer implementations
 - DeltaCheckpointer: Efficient delta-based checkpointing (~77% storage savings)
+- ToolEffectLedger: Every executed tool call, recorded in the thread's checkpointer
+  as it returns, so a run continued after a crash replays instead of re-running
 - get_checkpointer: Get a checkpointer by string identifier
 - register_checkpointer: Register a custom checkpointer provider
 - list_checkpointers: List available checkpointer providers
@@ -56,6 +58,7 @@ from locus.memory.delta import (
     DeltaStorage,
     InMemoryDeltaStorage,
 )
+from locus.memory.ledger import LedgerEntry, LedgerManifest, ToolEffectLedger
 from locus.memory.manager import (
     BaseMemoryManager,
     LLMMemoryManager,
@@ -95,6 +98,10 @@ __all__ = [
     "InMemoryDeltaStorage",
     "DeltaCheckpoint",
     "CheckpointMetadata",
+    # Tool-effect ledger
+    "ToolEffectLedger",
+    "LedgerEntry",
+    "LedgerManifest",
     # Registry
     "get_checkpointer",
     "register_checkpointer",

@@ -765,6 +765,45 @@ class AgentConfig(BaseModel):
         ),
     )
 
+    durability: Literal["sync", "async", "exit"] = Field(
+        default="sync",
+        description=(
+            "When a run writes its iteration checkpoints. 'sync' (the default) "
+            "awaits each one before the next model call; 'async' schedules it "
+            "and awaits every pending write before the run's final save; "
+            "'exit' writes once at the end of the run. The final save and the "
+            "save before an interrupt are awaited in every mode. Agent.run, "
+            "arun and run_sync take a per-run override. See "
+            "locus.agent.durability."
+        ),
+    )
+
+    tool_ledger: bool | None = Field(
+        default=None,
+        description=(
+            "Record every executed tool call in the thread's checkpointer the "
+            "moment it returns, so a run that continues the turn after a crash "
+            "(Agent.continue_turn, resume(invocation_id=...)) replays the "
+            "recorded result instead of running the tool again. None (the "
+            "default) turns the ledger on for durability 'async' and 'exit', "
+            "whose iteration checkpoints are deferred or absent, and off for "
+            "'sync'; True turns it on in every mode, False off. Needs a "
+            "checkpointer and a thread_id. See locus.memory.ledger."
+        ),
+    )
+
+    rerun_idempotent_on_replay: bool = Field(
+        default=False,
+        description=(
+            "On replay, run @tool(idempotent=True) tools again instead of "
+            "serving their ledger record, and refresh the record with the new "
+            "result. Off by default: a recorded call is not run twice. Turn on "
+            "when an idempotent tool's output should be current rather than "
+            "the one the crashed run saw. Tools not marked idempotent are "
+            "always served from the ledger."
+        ),
+    )
+
     # Hooks and plugins
     hooks: list[Any] = Field(
         default_factory=list,

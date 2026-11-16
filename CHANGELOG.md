@@ -10,6 +10,36 @@ policy.
 
 ### Added
 
+- **Durability modes.** `Agent(durability=...)`, and `durability=` on
+  `run`, `arun` and `run_sync`, say when a run writes its iteration
+  checkpoints: `"sync"` (the default, and what every earlier release did)
+  awaits each one before the next model call; `"async"` schedules it and
+  awaits every pending write before the run's final save; `"exit"` writes
+  once at the end of the run. The final save and the save before an
+  interrupt are awaited in every mode. `GraphConfig.durability` does the
+  same for a `StateGraph`'s per-step saves. Every checkpointer gets the
+  modes through the protocol; none needed code of its own.
+  (`locus.agent.durability`)
+- **Tool-effect ledger.** With `durability="async"` or `"exit"` (or
+  `Agent(tool_ledger=True)` in any mode) the executor records every
+  executed tool call in the thread's checkpointer the moment it returns,
+  keyed by `(thread id, step, tool name, canonical arguments)`, as
+  checkpoints of the sidecar thread `<thread_id>~ledger`. A run that
+  continues the turn after a crash — `Agent.continue_turn(thread_id)`,
+  the new `Agent.resume(invocation_id=..., thread_id=...)`, or
+  `Agent.run(..., invocation_id=...)` under the id the crashed run was
+  started with — replays a recorded call instead of running the tool
+  again and runs only the calls with no record; `ToolResult.replayed`
+  marks a replayed result. `continue_turn` now also picks up a turn none
+  of whose checkpoints landed, from the ledger's manifest. Tools not
+  marked idempotent run at least once; `Agent(rerun_idempotent_on_replay=
+  True)` lets `idempotent=True` tools run again on replay instead. The
+  turn's final save clears the ledger. Temporal and DBOS segments record
+  into the same ledger, and `run_agent_segment(kind="continue")` finishes
+  an interrupted segment by replaying it. The checkpointers page has an
+  overhead table for each mode on the in-memory and PostgreSQL
+  checkpointers. (`locus.memory.ledger`; #453)
+
 - **`OracleAuditTrail`.** The audit trail on an Oracle AI Database immutable
   table (`CREATE IMMUTABLE TABLE … NO DROP UNTIL n DAYS IDLE NO DELETE UNTIL
   n DAYS AFTER INSERT`), or a blockchain table with `table_kind="blockchain"`.
