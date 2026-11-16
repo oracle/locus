@@ -153,6 +153,7 @@ from locus.control.verification import (
     VerificationResult,
     verify,
 )
+from locus.tools.integrity import ToolCallIntegrityError, ToolCallSignature, ToolCallSigner
 
 
 __all__ = [
@@ -250,6 +251,10 @@ __all__ = [
     "anchor_trail",
     "latest_anchor",
     "verify_anchor",
+    # Tool-call integrity — what the runtime enforces between model and executor
+    "ToolCallSigner",
+    "ToolCallSignature",
+    "ToolCallIntegrityError",
     # Governed-by-default agent wrapper
     "GovernedAgent",
     "governed_agent",

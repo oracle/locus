@@ -472,6 +472,8 @@ class GuardrailsHook(HookProvider):
                 else:
                     redacted_args[key] = value
             event.arguments = redacted_args
+            # The redacted call is what runs: keep its chain of custody explicit.
+            event.resign(by="GuardrailsHook")
 
     async def on_after_tool_call(self, event: AfterToolCallEvent) -> None:
         """Validate tool result.
