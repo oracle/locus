@@ -376,7 +376,7 @@ def test_an_action_from_json_round_trips() -> None:
 @pytest.mark.parametrize(
     ("text", "error", "fragment"),
     [
-        ('{"name": "x", "nmae": 1}', ValueError, "unknown action key 'nmae'"),
+        ('{"name": "x", "unknown_key": 1}', ValueError, "unknown action key 'unknown_key'"),
         ('{"asset": "o1"}', TypeError, "'name' must be a string"),
         ('{"name": ""}', ValueError, "non-empty 'name'"),
         ('{"name": "x", "tags": "a"}', TypeError, "'tags' must be a list"),
