@@ -54,6 +54,57 @@ class OCIBucketConfig(BaseModel):
     region: str | None = None
 
 
+def build_object_storage_client(cfg: OCIBucketConfig) -> ObjectStorageClient:
+    """An ``ObjectStorageClient`` for ``cfg``, honouring its ``auth_type``.
+
+    ``api_key`` (the default) reads the profile from ``cfg.config_file``; a
+    session-token profile (``oci session authenticate``) is detected and
+    signed with its token. ``security_token``, ``instance_principal`` and
+    ``resource_principal`` select the matching signer. Shared by the
+    checkpointer and the audit-trail anchor store so the auth rules live once.
+    """
+    try:
+        import oci
+    except ImportError as e:  # pragma: no cover - optional dep
+        raise ImportError(
+            "OCI Object Storage needs the 'oci' package. Install with: pip install locus-sdk[oci]"
+        ) from e
+
+    from pathlib import Path
+
+    config_file = Path(cfg.config_file).expanduser()
+
+    if cfg.auth_type == "instance_principal":
+        signer = oci.auth.signers.InstancePrincipalsSecurityTokenSigner()
+        return oci.object_storage.ObjectStorageClient(config={}, signer=signer)
+    if cfg.auth_type == "resource_principal":
+        signer = oci.auth.signers.get_resource_principals_signer()
+        return oci.object_storage.ObjectStorageClient(config={}, signer=signer)
+    if cfg.auth_type == "security_token":
+        oci_config = oci.config.from_file(str(config_file), cfg.profile_name)
+        token_file = oci_config.get("security_token_file")
+        if not token_file:
+            raise ValueError("security_token_file not found in config")
+        with open(Path(token_file).expanduser()) as f:
+            token = f.read().strip()
+        private_key = oci.signer.load_private_key_from_file(oci_config.get("key_file"))
+        signer = oci.auth.signers.SecurityTokenSigner(token=token, private_key=private_key)
+        return oci.object_storage.ObjectStorageClient(config=oci_config, signer=signer)
+
+    oci_config = oci.config.from_file(str(config_file), cfg.profile_name)
+    if cfg.region:
+        oci_config["region"] = cfg.region
+    if oci_config.get("security_token_file") and not oci_config.get("user"):
+        # Session-token profile (``oci session authenticate``): API-key
+        # signing cannot work for it, so sign with the session token.
+        with open(Path(oci_config["security_token_file"]).expanduser()) as f:
+            token = f.read().strip()
+        private_key = oci.signer.load_private_key_from_file(oci_config.get("key_file"))
+        signer = oci.auth.signers.SecurityTokenSigner(token=token, private_key=private_key)
+        return oci.object_storage.ObjectStorageClient(config=oci_config, signer=signer)
+    return oci.object_storage.ObjectStorageClient(oci_config)
+
+
 class OCIBucketBackend(BaseCheckpointer):
     """OCI Object Storage-backed checkpointer.
 
@@ -147,52 +198,7 @@ class OCIBucketBackend(BaseCheckpointer):
     def _get_client(self) -> ObjectStorageClient:
         if self._client is not None:
             return self._client
-
-        try:
-            import oci
-        except ImportError as e:  # pragma: no cover - optional dep
-            raise ImportError(
-                "OCIBucketBackend requires the 'oci' package. Install with: pip install locus[oci]"
-            ) from e
-
-        from pathlib import Path
-
-        cfg = self.config
-        config_file = Path(cfg.config_file).expanduser()
-
-        if cfg.auth_type == "instance_principal":
-            signer = oci.auth.signers.InstancePrincipalsSecurityTokenSigner()
-            self._client = oci.object_storage.ObjectStorageClient(config={}, signer=signer)
-        elif cfg.auth_type == "resource_principal":
-            signer = oci.auth.signers.get_resource_principals_signer()
-            self._client = oci.object_storage.ObjectStorageClient(config={}, signer=signer)
-        elif cfg.auth_type == "security_token":
-            oci_config = oci.config.from_file(str(config_file), cfg.profile_name)
-            token_file = oci_config.get("security_token_file")
-            if not token_file:
-                raise ValueError("security_token_file not found in config")
-            with open(Path(token_file).expanduser()) as f:
-                token = f.read().strip()
-            private_key = oci.signer.load_private_key_from_file(oci_config.get("key_file"))
-            signer = oci.auth.signers.SecurityTokenSigner(token=token, private_key=private_key)
-            self._client = oci.object_storage.ObjectStorageClient(config=oci_config, signer=signer)
-        else:
-            oci_config = oci.config.from_file(str(config_file), cfg.profile_name)
-            if cfg.region:
-                oci_config["region"] = cfg.region
-            if oci_config.get("security_token_file") and not oci_config.get("user"):
-                # Session-token profile (``oci session authenticate``): API-key
-                # signing cannot work for it, so sign with the session token.
-                with open(Path(oci_config["security_token_file"]).expanduser()) as f:
-                    token = f.read().strip()
-                private_key = oci.signer.load_private_key_from_file(oci_config.get("key_file"))
-                signer = oci.auth.signers.SecurityTokenSigner(token=token, private_key=private_key)
-                self._client = oci.object_storage.ObjectStorageClient(
-                    config=oci_config, signer=signer
-                )
-            else:
-                self._client = oci.object_storage.ObjectStorageClient(oci_config)
-
+        self._client = build_object_storage_client(self.config)
         return self._client
 
     async def _ensure_bucket(self) -> None:

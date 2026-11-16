@@ -10,6 +10,28 @@ policy.
 
 ### Added
 
+- **`OracleAuditTrail`.** The audit trail on an Oracle AI Database immutable
+  table (`CREATE IMMUTABLE TABLE … NO DROP UNTIL n DAYS IDLE NO DELETE UNTIL
+  n DAYS AFTER INSERT`), or a blockchain table with `table_kind="blockchain"`.
+  Same API as `AuditTrail`, so `admit(trail=…)`, `gate_tool(trail=…)` and
+  `governed_agent(audit_trail=…)` take it unchanged; `record()` commits the
+  row before it returns, several processes can share one trail (a stale
+  writer reloads and continues the chain instead of forking it), and
+  `verify()` re-reads the rows and recomputes every hash. On a blockchain
+  table it also checks that every row carries its database-side hash
+  (`ORABCTAB_HASH$`) and that `DBMS_BLOCKCHAIN_TABLE.VERIFY_ROWS` verifies
+  them all. `arecord()` / `acheck()` / `averify()` run the same work on a
+  worker thread for async code.
+- **Chain-head anchoring in object storage.** `anchor_trail(trail, store,
+  every=…)` writes the current head (record count, sequence number, hash,
+  timestamp) as a small JSON object into an OCI Object Storage bucket
+  (`OCIBucketAnchorStore`) or any S3-compatible bucket (`S3AnchorStore`);
+  `verify_anchor(trail, store)` checks the chain still reaches the latest
+  anchor, so a trail cut short of it fails. `require_retention_rule=True`
+  refuses to anchor into a bucket without a retention rule (OCI) or Object
+  Lock (S3). `anchor_periodically()` is the loop a server or runner calls.
+  The observability, control-layer and guarantees pages describe when to use
+  each backend.
 - **Zero Data Retention detection on `OCIResponsesModel`.** A tenancy with
   Zero Data Retention (ZDR) answers every request that carries
   `previous_response_id` with a 400 saying so. That reply now raises
