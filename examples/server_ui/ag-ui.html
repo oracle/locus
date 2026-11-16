@@ -1,0 +1,141 @@
+<!doctype html>
+<!--
+  Copyright (c) 2025, 2026 Oracle and/or its affiliates.
+  Licensed under the Universal Permissive License v1.0 as shown at
+  https://oss.oracle.com/licenses/upl/
+
+  A minimal AG-UI client for a Locus AgentServer, in plain HTML and JS.
+
+  It POSTs an AG-UI RunAgentInput (threadId, runId, messages) to /ag-ui and
+  renders the AG-UI events the server streams back: RUN_STARTED,
+  TEXT_MESSAGE_START / CONTENT / END, TOOL_CALL_START / ARGS / END / RESULT,
+  STATE_SNAPSHOT / STATE_DELTA, CUSTOM and RUN_FINISHED / RUN_ERROR. Same
+  server and origin notes as index.html.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Locus AG-UI client</title>
+  <style>
+    body { font: 14px/1.4 system-ui, sans-serif; margin: 2rem; max-width: 56rem; }
+    fieldset { border: 1px solid #ccc; margin-bottom: 1rem; }
+    label { display: block; margin: .4rem 0; }
+    input[type=text] { width: 100%; box-sizing: border-box; }
+    textarea { width: 100%; height: 4rem; }
+    #messages { background: #f6f6f6; padding: 1rem; min-height: 8rem; }
+    .msg { margin: .5rem 0; }
+    .user { color: #036; }
+    .assistant { color: #000; }
+    .tool { color: #555; font-family: ui-monospace, monospace; white-space: pre-wrap; }
+    #events { white-space: pre-wrap; color: #666; font-family: ui-monospace, monospace; font-size: 12px; }
+    #state { font-family: ui-monospace, monospace; }
+  </style>
+</head>
+<body>
+  <h1>Locus AG-UI client</h1>
+  <fieldset>
+    <legend>Server</legend>
+    <label>Base URL <input id="base" type="text" value="http://127.0.0.1:8000"></label>
+    <label>API key (bearer; leave empty for an unauthenticated dev server)
+      <input id="key" type="text" value=""></label>
+    <label>Thread id <input id="thread" type="text" value="agui-demo"></label>
+  </fieldset>
+  <fieldset>
+    <legend>Message</legend>
+    <textarea id="prompt">Page on-call? CrashLoopBackOff on payments-worker, 12 restarts.</textarea>
+    <button id="send">Send</button>
+    <span>State: <span id="state">{}</span></span>
+  </fieldset>
+  <div id="messages"></div>
+  <details><summary>Raw AG-UI events</summary><div id="events"></div></details>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const history = [];               // AG-UI messages we send back each run
+    const messageEls = new Map();     // messageId -> element
+    let state = {};
+
+    function addMessage(id, role, text) {
+      const el = document.createElement("div");
+      el.className = `msg ${role}`;
+      el.textContent = (role === "user" ? "You: " : role === "tool" ? "tool: " : "Agent: ") + text;
+      $("messages").appendChild(el);
+      if (id) messageEls.set(id, el);
+      return el;
+    }
+
+    function applyDelta(ops) {
+      // RFC 6902, the subset the server emits: replace at a top-level path.
+      for (const op of ops) {
+        if (op.op === "replace" || op.op === "add") state[op.path.slice(1)] = op.value;
+        else if (op.op === "remove") delete state[op.path.slice(1)];
+      }
+      $("state").textContent = JSON.stringify(state);
+    }
+
+    function handleEvent(evt) {
+      $("events").textContent += JSON.stringify(evt) + "\n";
+      switch (evt.type) {
+        case "RUN_STARTED": break;
+        case "STATE_SNAPSHOT": state = evt.snapshot; $("state").textContent = JSON.stringify(state); break;
+        case "STATE_DELTA": applyDelta(evt.delta); break;
+        case "TEXT_MESSAGE_START": addMessage(evt.messageId, evt.role, ""); break;
+        case "TEXT_MESSAGE_CONTENT": messageEls.get(evt.messageId).textContent += evt.delta; break;
+        case "TEXT_MESSAGE_END": {
+          const text = messageEls.get(evt.messageId).textContent.replace(/^Agent: /, "");
+          history.push({ id: evt.messageId, role: "assistant", content: text });
+          break;
+        }
+        case "TOOL_CALL_START": addMessage(`call-${evt.toolCallId}`, "tool", `${evt.toolCallName}(`); break;
+        case "TOOL_CALL_ARGS": messageEls.get(`call-${evt.toolCallId}`).textContent += evt.delta; break;
+        case "TOOL_CALL_END": messageEls.get(`call-${evt.toolCallId}`).textContent += ")"; break;
+        case "TOOL_CALL_RESULT": addMessage(evt.messageId, "tool", `${evt.toolCallId} -> ${evt.content}`); break;
+        case "CUSTOM": addMessage(null, "tool", `${evt.name}: ${JSON.stringify(evt.value)}`); break;
+        case "RUN_FINISHED": addMessage(null, "tool", `run finished ${JSON.stringify(evt.outcome || evt.result || {})}`); break;
+        case "RUN_ERROR": addMessage(null, "tool", `run error: ${evt.message}`); break;
+        default: break;
+      }
+    }
+
+    async function send() {
+      const base = $("base").value.replace(/\/$/, "");
+      const prompt = $("prompt").value;
+      const userId = "u-" + Date.now();
+      history.push({ id: userId, role: "user", content: prompt });
+      addMessage(userId, "user", prompt);
+      const headers = { "Content-Type": "application/json", "Accept": "text/event-stream" };
+      const key = $("key").value.trim();
+      if (key) headers["Authorization"] = "Bearer " + key;
+      const res = await fetch(`${base}/ag-ui`, {
+        method: "POST", headers,
+        body: JSON.stringify({
+          threadId: $("thread").value,
+          runId: "run-" + Date.now(),
+          messages: history,
+          tools: [], context: [], state, forwardedProps: {},
+        }),
+      });
+      if (!res.ok) { addMessage(null, "tool", `POST /ag-ui -> ${res.status} ${await res.text()}`); return; }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const frames = buf.split("\n\n");
+        buf = frames.pop();
+        for (const frame of frames) {
+          const line = frame.split("\n").find((l) => l.startsWith("data: "));
+          if (!line) continue;
+          const data = line.slice(6);
+          if (data === "[DONE]") continue;
+          handleEvent(JSON.parse(data));
+        }
+      }
+    }
+
+    $("send").onclick = () => send().catch((e) => addMessage(null, "tool", String(e)));
+  </script>
+</body>
+</html>
