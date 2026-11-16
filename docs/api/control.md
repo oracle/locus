@@ -31,6 +31,36 @@ strongest result, so deny beats hold beats allow (in the API,
 ::: locus.control.policy.ApprovalDecision
 ::: locus.control.policy.ApprovalOutcome
 
+### The policy as a file
+
+`ControlPolicy.load()` reads a policy from a YAML or JSON file and
+`policy.dump()` writes one; every key is a field of the same name, unknown
+keys are errors that name the key, and the two forms round-trip.
+`policy.content_hash()` names the rules a decision was made under; `admit()`
+records it as `policy_hash` on every audit entry. `PolicyWatcher` follows a
+file and hands `admit()` or `gate_tool()` the current policy, one per
+decision. The [policy authoring](../concepts/policy-authoring.md#the-policy-as-a-file)
+page shows the file form and the `locus policy lint` and `locus policy
+explain` commands that read it.
+
+::: locus.control.policy_file.PolicyWatcher
+::: locus.control.policy_file.PolicyDocument
+::: locus.control.policy_file.PolicyFileError
+::: locus.control.policy_file.policy_hash
+::: locus.control.policy.PolicySource
+
+### Linting and explaining a policy
+
+What `locus policy lint` and `locus policy explain` do, as calls.
+
+::: locus.control.policy_lint.lint_policy
+::: locus.control.policy_lint.LintReport
+::: locus.control.policy_lint.LintFinding
+::: locus.control.policy_lint.explain
+::: locus.control.policy_lint.Explanation
+::: locus.control.policy.evaluate_rules
+::: locus.control.policy.RuleCheck
+
 ## Describing an action
 
 A policy matches on what an action *is* — its environment, kind, blast

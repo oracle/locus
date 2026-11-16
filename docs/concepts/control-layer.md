@@ -53,7 +53,12 @@ is wrapped.
 ## Recommended production composition
 
 1. Define a typed tool for the side effect and an argument-derived `Action`.
-2. Wrap it with `gate_tool()` and a reviewed `ControlPolicy`.
+2. Wrap it with `gate_tool()` and a reviewed `ControlPolicy`. Keep the policy
+   as a YAML or JSON file the owning team reviews, lint it in CI with
+   `locus policy lint`, and load it with `ControlPolicy.load()` or a
+   `PolicyWatcher` for reload without a deploy; see
+   [the policy as a file](policy-authoring.md#the-policy-as-a-file). Every
+   audit entry carries the hash of the rules it was decided under.
 3. Use an `ApprovalStore` that survives a restart, such as `FileApprovals`, for
    human decisions (see
    [Pausing until someone decides](../api/control.md#pausing-until-someone-decides)).
@@ -71,7 +76,7 @@ is wrapped.
 7. Test allow, hold, deny, restart, duplicate-call, and crash-recovery paths.
 
 See [First controlled action](../how-to/first-controlled-action.md) for a small
-offline run, [policy authoring](policy-authoring.md) for classification
-coverage, [`gate_tool`](../api/control.md#locus.control.gate.gate_tool) for the
+offline run, [policy authoring](policy-authoring.md) for the file form, lint
+and classification coverage, [`gate_tool`](../api/control.md#locus.control.gate.gate_tool) for the
 interrupt-and-resume parameters, [interrupts](interrupts.md) for
 `agent.resume(...)`.

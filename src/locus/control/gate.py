@@ -55,13 +55,13 @@ from typing import (
 from locus.control.action import ActionSpec, resolve_action
 from locus.control.admission import AdmissionError, admit
 from locus.control.approvals import ApprovalStore
-from locus.control.policy import ApprovalDecision, ApprovalOutcome
+from locus.control.policy import ApprovalDecision, ApprovalOutcome, current_policy
 
 
 if TYPE_CHECKING:
     from locus.control.audit import AuditTrail
     from locus.control.findings import Evidence
-    from locus.control.policy import Action, ControlAdvisor, ControlPolicy
+    from locus.control.policy import Action, ControlAdvisor, ControlPolicy, PolicySource
     from locus.control.spend import SpendLedger
     from locus.control.verification import VerificationResult
     from locus.tools.decorator import Tool
@@ -241,7 +241,7 @@ async def _evidence_for(
 def gate_tool(
     tool: Tool,
     *,
-    policy: ControlPolicy,
+    policy: ControlPolicy | PolicySource,
     action: ActionSpec | None = None,
     trail: AuditTrail | None = None,
     finding: PerCall[Evidence] = None,
@@ -263,7 +263,10 @@ def gate_tool(
         tool: The tool to gate. Not modified — an ungated reference stays
             usable, which matters when the same function is called by trusted
             code elsewhere.
-        policy: The :class:`ControlPolicy` to weigh the call against.
+        policy: The :class:`ControlPolicy` to weigh the call against, or a
+            :class:`~locus.control.policy.PolicySource` such as a
+            :class:`~locus.control.policy_file.PolicyWatcher`, asked for the
+            current policy once per call.
         action: How to turn a call into an :class:`Action`. A constant
             ``Action`` when risk does not vary, or ``(name, kwargs) -> Action``
             when it does — the usual case, since a $12 refund and a $4,000,000
@@ -370,7 +373,7 @@ def gate_tool(
     ) -> Any:
         """A ``require_human`` hold in interrupt mode: pause, or act on a decision."""
         store = cast("ApprovalStore", approval)
-        context = _approval_context(policy, approval_context, tool.name, kwargs)
+        context = _approval_context(current_policy(policy), approval_context, tool.name, kwargs)
         approval_id = store.submit(
             principal,
             tool.name,

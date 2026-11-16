@@ -47,7 +47,9 @@ from locus.control.policy import (
     ApprovalOutcome,
     ControlAdvisor,
     ControlPolicy,
+    PolicySource,
     approve,
+    current_policy,
 )
 from locus.control.verification import VerificationResult
 
@@ -77,7 +79,7 @@ async def admit(
     action: Action,
     perform: Callable[[], Awaitable[T]],
     *,
-    policy: ControlPolicy,
+    policy: ControlPolicy | PolicySource,
     finding: Evidence | None = None,
     verdict: VerificationResult | None = None,
     trail: AuditTrail | None = None,
@@ -101,10 +103,16 @@ async def admit(
     Args:
         action: The proposed side-effecting action.
         perform: A zero-arg async callable that performs the side effect.
-        policy: The governing :class:`~locus.control.policy.ControlPolicy`.
+        policy: The governing :class:`~locus.control.policy.ControlPolicy`, or a
+            :class:`~locus.control.policy.PolicySource` such as a
+            :class:`~locus.control.policy_file.PolicyWatcher`, asked once for
+            the policy this decision is made under.
         finding: The evidence the action responds to.
         verdict: The :func:`~locus.control.verification.verify` result.
         trail: An :class:`~locus.control.audit.AuditTrail` to record the decision on.
+            The entry carries ``policy_hash``, the
+            :meth:`~locus.control.policy.ControlPolicy.content_hash` of the
+            rules the decision was made under.
         approved_by: Who approved a ``require_human`` hold. With it, the held action
             runs and the approver is recorded on the trail. A ``deny`` still raises:
             no person approves past a denial.
@@ -149,7 +157,7 @@ def admit_sync(
     action: Action,
     perform: Callable[[], T],
     *,
-    policy: ControlPolicy,
+    policy: ControlPolicy | PolicySource,
     finding: Evidence | None = None,
     verdict: VerificationResult | None = None,
     trail: AuditTrail | None = None,
@@ -188,7 +196,7 @@ def admit_sync(
 def _decide(  # noqa: PLR0913 — admit()'s arguments, minus the side effect
     action: Action,
     *,
-    policy: ControlPolicy,
+    policy: ControlPolicy | PolicySource,
     finding: Evidence | None,
     verdict: VerificationResult | None,
     trail: AuditTrail | None,
@@ -199,6 +207,9 @@ def _decide(  # noqa: PLR0913 — admit()'s arguments, minus the side effect
     advisor: ControlAdvisor | None = None,
 ) -> ApprovalDecision:
     """Decide, record, and raise unless admitted. The one path both gates share."""
+    # One policy per decision: a source that reloads is asked here and nowhere
+    # else, so the rules weighed and the hash recorded are the same rules.
+    policy = current_policy(policy)
     spent = ledger.spent(spend_scope) if ledger is not None else 0.0
     decision = approve(
         action,
@@ -215,6 +226,7 @@ def _decide(  # noqa: PLR0913 — admit()'s arguments, minus the side effect
             "asset": action.asset,
             "outcome": decision.outcome,
             "reason": decision.reason,
+            "policy_hash": policy.content_hash(),
         }
         if ledger is not None:
             entry.update(
