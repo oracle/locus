@@ -834,3 +834,72 @@ def test_specs_carry_the_optional_connection_settings(monkeypatch: pytest.Monkey
         "http://object-store.local",
         "r1",
     )
+
+
+# --------------------------------------------------------------------------
+# A caller's report id reads back from every object store
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("report_id", ["build-42", "build42", "nightly/2026-11-16 #1"])
+def test_file_store_reads_back_a_report_stored_under_a_callers_id(
+    tmp_path: Path, report_id: str
+) -> None:
+    store = FileReportStore(tmp_path)
+    store.put(_report(passed=2, total=3, at=T0), suite="warden")
+    stored = store.put(
+        _report(passed=3, total=3, at=T0 + timedelta(hours=1)), suite="warden", report_id=report_id
+    )
+
+    assert stored.report_id == report_id
+    assert stored.location.startswith("warden/"), "the id cannot split the suite from the file"
+    assert stored.location.count("/") == 1
+    loaded = store.get(report_id)
+    assert loaded is not None
+    assert loaded.passed == 3
+    listed = store.list(suite="warden")
+    assert listed[0].report_id == report_id
+    assert listed[0].passed == 3
+    history = trend(store, suite="warden")
+    assert len(history.points) == 2
+    assert not history.regressed
+
+
+def test_bucket_stores_read_back_a_report_stored_under_a_callers_id() -> None:
+    stores: list[ReportStore] = [
+        OCIBucketReportStore("evals", "ns", prefix="locus/eval/", _client=_OCIClient(page=1)),
+        S3ReportStore("evals", prefix="evals/", _client=_S3Client()),
+    ]
+    for store in stores:
+        stored = store.put(_report(passed=1, total=1, at=T0), suite="warden", report_id="build-42")
+        assert stored.location.endswith("-abcdefabcdef-build-42.json")
+        loaded = store.get("build-42")
+        assert loaded is not None, store.spec
+        assert loaded.passed == 1
+        assert [item.report_id for item in store.list(suite="warden")] == ["build-42"]
+        assert store.get("build-43") is None
+        assert len(trend(store, suite="warden").points) == 1
+
+
+def test_a_report_stored_under_a_generated_id_still_parses(tmp_path: Path) -> None:
+    legacy = "0123456789abcdef0123456789abcdef"
+    (tmp_path / "warden").mkdir()
+    (tmp_path / "warden" / f"20261116T090000000000Z-abcdefabcdef-{legacy}.json").write_text(
+        _report(passed=1, total=1, at=T0).model_dump_json()
+    )
+    store = FileReportStore(tmp_path)
+
+    listed = store.list(suite="warden")
+
+    assert [item.report_id for item in listed] == [legacy]
+    assert listed[0].created_at == T0
+    assert listed[0].fingerprint == "abcdefabcdef"
+    assert store.get(legacy) is not None
+    stored = store.put(_report(passed=1, total=1, at=T0 + timedelta(hours=1)), suite="warden")
+    assert len(stored.report_id) == 32
+    assert stored.location.endswith(f"-{stored.report_id}.json"), "a generated id is not encoded"
+
+
+def test_a_blank_report_id_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="blank"):
+        FileReportStore(tmp_path).put(_report(passed=1, total=1), suite="warden", report_id="  ")

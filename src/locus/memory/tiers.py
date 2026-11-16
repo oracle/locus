@@ -619,10 +619,12 @@ class TieredCompaction(ContextCompactor):
         """Run the tiers that the context has reached; ``None`` when none has.
 
         See :meth:`ContextCompactor.compact` for the arguments. The outcome's
-        ``tiers`` lists what each tier did; ``exhausted`` is set when the
-        context is still at or over the highest trigger after the last tier,
-        or when a model-calling tier is needed again within
-        ``min_iterations_between_summaries`` iterations of the last one.
+        ``tiers`` lists what each tier did. A model-calling tier needed again
+        within ``min_iterations_between_summaries`` iterations of its last run
+        is held back for the pass (the last summary did not buy room, so
+        another would land in the same place) and the tiers after it still
+        run; ``exhausted`` is set only when the context is still at or over
+        the highest trigger after the last tier.
         """
         if not self.bound:
             self.bind(model=model)
@@ -674,8 +676,7 @@ class TieredCompaction(ContextCompactor):
         outcomes: list[TierOutcome] = []
         usage: dict[str, int] = {}
         summary: str | None = None
-        exhausted = False
-        detail: str | None = None
+        held: str | None = None
         guard = self.min_iterations_between_summaries
         lines = [int(usable * tier.trigger) for tier in self.tiers]
         for index, tier in enumerate(self.tiers):
@@ -684,15 +685,16 @@ class TieredCompaction(ContextCompactor):
             if tier.calls_model:
                 last = tracker.last_summary_iteration
                 if guard and last is not None and iteration - last < guard:
-                    exhausted = True
-                    detail = (
-                        f"compaction is thrashing: the {tier.name} tier was needed at "
-                        f"iteration {iteration}, {iteration - last} after it last ran "
-                        f"(minimum {guard}). The latest turns and fixed context "
-                        f"({tokens} tokens against a {lines[index]}-token line) no longer "
-                        "fit the window."
+                    # The last summary did not buy room, so another would land
+                    # in the same place at the price of a model call. The tier
+                    # is held back for this pass; the tiers after it still run,
+                    # and only the context they leave decides exhaustion.
+                    held = (
+                        f"the {tier.name} tier was needed again at iteration {iteration}, "
+                        f"{iteration - last} after it last ran (minimum {guard})"
                     )
-                    break
+                    logger.info("Compaction held back a tier: %s", held)
+                    continue
             continuing = any(tokens >= line for line in lines[index + 1 :])
             result = await tier.run(
                 TierContext(
@@ -734,8 +736,15 @@ class TieredCompaction(ContextCompactor):
             tokens = after
 
         highest = max(lines)
-        if not exhausted and tokens >= highest:
-            exhausted = True
+        exhausted = tokens >= highest
+        detail: str | None = None
+        if exhausted and held is not None:
+            detail = (
+                f"compaction is thrashing: {held}, and the other tiers left {tokens} "
+                f"tokens against a {highest}-token line. The latest turns and fixed "
+                "context no longer fit the window."
+            )
+        elif exhausted:
             detail = (
                 f"compaction left {tokens} tokens against a {highest}-token line: the "
                 "system prompt, task, tool definitions, pinned messages and latest turn "

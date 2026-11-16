@@ -31,6 +31,7 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
 import logging
 from datetime import UTC, datetime
@@ -102,6 +103,28 @@ def build_filter_expr(metadata_filter: dict[str, Any] | None) -> str:
             )
         clauses.append(f"metadata[{json.dumps(str(key), ensure_ascii=False)}] == {_literal(value)}")
     return " and ".join(clauses)
+
+
+def _is_lite_uri(uri: str) -> bool:
+    """A local ``.db`` path, which pymilvus serves with embedded Milvus Lite."""
+    return uri.endswith(".db") and not uri.startswith(("http://", "https://", "unix:", "tcp://"))
+
+
+def _release_lite_server(uri: str) -> None:
+    """Stop the embedded Milvus Lite server behind ``uri``.
+
+    ``MilvusClient.close()`` drops the connection and leaves the in-process
+    server running until interpreter exit, when it flushes and recreates the
+    database directory, so a caller that removed the file after ``close()``
+    found it back. Stopping the server here makes ``close()`` the last write.
+    """
+    try:
+        manager = importlib.import_module("milvus_lite.server_manager")
+    except ImportError:
+        return
+    release = getattr(getattr(manager, "server_manager_instance", None), "release_server", None)
+    if callable(release):
+        release(uri)
 
 
 class MilvusVectorStore(BaseVectorStore):
@@ -232,13 +255,18 @@ class MilvusVectorStore(BaseVectorStore):
                 )
             client.create_collection(self._collection, schema=schema, index_params=index_params)
             has_sparse = self._enable_hybrid
-        elif self._enable_hybrid:
-            description = client.describe_collection(self._collection)
-            has_sparse = any(
-                field.get("name") == "sparse" for field in description.get("fields") or []
-            )
         else:
+            # A collection that already exists may not be loaded: a Milvus
+            # Lite file reopened after ``close()`` stopped its server or in a
+            # new process, a server after a release or restart. Loading is
+            # idempotent, and a search on an unloaded collection fails.
+            client.load_collection(self._collection)
             has_sparse = False
+            if self._enable_hybrid:
+                description = client.describe_collection(self._collection)
+                has_sparse = any(
+                    field.get("name") == "sparse" for field in description.get("fields") or []
+                )
         self._hybrid_ready = has_sparse
         self._ensured = True
         return client
@@ -490,6 +518,8 @@ class MilvusVectorStore(BaseVectorStore):
             self._client = None
             self._ensured = False
             self._hybrid_ready = None
+            if _is_lite_uri(self._uri):
+                await asyncio.to_thread(_release_lite_server, self._uri)
 
     def __repr__(self) -> str:
         return f"MilvusVectorStore(uri={self._uri!r}, collection={self._collection!r})"

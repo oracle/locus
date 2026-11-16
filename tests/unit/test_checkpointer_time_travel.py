@@ -521,6 +521,12 @@ def test_info_from_normalises_what_a_backend_stored() -> None:
     assert info.to_dict()["created_at"] == "2026-01-02T03:04:05+00:00"
     assert parse_time("not a time") is None
     assert parse_time(None) is None
+    # A naive value is UTC wall-clock time and comes back aware, so infos from
+    # a backend whose driver drops the zone compare with every other backend's.
+    naive = datetime(2026, 1, 2, 3)  # noqa: DTZ001 — what a zone-dropping driver returns
+    assert parse_time(naive) == datetime(2026, 1, 2, 3, tzinfo=UTC)
+    assert parse_time("2026-01-02T03:00:00") == datetime(2026, 1, 2, 3, tzinfo=UTC)
+    assert parse_time(datetime(2026, 1, 2, 3, tzinfo=UTC)) == datetime(2026, 1, 2, 3, tzinfo=UTC)
     assert checkpoint_size({"a": 1}) == len(b'{"a":1}')
 
 
