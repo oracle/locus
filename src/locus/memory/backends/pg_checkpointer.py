@@ -53,7 +53,9 @@ from uuid import uuid4
 from locus.core.loop_bound import loop_bound_async
 from locus.core.protocols import CheckpointerCapabilities
 from locus.memory.checkpointer import BaseCheckpointer
+from locus.memory.ledger import LEDGER_SUFFIX
 from locus.memory.retention import oldest_message_time, stamp_messages, trim_messages
+from locus.memory.time_travel import CheckpointInfo, info_from, link_parents
 
 
 if TYPE_CHECKING:
@@ -104,7 +106,8 @@ class PgCheckpointer(BaseCheckpointer):
         tenant_of: ``(thread_id) -> tenant``, for thread ids that carry it.
         keep_checkpoints: Checkpoints kept per thread, newest first; older
             ones are deleted by the save that makes them surplus. ``None``
-            keeps all of them (every save is a restore point).
+            keeps all of them (every save is a restore point). The
+            tool-effect ledger's sidecar thread is never pruned.
         message_retention: Drop exchanges older than this at every save
             (:mod:`locus.memory.retention`). ``None`` keeps every message; they
             are stamped regardless, so :meth:`purge_messages` has times to go by.
@@ -335,7 +338,7 @@ class PgCheckpointer(BaseCheckpointer):
             "data = EXCLUDED.data, metadata = EXCLUDED.metadata, "
             "oldest_at = EXCLUDED.oldest_at, seq = DEFAULT, updated_at = now()"
         )
-        if self.keep_checkpoints is None:
+        if self.keep_checkpoints is None or thread_id.endswith(LEDGER_SUFFIX):
             sql = upsert
         else:
             # The DELETE reads the snapshot from before the INSERT, so it sees
@@ -644,3 +647,35 @@ class PgCheckpointer(BaseCheckpointer):
             f"PgCheckpointer(table={self._table!r}, keep_checkpoints={self.keep_checkpoints!r}, "
             f"message_retention={self.message_retention!r})"
         )
+
+    # Last on purpose: a method named ``list`` shadows the builtin for the
+    # annotations of anything defined after it.
+    async def list(self, thread_id: str, limit: int = 10) -> list[CheckpointInfo]:
+        """The thread's checkpoints, newest first, in one query that never returns the state."""
+        tenant = self.tenant_for(thread_id)
+        pool = await self._get_pool()
+        async with pool.acquire() as conn, conn.transaction():
+            await self._pinned(conn, tenant)
+            rows = await conn.fetch(
+                "SELECT checkpoint_id, metadata, created_at, "
+                "(data->>'iteration')::int AS iteration, octet_length(data::text) AS size "
+                f"FROM {self._table} WHERE tenant = $1 AND thread_id = $2 "
+                "ORDER BY seq DESC LIMIT $3",
+                tenant,
+                thread_id,
+                limit,
+            )
+        infos: list[CheckpointInfo] = []
+        for r in rows:
+            meta = r["metadata"]
+            infos.append(
+                info_from(
+                    r["checkpoint_id"],
+                    thread_id,
+                    created_at=r["created_at"],
+                    metadata=json.loads(meta) if isinstance(meta, str) else dict(meta or {}),
+                    iteration=r["iteration"],
+                    size=r["size"],
+                )
+            )
+        return link_parents(infos)

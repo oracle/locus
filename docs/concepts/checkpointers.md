@@ -148,6 +148,128 @@ call of a second or more per iteration, none of these numbers is visible;
 they matter for tight tool loops on a remote database and for backends
 billed per write.
 
+## Time travel
+
+Every checkpoint is a restore point, and every checkpointer exposes the
+same three operations over them: **list** a thread's checkpoints with
+what each one is, **fork** a new thread from one of them, and **run or
+resume from** one of them in place. By default a thread has one
+checkpoint per turn, plus one for each pause and each
+`agent.update_state`; `Agent(keep_iteration_checkpoints=True)` keeps a
+restore point after every tool-calling iteration as well.
+
+```python
+from locus.agent import Agent
+from locus.memory import CheckpointInfo
+from locus.memory.backends import MemoryCheckpointer
+
+cp = MemoryCheckpointer()
+agent = Agent(model="{{ locus_model }}", checkpointer=cp)
+agent.run_sync("Open ticket T-4821.", thread_id="case-4821")
+agent.run_sync("Refund the customer in full.", thread_id="case-4821")
+
+
+async def what_if() -> None:
+    history: list[CheckpointInfo] = await cp.list("case-4821")
+    for info in history:  # newest first
+        print(info.checkpoint_id, info.iteration, info.size, info.parent_checkpoint_id)
+    opened = history[-1]
+
+    # A new thread that stops where the ticket was opened; the original is untouched.
+    alt = await cp.fork("case-4821", opened.checkpoint_id, new_thread_id="case-4821-partial")
+    await agent.arun("Refund half and escalate.", thread_id=alt)
+
+    # Or branch the thread itself: this turn descends from `opened`, and the
+    # refund turn stays in the history beside it.
+    await agent.arun("Hold the refund.", thread_id="case-4821", from_checkpoint=opened.checkpoint_id)
+```
+
+`cp.list(thread_id, limit=10)` returns `CheckpointInfo` records, newest
+first: `checkpoint_id`, `thread_id`, `created_at`, the `iteration` the
+state had reached, the `size` of the serialised state in bytes, the
+`parent_checkpoint_id` it descends from, `forked_from` (the thread the
+parent lives in, for a fork's first checkpoint) and the `metadata` it
+was saved with. The parent is recorded in the checkpoint's metadata
+when the writer knew it was not the thread's previous checkpoint — a
+fork's first checkpoint, an `update_state` of an older checkpoint, every
+save of a run started `from_checkpoint=` — and is the previous
+checkpoint everywhere else, since a thread's history is otherwise a
+line.
+
+`cp.fork(thread_id, checkpoint_id=None, *, new_thread_id=None)` saves the
+state at that checkpoint (the latest by default) as the first checkpoint
+of a new thread (`<thread_id>-fork-<8 hex>` unless named) and returns
+the new thread's id. `Agent.fork` and `StateGraph.afork` call it. A
+fork takes the thread's
+[tool-effect ledger](idempotency.md#the-tool-effect-ledger) with it
+**up to the forked checkpoint's iteration and no further**: the records
+of calls the forked state already holds are copied, re-keyed under the
+new thread, and the records of what the parent did past the fork point
+are not, so a run on the fork — even one continuing the same
+`invocation_id` — replays nothing from beyond the fork.
+
+`agent.run(prompt, thread_id=..., from_checkpoint=...)` (also `arun`,
+`run_sync`) starts the turn from the thread's state at that checkpoint
+instead of its latest; `agent.resume(response, thread_id=...,
+from_checkpoint=...)` continues a *paused* turn from the checkpoint it
+paused on, discarding any later answer — the way to answer a question
+differently. Both need `thread_id` and a checkpointer, raise
+`LookupError` for a checkpoint the thread does not have, and record the
+checkpoint as the parent of everything the run saves, so the branch is
+visible in `list` and in the drawing below. The checkpoints written
+after the branch point stay; nothing is deleted.
+
+`draw_mermaid_history(cp, *thread_ids)`
+(`locus.multiagent.visualize`; `StateGraph.adraw_mermaid_history` for a
+graph's threads) renders the histories as one Mermaid flowchart: a lane
+per thread, oldest checkpoint first, an arrow from each checkpoint to the
+ones that descend from it, and — when a thread and its fork are both
+given — a dashed `fork` arrow from the checkpoint the fork was taken at,
+so the fork reads as a branch of its parent.
+
+```text
+graph LR
+    subgraph thread_case_4821["case-4821"]
+        direction LR
+        cp_case_4821__a1["a1…<br/>iteration 1"]
+        cp_case_4821__b2["b2…<br/>iteration 1"]
+    end
+    subgraph thread_case_4821_partial["case-4821-partial"]
+        direction LR
+        cp_case_4821_partial__f0["f0…<br/>iteration 1<br/>fork"]
+        cp_case_4821_partial__c3["c3…<br/>iteration 1"]
+    end
+    cp_case_4821__a1 --> cp_case_4821__b2
+    cp_case_4821_partial__f0 --> cp_case_4821_partial__c3
+    cp_case_4821__a1 -.->|fork| cp_case_4821_partial__f0
+```
+
+### Per backend
+
+Every backend already keeps each checkpoint as its own record, so
+history is complete everywhere; what differs is what `list` has to read
+and how the history is bounded. A thread's storage grows with the
+square of the conversation's length — each checkpoint holds the whole
+conversation — so a long-lived thread wants a bound, a retention rule,
+or `message_retention` on `PgCheckpointer`. No bound ever trims the
+tool-effect ledger's sidecar thread (`<thread_id>~ledger`): its records
+are one per executed call, and dropping one would run that call again
+on a replay.
+
+| Backend | History | What `list` reads | Bound | Storage per checkpoint |
+|---|---|---|---|---|
+| `MemoryCheckpointer` | every save, for the life of the process | the in-memory records; no state is loaded | `max_checkpoints_per_thread` | the serialised state, in memory |
+| `FileCheckpointer` | one `<checkpoint_id>.json` per save | the head of each file (the step fields and metadata are written before the state) | `max_checkpoints_per_thread` | one file |
+| `redis_checkpointer()`, `postgresql_checkpointer()`, `mysql_checkpointer()`, `opensearch_checkpointer()`, `oracle_checkpointer()` (the adapter) | one `<thread_id>:<checkpoint_id>` key per save, plus the `<thread_id>:_checkpoints` index | one read of the index key | `max_checkpoints_per_thread` on the factory | one key, plus the shared `latest` copy and index entry |
+| `PgCheckpointer` | one row per save | one query over the row's own columns; the state column is not returned | `keep_checkpoints` | one row |
+| `S3Backend`, `OCIBucketBackend` | one `<checkpoint_id>.json` and `.meta.json` per save | one listing, then one GET of the small `.meta.json` per checkpoint described (the listing's modification times are coarse; the exact write time in the metadata orders the result) | `max_checkpoints_per_thread`, or a bucket lifecycle rule | two objects |
+| `OracleCheckpointSaver` (the reference: one row per checkpoint with `parent_checkpoint_id` kept on the row) | one row per `put` | one query; the rows carry their data | none built in (`delete_thread`) | one row |
+| `HTTPCheckpointer`, your own `BaseCheckpointer` subclass | whatever the store keeps | the base default: each state is loaded to read its iteration and size, `get_metadata` for the rest when the backend has it | none unless you add one | the store's |
+
+A bounded backend deletes the surplus from the oldest end after every
+save, so `fork` and `list` reach back only as far as the bound; the
+oldest checkpoint kept reports no parent.
+
 ## Picking a backend
 
 | Situation | Backend |

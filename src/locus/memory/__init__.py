@@ -23,6 +23,7 @@ Checkpointing:
 - BaseCheckpointer: Abstract base for checkpointer implementations
 - DeltaCheckpointer: Efficient delta-based checkpointing (~77% storage savings)
 - ToolEffectLedger: Every executed tool call, recorded in the thread's checkpointer
+- CheckpointInfo: One checkpoint of a thread, as ``checkpointer.list()`` describes it
   as it returns, so a run continued after a crash replays instead of re-running
 - get_checkpointer: Get a checkpointer by string identifier
 - register_checkpointer: Register a custom checkpointer provider
@@ -99,6 +100,7 @@ from locus.memory.tiers import (
     Summarize,
     TieredCompaction,
 )
+from locus.memory.time_travel import CheckpointInfo
 
 
 __all__ = [
@@ -124,6 +126,7 @@ __all__ = [
     # Checkpointing
     "BaseCheckpointer",
     "CheckpointerCapabilities",
+    "CheckpointInfo",
     "DeltaCheckpointer",
     "DeltaStorage",
     "InMemoryDeltaStorage",

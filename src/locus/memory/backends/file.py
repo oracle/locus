@@ -41,6 +41,13 @@ from uuid import uuid4
 
 from locus.core.protocols import CheckpointerCapabilities
 from locus.memory.checkpointer import BaseCheckpointer
+from locus.memory.time_travel import (
+    CheckpointInfo,
+    checkpoint_iteration,
+    checkpoint_size,
+    info_from,
+    link_parents,
+)
 
 
 if TYPE_CHECKING:
@@ -51,10 +58,17 @@ logger = logging.getLogger(__name__)
 
 #: Bytes read from the head of a checkpoint file to find its id and time.
 _HEADER_BYTES = 1024
+#: Bytes read from the head to find the step fields and metadata as well;
+#: they are written ahead of the state, so this covers any metadata of a
+#: sane size, and :meth:`FileCheckpointer.list` parses the file when not.
+_INFO_BYTES = 8192
 #: A JSON string value: the quotes and everything up to the closing one.
 _JSON_STRING = r'("(?:[^"\\]|\\.)*")'
 _CHECKPOINT_ID = re.compile(rb'^\{\s*"checkpoint_id":\s*' + _JSON_STRING.encode())
 _CREATED_AT = re.compile(rb'"created_at":\s*' + _JSON_STRING.encode())
+_ITERATION = re.compile(rb'"iteration":\s*(\d+)')
+_SIZE = re.compile(rb'"size":\s*(\d+)')
+_METADATA = re.compile(rb'"metadata":\s*')
 _EPOCH = "1970-01-01T00:00:00+00:00"
 
 
@@ -151,13 +165,17 @@ class FileCheckpointer(BaseCheckpointer):
 
             checkpoint_path = self._get_checkpoint_path(thread_id, checkpoint_id)
 
-            # Prepare data with metadata
+            # The fields ``list`` reports come before the state, so a listing
+            # reads the head of each file and never the conversation itself.
+            state_data = state.to_checkpoint()
             data = {
                 "checkpoint_id": checkpoint_id,
                 "thread_id": thread_id,
                 "created_at": datetime.now(UTC).isoformat(),
-                "state": state.to_checkpoint(),
+                "iteration": checkpoint_iteration(state_data),
+                "size": checkpoint_size(state_data),
                 "metadata": metadata or {},
+                "state": state_data,
             }
 
             # Write to file (run in executor to not block)
@@ -165,14 +183,9 @@ class FileCheckpointer(BaseCheckpointer):
             await loop.run_in_executor(None, self._write_json, checkpoint_path, data)
 
         if self.max_checkpoints_per_thread is not None:
-            await self._trim(thread_id, self.max_checkpoints_per_thread)
+            await self._trim_history(thread_id, self.max_checkpoints_per_thread)
 
         return checkpoint_id
-
-    async def _trim(self, thread_id: str, keep: int) -> None:
-        """Delete all but the ``keep`` newest checkpoints of a thread."""
-        for old in (await self.list_checkpoints(thread_id, limit=1_000_000))[keep:]:
-            await self.delete(thread_id, old)
 
     def _write_json(self, path: Path, data: dict[str, Any]) -> None:
         """Write JSON data to file (sync, for executor).
@@ -218,6 +231,53 @@ class FileCheckpointer(BaseCheckpointer):
         if not data or "checkpoint_id" not in data:
             return None
         return str(data["checkpoint_id"]), str(data.get("created_at", _EPOCH))
+
+    def _read_info(self, path: Path, thread_id: str) -> CheckpointInfo | None:
+        """What :meth:`list` reports for one checkpoint file, from its head where possible.
+
+        Files written since the step fields were added carry ``iteration``,
+        ``size`` and ``metadata`` ahead of the state; a file without them (an
+        older layout) or whose metadata runs past the head is parsed in full.
+        """
+        try:
+            with open(path, "rb") as f:
+                head = f.read(_INFO_BYTES)
+        except OSError:
+            return None
+        found_id = _CHECKPOINT_ID.search(head)
+        found_at = _CREATED_AT.search(head)
+        found_iteration = _ITERATION.search(head)
+        found_size = _SIZE.search(head)
+        found_meta = _METADATA.search(head)
+        metadata: Any = None
+        if found_id and found_at and found_iteration and found_size and found_meta:
+            try:
+                metadata, _ = json.JSONDecoder().raw_decode(
+                    head[found_meta.end() :].decode("utf-8", errors="ignore")
+                )
+            except ValueError:
+                metadata = None
+        if isinstance(metadata, dict) and found_id and found_at and found_iteration and found_size:
+            return info_from(
+                json.loads(found_id.group(1)),
+                thread_id,
+                created_at=json.loads(found_at.group(1)),
+                metadata=metadata,
+                iteration=int(found_iteration.group(1)),
+                size=int(found_size.group(1)),
+            )
+        data = self._read_json(path)
+        if not data or "checkpoint_id" not in data or "state" not in data:
+            return None
+        state = data["state"]
+        return info_from(
+            str(data["checkpoint_id"]),
+            thread_id,
+            created_at=data.get("created_at", _EPOCH),
+            metadata=data.get("metadata") or {},
+            iteration=state.get("iteration") if isinstance(state, dict) else None,
+            size=checkpoint_size(state) if isinstance(state, dict) else None,
+        )
 
     def _read_json(self, path: Path) -> dict[str, Any] | None:
         """Read JSON data from file (sync, for executor).
@@ -471,3 +531,19 @@ class FileCheckpointer(BaseCheckpointer):
 
     def __repr__(self) -> str:
         return f"FileCheckpointer(base_dir={self.base_dir!r})"
+
+    # Last on purpose: a method named ``list`` shadows the builtin for the
+    # annotations of anything defined after it.
+    async def list(self, thread_id: str, limit: int = 10) -> list[CheckpointInfo]:
+        """The thread's checkpoints, newest first, from the head of each file."""
+        thread_dir = self._get_thread_dir(thread_id)
+        if not thread_dir.exists():
+            return []
+        loop = asyncio.get_event_loop()
+        infos: list[CheckpointInfo] = []
+        for path in thread_dir.glob("*.json"):
+            info = await loop.run_in_executor(None, self._read_info, path, thread_id)
+            if info is not None:
+                infos.append(info)
+        infos.sort(key=lambda i: i.created_at or datetime.fromisoformat(_EPOCH), reverse=True)
+        return link_parents(infos[:limit])

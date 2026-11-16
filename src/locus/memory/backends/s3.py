@@ -13,8 +13,15 @@ with ``endpoint_url``.
 Object layout::
 
     {prefix}{thread_id}/{checkpoint_id}.json      # AgentState payload
-    {prefix}{thread_id}/{checkpoint_id}.meta.json # per-checkpoint metadata
+    {prefix}{thread_id}/{checkpoint_id}.meta.json # per-checkpoint metadata,
+                                                  # iteration and size
     {prefix}{thread_id}/_latest                   # pointer to newest id
+
+Every checkpoint is its own object, so a thread's history is complete and
+its storage grows with the square of the conversation's length;
+``max_checkpoints_per_thread`` bounds it (a bucket lifecycle rule is the
+server-side alternative). ``list`` takes one listing plus one GET of the
+small ``.meta.json`` per checkpoint described.
 
 The ``_latest`` pointer lets ``load(thread_id)`` do a single GET instead
 of a list + sort every turn.
@@ -34,6 +41,13 @@ from uuid import uuid4
 
 from locus.core.protocols import CheckpointerCapabilities
 from locus.memory.checkpointer import BaseCheckpointer
+from locus.memory.time_travel import (
+    CheckpointInfo,
+    checkpoint_iteration,
+    checkpoint_size,
+    info_from,
+    link_parents,
+)
 
 
 if TYPE_CHECKING:
@@ -71,6 +85,10 @@ class S3Backend(BaseCheckpointer):
             ``aws_access_key_id``).
         create_bucket: Create the bucket on first use if it doesn't exist.
             Defaults to True (convenient for dev / MinIO / tests).
+        max_checkpoints_per_thread: Keep only this many of a thread's newest
+            checkpoints, deleting older ones after each save. ``None`` (the
+            default) keeps them all. The tool-effect ledger's sidecar thread
+            is never trimmed.
         _client: Injection seam for tests — a pre-built boto3 S3 client
             bypasses the lazy import and credential resolution.
 
@@ -88,10 +106,14 @@ class S3Backend(BaseCheckpointer):
         aws_access_key_id: str | None = None,
         aws_secret_access_key: str | None = None,
         create_bucket: bool = True,
+        max_checkpoints_per_thread: int | None = None,
         _client: Any = None,
     ) -> None:
+        if max_checkpoints_per_thread is not None and max_checkpoints_per_thread < 1:
+            raise ValueError("max_checkpoints_per_thread must be at least 1")
         self.bucket = bucket
         self.prefix = prefix
+        self.max_checkpoints_per_thread = max_checkpoints_per_thread
         self._endpoint_url = endpoint_url
         self._region_name = region_name
         self._aws_access_key_id = aws_access_key_id
@@ -257,23 +279,28 @@ class S3Backend(BaseCheckpointer):
         checkpoint_id = checkpoint_id or uuid4().hex
         now = datetime.now(UTC)
 
+        state_data = state.to_checkpoint()
         payload = {
             "checkpoint_id": checkpoint_id,
             "thread_id": thread_id,
             "created_at": now.isoformat(),
-            "state": state.to_checkpoint(),
+            "state": state_data,
         }
         meta_payload = {
             "checkpoint_id": checkpoint_id,
             "thread_id": thread_id,
             "created_at": now.isoformat(),
             "metadata": metadata or {},
+            "iteration": checkpoint_iteration(state_data),
+            "size": checkpoint_size(state_data),
         }
         await self._put_json(self._checkpoint_key(thread_id, checkpoint_id), payload)
         await self._put_json(self._meta_key(thread_id, checkpoint_id), meta_payload)
         await self._put_bytes(
             self._latest_key(thread_id), checkpoint_id.encode("utf-8"), "text/plain"
         )
+        if self.max_checkpoints_per_thread is not None:
+            await self._trim_history(thread_id, self.max_checkpoints_per_thread)
         return checkpoint_id
 
     async def load(
@@ -294,20 +321,22 @@ class S3Backend(BaseCheckpointer):
             return None
         return AgentState.from_checkpoint(data["state"])
 
-    async def list_checkpoints(self, thread_id: str, limit: int = 10) -> list[str]:
+    async def _checkpoint_objects(self, thread_id: str) -> list[tuple[str, Any]]:
+        """``(checkpoint_id, last_modified)`` of the thread's checkpoints, newest first."""
         listing = await self._list_keys(self._thread_prefix(thread_id))
-        items: list[tuple[str, str]] = []  # (last_modified_iso, checkpoint_id)
+        items: list[tuple[str, Any]] = []
         for obj in listing["contents"]:
             key = obj["Key"]
             if key.endswith((".meta.json", _LATEST_POINTER)):
                 continue
             if not key.endswith(".json"):
                 continue
-            checkpoint_id = key.rsplit("/", 1)[-1][: -len(".json")]
-            lm = obj.get("LastModified")
-            items.append((lm.isoformat() if lm else "", checkpoint_id))
-        items.sort(key=lambda t: t[0], reverse=True)
-        return [cid for _, cid in items[:limit]]
+            items.append((key.rsplit("/", 1)[-1][: -len(".json")], obj.get("LastModified")))
+        items.sort(key=lambda t: t[1].isoformat() if t[1] else "", reverse=True)
+        return items
+
+    async def list_checkpoints(self, thread_id: str, limit: int = 10) -> list[str]:
+        return [cid for cid, _ in (await self._checkpoint_objects(thread_id))[:limit]]
 
     async def delete(self, thread_id: str, checkpoint_id: str | None = None) -> bool:
         if checkpoint_id is None:
@@ -420,3 +449,37 @@ class S3Backend(BaseCheckpointer):
             if close is not None:
                 await asyncio.to_thread(close)
             self._client = None
+
+    # Last on purpose: a method named ``list`` shadows the builtin for the
+    # annotations of anything defined after it.
+    async def list(self, thread_id: str, limit: int = 10) -> list[CheckpointInfo]:
+        """The thread's checkpoints, newest first: one listing, then each one's ``.meta.json``."""
+        await self._ensure_bucket()
+        objects = (await self._checkpoint_objects(thread_id))[:limit]
+        metas = await asyncio.gather(
+            *(self._get_json(self._meta_key(thread_id, cid)) for cid, _ in objects)
+        )
+        infos: list[CheckpointInfo] = []
+        for (checkpoint_id, modified), raw_meta in zip(objects, metas, strict=True):
+            meta = raw_meta or {}
+            iteration, size = meta.get("iteration"), meta.get("size")
+            if iteration is None or size is None:
+                data = await self._get_json(self._checkpoint_key(thread_id, checkpoint_id))
+                state_data = (data or {}).get("state")
+                if isinstance(state_data, dict):
+                    iteration, size = state_data.get("iteration"), checkpoint_size(state_data)
+            infos.append(
+                info_from(
+                    checkpoint_id,
+                    thread_id,
+                    created_at=meta.get("created_at") or modified,
+                    metadata=meta.get("metadata") or {},
+                    iteration=iteration,
+                    size=size,
+                )
+            )
+        # The listing orders by the store's modification time, which some
+        # stores keep to the second; the write time in each ``.meta.json``
+        # is exact, so the window is re-sorted by it.
+        infos.sort(key=lambda i: i.created_at.isoformat() if i.created_at else "", reverse=True)
+        return link_parents(infos)

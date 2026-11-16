@@ -54,6 +54,7 @@ if TYPE_CHECKING:
 
     from locus.core.protocols import CheckpointerCapabilities
     from locus.core.state import AgentState
+    from locus.memory.time_travel import CheckpointInfo
 
 
 __all__ = [
@@ -216,3 +217,8 @@ class RetainedCheckpointer(BaseCheckpointer):
 
     def __repr__(self) -> str:
         return f"RetainedCheckpointer({self.inner!r}, max_age={self.max_age!r})"
+
+    # Last on purpose: a method named ``list`` shadows the builtin for the
+    # annotations of anything defined after it.
+    async def list(self, thread_id: str, limit: int = 10) -> list[CheckpointInfo]:
+        return await self.inner.list(thread_id, limit)

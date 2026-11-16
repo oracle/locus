@@ -16,15 +16,32 @@ Note: All data is lost when the process exits.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 from uuid import uuid4
 
 from locus.core.protocols import CheckpointerCapabilities
 from locus.memory.checkpointer import BaseCheckpointer
+from locus.memory.time_travel import (
+    CheckpointInfo,
+    checkpoint_iteration,
+    checkpoint_size,
+    info_from,
+    link_parents,
+)
 
 
 if TYPE_CHECKING:
     from locus.core.state import AgentState
+
+
+class _Stored(NamedTuple):
+    """One checkpoint as the dictionary holds it: the state and what ``list`` reports about it."""
+
+    data: dict[str, Any]
+    created_at: datetime
+    metadata: dict[str, Any]
+    iteration: int | None
+    size: int
 
 
 class MemoryCheckpointer(BaseCheckpointer):
@@ -44,6 +61,15 @@ class MemoryCheckpointer(BaseCheckpointer):
     - list_threads: Yes
     - persistent_checkpoint_ids: Yes (within process lifetime)
 
+    Args:
+        max_checkpoints_per_thread: Keep only this many of a thread's newest
+            checkpoints, dropping older ones after each save. ``None`` (the
+            default) keeps them all. Every checkpoint holds the whole
+            conversation, so a long thread's memory grows with the square of
+            its length; a cap bounds it, at the cost of ``fork`` and ``list``
+            reaching back only that far. The tool-effect ledger's sidecar
+            thread is never trimmed.
+
     Example:
         ```python
         checkpointer = MemoryCheckpointer()
@@ -56,9 +82,13 @@ class MemoryCheckpointer(BaseCheckpointer):
         ```
     """
 
-    def __init__(self) -> None:
-        # Storage: {thread_id: {checkpoint_id: (state_data, timestamp, metadata)}}
-        self._storage: dict[str, dict[str, tuple[dict[str, Any], datetime, dict[str, Any]]]] = {}
+    def __init__(self, max_checkpoints_per_thread: int | None = None) -> None:
+        if max_checkpoints_per_thread is not None and max_checkpoints_per_thread < 1:
+            raise ValueError("max_checkpoints_per_thread must be at least 1")
+        self.max_checkpoints_per_thread = max_checkpoints_per_thread
+        # Storage: {thread_id: {checkpoint_id: _Stored}}; the tuple's first
+        # three fields are (state_data, timestamp, metadata), as they always were.
+        self._storage: dict[str, dict[str, _Stored]] = {}
 
     @property
     def capabilities(self) -> CheckpointerCapabilities:
@@ -92,11 +122,16 @@ class MemoryCheckpointer(BaseCheckpointer):
         if thread_id not in self._storage:
             self._storage[thread_id] = {}
 
-        self._storage[thread_id][checkpoint_id] = (
-            state.to_checkpoint(),
+        data = state.to_checkpoint()
+        self._storage[thread_id][checkpoint_id] = _Stored(
+            data,
             datetime.now(UTC),
             metadata or {},
+            checkpoint_iteration(data),
+            checkpoint_size(data),
         )
+        if self.max_checkpoints_per_thread is not None:
+            await self._trim_history(thread_id, self.max_checkpoints_per_thread)
 
         return checkpoint_id
 
@@ -136,8 +171,7 @@ class MemoryCheckpointer(BaseCheckpointer):
         if checkpoint_id not in thread_data:
             return None
 
-        state_data, _, _ = thread_data[checkpoint_id]
-        return AgentState.from_checkpoint(state_data)
+        return AgentState.from_checkpoint(thread_data[checkpoint_id].data)
 
     async def list_checkpoints(
         self,
@@ -245,3 +279,25 @@ class MemoryCheckpointer(BaseCheckpointer):
         total = self.get_checkpoint_count()
         threads = len(self._storage)
         return f"MemoryCheckpointer(threads={threads}, checkpoints={total})"
+
+    # Last on purpose: a method named ``list`` shadows the builtin for the
+    # annotations of anything defined after it.
+    async def list(self, thread_id: str, limit: int = 10) -> list[CheckpointInfo]:
+        """The thread's checkpoints, newest first, read off the stored records."""
+        thread_data = self._storage.get(thread_id, {})
+        newest_first = sorted(
+            thread_data.items(), key=lambda item: item[1].created_at, reverse=True
+        )
+        return link_parents(
+            [
+                info_from(
+                    checkpoint_id,
+                    thread_id,
+                    created_at=stored.created_at,
+                    metadata=stored.metadata,
+                    iteration=stored.iteration,
+                    size=stored.size,
+                )
+                for checkpoint_id, stored in newest_first[:limit]
+            ]
+        )

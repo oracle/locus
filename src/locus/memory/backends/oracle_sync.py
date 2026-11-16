@@ -19,7 +19,7 @@ imports — locus owns the contract end-to-end.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import SecretStr
 
@@ -27,6 +27,10 @@ from locus._sync import run_sync
 from locus.core.state import AgentState
 from locus.memory.backends.oracle import OracleBackend
 from locus.memory.backends.oracle_versioned import OracleCheckpointSaver
+
+
+if TYPE_CHECKING:
+    from locus.memory.time_travel import CheckpointInfo
 
 
 class OracleSyncBackend:
@@ -263,6 +267,28 @@ class OracleSyncCheckpointSaver:
 
     def delete_thread(self, thread_id: str) -> None:
         return run_sync(self._async.delete_thread(thread_id))
+
+    def fork(
+        self,
+        thread_id: str,
+        checkpoint_id: str | None = None,
+        *,
+        new_thread_id: str | None = None,
+        checkpoint_ns: str = "default",
+    ) -> str:
+        return run_sync(
+            self._async.fork(
+                thread_id,
+                checkpoint_id,
+                new_thread_id=new_thread_id,
+                checkpoint_ns=checkpoint_ns,
+            )
+        )
+
+    def list(
+        self, thread_id: str, limit: int = 10, *, checkpoint_ns: str = "default"
+    ) -> list[CheckpointInfo]:
+        return run_sync(self._async.list(thread_id, limit, checkpoint_ns=checkpoint_ns))
 
     def close(self) -> None:
         run_sync(self._async.close())

@@ -758,6 +758,7 @@ class AgentRuntimeMixin:
         stream_tokens: bool = False,
         invocation_id: str | None = None,
         durability: DurabilityMode | None = None,
+        from_checkpoint: str | None = None,
     ) -> AsyncGenerator[LocusEvent, None]:
         """
         Run the agent with streaming events.
@@ -766,6 +767,13 @@ class AgentRuntimeMixin:
             prompt: User prompt to process
             thread_id: Optional thread ID for checkpointing
             metadata: Additional metadata for tools
+            from_checkpoint: Start this turn from the thread's state at that
+                checkpoint instead of its latest (one of
+                ``checkpointer.list(thread_id)``). The turn's saves record it
+                as their parent, so the thread's history shows the branch;
+                the checkpoints after it stay. Needs ``thread_id`` and a
+                checkpointer. To branch without touching the thread, fork it
+                first (``checkpointer.fork``) and run on the fork.
             invocation_id: An id for this turn, kept by the caller (a job id).
                 It becomes the run's ``run_id``, and a run issued again with
                 the same id after a crash replays the tool calls the crashed
@@ -813,7 +821,11 @@ class AgentRuntimeMixin:
             self._interrupts.pop(thread_id, None)
 
         # Create initial state
-        state = await self._create_initial_state(prompt, thread_id, metadata)
+        if from_checkpoint is not None and (thread_id is None or not self.config.checkpointer):
+            raise RuntimeError("run(from_checkpoint=...) needs thread_id and a checkpointer")
+        state = await self._create_initial_state(
+            prompt, thread_id, metadata, from_checkpoint=from_checkpoint
+        )
         if invocation_id is not None:
             # The caller's id names the turn: a retry of a crashed run under
             # the same id finds that run's tool-effect ledger.
@@ -831,6 +843,8 @@ class AgentRuntimeMixin:
             replay=invocation_id is not None,
         )
         rc.result_slot = result_slot
+        if from_checkpoint is not None and rc.checkpoints is not None:
+            rc.checkpoints.parent_checkpoint_id = from_checkpoint
 
         # Track metrics
         started_at = datetime.now(UTC)
@@ -2784,6 +2798,8 @@ class AgentRuntimeMixin:
         prompt: str,
         thread_id: str | None,
         metadata: dict[str, Any] | None,
+        *,
+        from_checkpoint: str | None = None,
     ) -> AgentState:
         """Create the state a new run (a new user turn) starts from.
 
@@ -2808,9 +2824,16 @@ class AgentRuntimeMixin:
         # the state (``run()`` has already split them off).
         metadata, _ = self._split_run_metadata(metadata)
 
-        # Try to load from checkpoint
+        # Try to load from checkpoint: the thread's latest, or the one named.
         if self.config.checkpointer and thread_id:
-            existing = await self.config.checkpointer.load(thread_id)
+            if from_checkpoint is not None:
+                existing = await self.config.checkpointer.load(thread_id, from_checkpoint)
+                if existing is None:
+                    raise LookupError(
+                        f"no checkpoint {from_checkpoint!r} of thread {thread_id!r} to run from"
+                    )
+            else:
+                existing = await self.config.checkpointer.load(thread_id)
             if existing:
                 from locus.observability.emit import (  # noqa: PLC0415
                     EV_CHECKPOINT_LOADED,
