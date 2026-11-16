@@ -76,6 +76,7 @@ from locus.models.base import ModelResponse
 from locus.observability.mechanisms import LEAKED_TOOL_CALLS, record_mechanism
 from locus.tools.context import _progress_sink
 from locus.tools.executor import ToolContextFactory, ToolExecutor
+from locus.tools.integrity import signer_for
 from locus.tools.registry import ToolRegistry
 
 
@@ -586,6 +587,11 @@ class AgentRuntimeMixin:
             agent_name=self.config.name or self.config.agent_id,
             termination=self.config.termination,
             ephemeral={**found, **(ephemeral or {})},
+        )
+        # The run's tool-call signer: a fresh key per run, in memory only.
+        rc.integrity = signer_for(
+            self.config.tool_call_integrity,
+            [*self.config.hooks, *getattr(self, "_hooks", ())],
         )
         with self._runs_lock:
             self._active_runs[id(rc)] = rc
@@ -1125,7 +1131,7 @@ class AgentRuntimeMixin:
                 # No structured tool calls: the model may have written its call
                 # in the body — its own markup leaked as text, or, for a model
                 # without native tool calling, a plain text call.
-                recovered = self._recover_text_tool_calls(response, state)
+                recovered = self._recover_text_tool_calls(response, state, run=rc)
                 if recovered is not None:
                     response, state = recovered
                     _last_assistant_content = response.message.content
@@ -1230,7 +1236,7 @@ class AgentRuntimeMixin:
                     # the model is not shown again if it is sent back on.
                     without_note = state.model_copy(update={"messages": before_note.messages})
                     as_call = (
-                        self._summary_as_tool_step(summary_resp, without_note)
+                        self._summary_as_tool_step(summary_resp, without_note, run=rc)
                         if summary_resp is not None
                         else None
                     )
@@ -1539,6 +1545,7 @@ class AgentRuntimeMixin:
                         state=state,
                         invocation_metadata=metadata or {},
                         ephemeral_metadata=rc.ephemeral,
+                        integrity=rc.integrity,
                     )
                     batch_start = time.perf_counter()
                     interrupted_slot_idx: int | None = None
@@ -1630,6 +1637,11 @@ class AgentRuntimeMixin:
                             slot["result"] = cancelled_result
                             slot["execution"] = cancelled_execution
                             slot["kind"] = "cancel"
+
+                # ``tool_call_integrity="abort"``: a refused call ends the run
+                # once its siblings have finished.
+                if rc.integrity is not None:
+                    rc.integrity.raise_pending_abort()
 
                 # Phase 3 — per-result fold, in tool_call order.
                 for slot in slots:
@@ -1783,6 +1795,7 @@ class AgentRuntimeMixin:
                                 state=state,
                                 invocation_metadata=metadata or {},
                                 ephemeral_metadata=rc.ephemeral,
+                                integrity=rc.integrity,
                             )
                             [result] = await self._executor.execute(
                                 [
@@ -2159,7 +2172,7 @@ class AgentRuntimeMixin:
 
                 # The same recovery as the first pass: a resumed turn on the
                 # same model leaks the same markup.
-                recovered = self._recover_text_tool_calls(response, state)
+                recovered = self._recover_text_tool_calls(response, state, run=rc)
                 if recovered is not None:
                     response, state = recovered
                     _last_assistant_content = response.message.content
@@ -2278,6 +2291,7 @@ class AgentRuntimeMixin:
                             state=state,
                             invocation_metadata=metadata or {},
                             ephemeral_metadata=rc.ephemeral,
+                            integrity=rc.integrity,
                         )
                         call = tc.model_copy(update={"arguments": invoke_args})
                         if self._emits_progress([call]):
@@ -2337,6 +2351,9 @@ class AgentRuntimeMixin:
                             duration_ms=(time.perf_counter() - start_time) * 1000,
                         )
 
+                    if rc.integrity is not None:
+                        rc.integrity.raise_pending_abort()
+
                     # Interrupt marker from a marker-returning tool (``ask_user``)
                     # on the RESUME path. The first-pass loop catches this at the
                     # ``'"__interrupt__": true'`` site above; this resume loop
@@ -2384,6 +2401,7 @@ class AgentRuntimeMixin:
                                 state=state,
                                 invocation_metadata=metadata or {},
                                 ephemeral_metadata=rc.ephemeral,
+                                integrity=rc.integrity,
                             )
                             [result] = await self._executor.execute(
                                 [tc.model_copy(update={"arguments": invoke_args})],
@@ -2910,7 +2928,7 @@ class AgentRuntimeMixin:
         return self._leaked_formats
 
     def _recover_text_tool_calls(
-        self, response: ModelResponse, state: AgentState
+        self, response: ModelResponse, state: AgentState, *, run: RunContext | None = None
     ) -> tuple[ModelResponse, AgentState] | None:
         """``response`` and ``state`` with the calls written in the body made structured.
 
@@ -2963,6 +2981,8 @@ class AgentRuntimeMixin:
             calls = self._parse_text_tool_calls(content)
         if not calls:
             return None
+        if run is not None and run.integrity is not None:
+            run.integrity.sign_all(calls)
         response = response.model_copy(
             update={
                 "message": Message(
@@ -3031,7 +3051,7 @@ class AgentRuntimeMixin:
         return found is not None or self._unfinished_text_tool_call(text) is not None
 
     def _summary_as_tool_step(
-        self, summary: ModelResponse, state: AgentState
+        self, summary: ModelResponse, state: AgentState, *, run: RunContext | None = None
     ) -> tuple[ModelResponse, AgentState] | UnfinishedToolCall | None:
         """What a reply to the no-tools final-answer request is, when it is not an answer.
 
@@ -3041,7 +3061,9 @@ class AgentRuntimeMixin:
         it never closes is an unfinished call; anything else (``None``) is the
         answer.
         """
-        recovered = self._recover_text_tool_calls(summary, state.with_message(summary.message))
+        recovered = self._recover_text_tool_calls(
+            summary, state.with_message(summary.message), run=run
+        )
         if recovered is not None:
             return recovered
         return self._unfinished_text_tool_call(summary.message.content)
@@ -3280,6 +3302,10 @@ class AgentRuntimeMixin:
                 response = await self._call_model(
                     complete_kwargs, chunk_queue, streaming=False, run=run
                 )
+            # Sign the calls as parsed — streamed or not — before any hook
+            # sees them (locus.tools.integrity).
+            if run is not None and run.integrity is not None:
+                run.integrity.sign_all(response.message.tool_calls)
 
             # Post-model hooks: event.retry = True to re-call
             after_event = await self._run_after_model_hooks(response, messages, run=run)

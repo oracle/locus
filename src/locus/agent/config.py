@@ -605,6 +605,20 @@ class AgentConfig(BaseModel):
         ),
     )
 
+    tool_call_integrity: bool | Literal["refuse", "abort"] = Field(
+        default=False,
+        description=(
+            "Sign every tool call as the model's response is parsed and verify "
+            "it at the executor, so arguments changed between the two — by a "
+            "hook that did not re-sign, a plugin, a consumer mutating the call "
+            "— are refused with a ToolCallIntegrityError, an audit entry and a "
+            "tool error the model reads. ``True`` or ``'refuse'`` refuses the "
+            "call and the run continues; ``'abort'`` ends the run with the "
+            "error once the batch has finished. Off (``False``) by default in "
+            "5.x; on by default from 6.0. See locus.tools.integrity."
+        ),
+    )
+
     max_tool_result_length: int = Field(
         default=32000,
         ge=0,

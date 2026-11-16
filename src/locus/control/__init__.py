@@ -101,6 +101,7 @@ from locus.control.grounded import (
     ground_fingerprint,
     is_finding,
 )
+from locus.control.judge import JudgeVerdict, ToolCallJudge
 from locus.control.permissions import (
     VERDICT_POLICY,
     PermissionMatch,
@@ -115,8 +116,18 @@ from locus.control.policy import (
     ApprovalDecision,
     ApprovalOutcome,
     ControlPolicy,
+    PolicySource,
+    RuleCheck,
     approve,
+    evaluate_rules,
 )
+from locus.control.policy_file import (
+    PolicyDocument,
+    PolicyFileError,
+    PolicyWatcher,
+    policy_hash,
+)
+from locus.control.policy_lint import LintFinding, LintReport, explain, lint_policy
 from locus.control.shell import ShellCommand, SimpleCommand, parse_command
 from locus.control.spend import FileSpendLedger, InMemorySpendLedger, SpendLedger
 from locus.control.taxonomy import (
@@ -137,6 +148,7 @@ from locus.control.verification import (
     VerificationResult,
     verify,
 )
+from locus.tools.integrity import ToolCallIntegrityError, ToolCallSignature, ToolCallSigner
 
 
 __all__ = [
@@ -171,6 +183,9 @@ __all__ = [
     "admit",
     "admit_sync",
     "AdmissionError",
+    # A model that reads the proposed call and can tighten the decision
+    "ToolCallJudge",
+    "JudgeVerdict",
     # Operator-written allow / ask / deny rules, fed to admission as labels
     "PermissionRule",
     "PermissionRules",
@@ -189,6 +204,18 @@ __all__ = [
     "ApprovalDecision",
     "ApprovalOutcome",
     "SANDBOXED_TAG",
+    "RuleCheck",
+    "evaluate_rules",
+    # The policy as a document: file form, content hash, hot reload, lint
+    "PolicyDocument",
+    "PolicyFileError",
+    "PolicySource",
+    "PolicyWatcher",
+    "policy_hash",
+    "LintFinding",
+    "LintReport",
+    "explain",
+    "lint_policy",
     # Tamper-evident audit
     "AuditTrail",
     "AuditRecord",
@@ -210,6 +237,10 @@ __all__ = [
     "anchor_trail",
     "latest_anchor",
     "verify_anchor",
+    # Tool-call integrity — what the runtime enforces between model and executor
+    "ToolCallSigner",
+    "ToolCallSignature",
+    "ToolCallIntegrityError",
     # Governed-by-default agent wrapper
     "GovernedAgent",
     "governed_agent",

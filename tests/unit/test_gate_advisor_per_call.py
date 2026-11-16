@@ -125,7 +125,14 @@ async def test_without_an_advisor_the_trail_entry_keeps_its_shape() -> None:
 
     await gated.execute(text="hi")
 
-    assert set(trail.records()[-1].payload) == {"action", "asset", "outcome", "reason"}
+    # ``policy_hash`` is part of every admission entry; the advisor keys are not.
+    assert set(trail.records()[-1].payload) == {
+        "action",
+        "asset",
+        "outcome",
+        "reason",
+        "policy_hash",
+    }
 
 
 @pytest.mark.asyncio

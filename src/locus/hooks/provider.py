@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from locus.core.events import CustomEvent, RunInfo
     from locus.core.state import AgentState
+    from locus.tools.integrity import ToolCallSigner
 
 
 # =============================================================================
@@ -236,6 +237,37 @@ class BeforeToolCallEvent(ProtectedEvent):
         self._init("secret_arguments", {})
         self._init("cancel", False)
         self._bind_run(run)
+
+    @property
+    def integrity(self) -> ToolCallSigner | None:
+        """The run's :class:`~locus.tools.integrity.ToolCallSigner`, or ``None``.
+
+        ``None`` when the agent runs without ``tool_call_integrity``, or the
+        event was constructed by hand.
+        """
+        ctx = self._run_ctx
+        signer: ToolCallSigner | None = getattr(ctx, "integrity", None) if ctx is not None else None
+        return signer
+
+    def resign(self, *, by: str) -> None:
+        """Vouch for ``arguments`` as they are now, under the name ``by``.
+
+        A hook that rewrites ``event.arguments`` calls this afterwards, so the
+        call's chain of custody names it; without it the executor refuses the
+        rewritten call when ``tool_call_integrity`` is on. A no-op when it is
+        off, so a hook can call it unconditionally::
+
+            event.arguments = redact(event.arguments)
+            event.resign(by="PIIRedaction")
+        """
+        signer = self.integrity
+        if signer is None:
+            return
+        from locus.core.messages import ToolCall  # noqa: PLC0415
+
+        signer.resign(
+            ToolCall(id=self.tool_call_id, name=self.tool_name, arguments=self.arguments), by=by
+        )
 
 
 class AfterToolCallEvent(ProtectedEvent):

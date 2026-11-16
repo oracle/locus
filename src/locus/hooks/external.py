@@ -495,6 +495,8 @@ class ExternalHooks(HookProvider):
             event.cancel = verdict.cancel
             return
         event.arguments = verdict.arguments
+        # The hook's rewrite is what runs: keep its chain of custody explicit.
+        event.resign(by="ExternalHooks:PreToolUse")
 
     async def on_after_tool_call(self, event: AfterToolCallEvent) -> None:
         """``PostToolUse``: hand the model a hook's objection or added context."""

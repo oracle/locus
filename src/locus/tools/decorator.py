@@ -61,6 +61,12 @@ class Tool(BaseModel):
     side-effects you don't want duplicated (bookings, transfers, writes) or
     whose output is stable across the run (config/date lookups)."""
 
+    read_only: bool = False
+    """When True, the tool only observes: it changes nothing the agent could
+    be held to. The :class:`~locus.control.judge.ToolCallJudge` does not
+    spend a model call on it. Off by default, so a tool is judged unless
+    its author says otherwise; the flag is a declaration, not a check."""
+
     labels: frozenset[str] = frozenset()
     """Policy-matching labels this tool declares (e.g. ``{"code-exec"}``).
     Matched against :class:`~locus.control.policy.ControlPolicy` label sets
@@ -337,6 +343,7 @@ def tool(
     name: str | None = None,
     description: str | None = None,
     idempotent: bool = False,
+    read_only: bool = False,
     labels: Iterable[str] | None = None,
     sandbox: SandboxSpec | ToolSandbox | str | bool | None = None,
     deferred: bool = False,
@@ -350,6 +357,7 @@ def tool(
     name: str | None = None,
     description: str | None = None,
     idempotent: bool = False,
+    read_only: bool = False,
     labels: Iterable[str] | None = None,
     sandbox: SandboxSpec | ToolSandbox | str | bool | None = None,
     deferred: bool = False,
@@ -390,6 +398,10 @@ def tool(
             matching (name, arguments) within a single agent run. Prevents
             duplicate side-effects when a model re-issues a tool call it
             has already made this turn.
+        read_only: Declare that the tool only observes. A
+            :class:`~locus.control.judge.ToolCallJudge` skips it rather
+            than spend a model call on a lookup. A declaration the author
+            vouches for, not something the SDK checks.
         labels: Policy-matching labels the tool declares; matched against
             :class:`~locus.control.policy.ControlPolicy` label sets (e.g.
             ``require_sandbox_for``).
@@ -422,6 +434,7 @@ def tool(
             parameters=func_schema["parameters"],
             fn=func,
             idempotent=idempotent,
+            read_only=read_only,
             labels=frozenset(labels or ()),
             sandbox=spec,
             deferred=deferred,

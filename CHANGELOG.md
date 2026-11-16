@@ -32,6 +32,78 @@ policy.
   Lock (S3). `anchor_periodically()` is the loop a server or runner calls.
   The observability, control-layer and guarantees pages describe when to use
   each backend.
+- **`ControlPolicy` as data.** `ControlPolicy.load(path_or_text)` reads a
+  policy from a YAML or JSON document and `policy.dump(path, format=...)`
+  writes one; every key is a field of the same name, type and default, so
+  the file form and the Python form round-trip and a file can never say
+  what the API cannot. An unknown key, a wrong type or a bad value is a
+  `PolicyFileError` that names the key and its path
+  (`require_human_for[2]`). Reading YAML needs the optional `pyyaml`
+  package; JSON and writing need nothing. `policy.content_hash()` is the
+  SHA-256 of the rules, equal for equal policies however they were built.
+- **The policy hash on the audit trail.** `admit()` and `admit_sync()`
+  record `policy_hash` on every `action-admission` entry, so a reader knows
+  which rules each decision was made under. The key lives in the entry's
+  payload: trails written before it exists verify unchanged, and readers
+  that do not know it are unaffected.
+- **Hot reload.** `PolicyWatcher(path, interval=...)` follows a policy file
+  by modification time and is accepted wherever `admit()`, `admit_sync()`
+  and `gate_tool()` take a `policy` (any `PolicySource` with a `current()`
+  method is). Each decision asks it once, so the swap is atomic between
+  admissions; a rewrite that no longer parses keeps the last good policy in
+  force and reports why on `last_error`; `on_reload` is called with the old
+  and new policy when the rules change.
+- **`locus policy lint <file>`** reports `unreachable-rule` (a hold label
+  that `deny_for` pre-empts, a cost hold at or above the spend limit, a
+  verification bar above 1.0, a denied `sandboxed` tag, a zero blast-radius
+  cap), `uncovered-environment` and `kind-never-held` for the environments
+  and kinds the file's `governs:` block or `--environments` / `--kinds`
+  declare. Exit 1 on a finding; `--format json` for CI. The last two are
+  found by weighing probe actions with `approve()`, so lint agrees with the
+  gate by construction.
+- **`locus policy explain <file> --action '{...}'`** prints every rule,
+  fired or not, the outcome and whether a person can approve it;
+  `--expect allow|require_human|deny` turns it into a check with the exit
+  code, `--spent-usd` and `--verification` supply what the gate would read
+  from a ledger and a verdict. `evaluate_rules()` is the one evaluation
+  `approve()` and `explain()` share; `lint_policy()`, `explain()` and
+  `PolicyDocument` are the same from Python.
+- Notebook 71 loads its policy from `examples/notebook_71_refund_policy.yaml`;
+  the policy authoring guide shows the file form first and a CI lint job.
+- **A model-based tool-call judge that feeds the gate.**
+  `locus.control.ToolCallJudge` shows a model the proposed tool call, name
+  and arguments, with the policy's intent and optional per-tool guidance,
+  and returns a typed `allow` / `hold` / `deny` verdict with a one-line
+  reason, parsed through the structured-output path. `gate_tool(judge=...)`
+  hands the verdict to `admit(judgement=...)`, where `tighten()` keeps the
+  stricter of the policy's outcome and the judge's: an allow can become a
+  hold or a deny, never the reverse. The verdict is on the audit entry under
+  `judge` (model, verdict, reason, cache hit, and the error when it failed
+  closed) and emitted as `control.judge.decided`. Installed as a hook it
+  judges every call and cancels a held or denied one; with no model of its
+  own it borrows the agent's. Read-only tools are skipped, verdicts are
+  cached per (tool, canonical arguments) within a run, and `budget=` caps
+  model calls per run; a model error, an off-schema reply or a spent budget
+  is a hold. (#448)
+- **`@tool(read_only=True)`.** Declares a tool that only observes, so the
+  judge does not spend a model call on it. Off by default.
+- **Notebook 72** gains the judge as an optional step on the scripted test
+  double: a staging rollout to an unpinned image, which the policy allows, is
+  held by the judge, and the page shows the audit entry that records both.
+- **Tool-call integrity (`Agent(tool_call_integrity=True)`).** The runtime
+  signs every tool call as the model's response is parsed, the streaming
+  path included, over a canonical form of its id, name and arguments with
+  HMAC-SHA256 under a random per-run key, and the executor verifies the call
+  before it runs. A call changed in between is refused with a typed
+  `ToolCallIntegrityError`, an entry on the agent's `AuditTrail` (the signed
+  and received digests, and the hook the change is attributed to), a
+  `tool.integrity.refused` event, and a tool error the model reads so the
+  run continues; `"abort"` ends the run instead. Hooks that rewrite
+  arguments re-sign through `event.resign(by="...")` or
+  `ToolCallSigner.resign`, so the chain of custody names them; the built-in
+  `GuardrailsHook` redaction and `ExternalHooks` rewrites do. The signature
+  lives on the run, not on `ToolCall`, so messages and checkpoints are
+  unchanged. Off by default in 5.x, on by default in 6.0. (#450)
 - **Full `reasoning` control on `OCIResponsesModel`.** `reasoning` takes the
   Responses-native object (`effort`, `summary`, ...) on `OCIResponsesConfig`,
   the constructor and as a call kwarg such as an agent's `model_kwargs`, and

@@ -97,6 +97,14 @@ def initialize_agent(agent: Agent) -> None:
 
     agent._hook_orchestrator = HookOrchestrator(agent._hooks)
 
+    # A hook that declares ``bind_agent(model=, tools=)`` is lent the agent's
+    # resolved model and tools: ``ToolCallJudge`` judges with the agent's
+    # own model unless it was given one, and learns which tools are read-only.
+    for hook in agent._hooks:
+        bind_agent = getattr(hook, "bind_agent", None)
+        if callable(bind_agent):
+            bind_agent(model=agent._model, tools=list(agent._tool_registry))
+
     # --- Plugins (bundles of hooks + tools) -------------------------------
     for plugin in agent.config.plugins:
         from locus.hooks.plugin import Plugin, PluginAdapter

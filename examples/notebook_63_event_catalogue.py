@@ -9,7 +9,7 @@ would you know they did it?" — the question behind a payments-operations
 monitoring control — the answer is the event catalogue. Locus components
 emit typed events under a stable prefix per subsystem: agent.*,
 multiagent.*, composition.*, rag.*, memory.*, a2a.*, skills.*,
-deepagent.*, research.*, model.*, tool.* and harness.* (the router.*
+deepagent.*, research.*, model.*, tool.*, control.* and harness.* (the router.*
 events are published as string literals outside the registry). The EV_*
 constants in locus.observability.emit are the canonical registry: change
 a constant and every emission site that imports it follows, so the
