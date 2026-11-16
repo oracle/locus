@@ -36,6 +36,7 @@ pip install "locus-sdk[oci,oracledb]"
 | Every version of a thread, resume from any point | `OracleCheckpointSaver` | [43 — Versioned saver](../notebooks/notebook_43_oracle_versioned_saver.md) |
 | Long-term memory store (`BaseStore`) | `OracleStore` | [37 — Oracle store](../notebooks/notebook_37_oracle_store.md) |
 | Oracle's agent-memory client: LLM-backed extraction, in-database recall | `OracleAgentMemoryManager` | [44 — Oracle agent memory](../notebooks/notebook_44_oracle_agent_memory.md) |
+| Tamper-evident audit trail on an immutable or blockchain table | `OracleAuditTrail` | [Where the audit trail lives](observability.md#where-the-audit-trail-lives) |
 
 Six of the classes have a synchronous twin (`OracleSyncVectorStore`,
 `OracleSyncInDBEmbeddings`, `OracleSyncInDBChunker`, `OracleSyncADBLoader`,

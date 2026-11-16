@@ -111,6 +111,47 @@ so it lands on the hash-chained
 [`AuditTrail`](control-layer.md) — each entry commits to the one
 before it, so `verify()` fails on any edit.
 
+### Where the audit trail lives
+
+A hash chain proves its records agree with each other. It cannot stop
+whoever holds the file from rewriting the whole chain, and it cannot see
+records dropped off its own end. Two backends put the record beyond the
+reach of the process that wrote it:
+
+| Backend | What it adds | Use it when |
+|---|---|---|
+| `AuditTrail(path=...)` | Every record fsynced to a JSONL file before `record()` returns | Development, single-host runners, shipping to a SIEM |
+| `OracleAuditTrail` | Rows in an Oracle AI Database **immutable table** (`NO DROP UNTIL n DAYS IDLE NO DELETE UNTIL n DAYS AFTER INSERT`); with `table_kind="blockchain"` the database chains each row with its own hash and `verify()` asks it to re-check them (`DBMS_BLOCKCHAIN_TABLE.VERIFY_ROWS`) | Decisions a regulator or a dispute may turn on, several processes writing one trail, a DBA-run retention policy |
+| `anchor_trail(trail, store)` | The chain head (record count, hash, timestamp) as a small object in OCI Object Storage or an S3-compatible bucket; a bucket **retention rule** keeps it from being deleted or overwritten | Any trail, including the file-backed one, when truncation must be detectable; cheap enough to run every few records |
+
+```python
+from locus.control import OracleAuditTrail, OCIBucketAnchorStore, anchor_trail, verify_anchor
+
+trail = OracleAuditTrail(
+    dsn="audit_low", user="AUDIT", password=pw, wallet_location="~/wallets/audit",
+    table_kind="blockchain",
+)
+await admit(action, perform, policy=policy, trail=trail)   # one row, committed
+
+store = OCIBucketAnchorStore(bucket_name="audit-anchors", namespace="...")
+anchor_trail(trail, store, every=100, require_retention_rule=True)
+
+trail.verify()                 # re-reads the rows, recomputes the chain, asks the database
+verify_anchor(trail, store)    # the chain still reaches the last anchored head
+```
+
+`OracleAuditTrail` has the same API as `AuditTrail`, so `admit(trail=...)`,
+`gate_tool(trail=...)` and `governed_agent(audit_trail=...)` take it
+unchanged; `record()` commits before it returns, and `arecord()` /
+`averify()` run the same work on a worker thread for async code.
+`require_retention_rule=True` refuses to anchor into a bucket that has no
+retention rule (OCI) or Object Lock (S3), so a bucket that can be emptied
+is never mistaken for an anchor; the rule itself is the bucket's
+configuration. `anchor_periodically()` is the loop a server or runner
+calls. The table and the rule outlive the agent on purpose: an immutable
+table cannot be dropped inside its idle window, and a locked retention
+rule cannot be shortened.
+
 ### Traces and metrics over OTLP
 
 ```python

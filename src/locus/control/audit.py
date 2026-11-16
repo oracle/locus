@@ -269,6 +269,16 @@ class AuditTrail:
             except (TypeError, ValueError):
                 self._unreadable += 1
 
+    def _persist(self, rec: AuditRecord) -> None:
+        """Make ``rec`` durable before it is kept in memory.
+
+        The file-backed trail appends to its JSONL file here; a backend such as
+        :class:`~locus.control.audit_oracle.OracleAuditTrail` overrides this to
+        write the row. Raising keeps the record out of the chain.
+        """
+        if self._path is not None:
+            self._append(rec)
+
     def _append(self, rec: AuditRecord) -> None:
         """Write one record to the file and make it durable before returning."""
         assert self._path is not None  # noqa: S101 — only called when a path is set
@@ -323,8 +333,7 @@ class AuditTrail:
                 key_id=key_id,
                 signature=signature,
             )
-            if self._path is not None:
-                self._append(rec)
+            self._persist(rec)
             self._records.append(rec)
         return rec
 

@@ -668,7 +668,12 @@ async def test_stream_zdr_400_flips_an_auto_model_and_raises_the_typed_error() -
         pytest.raises(OCIResponsesZeroDataRetentionError),
     ):
         await _drain()
-    assert len(record) == 1
+    zdr = [
+        w
+        for w in record
+        if issubclass(w.category, LocusWarning) and "Zero Data Retention" in str(w.message)
+    ]
+    assert len(zdr) == 1
     assert model.zdr_detected is True
     assert model.server_stateful is False
     await model.aclose()
