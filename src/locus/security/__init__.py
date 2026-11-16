@@ -195,7 +195,7 @@ _INSTALL_HINT = (
 def _moved(old: str, new: str) -> None:
     warnings.warn(
         f"{old} moved to {new}; import it from there. "
-        "The locus.security path is deprecated and will be removed in Locus 3.0.",
+        "The locus.security path is deprecated and will be removed in Locus 6.0.",
         LocusDeprecationWarning,
         stacklevel=3,
     )

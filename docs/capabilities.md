@@ -10,7 +10,6 @@ does, and where to find it.
 | Agent loop, tools, control policy, events | Supported | Core install; provider required only for model calls | Controls apply only where configured and wired |
 | OCI Generative AI, OpenAI, Anthropic, OpenRouter, and Together.ai model access | Supported | Live; provider extra and credential required | OpenRouter and Together.ai use the OpenAI-compatible transport; model capabilities vary |
 | Checkpointer and vector-store adapters | Supported interfaces | Live infrastructure for non-memory backends; matching extra/config required | Operate and test the backing service yourself |
-| `SecurityContext` reference adapters | Offline simulation | No credentials | Vendor write templates return simulated receipts unless replaced and verified |
 | Published research and evaluation artifacts | Research-only | See each research page | Some source datasets and evaluated model artifacts are not publicly available |
 
 <dl class="locus-facts" markdown="block">

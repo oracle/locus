@@ -142,15 +142,43 @@ class ToolResultStore:
         """Recover the full content for a previously-offloaded result."""
         return self._load(key)
 
+    def put(
+        self,
+        content: str,
+        *,
+        run_id: str,
+        iteration: int,
+        tool: str,
+        tool_call_id: str | None = None,
+    ) -> str:
+        """Persist ``content`` whatever its size and return its key.
+
+        For callers that decide for themselves what to store
+        (:class:`~locus.memory.offload.ToolResultOffload`, the harness shell
+        tool) rather than through ``threshold_chars``. The key names the call
+        when ``tool_call_id`` is given, so two calls of one tool in the same
+        iteration (parallel tool calls) never share a key.
+        """
+        key = self._build_key(
+            run_id=run_id, iteration=iteration, tool=tool, tool_call_id=tool_call_id
+        )
+        self._save(key, content)
+        return key
+
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _build_key(*, run_id: str, iteration: int, tool: str) -> str:
+    def _build_key(
+        *, run_id: str, iteration: int, tool: str, tool_call_id: str | None = None
+    ) -> str:
         # Keys are human-readable for grep-ability, but the caller
         # shouldn't rely on the exact format — treat as opaque.
         safe_run = run_id.replace(":", "_").replace("/", "_")
         safe_tool = tool.replace(":", "_").replace("/", "_") or "tool"
-        return f"locus:result:{safe_run}:{iteration}:{safe_tool}"
+        key = f"locus:result:{safe_run}:{iteration}:{safe_tool}"
+        if tool_call_id:
+            key = f"{key}:{tool_call_id.replace(':', '_').replace('/', '_')}"
+        return key
 
 
 def extract_reference_key(content: str) -> str | None:

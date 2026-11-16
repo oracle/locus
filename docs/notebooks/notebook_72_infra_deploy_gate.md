@@ -38,9 +38,12 @@ its arguments, together with the intent written in words and a line of
 guidance for this tool; it returns `allow`, `hold` or `deny` with a reason. The
 verdict reaches `admit()` as evidence and can only tighten the decision: the
 pinned rollout clears, the `latest` rollout the policy had allowed is held, and
-a policy hold or deny would stand whatever the judge said. The judge model here
-is the SDK's scripted test double, so this part runs offline too; on an agent
-it borrows the agent's model unless given its own.
+a policy hold or deny would stand whatever the judge said. The judge model
+follows the series convention in `examples/config.py`: with no provider
+configured it is the SDK's scripted test double, so this part runs offline
+too; with `LOCUS_MODEL_PROVIDER` set it is the configured model, and its id is
+on the audit entries. On an agent it borrows the agent's model unless given
+its own.
 
 What this notebook covers:
 
@@ -94,11 +97,19 @@ python examples/notebook_72_infra_deploy_gate.py
 ```
 
 The gate needs no model: the agent's two proposals are `Action` values built
-in `main()` and the rollout is an in-memory stub. The judge in the optional
-step runs on `locus.testing.ScriptedModel`, the SDK's test double, with its two
-verdicts written down, so the whole example runs offline with no provider
-configuration and no credentials. `examples/config.py` and
-`LOCUS_MODEL_PROVIDER` play no part in this notebook.
+in `main()` and the rollout is an in-memory stub. With no provider configured
+the judge in the optional step runs on `locus.testing.ScriptedModel`, the
+SDK's test double, with its two verdicts written down, so the whole example
+runs offline with no credentials. Set `LOCUS_MODEL_PROVIDER` (and
+`LOCUS_MODEL_ID`) as for any other example and the judge is the configured
+model reading the two calls itself:
+
+```bash
+LOCUS_MODEL_PROVIDER=oci LOCUS_MODEL_ID=openai.gpt-4.1 python examples/notebook_72_infra_deploy_gate.py
+```
+
+The verdict on the unpinned image is then the model's own; the script accepts
+a hold or a deny for it, either being a tightening the policy did not make.
 
 ## Output
 

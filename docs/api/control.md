@@ -5,7 +5,7 @@ record the decision either way.
 
 `locus.control` is the domain-neutral surface, and the import path to use.
 Older releases shipped these under `locus.security`; that path still resolves,
-with a deprecation warning, until a future major release removes it.
+with a deprecation warning, until 6.0 removes it.
 
 For the concepts, start with [The control layer](../concepts/control-layer.md)
 and [Writing a policy that holds](../concepts/policy-authoring.md).
@@ -115,9 +115,10 @@ A **denial** deliberately gets no id. It is final, and offering one would invite
 the agent to wait for a decision that is not coming.
 
 `ApprovalBridge` is a structural `Protocol` with no import-time dependency, so
-any approval queue with `submit` and `state` methods satisfies it. The two
-stores the SDK ships, `InMemoryApprovals` and `FileApprovals`, satisfy it too;
-see [Pausing until someone decides](#pausing-until-someone-decides).
+any approval queue with `submit` and `state` methods satisfies it. The stores
+the SDK ships, `InMemoryApprovals`, `FileApprovals`, `PostgresApprovals`,
+`RedisApprovals` and `OracleApprovals`, satisfy it too; see
+[Pausing until someone decides](#pausing-until-someone-decides).
 
 ::: locus.control.gate.ApprovalBridge
 
@@ -260,9 +261,11 @@ spec. A process that finds the thread later reads them with
 ```python
 from locus.control import approval_store, pending_holds
 
-for hold in await pending_holds(checkpointer, "t1"):
-    store = approval_store(hold.store)
-    print(hold.approval_id, hold.action, hold.asset, hold.state(store))
+
+async def show_holds(checkpointer):
+    for hold in await pending_holds(checkpointer, "t1"):
+        store = approval_store(hold.store)
+        print(hold.approval_id, hold.action, hold.asset, hold.state(store))
 ```
 
 `agent.resume(..., thread_id=..., perform_dangling=True)` then performs the
@@ -387,6 +390,20 @@ verdicts are cached per (tool, canonical arguments) within a run.
 ::: locus.control.judge.ToolCallJudge
 ::: locus.control.judge.JudgeVerdict
 ::: locus.control.judge.tighten
+
+### Tool-call integrity
+
+With `Agent(tool_call_integrity=True)` the runtime signs every tool call as
+the model's response is parsed and the executor verifies it before it runs;
+a call changed in between is refused with `ToolCallIntegrityError`, recorded
+on the agent's `AuditTrail` and published as `tool.integrity.refused`. A hook
+that rewrites arguments re-signs through `event.resign(by=...)` on its
+`BeforeToolCallEvent`. The [control-layer page](../concepts/control-layer.md#what-the-runtime-enforces-tool-call-integrity)
+describes what the check guarantees and where it stops.
+
+::: locus.tools.integrity.ToolCallSigner
+::: locus.tools.integrity.ToolCallSignature
+::: locus.tools.integrity.ToolCallIntegrityError
 
 ## Deriving action labels
 
