@@ -120,6 +120,8 @@ case. Each check contributes equally to the per-case score.
 | `require_receipts` | Every figure, identifier, date and quoted string in the answer appears in a tool result or in the prompt. No model call. |
 | `claims` | Each claim was confirmed: by code when the evidence carries its figures, otherwise by the judge in `arun()`, citing rows. |
 | `grounding` | The GSAR score of the answer against the run's evidence is at least the floor (`arun()` only). |
+| `evaluators` | Each evaluator's verdict passed: `TrajectoryMatch`, `ToolSelection` and `ArgumentCorrectness` read the run's path ([below](#scoring-the-path-not-only-the-answer)). One check per evaluator, named by its label. |
+| `simulated_user` | The conversation a model played against the agent ended on the goal or a stop phrase, not on the turn budget (`arun()` only; [below](#a-simulated-user-for-multi-turn-cases)). |
 
 A case **passes** when every check passed; the **score** is the
 fraction of checks that passed (handy for partial-credit scoring
@@ -235,6 +237,68 @@ report = EvalRunner(agent=agent).run([case])
 that reports no metrics, or a cost the provider did not price, fails the
 check rather than passing it: a budget the suite cannot verify is not a
 budget that held.
+
+## Scoring the path, not only the answer
+
+For an agent that acts, the path to the answer is most of what correctness
+means: which tools it chose, in what order, with what arguments. Three
+evaluators read that path off the ledger with no model call. Each lives on
+the case under `evaluators`, is one check named by its label, and leaves a
+typed verdict in `result.evaluations` that says what matched, what was
+missing, what was unexpected, and under which settings (`provenance.revision`
+moves when the settings do).
+
+```python
+from locus.evaluation import ArgumentCorrectness, EvalCase, ToolSelection, TrajectoryMatch
+
+case = EvalCase(
+    name="refund_path",
+    prompt="Refund order ord-4821, the headphones arrived broken.",
+    evaluators=[
+        TrajectoryMatch(expected=["lookup_order", "issue_refund"], mode="subset"),
+        ToolSelection(expected=["lookup_order", "issue_refund"], forbidden=["delete_order"]),
+        ArgumentCorrectness(
+            tool="issue_refund",
+            expected={"order_id": "ord-4821", "amount": 49.9},
+            tolerance=0.05,
+        ),
+    ],
+)
+```
+
+`TrajectoryMatch` compares the sequence of tool calls with the one expected.
+`strict` wants the same calls in the same order; `unordered` the same calls
+in any order; `subset` the expected calls in order with other calls allowed
+around them, which is the mode for "it must look the order up before it
+refunds" when a retry or an extra lookup is not a failure. The verdict's
+score gives partial credit (the common subsequence, the multiset overlap,
+the share of expected steps found) and `passed` wants a full match. A call
+the gate refused is part of the path by default; `executed_only=True` drops
+refused and errored calls.
+
+`ToolSelection` scores which tools were chosen against which should have
+been: recall over `expected`, precision over what was selected, and a list
+of `forbidden` tools any one of which fails the verdict. Extra tools are
+allowed unless `allow_extra=False`.
+
+`ArgumentCorrectness` compares the arguments of one tool's call with the
+ones expected, and reads the tool's parameter schema to do it: on a
+`number` argument `"49.9"` and `49.9` agree within `tolerance` (absolute,
+per argument with `tolerances`, or `relative_tolerance`); a `boolean` accepts
+`"true"`; an `array` compares element by element, or as a set when the
+schema says `uniqueItems`; an `object` compares its properties recursively.
+The runner fills the schema in from the tool on the agent under test, so a
+case rarely has to carry one; pass `schema=` when it does. Strings compare
+case-insensitively with whitespace folded unless `ignore_case=False`,
+`strict_keys=True` also fails on arguments the call carried that were not
+expected, and `occurrence` chooses which call of the tool must agree
+(`any`, `first`, `last` or `all`). A tool that was never called scores 0.
+
+Every evaluator is data: it loads from a case file under its `kind`
+(`trajectory_match`, `tool_selection`, `argument_correctness`) and enters
+the suite fingerprint, so retuning a tolerance is a new suite, as it should
+be. The same object evaluates on its own, against a ledger or an agent
+result: `TrajectoryMatch(expected=[...]).evaluate(result)`.
 
 ## LLM-as-judge for open-ended quality
 
@@ -445,6 +509,109 @@ comparison = asyncio.run(
 print(comparison.winner, comparison.consistent)
 ```
 
+## A simulated user for multi-turn cases
+
+A prompt tests a reply. Most of what goes wrong in a conversation happens
+after it: the agent asks a clarifying question and mishandles the answer,
+drops a detail from two turns ago, keeps going after the user is done. A
+`SimulatedUser` on the case is a persona and a goal; in `arun()` a model
+plays that user against the agent, opening with the case prompt, until the
+user says the goal is met, the agent says one of the `stop_on` phrases, or
+`max_turns` user messages have been sent.
+
+```python
+from locus.evaluation import EvalCase, SimulatedUser, TrajectoryMatch
+
+case = EvalCase(
+    name="refund_conversation",
+    prompt="Hi, I need help with a recent order.",
+    simulated_user=SimulatedUser(
+        persona="A hurried customer who writes short messages and gives details only when asked.",
+        goal="Get a refund for order ord-4821 because the headphones arrived broken.",
+        max_turns=5,
+        stop_on=["anything else?"],
+    ),
+    expected_tools=["issue_refund"],
+    evaluators=[TrajectoryMatch(expected=["lookup_order", "issue_refund"], mode="subset")],
+    rubric="Passes if the agent asked for the order id before acting and confirmed the refund.",
+)
+```
+
+The simulated user is a real model call. `EvalRunner(simulator=UserSimulator(model))`
+names the model; without one the runner uses the judge's, and a case with a
+simulated user and neither fails under `simulated_user:no_model_configured`.
+The synchronous `run()` fails such a case under `simulated_user:requires_arun`
+rather than grading its opening line alone.
+
+The whole conversation is what gets graded. The structural checks and the
+evaluators read every reply the agent gave and every tool it called across
+the turns; the judge reads the full transcript with the persona and the
+goal; `result.transcript` keeps the turns and `result.stopped_by` says how
+it ended. A conversation that stopped on the turn budget fails
+`simulated_user:goal_met` (turn it off with `require_goal_met=False`), and an
+agent that raised mid-conversation fails `simulated_user:agent_answered` with
+the error on the result.
+
+How the agent is driven matters. With a checkpointer on the agent
+(`MemoryCheckpointer` is enough), every turn continues one thread, which is
+how the agent would see a real conversation. Without one, `arun()` starts
+each call from an empty conversation, so the simulator carries the transcript
+so far in each prompt and says so. `max_duration_ms` on the case bounds the
+whole conversation, and `max_total_tokens` / `max_cost_usd` read the totals
+over the turns.
+
+## Online evaluation
+
+A regression suite grades the cases somebody wrote; production grades the
+ones nobody wrote. `OnlineEvaluator` subscribes to the event bus, follows
+each run's `agent.*` events to its `agent.terminate`, keeps the runs a
+sampler picks within a budget, turns each into a case from a template of
+expectations, and grades it in the background with the same checks, the same
+evaluators and the same judge as the suite. The results fold into an
+ordinary `EvalReport`, so the gate, the diff and the stores read it
+unchanged, and every report from one template carries the same fingerprint.
+
+```python
+from locus.evaluation import EvalCase, OnlineBudget, OnlineEvaluator, ToolSelection, fraction
+
+evaluator = OnlineEvaluator(
+    template=EvalCase(
+        name="live",
+        prompt="",
+        evaluators=[ToolSelection(expected=["lookup_order"], forbidden=["delete_order"])],
+        max_iterations=6,
+    ),
+    sampler=fraction(0.1, seed=7),
+    budget=OnlineBudget(max_cases=200, max_per_minute=20),
+)
+
+
+async def serve() -> None:
+    await evaluator.start()
+    # ... serve traffic; every agent run inside a run_context() is seen ...
+    await evaluator.stop()
+    print(evaluator.report().summary())
+```
+
+`every_nth(n)` and `fraction(share, seed=)` are the samplers; any callable
+from a `RecordedRun` to a boolean is one. The budget caps gradings over the
+evaluator's lifetime, per sliding minute, and in flight at once; a sampled
+run that does not fit is counted in `over_budget`, never queued without
+bound.
+
+What the bus carries, the evaluator grades. The bridge publishes every tool
+call with its name, outcome and a preview of its result, the iteration count,
+the stop reason and a preview of the final message; it does not publish the
+prompt, the arguments or the full answer, which keeps user data off the bus
+by design. So the trajectory evaluators, the budgets and the forbidden-tool
+checks grade a bus-only run completely, while a rubric or a receipt check
+sees previews until the application attaches what it knows:
+`evaluator.attach(run_id, prompt=..., output=..., arguments={span_id: {...}})`.
+An application that holds the `AgentResult` can hand it over whole with
+`await evaluator.submit(prompt, result)`, which goes through the same sampler
+and budget. A grading that fails (the judge unreachable, say) is recorded in
+`evaluator.errors` rather than raised out of the background task.
+
 ## Comparable reports and a gate for CI
 
 Every report carries a `fingerprint` of the cases it measured, so two
@@ -479,6 +646,42 @@ top-level rubric applied to cases that name none), and the whole flow runs
 from the command line as `locus eval run`, `diff`, `gate` and `summary`.
 The how-to [Evaluate an agent in CI](../how-to/evaluate-in-ci.md) walks
 through it.
+
+### Keeping reports and reading the trend
+
+A report on disk is one build's artefact. A regression is a question about
+several, so a `ReportStore` keeps reports by suite and by fingerprint, and
+`trend` reads the last N of one suite back and says where each moved against
+the one before it. Four stores share the interface: a directory
+(`FileReportStore`), a table on an Oracle AI Database (`OracleReportStore`,
+the report as JSON with its headline figures in columns), an OCI Object
+Storage bucket (`OCIBucketReportStore`) and any S3-compatible bucket
+(`S3ReportStore`). `report_store(spec)` opens one from a string, which is how
+the command line names it:
+
+```python
+from locus.evaluation import report_store, trend
+
+store = report_store("oci://<namespace>/<bucket>/locus/eval/?profile=DEFAULT&region=eu-frankfurt-1")
+store.put(report, suite="warden")
+
+history = trend(store, suite="warden", last=10)
+print(history.summary())
+assert not history.regressed, history.summary()
+```
+
+`file:///var/lib/locus/evals` (or a bare path), `oracle://user:pw@/?dsn=mydb_low&wallet=/opt/wallet&table=LOCUS_EVAL_REPORTS`
+(a bare `oracle://` reads `ORACLE_DSN`, `ORACLE_USER`, `ORACLE_PASSWORD`,
+`ORACLE_WALLET` and `ORACLE_WALLET_PASSWORD` from the environment, as the
+approval stores do), `oci://<namespace>/<bucket>/<prefix>?profile=&region=&auth=`
+and `s3://<bucket>/<prefix>?endpoint_url=` are the forms. Each point of the
+trend carries the pass count, the average and their deltas against the
+previous point; a point whose fingerprint differs from the previous one is
+marked `suite_changed` rather than read as a regression, and
+`trend.regressed` says whether the newest report is worse than the one
+before it. `locus eval run --store <spec> --suite <name>` keeps the report
+after a run and `locus eval trend --store <spec> --suite <name> --last 10`
+prints the trend, exiting 1 on a regression.
 
 ## When the judge cannot grade
 
@@ -529,6 +732,10 @@ leaves the case not graded rather than failed.
 - [`locus.evaluation.reliability`](https://github.com/oracle/locus/blob/main/src/locus/evaluation/reliability.py) — `consistency`, `panel_agreement`, `trust_decision`, `cohen_kappa`, `calibration_drift`.
 - [`locus.evaluation.report`](https://github.com/oracle/locus/blob/main/src/locus/evaluation/report.py) — `diff_reports`, `EvalGate`.
 - [`locus.evaluation.datasets`](https://github.com/oracle/locus/blob/main/src/locus/evaluation/datasets.py) — `load_cases`, `dump_cases`.
+- [`locus.evaluation.evaluators`](https://github.com/oracle/locus/blob/main/src/locus/evaluation/evaluators.py) — `TrajectoryMatch`, `ToolSelection`, `ArgumentCorrectness`, `EvaluatorVerdict`.
+- [`locus.evaluation.simulator`](https://github.com/oracle/locus/blob/main/src/locus/evaluation/simulator.py) — `SimulatedUser`, `UserSimulator`, `Conversation`.
+- [`locus.evaluation.online`](https://github.com/oracle/locus/blob/main/src/locus/evaluation/online.py) — `OnlineEvaluator`, `OnlineBudget`, `every_nth`, `fraction`.
+- [`locus.evaluation.stores`](https://github.com/oracle/locus/blob/main/src/locus/evaluation/stores.py) — `report_store`, the four stores, `trend`.
 
 ## See also
 

@@ -93,8 +93,22 @@ def dump_cases(cases: Sequence[EvalCase], path: str | Path) -> None:
     """Write ``cases`` as a JSON list that :func:`load_cases` reads back.
 
     A :class:`~locus.evaluation.rubric.Rubric` on a case is written as its
-    object form; a string rubric as the string.
+    object form; a string rubric as the string. Evaluators are written with
+    their ``kind``, which is how :func:`load_cases` tells them apart.
     """
     file = Path(path)
-    payload = [case.model_dump(mode="json", exclude_defaults=True) for case in cases]
+    payload = []
+    for case in cases:
+        data = case.model_dump(mode="json", exclude_defaults=True)
+        if case.evaluators:
+            # ``kind`` is a default, but it is also the tag the loader tells
+            # the evaluators apart by, so it must survive the round trip.
+            data["evaluators"] = [
+                {
+                    "kind": evaluator.kind,
+                    **evaluator.model_dump(mode="json", exclude_defaults=True, by_alias=True),
+                }
+                for evaluator in case.evaluators
+            ]
+        payload.append(data)
     file.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")

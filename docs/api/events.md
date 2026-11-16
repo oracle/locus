@@ -27,8 +27,10 @@ the [Server-Sent Events (SSE) event catalogue](../concepts/sse-events.md)
 for the full wire-format reference: every `event_type` string the SDK
 emits, grouped by prefix, with its payload fields.
 
-::: locus.observability.event_bus.EventBus
-::: locus.observability.event_bus.StreamEvent
+`EventBus` and `StreamEvent` themselves are documented once, on the
+[Observability API page](observability.md#locus.observability.event_bus.EventBus);
+this page keeps the run context and the hook that feeds the bus.
+
 ::: locus.observability.context.run_context
 ::: locus.observability.context.current_run_id
 ::: locus.observability.bus_hook.EventBusHook
