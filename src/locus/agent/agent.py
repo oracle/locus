@@ -233,7 +233,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
                 ``require_verification``, ``plugins``, ``temperature``,
                 ``max_tokens``, ``token_budget``, ``time_budget_seconds``,
                 ``max_concurrency``, ``tool_execution``, ``tool_result_store``,
-                ``web_search``, ``web_fetch``, ``image_generator``,
+                ``tool_result_offload``, ``web_search``, ``web_fetch``, ``image_generator``,
                 ``speech_provider``, ``name``, ``agent_id``, ``metadata``.
 
                 See :class:`~locus.agent.config.AgentConfig` for the full
