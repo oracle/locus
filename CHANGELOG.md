@@ -218,6 +218,47 @@ policy.
   unchanged; only the ZDR case now completes instead of failing. Pass
   `store=True` to keep the old behaviour, or `store=False` on a tenancy known
   to be ZDR to skip the one stateful attempt.
+- **OAuth 2.1 for remote MCP servers.** `MCPClient(oauth=MCPOAuth(...))`
+  signs in to a Streamable HTTP server that answers `401`: authorization
+  code with PKCE, discovery of the protected-resource and
+  authorization-server metadata, dynamic client registration (or a hosted
+  client-metadata document via `client_metadata_url`), token refresh, and a
+  browser hand-off with a loopback listener that a headless process replaces
+  with its own `redirect_handler` / `callback_handler`. Tokens live in a
+  pluggable store: `InMemoryTokenStore` (default), `FileTokenStore` (a
+  `0600` file under the user's config directory) or `KeyringTokenStore`
+  (the optional `keyring` package). No token value is logged. An
+  `Authorization` header or a static `access_token` still wins over OAuth.
+- **Toolset shaping on `MCPClient`.** `include=` and `exclude=` take server
+  tool names or globs, `prefix=` renames what is imported, so two servers
+  mount without name clashes. Order: `allowed_tools` and `include` narrow,
+  `exclude` removes (and wins over `include`), `tool_filter` decides last,
+  `prefix` is applied after matching. Calls through either name land; a
+  shaped-out tool raises `MCPToolNotAllowedError`.
+- **Elicitation.** A server that asks the person a question mid-call pauses
+  the agent run through the interrupt mechanism: an `InterruptEvent` whose
+  `fields` describe the requested schema and whose `metadata` carries
+  `mcp_elicitation`. `client.answer_elicitation(event, answer)` then
+  `agent.resume(answer, perform_dangling=True)` re-issues the call with the
+  answer. `elicitation_handler=` answers without pausing (and outside a run);
+  with neither, a question outside a run is declined. `MCPElicitation` and
+  `ElicitationAnswer` are the types. An agent served by `LocusMCPServer`
+  has its own `ask_user` questions relayed to the MCP client as
+  elicitations through `run_agent_stream`.
+- **W3C trace context in MCP `_meta`.** Every `tools/call` the agent makes
+  carries `traceparent` / `tracestate` parented to the telemetry hook's
+  span for that tool call (`TelemetryHook` now exposes it through
+  `current_tool_span()`), and every call `LocusMCPServer` serves runs under
+  the context its `_meta` carries, so an MCP hop stays inside one trace.
+  `propagate_trace=False` opts out; `locus.integrations.mcp_tracing` holds
+  `trace_meta()` and `trace_scope()` for other servers.
+- **`locus mcp serve <target>`** exposes an agent (`MODULE:ATTR` /
+  `FILE.py:ATTR`, an `Agent`, a factory, a `Tool` or a list of tools) or a
+  bare module of `@tool` functions as an MCP server over stdio (default) or
+  Streamable HTTP (`--transport http --host --port --path`).
+  `create_tool_server(tools)` and `LocusMCPServer.build()` are the same from
+  Python. The MCP concept page covers the auth flow, shaping precedence,
+  elicitation, tracing and the command. (#457)
 
 ### Fixed
 
