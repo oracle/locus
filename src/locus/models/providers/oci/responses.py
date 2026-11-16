@@ -595,6 +595,10 @@ class OCIResponsesModel(BaseModel):
         client = self._http_client()
         tool_args_buf: dict[str, str] = {}
         tool_names: dict[str, str] = {}
+        # Argument deltas are keyed by the stream item id; ``output_item.added``
+        # announces the call id the server expects back. Accumulate under the
+        # call id so the emitted ToolCall matches what ``complete()`` returns.
+        item_to_call: dict[str, str] = {}
 
         async with client.stream(
             "POST", "/responses", json=body, headers=self._extra_headers()
@@ -618,8 +622,25 @@ class OCIResponsesModel(BaseModel):
                 if "tool_calls" in parsed:
                     for partial in parsed["tool_calls"]:
                         cid = partial.get("id", "")
-                        delta = partial.get("arguments_delta", "")
-                        tool_args_buf[cid] = tool_args_buf.get(cid, "") + delta
+                        item_id = partial.get("item_id", "")
+                        if item_id and cid and cid != item_id:
+                            item_to_call[item_id] = cid
+                            # Deltas that arrived under the item id move over.
+                            if item_id in tool_args_buf:
+                                tool_args_buf[cid] = tool_args_buf.pop(item_id) + tool_args_buf.get(
+                                    cid, ""
+                                )
+                            if item_id in tool_names and cid not in tool_names:
+                                tool_names[cid] = tool_names.pop(item_id)
+                        cid = item_to_call.get(cid, cid)
+                        if partial.get("final"):
+                            # ``output_item.done`` carries the whole argument string.
+                            tool_args_buf[cid] = partial.get("arguments") or tool_args_buf.get(
+                                cid, ""
+                            )
+                        else:
+                            delta = partial.get("arguments_delta", "")
+                            tool_args_buf[cid] = tool_args_buf.get(cid, "") + delta
                         if partial.get("name"):
                             tool_names[cid] = partial["name"]
                 if parsed.get("error"):
