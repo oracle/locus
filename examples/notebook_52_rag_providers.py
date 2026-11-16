@@ -14,9 +14,11 @@ Production RAG is two pluggable pieces, both behind one Locus interface:
   26ai).
 - **Vector store** — ``InMemoryVectorStore`` for demos and tests, or a
   durable backend: ``PgVectorStore``, ``OpenSearchVectorStore``,
-  ``QdrantVectorStore``, ``ChromaVectorStore`` or ``OracleVectorStore``
-  (Oracle Database 26ai). Swapping is a one-line change; the retrieve/add
-  API is identical.
+  ``QdrantVectorStore``, ``ChromaVectorStore``, ``OracleVectorStore``
+  (Oracle Database 26ai), ``MilvusVectorStore``, ``WeaviateVectorStore``,
+  ``ElasticsearchVectorStore``, ``RedisVectorStore``,
+  ``MongoDBAtlasVectorStore`` or ``PineconeVectorStore``. Swapping is a
+  one-line change; the retrieve/add API is identical.
 
 Choice of embedding model and distance metric is an operations
 decision, not just a tuning knob: it sets retrieval precision, and weak
@@ -24,27 +26,35 @@ retrieval is what routes an agent to the wrong runbook and a wrong
 answer to a merchant. What each part covers (all against the same
 runbook corpus):
 
-- Part 1 — embedding-model selection (small vs large dimensions).
+- Part 1 — embedding-model selection (two models of different width).
 - Part 2 — three ``distance_metric`` strings (COSINE / DOT / EUCLIDEAN) and
   what the store does with them.
 - Part 3 — Qdrant in-memory store as a drop-in for ``InMemoryVectorStore``.
 - Part 4 — batch ingest, ``count()``, ``clear()``.
+- Part 5 — Milvus Lite: a file-backed embedded store (no server, no account)
+  with BM25 hybrid search behind the retriever's ``hybrid=True`` switch.
+- Part 6 — ``LLMReranker``: the chat model grades the over-fetched hits.
 
 Run it:
-    # Embeddings need an OpenAI API key; without it the notebook prints
-    # what's missing and exits cleanly.
+    # Embeddings need a provider: an OpenAI API key, or an OCI profile
+    # (LOCUS_EMBEDDING_PROVIDER=oci picks OCI Generative AI explicitly).
+    # Without either the notebook prints what's missing and exits cleanly.
     export OPENAI_API_KEY=sk-...
     python examples/notebook_52_rag_providers.py
 """
 
 import asyncio
 import os
+import shutil
 import sys
+import tempfile
 
-from config import get_embedder
+from config import get_embedder, get_embedding_provider, get_model
 
 from locus.rag import (
     InMemoryVectorStore,
+    LLMReranker,
+    MilvusVectorStore,
     QdrantVectorStore,
     RAGRetriever,
 )
@@ -52,7 +62,30 @@ from locus.rag.stores.base import Document
 
 
 def _missing_env() -> list[str]:
+    if get_embedding_provider() == "oci":
+        return (
+            []
+            if os.environ.get("OCI_PROFILE") or os.environ.get("LOCUS_OCI_PROFILE")
+            else ["OCI_PROFILE"]
+        )
     return [name for name in ("OPENAI_API_KEY",) if not os.environ.get(name)]
+
+
+def _embedding_models() -> list[str]:
+    """Two embedding models of different width for Part 1; the first is used everywhere else."""
+    configured = [
+        m
+        for m in (
+            os.environ.get("LOCUS_EMBEDDING_MODEL"),
+            os.environ.get("LOCUS_EMBEDDING_MODEL_B"),
+        )
+        if m
+    ]
+    if configured:
+        return configured
+    if get_embedding_provider() == "oci":
+        return ["cohere.embed-v4.0", "openai.text-embedding-3-small"]
+    return ["text-embedding-3-small", "text-embedding-3-large"]
 
 
 def _store(*, dimension: int, distance: str = "COSINE") -> InMemoryVectorStore:
@@ -89,10 +122,10 @@ CORPUS = [
 
 async def part1_embedding_models():
     print("=" * 60)
-    print("Part 1: OpenAIEmbeddings — small vs large")
+    print("Part 1: two embedding models on the same corpus")
     print("=" * 60)
 
-    for model in ["text-embedding-3-small", "text-embedding-3-large"]:
+    for model in _embedding_models():
         embedder = get_embedder(model=model)
         store = _store(dimension=embedder.config.dimension)
         retriever = RAGRetriever(embedder=embedder, store=store)
@@ -117,7 +150,7 @@ async def part2_distance_metrics():
     print("Part 2: Distance metric variants on the same corpus")
     print("=" * 60)
 
-    embedder = get_embedder(model="text-embedding-3-small")
+    embedder = get_embedder(model=_embedding_models()[0])
     query = "issuer declined the card for not enough money"
 
     # The metric is a property of the store, not the vectors: embed the
@@ -149,7 +182,7 @@ async def part3_swap_backend():
     print("Part 3: QdrantVectorStore (location=':memory:')")
     print("=" * 60)
 
-    embedder = get_embedder(model="text-embedding-3-small")
+    embedder = get_embedder(model=_embedding_models()[0])
     try:
         store = QdrantVectorStore(
             location=":memory:",
@@ -192,7 +225,7 @@ async def part4_batch():
     print("Part 4: Batch ingest + count + clear")
     print("=" * 60)
 
-    embedder = get_embedder(model="text-embedding-3-small")
+    embedder = get_embedder(model=_embedding_models()[0])
     store = _store(dimension=embedder.config.dimension)
     retriever = RAGRetriever(embedder=embedder, store=store)
 
@@ -200,6 +233,82 @@ async def part4_batch():
     print(f"  After add_documents: runbooks = {await store.count()}")
     await store.clear()
     print(f"  After clear():       runbooks = {await store.count()}")
+
+
+# =============================================================================
+# Part 5: Milvus Lite — a file on disk is the whole database. No server, no
+#         account. ``enable_hybrid=True`` adds a BM25 sparse field so the
+#         retriever's ``hybrid=True`` switch blends keyword and vector
+#         relevance; the same switch on a store without hybrid search falls
+#         back to vector-only and logs it once.
+# =============================================================================
+
+
+async def part5_milvus_lite_hybrid():
+    print("\n" + "=" * 60)
+    print("Part 5: MilvusVectorStore (Milvus Lite) + hybrid=True")
+    print("=" * 60)
+
+    embedder = get_embedder(model=_embedding_models()[0])
+    workdir = tempfile.mkdtemp(prefix="locus-nb52-")
+    try:
+        try:
+            store = MilvusVectorStore(
+                uri=os.path.join(workdir, "runbooks.db"),
+                dimension=embedder.config.dimension,
+                enable_hybrid=True,
+            )
+        except ImportError:
+            print("  MilvusVectorStore needs the milvus extra (pip install 'locus-sdk[milvus]').")
+            print("  Same RAGRetriever/store API as the stores above — nothing else changes.")
+            return
+
+        retriever = RAGRetriever(embedder=embedder, store=store, hybrid=True, hybrid_alpha=0.5)
+        await retriever.add_documents(CORPUS)
+        print(f"  Milvus Lite file: {store!r}; hybrid supported: {retriever.hybrid_supported}")
+
+        # An exact code is a keyword problem: "05" carries little meaning for
+        # an embedding model but is decisive for BM25.
+        query = "what should the agent do with decline code 05?"
+        for hybrid in (False, True):
+            hits = await retriever.retrieve(query, limit=2, hybrid=hybrid)
+            label = "hybrid (alpha=0.5)" if hybrid else "vector only       "
+            print(f"\n  {label}:")
+            for i, h in enumerate(hits.documents, start=1):
+                print(f"    #{i} score={h.score:.4f} {h.document.content[:70]}…")
+        await store.close()
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+# =============================================================================
+# Part 6: LLM reranker — the chat model the agent already uses grades the
+#         over-fetched candidates. No rerank endpoint, one completion per
+#         batch of up to 20 passages; the retriever's score stays on
+#         ``.distance`` so both signals can be compared.
+# =============================================================================
+
+
+async def part6_llm_reranker():
+    print("\n" + "=" * 60)
+    print("Part 6: LLMReranker on the retriever")
+    print("=" * 60)
+
+    embedder = get_embedder(model=_embedding_models()[0])
+    store = _store(dimension=embedder.config.dimension)
+    retriever = RAGRetriever(
+        embedder=embedder,
+        store=store,
+        reranker=LLMReranker(get_model(), top_n=2),
+        rerank_candidate_pool=len(CORPUS),
+    )
+    await retriever.add_documents(CORPUS)
+
+    hits = await retriever.retrieve("how long until a refund shows on the statement?", limit=2)
+    for i, h in enumerate(hits.documents, start=1):
+        print(
+            f"  #{i} grade={h.score:.2f} (vector score {h.distance:.4f}) {h.document.content[:60]}…"
+        )
 
 
 async def main():
@@ -212,13 +321,18 @@ async def main():
         )
         for name in missing:
             print(f"  - {name}")
-        print("\nSet OPENAI_API_KEY (for embeddings), then re-run.")
+        print(
+            "\nSet OPENAI_API_KEY, or an OCI profile with LOCUS_EMBEDDING_PROVIDER=oci "
+            "(for embeddings), then re-run."
+        )
         return
 
     await part1_embedding_models()
     await part2_distance_metrics()
     await part3_swap_backend()
     await part4_batch()
+    await part5_milvus_lite_hybrid()
+    await part6_llm_reranker()
 
     print("\n" + "=" * 60)
     print("Notebook 52 complete.")
