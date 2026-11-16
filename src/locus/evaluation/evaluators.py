@@ -170,7 +170,7 @@ def _longest_common_subsequence(a: Sequence[str], b: Sequence[str]) -> int:
 class TrajectoryMatch(LedgerEvaluator):
     """The sequence of tool calls against the sequence expected.
 
-    Args:
+    Attributes:
         expected: Tool names in the order expected.
         mode: ``strict``: the run made exactly these calls in this order.
             ``unordered``: the same calls, as a multiset, in any order.
@@ -267,7 +267,7 @@ class TrajectoryMatch(LedgerEvaluator):
 class ToolSelection(LedgerEvaluator):
     """Which tools the agent chose, against which it should have chosen.
 
-    Args:
+    Attributes:
         expected: Tools that should have been selected at least once.
         forbidden: Tools that must not have been selected. A selection of one
             fails the verdict whatever else matched.
@@ -373,7 +373,7 @@ def _as_bool(value: Any) -> bool | None:
 class ArgumentCorrectness(LedgerEvaluator):
     """The arguments of one tool's call against the arguments expected.
 
-    Args:
+    Attributes:
         tool: The tool whose call is checked.
         expected: The arguments that matter and their values. Keys not named
             are not checked unless ``strict_keys`` is on.

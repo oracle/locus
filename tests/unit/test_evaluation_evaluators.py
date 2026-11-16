@@ -411,10 +411,10 @@ async def test_evaluators_grade_the_same_on_the_async_path() -> None:
 
 def test_evaluator_settings_enter_the_fingerprint() -> None:
     base = EvalCase(name="c", prompt="p", evaluators=[TrajectoryMatch(expected=["a"])])
-    retuned = EvalCase(
+    variant = EvalCase(
         name="c", prompt="p", evaluators=[TrajectoryMatch(expected=["a"], mode="subset")]
     )
-    assert suite_fingerprint([base]) != suite_fingerprint([retuned])
+    assert suite_fingerprint([base]) != suite_fingerprint([variant])
 
 
 def test_evaluators_round_trip_through_a_case_file(tmp_path: Path) -> None:
