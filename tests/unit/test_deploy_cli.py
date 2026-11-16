@@ -967,6 +967,36 @@ def test_the_server_template_starts_with_a_key_or_an_explicit_opt_out(
     assert started.stdout.strip() == "FastAPI"
 
 
+def test_the_server_template_runs_with_an_api_key_profile(tmp_path: Path) -> None:
+    """``LOCUS_OCI_AUTH_TYPE=api_key`` — the value the variable documents as its
+    default — with a mounted profile, as a local run of the image passes it.
+    The OCI model is built at import, so a value the model rejects stops the
+    server before it serves (the negative half proves the positive one)."""
+    home = tmp_path / "home"
+    (home / ".oci").mkdir(parents=True)
+    (home / ".oci" / "config").write_text(
+        "[FAKE]\n"
+        "user=ocid1.user.oc1..fake\n"
+        "fingerprint=aa:bb:cc\n"
+        "tenancy=ocid1.tenancy.oc1..fake\n"
+        "region=eu-frankfurt-1\n"
+        f"key_file={home / '.oci' / 'key.pem'}\n"
+    )
+    environ = {
+        "LOCUS_SERVER_API_KEY": "k",
+        "LOCUS_MODEL": "oci:openai.gpt-4.1",
+        "OCI_PROFILE": "FAKE",
+        "HOME": str(home),
+    }
+    started = _run_server_template(tmp_path, LOCUS_OCI_AUTH_TYPE="api_key", **environ)
+    assert started.returncode == 0, started.stderr
+    assert started.stdout.strip() == "FastAPI"
+
+    refused = _run_server_template(tmp_path, LOCUS_OCI_AUTH_TYPE="bogus", **environ)
+    assert refused.returncode != 0
+    assert "auth_type must be one of" in refused.stderr
+
+
 # --------------------------------------------------------------------------
 # The bundled Terraform and Helm, with the tools when they are installed
 # --------------------------------------------------------------------------

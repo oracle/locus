@@ -40,9 +40,12 @@ import functools
 import inspect
 import json
 import logging
+import os
 import re
+import sys
+import threading
 import time
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from collections.abc import Awaitable, Callable, Hashable, Mapping
 from contextlib import AsyncExitStack
 from contextvars import ContextVar
@@ -985,6 +988,52 @@ _request_metadata: ContextVar[Mapping[str, Any] | None] = ContextVar(
 )
 
 
+class _StderrTail:
+    """A stdio server's stderr, forwarded to ours with its last lines kept.
+
+    The ``mcp`` SDK writes the child's stderr wherever ``errlog`` points; this
+    gives it a pipe, forwards every line to this process's stderr as before,
+    and remembers the last ``keep`` lines, so a server that dies during the
+    handshake can be reported with what it said instead of a bare
+    "Connection closed".
+    """
+
+    def __init__(self, label: str, keep: int = 20) -> None:
+        self.lines: deque[str] = deque(maxlen=keep)
+        read_fd, write_fd = os.pipe()
+        self._reader = os.fdopen(read_fd, "r", encoding="utf-8", errors="replace")
+        #: The ``errlog`` to hand ``stdio_client``; the child inherits its fd.
+        self.errlog = os.fdopen(write_fd, "w", encoding="utf-8")
+        self._thread = threading.Thread(target=self._pump, name=f"mcp-stderr:{label}", daemon=True)
+        self._thread.start()
+
+    def _pump(self) -> None:
+        try:
+            for line in self._reader:
+                self.lines.append(line.rstrip("\n"))
+                stream = sys.stderr
+                if stream is not None:
+                    try:
+                        stream.write(line)
+                        stream.flush()
+                    except Exception:  # noqa: BLE001 — a closed stderr must not stop the drain
+                        pass
+        finally:
+            self._reader.close()
+
+    def close(self, wait: float = 0.0) -> None:
+        """Drop our end of the pipe; with ``wait``, give the drain that long to finish."""
+        try:
+            self.errlog.close()
+        except OSError:
+            pass
+        if wait > 0:
+            self._thread.join(timeout=wait)
+
+    def tail(self) -> str:
+        return "\n".join(self.lines)
+
+
 class _SessionHandle:
     """One MCP session, owned by a dedicated task.
 
@@ -1012,6 +1061,8 @@ class _SessionHandle:
         self.last_used: float = time.monotonic()
         #: Requests currently using this session (idle eviction skips it).
         self.in_flight: int = 0
+        #: The stdio server's stderr, when this session spawned one.
+        self.stderr_tail: _StderrTail | None = None
 
     @property
     def alive(self) -> bool:
@@ -1096,6 +1147,8 @@ class _SessionHandle:
         within ``grace`` seconds."""
         task = self.task
         if task is None or task.done():
+            if self.stderr_tail is not None:
+                self.stderr_tail.close()
             return
         if self._stop is not None:
             self._stop.set()
@@ -1103,6 +1156,8 @@ class _SessionHandle:
         if not done:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+        if self.stderr_tail is not None:
+            self.stderr_tail.close()
 
 
 async def _await_while_alive(
@@ -1297,6 +1352,21 @@ class MCPClient(BaseModel):
     # Stdio transport
     server_command: list[str] | None = Field(
         default=None, description="Command to start stdio MCP server"
+    )
+    env: dict[str, str] | None = Field(
+        default=None,
+        description=(
+            "Environment variables for a stdio server, on top of this process's. "
+            "The server inherits os.environ (see inherit_env), so a PYTHONPATH, "
+            "an OCI profile or an API key the server needs is set here or exported."
+        ),
+    )
+    inherit_env: bool = Field(
+        default=True,
+        description=(
+            "Start a stdio server with this process's environment. False starts it "
+            "from the mcp SDK's minimal one (PATH, HOME, USER, ...) plus env."
+        ),
     )
 
     # HTTP transport
@@ -1685,17 +1755,58 @@ class MCPClient(BaseModel):
             if reason:
                 raise ValidationError(f"MCP launch blocked: {reason}")
 
+        # The SDK's own default is a stripped environment (PATH, HOME, USER,
+        # ...): a server that needs PYTHONPATH, an OCI profile or an API key
+        # then dies during the handshake with nothing but "Connection closed".
+        if self.inherit_env:
+            environment = dict(os.environ)
+        else:
+            from mcp.client.stdio import get_default_environment
+
+            environment = dict(get_default_environment())
+        if self.env:
+            environment.update(self.env)
         server_params = StdioServerParameters(
             command=cmd,
             args=cmd_args,
+            env=environment,
         )
 
+        stderr_tail = _StderrTail(self.label)
         handle = _SessionHandle(self.label)
-        await handle.start(
-            stdio_client(server_params), self._session_factory(ClientSession), self.connect_timeout
-        )
+        handle.stderr_tail = stderr_tail
+        try:
+            await handle.start(
+                stdio_client(server_params, errlog=stderr_tail.errlog),
+                self._session_factory(ClientSession),
+                self.connect_timeout,
+            )
+        except Exception as exc:
+            # Our end of the pipe closes first so the drain sees EOF once the
+            # child has gone; what it wrote on the way out is the diagnosis.
+            stderr_tail.close(wait=1.0)
+            said = stderr_tail.tail()
+            if said:
+                raise MCPConnectionError(
+                    f"MCP server {self.label} failed during setup "
+                    f"({type(exc).__name__}: {exc}); its stderr ended with:\n{said}"
+                ) from exc
+            raise
         self._install(handle)
         return handle
+
+    def bound_loop(self) -> asyncio.AbstractEventLoop | None:
+        """The event loop the default session runs on, while it is up.
+
+        A session is bound to the loop that opened it; a run driven on another
+        loop — ``Agent.run_sync`` called inside a running loop runs on a worker
+        thread's — cannot reach it, and ``run_sync`` refuses such a run.
+        """
+        task = getattr(self._runner, "task", None)
+        if task is None or task.done():
+            return None
+        loop: asyncio.AbstractEventLoop = task.get_loop()
+        return loop
 
     def _install(self, handle: _SessionHandle) -> None:
         """Make ``handle`` the default session."""
@@ -2288,6 +2399,7 @@ class MCPClient(BaseModel):
                 output_schema=mcp_tool.get("outputSchema"),
                 emits_progress=True,
             )
+            locus_tool._source = self
             locus_tools.append(locus_tool)
 
         return locus_tools

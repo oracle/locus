@@ -266,7 +266,12 @@ from the SDK's in-memory exporter, or a recorded trace — against the
 conventions: one trace, one `invoke_agent` root, the kind and name each
 operation requires, the required attributes present and typed, `error.type`
 on every failed span, and no misspelled `gen_ai.*` key. It returns the
-problems, one line each; `assert_valid_spans` raises with them. Notebook
+problems, one line each; `assert_valid_spans` raises with them. When the
+exporter also caught spans from other instrumentation scopes — FastAPI's
+`POST /`, the `mcp` package's `MCP send …` — only the hook's own scope
+(`locus.hooks.telemetry`) is checked, so those are not reported as foreign
+roots or extra traces; `scope=` names another, `scope=None` checks
+everything. Notebook
 60 runs it on the trace of its ticket reply:
 
 ```python
@@ -376,8 +381,12 @@ metrics.set_meter_provider(
 ```
 
 Call `tracer_provider.shutdown()` (and the meter provider's) before the
-process exits so the last batch is flushed. Nothing below adds a
-dependency beyond the `telemetry` extra.
+process exits so the last batch is flushed. A reader given to a
+`MeterProvider` after construction (`add_metric_reader`) is outside that
+`shutdown()` and `force_flush()` — the SDK visits the constructor-time
+readers only — so shut such a reader down yourself; the `install()`
+below returns an object that does. Nothing below adds a dependency beyond
+the `telemetry` extra.
 
 ### OCI Application Performance Monitoring
 
@@ -397,16 +406,22 @@ apm = oci_apm(
     data_upload_endpoint="https://<domain>.apm-agt.<region>.oci.oraclecloud.com",
     private_data_key="<private data key>",
 )
-tracer_provider, meter_provider = apm.install(service_name="support-agent")
+installation = apm.install(service_name="support-agent")
 
 agent = Agent(model="{{ locus_example_model }}", tools=[lookup_order], hooks=[TelemetryHook()])
 result = agent.run_sync("Resolve the duplicate charge on ord-4821.")
 
-tracer_provider.shutdown()
-meter_provider.shutdown()
+installation.shutdown()
 ```
 
-Both arguments default to the `OCI_APM_DATA_UPLOAD_ENDPOINT` and
+`install()` returns the `(tracer_provider, meter_provider)` pair it set up
+— it unpacks as a tuple — with `force_flush()` and `shutdown()` that reach
+what the call added. Use that `shutdown()` rather than the providers':
+a `MeterProvider` already in place does not flush a reader added to it
+after construction, so the last metrics interval would be lost; when
+`install()` joined existing providers it also registers its `shutdown()`
+with `atexit`, so the exit flush happens with no code of yours. Both
+arguments default to the `OCI_APM_DATA_UPLOAD_ENDPOINT` and
 `OCI_APM_PRIVATE_DATA_KEY` environment variables, so `oci_apm().install()`
 is the deployment form; `apm.span_processor()` and `apm.metric_reader()`
 plug into providers you already own. The exporters post to

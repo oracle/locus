@@ -80,13 +80,28 @@ agent = Agent(
     tools=mcp_tools,
     system_prompt="Triage the alert. Enrich every indicator before you act.",
 )
-result = agent.run_sync("Is 198.51.100.23 a known malicious endpoint?")
+result = await agent.arun("Is 198.51.100.23 a known malicious endpoint?")
 ```
 
 `await ti.list_tools()` returns the server's tool descriptors; passing
 them through `ti.to_locus_tools(...)` produces SDK `Tool` objects with
 full schemas, descriptions, and call-through plumbing. The agent doesn't
 know they're MCP — they look like any other `@tool`.
+
+Run the agent with `await agent.arun(...)` (or `async for event in
+agent.run(...)`) on the loop that connected the client. The MCP session
+belongs to that loop; `agent.run_sync(...)` inside a running loop drives
+the run on a worker thread's own loop, which cannot reach the session,
+so `run_sync` raises a `RuntimeError` saying so rather than hang on the
+first tool call. `run_sync` is for code with no loop running — there,
+pass the client as `mcp_servers=[ti]` and the agent connects it inside
+the run.
+
+A stdio server starts with this process's environment, so the
+`PYTHONPATH`, OCI profile or API key it needs is already there; `env=`
+adds to it (`inherit_env=False` starts from the `mcp` SDK's minimal
+environment instead). A server that exits during the handshake is
+reported with the last lines it wrote to stderr.
 
 ### Side effects in the host process — use hooks, not wrappers
 
@@ -321,7 +336,10 @@ outside a run is declined and logged.
 The other way round: an agent served by `LocusMCPServer` that pauses on
 `ask_user` has its question relayed to the MCP client as an elicitation
 (through `run_agent_stream`), and resumes with the reply. A client that
-cannot be asked ends the call with the question in its result.
+cannot be asked ends the call with the question in its result. `ask_user`
+exists in `completion_mode="explicit"` (see [Interrupts](interrupts.md)),
+where the run ends through `task_complete`; the `summary` the agent
+passes to it is the answer the client receives.
 
 ## Tracing across the hop
 

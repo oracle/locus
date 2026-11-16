@@ -258,9 +258,10 @@ class TestConnectStdioFullPath:
         mcp_stdio_mod = types.ModuleType("mcp.client.stdio")
 
         class _StdioParams:
-            def __init__(self, command: str, args: list) -> None:
+            def __init__(self, command: str, args: list, env: dict | None = None) -> None:
                 self.command = command
                 self.args = args
+                self.env = env
 
         mcp_pkg.StdioServerParameters = _StdioParams
 
@@ -274,7 +275,7 @@ class TestConnectStdioFullPath:
         mock_ctx.__aenter__ = AsyncMock(return_value=(MagicMock(), MagicMock()))
         mock_ctx.__aexit__ = AsyncMock(return_value=None)
 
-        def _fake_stdio_client(params):
+        def _fake_stdio_client(params, errlog=None):
             return mock_ctx
 
         mcp_stdio_mod.stdio_client = _fake_stdio_client
