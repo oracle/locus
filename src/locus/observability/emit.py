@@ -145,6 +145,8 @@ EV_TOOL_SANDBOX_DENIED = "tool.sandbox.denied"
 
 # --- Control layer (locus.control) ---
 EV_CONTROL_JUDGE_DECIDED = "control.judge.decided"
+# --- Tool-call integrity (locus.tools.integrity) ---
+EV_TOOL_INTEGRITY_REFUSED = "tool.integrity.refused"
 
 # --- Coding harness (locus.harness) ---
 EV_HARNESS_EXEC = "harness.exec"

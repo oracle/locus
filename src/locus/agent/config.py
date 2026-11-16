@@ -215,6 +215,16 @@ class CompactionConfig(BaseModel):
     )
     summary_max_tokens: int | None = Field(default=None, ge=1)
     min_iterations_between_summaries: int = Field(default=3, ge=0)
+    native: bool = Field(
+        default=False,
+        description=(
+            "Hand the summary stage to the model's own compaction endpoint "
+            "when the model offers one (``compact_history``), such as "
+            "OCIResponsesModel with store=False. The endpoint folds the older "
+            "history into an item the model replays itself; no client-side "
+            "summary is written. Models without one summarise as usual."
+        ),
+    )
 
 
 class ObservationPackConfig(BaseModel):
@@ -592,6 +602,20 @@ class AgentConfig(BaseModel):
             "want to surface 'tool X done' the moment it happens. "
             "``state.tool_executions`` order stays in tool_call order in "
             "both modes — only event timing changes."
+        ),
+    )
+
+    tool_call_integrity: bool | Literal["refuse", "abort"] = Field(
+        default=False,
+        description=(
+            "Sign every tool call as the model's response is parsed and verify "
+            "it at the executor, so arguments changed between the two — by a "
+            "hook that did not re-sign, a plugin, a consumer mutating the call "
+            "— are refused with a ToolCallIntegrityError, an audit entry and a "
+            "tool error the model reads. ``True`` or ``'refuse'`` refuses the "
+            "call and the run continues; ``'abort'`` ends the run with the "
+            "error once the batch has finished. Off (``False``) by default in "
+            "5.x; on by default from 6.0. See locus.tools.integrity."
         ),
     )
 

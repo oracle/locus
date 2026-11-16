@@ -112,11 +112,14 @@ model = OCIResponsesModel(
 ### Zero Data Retention (ZDR) tenancies
 
 Enterprise OCI tenancies with ZDR reject `previous_response_id`
-(server doesn't persist responses). For those, pass `store=False` —
-the model sends `store: false` on every request, drops the
+(server doesn't persist responses). The default `store="auto"` handles
+this on its own: the model starts stateful, and when the endpoint reports
+ZDR it switches to the stateless path for good, warns once, and the agent
+replays the turn. If you know the tenancy is ZDR, pass `store=False` —
+the model sends `store: false` on every request from the start, drops the
 continuation token, and reports `server_stateful=False` so the agent
 sends the full message history each turn. Responses-only models
-remain reachable.
+remain reachable either way.
 
 ```python
 model = OCIResponsesModel(

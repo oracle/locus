@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from locus.core.state import AgentState
     from locus.core.termination import TerminationCondition
     from locus.memory.compaction import CompactionTracker
+    from locus.tools.integrity import ToolCallSigner
 
 
 @dataclass
@@ -147,6 +148,9 @@ class RunContext:
     #: The run's compaction memory (thrash guard, last reported usage). Set by
     #: the loop on first use, and only when the agent compacts its context.
     compaction: CompactionTracker | None = None
+    #: The run's tool-call signer (``AgentConfig.tool_call_integrity``), or
+    #: ``None`` when the feature is off. Set by the runtime's ``_begin_run``.
+    integrity: ToolCallSigner | None = None
 
     @classmethod
     def create(

@@ -90,6 +90,97 @@ policy.
 - **Notebook 72** gains the judge as an optional step on the scripted test
   double: a staging rollout to an unpinned image, which the policy allows, is
   held by the judge, and the page shows the audit entry that records both.
+- **Tool-call integrity (`Agent(tool_call_integrity=True)`).** The runtime
+  signs every tool call as the model's response is parsed, the streaming
+  path included, over a canonical form of its id, name and arguments with
+  HMAC-SHA256 under a random per-run key, and the executor verifies the call
+  before it runs. A call changed in between is refused with a typed
+  `ToolCallIntegrityError`, an entry on the agent's `AuditTrail` (the signed
+  and received digests, and the hook the change is attributed to), a
+  `tool.integrity.refused` event, and a tool error the model reads so the
+  run continues; `"abort"` ends the run instead. Hooks that rewrite
+  arguments re-sign through `event.resign(by="...")` or
+  `ToolCallSigner.resign`, so the chain of custody names them; the built-in
+  `GuardrailsHook` redaction and `ExternalHooks` rewrites do. The signature
+  lives on the run, not on `ToolCall`, so messages and checkpoints are
+  unchanged. Off by default in 5.x, on by default in 6.0. (#450)
+- **Database-backed approval stores.** `PostgresApprovals`, `RedisApprovals`
+  and `OracleApprovals` implement `ApprovalStore` with the semantics of the
+  in-memory store (one-use consumption, approver rules, quorums, delegations)
+  over one row or key per held call, decided under the database's own lock, so
+  replicas that share the store never both redeem one approval. They follow the
+  connection conventions of the matching checkpointer backend and create their
+  table on first use only when it is missing. Each store owns one event loop on
+  a background thread; the `ApprovalStore` methods block on it and `asubmit` /
+  `aget` / `adecide` / `aconsume` / `apending` await it. Every store has a
+  password-free `spec` (`file://…`, `postgresql://…`, `redis://…`,
+  `oracle://…`) and `approval_store(spec)` opens one; a bare database scheme
+  reads `POSTGRES_*`, `REDIS_URL` or `ORACLE_*` from the environment.
+- **Pending holds in the checkpoint.** When a gated tool holds a call in
+  interrupt mode during a run with a checkpointer, the hold (approval id, tool,
+  action, asset, principal, reason, arguments, approvers so far, context, store
+  spec) is written into the thread's checkpoint under
+  `state.metadata["_locus_pending_holds"]`. `pending_holds(checkpointer,
+  thread_id)` reads it back in another process, `PendingHold.state(store)`
+  re-checks it, and the hold leaves the checkpoint when the call is answered.
+  Checkpoints written before this carry no holds and resume as before. The
+  gate's interrupt metadata gains a `store` key.
+- **`locus approvals` against any store.** `--store` takes a spec (or
+  `LOCUS_APPROVALS_STORE`), a bare path still means a `FileApprovals` file,
+  `--by` falls back to `LOCUS_APPROVER`, and `approve` / `reject` take
+  `--reason`, recorded on the decision. `ApprovalStore.decide()` accepts
+  `reason=""` for the same purpose.
+- Notebook 73 (support account gate) now ends with the hold parked in a
+  file-backed store, approved from another process through `locus approvals`,
+  and performed by a fresh agent resuming the thread.
+- **Full `reasoning` control on `OCIResponsesModel`.** `reasoning` takes the
+  Responses-native object (`effort`, `summary`, ...) on `OCIResponsesConfig`,
+  the constructor and as a call kwarg such as an agent's `model_kwargs`, and
+  is sent as given; with `reasoning_effort` set too the dict wins and the
+  effort only fills `effort` when the dict lacks it. Nothing is sent when
+  both are unset. Reasoning summaries the endpoint returns surface as
+  `ModelResponse.reasoning`. Before, a `reasoning` dict was dropped.
+- **Reasoning items replayed across tool calls on the stateless path.** With
+  `store=False` (or after the Zero Data Retention switch) and a reasoning
+  control set, the request asks for `include=["reasoning.encrypted_content"]`;
+  the reasoning items that come back stay on the assistant message under
+  `metadata["oci_responses_items"]` with the turn's `function_call` items,
+  and the next request replays them verbatim ahead of the tool result, so a
+  tool-calling turn keeps its reasoning. Turns without such items, and
+  streamed turns, are reconstructed as before.
+- **Native compaction on the OCI Responses transport.**
+  `OCIResponsesModel.compact_history()` posts a history to
+  `/responses/compact` and returns the compacted messages: the ones the
+  endpoint kept plus an encrypted `compaction` item the model replays on
+  later requests. `ContextCompactor(native_compaction=True)`, or
+  `CompactionConfig(native=True)` on the agent, hands the summary stage to a
+  model that offers `compact_history()` instead of writing a client-side
+  summary; the system prompt and the task message stay verbatim, the
+  `CompactionEvent` carries `stage="native"` (new value), the compaction
+  call's tokens count against the run's budgets, and a failed call falls
+  back to the client-side summary. Opt-in; off by default.
+- **Zero Data Retention detection on `OCIResponsesModel`.** A tenancy with
+  Zero Data Retention (ZDR) answers every request that carries
+  `previous_response_id` with a 400 saying so. That reply now raises
+  `OCIResponsesZeroDataRetentionError`, a subclass of
+  `OCIResponsesStateLostError` so existing handlers keep working. `store`
+  accepts `"auto"` besides `True` and `False`: under `"auto"` the model starts
+  stateful and, on that error, switches itself to the stateless path for the
+  rest of its lifetime (`store: false`, full history on every request), warns
+  once with a `LocusWarning`, and the agent runtime replays the interrupted
+  turn from the history it holds, so the run completes with the same result.
+  `model.zdr_detected` reports the switch and the run's event stream carries a
+  `CustomEvent` named `server_state_fallback`. `store=True` still raises;
+  `store=False` is unchanged.
+
+### Changed
+
+- **`OCIResponsesModel` defaults to `store="auto"`.** Before, the default was
+  `store=True` and the first tool-call continuation on a ZDR tenancy failed the
+  run with `OCIResponsesStateLostError`. The first request of a run is
+  unchanged; only the ZDR case now completes instead of failing. Pass
+  `store=True` to keep the old behaviour, or `store=False` on a tenancy known
+  to be ZDR to skip the one stateful attempt.
 - **OAuth 2.1 for remote MCP servers.** `MCPClient(oauth=MCPOAuth(...))`
   signs in to a Streamable HTTP server that answers `401`: authorization
   code with PKCE, discovery of the protected-resource and

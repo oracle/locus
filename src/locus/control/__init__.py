@@ -57,6 +57,10 @@ from locus.control.approvals import (
     InMemoryApprovals,
     call_digest,
 )
+from locus.control.approvals_oracle import OracleApprovals
+from locus.control.approvals_postgres import PostgresApprovals
+from locus.control.approvals_redis import RedisApprovals
+from locus.control.approvals_spec import approval_store, store_spec
 from locus.control.audit import (
     AuditRecord,
     AuditReport,
@@ -101,6 +105,7 @@ from locus.control.grounded import (
     ground_fingerprint,
     is_finding,
 )
+from locus.control.holds import PendingHold, holds_of, pending_holds
 from locus.control.judge import JudgeVerdict, ToolCallJudge
 from locus.control.permissions import (
     VERDICT_POLICY,
@@ -148,6 +153,7 @@ from locus.control.verification import (
     VerificationResult,
     verify,
 )
+from locus.tools.integrity import ToolCallIntegrityError, ToolCallSignature, ToolCallSigner
 
 
 __all__ = [
@@ -166,6 +172,15 @@ __all__ = [
     "ApprovalRecord",
     "ApprovalStore",
     "FileApprovals",
+    "OracleApprovals",
+    "PostgresApprovals",
+    "RedisApprovals",
+    "approval_store",
+    "store_spec",
+    # What a paused thread's checkpoint says it waits on
+    "PendingHold",
+    "holds_of",
+    "pending_holds",
     # Who may decide a held call
     "ApprovalAuthority",
     "ApprovalAuthorityError",
@@ -236,6 +251,10 @@ __all__ = [
     "anchor_trail",
     "latest_anchor",
     "verify_anchor",
+    # Tool-call integrity — what the runtime enforces between model and executor
+    "ToolCallSigner",
+    "ToolCallSignature",
+    "ToolCallIntegrityError",
     # Governed-by-default agent wrapper
     "GovernedAgent",
     "governed_agent",

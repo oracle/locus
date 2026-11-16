@@ -1079,6 +1079,14 @@ class Agent(AgentRuntimeMixin, BaseModel):
                     from locus.tools.executor import ToolContextFactory
 
                     arguments = dict(dangling.arguments or {})
+                    if rc.integrity is not None:
+                        # Its provenance in THIS run is the checkpoint, not a
+                        # model response; signed so the hook seam below is
+                        # held to the same chain of custody as a live call.
+                        rc.integrity.sign(
+                            _ToolCall(id=dangling.id, name=dangling.name, arguments=arguments),
+                            by="checkpoint",
+                        )
                     # The same start event the loop emits, so the performed
                     # call arrives as a start/complete pair — and the start
                     # carries the ARGUMENTS, which ToolCompleteEvent does not,
@@ -1134,6 +1142,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
                                 state=state,
                                 invocation_metadata=rc.metadata or {},
                                 ephemeral_metadata=rc.ephemeral,
+                                integrity=rc.integrity,
                             ),
                         )
                         still_held = _interrupt_payload(invoked.content)
@@ -1189,6 +1198,10 @@ class Agent(AgentRuntimeMixin, BaseModel):
                     out_events.extend(rc.drain())
             if folded is None:
                 folded = ToolResult(tool_call_id=dangling.id, name=dangling.name, content=response)
+            # The call is answered: the thread no longer waits on its hold.
+            from locus.control.holds import without_hold  # noqa: PLC0415
+
+            state = without_hold(state, dangling.id)
             state = state.with_message(Message.tool(folded))
         else:
             state = state.with_message(Message.system(f"[User Response] {response}"))

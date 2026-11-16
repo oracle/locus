@@ -112,10 +112,29 @@ must route each consequential path through `admit()` or `gate_tool()`, classify
 the action accurately, store approvals and audit records durably, and use a
 payment-provider idempotency key for crash-safe external effects.
 
+## Deciding a hold from the command line
+
+The `REQUIRE_HUMAN` above is where a person comes in. With
+`gate_tool(..., on_refusal="interrupt", approval=store)` the run pauses on the
+hold and the store keeps it; an operator with no UI decides with the `locus`
+command, against the same store the agent uses:
+
+```bash
+locus approvals --store file://approvals.json list
+locus approvals --store file://approvals.json approve appr-… --by alice@example.com --reason "ticket 4821"
+locus approvals --store postgresql://locus@db.internal:5432/locus reject appr-… --by bob
+```
+
+`--store` takes `memory://`, `file://`, `postgresql://`, `redis://` or
+`oracle://` (or `LOCUS_APPROVALS_STORE`), and `--by` falls back to
+`LOCUS_APPROVER`. The [support account gate](../notebooks/notebook_73_support_account_gate.md)
+runs this end to end offline: a held upgrade, approved from another process,
+performed by a fresh agent.
+
 ## Next steps
 
 - [Control-layer architecture](../concepts/control-layer.md) explains the
-  enforcement boundary.
+  enforcement boundary, the approval stores and the restart story.
 - [Writing a policy that holds](../concepts/policy-authoring.md) covers missing
   risk families and second paths.
 - [Payment refund example](../notebooks/notebook_71_payment_refund_gate.md)

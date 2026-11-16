@@ -145,7 +145,8 @@ def _cmd_resume(args: argparse.Namespace) -> int:
 
 
 def _store(args: argparse.Namespace) -> Any:
-    from locus.control import ApprovalAuthority, FileApprovals  # noqa: PLC0415
+    from locus.control import ApprovalAuthority, approval_store  # noqa: PLC0415
+    from locus.control.approvals_spec import SPEC_ENV  # noqa: PLC0415
 
     authority = None
     if args.authority:
@@ -154,13 +155,28 @@ def _store(args: argparse.Namespace) -> Any:
             authority = authority()
         if not isinstance(authority, ApprovalAuthority):
             raise CLIError(f"{args.authority} is not an ApprovalAuthority")
-    return FileApprovals(args.store, authority)
+    spec = args.store or os.environ.get(SPEC_ENV)
+    if not spec:
+        raise CLIError(f"--store is required (or set {SPEC_ENV})")
+    try:
+        return approval_store(spec, authority)
+    except ValueError as exc:
+        raise CLIError(str(exc)) from exc
 
 
 def _cmd_approvals(args: argparse.Namespace) -> int:
+    store = _store(args)
+    try:
+        return _approvals(args, store)
+    finally:
+        close = getattr(store, "close", None)
+        if callable(close):
+            close()
+
+
+def _approvals(args: argparse.Namespace, store: Any) -> int:
     from locus.control import ApprovalAuthorityError  # noqa: PLC0415
 
-    store = _store(args)
     if args.action == "list":
         pending = store.pending()
         if args.json:
@@ -182,15 +198,18 @@ def _cmd_approvals(args: argparse.Namespace) -> int:
         print(json.dumps(asdict(record), indent=2, default=str))
         return 0
     verdict = "approved" if args.action == "approve" else "denied"
+    by = args.by or os.environ.get("LOCUS_APPROVER")
+    if not by:
+        raise CLIError("--by is required (or set LOCUS_APPROVER)")
     try:
-        record = store.decide(args.approval_id, verdict, by=args.by)
+        record = store.decide(args.approval_id, verdict, by=by, reason=args.reason or "")
     except ApprovalAuthorityError as exc:
         print(f"locus: refused: {exc}", file=sys.stderr)
         return 1
     except (KeyError, ValueError) as exc:
         print(f"locus: {exc}", file=sys.stderr)
         return 1
-    print(f"{record.approval_id}: {record.status}")
+    print(f"{record.approval_id}: {record.status} by {by}")
     return 0
 
 
@@ -448,7 +467,11 @@ def build_parser() -> argparse.ArgumentParser:
     resume.set_defaults(handler=_cmd_resume)
 
     approvals = commands.add_parser("approvals", help="list and decide held calls")
-    approvals.add_argument("--store", required=True, help="the FileApprovals JSON file")
+    approvals.add_argument(
+        "--store",
+        help="the approval store: a FileApprovals path, or memory://, file://, postgresql://, "
+        "redis://, oracle:// (default: $LOCUS_APPROVALS_STORE)",
+    )
     approvals.add_argument(
         "--authority", help="MODULE:ATTR naming an ApprovalAuthority checked on every decision"
     )
@@ -460,7 +483,8 @@ def build_parser() -> argparse.ArgumentParser:
     for verb in ("approve", "reject"):
         decide = actions.add_parser(verb, help=f"{verb} a held call")
         decide.add_argument("approval_id")
-        decide.add_argument("--by", required=True, help="who is deciding")
+        decide.add_argument("--by", help="who is deciding (default: $LOCUS_APPROVER)")
+        decide.add_argument("--reason", help="why, recorded with the decision")
     approvals.set_defaults(handler=_cmd_approvals)
 
     audit = commands.add_parser("audit", help="check an exported audit trail")

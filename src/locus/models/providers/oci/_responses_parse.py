@@ -31,6 +31,21 @@ from typing import Any
 from locus.core.messages import Message, Role, ToolCall
 
 
+#: ``Message.metadata`` key under which an assistant turn keeps the raw
+#: Responses output items it came from (``reasoning`` items with their
+#: ``encrypted_content``, ``function_call`` items, ``compaction`` items,
+#: in order). :func:`build_request_body` replays them verbatim instead of
+#: reconstructing the turn from ``content`` / ``tool_calls``, which is what
+#: the stateless path (``store=False``) needs for a reasoning model to
+#: continue a tool-calling turn with its reasoning, and for a compacted
+#: thread to carry its compaction item.
+OCI_RESPONSES_ITEMS_METADATA_KEY = "oci_responses_items"
+
+#: ``include`` value that asks the endpoint to return reasoning items in a
+#: replayable form when nothing is stored server-side.
+_ENCRYPTED_REASONING_INCLUDE = "reasoning.encrypted_content"
+
+
 def build_request_body(
     messages: list[Message],
     *,
@@ -42,6 +57,7 @@ def build_request_body(
     stream: bool = False,
     response_format: dict[str, Any] | None = None,
     store: bool = True,
+    reasoning: dict[str, Any] | None = None,
     reasoning_effort: str | None = None,
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -60,6 +76,10 @@ def build_request_body(
         max_output_tokens: Optional output token cap.
         stream: True to request SSE streaming.
         response_format: Optional structured-output schema.
+        reasoning: Optional Responses-native ``reasoning`` object
+            (``effort``, ``summary``, ...), sent as given. When both this
+            and ``reasoning_effort`` are set, the dict wins and
+            ``reasoning_effort`` only fills ``effort`` if the dict lacks it.
         reasoning_effort: Optional reasoning effort for reasoning models,
             sent as ``reasoning={"effort": ...}``. ``None`` sends nothing,
             so the server's default applies.
@@ -73,7 +93,13 @@ def build_request_body(
     ``instructions`` field; they never appear in ``input``. Tool result
     messages (role=tool) become ``function_call_output`` items keyed
     by ``call_id``. User and assistant text messages become ``message``
-    items with typed content.
+    items with typed content. An assistant message carrying raw output
+    items under :data:`OCI_RESPONSES_ITEMS_METADATA_KEY` is replayed
+    verbatim from them instead.
+
+    With ``store=False`` and a reasoning control set, the body also asks
+    for ``include=["reasoning.encrypted_content"]`` so the reasoning items
+    of this turn come back in the form the next request can replay.
     """
     instructions_parts: list[str] = []
     input_items: list[dict[str, Any]] = []
@@ -96,6 +122,16 @@ def build_request_body(
             continue
 
         if msg.role == Role.ASSISTANT:
+            # A turn this transport produced with reasoning (or a compaction
+            # item) is replayed from its raw output items, in order: the
+            # server pairs a function_call with the reasoning item that
+            # preceded it, and a reconstruction cannot supply that.
+            raw_items = msg.metadata.get(OCI_RESPONSES_ITEMS_METADATA_KEY)
+            if isinstance(raw_items, list):
+                replay = [item for item in raw_items if isinstance(item, dict)]
+                if replay:
+                    input_items.extend(replay)
+                    continue
             # An assistant message can carry text content AND/OR tool
             # calls. Both need to be reconstructed as Responses input
             # items so the server has context for any function_call_output
@@ -159,8 +195,18 @@ def build_request_body(
         # nested under ``text.format`` in newer revisions. Keep the
         # chat/completions shape — OCI normalizes both per the spec.
         body["response_format"] = response_format
-    if reasoning_effort is not None:
+    # Reasoning controls: the dict wins, the effort fills in.
+    if reasoning is not None:
+        merged = dict(reasoning)
+        if reasoning_effort is not None:
+            merged.setdefault("effort", reasoning_effort)
+        body["reasoning"] = merged
+    elif reasoning_effort is not None:
         body["reasoning"] = {"effort": reasoning_effort}
+    # Nothing is stored server-side, so a reasoning model's items for this
+    # turn must come back encrypted to be replayed on the next request.
+    if store is False and "reasoning" in body:
+        body["include"] = [_ENCRYPTED_REASONING_INCLUDE]
     if extra:
         body.update(extra)
 
@@ -214,12 +260,24 @@ def parse_response(
         - ``provider_state``: ``{"previous_response_id": <id>}`` —
           the token the agent threads back into the next ``complete()``
           call. Empty dict if the response carried no id (defensive).
+
+    When the output carries a ``reasoning`` or ``compaction`` item, the raw
+    output items are kept on the message under
+    :data:`OCI_RESPONSES_ITEMS_METADATA_KEY` so the next stateless request
+    replays them verbatim (see :func:`build_request_body`).
     """
     content_parts: list[str] = []
     tool_calls: list[ToolCall] = []
+    raw_items: list[dict[str, Any]] = []
+    needs_replay = False
 
     for item in response.get("output", []):
+        if not isinstance(item, dict):
+            continue
+        raw_items.append(item)
         item_type = item.get("type")
+        if item_type in ("reasoning", "compaction"):
+            needs_replay = True
         if item_type == "message":
             # Assistant message — content is a list of typed parts.
             for part in item.get("content", []):
@@ -261,8 +319,98 @@ def parse_response(
     response_id = response.get("id")
     provider_state: dict[str, Any] = {"previous_response_id": response_id} if response_id else {}
 
-    msg = Message.assistant(content=content, tool_calls=tool_calls or None)
+    msg = Message(
+        role=Role.ASSISTANT,
+        content=content,
+        tool_calls=tool_calls,
+        metadata={OCI_RESPONSES_ITEMS_METADATA_KEY: raw_items} if needs_replay else {},
+    )
     return msg, usage, stop_reason, provider_state
+
+
+def reasoning_text(message: Message) -> str | None:
+    """The reasoning summary of a turn, from its replayable raw items.
+
+    Joins the ``summary`` (and, where a model exposes it, ``content``) texts
+    of the ``reasoning`` items kept on ``message`` by :func:`parse_response`.
+    ``None`` when the turn carried no reasoning text.
+    """
+    raw_items = message.metadata.get(OCI_RESPONSES_ITEMS_METADATA_KEY)
+    if not isinstance(raw_items, list):
+        return None
+    parts: list[str] = []
+    for item in raw_items:
+        if not isinstance(item, dict) or item.get("type") != "reasoning":
+            continue
+        for block in (item.get("summary") or []) + (item.get("content") or []):
+            text = block.get("text") if isinstance(block, dict) else None
+            if isinstance(text, str) and text:
+                parts.append(text)
+    return "\n".join(parts) if parts else None
+
+
+def parse_compaction_response(
+    response: dict[str, Any],
+) -> tuple[list[Message], dict[str, int]]:
+    """Turn a ``/responses/compact`` reply into the compacted Locus history.
+
+    The endpoint answers with the items a continuation must carry: the
+    ``message`` items it kept and one or more ``compaction`` items holding
+    the folded history as ``encrypted_content``. Kept messages become
+    :class:`Message` objects again; each ``compaction`` item rides on an
+    assistant message under :data:`OCI_RESPONSES_ITEMS_METADATA_KEY`, so
+    :func:`build_request_body` replays it verbatim at the same position.
+
+    Returns:
+        ``(messages, usage)`` with usage in Locus's ``prompt_tokens`` /
+        ``completion_tokens`` / ``total_tokens`` convention.
+    """
+    messages: list[Message] = []
+    for item in response.get("output", []):
+        if not isinstance(item, dict):
+            continue
+        item_type = item.get("type")
+        if item_type == "message":
+            text = "".join(
+                part.get("text") or ""
+                for part in item.get("content", [])
+                if isinstance(part, dict) and part.get("type") in ("input_text", "output_text")
+            )
+            if item.get("role") == "assistant":
+                messages.append(Message.assistant(content=text or None))
+            else:
+                messages.append(Message.user(text))
+        elif item_type == "compaction":
+            messages.append(
+                Message(
+                    role=Role.ASSISTANT,
+                    content=(
+                        "[Context compacted by the model: earlier turns are carried "
+                        "in an encrypted compaction item.]"
+                    ),
+                    metadata={OCI_RESPONSES_ITEMS_METADATA_KEY: [item]},
+                )
+            )
+        # Anything else (a replayed function_call the endpoint kept, ...) is
+        # also replayed verbatim rather than dropped.
+        elif item_type is not None:
+            messages.append(
+                Message(
+                    role=Role.ASSISTANT,
+                    content=None,
+                    metadata={OCI_RESPONSES_ITEMS_METADATA_KEY: [item]},
+                )
+            )
+
+    raw_usage = response.get("usage", {}) or {}
+    usage = {
+        "prompt_tokens": int(raw_usage.get("input_tokens", 0)),
+        "completion_tokens": int(raw_usage.get("output_tokens", 0)),
+        "total_tokens": int(raw_usage.get("total_tokens", 0)),
+    }
+    if usage["total_tokens"] == 0:
+        usage["total_tokens"] = usage["prompt_tokens"] + usage["completion_tokens"]
+    return messages, usage
 
 
 def parse_stream_event(event: dict[str, Any]) -> dict[str, Any]:
