@@ -250,7 +250,7 @@ class TestParseStreamEvent:
                 "delta": '{"q":',
             }
         )
-        assert out == {"tool_calls": [{"id": "call_1", "arguments_delta": '{"q":'}]}
+        assert out == {"tool_calls": [{"id": "call_1", "item_id": "", "arguments_delta": '{"q":'}]}
 
     def test_response_completed_emits_done_and_provider_state(self) -> None:
         out = parse_stream_event({"type": "response.completed", "response": {"id": "resp_final"}})

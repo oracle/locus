@@ -131,10 +131,14 @@ trail = OracleAuditTrail(
     dsn="audit_low", user="AUDIT", password=pw, wallet_location="~/wallets/audit",
     table_kind="blockchain",
 )
-await admit(action, perform, policy=policy, trail=trail)   # one row, committed
-
 store = OCIBucketAnchorStore(bucket_name="audit-anchors", namespace="...")
-anchor_trail(trail, store, every=100, require_retention_rule=True)
+
+
+async def refund(action, perform, policy):
+    result = await admit(action, perform, policy=policy, trail=trail)   # one row, committed
+    anchor_trail(trail, store, every=100, require_retention_rule=True)
+    return result
+
 
 trail.verify()                 # re-reads the rows, recomputes the chain, asks the database
 verify_anchor(trail, store)    # the chain still reaches the last anchored head

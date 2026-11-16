@@ -173,6 +173,42 @@ policy.
   `CustomEvent` named `server_state_fallback`. `store=True` still raises;
   `store=False` is unchanged.
 
+- **Threads and runs on `AgentServer`, with a resumable event stream.**
+  `POST /threads` creates a thread, `POST /threads/{id}/runs` starts a turn
+  (or continues a paused one with a `resume` payload: the `/resume`
+  semantics, as a run of its own) and answers at once with a run id while
+  the agent runs in the background; `GET /runs/{id}` reports its status and
+  outcome; `GET /runs/{id}/events` streams it as SSE with an `id:` line per
+  event and honours `Last-Event-ID`, replaying exactly the events a dropped
+  client missed from the run's EventBus history; `POST /runs/{id}/cancel`
+  asks the agent to stop through `agent.cancel(thread_id=...)` and falls
+  back to cancelling the task. Thread state comes from the agent's
+  checkpointer when one is configured; the threads-and-runs registry itself
+  is in memory and bounded (`RunRegistry(history_per_run=500, max_runs=200,
+  ttl_seconds=3600)`, passed as `AgentServer(run_registry=...)`); a resume
+  past the retained window gets a `replay_gap` frame. (#456)
+- **`WS /runs/live`.** One WebSocket for user turns, approval answers
+  (`resume`, through the existing `decision_handler` and `agent.resume`),
+  `cancel`, `subscribe` (follow a run from a sequence number) and the events
+  of every run started or subscribed on it. Bearer header or `?token=`.
+  Voice frames are not carried: `locus.voice` sessions remain
+  application-driven.
+- **AG-UI and Vercel AI SDK UI message stream adapters.** `POST /ag-ui`
+  takes a `RunAgentInput` and streams `RUN_STARTED`, `TEXT_MESSAGE_*`,
+  `TOOL_CALL_*`, `STATE_SNAPSHOT` / `STATE_DELTA`, `CUSTOM` and
+  `RUN_FINISHED` / `RUN_ERROR`; `POST /vercel-ai` takes a UI message request
+  and answers an `x-vercel-ai-ui-message-stream: v1` stream (`start`,
+  `text-*`, `reasoning-*`, `tool-input-*`, `tool-output-available`,
+  `data-*`, `finish`). Both are also available for any run as
+  `GET /runs/{id}/events?protocol=ag-ui|vercel-ai`, resume included. The
+  conservative readings of the two protocols are recorded on the server
+  page. `examples/server_ui/` holds two plain HTML pages (resumable SSE, and
+  an AG-UI client); notebook 65 follows, drops and resumes a run.
+- `GET /threads/{id}` now adds the thread's `runs` and a `source` field,
+  answers from the registry when no checkpointer is configured, and no
+  longer fails with a 500 for a runnable without `config` (a
+  `GraphRunnable`); `DELETE /threads/{id}` forgets the thread's finished
+  runs as well.
 - **Tiered compaction.** `TieredCompaction([ClearToolResults, SlidingWindow,
   Summarize, Relevance])` (`locus.memory.tiers`) runs compaction tiers in
   order, each at its own trigger as a fraction of the usable window (0.5,
@@ -210,6 +246,57 @@ policy.
   unchanged; only the ZDR case now completes instead of failing. Pass
   `store=True` to keep the old behaviour, or `store=False` on a tenancy known
   to be ZDR to skip the one stateful attempt.
+- **OAuth 2.1 for remote MCP servers.** `MCPClient(oauth=MCPOAuth(...))`
+  signs in to a Streamable HTTP server that answers `401`: authorization
+  code with PKCE, discovery of the protected-resource and
+  authorization-server metadata, dynamic client registration (or a hosted
+  client-metadata document via `client_metadata_url`), token refresh, and a
+  browser hand-off with a loopback listener that a headless process replaces
+  with its own `redirect_handler` / `callback_handler`. Tokens live in a
+  pluggable store: `InMemoryTokenStore` (default), `FileTokenStore` (a
+  `0600` file under the user's config directory) or `KeyringTokenStore`
+  (the optional `keyring` package). No token value is logged. An
+  `Authorization` header or a static `access_token` still wins over OAuth.
+- **Toolset shaping on `MCPClient`.** `include=` and `exclude=` take server
+  tool names or globs, `prefix=` renames what is imported, so two servers
+  mount without name clashes. Order: `allowed_tools` and `include` narrow,
+  `exclude` removes (and wins over `include`), `tool_filter` decides last,
+  `prefix` is applied after matching. Calls through either name land; a
+  shaped-out tool raises `MCPToolNotAllowedError`.
+- **Elicitation.** A server that asks the person a question mid-call pauses
+  the agent run through the interrupt mechanism: an `InterruptEvent` whose
+  `fields` describe the requested schema and whose `metadata` carries
+  `mcp_elicitation`. `client.answer_elicitation(event, answer)` then
+  `agent.resume(answer, perform_dangling=True)` re-issues the call with the
+  answer. `elicitation_handler=` answers without pausing (and outside a run);
+  with neither, a question outside a run is declined. `MCPElicitation` and
+  `ElicitationAnswer` are the types. An agent served by `LocusMCPServer`
+  has its own `ask_user` questions relayed to the MCP client as
+  elicitations through `run_agent_stream`.
+- **W3C trace context in MCP `_meta`.** Every `tools/call` the agent makes
+  carries `traceparent` / `tracestate` parented to the telemetry hook's
+  span for that tool call (`TelemetryHook` now exposes it through
+  `current_tool_span()`), and every call `LocusMCPServer` serves runs under
+  the context its `_meta` carries, so an MCP hop stays inside one trace.
+  `propagate_trace=False` opts out; `locus.integrations.mcp_tracing` holds
+  `trace_meta()` and `trace_scope()` for other servers.
+- **`locus mcp serve <target>`** exposes an agent (`MODULE:ATTR` /
+  `FILE.py:ATTR`, an `Agent`, a factory, a `Tool` or a list of tools) or a
+  bare module of `@tool` functions as an MCP server over stdio (default) or
+  Streamable HTTP (`--transport http --host --port --path`).
+  `create_tool_server(tools)` and `LocusMCPServer.build()` are the same from
+  Python. The MCP concept page covers the auth flow, shaping precedence,
+  elicitation, tracing and the command. (#457)
+
+### Fixed
+
+- **Streamed tool calls on the OCI Responses transport keep their name and call
+  id.** `stream()` only read the argument deltas, which carry the stream item id
+  and no function name, so a streamed tool call came back as `name=""` keyed by
+  the item id while `complete()` returned the real name and `call_id`. The parser
+  now reads `response.output_item.added` and `.done` for `function_call` items
+  and the accumulator keys by the call id, so streamed and non-streamed turns
+  are identical and a streaming agent on the stateless path executes its tools.
 
 ### Removed
 

@@ -10,7 +10,31 @@ server, and consume MCP tools from any compliant client as native
 
 ::: locus.integrations.fastmcp.LocusMCPServer
 ::: locus.integrations.fastmcp.create_mcp_server
+::: locus.integrations.fastmcp.create_tool_server
 ::: locus.integrations.fastmcp.mcp_tool_to_locus
+
+### Signing in to a remote server
+
+`MCPClient(oauth=MCPOAuth(...))` runs the OAuth 2.1 authorization-code
+flow (PKCE, discovery, refresh) against a Streamable HTTP server that asks
+for it; the token store is pluggable. See
+[MCP — signing in](../concepts/mcp.md#signing-in-to-a-remote-server-oauth-21).
+
+::: locus.integrations.mcp_auth.MCPOAuth
+::: locus.integrations.mcp_auth.MCPTokenStore
+::: locus.integrations.mcp_auth.InMemoryTokenStore
+::: locus.integrations.mcp_auth.FileTokenStore
+::: locus.integrations.mcp_auth.KeyringTokenStore
+
+### A server's questions
+
+::: locus.integrations.fastmcp.MCPElicitation
+::: locus.integrations.fastmcp.ElicitationAnswer
+
+### Trace context in `_meta`
+
+::: locus.integrations.mcp_tracing.trace_meta
+::: locus.integrations.mcp_tracing.trace_scope
 
 ## OCI cloud-posture (read-only)
 
