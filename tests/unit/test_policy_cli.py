@@ -205,7 +205,10 @@ def test_expect_turns_explain_into_a_check(
         (["policy", "lint", "{tmp}/missing.yaml"], "No such file"),
         (["policy", "lint", "{tmp}/typo.yaml"], "did you mean 'max_blast_radius'"),
         (["policy", "explain", "{tmp}/ok.yaml", "--action", "{nope"], "not valid JSON"),
-        (["policy", "explain", "{tmp}/ok.yaml", "--action", '{"unknown_key": "x"}'], "unknown action key"),
+        (
+            ["policy", "explain", "{tmp}/ok.yaml", "--action", '{"unknown_key": "x"}'],
+            "unknown action key",
+        ),
         (
             ["policy", "explain", "{tmp}/ok.yaml", "--action", '{"name": 1}'],
             "'name' must be a string",
