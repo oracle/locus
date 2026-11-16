@@ -18,7 +18,11 @@ import respx
 
 from locus.core.events import ModelChunkEvent
 from locus.core.messages import Message
-from locus.models.providers.oci import OCIResponsesModel
+from locus.models.providers.oci import (
+    OCIProjectRequiredError,
+    OCIResponsesModel,
+    OCIResponsesStateLostError,
+)
 from locus.models.providers.oci._responses_parse import (
     _translate_tool_schema,
     build_request_body,
@@ -373,7 +377,10 @@ def test_extra_headers_empty_when_no_project_ocid() -> None:
 def test_extra_headers_includes_project_ocid_when_set() -> None:
     model = _make_model(project_ocid="ocid1.genaiagentproject.oc1..x")
     headers = model._extra_headers()
-    assert headers == {"opc-project-id": "ocid1.genaiagentproject.oc1..x"}
+    assert headers == {
+        "OpenAI-Project": "ocid1.genaiagentproject.oc1..x",
+        "opc-project-id": "ocid1.genaiagentproject.oc1..x",
+    }
 
 
 # =============================================================================
@@ -548,4 +555,78 @@ async def test_stream_reasoning_effort_kwarg_overrides_config() -> None:
     async for _ in model.stream([Message.user("hi")], reasoning_effort="high"):
         pass
     assert captured["body"]["reasoning"] == {"effort": "high"}
+    await model.aclose()
+
+
+# =============================================================================
+# Error bodies on the streaming path
+# =============================================================================
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_stream_4xx_surfaces_the_server_message() -> None:
+    """A non-2xx stream is read before classification, so the server's
+    message reaches the caller instead of ``httpx.ResponseNotRead``."""
+    model = _make_model()
+    respx.post("https://fake-oci.test/openai/v1/responses").mock(
+        return_value=httpx.Response(
+            400, json={"code": "400", "message": "Proxy model has been retired."}
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="Proxy model has been retired") as exc_info:
+        async for _ in model.stream([Message.user("hi")]):
+            pass
+    assert not isinstance(exc_info.value, httpx.ResponseNotRead)
+    await model.aclose()
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_stream_400_project_header_maps_to_typed_exception() -> None:
+    model = _make_model(model="google.gemini-2.5-flash")
+    respx.post("https://fake-oci.test/openai/v1/responses").mock(
+        return_value=httpx.Response(
+            400,
+            json={
+                "error": {
+                    "code": "invalid_value",
+                    "message": (
+                        "Non-OpenAI models require 'OpenAI-Project' or "
+                        "'opc-conversation-store-id' header for the Responses API."
+                    ),
+                }
+            },
+        )
+    )
+
+    with pytest.raises(OCIProjectRequiredError, match="project_ocid="):
+        async for _ in model.stream([Message.user("hi")]):
+            pass
+    await model.aclose()
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_stream_unknown_previous_response_id_maps_to_state_lost() -> None:
+    model = _make_model()
+    respx.post("https://fake-oci.test/openai/v1/responses").mock(
+        return_value=httpx.Response(
+            400,
+            json={
+                "error": {
+                    "code": "unsupported_parameter",
+                    "message": "Previous response cannot be used for this organization.",
+                    "param": "previous_response_id",
+                }
+            },
+        )
+    )
+
+    with pytest.raises(OCIResponsesStateLostError):
+        async for _ in model.stream(
+            [Message.user("hi")], provider_state={"previous_response_id": "resp_old"}
+        ):
+            pass
     await model.aclose()

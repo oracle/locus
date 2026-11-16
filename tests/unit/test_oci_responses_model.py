@@ -159,6 +159,8 @@ async def test_complete_passes_project_ocid_header_when_set() -> None:
 
     await model.complete([Message.user("hi")])
     assert captured["headers"].get("opc-project-id") == "ocid1.genaiagentproject.oc1..fake"
+    # The Responses endpoint reads the project from ``OpenAI-Project``.
+    assert captured["headers"].get("openai-project") == "ocid1.genaiagentproject.oc1..fake"
     await model.aclose()
 
 
@@ -483,4 +485,54 @@ async def test_complete_reasoning_effort_kwarg_without_config() -> None:
 
     await model.complete([Message.user("hi")], reasoning_effort="medium")
     assert captured["body"]["reasoning"] == {"effort": "medium"}
+    await model.aclose()
+
+
+# =============================================================================
+# Project header signalled with a 400
+# =============================================================================
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_400_naming_the_project_header_maps_to_typed_exception() -> None:
+    """Non-OpenAI models on the Responses endpoint ask for the project with a 400."""
+    model = _make_model(model="google.gemini-2.5-flash")
+    respx.post("https://fake-oci.test/openai/v1/responses").mock(
+        return_value=httpx.Response(
+            400,
+            json={
+                "error": {
+                    "code": "invalid_value",
+                    "message": (
+                        "Non-OpenAI models require 'OpenAI-Project' or "
+                        "'opc-conversation-store-id' header for the Responses API."
+                    ),
+                    "param": None,
+                    "type": "invalid_request_error",
+                }
+            },
+        )
+    )
+
+    with pytest.raises(OCIProjectRequiredError, match="project_ocid="):
+        await model.complete([Message.user("hi")])
+    await model.aclose()
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_400_mentioning_a_project_elsewhere_stays_generic() -> None:
+    """Only the header wording means "send a project"; other 400s stay RuntimeError."""
+    model = _make_model()
+    respx.post("https://fake-oci.test/openai/v1/responses").mock(
+        return_value=httpx.Response(
+            400,
+            json={"error": {"code": "LimitExceeded", "message": "project request quota exceeded"}},
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="quota exceeded") as exc_info:
+        await model.complete([Message.user("hi")])
+    assert not isinstance(exc_info.value, OCIProjectRequiredError)
     await model.aclose()

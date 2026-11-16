@@ -62,10 +62,21 @@ class OCIProjectRequiredError(Exception):
 
     Locus keeps the Project OCID dependency optional. If a specific
     Responses feature demands one (some preview features do), the OCI
-    endpoint returns a 403 / 404 with a project-related error body;
-    this exception surfaces that with a pointer at the constructor
-    kwarg so the caller can fix the call without grepping wire dumps.
+    endpoint returns a 403 / 404 with a project-related error body, and
+    for non-OpenAI models it returns a 400 naming the ``OpenAI-Project``
+    / ``opc-conversation-store-id`` header; this exception surfaces both
+    with a pointer at the constructor kwarg so the caller can fix the
+    call without grepping wire dumps.
     """
+
+
+#: Lower-cased fragments of the 400 the Responses endpoint returns when a
+#: model needs a project header (non-OpenAI models on ``/responses``).
+_PROJECT_HEADER_MARKERS: tuple[str, ...] = (
+    "openai-project",
+    "opc-project-id",
+    "opc-conversation-store-id",
+)
 
 
 class OCIResponsesStateLostError(Exception):
@@ -317,10 +328,14 @@ class OCIResponsesModel(BaseModel):
 
         ``opc-compartment-id`` is set by the signer for IAM-auth paths;
         the optional Project OCID is folded in here so it's part of the
-        signed payload too.
+        signed payload too. It goes out under both names: ``OpenAI-Project``
+        is the header the Responses endpoint reads (non-OpenAI models
+        require it there), ``opc-project-id`` is kept for the OCI-side
+        features that look for it.
         """
         headers: dict[str, str] = {}
         if self.config.project_ocid is not None:
+            headers["OpenAI-Project"] = self.config.project_ocid
             headers["opc-project-id"] = self.config.project_ocid
         return headers
 
@@ -432,6 +447,11 @@ class OCIResponsesModel(BaseModel):
         async with client.stream(
             "POST", "/responses", json=body, headers=self._extra_headers()
         ) as resp:
+            if not resp.is_success:
+                # A streaming response has no body yet; read it so the
+                # server's message reaches _raise_for_error instead of
+                # surfacing as httpx.ResponseNotRead.
+                await resp.aread()
             self._raise_for_error(resp)
             async for raw_event in _iter_sse_events(resp):
                 parsed = parse_stream_event(raw_event)
@@ -479,12 +499,19 @@ class OCIResponsesModel(BaseModel):
         # Try to surface OCI's structured error.
         error_obj = body.get("error", body) if isinstance(body, dict) else {}
         message = ""
+        param = ""
         if isinstance(error_obj, dict):
             message = str(error_obj.get("message") or error_obj.get("code") or "")
+            # The unwrapped envelope names the offending field here rather
+            # than in the message (``"param": "previous_response_id"``).
+            param = str(error_obj.get("param") or "")
 
-        text = (message or response.text or "").lower()
+        text = f"{message} {param}".strip().lower() or response.text.lower()
 
-        if response.status_code in (403, 404) and ("project" in text):
+        project_signalled = (response.status_code in (403, 404) and "project" in text) or (
+            response.status_code == 400 and any(m in text for m in _PROJECT_HEADER_MARKERS)
+        )
+        if project_signalled:
             raise OCIProjectRequiredError(
                 "OCI Responses request requires a Project OCID — pass "
                 "project_ocid=<ocid> to OCIResponsesModel(...). "
