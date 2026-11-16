@@ -67,6 +67,29 @@ def test_from_mapping_refuses_what_it_does_not_know(data: dict[str, Any], messag
         SandboxSpec.from_mapping(data)
 
 
+@pytest.mark.parametrize(
+    ("name", "value", "message"),
+    [
+        ("limits", 5, "limits must be a ResourceLimits, got int"),
+        ("warm_pool", "two", "warm_pool must be a WarmPoolHint, got str"),
+        ("backend", "", "backend must be a non-empty string"),
+        ("backend", 3, "backend must be a non-empty string"),
+        ("env", ["A=1"], "env must be a mapping, got list"),
+        ("options", 3, "options must be a mapping, got int"),
+    ],
+)
+def test_a_spec_field_of_the_wrong_type_is_refused_when_the_spec_is_built(
+    name: str, value: Any, message: str
+) -> None:
+    with pytest.raises(TypeError, match=message):
+        SandboxSpec(**{name: value})
+
+
+def test_limits_that_are_not_limits_never_reach_a_backend(tmp_path: Path) -> None:
+    with pytest.raises(TypeError, match="ResourceLimits"):
+        open_sandbox(SandboxSpec(backend="local", root=str(tmp_path), limits=5))  # type: ignore[arg-type]
+
+
 def test_the_default_spec_is_the_local_backend(tmp_path: Path) -> None:
     backend = open_sandbox(SandboxSpec(root=str(tmp_path), env={"X": "1"}))
     assert isinstance(backend, LocalBackend)

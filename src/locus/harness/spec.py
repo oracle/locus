@@ -84,6 +84,32 @@ class SandboxSpec:
     warm_pool: WarmPoolHint = field(default_factory=WarmPoolHint)
     options: Mapping[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        """Refuse a field of the wrong type here, not in the first command.
+
+        A ``limits`` that is not a :class:`ResourceLimits` would be set on
+        the backend as it is and fail inside ``exec``; a ``backend`` that is
+        not a name would fail in :func:`open_sandbox` with a message about
+        an unknown backend.
+        """
+        if not isinstance(self.backend, str) or not self.backend:
+            raise TypeError(f"backend must be a non-empty string, got {self.backend!r}")
+        if not isinstance(self.limits, ResourceLimits):
+            raise TypeError(
+                f"limits must be a ResourceLimits, got {type(self.limits).__name__}; "
+                "SandboxSpec.from_mapping takes a mapping"
+            )
+        if not isinstance(self.warm_pool, WarmPoolHint):
+            raise TypeError(
+                f"warm_pool must be a WarmPoolHint, got {type(self.warm_pool).__name__}; "
+                "SandboxSpec.from_mapping takes a mapping"
+            )
+        for name in ("env", "options"):
+            if not isinstance(getattr(self, name), Mapping):
+                raise TypeError(
+                    f"{name} must be a mapping, got {type(getattr(self, name)).__name__}"
+                )
+
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> SandboxSpec:
         """A spec from a plain mapping (a parsed YAML or JSON document).

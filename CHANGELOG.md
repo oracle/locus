@@ -607,6 +607,35 @@ policy.
 
 ### Fixed
 
+- **`OCIContainerInstanceBackend` connects through an OCI Bastion with the
+  default `known_hosts="strict"`.** The service reports no host key for a
+  port-forwarding session (`bastion_public_host_key_info` is empty), so the
+  strict default refused every bastion path with "reports no host key". The
+  bastion's key is now the one in `known_hosts` or, failing that, the key the
+  endpoint presents at the first connection, read once with
+  `locus.harness.ssh.learn_host_key` and pinned for the session (an `INFO`
+  line says so); the container's keys are still pinned from its log, and
+  `known_hosts="accept-unknown"` stays the explicit unverified opt-in. The
+  unit stand-in for the bastion now reports no key, as the service does.
+- **A key the bastion or the container refuses is reported as such, in time,
+  with the container log.** `create()` retried an `AuthenticationException`
+  until the whole `ready_timeout` ran out, then deleted the instance and the
+  log that said why, and the error could not say whether the bastion or the
+  container's `sshd` had closed the connection. A failure at the jump is now
+  an `SSHJumpError` (new, exported from `locus.harness`) that records whether
+  the jump had accepted the key; a refused key, or a bastion that accepts the
+  key and then closes the connection — what an OCI Bastion does when the
+  client's address is not in its client CIDR allow-list, which it checks
+  after authentication — is retried for `AUTH_GRACE` (90 s) and then raised,
+  naming the bastion or the container's `sshd` and carrying the last 30
+  lines of the container log with key material redacted, before the
+  instance is deleted. Transport failures are retried to the deadline as
+  before; a host key that does not match is still raised at once.
+- **`SandboxSpec` refuses a field of the wrong type when it is built.**
+  `SandboxSpec(limits=5)` was accepted and the first `exec` failed with
+  `AttributeError: 'int' object has no attribute 'bound'`; `backend`,
+  `limits`, `warm_pool`, `env` and `options` are now checked in
+  `__post_init__` (`TypeError`), as `from_mapping` already did for mappings.
 - **Streamed tool calls on the OCI Responses transport keep their name and call
   id.** `stream()` only read the argument deltas, which carry the stream item id
   and no function name, so a streamed tool call came back as `name=""` keyed by

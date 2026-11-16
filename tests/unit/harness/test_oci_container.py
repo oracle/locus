@@ -18,7 +18,13 @@ from typing import Any
 
 import pytest
 
-from locus.harness import OCIContainerInstanceBackend, ResourceLimits, SandboxBackend, SSHJump
+from locus.harness import (
+    OCIContainerInstanceBackend,
+    ResourceLimits,
+    SandboxBackend,
+    SSHJump,
+    SSHJumpError,
+)
 from locus.harness import oci_container as mod
 
 
@@ -112,7 +118,9 @@ class FakeBastion:
         self.created: list[Any] = []
         self.deleted: list[str] = []
         self.states = ["CREATING", "ACTIVE"]
-        self.host_key_info: str | None = "ssh-rsa AAAAB3bastion"
+        #: What the service puts in ``bastion_public_host_key_info``: nothing,
+        #: for a port-forwarding session.
+        self.host_key_info: str | None = None
         self.gone: set[str] = set()
 
     def create_session(self, details: Any) -> SimpleNamespace:
@@ -209,7 +217,25 @@ def fakes(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     )
     monkeypatch.setattr(mod, "_open_ssh", open_ssh)
     monkeypatch.setattr(mod.time, "sleep", lambda _s: None)
-    return {"clients": clients, "opened": opened, "sessions": sessions}
+    learned: list[tuple[str, int]] = []
+
+    def learn(host: str, port: int = 22, *, timeout: float = 30.0) -> tuple[str, str]:
+        learned.append((host, port))
+        return "ssh-ed25519 AAAAC3bastion", "endpoint"
+
+    monkeypatch.setattr(mod, "learn_host_key", learn)
+    return {"clients": clients, "opened": opened, "sessions": sessions, "learned": learned}
+
+
+class SSHException(Exception):  # noqa: N818 - paramiko's name is what is matched
+    pass
+
+
+class AuthenticationException(SSHException):
+    pass
+
+
+BASTION_HOST = "host.bastion.eu-frankfurt-1.oci.oraclecloud.com"
 
 
 def create(**options: Any) -> OCIContainerInstanceBackend:
@@ -302,12 +328,13 @@ def test_create_through_a_bastion(fakes: dict[str, Any]) -> None:
     [(reach, _, _, _)] = fakes["opened"]
     assert reach.port == 2222
     assert reach.via == SSHJump(
-        host="host.bastion.eu-frankfurt-1.oci.oraclecloud.com",
+        host=BASTION_HOST,
         username="ocid1.bastionsession.test1",
         pkey="PKEY",
-        host_key="ssh-rsa AAAAB3bastion",
+        host_key="ssh-ed25519 AAAAC3bastion",
         known_hosts="strict",
-    ), "the jump logs in with the key the session was created for"
+    ), "the jump logs in with the key the session was created for, the bastion's key pinned"
+    assert fakes["learned"] == [(BASTION_HOST, 22)], "the service gave no key: the endpoint's"
     backend.close()
     assert bastion.deleted == ["ocid1.bastionsession.test1"]
     assert fakes["clients"].instances.deleted == ["ocid1.containerinstance.test"]
@@ -319,24 +346,68 @@ def test_the_default_bastion_ttl_is_three_hours(fakes: dict[str, Any]) -> None:
     assert details.session_ttl_in_seconds == mod.BASTION_SESSION_TTL == 3 * 60 * 60
 
 
-def test_a_bastion_without_a_host_key_is_refused_unless_asked(
+def test_the_bastion_host_key_the_service_reports_is_the_one_pinned(fakes: dict[str, Any]) -> None:
+    fakes["clients"].bastion.host_key_info = "ssh-rsa AAAAB3bastion"
+    create(bastion_id="ocid1.bastion.test")
+    [(reach, _, _, _)] = fakes["opened"]
+    assert reach.via is not None
+    assert (reach.via.host_key, reach.via.known_hosts) == ("ssh-rsa AAAAB3bastion", "strict")
+    assert fakes["learned"] == [], "the service's word is taken; the endpoint is not asked"
+
+
+def test_a_bastion_without_a_published_host_key_is_pinned_from_the_endpoint_and_said_so(
     fakes: dict[str, Any], caplog: pytest.LogCaptureFixture
 ) -> None:
-    bastion = fakes["clients"].bastion
-    bastion.host_key_info = None
-    with pytest.raises(RuntimeError, match=r'no host key.*known_hosts="accept-unknown"'):
+    with caplog.at_level("INFO", logger=mod.logger.name):
         create(bastion_id="ocid1.bastion.test")
-    assert bastion.deleted == ["ocid1.bastionsession.test1"], "the session is not left behind"
-    assert fakes["clients"].instances.deleted == ["ocid1.containerinstance.test"]
-    assert fakes["opened"] == []
+    [(reach, _, _, _)] = fakes["opened"]
+    assert reach.via is not None
+    assert (reach.via.host_key, reach.via.known_hosts) == ("ssh-ed25519 AAAAC3bastion", "strict")
+    assert fakes["learned"] == [(BASTION_HOST, 22)]
+    [record] = [r for r in caplog.records if "published no host key" in r.getMessage()]
+    assert record.levelname == "INFO"
+    assert "pinned for the session" in record.getMessage()
 
-    reset_instance(fakes)
+
+def test_a_bastion_host_key_found_in_known_hosts_is_pinned_from_there(
+    fakes: dict[str, Any], caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        mod, "learn_host_key", lambda *a, **k: ("ssh-rsa AAAAB3known", "known_hosts")
+    )
+    with caplog.at_level("INFO", logger=mod.logger.name):
+        create(bastion_id="ocid1.bastion.test")
+    [(reach, _, _, _)] = fakes["opened"]
+    assert reach.via is not None
+    assert reach.via.host_key == "ssh-rsa AAAAB3known"
+    assert "the one in known_hosts is pinned" in caplog.text
+
+
+def test_a_bastion_without_a_host_key_connects_unverified_only_when_asked(
+    fakes: dict[str, Any], caplog: pytest.LogCaptureFixture
+) -> None:
     with caplog.at_level("WARNING"):
         create(bastion_id="ocid1.bastion.test", known_hosts="accept-unknown")
     [(reach, _, _, _)] = fakes["opened"]
     assert reach.via is not None
     assert (reach.via.host_key, reach.via.known_hosts) == (None, "accept-unknown")
+    assert fakes["learned"] == [], "unverified means unverified: nothing is read either"
     assert "bastion reported no host key" in caplog.text
+
+
+def test_a_bastion_whose_key_the_endpoint_does_not_present_is_refused_and_cleaned_up(
+    fakes: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def no_answer(*args: Any, **kwargs: Any) -> Any:
+        raise OSError("timed out")
+
+    monkeypatch.setattr(mod, "learn_host_key", no_answer)
+    with pytest.raises(RuntimeError, match=r"reports no host key.*did not present one: timed out"):
+        create(bastion_id="ocid1.bastion.test")
+    bastion = fakes["clients"].bastion
+    assert bastion.deleted == ["ocid1.bastionsession.test1"], "the session is not left behind"
+    assert fakes["clients"].instances.deleted == ["ocid1.containerinstance.test"]
+    assert fakes["opened"] == []
 
 
 def test_a_public_ip_is_used_when_asked(fakes: dict[str, Any]) -> None:
@@ -450,6 +521,142 @@ def test_authentication_not_yet_accepted_is_retried(
     monkeypatch.setattr(mod, "_open_ssh", flaky)
     create()
     assert len(attempts) == 3
+
+
+def test_a_key_the_bastion_keeps_refusing_is_its_answer_after_the_grace_with_the_log(
+    fakes: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(mod, "AUTH_GRACE", 0.0)
+    attempts = 0
+
+    def refused(*args: Any, **kwargs: Any) -> Any:
+        nonlocal attempts
+        attempts += 1
+        raise SSHJumpError(
+            BASTION_HOST, AuthenticationException("Authentication failed."), authenticated=False
+        )
+
+    monkeypatch.setattr(mod, "_open_ssh", refused)
+    with pytest.raises(RuntimeError, match=r"through the bastion; the bastion .* refused") as info:
+        create(bastion_id="ocid1.bastion.test", ready_timeout=60)
+    message = str(info.value)
+    assert attempts == 1, "a refusal past the grace is not retried to the ready timeout"
+    assert "Authentication failed." in message
+    assert "container log, last 30 lines (keys redacted):" in message
+    assert "LOCUS_SSHD_READY boot-1" in message
+    assert "AAAAB3rsa" not in message
+    assert "LOCUS_HOST_KEY ssh-rsa <redacted> root@box" in message
+    assert fakes["clients"].bastion.deleted == ["ocid1.bastionsession.test1"]
+    assert fakes["clients"].instances.deleted == ["ocid1.containerinstance.test"]
+
+
+def test_a_bastion_that_drops_the_connection_after_accepting_the_key_names_the_allow_list(
+    fakes: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(mod, "AUTH_GRACE", 0.0)
+
+    def dropped(*args: Any, **kwargs: Any) -> Any:
+        raise SSHJumpError(BASTION_HOST, EOFError(), authenticated=True)
+
+    monkeypatch.setattr(mod, "_open_ssh", dropped)
+    with pytest.raises(RuntimeError, match="accepted the session's key and then closed") as info:
+        create(bastion_id="ocid1.bastion.test", ready_timeout=60)
+    assert "client CIDR allow-list" in str(info.value)
+    assert "as the bastion sees it" in str(info.value)
+
+
+def test_a_key_the_container_refuses_is_reported_with_the_container_log(
+    fakes: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(mod, "AUTH_GRACE", 0.0)
+
+    def refused(*args: Any, **kwargs: Any) -> Any:
+        raise AuthenticationException("Authentication failed.")
+
+    monkeypatch.setattr(mod, "_open_ssh", refused)
+    with pytest.raises(
+        RuntimeError, match=r"sshd at 10\.9\.1\.7:22 refused the key the bootstrap"
+    ) as info:
+        create(ready_timeout=60)
+    assert "its log below says what sshd made of it" in str(info.value)
+    assert "LOCUS_SSHD_READY boot-1" in str(info.value)
+    assert fakes["clients"].instances.deleted == ["ocid1.containerinstance.test"]
+
+
+def test_a_refusal_then_a_transport_failure_starts_the_grace_over(
+    fakes: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    errors: list[Exception] = [
+        AuthenticationException("not yet"),
+        OSError("connection reset"),
+        AuthenticationException("not yet"),
+    ]
+    real = mod._open_ssh
+
+    def flaky(*args: Any, **kwargs: Any) -> Any:
+        if errors:
+            raise errors.pop(0)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(mod, "_open_ssh", flaky)
+    backend = create()
+    assert backend.state == "running"
+    assert errors == []
+
+
+def test_a_connection_failure_without_a_log_to_read_is_still_explained() -> None:
+    reach = mod._Reach("10.9.1.7", 22, ())
+    plain = mod._explain(reach, OSError("refused"), None)
+    assert plain == "could not reach sshd at 10.9.1.7:22: refused"
+    jump = mod._explain(reach, SSHJumpError("bastion", OSError("reset"), authenticated=False), None)
+    assert jump.startswith(
+        "could not reach sshd at 10.9.1.7:22 through the bastion; the bastion bastion did not carry"
+    )
+    assert "container log" not in jump
+
+
+def test_the_log_tail_is_the_last_lines_or_says_why_not() -> None:
+    class Instances:
+        def __init__(self, text: str | None) -> None:
+            self.text = text
+
+        def retrieve_logs(self, container_id: str) -> SimpleNamespace:
+            if self.text is None:
+                raise ServiceError(503)
+            return ns(data=ns(content=self.text.encode()))
+
+    def clients(text: str | None) -> Any:
+        return mod._Clients(Instances(text), None, None, None, None)
+
+    lines = (
+        "\n".join(f"line {n}" for n in range(40))
+        + "\nLOCUS_HOST_KEY ssh-ed25519 AAAAC3abcdefgh x\n"
+    )
+    tail = mod._log_tail(clients(lines), "c")
+    assert tail.splitlines()[0] == "line 11", "the last 30 lines"
+    assert tail.splitlines()[-1] == "LOCUS_HOST_KEY ssh-ed25519 <redacted> x"
+    assert mod._log_tail(clients(""), "c") == "(empty)"
+    assert (
+        mod._log_tail(clients(None), "c")
+        == "(the container log could not be read: service error 503)"
+    )
+
+
+def test_refusals_are_told_from_the_rest_through_the_jump() -> None:
+    class BadHostKeyException(SSHException):
+        pass
+
+    assert mod._refused(AuthenticationException("no"))
+    assert not mod._refused(SSHException("not yet"))
+    assert not mod._refused(OSError("refused"))
+    assert mod._refused(SSHJumpError("b", AuthenticationException("no"), authenticated=False))
+    assert mod._refused(SSHJumpError("b", EOFError(), authenticated=True))
+    assert not mod._refused(SSHJumpError("b", OSError("reset"), authenticated=False))
+    assert mod._transient(SSHJumpError("b", EOFError(), authenticated=True))
+    assert not mod._transient(
+        SSHJumpError("b", BadHostKeyException("mismatch"), authenticated=False)
+    )
+    assert not mod._transient(SSHJumpError("b", TypeError("bug"), authenticated=False))
 
 
 def test_an_unrelated_error_while_connecting_is_raised_at_once(

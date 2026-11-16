@@ -34,6 +34,9 @@ there. Three things are decided here rather than left to the host:
   ``known_hosts="accept-unknown"`` is the explicit opt-out for a sandbox
   with no other channel. A key accepted that way is kept for the session,
   in memory: the backend never writes the user's ``known_hosts``.
+  :func:`learn_host_key` reads a host's key from ``known_hosts`` or, failing
+  that, from one key exchange with the host, for a caller that wants to pin
+  it with ``host_key=`` when no other channel carries it.
 
 ``paramiko`` is imported by :meth:`SSHSandboxBackend.connect` only. Pass a
 connected ``SSHClient`` — or anything with ``get_transport`` and
@@ -57,7 +60,7 @@ from locus.harness.local import MAX_BACKGROUND
 from locus.harness.session import SessionBackend
 
 
-__all__ = ["SSHJump", "SSHSandboxBackend", "SSHSession"]
+__all__ = ["SSHJump", "SSHJumpError", "SSHSandboxBackend", "SSHSession", "learn_host_key"]
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +118,32 @@ class SSHJump:
     password: str | None = field(default=None, repr=False)
     host_key: str | None = None
     known_hosts: KnownHosts = "strict"
+
+
+class SSHJumpError(Exception):
+    """The jump host did not carry the connection to the workspace host.
+
+    Raised by :meth:`SSHSession.open` for a failure at the jump — its own
+    connection, or the channel through it — so a caller can tell the jump
+    from the host behind it. The jump's own error is the ``__cause__``.
+
+    Attributes:
+        host: The jump host.
+        cause: The jump's own error, also the ``__cause__``.
+        authenticated: Whether the jump had accepted the key before the
+            failure. A bastion that accepts the key and then closes the
+            connection is admitting the session but not this client's
+            address.
+    """
+
+    def __init__(self, host: str, cause: BaseException, *, authenticated: bool) -> None:
+        self.host = host
+        self.cause = cause
+        self.authenticated = authenticated
+        self.__cause__ = cause
+        when = "after accepting the key" if authenticated else "before accepting the key"
+        detail = f"{type(cause).__name__}: {cause}" if str(cause) else type(cause).__name__
+        super().__init__(f"jump host {host} failed {when}: {detail}")
 
 
 def _deadline_script(command: str, seconds: int) -> str:
@@ -206,21 +235,27 @@ class SSHSession:
         key_filename = _expanded(key_filename)
         if via is not None:
             jump = _client(paramiko, via.host, via.port, via.host_key, via.known_hosts)
-            jump.connect(
-                via.host,
-                port=via.port,
-                username=via.username,
-                key_filename=_expanded(via.key_filename),
-                pkey=via.pkey,
-                password=via.password,
-                timeout=connect_timeout,
-                banner_timeout=connect_timeout,
-                auth_timeout=connect_timeout,
-                **_only_that_key(via.pkey, via.key_filename),
-            )
-            sock = jump.get_transport().open_channel(
-                "direct-tcpip", (host, port), ("127.0.0.1", 0), timeout=connect_timeout
-            )
+            authenticated = False
+            try:
+                jump.connect(
+                    via.host,
+                    port=via.port,
+                    username=via.username,
+                    key_filename=_expanded(via.key_filename),
+                    pkey=via.pkey,
+                    password=via.password,
+                    timeout=connect_timeout,
+                    banner_timeout=connect_timeout,
+                    auth_timeout=connect_timeout,
+                    **_only_that_key(via.pkey, via.key_filename),
+                )
+                authenticated = True
+                sock = jump.get_transport().open_channel(
+                    "direct-tcpip", (host, port), ("127.0.0.1", 0), timeout=connect_timeout
+                )
+            except Exception as exc:
+                jump.close()
+                raise SSHJumpError(via.host, exc, authenticated=authenticated) from exc
         client = _client(paramiko, host, port, host_key, known_hosts)
         try:
             client.connect(
@@ -559,6 +594,51 @@ def _send_input(channel: Any, data: bytes, deadline: float) -> None:
 def _expanded(path: str | None) -> str | None:
     """``path`` with a leading ``~`` expanded; ``paramiko`` does not do it."""
     return None if path is None else str(Path(path).expanduser())
+
+
+def learn_host_key(
+    host: str, port: int = 22, *, timeout: float = 30.0
+) -> tuple[str, Literal["known_hosts", "endpoint"]]:
+    """The host key of ``host``, ``"<type> <base64>"``, and where it came from.
+
+    The system's and the user's ``known_hosts`` are read first; a host in
+    neither is asked, in one key exchange with nothing authenticated and
+    nothing written. A caller that pins the result with ``host_key=`` for
+    the rest of a session has narrowed trust-on-first-use to that one
+    exchange, which is the most a host with no other channel for its key
+    allows.
+    """
+    paramiko = _paramiko()
+    known = _known_host_key(paramiko, host, port)
+    if known is not None:
+        return known, "known_hosts"
+    sock = socket.create_connection((host, port), timeout=timeout)
+    transport = paramiko.Transport(sock)
+    try:
+        transport.banner_timeout = timeout
+        transport.start_client(timeout=timeout)
+        key = transport.get_remote_server_key()
+    finally:
+        transport.close()
+    return f"{key.get_name()} {key.get_base64()}", "endpoint"
+
+
+def _known_host_key(paramiko: Any, host: str, port: int) -> str | None:
+    """The first key ``known_hosts`` holds for ``host``, or ``None``."""
+    name = host if port == 22 else f"[{host}]:{port}"
+    for path in _KNOWN_HOSTS_FILES:
+        keys = paramiko.HostKeys()
+        try:
+            keys.load(str(Path(path).expanduser()))
+        except OSError:
+            continue
+        except Exception:  # noqa: BLE001 - an unreadable line is not this host's key
+            continue
+        found = keys.lookup(name)
+        if found:
+            kind, key = next(iter(found.items()))
+            return f"{kind} {key.get_base64()}"
+    return None
 
 
 def _only_that_key(pkey: Any, key_filename: str | None) -> dict[str, bool]:

@@ -81,7 +81,7 @@ from locus.harness.spec import (
     register_backend,
     registered_backends,
 )
-from locus.harness.ssh import SSHJump, SSHSandboxBackend, SSHSession
+from locus.harness.ssh import SSHJump, SSHJumpError, SSHSandboxBackend, SSHSession
 from locus.harness.state import MemoryBackend
 from locus.harness.tools.common import FileChange, HarnessConfig, HarnessContext
 from locus.harness.toolset import (
@@ -133,6 +133,7 @@ __all__ = [
     "ReadLedger",
     "ResourceLimits",
     "SSHJump",
+    "SSHJumpError",
     "SSHSandboxBackend",
     "SSHSession",
     "SandboxBackend",
