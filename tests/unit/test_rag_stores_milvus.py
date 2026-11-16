@@ -109,6 +109,9 @@ class _FakeMilvusClient:
         self.calls.append(("create_collection", {"schema": schema, "index_params": index_params}))
         self.collections[name] = {"schema": schema, "index_params": index_params, "rows": {}}
 
+    def load_collection(self, name: str) -> None:
+        self.calls.append(("load_collection", {"name": name}))
+
     def describe_collection(self, name: str) -> dict[str, Any]:
         self.calls.append(("describe_collection", {"name": name}))
         schema = self.collections[name]["schema"]
@@ -279,6 +282,55 @@ async def test_injected_client_is_used_and_not_closed(fake_pymilvus: types.Modul
     assert client.calls[0][0] == "create_collection"
     await store.close()
     assert client.closed is False  # injected clients belong to the caller
+
+
+async def test_close_stops_the_embedded_lite_server_for_a_local_file(
+    fake_pymilvus: types.ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # ``MilvusClient.close()`` leaves the Lite server running until interpreter
+    # exit, when it flushes and recreates the database directory a caller
+    # removed; ``close()`` releases the server for that file itself.
+    released: list[str] = []
+    manager = types.ModuleType("milvus_lite.server_manager")
+    manager.server_manager_instance = SimpleNamespace(release_server=released.append)  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "milvus_lite", types.ModuleType("milvus_lite"))
+    monkeypatch.setitem(sys.modules, "milvus_lite.server_manager", manager)
+
+    lite = MilvusVectorStore(dimension=3, collection_name="t", uri="./kb.db")
+    assert await lite.count() == 0
+    client = lite._get_client()
+    await lite.close()
+    assert client.closed is True
+    assert released == ["./kb.db"]
+
+    served = _store()  # an http uri has no embedded server to stop
+    assert await served.count() == 0
+    await served.close()
+    assert released == ["./kb.db"]
+
+
+async def test_close_tolerates_a_lite_server_manager_without_release(
+    fake_pymilvus: types.ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manager = types.ModuleType("milvus_lite.server_manager")
+    manager.server_manager_instance = SimpleNamespace()  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "milvus_lite", types.ModuleType("milvus_lite"))
+    monkeypatch.setitem(sys.modules, "milvus_lite.server_manager", manager)
+    lite = MilvusVectorStore(dimension=3, collection_name="t", uri="./kb.db")
+    assert await lite.count() == 0
+    await lite.close()
+    assert lite._client is None
+
+
+async def test_close_without_milvus_lite_installed_is_quiet(
+    fake_pymilvus: types.ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(sys.modules, "milvus_lite", None)
+    monkeypatch.setitem(sys.modules, "milvus_lite.server_manager", None)
+    lite = MilvusVectorStore(dimension=3, collection_name="t", uri="./kb.db")
+    assert await lite.count() == 0
+    await lite.close()
+    assert lite._client is None
 
 
 def test_constructor_validation() -> None:

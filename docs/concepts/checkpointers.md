@@ -314,6 +314,8 @@ store, not a drop-in for `Agent(checkpointer=...)`: it is not a
 `get()` after each run, keeping one row per checkpoint with a parent
 link (see [Oracle Database 26ai](oracle-26ai.md) and
 [notebook 43](../notebooks/notebook_43_oracle_versioned_saver.md)).
+Passing it as `Agent(checkpointer=...)` raises `TypeError` at
+construction, naming `oracle_checkpointer()`.
 
 ```python
 import os

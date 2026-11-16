@@ -109,7 +109,10 @@ A durable backend takes the same shape — pass its connection settings
 and a `dimension` that matches your embedder. The free, in-process
 options for tests and small corpora are `InMemoryVectorStore`,
 `QdrantVectorStore(location=":memory:")`, `ChromaVectorStore()` and
-`MilvusVectorStore(uri="./kb.db")` (Milvus Lite). Each served backend
+`MilvusVectorStore(uri="./kb.db")` (Milvus Lite). On Milvus Lite,
+`await store.close()` also stops the embedded server for that file, so
+the directory can be removed afterwards; left running, Milvus Lite
+flushes at interpreter exit and recreates it. Each served backend
 has its own extra: `[pgvector]`, `[opensearch]`, `[qdrant]`, `[chroma]`,
 `[oracledb]`, `[milvus]`, `[weaviate]`, `[elasticsearch]`,
 `[redis-vector]`, `[mongodb]`, `[pinecone]`; `[rag]` installs them all.

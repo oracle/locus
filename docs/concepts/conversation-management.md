@@ -129,8 +129,10 @@ After dozens of turns, even the most disciplined conversation
 exceeds the model's context window, so an agent manages its context
 by default. With no `conversation_manager`, an agent whose model's
 window is known (`context_window=`, registered metadata — a built-in
-entry, or one you add with `locus.models.metadata.register_metadata` —
-or the model itself) gets a `ContextCompactor`: old tool output is
+entry, one an OCI id such as `oci:openai.gpt-4.1` resolves through the
+model it serves, or one you add with
+`locus.models.metadata.register_metadata` — or the model itself) gets a
+`ContextCompactor`: old tool output is
 cleared first and, when that is not enough, older turns are summarised
 by the agent's own model (or `compaction.summary_model`) and the run
 carries on. With `compaction=False` it gets
@@ -205,10 +207,13 @@ whatever the tier.
 Every tier that ran yields its own `CompactionEvent`, with `tier` set and
 the tokens before and after it (`agent.context.compacted` on the
 [event bus](sse-events.md)). The pipeline reports `exhausted` when the
-context is still at or over the highest trigger after the last tier, or
-when a model-calling tier is needed again within
-`min_iterations_between_summaries` iterations of the last one; the run
-then ends with `context_exhausted`.
+context is still at or over the highest trigger after the last tier; the
+run then ends with `context_exhausted`. A model-calling tier needed again
+within `min_iterations_between_summaries` iterations of its last run is
+held back for that pass (the last summary did not buy room, so another
+would land in the same place) and the tiers after it still run, so a
+`Summarize` tier placed before `ClearToolResults` or `SlidingWindow`
+cannot end a run those cheaper tiers would have kept inside the window.
 
 ### Pinning
 

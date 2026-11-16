@@ -30,7 +30,9 @@ Four stores share one interface:
 
 Every report is stored under a suite name; the fingerprint on the report
 is kept beside it, and ``list()`` can be narrowed to one fingerprint so a
-trend never mixes two different suites.
+trend never mixes two different suites. A report's id is the one ``put()``
+is given (``build-42``, a pipeline's run number) or a generated 32-hex one;
+either reads back as itself from every store.
 """
 
 from __future__ import annotations
@@ -41,7 +43,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -142,7 +144,11 @@ class ReportStore(Protocol):
     spec: str
 
     def put(self, report: EvalReport, *, suite: str, report_id: str | None = None) -> StoredReport:
-        """Keep ``report`` under ``suite``; returns what was recorded about it."""
+        """Keep ``report`` under ``suite``; returns what was recorded about it.
+
+        ``report_id`` names the report (any non-blank string); a 32-hex id is
+        generated when it is omitted.
+        """
 
     def get(self, report_id: str) -> EvalReport | None:
         """The report with ``report_id``, or ``None``."""
@@ -154,14 +160,17 @@ class ReportStore(Protocol):
 
 
 def _object_name(prefix: str, suite: str, report: EvalReport, report_id: str) -> str:
+    # The id is percent-encoded: a caller's ``build-42`` or a generated 32-hex
+    # id is left as it is, while a ``/`` or a space cannot split the name or
+    # stop it parsing, and ``_parse_name`` reads the id back exactly.
     return (
         f"{prefix}{_safe(suite)}/{_stamp(report.created_at)}-"
-        f"{report.fingerprint or 'none'}-{report_id}.json"
+        f"{report.fingerprint or 'none'}-{quote(report_id, safe='')}.json"
     )
 
 
 _NAME = re.compile(
-    r"(?P<stamp>\d{8}T\d{12}Z)-(?P<fingerprint>[0-9a-f]{12}|none)-(?P<id>[0-9a-f]{32})\.json$"
+    r"(?P<stamp>\d{8}T\d{12}Z)-(?P<fingerprint>[0-9a-f]{12}|none)-(?P<id>[^/]+)\.json$"
 )
 
 
@@ -179,7 +188,7 @@ def _parse_name(name: str, *, prefix: str) -> tuple[str, str, str | None, dateti
     fingerprint = match.group("fingerprint")
     return (
         suite,
-        match.group("id"),
+        unquote(match.group("id")),
         None if fingerprint == "none" else fingerprint,
         _unstamp(match.group("stamp")),
     )
@@ -202,6 +211,8 @@ class _ObjectStore:
 
     def put(self, report: EvalReport, *, suite: str, report_id: str | None = None) -> StoredReport:
         report_id = report_id or uuid4().hex
+        if not report_id.strip():
+            raise ValueError("report_id must not be blank")
         name = _object_name(self.prefix, suite, report, report_id)
         self._put_bytes(name, report.model_dump_json(indent=2).encode("utf-8"))
         return StoredReport.of(report, report_id=report_id, suite=suite, location=name)

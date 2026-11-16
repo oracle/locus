@@ -138,15 +138,23 @@ def checkpoint_iteration(data: Mapping[str, Any]) -> int | None:
 
 
 def parse_time(value: Any) -> datetime | None:
-    """``value`` as a datetime: one already, an ISO-8601 string, or ``None``."""
+    """``value`` as a datetime: one already, an ISO-8601 string, or ``None``.
+
+    A naive value is UTC wall-clock time, which is what every backend
+    stores, and comes back aware, so infos from different backends compare
+    (a naive and an aware datetime cannot be ordered).
+    """
+    moment: datetime | None = None
     if isinstance(value, datetime):
-        return value
-    if isinstance(value, str) and value:
+        moment = value
+    elif isinstance(value, str) and value:
         try:
-            return datetime.fromisoformat(value)
+            moment = datetime.fromisoformat(value)
         except ValueError:
             return None
-    return None
+    if moment is None:
+        return None
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
 
 
 def new_fork_id(thread_id: str) -> str:
