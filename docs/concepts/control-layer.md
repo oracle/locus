@@ -81,6 +81,56 @@ Where it stops:
   then carries a `tool-call-judged` record for it rather than an
   `action-admission` one.
 
+### What the runtime enforces: tool-call integrity
+
+The admission gate decides whether an action may run. A second check, inside
+the runtime, decides whether the call that reaches the executor is the call
+the model produced. With `Agent(tool_call_integrity=True)` the runtime signs
+every `ToolCall` as the model's response is parsed, streamed or not, over a
+canonical form of its id, name and arguments (sorted keys, no whitespace)
+with HMAC-SHA256 under a random per-run key that lives only in memory. The
+executor verifies each call against that record before it runs it.
+
+A call that no longer matches is refused: the tool does not run, the model
+reads a tool error that says so, and the run continues. The refusal lands on
+the agent's `AuditTrail` when it has one (`governed_agent()`, or an
+`AuditHook` among its hooks) with the signed and received digests and the
+hook the change is attributed to, and `tool.integrity.refused` is published
+on the event bus. `tool_call_integrity="abort"` ends the run with the typed
+`ToolCallIntegrityError` instead, once the batch of tools has finished.
+
+Hooks that legitimately rewrite arguments re-sign the call under their own
+name, so the chain of custody stays explicit:
+
+```python
+from locus.hooks.provider import BeforeToolCallEvent, HookProvider
+
+
+class RedactingHook(HookProvider):
+    async def on_before_tool_call(self, event: BeforeToolCallEvent) -> None:
+        event.arguments = {k: str(v).replace("@", " at ") for k, v in event.arguments.items()}
+        event.resign(by="RedactingHook")  # chain of custody: ("model", "RedactingHook")
+```
+
+`event.resign()` is a no-op when the feature is off, so a hook can call it
+unconditionally. The built-in `GuardrailsHook` (PII redaction) and
+`ExternalHooks` (`PreToolUse` rewrites) already do. A hook that changes the
+arguments without re-signing taints the record: the executor refuses the
+call and the audit entry names that hook. A later re-sign does not clear the
+taint, so one hook cannot launder another's silent change. The same holds
+for anything else that changes a call after the model produced it, such as a
+consumer mutating the `ToolCall` it was handed on a `ThinkEvent`.
+
+Scope. The signature is kept on the run, keyed by call id, not on the
+`ToolCall`, so message types, checkpoints and wire formats are unchanged. The
+key is per run and never persisted. A held call that `resume(...,
+perform_dangling=True)` re-issues is signed again under the new run's key
+before it enters the hook seam; a call that reaches the executor without any
+record in the current run, because code outside the runtime issued it, is
+unsigned and runs unverified. The guarantee is that once the runtime has
+signed a call, nothing may change it unnamed. Off by default in 5.x, on by
+default from 6.0.
+
 ## Failure behavior
 
 | Failure | Behavior to design for |
