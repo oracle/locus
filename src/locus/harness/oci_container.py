@@ -88,8 +88,12 @@ FAILED_MARK = "LOCUS_BOOTSTRAP_FAILED"
 #: Seconds a bastion session lives; the backend deletes it sooner on close.
 BASTION_SESSION_TTL = 3 * 60 * 60
 
+#: Seconds a stop or a start of the instance may take.
+LIFECYCLE_TIMEOUT = 600.0
+
 _ACTIVE = "ACTIVE"
 _INACTIVE = "INACTIVE"
+_UPDATING = "UPDATING"
 _DELETED = "DELETED"
 _FAILED = frozenset({"FAILED", "DELETING", "DELETED"})
 
@@ -266,6 +270,12 @@ def _host_keys(log: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(keys))
 
 
+def _last_boot(log: str) -> str:
+    """The lines of the latest bootstrap that reached the ready mark."""
+    blocks = log.split(READY_MARK)
+    return blocks[-2] if len(blocks) >= 2 else log
+
+
 _BASTION_HOST = re.compile(r"@(host\.bastion\.[a-z0-9.-]+)")
 
 
@@ -295,8 +305,10 @@ class OCIContainerInstanceBackend(SSHSandboxBackend):
         region: The instance's region, for the label.
         owns_instance: Delete the instance on :meth:`close`. Set by
             :meth:`create`.
-        reconnect: Opens a new SSH session after a restart. Set by
-            :meth:`create` and :meth:`connect`.
+        reconnect: Opens a new SSH session after a restart, given the host
+            keys of the previous boot; returns the session and the new keys.
+            Set by :meth:`create` and :meth:`connect`.
+        host_keys: The container's host public keys, as pinned.
         bastion_session_id: A bastion session to delete on :meth:`close`.
         limits: What the instance was given.
         root: The workspace directory in the container.
@@ -313,7 +325,8 @@ class OCIContainerInstanceBackend(SSHSandboxBackend):
         clients: _Clients | None = None,
         region: str | None = None,
         owns_instance: bool = False,
-        reconnect: Callable[[], SSHSession] | None = None,
+        reconnect: Callable[[tuple[str, ...]], tuple[SSHSession, tuple[str, ...]]] | None = None,
+        host_keys: tuple[str, ...] = (),
         bastion_session_id: str | None = None,
         limits: ResourceLimits | None = None,
         root: str = SANDBOX_ROOT,
@@ -336,6 +349,7 @@ class OCIContainerInstanceBackend(SSHSandboxBackend):
         self._clients = clients
         self._owns_instance = owns_instance
         self._reconnect = reconnect
+        self._host_keys = host_keys
         self._bastion_session_id = bastion_session_id
         if limits is not None:
             self.limits = limits
@@ -352,26 +366,35 @@ class OCIContainerInstanceBackend(SSHSandboxBackend):
 
     # ----------------------------------------------------------- lifecycle --
 
+    def _state(self) -> str:
+        assert self._clients is not None  # noqa: S101 - callers check
+        instances = self._clients.instances
+        return str(instances.get_container_instance(self._instance_id).data.lifecycle_state).upper()
+
     def _start(self) -> None:
-        """Start a stopped instance and reconnect; the workspace is fresh."""
+        """Start a stopped instance and reconnect; the workspace is fresh.
+
+        The container restarts from its image, so the bootstrap runs again
+        and prints new host keys; the reconnect waits for keys that differ
+        from the previous boot's before it trusts them.
+        """
         if self._clients is not None:
-            instances = self._clients.instances
-            state = str(instances.get_container_instance(self._instance_id).data.lifecycle_state)
-            if state.upper() == _INACTIVE:
-                instances.start_container_instance(self._instance_id)
+            state = self._state()
+            if state == _INACTIVE:
+                self._clients.instances.start_container_instance(self._instance_id)
             _wait(
-                lambda: str(
-                    instances.get_container_instance(self._instance_id).data.lifecycle_state
-                ),
+                self._state,
                 _ACTIVE,
                 failed=_FAILED,
-                timeout=600.0,
+                timeout=LIFECYCLE_TIMEOUT,
                 interval=5.0,
                 what=f"container instance {self._instance_id}",
             )
         if self._reconnect is None:
             raise RuntimeError("this backend cannot reconnect: it was built without reconnect=")
-        self._ssh = self._session = self._reconnect()
+        session, keys = self._reconnect(self._host_keys)
+        self._ssh = self._session = session
+        self._host_keys = keys
         self._has_rg = None
 
     def _stop(self) -> None:
@@ -381,10 +404,18 @@ class OCIContainerInstanceBackend(SSHSandboxBackend):
         finally:
             self._ssh.close()
         if self._clients is not None and self._owns_instance:
-            instances = self._clients.instances
-            state = str(instances.get_container_instance(self._instance_id).data.lifecycle_state)
-            if state.upper() == _ACTIVE:
-                instances.stop_container_instance(self._instance_id)
+            state = self._state()
+            if state == _ACTIVE:
+                self._clients.instances.stop_container_instance(self._instance_id)
+            if state in (_ACTIVE, _UPDATING):
+                _wait(
+                    self._state,
+                    _INACTIVE,
+                    failed=_FAILED,
+                    timeout=LIFECYCLE_TIMEOUT,
+                    interval=5.0,
+                    what=f"container instance {self._instance_id}",
+                )
 
     def _destroy(self) -> None:
         """Close the connection; delete the bastion session and the instance this backend made."""
@@ -534,7 +565,7 @@ class OCIContainerInstanceBackend(SSHSandboxBackend):
             )
             bastion_session = reach.bastion_session_id
 
-            def reconnect() -> SSHSession:
+            def reconnect(previous: tuple[str, ...]) -> tuple[SSHSession, tuple[str, ...]]:
                 fresh = _reach(
                     clients,
                     instance_id,
@@ -546,8 +577,9 @@ class OCIContainerInstanceBackend(SSHSandboxBackend):
                     deadline=time.monotonic() + ready_timeout,
                     interval=poll_interval,
                     via=reach.via,
+                    previous_keys=previous,
                 )
-                return _connect_until(
+                session = _connect_until(
                     fresh,
                     pkey,
                     deadline=time.monotonic() + ready_timeout,
@@ -555,6 +587,7 @@ class OCIContainerInstanceBackend(SSHSandboxBackend):
                     connect_timeout=connect_timeout,
                     path=path,
                 )
+                return session, fresh.host_keys
 
             session = _connect_until(
                 reach,
@@ -571,6 +604,7 @@ class OCIContainerInstanceBackend(SSHSandboxBackend):
                 region=clients.region,
                 owns_instance=True,
                 reconnect=reconnect,
+                host_keys=reach.host_keys,
                 bastion_session_id=bastion_session,
                 limits=ResourceLimits(cpus=ocpus, memory_mb=int(memory_gb * 1024)),
                 root=root,
@@ -659,7 +693,11 @@ class OCIContainerInstanceBackend(SSHSandboxBackend):
             clients=clients,
             region=clients.region,
             owns_instance=False,
-            reconnect=lambda: _open_ssh(reach, pkey, connect_timeout=connect_timeout, path=path),
+            reconnect=lambda _previous: (
+                _open_ssh(reach, pkey, connect_timeout=connect_timeout, path=path),
+                reach.host_keys,
+            ),
+            host_keys=reach.host_keys,
             bastion_session_id=bastion_session,
             root=root,
             env=env,
@@ -688,8 +726,14 @@ def _reach(
     deadline: float,
     interval: float,
     via: SSHJump | None = None,
+    previous_keys: tuple[str, ...] = (),
 ) -> _Reach:
-    """Wait for the instance to run and its ``sshd`` to announce itself; how to reach it."""
+    """Wait for the instance to run and its ``sshd`` to announce itself; how to reach it.
+
+    After a restart the log may still show the previous boot, so with
+    ``previous_keys`` the wait goes on until the latest boot's keys differ
+    from them.
+    """
     instances = clients.instances
     _wait(
         lambda: str(instances.get_container_instance(instance_id).data.lifecycle_state),
@@ -709,8 +753,9 @@ def _reach(
             line = next(ln for ln in log.splitlines() if FAILED_MARK in ln)
             raise RuntimeError(f"the container could not start sshd: {line}")
         if READY_MARK in log:
-            keys = _host_keys(log)
-            break
+            keys = _host_keys(_last_boot(log))
+            if not previous_keys or keys != previous_keys:
+                break
         time.sleep(interval)
     else:
         raise RuntimeError(

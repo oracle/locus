@@ -28,6 +28,9 @@ LOG_READY = (
     "LOCUS_SSHD_READY\n"
 )
 
+#: The log after a restart: the first boot's lines, then the second's.
+LOG_REBOOTED = LOG_READY + "LOCUS_HOST_KEY ssh-ed25519 AAAAC3second root@box\nLOCUS_SSHD_READY\n"
+
 
 def ns(**fields: Any) -> SimpleNamespace:
     return SimpleNamespace(**fields)
@@ -346,11 +349,15 @@ def test_stop_and_start_restart_the_instance_and_reconnect(fakes: dict[str, Any]
     assert instances.stopped == ["ocid1.containerinstance.test"]
     assert first.closed
     assert backend.state == "stopped"
-    instances.logs = [LOG_READY]
+    instances.logs = [LOG_READY, LOG_REBOOTED]
     backend.start()
     assert instances.started == ["ocid1.containerinstance.test"]
     assert len(fakes["sessions"]) == 2, "a new connection to the restarted container"
     assert backend.ssh is fakes["sessions"][1]
+    second_reach = fakes["opened"][1][0]
+    assert second_reach.host_keys == ("ssh-ed25519 AAAAC3second",), (
+        "the restarted container's own keys are pinned, not the first boot's"
+    )
     assert backend.state == "running"
     backend.exec("true", timeout=5)
     assert any("true" in c for c in fakes["sessions"][1].commands)
@@ -392,6 +399,12 @@ def test_connect_needs_a_key(fakes: dict[str, Any]) -> None:
 
 
 # ----------------------------------------------------------------- helpers --
+
+
+def test_the_latest_boot_is_the_one_read() -> None:
+    assert mod._last_boot(LOG_REBOOTED).strip().endswith("AAAAC3second root@box")
+    assert mod._last_boot(LOG_READY) == LOG_READY.partition("LOCUS_SSHD_READY")[0]
+    assert mod._last_boot("no ready mark yet") == "no ready mark yet"
 
 
 def test_host_keys_are_parsed_and_ed25519_comes_first() -> None:
