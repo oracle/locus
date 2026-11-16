@@ -483,6 +483,17 @@ class TestApprovalStoreSpecs:
         assert (from_env.url, from_env.prefix) == ("redis://cache:6379", "locus:approvals:")
 
     def test_oracle(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for name in (
+            "ORACLE_DSN",
+            "ORACLE_USER",
+            "ORACLE_PASSWORD",
+            "ORACLE_WALLET",
+            "ORACLE_WALLET_PASSWORD",
+            "TNS_ADMIN",
+        ):
+            monkeypatch.delenv(
+                name, raising=False
+            )  # a bare spec must not find a database in this shell
         store = approval_store("oracle://U:pw@h:1522/svc?wallet=/w&table=S.T")
         assert isinstance(store, OracleApprovals)
         config = store.config
