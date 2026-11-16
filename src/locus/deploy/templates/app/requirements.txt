@@ -1,0 +1,2 @@
+# Python dependencies of the agent server image. Pin what your agent imports.
+__LOCUS_SDK_SPEC__
