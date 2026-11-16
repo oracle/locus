@@ -15,11 +15,15 @@ Vector Stores (persist and search vectors):
 - QdrantVectorStore: Qdrant (local or server)
 - ChromaVectorStore: Chroma (embedded or server)
 - OracleVectorStore: Oracle Database 26ai with the native VECTOR type
+- MilvusVectorStore, WeaviateVectorStore, ElasticsearchVectorStore,
+  RedisVectorStore, MongoDBAtlasVectorStore, PineconeVectorStore
 
 Rerankers (reorder candidates by relevance):
 - CrossEncoderReranker: local sentence-transformers cross-encoder (offline)
 - CohereReranker: Cohere's direct rerank API
 - OCICohereReranker: Cohere rerank models served by OCI Generative AI
+- LLMReranker: any registered chat model grades the candidates
+- JinaReranker / VoyageReranker: hosted rerank APIs
 
 Retriever (combines embedding + store):
 - RAGRetriever: Unified interface for document management and retrieval
@@ -101,9 +105,11 @@ from locus.rag.retriever import RAGRetriever, RetrievalResult
 from locus.rag.stores.base import (
     BaseVectorStore,
     Document,
+    HybridSearchable,
     SearchResult,
     VectorStore,
     VectorStoreConfig,
+    supports_hybrid_search,
 )
 
 # Tools
@@ -134,9 +140,11 @@ __all__ = [
     # Stores - Base
     "BaseVectorStore",
     "Document",
+    "HybridSearchable",
     "SearchResult",
     "VectorStore",
     "VectorStoreConfig",
+    "supports_hybrid_search",
     # Stores - Implementations (lazy)
     "InMemoryVectorStore",
     "PgVectorStore",
@@ -145,6 +153,12 @@ __all__ = [
     "ChromaVectorStore",
     "OracleVectorStore",
     "OracleSyncVectorStore",
+    "MilvusVectorStore",
+    "WeaviateVectorStore",
+    "ElasticsearchVectorStore",
+    "RedisVectorStore",
+    "MongoDBAtlasVectorStore",
+    "PineconeVectorStore",
     # Oracle ingestion (lazy)
     "OracleADBLoader",
     "OracleInDBChunker",
@@ -156,6 +170,9 @@ __all__ = [
     "CrossEncoderReranker",
     "CohereReranker",
     "OCICohereReranker",
+    "LLMReranker",
+    "JinaReranker",
+    "VoyageReranker",
     # Multimodal
     "ContentType",
     "MultimodalProcessor",
@@ -222,10 +239,23 @@ def __getattr__(name: str) -> Any:
         from locus.rag import embeddings
 
         return getattr(embeddings, name)
-    if name in ("OracleVectorStore", "OracleSyncVectorStore"):
+    if name in (
+        "OracleVectorStore",
+        "OracleSyncVectorStore",
+        "MilvusVectorStore",
+        "WeaviateVectorStore",
+        "ElasticsearchVectorStore",
+        "RedisVectorStore",
+        "MongoDBAtlasVectorStore",
+        "PineconeVectorStore",
+    ):
         from locus.rag import stores
 
         return getattr(stores, name)
+    if name in ("LLMReranker", "JinaReranker", "VoyageReranker"):
+        from locus.rag import reranker
+
+        return getattr(reranker, name)
     if name == "OracleADBLoader":
         from locus.rag.loaders.oracle import OracleADBLoader
 

@@ -134,9 +134,9 @@ Done. Next: notebook 54 — reasoning patterns.
   agent reads.
 - [GSAR typed grounding](notebook_55_gsar_typed_grounding.md) — the four-way
   partition, the score and the decision loop in full.
-- [Concepts: RAG](../concepts/rag.md#retrieval-is-vector-similarity-only) —
-  chunk-size and metadata-filter levers for operations corpora, and
-  reranking.
+- [Concepts: RAG](../concepts/rag.md#hybrid-search-vector-plus-lexical) —
+  hybrid search, chunk-size and metadata-filter levers for operations
+  corpora, and reranking.
 - [Concepts: GSAR](../concepts/gsar.md) — when to use typed grounding over
   `grounding=True`.
 

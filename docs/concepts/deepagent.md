@@ -207,7 +207,9 @@ by other deep-research toolkits, so existing recipes carry over.
 The retriever's `store` can be any `BaseVectorStore` implementation. The
 SDK ships [`OracleVectorStore`](oracle-26ai.md) for Oracle Database 26ai,
 `PgVectorStore`, `OpenSearchVectorStore`, `QdrantVectorStore`,
-`ChromaVectorStore`, and `InMemoryVectorStore`. The embedder is likewise a
+`ChromaVectorStore`, `MilvusVectorStore`, `WeaviateVectorStore`,
+`ElasticsearchVectorStore`, `RedisVectorStore`, `MongoDBAtlasVectorStore`,
+`PineconeVectorStore`, and `InMemoryVectorStore`. The embedder is likewise a
 separate choice from the chat model: the example embeds through OCI
 Generative AI with `OCIEmbeddings`, and `OracleInDBEmbeddings` runs an
 ONNX model inside Oracle Database 26ai. See
