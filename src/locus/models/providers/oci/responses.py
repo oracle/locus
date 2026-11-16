@@ -47,6 +47,7 @@ from locus.models.providers.oci._signing import OCIRequestSigner
 from locus.models.providers.oci.openai_compat import (
     DEFAULT_OCI_GENAI_REGION,
     _build_instance_principal_signer,
+    _build_oke_workload_identity_signer,
     _build_resource_principal_signer,
     _build_signer_from_profile,
     _load_profile_config,
@@ -59,7 +60,7 @@ if TYPE_CHECKING:
     from oci.signer import AbstractBaseSigner
 
 
-_VALID_AUTH_TYPES = frozenset({"instance_principal", "resource_principal"})
+_VALID_AUTH_TYPES = frozenset({"instance_principal", "resource_principal", "oke_workload_identity"})
 
 
 class OCIProjectRequiredError(Exception):
@@ -376,6 +377,8 @@ class OCIResponsesModel(BaseModel):
             return _build_instance_principal_signer()
         if self.config.auth_type == "resource_principal":
             return _build_resource_principal_signer()
+        if self.config.auth_type == "oke_workload_identity":
+            return _build_oke_workload_identity_signer()
         assert self.config.profile is not None  # noqa: S101 — invariant from __init__
         return _build_signer_from_profile(self.config.profile, self.config.config_file)
 

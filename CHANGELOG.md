@@ -156,6 +156,34 @@ policy.
   and `locus eval trend --store <spec> --suite <name>` prints the trend,
   exiting 1 when the newest report is worse than the one before it. Notebook
   56 gains a trajectory case and a simulated-user case.
+- **`locus deploy`: the agent server on OCI.** `locus deploy init` writes a
+  deployment directory: Terraform roots for OCI Container Instances, OKE (a
+  bundled Helm chart installed through the Helm provider) and OCI Functions,
+  a registry root for the OCIR repository, a Dockerfile per image shape
+  (Oracle Linux 9, Python 3.12, non-root) and `locus-deploy.yaml`, the one
+  file a person edits. `plan`, `apply` and `destroy` run Terraform for the
+  chosen target; `apply` builds the image for the chosen architecture and
+  pushes it between the registry root and the target root; `plan`, `apply`
+  and `destroy` take `--dry-run` to print every command. `init` never
+  replaces an existing Dockerfile or `.dockerignore` without `--force`, only
+  appends to a `.gitignore`, writes a `.dockerignore` that keeps Terraform
+  state and tfvars out of the image, and takes `--sdk-wheel` to ship a
+  locus-sdk build that is not on PyPI. The roots share one set of variables
+  for the Oracle AI Database checkpointer, OCI Cache, OCI Object Storage and
+  OCI Application Performance Monitoring, authenticate the container with its
+  own principal (resource principal, instance principal or OKE workload
+  identity, the new `oke_workload_identity` auth type that every OCI auth
+  switch in the SDK accepts and that `resource_principal` detects on a pod)
+  and take secrets as OCI Vault secret OCIDs: the image starts with
+  `python -m locus.deploy.entrypoint`, which resolves every
+  `<VAR>_SECRET_OCID` into `<VAR>` before uvicorn. The generated server
+  refuses to start without its bearer key unless `allow_unauthenticated` is
+  set, and a public Container Instance needs `server_api_key_secret_id` or
+  that opt-out. `locus.deploy.functions` runs the `AgentServer` app behind
+  the Fn FDK, so the same server answers `oci fn function invoke` and API
+  Gateway requests. New extras: `deploy` (PyYAML) and `functions` (the Fn
+  FDK). The guide is [Deploy to OCI](docs/how-to/deploy-oci.md), with sizing
+  and cost notes and a deploy-on-tag workflow.
 - **`OracleAuditTrail`.** The audit trail on an Oracle AI Database immutable
   table (`CREATE IMMUTABLE TABLE … NO DROP UNTIL n DAYS IDLE NO DELETE UNTIL
   n DAYS AFTER INSERT`), or a blockchain table with `table_kind="blockchain"`.
@@ -439,6 +467,19 @@ policy.
   `create_tool_server(tools)` and `LocusMCPServer.build()` are the same from
   Python. The MCP concept page covers the auth flow, shaping precedence,
   elicitation, tracing and the command. (#457)
+- **The Codex skill covers the new surface.** `.agents/skills/locus/` (what
+  `locus codex init` places) teaches the policy file form with `locus policy
+  lint` / `explain` and `PolicyWatcher`, the tool-call judge and
+  `@tool(read_only=True)`, tool-call integrity, the database approval stores,
+  `approval_store()` and `pending_holds()`, `OracleAuditTrail` and the
+  object-storage anchors, the OCI Responses `store="auto"`, Zero Data
+  Retention, `reasoning` and native-compaction controls, the server's threads
+  and runs, `Last-Event-ID` resume, `WS /runs/live` and the AG-UI and Vercel
+  AI SDK adapters, and the evaluation primitives (rubrics, evidence receipts
+  and claims, reliability, report diffs and `EvalGate`), each with a snippet
+  that runs against the installed SDK. The skill test's wire-type exclusion
+  now also covers the A2A JSON-RPC envelope, parameter and push-notification
+  types. (#492)
 
 ### Fixed
 

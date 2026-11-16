@@ -245,7 +245,26 @@ reply is `task.artifacts[-1].parts[0].text`; `send_message_streaming`, `get_task
 client.invoke(prompt)` is the flat legacy call; `client.as_tool(name=, description=)` wraps the remote agent as a local
 tool. The server runs the agent without a `thread_id`: `contextId` groups tasks but carries no conversation memory.
 Check: `sorted(route.path for route in server.app.routes)` includes `/`, `/.well-known/agent-card.json` and
-`/a2a/invoke` (needs the `server` extra); `A2AServer` also accepts a `GraphRunnable`.
+`/a2a/invoke` (needs the `server` extra); `A2AServer` also accepts a `GraphRunnable`. A `FilePart` carries
+`FileWithBytes(bytes=<base64>)` or `FileWithUri(uri=...)`; `send_message_streaming(message)` yields the JSON-RPC stream
+events as dicts, which on the server side are the task's `TaskStatusUpdateEvent` transitions and the final
+`TaskArtifactUpdateEvent`. The same handlers serve every binding the specification defines: JSON-RPC, the HTTP+JSON
+binding (`POST /message:send`, `GET /tasks/{id}`, `POST /tasks/{id}:cancel`, the push-config resources, server-sent
+events for `message:stream` and `tasks/{id}:subscribe`) on the same app, and with `grpc_port=` the gRPC binding
+(`lf.a2a.v1.A2AService`, the `a2a-grpc` extra); the card's `supportedInterfaces` lists what is on (`transports=`), and
+`A2AClient.connect(url, prefer=[...])` or `A2AClient.from_card(card)` picks a binding from the card and moves to the
+next one when an interface is unreachable (`binding=` selects one outright; `A2ATransportUnavailableError` when none
+answers, `A2AClientError` for a reply the peer refused). `A2AServer(push_notifications=PushNotificationSettings(...))` delivers every status and artifact change to
+the webhooks a task registers (in `SendMessage`'s configuration or with the `*TaskPushNotificationConfig` methods),
+with retries and a URL policy that refuses private addresses unless told otherwise; `PushNotificationSigner` signs
+each body (Ed25519) and publishes the key at `/.well-known/jwks.json`, and `PushNotificationReceiver` is the
+client-side webhook that checks the token and the signature; `send_message(..., push_notification_config=...,
+blocking=False)` returns the task at once. A run that pauses for a person (`ask_user`, or a hold from
+`gate_tool(on_refusal="interrupt")`) surfaces as the task state `input-required` with the question as the status
+message; the peer's next message on the task resumes the run, and for a hold its first word decides (`approve` /
+`deny`) on the store passed as `A2AServer(approvals=...)`. `locus a2a card AGENT [--transport ...] [--grpc-port N]
+[--push] [--serve]` writes a v1.0 card from the agent's tools, skills and transports (`card_from_agent()` /
+`write_card()` in code).
 
 ## DeepAgent
 
@@ -386,7 +405,7 @@ provider or credential the runner lacks); `1` error.
 ## AgentServer
 
 `AgentServer(agent, title=..., description=..., api_key=None, allow_unauthenticated=False, *, stream_tokens=True,
-metadata_resolver=None, decision_handler=None)` needs `locus-sdk[server]`. `server.app` is the FastAPI application
+metadata_resolver=None, decision_handler=None, run_registry=None)` needs `locus-sdk[server]`. `server.app` is the FastAPI application
 (`app = server.app` at module scope serves under `uvicorn server:app`); `server.run(host="127.0.0.1", port=8000,
 **uvicorn_kwargs)` refuses a non-loopback host without `api_key` or `LOCUS_SERVER_API_KEY`; serving `server.app`
 yourself skips that check, so set the key anyway. With a key, every route but `/health` needs `Authorization: Bearer
@@ -399,8 +418,86 @@ yourself skips that check, so set the key anyway. With a key, every route but `/
 | `POST /invoke` | `{"prompt", "thread_id"?, "metadata"?}` | `InvokeResponse`: `message`, `success`, `stop_reason`, `iterations`, `tool_calls`, `duration_ms` |
 | `POST /stream` | same | SSE `data: {json}` frames with `type` in `think`, `tool_start`, `tool_complete`, `model_chunk`, `interrupt`, `done`, `error`; then `data: [DONE]` |
 | `POST /resume` | `{"thread_id", "response"?, "decision"?, "perform_dangling"?}` | SSE of the continued thread; 409 while an approval is undecided, 404 for an unknown thread |
-| `GET` / `DELETE /threads/{tid}` | | thread state; needs a checkpointer on the agent |
+| `GET` / `DELETE /threads/{tid}` | | thread state from the checkpointer (`source: "checkpointer"`) or the registry (`"registry"`), plus the thread's `runs`; `DELETE` also forgets its finished runs |
 | `GET /health` | | 200 |
+| `POST /threads` | `{"thread_id"?, "metadata"?}` | 201 with the thread; 409 if the id exists. Optional: a run on an unseen thread id creates it |
+| `POST /threads/{tid}/runs` | `{"prompt"}` or `{"resume": {"response", "decision", "perform_dangling"}}`, `metadata`? | 202 `{run_id, thread_id, status: "queued"}` at once; the agent runs in the background; 409 `run_in_progress` for a second run on the thread |
+| `GET /runs/{rid}` | | `status` (`queued`, `running`, `completed`, `interrupted`, `cancelled`, `failed`), `event_count`, `message`, `stop_reason`, `interrupt` |
+| `GET /runs/{rid}/events` | header `Last-Event-ID`, query `protocol=locus` / `ag-ui` / `vercel-ai` | SSE with an `id:` line per event, resumable |
+| `POST /runs/{rid}/cancel` | | `{"accepted": true}` in flight, `false` once finished |
+| `WS /runs/live` | JSON messages | turns, approval answers, cancel, subscribe and every run's events on one socket |
+| `POST /ag-ui` | an AG-UI `RunAgentInput` | AG-UI events as SSE |
+| `POST /vercel-ai` | a UI message request (`id`, `messages`) | a Vercel AI SDK UI message stream |
+
+### Threads, runs and the resumable stream
+
+`/invoke` and `/stream` hold the connection for the run; the thread and run resources start a turn with one request and
+follow it with another. Each frame on `GET /runs/{rid}/events` is an `id: N` line (the event's sequence number, from 1)
+and a `/stream`-shaped `data:` frame; a client sends the last id it saw back as `Last-Event-ID` and gets exactly the
+events it missed, then the live tail, then `data: [DONE]`. The registry is in memory and bounded:
+`RunRegistry(*, ttl_seconds=3600.0, max_runs=200, history_per_run=500, cancel_grace_seconds=5.0)`, passed as
+`AgentServer(run_registry=...)` and read as `server.runs`; a resume past the retained window gets one
+`{"type": "replay_gap", "from": N, "to": M}` frame first, and a forgotten run is a 404. It is per process: sticky
+routing or one worker per replica; thread state lives in the checkpointer. `POST /runs/{rid}/cancel` calls
+`agent.cancel(thread_id=...)` so the loop finishes its step and checkpoints, then cancels the task outright after
+`cancel_grace_seconds`. `WS /runs/live` (bearer header, or `?token=` for a browser) takes JSON objects with a `type` and
+an optional `ref` the server echoes: `run` (`prompt`, `thread_id`?, `metadata`), `resume` (`thread_id`, `response`,
+`decision`, `perform_dangling`, `metadata`), `cancel` (`run_id`), `subscribe` (`run_id`, `after`), `ping`; it answers
+`run_started`, one `event` frame per run event (`run_id`, `seq`, `event`), `run_finished` with the `status`,
+`cancelled`, `pong`, or `error` with the HTTP route's `code` and `detail`. Voice frames are not carried.
+
+`AGUIAdapter(*, thread_id, run_id)` and `VercelDataStreamAdapter(*, run_id)` (`locus.server`) turn the run's payloads
+into AG-UI events (`RUN_STARTED`, `STATE_SNAPSHOT` / `STATE_DELTA`, `TEXT_MESSAGE_START` / `CONTENT` / `END`,
+`TOOL_CALL_START` / `ARGS` / `END` / `RESULT`, `CUSTOM`, `RUN_FINISHED` / `RUN_ERROR`) or the
+`x-vercel-ai-ui-message-stream: v1` parts (`start`, `text-*`, `reasoning-*`, `tool-input-*`, `tool-output-available`,
+`data-*`, `finish`); each is a small state machine with `start()`, `feed(payload)` and `finish()`, and frame ids derive
+from the run id and a counter, so a stream rebuilt from history on reconnect names the same messages. The conservative
+readings: assistant text from token deltas when `stream_tokens=True`, else from `think`, never both; tool arguments sent
+whole; a tool failure is a result whose content is `{"error": ...}`; an interrupt is a `CUSTOM` / `data-locus-interrupt`
+frame followed by the run-finished frame, and the answer goes through `POST /threads/{tid}/runs` with `resume`.
+
+```python
+import json
+
+from fastapi.testclient import TestClient
+
+from locus.agent import Agent
+from locus.server import AgentServer, RunRegistry
+from locus.testing import ScriptedModel, text, tool_call
+from locus.tools import tool
+
+@tool
+def lookup_order(order_id: str) -> str:
+    """Return an order's status."""
+    return "delivered"
+
+model = ScriptedModel([tool_call("lookup_order", order_id="ord-4821"), text("ord-4821 was delivered.")])
+agent = Agent(model=model, tools=[lookup_order], reflexion=False, grounding=False)
+server = AgentServer(agent=agent, allow_unauthenticated=True,
+                     run_registry=RunRegistry(history_per_run=500, max_runs=200, ttl_seconds=3600))
+
+def frames(body):
+    return [line for line in body.splitlines() if line.startswith(("id:", "data:"))]
+
+with TestClient(server.app) as client:
+    run = client.post("/threads/t1/runs", json={"prompt": "Where is ord-4821?"}).json()
+    print(run["status"])                                                        # queued
+    live = frames(client.get(f"/runs/{run['run_id']}/events").text)            # follows the run to its end
+    print(live[0], live[-1])                                                    # id: 1 data: [DONE]
+    status = client.get(f"/runs/{run['run_id']}").json()
+    print(status["status"], status["event_count"] == len(live) // 2, status["message"])
+    resumed = frames(client.get(f"/runs/{run['run_id']}/events", headers={"Last-Event-ID": "2"}).text)
+    print([f for f in resumed if f.startswith("id:")][:2], resumed[-1])         # ['id: 3', 'id: 4'] data: [DONE]
+    agui = client.get(f"/runs/{run['run_id']}/events", params={"protocol": "ag-ui"}).text
+    print([json.loads(f[5:])["type"] for f in frames(agui) if f.startswith("data: {")][:4])
+    print(client.get("/threads/t1").json()["source"], client.post(f"/runs/{run['run_id']}/cancel").json()["accepted"])
+```
+
+Prints `queued`, `id: 1 data: [DONE]`, `completed True ord-4821 was delivered.`, `['id: 3', 'id: 4'] data: [DONE]` (the
+reconnect replays from event 3), `['RUN_STARTED', 'STATE_SNAPSHOT', 'STATE_DELTA', 'TOOL_CALL_START']` and
+`registry False` (no checkpointer, so the registry answered; the finished run could not be cancelled). `TestClient`
+keeps one event loop alive across requests, which the background run needs; `examples/server_ui/` holds a resumable SSE
+page and an AG-UI client.
 
 ## The locus command line
 
@@ -410,7 +507,9 @@ yourself skips that check, so set the key anyway. With a key, every route but `/
 | --- | --- |
 | `locus run AGENT "prompt" [--thread ID]` | runs, printing `-> tool(args)` / `<- tool: result` and the final message; a pause prints the `resume` command |
 | `locus resume AGENT --thread ID [--answer TEXT] [--perform]` | continues a paused thread; `--perform` re-issues a held call once approved |
-| `locus approvals --store FILE [--authority MODULE:ATTR] list [--json] / show ID / approve ID --by WHO / reject ID --by WHO` | reads and decides holds in a `FileApprovals` store |
+| `locus approvals --store SPEC [--authority MODULE:ATTR] list [--json] / show ID / approve ID --by WHO [--reason R] / reject ID --by WHO` | reads and decides holds in the store `SPEC` names: a `FileApprovals` path, or `file://`, `postgresql://`, `redis://`, `oracle://`, `memory://` (default `LOCUS_APPROVALS_STORE`; `--by` defaults to `LOCUS_APPROVER`) |
+| `locus policy lint FILE [--environments ...] [--kinds ...] [--format json]` / `explain FILE --action JSON [--expect OUTCOME]` | lints a policy file for gaps (exit 1 on a finding) / shows the decision path for one action |
+| `locus eval run CASES --agent AGENT [--judge J] [--rubric FILE] [--repeats N] [--tags ...] [--report OUT] [--baseline IN] [--min-pass-rate R]` / `diff BASELINE CANDIDATE [--markdown]` / `gate REPORT [--baseline IN]` / `summary REPORT` | runs a suite file against an agent, diffs two saved reports, gates a build on one (exit 1 when it fails), prints one |
 | `locus audit verify FILE.jsonl [--key KEY_ID=PEM ...] [--head HASH]` | verifies an exported audit trail |
 | `locus serve AGENT [--host H] [--port P] [--api-key K]` | `AgentServer` over the named agent |
 | `locus codex init [DIR] / run ["prompt"] / path` | installs or runs the bundled Codex skill |
