@@ -427,11 +427,32 @@ def parse_stream_event(event: dict[str, Any]) -> dict[str, Any]:
         return {"content": event.get("delta", "")}
 
     if etype.endswith(("function_call.delta", "function_call_arguments.delta")):
-        # Argument deltas come in pieces; the caller accumulates by call_id.
+        # Argument deltas come in pieces and carry only the item id; the caller
+        # accumulates them and maps the item id onto the call id announced by
+        # ``response.output_item.added``.
         partial = {
             "id": event.get("call_id") or event.get("item_id") or "",
+            "item_id": event.get("item_id") or "",
             "arguments_delta": event.get("delta", ""),
         }
+        return {"tool_calls": [partial]}
+
+    if etype in ("response.output_item.added", "response.output_item.done"):
+        # The function name and the ``call_id`` the server expects back in a
+        # ``function_call_output`` live on the item, not on the argument
+        # deltas. ``done`` also carries the complete argument string.
+        item = event.get("item") or {}
+        if not isinstance(item, dict) or item.get("type") != "function_call":
+            return {}
+        partial = {
+            "id": item.get("call_id") or item.get("id") or "",
+            "item_id": item.get("id") or "",
+            "name": item.get("name") or "",
+            "arguments_delta": "",
+        }
+        if etype.endswith(".done"):
+            partial["arguments"] = item.get("arguments") or ""
+            partial["final"] = True
         return {"tool_calls": [partial]}
 
     if etype == "response.completed":

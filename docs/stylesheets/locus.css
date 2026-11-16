@@ -3350,3 +3350,13 @@ html.tl-dia-open body {
   background: var(--tl-surface);
   pointer-events: none;
 }
+
+/* Release notes: the date sits beside the version in each release heading, set
+   small and quiet so the version stays the thing the eye lands on. The
+   table of contents shows the bare version (data-toc-label). */
+.md-typeset h2 .release-date {
+  margin-left: 0.5em;
+  font: 400 0.6em/1 var(--locus-mono);
+  color: var(--md-default-fg-color--light);
+  vertical-align: middle;
+}

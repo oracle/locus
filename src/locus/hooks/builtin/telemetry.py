@@ -39,6 +39,31 @@ except ImportError:
     StatusCode = None  # type: ignore[assignment,misc]
 
 
+#: Tool spans in flight, by ``tool_call_id``, across every ``TelemetryHook``.
+#: An integration running inside the tool (the MCP client, say) reads the span
+#: of ITS call through :func:`current_tool_span` to propagate it onward.
+_TOOL_CALL_SPANS: dict[str, Any] = {}
+
+
+def current_tool_span() -> Span | None:
+    """The ``TelemetryHook`` span of the tool call running in this task.
+
+    ``None`` outside a tool call, when no ``TelemetryHook`` is installed, or
+    when OpenTelemetry is not available. Lets a tool — or a client library it
+    calls, like the MCP client — carry the agent's trace to a remote system
+    with this call's span as the parent, not merely the iteration's.
+    """
+    if not OTEL_AVAILABLE or not _TOOL_CALL_SPANS:
+        return None
+    from locus.tools.context import current_tool_context
+
+    ctx = current_tool_context()
+    if ctx is None:
+        return None
+    span: Span | None = _TOOL_CALL_SPANS.get(ctx.tool_call_id)
+    return span
+
+
 class TelemetryHook(HookProvider):
     """Hook provider for OpenTelemetry tracing and metrics.
 
@@ -275,6 +300,9 @@ class TelemetryHook(HookProvider):
 
         span = self._tracer.start_span(f"tool.{tool_name}", attributes=span_attrs)
         self._tool_spans[tool_name] = (span, time.perf_counter())
+        call_id = getattr(event, "tool_call_id", "")
+        if call_id:
+            _TOOL_CALL_SPANS[call_id] = span
 
         self._tool_call_counter.add(1, {"tool_name": tool_name})
 
@@ -291,6 +319,13 @@ class TelemetryHook(HookProvider):
         if tool_name in self._tool_spans:
             span, start_time = self._tool_spans.pop(tool_name)
             duration_ms = (time.perf_counter() - start_time) * 1000
+            call_id = getattr(event, "tool_call_id", "")
+            if call_id:
+                _TOOL_CALL_SPANS.pop(call_id, None)
+            else:  # an event built without the id: drop the entry by identity
+                for key, active in list(_TOOL_CALL_SPANS.items()):
+                    if active is span:
+                        del _TOOL_CALL_SPANS[key]
 
             span.set_attribute("locus.duration_ms", duration_ms)
 

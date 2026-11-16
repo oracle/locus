@@ -78,6 +78,14 @@ class ToolResult(BaseModel):
         default=None,
         description="Non-text content blocks (images, resources) in the tool protocol's shape.",
     )
+    replayed: bool = Field(
+        default=False,
+        description=(
+            "True when the result came from the tool-effect ledger: a run that "
+            "continued a turn found the call already executed and did not run "
+            "the tool body again (locus.memory.ledger)."
+        ),
+    )
 
     @property
     def success(self) -> bool:

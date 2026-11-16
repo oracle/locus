@@ -21,7 +21,7 @@ extension that handles them runs later, inside the HTML renderer. An inlined
 diagram becomes a one-line description taken from the SVG's title. A facts
 row (``<dl class="locus-facts">``) becomes a bulleted list of label/value
 pairs, and the examples filter box, which only works with the page's script,
-is dropped.
+is dropped, as is the attribute list a heading carries for its anchor.
 """
 
 from __future__ import annotations
@@ -51,6 +51,10 @@ _HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 _TAB_LABEL = re.compile(r'^=== "[^"\n]+"\s*$')
 #: Inline HTML code used in table cells for a pipe (``<code>a &#124; b</code>``).
 _HTML_CODE = re.compile(r"<code>(.*?)</code>", re.DOTALL)
+#: A heading's attribute list (``## 5.5.0 { #v5.5.0 data-toc-label="5.5.0" }``) sets
+#: the anchor and the table-of-contents label of the HTML page; the twin keeps
+#: the heading text alone.
+_HEADING_ATTRS = re.compile(r"^(#{1,6} .*?)[ \t]+\{:?[ \t]*[#.][^}\n]*\}[ \t]*$", re.MULTILINE)
 
 #: Collected in on_page_markdown, written in on_post_build.
 _pages: dict[str, dict[str, Any]] = {}
@@ -128,6 +132,7 @@ def _plain_markdown(markdown: str, roots: list[Path]) -> str:
     text = _HTML_COMMENT.sub("", text)
     text = _first_tab_only(text)
     text = _HTML_CODE.sub(lambda m: "`" + html.unescape(m.group(1)) + "`", text)
+    text = _HEADING_ATTRS.sub(r"\1", text)
     return _expand_snippets(text, roots).strip() + "\n"
 
 

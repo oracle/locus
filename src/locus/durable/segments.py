@@ -13,6 +13,14 @@ A :class:`~locus.multiagent.graph.StateGraph` runs the same way: a segment runs
 the graph until it ends or a node pauses on
 :func:`~locus.core.interrupt.interrupt`, then resumes it from its checkpoint
 with the value the pause was waiting for (:func:`run_graph`).
+
+A segment runs the agent's own loop, so its tool calls go through the agent's
+tool-effect ledger (:mod:`locus.memory.ledger`) when the agent keeps one
+(``Agent(tool_ledger=True)``, or ``durability="async"`` / ``"exit"``). A
+segment the engine will not retry — Temporal and DBOS run each one once, since
+re-running it would repeat its tool calls — can then be finished by hand with
+``kind="continue"``: the agent continues the turn from its last checkpoint and
+replays the recorded calls instead of running them again.
 """
 
 from __future__ import annotations
@@ -61,8 +69,17 @@ async def run_agent_segment(
     prompt: str = "",
     answer: str = "",
     perform: bool = True,
+    invocation_id: str | None = None,
 ) -> SegmentOutcome:
-    """Run (``kind="run"``) or resume a registered agent until it finishes or pauses.
+    """Run (``kind="run"``), resume (``"resume"``) or continue (``"continue"``) a
+    registered agent until it finishes or pauses.
+
+    ``kind="continue"`` picks a turn up after the process running it died:
+    :meth:`~locus.agent.Agent.continue_turn` from the thread's last
+    checkpoint, replaying the tool calls the agent's tool-effect ledger
+    recorded. ``invocation_id`` names the run: on ``"run"`` it is the id the
+    turn gets (a retry under the same id replays), on ``"continue"`` the run
+    that must be in flight.
 
     Raises:
         SegmentError: No agent is registered under ``agent``, or it has no
@@ -75,7 +92,9 @@ async def run_agent_segment(
     if instance.config.checkpointer is None:
         raise SegmentError(f"agent {agent!r} needs a checkpointer shared by every worker")
     if kind == "run":
-        events = instance.run(prompt, thread_id=thread_id)
+        events = instance.run(prompt, thread_id=thread_id, invocation_id=invocation_id)
+    elif kind == "continue":
+        events = instance.continue_turn(thread_id, invocation_id=invocation_id)
     else:
         events = instance.resume(answer, thread_id=thread_id, perform_dangling=perform)
 
