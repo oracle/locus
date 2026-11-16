@@ -28,10 +28,13 @@ What this notebook covers:
 - Turning a proposed refund into an `Action` the policy reasons over: the
   ledger entries it touches become `blast_radius`, and an amount at or above
   $200 adds the `high_value` tag.
-- A `ControlPolicy` with `max_blast_radius=1`,
-  `require_human_for={"high_value"}` and `require_verification_score=0.0`. A
-  refund is a business action, not a security finding: there is no threat to
-  verify, so the gate reasons purely over amount and scope.
+- A `ControlPolicy` loaded from a YAML file next to the script with
+  `ControlPolicy.load()`: `max_blast_radius: 1`,
+  `require_human_for: ["high_value"]` and `require_verification_score: 0.0`.
+  A refund is a business action, not a security finding: there is no threat
+  to verify, so the gate reasons purely over amount and scope. The rules are
+  a document the team that owns them reviews and changes; the script does
+  not change with them.
 - `admit()` as the single enforcement point: the payout runs only on allow, a
   hold raises `AdmissionError` carrying the checks that fired, and both
   decisions are recorded on the `AuditTrail` before anything moves.
@@ -58,6 +61,20 @@ play no part here:
 
 ## Key lines
 
+The policy is the file `examples/notebook_71_refund_policy.yaml`. Every key
+is a `ControlPolicy` field with the same name; a key the policy does not have
+is an error that names it:
+
+```yaml
+--8<-- "examples/notebook_71_refund_policy.yaml"
+```
+
+`locus policy lint examples/notebook_71_refund_policy.yaml` checks it for
+rules that cannot fire and, given `--environments` or `--kinds`, for labels
+nothing holds; `locus policy explain` with an `--action` prints the decision
+path the gate takes for one refund. Both are described in
+[the policy as a file](../concepts/policy-authoring.md#the-policy-as-a-file).
+
 `refund_action()` turns a proposed refund into the `Action` the policy reasons
 over: the number of ledger entries it touches becomes `blast_radius`, and an
 amount at or above `LARGE_REFUND_THRESHOLD` ($200) adds the `high_value` tag:
@@ -66,8 +83,8 @@ amount at or above `LARGE_REFUND_THRESHOLD` ($200) adds the `high_value` tag:
 
 `propose_refund()` is the gate call: `admit()` takes the `Action`, the payout
 as a callable it awaits only on allow, and the `ControlPolicy` that `main()`
-builds with `max_blast_radius=1` and `require_human_for={"high_value"}`. It
-records the decision on the `AuditTrail` either way. A hold arrives as
+loads from the YAML file. It records the decision on the `AuditTrail` either
+way, with the hash of the policy it decided under. A hold arrives as
 `AdmissionError`; its `decision.checks` name the rules that stopped the
 refund, and the script then records the hold for a person:
 
@@ -87,8 +104,10 @@ python examples/notebook_71_payment_refund_gate.py
 ```
 
 The payout is a local ledger stub and the script builds no model — its only
-import is `locus.control` — so it runs fully offline with no provider, no
-credentials and no network. `LOCUS_MODEL_PROVIDER` has no effect here.
+Locus import is `locus.control` — so it runs fully offline with no provider,
+no credentials and no network. Reading the YAML policy needs the `pyyaml`
+package (`pip install pyyaml`); the same policy as JSON would need nothing.
+`LOCUS_MODEL_PROVIDER` has no effect here.
 
 ## Output
 

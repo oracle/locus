@@ -126,7 +126,7 @@ async def test_the_trail_shows_spend_and_is_unchanged_without_a_ledger() -> None
     [spent] = [json.loads(line)["payload"] for line in with_ledger.export_jsonl().splitlines()]
     assert (spent["cost_usd"], spent["spent_usd"], spent["spend_scope"]) == (25.0, 0.0, "s")
     [plain] = [json.loads(line)["payload"] for line in without.export_jsonl().splitlines()]
-    assert set(plain) == {"action", "asset", "outcome", "reason"}
+    assert set(plain) == {"action", "asset", "outcome", "reason", "policy_hash"}
 
 
 def test_a_file_ledger_keeps_totals_and_entries_across_instances(tmp_path: Path) -> None:
