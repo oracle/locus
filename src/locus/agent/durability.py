@@ -87,6 +87,14 @@ class CheckpointWriter:
         self._pending: set[asyncio.Task[Any]] = set()
         #: Iteration saves this writer made or scheduled.
         self.iteration_writes = 0
+        #: The checkpoint this run descends from, when it is not the thread's
+        #: latest: set for a run started ``from_checkpoint=``, and written
+        #: into the metadata of the run's first lasting save as
+        #: ``parent_checkpoint_id`` (an iteration save the turn's final save
+        #: will delete carries it too, but does not use it up), so the
+        #: thread's history shows the branch and the run's later saves follow
+        #: on from that one (:mod:`locus.memory.time_travel`).
+        self.parent_checkpoint_id: str | None = None
 
     @property
     def mode(self) -> DurabilityMode:
@@ -108,15 +116,21 @@ class CheckpointWriter:
         thread_id: str,
         checkpoint_id: str | None = None,
         metadata: dict[str, Any] | None = None,
+        *,
+        kept: bool = True,
     ) -> bool:
         """Write (``sync``) or schedule (``async``) an iteration checkpoint.
 
-        Returns ``False`` when the mode skips iteration checkpoints, so the
-        caller does no bookkeeping for a save that never happens.
+        ``kept`` is ``False`` for a save the turn's final save will delete;
+        it names the run's origin like any other but leaves it for the save
+        that stays. Returns ``False`` when the mode skips iteration
+        checkpoints, so the caller does no bookkeeping for a save that never
+        happens.
         """
         if self._mode == "exit":
             return False
         self.iteration_writes += 1
+        metadata = self._with_parent(metadata, kept=kept)
         if self._mode == "sync":
             await self._checkpointer.save(state, thread_id, checkpoint_id, metadata)
             return True
@@ -143,9 +157,24 @@ class CheckpointWriter:
         """
         await self.flush()
         checkpoint_id_out: str = await self._checkpointer.save(
-            state, thread_id, checkpoint_id, metadata
+            state, thread_id, checkpoint_id, self._with_parent(metadata)
         )
         return checkpoint_id_out
+
+    def _with_parent(
+        self, metadata: dict[str, Any] | None, *, kept: bool = True
+    ) -> dict[str, Any] | None:
+        """``metadata`` naming the run's origin checkpoint, when there is one left to name.
+
+        A ``kept`` save uses the origin up: the saves after it descend from
+        it by position, and the history is a chain, not a star.
+        """
+        if self.parent_checkpoint_id is None:
+            return metadata
+        stamped = {**(metadata or {}), "parent_checkpoint_id": self.parent_checkpoint_id}
+        if kept:
+            self.parent_checkpoint_id = None
+        return stamped
 
     async def flush(self) -> None:
         """Await the scheduled writes. A failed write is logged; the run goes on."""

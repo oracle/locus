@@ -1643,6 +1643,29 @@ class StateGraph(BaseModel):
         ``docs/concepts/multi-agent/graph.md``."""
         return self.draw_mermaid(direction=direction)
 
+    async def adraw_mermaid_history(
+        self, *thread_ids: str, limit: int = 50, direction: str = "LR"
+    ) -> str:
+        """Render the threads' checkpoint histories as a Mermaid flowchart.
+
+        One lane per thread, oldest checkpoint first; a thread forked from
+        another (:meth:`afork`) is drawn as a branch off the checkpoint it
+        was forked at when both threads are given. With no ``thread_ids``
+        the graph's configured thread is drawn. Delegates to
+        :func:`locus.multiagent.visualize.draw_mermaid_history`.
+        """
+        from locus.multiagent.visualize import (  # noqa: PLC0415
+            draw_mermaid_history as _draw_mermaid_history,
+        )
+
+        ids = thread_ids or ((self.config.thread_id,) if self.config.thread_id else ())
+        if not ids:
+            raise ValueError("adraw_mermaid_history() needs at least one thread id")
+        self._thread_for({"configurable": {"thread_id": ids[0]}}, "adraw_mermaid_history()")
+        return await _draw_mermaid_history(
+            self.config.checkpointer, *ids, limit=limit, direction=direction
+        )
+
     async def aget_state(
         self, config: Any = None, checkpoint_id: str | None = None
     ) -> dict[str, Any] | None:
@@ -1776,6 +1799,13 @@ class StateGraph(BaseModel):
 
         thread_id = self._thread_for(config, "afork()")
         checkpointer: Any = self.config.checkpointer
+        if hasattr(checkpointer, "fork"):
+            # The checkpointer's own fork: the same copy, plus the thread's
+            # tool-effect ledger up to the forked step.
+            forked_id: str = await checkpointer.fork(
+                thread_id, checkpoint_id, new_thread_id=new_thread_id
+            )
+            return forked_id
         saved = await _load_checkpoint(checkpointer, thread_id, checkpoint_id)
         if saved is None:
             where = f"checkpoint {checkpoint_id!r} of " if checkpoint_id else ""

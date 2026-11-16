@@ -288,6 +288,28 @@ class TestOracleSyncCheckpointSaver:
         wrapper.delete_thread("t1")
         mock.delete_thread.assert_awaited_once_with("t1")
 
+    def test_fork_routes_through(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _install_oracledb_stub(monkeypatch)
+        from locus.memory.backends.oracle_sync import OracleSyncCheckpointSaver
+
+        wrapper = OracleSyncCheckpointSaver(dsn="x", user="u", password="p")  # noqa: S106
+        mock = _patch_async_with_mock(wrapper, fork="t1-alt")
+
+        assert wrapper.fork("t1", "c1", new_thread_id="t1-alt", checkpoint_ns="ns") == "t1-alt"
+        mock.fork.assert_awaited_once_with("t1", "c1", new_thread_id="t1-alt", checkpoint_ns="ns")
+
+    def test_list_routes_through(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _install_oracledb_stub(monkeypatch)
+        from locus.memory.backends.oracle_sync import OracleSyncCheckpointSaver
+        from locus.memory.time_travel import CheckpointInfo
+
+        wrapper = OracleSyncCheckpointSaver(dsn="x", user="u", password="p")  # noqa: S106
+        info = CheckpointInfo("c1", "t1")
+        mock = _patch_async_with_mock(wrapper, list=[info])
+
+        assert wrapper.list("t1", 5) == [info]
+        mock.list.assert_awaited_once_with("t1", 5, checkpoint_ns="default")
+
 
 # ---------------------------------------------------------------------------
 # OracleSyncStore
