@@ -10,9 +10,11 @@ The images ``locus deploy`` builds start with::
 
 Every variable named ``<VAR>_SECRET_OCID`` is read from OCI Vault with the
 principal the platform gives the container (``LOCUS_OCI_AUTH_TYPE``:
-``resource_principal`` on Container Instances, Functions and OKE workload
-identity; ``instance_principal`` on OKE node identity; ``api_key`` with
-``OCI_PROFILE`` for a local run) and its content becomes ``<VAR>``. A ``<VAR>``
+``resource_principal`` on Container Instances and Functions;
+``oke_workload_identity`` on OKE workload identity, which ``resource_principal``
+also detects from the pod's service-account token; ``instance_principal`` on
+OKE node identity; ``api_key`` with ``OCI_PROFILE`` for a local run) and its
+content becomes ``<VAR>``. A ``<VAR>``
 that is already set wins, so a value injected another way is never
 overwritten. With ``LOCUS_APM_DATA_KEY`` resolved and no
 ``OTEL_EXPORTER_OTLP_HEADERS``, the Application Performance Monitoring
@@ -42,8 +44,10 @@ _OTLP_HEADERS = "OTEL_EXPORTER_OTLP_HEADERS"
 def _signer(auth_type: str, environ: MutableMapping[str, str]) -> tuple[dict[str, Any], Any]:
     import oci
 
-    if auth_type == "resource_principal":
-        signer = oci.auth.signers.get_resource_principals_signer()
+    from locus._oci_auth import RESOURCE_PRINCIPAL_AUTH_TYPES, resource_principal_signer
+
+    if auth_type in RESOURCE_PRINCIPAL_AUTH_TYPES:
+        signer = resource_principal_signer(auth_type, oci_module=oci, environ=environ)
         return {"region": signer.region}, signer
     if auth_type == "instance_principal":
         signer = oci.auth.signers.InstancePrincipalsSecurityTokenSigner()
@@ -52,8 +56,8 @@ def _signer(auth_type: str, environ: MutableMapping[str, str]) -> tuple[dict[str
         config = oci.config.from_file(profile_name=environ.get("OCI_PROFILE", "DEFAULT"))
         return dict(config), oci.signer.Signer.from_config(config)
     raise ValueError(
-        "LOCUS_OCI_AUTH_TYPE must be resource_principal, instance_principal or api_key, "
-        f"got {auth_type!r}"
+        "LOCUS_OCI_AUTH_TYPE must be resource_principal, oke_workload_identity, "
+        f"instance_principal or api_key, got {auth_type!r}"
     )
 
 

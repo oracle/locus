@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 
-from locus import deploy
+from locus import __version__, deploy
 from locus.cli import main
 from locus.deploy import DeployError, DeployValues, Step, entrypoint, functions
 
@@ -27,6 +27,7 @@ pytest.importorskip("yaml")
 
 COMPARTMENT = "ocid1.compartment.oc1..aaaaaaaaexample"
 REGION = "eu-frankfurt-1"
+SERVER_KEY_SECRET = "ocid1.vaultsecret.oc1..serverkey"  # noqa: S105 — a secret OCID placeholder
 
 
 def _values(**overrides: Any) -> DeployValues:
@@ -40,6 +41,7 @@ def _values(**overrides: Any) -> DeployValues:
 
 
 def _init(tmp_path: Path, *args: str) -> Path:
+    """``locus deploy init`` with the bearer key in Vault, as the quickstart does."""
     dest = tmp_path / "deploy"
     assert (
         main(
@@ -51,6 +53,8 @@ def _init(tmp_path: Path, *args: str) -> Path:
                 COMPARTMENT,
                 "--region",
                 REGION,
+                "--server-api-key-secret-id",
+                SERVER_KEY_SECRET,
                 *args,
             ]
         )
@@ -135,7 +139,7 @@ def test_tfvars_fold_in_the_users_variables_and_drop_nulls() -> None:
 
 
 def test_required_variables_per_target() -> None:
-    _values().check_required_variables()
+    _values(variables={"server_api_key_secret_id": SERVER_KEY_SECRET}).check_required_variables()
     with pytest.raises(DeployError, match=r"variables\.cluster_id or variables\.kubeconfig_path"):
         _values(target="oke").check_required_variables()
     _values(
@@ -143,6 +147,44 @@ def test_required_variables_per_target() -> None:
     ).check_required_variables()
     with pytest.raises(DeployError, match=r"variables\.subnet_id"):
         _values(target="functions", variables={"subnet_id": None}).check_required_variables()
+
+
+def test_a_public_open_container_instance_needs_a_key_or_an_explicit_opt_out() -> None:
+    """The default Container Instance is public on 0.0.0.0/0: not without a bearer key."""
+    message = r"variables\.server_api_key_secret_id .* or variables\.allow_unauthenticated: true"
+    with pytest.raises(DeployError, match=message):
+        _values().check_required_variables()
+    with pytest.raises(DeployError, match=message):
+        _values(
+            variables={"assign_public_ip": True, "ingress_cidr": "0.0.0.0/0"}
+        ).check_required_variables()
+    with pytest.raises(DeployError, match=message):
+        _values(variables={"allow_unauthenticated": False}).check_required_variables()
+    # Any one of these makes it acceptable.
+    _values(variables={"server_api_key_secret_id": SERVER_KEY_SECRET}).check_required_variables()
+    _values(variables={"allow_unauthenticated": True}).check_required_variables()
+    _values(variables={"assign_public_ip": False}).check_required_variables()
+    _values(variables={"ingress_cidr": "10.0.0.0/8"}).check_required_variables()
+    # Only Container Instances get a public IP from the root.
+    _values(
+        target="functions", variables={"subnet_id": "ocid1.subnet.oc1..x"}
+    ).check_required_variables()
+
+
+def test_tfvars_write_only_the_variables_each_root_declares() -> None:
+    """``port`` has no meaning for a function; Terraform rejects undeclared variables."""
+    assert "port" in deploy.declared_variables("container-instances")
+    assert "port" in deploy.declared_variables("oke")
+    assert "port" not in deploy.declared_variables("functions")
+    functions = _values(target="functions", variables={"subnet_id": "ocid1.subnet.oc1..x"})
+    tfvars = functions.tfvars("x.ocir.io/ns/agent:1")
+    assert "port" not in tfvars
+    assert tfvars["subnet_id"] == "ocid1.subnet.oc1..x"
+    assert set(tfvars) <= deploy.declared_variables("functions")
+    for target in deploy.TARGETS:
+        declared = deploy.declared_variables(target)
+        assert {"compartment_id", "region", "image", "architecture", "environment"} <= declared
+        assert "allow_unauthenticated" in declared
 
 
 def test_image_reference_and_dockerfile_follow_the_target() -> None:
@@ -187,8 +229,6 @@ def test_init_writes_every_target_and_the_values_file(
     assert "__LOCUS_" not in dockerfile
     assert 'asgi_handler("svc:application")' in (dest / "app" / "func.py").read_text()
     requirements = (dest / "app" / "requirements.txt").read_text()
-    from locus import __version__
-
     assert f"locus-sdk[server,oci]=={__version__}" in requirements
     assert "server.py" in {p.name for p in (dest / "app").iterdir()}
     values = deploy.load_values(dest / deploy.VALUES_FILE)
@@ -197,10 +237,191 @@ def test_init_writes_every_target_and_the_values_file(
     assert values.port == 9000
     assert values.variables["memory_mbs"] == 1024
     assert "subnet_id" in values.variables
+    assert values.variables["server_api_key_secret_id"] == SERVER_KEY_SECRET
     assert "*.tfstate" in (dest / ".gitignore").read_text()
+    assert (dest / ".dockerignore").is_file()
     out = capsys.readouterr().out
     assert "written" in out
     assert "locus deploy plan" in out
+    assert f"the image installs locus-sdk[server,oci]=={__version__} from PyPI" in out
+    assert "--sdk-wheel" in out
+
+
+def test_init_writes_a_dockerignore_and_the_dockerfiles_copy_only_app(tmp_path: Path) -> None:
+    """The build context is the whole directory: Terraform state and tfvars must stay out."""
+    dest = _init(tmp_path)
+    ignored = (dest / ".dockerignore").read_text().splitlines()
+    for pattern in (
+        ".terraform/",
+        "**/.terraform/",
+        "*.tfstate",
+        "*.tfstate.*",
+        "*.tfvars",
+        "*.tfvars.json",
+        "terraform/",
+        "helm/",
+        ".git/",
+        "locus-deploy.yaml",
+    ):
+        assert pattern in ignored, pattern
+    for name in ("Dockerfile", "Dockerfile.functions"):
+        copies = [
+            line.split()
+            for line in (dest / name).read_text().splitlines()
+            if line.startswith("COPY ") and "--from=" not in line
+        ]
+        assert copies, name
+        assert all(words[1] == "app/" for words in copies), (name, copies)
+        assert "wheels/*.whl" in (dest / name).read_text()
+
+
+def test_init_installs_a_local_sdk_wheel_when_asked(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    wheel = tmp_path / "locus_sdk-9.9.9-py3-none-any.whl"
+    wheel.write_bytes(b"not really a wheel")
+    dest = _init(tmp_path, "--sdk-wheel", str(wheel))
+    out = capsys.readouterr().out
+    copied = dest / "app" / "wheels" / wheel.name
+    assert copied.read_bytes() == b"not really a wheel"
+    assert f"written {copied}" in out
+    assert "the image installs locus_sdk-9.9.9-py3-none-any.whl from app/wheels/" in out
+    requirements = (dest / "app" / "requirements.txt").read_text()
+    assert "locus-sdk[server,oci]==9.9.9" in requirements
+
+    # A newer wheel replaces the old one; two locus-sdk wheels would conflict in pip.
+    newer = tmp_path / "locus_sdk-9.9.10-py3-none-any.whl"
+    newer.write_bytes(b"newer")
+    assert (
+        main(
+            [
+                "deploy",
+                "init",
+                str(dest),
+                "--compartment-id",
+                COMPARTMENT,
+                "--region",
+                REGION,
+                "--sdk-wheel",
+                str(newer),
+            ]
+        )
+        == 0
+    )
+    assert [p.name for p in (dest / "app" / "wheels").iterdir()] == [newer.name]
+
+
+def test_sdk_wheel_must_be_a_locus_sdk_wheel_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    missing = tmp_path / "locus_sdk-1.0.0-py3-none-any.whl"
+    assert (
+        main(
+            [
+                "deploy",
+                "init",
+                str(tmp_path / "d"),
+                "--compartment-id",
+                COMPARTMENT,
+                "--region",
+                REGION,
+                "--sdk-wheel",
+                str(missing),
+            ]
+        )
+        == 2
+    )
+    assert "is not a file" in capsys.readouterr().err
+    other = tmp_path / "requests-2.0-py3-none-any.whl"
+    other.write_bytes(b"x")
+    assert (
+        main(
+            [
+                "deploy",
+                "init",
+                str(tmp_path / "d"),
+                "--compartment-id",
+                COMPARTMENT,
+                "--region",
+                REGION,
+                "--sdk-wheel",
+                str(other),
+            ]
+        )
+        == 2
+    )
+    assert "is not a locus-sdk wheel" in capsys.readouterr().err
+    assert deploy.sdk_requirement(Path("locus_sdk-5.6.0.dev3-py3-none-any.whl")) == (
+        "locus-sdk[server,oci]==5.6.0.dev3"
+    )
+
+
+def test_the_sdk_note_flags_a_development_version(monkeypatch: pytest.MonkeyPatch) -> None:
+    import locus
+    from locus.deploy.cli import _sdk_note
+
+    monkeypatch.setattr(locus, "__version__", "5.6.0.dev0")
+    note = _sdk_note(None)
+    assert "locus-sdk[server,oci]==5.6.0.dev0 from PyPI" in note
+    assert "development version" in note
+    assert "--sdk-wheel" in note
+    monkeypatch.setattr(locus, "__version__", "5.6.0")
+    assert "development version" not in _sdk_note(None)
+
+
+def test_init_never_replaces_an_existing_dockerfile_without_force(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    dest = tmp_path / "project"
+    dest.mkdir()
+    (dest / "Dockerfile").write_text("FROM scratch\n")
+    (dest / ".dockerignore").write_text("node_modules/\n")
+    args = ["deploy", "init", str(dest), "--compartment-id", COMPARTMENT, "--region", REGION]
+    assert main(args) == 2
+    err = capsys.readouterr().err
+    assert "Dockerfile exists and differs from the template; pass --force" in err
+    # Nothing was written before the refusal.
+    assert (dest / "Dockerfile").read_text() == "FROM scratch\n"
+    assert not (dest / "terraform").exists()
+    assert not (dest / deploy.VALUES_FILE).exists()
+
+    (dest / "Dockerfile").unlink()
+    assert main(args) == 2
+    assert ".dockerignore exists and differs" in capsys.readouterr().err
+
+    assert main([*args, "--force"]) == 0
+    assert "FROM ${BASE_IMAGE}" in (dest / "Dockerfile").read_text()
+    assert "terraform/" in (dest / ".dockerignore").read_text()
+    # Re-running on what init itself wrote is fine: identical content is not a conflict.
+    assert main(args) == 0
+
+
+def test_init_appends_to_an_existing_gitignore_under_a_marker(tmp_path: Path) -> None:
+    dest = tmp_path / "project"
+    dest.mkdir()
+    (dest / ".gitignore").write_text("node_modules/\nterraform/**/*.tfstate")
+    args = ["deploy", "init", str(dest), "--compartment-id", COMPARTMENT, "--region", REGION]
+    assert main(args) == 0
+    text = (dest / ".gitignore").read_text()
+    assert text.startswith("node_modules/\nterraform/**/*.tfstate\n\n# locus deploy\n")
+    assert text.count("terraform/**/*.tfstate\n") == 1  # already there; not repeated
+    assert "terraform/**/.terraform/" in text
+    assert "terraform/**/locus.auto.tfvars.json" in text
+    assert main(args) == 0
+    assert (dest / ".gitignore").read_text() == text  # idempotent
+
+
+def test_init_refuses_a_destination_that_is_a_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    file = tmp_path / "notes.txt"
+    file.write_text("x")
+    assert (
+        main(["deploy", "init", str(file), "--compartment-id", COMPARTMENT, "--region", REGION])
+        == 2
+    )
+    assert "is a file" in capsys.readouterr().err
+    assert file.read_text() == "x"
 
 
 def test_init_refreshes_managed_files_but_keeps_the_users(
@@ -427,8 +648,45 @@ def test_a_failing_step_is_reported_with_its_exit_code(tmp_path: Path) -> None:
         del cwd, capture
         return subprocess.CompletedProcess(step.argv, 3, stdout="", stderr="")
 
-    with pytest.raises(DeployError, match="terraform exited with 3"):
+    with pytest.raises(
+        deploy.DeployToolError,
+        match="terraform -chdir=terraform/registry init -input=false exited with 3",
+    ):
         deploy.run(dest, "plan", out=io.StringIO(), execute=execute)
+
+
+def test_a_failing_tool_exits_1_not_2(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Exit 2 is for usage errors; a tool that ran and failed exits 1 with what failed."""
+    dest = _init(tmp_path)
+    capsys.readouterr()
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda argv, **kwargs: subprocess.CompletedProcess(argv, 1, stdout="", stderr=""),
+    )
+    assert main(["deploy", "plan", str(dest)]) == 1
+    err = capsys.readouterr().err
+    assert (
+        "locus deploy: terraform -chdir=terraform/registry init -input=false exited with 1" in err
+    )
+    assert "usage" not in err
+
+
+def test_a_missing_registry_output_after_apply_is_a_tool_error(tmp_path: Path) -> None:
+    dest = _init(tmp_path)
+
+    def execute(
+        step: Step, cwd: Path, *, capture: bool = False
+    ) -> subprocess.CompletedProcess[str]:
+        del cwd
+        stderr = "No outputs found" if capture else ""
+        return subprocess.CompletedProcess(step.argv, 1 if capture else 0, stdout="", stderr=stderr)
+
+    with pytest.raises(deploy.DeployToolError, match=r"image_repository.*No outputs found"):
+        deploy.run(dest, "apply", out=io.StringIO(), execute=execute)
 
 
 def test_a_missing_tool_is_reported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -603,6 +861,40 @@ async def test_the_handler_runs_the_asgi_app_in_process(
     assert fake_fdk[-1]["status"] == 401
 
 
+async def test_the_first_direct_invocation_after_a_cold_start_is_authenticated(
+    fake_fdk: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Secrets resolve before the request is built, so the bearer is the key, not a Vault OCID."""
+    from locus.agent import Agent
+    from locus.server import AgentServer
+    from locus.testing import FunctionModel
+
+    monkeypatch.delenv("LOCUS_SERVER_API_KEY", raising=False)
+    monkeypatch.setenv("LOCUS_SERVER_API_KEY_SECRET_OCID", "ocid1.vaultsecret.oc1..serverkey")
+    fetched: list[str] = []
+
+    def fetch(secret_id: str) -> str:
+        fetched.append(secret_id)
+        return "k"
+
+    monkeypatch.setattr(entrypoint, "vault_fetcher", lambda environ: fetch)
+    agent = Agent(
+        model=FunctionModel(lambda messages, tools: "pong"),
+        tools=[],
+        reflexion=False,
+        grounding=False,
+    )
+    handler = functions.asgi_handler(AgentServer(agent=agent, api_key="k").app)
+
+    await handler(_Ctx(), io.BytesIO(b'{"prompt": "ping"}'))
+    assert fetched == ["ocid1.vaultsecret.oc1..serverkey"]
+    assert fake_fdk[-1]["status"] == 200
+    assert os.environ["LOCUS_SERVER_API_KEY"] == "k"
+    await handler(_Ctx(), io.BytesIO(b'{"prompt": "again"}'))
+    assert fetched == ["ocid1.vaultsecret.oc1..serverkey"]  # resolved once
+    assert fake_fdk[-1]["status"] == 200
+
+
 async def test_the_handler_loads_the_app_by_name(
     fake_fdk: list[dict[str, Any]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -620,8 +912,82 @@ async def test_the_handler_loads_the_app_by_name(
 
 
 # --------------------------------------------------------------------------
+# The generated server
+# --------------------------------------------------------------------------
+
+
+def _run_server_template(tmp_path: Path, **environ: str) -> subprocess.CompletedProcess[str]:
+    pytest.importorskip("fastapi")
+    dest = _init(tmp_path)
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in ("LOCUS_SERVER_API_KEY", "LOCUS_SERVER_ALLOW_UNAUTHENTICATED")
+    }
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(Path(deploy.__file__).resolve().parents[2]), env.get("PYTHONPATH", "")]
+    )
+    env["OCI_COMPARTMENT_ID"] = COMPARTMENT
+    env.update(environ)
+    return subprocess.run(  # noqa: S603 — the generated server module, imported as a script
+        [sys.executable, "-c", "import server; print(type(server.app).__name__)"],
+        cwd=dest / "app",
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+
+
+def test_the_server_template_refuses_to_start_without_a_bearer_key(tmp_path: Path) -> None:
+    refused = _run_server_template(tmp_path, LOCUS_MODEL="mock")
+    assert refused.returncode == 1, refused.stderr
+    assert "LOCUS_SERVER_API_KEY is not set" in refused.stderr
+    assert "allow_unauthenticated" in refused.stderr
+    assert "LOCUS_SERVER_ALLOW_UNAUTHENTICATED=1" in refused.stderr
+
+
+@pytest.mark.parametrize(
+    "environ",
+    [
+        {"LOCUS_SERVER_API_KEY": "k"},
+        {"LOCUS_SERVER_ALLOW_UNAUTHENTICATED": "1"},
+    ],
+)
+def test_the_server_template_starts_with_a_key_or_an_explicit_opt_out(
+    tmp_path: Path, environ: dict[str, str]
+) -> None:
+    started = _run_server_template(tmp_path, LOCUS_MODEL="mock", **environ)
+    assert started.returncode == 0, started.stderr
+    assert started.stdout.strip() == "FastAPI"
+
+
+# --------------------------------------------------------------------------
 # The bundled Terraform and Helm, with the tools when they are installed
 # --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("root", ["registry", *deploy.TARGETS])
+def test_every_root_requires_terraform_1_9(root: str) -> None:
+    """Cross-variable validation (the oke root, the public-instance check) needs 1.9."""
+    text = (deploy.templates_root() / "terraform" / root / "main.tf").read_text()
+    assert 'required_version = ">= 1.9"' in text
+
+
+def test_the_oke_outputs_follow_the_charts_fullname_rule() -> None:
+    main_tf = (deploy.templates_root() / "terraform" / "oke" / "main.tf").read_text()
+    helpers = (
+        deploy.templates_root() / "helm" / "locus-agent" / "templates" / "_helpers.tpl"
+    ).read_text()
+    assert "contains .Chart.Name .Release.Name" in helpers
+    assert 'strcontains(var.name, "locus-agent") ? var.name : "${var.name}-locus-agent"' in main_tf
+    assert "value       = local.fullname" in main_tf
+    assert "${var.name}-locus-agent'" not in main_tf
+    assert (
+        'auth_type   = var.workload_identity ? "oke_workload_identity" : "instance_principal"'
+        in main_tf
+    )
 
 
 @pytest.mark.skipif(shutil.which("terraform") is None, reason="terraform is not installed")
@@ -692,3 +1058,38 @@ def test_helm_lint_and_template() -> None:
     ]
     assert "OCI_RESOURCE_PRINCIPAL_VERSION" in template.stdout
     assert "readOnlyRootFilesystem: true" in template.stdout
+    assert 'value: "oke_workload_identity"' in template.stdout
+    names = {
+        line.split(": ", 1)[1]
+        for line in template.stdout.splitlines()
+        if line.startswith("  name: ")
+    }
+    assert names == {"agent-locus-agent"}
+
+    # The Terraform outputs apply the same rule: a release name that already
+    # contains the chart name is used as is.
+    for release, expected in (("locus-agent", "locus-agent"), ("my-locus-agent", "my-locus-agent")):
+        rendered = subprocess.run(  # noqa: S603
+            ["helm", "template", release, chart, *sets],  # noqa: S607
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=120,
+        )
+        assert rendered.returncode == 0, rendered.stderr
+        assert {
+            line.split(": ", 1)[1]
+            for line in rendered.stdout.splitlines()
+            if line.startswith("  name: ")
+        } == {expected}
+
+    node_identity = subprocess.run(  # noqa: S603
+        ["helm", "template", "agent", chart, *sets, "--set", "oci.workloadIdentity=false"],  # noqa: S607
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+    assert node_identity.returncode == 0, node_identity.stderr
+    assert 'value: "instance_principal"' in node_identity.stdout
+    assert "OCI_RESOURCE_PRINCIPAL_VERSION" not in node_identity.stdout

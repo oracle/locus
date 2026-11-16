@@ -66,7 +66,7 @@ variable "image_pull_secret_name" {
 variable "workload_identity" {
   type        = bool
   default     = true
-  description = "Use OKE workload identity (resource principal, enhanced clusters). False uses the node's instance principal."
+  description = "Use OKE workload identity (enhanced clusters; auth type oke_workload_identity). False uses the node's instance principal."
 }
 
 variable "replicas" {
@@ -128,7 +128,13 @@ variable "memory_limit" {
 variable "server_api_key_secret_id" {
   type        = string
   default     = null
-  description = "Vault secret holding LOCUS_SERVER_API_KEY, the bearer key clients send."
+  description = "Vault secret holding LOCUS_SERVER_API_KEY, the bearer key clients send. A Kubernetes Secret works too: serverApiKey.existingSecret in the chart."
+}
+
+variable "allow_unauthenticated" {
+  type        = bool
+  default     = false
+  description = "Run the server without a bearer key; it refuses to start otherwise. Sets LOCUS_SERVER_ALLOW_UNAUTHENTICATED=1."
 }
 
 variable "oracle_dsn" {

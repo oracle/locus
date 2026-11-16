@@ -18,6 +18,7 @@ RUN microdnf -y install python3.12 python3.12-pip \
 WORKDIR /function
 COPY app/ /function/
 RUN python3.12 -m venv /opt/venv \
+    && if ls /function/wheels/*.whl >/dev/null 2>&1; then /opt/venv/bin/pip install /function/wheels/*.whl; fi \
     && /opt/venv/bin/pip install -r requirements.txt "fdk>=0.1.80"
 
 FROM ${BASE_IMAGE}

@@ -61,7 +61,13 @@ variable "provisioned_concurrency" {
 variable "server_api_key_secret_id" {
   type        = string
   default     = null
-  description = "Vault secret holding LOCUS_SERVER_API_KEY, the bearer key HTTP callers send."
+  description = "Vault secret holding LOCUS_SERVER_API_KEY, the bearer key HTTP callers send and direct invocations sign with."
+}
+
+variable "allow_unauthenticated" {
+  type        = bool
+  default     = false
+  description = "Run the server without a bearer key; it refuses to start otherwise. Sets LOCUS_SERVER_ALLOW_UNAUTHENTICATED=1."
 }
 
 variable "oracle_dsn" {

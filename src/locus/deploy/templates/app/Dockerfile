@@ -4,8 +4,10 @@
 # Oracle Linux 9, Python 3.12, a venv built in one stage and copied into a
 # slim runtime; non-root user 10001; works with a read-only root filesystem.
 #
-# Build context is this directory. app/ holds requirements.txt and the module
-# that defines the ASGI app (__LOCUS_APP__).
+# Build context is this directory; .dockerignore admits app/ alone. app/ holds
+# requirements.txt, the module that defines the ASGI app (__LOCUS_APP__) and,
+# after `locus deploy init --sdk-wheel`, wheels/ with a locus-sdk build that is
+# installed before requirements.txt.
 
 ARG BASE_IMAGE=container-registry.oracle.com/os/oraclelinux:9-slim
 
@@ -21,6 +23,7 @@ RUN microdnf -y install python3.12 python3.12-pip \
 WORKDIR /app
 COPY app/ /app/
 RUN python3.12 -m venv /opt/venv \
+    && if ls /app/wheels/*.whl >/dev/null 2>&1; then /opt/venv/bin/pip install /app/wheels/*.whl; fi \
     && /opt/venv/bin/pip install -r requirements.txt
 
 # ─── runtime ──────────────────────────────────────────────────────────

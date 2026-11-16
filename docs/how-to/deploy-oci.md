@@ -13,7 +13,7 @@ OCI Cache, OCI Object Storage and OCI Application Performance Monitoring.
 | Status | Supported CLI; the Terraform roots and the Helm chart are reference configurations to adapt |
 | Tested SDK | `locus-sdk` {{ locus_sdk_version }} |
 | Execution mode | Live OCI tenancy |
-| Requirements | `locus-sdk[server,oci,deploy]`, Terraform 1.5+, Docker, the OCI CLI configuration Terraform reads (`~/.oci/config`), an OCIR auth token for `docker login` |
+| Requirements | `locus-sdk[server,oci,deploy]`, Terraform 1.9+, Docker, the OCI CLI configuration Terraform reads (`~/.oci/config`), an OCIR auth token for `docker login`, an OCI Vault with a key for the server's bearer key |
 | Secrets | OCI Vault secret OCIDs in the values file; nothing secret in the repository or the image |
 
 Pick the target by how the agent is called:
@@ -26,14 +26,25 @@ Pick the target by how the agent is called:
 
 ## Quickstart
 
+The server answers only callers that present a bearer key, so the key comes
+first: generate it, keep it in OCI Vault and hand `init` the secret's OCID.
+
 ```bash
 pip install "locus-sdk[server,oci,deploy]"
+
+LOCUS_SERVER_API_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+SECRET_OCID=$(oci vault secret create-base64 \
+    --compartment-id "$OCI_COMPARTMENT_ID" --vault-id "$VAULT_ID" --key-id "$KMS_KEY_ID" \
+    --secret-name concierge-server-key \
+    --secret-content-content "$(printf %s "$LOCUS_SERVER_API_KEY" | base64)" \
+    --query 'data.id' --raw-output)
 
 locus deploy init concierge \
     --target container-instances \
     --compartment-id "$OCI_COMPARTMENT_ID" \
     --region eu-frankfurt-1 \
-    --profile "$OCI_PROFILE"
+    --profile "$OCI_PROFILE" \
+    --server-api-key-secret-id "$SECRET_OCID"
 cd concierge
 ```
 
@@ -42,6 +53,13 @@ the agent the image serves. The generated server reads its model from
 `LOCUS_MODEL` and authenticates to OCI Generative AI with the principal the
 platform gives it; put `LOCUS_MODEL: mock` under `environment:` for a first
 deployment that proves the path before a model is wired, then remove it.
+
+`init` also says which SDK the image installs: `app/requirements.txt` pins
+`locus-sdk[server,oci]` to the version running `locus deploy`. To ship a
+build that is not on PyPI yet, pass `--sdk-wheel dist/locus_sdk-<version>-py3-none-any.whl`
+(from `python -m build --wheel`): the wheel is copied to `app/wheels/` and the
+Dockerfiles install it before `requirements.txt`, whose pin then matches the
+wheel's version.
 
 ```bash
 docker login eu-frankfurt-1.ocir.io      # <namespace>/<user>, the auth token as password
@@ -61,7 +79,9 @@ curl -sS -X POST "$URL/invoke" \
 ```
 
 `locus deploy destroy` removes the target, then the repository and its
-images. Every command takes `--dry-run` to print what it would run.
+images. `plan`, `apply` and `destroy` take `--dry-run` to print what they
+would run. A usage problem (a bad values file, a missing variable) exits 2; a
+Terraform or Docker step that fails exits 1 after that tool's own output.
 
 ## The deployment directory
 
@@ -70,10 +90,12 @@ concierge/
 ├── locus-deploy.yaml          # target, compartment, image, variables, environment
 ├── Dockerfile                 # Container Instances and OKE image (Oracle Linux 9, Python 3.12)
 ├── Dockerfile.functions       # the same server behind the Fn FDK
+├── .dockerignore              # the build context is app/ alone: no Terraform state or tfvars
 ├── app/
 │   ├── server.py              # your agent: `app = server.app`
 │   ├── func.py                # Functions entry, two lines
-│   └── requirements.txt       # locus-sdk[server,oci]==<version> plus what your agent imports
+│   ├── requirements.txt       # locus-sdk[server,oci]==<version> plus what your agent imports
+│   └── wheels/                # a local locus-sdk build, with --sdk-wheel
 ├── terraform/
 │   ├── registry/              # the OCIR repository
 │   ├── container-instances/
@@ -83,11 +105,15 @@ concierge/
 └── helm/locus-agent/          # the chart the oke root installs; usable with helm alone
 ```
 
-`terraform/`, `helm/` and the Dockerfiles are refreshed by every `init`;
-`locus-deploy.yaml`, `app/server.py` and `app/requirements.txt` are yours and
-are only rewritten with `--force`. Commit the directory: the state files and
-the generated `locus.auto.tfvars.json` are ignored by the `.gitignore` it
-writes, because they name your tenancy.
+`terraform/` and `helm/` are refreshed by every `init`; `locus-deploy.yaml`,
+`app/server.py` and `app/requirements.txt` are yours and are only rewritten
+with `--force`. A `Dockerfile`, `Dockerfile.functions` or `.dockerignore` that
+already exists with other content (an existing project's, or one you edited)
+stops `init` until you pass `--force`, and an existing `.gitignore` only gains
+the missing lines under a `# locus deploy` marker. Commit the directory: the
+state files and the generated `locus.auto.tfvars.json` are ignored by that
+`.gitignore`, because they name your tenancy, and `.dockerignore` keeps them,
+the `.terraform/` provider caches and every `*.tfvars` out of the image.
 
 ### `locus-deploy.yaml`
 
@@ -107,15 +133,26 @@ writes, because they name your tenancy.
 | `environment` | Extra environment variables for the server; these win over the derived ones |
 
 Every root declares the same managed-service variables; `init` seeds
-`variables:` with the knobs a first deployment touches.
+`variables:` with the knobs a first deployment touches. Two of them decide
+who can call the agent:
+
+| Variable | Meaning |
+|---|---|
+| `server_api_key_secret_id` | The Vault secret holding the bearer key (`--server-api-key-secret-id` at `init`). The generated server refuses to start without the key it resolves to. |
+| `allow_unauthenticated` | `true` runs the server with no bearer key (`--allow-unauthenticated`); the container gets `LOCUS_SERVER_ALLOW_UNAUTHENTICATED=1`. For an agent behind an API Gateway or a private network that authenticates callers itself. |
+
+A Container Instance with the root's defaults has a public IP open to
+`0.0.0.0/0`, so `plan` and `apply` refuse that target until one of the two is
+set, and the root's own validation says the same.
 
 ## Identity
 
 The container never holds a credential. It authenticates to OCI services with
 the principal the platform gives it, and the roots export the pieces the SDK
-needs: `OCI_COMPARTMENT_ID`, `OCI_REGION` and `LOCUS_OCI_AUTH_TYPE`
-(`resource_principal` or `instance_principal`). The generated `server.py`
-passes them to the model:
+needs: `OCI_COMPARTMENT_ID`, `OCI_REGION`, and `LOCUS_OCI_AUTH_TYPE` with
+`OCI_AUTH_TYPE` (`resource_principal` on Container Instances and Functions,
+`oke_workload_identity` on OKE workload identity, `instance_principal` on OKE
+node identity). The generated `server.py` passes them to the model:
 
 ```python
 import os
@@ -160,10 +197,19 @@ Allow any-user to use generative-ai-family in compartment <name> where all {
   request.principal.cluster_id = '<cluster-id>' }
 ```
 
-Add `read secret-bundles` and the Object Storage statements the same way. The
-OKE root's `workload_identity` variable switches between the two models; the
-chart sets `OCI_RESOURCE_PRINCIPAL_VERSION=2.2` and the region for workload
-identity, which is what the SDK's `resource_principal` signer reads.
+Add `read secret-bundles` and the Object Storage statements the same way.
+`<release>` is the Helm release name, the deployment's `name`; the `service`
+and `service_account` outputs of the OKE root print the exact value (a release
+name that already contains `locus-agent` is used as is, so the default
+`locus-agent` release creates a service account named `locus-agent`). The OKE
+root's `workload_identity` variable switches between the two models. With
+workload identity the chart sets `LOCUS_OCI_AUTH_TYPE` and `OCI_AUTH_TYPE` to
+`oke_workload_identity` next to `OCI_RESOURCE_PRINCIPAL_VERSION=2.2` and the
+region: a pod holds no resource principal session token, so the SDK exchanges
+the pod's Kubernetes service-account token through the OKE workload-identity
+signer. The SDK's `resource_principal` auth type detects that token on its own
+and does the same, so an agent written for Functions runs unchanged on OKE;
+`oke_workload_identity` names the path outright.
 
 ## Secrets
 
@@ -190,19 +236,14 @@ environment:
   SLACK_WEBHOOK_SECRET_OCID: ocid1.vaultsecret.oc1..example
 ```
 
-Create the server key once and keep only its OCID:
-
-```bash
-KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
-oci vault secret create-base64 \
-  --compartment-id "$OCI_COMPARTMENT_ID" --vault-id "$VAULT_ID" --key-id "$KMS_KEY_ID" \
-  --secret-name concierge-server-key \
-  --secret-content-content "$(printf %s "$KEY" | base64)"
-```
-
-The policy line `read secret-bundles` above is what lets the container read it.
-On OKE a Kubernetes Secret works too: `serverApiKey.existingSecret` in the
-chart maps a Secret key onto `LOCUS_SERVER_API_KEY`.
+The server key is the one the quickstart creates first; `init` takes its OCID
+as `--server-api-key-secret-id` and the roots hand it to the container as
+`LOCUS_SERVER_API_KEY_SECRET_OCID`. The policy line `read secret-bundles`
+above is what lets the container read it. On OKE a Kubernetes Secret works
+too: `serverApiKey.existingSecret` in the chart maps a Secret key onto
+`LOCUS_SERVER_API_KEY`. Without a key the generated server exits at start-up
+with the reason; `allow_unauthenticated: true` is the explicit way to run it
+open.
 
 ## Managed services
 
@@ -309,6 +350,9 @@ helm upgrade --install concierge ./helm/locus-agent \
   --set env.LOCUS_SERVER_API_KEY_SECRET_OCID="$SECRET_OCID"
 ```
 
+Installed this way the chart derives `LOCUS_OCI_AUTH_TYPE` and
+`OCI_AUTH_TYPE` from `oci.workloadIdentity`; a value under `env:` wins.
+
 A private repository needs a docker-registry Secret in the namespace, named in
 `image_pull_secret_name`. Server-Sent Events from `/stream` pass through the
 OCI load balancer unbuffered; an ingress controller in front must not buffer
@@ -403,8 +447,8 @@ jobs:
 ```
 
 Keep Terraform state out of the runner: add a `backend.tf` next to each root
-(an OCI Object Storage bucket with the `oci` backend, or an S3-compatible
-backend on the same bucket) before the first CI apply, and commit it. Run
+(an object-storage backend on an OCI Object Storage bucket) before the first
+CI apply, and commit it. Run
 `locus deploy plan` on pull requests the same way, without the apply step, to
 review changes before they are tagged.
 

@@ -771,6 +771,9 @@ module = [
     # The coding harness's OpenShell backend imports it lazily.
     "openshell",
     "openshell.*",
+    # The Fn FDK behind ``locus.deploy.functions``; untyped, imported on use.
+    "fdk",
+    "fdk.*",
 ]
 ignore_missing_imports = true
 

@@ -4,7 +4,7 @@
 # authenticates to OCI services with its resource principal.
 
 terraform {
-  required_version = ">= 1.5"
+  required_version = ">= 1.9"
   required_providers {
     oci = {
       source  = "oracle/oci"
@@ -24,6 +24,7 @@ module "environment" {
   region                    = var.region
   auth_type                 = "resource_principal"
   server_api_key_secret_id  = var.server_api_key_secret_id
+  allow_unauthenticated     = var.allow_unauthenticated
   oracle_dsn                = var.oracle_dsn
   oracle_user               = var.oracle_user
   oracle_password_secret_id = var.oracle_password_secret_id

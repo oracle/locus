@@ -80,7 +80,7 @@ that already exports `OCI_PROFILE` works unchanged. See
 | Variable | Used by |
 |---|---|
 | `LOCUS_OCI_PROFILE` / `OCI_PROFILE` | `~/.oci/config` profile; when neither is set the notebooks pick `[DEFAULT]` or the only named profile |
-| `LOCUS_OCI_AUTH_TYPE` / `OCI_AUTH_TYPE` | `api_key` (default), `security_token`, `instance_principal`, `resource_principal` |
+| `LOCUS_OCI_AUTH_TYPE` / `OCI_AUTH_TYPE` | `api_key` (default), `security_token`, `instance_principal`, `resource_principal`, `oke_workload_identity` (`resource_principal` detects an OKE pod on its own) |
 | `LOCUS_OCI_REGION` / `OCI_REGION` | GenAI region, e.g. `us-chicago-1` |
 | `LOCUS_OCI_COMPARTMENT` / `OCI_COMPARTMENT` | Compartment OCID; the OCI model classes also read `OCI_COMPARTMENT_ID`, the name [Configure a model provider](configure-providers.md) uses. Derived from the profile's tenancy when none is set |
 | `LOCUS_OCI_ENDPOINT` / `OCI_ENDPOINT` | Service endpoint override — SDK transport (`OCIModel`) only |

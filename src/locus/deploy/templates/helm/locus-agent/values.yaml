@@ -20,8 +20,10 @@ serverApiKey:
   existingSecret: ''        # Secret name
   key: server-api-key
 
+# LOCUS_OCI_AUTH_TYPE and OCI_AUTH_TYPE follow workloadIdentity: oke_workload_identity
+# (the pod exchanges its service-account token) or instance_principal (the node's).
 oci:
-  workloadIdentity: true    # OKE workload identity: resource principal per service account
+  workloadIdentity: true    # OKE workload identity: a resource principal per service account
   region: ''
 
 serviceAccount:

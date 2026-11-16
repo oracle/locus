@@ -27,12 +27,14 @@ on OKE node identity) and secrets reach it as OCI Vault secret OCIDs that
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import shutil
 import subprocess
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from functools import cache
 from importlib import resources
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -47,14 +49,17 @@ __all__ = [
     "TARGETS",
     "VALUES_FILE",
     "DeployError",
+    "DeployToolError",
     "DeployValues",
     "Step",
+    "declared_variables",
     "image_steps",
     "init",
     "load_values",
     "registry_steps",
     "render_values",
     "run",
+    "sdk_requirement",
     "target_steps",
     "templates_root",
 ]
@@ -74,6 +79,13 @@ VALUES_FILE = "locus-deploy.yaml"
 #: Files ``init`` never overwrites without ``force``: they hold the user's work.
 _OWNED_BY_USER = (VALUES_FILE, "app/server.py", "app/requirements.txt")
 
+#: Files ``init`` refuses to change when they exist with other content: an
+#: existing project's build files are never replaced silently.
+_NEVER_REPLACED = ("Dockerfile", "Dockerfile.functions", ".dockerignore")
+
+#: Where ``--sdk-wheel`` puts the wheel the Dockerfiles install before requirements.txt.
+_WHEELS_DIR = "app/wheels"
+
 #: Variables a target cannot run without; ``load_values`` refuses early.
 _REQUIRED_VARIABLES: dict[str, tuple[tuple[str, ...], ...]] = {
     "container-instances": (),
@@ -88,6 +100,8 @@ _DEFAULT_VARIABLES: dict[str, dict[str, Any]] = {
         "ingress_cidr": "0.0.0.0/0",
         "ocpus": 1,
         "memory_gbs": 4,
+        "server_api_key_secret_id": None,
+        "allow_unauthenticated": False,
     },
     "oke": {
         "cluster_id": None,
@@ -95,24 +109,57 @@ _DEFAULT_VARIABLES: dict[str, dict[str, Any]] = {
         "replicas": 2,
         "max_replicas": 2,
         "workload_identity": True,
+        "server_api_key_secret_id": None,
     },
     "functions": {
         "subnet_id": None,
         "memory_mbs": 1024,
         "timeout_seconds": 300,
+        "server_api_key_secret_id": None,
     },
 }
 
-_GITIGNORE = """# Terraform state and working directories; the state names your tenancy.
-terraform/**/.terraform/
-terraform/**/*.tfstate
-terraform/**/*.tfstate.backup
-terraform/**/locus.auto.tfvars.json
+#: The open-to-everyone ingress CIDR, the Container Instances root's default.
+_ANY_CIDR = "0.0.0.0/0"
+
+#: ``init`` appends what is missing of these under the marker; an existing ``.gitignore`` is kept.
+_GITIGNORE_MARKER = "# locus deploy"
+_GITIGNORE_LINES = (
+    "# Terraform state and working directories; the state names your tenancy.",
+    "terraform/**/.terraform/",
+    "terraform/**/*.tfstate",
+    "terraform/**/*.tfstate.backup",
+    "terraform/**/locus.auto.tfvars.json",
+)
+
+#: The build context is the deployment directory; the Dockerfiles copy app/ and nothing else.
+_DOCKERIGNORE = """# Written by `locus deploy init`. The Dockerfiles copy app/ and nothing else;
+# Terraform working directories, state and variable files (they hold secret
+# OCIDs) must never enter the build context or the image.
+.terraform/
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+terraform/
+helm/
+.git/
+.gitignore
+locus-deploy.yaml
+Dockerfile
+Dockerfile.functions
+**/__pycache__/
+**/*.pyc
 """
 
 
 class DeployError(Exception):
     """A problem with the values file, the directory or a tool, reported without a traceback."""
+
+
+class DeployToolError(DeployError):
+    """A tool ``run`` executed (terraform, docker) exited with an error; its own output says why."""
 
 
 @dataclass(frozen=True)
@@ -277,7 +324,12 @@ class DeployValues:
         }
 
     def tfvars(self, image: str) -> dict[str, Any]:
-        """Variables of the target root, with ``image`` and the user's ``variables`` folded in."""
+        """Variables of the target root, with ``image`` and the user's ``variables`` folded in.
+
+        Only variables the root declares are written (``port`` has no meaning
+        for a function); the user's ``variables`` pass through unchanged.
+        """
+        declared = declared_variables(self.target)
         base: dict[str, Any] = {
             "compartment_id": self.compartment_id,
             "region": self.region,
@@ -288,6 +340,7 @@ class DeployValues:
             "environment": dict(self.environment),
             "port": self.port,
         }
+        base = {key: value for key, value in base.items() if key in declared}
         for key, value in self.variables.items():
             if value is None:
                 continue
@@ -295,11 +348,32 @@ class DeployValues:
         return base
 
     def check_required_variables(self) -> None:
-        """Refuse a target whose required variables are still unset."""
+        """Refuse a target whose required variables are still unset.
+
+        A Container Instance with a public IP open to ``0.0.0.0/0`` is an
+        agent anyone can call: it needs ``server_api_key_secret_id`` (the
+        bearer key in OCI Vault) or an explicit ``allow_unauthenticated``.
+        """
         for alternatives in _REQUIRED_VARIABLES[self.target]:
             if not any(self.variables.get(name) for name in alternatives):
                 names = " or ".join(f"variables.{name}" for name in alternatives)
                 raise DeployError(f"the {self.target} target needs {names} in {VALUES_FILE}")
+        if self.target == "container-instances" and self._public_and_open():
+            variables = self.variables
+            if not variables.get("server_api_key_secret_id") and (
+                variables.get("allow_unauthenticated") is not True
+            ):
+                raise DeployError(
+                    "the container-instances target gets a public IP open to 0.0.0.0/0; set "
+                    "variables.server_api_key_secret_id (the Vault secret holding the bearer "
+                    f"key) or variables.allow_unauthenticated: true in {VALUES_FILE}"
+                )
+
+    def _public_and_open(self) -> bool:
+        assign_public_ip = self.variables.get("assign_public_ip")
+        ingress_cidr = self.variables.get("ingress_cidr")
+        public = assign_public_ip is None or assign_public_ip is True
+        return public and ingress_cidr in (None, _ANY_CIDR)
 
 
 @dataclass(frozen=True)
@@ -328,6 +402,35 @@ def _yaml() -> Any:
 def templates_root() -> Path:
     """Where the bundled Terraform roots, Helm chart and Dockerfiles are."""
     return Path(str(resources.files(__name__) / "templates"))
+
+
+@cache
+def declared_variables(target: str) -> frozenset[str]:
+    """The variables the bundled Terraform root of ``target`` declares."""
+    text = (templates_root() / "terraform" / target / "variables.tf").read_text(encoding="utf-8")
+    return frozenset(re.findall(r'^variable\s+"([^"]+)"', text, flags=re.MULTILINE))
+
+
+_WHEEL_NAME = re.compile(r"^locus_sdk-(?P<version>[^-]+)(-[^-]+)?-py3-none-any\.whl$")
+
+
+def sdk_requirement(sdk_wheel: Path | None = None) -> str:
+    """The ``locus-sdk`` line of ``app/requirements.txt``.
+
+    Pinned to the running SDK's version, or to the version in ``sdk_wheel``'s
+    file name when a wheel is given: the Dockerfiles install the wheel first,
+    so pip finds the pin satisfied and only adds the extras.
+    """
+    if sdk_wheel is None:
+        from locus import __version__
+
+        return f"locus-sdk[server,oci]=={__version__}"
+    match = _WHEEL_NAME.match(sdk_wheel.name)
+    if match is None:
+        raise DeployError(
+            f"{sdk_wheel} is not a locus-sdk wheel (expected locus_sdk-<version>-py3-none-any.whl)"
+        )
+    return f"locus-sdk[server,oci]=={match.group('version')}"
 
 
 def render_values(values: DeployValues) -> str:
@@ -385,25 +488,68 @@ def load_values(path: Path) -> DeployValues:
     return DeployValues.from_mapping(data or {})
 
 
-def _render_template(text: str, values: DeployValues) -> str:
-    from locus import __version__
-
+def _render_template(text: str, values: DeployValues, sdk_spec: str) -> str:
     return (
         text.replace("__LOCUS_APP__", values.app)
         .replace("__LOCUS_PORT__", str(values.port))
-        .replace("__LOCUS_SDK_SPEC__", f"locus-sdk[server,oci]=={__version__}")
+        .replace("__LOCUS_SDK_SPEC__", sdk_spec)
     )
 
 
-def init(dest: Path, values: DeployValues, *, force: bool = False) -> list[Path]:
+def _merge_gitignore(path: Path) -> bool:
+    """Add the missing ignore lines under the marker; return whether the file changed."""
+    existing = path.read_text(encoding="utf-8") if path.is_file() else ""
+    present = {line.strip() for line in existing.splitlines()}
+    missing = [line for line in _GITIGNORE_LINES if line not in present]
+    if not missing:
+        return False
+    block = "\n".join((_GITIGNORE_MARKER, *missing)) + "\n"
+    if existing and not existing.endswith("\n"):
+        existing += "\n"
+    path.write_text(f"{existing}\n{block}" if existing else block, encoding="utf-8")
+    return True
+
+
+def init(
+    dest: Path, values: DeployValues, *, force: bool = False, sdk_wheel: Path | None = None
+) -> list[Path]:
     """Write the deployment directory for ``values`` and return the files written.
 
-    Terraform roots, the Helm chart and the Dockerfiles are managed files and
-    are refreshed on every call; ``locus-deploy.yaml``, ``app/server.py`` and
+    Terraform roots and the Helm chart are managed files and are refreshed on
+    every call. ``locus-deploy.yaml``, ``app/server.py`` and
     ``app/requirements.txt`` are yours and are only written when missing or
-    with ``force``.
+    with ``force``. A ``Dockerfile``, ``Dockerfile.functions`` or
+    ``.dockerignore`` that exists with other content is never replaced without
+    ``force``, and an existing ``.gitignore`` only gains the missing lines.
+    ``sdk_wheel`` is copied into ``app/wheels/`` and installed before
+    ``requirements.txt``, for an image built from an unreleased SDK.
     """
+    if dest.exists() and not dest.is_dir():
+        raise DeployError(f"{dest} is a file; the deployment directory must be a directory")
+    if sdk_wheel is not None and not sdk_wheel.is_file():
+        raise DeployError(f"--sdk-wheel {sdk_wheel} is not a file")
+    sdk_spec = sdk_requirement(sdk_wheel)
     source = templates_root()
+    rendered = {
+        name: _render_template(
+            (source / "app" / name).read_text(encoding="utf-8"), values, sdk_spec
+        )
+        for name in (
+            "Dockerfile",
+            "Dockerfile.functions",
+            "server.py",
+            "func.py",
+            "requirements.txt",
+        )
+    }
+    rendered[".dockerignore"] = _DOCKERIGNORE
+    if not force:
+        for name in _NEVER_REPLACED:
+            target = dest / name
+            if target.exists() and target.read_text(encoding="utf-8") != rendered[name]:
+                raise DeployError(
+                    f"{target} exists and differs from the template; pass --force to replace it"
+                )
     written: list[Path] = []
 
     def write(relative: str, content: str) -> None:
@@ -420,14 +566,23 @@ def init(dest: Path, values: DeployValues, *, force: bool = False) -> list[Path]
             if file.is_file():
                 relative = str(file.relative_to(source))
                 write(relative, file.read_text(encoding="utf-8"))
-    for name in ("Dockerfile", "Dockerfile.functions"):
-        write(name, _render_template((source / "app" / name).read_text(encoding="utf-8"), values))
+    for name in _NEVER_REPLACED:
+        write(name, rendered[name])
     for name in ("server.py", "func.py", "requirements.txt"):
-        write(
-            f"app/{name}",
-            _render_template((source / "app" / name).read_text(encoding="utf-8"), values),
-        )
-    write(".gitignore", _GITIGNORE)
+        write(f"app/{name}", rendered[name])
+    if sdk_wheel is not None:
+        wheels = dest / _WHEELS_DIR
+        wheels.mkdir(parents=True, exist_ok=True)
+        for stale in wheels.glob("locus_sdk-*.whl"):
+            if stale.name != sdk_wheel.name:
+                stale.unlink()
+        copied = wheels / sdk_wheel.name
+        if not copied.exists() or copied.read_bytes() != sdk_wheel.read_bytes():
+            shutil.copyfile(sdk_wheel, copied)
+            written.append(copied)
+    dest.mkdir(parents=True, exist_ok=True)
+    if _merge_gitignore(dest / ".gitignore"):
+        written.append(dest / ".gitignore")
     write(VALUES_FILE, render_values(values))
     return written
 
@@ -532,7 +687,9 @@ def run(
                 continue
             completed = execute(step, dest)
             if completed.returncode != 0:
-                raise DeployError(f"{step.argv[0]} exited with {completed.returncode}")
+                raise DeployToolError(
+                    f"{step.render()} exited with {completed.returncode}; see its output above"
+                )
 
     repository = values.repository
     if repository is None:
@@ -559,6 +716,10 @@ def _registry_output(
     completed = execute(step, dest, capture=True)
     if completed.returncode != 0 or not completed.stdout.strip():
         if required:
-            raise DeployError("could not read image_repository from the registry root's outputs")
+            detail = (completed.stderr or "").strip()
+            raise DeployToolError(
+                "could not read image_repository from the registry root's outputs"
+                + (f": {detail}" if detail else "")
+            )
         return None
     return str(completed.stdout.strip())

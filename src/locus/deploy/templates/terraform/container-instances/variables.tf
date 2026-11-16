@@ -122,7 +122,17 @@ variable "image_pull_secret_id" {
 variable "server_api_key_secret_id" {
   type        = string
   default     = null
-  description = "Vault secret holding LOCUS_SERVER_API_KEY, the bearer key clients send."
+  description = "Vault secret holding LOCUS_SERVER_API_KEY, the bearer key clients send. Required with a public IP open to 0.0.0.0/0 unless allow_unauthenticated is true."
+  validation {
+    condition     = var.server_api_key_secret_id != null || var.allow_unauthenticated || !var.assign_public_ip || var.ingress_cidr != "0.0.0.0/0"
+    error_message = "A public instance open to 0.0.0.0/0 is an agent anyone can call: set server_api_key_secret_id (the bearer key in Vault), or allow_unauthenticated = true if that is intended."
+  }
+}
+
+variable "allow_unauthenticated" {
+  type        = bool
+  default     = false
+  description = "Run the server without a bearer key; it refuses to start otherwise. Sets LOCUS_SERVER_ALLOW_UNAUTHENTICATED=1."
 }
 
 variable "oracle_dsn" {

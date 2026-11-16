@@ -73,7 +73,7 @@ def request_for(
 
 
 def _fdk_response() -> Any:
-    from fdk import response  # type: ignore[import-not-found]  # the Fn FDK, an optional dependency
+    from fdk import response  # the Fn FDK, an optional dependency
 
     return response
 
@@ -99,11 +99,13 @@ def asgi_handler(app: str | Any) -> Callable[..., Awaitable[Any]]:
         return state["app"]
 
     async def handler(ctx: Any, data: Any = None) -> Any:
+        # Secrets first: a direct invocation signs with LOCUS_SERVER_API_KEY,
+        # which may still be a Vault OCID on the first call after a cold start.
+        transport = httpx.ASGITransport(app=prepare())
         body = data.getvalue() if data is not None and hasattr(data, "getvalue") else (data or b"")
         if isinstance(body, str):
             body = body.encode("utf-8")
         method, path, headers = request_for(ctx, body)
-        transport = httpx.ASGITransport(app=prepare())
         async with httpx.AsyncClient(transport=transport, base_url="http://function") as client:
             response = await client.request(method, path, content=body, headers=headers)
         return _fdk_response().Response(

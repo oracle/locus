@@ -5,7 +5,7 @@
 # chart from ../../helm/locus-agent.
 
 terraform {
-  required_version = ">= 1.5"
+  required_version = ">= 1.9"
   required_providers {
     oci = {
       source  = "oracle/oci"
@@ -43,7 +43,10 @@ locals {
     : concat(local.exec.args, ["--profile", var.oci_profile])
   )
   image_parts = regex("^(.*):([^:/]+)$", var.image)
-  auth_type   = var.workload_identity ? "resource_principal" : "instance_principal"
+  auth_type   = var.workload_identity ? "oke_workload_identity" : "instance_principal"
+  # The chart's fullname rule (templates/_helpers.tpl): the release name when it
+  # already contains the chart name, else <release>-locus-agent, at most 63 chars.
+  fullname = trimsuffix(substr(strcontains(var.name, "locus-agent") ? var.name : "${var.name}-locus-agent", 0, 63), "-")
 }
 
 provider "helm" {
@@ -65,6 +68,7 @@ module "environment" {
   region                    = var.region
   auth_type                 = local.auth_type
   server_api_key_secret_id  = var.server_api_key_secret_id
+  allow_unauthenticated     = var.allow_unauthenticated
   oracle_dsn                = var.oracle_dsn
   oracle_user               = var.oracle_user
   oracle_password_secret_id = var.oracle_password_secret_id
@@ -130,11 +134,16 @@ output "release" {
 }
 
 output "service" {
-  value       = "${var.name}-locus-agent"
+  value       = local.fullname
   description = "Service name; `kubectl -n <namespace> get svc <service>` shows the load balancer address."
 }
 
+output "service_account" {
+  value       = local.fullname
+  description = "ServiceAccount the chart creates; the workload-identity policy subject."
+}
+
 output "resource_principal_rule" {
-  value       = var.workload_identity ? "workload identity: policy subject `request.principal.type = 'workload', request.principal.namespace = '${var.namespace}', request.principal.service_account = '${var.name}-locus-agent', request.principal.cluster_id = '${coalesce(var.cluster_id, "<cluster-id>")}'`" : "ALL {instance.compartment.id = '${var.compartment_id}'}"
+  value       = var.workload_identity ? "workload identity: policy subject `request.principal.type = 'workload', request.principal.namespace = '${var.namespace}', request.principal.service_account = '${local.fullname}', request.principal.cluster_id = '${coalesce(var.cluster_id, "<cluster-id>")}'`" : "ALL {instance.compartment.id = '${var.compartment_id}'}"
   description = "What to put in the dynamic group (instance principal) or the policy (workload identity)."
 }

@@ -16,10 +16,10 @@ variable "region" {
 
 variable "auth_type" {
   type        = string
-  description = "How the agent authenticates to OCI services: instance_principal or resource_principal."
+  description = "How the agent authenticates to OCI services: instance_principal, resource_principal or oke_workload_identity."
   validation {
-    condition     = contains(["instance_principal", "resource_principal"], var.auth_type)
-    error_message = "auth_type must be instance_principal or resource_principal."
+    condition     = contains(["instance_principal", "resource_principal", "oke_workload_identity"], var.auth_type)
+    error_message = "auth_type must be instance_principal, resource_principal or oke_workload_identity."
   }
 }
 
@@ -27,6 +27,12 @@ variable "server_api_key_secret_id" {
   type        = string
   default     = null
   description = "Vault secret holding the bearer key clients send (LOCUS_SERVER_API_KEY)."
+}
+
+variable "allow_unauthenticated" {
+  type        = bool
+  default     = false
+  description = "Let the server start without a bearer key (LOCUS_SERVER_ALLOW_UNAUTHENTICATED=1); it refuses otherwise."
 }
 
 variable "oracle_dsn" {
@@ -89,8 +95,10 @@ locals {
       OCI_COMPARTMENT_ID  = var.compartment_id
       OCI_REGION          = var.region
       LOCUS_OCI_AUTH_TYPE = var.auth_type
+      OCI_AUTH_TYPE       = var.auth_type
     },
     var.server_api_key_secret_id == null ? {} : { LOCUS_SERVER_API_KEY_SECRET_OCID = var.server_api_key_secret_id },
+    var.allow_unauthenticated ? { LOCUS_SERVER_ALLOW_UNAUTHENTICATED = "1" } : {},
     var.oracle_dsn == null ? {} : { ORACLE_DSN = var.oracle_dsn },
     var.oracle_user == null ? {} : { ORACLE_USER = var.oracle_user },
     var.oracle_password_secret_id == null ? {} : { ORACLE_PASSWORD_SECRET_OCID = var.oracle_password_secret_id },
