@@ -25,7 +25,7 @@ deny; the API strings are secondary detail.
 | Admission | Calls the side effect only on `allow`; returns/raises on hold or deny | Route every consequential path through `admit()` or `gate_tool()` | None in `ControlPolicy` evaluation itself |
 | Approval | Persists a pending decision through a configured store, and writes the hold into the thread's checkpoint | Provide a store that survives a restart (`FileApprovals`, or `PostgresApprovals` / `RedisApprovals` / `OracleApprovals` when replicas share it), an authenticated decision channel, and a resume flow | None required for the store state machine |
 | Persistence | Restores supported run state through a checkpointer | Choose and operate a backend with suitable durability and isolation | None |
-| Audit | Hash-chains records supplied to an `AuditTrail` | Persist/export the trail and protect its head externally | None |
+| Audit | Hash-chains records supplied to an `AuditTrail`; `OracleAuditTrail` makes them rows of an immutable table, `anchor_trail()` keeps the head in object storage | Choose the [backend](observability.md#where-the-audit-trail-lives), its retention window, and the bucket's retention rule | None |
 
 ## The enforcement boundary
 
@@ -46,7 +46,7 @@ is wrapped.
 | Policy returns hold or deny | Side effect is not called; handle the refusal or interrupt explicitly |
 | Process stops while held | Resume requires an `ApprovalStore` that survives a restart ([`FileApprovals`, `PostgresApprovals`, `RedisApprovals` or `OracleApprovals`](../api/control.md#pausing-until-someone-decides)) and a checkpointer; the checkpoint carries the hold (`pending_holds()`), so the resuming process knows which approval the thread waits on and in which store; `InMemoryApprovals` is for tests and is lost with the process |
 | External API succeeds, process stops before local result is recorded | A replay may occur; pass a stable idempotency key to the external API |
-| Audit records are changed | `AuditTrail.verify()` detects a broken local chain; protect a durable copy or chain head outside the process |
+| Audit records are changed | `AuditTrail.verify()` detects a broken local chain; `OracleAuditTrail` keeps the rows where the database refuses the change, and `verify_anchor()` catches a chain cut short of its anchored head |
 | Action is mislabeled or a route skips the gate | Policy cannot protect what it cannot see; coverage tests and code review are required |
 | Grounding judge is wrong | Typed scores remain an assessment, not a truth oracle; evaluate and calibrate the judge for the deployment |
 
@@ -87,7 +87,10 @@ is wrapped.
     falls back to the dangling tool call as before.
 4. Use a checkpointer for resumable agent state.
 5. Send a stable operation key to the downstream service.
-6. Export audit records to durable, access-controlled storage.
+6. Keep audit records where the agent cannot rewrite them: an `OracleAuditTrail`
+   on an immutable table, or a trail whose head is anchored with `anchor_trail()`
+   into a bucket with a retention rule (see
+   [where the audit trail lives](observability.md#where-the-audit-trail-lives)).
 7. Test allow, hold, deny, restart, duplicate-call, and crash-recovery paths.
 
 See [First controlled action](../how-to/first-controlled-action.md) for a small

@@ -70,6 +70,19 @@ from locus.control.audit import (
     check_jsonl,
     verify_jsonl,
 )
+from locus.control.audit_anchor import (
+    Anchor,
+    AnchorError,
+    AnchorReport,
+    AnchorStore,
+    OCIBucketAnchorStore,
+    S3AnchorStore,
+    anchor_periodically,
+    anchor_trail,
+    latest_anchor,
+    verify_anchor,
+)
+from locus.control.audit_oracle import OracleAuditTrail
 from locus.control.findings import (
     Confidence,
     Evidence,
@@ -199,6 +212,18 @@ __all__ = [
     "Ed25519Signer",
     "verify_jsonl",
     "AuditHook",
+    # Durable audit backends: Oracle immutable/blockchain table, object-storage anchors
+    "OracleAuditTrail",
+    "Anchor",
+    "AnchorError",
+    "AnchorReport",
+    "AnchorStore",
+    "OCIBucketAnchorStore",
+    "S3AnchorStore",
+    "anchor_periodically",
+    "anchor_trail",
+    "latest_anchor",
+    "verify_anchor",
     # Governed-by-default agent wrapper
     "GovernedAgent",
     "governed_agent",
