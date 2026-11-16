@@ -12,6 +12,8 @@ or a zero-argument function that returns one::
     locus approvals --store approvals.json approve appr-3f1c... --by alice@example.com
     locus resume app.py:agent --thread t1 --answer approved --perform
     locus audit verify trail.jsonl --key audit-1=audit-1.pub.pem --head 9c2e...
+    locus policy lint policy.yaml --environments production staging
+    locus policy explain policy.yaml --action '{"name": "refund", "kind": "payment"}'
     locus serve app.py:agent --port 8000
     locus codex init                 # the Locus skill for Codex, in this project
     locus codex run "build an agent that triages tickets with a gated refund tool"
@@ -222,6 +224,45 @@ def _cmd_audit_verify(args: argparse.Namespace) -> int:
     return 1
 
 
+def _cmd_policy(args: argparse.Namespace) -> int:
+    from locus.control.policy_file import PolicyDocument, PolicyFileError  # noqa: PLC0415
+    from locus.control.policy_lint import (  # noqa: PLC0415
+        action_from_json,
+        explain,
+        lint_document,
+    )
+    from locus.control.verification import VerificationResult  # noqa: PLC0415
+
+    try:
+        document = PolicyDocument.load(args.file)
+    except (PolicyFileError, OSError, ImportError) as exc:
+        raise CLIError(str(exc)) from exc
+    if args.action == "lint":
+        report = lint_document(document, environments=args.environments, kinds=args.kinds)
+        print(json.dumps(report.to_dict(), indent=2) if args.format == "json" else report.render())
+        return 0 if report.ok else 1
+    try:
+        action = action_from_json(args.action_json)
+    except (TypeError, ValueError) as exc:
+        raise CLIError(str(exc)) from exc
+    verdict = (
+        VerificationResult(
+            survives=True, confidence=args.verification, evidence_quality=args.verification
+        )
+        if args.verification is not None
+        else None
+    )
+    explanation = explain(
+        document.policy, action, verdict=verdict, spent_usd=args.spent_usd, source=document.source
+    )
+    print(
+        json.dumps(explanation.to_dict(), indent=2)
+        if args.format == "json"
+        else explanation.render()
+    )
+    return 0 if args.expect is None or explanation.decision.outcome == args.expect else 1
+
+
 def _cmd_serve(args: argparse.Namespace) -> int:
     from locus.server import AgentServer  # noqa: PLC0415
 
@@ -415,6 +456,43 @@ def build_parser() -> argparse.ArgumentParser:
     )
     verify.add_argument("--head", help="the chain head anchored out of band")
     verify.set_defaults(handler=_cmd_audit_verify)
+
+    policy = commands.add_parser(
+        "policy", help="lint a policy file for gaps, or explain its decision for one action"
+    )
+    policy_actions = policy.add_subparsers(dest="action", required=True)
+    lint = policy_actions.add_parser(
+        "lint", help="report unreachable rules, uncovered environments and kinds never held"
+    )
+    lint.add_argument("file", help="a .yaml, .yml or .json policy file")
+    lint.add_argument(
+        "--environments", nargs="*", default=[], help="environments to check for a rule"
+    )
+    lint.add_argument("--kinds", nargs="*", default=[], help="action kinds to check for a hold")
+    lint.add_argument("--format", choices=["text", "json"], default="text")
+    lint.set_defaults(handler=_cmd_policy)
+    explain = policy_actions.add_parser("explain", help="the decision path for one action")
+    explain.add_argument("file", help="a .yaml, .yml or .json policy file")
+    explain.add_argument(
+        "--action",
+        dest="action_json",
+        required=True,
+        metavar="JSON",
+        help='the action, e.g. \'{"name": "refund", "kind": "payment", "blast_radius": 3}\'',
+    )
+    explain.add_argument(
+        "--spent-usd", type=float, default=0.0, help="what the action's scope has already spent"
+    )
+    explain.add_argument(
+        "--verification", type=float, help="confidence of a verification the finding survived"
+    )
+    explain.add_argument(
+        "--expect",
+        choices=["allow", "require_human", "deny"],
+        help="exit 1 unless the outcome is this one",
+    )
+    explain.add_argument("--format", choices=["text", "json"], default="text")
+    explain.set_defaults(handler=_cmd_policy)
 
     serve = commands.add_parser("serve", help="serve an agent over HTTP")
     serve.add_argument("agent")
