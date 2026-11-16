@@ -170,6 +170,9 @@ _PROVIDER_BY_PREFIX: dict[str, str] = {
 #: is the SDK's own, kept low-cardinality (the index is an attribute).
 ITERATION_SPAN_NAME = "locus.iteration"
 
+#: The instrumentation scope ``TelemetryHook`` records its spans and metrics under.
+TELEMETRY_SCOPE = "locus.hooks.telemetry"
+
 # --- Metric names ----------------------------------------------------------------
 
 METRIC_INFERENCE_DURATION = "gen_ai.client.inference.duration"
@@ -325,7 +328,11 @@ _EXPECTED_KIND = {OP_INVOKE_AGENT: "INTERNAL", OP_CHAT: "CLIENT", OP_EXECUTE_TOO
 
 @dataclass
 class SpanRecord:
-    """The part of a finished span the validator and fixtures work from."""
+    """The part of a finished span the validator and fixtures work from.
+
+    ``scope`` is the instrumentation scope that produced the span (the
+    hook's is :data:`TELEMETRY_SCOPE`); ``None`` when the source did not say.
+    """
 
     name: str
     kind: str
@@ -335,6 +342,7 @@ class SpanRecord:
     status: str
     attributes: dict[str, Any] = field(default_factory=dict)
     status_description: str | None = None
+    scope: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -346,6 +354,7 @@ class SpanRecord:
             "status": self.status,
             "status_description": self.status_description,
             "attributes": dict(self.attributes),
+            "scope": self.scope,
         }
 
     @classmethod
@@ -361,6 +370,7 @@ class SpanRecord:
             status=str(data.get("status", "UNSET")),
             status_description=data.get("status_description"),
             attributes=dict(data.get("attributes") or {}),
+            scope=str(data["scope"]) if data.get("scope") is not None else None,
         )
 
     @classmethod
@@ -375,6 +385,7 @@ class SpanRecord:
             k: (list(v) if isinstance(v, tuple) else v)
             for k, v in dict(span.attributes or {}).items()
         }
+        scope = getattr(getattr(span, "instrumentation_scope", None), "name", None)
         return cls(
             name=span.name,
             kind=getattr(kind, "name", str(kind)),
@@ -384,6 +395,7 @@ class SpanRecord:
             status=getattr(status_code, "name", "UNSET"),
             status_description=getattr(status, "description", None),
             attributes=attributes,
+            scope=str(scope) if scope is not None else None,
         )
 
 
@@ -414,7 +426,12 @@ def _is_int(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-def validate_spans(spans: Iterable[Any], *, require_usage: bool = True) -> list[str]:
+def validate_spans(
+    spans: Iterable[Any],
+    *,
+    require_usage: bool = True,
+    scope: str | None = TELEMETRY_SCOPE,
+) -> list[str]:
     """Check a finished trace against the GenAI semantic conventions.
 
     Returns the problems found, one line each; an empty list means the trace
@@ -432,11 +449,24 @@ def validate_spans(spans: Iterable[Any], *, require_usage: bool = True) -> list[
             ``output_tokens`` on ``chat`` and ``invoke_agent`` spans. The
             conventions only recommend them, but the hook sets them whenever
             the provider reports usage, so a trace from a real model has them.
+        scope: When the spans come from more than one instrumentation scope,
+            only those of this one are checked — by default the telemetry
+            hook's own, so the spans a web framework or the ``mcp`` package
+            wrote into the same exporter (``POST /``, ``MCP send tools/call
+            …``) are not counted as foreign roots or extra traces. Spans from
+            a single scope are checked as they are, whatever it is called
+            (a hook with its own ``tracer_name``), and spans whose scope is
+            unknown (records loaded from a fixture) are always kept. ``None``
+            checks everything given.
     """
     records = records_from_spans(spans)
+    filtered = False
+    if scope is not None and len({r.scope for r in records if r.scope is not None}) > 1:
+        records = [r for r in records if r.scope is None or r.scope == scope]
+        filtered = True
     problems: list[str] = []
     if not records:
-        return ["no spans recorded"]
+        return ["no spans recorded" + (f" in scope {scope!r}" if filtered else "")]
 
     trace_ids = {r.trace_id for r in records}
     if len(trace_ids) != 1:
@@ -515,9 +545,14 @@ def _check_usage(r: SpanRecord, where: str, problems: list[str]) -> None:
             problems.append(f"{where}: {key} must be a non-negative integer")
 
 
-def assert_valid_spans(spans: Iterable[Any], *, require_usage: bool = True) -> None:
+def assert_valid_spans(
+    spans: Iterable[Any],
+    *,
+    require_usage: bool = True,
+    scope: str | None = TELEMETRY_SCOPE,
+) -> None:
     """Raise ``AssertionError`` listing every problem :func:`validate_spans` finds."""
-    problems = validate_spans(spans, require_usage=require_usage)
+    problems = validate_spans(spans, require_usage=require_usage, scope=scope)
     if problems:
         raise AssertionError(
             "trace does not follow the GenAI conventions:\n  " + "\n  ".join(problems)
@@ -525,10 +560,14 @@ def assert_valid_spans(spans: Iterable[Any], *, require_usage: bool = True) -> N
 
 
 __all__ = [
+    "assert_valid_spans",
     "CALL_COUNT_BUCKETS",
+    "dump_spans",
     "DURATION_BUCKETS_S",
     "ERROR_TYPE",
+    "error_type",
     "ERROR_TYPE_OTHER",
+    "fallback_provider_name",
     "GEN_AI_AGENT_DESCRIPTION",
     "GEN_AI_AGENT_ID",
     "GEN_AI_AGENT_NAME",
@@ -556,6 +595,7 @@ __all__ = [
     "GEN_AI_USAGE_OUTPUT_TOKENS",
     "INVOKE_AGENT_DURATION_BUCKETS_S",
     "ITERATION_SPAN_NAME",
+    "load_spans",
     "METRIC_EXECUTE_TOOL_DURATION",
     "METRIC_INFERENCE_DURATION",
     "METRIC_INPUT_TOKENS",
@@ -563,33 +603,29 @@ __all__ = [
     "METRIC_INVOKE_AGENT_INFERENCE_CALLS",
     "METRIC_INVOKE_AGENT_TOOL_CALLS",
     "METRIC_OUTPUT_TOKENS",
-    "OPERATIONS",
     "OP_CHAT",
     "OP_EXECUTE_TOOL",
     "OP_INVOKE_AGENT",
+    "OPERATIONS",
+    "provider_name",
     "PROVIDER_OCI_GENERATIVE_AI",
+    "records_from_spans",
+    "request_model",
+    "resolve_semconv",
     "SEMCONV_DEFAULT",
     "SEMCONV_GENAI",
     "SEMCONV_LEGACY",
     "SERVER_ADDRESS",
+    "server_address",
     "SERVER_PORT",
+    "SpanRecord",
     "SUPPORTED_SEMCONV",
+    "TELEMETRY_SCOPE",
     "TOKEN_MODALITY_AUDIO",
     "TOKEN_MODALITY_IMAGE",
     "TOKEN_MODALITY_TEXT",
     "TOKEN_MODALITY_UNKNOWN",
     "TOKEN_MODALITY_VIDEO",
     "TOOL_TYPE_FUNCTION",
-    "SpanRecord",
-    "assert_valid_spans",
-    "dump_spans",
-    "error_type",
-    "fallback_provider_name",
-    "load_spans",
-    "provider_name",
-    "records_from_spans",
-    "request_model",
-    "resolve_semconv",
-    "server_address",
     "validate_spans",
 ]
