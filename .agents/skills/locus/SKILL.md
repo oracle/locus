@@ -1,6 +1,6 @@
 ---
 name: locus
-description: Build, govern, test and run AI agents with Locus (`locus-sdk`), Oracle's Python agent SDK. Use whenever code imports `locus`, the task names Locus or locus-sdk, or an agent has to run on OCI Generative AI with tools that are gated, audited and testable. Covers Agent and @tool, the admission gate (gate_tool, admit, ControlPolicy, AuditTrail, approvals), structured output, multi-agent shapes, memory and RAG on Oracle Database 26ai, the sandboxed coding harness, model providers, offline tests with model doubles, and the locus command line. Not for other agent frameworks.
+description: Build, govern, test and run AI agents with Locus (`locus-sdk`), Oracle's Python agent SDK. Use whenever code imports `locus`, the task names Locus or locus-sdk, or an agent has to run on OCI Generative AI with tools that are gated, audited and testable. Covers Agent and @tool, the admission gate (gate_tool, admit, ControlPolicy as code or as a linted file, the tool-call judge, signed tool calls, AuditTrail, approvals in a file or a database), structured output, multi-agent shapes, memory and RAG on Oracle Database 26ai, the sandboxed coding harness, model providers, offline tests with model doubles, evaluation suites with rubrics and a CI gate, the agent server with resumable runs, and the locus command line. Not for other agent frameworks.
 license: UPL-1.0
 metadata:
   author: Oracle
@@ -109,6 +109,10 @@ one from the call's name and arguments, which is how a label such as
 `high_value` comes from the real amount. The policy is data: tags that
 `require_human_for` holds and `deny_for` refuses, a `max_blast_radius`, a
 `spend_limit_usd`. The decision and its reason land on the `AuditTrail`.
+The same policy lives in a file when a reviewer should read it:
+`ControlPolicy.load("policy.yaml")` loads it, `locus policy lint policy.yaml`
+finds the rules that cannot fire, and a `PolicyWatcher("policy.yaml")` in
+place of the policy reloads it without a deploy.
 
 ```python
 from locus import Agent, tool
@@ -169,6 +173,13 @@ notice a mislabeled action (derive labels from the real arguments, with
 idempotency key downstream; `@tool(idempotent=True)` stops a repeat within
 one run).
 
+Two more layers for what labels cannot carry: `gate_tool(...,
+judge=ToolCallJudge(intent=..., guidance={...}))` has a model read the
+arguments and can turn an allow into a hold or a deny, never the reverse
+(`@tool(read_only=True)` marks the lookups it should skip), and
+`Agent(tool_call_integrity=True)` signs every tool call as it is parsed and
+refuses one that a hook changed without `event.resign(by=...)`.
+
 ## Hold for a person, then resume
 
 `on_refusal="interrupt"` with an `ApprovalStore` pauses the run on a hold;
@@ -192,7 +203,11 @@ The same flow from a terminal: `locus run app.py:agent "..." --thread t1`
 exits 3 while paused, `locus approvals --store approvals.json list | approve
 <id> --by <who>`, `locus resume app.py:agent --thread t1 --perform`. An
 `ApprovalAuthority` restricts who may decide. `FileApprovals` and a
-checkpointer survive a restart; `InMemoryApprovals` does not.
+checkpointer survive a restart; `InMemoryApprovals` does not. For a service,
+`approval_store("postgresql://...")` (also `redis://`, `oracle://`) opens a
+database store with the same API, `locus approvals --store <spec>` decides
+against it, and `pending_holds(checkpointer, thread_id)` tells another
+process what a parked thread waits on.
 
 ## Typed answers, stopping, streaming
 
@@ -326,16 +341,25 @@ asks for more; `FunctionModel(handler)` decides per turn from the messages
 so far. Both record `call_count`, `received_messages` and `offered_tools`.
 `python -m locus.rogue` is the built-in check that the gate holds against a
 model that is compromised by construction; its last line reads
-`BREACHES: 0` and `audit chain intact: ✓`.
+`BREACHES: 0` and `audit chain intact: ✓`. `locus.evaluation` turns the same
+doubles into a suite: `EvalCase(..., expected_tools=[...],
+require_receipts=True, forbidden_tools=[...])` checks the run and its
+evidence, `EvalRunner(agent).run(cases)` reports, `EvalGate(...).check(report,
+baseline=...)` fails a build on a regression, and `locus eval run cases.json
+--agent app.py:agent` does the same from the command line.
 
 ## Run and serve
 
 `locus run app.py:agent "prompt" --thread t1` streams a run; `locus serve
 app.py:agent --port 8000` serves it over HTTP (`AgentServer`, bearer key in
-`LOCUS_SERVER_API_KEY`); `locus audit verify trail.jsonl --key id=pub.pem`
-checks an exported trail. `AGENT` is `module:attr` or `file.py:attr` naming
-an `Agent` or a zero-argument factory. Exit codes: 0, 1 a check failed, 2
-usage, 3 paused for a person.
+`LOCUS_SERVER_API_KEY`): `POST /invoke` and `POST /stream` hold the
+connection, `POST /threads/{id}/runs` starts a turn in the background and
+`GET /runs/{id}/events` follows it as SSE that a dropped client resumes with
+`Last-Event-ID`, also as AG-UI or Vercel AI SDK frames (`?protocol=`), and
+`WS /runs/live` is one socket both ways. `locus audit verify trail.jsonl
+--key id=pub.pem` checks an exported trail. `AGENT` is `module:attr` or
+`file.py:attr` naming an `Agent` or a zero-argument factory. Exit codes: 0,
+1 a check failed, 2 usage, 3 paused for a person.
 
 ## Known behaviour
 
@@ -347,6 +371,8 @@ usage, 3 paused for a person.
 | `ScriptedModel` raises "out of turns" | the agent asked for more turns than scripted, usually because it did not terminate | fix the termination or add the turn; `repeat_last=True` only when turn count is not the point |
 | `LLMMemoryManager` stored nothing | its default extractor is a keyword heuristic | phrase facts as "never ..." or "I'm a ..." or supply an extractor |
 | a gated tool ran with `require_human_for` set | the action's labels did not carry the tag | label from the real arguments; assert `trail.records()[-1].payload["outcome"]` in a test |
+| `LocusWarning: OCI Responses: the endpoint reported Zero Data Retention ...` or `OCIResponsesZeroDataRetentionError` | the tenancy enforces Zero Data Retention; under the default `store="auto"` the model switched to the stateless path and the run completed | nothing; `store=False` on that tenancy skips the first stateful attempt |
+| a tool result reads `ToolCallIntegrityError: ... changed by <Hook> outside the re-sign API` | `tool_call_integrity` is on and a hook rewrote the arguments without re-signing | call `event.resign(by="<Hook>")` after the rewrite |
 
 ## Rules
 
@@ -365,10 +391,10 @@ usage, 3 paused for a person.
 
 | File | Read it for |
 |---|---|
-| `references/agent-and-tools.md` | `Agent` and `AgentConfig` options, `@tool`, `ToolContext`, structured output, streaming, hooks, termination, reflexion and grounding, decisions, skills, playbooks, evaluation, MCP, the testing doubles |
-| `references/control-layer.md` | `ControlPolicy`, `Action`, `admit`, `gate_tool`, approvals and authorities, interrupt and resume, `AuditTrail` and signed exports, permission rules, shell parsing, spend ledgers, the governed wrapper |
-| `references/multi-agent-harness-deploy.md` | each shape with code, `StateGraph` primitives, A2A, DeepAgent, the harness and its backends, the box runner, `AgentServer`, the command line, observability |
-| `references/providers-memory-rag.md` | every provider prefix and its environment, OCI transports and errors, checkpointers and backends, memory managers, Oracle Database 26ai, embeddings, vector stores, rerankers |
+| `references/agent-and-tools.md` | `Agent` and `AgentConfig` options, `@tool`, `ToolContext`, structured output, streaming, hooks, termination, reflexion and grounding, decisions, skills, playbooks, evaluation (rubrics, evidence receipts and claims, reliability, report diffs and the CI gate), MCP, the testing doubles |
+| `references/control-layer.md` | `ControlPolicy` in code and as a linted, hot-reloaded file (`locus policy`), `Action`, `admit`, `gate_tool`, the tool-call judge, tool-call integrity, approvals in a file or a database and the holds a checkpoint carries, authorities, interrupt and resume, `AuditTrail` with signed exports, Oracle immutable tables and object-storage anchors, permission rules, shell parsing, spend ledgers, the governed wrapper |
+| `references/multi-agent-harness-deploy.md` | each shape with code, `StateGraph` primitives, A2A, DeepAgent, the harness and its backends, the box runner, `AgentServer` with threads, resumable runs, the live socket and the AG-UI and Vercel AI SDK adapters, the command line, observability |
+| `references/providers-memory-rag.md` | every provider prefix and its environment, OCI transports (`store` modes, Zero Data Retention, reasoning, native compaction) and errors, checkpointers and backends, memory managers, Oracle Database 26ai, embeddings, vector stores, rerankers |
 | `references/extending-and-advanced.md` | subagents, voice sessions, external hooks, tool sandboxes, writing a model provider, the ReAct loop, core protocols, settings, events and errors, DeepAgent internals, graph evaluation, decision providers, router runnables, delta checkpointers, the runner, rogue and codex modules |
 
 The documentation site is <https://locusagents.ai/>; <https://locusagents.ai/llms.txt>

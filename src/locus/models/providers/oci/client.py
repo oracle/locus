@@ -52,6 +52,7 @@ class OCIAuthType(StrEnum):
     SESSION_TOKEN = "session_token"  # noqa: S105 — alias for SECURITY_TOKEN, not a secret
     INSTANCE_PRINCIPAL = "instance_principal"
     RESOURCE_PRINCIPAL = "resource_principal"
+    OKE_WORKLOAD_IDENTITY = "oke_workload_identity"
 
 
 class OCIClientConfig(BaseModel):
@@ -116,6 +117,7 @@ class OCIClient:
             if self.config.auth_type in (
                 OCIAuthType.INSTANCE_PRINCIPAL,
                 OCIAuthType.RESOURCE_PRINCIPAL,
+                OCIAuthType.OKE_WORKLOAD_IDENTITY,
             ):
                 self._oci_config = {}
             else:
@@ -169,8 +171,8 @@ class OCIClient:
         if auth_type == OCIAuthType.INSTANCE_PRINCIPAL:
             return self._create_instance_principal_client()
 
-        # Resource principal - for OCI functions
-        if auth_type == OCIAuthType.RESOURCE_PRINCIPAL:
+        # Resource principal - OCI Functions, Container Instances, OKE workload identity
+        if auth_type in (OCIAuthType.RESOURCE_PRINCIPAL, OCIAuthType.OKE_WORKLOAD_IDENTITY):
             return self._create_resource_principal_client()
 
         # Security token - for session-based auth
@@ -267,12 +269,15 @@ class OCIClient:
     def _create_resource_principal_client(self) -> GenerativeAiInferenceClient:
         """Create client with resource principal authentication.
 
-        Used when running in OCI Functions or other resource principal contexts.
+        Used in OCI Functions, Container Instances and OKE workload identity;
+        :func:`locus._oci_auth.resource_principal_signer` picks the signer the
+        platform supports.
         """
-        from oci.auth import signers
         from oci.generative_ai_inference import GenerativeAiInferenceClient
 
-        signer = signers.get_resource_principals_signer()
+        from locus._oci_auth import resource_principal_signer
+
+        signer = resource_principal_signer(str(self.config.auth_type))
 
         return GenerativeAiInferenceClient(
             config={},

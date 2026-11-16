@@ -115,6 +115,12 @@ server = [
     "uvicorn[standard]>=0.27",
 ]
 
+# ``locus deploy``: the values file is YAML (src/locus/deploy/).
+deploy = ["pyyaml>=6.0"]
+
+# The AgentServer behind an OCI Function (src/locus/deploy/functions.py): the Fn FDK.
+functions = ["fdk>=0.1.80"]
+
 # Checkpoint backends — one extra per backend under
 # src/locus/memory/backends/ that needs a runtime dep. Keep in sync.
 redis = ["redis>=5.0"]
@@ -210,6 +216,18 @@ checkpoints = [
 pgvector = ["asyncpg>=0.29", "numpy>=1.26"]
 qdrant = ["qdrant-client>=1.9"]
 chroma = ["chromadb>=0.5"]
+# Milvus Lite (embedded, file-backed) rides the pymilvus extra; a Milvus
+# server or Zilliz Cloud needs only pymilvus itself.
+milvus = ["pymilvus[milvus-lite]>=2.5"]
+# 4.16 introduced ``Configure.Vectors.self_provided`` (the collection config
+# the store creates); embedded Weaviate downloads its binary on first use.
+weaviate = ["weaviate-client>=4.16"]
+elasticsearch = ["elasticsearch>=8.12"]
+# Redis Query Engine (Redis Stack / Redis 8) vector fields over redis-py.
+redis-vector = ["redis>=5.0"]
+pinecone = ["pinecone>=5"]
+# ``pymongo.AsyncMongoClient`` is GA from 4.13.
+mongodb = ["pymongo>=4.13"]
 
 # Cohere direct API (rerank + embeddings) and a local cross-encoder
 # reranker. Neither requires any cloud vendor SDK.
@@ -219,6 +237,7 @@ rerank = ["cohere>=5.0", "sentence-transformers>=3.0"]
 
 # Full RAG stack — every vector store + embedder + reranker Locus ships.
 # Use this if you want to pick a store at runtime rather than up front.
+# (The Jina, Voyage and LLM rerankers need nothing beyond the core install.)
 rag = [
     "asyncpg>=0.29",
     "opensearch-py>=2.4",
@@ -227,6 +246,12 @@ rag = [
     "requests>=2.31",
     "qdrant-client>=1.9",
     "chromadb>=0.5",
+    "pymilvus[milvus-lite]>=2.5",
+    "weaviate-client>=4.16",
+    "elasticsearch>=8.12",
+    "redis>=5.0",
+    "pinecone>=5",
+    "pymongo>=4.13",
     "openai>=1.50,<3",
     "cohere>=5.0",
     "sentence-transformers>=3.0",
@@ -616,6 +641,9 @@ ignore = [
 ]
 # ``locus a2a card``: the same command, registered from the a2a package.
 "src/locus/a2a/cli.py" = ["T201"]
+"src/locus/deploy/*.py" = [
+    "T201",    # print — `locus deploy` and the container entrypoint report on stdout/stderr
+]
 "src/locus/memory/backends/**/*.py" = [
     "S608",    # SQL built from validated identifiers (regex-checked at init)
     "PYI063",  # PEP 570 positional-only — `__context` is Pydantic's spelling
@@ -770,6 +798,11 @@ module = [
     "botocore.*",
     "qdrant_client.*",
     "chromadb.*",
+    "pymilvus.*",
+    "weaviate.*",
+    "elasticsearch.*",
+    "pinecone.*",
+    "pymongo.*",
     "cohere.*",
     "sentence_transformers.*",
     "mem0.*",
@@ -794,6 +827,9 @@ module = [
     "grpc.*",
     "grpc_status",
     "grpc_status.*",
+    # The Fn FDK behind ``locus.deploy.functions``; untyped, imported on use.
+    "fdk",
+    "fdk.*",
     # The coding harness's SSH, E2B and Daytona backends import these lazily.
     "paramiko",
     "paramiko.*",

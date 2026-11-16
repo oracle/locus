@@ -268,7 +268,7 @@ class OCIEmbeddings(BaseModel, BaseEmbedding):
         # explicit principal-based modes (which never read a profile) are
         # left alone.
         if (
-            auth_type not in ("instance_principal", "resource_principal")
+            auth_type not in ("instance_principal", "resource_principal", "oke_workload_identity")
             and "security_token_file" in config_dict
             and "user" not in config_dict
         ):
@@ -305,8 +305,10 @@ class OCIEmbeddings(BaseModel, BaseEmbedding):
                 signer=signer,
                 service_endpoint=endpoint,
             )
-        elif auth_type == "resource_principal":
-            signer = oci.auth.signers.get_resource_principals_signer()
+        elif auth_type in ("resource_principal", "oke_workload_identity"):
+            from locus._oci_auth import resource_principal_signer
+
+            signer = resource_principal_signer(str(auth_type), oci_module=oci)
             self._client = GenerativeAiInferenceClient(
                 config={},
                 signer=signer,

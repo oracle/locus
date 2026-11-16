@@ -116,6 +116,44 @@ policy.
   skills, streaming capability and the transports named (`--transport`,
   `--grpc-port`, `--push`); `--serve` runs the server with that card.
   `card_from_agent()` is the same in code.
+- **Six more vector stores.** `MilvusVectorStore` (Milvus server, Zilliz
+  Cloud, or embedded Milvus Lite from a local file), `WeaviateVectorStore`
+  (local, Weaviate Cloud or embedded), `ElasticsearchVectorStore`
+  (`dense_vector` k-NN with a `flattened` metadata field),
+  `RedisVectorStore` (Redis Query Engine `VECTOR` fields with `TAG`
+  filters on declared metadata keys), `MongoDBAtlasVectorStore`
+  (`$vectorSearch`, `ensure_index()` creates the Atlas index) and
+  `PineconeVectorStore` (serverless indexes). Each sits behind the existing
+  `VectorStore` protocol with `metadata_filter` and has its own extra:
+  `[milvus]`, `[weaviate]`, `[elasticsearch]`, `[redis-vector]`,
+  `[mongodb]`, `[pinecone]`; `[rag]` includes them all. The shared
+  conformance suite (`tests/unit/rag/store_conformance.py`) runs
+  unconditionally against the in-process stores — in-memory, Qdrant, Chroma
+  and Milvus Lite — and against the served ones (Weaviate, Elasticsearch,
+  Redis, MongoDB Atlas, Pinecone) only when the environment points at a
+  running service. Closes #460.
+- **Three more rerankers.** `LLMReranker` has any registered chat model
+  (`"oci:openai.gpt-4.1"`, or a model object) grade the candidates in
+  batches from a fenced prompt, so reranking needs no dedicated endpoint;
+  `JinaReranker` and `VoyageReranker` call the hosted rerank APIs over
+  `httpx` with `JINA_API_KEY` / `VOYAGE_API_KEY`.
+- **Hybrid search, one switch.** `RAGRetriever(hybrid=True, hybrid_alpha=…)`
+  calls `store.hybrid_search(query_text, query_embedding, alpha=…)` on
+  stores implementing the new `HybridSearchable` protocol — Oracle
+  Database 26ai, OpenSearch, Elasticsearch, Weaviate and Milvus
+  (`enable_hybrid=True`) — with the same `alpha` meaning everywhere
+  (`1.0` vector only, `0.0` lexical only). Stores without hybrid search
+  fall back to vector-only search with one logged warning;
+  `supports_hybrid_search(store)` and `retriever.hybrid_supported` report
+  the capability, `retrieve(..., hybrid=…)` overrides it per call and
+  `hybrid_kwargs` passes store-specific options such as Oracle's
+  `use_text_index`. `OpenSearchVectorStore` gains `hybrid_search`
+  (k-NN and BM25 legs blended client-side, no search pipeline needed).
+- **Notebook 52** adds the keyless Milvus Lite path with hybrid search and
+  the LLM reranker, and `examples/config.get_embedder()` builds
+  `OCIEmbeddings` when `LOCUS_EMBEDDING_PROVIDER=oci` (or when only an OCI
+  profile is configured), so the RAG notebooks run on OCI Generative AI
+  without an OpenAI key.
 
 - **Evaluators over the run's path.** `TrajectoryMatch` (`strict`,
   `unordered` or `subset`), `ToolSelection` (recall and precision over the
@@ -161,6 +199,34 @@ policy.
   and `locus eval trend --store <spec> --suite <name>` prints the trend,
   exiting 1 when the newest report is worse than the one before it. Notebook
   56 gains a trajectory case and a simulated-user case.
+- **`locus deploy`: the agent server on OCI.** `locus deploy init` writes a
+  deployment directory: Terraform roots for OCI Container Instances, OKE (a
+  bundled Helm chart installed through the Helm provider) and OCI Functions,
+  a registry root for the OCIR repository, a Dockerfile per image shape
+  (Oracle Linux 9, Python 3.12, non-root) and `locus-deploy.yaml`, the one
+  file a person edits. `plan`, `apply` and `destroy` run Terraform for the
+  chosen target; `apply` builds the image for the chosen architecture and
+  pushes it between the registry root and the target root; `plan`, `apply`
+  and `destroy` take `--dry-run` to print every command. `init` never
+  replaces an existing Dockerfile or `.dockerignore` without `--force`, only
+  appends to a `.gitignore`, writes a `.dockerignore` that keeps Terraform
+  state and tfvars out of the image, and takes `--sdk-wheel` to ship a
+  locus-sdk build that is not on PyPI. The roots share one set of variables
+  for the Oracle AI Database checkpointer, OCI Cache, OCI Object Storage and
+  OCI Application Performance Monitoring, authenticate the container with its
+  own principal (resource principal, instance principal or OKE workload
+  identity, the new `oke_workload_identity` auth type that every OCI auth
+  switch in the SDK accepts and that `resource_principal` detects on a pod)
+  and take secrets as OCI Vault secret OCIDs: the image starts with
+  `python -m locus.deploy.entrypoint`, which resolves every
+  `<VAR>_SECRET_OCID` into `<VAR>` before uvicorn. The generated server
+  refuses to start without its bearer key unless `allow_unauthenticated` is
+  set, and a public Container Instance needs `server_api_key_secret_id` or
+  that opt-out. `locus.deploy.functions` runs the `AgentServer` app behind
+  the Fn FDK, so the same server answers `oci fn function invoke` and API
+  Gateway requests. New extras: `deploy` (PyYAML) and `functions` (the Fn
+  FDK). The guide is [Deploy to OCI](docs/how-to/deploy-oci.md), with sizing
+  and cost notes and a deploy-on-tag workflow.
 - **`OracleAuditTrail`.** The audit trail on an Oracle AI Database immutable
   table (`CREATE IMMUTABLE TABLE … NO DROP UNTIL n DAYS IDLE NO DELETE UNTIL
   n DAYS AFTER INSERT`), or a blockchain table with `table_kind="blockchain"`.
@@ -444,6 +510,19 @@ policy.
   `create_tool_server(tools)` and `LocusMCPServer.build()` are the same from
   Python. The MCP concept page covers the auth flow, shaping precedence,
   elicitation, tracing and the command. (#457)
+- **The Codex skill covers the new surface.** `.agents/skills/locus/` (what
+  `locus codex init` places) teaches the policy file form with `locus policy
+  lint` / `explain` and `PolicyWatcher`, the tool-call judge and
+  `@tool(read_only=True)`, tool-call integrity, the database approval stores,
+  `approval_store()` and `pending_holds()`, `OracleAuditTrail` and the
+  object-storage anchors, the OCI Responses `store="auto"`, Zero Data
+  Retention, `reasoning` and native-compaction controls, the server's threads
+  and runs, `Last-Event-ID` resume, `WS /runs/live` and the AG-UI and Vercel
+  AI SDK adapters, and the evaluation primitives (rubrics, evidence receipts
+  and claims, reliability, report diffs and `EvalGate`), each with a snippet
+  that runs against the installed SDK. The skill test's wire-type exclusion
+  now also covers the A2A JSON-RPC envelope, parameter and push-notification
+  types. (#492)
 
 ### Fixed
 
