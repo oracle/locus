@@ -15,6 +15,7 @@ or a zero-argument function that returns one::
     locus policy lint policy.yaml --environments production staging
     locus policy explain policy.yaml --action '{"name": "refund", "kind": "payment"}'
     locus serve app.py:agent --port 8000
+    locus a2a card app.py:agent --url https://agent.example.com -o agent-card.json
     locus codex init                 # the Locus skill for Codex, in this project
     locus codex run "build an agent that triages tickets with a gated refund tool"
 
@@ -500,6 +501,10 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--port", type=int, default=8000)
     serve.add_argument("--api-key", help="bearer key; or set LOCUS_SERVER_API_KEY")
     serve.set_defaults(handler=_cmd_serve)
+
+    from locus.a2a.cli import register_a2a_commands  # noqa: PLC0415
+
+    register_a2a_commands(commands, load_agent)
     codex = commands.add_parser(
         "codex", help="install the Locus skill for Codex and start Codex with it"
     )

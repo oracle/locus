@@ -25,6 +25,7 @@ dependencies = [
     "uvicorn[standard]>=0.27",
     "httpx>=0.27",
     "pytest>=8.0",
+    "pytest-asyncio>=0.24",
 ]
 
 [tool.hatch.envs.default.env-vars]
@@ -44,3 +45,4 @@ test = "pytest tests/ {args:-v}"
 # repo's pyproject and reads config for plugins this env doesn't have.
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "auto"

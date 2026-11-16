@@ -10,6 +10,41 @@ policy.
 
 ### Added
 
+- **A2A: every binding the specification defines.** Next to JSON-RPC,
+  `A2AServer` serves the HTTP+JSON binding (`POST /message:send`,
+  `GET /tasks/{id}`, `POST /tasks/{id}:cancel`, the push-config resources,
+  server-sent events for `message:stream` and `tasks/{id}:subscribe`) on the
+  same app, and the gRPC binding (`lf.a2a.v1.A2AService`, all eleven RPCs)
+  on `grpc_port`, behind the new `a2a-grpc` extra. The card's
+  `supportedInterfaces` lists what is on (`transports=`); every binding lands
+  in one set of handlers and reports the same `ErrorInfo` reason on a
+  failure. `A2AClient.connect(url, prefer=[...])` / `from_card(card, ...)`
+  pick a binding from the card in preference order and move to the next one
+  when an interface is unreachable; `binding=` selects one outright.
+  `SubscribeToTask` now streams a task's live events after the snapshot.
+- **A2A push notifications.** `A2AServer(push_notifications=
+  PushNotificationSettings(...))` delivers every status and artifact change
+  to the webhooks a task registers (in `SendMessage`'s configuration or with
+  the `*TaskPushNotificationConfig` methods), with the token and
+  `Authorization` the config asks for, retries, and a URL policy that refuses
+  private addresses unless told otherwise. `PushNotificationSigner` signs
+  each body (Ed25519) and publishes the key at `/.well-known/jwks.json`;
+  `PushNotificationReceiver` is the client-side webhook that checks the token
+  and the signature. `send_message(..., push_notification_config=...,
+  blocking=False)` returns the task at once and runs it in the background.
+- **A2A interrupt mapping.** A run that pauses for a person — `ask_user`, or
+  an approval hold from `gate_tool(on_refusal="interrupt")` — surfaces as the
+  task state `input-required` with the question (or the hold summary) as the
+  status message. The peer's next message on the task resumes the run through
+  `Agent.resume()`; for a hold its first word decides (`approve` / `deny`),
+  recorded on the approval store passed as `A2AServer(approvals=...)`. An
+  approved hold performs the call once; a denied hold ends the task
+  `rejected`.
+- **`locus a2a card AGENT`** writes a v1.0 agent card from the agent's tools,
+  skills, streaming capability and the transports named (`--transport`,
+  `--grpc-port`, `--push`); `--serve` runs the server with that card.
+  `card_from_agent()` is the same in code.
+
 - **`OracleAuditTrail`.** The audit trail on an Oracle AI Database immutable
   table (`CREATE IMMUTABLE TABLE … NO DROP UNTIL n DAYS IDLE NO DELETE UNTIL
   n DAYS AFTER INSERT`), or a blockchain table with `table_kind="blockchain"`.
