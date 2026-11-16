@@ -30,6 +30,15 @@ What this notebook covers:
   every reading passed, and `consistency` flags readings that disagreed.
 - Part 5, two reports of one suite: saved, loaded, diffed with
   `diff_reports`, and gated with `EvalGate` against the baseline.
+- Part 6, the path: `TrajectoryMatch`, `ToolSelection` and
+  `ArgumentCorrectness` on the case read which tools an access-review agent
+  called, in what order and with what arguments, with no model call; a
+  careless agent that grants raw access before reading the classification
+  fails all three.
+- Part 7, a simulated user: a `SimulatedUser` persona and goal on the case,
+  a model playing the requester against WARDEN turn by turn within a turn
+  budget, and the whole conversation graded, with the transcript and the
+  reason it stopped on the result.
 
 The three `EvalCase` objects go to the `EvalRunner`, which calls WARDEN
 once per case with the case's prompt, grades each reply against the checks
@@ -68,6 +77,21 @@ fails on the regression:
 
 {{ locus_source examples/notebook_56_evaluation.py::example_diff_and_gate }}
 
+Part 6 runs one access request through a careful agent and a careless one.
+Three evaluators on the case read the path: the classification must be
+read before access is granted (`subset` order), raw export is forbidden,
+and the grant must name the aggregate scope, compared under the tool's own
+schema:
+
+{{ locus_source examples/notebook_56_evaluation.py::example_trajectory }}
+
+Part 7 writes the requester as a persona and a goal. The simulator plays
+them against WARDEN, which asks what the data is for before deciding; the
+conversation ends on the goal, a stop phrase or the turn budget, and the
+checks read every reply the agent gave:
+
+{{ locus_source examples/notebook_56_evaluation.py::example_simulated_user }}
+
 ## Run it
 
 ```bash
@@ -77,7 +101,9 @@ python examples/notebook_56_evaluation.py
 Model choice comes from `examples/config.py`: OCI Generative AI when
 `~/.oci/config` has a usable profile, otherwise the bundled mock model, so the
 example also runs offline with no credentials. Set `LOCUS_MODEL_PROVIDER`
-(`oci`, `openai`, `anthropic` or `mock`) to force one.
+(`oci`, `openai`, `anthropic` or `mock`) to force one. Part 7's requester is
+played by the secondary model slot (`LOCUS_MODEL_ID_B`) when a provider is
+configured, and by a scripted requester offline.
 
 To run offline regardless of the local OCI configuration:
 

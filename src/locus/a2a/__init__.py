@@ -13,9 +13,12 @@ Wire surface served by :class:`A2AServer`:
 - ``GET  /.well-known/agent-card.json`` — public Agent Card (spec §5.5)
 - ``POST /``                            — JSON-RPC 2.0 method dispatch
   for A2A v1.0 methods (``SendMessage``, ``SendStreamingMessage``,
-  ``GetTask``, ``ListTasks``, ``CancelTask``, ``SubscribeToTask``)
-  and compatibility methods (``message/send``, ``message/stream``,
-  ``tasks/get``, ``tasks/cancel``)
+  ``GetTask``, ``ListTasks``, ``CancelTask``, ``SubscribeToTask``, the
+  push-notification config methods) and compatibility methods
+  (``message/send``, ``message/stream``, ``tasks/get``, ``tasks/cancel``)
+- The HTTP+JSON binding (``POST /message:send``, ``GET /tasks/{id}``, ...)
+  and, with ``grpc_port``, the gRPC binding ``lf.a2a.v1.A2AService``
+- Push notifications to registered webhooks (:mod:`locus.a2a.push`)
 - Backwards-compat: ``GET /agent-card``, ``POST /a2a/{invoke,stream}``
 
 Re-exports the spec models so consumers can do ``from locus.a2a import
@@ -24,12 +27,19 @@ AgentCard, AgentSkill, Message, TextPart, Task`` directly. The
 public API for cross-framework interoperability.
 """
 
+from locus.a2a.card import card_from_agent, write_card
 from locus.a2a.protocol import (
     A2AClient,
     A2AMessage,
     A2ARequest,
     A2AResponse,
     A2AServer,
+)
+from locus.a2a.push import (
+    PushNotification,
+    PushNotificationReceiver,
+    PushNotificationSettings,
+    PushNotificationSigner,
 )
 from locus.a2a.spec import (
     AgentCapabilities,
@@ -63,8 +73,13 @@ from locus.a2a.spec import (
     TextPart,
 )
 from locus.a2a.spec_v1 import (
+    A2A_PROTOCOL_BINDINGS,
     A2A_V1_PROTOCOL_VERSION,
+    BINDING_GRPC,
+    BINDING_HTTP_JSON,
+    BINDING_JSONRPC,
     A2AV1Artifact,
+    A2AV1AuthenticationInfo,
     A2AV1CancelTaskRequest,
     A2AV1GetTaskRequest,
     A2AV1ListTasksRequest,
@@ -78,15 +93,22 @@ from locus.a2a.spec_v1 import (
     A2AV1StreamResponse,
     A2AV1Task,
     A2AV1TaskArtifactUpdateEvent,
+    A2AV1TaskPushNotificationConfig,
     A2AV1TaskState,
     A2AV1TaskStatus,
     A2AV1TaskStatusUpdateEvent,
 )
+from locus.a2a.transports import A2AClientError, A2ATransportUnavailableError
 
 
 __all__ = [
+    "A2A_PROTOCOL_BINDINGS",
     "A2A_V1_PROTOCOL_VERSION",
+    "BINDING_GRPC",
+    "BINDING_HTTP_JSON",
+    "BINDING_JSONRPC",
     "A2AV1Artifact",
+    "A2AV1AuthenticationInfo",
     "A2AV1CancelTaskRequest",
     "A2AV1GetTaskRequest",
     "A2AV1ListTasksRequest",
@@ -100,12 +122,23 @@ __all__ = [
     "A2AV1StreamResponse",
     "A2AV1Task",
     "A2AV1TaskArtifactUpdateEvent",
+    "A2AV1TaskPushNotificationConfig",
     "A2AV1TaskState",
     "A2AV1TaskStatus",
     "A2AV1TaskStatusUpdateEvent",
     # Server / client.
     "A2AClient",
+    "A2AClientError",
     "A2AServer",
+    "A2ATransportUnavailableError",
+    # Push notifications.
+    "PushNotification",
+    "PushNotificationReceiver",
+    "PushNotificationSettings",
+    "PushNotificationSigner",
+    # Agent card generation.
+    "card_from_agent",
+    "write_card",
     # Spec models.
     "AgentCapabilities",
     "AgentCard",

@@ -16,8 +16,11 @@ or a zero-argument function that returns one::
     locus policy explain policy.yaml --action '{"name": "refund", "kind": "payment"}'
     locus serve app.py:agent --port 8000
     locus mcp serve app.py:agent     # the agent as an MCP server over stdio
+    locus a2a card app.py:agent --url https://agent.example.com -o agent-card.json
     locus codex init                 # the Locus skill for Codex, in this project
     locus codex run "build an agent that triages tickets with a gated refund tool"
+    locus eval run evals/cases.json --agent app.py:agent --store reports/
+    locus eval trend --store reports/ --suite cases --last 5
     locus deploy init my-agent --target container-instances --compartment-id ocid1... --region eu-frankfurt-1
     locus deploy apply my-agent  # builds the image, pushes it to OCIR, applies Terraform
 
@@ -437,10 +440,36 @@ def _cmd_eval(args: argparse.Namespace) -> int:
     print(report.summary())
     if args.report:
         print(f"report written to {report.save(args.report)}")
+    if args.store:
+        store = _open_report_store(args.store)
+        suite = args.suite or Path(args.cases).stem
+        stored = store.put(report, suite=suite)
+        print(f"report {stored.report_id} stored under suite {suite!r} in {store.spec}")
     baseline = read(args.baseline) if args.baseline else None
     result = _gate_from_args(args).check(report, baseline=baseline)
     print(result.summary())
     return 0 if result.passed else 1
+
+
+def _open_report_store(spec: str | None) -> Any:
+    from locus.evaluation import report_store  # noqa: PLC0415
+
+    try:
+        return report_store(spec)
+    except (ValueError, ImportError) as exc:
+        raise CLIError(str(exc)) from exc
+
+
+def _cmd_eval_trend(args: argparse.Namespace) -> int:
+    from locus.evaluation import trend  # noqa: PLC0415
+
+    store = _open_report_store(args.store)
+    try:
+        result = trend(store, suite=args.suite, last=args.last, fingerprint=args.fingerprint)
+    except Exception as exc:  # noqa: BLE001 — a store that cannot answer is a usage problem here
+        raise CLIError(f"cannot read the store {store.spec}: {exc}") from exc
+    print(result.to_markdown() if args.markdown else result.summary())
+    return 1 if result.regressed else 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -569,6 +598,9 @@ def build_parser() -> argparse.ArgumentParser:
     mcp_serve.add_argument("--name", help="the server name clients see")
     mcp.set_defaults(handler=_cmd_mcp)
 
+    from locus.a2a.cli import register_a2a_commands  # noqa: PLC0415
+
+    register_a2a_commands(commands, load_agent)
     codex = commands.add_parser(
         "codex", help="install the Locus skill for Codex and start Codex with it"
     )
@@ -622,6 +654,15 @@ def build_parser() -> argparse.ArgumentParser:
     eval_run.add_argument("--concurrency", type=int, default=4, help="cases run at once")
     eval_run.add_argument("--tags", nargs="*", default=[], help="only cases carrying one of these")
     eval_run.add_argument("--report", help="write the report as JSON here")
+    eval_run.add_argument(
+        "--store",
+        help="also keep the report in a store: a directory, file://, oracle://, oci:// or "
+        "s3:// (see locus.evaluation.stores)",
+    )
+    eval_run.add_argument(
+        "--suite",
+        help="the suite name the stored report is filed under (default: the cases file stem)",
+    )
     eval_run.add_argument("--baseline", help="a saved report to gate regressions against")
     _add_gate_arguments(eval_run)
     eval_run.set_defaults(handler=_cmd_eval)
@@ -649,6 +690,21 @@ def build_parser() -> argparse.ArgumentParser:
     eval_summary.add_argument("--markdown", action="store_true", help="print a Markdown table")
     eval_summary.set_defaults(handler=_cmd_eval)
 
+    eval_trend = eval_actions.add_parser(
+        "trend", help="compare the last reports of one suite kept in a store"
+    )
+    eval_trend.add_argument(
+        "--store",
+        help="the report store: a directory, file://, oracle://, oci:// or s3:// "
+        "(default: $LOCUS_EVAL_STORE)",
+    )
+    eval_trend.add_argument(
+        "--suite", required=True, help="the suite name reports were filed under"
+    )
+    eval_trend.add_argument("--last", type=int, default=10, help="how many reports (default 10)")
+    eval_trend.add_argument("--fingerprint", help="only reports of this suite fingerprint")
+    eval_trend.add_argument("--markdown", action="store_true", help="print a Markdown table")
+    eval_trend.set_defaults(handler=_cmd_eval_trend)
     from locus.deploy.cli import add_deploy_command  # noqa: PLC0415
 
     add_deploy_command(commands)

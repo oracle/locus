@@ -22,6 +22,33 @@ To publish a compiled `StateGraph` instead of an agent, wrap it in
 
 ::: locus.a2a.protocol.A2AServer
 ::: locus.a2a.protocol.A2AClient
+::: locus.a2a.transports.A2AClientError
+::: locus.a2a.transports.A2ATransportUnavailableError
+
+## Transports
+
+Three protocol bindings, one set of handlers. The server advertises what it
+serves in the card's `supportedInterfaces`; the client orders those by
+preference and moves on when one is unreachable.
+
+::: locus.a2a.spec_v1.A2A_PROTOCOL_BINDINGS
+::: locus.a2a.transports.select_interfaces
+::: locus.a2a.transports.ClientTransport
+::: locus.a2a.transports.JsonRpcClientTransport
+::: locus.a2a.transports.HttpJsonClientTransport
+::: locus.a2a.grpc_binding.GrpcClientTransport
+::: locus.a2a.grpc_binding.A2AGrpcService
+::: locus.a2a.grpc_binding.build_grpc_server
+::: locus.a2a.rest.mount_http_json
+
+## Agent card from an agent
+
+`locus a2a card AGENT` on the command line; the same function in code.
+
+::: locus.a2a.card.card_from_agent
+::: locus.a2a.card.skills_from_agent
+::: locus.a2a.card.interfaces_for
+::: locus.a2a.card.write_card
 
 ## Agent cards — discovery
 
@@ -101,7 +128,21 @@ text, a file, or structured data, and the `kind` field decides which.
 ## Push notifications
 
 For work long enough that polling is the wrong shape: the peer calls you back
-when the task changes.
+when the task changes. The server side delivers (`PushNotificationSettings`
+on `A2AServer`, signing with `PushNotificationSigner`); the client side
+receives (`PushNotificationReceiver`).
+
+::: locus.a2a.spec_v1.A2AV1TaskPushNotificationConfig
+::: locus.a2a.spec_v1.A2AV1AuthenticationInfo
+::: locus.a2a.push.PushNotificationSettings
+::: locus.a2a.push.PushNotificationSigner
+::: locus.a2a.push.PushNotificationDispatcher
+::: locus.a2a.push.PushNotificationReceiver
+::: locus.a2a.push.PushNotification
+::: locus.a2a.push.verify_signature
+::: locus.a2a.push.validate_push_url
+
+The pre-v1 spellings of the config, kept for callers that still build them:
 
 ::: locus.a2a.spec.PushNotificationConfig
 ::: locus.a2a.spec.TaskPushNotificationConfig

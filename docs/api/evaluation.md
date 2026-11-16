@@ -104,6 +104,57 @@ Pure functions over verdicts and grade pairs. `EvalRunner` calls
 ::: locus.evaluation.reliability.ReliabilityGates
 ::: locus.evaluation.reliability.HoldReason
 
+## Scoring the path
+
+Three evaluators read the run's path off the evidence ledger with no model
+call: the sequence of tool calls, the set of tools chosen, the arguments of one
+tool's call compared under its schema. Each is data on the case
+(`evaluators=[...]`), one named check, and a typed verdict with provenance.
+
+::: locus.evaluation.evaluators.TrajectoryMatch
+::: locus.evaluation.evaluators.ToolSelection
+::: locus.evaluation.evaluators.ArgumentCorrectness
+::: locus.evaluation.evaluators.EvaluatorVerdict
+::: locus.evaluation.evaluators.EvaluatorProvenance
+::: locus.evaluation.evaluators.ArgumentMismatch
+
+## A simulated user
+
+A persona and a goal on the case; a model plays that user against the agent
+within a turn budget, and the whole conversation is graded.
+
+::: locus.evaluation.simulator.SimulatedUser
+::: locus.evaluation.simulator.UserSimulator
+::: locus.evaluation.simulator.Conversation
+::: locus.evaluation.simulator.ConversationTurn
+::: locus.evaluation.simulator.SimulatorUnavailableError
+
+## Online evaluation
+
+Live runs sampled off the event bus, graded in the background with the
+suite's checks, folded into an ordinary report.
+
+::: locus.evaluation.online.OnlineEvaluator
+::: locus.evaluation.online.OnlineBudget
+::: locus.evaluation.online.RecordedRun
+::: locus.evaluation.online.RecordedToolCall
+::: locus.evaluation.online.every_nth
+::: locus.evaluation.online.fraction
+::: locus.evaluation.framework.EvalRunner.agrade
+
+## Report stores and the trend
+
+::: locus.evaluation.stores.report_store
+::: locus.evaluation.stores.ReportStore
+::: locus.evaluation.stores.StoredReport
+::: locus.evaluation.stores.FileReportStore
+::: locus.evaluation.stores.OracleReportStore
+::: locus.evaluation.stores.OCIBucketReportStore
+::: locus.evaluation.stores.S3ReportStore
+::: locus.evaluation.stores.trend
+::: locus.evaluation.stores.Trend
+::: locus.evaluation.stores.TrendPoint
+
 ## Asserting the order, not just the membership
 
 `expected_tools` asks whether a tool appeared *somewhere* in the run. It cannot
