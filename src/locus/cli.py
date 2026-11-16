@@ -17,6 +17,8 @@ or a zero-argument function that returns one::
     locus serve app.py:agent --port 8000
     locus codex init                 # the Locus skill for Codex, in this project
     locus codex run "build an agent that triages tickets with a gated refund tool"
+    locus deploy init my-agent --target container-instances --compartment-id ocid1... --region eu-frankfurt-1
+    locus deploy apply my-agent  # builds the image, pushes it to OCIR, applies Terraform
 
 Exit codes: 0 success, 1 a check or decision failed, 2 usage error, 3 the run is
 paused waiting for a person.
@@ -603,6 +605,10 @@ def build_parser() -> argparse.ArgumentParser:
     eval_summary.add_argument("report")
     eval_summary.add_argument("--markdown", action="store_true", help="print a Markdown table")
     eval_summary.set_defaults(handler=_cmd_eval)
+
+    from locus.deploy.cli import add_deploy_command  # noqa: PLC0415
+
+    add_deploy_command(commands)
     return parser
 
 

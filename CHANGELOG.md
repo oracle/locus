@@ -10,6 +10,26 @@ policy.
 
 ### Added
 
+- **`locus deploy`: the agent server on OCI.** `locus deploy init` writes a
+  deployment directory: Terraform roots for OCI Container Instances, OKE (a
+  bundled Helm chart installed through the Helm provider) and OCI Functions,
+  a registry root for the OCIR repository, a Dockerfile per image shape
+  (Oracle Linux 9, Python 3.12, non-root) and `locus-deploy.yaml`, the one
+  file a person edits. `plan`, `apply` and `destroy` run Terraform for the
+  chosen target; `apply` builds the image for the chosen architecture and
+  pushes it between the registry root and the target root; `--dry-run`
+  prints every command. The roots share one set of variables for the Oracle
+  AI Database checkpointer, OCI Cache, OCI Object Storage and OCI
+  Application Performance Monitoring, authenticate the container with its
+  own principal (resource principal, instance principal or OKE workload
+  identity) and take secrets as OCI Vault secret OCIDs: the image starts with
+  `python -m locus.deploy.entrypoint`, which resolves every
+  `<VAR>_SECRET_OCID` into `<VAR>` before uvicorn. `locus.deploy.functions`
+  runs the `AgentServer` app behind the Fn FDK, so the same server answers
+  `oci fn function invoke` and API Gateway requests. New extras: `deploy`
+  (PyYAML) and `functions` (the Fn FDK). The guide is
+  [Deploy to OCI](docs/how-to/deploy-oci.md), with sizing and cost notes and
+  a deploy-on-tag workflow.
 - **`OracleAuditTrail`.** The audit trail on an Oracle AI Database immutable
   table (`CREATE IMMUTABLE TABLE … NO DROP UNTIL n DAYS IDLE NO DELETE UNTIL
   n DAYS AFTER INSERT`), or a blockchain table with `table_kind="blockchain"`.

@@ -123,6 +123,9 @@ LOCUS_NOTEBOOK_BOOT=1 python examples/notebook_65_agent_server.py
 
 - [Agent Server](../concepts/server.md) — endpoints, authentication and
   thread scoping, human-in-the-loop over `/resume`, deployment.
+- [Deploy to OCI](../how-to/deploy-oci.md) — `locus deploy` puts this
+  server on OCI Container Instances, OKE or OCI Functions from one values
+  file, with the checkpointer, cache and tracing wired through variables.
 - [Checkpointers](../concepts/checkpointers.md) — the backends an
   incident thread can be persisted in, Redis among them.
 - [SSE streaming](notebook_64_sse_streaming.md) — the SSE wire format and

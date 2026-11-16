@@ -18,6 +18,11 @@ Those two credentials serve different trust boundaries. The provider
 credential lets the application call its model. The server key is the
 bearer token clients send to `/invoke`, `/stream`, and thread routes.
 
+On Oracle Cloud Infrastructure, `locus deploy` does the container, serverless
+and Kubernetes paths below from one values file, with Terraform roots for OCI
+Container Instances, OKE and OCI Functions and the managed services wired
+through variables: see [Deploy to OCI](deploy-oci.md).
+
 ## The shape you ship
 
 {{ locus_model_tabs }}
@@ -293,6 +298,8 @@ Honeycomb, Grafana Tempo, and other OTLP-compatible backends. See
 
 ## See also
 
+- [Deploy to OCI](deploy-oci.md) — `locus deploy` to Container Instances,
+  OKE and Functions with Terraform and Helm.
 - [Agent Server](../concepts/server.md) — the FastAPI wrapper in detail.
 - [Conversation Management](../concepts/conversation-management.md) —
   how `thread_id` survives across requests and restarts.
