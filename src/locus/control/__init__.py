@@ -105,8 +105,8 @@ from locus.control.grounded import (
     ground_fingerprint,
     is_finding,
 )
-from locus.control.judge import JudgeVerdict, ToolCallJudge
 from locus.control.holds import PendingHold, holds_of, pending_holds
+from locus.control.judge import JudgeVerdict, ToolCallJudge
 from locus.control.permissions import (
     VERDICT_POLICY,
     PermissionMatch,
