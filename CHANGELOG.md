@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [5.5.0] - 2026-11-16
+
 ### Added
 
 - **Reasoning effort on `OCIResponsesModel`.** `OCIResponsesConfig` takes
