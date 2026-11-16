@@ -28,8 +28,9 @@ specific experiment rather than the current documentation.
 ## Changes and deprecations
 
 The SDK uses semantic versioning as the intended public contract. Deprecations
-are announced in the [changelog](https://github.com/oracle/locus/blob/main/CHANGELOG.md)
-and [deprecation policy](https://github.com/oracle/locus/blob/main/DEPRECATION.md).
+are announced in the [release notes](release-notes.md) (generated from the
+[changelog](https://github.com/oracle/locus/blob/main/CHANGELOG.md)) and the
+[deprecation policy](https://github.com/oracle/locus/blob/main/DEPRECATION.md).
 Before upgrading a production deployment, read both and run your policy,
 approval, idempotency, and persistence tests against the new version.
 

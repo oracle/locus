@@ -10,6 +10,35 @@ policy.
 
 ### Added
 
+- **Durability modes.** `Agent(durability=...)`, and `durability=` on
+  `run`, `arun` and `run_sync`, say when a run writes its iteration
+  checkpoints: `"sync"` (the default, and what every earlier release did)
+  awaits each one before the next model call; `"async"` schedules it and
+  awaits every pending write before the run's final save; `"exit"` writes
+  once at the end of the run. The final save and the save before an
+  interrupt are awaited in every mode. `GraphConfig.durability` does the
+  same for a `StateGraph`'s per-step saves. Every checkpointer gets the
+  modes through the protocol; none needed code of its own.
+  (`locus.agent.durability`)
+- **Tool-effect ledger.** With `durability="async"` or `"exit"` (or
+  `Agent(tool_ledger=True)` in any mode) the executor records every
+  executed tool call in the thread's checkpointer the moment it returns,
+  keyed by `(thread id, step, tool name, canonical arguments)`, as
+  checkpoints of the sidecar thread `<thread_id>~ledger`. A run that
+  continues the turn after a crash — `Agent.continue_turn(thread_id)`,
+  the new `Agent.resume(invocation_id=..., thread_id=...)`, or
+  `Agent.run(..., invocation_id=...)` under the id the crashed run was
+  started with — replays a recorded call instead of running the tool
+  again and runs only the calls with no record; `ToolResult.replayed`
+  marks a replayed result. `continue_turn` now also picks up a turn none
+  of whose checkpoints landed, from the ledger's manifest. Tools not
+  marked idempotent run at least once; `Agent(rerun_idempotent_on_replay=
+  True)` lets `idempotent=True` tools run again on replay instead. The
+  turn's final save clears the ledger. Temporal and DBOS segments record
+  into the same ledger, and `run_agent_segment(kind="continue")` finishes
+  an interrupted segment by replaying it. The checkpointers page has an
+  overhead table for each mode on the in-memory and PostgreSQL
+  checkpointers. (`locus.memory.ledger`; #453)
 - **OpenTelemetry GenAI semantic conventions.** `TelemetryHook` now files a
   run as one `invoke_agent` span, each model call as a `chat` span (CLIENT)
   and each tool call as an `execute_tool` span, with the `gen_ai.*`
@@ -205,6 +234,12 @@ policy.
   `model.zdr_detected` reports the switch and the run's event stream carries a
   `CustomEvent` named `server_state_fallback`. `store=True` still raises;
   `store=False` is unchanged.
+- **Release notes on the documentation site.** `docs/release-notes.md` is
+  generated from this file when the site is built (`hooks/release_notes.py`,
+  the `{{ locus_release_notes }}` token): `Unreleased` first, then every
+  release from 3.0.0 onward with its date, each version anchored by its tag
+  (`#v5.5.0`). Linked from the site footer, the compatibility and about
+  pages, and the README. (#465)
 
 - **Threads and runs on `AgentServer`, with a resumable event stream.**
   `POST /threads` creates a thread, `POST /threads/{id}/runs` starts a turn
@@ -242,6 +277,34 @@ policy.
   longer fails with a 500 for a runnable without `config` (a
   `GraphRunnable`); `DELETE /threads/{id}` forgets the thread's finished
   runs as well.
+- **Tiered compaction.** `TieredCompaction([ClearToolResults, SlidingWindow,
+  Summarize, Relevance])` (`locus.memory.tiers`) runs compaction tiers in
+  order, each at its own trigger as a fraction of the usable window (0.5,
+  0.7, 0.85 and 0.95 by default): stale tool outputs become stubs, the
+  oldest turns past a turn window are dropped, older history is summarised
+  by the existing summariser and, as a last resort, only the turns relevant
+  to the current task stay (by embeddings with an `embedder=`, by recency
+  without one). A `Native` tier hands the stage to a model's own compaction
+  endpoint (`default_tiers(native=True)`). The window comes from the model's
+  metadata, or `context_length=`. Pass `conversation_manager=TieredCompaction(...)`
+  or `CompactionConfig(tiers=True | [...])`; the agent binds the pipeline to
+  its model and window. One `CompactionEvent` per tier that ran, with `tier`
+  and the tokens before and after it; `stage` gains `"window"` and
+  `"relevance"`.
+- **Pinned messages.** `pin(message)` (or `metadata={"pin": True}`) and a
+  `pins=` predicate on `TieredCompaction` keep a message verbatim through
+  every compaction stage and tier, in `ContextCompactor` too; a pinned tool
+  result keeps the call that produced it.
+- **`ToolResultOffload`.** A tool result over `threshold_chars` (16,000) goes
+  to a `ToolResultStore` the moment it is produced; the message keeps a
+  handle and a preview, and the `fetch_tool_result` tool, registered with
+  the offload, reads the stored text back a page at a time. The handle
+  travels in the message text, so it survives checkpoints and compaction (a
+  cleared stub names it). `AgentConfig(tool_result_offload=...)`, or `True`
+  for an in-memory store. The coding harness includes the same
+  `fetch_tool_result` whenever its `HarnessConfig` names a `result_store`,
+  and the `bash` note says so. `ToolResultStore.put()` stores a result
+  whatever its size and returns its key.
 
 ### Changed
 
@@ -308,6 +371,12 @@ policy.
   now reads `response.output_item.added` and `.done` for `function_call` items
   and the accumulator keys by the call id, so streamed and non-streamed turns
   are identical and a streaming agent on the stateless path executes its tools.
+
+### Deprecated
+
+- **The `locus.security` compatibility shim is removed in 6.0.** It keeps forwarding the
+  control-layer names to `locus.control` until then; its warning named a release
+  that has long passed and now says 6.0. Import from `locus.control`.
 
 ### Removed
 
@@ -948,7 +1017,7 @@ policy.
   RAG, grounding, guardrails and the admission gate, observability, serving,
   skills, providers), a "Verified on OCI" section with the 27 October 2026
   model matrix, a compact control-layer section, and a comparison with
-  LangGraph and Strands Agents (new `concepts/compare.md`). The Concepts
+  other agent SDKs (`concepts/compare.md`, since removed). The Concepts
   navigation follows the same order: start here, multi-agent shapes, the
   harness, control layer, providers. The OCI models page carries the verified
   matrix and corrects the Responses-API note (availability is per region).

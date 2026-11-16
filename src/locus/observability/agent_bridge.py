@@ -165,6 +165,9 @@ async def bridge_locus_event(event: LocusEvent) -> None:
             options=event.options,
         )
     elif isinstance(event, CompactionEvent):
+        # ``tier`` only for a tiered compaction: the plain compactor's payload
+        # is unchanged for the consumers that read it.
+        tier = {"tier": event.tier} if event.tier is not None else {}
         await emit(
             EV_AGENT_COMPACTION,
             iteration=event.iteration,
@@ -173,6 +176,7 @@ async def bridge_locus_event(event: LocusEvent) -> None:
             tokens_after=event.tokens_after,
             threshold=event.threshold,
             exhausted=event.exhausted,
+            **tier,
         )
     elif isinstance(event, TerminateEvent):
         await emit(

@@ -18,6 +18,7 @@ Quick links for the most common drops:
 
 - [Code of Conduct](#code-of-conduct)
 - [Getting Started](#getting-started)
+- [Roadmap](#roadmap)
 - [Development Setup](#development-setup)
 - [Notebook authoring](#notebook-authoring)
 - [Making Changes](#making-changes)
@@ -54,6 +55,18 @@ We welcome:
 - **Documentation** - Notebooks, examples, API docs
 - **Tests** - Unit tests, integration tests, benchmarks
 - **Performance** - Optimizations and efficiency improvements
+
+## Roadmap
+
+The roadmap is public and lives on the issue tracker. Every planned item
+carries the [`roadmap` label](https://github.com/oracle/locus/issues?q=is%3Aissue+is%3Aopen+label%3Aroadmap),
+and the pinned [tracking issue](https://github.com/oracle/locus/issues/466)
+groups them into phases with the order they land in. Comment on an item to
+pick it up or to argue for a different scope before you write code.
+
+New to the codebase? The [`good first issue` label](https://github.com/oracle/locus/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
+marks small, self-contained tasks, each with a brief that names the files
+involved and the acceptance criteria.
 
 ## Development Setup
 
