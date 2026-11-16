@@ -34,4 +34,9 @@ regexes = [
   # every ref in the clone, so one such id on any branch failed Secret Scan
   # for every pull request in the repository.
   '''obs_[0-9]{10}[a-z0-9]{14}''',
+  # Placeholder Vault secret OCIDs in the ``locus deploy`` tests and docs
+  # (``ocid1.vaultsecret.oc1..key``): the ``*_SECRET_OCID`` variable names put
+  # them under generic-api-key. A real OCID ends in a long mixed-case
+  # alphanumeric suffix, which this short lowercase-only shape does not match.
+  '''ocid1\.vaultsecret\.oc1\.\.[a-z]{1,12}''',
 ]

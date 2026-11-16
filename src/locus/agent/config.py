@@ -225,6 +225,27 @@ class CompactionConfig(BaseModel):
             "summary is written. Models without one summarise as usual."
         ),
     )
+    tiers: list[Any] | None = Field(
+        default=None,
+        description=(
+            "Compaction tiers (``locus.memory.tiers``), each with its own trigger "
+            "as a fraction of the usable window. When set, the agent runs a "
+            "TieredCompaction over them instead of the two-stage ContextCompactor; "
+            "``True`` uses the default pipeline (clear tool results, sliding window, "
+            "summarise, relevance; with ``native=True`` the model's own compaction "
+            "before the summary). The settings above apply to the tiers that use them."
+        ),
+    )
+
+    @field_validator("tiers", mode="before")
+    @classmethod
+    def _tiers_flag(cls, v: Any) -> Any:
+        if v is True:
+            # The default pipeline; ``native`` is read when the compactor is built.
+            return []
+        if v is False:
+            return None
+        return v
 
 
 class ObservationPackConfig(BaseModel):
@@ -657,6 +678,31 @@ class AgentConfig(BaseModel):
             "tail of the result and cuts the middle."
         ),
     )
+
+    # Offloading by handle: any result over the offload's threshold goes to
+    # its store the moment it is produced, the message keeps a handle and a
+    # preview, and the ``fetch_tool_result`` tool (registered with it) reads
+    # the stored text back. See ``locus.memory.offload.ToolResultOffload``.
+    tool_result_offload: Any | None = Field(
+        default=None,
+        description=(
+            "Optional ToolResultOffload. Results over its threshold are stored "
+            "whole and replaced by a handle and a preview; fetch_tool_result "
+            "reads them back on demand. ``True`` uses an in-memory store with "
+            "the defaults."
+        ),
+    )
+
+    @field_validator("tool_result_offload", mode="before")
+    @classmethod
+    def _tool_result_offload_flag(cls, v: Any) -> Any:
+        if v is True:
+            from locus.memory.offload import ToolResultOffload  # noqa: PLC0415
+
+            return ToolResultOffload()
+        if v is False:
+            return None
+        return v
 
     # State management
     conversation_manager: Any | None = Field(

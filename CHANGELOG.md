@@ -279,6 +279,34 @@ policy.
   longer fails with a 500 for a runnable without `config` (a
   `GraphRunnable`); `DELETE /threads/{id}` forgets the thread's finished
   runs as well.
+- **Tiered compaction.** `TieredCompaction([ClearToolResults, SlidingWindow,
+  Summarize, Relevance])` (`locus.memory.tiers`) runs compaction tiers in
+  order, each at its own trigger as a fraction of the usable window (0.5,
+  0.7, 0.85 and 0.95 by default): stale tool outputs become stubs, the
+  oldest turns past a turn window are dropped, older history is summarised
+  by the existing summariser and, as a last resort, only the turns relevant
+  to the current task stay (by embeddings with an `embedder=`, by recency
+  without one). A `Native` tier hands the stage to a model's own compaction
+  endpoint (`default_tiers(native=True)`). The window comes from the model's
+  metadata, or `context_length=`. Pass `conversation_manager=TieredCompaction(...)`
+  or `CompactionConfig(tiers=True | [...])`; the agent binds the pipeline to
+  its model and window. One `CompactionEvent` per tier that ran, with `tier`
+  and the tokens before and after it; `stage` gains `"window"` and
+  `"relevance"`.
+- **Pinned messages.** `pin(message)` (or `metadata={"pin": True}`) and a
+  `pins=` predicate on `TieredCompaction` keep a message verbatim through
+  every compaction stage and tier, in `ContextCompactor` too; a pinned tool
+  result keeps the call that produced it.
+- **`ToolResultOffload`.** A tool result over `threshold_chars` (16,000) goes
+  to a `ToolResultStore` the moment it is produced; the message keeps a
+  handle and a preview, and the `fetch_tool_result` tool, registered with
+  the offload, reads the stored text back a page at a time. The handle
+  travels in the message text, so it survives checkpoints and compaction (a
+  cleared stub names it). `AgentConfig(tool_result_offload=...)`, or `True`
+  for an in-memory store. The coding harness includes the same
+  `fetch_tool_result` whenever its `HarnessConfig` names a `result_store`,
+  and the `bash` note says so. `ToolResultStore.put()` stores a result
+  whatever its size and returns its key.
 
 ### Changed
 
@@ -339,6 +367,12 @@ policy.
   now reads `response.output_item.added` and `.done` for `function_call` items
   and the accumulator keys by the call id, so streamed and non-streamed turns
   are identical and a streaming agent on the stateless path executes its tools.
+
+### Deprecated
+
+- **The `locus.security` compatibility shim is removed in 6.0.** It keeps forwarding the
+  control-layer names to `locus.control` until then; its warning named a release
+  that has long passed and now says 6.0. Import from `locus.control`.
 
 ### Removed
 
