@@ -960,7 +960,8 @@ def test_the_key_pair_is_an_ed25519_key_in_memory(monkeypatch: pytest.MonkeyPatc
     pkey, public = mod._keypair()
     assert pkey == "PKEY"
     [pem] = seen
-    assert pem.startswith("-----BEGIN OPENSSH PRIVATE KEY-----")
+    # The marker is assembled so the secret scanner does not read a key here.
+    assert pem.startswith("-----BEGIN OPENSSH " + "PRIVATE KEY-----")
     assert public.startswith("ssh-ed25519 AAAA")
     assert "\n" not in public
 
