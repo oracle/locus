@@ -26,6 +26,7 @@ deny; the API strings are secondary detail.
 | Approval | Persists a pending decision through a configured store | Provide a store that survives a restart (such as `FileApprovals`), an authenticated decision channel, and a resume flow | None required for the store state machine |
 | Persistence | Restores supported run state through a checkpointer | Choose and operate a backend with suitable durability and isolation | None |
 | Audit | Hash-chains records supplied to an `AuditTrail`; `OracleAuditTrail` makes them rows of an immutable table, `anchor_trail()` keeps the head in object storage | Choose the [backend](observability.md#where-the-audit-trail-lives), its retention window, and the bucket's retention rule | None |
+| Judge (optional) | Folds a typed allow / hold / deny verdict into the admission decision; the stricter side wins | Write the intent and per-tool guidance, choose and evaluate the judge model, set a budget | The verdict |
 
 ## The enforcement boundary
 
@@ -39,6 +40,46 @@ discover an alternate direct call elsewhere in your application. Prefer
 ungated implementation private, and test that every registered mutating tool
 is wrapped.
 
+## A second check that reads the call
+
+The policy weighs the labels an `Action` carries, and labels are all it can
+see: a staging rollout pinned to `1.8.2` and one to the floating `latest` tag
+are the same action to it. `ToolCallJudge` is an optional, model-based check
+that reads the proposed call itself, the tool's name and the arguments as the
+model sent them, against the policy's intent in plain words and optional
+per-tool guidance, and returns a typed verdict: allow, hold or deny, with a
+one-line reason. The reply is parsed through the structured-output path, so it
+is a value of a known schema or it is no verdict.
+
+Hand it to `gate_tool(..., judge=judge)` and the verdict reaches `admit()` as
+evidence, folded into the decision by `tighten()`: the stricter of the
+policy's outcome and the judge's wins, so the judge can turn an allow into a
+hold or a deny and can never do the reverse. Install it as a hook
+(`hooks=[judge]`) and it judges every call the agent makes, cancelling a held
+or denied one with a refusal the model can read. Either way the verdict is on
+the audit record (judge model, verdict, reason, whether it came from the
+cache) and emitted as `control.judge.decided`.
+
+What it adds: judgement over the arguments, which no label set carries, and a
+reading of intent that can catch the call the risk list never named (see
+[guidance for the judge](policy-authoring.md#guidance-for-the-judge)).
+
+Where it stops:
+
+- It is a model. A wrong verdict is possible in both directions; the fold
+  bounds the damage of a wrong *allow*, because the policy's own hold or deny
+  stands whatever the judge says. A wrong hold costs a human review.
+- It fails closed. A judge model that errors, replies with something that is
+  not a verdict, or has spent its per-run `budget` returns a hold, with the
+  failure on the audit entry under `judge.error`. An unavailable judge turns
+  an allow into a hold, never into a silent allow.
+- It costs a model call per distinct call. Tools declared
+  `@tool(read_only=True)` are not judged, verdicts are cached per (tool,
+  canonical arguments) within a run, and `budget=` caps calls per run.
+- A judge given only to `gate_tool` sees only gated tools. As a hook it sees
+  every call, but a hook hold stops the call before the gate, so the trail
+  then carries a `tool-call-judged` record for it rather than an
+  `action-admission` one.
 ### What the runtime enforces: tool-call integrity
 
 The admission gate decides whether an action may run. A second check, inside
@@ -99,6 +140,8 @@ default from 6.0.
 | Audit records are changed | `AuditTrail.verify()` detects a broken local chain; `OracleAuditTrail` keeps the rows where the database refuses the change, and `verify_anchor()` catches a chain cut short of its anchored head |
 | Action is mislabeled or a route skips the gate | Policy cannot protect what it cannot see; coverage tests and code review are required |
 | Grounding judge is wrong | Typed scores remain an assessment, not a truth oracle; evaluate and calibrate the judge for the deployment |
+| Tool-call judge errors, replies off-schema, or its budget is spent | The call is held, not allowed; the failure is on the audit entry under `judge.error` |
+| Tool-call judge verdict is wrong | A wrong hold costs a review; a wrong allow changes nothing the policy holds or denies, because the fold is one-directional |
 
 ## Recommended production composition
 

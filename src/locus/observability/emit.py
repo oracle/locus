@@ -143,6 +143,8 @@ EV_TOOL_SANDBOX_STARTED = "tool.sandbox.started"
 EV_TOOL_SANDBOX_COMPLETED = "tool.sandbox.completed"
 EV_TOOL_SANDBOX_DENIED = "tool.sandbox.denied"
 
+# --- Control layer (locus.control) ---
+EV_CONTROL_JUDGE_DECIDED = "control.judge.decided"
 # --- Tool-call integrity (locus.tools.integrity) ---
 EV_TOOL_INTEGRITY_REFUSED = "tool.integrity.refused"
 
