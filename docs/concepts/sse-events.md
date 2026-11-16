@@ -25,7 +25,7 @@ from the in-memory history buffer.
     pipeline — but it is **not** a complete or tamper-evident
     audit trail on its own. Forward events to durable storage if you need
     retention, and route security decisions through the
-    [`AuditTrail`](agentic-ai-security.md) for a tamper-evident record.
+    [`AuditTrail`](control-layer.md) for a tamper-evident record.
 
 This page is the **wire-format contract**. A browser renderer, the
 JSON log adapter, and any downstream OTEL bridge consume from it. If you

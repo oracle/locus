@@ -11,7 +11,7 @@ The gateway prices every request a virtual key makes and writes it to its
 Postgres store, and it enforces the `max_budget` on each key from the same
 store, so a looping automation is stopped at its cap rather than on the
 invoice ([OWASP LLM10, Unbounded
-Consumption](../concepts/threat-scenarios.md#owasp-llm-top-10-2025)).
+Consumption](../api/control.md)).
 Finance charge-back and per-model cost drill-down read from the same
 records; the how-to's [enterprise patterns
 section](../how-to/litellm-gateway.md#how-enterprises-use-this-pattern)

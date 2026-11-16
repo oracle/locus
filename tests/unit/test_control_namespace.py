@@ -5,9 +5,9 @@
 """The 2.0 control-runtime rename.
 
 ``locus.control`` is the canonical home for the domain-neutral control core,
-including the grounding / verification layer. The security-domain tooling ships
-separately as ``locus_security``; ``locus.security`` is now only a compatibility
-shim over both (see test_security_shim.py). The old security-coded names
+including the grounding / verification layer. The security-domain tooling is no
+longer part of Locus; ``locus.security`` is now only a compatibility shim (see
+test_security_shim.py). The old security-coded names
 (``SecurityPolicy``, ``Finding``, ``Verdict``, ``SecureAgent``, ``secure_agent``,
 ``SecurityProfile``) were removed outright (no shims).
 """
@@ -80,25 +80,6 @@ def test_old_import_paths_raise() -> None:
     with pytest.raises(ImportError):
         # relocated to locus.control — must not resolve from locus.security
         from locus.security import ControlPolicy  # noqa: F401
-
-
-def test_security_path_still_resolves_its_old_names() -> None:
-    pytest.importorskip("locus_security")
-    import locus.security as s
-
-    for name in (
-        "Evidence",
-        "verify",
-        "VerificationResult",
-        "red_team",
-        "assure",
-        "SecurityContext",
-        "ground_finding",
-        "Severity",
-        "security_toolset",
-        "Target",
-    ):
-        assert hasattr(s, name), f"locus.security lost symbol {name!r}"
 
 
 def test_evidence_and_verification_are_shared_objects() -> None:

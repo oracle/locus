@@ -19,34 +19,38 @@ scratch. With one, the same `thread_id` round-trips through restarts,
 across containers, and across regions, so the record of *what was done
 and why* survives.
 
-The same story, security-operations flavored: a host gets isolated at
-02:00, the runner restarts, the on-call hands off, and the next shift
-must pick up the *same* investigation — every enriched indicator, every
-containment receipt, the case record carried forward.
+The same story on an on-call rotation: a case is worked at 02:00, the
+runner restarts, the on-call hands off, and the next shift must pick up the
+*same* case — every lookup, every action taken, the record carried forward.
 
 {{ locus_model_tabs }}
 
 ```python
 from locus.agent import Agent
 from locus.memory.backends import S3Backend
+from locus.tools import tool
 
-from locus_security import security_toolset
+
+@tool
+def lookup_ticket(ticket_id: str) -> str:
+    """Return the current record for a support ticket."""
+    return TICKETS[ticket_id]
+
 
 agent = Agent(
     model="{{ locus_model }}",
-    # query_siem, enrich_indicator, isolate_host, ...
-    tools=security_toolset(allow_containment=True),
+    tools=[lookup_ticket],
     checkpointer=S3Backend(
-        bucket="soc-case-checkpoints",
+        bucket="case-checkpoints",
         endpoint_url="https://<namespace>.compat.objectstorage.<region>.oraclecloud.com",
     ),
 )
 
-# 02:00 — triage fires, host gets isolated, the runner crashes mid-loop
-agent.run_sync("Triage alert A-42 and contain the affected host.", thread_id="case-4821")
+# 02:00 — the case is worked, the runner crashes mid-loop
+agent.run_sync("Work ticket T-4821 and record what you did.", thread_id="case-4821")
 
 # 08:00 — next shift, different process, same thread_id: the saved case state is loaded back
-agent.run_sync("What host did we isolate, and on what evidence?", thread_id="case-4821")
+agent.run_sync("What did we do on this ticket, and on what evidence?", thread_id="case-4821")
 ```
 
 !!! note "What a checkpoint is — and isn't"
@@ -65,7 +69,7 @@ agent.run_sync("What host did we isolate, and on what evidence?", thread_id="cas
     to the store can alter a checkpoint in place. It gives you
     **durability and resumability**, not a tamper-evident audit log. For
     a tamper-evident record of decisions, route those through the
-    [`AuditTrail`](agentic-ai-security.md) hash chain instead.
+    [`AuditTrail`](control-layer.md) hash chain instead.
 
 ## Picking a backend
 

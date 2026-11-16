@@ -13,9 +13,7 @@ code that runs *before* the action, not a rule in the prompt — so a model that
 fooled still cannot act outside your policy.
 
 This is framework- and domain-agnostic: the control runtime applies to any
-agent that takes real actions. Domain tooling built on this core ships as
-separate, opt-in distributions (the security-domain tooling is
-``locus-sdk-security``, imported as :mod:`locus_security`).
+agent that takes real actions.
 
     from locus.control import Action, ControlPolicy, AuditTrail, admit, AdmissionError
 

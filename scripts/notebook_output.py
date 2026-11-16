@@ -64,15 +64,6 @@ PAGES: dict[str, str] = {
     "notebook_74_data_deletion_gate": "the export allowed on its own, the erasure held with nothing deleted until the Data Protection Officer signs off and it is re-admitted, and the three-record trail that verifies intact",
     "notebook_75_cloud_resource_gate": "a staging resize allowed, then a production terminate and an IAM grant held",
     "notebook_80_vendor_integrations": "the offline sample each integration returns: the risk verdict for three identifiers, the two catalog records that hold the subject's data with their sensitivity, and the four PII categories a scan of `crm.customers` finds, then the STEWARD triage result",
-    "notebook_81_cloud_posture_agent": "the grounding decision trail: two findings shipped with their GSAR score and evidence refs, the speculative one abstaining with its reason, then the analyst's read-only tool list before the bring-your-own-credentials skip notice",
-    "notebook_82_security_playbooks": "the four bundled playbooks with their step order, the mock model's one-line triage verdict from the enforced agent run, then the `PlaybookEnforcer` step gate for phishing triage: each expected tool allowed in turn, progress 100% and no violations",
-    "notebook_83_agent_red_team": "what a red-team run reports",
-    "notebook_84_redteam_support_bot": "the graded trail for both bots: five naive-bot findings with their severity and OWASP LLM / ASI / MITRE ATLAS tags and one abstention on the proof-of-execution probe, then an abstention for every probe against the hardened bot",
-    "notebook_85_ci_security_gate": "the PASS/FAIL coverage line for each build against the 80% bar, the grounded finding title, the taxonomy tags of the categories that slipped through on the failing candidate, and the merge verdict",
-    "notebook_86_verify_findings": "the verdict for each of the three findings: the grounded one survives at confidence 1.00, and each refuted one lists its weighted objections (no evidence references, grounding score below the 0.80 proceed threshold, high severity asserted on a single reference)",
-    "notebook_87_soc_alert_triage": "one verdict per alert: the three corroborated alerts filed as findings with their severity, GSAR score and evidence references, the benign-noise alert withheld as an abstention with the reason and the score that fell short, then the count of findings filed and abstentions",
-    "notebook_88_model_fingerprint": "the probe's model name, sample count and path, the timing feature vector of the deterministic sample with its coverage, the grounded `FingerprintFinding` (GSAR score, model class, engine, hardware class, confidence, coverage, evidence reference and MITRE ATLAS tags) with the script's interpretation of the hardware class against the vendor claim, the audit-trail record count and integrity check, and the command for probing a live endpoint",
-    "notebook_89_investigate_with_ctx": "the five-step investigation trail: each domain port's answer from the reference providers (a high-risk user with impossible travel, a malicious indicator) and the policy verdict on `disable_user` in production, REQUIRE_HUMAN with its reason",
 }
 
 _MARKER = "## Output"
@@ -100,17 +91,8 @@ def sdk_dir() -> Path:
     raise SystemExit("SDK checkout not found — set LOCUS_SDK_DIR")
 
 
-#: The security-domain notebooks ship with the locus-sdk-security
-#: distribution, which lives in the same checkout under packages/.
-SECURITY_PKG = Path("packages") / "locus-sdk-security"
-
-
 def notebook_script(stem: str, sdk: Path) -> Path:
-    """The notebook's source: the core examples first, then the security package's."""
-    for base in (sdk, sdk / SECURITY_PKG):
-        script = base / "examples" / f"{stem}.py"
-        if script.is_file():
-            return script
+    """The notebook's source under the checkout's examples directory."""
     return sdk / "examples" / f"{stem}.py"
 
 
@@ -130,7 +112,7 @@ def run_notebook(stem: str, sdk: Path) -> str:
         env={
             "PATH": os.environ.get("PATH", ""),
             "HOME": os.environ.get("HOME", ""),
-            "PYTHONPATH": os.pathsep.join([str(sdk / "src"), str(sdk / SECURITY_PKG / "src")]),
+            "PYTHONPATH": str(sdk / "src"),
         },
         check=False,
     )

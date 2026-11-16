@@ -36,7 +36,6 @@ import tomllib
 
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-SECURITY_PYPROJECT = "packages/locus-sdk-security/pyproject.toml"
 
 
 class ConsistencyError(Exception):
@@ -134,32 +133,6 @@ def check_security_major(version: str, verbose: bool) -> None:
         print(f"  SECURITY.md       covers the `{major}.x` line")
 
 
-def check_security_lockstep(version: str, verbose: bool) -> None:
-    """locus-sdk-security ships in lockstep: same version, floor on this one.
-
-    The release workflow installs ``locus_sdk_security-<version>`` built
-    from the same tag; a package left at the previous version fails that
-    install after locus-sdk is already on PyPI (v2.19.0 did).
-    """
-    data = tomllib.loads(_read(SECURITY_PYPROJECT))
-    own = data["project"]["version"]
-    floor = f"locus-sdk>={version}"
-    deps = data["project"].get("dependencies", [])
-    problems = []
-    if own != version:
-        problems.append(f"  version is {own}, the release is {version}")
-    if floor not in deps:
-        problems.append(f"  dependencies lack {floor!r}")
-    if problems:
-        raise ConsistencyError(
-            f"{SECURITY_PYPROJECT} is not in lockstep with the release.\n"
-            + "\n".join(problems)
-            + "\n  Bump both with the core version (see the comment above its version)."
-        )
-    if verbose:
-        print(f"  security package  {own}  (lockstep, floor locus-sdk>={version})")
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("-v", "--verbose", action="store_true", help="show each passing check")
@@ -169,7 +142,6 @@ def main() -> int:
         version = check_versions_agree(args.verbose)
         check_changelog(version, args.verbose)
         check_security_major(version, args.verbose)
-        check_security_lockstep(version, args.verbose)
     except ConsistencyError as failure:
         print(f"release consistency: FAILED\n\n{failure}\n", file=sys.stderr)
         return 1

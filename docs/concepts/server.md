@@ -70,10 +70,6 @@ server = AgentServer(agent=agent, api_key="…")
 server.run(host="0.0.0.0", port=8080)
 ```
 
-The SOC variant is one swap:
-`tools=security_toolset(siem=True, edr=True, threat_intel=True)` (from
-`locus_security`, in the `locus-sdk-security` package) and a `ToolCalled("isolate_host")` terminal.
-
 ### 2. Call `/invoke` (one-shot)
 
 ```bash

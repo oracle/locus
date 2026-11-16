@@ -1,6 +1,6 @@
 # Writing a policy that holds
 
-The [admission gate](security-context.md) is enforcement. It runs whatever
+The [admission gate](control-layer.md) is enforcement. It runs whatever
 `ControlPolicy` you hand it, against whatever `Action` you hand it — and it
 cannot know that the action you *didn't* classify as risky is the one that
 moves money.
@@ -221,5 +221,5 @@ same discipline as writing the exclusions down, enforced by CI.
 
 ## See also
 
-- [The control layer](security-context.md) — how `admit()` and `approve()` fit together
+- [The control layer](control-layer.md) — how `admit()` and `approve()` fit together
 - [GSAR grounding](gsar.md) — the same "prove it, don't assert it" discipline applied to claims

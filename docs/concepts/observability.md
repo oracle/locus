@@ -108,7 +108,7 @@ with its completion), consume the `EventBus` stream instead — its
 The JSONL event log is a faithful trace, not a tamper-evident record —
 for decisions an auditor must trust, route the action through `admit()`
 so it lands on the hash-chained
-[`AuditTrail`](agentic-ai-security.md) — each entry commits to the one
+[`AuditTrail`](control-layer.md) — each entry commits to the one
 before it, so `verify()` fails on any edit.
 
 ### Traces and metrics over OTLP

@@ -8,6 +8,18 @@ policy.
 
 ## [Unreleased]
 
+### Removed
+
+- **The `locus-sdk-security` package.** The security-domain tooling (red-team
+  probes and jobs, `Target`, `SecurityContext`, the SOC analyst and
+  `PostureReport` grounding, the intel / SIEM / EDR / scanner / fingerprint
+  adapters, the IR playbooks, notebooks 81–89 and their documentation pages)
+  is no longer part of this repository. It last shipped at the `v5.5.0` tag.
+  The `locus.security` compatibility shim keeps forwarding the control-layer
+  names to `locus.control`; its security-domain names now raise an
+  `ImportError` that says so. The release workflow no longer builds the
+  package.
+
 ## [5.5.0] - 2026-11-16
 
 ### Added

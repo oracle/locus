@@ -40,14 +40,9 @@ jobs:
       - name: Install Hatch
         run: pip install hatch==${{ env.HATCH_VERSION }}
 
-      # Only locus-sdk (root) is published. locus-sdk-security
-      # (packages/) is built into its own directory so pre-release-checks can
-      # prove the two still install together; it ships from the repository,
-      # not from PyPI.
       - name: Build project for distribution
         run: |
           hatch build
-          cd packages/locus-sdk-security && hatch build ../../dist-security
 
       # actions/upload-artifact@v7.0.1
       - name: Upload build
@@ -55,13 +50,6 @@ jobs:
         with:
           name: dist
           path: dist/
-
-      # actions/upload-artifact@v7.0.1
-      - name: Upload security build (checks only, not published)
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: dist-security
-          path: dist-security/
 
       - name: Check Version
         id: check-version
@@ -126,23 +114,15 @@ jobs:
         with:
           name: dist
           path: dist/
-      - name: Download security build
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        with:
-          name: dist-security
-          path: dist-security/
       - name: Verify package imports
         env:
           PKG_NAME: ${{ needs.build.outputs.pkg-name }}
           VERSION: ${{ needs.build.outputs.version }}
         run: |
           set -eu
-          # Install the wheels directly from the build artifacts: the core
-          # alone first (it must not need the security package), then both.
+          # Install the wheel directly from the build artifact.
           pip install "dist/${PKG_NAME//-/_}-${VERSION}-py3-none-any.whl"
           python -c "import locus, locus.control; print(dir(locus))"
-          pip install "dist-security/locus_sdk_security-${VERSION}-py3-none-any.whl"
-          python -c "import locus_security; from locus.security import red_team; print(locus_security.__name__)"
 
   publish:
     needs:
@@ -168,10 +148,6 @@ jobs:
       # pypa/gh-action-pypi-publish@v1.14.2 — Trusted Publishing (OIDC).
       # Requires a trusted publisher on pypi.org for locus-sdk:
       #   repo=oracle/locus, workflow=_release.yml, environment=pypi
-      # dist/ holds locus-sdk only; locus-sdk-security is not published (an
-      # upload without a pending publisher for that name fails the job with
-      # PyPI's "Non-user identities cannot create new projects").
-      #
       # Moved off v1.14.0 on 2026-08-12: `requires = ["hatchling"]` is unpinned,
       # so the build machine picked up a hatchling that emits
       # `Metadata-Version: 2.5`, and v1.14.0's bundled twine refused it —

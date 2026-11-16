@@ -35,7 +35,5 @@ complements `NOTICE` and the `LICENSES/` directory.
 
 ## Security tooling
 
-Offensive-capable tooling (red-team agents, model and hardware
-fingerprinting) ships only in the separate, opt-in `locus-sdk-security`
-package under `packages/locus-sdk-security/`, not in the core
-`locus-sdk` distribution.
+Locus does not ship offensive-capable tooling (red-team agents, model and
+hardware fingerprinting).

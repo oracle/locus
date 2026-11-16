@@ -5,10 +5,10 @@
 """``locus.security`` is a compatibility shim over two new homes.
 
 The grounding / verification names moved to ``locus.control`` and still import
-from the old path with a deprecation warning. The security-domain tooling moved
-to the separate ``locus-sdk-security`` distribution (``locus_security``):
+from the old path with a deprecation warning. The security-domain tooling is no
+longer part of Locus (it last shipped as ``locus-sdk-security`` at v5.5.0):
 the old path resolves it when that package is installed and raises an
-ImportError naming the install when it is not. Submodule paths alias to the
+ImportError saying so when it is not. Submodule paths alias to the
 same module objects, so nothing is loaded twice.
 """
 
@@ -80,19 +80,10 @@ def test_core_names_resolve_without_the_security_package(
     assert ground_finding is control.ground_finding
 
 
-@pytest.mark.parametrize("name", _DOMAIN)
-def test_domain_names_resolve_from_the_security_package(fresh_shim: object, name: str) -> None:
-    locus_security = pytest.importorskip("locus_security")
-
-    with warnings.catch_warnings():
-        warnings.simplefilter("error", LocusDeprecationWarning)
-        assert getattr(fresh_shim, name) is getattr(locus_security, name)
-
-
 def test_domain_names_without_the_package_say_what_to_install(
     fresh_shim: object, without_security_package: None
 ) -> None:
-    with pytest.raises(ImportError, match="subdirectory=packages/locus-sdk-security") as exc:
+    with pytest.raises(ImportError, match="no longer part of Locus") as exc:
         from locus.security import red_team  # noqa: F401
     assert exc.value.name == "locus_security"
 
@@ -114,32 +105,10 @@ def test_core_submodules_alias_the_moved_module(old: str, new: str) -> None:
     assert module.__spec__.name == new
 
 
-@pytest.mark.parametrize("old", sorted(shim._DOMAIN_MODULES))
-def test_domain_submodules_alias_the_security_package(old: str) -> None:
-    pytest.importorskip("locus_security")
-    sys.modules.pop(f"locus.security.{old}", None)
-    module = importlib.import_module(f"locus.security.{old}")
-    assert module is importlib.import_module(f"locus_security.{old}")
-    assert module.__spec__ is not None
-    assert module.__spec__.name == f"locus_security.{old}"
-
-
-def test_nested_domain_submodules_alias_too() -> None:
-    pytest.importorskip("locus_security")
-    probes = importlib.import_module("locus.security.redteam.probes")
-    assert probes is importlib.import_module("locus_security.redteam.probes")
-
-
-def test_submodule_attribute_access_imports_it(monkeypatch: pytest.MonkeyPatch) -> None:
-    pytest.importorskip("locus_security")
-    monkeypatch.delitem(vars(shim), "redteam", raising=False)
-    assert shim.redteam is importlib.import_module("locus_security.redteam")
-
-
 def test_domain_submodules_without_the_package_say_what_to_install(
     without_security_package: None,
 ) -> None:
-    with pytest.raises(ImportError, match="subdirectory=packages/locus-sdk-security"):
+    with pytest.raises(ImportError, match="no longer part of Locus"):
         importlib.import_module("locus.security.redteam.probes")
 
 

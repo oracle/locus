@@ -16,8 +16,6 @@ GPU (RunPod/Lambda) are reported as SKIPPED with what they'd need.
 
 from __future__ import annotations
 
-import inspect
-import os
 import sys
 
 
@@ -32,38 +30,6 @@ def record(claim: str, status: str, detail: str) -> None:
 
 
 def main() -> None:
-    # ── CLAIM 1 — the homepage hero snippet's API contract is valid ──────────
-    # The published snippet (now corrected) is:
-    #     analyst = create_soc_analyst(model="anthropic:claude-sonnet-4-6")
-    #     result  = analyst.run_sync("Audit this account's IAM posture.")
-    #     for f in ground_report(result.parsed):
-    #         print(f.severity, f.title, f.gsar_score)  /  print("withheld:", f.reason)
-    # We assert the exact contract: run_sync -> AgentResult with .parsed (NOT
-    # .output), and that .run is an async generator (so the OLD `await
-    # analyst.run(...)` form was invalid Python — the bug this guards against).
-    try:
-        from config import get_model
-
-        from locus.agent.agent import Agent
-        from locus.agent.result import AgentResult
-        from locus_security import create_soc_analyst, ground_report, is_finding  # noqa: F401
-
-        analyst = create_soc_analyst(model=get_model())
-        result = analyst.run_sync("Audit this account's IAM posture.")
-        contract = (
-            isinstance(result, AgentResult)
-            and hasattr(result, "parsed")
-            and not hasattr(result, "output")  # the published bug
-            and inspect.isasyncgenfunction(Agent.run)  # why `await .run()` was invalid
-        )
-        record(
-            "hero snippet: run_sync -> AgentResult.parsed (not .output / not await .run)",
-            PASS if contract else FAIL,
-            f"{type(result).__name__}.parsed ok; Agent.run is async-gen ({inspect.isasyncgenfunction(Agent.run)})",
-        )
-    except Exception as exc:  # noqa: BLE001
-        record("hero snippet: API contract", FAIL, f"{type(exc).__name__}: {exc}")
-
     # ── CLAIM 2 — abstain by construction: an ungrounded answer yields an ────
     # Abstention, never a Finding. (open-source.html: "an ungrounded finding is
     # a false positive by construction. There's no public path that builds one.")
@@ -151,29 +117,6 @@ def main() -> None:
     except Exception as exc:  # noqa: BLE001
         record('"eight shapes, one class"', FAIL, f"{type(exc).__name__}: {exc}")
 
-    # ── CLAIM 5 — read-only cloud-posture auditor ("its tools admit only ─────
-    # describe/list/get calls")
-    try:
-        from locus_security import cloud_posture_audit
-
-        tools = cloud_posture_audit()
-        names = [getattr(t, "name", str(t)) for t in tools]
-        bad = [
-            n
-            for n in names
-            if any(
-                w in n.lower() for w in ("create", "delete", "put", "update", "attach", "remove")
-            )
-            and "posture" not in n.lower()  # submit_posture is the output channel, not an AWS write
-        ]
-        record(
-            "read-only auditor: no mutating AWS tools",
-            PASS if not bad else FAIL,
-            f"{len(names)} tools; mutating={bad or 'none'}",
-        )
-    except Exception as exc:  # noqa: BLE001
-        record("read-only auditor", FAIL, f"{type(exc).__name__}: {exc}")
-
     # ── CLAIM 6 — "provider-agnostic: OpenAI, Anthropic, self-hosted vLLM, ───
     # or any OpenAI-compatible endpoint via base_url". vLLM is reached through
     # the OpenAI provider + base_url (not a dedicated prefix), so verify both
@@ -192,27 +135,6 @@ def main() -> None:
         )
     except Exception as exc:  # noqa: BLE001
         record("provider-agnostic", FAIL, f"{type(exc).__name__}: {exc}")
-
-    # ── CLAIM 7 — "fingerprint AI infrastructure": timing measurement ────────
-    try:
-        from locus_security.fingerprint import FEATURE_KEYS, measure_endpoint_timing
-
-        feats = measure_endpoint_timing()  # offline sample without OPENAI_API_KEY
-        have = set(feats) >= set(FEATURE_KEYS)
-        live = bool(os.environ.get("OPENAI_API_KEY"))
-        record(
-            "fingerprint: measure_endpoint_timing returns feature vector",
-            PASS if have else FAIL,
-            ("LIVE vs OpenAI" if live else "offline sample") + f"; keys={sorted(feats)}",
-        )
-        if not live:
-            record(
-                'fingerprint: "verified live vs gpt-4o-mini"',
-                SKIP,
-                "needs OPENAI_API_KEY (source ~/.profile) — measurement is real, rerun to re-verify",
-            )
-    except Exception as exc:  # noqa: BLE001
-        record("fingerprint: measure_endpoint_timing", FAIL, f"{type(exc).__name__}: {exc}")
 
     # ── Credential / billable claims — reported, not run ─────────────────────
     record(

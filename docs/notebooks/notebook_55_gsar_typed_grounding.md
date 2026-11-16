@@ -72,7 +72,7 @@ grounded `Claim`s whose `evidence_refs` trace to TLS scan rows and a fired
 detection, one complementary observation and one ungrounded inference. It
 hands the partition to `ground_finding` with the finding's title, severity,
 asset, remediation and
-[OWASP LLM](../concepts/threat-scenarios.md#owasp-llm-top-10-2025) tag; the
+[OWASP LLM](../api/control.md) tag; the
 call returns an `Evidence` because `S` clears `τ_proceed`, and `is_finding`
 narrows the union before the score arithmetic is printed:
 

@@ -13,7 +13,7 @@ The software is provided **"AS IS", without warranty of any kind**, express or i
 
 ### Responsible use
 
-The core `locus-sdk` package does not include offensive-capable tooling. The separate, opt-in `locus-sdk-security` package does — red-team agents, model and hardware fingerprinting, and similar reconnaissance capabilities. **Use it only against systems you own or are explicitly authorized to test.** Running these capabilities against systems you do not own or have not been authorized to assess may be unlawful.
+Locus does not include offensive-capable tooling such as red-team agents or model and hardware fingerprinting. **Run agents only against systems you own or are explicitly authorized to operate on.** Driving actions against systems you do not own or have not been authorized to touch may be unlawful.
 
 *This page is not legal advice. Consult your own counsel.*
 

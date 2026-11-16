@@ -223,12 +223,9 @@ full runtime.
 
 The notebooks are numbered in reading order: start here (01–11), multi-agent shapes (12–32),
 Oracle Cloud and Database 26ai (33–45), the harness (46–59), observability, streaming and
-serving (60–67), control layer and security (68–76) and real-world workflows (77–80) live in
-[`examples/`](https://github.com/oracle/locus/tree/main/examples); the security-operations notebooks (81–89) ship with the
-opt-in [`locus-sdk-security`](https://github.com/oracle/locus/tree/main/packages/locus-sdk-security) package, installed from
-the repository at the matching tag. Notebooks 01–80 run against OCI Generative AI with an OCI
-profile, or the bundled mock model without one; 81–89 run on the mock model, or on OpenAI or
-Anthropic through `LOCUS_MODEL_PROVIDER`.
+serving (60–67), control layer and security (68–76) and real-world workflows (77–80), all in
+[`examples/`](https://github.com/oracle/locus/tree/main/examples). They run against OCI Generative AI with an OCI
+profile, or the bundled mock model without one.
 
 ```bash
 git clone https://github.com/oracle/locus.git
@@ -330,10 +327,7 @@ src/locus/
 ```
 
 The docs site lives in [`docs/`](https://github.com/oracle/locus/tree/main/docs) (`mkdocs.yml`, theme in `overrides/`, build
-hooks in `hooks/`) and publishes to [locusagents.ai](https://locusagents.ai/). The opt-in security
-package lives in [`packages/locus-sdk-security/`](https://github.com/oracle/locus/tree/main/packages/locus-sdk-security); it is
-not on PyPI and installs from the repository at the matching tag (see its
-[README](https://github.com/oracle/locus/blob/main/packages/locus-sdk-security/README.md)).
+hooks in `hooks/`) and publishes to [locusagents.ai](https://locusagents.ai/).
 
 ---
 
