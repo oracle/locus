@@ -8,9 +8,19 @@ Exposes a Locus Agent as HTTP endpoints:
 - POST   /invoke         — synchronous invocation, returns final result
 - POST   /stream         — SSE streaming of agent events (token deltas included)
 - POST   /resume         — continue a paused thread (SSE), strictly by thread id
-- GET    /threads/{tid}  — load a thread's persisted state (requires checkpointer)
-- DELETE /threads/{tid}  — drop a thread's persisted state (requires checkpointer)
+- GET    /threads/{tid}  — a thread's persisted state (checkpointer) and its runs
+- DELETE /threads/{tid}  — drop a thread's persisted state and forget its runs
 - GET    /health         — health check
+
+Threads and runs (see :mod:`locus.server.routes`):
+- POST   /threads               — create a thread
+- POST   /threads/{tid}/runs    — start a turn (or continue a pause) in the background
+- GET    /runs/{rid}            — a run's status and outcome
+- GET    /runs/{rid}/events     — the run's events as SSE, resumable with Last-Event-ID;
+                                  ``?protocol=ag-ui`` / ``?protocol=vercel-ai``
+- POST   /runs/{rid}/cancel     — stop a run
+- WS     /runs/live             — turns, approval answers, cancellation and events on one socket
+- POST   /ag-ui, /vercel-ai     — the two UI wire protocols' request endpoints
 
 Security model
 --------------
@@ -30,6 +40,7 @@ local development or when an upstream proxy handles auth).
 
 from __future__ import annotations
 
+import contextlib
 import hmac
 import inspect
 import ipaddress
@@ -42,6 +53,9 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+from locus.server.routes import RouteContext, mount_run_routes
+from locus.server.runs import RunRegistry
 
 
 # Route signatures are resolved by FastAPI against this module's globals
@@ -237,13 +251,18 @@ class AgentServer:
         stream_tokens: bool = True,
         metadata_resolver: MetadataResolver | None = None,
         decision_handler: DecisionHandler | None = None,
+        run_registry: RunRegistry | None = None,
     ) -> None:
         """Wrap ``agent``.
 
         Args:
-            stream_tokens: Stream model token deltas on ``/stream`` and
-                ``/resume`` (as ``{"type": "model_chunk", ...}`` events) when
-                the agent supports it.
+            stream_tokens: Stream model token deltas on ``/stream``,
+                ``/resume`` and background runs (as ``{"type": "model_chunk",
+                ...}`` events) when the agent supports it.
+            run_registry: The in-memory threads-and-runs registry behind
+                ``/threads``, ``/runs`` and ``/runs/live`` (see
+                :class:`~locus.server.runs.RunRegistry` for its bounds: event
+                history per run, runs kept, TTL). A default one is created.
             metadata_resolver: Server-side source of trusted run metadata,
                 called per request with ``(request, principal)``. Its keys
                 override the client's ``metadata`` so a client cannot spoof
@@ -262,6 +281,7 @@ class AgentServer:
         # deployments don't have to thread the secret through code.
         self._api_key = api_key or os.environ.get("LOCUS_SERVER_API_KEY") or None
         self._allow_unauthenticated = allow_unauthenticated
+        self._registry = run_registry or RunRegistry()
         self._app = None
 
     @property
@@ -270,6 +290,11 @@ class AgentServer:
         if self._app is None:
             self._app = self._create_app()
         return self._app
+
+    @property
+    def runs(self) -> RunRegistry:
+        """The registry of threads and background runs this server drives."""
+        return self._registry
 
     def _resolve_docs_enabled(self) -> bool:
         """Expose /docs, /redoc, /openapi.json only when debug is on.
@@ -348,12 +373,24 @@ class AgentServer:
             )
 
         debug_docs = self._resolve_docs_enabled()
+        registry = self._registry
+
+        @contextlib.asynccontextmanager
+        async def lifespan(_app: Any) -> AsyncIterator[None]:
+            # Background runs outlive the request that started them; stop
+            # the ones still going when the application shuts down.
+            try:
+                yield
+            finally:
+                await registry.aclose()
+
         app = FastAPI(
             title=self._title,
             description=self._description,
             docs_url="/docs" if debug_docs else None,
             redoc_url="/redoc" if debug_docs else None,
             openapi_url="/openapi.json" if debug_docs else None,
+            lifespan=lifespan,
         )
         agent = self.agent
         scope_thread = self._scoped_thread_id
@@ -583,33 +620,44 @@ class AgentServer:
             thread_id: str,
             principal: str = auth_dep,
         ) -> dict[str, Any]:
-            """Return the persisted thread state, scoped to the caller principal.
+            """Return the thread's state, scoped to the caller principal.
 
-            Returns 404 if no checkpointer is configured or the thread isn't
-            found. The principal-scoping prevents thread enumeration across
+            The transcript comes from the agent's checkpointer when one is
+            configured; the thread's runs come from the server's registry
+            (``source`` says which answered). 404 when neither knows the
+            thread. The principal-scoping prevents thread enumeration across
             API keys when an upstream proxy multiplexes clients.
             """
             from fastapi import HTTPException
 
-            checkpointer = agent.config.checkpointer
-            if checkpointer is None:
-                raise HTTPException(
-                    status_code=404,
-                    detail="No checkpointer configured on this AgentServer",
-                )
+            checkpointer = getattr(getattr(agent, "config", None), "checkpointer", None)
             scoped_id = scope_thread(principal, thread_id)
-            state = await checkpointer.load(scoped_id)
-            if state is None:
-                raise HTTPException(status_code=404, detail=f"Thread {thread_id!r} not found")
+            known = registry.get_thread(principal, thread_id)
+            state = await checkpointer.load(scoped_id) if checkpointer is not None else None
+            if state is None and known is None:
+                detail = f"Thread {thread_id!r} not found"
+                if checkpointer is None:
+                    detail += (
+                        " (no checkpointer configured on this AgentServer; only threads "
+                        "created or run through it are known)"
+                    )
+                raise HTTPException(status_code=404, detail=detail)
             # Hand back the public Pydantic projection. AgentState is already
             # JSON-serializable; the principal scope is intentionally hidden
             # from the response (callers see their unprefixed id).
+            metadata: Any = state.metadata if state is not None else {}
+            if state is None and known is not None:
+                metadata = known.metadata
             return {
                 "thread_id": thread_id,
-                "iteration": state.iteration,
-                "messages": [m.model_dump(mode="json") for m in state.messages],
-                "tool_executions": [te.model_dump(mode="json") for te in state.tool_executions],
-                "metadata": state.metadata,
+                "iteration": state.iteration if state is not None else 0,
+                "messages": [m.model_dump(mode="json") for m in state.messages] if state else [],
+                "tool_executions": (
+                    [te.model_dump(mode="json") for te in state.tool_executions] if state else []
+                ),
+                "metadata": metadata,
+                "source": "checkpointer" if state is not None else "registry",
+                "runs": [r.to_dict() for r in registry.runs_for(known)] if known else [],
             }
 
         @app.delete("/threads/{thread_id}")
@@ -617,22 +665,47 @@ class AgentServer:
             thread_id: str,
             principal: str = auth_dep,
         ) -> dict[str, Any]:
-            """Drop a thread's persisted state. 404 when no checkpointer.
+            """Drop a thread's persisted state and forget its finished runs.
 
             Idempotent: deleting a non-existent thread returns ``deleted=False``
-            with a 200, matching ``BaseCheckpointer.delete()``'s contract.
+            with a 200, matching ``BaseCheckpointer.delete()``'s contract. 404
+            when no checkpointer is configured and the registry does not know
+            the thread either.
             """
             from fastapi import HTTPException
 
-            checkpointer = agent.config.checkpointer
+            checkpointer = getattr(getattr(agent, "config", None), "checkpointer", None)
+            dropped = registry.drop_thread(principal, thread_id)
             if checkpointer is None:
-                raise HTTPException(
-                    status_code=404,
-                    detail="No checkpointer configured on this AgentServer",
-                )
+                if not dropped:
+                    raise HTTPException(
+                        status_code=404,
+                        detail="No checkpointer configured on this AgentServer",
+                    )
+                return {"thread_id": thread_id, "deleted": True}
             scoped_id = scope_thread(principal, thread_id)
             deleted = await checkpointer.delete(scoped_id)
-            return {"thread_id": thread_id, "deleted": bool(deleted)}
+            return {"thread_id": thread_id, "deleted": bool(deleted) or dropped}
+
+        mount_run_routes(
+            app,
+            RouteContext(
+                agent=agent,
+                registry=registry,
+                auth_dep=auth_dep,
+                api_key=self._api_key,
+                principal_key=_principal_key,
+                scope_thread=scope_thread,
+                resolve_metadata=resolve_metadata,
+                decision_handler=decision_handler,
+                has_resolver=resolver is not None,
+                stream_tokens=want_tokens,
+                serialize=lambda event, scoped, tid: _event_payload(
+                    event, scoped_thread_id=scoped, thread_id=tid
+                ),
+                accepts_kwarg=_accepts_kwarg,
+            ),
+        )
 
         return app
 

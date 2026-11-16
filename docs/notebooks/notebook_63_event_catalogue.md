@@ -185,7 +185,8 @@ Running it offline — no credentials, bundled mock model — prints the canonic
     - research.summarize.completed
   skills.*  (1 events)
     - skills.activated
-  tool.*  (3 events)
+  tool.*  (4 events)
+    - tool.integrity.refused
     - tool.sandbox.completed
     - tool.sandbox.denied
     - tool.sandbox.started

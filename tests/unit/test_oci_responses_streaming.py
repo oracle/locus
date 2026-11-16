@@ -290,7 +290,49 @@ class TestParseStreamEventEdgeCases:
                 "delta": "args",
             }
         )
-        assert out == {"tool_calls": [{"id": "item_42", "arguments_delta": "args"}]}
+        assert out == {
+            "tool_calls": [{"id": "item_42", "item_id": "item_42", "arguments_delta": "args"}]
+        }
+
+    def test_output_item_added_carries_name_and_call_id(self) -> None:
+        out = parse_stream_event(
+            {
+                "type": "response.output_item.added",
+                "output_index": 0,
+                "item": {
+                    "type": "function_call",
+                    "id": "fc_1",
+                    "call_id": "call_1",
+                    "name": "add_numbers",
+                    "arguments": "",
+                },
+            }
+        )
+        assert out == {
+            "tool_calls": [
+                {"id": "call_1", "item_id": "fc_1", "name": "add_numbers", "arguments_delta": ""}
+            ]
+        }
+
+    def test_output_item_done_carries_the_full_arguments(self) -> None:
+        out = parse_stream_event(
+            {
+                "type": "response.output_item.done",
+                "item": {
+                    "type": "function_call",
+                    "id": "fc_1",
+                    "call_id": "call_1",
+                    "name": "add_numbers",
+                    "arguments": '{"a": 2, "b": 3}',
+                },
+            }
+        )
+        assert out["tool_calls"][0]["final"] is True
+        assert out["tool_calls"][0]["arguments"] == '{"a": 2, "b": 3}'
+
+    def test_non_function_output_items_stay_structural(self) -> None:
+        added = {"type": "response.output_item.added", "item": {"type": "message", "id": "msg_1"}}
+        assert parse_stream_event(added) == {}
 
     def test_nested_error_event(self) -> None:
         """Some servers emit ``foo.error`` instead of ``response.error``."""
@@ -997,4 +1039,108 @@ async def test_error_envelope_that_is_not_an_object_falls_back_to_the_body_text(
         await model.complete([Message.user("hi")])
     assert "upstream unavailable" in str(exc_info.value)
     assert not isinstance(exc_info.value, OCIResponsesStateLostError)
+    await model.aclose()
+
+
+# =============================================================================
+# Streamed tool calls carry the function name and the call id (#474)
+# =============================================================================
+
+
+def _fc_item(call_id: str, item_id: str, name: str, arguments: str) -> dict[str, Any]:
+    return {
+        "type": "function_call",
+        "id": item_id,
+        "call_id": call_id,
+        "name": name,
+        "arguments": arguments,
+    }
+
+
+def _events(*events: dict[str, Any]) -> bytes:
+    import json as _json
+
+    return _sse([_json.dumps(e) for e in events])
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_streamed_tool_call_has_the_name_and_call_id_complete_would_return() -> None:
+    """The deltas only carry the item id; the call id and the name come from the
+    ``output_item`` events, and the emitted ToolCall must match ``complete()``."""
+    model = _make_model()
+    respx.post("https://fake-oci.test/openai/v1/responses").mock(
+        return_value=httpx.Response(
+            200,
+            content=_events(
+                {"type": "response.created", "response": {"id": "resp_1"}},
+                {
+                    "type": "response.output_item.added",
+                    "output_index": 0,
+                    "item": _fc_item("call_1", "fc_1", "add_numbers", ""),
+                },
+                {
+                    "type": "response.function_call_arguments.delta",
+                    "item_id": "fc_1",
+                    "delta": '{"a": 2, ',
+                },
+                {
+                    "type": "response.function_call_arguments.delta",
+                    "item_id": "fc_1",
+                    "delta": '"b": 3}',
+                },
+                {
+                    "type": "response.function_call_arguments.done",
+                    "item_id": "fc_1",
+                    "arguments": '{"a": 2, "b": 3}',
+                },
+                {
+                    "type": "response.output_item.done",
+                    "output_index": 0,
+                    "item": _fc_item("call_1", "fc_1", "add_numbers", '{"a": 2, "b": 3}'),
+                },
+                {"type": "response.completed", "response": {"id": "resp_1"}},
+            ),
+        )
+    )
+
+    calls = []
+    async for chunk in model.stream([Message.user("add 2 and 3")]):
+        if chunk.tool_calls:
+            calls.extend(chunk.tool_calls)
+    assert [(c.id, c.name, c.arguments) for c in calls] == [
+        ("call_1", "add_numbers", {"a": 2, "b": 3})
+    ]
+    await model.aclose()
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_streamed_deltas_before_the_added_event_still_land_on_the_call_id() -> None:
+    """Out-of-order delivery: deltas keyed by the item id are moved under the
+    call id once ``output_item.added`` names it; no ``done`` item is needed."""
+    model = _make_model()
+    respx.post("https://fake-oci.test/openai/v1/responses").mock(
+        return_value=httpx.Response(
+            200,
+            content=_events(
+                {
+                    "type": "response.function_call_arguments.delta",
+                    "item_id": "fc_9",
+                    "delta": '{"x": 1}',
+                },
+                {
+                    "type": "response.output_item.added",
+                    "output_index": 0,
+                    "item": _fc_item("call_9", "fc_9", "noop", ""),
+                },
+                {"type": "response.completed", "response": {"id": "resp_9"}},
+            ),
+        )
+    )
+    calls = []
+    async for chunk in model.stream([Message.user("go")]):
+        if chunk.tool_calls:
+            calls.extend(chunk.tool_calls)
+    assert [(c.id, c.name, c.arguments) for c in calls] == [("call_9", "noop", {"x": 1})]
     await model.aclose()

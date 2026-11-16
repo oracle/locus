@@ -67,6 +67,8 @@ theme:
 
 hooks:
 - hooks/cache_bust.py
+# Before build_metadata so the GitHub links it writes get pinned to the release.
+- hooks/release_notes.py
 - hooks/build_metadata.py
 - hooks/search_exclude.py
 - hooks/inline_code_breaks.py
@@ -86,13 +88,17 @@ extra_javascript:
 - javascripts/notebook-filter.js
 - javascripts/sidebar-filter.js
 
-copyright: <span class="footer-brand"><span class="footer-brand__o" aria-hidden="true"></span><span class="footer-brand__text">Oracle Generative AI</span></span><br><span class="footer-copy">Copyright &copy; 2025–2026 <span class="oracle-mark" aria-label="Oracle"></span> and/or its affiliates &middot; <a href="/legal/">Legal</a></span>
+copyright: <span class="footer-brand"><span class="footer-brand__o" aria-hidden="true"></span><span class="footer-brand__text">Oracle Generative AI</span></span><br><span class="footer-copy">Copyright &copy; 2025–2026 <span class="oracle-mark" aria-label="Oracle"></span> and/or its affiliates &middot; <a href="/legal/">Legal</a> &middot; <a href="/release-notes/">Release notes</a></span>
 
 extra:
   homepage: https://locusagents.ai/
   # The model every generic example uses; the build hook expands
   # {{ locus_example_model }} everywhere, so change it here, not on the pages.
   example_model: oci:openai.gpt-5.5
+  # The release-notes page ({{ locus_release_notes }}) renders CHANGELOG.md from
+  # this release onward: the locus-sdk line published from this repository.
+  # Earlier entries stay in the file on GitHub, which the page links.
+  release_notes_since: 3.0.0
   # Provider tab sets ({{ locus_model_tabs }}): one example model id per
   # provider, shown as linked tabs so a reader picks a provider once.
   model_tabs:
@@ -254,6 +260,7 @@ nav:
   - Project:
     - Guarantees & boundaries: why-locus.md
     - Compatibility & releases: compatibility.md
+    - Release notes: release-notes.md
     - About & maintainers: about.md
 - How-to:
   - Quickstart: how-to/quickstart.md

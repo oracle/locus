@@ -90,7 +90,7 @@ LOCUS_MODEL_PROVIDER=mock python examples/notebook_46_mcp_integration.py
 
 ## Output
 
-Running it offline — no credentials, bundled mock model — prints the MCP schema derived from a tool and its round trip back with parameters preserved, the `tools/list` catalogue and a `tools/call` result (Part 4 ran because the optional `fastmcp` package was installed for this capture; without it the script prints an install note there instead), then the GSAR ship/abstain trail (SHIP at S=1.0000 on full refund signals, ABSTAIN/REPLAN at S=0.0000 on sparse ones):
+Running it offline — no credentials, bundled mock model — prints the MCP schema derived from a Locus tool and its round trip back with parameters preserved, the `tools/list` catalogue and a `tools/call` result (Part 4 ran because the optional `fastmcp` package was installed for this capture; without it the script prints an install note there instead), then the GSAR ship/abstain trail (SHIP at S=1.0000 on full refund signals, ABSTAIN/REPLAN at S=0.0000 on sparse ones):
 
 ```text
 ============================================================

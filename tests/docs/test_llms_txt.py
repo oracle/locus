@@ -176,3 +176,15 @@ def test_html_code_cells_become_code_spans(repo: Path) -> None:
         llms_txt._plain_markdown(markdown, [repo])
         == "| Field | Type |\n|---|---|\n| a | `str | None` |\n"
     )
+
+
+def test_heading_attribute_lists_are_dropped_from_the_twin(repo: Path) -> None:
+    text = (
+        '## 5.5.0 <small class="release-date">2026-11-16</small> { #v5.5.0 data-toc-label="5.5.0" }\n\n'
+        "## Unreleased { #unreleased }\n\n## Plain heading\n\nA line with { braces } stays.\n"
+    )
+    out = llms_txt._plain_markdown(text, [repo])
+    assert out.startswith(
+        '## 5.5.0 <small class="release-date">2026-11-16</small>\n\n## Unreleased\n\n'
+    )
+    assert "## Plain heading\n\nA line with { braces } stays.\n" in out

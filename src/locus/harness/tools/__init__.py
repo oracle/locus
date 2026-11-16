@@ -31,6 +31,7 @@ from locus.harness.tools.files import (
 )
 from locus.harness.tools.notebook import make_notebook_edit, plan_notebook_edit
 from locus.harness.tools.patch import make_apply_patch, plan_patch
+from locus.harness.tools.results import make_fetch_tool_result
 from locus.harness.tools.search import make_glob, make_grep
 from locus.harness.tools.shell import (
     make_bash,
@@ -61,6 +62,7 @@ FACTORIES: dict[str, Callable[[HarnessContext], Tool]] = {
     "write_stdin": make_write_stdin,
     "todo_write": make_todo_write,
     "todo_read": make_todo_read,
+    "fetch_tool_result": make_fetch_tool_result,
 }
 
 #: The tools that need a shell.

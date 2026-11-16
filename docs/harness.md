@@ -52,7 +52,9 @@ the shell's default and maximum timeouts, what happens at a timeout
 (`"background"` keeps the command under a handle, `"kill"` stops it), how
 much output the model sees, whether the model can see images, a
 `ToolResultStore` for output too long to show, and the `on_exec` /
-`on_change` hooks.
+`on_change` hooks. With a store, the default tool set also includes
+`fetch_tool_result`, which pages a stored output back by the key its
+note names.
 
 ## The single-gate rule
 
