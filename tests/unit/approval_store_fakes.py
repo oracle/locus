@@ -36,11 +36,17 @@ class FakeTable:
 
 
 class FakeServer:
-    """Rows per table, shared across every connection of one fake server."""
+    """Rows per table, shared across every connection of one fake server.
 
-    def __init__(self) -> None:
+    ``parsed_json=True`` hands the ``record`` column back as a dict instead of a
+    LOB or text, as python-oracledb does for a ``CLOB CHECK (IS JSON)`` column
+    on Oracle AI Database 26ai.
+    """
+
+    def __init__(self, *, parsed_json: bool = False) -> None:
         self.tables: dict[str, FakeTable] = {}
         self.statements: list[str] = []
+        self.parsed_json = parsed_json
 
     def table(self, name: str) -> FakeTable:
         return self.tables.setdefault(name.lower(), FakeTable())
@@ -202,6 +208,11 @@ class _OracleCursor:
         self._server = server
         self._rows: list[Any] = []
 
+    def _fetched(self, stored: Any) -> Any:
+        if not self._server.parsed_json:
+            return stored
+        return json.loads(stored.value if isinstance(stored, _Lob) else stored)
+
     async def execute(self, sql: str, params: dict[str, Any] | None = None) -> None:
         self._server.statements.append(sql)
         params = params or {}
@@ -216,7 +227,7 @@ class _OracleCursor:
             return
         table = self._server.table(_table_name(sql))
         if head == "SELECT":
-            self._rows = [(r["record"],) for r in _query(table, sql, params)]
+            self._rows = [(self._fetched(r["record"]),) for r in _query(table, sql, params)]
             return
         if head == "INSERT":
             if params["approval_id"] in table.rows:

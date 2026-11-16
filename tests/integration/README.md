@@ -34,7 +34,9 @@ python scripts/run_notebooks.py --provider gemini --model gemini-2.5-flash
 ## PostgreSQL
 
 PostgreSQL-backed tests use the same environment variables as the backend
-fixtures:
+fixtures. `POSTGRES_USER` and `POSTGRES_DB` are the opt-in; `POSTGRES_HOST`
+defaults to `localhost`, `POSTGRES_PORT` to `5432`, and `POSTGRES_PASSWORD`
+to none (a Homebrew server with `trust` on localhost needs no password):
 
 ```bash
 export POSTGRES_HOST=localhost
@@ -43,6 +45,9 @@ export POSTGRES_DB=locus_test
 export POSTGRES_USER=postgres
 export POSTGRES_PASSWORD=postgres
 ```
+
+When the tests skip, the skip reason says which variable is missing or why
+the port did not answer.
 
 The development compose file includes a PostgreSQL service:
 

@@ -102,10 +102,15 @@ class PostgresApprovals(DatabaseApprovals):
 
     Args:
         dsn: A libpq connection string. Overrides the individual parameters.
-        host, port, database, user, password: The connection, when no ``dsn``.
+        host: The server, when no ``dsn``.
+        port: Its port.
+        database: The database.
+        user: The role to connect as.
+        password: Its password.
         table_name: The table; created on first use if missing.
         schema_name: Its schema.
-        min_pool_size, max_pool_size: The ``asyncpg`` pool bounds.
+        min_pool_size: The ``asyncpg`` pool's lower bound.
+        max_pool_size: Its upper bound.
         authority: Who may decide, as for
             :class:`~locus.control.approvals.InMemoryApprovals`.
     """

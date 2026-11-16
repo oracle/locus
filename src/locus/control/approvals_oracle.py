@@ -28,7 +28,7 @@ through a temporary LOB as the checkpointer writes its state. Install with
 from __future__ import annotations
 
 import inspect
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
@@ -48,13 +48,19 @@ if TYPE_CHECKING:
 __all__ = ["OracleApprovals"]
 
 
-async def _document(value: Any) -> str:
-    """The JSON text of a ``record`` column, whichever shape the driver returned."""
+async def _document(value: Any) -> str | Mapping[str, Any]:
+    """The ``record`` column as JSON text or as the parsed document.
+
+    The driver returns a ``CLOB CHECK (IS JSON)`` column as a LOB to read, as
+    text, or -- against Oracle AI Database 26ai -- already parsed into a dict.
+    """
     if hasattr(value, "read"):
         value = value.read()
         if inspect.isawaitable(value):
             value = await value
-    return value if isinstance(value, str) else bytes(value).decode("utf-8")
+    if isinstance(value, str | Mapping):
+        return value
+    return bytes(value).decode("utf-8")
 
 
 class _OracleTransaction:
@@ -133,13 +139,17 @@ class OracleApprovals(DatabaseApprovals):
 
     Args:
         dsn: A TNS alias from the wallet's ``tnsnames.ora``, or a connect string.
-        user, password: The schema to connect as.
+        user: The schema to connect as.
+        password: Its password.
         wallet_location: The unzipped wallet directory, for Autonomous Database.
         wallet_password: The wallet password, when the wallet is encrypted.
-        host, port, service_name: The connection, when no ``dsn``.
+        host: The server, when no ``dsn``.
+        port: Its port.
+        service_name: The service.
         table_name: The table; created on first use if missing.
         schema_name: Its schema; the user's own when ``None``.
-        min_pool_size, max_pool_size: The pool bounds.
+        min_pool_size: The pool's lower bound.
+        max_pool_size: Its upper bound.
         authority: Who may decide, as for
             :class:`~locus.control.approvals.InMemoryApprovals`.
     """

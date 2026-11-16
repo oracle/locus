@@ -379,6 +379,21 @@ class TestOracleApprovals(ApprovalStoreConformance):
         parts = OracleApprovals(host="h", port=1522, service_name="svc", user="U")
         assert parts.spec == "oracle://U@h:1522/svc?table=locus_approvals"
 
+    def test_a_record_the_driver_already_parsed_is_read(
+        self, monkeypatch: pytest.MonkeyPatch, closing: list[Any]
+    ) -> None:
+        """Oracle AI Database 26ai hands a ``CLOB CHECK (IS JSON)`` column back as a dict."""
+        install_oracledb(monkeypatch, FakeServer(parsed_json=True))
+        store = OracleApprovals(dsn="x", user="u", password="p", table_name="appr")  # noqa: S106
+        closing.append(store)
+
+        approval_id = store.submit("svc", "t", {"a": 1})
+        record = store.decide(approval_id, "approved", by="alice")
+
+        assert (record.status, record.arguments) == ("approved", {"a": 1})
+        assert store.consume(approval_id).status == "consumed"
+        assert store.pending() == []
+
     def test_a_missing_driver_says_what_to_install(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setitem(sys.modules, "oracledb", None)
         store = OracleApprovals(dsn="x")

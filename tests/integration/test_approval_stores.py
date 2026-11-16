@@ -31,7 +31,7 @@ pytestmark = pytest.mark.integration
 
 
 def _pg_dsn() -> str:
-    host = os.environ["POSTGRES_HOST"]
+    host = os.getenv("POSTGRES_HOST", "localhost")
     port = os.getenv("POSTGRES_PORT", "5432")
     db = os.environ["POSTGRES_DB"]
     user = os.environ["POSTGRES_USER"]
@@ -183,10 +183,17 @@ class TestOracleApprovalsLive(ApprovalStoreConformance, _Live):
         yield name
 
         async def drop() -> None:
+            import oracledb
+
             store = OracleApprovals(**_oracle_connection(), table_name=name)
             pool = await store._get_pool()  # noqa: SLF001 - teardown through the same pool code
             async with pool.acquire() as conn, conn.cursor() as cursor:
-                await cursor.execute(f"DROP TABLE {name}")
+                try:
+                    await cursor.execute(f"DROP TABLE {name}")
+                except oracledb.DatabaseError as error:
+                    # A test that never reached the database made no table.
+                    if "ORA-00942" not in str(error):
+                        raise
                 await conn.commit()
             await pool.close()
 
