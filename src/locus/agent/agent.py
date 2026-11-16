@@ -35,6 +35,7 @@ from locus.agent.runtime_loop import (
     UNFINISHED_CALL_ERROR,
     AgentRuntimeMixin,
     _invocation_arguments,
+    _take_iteration_checkpoints,
     close_unfinished_calls,
 )
 from locus.core.errors import ApprovalPendingError, GSARValidationError
@@ -896,8 +897,10 @@ class Agent(AgentRuntimeMixin, BaseModel):
                 checkpoint instead of its latest (one of
                 ``checkpointer.list(thread_id)``), as if the run had paused
                 there: the thread's in-memory pause, if any, is discarded,
-                and the segment's saves record the checkpoint as their
-                parent. Needs ``thread_id`` and a checkpointer.
+                and the segment's first lasting save records the checkpoint
+                as its parent (later saves follow on from it). The
+                checkpoint itself is never deleted. Needs ``thread_id`` and
+                a checkpointer.
 
         Raises:
             ApprovalPendingError: ``perform_dangling=True`` and the held call
@@ -977,6 +980,10 @@ class Agent(AgentRuntimeMixin, BaseModel):
                     )
                 raise RuntimeError(f"No checkpoint found for thread {thread_id!r} to resume from.")
             state = loaded
+            if from_checkpoint is not None:
+                # The segment's final save must not delete the checkpoint it
+                # descends from (an iteration save names itself in the list).
+                _, state = _take_iteration_checkpoints(state)
             prompt = ""
             # A checkpoint never holds ephemeral metadata (``mcp_headers``):
             # a cross-process resume that needs it passes ``metadata=``.

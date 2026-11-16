@@ -420,10 +420,13 @@ class BaseCheckpointer(ABC):
 
         Each :class:`~locus.memory.time_travel.CheckpointInfo` has the
         checkpoint's id, when it was written, the iteration the state had
-        reached, the serialised state's size in bytes, the checkpoint it
-        descends from and, for a fork's first checkpoint, the thread it was
-        forked from. The default loads each state to read these; backends
-        that store the fields beside the state override it.
+        reached, the checkpoint's size in bytes as this backend stores it,
+        the checkpoint it descends from and, for a fork's first checkpoint,
+        the thread it was forked from. ``parent_checkpoint_id`` is ``None``
+        only for a thread's first checkpoint: with a ``limit``, the oldest
+        checkpoint described still names the one before it. The default
+        loads each state to read these; backends that store the fields
+        beside the state override it.
 
         Args:
             thread_id: Thread identifier.

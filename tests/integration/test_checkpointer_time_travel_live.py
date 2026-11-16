@@ -287,9 +287,6 @@ class TestOracleVersionedSaverTimeTravel:
 class TestOCIBucketTimeTravel(
     _Tracked, CheckpointerTimeTravelConformance, BoundedHistoryConformance
 ):
-    # Object Storage keeps modification times to the millisecond.
-    settle_seconds = 0.05
-
     def _build(self, keep: int | None) -> Any:
         from locus.memory.backends import OCIBucketBackend
 

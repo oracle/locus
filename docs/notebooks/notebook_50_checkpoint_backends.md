@@ -171,19 +171,19 @@ Mermaid, both threads:
 graph LR
     subgraph thread_case_tkt_4021["case_tkt_4021"]
         direction LR
-        cp_case_tkt_4021__day_1["day-1<br/>iteration 1"]
-        cp_case_tkt_4021__day_2["day-2<br/>iteration 2"]
-        cp_case_tkt_4021__day_3["day-3<br/>iteration 3"]
+        cp_case_tkt_4021__day_1_1e3471dc["day-1<br/>iteration 1"]
+        cp_case_tkt_4021__day_2_2dd8e41b["day-2<br/>iteration 2"]
+        cp_case_tkt_4021__day_3_472b4b89["day-3<br/>iteration 3"]
     end
-    subgraph thread_case_tkt_4021_partial["case_tkt_4021-partial"]
+    subgraph thread_case_tkt_4021_partial_19a767fa["case_tkt_4021-partial"]
         direction LR
-        cp_case_tkt_4021_partial__fork_root["fork_root<br/>iteration 2<br/>fork"]
-        cp_case_tkt_4021_partial__alt_day_3["alt-day-3<br/>iteration 3"]
+        cp_case_tkt_4021_partial_19a767fa__fork_root["fork_root<br/>iteration 2<br/>fork"]
+        cp_case_tkt_4021_partial_19a767fa__alt_day_3_3c327834["alt-day-3<br/>iteration 3"]
     end
-    cp_case_tkt_4021__day_2 --> cp_case_tkt_4021__day_3
-    cp_case_tkt_4021__day_1 --> cp_case_tkt_4021__day_2
-    cp_case_tkt_4021_partial__fork_root --> cp_case_tkt_4021_partial__alt_day_3
-    cp_case_tkt_4021__day_2 -.->|fork| cp_case_tkt_4021_partial__fork_root
+    cp_case_tkt_4021__day_2_2dd8e41b --> cp_case_tkt_4021__day_3_472b4b89
+    cp_case_tkt_4021__day_1_1e3471dc --> cp_case_tkt_4021__day_2_2dd8e41b
+    cp_case_tkt_4021_partial_19a767fa__fork_root --> cp_case_tkt_4021_partial_19a767fa__alt_day_3_3c327834
+    cp_case_tkt_4021__day_2_2dd8e41b -.->|fork| cp_case_tkt_4021_partial_19a767fa__fork_root
 
 case-4821 after re-running the second turn from the first checkpoint:
   checkpoints: 3

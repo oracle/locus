@@ -13,10 +13,11 @@ checkpointers and over a minimal subclass that has only the base defaults;
 the integration suite runs them over live PostgreSQL, Redis, Oracle and an
 OCI bucket behind the usual service markers.
 
-``settle_seconds`` is the pause between saves whose order the tests read
-back: zero where the backend stamps writes to the microsecond, about a
-second for an object store whose listing keeps modification times to the
-second.
+Between saves whose order the tests read back there is a pause of a few
+milliseconds and no more: every backend orders checkpoints by a time it
+writes itself to the microsecond, an object store included, so several
+checkpoints saved within one second must list in the order they were
+saved (:meth:`CheckpointerTimeTravelConformance.test_saves_within_one_second_keep_their_order`).
 """
 
 from __future__ import annotations
@@ -105,11 +106,9 @@ async def _record_calls(
 
 
 class _Settles:
-    settle_seconds: float = 0.0
-
     async def settle(self) -> None:
         """Let the next save get a later timestamp than the last."""
-        await asyncio.sleep(self.settle_seconds or 0.002)
+        await asyncio.sleep(0.002)
 
 
 class CheckpointerTimeTravelConformance(_Settles):
@@ -151,8 +150,29 @@ class CheckpointerTimeTravelConformance(_Settles):
     async def test_list_honours_the_limit_and_an_unknown_thread(self, cp: Any) -> None:
         await self._three(cp)
 
-        assert [i.checkpoint_id for i in await cp.list("t", limit=2)] == ["cp-2", "cp-1"]
+        window = await cp.list("t", limit=2)
+
+        assert [i.checkpoint_id for i in window] == ["cp-2", "cp-1"]
+        assert window[-1].parent_checkpoint_id == "cp-0", "the window's edge is not a root"
+        assert [i.parent_checkpoint_id for i in await cp.list("t", limit=1)] == ["cp-1"]
         assert await cp.list("no-such-thread") == []
+
+    async def test_saves_within_one_second_keep_their_order(self, cp: Any) -> None:
+        for step in range(4):
+            await cp.save(_state(step), "t", f"cp-{step}")
+
+        ids = [i.checkpoint_id for i in await cp.list("t")]
+
+        assert ids == ["cp-3", "cp-2", "cp-1", "cp-0"]
+        assert await cp.list_checkpoints("t", limit=2) == ["cp-3", "cp-2"]
+        latest = await cp.load("t")
+        assert latest is not None
+        assert latest.iteration == 3
+        forked = await cp.fork("t", new_thread_id="t-alt")
+        [first] = await cp.list(forked)
+        fork_state = await cp.load(forked)
+        assert fork_state is not None
+        assert (first.parent_checkpoint_id, fork_state.iteration) == ("cp-3", 3)
 
     async def test_list_names_the_parent_a_checkpoint_recorded(self, cp: Any) -> None:
         await self._three(cp)
@@ -330,9 +350,10 @@ class BoundedHistoryConformance(_Settles):
         return make_bounded(2)
 
     async def test_the_bound_keeps_the_newest_checkpoints(self, bounded: Any) -> None:
+        # No pause between saves: the bound must cut the oldest even when a
+        # store's own clock cannot tell the four apart.
         for step in range(4):
             await bounded.save(_state(step), "t", f"cp-{step}")
-            await self.settle()
 
         infos = await bounded.list("t")
 

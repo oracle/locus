@@ -769,9 +769,12 @@ class AgentRuntimeMixin:
             metadata: Additional metadata for tools
             from_checkpoint: Start this turn from the thread's state at that
                 checkpoint instead of its latest (one of
-                ``checkpointer.list(thread_id)``). The turn's saves record it
-                as their parent, so the thread's history shows the branch;
-                the checkpoints after it stay. Needs ``thread_id`` and a
+                ``checkpointer.list(thread_id)``). The turn's first lasting
+                save records it as its parent and the turn's later saves
+                follow on from that one, so the thread's history shows the
+                branch; the checkpoints after it stay, and the checkpoint
+                itself is never deleted, even when it is an iteration save
+                of a turn that did not finish. Needs ``thread_id`` and a
                 checkpointer. To branch without touching the thread, fork it
                 first (``checkpointer.fork``) and run on the fork.
             invocation_id: An id for this turn, kept by the caller (a job id).
@@ -2680,7 +2683,10 @@ class AgentRuntimeMixin:
             pending = list(state.metadata.get(ITERATION_CHECKPOINTS_KEY) or [])
             state = state.with_metadata(ITERATION_CHECKPOINTS_KEY, [*pending, checkpoint_id])
         if writer is not None:
-            await writer.save_iteration(_durable(state), cp_thread, checkpoint_id)
+            # A save with a generated id is one the final save deletes.
+            await writer.save_iteration(
+                _durable(state), cp_thread, checkpoint_id, kept=checkpoint_id is None
+            )
         else:
             await checkpointer.save(_durable(state), cp_thread, checkpoint_id)
         from locus.observability.emit import (  # noqa: PLC0415
@@ -2832,6 +2838,11 @@ class AgentRuntimeMixin:
                     raise LookupError(
                         f"no checkpoint {from_checkpoint!r} of thread {thread_id!r} to run from"
                     )
+                # A turn from a chosen checkpoint starts its own list of
+                # iteration saves: the ones the checkpoint names are its
+                # own turn's (itself among them), and this turn's final save
+                # must not delete the checkpoint it descends from.
+                _, existing = _take_iteration_checkpoints(existing)
             else:
                 existing = await self.config.checkpointer.load(thread_id)
             if existing:

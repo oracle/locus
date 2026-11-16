@@ -66,9 +66,10 @@ _INFO_BYTES = 8192
 _JSON_STRING = r'("(?:[^"\\]|\\.)*")'
 _CHECKPOINT_ID = re.compile(rb'^\{\s*"checkpoint_id":\s*' + _JSON_STRING.encode())
 _CREATED_AT = re.compile(rb'"created_at":\s*' + _JSON_STRING.encode())
-_ITERATION = re.compile(rb'"iteration":\s*(\d+)')
-_SIZE = re.compile(rb'"size":\s*(\d+)')
-_METADATA = re.compile(rb'"metadata":\s*')
+#: Where the state begins: everything before it is the header.
+_STATE_KEY = re.compile(rb'"state":\s*')
+#: The header fields a file written since the step fields were added carries.
+_INFO_FIELDS = ("checkpoint_id", "created_at", "iteration", "size", "metadata")
 _EPOCH = "1970-01-01T00:00:00+00:00"
 
 
@@ -232,39 +233,52 @@ class FileCheckpointer(BaseCheckpointer):
             return None
         return str(data["checkpoint_id"]), str(data.get("created_at", _EPOCH))
 
+    @staticmethod
+    def _header_fields(head: bytes) -> dict[str, Any] | None:
+        """The fields written ahead of the state, parsed on their own.
+
+        The header runs up to the ``"state"`` key, so it is parsed as a
+        document of its own with the state left out; nothing is searched
+        for inside the state, whose messages and tool arguments may well
+        hold a ``size`` or a ``metadata`` of their own. ``None`` when the
+        head does not hold the whole header (an older layout has no step
+        fields before the state; a large metadata runs past the head) —
+        the file is parsed in full then.
+        """
+        found = _STATE_KEY.search(head)
+        if found is None:
+            return None
+        try:
+            fields = json.loads(head[: found.start()] + b'"state":null}')
+        except ValueError:
+            return None
+        if not isinstance(fields, dict) or not all(k in fields for k in _INFO_FIELDS):
+            return None
+        return fields if isinstance(fields["metadata"], dict) else None
+
     def _read_info(self, path: Path, thread_id: str) -> CheckpointInfo | None:
         """What :meth:`list` reports for one checkpoint file, from its head where possible.
 
         Files written since the step fields were added carry ``iteration``,
-        ``size`` and ``metadata`` ahead of the state; a file without them (an
-        older layout) or whose metadata runs past the head is parsed in full.
+        ``size`` and ``metadata`` ahead of the state (:meth:`_header_fields`);
+        a file without them (an older layout) or whose metadata runs past
+        the head is parsed in full, and its size is the state's as compact
+        JSON — the figure the header would have recorded.
         """
         try:
             with open(path, "rb") as f:
                 head = f.read(_INFO_BYTES)
         except OSError:
             return None
-        found_id = _CHECKPOINT_ID.search(head)
-        found_at = _CREATED_AT.search(head)
-        found_iteration = _ITERATION.search(head)
-        found_size = _SIZE.search(head)
-        found_meta = _METADATA.search(head)
-        metadata: Any = None
-        if found_id and found_at and found_iteration and found_size and found_meta:
-            try:
-                metadata, _ = json.JSONDecoder().raw_decode(
-                    head[found_meta.end() :].decode("utf-8", errors="ignore")
-                )
-            except ValueError:
-                metadata = None
-        if isinstance(metadata, dict) and found_id and found_at and found_iteration and found_size:
+        header = self._header_fields(head)
+        if header is not None:
             return info_from(
-                json.loads(found_id.group(1)),
+                str(header["checkpoint_id"]),
                 thread_id,
-                created_at=json.loads(found_at.group(1)),
-                metadata=metadata,
-                iteration=int(found_iteration.group(1)),
-                size=int(found_size.group(1)),
+                created_at=header["created_at"],
+                metadata=header["metadata"],
+                iteration=header["iteration"],
+                size=header["size"],
             )
         data = self._read_json(path)
         if not data or "checkpoint_id" not in data or "state" not in data:
@@ -546,4 +560,6 @@ class FileCheckpointer(BaseCheckpointer):
             if info is not None:
                 infos.append(info)
         infos.sort(key=lambda i: i.created_at or datetime.fromisoformat(_EPOCH), reverse=True)
-        return link_parents(infos[:limit])
+        # The checkpoint just past the window is the parent of the oldest in it.
+        older = infos[limit].checkpoint_id if len(infos) > limit else None
+        return link_parents(infos[:limit], older)

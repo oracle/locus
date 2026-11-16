@@ -860,11 +860,14 @@ class OracleCheckpointSaver(BaseModel):
         is read from the checkpoint data when it has one (an agent state
         does), and ``size`` is the data's size as compact JSON.
         """
+        # One row past the window names the parent of the oldest in it when
+        # that row did not record one.
         rows = await self.list_checkpoints(
-            thread_id=thread_id, checkpoint_ns=checkpoint_ns, limit=limit
+            thread_id=thread_id, checkpoint_ns=checkpoint_ns, limit=limit + 1
         )
+        older = str(rows[limit]["checkpoint_id"]) if len(rows) > limit else None
         infos: list[CheckpointInfo] = []
-        for row in rows:
+        for row in rows[:limit]:
             data = row["checkpoint"] if isinstance(row["checkpoint"], dict) else {}
             metadata = dict(row["metadata"] or {})
             if row["parent_checkpoint_id"] is not None:
@@ -879,4 +882,4 @@ class OracleCheckpointSaver(BaseModel):
                     size=checkpoint_size(data),
                 )
             )
-        return link_parents(infos)
+        return link_parents(infos, older)

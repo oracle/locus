@@ -23,6 +23,12 @@ its storage grows with the square of the conversation's length;
 server-side alternative). ``list`` takes one listing plus one GET of the
 small ``.meta.json`` per checkpoint described.
 
+S3 keeps an object's modification time to the second, and a turn writes
+several checkpoints in that, so the listing alone cannot order them; the
+write time each ``.meta.json`` records (to the microsecond) orders the
+checkpoints that share a second, and only those are read for it
+(:func:`~locus.memory.time_travel.order_by_write_time`).
+
 The ``_latest`` pointer lets ``load(thread_id)`` do a single GET instead
 of a list + sort every turn.
 
@@ -47,6 +53,7 @@ from locus.memory.time_travel import (
     checkpoint_size,
     info_from,
     link_parents,
+    order_by_write_time,
 )
 
 
@@ -321,8 +328,15 @@ class S3Backend(BaseCheckpointer):
             return None
         return AgentState.from_checkpoint(data["state"])
 
-    async def _checkpoint_objects(self, thread_id: str) -> list[tuple[str, Any]]:
-        """``(checkpoint_id, last_modified)`` of the thread's checkpoints, newest first."""
+    async def _checkpoint_objects(
+        self, thread_id: str
+    ) -> list[tuple[str, Any, dict[str, Any] | None]]:
+        """``(checkpoint_id, last_modified, meta)`` of the thread's checkpoints, newest first.
+
+        Ordered by the store's modification time, and within one second of
+        it by the write time in each ``.meta.json``; ``meta`` is that object
+        where it had to be read, ``None`` otherwise.
+        """
         listing = await self._list_keys(self._thread_prefix(thread_id))
         items: list[tuple[str, Any]] = []
         for obj in listing["contents"]:
@@ -332,11 +346,12 @@ class S3Backend(BaseCheckpointer):
             if not key.endswith(".json"):
                 continue
             items.append((key.rsplit("/", 1)[-1][: -len(".json")], obj.get("LastModified")))
-        items.sort(key=lambda t: t[1].isoformat() if t[1] else "", reverse=True)
-        return items
+        return await order_by_write_time(
+            items, lambda cid: self._get_json(self._meta_key(thread_id, cid)), "created_at"
+        )
 
     async def list_checkpoints(self, thread_id: str, limit: int = 10) -> list[str]:
-        return [cid for cid, _ in (await self._checkpoint_objects(thread_id))[:limit]]
+        return [cid for cid, _, _ in (await self._checkpoint_objects(thread_id))[:limit]]
 
     async def delete(self, thread_id: str, checkpoint_id: str | None = None) -> bool:
         if checkpoint_id is None:
@@ -353,14 +368,17 @@ class S3Backend(BaseCheckpointer):
             return False
         await self._delete_object(ckpt_key)
         await self._delete_object(self._meta_key(thread_id, checkpoint_id))
-        # Repoint _latest if we just deleted the newest checkpoint.
-        remaining = await self.list_checkpoints(thread_id, limit=1)
-        if remaining:
-            await self._put_bytes(
-                self._latest_key(thread_id), remaining[0].encode("utf-8"), "text/plain"
-            )
-        else:
-            await self._delete_object(self._latest_key(thread_id))
+        # Repoint _latest only when it named the deleted checkpoint: the
+        # pointer is right for any other, and finding the next newest lists.
+        pointer = await self._get_bytes(self._latest_key(thread_id))
+        if pointer is not None and pointer.decode("utf-8").strip() == checkpoint_id:
+            remaining = await self.list_checkpoints(thread_id, limit=1)
+            if remaining:
+                await self._put_bytes(
+                    self._latest_key(thread_id), remaining[0].encode("utf-8"), "text/plain"
+                )
+            else:
+                await self._delete_object(self._latest_key(thread_id))
         return True
 
     async def get_metadata(
@@ -455,12 +473,18 @@ class S3Backend(BaseCheckpointer):
     async def list(self, thread_id: str, limit: int = 10) -> list[CheckpointInfo]:
         """The thread's checkpoints, newest first: one listing, then each one's ``.meta.json``."""
         await self._ensure_bucket()
-        objects = (await self._checkpoint_objects(thread_id))[:limit]
+        ordered = await self._checkpoint_objects(thread_id)
+        # The checkpoint just past the window is the parent of the oldest in it.
+        older = ordered[limit][0] if len(ordered) > limit else None
+        objects = ordered[:limit]
         metas = await asyncio.gather(
-            *(self._get_json(self._meta_key(thread_id, cid)) for cid, _ in objects)
+            *(
+                self._get_json(self._meta_key(thread_id, cid)) if meta is None else _ready(meta)
+                for cid, _, meta in objects
+            )
         )
         infos: list[CheckpointInfo] = []
-        for (checkpoint_id, modified), raw_meta in zip(objects, metas, strict=True):
+        for (checkpoint_id, modified, _), raw_meta in zip(objects, metas, strict=True):
             meta = raw_meta or {}
             iteration, size = meta.get("iteration"), meta.get("size")
             if iteration is None or size is None:
@@ -478,8 +502,9 @@ class S3Backend(BaseCheckpointer):
                     size=size,
                 )
             )
-        # The listing orders by the store's modification time, which some
-        # stores keep to the second; the write time in each ``.meta.json``
-        # is exact, so the window is re-sorted by it.
-        infos.sort(key=lambda i: i.created_at.isoformat() if i.created_at else "", reverse=True)
-        return link_parents(infos)
+        return link_parents(infos, older)
+
+
+async def _ready(value: dict[str, Any]) -> dict[str, Any]:
+    """``value`` as an awaitable, beside the GETs of a gather."""
+    return value

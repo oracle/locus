@@ -186,15 +186,19 @@ async def what_if() -> None:
 
 `cp.list(thread_id, limit=10)` returns `CheckpointInfo` records, newest
 first: `checkpoint_id`, `thread_id`, `created_at`, the `iteration` the
-state had reached, the `size` of the serialised state in bytes, the
-`parent_checkpoint_id` it descends from, `forked_from` (the thread the
-parent lives in, for a fork's first checkpoint) and the `metadata` it
-was saved with. The parent is recorded in the checkpoint's metadata
-when the writer knew it was not the thread's previous checkpoint — a
-fork's first checkpoint, an `update_state` of an older checkpoint, every
-save of a run started `from_checkpoint=` — and is the previous
-checkpoint everywhere else, since a thread's history is otherwise a
-line.
+state had reached, the `size` of the checkpoint in bytes as that backend
+stores it (the serialised state as compact JSON for most backends, the
+stored row's text for `PgCheckpointer`'s `jsonb` — compare sizes within
+one backend, not across them), the `parent_checkpoint_id` it descends
+from, `forked_from` (the thread the parent lives in, for a fork's first
+checkpoint) and the `metadata` it was saved with. The parent is
+recorded in the checkpoint's metadata when the writer knew it was not
+the thread's previous checkpoint — a fork's first checkpoint, an
+`update_state` of an older checkpoint, the first lasting save of a run
+started `from_checkpoint=` — and is the previous checkpoint everywhere
+else, since a thread's history is otherwise a line. Only a thread's
+first checkpoint has no parent: with a `limit`, the oldest checkpoint
+described still names the one before it.
 
 `cp.fork(thread_id, checkpoint_id=None, *, new_thread_id=None)` saves the
 state at that checkpoint (the latest by default) as the first checkpoint
@@ -215,9 +219,12 @@ from_checkpoint=...)` continues a *paused* turn from the checkpoint it
 paused on, discarding any later answer — the way to answer a question
 differently. Both need `thread_id` and a checkpointer, raise
 `LookupError` for a checkpoint the thread does not have, and record the
-checkpoint as the parent of everything the run saves, so the branch is
-visible in `list` and in the drawing below. The checkpoints written
-after the branch point stay; nothing is deleted.
+checkpoint as the parent of the run's first lasting save — the run's
+later saves follow on from that one, so the branch is a chain in `list`
+and in the drawing below, not a star. The checkpoints written after the
+branch point stay, and the checkpoint the run started from is never
+deleted, even when it is an iteration save of a turn that did not
+finish; nothing is deleted.
 
 `draw_mermaid_history(cp, *thread_ids)`
 (`locus.multiagent.visualize`; `StateGraph.adraw_mermaid_history` for a
@@ -225,23 +232,26 @@ graph's threads) renders the histories as one Mermaid flowchart: a lane
 per thread, oldest checkpoint first, an arrow from each checkpoint to the
 ones that descend from it, and — when a thread and its fork are both
 given — a dashed `fork` arrow from the checkpoint the fork was taken at,
-so the fork reads as a branch of its parent.
+so the fork reads as a branch of its parent. Node ids are the thread and
+checkpoint ids made safe for Mermaid; one that needed a character
+replaced carries a short hash of the original, so `a-b` and `a_b` never
+share a node, and labels show the ids as they are.
 
 ```text
 graph LR
-    subgraph thread_case_4821["case-4821"]
+    subgraph thread_case_4821_dd05c8c4["case-4821"]
         direction LR
-        cp_case_4821__a1["a1…<br/>iteration 1"]
-        cp_case_4821__b2["b2…<br/>iteration 1"]
+        cp_case_4821_dd05c8c4__a1["a1…<br/>iteration 1"]
+        cp_case_4821_dd05c8c4__b2["b2…<br/>iteration 1"]
     end
-    subgraph thread_case_4821_partial["case-4821-partial"]
+    subgraph thread_case_4821_partial_dfe2003b["case-4821-partial"]
         direction LR
-        cp_case_4821_partial__f0["f0…<br/>iteration 1<br/>fork"]
-        cp_case_4821_partial__c3["c3…<br/>iteration 1"]
+        cp_case_4821_partial_dfe2003b__f0["f0…<br/>iteration 1<br/>fork"]
+        cp_case_4821_partial_dfe2003b__c3["c3…<br/>iteration 1"]
     end
-    cp_case_4821__a1 --> cp_case_4821__b2
-    cp_case_4821_partial__f0 --> cp_case_4821_partial__c3
-    cp_case_4821__a1 -.->|fork| cp_case_4821_partial__f0
+    cp_case_4821_dd05c8c4__a1 --> cp_case_4821_dd05c8c4__b2
+    cp_case_4821_partial_dfe2003b__f0 --> cp_case_4821_partial_dfe2003b__c3
+    cp_case_4821_dd05c8c4__a1 -.->|fork| cp_case_4821_partial_dfe2003b__f0
 ```
 
 ### Per backend
@@ -261,14 +271,15 @@ on a replay.
 | `MemoryCheckpointer` | every save, for the life of the process | the in-memory records; no state is loaded | `max_checkpoints_per_thread` | the serialised state, in memory |
 | `FileCheckpointer` | one `<checkpoint_id>.json` per save | the head of each file (the step fields and metadata are written before the state) | `max_checkpoints_per_thread` | one file |
 | `redis_checkpointer()`, `postgresql_checkpointer()`, `mysql_checkpointer()`, `opensearch_checkpointer()`, `oracle_checkpointer()` (the adapter) | one `<thread_id>:<checkpoint_id>` key per save, plus the `<thread_id>:_checkpoints` index | one read of the index key | `max_checkpoints_per_thread` on the factory | one key, plus the shared `latest` copy and index entry |
-| `PgCheckpointer` | one row per save | one query over the row's own columns; the state column is not returned | `keep_checkpoints` | one row |
-| `S3Backend`, `OCIBucketBackend` | one `<checkpoint_id>.json` and `.meta.json` per save | one listing, then one GET of the small `.meta.json` per checkpoint described (the listing's modification times are coarse; the exact write time in the metadata orders the result) | `max_checkpoints_per_thread`, or a bucket lifecycle rule | two objects |
+| `PgCheckpointer` | one row per save | one query over the row's own columns; the state column is not returned (`size` is the row's `jsonb` as text) | `keep_checkpoints` | one row |
+| `S3Backend`, `OCIBucketBackend` | one `<checkpoint_id>.json` and `.meta.json` per save | one listing, then one GET of the small `.meta.json` per checkpoint described; the listing's modification times are coarse (S3 keeps them to the second), so checkpoints written within one second are ordered by the exact write time in their `.meta.json`, read for those alone | `max_checkpoints_per_thread`, or a bucket lifecycle rule | two objects |
 | `OracleCheckpointSaver` (the reference: one row per checkpoint with `parent_checkpoint_id` kept on the row) | one row per `put` | one query; the rows carry their data | none built in (`delete_thread`) | one row |
 | `HTTPCheckpointer`, your own `BaseCheckpointer` subclass | whatever the store keeps | the base default: each state is loaded to read its iteration and size, `get_metadata` for the rest when the backend has it | none unless you add one | the store's |
 
 A bounded backend deletes the surplus from the oldest end after every
-save, so `fork` and `list` reach back only as far as the bound; the
-oldest checkpoint kept reports no parent.
+save — several saves within one second included — so `fork` and `list`
+reach back only as far as the bound; the oldest checkpoint kept reports
+no parent.
 
 ## Picking a backend
 

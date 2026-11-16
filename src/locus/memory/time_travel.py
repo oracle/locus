@@ -23,17 +23,20 @@ names them. This module is the uniform layer above that:
 Lineage. The ``parent_checkpoint_id`` of a checkpoint is recorded in its
 metadata when the writer knew it was not the thread's previous checkpoint:
 a fork's first checkpoint (its parent is in the source thread), an edit
-(``update_state``) of an older checkpoint, and every save of a run started
-``from_checkpoint=``. Everywhere else a thread's history is a line, and the
-parent is the checkpoint before it (:func:`link_parents`).
+(``update_state``) of an older checkpoint, and the first lasting save of a
+run started ``from_checkpoint=`` (the run's later saves follow on from it).
+Everywhere else a thread's history is a line, and the parent is the
+checkpoint before it (:func:`link_parents`); only a thread's first
+checkpoint has none.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -56,6 +59,7 @@ __all__ = [
     "info_from",
     "link_parents",
     "new_fork_id",
+    "order_by_write_time",
     "parse_time",
     "split_stored_metadata",
 ]
@@ -80,8 +84,11 @@ class CheckpointInfo:
         created_at: When it was written; ``None`` when the backend does not keep it.
         iteration: The state's iteration counter when it was saved — the step
             of the turn it was written in (0 before the first model call).
-        size: Bytes of the serialised state (compact JSON), so a thread's
-            storage can be read off its history.
+        size: Bytes of the checkpoint as its backend stores it — the
+            serialised state as compact JSON for most, the stored row's text
+            where the database keeps its own encoding (PostgreSQL ``jsonb``)
+            — so a thread's storage can be read off its history. Sizes
+            compare within one backend, not across backends.
         parent_checkpoint_id: The checkpoint this one descends from: in the
             same thread unless ``forked_from`` is set; ``None`` for a thread's
             first checkpoint.
@@ -120,7 +127,7 @@ class CheckpointInfo:
 
 
 def checkpoint_size(data: Mapping[str, Any]) -> int:
-    """Bytes of a checkpoint's state as compact JSON — the figure every backend reports."""
+    """Bytes of a checkpoint's state as compact JSON — the ``size`` most backends report."""
     return len(json.dumps(data, separators=(",", ":"), default=str).encode("utf-8"))
 
 
@@ -182,21 +189,67 @@ def info_from(
     )
 
 
-def link_parents(infos: list[CheckpointInfo]) -> list[CheckpointInfo]:
+def link_parents(infos: list[CheckpointInfo], older: str | None = None) -> list[CheckpointInfo]:
     """Fill in the parent of each checkpoint that did not record one.
 
-    ``infos`` is a thread's history, newest first. A checkpoint whose
-    metadata names its parent keeps it; any other descends from the one
-    before it in the thread, and the oldest from nothing.
+    ``infos`` is a thread's history, newest first — or the newest part of
+    it, with ``older`` the checkpoint just before that window. A checkpoint
+    whose metadata names its parent keeps it; any other descends from the
+    one before it in the thread (``older`` for the last of ``infos``), and
+    only a thread's first checkpoint from nothing.
     """
     linked: list[CheckpointInfo] = []
     for position, info in enumerate(infos):
         if info.parent_checkpoint_id is not None or info.forked_from is not None:
             linked.append(info)
             continue
-        older = infos[position + 1].checkpoint_id if position + 1 < len(infos) else None
-        linked.append(replace(info, parent_checkpoint_id=older))
+        before = infos[position + 1].checkpoint_id if position + 1 < len(infos) else older
+        linked.append(replace(info, parent_checkpoint_id=before))
     return linked
+
+
+def _utc(when: datetime) -> datetime:
+    return when if when.tzinfo is not None else when.replace(tzinfo=UTC)
+
+
+async def order_by_write_time(
+    objects: Sequence[tuple[str, Any]],
+    read_meta: Callable[[str], Awaitable[Mapping[str, Any] | None]],
+    time_key: str,
+) -> list[tuple[str, Any, dict[str, Any] | None]]:
+    """An object store's checkpoints newest first, exact where the store's clock is coarse.
+
+    ``objects`` are ``(checkpoint_id, modified)`` from a bucket listing. The
+    store's modification time orders them, but S3 keeps it to the second
+    (OCI Object Storage to the millisecond) and a turn writes several
+    checkpoints in that; each checkpoint's metadata object records its
+    write time to the microsecond under ``time_key``, so for the checkpoints
+    that share a second of the store's clock — those alone — ``read_meta``
+    fetches it and it orders them. Each result is ``(checkpoint_id,
+    modified, meta)``: ``meta`` is the metadata object where it was read,
+    ``None`` where the listing was enough.
+    """
+    epoch = datetime.fromtimestamp(0, UTC)
+
+    def second(modified: Any) -> datetime:
+        when = _utc(modified) if isinstance(modified, datetime) else epoch
+        return when.replace(microsecond=0)
+
+    groups: dict[datetime, list[str]] = {}
+    for checkpoint_id, modified in objects:
+        groups.setdefault(second(modified), []).append(checkpoint_id)
+    tied = [cid for ids in groups.values() if len(ids) > 1 for cid in ids]
+    metas = dict(zip(tied, await asyncio.gather(*(read_meta(cid) for cid in tied)), strict=True))
+
+    def key(item: tuple[str, Any]) -> tuple[datetime, datetime]:
+        checkpoint_id, modified = item
+        exact = parse_time((metas.get(checkpoint_id) or {}).get(time_key))
+        return second(modified), _utc(exact) if exact else second(modified)
+
+    return [
+        (checkpoint_id, modified, dict(meta) if (meta := metas.get(checkpoint_id)) else None)
+        for checkpoint_id, modified in sorted(objects, key=key, reverse=True)
+    ]
 
 
 def split_stored_metadata(raw: Mapping[str, Any] | None) -> tuple[dict[str, Any], datetime | None]:
@@ -226,7 +279,10 @@ async def default_list(
     """
     infos: list[CheckpointInfo] = []
     has_metadata = checkpointer.capabilities.metadata_query
-    for checkpoint_id in await checkpointer.list_checkpoints(thread_id, limit=limit):
+    # One id past the window names the parent of the oldest checkpoint in it.
+    ids = await checkpointer.list_checkpoints(thread_id, limit=limit + 1)
+    older = ids[limit] if len(ids) > limit else None
+    for checkpoint_id in ids[:limit]:
         state = await checkpointer.load(thread_id, checkpoint_id)
         if state is None:
             continue
@@ -249,7 +305,7 @@ async def default_list(
                 size=checkpoint_size(state.to_checkpoint()),
             )
         )
-    return link_parents(infos)
+    return link_parents(infos, older)
 
 
 async def default_fork(

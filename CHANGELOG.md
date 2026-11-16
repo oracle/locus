@@ -12,16 +12,18 @@ policy.
 
 - **Time travel on every checkpointer.** `checkpointer.list(thread_id)`
   describes a thread's checkpoints newest first as `CheckpointInfo`
-  records (id, write time, the state's iteration, the serialised state's
-  size, the checkpoint it descends from and, for a fork, the thread it
-  came from); `checkpointer.fork(thread_id, checkpoint_id)` starts a new
-  thread from any of them, with the thread's tool-effect ledger copied up
-  to that step and no further, so a run on the fork never replays what
-  the parent did past the fork point; `agent.run(...,
-  from_checkpoint=...)`, `arun`, `run_sync` and `agent.resume(...,
-  from_checkpoint=...)` continue a thread from a past checkpoint, with
-  the new saves recording it as their parent so the thread's history
-  shows the branch. `Agent.fork` and `StateGraph.afork` go through the
+  records (id, write time, the state's iteration, the checkpoint's size
+  as that backend stores it, the checkpoint it descends from — `None`
+  only for a thread's first — and, for a fork, the thread it came from);
+  `checkpointer.fork(thread_id, checkpoint_id)` starts a new thread from
+  any of them, with the thread's tool-effect ledger copied up to that
+  step and no further, so a run on the fork never replays what the
+  parent did past the fork point; `agent.run(..., from_checkpoint=...)`,
+  `arun`, `run_sync` and `agent.resume(..., from_checkpoint=...)`
+  continue a thread from a past checkpoint, the run's first lasting save
+  recording it as its parent and the rest following on, so the thread's
+  history shows the branch as a chain; the checkpoint run from is never
+  deleted. `Agent.fork` and `StateGraph.afork` go through the
   checkpointer's `fork`. Every `BaseCheckpointer` has the surface through
   the base defaults; the in-memory, file, adapter-wrapped (Redis,
   PostgreSQL, MySQL, OpenSearch, Oracle), S3, OCI Object Storage and
@@ -32,10 +34,14 @@ policy.
   `OCIBucketBackend`, `StorageBackendAdapter` and the `*_checkpointer()`
   factories bounds a thread's history (`FileCheckpointer` and
   `PgCheckpointer` already had one); no bound ever trims a ledger
-  sidecar. `draw_mermaid_history(checkpointer, *thread_ids)` and
-  `StateGraph.adraw_mermaid_history` draw the histories with a fork as a
-  branch of its parent. The checkpointers page has the per-backend
-  table; notebook 50 forks a thread on the in-memory checkpointer.
+  sidecar, and the object-store backends order checkpoints saved within
+  one second by the write time in their own metadata, not the listing's
+  coarse modification time. `draw_mermaid_history(checkpointer,
+  *thread_ids)` and `StateGraph.adraw_mermaid_history` draw the
+  histories with a fork as a branch of its parent (node ids stay
+  distinct for thread ids that differ only in punctuation; labels escape
+  Mermaid's specials). The checkpointers page has the per-backend table;
+  notebook 50 forks a thread on the in-memory checkpointer.
   (`locus.memory.time_travel`; #454)
 - **Durability modes.** `Agent(durability=...)`, and `durability=` on
   `run`, `arun` and `run_sync`, say when a run writes its iteration

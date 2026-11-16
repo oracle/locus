@@ -23,6 +23,11 @@ its storage grows with the square of the conversation's length;
 ``max_checkpoints_per_thread`` bounds it (an Object Storage lifecycle rule
 is the server-side alternative). ``list`` takes one listing plus one GET
 of the small ``.meta.json`` per checkpoint described.
+
+The listing's modification times are the service's (to the millisecond);
+checkpoints written within one second of each other are ordered by the
+write time their ``.meta.json`` records, and only those are read for it
+(:func:`~locus.memory.time_travel.order_by_write_time`).
 """
 
 from __future__ import annotations
@@ -43,6 +48,7 @@ from locus.memory.time_travel import (
     checkpoint_size,
     info_from,
     link_parents,
+    order_by_write_time,
 )
 
 
@@ -442,8 +448,15 @@ class OCIBucketBackend(BaseCheckpointer):
             return None
         return AgentState.from_checkpoint(data["state"])
 
-    async def _checkpoint_objects(self, thread_id: str) -> list[tuple[str, Any]]:
-        """``(checkpoint_id, time_modified)`` of the thread's checkpoints, newest first."""
+    async def _checkpoint_objects(
+        self, thread_id: str
+    ) -> list[tuple[str, Any, dict[str, Any] | None]]:
+        """``(checkpoint_id, time_modified, meta)`` of the thread's checkpoints, newest first.
+
+        Ordered by the service's modification time, and within one second of
+        it by the write time in each ``.meta.json``; ``meta`` is that object
+        where it had to be read, ``None`` otherwise.
+        """
         objects, _ = await self._list_objects(self._thread_prefix(thread_id), limit=1000)
 
         thread_prefix_len = len(self._thread_prefix(thread_id))
@@ -457,10 +470,9 @@ class OCIBucketBackend(BaseCheckpointer):
             checkpoint_id = name[thread_prefix_len:-5]
             entries.append((checkpoint_id, getattr(obj, "time_modified", None)))
 
-        # Newest first. time_modified comes through as datetime; fall back to
-        # id string if absent (shouldn't happen in practice).
-        entries.sort(key=lambda x: x[1] or "", reverse=True)
-        return entries
+        return await order_by_write_time(
+            entries, lambda cid: self._get_json(self._meta_key(thread_id, cid)), "updated_at"
+        )
 
     async def list_checkpoints(
         self,
@@ -468,7 +480,7 @@ class OCIBucketBackend(BaseCheckpointer):
         limit: int = 10,
     ) -> list[str]:
         await self._ensure_bucket()
-        return [cp_id for cp_id, _ in (await self._checkpoint_objects(thread_id))[:limit]]
+        return [cp_id for cp_id, _, _ in (await self._checkpoint_objects(thread_id))[:limit]]
 
     async def delete(
         self,
@@ -655,12 +667,18 @@ class OCIBucketBackend(BaseCheckpointer):
     async def list(self, thread_id: str, limit: int = 10) -> list[CheckpointInfo]:
         """The thread's checkpoints, newest first: one listing, then each one's ``.meta.json``."""
         await self._ensure_bucket()
-        objects = (await self._checkpoint_objects(thread_id))[:limit]
+        ordered = await self._checkpoint_objects(thread_id)
+        # The checkpoint just past the window is the parent of the oldest in it.
+        older = ordered[limit][0] if len(ordered) > limit else None
+        objects = ordered[:limit]
         metas = await asyncio.gather(
-            *(self._get_json(self._meta_key(thread_id, cid)) for cid, _ in objects)
+            *(
+                self._get_json(self._meta_key(thread_id, cid)) if meta is None else _ready(meta)
+                for cid, _, meta in objects
+            )
         )
         infos: list[CheckpointInfo] = []
-        for (checkpoint_id, modified), raw_meta in zip(objects, metas, strict=True):
+        for (checkpoint_id, modified, _), raw_meta in zip(objects, metas, strict=True):
             meta = raw_meta or {}
             iteration, size = meta.get("iteration"), meta.get("size")
             if iteration is None or size is None:
@@ -678,8 +696,9 @@ class OCIBucketBackend(BaseCheckpointer):
                     size=size,
                 )
             )
-        # The listing orders by the store's modification time, which some
-        # stores keep to the second; the write time in each ``.meta.json``
-        # is exact, so the window is re-sorted by it.
-        infos.sort(key=lambda i: i.created_at.isoformat() if i.created_at else "", reverse=True)
-        return link_parents(infos)
+        return link_parents(infos, older)
+
+
+async def _ready(value: dict[str, Any]) -> dict[str, Any]:
+    """``value`` as an awaitable, beside the GETs of a gather."""
+    return value

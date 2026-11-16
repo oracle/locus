@@ -288,6 +288,8 @@ class MemoryCheckpointer(BaseCheckpointer):
         newest_first = sorted(
             thread_data.items(), key=lambda item: item[1].created_at, reverse=True
         )
+        # The checkpoint just past the window is the parent of the oldest in it.
+        older = newest_first[limit][0] if len(newest_first) > limit else None
         return link_parents(
             [
                 info_from(
@@ -299,5 +301,6 @@ class MemoryCheckpointer(BaseCheckpointer):
                     size=stored.size,
                 )
                 for checkpoint_id, stored in newest_first[:limit]
-            ]
+            ],
+            older,
         )

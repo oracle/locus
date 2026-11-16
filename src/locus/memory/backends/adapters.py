@@ -500,22 +500,20 @@ class StorageBackendAdapter(BaseCheckpointer):
         ``iteration`` or ``size``; they are read from the checkpoint then.
         """
         existing = await self._backend.load(f"{thread_id}:_checkpoints")
-        entries = list((existing or {}).get("checkpoints", []))[:limit]
+        entries = list((existing or {}).get("checkpoints", []))
+        # The entry just past the window is the parent of the oldest in it.
+        older = entries[limit].get("checkpoint_id") if len(entries) > limit else None
         infos: list[CheckpointInfo] = []
-        for entry in entries:
+        for entry in entries[:limit]:
             checkpoint_id = entry.get("checkpoint_id")
             if not checkpoint_id:
                 continue
             iteration, size = entry.get("iteration"), entry.get("size")
             if iteration is None or size is None:
+                # The same figures a save records: the document as stored.
                 data = await self._backend.load(f"{thread_id}:{checkpoint_id}")
                 if data is not None:
-                    stored = {
-                        k: v
-                        for k, v in data.items()
-                        if k not in ("_checkpoint_id", "_checkpoint_timestamp", "_metadata")
-                    }
-                    iteration, size = stored.get("iteration"), checkpoint_size(stored)
+                    iteration, size = data.get("iteration"), checkpoint_size(data)
             infos.append(
                 info_from(
                     str(checkpoint_id),
@@ -526,7 +524,7 @@ class StorageBackendAdapter(BaseCheckpointer):
                     size=size,
                 )
             )
-        return link_parents(infos)
+        return link_parents(infos, older)
 
 
 # =============================================================================

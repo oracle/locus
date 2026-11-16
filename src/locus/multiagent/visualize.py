@@ -30,6 +30,7 @@ the thread ids to draw.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from typing import TYPE_CHECKING, Any
 
@@ -39,6 +40,8 @@ if TYPE_CHECKING:
 
 #: Characters a Mermaid node id may not contain, replaced by ``_``.
 _UNSAFE = re.compile(r"[^0-9A-Za-z_]")
+#: Characters with a meaning inside a Mermaid label, and their entity codes.
+_LABEL_ESCAPES = (("#", "#35;"), ('"', "#quot;"), ("<", "#lt;"), (">", "#gt;"))
 
 
 def draw_mermaid(graph: Any, direction: str = "TD") -> str:
@@ -159,18 +162,25 @@ async def draw_mermaid_history(
         limit: Checkpoints drawn per thread, newest first.
         direction: Flow direction — LR (left-right) or TD (top-down).
 
+    Node ids are the thread and checkpoint ids made safe for Mermaid
+    (:func:`_history_id`); a thread id that needed a character replaced
+    carries a short hash of the original, so ``a-b`` and ``a_b`` never share
+    a node. Labels show the ids as they are.
+
     Example output::
 
         graph LR
             subgraph thread_main["main"]
                 direction LR
-                cp_main__c1["c1<br/>iteration 1"] --> cp_main__c2["c2<br/>iteration 2"]
+                cp_main__c1["c1<br/>iteration 1"]
+                cp_main__c2["c2<br/>iteration 2"]
             end
-            subgraph thread_main_alt["main-alt"]
+            subgraph thread_main_alt_59e97666["main-alt"]
                 direction LR
-                cp_main_alt__f1["f1<br/>iteration 1<br/>fork"]
+                cp_main_alt_59e97666__f1["f1<br/>iteration 1<br/>fork"]
             end
-            cp_main__c1 -.->|fork| cp_main_alt__f1
+            cp_main__c1 --> cp_main__c2
+            cp_main__c1 -.->|fork| cp_main_alt_59e97666__f1
     """
     lines = [f"graph {direction}"]
     nodes: dict[tuple[str, str], str] = {}
@@ -178,10 +188,11 @@ async def draw_mermaid_history(
     for thread_id in thread_ids:
         infos = await checkpointer.list(thread_id, limit=limit)
         histories[thread_id] = infos
-        lines.append(f'    subgraph {_history_id("thread_" + thread_id)}["{_quote(thread_id)}"]')
+        lane = _history_id(thread_id)
+        lines.append(f'    subgraph thread_{lane}["{_quote(thread_id)}"]')
         lines.append(f"        direction {direction}")
         for info in reversed(infos):
-            node = _history_id(f"cp_{thread_id}__{info.checkpoint_id}")
+            node = f"cp_{lane}__{_history_id(info.checkpoint_id)}"
             nodes[(thread_id, info.checkpoint_id)] = node
             lines.append(f'        {node}["{_history_label(info)}"]')
         lines.append("    end")
@@ -206,13 +217,24 @@ async def draw_mermaid_history(
 
 
 def _history_id(raw: str) -> str:
-    """A Mermaid node id from a thread or checkpoint id (which may hold anything)."""
-    return _UNSAFE.sub("_", raw)
+    """A Mermaid node id from a thread or checkpoint id (which may hold anything).
+
+    Letters, digits and ``_`` stay; any other character becomes ``_`` and
+    the id gets a suffix of eight hex digits hashed from the original, so
+    two ids that differ only in such characters (``a-b``, ``a_b``) never
+    share a node.
+    """
+    safe = _UNSAFE.sub("_", raw)
+    if safe == raw:
+        return safe
+    return f"{safe}_{hashlib.sha1(raw.encode('utf-8'), usedforsecurity=False).hexdigest()[:8]}"
 
 
 def _quote(text: str) -> str:
-    """``text`` safe inside a double-quoted Mermaid label."""
-    return text.replace('"', "#quot;")
+    """``text`` safe inside a double-quoted Mermaid label: its specials as entity codes."""
+    for char, entity in _LABEL_ESCAPES:
+        text = text.replace(char, entity)
+    return text
 
 
 def _history_label(info: CheckpointInfo) -> str:

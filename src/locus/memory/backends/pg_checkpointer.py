@@ -651,11 +651,16 @@ class PgCheckpointer(BaseCheckpointer):
     # Last on purpose: a method named ``list`` shadows the builtin for the
     # annotations of anything defined after it.
     async def list(self, thread_id: str, limit: int = 10) -> list[CheckpointInfo]:
-        """The thread's checkpoints, newest first, in one query that never returns the state."""
+        """The thread's checkpoints, newest first, in one query that never returns the state.
+
+        ``size`` is the stored row's ``jsonb`` as text — the checkpoint as
+        this backend keeps it, not the compact JSON the others report.
+        """
         tenant = self.tenant_for(thread_id)
         pool = await self._get_pool()
         async with pool.acquire() as conn, conn.transaction():
             await self._pinned(conn, tenant)
+            # One row past the window names the parent of the oldest in it.
             rows = await conn.fetch(
                 "SELECT checkpoint_id, metadata, created_at, "
                 "(data->>'iteration')::int AS iteration, octet_length(data::text) AS size "
@@ -663,10 +668,11 @@ class PgCheckpointer(BaseCheckpointer):
                 "ORDER BY seq DESC LIMIT $3",
                 tenant,
                 thread_id,
-                limit,
+                limit + 1,
             )
+        older = rows[limit]["checkpoint_id"] if len(rows) > limit else None
         infos: list[CheckpointInfo] = []
-        for r in rows:
+        for r in rows[:limit]:
             meta = r["metadata"]
             infos.append(
                 info_from(
@@ -678,4 +684,4 @@ class PgCheckpointer(BaseCheckpointer):
                     size=r["size"],
                 )
             )
-        return link_parents(infos)
+        return link_parents(infos, older)
