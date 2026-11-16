@@ -133,6 +133,28 @@ policy.
 - Notebook 73 (support account gate) now ends with the hold parked in a
   file-backed store, approved from another process through `locus approvals`,
   and performed by a fresh agent resuming the thread.
+- **Zero Data Retention detection on `OCIResponsesModel`.** A tenancy with
+  Zero Data Retention (ZDR) answers every request that carries
+  `previous_response_id` with a 400 saying so. That reply now raises
+  `OCIResponsesZeroDataRetentionError`, a subclass of
+  `OCIResponsesStateLostError` so existing handlers keep working. `store`
+  accepts `"auto"` besides `True` and `False`: under `"auto"` the model starts
+  stateful and, on that error, switches itself to the stateless path for the
+  rest of its lifetime (`store: false`, full history on every request), warns
+  once with a `LocusWarning`, and the agent runtime replays the interrupted
+  turn from the history it holds, so the run completes with the same result.
+  `model.zdr_detected` reports the switch and the run's event stream carries a
+  `CustomEvent` named `server_state_fallback`. `store=True` still raises;
+  `store=False` is unchanged.
+
+### Changed
+
+- **`OCIResponsesModel` defaults to `store="auto"`.** Before, the default was
+  `store=True` and the first tool-call continuation on a ZDR tenancy failed the
+  run with `OCIResponsesStateLostError`. The first request of a run is
+  unchanged; only the ZDR case now completes instead of failing. Pass
+  `store=True` to keep the old behaviour, or `store=False` on a tenancy known
+  to be ZDR to skip the one stateful attempt.
 
 ### Removed
 

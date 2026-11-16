@@ -40,6 +40,7 @@ from locus.models.providers.oci.responses import (
     OCIResponsesConfig,
     OCIResponsesModel,
     OCIResponsesStateLostError,
+    OCIResponsesZeroDataRetentionError,
 )
 
 
@@ -434,5 +435,6 @@ __all__ = [
     "OCIResponsesConfig",
     "OCIResponsesModel",
     "OCIResponsesStateLostError",
+    "OCIResponsesZeroDataRetentionError",
     "build_oci_openai_base_url",
 ]

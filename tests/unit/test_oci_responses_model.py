@@ -18,17 +18,21 @@ requires real OCI auth.
 from __future__ import annotations
 
 import json
+import warnings
 from typing import Any
 
 import httpx
 import pytest
 import respx
+from pydantic import ValidationError
 
 from locus.core.messages import Message
+from locus.core.warnings import LocusWarning
 from locus.models.providers.oci import (
     OCIProjectRequiredError,
     OCIResponsesModel,
     OCIResponsesStateLostError,
+    OCIResponsesZeroDataRetentionError,
 )
 
 
@@ -535,4 +539,228 @@ async def test_400_mentioning_a_project_elsewhere_stays_generic() -> None:
     with pytest.raises(RuntimeError, match="quota exceeded") as exc_info:
         await model.complete([Message.user("hi")])
     assert not isinstance(exc_info.value, OCIProjectRequiredError)
+    await model.aclose()
+
+
+# =============================================================================
+# Zero Data Retention
+# =============================================================================
+
+_URL = "https://fake-oci.test/openai/v1/responses"
+
+#: The 400 a ZDR tenancy returns for every request carrying previous_response_id.
+_ZDR_BODY: dict[str, Any] = {
+    "error": {
+        "code": "unsupported_parameter",
+        "message": (
+            "Previous response cannot be used for this organization due to Zero Data Retention."
+        ),
+        "param": "previous_response_id",
+        "type": "invalid_request_error",
+    }
+}
+
+
+def _tool_call_response(response_id: str, call_id: str) -> dict[str, Any]:
+    return {
+        "id": response_id,
+        "status": "completed",
+        "output": [
+            {
+                "type": "function_call",
+                "call_id": call_id,
+                "name": "add",
+                "arguments": json.dumps({"a": 2, "b": 3}),
+            }
+        ],
+        "usage": {"input_tokens": 5, "output_tokens": 3, "total_tokens": 8},
+    }
+
+
+def _text_response(response_id: str, text: str) -> dict[str, Any]:
+    return {
+        "id": response_id,
+        "status": "completed",
+        "output": [
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": text}],
+            }
+        ],
+        "usage": {"input_tokens": 5, "output_tokens": 1, "total_tokens": 6},
+    }
+
+
+def _zdr_warnings(record: Any) -> list[Any]:
+    """Only the Locus ZDR warning: the interpreter may record others alongside."""
+    return [
+        w
+        for w in record
+        if issubclass(w.category, LocusWarning) and "Zero Data Retention" in str(w.message)
+    ]
+
+
+def test_store_defaults_to_auto_and_validates_its_values() -> None:
+    assert _make_model().config.store == "auto"
+    assert _make_model(store=True).config.store is True
+    assert _make_model(store=False).config.store is False
+    assert _make_model().zdr_detected is False
+    with pytest.raises(ValidationError):
+        _make_model(store="never")
+
+
+def test_zdr_error_is_a_state_lost_error() -> None:
+    """Handlers written for the expired-thread case keep catching ZDR."""
+    assert issubclass(OCIResponsesZeroDataRetentionError, OCIResponsesStateLostError)
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_store_true_raises_the_typed_zdr_error_and_stays_stateful() -> None:
+    """store=True keeps today's behaviour: the error propagates, nothing switches."""
+    model = _make_model(store=True)
+    respx.post(_URL).mock(return_value=httpx.Response(400, json=_ZDR_BODY))
+
+    with pytest.raises(OCIResponsesZeroDataRetentionError, match="Zero Data Retention"):
+        await model.complete(
+            [Message.user("hi")], provider_state={"previous_response_id": "resp_1"}
+        )
+    assert model.server_stateful is True
+    assert model.zdr_detected is False
+
+    # Existing handlers for the parent type still see it.
+    with pytest.raises(OCIResponsesStateLostError):
+        await model.complete(
+            [Message.user("hi")], provider_state={"previous_response_id": "resp_1"}
+        )
+    await model.aclose()
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_store_auto_switches_to_stateless_after_the_zdr_error() -> None:
+    """Under store="auto" the first ZDR 400 flips the model for good and warns once."""
+    model = _make_model()
+    bodies: list[dict[str, Any]] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        bodies.append(body)
+        if "previous_response_id" in body:
+            return httpx.Response(400, json=_ZDR_BODY)
+        return httpx.Response(200, json=_text_response("resp_2", "ok"))
+
+    respx.post(_URL).mock(side_effect=_handler)
+
+    with (
+        pytest.warns(LocusWarning, match="Zero Data Retention") as record,
+        pytest.raises(OCIResponsesZeroDataRetentionError),
+    ):
+        await model.complete(
+            [Message.user("hi")], provider_state={"previous_response_id": "resp_1"}
+        )
+    assert len(_zdr_warnings(record)) == 1
+    assert model.zdr_detected is True
+    assert model.server_stateful is False
+
+    # The next call is stateless even with a continuation id threaded in,
+    # and there is no second warning.
+    with warnings.catch_warnings(record=True) as again:
+        warnings.simplefilter("always")
+        response = await model.complete(
+            [Message.user("hi")], provider_state={"previous_response_id": "resp_1"}
+        )
+    assert _zdr_warnings(again) == []
+    assert response.message.content == "ok"
+    assert bodies[-1]["store"] is False
+    assert "previous_response_id" not in bodies[-1]
+    await model.aclose()
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_store_false_is_unchanged_by_the_zdr_detection() -> None:
+    model = _make_model(store=False)
+    captured: dict[str, Any] = {}
+    _capture_body(captured)
+
+    await model.complete([Message.user("hi")], provider_state={"previous_response_id": "r"})
+    assert captured["body"]["store"] is False
+    assert model.server_stateful is False
+    assert model.zdr_detected is False
+    await model.aclose()
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_agent_run_completes_statelessly_on_a_zdr_tenancy() -> None:
+    """First call 200 with a tool call, the continuation 400 ZDR: the runtime
+    replays the turn with the full history and store=false, the run completes
+    with the tool's result, the warning fires once, and a second run on the
+    same model never tries the stateful path again."""
+    from locus.agent import Agent
+    from locus.tools.decorator import tool
+
+    @tool
+    def add(a: int, b: int) -> int:
+        """Add two numbers."""
+        return a + b
+
+    model = _make_model()
+    bodies: list[dict[str, Any]] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        bodies.append(body)
+        if "previous_response_id" in body:
+            return httpx.Response(400, json=_ZDR_BODY)
+        if any(item.get("type") == "function_call_output" for item in body["input"]):
+            return httpx.Response(200, json=_text_response("resp_2", "5"))
+        return httpx.Response(200, json=_tool_call_response("resp_1", "call_add"))
+
+    respx.post(_URL).mock(side_effect=_handler)
+    agent = Agent(model=model, tools=[add], max_iterations=4)
+
+    with pytest.warns(LocusWarning, match="Zero Data Retention") as record:
+        result = await agent.arun("Add 2 and 3.")
+
+    assert result.success
+    assert result.message == "5"
+    assert len(_zdr_warnings(record)) == 1
+    assert len(bodies) == 3
+    first, rejected, replay = bodies
+    assert "previous_response_id" not in first
+    assert "store" not in first
+    assert rejected["previous_response_id"] == "resp_1"
+    # The replay is the stateless request the agent would have sent from
+    # the start: full history, store=false, no continuation id.
+    assert replay["store"] is False
+    assert "previous_response_id" not in replay
+    assert [item["type"] for item in replay["input"]] == [
+        "message",
+        "function_call",
+        "function_call_output",
+    ]
+    assert replay["input"][0]["role"] == "user"
+    assert replay["input"][1]["call_id"] == "call_add"
+    assert replay["input"][2] == {
+        "type": "function_call_output",
+        "call_id": "call_add",
+        "output": "5",
+    }
+    assert model.server_stateful is False
+    assert result.state.provider_state is None
+
+    # Same model, second run: stateless from the first request, no new warning.
+    bodies.clear()
+    with warnings.catch_warnings(record=True) as again:
+        warnings.simplefilter("always")
+        second = await agent.arun("Add 2 and 3 again.")
+    assert _zdr_warnings(again) == []
+    assert second.success
+    assert second.message == "5"
+    assert len(bodies) == 2
+    assert all(body["store"] is False for body in bodies)
+    assert all("previous_response_id" not in body for body in bodies)
     await model.aclose()

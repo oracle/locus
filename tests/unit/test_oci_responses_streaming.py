@@ -18,10 +18,12 @@ import respx
 
 from locus.core.events import ModelChunkEvent
 from locus.core.messages import Message
+from locus.core.warnings import LocusWarning
 from locus.models.providers.oci import (
     OCIProjectRequiredError,
     OCIResponsesModel,
     OCIResponsesStateLostError,
+    OCIResponsesZeroDataRetentionError,
 )
 from locus.models.providers.oci._responses_parse import (
     _translate_tool_schema,
@@ -629,4 +631,46 @@ async def test_stream_unknown_previous_response_id_maps_to_state_lost() -> None:
             [Message.user("hi")], provider_state={"previous_response_id": "resp_old"}
         ):
             pass
+    await model.aclose()
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_stream_zdr_400_flips_an_auto_model_and_raises_the_typed_error() -> None:
+    model = _make_model()
+    respx.post("https://fake-oci.test/openai/v1/responses").mock(
+        return_value=httpx.Response(
+            400,
+            json={
+                "error": {
+                    "code": "unsupported_parameter",
+                    "message": (
+                        "Previous response cannot be used for this organization "
+                        "due to Zero Data Retention."
+                    ),
+                    "param": "previous_response_id",
+                }
+            },
+        )
+    )
+
+    async def _drain() -> None:
+        async for _ in model.stream(
+            [Message.user("hi")], provider_state={"previous_response_id": "resp_old"}
+        ):
+            pass
+
+    with (
+        pytest.warns(LocusWarning, match="Zero Data Retention") as record,
+        pytest.raises(OCIResponsesZeroDataRetentionError),
+    ):
+        await _drain()
+    zdr = [
+        w
+        for w in record
+        if issubclass(w.category, LocusWarning) and "Zero Data Retention" in str(w.message)
+    ]
+    assert len(zdr) == 1
+    assert model.zdr_detected is True
+    assert model.server_stateful is False
     await model.aclose()

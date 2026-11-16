@@ -23,8 +23,9 @@ identity. Reuses the existing httpx signer (``OCIRequestSigner``).
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import AsyncIterator
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
@@ -32,6 +33,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from locus.core.events import ModelChunkEvent
 from locus.core.loop_bound import loop_bound
 from locus.core.messages import Message, ToolCall
+from locus.core.warnings import LocusWarning
 from locus.models.base import ModelResponse
 from locus.models.providers.oci._responses_parse import (
     build_request_body,
@@ -89,6 +91,30 @@ class OCIResponsesStateLostError(Exception):
     """
 
 
+class OCIResponsesZeroDataRetentionError(OCIResponsesStateLostError):
+    """Raised when the tenancy enforces Zero Data Retention (ZDR).
+
+    On a ZDR tenancy the Responses endpoint answers every request that
+    carries ``previous_response_id`` with HTTP 400 ("Previous response
+    cannot be used for this organization due to Zero Data Retention"),
+    so the server-stateful flow can never continue a thread there. A
+    subclass of :class:`OCIResponsesStateLostError`, so handlers written
+    for the expired-thread case keep working.
+
+    Under ``store="auto"`` (the default) the model switches itself to the
+    stateless path when it first sees this error and the agent runtime
+    replays the turn from the history it holds; the error still
+    propagates out of :meth:`OCIResponsesModel.complete` so a direct
+    caller knows to re-send the full conversation. Under ``store=True``
+    nothing is switched and the error is the final word.
+    """
+
+
+#: Lower-cased fragment of the 400 a Zero Data Retention tenancy returns
+#: for ``previous_response_id``.
+_ZDR_MARKER = "zero data retention"
+
+
 class OCIResponsesConfig(BaseModel):
     """Configuration for :class:`OCIResponsesModel`."""
 
@@ -122,18 +148,21 @@ class OCIResponsesConfig(BaseModel):
             "kwarg overrides it for that call."
         ),
     )
-    store: bool = Field(
-        default=True,
+    store: bool | Literal["auto"] = Field(
+        default="auto",
         description=(
             "Whether the OCI server should persist responses and accept "
-            "``previous_response_id`` for multi-turn continuation. Set to "
-            "False for tenancies with Zero Data Retention (ZDR) enabled — "
-            "the server will reject `previous_response_id` otherwise. When "
-            "False, ``store=false`` is sent on every request, the model "
-            "advertises ``server_stateful=False`` so the agent sends the "
-            "full message history each turn, and ``provider_state`` stays "
-            "empty. ZDR tenants still benefit from access to Responses-"
-            "only models like ``openai.gpt-5.5-pro``."
+            "``previous_response_id`` for multi-turn continuation. "
+            "``'auto'`` (default) starts stateful and, if the endpoint "
+            "reports Zero Data Retention (ZDR) for the tenancy, switches the "
+            "model to the stateless path for the rest of its lifetime with "
+            "one warning. ``True`` is always stateful and raises "
+            "``OCIResponsesZeroDataRetentionError`` on a ZDR tenancy. "
+            "``False`` is always stateless: ``store=false`` is sent on every "
+            "request, the model advertises ``server_stateful=False`` so the "
+            "agent sends the full message history each turn, and "
+            "``provider_state`` stays empty. ZDR tenants still benefit from "
+            "access to Responses-only models like ``openai.gpt-5.5-pro``."
         ),
     )
 
@@ -162,6 +191,7 @@ class OCIResponsesModel(BaseModel):
     _client: httpx.AsyncClient | None = None
     _client_loop: Any = None  # event loop ``_client`` was built on
     _signer: Any = None  # AbstractBaseSigner — lazy import-free
+    _zdr_detected: bool = False  # set once under store="auto", never reset
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -179,7 +209,7 @@ class OCIResponsesModel(BaseModel):
         max_output_tokens: int = 4096,
         temperature: float = 0.7,
         request_timeout: float = 600.0,
-        store: bool = True,
+        store: bool | Literal["auto"] = "auto",
         reasoning_effort: str | None = None,
         **kwargs: Any,
     ) -> None:
@@ -205,16 +235,20 @@ class OCIResponsesModel(BaseModel):
             max_output_tokens: Default output token cap.
             temperature: Default sampling temperature.
             request_timeout: HTTP request timeout in seconds.
-            store: When True (default) the OCI server persists responses
-                and the agent uses ``previous_response_id`` for cheap
-                multi-turn continuation. Set False for tenancies with
-                Zero Data Retention (ZDR) enabled — the server rejects
-                ``previous_response_id`` otherwise. With ``store=False``
-                the model reports ``server_stateful=False`` to the agent
-                runtime, so the agent sends the full message history
-                each turn (like chat/completions) but still uses the
-                Responses endpoint — useful for Responses-only models
-                in ZDR tenants.
+            store: ``"auto"`` (default) starts stateful: the OCI server
+                persists responses and the agent uses
+                ``previous_response_id`` for cheap multi-turn continuation.
+                If the endpoint reports Zero Data Retention (ZDR) for the
+                tenancy, the model switches to the stateless path for the
+                rest of its lifetime (see :attr:`zdr_detected`), warns
+                once, and the agent runtime replays the turn from its own
+                history. ``True`` never switches: a ZDR tenancy raises
+                ``OCIResponsesZeroDataRetentionError``. ``False`` is
+                stateless from the start — the model reports
+                ``server_stateful=False`` to the agent runtime, so the
+                agent sends the full message history each turn (like
+                chat/completions) but still uses the Responses endpoint —
+                the right choice when the tenancy is known to be ZDR.
             reasoning_effort: Reasoning effort for reasoning models (e.g.
                 ``"low"``, ``"medium"``, ``"high"``), sent as
                 ``reasoning={"effort": ...}``. The accepted values depend on
@@ -272,14 +306,46 @@ class OCIResponsesModel(BaseModel):
     def server_stateful(self) -> bool:
         """Whether this model relies on OCI-side response persistence.
 
-        Reflects :attr:`OCIResponsesConfig.store`. The agent runtime
-        reads this to decide between the latest-turn-slice +
+        Reflects :attr:`OCIResponsesConfig.store` and, under
+        ``store="auto"``, whether Zero Data Retention has been detected
+        (:attr:`zdr_detected`). The agent runtime reads this before every
+        model call to decide between the latest-turn-slice +
         ``provider_state`` flow (True) and the stateless full-history
-        flow (False). ZDR tenancies set ``store=False`` at construction
-        so the agent automatically picks the stateless path and avoids
-        ``OCIResponsesStateLostError`` on every turn.
+        flow (False), so the switch takes effect on the very turn that
+        met the ZDR error.
         """
-        return self.config.store
+        if self.config.store is False:
+            return False
+        return not self._zdr_detected
+
+    @property
+    def zdr_detected(self) -> bool:
+        """``True`` once the endpoint reported Zero Data Retention.
+
+        Only ever set under ``store="auto"``, on the first
+        :class:`OCIResponsesZeroDataRetentionError`; it stays set for the
+        lifetime of the instance, so no later run on this model attempts
+        the stateful path again. A plain flag written once from the
+        coroutine that saw the error — safe for concurrent asyncio
+        callers on one loop.
+        """
+        return self._zdr_detected
+
+    def _note_zero_data_retention(self) -> None:
+        """Switch to the stateless path under ``store="auto"``; no-op otherwise."""
+        if self.config.store != "auto" or self._zdr_detected:
+            return
+        self._zdr_detected = True
+        warnings.warn(
+            "OCI Responses: the endpoint reported Zero Data Retention for this "
+            "tenancy, so previous_response_id cannot be used. "
+            f"OCIResponsesModel({self.config.model!r}) now sends store=false "
+            "with the full history on every request for the rest of its "
+            "lifetime. Pass store=False at construction to skip the first "
+            "stateful attempt.",
+            LocusWarning,
+            stacklevel=3,
+        )
 
     def _build_signer(self) -> AbstractBaseSigner:
         if self.config.auth_type == "instance_principal":
@@ -373,7 +439,7 @@ class OCIResponsesModel(BaseModel):
             or kwargs.pop("max_output_tokens", self.config.max_output_tokens),
             stream=False,
             response_format=kwargs.pop("response_format", None),
-            store=self.config.store,
+            store=self.server_stateful,
             reasoning_effort=kwargs.pop("reasoning_effort", None) or self.config.reasoning_effort,
         )
 
@@ -388,7 +454,11 @@ class OCIResponsesModel(BaseModel):
             msg = f"OCI Responses request failed: {exc}"
             raise RuntimeError(msg) from exc
 
-        self._raise_for_error(resp)
+        try:
+            self._raise_for_error(resp)
+        except OCIResponsesZeroDataRetentionError:
+            self._note_zero_data_retention()
+            raise
 
         try:
             payload = resp.json()
@@ -436,7 +506,7 @@ class OCIResponsesModel(BaseModel):
             or kwargs.pop("max_output_tokens", self.config.max_output_tokens),
             stream=True,
             response_format=kwargs.pop("response_format", None),
-            store=self.config.store,
+            store=self.server_stateful,
             reasoning_effort=kwargs.pop("reasoning_effort", None) or self.config.reasoning_effort,
         )
 
@@ -452,7 +522,11 @@ class OCIResponsesModel(BaseModel):
                 # server's message reaches _raise_for_error instead of
                 # surfacing as httpx.ResponseNotRead.
                 await resp.aread()
-            self._raise_for_error(resp)
+            try:
+                self._raise_for_error(resp)
+            except OCIResponsesZeroDataRetentionError:
+                self._note_zero_data_retention()
+                raise
             async for raw_event in _iter_sse_events(resp):
                 parsed = parse_stream_event(raw_event)
                 if not parsed:
@@ -518,6 +592,14 @@ class OCIResponsesModel(BaseModel):
                 f"Server said: {message or response.text[:200]}"
             )
 
+        if response.status_code == 400 and _ZDR_MARKER in text:
+            raise OCIResponsesZeroDataRetentionError(
+                "OCI Responses: this tenancy enforces Zero Data Retention, so "
+                "previous_response_id cannot be used. Build the model with "
+                "store=False (or leave store='auto' and let it switch). "
+                f"Server said: {message or response.text[:200]}"
+            )
+
         if response.status_code in (400, 404) and (
             "previous_response_id" in text or "response not found" in text or "thread" in text
         ):
@@ -568,4 +650,5 @@ __all__ = [
     "OCIResponsesConfig",
     "OCIResponsesModel",
     "OCIResponsesStateLostError",
+    "OCIResponsesZeroDataRetentionError",
 ]
