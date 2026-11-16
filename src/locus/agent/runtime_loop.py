@@ -3183,33 +3183,7 @@ class AgentRuntimeMixin:
         if server_stateful:
             messages = self._messages_since_last_assistant(state)
         else:
-            # Apply conversation manager if present
-            messages = list(state.messages)
-            if self._conversation_manager:
-                if hasattr(self._conversation_manager, "async_apply"):
-                    messages = await self._conversation_manager.async_apply(messages)
-                else:
-                    messages = self._conversation_manager.apply(messages)
-
-            # Validate message pairs (remove orphaned tool calls/results)
-            messages = self._validate_messages(messages)
-
-            # Large old tool outputs go as recallable placeholders. Only this
-            # request's list changes: the state and its checkpoints keep them.
-            pack = self._observation_pack
-            if pack is not None:
-                session = self._observation_session(state, run)
-
-                def _announce(data: dict[str, Any]) -> None:
-                    if run is not None:
-                        run.emit(CustomEvent(name="observation_pack", data=data))
-
-                messages = pack.project(
-                    messages,
-                    session=session,
-                    on_event=_announce,
-                    context_limit=self._compaction_limit(),
-                )
+            messages = await self._client_side_request_messages(state, run)
 
         # Get tool schemas
         tool_schemas = self._tool_registry.to_openai_schemas()
@@ -3275,9 +3249,37 @@ class AgentRuntimeMixin:
             streaming = (
                 chunk_queue is not None and not server_stateful and hasattr(self._model, "stream")
             )
-            response = await self._call_model(
-                complete_kwargs, chunk_queue, streaming=streaming, run=run
-            )
+            try:
+                response = await self._call_model(
+                    complete_kwargs, chunk_queue, streaming=streaming, run=run
+                )
+            except Exception as exc:
+                # A transport that stops being server-stateful during the call
+                # (OCIResponsesModel under ``store="auto"`` meeting a Zero Data
+                # Retention tenancy) has lost the thread it was sent a slice
+                # for. This loop still holds the whole history, so the turn is
+                # replayed client-side and the run completes as if the model
+                # had been stateless from the start.
+                if not server_stateful or getattr(self._model, "server_stateful", False) is True:
+                    raise
+                server_stateful = False
+                state = state.with_provider_state(None)
+                messages = await self._client_side_request_messages(state, run)
+                messages = await self._run_before_model_hooks(
+                    messages, tool_schemas or None, run=run
+                )
+                complete_kwargs["messages"] = messages
+                complete_kwargs.pop("provider_state", None)
+                if run is not None:
+                    run.emit(
+                        CustomEvent(
+                            name="server_state_fallback",
+                            data={"error": f"{type(exc).__name__}: {exc}"[:500]},
+                        )
+                    )
+                response = await self._call_model(
+                    complete_kwargs, chunk_queue, streaming=False, run=run
+                )
 
             # Post-model hooks: event.retry = True to re-call
             after_event = await self._run_after_model_hooks(response, messages, run=run)
@@ -3478,6 +3480,45 @@ class AgentRuntimeMixin:
         if run is not None:
             return ObservationPack.session_key(run.thread_id, run.run_id)
         return ObservationPack.session_key(None, state.run_id)
+
+    async def _client_side_request_messages(
+        self, state: AgentState, run: RunContext | None
+    ) -> list[Message]:
+        """Shape the full history into this request's message list.
+
+        The stateless path: the conversation manager, message-pair
+        validation and the observation pack all work on the client-side
+        history. Server-stateful transports skip this and send only the
+        slice since the last assistant turn.
+        """
+        # Apply conversation manager if present
+        messages = list(state.messages)
+        if self._conversation_manager:
+            if hasattr(self._conversation_manager, "async_apply"):
+                messages = await self._conversation_manager.async_apply(messages)
+            else:
+                messages = self._conversation_manager.apply(messages)
+
+        # Validate message pairs (remove orphaned tool calls/results)
+        messages = self._validate_messages(messages)
+
+        # Large old tool outputs go as recallable placeholders. Only this
+        # request's list changes: the state and its checkpoints keep them.
+        pack = self._observation_pack
+        if pack is not None:
+            session = self._observation_session(state, run)
+
+            def _announce(data: dict[str, Any]) -> None:
+                if run is not None:
+                    run.emit(CustomEvent(name="observation_pack", data=data))
+
+            messages = pack.project(
+                messages,
+                session=session,
+                on_event=_announce,
+                context_limit=self._compaction_limit(),
+            )
+        return messages
 
     def _messages_since_last_assistant(self, state: AgentState) -> list[Message]:
         """Return the slice of state.messages that the model hasn't seen yet.

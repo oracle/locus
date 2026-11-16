@@ -135,12 +135,38 @@ raises `OCIResponsesStateLostError`. The agent should usually restart the
 run rather than silently dropping the conversation; catch it explicitly
 if you need different behavior.
 
+## `store`: stateful, stateless, or decided by the tenancy
+
+`store` controls whether OCI keeps the thread. It takes three values:
+
+- `"auto"` (default). The model starts stateful. Some tenancies enforce
+  Zero Data Retention (ZDR): the endpoint then answers every request that
+  carries `previous_response_id` with a 400 saying so, and nothing can be
+  continued server-side. On that error the model switches itself to the
+  stateless path for the rest of its lifetime (`store: false` and the
+  full history on every request), warns once with a `LocusWarning`, and
+  the agent runtime replays the interrupted turn from the history it
+  holds, so the run completes with the same result. The runtime reads
+  `server_stateful` before every model call, so the switch takes effect on
+  that very turn; `model.zdr_detected` tells you it happened, and the
+  run's event stream carries a `CustomEvent` named `server_state_fallback`.
+- `True`. Always stateful. On a ZDR tenancy the first continuation raises
+  `OCIResponsesZeroDataRetentionError`.
+- `False`. Always stateless. The right choice when you know the tenancy
+  is ZDR: it skips the one stateful attempt and the warning. The
+  Responses-only models stay reachable either way.
+
+With `store=False`, or after the switch, the runtime takes the same
+client-side path as `OCIChatCompletionsModel`: `ConversationManager`,
+message-pair validation, the observation pack and streaming all apply.
+
 ## Errors you'll see
 
 | Exception | When |
 |---|---|
 | `OCIProjectRequiredError` | OCI returned 403/404 with a project-related error body, or 400 saying the model needs the `OpenAI-Project` / `opc-conversation-store-id` header. Pass `project_ocid=` to the constructor. |
 | `OCIResponsesStateLostError` | `previous_response_id` is unknown or expired. Restart the run. |
+| `OCIResponsesZeroDataRetentionError` | The tenancy enforces Zero Data Retention, so `previous_response_id` can never be used. A subclass of `OCIResponsesStateLostError`. Under `store="auto"` the model switches to the stateless path and the agent runtime replays the turn; under `store=True` it propagates — build the model with `store=False`. |
 | `RuntimeError` | Generic 5xx / non-JSON body / transport error. Status code + first 300 chars of body included in the message. |
 
 No fallback to chat/completions. Picking the Responses

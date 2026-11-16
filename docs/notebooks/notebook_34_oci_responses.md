@@ -10,9 +10,13 @@ thread so multi-turn payloads stay small. Two modes:
   out on every request, the agent sends the full history each turn and
   OCI keeps nothing. Works in every tenancy, including those with ZDR
   enforced.
-- **`store=True`** — the class default. OCI holds the thread; the SDK
-  passes `previous_response_id` between turns and only the latest turn
-  goes on the wire. Requires a non-ZDR tenancy.
+- **`store=True`** — OCI holds the thread; the SDK passes
+  `previous_response_id` between turns and only the latest turn goes on
+  the wire. Requires a non-ZDR tenancy.
+
+The class default, `store="auto"`, starts in the second mode and drops
+to the first for the rest of the model's lifetime when the endpoint
+reports a ZDR tenancy, with one warning.
 
 The model reports its mode as `server_stateful`, and the runtime loop
 reads that flag. With `store=True` the loop sends only the messages
