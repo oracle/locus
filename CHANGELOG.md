@@ -182,6 +182,16 @@ policy.
   `store=True` to keep the old behaviour, or `store=False` on a tenancy known
   to be ZDR to skip the one stateful attempt.
 
+### Fixed
+
+- **Streamed tool calls on the OCI Responses transport keep their name and call
+  id.** `stream()` only read the argument deltas, which carry the stream item id
+  and no function name, so a streamed tool call came back as `name=""` keyed by
+  the item id while `complete()` returned the real name and `call_id`. The parser
+  now reads `response.output_item.added` and `.done` for `function_call` items
+  and the accumulator keys by the call id, so streamed and non-streamed turns
+  are identical and a streaming agent on the stateless path executes its tools.
+
 ### Removed
 
 - **The `locus-sdk-security` package.** The security-domain tooling (red-team
