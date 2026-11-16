@@ -22,6 +22,7 @@ Sub-hierarchies correspond to subsystems:
 - :class:`RAGError` — embeddings, vector store, retrieval
 - :class:`ValidationError` — bad input at a public API boundary
 - :class:`ConfigError` — invalid or missing configuration
+  (:class:`UnknownProviderError` — a registry has no such provider)
 
 Each subclass of :class:`LocusError` exposes a ``kind`` attribute
 (a short snake-case string) that can be used as a stable key in
@@ -186,6 +187,37 @@ class ConfigError(LocusError):
     kind = "config_error"
 
 
+class UnknownProviderError(ConfigError, ValueError):
+    """A registry was asked for a provider it does not have.
+
+    Raised by :func:`locus.models.registry.get_model` and
+    :func:`locus.memory.registry.get_checkpointer` when the identifier names
+    no registered provider, or (for ``get_model``) is not in
+    ``"provider:model"`` form at all. It also subclasses :class:`ValueError`,
+    so existing ``except ValueError`` handlers keep working.
+
+    Attributes:
+        provider: The provider prefix that was asked for, or ``None`` when
+            the identifier names none (a model string without a ``:``).
+        available: The providers registered when the lookup failed, in
+            registration order.
+    """
+
+    kind = "unknown_provider"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        provider: str | None,
+        available: list[str],
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(message, cause=cause)
+        self.provider = provider
+        self.available = available
+
+
 class GSARValidationError(LocusError):
     """A GSAR judgment did not clear the bar, and the caller asked to stop.
 
@@ -231,6 +263,7 @@ __all__ = [
     "ToolExecutionError",
     "ToolNotFoundError",
     "ToolValidationError",
+    "UnknownProviderError",
     "ValidationError",
     "VectorStoreError",
 ]

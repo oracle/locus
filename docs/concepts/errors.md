@@ -26,6 +26,7 @@ except LocusError as exc:
 | `GSARConfig.fail_on_low_score` is set and the GSAR decision for a `run_sync` / `arun` result is not `proceed` | `GSARValidationError` (carries `.decision` and `.score`) |
 | Every credential in a `CredentialPoolModel` is cooling down | `ModelAuthError` (its `kind` is `model_pool_exhausted`) |
 | A safety check rejected input — `safe_resolve` (path), `validate_url` (URL), or `MCPClient.connect()` (server URL or launch package) | `ValidationError` |
+| `get_model` or `get_checkpointer` was given an unknown provider, or `get_model` a string not in `provider:model` form | `UnknownProviderError` (a `ConfigError` and a `ValueError`; carries `.provider` and `.available`) |
 | `Agent.resume(..., perform_dangling=True)` while the [held approval](interrupts.md#a-hold-that-pauses-the-run) is still undecided | `ApprovalPendingError` (carries `.thread_id`, `.interrupt_id`, `.question` and `.metadata`; the thread stays paused) |
 | Provider auth, quota or rate-limit failure | The provider SDK's own exception — it is not wrapped. [`classify`](providers/resilience.md#classifying-an-error) maps it to a `FailoverReason` |
 | A tool raised | Nothing — the loop returns the error to the model as the tool's result; `result.metrics.tool_errors` counts them |
@@ -35,8 +36,8 @@ exceptions pass through unwrapped, much of the SDK raises built-in
 exceptions such as `ValueError`, and several modules define their own
 exceptions outside this hierarchy — so a boundary handler that must see
 every failure catches `Exception` after `LocusError`. The SDK does not
-itself raise the tool, checkpoint and RAG families, `ConfigError`, or the
-other model errors; they are public, so your own model adapters and
+itself raise the tool, checkpoint and RAG families, `ConfigError` other
+than `UnknownProviderError`, or the other model errors; they are public, so your own model adapters and
 checkpointers can raise them under the same root.
 
 ## Hierarchy

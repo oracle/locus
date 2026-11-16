@@ -41,6 +41,7 @@ class TestLocusErrorHierarchy:
             errors.VectorStoreError,
             errors.ValidationError,
             errors.ConfigError,
+            errors.UnknownProviderError,
         ],
     )
     def test_every_error_subclasses_locus_error(self, cls: type[Exception]) -> None:
@@ -56,6 +57,7 @@ class TestLocusErrorHierarchy:
         assert issubclass(errors.CheckpointNotFoundError, errors.CheckpointError)
         assert issubclass(errors.EmbeddingError, errors.RAGError)
         assert issubclass(errors.VectorStoreError, errors.RAGError)
+        assert issubclass(errors.UnknownProviderError, errors.ConfigError)
 
     def test_kind_is_snake_case_and_unique(self) -> None:
         """Every leaf class has a distinct snake_case ``kind``."""
@@ -89,3 +91,23 @@ class TestLocusErrorHierarchy:
             raise errors.ModelThrottledError("slow down")
         with pytest.raises(errors.LocusError):
             raise errors.CheckpointNotFoundError("missing thread")
+
+
+class TestUnknownProviderError:
+    def test_is_a_config_error_and_a_value_error(self) -> None:
+        """Existing ``except ValueError`` handlers keep catching it."""
+        assert issubclass(errors.UnknownProviderError, errors.ConfigError)
+        assert issubclass(errors.UnknownProviderError, ValueError)
+        assert errors.UnknownProviderError.kind == "unknown_provider"
+
+    def test_carries_provider_and_available(self) -> None:
+        err = errors.UnknownProviderError("no such provider", provider="nope", available=["a", "b"])
+        assert str(err) == "no such provider"
+        assert err.provider == "nope"
+        assert err.available == ["a", "b"]
+
+    def test_is_exported(self) -> None:
+        import locus.core
+
+        assert "UnknownProviderError" in errors.__all__
+        assert locus.core.UnknownProviderError is errors.UnknownProviderError
