@@ -15,26 +15,31 @@ policy.
   (`state`, `start()`, `stop()`, `close()`, each idempotent), declared
   `ResourceLimits` (a `max_exec_s` is enforced by clamping every `exec`
   timeout), and `add_exec_hook()`, which hands an `ExecRecord` of every
-  command the backend runs to whoever holds it. `SandboxMixin` gives a
-  backend of your own all of it by overriding `_start`, `_stop` and
-  `_destroy`. `locus.harness.testing.assert_backend_conformance(factory)`
+  command the backend runs to whoever holds it — after the command, so a
+  hook that raises is logged and the result still reaches the caller.
+  `SandboxMixin` gives a backend of your own all of it by overriding
+  `_start`, `_stop` and `_destroy`.
+  `locus.harness.testing.assert_backend_conformance(factory)`
   is the conformance kit: the file, shell, deadline, background-command and
   protocol checks the tools assume, run on a backend and reported together;
   `run_conformance(backend)` does the same without closing it.
 - **`SSHSandboxBackend`.** Any host with `sshd` as a workspace (the `ssh`
   extra, `paramiko`): commands run under a watchdog on the host so a deadline
   kills the process group where it runs, both streams come back in order,
-  files move over SFTP with a `cat` fallback, host keys are checked against
-  `known_hosts` or a pinned `host_key=`, and `via=SSHJump(...)` connects
-  through a bastion.
+  files move over SFTP with a `cat` fallback that checks the byte count,
+  host keys are checked against `known_hosts` or a pinned `host_key=` (a key
+  accepted under `known_hosts="accept-unknown"` stays in memory; the user's
+  file is never written), and `via=SSHJump(...)` connects through a bastion.
 - **`OCIContainerInstanceBackend`.** An OCI Container Instance as the
   Oracle-native remote sandbox (the `oci-container` extra): `create()`
   provisions the instance from an image with `sshd` or a package manager,
   bootstraps `sshd` with a key pair generated for the backend, reads the
   container's host keys from its log and connects with them pinned, directly
-  or through an OCI Bastion port-forwarding session for a private subnet;
-  `stop()`/`start()` restart the instance and `close()` deletes it and the
-  session.
+  or through an OCI Bastion port-forwarding session for a private subnet
+  (`bastion_session_ttl=` sets its lifetime; a restart past it makes a new
+  one). A container or bastion that reports no host key is refused unless
+  `known_hosts="accept-unknown"` is passed. `stop()`/`start()` restart the
+  instance and `close()` deletes it and the session.
 - **`E2BBackend` and `DaytonaBackend`.** Thin adapters over the two hosted
   sandbox services' Python clients (the `e2b` and `daytona` extras), checked
   with stand-ins; the live tests run when the service's API key is set.

@@ -23,6 +23,7 @@ from locus.harness import (
     WarmPoolHint,
     WorkspaceBackend,
 )
+from locus.harness import sandbox as sandbox_mod
 from locus.harness.backend import BackendCapabilities
 from tests.unit.harness.conftest import FILE_BACKENDS, make_backend
 
@@ -73,6 +74,28 @@ def test_hooks_see_every_command_with_digests_only(root: Path) -> None:
     remove()
     backend.exec("true", timeout=5)
     assert len(seen) == 2, "a removed hook sees nothing more"
+    backend.close()
+
+
+def test_a_hook_that_raises_does_not_take_the_result_from_the_caller(
+    root: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    backend = LocalBackend(root)
+    records: list[ExecRecord] = []
+
+    def broken(_record: ExecRecord) -> None:
+        raise RuntimeError("ledger down")
+
+    backend.add_exec_hook(broken)
+    backend.add_exec_hook(records.append)
+    with caplog.at_level("ERROR"):
+        result = backend.exec("echo ran > marker.txt; echo ok", timeout=5)
+    assert result.exit_code == 0, "the command ran; its result reaches the caller"
+    assert result.output == b"ok\n"
+    assert backend.exists("marker.txt")
+    assert len(records) == 1, "the hooks after the broken one still see the record"
+    assert "ledger down" in caplog.text
+    assert "exec hook" in caplog.text
     backend.close()
 
 
@@ -236,6 +259,58 @@ def test_a_factory_error_reaches_the_caller() -> None:
     pool.close()
 
 
+def test_a_failed_warm_is_forgotten_once_a_later_one_succeeds() -> None:
+    calls = 0
+    lock = threading.Lock()
+
+    def flaky() -> WorkspaceBackend:
+        nonlocal calls
+        with lock:
+            calls += 1
+            first = calls == 1
+        if first:
+            raise ValueError("no capacity, once")
+        time.sleep(0.05)
+        return Counted()  # type: ignore[return-value]
+
+    pool = SandboxPool(flaky, ready=2)  # type: ignore[arg-type]
+    _wait_ready(pool, 1)
+    first = pool.acquire(timeout=5)
+    assert isinstance(first, Counted)
+    second = pool.acquire(timeout=5)
+    assert isinstance(second, Counted), "a replacement was warming: wait for it, not the old error"
+    pool.release(first)
+    pool.release(second)
+    pool.close()
+
+
+def test_a_factory_error_is_raised_only_when_nothing_is_on_its_way() -> None:
+    gate = threading.Event()
+    calls = 0
+
+    def slow_then_broken() -> WorkspaceBackend:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise ValueError("no capacity")
+        gate.wait(5)
+        raise ValueError("still no capacity")
+
+    pool = SandboxPool(slow_then_broken, ready=1)  # type: ignore[arg-type]
+    deadline = time.monotonic() + 5
+    while pool._errors == []:
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
+    # The first warm failed; acquire starts another, which is held at the gate.
+    with pytest.raises(RuntimeError, match="within"):
+        pool.acquire(timeout=0.2)
+    gate.set()
+    with pytest.raises(ValueError, match="still no capacity"):
+        pool.acquire(timeout=5)
+    assert pool._errors == [], "the error raised is the latest, and none is kept behind"
+    pool.close()
+
+
 def test_acquire_times_out_when_nothing_arrives() -> None:
     gate = threading.Event()
 
@@ -272,4 +347,51 @@ def test_a_sandbox_finished_after_close_is_closed_not_kept() -> None:
     while not made or not made[0].closed:
         assert time.monotonic() < deadline
         time.sleep(0.01)
+    assert pool.ready == 0
+
+
+def test_a_pool_left_open_closes_what_it_is_creating_at_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registered: list[object] = []
+    monkeypatch.setattr(sandbox_mod.atexit, "register", registered.append)
+    monkeypatch.setattr(
+        sandbox_mod.atexit,
+        "unregister",
+        lambda hook: registered.remove(hook) if hook in registered else None,
+    )
+    gate = threading.Event()
+    made: list[Counted] = []
+
+    def slow() -> WorkspaceBackend:
+        gate.wait(5)
+        backend = Counted()
+        made.append(backend)
+        return backend  # type: ignore[return-value]
+
+    pool = SandboxPool(slow, ready=1)  # type: ignore[arg-type]
+    assert registered == [pool._at_exit], "an open pool has a hand at interpreter exit"
+    threading.Timer(0.05, gate.set).start()
+    pool._at_exit()  # what the interpreter would call, with the factory mid-create
+    assert made, "the exit waited for the sandbox being created"
+    assert made[0].closed, "and closed it"
+    assert pool.ready == 0
+    assert registered == [], "closing takes the hand back"
+    with pytest.raises(RuntimeError, match="closed"):
+        pool.acquire()
+
+
+def test_a_closed_pool_is_not_kept_for_exit(monkeypatch: pytest.MonkeyPatch) -> None:
+    registered: list[object] = []
+    monkeypatch.setattr(sandbox_mod.atexit, "register", registered.append)
+    monkeypatch.setattr(
+        sandbox_mod.atexit,
+        "unregister",
+        lambda hook: registered.remove(hook) if hook in registered else None,
+    )
+    pool = SandboxPool(Counted, ready=1)  # type: ignore[arg-type]
+    _wait_ready(pool, 1)
+    pool.close()
+    assert registered == []
+    pool._at_exit()  # harmless if it runs anyway
     assert pool.ready == 0

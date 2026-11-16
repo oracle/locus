@@ -25,7 +25,9 @@ no command API — it starts a container and shows its log — so
 3. Waits for the instance to be ``ACTIVE``, reads the host keys from the
    log, and connects with them pinned: the host key is verified against
    what the container itself reported, over the authenticated service API,
-   so there is no trust-on-first-use.
+   so there is no trust-on-first-use. A log without a key is an error, not
+   an unverified connection, unless ``known_hosts="accept-unknown"`` says
+   so; the same goes for a bastion that reports no host key.
 4. Connects directly to the instance's IP, or through an
    `OCI Bastion <https://docs.oracle.com/en-us/iaas/Content/Bastion/home.htm>`_
    when ``bastion_id`` is given: a port-forwarding session to the
@@ -34,10 +36,12 @@ no command API — it starts a container and shows its log — so
    instance in a private subnet, which is where a sandbox belongs.
 
 ``close()`` ends the harness's background commands, closes the connection,
-deletes the bastion session and deletes the instance; ``stop()`` and
-``start()`` stop and restart the instance, which **loses the container's
-filesystem**: the service restarts the container from its image, the
-bootstrap runs again and the backend reconnects to a fresh workspace.
+deletes the bastion session and deletes the instance — a running instance
+is deleted as it is, not stopped first; ``stop()`` and ``start()`` stop and
+restart the instance, which **loses the container's filesystem**: the
+service restarts the container from its image, the bootstrap runs again
+and the backend reconnects to a fresh workspace, through a new bastion
+session when the previous one has expired.
 
 Everything from the ``oci`` SDK is imported when a backend is built, never
 at import time. The container's bootstrap needs network egress to install
@@ -54,7 +58,8 @@ import shlex
 import time
 import uuid
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Any
 
 from locus.harness.local import MAX_BACKGROUND
@@ -79,13 +84,16 @@ SANDBOX_ROOT = "/workspace"
 #: What the bootstrap prints before each host public key.
 HOST_KEY_MARK = "LOCUS_HOST_KEY "
 
-#: What the bootstrap prints when ``sshd`` is about to start.
+#: What the bootstrap prints when ``sshd`` is about to start, followed by an
+#: id for this boot, so a restart is told from the previous boot's log.
 READY_MARK = "LOCUS_SSHD_READY"
 
 #: What the bootstrap prints when it could not get ``sshd``.
 FAILED_MARK = "LOCUS_BOOTSTRAP_FAILED"
 
-#: Seconds a bastion session lives; the backend deletes it sooner on close.
+#: Seconds a bastion session lives when ``bastion_session_ttl`` is not
+#: given; the backend deletes it sooner on close, and makes a new one when
+#: a restart finds it expired.
 BASTION_SESSION_TTL = 3 * 60 * 60
 
 #: Seconds a stop or a start of the instance may take.
@@ -119,7 +127,7 @@ chmod 700 /root/.ssh
 printf '%s\n' "$LOCUS_AUTHORIZED_KEY" > /root/.ssh/authorized_keys
 chmod 600 /root/.ssh/authorized_keys
 for k in /etc/ssh/ssh_host_*_key.pub; do echo "LOCUS_HOST_KEY $(cut -d' ' -f1,2 < "$k")"; done
-echo LOCUS_SSHD_READY
+echo "LOCUS_SSHD_READY $(cat /proc/sys/kernel/random/uuid 2>/dev/null || date +%s)"
 exec "$(command -v sshd)" -D -e -p "$LOCUS_SSH_PORT" \
   -o PermitRootLogin=prohibit-password -o PasswordAuthentication=no -o PubkeyAuthentication=yes
 """.strip()
@@ -147,6 +155,26 @@ class _Reach:
     bastion_session_id: str | None = None
     known_hosts: KnownHosts = "strict"
     username: str = "root"
+    #: The id the bootstrap printed with its ready mark; ``""`` when not read.
+    boot: str = ""
+
+
+def _transient(exc: BaseException) -> bool:
+    """Whether ``exc`` is a failure of the transport, to retry or to step over.
+
+    The socket's own errors and ``paramiko``'s ``SSHException`` family are,
+    except a host key that does not match the pinned one: that is a
+    verdict, not a connection that is not up yet.
+    """
+    names = {cls.__name__ for cls in type(exc).__mro__}
+    if "BadHostKeyException" in names:
+        return False
+    return isinstance(exc, (OSError, EOFError)) or "SSHException" in names
+
+
+#: Opens a new SSH session after a restart, given the previous boot's host
+#: keys: the session, the keys now pinned, and the bastion session in use.
+Reconnect = Callable[[tuple[str, ...]], tuple[SSHSession, tuple[str, ...], str | None]]
 
 
 def _clients(profile: str, auth_type: str, region: str | None) -> _Clients:
@@ -270,10 +298,18 @@ def _host_keys(log: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(keys))
 
 
-def _last_boot(log: str) -> str:
-    """The lines of the latest bootstrap that reached the ready mark."""
-    blocks = log.split(READY_MARK)
-    return blocks[-2] if len(blocks) >= 2 else log
+def _latest_boot(log: str) -> tuple[str, str]:
+    """The lines of the latest bootstrap that reached the ready mark, and that boot's id.
+
+    The log may hold several boots after a restart; the latest is the one
+    whose keys are current. Without a ready mark the whole log is returned
+    with an empty id.
+    """
+    head, mark, tail = log.rpartition(READY_MARK)
+    if not mark:
+        return log, ""
+    boot = tail.split("\n", 1)[0].strip()
+    return head.rpartition(READY_MARK)[2], boot
 
 
 _BASTION_HOST = re.compile(r"@(host\.bastion\.[a-z0-9.-]+)")
@@ -306,8 +342,9 @@ class OCIContainerInstanceBackend(SSHSandboxBackend):
         owns_instance: Delete the instance on :meth:`close`. Set by
             :meth:`create`.
         reconnect: Opens a new SSH session after a restart, given the host
-            keys of the previous boot; returns the session and the new keys.
-            Set by :meth:`create` and :meth:`connect`.
+            keys of the previous boot; returns the session, the new keys
+            and the bastion session the connection goes through (``None``
+            without one). Set by :meth:`create` and :meth:`connect`.
         host_keys: The container's host public keys, as pinned.
         bastion_session_id: A bastion session to delete on :meth:`close`.
         limits: What the instance was given.
@@ -325,7 +362,7 @@ class OCIContainerInstanceBackend(SSHSandboxBackend):
         clients: _Clients | None = None,
         region: str | None = None,
         owns_instance: bool = False,
-        reconnect: Callable[[tuple[str, ...]], tuple[SSHSession, tuple[str, ...]]] | None = None,
+        reconnect: Reconnect | None = None,
         host_keys: tuple[str, ...] = (),
         bastion_session_id: str | None = None,
         limits: ResourceLimits | None = None,
@@ -351,6 +388,7 @@ class OCIContainerInstanceBackend(SSHSandboxBackend):
         self._reconnect = reconnect
         self._host_keys = host_keys
         self._bastion_session_id = bastion_session_id
+        self._closing = False
         if limits is not None:
             self.limits = limits
 
@@ -375,8 +413,9 @@ class OCIContainerInstanceBackend(SSHSandboxBackend):
         """Start a stopped instance and reconnect; the workspace is fresh.
 
         The container restarts from its image, so the bootstrap runs again
-        and prints new host keys; the reconnect waits for keys that differ
-        from the previous boot's before it trusts them.
+        and prints its host keys with a new boot id; the reconnect waits for
+        the new boot's lines before it trusts the keys — the same keys as
+        before, for an image that carries its own, or new ones, re-pinned.
         """
         if self._clients is not None:
             state = self._state()
@@ -392,18 +431,31 @@ class OCIContainerInstanceBackend(SSHSandboxBackend):
             )
         if self._reconnect is None:
             raise RuntimeError("this backend cannot reconnect: it was built without reconnect=")
-        session, keys = self._reconnect(self._host_keys)
+        session, keys, bastion_session_id = self._reconnect(self._host_keys)
         self._ssh = self._session = session
         self._host_keys = keys
+        self._bastion_session_id = bastion_session_id
         self._has_rg = None
 
     def _stop(self) -> None:
-        """End the commands, close the connection and stop the instance."""
+        """End the commands, close the connection and stop the instance.
+
+        A connection that is already gone cannot end the commands, but
+        stopping the instance does, and a backend that does not own the
+        instance gets a fresh connection from the next ``start``; so a
+        transport failure here is logged and the stop goes on, and the
+        backend is not left running over a closed connection. Any other
+        failure leaves the connection open and the state as it was, for
+        the caller to retry.
+        """
         try:
             super()._stop()
-        finally:
-            self._ssh.close()
-        if self._clients is not None and self._owns_instance:
+        except Exception as exc:
+            if not _transient(exc):
+                raise
+            logger.warning("could not end the commands in %s over SSH: %s", self._instance_id, exc)
+        self._ssh.close()
+        if self._clients is not None and self._owns_instance and not self._closing:
             state = self._state()
             if state == _ACTIVE:
                 self._clients.instances.stop_container_instance(self._instance_id)
@@ -416,6 +468,18 @@ class OCIContainerInstanceBackend(SSHSandboxBackend):
                     interval=5.0,
                     what=f"container instance {self._instance_id}",
                 )
+
+    def close(self) -> None:
+        """End the commands, close the connection, delete the session and the instance.
+
+        A running instance is deleted as it is: deleting is one call, and
+        stopping it first would wait for the service to stop it.
+        """
+        self._closing = True
+        try:
+            super().close()
+        finally:
+            self._closing = False
 
     def _destroy(self) -> None:
         """Close the connection; delete the bastion session and the instance this backend made."""
@@ -449,7 +513,9 @@ class OCIContainerInstanceBackend(SSHSandboxBackend):
         display_name: str | None = None,
         public_ip: bool = False,
         bastion_id: str | None = None,
+        bastion_session_ttl: int = BASTION_SESSION_TTL,
         ssh_port: int = 22,
+        known_hosts: KnownHosts = "strict",
         region: str | None = None,
         profile: str = "DEFAULT",
         auth_type: str = "api_key",
@@ -488,7 +554,13 @@ class OCIContainerInstanceBackend(SSHSandboxBackend):
             bastion_id: An OCI Bastion in the instance's VCN to connect
                 through; a port-forwarding session is created for this
                 backend and deleted on close.
+            bastion_session_ttl: Seconds the bastion session lives. A
+                restart after it has expired makes a new one.
             ssh_port: The port ``sshd`` listens on in the container.
+            known_hosts: ``"strict"`` requires the host keys the container
+                printed to its log, and the bastion's from the service, and
+                fails without them; ``"accept-unknown"`` connects unverified
+                when one of them is missing, with a warning.
             region: The region; the profile's when omitted.
             profile: The ``~/.oci/config`` profile.
             auth_type: ``api_key``, ``security_token``, ``instance_principal``
@@ -562,23 +634,38 @@ class OCIContainerInstanceBackend(SSHSandboxBackend):
                 ssh_port=ssh_port,
                 deadline=deadline,
                 interval=poll_interval,
+                known_hosts=known_hosts,
+                bastion_session_ttl=bastion_session_ttl,
             )
             bastion_session = reach.bastion_session_id
 
-            def reconnect(previous: tuple[str, ...]) -> tuple[SSHSession, tuple[str, ...]]:
+            def reconnect(
+                _previous: tuple[str, ...],
+            ) -> tuple[SSHSession, tuple[str, ...], str | None]:
+                nonlocal reach
+                # The bastion session is reused while it lives; an expired
+                # or deleted one is replaced, and the new id goes back to
+                # the backend for its close.
+                via, session_id = reach.via, reach.bastion_session_id
+                if session_id is not None and not _bastion_session_alive(clients, session_id):
+                    via = session_id = None
                 fresh = _reach(
                     clients,
                     instance_id,
                     public_ip=public_ip,
-                    bastion_id=None,
+                    bastion_id=bastion_id,
                     public=public,
                     pkey=pkey,
                     ssh_port=ssh_port,
                     deadline=time.monotonic() + ready_timeout,
                     interval=poll_interval,
-                    via=reach.via,
-                    previous_keys=previous,
+                    via=via,
+                    previous_boot=reach.boot,
+                    known_hosts=known_hosts,
+                    bastion_session_ttl=bastion_session_ttl,
                 )
+                if fresh.bastion_session_id is None:
+                    fresh = replace(fresh, bastion_session_id=session_id)
                 session = _connect_until(
                     fresh,
                     pkey,
@@ -587,7 +674,8 @@ class OCIContainerInstanceBackend(SSHSandboxBackend):
                     connect_timeout=connect_timeout,
                     path=path,
                 )
-                return session, fresh.host_keys
+                reach = fresh
+                return session, fresh.host_keys, fresh.bastion_session_id
 
             session = _connect_until(
                 reach,
@@ -637,6 +725,7 @@ class OCIContainerInstanceBackend(SSHSandboxBackend):
         known_hosts: KnownHosts = "strict",
         public_ip: bool = False,
         bastion_id: str | None = None,
+        bastion_session_ttl: int = BASTION_SESSION_TTL,
         region: str | None = None,
         profile: str = "DEFAULT",
         auth_type: str = "api_key",
@@ -650,28 +739,35 @@ class OCIContainerInstanceBackend(SSHSandboxBackend):
 
         The instance's IP comes from the service; the key is yours. With
         ``bastion_id``, a port-forwarding session is created with the public
-        half of ``pkey`` or ``key_filename`` and deleted on close.
+        half of ``pkey`` or ``key_filename`` and deleted on close; a restart
+        after ``bastion_session_ttl`` seconds makes a new one.
         """
         clients = _clients(profile, auth_type, region)
         if pkey is None and key_filename is not None:
-            pkey = _paramiko().PKey.from_path(key_filename)
+            pkey = _paramiko().PKey.from_path(str(Path(key_filename).expanduser()))
         if pkey is None:
             raise ValueError("connect needs pkey= or key_filename= for the instance's sshd")
         public = f"{pkey.get_name()} {pkey.get_base64()}"
         instance = clients.instances.get_container_instance(instance_id).data
         ip = _ip(clients, instance, public_ip=public_ip)
-        bastion_session: str | None = None
-        via: SSHJump | None = None
-        if bastion_id is not None:
-            via, bastion_session = _bastion_session(
+        jump = bastion_id
+
+        def bastion() -> tuple[SSHJump | None, str | None]:
+            if jump is None:
+                return None, None
+            return _bastion_session(
                 clients,
-                bastion_id,
+                jump,
                 ip,
                 ssh_port,
                 public,
                 pkey,
                 time.monotonic() + connect_timeout * 4,
+                known_hosts=known_hosts,
+                ttl=bastion_session_ttl,
             )
+
+        via, bastion_session = bastion()
         reach = _Reach(
             ip,
             ssh_port,
@@ -687,16 +783,26 @@ class OCIContainerInstanceBackend(SSHSandboxBackend):
             if bastion_session is not None:
                 clients.bastion.delete_session(bastion_session)
             raise
+
+        def reconnect(_previous: tuple[str, ...]) -> tuple[SSHSession, tuple[str, ...], str | None]:
+            nonlocal reach
+            session_id = reach.bastion_session_id
+            if session_id is not None and not _bastion_session_alive(clients, session_id):
+                via, session_id = bastion()
+                reach = replace(reach, via=via, bastion_session_id=session_id)
+            return (
+                _open_ssh(reach, pkey, connect_timeout=connect_timeout, path=path),
+                reach.host_keys,
+                reach.bastion_session_id,
+            )
+
         return cls(
             session,
             instance_id,
             clients=clients,
             region=clients.region,
             owns_instance=False,
-            reconnect=lambda _previous: (
-                _open_ssh(reach, pkey, connect_timeout=connect_timeout, path=path),
-                reach.host_keys,
-            ),
+            reconnect=reconnect,
             host_keys=reach.host_keys,
             bastion_session_id=bastion_session,
             root=root,
@@ -726,13 +832,16 @@ def _reach(
     deadline: float,
     interval: float,
     via: SSHJump | None = None,
-    previous_keys: tuple[str, ...] = (),
+    previous_boot: str | None = None,
+    known_hosts: KnownHosts = "strict",
+    bastion_session_ttl: int = BASTION_SESSION_TTL,
 ) -> _Reach:
     """Wait for the instance to run and its ``sshd`` to announce itself; how to reach it.
 
     After a restart the log may still show the previous boot, so with
-    ``previous_keys`` the wait goes on until the latest boot's keys differ
-    from them.
+    ``previous_boot`` the wait goes on until the latest boot's id differs
+    from it; its keys may well be the same. ``via`` is a jump to keep;
+    without one, ``bastion_id`` gets a session.
     """
     instances = clients.instances
     _wait(
@@ -747,14 +856,16 @@ def _reach(
     ip = _ip(clients, instance, public_ip=public_ip)
     container_id = instance.containers[0].container_id
     keys: tuple[str, ...] = ()
+    boot = ""
     while time.monotonic() < deadline:
         log = _text(instances.retrieve_logs(container_id).data)
         if FAILED_MARK in log:
             line = next(ln for ln in log.splitlines() if FAILED_MARK in ln)
             raise RuntimeError(f"the container could not start sshd: {line}")
         if READY_MARK in log:
-            keys = _host_keys(_last_boot(log))
-            if not previous_keys or keys != previous_keys:
+            lines, boot = _latest_boot(log)
+            if boot != previous_boot:
+                keys = _host_keys(lines)
                 break
         time.sleep(interval)
     else:
@@ -762,14 +873,33 @@ def _reach(
             f"sshd in container instance {instance_id} did not start within the ready timeout"
         )
     if not keys:
+        if known_hosts != "accept-unknown":
+            raise RuntimeError(
+                f"container instance {instance_id} printed no host key to its log; "
+                'pass known_hosts="accept-unknown" to connect to its sshd unverified'
+            )
         logger.warning("the container printed no host key; its sshd is accepted unverified")
     session_id: str | None = None
-    if bastion_id is not None:
+    if via is None and bastion_id is not None:
         via, session_id = _bastion_session(
-            clients, bastion_id, ip, ssh_port, public, pkey, deadline
+            clients,
+            bastion_id,
+            ip,
+            ssh_port,
+            public,
+            pkey,
+            deadline,
+            known_hosts=known_hosts,
+            ttl=bastion_session_ttl,
         )
     return _Reach(
-        ip, ssh_port, keys, via, session_id, known_hosts="strict" if keys else "accept-unknown"
+        ip,
+        ssh_port,
+        keys,
+        via,
+        session_id,
+        known_hosts="strict" if keys else "accept-unknown",
+        boot=boot,
     )
 
 
@@ -781,11 +911,17 @@ def _bastion_session(
     public: str,
     pkey: Any,
     deadline: float,
+    *,
+    known_hosts: KnownHosts = "strict",
+    ttl: int = BASTION_SESSION_TTL,
 ) -> tuple[SSHJump, str]:
     """A port-forwarding bastion session to ``ip:port``; the jump to use and the session id.
 
     The session is authorized for ``public``, and the jump logs in with its
     private half ``pkey``: the same key pair the container's ``sshd`` takes.
+    The bastion's host key, as the service reports it, is pinned on the
+    jump; a session that reports none is deleted and refused unless
+    ``known_hosts`` is ``"accept-unknown"``.
     """
     models = _bastion_models()
     details = models.CreateSessionDetails(
@@ -793,7 +929,7 @@ def _bastion_session(
         display_name=f"locus-harness-{uuid.uuid4().hex[:8]}",
         key_type="PUB",
         key_details=models.PublicKeyDetails(public_key_content=public),
-        session_ttl_in_seconds=BASTION_SESSION_TTL,
+        session_ttl_in_seconds=ttl,
         target_resource_details=models.CreatePortForwardingSessionTargetResourceDetails(
             target_resource_private_ip_address=ip, target_resource_port=port
         ),
@@ -817,6 +953,14 @@ def _bastion_session(
     region = clients.region or "unknown"
     host = match.group(1) if match else f"host.bastion.{region}.oci.oraclecloud.com"
     host_key = _public_key_line(getattr(session, "bastion_public_host_key_info", None))
+    if host_key is None:
+        if known_hosts != "accept-unknown":
+            clients.bastion.delete_session(session_id)
+            raise RuntimeError(
+                f"bastion session {session_id} reports no host key for {host}; "
+                'pass known_hosts="accept-unknown" to connect through it unverified'
+            )
+        logger.warning("the bastion reported no host key; %s is accepted unverified", host)
     via = SSHJump(
         host=host,
         username=str(getattr(session, "bastion_user_name", None) or session_id),
@@ -825,6 +969,17 @@ def _bastion_session(
         known_hosts="strict" if host_key else "accept-unknown",
     )
     return via, session_id
+
+
+def _bastion_session_alive(clients: _Clients, session_id: str) -> bool:
+    """Whether the bastion session can still carry a connection: ``ACTIVE``, not gone."""
+    try:
+        state = str(clients.bastion.get_session(session_id).data.lifecycle_state).upper()
+    except Exception as exc:
+        if _status(exc) == 404:
+            return False
+        raise
+    return state == _ACTIVE
 
 
 def _connect_until(
@@ -836,21 +991,21 @@ def _connect_until(
     connect_timeout: float,
     path: str | None,
 ) -> SSHSession:
-    """Connect to ``sshd``, retrying until ``deadline``: it answers a little after it logs."""
+    """Connect to ``sshd``, retrying until ``deadline``: it answers a little after it logs.
+
+    The bastion reports a session ACTIVE a little before it accepts the
+    session's key, and ``sshd`` answers a little after it logs; an
+    authentication or transport failure now is "not yet", not "no". A host
+    key that does not match the pinned one is "no", at once.
+    """
     last: BaseException | None = None
     while True:
         try:
             return _open_ssh(reach, pkey, connect_timeout=connect_timeout, path=path)
-        except (OSError, EOFError) as exc:
-            last = exc
-        except Exception as exc:  # noqa: BLE001 - paramiko's SSHException family; retried alike
-            # The bastion reports a session ACTIVE a little before it accepts
-            # the session's key, and sshd answers a little after it logs; an
-            # authentication or transport failure now is "not yet", not "no".
-            if any(cls.__name__ == "SSHException" for cls in type(exc).__mro__):
-                last = exc
-            else:
+        except Exception as exc:
+            if not _transient(exc):
                 raise
+            last = exc
         if time.monotonic() >= deadline:
             raise RuntimeError(f"could not reach sshd at {reach.host}:{reach.port}: {last}")
         time.sleep(interval)

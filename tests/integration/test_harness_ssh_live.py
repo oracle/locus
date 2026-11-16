@@ -52,6 +52,38 @@ def test_the_ssh_backend_conforms() -> None:
     assert report.failed == []
 
 
+def test_input_reaches_the_command_through_the_watchdog() -> None:
+    backend = _connect()
+    try:
+        code, out = backend.ssh.run("cat; echo END", timeout=10, stdin=b"hello\n")
+        assert (code, out) == (0, b"hello\nEND\n")
+    finally:
+        backend.close()
+
+
+@pytest.mark.parametrize("size", [14, 3 * 1024 * 1024])
+def test_files_round_trip_over_cat_when_sftp_is_not_used(size: int) -> None:
+    backend = SSHSandboxBackend.connect(
+        HOST,
+        port=int(os.environ.get("LOCUS_SSH_PORT", "22")),
+        username=os.environ.get("LOCUS_SSH_USER") or None,
+        key_filename=os.environ.get("LOCUS_SSH_KEY") or None,
+        host_key=os.environ.get("LOCUS_SSH_HOST_KEY") or None,
+        path=os.environ.get("LOCUS_SSH_PATH") or None,
+        root=os.environ.get("LOCUS_SSH_ROOT", "/tmp/locus-ssh-live"),  # noqa: S108 - on the host
+        transfer="exec",
+    )
+    try:
+        payload = bytes(range(256)) * (size // 256) + b"x" * (size % 256)
+        backend.write_bytes("live/exec-transfer.bin", payload)
+        counted = backend.exec("wc -c < live/exec-transfer.bin", timeout=10)
+        assert (counted.exit_code, counted.output.strip()) == (0, str(size).encode())
+        assert backend.read_bytes("live/exec-transfer.bin") == payload
+        backend.exec("rm -rf live", timeout=30)
+    finally:
+        backend.close()
+
+
 async def test_the_harness_edits_and_runs_over_ssh() -> None:
     backend = _connect()
     try:

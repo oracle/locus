@@ -29,7 +29,9 @@ remote workspace has that a directory on the host does not.
   every command the backend runs for a caller — digests, not text — whether
   or not the command came through a harness tool. The tools still publish
   their own records on the event bus; a hook is for the caller that holds the
-  backend: a runner's evidence ledger, a test, a gateway.
+  backend: a runner's evidence ledger, a test, a gateway. A hook runs after
+  the command; one that raises is logged and the result still reaches the
+  caller, who must not lose what the command did because a listener failed.
 
 :class:`SandboxMixin` implements all of this once. Every backend in
 :mod:`locus.harness` mixes it in, so a backend written over
@@ -48,6 +50,8 @@ this protocol and the workspace contract behind it.
 
 from __future__ import annotations
 
+import atexit
+import logging
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -66,6 +70,12 @@ __all__ = [
     "SandboxPool",
     "WarmPoolHint",
 ]
+
+logger = logging.getLogger(__name__)
+
+#: Seconds a pool still open at interpreter exit waits for a sandbox being
+#: created, so that it can be closed rather than left running.
+EXIT_GRACE = 60.0
 
 #: Where a sandbox is in its life. ``starting`` is between creation and the
 #: first command; ``stopped`` keeps the sandbox but not its compute; ``closed``
@@ -159,6 +169,8 @@ class SandboxBackend(WorkspaceBackend, Protocol):
     def add_exec_hook(self, hook: ExecHook) -> Callable[[], None]:
         """Call ``hook`` with a record of every command run for a caller.
 
+        The hook runs after the command. One that raises is logged and
+        skipped; the command's result reaches the caller regardless.
         Returns a callable that removes the hook again.
         """
         ...
@@ -260,7 +272,12 @@ class SandboxMixin:
         return lock
 
     def _record(self, command: str, result: ExecResult, *, background: bool = False) -> None:
-        """Hand every registered hook a record of ``command``."""
+        """Hand every registered hook a record of ``command``.
+
+        The command has run by now, so a hook that raises must not take the
+        result from the caller — who might run the command again. The error
+        is logged and the other hooks still see the record.
+        """
         hooks = self._sandbox_hooks
         if not hooks:
             return
@@ -268,7 +285,12 @@ class SandboxMixin:
             command, result, backend_label=self.capabilities.label, background=background
         )
         for hook in hooks:
-            hook(record)
+            try:
+                hook(record)
+            except Exception:
+                logger.exception(
+                    "an exec hook on %s failed; the result stands", record.backend_label
+                )
 
     def _bounded(self, timeout: float) -> float:
         """``timeout`` clamped to the declared command-time limit."""
@@ -284,6 +306,13 @@ class SandboxPool:
     A sandbox that comes back through :meth:`release` is closed, not reused:
     a workspace an agent has worked in is not clean, and a fresh one is what
     the next run expects.
+
+    A factory error is kept for :meth:`acquire` to raise when nothing else
+    is to be had: not while a replacement is still being created, and not
+    once a later creation has succeeded. A pool still open when the
+    interpreter exits closes what it holds, waiting up to :data:`EXIT_GRACE`
+    seconds for a sandbox being created so that it is closed too, not left
+    running.
 
     Args:
         factory: Creates one sandbox, synchronously. Called on worker
@@ -302,6 +331,7 @@ class SandboxPool:
         self._errors: list[BaseException] = []
         self._closed = False
         self._cond = threading.Condition()
+        atexit.register(self._at_exit)
         self._fill()
 
     @property
@@ -313,8 +343,13 @@ class SandboxPool:
     def _fill(self) -> None:
         with self._cond:
             while not self._closed and len(self._idle) + self._warming < self._target:
-                self._warming += 1
-                threading.Thread(target=self._warm, name="locus-sandbox-pool", daemon=True).start()
+                self._start_warm()
+
+    def _start_warm(self) -> None:
+        # Under the lock. The thread is a daemon so a factory that hangs does
+        # not hold the interpreter; ``_at_exit`` waits for it within reason.
+        self._warming += 1
+        threading.Thread(target=self._warm, name="locus-sandbox-pool", daemon=True).start()
 
     def _warm(self) -> None:
         try:
@@ -326,15 +361,21 @@ class SandboxPool:
                 self._cond.notify_all()
             return
         with self._cond:
-            self._warming -= 1
-            if self._closed:
-                stale: SandboxBackend | None = backend
-            else:
-                stale = None
+            stale = self._closed
+            if not stale:
                 self._idle.append(backend)
-            self._cond.notify_all()
-        if stale is not None:
-            stale.close()
+                self._errors.clear()
+                self._warming -= 1
+                self._cond.notify_all()
+        if stale:
+            # Counted as warming until it is closed, so a close or an exit
+            # waiting for the pool to drain waits for this too.
+            try:
+                backend.close()
+            finally:
+                with self._cond:
+                    self._warming -= 1
+                    self._cond.notify_all()
 
     def acquire(self, timeout: float | None = None) -> SandboxBackend:
         """A created sandbox, waiting at most ``timeout`` seconds for one.
@@ -342,18 +383,22 @@ class SandboxPool:
         Raises:
             RuntimeError: The pool is closed, or no sandbox arrived in time.
             Exception: The factory failed and there is no sandbox to give
-                instead; the factory's own error.
+                instead, nor one on its way; the factory's own error.
         """
         with self._cond:
             if self._closed:
                 raise RuntimeError("the sandbox pool is closed")
             if not self._idle and self._warming == 0:
-                self._warming += 1
-                threading.Thread(target=self._warm, name="locus-sandbox-pool", daemon=True).start()
-            if not self._cond.wait_for(lambda: self._idle or self._errors, timeout=timeout):
+                self._start_warm()
+            ready = self._cond.wait_for(
+                lambda: bool(self._idle) or (bool(self._errors) and self._warming == 0),
+                timeout=timeout,
+            )
+            if not ready:
                 raise RuntimeError(f"no sandbox was ready within {timeout:g}s")
             if not self._idle:
-                raise self._errors.pop(0)
+                error, self._errors = self._errors[-1], []
+                raise error
             backend = self._idle.pop(0)
         self._fill()
         return backend
@@ -369,5 +414,13 @@ class SandboxPool:
             self._closed = True
             idle, self._idle = self._idle, []
             self._cond.notify_all()
+        atexit.unregister(self._at_exit)
         for backend in idle:
             backend.close()
+
+    def _at_exit(self) -> None:
+        """Close the pool at interpreter exit, waiting for sandboxes being created."""
+        with self._cond:
+            self._closed = True
+            self._cond.wait_for(lambda: self._warming == 0, timeout=EXIT_GRACE)
+        self.close()

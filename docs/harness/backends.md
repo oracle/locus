@@ -74,7 +74,10 @@ the backend runs for a caller — the command and its output by SHA-256, the
 exit status, the duration, the backend label — whether or not the command
 came through a harness tool. The tools still publish their own records on
 the event bus; a hook is for whoever holds the backend: a runner's evidence
-ledger, a gateway, a test.
+ledger, a gateway, a test. A hook runs after the command; one that raises
+is logged and skipped, and the result still reaches the caller — the
+command ran, and a listener's failure must not make the caller run it
+again.
 
 ```python
 records: list[ExecRecord] = []
@@ -223,7 +226,10 @@ Three decisions are made on this side rather than left to the host:
 - **Host keys are checked.** By default the host must be in the system's or
   the user's `known_hosts`. `host_key="<type> <base64>"` pins one key for a
   host whose key arrived another way; `known_hosts="accept-unknown"` is the
-  explicit opt-out for a sandbox with no other channel.
+  explicit opt-out for a sandbox with no other channel. A key accepted that
+  way is kept in memory for the session: the backend never writes the
+  user's `known_hosts`, and a file it cannot parse (an `@cert-authority`
+  line) is skipped with a warning rather than failing the connection.
 
 `connect()` labels the workspace `ssh:user@host[:port]` and treats
 `localhost` as not isolated; pass `isolated=` to say otherwise.
@@ -255,21 +261,27 @@ starts the container with a bootstrap command that installs `sshd` if the
 image lacks it, authorizes the key for `root`, creates the workspace,
 **prints the host's public keys to the container log** and runs `sshd` in
 the foreground. The backend reads the keys back through the service API and
-connects with them pinned, so there is no trust-on-first-use. With
-`bastion_id`, a port-forwarding session to the instance's private IP is
-created with the same key pair and the connection is a channel through the
-bastion; that is the shape for an instance in a private subnet, which is
-where a sandbox belongs. Without it, `public_ip=True` assigns a public IP
-on a public subnet, or the private IP is used as is for a process that can
-reach it.
+connects with them pinned, so there is no trust-on-first-use: a log without
+a key is an error, not an unverified connection. With `bastion_id`, a
+port-forwarding session to the instance's private IP is created with the
+same key pair and the connection is a channel through the bastion, with the
+bastion's host key as the service reports it pinned the same way; that is
+the shape for an instance in a private subnet, which is where a sandbox
+belongs. Without it, `public_ip=True` assigns a public IP on a public
+subnet, or the private IP is used as is for a process that can reach it.
+`known_hosts="accept-unknown"` is the explicit opt-in to connect anyway when
+the container or the bastion reports no key, with a warning; nothing is
+written to the user's `known_hosts` either way.
 
 | Option | Default | What it does |
 | --- | --- | --- |
 | `image` | Oracle Linux 9 from Oracle's registry | Any image with `sshd` or with `dnf`, `microdnf`, `apt-get` or `apk` to install it |
 | `shape`, `ocpus`, `memory_gb` | `CI.Standard.E4.Flex`, 1, 2 | The instance's compute; reported as `limits` |
 | `bastion_id` | none | Connect through an OCI Bastion; the session is deleted on close |
+| `bastion_session_ttl` | 3 h | How long the bastion session lives; a restart after it expired makes a new one |
 | `public_ip` | `False` | Assign a public IP and connect to it |
 | `ssh_port` | 22 | The port `sshd` listens on in the container |
+| `known_hosts` | `"strict"` | Require the container's and the bastion's host keys; `"accept-unknown"` connects unverified when one is missing |
 | `container_env` | none | Environment variables set on the container |
 | `ready_timeout` | 600 s | For the instance to run and `sshd` to answer; installing it on the default image takes about a minute |
 
@@ -294,9 +306,11 @@ Prerequisites:
 `stop()` stops the instance and `start()` starts it again; **the
 container's filesystem does not survive a stop** — the service restarts the
 container from its image, the bootstrap runs again and the backend
-reconnects to a fresh workspace. `connect(instance_id, pkey=...)` attaches
-to an instance you provisioned yourself (one that runs `sshd` and accepts
-the key) and never deletes it.
+reconnects to a fresh workspace, re-pinning the host keys of the new boot
+(the same keys, for an image that carries its own). `close()` on a running
+instance deletes it as it is, without stopping it first.
+`connect(instance_id, pkey=...)` attaches to an instance you provisioned
+yourself (one that runs `sshd` and accepts the key) and never deletes it.
 
 ## E2B and Daytona
 

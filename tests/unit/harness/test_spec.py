@@ -56,7 +56,9 @@ def test_from_mapping_reads_nested_limits_and_pool() -> None:
     [
         ({"backnd": "local"}, "unknown sandbox spec keys: backnd"),
         ({"limits": {"cpu": 1}}, "unknown limits keys: cpu"),
+        ({"limits": [1, 2]}, "limits must be a mapping, got list"),
         ({"warm_pool": {"size": 1}}, "unknown warm_pool keys: size"),
+        ({"warm_pool": "two"}, "warm_pool must be a mapping, got str"),
         ({"backend": ""}, "non-empty string"),
     ],
 )

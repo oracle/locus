@@ -32,7 +32,8 @@ there. Three things are decided here rather than left to the host:
   the user's ``known_hosts``; ``host_key=`` pins one key for a host whose
   key arrived another way (a container that printed it to its log), and
   ``known_hosts="accept-unknown"`` is the explicit opt-out for a sandbox
-  with no other channel.
+  with no other channel. A key accepted that way is kept for the session,
+  in memory: the backend never writes the user's ``known_hosts``.
 
 ``paramiko`` is imported by :meth:`SSHSandboxBackend.connect` only. Pass a
 connected ``SSHClient`` — or anything with ``get_transport`` and
@@ -42,12 +43,14 @@ connected ``SSHClient`` — or anything with ``get_transport`` and
 from __future__ import annotations
 
 import base64
+import logging
 import posixpath
 import shlex
 import socket
 import time
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Literal
 
 from locus.harness.local import MAX_BACKGROUND
@@ -55,6 +58,8 @@ from locus.harness.session import SessionBackend
 
 
 __all__ = ["SSHJump", "SSHSandboxBackend", "SSHSession"]
+
+logger = logging.getLogger(__name__)
 
 #: Seconds between the deadline on the host and the client giving up on the
 #: channel: the watchdog's ``TERM`` grace, the ``KILL``, and slack.
@@ -66,8 +71,15 @@ _KILL_GRACE = 2
 #: Seconds an internal operation (a file move, a probe) may take.
 _DEFAULT_TIMEOUT = 60.0
 
+#: Bytes per second an upload over ``cat`` is given on top of the default
+#: timeout, so a large file on a slow link is not cut off at a fixed size.
+_UPLOAD_RATE = 256 * 1024
+
 #: Bytes read from the channel at a time.
 _CHUNK = 64 * 1024
+
+#: The ``known_hosts`` files read for an unpinned host, in order.
+_KNOWN_HOSTS_FILES = ("/etc/ssh/ssh_known_hosts", "~/.ssh/known_hosts")
 
 _q = shlex.quote
 
@@ -99,8 +111,8 @@ class SSHJump:
     port: int = 22
     username: str | None = None
     key_filename: str | None = None
-    pkey: Any = None
-    password: str | None = None
+    pkey: Any = field(default=None, repr=False)
+    password: str | None = field(default=None, repr=False)
     host_key: str | None = None
     known_hosts: KnownHosts = "strict"
 
@@ -108,22 +120,25 @@ class SSHJump:
 def _deadline_script(command: str, seconds: int) -> str:
     """``command`` under a watchdog that stops it at ``seconds``.
 
-    The command's streams are joined on the host. Its exit status comes
-    back unless the watchdog fired, in which case the script exits 124 —
-    decided by the watchdog's absence *or* by the clock, because a command
-    killed by ``TERM`` returns 143 before the watchdog has gone.
+    The command's streams are joined on the host, and the channel's input
+    is the command's alone: the wrapper keeps it on descriptor 3 for the
+    command (a background job would otherwise get ``/dev/null``) and gives
+    the watchdog nothing. The command's exit status comes back unless the
+    watchdog fired, in which case the script exits 124 — decided by the
+    watchdog's absence *or* by the clock, because a command killed by
+    ``TERM`` returns 143 before the watchdog has gone.
     """
     watchdog = (
         'sleep "$1"; kill -s TERM -- "-$2" 2>/dev/null; '
         f'sleep {_KILL_GRACE}; kill -s KILL -- "-$2" 2>/dev/null'
     )
     return (
-        "exec </dev/null; "
+        "exec 3<&0 </dev/null; "
         "if command -v setsid >/dev/null 2>&1; then s=setsid; else s=; set -m; fi; "
         "t0=$(date +%s); "
-        f"$s sh -c {_q(command)} 2>&1 & p=$!; "
+        f"$s sh -c {_q(command)} <&3 3<&- 2>&1 & p=$!; "
         f'$s sh -c {_q(watchdog)} wd {seconds} "$p" >/dev/null 2>&1 & w=$!; '
-        'wait "$p"; rc=$?; '
+        'exec 3<&-; wait "$p"; rc=$?; '
         'if kill -0 "$w" 2>/dev/null; then kill -s KILL -- "-$w" 2>/dev/null; '
         'kill -s KILL "$w" 2>/dev/null; else rc=124; fi; '
         f"[ $(( $(date +%s) - t0 )) -ge {seconds} ] && rc=124; exit $rc"
@@ -182,18 +197,20 @@ class SSHSession:
 
         The arguments are those of :meth:`SSHSandboxBackend.connect`. The
         jump host, when there is one, is connected first and closed with the
-        session.
+        session. A ``~`` in a key file's path is expanded here; ``paramiko``
+        takes the path as it is.
         """
         paramiko = _paramiko()
         jump = None
         sock = None
+        key_filename = _expanded(key_filename)
         if via is not None:
             jump = _client(paramiko, via.host, via.port, via.host_key, via.known_hosts)
             jump.connect(
                 via.host,
                 port=via.port,
                 username=via.username,
-                key_filename=via.key_filename,
+                key_filename=_expanded(via.key_filename),
                 pkey=via.pkey,
                 password=via.password,
                 timeout=connect_timeout,
@@ -247,9 +264,11 @@ class SSHSession:
 
         The command runs under a watchdog that stops it at ``timeout``
         seconds (status 124, which the backend reads as a timeout). ``stdin``
-        is sent before the command's input is closed. Returns ``None`` for
-        the status when the host neither finished the command nor reported
-        it by the deadline plus a grace period.
+        is sent before the command's input is closed, as fast as the command
+        reads it; a command that ends before reading all of it is not an
+        error here, its status says what it did. Returns ``None`` for the
+        status when the host neither finished the command nor reported it
+        by the deadline plus a grace period.
         """
         seconds = max(1, int(timeout + 0.999))
         script = self._prelude + _deadline_script(command, seconds)
@@ -264,7 +283,7 @@ class SSHSession:
             channel.settimeout(0.5)
             channel.exec_command(f"exec sh -c {_q(script)}")
             if stdin:
-                channel.sendall(stdin)
+                _send_input(channel, stdin, deadline)
             channel.shutdown_write()
             eof = False
             while True:
@@ -324,13 +343,20 @@ class SSHSession:
                 handle.set_pipelined(True)
                 handle.write(data)
             return
+        # ``cat`` takes the bytes from the channel's input; the count the
+        # host wrote is checked, so a short write is an error, not a file.
         code, out = self.run(
-            f"mkdir -p {_q(posixpath.dirname(path) or '/')} && cat > {_q(path)}",
-            timeout=_DEFAULT_TIMEOUT,
+            f"mkdir -p {_q(posixpath.dirname(path) or '/')} && cat > {_q(path)} && wc -c < {_q(path)}",
+            timeout=_DEFAULT_TIMEOUT + len(data) / _UPLOAD_RATE,
             stdin=data,
         )
+        text = out.decode(errors="replace").strip()
         if code != 0:
-            raise OSError(f"upload of {path} failed: {out.decode(errors='replace').strip()}")
+            raise OSError(f"upload of {path} failed: {text}")
+        fields = text.split()
+        written = int(fields[-1]) if fields and fields[-1].isdigit() else -1
+        if written != len(data):
+            raise OSError(f"upload of {path} wrote {written} of {len(data)} bytes")
 
     def download_file(self, path: str) -> bytes:
         sftp = self._sftp_client()
@@ -508,6 +534,33 @@ def _prepare_root(session: SSHSession, root: str | None) -> str:
     return posixpath.normpath(root)
 
 
+def _send_input(channel: Any, data: bytes, deadline: float) -> None:
+    """Write ``data`` to the channel as the command reads it, until ``deadline``.
+
+    The channel's short timeout, set for the output loop, would turn a
+    closed send window into an error; here a closed window is waited out,
+    and a channel the host closed ends the send — the command finished
+    without the rest, and its status will say so.
+    """
+    view = memoryview(data)
+    while view:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return
+        try:
+            sent = channel.send(view[:_CHUNK])
+        except socket.timeout:
+            continue
+        except OSError:
+            return
+        view = view[sent:]
+
+
+def _expanded(path: str | None) -> str | None:
+    """``path`` with a leading ``~`` expanded; ``paramiko`` does not do it."""
+    return None if path is None else str(Path(path).expanduser())
+
+
 def _only_that_key(pkey: Any, key_filename: str | None) -> dict[str, bool]:
     """With an explicit key, offer that key alone.
 
@@ -533,18 +586,29 @@ def _paramiko() -> Any:
 def _client(
     paramiko: Any, host: str, port: int, host_key: str | None, known_hosts: KnownHosts
 ) -> Any:
-    """An ``SSHClient`` with the host-key policy the caller asked for."""
+    """An ``SSHClient`` with the host-key policy the caller asked for.
+
+    The known hosts are loaded as read-only sets, so a key accepted under
+    ``"accept-unknown"`` stays in memory and the user's file is not written.
+    A file the parser cannot read (an ``@cert-authority`` or ``@revoked``
+    line) is skipped with a warning instead of failing the connection.
+    """
     client = paramiko.SSHClient()
     if host_key is not None:
         kind, key = _public_key(paramiko, host_key)
         client.get_host_keys().add(host if port == 22 else f"[{host}]:{port}", kind, key)
         client.set_missing_host_key_policy(paramiko.RejectPolicy())
         return client
-    client.load_system_host_keys()
-    try:
-        client.load_host_keys(posixpath.expanduser("~/.ssh/known_hosts"))
-    except OSError:
-        pass
+    for name in _KNOWN_HOSTS_FILES:
+        path = str(Path(name).expanduser())
+        try:
+            client.load_system_host_keys(path)
+        except OSError:
+            continue
+        except Exception as exc:  # noqa: BLE001 - InvalidHostKey is a plain Exception in paramiko
+            logger.warning(
+                "%s could not be read (%s); the hosts in it are not known here", path, exc
+            )
     if known_hosts == "accept-unknown":
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # noqa: S507 - explicit opt-in
     else:

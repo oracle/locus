@@ -88,9 +88,10 @@ class SandboxSpec:
     def from_mapping(cls, data: Mapping[str, Any]) -> SandboxSpec:
         """A spec from a plain mapping (a parsed YAML or JSON document).
 
-        ``limits`` and ``warm_pool`` may be mappings themselves. An unknown
-        key is a ``ValueError`` that names it, so a typo in a config file
-        does not silently fall back to the host.
+        ``limits`` and ``warm_pool`` may be mappings themselves, and must
+        be mappings when given. An unknown key is a ``ValueError`` that
+        names it, so a typo in a config file does not silently fall back to
+        the host.
         """
         known = {f.name for f in fields(cls)}
         unknown = sorted(set(data) - known)
@@ -100,9 +101,13 @@ class SandboxSpec:
         limits = values.get("limits")
         if isinstance(limits, Mapping):
             values["limits"] = _dataclass(ResourceLimits, limits, "limits")
+        elif limits is not None and not isinstance(limits, ResourceLimits):
+            raise ValueError(f"limits must be a mapping, got {type(limits).__name__}")
         pool = values.get("warm_pool")
         if isinstance(pool, Mapping):
             values["warm_pool"] = _dataclass(WarmPoolHint, pool, "warm_pool")
+        elif pool is not None and not isinstance(pool, WarmPoolHint):
+            raise ValueError(f"warm_pool must be a mapping, got {type(pool).__name__}")
         backend = values.get("backend", "local")
         if not isinstance(backend, str) or not backend:
             raise ValueError(f"backend must be a non-empty string, got {backend!r}")
