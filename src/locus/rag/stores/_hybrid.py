@@ -36,11 +36,18 @@ def blend_hybrid(
             scores ``1.0``.
         alpha: Weight of the vector leg; ``1 - alpha`` goes to the lexical leg.
         limit: Maximum number of results.
-        threshold: Minimum *blended* score to keep.
+        threshold: Minimum score to keep — the blended score when both legs
+            returned hits, the surviving leg's own score when only one did.
 
     Returns:
         ``SearchResult`` list sorted by blended score, ``distance`` carrying
         the vector leg's distance when the document appeared there.
+
+    When one leg returns nothing there is nothing to blend, so the other
+    leg's hits come back with their own scores (the vector similarity, or
+    the lexical score normalised so the best match is ``1.0``) instead of
+    being scaled by ``alpha``. A ``threshold`` chosen for vector search
+    therefore still keeps an exact match when the lexical leg is empty.
     """
     if not 0.0 <= alpha <= 1.0:
         raise ValueError(f"alpha must be in [0.0, 1.0], got {alpha}")
@@ -59,9 +66,17 @@ def blend_hybrid(
         else:
             pool[doc.id] = (doc, 0.0, lex, None)
 
+    # One empty leg: a pure fallback to the other leg, scores unblended.
+    if not lexical_hits:
+        weight = 1.0
+    elif not vector_hits:
+        weight = 0.0
+    else:
+        weight = alpha
+
     blended: list[SearchResult] = []
     for doc, vec, lex, distance in pool.values():
-        score = alpha * vec + (1.0 - alpha) * lex
+        score = weight * vec + (1.0 - weight) * lex
         if threshold is not None and score < threshold:
             continue
         blended.append(SearchResult(document=doc, score=score, distance=distance))

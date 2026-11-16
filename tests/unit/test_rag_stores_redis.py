@@ -147,7 +147,10 @@ async def test_index_created_with_vector_and_declared_tag_fields() -> None:
     assert create[1] == "t"
     assert create[create.index("PREFIX") + 2] == "t:doc:"
     assert "meta_topic" in create
-    assert create[create.index("meta_topic") + 1] == "TAG"
+    assert create[create.index("meta_topic") + 1 : create.index("meta_topic") + 3] == (
+        "TAG",
+        "CASESENSITIVE",
+    )
     vector = create[create.index("embedding") :]
     assert vector[1:3] == ("VECTOR", "HNSW")
     assert vector[vector.index("DIM") + 1] == "3"
@@ -212,6 +215,18 @@ async def test_search_uses_declared_tag_prefilter() -> None:
     assert results[0].distance == pytest.approx(0.0)
     assert results[1].score == pytest.approx(0.7)
     assert results[0].document.embedding == pytest.approx([1.0, 0.0, 0.0])
+
+
+async def test_search_rejects_empty_value_on_declared_tag_field() -> None:
+    store, fake = _store(metadata_fields=["topic"])
+    fake.index_exists = True
+    with pytest.raises(ValueError, match="metadata_filter\\['topic'\\] is empty"):
+        await store.search([1.0, 0.0, 0.0], limit=2, metadata_filter={"topic": ""})
+    assert not [c for c in fake.commands if c[0] == "FT.SEARCH"]
+    # An undeclared key is filtered client-side, where an empty value is fine.
+    fake.search_reply = _reply(("a", 0.0, {"other": ""}), ("b", 0.2, {"other": "x"}))
+    results = await store.search([1.0, 0.0, 0.0], limit=2, metadata_filter={"other": ""})
+    assert [r.document.id for r in results] == ["a"]
 
 
 async def test_search_undeclared_filter_overfetches_and_filters_client_side() -> None:

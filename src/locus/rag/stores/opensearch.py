@@ -385,6 +385,10 @@ class OpenSearchVectorStore(BaseModel, BaseVectorStore):
         ``alpha * vector + (1 - alpha) * lexical``. ``alpha=1.0`` is pure
         vector search, ``alpha=0.0`` pure BM25. An empty ``query_text`` is
         answered by :meth:`search`.
+
+        ``threshold`` applies to the blended score. When only one leg returns
+        hits, that leg's scores are returned unblended, so a threshold chosen
+        for vector search still keeps an exact match.
         """
         if not 0.0 <= alpha <= 1.0:
             raise ValueError(f"alpha must be in [0.0, 1.0], got {alpha}")

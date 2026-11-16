@@ -137,6 +137,22 @@ def test_hybrid_alpha_is_validated() -> None:
         _retriever(_HybridStore(), hybrid_alpha=1.5)
 
 
+def test_hybrid_kwargs_rejects_keys_the_retriever_passes_itself() -> None:
+    with pytest.raises(ValueError, match=r"'alpha'.*hybrid_alpha"):
+        _retriever(_HybridStore(), hybrid_kwargs={"alpha": 0.9})
+    with pytest.raises(ValueError, match=r"'limit'.*retrieve\(\).*'threshold'"):
+        _retriever(_HybridStore(), hybrid_kwargs={"limit": 3, "threshold": 0.1})
+    with pytest.raises(ValueError, match="metadata_filter"):
+        _retriever(_HybridStore(), hybrid_kwargs={"metadata_filter": {"t": "x"}})
+    with pytest.raises(ValueError, match="query_embedding"):
+        _retriever(_HybridStore(), hybrid_kwargs={"query_embedding": [1.0]})
+    with pytest.raises(ValueError, match="query_text"):
+        _retriever(_HybridStore(), hybrid_kwargs={"query_text": "q"})
+    # Store-specific options still pass through untouched.
+    retriever = _retriever(_HybridStore(), hybrid_kwargs={"use_text_index": True})
+    assert retriever.hybrid_kwargs == {"use_text_index": True}
+
+
 def test_supports_hybrid_search_on_real_stores() -> None:
     assert supports_hybrid_search(InMemoryVectorStore(dimension=2)) is False
 
@@ -186,3 +202,30 @@ def test_blend_even_mix_threshold_limit_and_clamping() -> None:
 def test_blend_rejects_bad_alpha() -> None:
     with pytest.raises(ValueError, match="alpha"):
         blend_hybrid([], [], alpha=-0.1, limit=1)
+
+
+def test_blend_empty_lexical_leg_keeps_vector_scores_unblended() -> None:
+    out = blend_hybrid(
+        [_hit("exact", 1.0, 0.0), _hit("b", 0.4, 0.6)], [], alpha=0.5, limit=5, threshold=0.9
+    )
+    # Not 0.5 * 1.0: a vector-scale threshold still keeps the exact match.
+    assert [r.document.id for r in out] == ["exact"]
+    assert out[0].score == pytest.approx(1.0)
+    assert out[0].distance == 0.0
+    both = blend_hybrid([_hit("exact", 1.0), _hit("b", 0.4)], [], alpha=0.0, limit=5)
+    assert [r.score for r in both] == pytest.approx([1.0, 0.4])
+
+
+def test_blend_empty_vector_leg_keeps_normalised_lexical_scores() -> None:
+    out = blend_hybrid(
+        [],
+        [(Document(id="b", content="b"), 8.0), (Document(id="a", content="a"), 2.0)],
+        alpha=0.5,
+        limit=5,
+    )
+    # Not 0.5 * 1.0: the best lexical match stays at 1.0.
+    assert [r.document.id for r in out] == ["b", "a"]
+    assert out[0].score == pytest.approx(1.0)
+    assert out[1].score == pytest.approx(0.25)
+    assert out[0].distance is None
+    assert blend_hybrid([], [], alpha=0.5, limit=5) == []

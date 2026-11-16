@@ -104,6 +104,19 @@ async def test_unparseable_reply_scores_zero_and_warns(caplog: pytest.LogCapture
     assert "could not parse grades" in caplog.text
 
 
+async def test_echoed_example_before_the_answer_does_not_zero_the_batch() -> None:
+    candidates = [_candidate("a", "a", 0.9), _candidate("b", "b", 0.8)]
+    reply = (
+        "Using the shape "
+        '{"grades": [{"passage": 1, "grade": 7}, {"passage": 2, "grade": 0}]}'
+        "\n\nMy grades:\n"
+        '{"grades": [{"passage": 1, "grade": 2}, {"passage": 2, "grade": 9}]}'
+    )
+    out = await LLMReranker(_model=_FakeModel([reply])).rerank("q", candidates)
+    assert [r.document.id for r in out] == ["b", "a"]
+    assert [r.score for r in out] == pytest.approx([0.9, 0.2])
+
+
 async def test_model_kwargs_and_system_prompt_override() -> None:
     model = _FakeModel([_grades((1, 7))])
     reranker = LLMReranker(_model=model, system_prompt="grade it", model_kwargs={"max_tokens": 50})
@@ -163,12 +176,26 @@ def test_prompt_fences_passages_truncates_and_escapes_tags() -> None:
         ("[4, 6]", [0.4, 0.6]),
         ('{"scores": [{"id": 1, "score": -2}, {"id": 2, "score": 7}]}', [0.0, 0.7]),
         ('{"grades": [{"passage": 9, "grade": 7}, {"passage": "x", "grade": 1}]}', [0.0, 0.0]),
+        # Two objects: the echoed example, then the answer — the answer wins.
+        (
+            'Shape: {"grades": [{"passage": 1, "grade": 7}, {"passage": 2, "grade": 0}]}\n'
+            'Answer: {"grades": [{"passage": 1, "grade": 2}, {"passage": 2, "grade": 9}]}',
+            [0.2, 0.9],
+        ),
+        # A stray entry-shaped object before the answer is skipped.
+        ('{"passage": 1, "grade": 7} then {"grades": [{"passage": 2, "grade": 4}]}', [0.0, 0.4]),
+        # A shapeless object after the answer does not displace it.
+        ('{"grades": [{"passage": 1, "grade": 6}]} {"done": true}', [0.6, 0.0]),
+        # Unbalanced braces before a complete answer.
+        ('{oops {"grades": [{"passage": 2, "grade": 10}]}', [0.0, 1.0]),
     ],
 )
 def test_parse_grades_variants(reply: str, expected: list[float]) -> None:
     assert parse_grades(reply, 2) == pytest.approx(expected)
 
 
-@pytest.mark.parametrize("reply", ["", "no json here", '{"grades": "nope"}', "{broken"])
+@pytest.mark.parametrize(
+    "reply", ["", "no json here", '{"grades": "nope"}', "{broken", '{"a": 1} {"b": [}']
+)
 def test_parse_grades_rejects_garbage(reply: str) -> None:
     assert parse_grades(reply, 2) is None

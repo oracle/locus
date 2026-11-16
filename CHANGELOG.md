@@ -47,11 +47,14 @@ policy.
   filters on declared metadata keys), `MongoDBAtlasVectorStore`
   (`$vectorSearch`, `ensure_index()` creates the Atlas index) and
   `PineconeVectorStore` (serverless indexes). Each sits behind the existing
-  `VectorStore` protocol with `metadata_filter`, passes the shared
-  conformance suite (`tests/unit/rag/store_conformance.py`, also run
-  against the served backends behind environment gates) and has its own
-  extra: `[milvus]`, `[weaviate]`, `[elasticsearch]`, `[redis-vector]`,
-  `[mongodb]`, `[pinecone]`; `[rag]` includes them all. Closes #460.
+  `VectorStore` protocol with `metadata_filter` and has its own extra:
+  `[milvus]`, `[weaviate]`, `[elasticsearch]`, `[redis-vector]`,
+  `[mongodb]`, `[pinecone]`; `[rag]` includes them all. The shared
+  conformance suite (`tests/unit/rag/store_conformance.py`) runs
+  unconditionally against the in-process stores — in-memory, Qdrant, Chroma
+  and Milvus Lite — and against the served ones (Weaviate, Elasticsearch,
+  Redis, MongoDB Atlas, Pinecone) only when the environment points at a
+  running service. Closes #460.
 - **Three more rerankers.** `LLMReranker` has any registered chat model
   (`"oci:openai.gpt-4.1"`, or a model object) grade the candidates in
   batches from a fenced prompt, so reranking needs no dedicated endpoint;

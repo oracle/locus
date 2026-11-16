@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import sys
+import types
 from typing import Any
 
 import pytest
@@ -270,6 +272,105 @@ def test_filter_clauses_and_metric_validation() -> None:
     assert build_filter_clauses({"a": 1}) == [{"term": {"metadata.a": 1}}]
     with pytest.raises(ValueError, match="distance_metric"):
         ElasticsearchVectorStore(distance_metric="hamming", _client=object())
+
+
+def _fake_elasticsearch_module(monkeypatch: pytest.MonkeyPatch) -> type:
+    """Stand in for the ``elasticsearch`` package; the client records its kwargs."""
+
+    class AsyncElasticsearch:
+        def __init__(self, **kwargs: Any) -> None:
+            self.kwargs = kwargs
+            self.closed = False
+
+        async def close(self) -> None:
+            self.closed = True
+
+    module = types.ModuleType("elasticsearch")
+    module.AsyncElasticsearch = AsyncElasticsearch  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "elasticsearch", module)
+    return AsyncElasticsearch
+
+
+def test_client_built_from_hosts_with_auth_and_ca_bundle(monkeypatch: pytest.MonkeyPatch) -> None:
+    client_cls = _fake_elasticsearch_module(monkeypatch)
+    store = ElasticsearchVectorStore(
+        hosts=["https://es.internal:9200"],
+        api_key=("id", "secret"),
+        basic_auth=("user", "pass"),
+        verify_certs=False,
+        ca_certs="/etc/ssl/es-ca.pem",
+    )
+    client = store._get_client()
+    assert isinstance(client, client_cls)
+    assert client.kwargs == {
+        "verify_certs": False,
+        "hosts": ["https://es.internal:9200"],
+        "api_key": ("id", "secret"),
+        "basic_auth": ("user", "pass"),
+        "ca_certs": "/etc/ssl/es-ca.pem",
+    }
+    assert store._get_client() is client  # cached
+
+
+def test_client_defaults_to_localhost_and_cloud_id_replaces_hosts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fake_elasticsearch_module(monkeypatch)
+    local = ElasticsearchVectorStore()._get_client()
+    assert local.kwargs == {"verify_certs": True, "hosts": ["http://localhost:9200"]}
+    cloud = ElasticsearchVectorStore(
+        cloud_id="deployment:abc", hosts=["http://ignored:9200"], api_key="key"
+    )._get_client()
+    assert cloud.kwargs == {"verify_certs": True, "cloud_id": "deployment:abc", "api_key": "key"}
+
+
+def test_missing_elasticsearch_package_names_the_extra(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "elasticsearch", None)
+    with pytest.raises(ImportError, match=r"locus-sdk\[elasticsearch\]"):
+        ElasticsearchVectorStore()._get_client()
+
+
+async def test_close_is_a_no_op_without_a_client_and_closes_a_built_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ElasticsearchVectorStore()
+    await store.close()  # nothing built yet
+    _fake_elasticsearch_module(monkeypatch)
+    client = store._get_client()
+    await store.close()
+    assert client.closed is True
+    assert store._client is None
+
+
+def test_to_document_tolerates_malformed_created_at() -> None:
+    doc = ElasticsearchVectorStore._to_document({"doc_id": "a", "created_at": "not-a-date"})
+    assert doc.id == "a"
+    assert doc.created_at.tzinfo is not None
+    assert doc.embedding is None
+
+
+async def test_add_batch_empty_is_a_no_op() -> None:
+    store, fake = _store()
+    assert await store.add_batch([]) == []
+    assert fake.calls == []
+
+
+async def test_get_and_delete_reraise_errors_that_are_not_404() -> None:
+    store, fake = _store()
+    fake.indices.exists_result = True
+
+    class _UnavailableError(Exception):
+        status_code = 503
+
+    async def failing(**kwargs: Any) -> dict[str, Any]:
+        raise _UnavailableError("cluster unavailable")
+
+    fake.get = failing  # type: ignore[method-assign]
+    fake.delete = failing  # type: ignore[method-assign]
+    with pytest.raises(_UnavailableError):
+        await store.get("a")
+    with pytest.raises(_UnavailableError):
+        await store.delete("a")
 
 
 def test_l2_and_dot_score_mapping() -> None:

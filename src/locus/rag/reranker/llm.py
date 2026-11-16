@@ -56,9 +56,9 @@ DEFAULT_SYSTEM_PROMPT = (
     "Include one entry per passage."
 )
 
-_JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
-_JSON_ARRAY_RE = re.compile(r"\[.*\]", re.DOTALL)
+_JSON_START_RE = re.compile(r"[\[{]")
 _PASSAGE_TAG_RE = re.compile(r"</?passage\b[^>]*>", re.IGNORECASE)
+_DECODER = json.JSONDecoder()
 
 
 def _fence(index: int, text: str, max_chars: int) -> str:
@@ -74,35 +74,49 @@ def build_user_prompt(query: str, passages: list[str], *, max_doc_chars: int) ->
     return f"Query:\n{query}\n\nPassages ({len(passages)}):\n\n{fenced}"
 
 
+def _json_values(text: str) -> list[Any]:
+    """Every complete top-level JSON object or array in ``text``, in order.
+
+    ``raw_decode`` from each opening bracket takes one complete value and
+    skips past it, so a reply that echoes the example before answering
+    yields two values instead of one span that fails to parse.
+    """
+    values: list[Any] = []
+    position = 0
+    while (match := _JSON_START_RE.search(text, position)) is not None:
+        try:
+            value, end = _DECODER.raw_decode(text, match.start())
+        except ValueError:
+            position = match.start() + 1
+            continue
+        values.append(value)
+        position = end
+    return values
+
+
 def parse_grades(text: str, count: int) -> list[float] | None:
     """Extract ``count`` normalised grades from a model reply.
 
     Accepts the documented ``{"grades": [{"passage": n, "grade": g}, …]}``
     object, a bare list of those entries, or a bare list of numbers in
-    passage order. Grades are clamped to ``[0, MAX_GRADE]`` and divided by
-    ``MAX_GRADE``; passages the reply omits get ``0.0``. Returns ``None``
-    when nothing parseable is found.
+    passage order. A reply holding several JSON values — the example echoed
+    back, then the answer — is read value by value and the last one with
+    the expected shape wins. Grades are clamped to ``[0, MAX_GRADE]`` and
+    divided by ``MAX_GRADE``; passages the reply omits get ``0.0``. Returns
+    ``None`` when nothing parseable is found.
     """
     if not text:
         return None
-    payload: Any = None
-    for pattern in (_JSON_OBJECT_RE, _JSON_ARRAY_RE):
-        match = pattern.search(text)
-        if match is None:
-            continue
-        try:
-            payload = json.loads(match.group(0))
-            break
-        except ValueError:
-            continue
-    if payload is None:
-        return None
-    entries: Any
-    if isinstance(payload, dict):
-        entries = payload.get("grades") or payload.get("scores") or payload.get("results")
-    else:
-        entries = payload
-    if not isinstance(entries, list):
+    entries: Any = None
+    for payload in _json_values(text):
+        candidate = (
+            payload.get("grades") or payload.get("scores") or payload.get("results")
+            if isinstance(payload, dict)
+            else payload
+        )
+        if isinstance(candidate, list):
+            entries = candidate
+    if entries is None:
         return None
 
     grades = [0.0] * count

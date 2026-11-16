@@ -77,6 +77,16 @@ def unpack_vector(blob: bytes) -> list[float]:
 class RedisVectorStore(BaseVectorStore):
     """Vector store backed by the Redis Query Engine (``FT.*``).
 
+    The ``TAG`` fields for ``metadata_fields`` are declared ``CASESENSITIVE``
+    so a server-side filter is the same exact match as every other store's
+    ``metadata_filter``; an empty filter value on a declared key is rejected
+    with ``ValueError`` because the query syntax has no form for it. The
+    schema is fixed when the index is created: a key added to
+    ``metadata_fields`` afterwards is not added to an existing index, so its
+    server-side filter fails until the index is altered
+    (``FT.ALTER <index> SCHEMA ADD meta_<key> TAG CASESENSITIVE``) or dropped
+    and recreated.
+
     Args:
         dimension: Embedding dimension; fixed in the index schema.
         index_name: ``FT.CREATE`` index name. Defaults to ``"locus"``.
@@ -86,6 +96,7 @@ class RedisVectorStore(BaseVectorStore):
         key_prefix: Hash key prefix. Defaults to ``"<index_name>:doc:"``.
         metadata_fields: Metadata keys indexed as ``TAG`` fields for
             server-side filtering. Other keys still filter, client-side.
+            Fixed when the index is created.
         algorithm: ``"HNSW"`` (default) or ``"FLAT"``.
         _client: Injection seam for tests — a ``redis.asyncio.Redis``-shaped
             object returning raw bytes.
@@ -163,7 +174,7 @@ class RedisVectorStore(BaseVectorStore):
             "TAG",
         ]
         for field in self._metadata_fields:
-            args += [f"meta_{field}", "TAG"]
+            args += [f"meta_{field}", "TAG", "CASESENSITIVE"]
         args += [
             "embedding",
             "VECTOR",
@@ -257,7 +268,12 @@ class RedisVectorStore(BaseVectorStore):
         remaining: dict[str, Any] = {}
         for key, value in metadata_filter.items():
             if key in self._metadata_fields:
-                clauses.append(f"@meta_{key}:{{{escape_tag(value)}}}")
+                tag = escape_tag(value)
+                if not tag:
+                    raise ValueError(
+                        f"metadata_filter[{key!r}] is empty; a TAG filter needs a value"
+                    )
+                clauses.append(f"@meta_{key}:{{{tag}}}")
             else:
                 remaining[key] = value
         return (" ".join(clauses) if clauses else "*"), remaining

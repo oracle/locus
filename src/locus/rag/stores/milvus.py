@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from datetime import UTC, datetime
 from typing import Any
 
@@ -42,6 +43,8 @@ from locus.rag.stores.base import (
     VectorStoreConfig,
 )
 
+
+logger = logging.getLogger(__name__)
 
 _MISSING_PYMILVUS = (
     'pymilvus is not installed. Install with: pip install "locus-sdk[milvus]" '
@@ -75,7 +78,9 @@ def _literal(value: Any) -> str:
         return "true" if value else "false"
     if isinstance(value, int | float):
         return repr(value)
-    return json.dumps(str(value))
+    # ``ensure_ascii=False``: Milvus has no ``\uXXXX`` escape, so non-ASCII
+    # text must stay literal inside the quoted string.
+    return json.dumps(str(value), ensure_ascii=False)
 
 
 def build_filter_expr(metadata_filter: dict[str, Any] | None) -> str:
@@ -95,7 +100,7 @@ def build_filter_expr(metadata_filter: dict[str, Any] | None) -> str:
                 f"metadata_filter[{key!r}] must be a str, int, float or bool, "
                 f"got {type(value).__name__}"
             )
-        clauses.append(f"metadata[{json.dumps(str(key))}] == {_literal(value)}")
+        clauses.append(f"metadata[{json.dumps(str(key), ensure_ascii=False)}] == {_literal(value)}")
     return " and ".join(clauses)
 
 
@@ -112,7 +117,9 @@ class MilvusVectorStore(BaseVectorStore):
         token: Server/cloud credentials (``user:password`` or an API key).
         db_name: Milvus database to use. ``None`` keeps the client default.
         enable_hybrid: Add a BM25 sparse vector derived from ``content`` so
-            :meth:`hybrid_search` is available. Set at collection creation.
+            :meth:`hybrid_search` is available. Set at collection creation; an
+            existing collection created without it stays vector-only (see
+            :attr:`hybrid_search_available`).
         _client: Injection seam for tests — a pre-built ``MilvusClient``
             (or any object with the same method surface).
     """
@@ -147,6 +154,8 @@ class MilvusVectorStore(BaseVectorStore):
         self._client_override = _client
         self._client: Any = None
         self._ensured = False
+        # Derived from the collection schema once it has been opened.
+        self._hybrid_ready: bool | None = None
 
     @property
     def config(self) -> VectorStoreConfig:
@@ -158,8 +167,17 @@ class MilvusVectorStore(BaseVectorStore):
 
     @property
     def hybrid_search_available(self) -> bool:
-        """True when the collection carries the BM25 function (``enable_hybrid``)."""
-        return self._enable_hybrid
+        """True when the collection carries the BM25 sparse field.
+
+        Until the collection has been opened this mirrors ``enable_hybrid``;
+        after the first operation it is read from the collection schema, so
+        an existing collection created without the BM25 function reports
+        ``False`` and ``RAGRetriever(hybrid=True)`` searches it by vector
+        alone.
+        """
+        if self._hybrid_ready is None:
+            return self._enable_hybrid
+        return self._hybrid_ready
 
     # ----------------------------------------------------------------- client
 
@@ -213,6 +231,15 @@ class MilvusVectorStore(BaseVectorStore):
                     field_name="sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25"
                 )
             client.create_collection(self._collection, schema=schema, index_params=index_params)
+            has_sparse = self._enable_hybrid
+        elif self._enable_hybrid:
+            description = client.describe_collection(self._collection)
+            has_sparse = any(
+                field.get("name") == "sparse" for field in description.get("fields") or []
+            )
+        else:
+            has_sparse = False
+        self._hybrid_ready = has_sparse
         self._ensured = True
         return client
 
@@ -333,6 +360,8 @@ class MilvusVectorStore(BaseVectorStore):
         threshold: float | None = None,
         metadata_filter: dict[str, Any] | None = None,
     ) -> list[SearchResult]:
+        if limit <= 0:
+            return []
         return await asyncio.to_thread(
             self._search_sync, query_embedding, limit, threshold, metadata_filter
         )
@@ -397,6 +426,13 @@ class MilvusVectorStore(BaseVectorStore):
         needs its sparse BM25 field). ``alpha=1.0`` is pure vector search,
         ``alpha=0.0`` pure BM25. An empty ``query_text`` has no lexical
         signal and is answered by :meth:`search`.
+
+        The fused score comes from Milvus's ``WeightedRanker``: it keeps the
+        ranking of the weighted legs but is not the raw vector similarity,
+        even at ``alpha=1.0``, so ``threshold`` applies to the fused score.
+        An existing collection created without the BM25 function cannot
+        answer the lexical leg; the call is answered by :meth:`search` with
+        a warning and :attr:`hybrid_search_available` turns ``False``.
         """
         if not 0.0 <= alpha <= 1.0:
             raise ValueError(f"alpha must be in [0.0, 1.0], got {alpha}")
@@ -404,6 +440,18 @@ class MilvusVectorStore(BaseVectorStore):
             raise ValueError(
                 "hybrid_search needs MilvusVectorStore(enable_hybrid=True); the collection "
                 "was created without the BM25 sparse field."
+            )
+        if limit <= 0:
+            return []
+        await asyncio.to_thread(self._ensure_collection_sync)
+        if not self.hybrid_search_available:
+            logger.warning(
+                "MilvusVectorStore(enable_hybrid=True) but collection %r has no BM25 sparse "
+                "field; answering hybrid_search by vector alone",
+                self._collection,
+            )
+            return await self.search(
+                query_embedding, limit=limit, threshold=threshold, metadata_filter=metadata_filter
             )
         if not query_text.strip():
             return await self.search(
@@ -430,6 +478,7 @@ class MilvusVectorStore(BaseVectorStore):
         n = self._count_sync()
         client.drop_collection(self._collection)
         self._ensured = False
+        self._hybrid_ready = None
         return n
 
     async def clear(self) -> int:
@@ -440,6 +489,7 @@ class MilvusVectorStore(BaseVectorStore):
             await asyncio.to_thread(self._client.close)
             self._client = None
             self._ensured = False
+            self._hybrid_ready = None
 
     def __repr__(self) -> str:
         return f"MilvusVectorStore(uri={self._uri!r}, collection={self._collection!r})"

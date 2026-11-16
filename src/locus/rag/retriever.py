@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, PrivateAttr
+from pydantic import BaseModel, Field, PrivateAttr, field_validator
 
 from locus.rag.stores.base import Document, SearchResult, supports_hybrid_search
 
@@ -36,6 +36,17 @@ logger = logging.getLogger(__name__)
 # Pattern that neutralises literal occurrences of the spotlight tag inside
 # retrieved content so a poisoned document cannot forge a closing marker.
 _SPOTLIGHT_TAG_RE = re.compile(r"</?retrieved_document\s*>", re.IGNORECASE)
+
+# ``hybrid_search`` arguments the retriever fills in itself; ``hybrid_kwargs``
+# must not repeat them or the call raises ``TypeError``.
+_HYBRID_RESERVED = {
+    "query_text": "retrieve(query) supplies it",
+    "query_embedding": "retrieve() embeds the query",
+    "limit": "pass limit= to retrieve()",
+    "alpha": "use RAGRetriever(hybrid_alpha=...)",
+    "threshold": "pass threshold= to retrieve()",
+    "metadata_filter": "pass metadata_filter= to retrieve()",
+}
 
 
 def _escape_spotlight(text: str) -> str:
@@ -159,13 +170,26 @@ class RAGRetriever(BaseModel):
         default_factory=dict,
         description=(
             "Extra keyword arguments for ``store.hybrid_search`` — e.g. "
-            '``{"use_text_index": True}`` for ``OracleVectorStore``.'
+            '``{"use_text_index": True}`` for ``OracleVectorStore``. Store-specific '
+            "options only: ``query_text``, ``query_embedding``, ``limit``, ``alpha``, "
+            "``threshold`` and ``metadata_filter`` are filled in by ``retrieve()`` "
+            "and ``hybrid_alpha`` and are rejected here."
         ),
     )
 
     model_config = {"arbitrary_types_allowed": True}
 
     _hybrid_fallback_logged: bool = PrivateAttr(default=False)
+
+    @field_validator("hybrid_kwargs")
+    @classmethod
+    def _reject_reserved_hybrid_kwargs(cls, value: dict[str, Any]) -> dict[str, Any]:
+        """Refuse keys ``retrieve()`` passes itself, naming the parameter to use."""
+        clashes = [key for key in value if key in _HYBRID_RESERVED]
+        if clashes:
+            hints = "; ".join(f"{key!r} ({_HYBRID_RESERVED[key]})" for key in clashes)
+            raise ValueError(f"hybrid_kwargs must not set {hints}")
+        return value
 
     @property
     def hybrid_supported(self) -> bool:
@@ -489,7 +513,8 @@ class RAGRetriever(BaseModel):
         Args:
             query: Query text
             limit: Maximum documents to return
-            threshold: Minimum similarity score (0.0-1.0)
+            threshold: Minimum similarity score (0.0-1.0). Under hybrid search
+                it applies to the store's blended score.
             metadata_filter: Filter by metadata fields
             hybrid: Override the retriever's ``hybrid`` setting for this call.
                 ``None`` (default) uses the retriever's setting.

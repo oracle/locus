@@ -340,6 +340,16 @@ the k-NN and `match` legs as two requests and blend the normalised scores
 client-side, so no cluster-side pipeline is needed; Weaviate and Milvus
 use their native fused queries.
 
+Under `hybrid=True` the `threshold` passed to `retrieve()` applies to the
+blended score, not the vector similarity. The client-side blend returns the
+surviving leg's scores unblended when the other leg finds nothing, so a
+threshold chosen for vector search still keeps an exact match. Server-side
+rankers such as Milvus's `WeightedRanker` keep the order of the weighted
+legs but do not report the raw vector similarity, even at
+`hybrid_alpha=1.0`. `hybrid_kwargs` carries store-specific options only:
+`limit`, `alpha`, `threshold` and `metadata_filter` belong to `retrieve()`
+and `hybrid_alpha`, and the retriever rejects them at construction.
+
 Any other store — or a Milvus collection created without the BM25
 function — is searched by vector alone when `hybrid=True`; the retriever
 logs one warning per instance naming the store. `retriever.hybrid_supported`

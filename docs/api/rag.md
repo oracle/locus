@@ -82,7 +82,7 @@ synchronous code. All need the `oracledb` extra.
 ## Reranker
 
 Re-score candidates after the initial vector search. The `Reranker`
-Protocol lets you plug in any scorer; three implementations ship:
+Protocol lets you plug in any scorer; six implementations ship:
 `CrossEncoderReranker` (local, offline), `CohereReranker` (Cohere's
 direct rerank API), `OCICohereReranker` (Cohere `rerank-v3.5` /
 `rerank-v4.0` served by OCI Generative AI), `LLMReranker` (any
