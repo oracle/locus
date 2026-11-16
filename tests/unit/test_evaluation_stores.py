@@ -581,3 +581,256 @@ def test_stored_json_is_plain_and_readable(tmp_path: Path) -> None:
     assert data["passed"] == 1
     assert data["fingerprint"] == "abcdefabcdef"
     assert os.sep not in stored.location or os.sep == "/"
+
+
+# --------------------------------------------------------------------------
+# The clients the stores build themselves, and the error paths around them
+# --------------------------------------------------------------------------
+
+
+def test_name_helpers_reject_what_is_not_a_report_name() -> None:
+    from locus.evaluation.stores import _parse_name, _utc_naive
+
+    aware = datetime(2026, 11, 16, 9, 0, tzinfo=UTC)
+    naive = aware.replace(tzinfo=None)
+    assert _utc_naive(aware) == naive
+    assert _utc_naive(naive) == naive
+    assert _parse_name("elsewhere/x.json", prefix="locus/eval/") is None
+    assert _parse_name("locus/eval/no-suite.json", prefix="locus/eval/") is None
+    assert _parse_name("locus/eval/warden/notes.txt", prefix="locus/eval/") is None
+
+
+def test_listing_skips_an_object_that_vanished_between_list_and_read(tmp_path: Path) -> None:
+    store = FileReportStore(tmp_path)
+    first, second, _third = _three_reports(store)
+    (tmp_path / second.location).unlink()
+    listed = store.list(suite="warden")
+    assert [item.report_id for item in listed] == [_third.report_id, first.report_id]
+
+
+def test_oci_bucket_store_builds_its_client_from_the_bucket_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from locus.memory.backends import oci_bucket
+
+    built: list[Any] = []
+    client = _OCIClient()
+
+    def build(config: Any) -> Any:
+        built.append(config)
+        return client
+
+    monkeypatch.setattr(oci_bucket, "build_object_storage_client", build)
+    store = OCIBucketReportStore(
+        "evals", "ns", profile_name="EVALS", auth_type="instance_principal", region="eu-x-1"
+    )
+    stored = store.put(_report(passed=1, total=1, at=T0), suite="warden")
+    assert store.get(stored.report_id) is not None
+    assert store.get("missing") is None
+    (config,) = built
+    assert (config.bucket_name, config.namespace, config.profile_name) == ("evals", "ns", "EVALS")
+    assert (config.auth_type, config.region) == ("instance_principal", "eu-x-1")
+
+    class _Broken(_OCIClient):
+        def get_object(self, **kwargs: Any) -> Any:
+            raise RuntimeError("ServiceUnavailable")
+
+    with pytest.raises(RuntimeError, match="ServiceUnavailable"):
+        OCIBucketReportStore("evals", "ns", _client=_Broken())._get_bytes("locus/eval/x.json")
+
+
+def test_s3_store_builds_a_boto3_client_and_maps_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+    import types
+
+    calls: list[tuple[str, dict[str, Any]]] = []
+    client = _S3Client()
+
+    def make_client(service: str, **kwargs: Any) -> Any:
+        calls.append((service, kwargs))
+        return client
+
+    monkeypatch.setitem(sys.modules, "boto3", types.SimpleNamespace(client=make_client))
+    store = S3ReportStore("evals", endpoint_url="http://object-store.local", region_name="r1")
+    stored = store.put(_report(passed=1, total=1, at=T0), suite="warden")
+    assert store.get(stored.report_id) is not None
+    assert store.get("missing") is None
+    assert calls == [
+        (
+            "s3",
+            {
+                "endpoint_url": "http://object-store.local",
+                "region_name": "r1",
+                "aws_access_key_id": None,
+                "aws_secret_access_key": None,
+            },
+        )
+    ]
+
+    class _Broken(_S3Client):
+        def get_object(self, **kwargs: Any) -> Any:
+            raise RuntimeError("AccessDenied")
+
+    with pytest.raises(RuntimeError, match="AccessDenied"):
+        S3ReportStore("evals", _client=_Broken())._get_bytes("locus/eval/x.json")
+
+    monkeypatch.setitem(sys.modules, "boto3", None)
+    with pytest.raises(ImportError, match=r"locus-sdk\[s3\]"):
+        S3ReportStore("evals").get("x")
+
+
+class _DeadError(Exception):
+    """The driver error a dropped socket raises."""
+
+
+class _Pool:
+    """A pool whose connections come from one in-memory table; the first can be dead."""
+
+    def __init__(self, db: _OracleDB, *, dead_first: bool = False) -> None:
+        self.db = db
+        self.dead = dead_first
+        self.closed: list[bool] = []
+
+    def acquire(self) -> Any:
+        pool = self
+
+        class _Acquired:
+            def __enter__(self) -> Any:
+                if pool.dead:
+                    pool.dead = False
+                    raise _DeadError("DPY-4011: the database or network closed the connection")
+                return _OracleConnection(pool.db)
+
+            def __exit__(self, *exc: object) -> None:
+                return None
+
+        return _Acquired()
+
+    def close(self, force: bool = False) -> None:
+        self.closed.append(force)
+        raise RuntimeError("already closed")  # the store treats teardown as best effort
+
+
+def _fake_oracledb(monkeypatch: pytest.MonkeyPatch, pools: list[_Pool]) -> list[dict[str, Any]]:
+    import sys
+    import types
+
+    created: list[dict[str, Any]] = []
+
+    def create_pool(**kwargs: Any) -> _Pool:
+        created.append(kwargs)
+        return pools.pop(0)
+
+    module = types.SimpleNamespace(
+        makedsn=lambda host, port, service_name: f"{host}:{port}/{service_name}",
+        create_pool=create_pool,
+        DB_TYPE_CLOB="CLOB",
+    )
+    monkeypatch.setitem(sys.modules, "oracledb", module)
+    return created
+
+
+def test_oracle_store_pools_reconnects_once_and_closes_best_effort(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import locus._oracle_pool_cache as pool_cache
+
+    monkeypatch.setattr(pool_cache, "is_reconnectable", lambda exc: isinstance(exc, _DeadError))
+    db = _OracleDB()
+    pools = [_Pool(db, dead_first=True), _Pool(db)]
+    created = _fake_oracledb(monkeypatch, pools)
+    store = OracleReportStore(
+        host="db.internal",
+        port=1522,
+        service_name="evals_low",
+        user="EVALS",
+        password="pw",  # noqa: S106 — a double's password
+        wallet_location="/wallets/evals",
+        wallet_password="wpw",  # noqa: S106 — a double's password
+        schema_name="EVALS",
+    )
+    assert store._full_table_name == "EVALS.locus_eval_reports"
+    stored = store.put(_report(passed=1, total=1, at=T0), suite="warden")
+    # The first pool died on acquire; the store rebuilt it and ran the insert on the second.
+    assert len(created) == 2
+    assert created[0]["dsn"] == "db.internal:1522/evals_low"
+    assert created[0]["config_dir"] == "/wallets/evals"
+    assert created[0]["wallet_password"] == "wpw"  # noqa: S105 — a double's password
+    assert store.get(stored.report_id) is not None
+    assert pools == []
+    store.close()
+    assert store._pool is None
+
+    def never(_exc: BaseException) -> bool:
+        return False
+
+    monkeypatch.setattr(pool_cache, "is_reconnectable", never)
+    broken = OracleReportStore(dsn="x", user="u", password="p")  # noqa: S106
+    _fake_oracledb(monkeypatch, [_Pool(_OracleDB(), dead_first=True)])
+    with pytest.raises(_DeadError):
+        broken.get("anything")
+
+
+def test_oracle_store_writes_a_large_report_as_a_lob_and_reads_bytes_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sys
+    import types
+
+    class _Lob:
+        def __init__(self) -> None:
+            self.text = ""
+
+        def write(self, text: str) -> None:
+            self.text += text
+
+        def read(self) -> str:
+            return self.text
+
+    class _LobConnection(_OracleConnection):
+        def createlob(self, kind: str) -> _Lob:
+            assert kind == "CLOB"
+            return _Lob()
+
+    monkeypatch.setitem(sys.modules, "oracledb", types.SimpleNamespace(DB_TYPE_CLOB="CLOB"))
+    db = _OracleDB()
+    store = OracleReportStore(
+        dsn="evals_low",
+        user="EVALS",
+        password="pw",  # noqa: S106 — a double's password
+        _connect=lambda: _LobConnection(db),
+    )
+    big = _report(passed=300, total=400, at=T0)
+    stored = store.put(big, suite="warden")
+    assert isinstance(db.rows[-1]["report"], _Lob)  # over the inline limit: streamed as a LOB
+    read = store.get(stored.report_id)
+    assert read is not None
+    assert read.total_cases == 400
+    db.rows.append({**db.rows[-1], "report_id": "raw", "report": big.model_dump_json().encode()})
+    raw = store.get("raw")
+    assert raw is not None
+    assert raw.passed == 300
+
+
+def test_specs_carry_the_optional_connection_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    oracle = report_store("oracle://u:p@/?dsn=evals_low&table=reports&schema=EVALS")
+    assert isinstance(oracle, OracleReportStore)
+    assert oracle.config.schema_name == "EVALS"
+    assert oracle.config.table_name == "reports"
+    bucket = report_store(
+        "oci://ns/evals/trend?profile=EVALS&auth=instance_principal&region=eu-x-1"
+    )
+    assert isinstance(bucket, OCIBucketReportStore)
+    assert bucket.prefix == "trend/"
+    assert (bucket._profile_name, bucket._auth_type, bucket._region) == (
+        "EVALS",
+        "instance_principal",
+        "eu-x-1",
+    )
+    s3 = report_store("s3://evals/trend?endpoint_url=http://object-store.local&region=r1")
+    assert isinstance(s3, S3ReportStore)
+    assert (s3.prefix, s3._endpoint_url, s3._region_name) == (
+        "trend/",
+        "http://object-store.local",
+        "r1",
+    )
