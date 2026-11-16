@@ -10,42 +10,6 @@ policy.
 
 ### Added
 
-- **Threads and runs on `AgentServer`, with a resumable event stream.**
-  `POST /threads` creates a thread, `POST /threads/{id}/runs` starts a turn
-  (or continues a paused one with a `resume` payload: the `/resume`
-  semantics, as a run of its own) and answers at once with a run id while
-  the agent runs in the background; `GET /runs/{id}` reports its status and
-  outcome; `GET /runs/{id}/events` streams it as SSE with an `id:` line per
-  event and honours `Last-Event-ID`, replaying exactly the events a dropped
-  client missed from the run's EventBus history; `POST /runs/{id}/cancel`
-  asks the agent to stop through `agent.cancel(thread_id=...)` and falls
-  back to cancelling the task. Thread state comes from the agent's
-  checkpointer when one is configured; the threads-and-runs registry itself
-  is in memory and bounded (`RunRegistry(history_per_run=500, max_runs=200,
-  ttl_seconds=3600)`, passed as `AgentServer(run_registry=...)`); a resume
-  past the retained window gets a `replay_gap` frame. (#456)
-- **`WS /runs/live`.** One WebSocket for user turns, approval answers
-  (`resume`, through the existing `decision_handler` and `agent.resume`),
-  `cancel`, `subscribe` (follow a run from a sequence number) and the events
-  of every run started or subscribed on it. Bearer header or `?token=`.
-  Voice frames are not carried: `locus.voice` sessions remain
-  application-driven.
-- **AG-UI and Vercel AI SDK UI message stream adapters.** `POST /ag-ui`
-  takes a `RunAgentInput` and streams `RUN_STARTED`, `TEXT_MESSAGE_*`,
-  `TOOL_CALL_*`, `STATE_SNAPSHOT` / `STATE_DELTA`, `CUSTOM` and
-  `RUN_FINISHED` / `RUN_ERROR`; `POST /vercel-ai` takes a UI message request
-  and answers an `x-vercel-ai-ui-message-stream: v1` stream (`start`,
-  `text-*`, `reasoning-*`, `tool-input-*`, `tool-output-available`,
-  `data-*`, `finish`). Both are also available for any run as
-  `GET /runs/{id}/events?protocol=ag-ui|vercel-ai`, resume included. The
-  conservative readings of the two protocols are recorded on the server
-  page. `examples/server_ui/` holds two plain HTML pages (resumable SSE, and
-  an AG-UI client); notebook 65 follows, drops and resumes a run.
-- `GET /threads/{id}` now adds the thread's `runs` and a `source` field,
-  answers from the registry when no checkpointer is configured, and no
-  longer fails with a 500 for a runnable without `config` (a
-  `GraphRunnable`); `DELETE /threads/{id}` forgets the thread's finished
-  runs as well.
 - **`OracleAuditTrail`.** The audit trail on an Oracle AI Database immutable
   table (`CREATE IMMUTABLE TABLE … NO DROP UNTIL n DAYS IDLE NO DELETE UNTIL
   n DAYS AFTER INSERT`), or a blockchain table with `table_kind="blockchain"`.
@@ -208,6 +172,43 @@ policy.
   `model.zdr_detected` reports the switch and the run's event stream carries a
   `CustomEvent` named `server_state_fallback`. `store=True` still raises;
   `store=False` is unchanged.
+
+- **Threads and runs on `AgentServer`, with a resumable event stream.**
+  `POST /threads` creates a thread, `POST /threads/{id}/runs` starts a turn
+  (or continues a paused one with a `resume` payload: the `/resume`
+  semantics, as a run of its own) and answers at once with a run id while
+  the agent runs in the background; `GET /runs/{id}` reports its status and
+  outcome; `GET /runs/{id}/events` streams it as SSE with an `id:` line per
+  event and honours `Last-Event-ID`, replaying exactly the events a dropped
+  client missed from the run's EventBus history; `POST /runs/{id}/cancel`
+  asks the agent to stop through `agent.cancel(thread_id=...)` and falls
+  back to cancelling the task. Thread state comes from the agent's
+  checkpointer when one is configured; the threads-and-runs registry itself
+  is in memory and bounded (`RunRegistry(history_per_run=500, max_runs=200,
+  ttl_seconds=3600)`, passed as `AgentServer(run_registry=...)`); a resume
+  past the retained window gets a `replay_gap` frame. (#456)
+- **`WS /runs/live`.** One WebSocket for user turns, approval answers
+  (`resume`, through the existing `decision_handler` and `agent.resume`),
+  `cancel`, `subscribe` (follow a run from a sequence number) and the events
+  of every run started or subscribed on it. Bearer header or `?token=`.
+  Voice frames are not carried: `locus.voice` sessions remain
+  application-driven.
+- **AG-UI and Vercel AI SDK UI message stream adapters.** `POST /ag-ui`
+  takes a `RunAgentInput` and streams `RUN_STARTED`, `TEXT_MESSAGE_*`,
+  `TOOL_CALL_*`, `STATE_SNAPSHOT` / `STATE_DELTA`, `CUSTOM` and
+  `RUN_FINISHED` / `RUN_ERROR`; `POST /vercel-ai` takes a UI message request
+  and answers an `x-vercel-ai-ui-message-stream: v1` stream (`start`,
+  `text-*`, `reasoning-*`, `tool-input-*`, `tool-output-available`,
+  `data-*`, `finish`). Both are also available for any run as
+  `GET /runs/{id}/events?protocol=ag-ui|vercel-ai`, resume included. The
+  conservative readings of the two protocols are recorded on the server
+  page. `examples/server_ui/` holds two plain HTML pages (resumable SSE, and
+  an AG-UI client); notebook 65 follows, drops and resumes a run.
+- `GET /threads/{id}` now adds the thread's `runs` and a `source` field,
+  answers from the registry when no checkpointer is configured, and no
+  longer fails with a 500 for a runnable without `config` (a
+  `GraphRunnable`); `DELETE /threads/{id}` forgets the thread's finished
+  runs as well.
 
 ### Changed
 
