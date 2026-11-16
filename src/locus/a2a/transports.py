@@ -47,6 +47,7 @@ from locus.a2a.spec_v1 import (
     BINDING_JSONRPC,
 )
 from locus.core.loop_bound import loop_bound
+from locus.observability.propagation import inject_trace_headers
 
 
 if TYPE_CHECKING:
@@ -175,11 +176,12 @@ class _HttpTransport(ClientTransport):
         self._owns_client = http_client is None
 
     def headers(self, **extra: str) -> dict[str, str]:
+        """The headers of one call: version, bearer, ``extra`` and the trace context."""
         headers = {A2A_VERSION_HEADER: A2A_V1_PROTOCOL_VERSION}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
         headers.update(extra)
-        return headers
+        return inject_trace_headers(headers)
 
     def _build_client(self) -> httpx.AsyncClient:
         import httpx
