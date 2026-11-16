@@ -10,6 +10,50 @@ policy.
 
 ### Added
 
+- **Evaluators over the run's path.** `TrajectoryMatch` (`strict`,
+  `unordered` or `subset`), `ToolSelection` (recall and precision over the
+  tools chosen, with `forbidden` tools) and `ArgumentCorrectness` (one tool's
+  arguments against the expected ones, compared under the tool's parameter
+  schema with absolute, per-argument and relative tolerances) read the
+  evidence ledger with no model call. Each lives on an `EvalCase` under
+  `evaluators`, is one check named by its label, loads from a case file by
+  `kind`, enters the suite fingerprint, and leaves a typed
+  `EvaluatorVerdict` with its provenance in `EvalResult.evaluations`. The
+  runner fills an `ArgumentCorrectness` schema in from the tool on the agent
+  under test.
+- **A simulated user for multi-turn cases.** `EvalCase(simulated_user=
+  SimulatedUser(persona=..., goal=..., max_turns=..., stop_on=[...]))` has a
+  model play that user against the agent in `arun()`, opening with the case
+  prompt, until the goal is met, a stop phrase appears or the turn budget
+  runs out. `EvalRunner(simulator=UserSimulator(model))` names the model; the
+  judge's is used otherwise. The whole conversation is graded: every reply
+  and tool call for the checks and evaluators, the full transcript for the
+  judge; `EvalResult.transcript` and `stopped_by` keep what happened, and a
+  conversation that hit the budget fails `simulated_user:goal_met`. With a
+  checkpointer on the agent each turn continues one thread; without one the
+  transcript is carried in the prompt.
+- **Online evaluation.** `OnlineEvaluator(template, judge=, sampler=,
+  budget=)` subscribes to the event bus, rebuilds each run from its `agent.*`
+  events, keeps the runs `every_nth(n)` or `fraction(share)` pick within an
+  `OnlineBudget` (total, per minute, in flight), and grades them in the
+  background with the same checks and judge as a suite through the new
+  `EvalRunner.agrade(case, result)`. `attach(run_id, prompt=, output=,
+  arguments=)` supplies what the bus does not carry; `submit(prompt, result)`
+  grades a result the application holds. `report()` is an `EvalReport` whose
+  fingerprint is the template's, so online reports diff and trend as one
+  suite.
+- **Persisted reports and `locus eval trend`.** `report_store(spec)` opens a
+  `ReportStore`: a directory, an Oracle AI Database table
+  (`OracleReportStore`, headline figures in columns and the report as JSON),
+  an OCI Object Storage bucket (`OCIBucketReportStore`) or an S3-compatible
+  bucket (`S3ReportStore`), from `file://`, `oracle://`, `oci://` and `s3://`
+  specs or `LOCUS_EVAL_STORE`. `trend(store, suite=, last=)` reads the last
+  reports of a suite back with the pass and average deltas between them and
+  marks a fingerprint change rather than reading it as a regression.
+  `locus eval run --store <spec> --suite <name>` keeps the report after a run
+  and `locus eval trend --store <spec> --suite <name>` prints the trend,
+  exiting 1 when the newest report is worse than the one before it. Notebook
+  56 gains a trajectory case and a simulated-user case.
 - **`OracleAuditTrail`.** The audit trail on an Oracle AI Database immutable
   table (`CREATE IMMUTABLE TABLE … NO DROP UNTIL n DAYS IDLE NO DELETE UNTIL
   n DAYS AFTER INSERT`), or a blockchain table with `table_kind="blockchain"`.

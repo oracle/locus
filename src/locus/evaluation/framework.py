@@ -41,6 +41,16 @@ Grading rules (see :class:`EvalRunner` for the reasons):
   the case. The result carries ``not_graded_reason``, counts in
   ``EvalReport.not_graded``, and is left out of ``failed`` and ``avg_score``:
   a dead judge must neither lower the agent's average nor pass it.
+- The path is graded as well as the answer. ``evaluators`` carry
+  :mod:`locus.evaluation.evaluators` objects (trajectory, tool selection,
+  argument correctness) that read the evidence ledger with no model call;
+  each is one check and its typed verdict lands in ``EvalResult.evaluations``.
+- A case with a ``simulated_user`` is a conversation, not a prompt: a model
+  plays the persona against the agent within the turn budget (``arun()``
+  only), and the whole conversation is what the checks and the judge read.
+- A run that already happened can be graded without running the agent:
+  :meth:`EvalRunner.agrade` takes the result, which is how online
+  evaluation scores sampled traffic with the same checks.
 """
 
 from __future__ import annotations
@@ -59,6 +69,12 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from locus.evaluation.evaluators import (
+    ArgumentCorrectness,
+    CaseEvaluator,
+    EvaluatorVerdict,
+    evaluator_label,
+)
 from locus.evaluation.evidence import (
     ClaimCheck,
     EvidenceLedger,
@@ -77,6 +93,12 @@ from locus.evaluation.reliability import (
     trust_decision,
 )
 from locus.evaluation.rubric import Rubric
+from locus.evaluation.simulator import (
+    Conversation,
+    ConversationTurn,
+    SimulatedUser,
+    UserSimulator,
+)
 
 
 class EvalCase(BaseModel):
@@ -182,6 +204,19 @@ class EvalCase(BaseModel):
         description="Minimum GSAR grounding score of the answer against the run's "
         "evidence, audited by the runner's judge model in arun(). An abstaining "
         "audit leaves the case not graded.",
+    )
+    evaluators: list[CaseEvaluator] = Field(
+        default_factory=list,
+        description="Evaluators over the run's path: TrajectoryMatch, ToolSelection and "
+        "ArgumentCorrectness read the evidence ledger with no model call. Each is one "
+        "check, named by its label, and its verdict lands in EvalResult.evaluations.",
+    )
+    simulated_user: SimulatedUser | None = Field(
+        default=None,
+        description="Play the case as a conversation: a model acts this persona against "
+        "the agent, opening with the prompt, within the turn budget. Needs arun() and a "
+        "simulator model (the judge's by default). The checks and the judge read the "
+        "whole conversation.",
     )
     tags: list[str] = Field(
         default_factory=list,
@@ -289,6 +324,19 @@ class EvalResult(BaseModel):
     )
     panel_verdicts: list[Verdict] = Field(
         default_factory=list, description="Every judge's verdict, primary first, with judges"
+    )
+    evaluations: list[EvaluatorVerdict] = Field(
+        default_factory=list,
+        description="The verdict of every evaluator on the case, in the case's order",
+    )
+    transcript: list[ConversationTurn] = Field(
+        default_factory=list,
+        description="Every turn of the conversation, when the case had a simulated user",
+    )
+    stopped_by: str | None = Field(
+        default=None,
+        description="Why a simulated conversation ended: goal_met, stop_phrase, max_turns "
+        "or agent_error",
     )
 
     model_config = {"arbitrary_types_allowed": True}
@@ -496,10 +544,16 @@ class EvalRunner:
         judges: Sequence[Any] | None = None,
         concurrency: int = 4,
         repeats: int = 1,
+        simulator: UserSimulator | None = None,
     ) -> None:
         """
         Args:
-            agent: The agent under test.
+            agent: The agent under test. ``None`` for a runner that only
+                grades runs that already happened, through :meth:`agrade`.
+            simulator: Plays the ``simulated_user`` of a case against the
+                agent. Built from the judge's model when not given; a case
+                with a simulated user and neither fails under
+                ``simulated_user:no_model_configured``.
             judges: A panel. Every judged answer is graded by each of them;
                 the first is the primary whose verdict scores the case, and
                 the others feed ``EvalResult.panel`` and a ``trust``
@@ -527,6 +581,18 @@ class EvalRunner:
         self.judge = self.judges[0] if self.judges else None
         self.concurrency = max(1, concurrency)
         self.repeats = max(1, repeats)
+        self._simulator = simulator
+
+    @property
+    def simulator(self) -> UserSimulator | None:
+        """The simulator given, else one on the judge's model, else ``None``."""
+        if self._simulator is not None:
+            return self._simulator
+        model = getattr(self.judge, "model", None)
+        if model is None:
+            return None
+        self._simulator = UserSimulator(model, timeout_s=getattr(self.judge, "timeout_s", None))
+        return self._simulator
 
     def run(self, cases: list[EvalCase]) -> EvalReport:
         """Run all eval cases, one after another, and produce a report.
@@ -706,7 +772,7 @@ class EvalRunner:
         return summaries
 
     async def _judge_panel(
-        self, case: EvalCase, *, output: str, primary: Verdict
+        self, case: EvalCase, *, output: str, primary: Verdict, prompt: str | None = None
     ) -> tuple[list[Verdict], PanelAgreement | None, TrustDecision | None]:
         """Grade the answer with every other judge; agreement and trust against the primary."""
         others = [judge for judge in self.judges if judge is not self.judge]
@@ -714,7 +780,11 @@ class EvalRunner:
             return [], None, None
         verdicts = [primary]
         for judge in others:
-            second = await judge.score(prompt=case.prompt, output=output, rubric=case.rubric)
+            second = await judge.score(
+                prompt=prompt if prompt is not None else case.prompt,
+                output=output,
+                rubric=case.rubric,
+            )
             self._stamp_self_graded(second)
             verdicts.append(second)
         return verdicts, panel_agreement(verdicts), trust_decision(primary, verdicts[1])
@@ -784,15 +854,24 @@ class EvalRunner:
             raise outcome["error"]
         return outcome["value"]
 
+    def _execute(self, case: EvalCase) -> Any:
+        """The coroutine that produces the case's run: one ``arun``, or a conversation."""
+        if case.simulated_user is not None:
+            simulator = self.simulator
+            if simulator is None:
+                raise RuntimeError("no simulator")  # pragma: no cover - checked by the caller
+            return simulator.converse(self.agent, case.simulated_user, opening=case.prompt)
+        return self.agent.arun(case.prompt)
+
     async def _call_async_with_budget(self, case: EvalCase) -> Any:
-        """Await the agent, cancelling it at ``max_duration_ms``.
+        """Await the run, cancelling it at ``max_duration_ms``.
 
         Returns ``_BUDGET_EXCEEDED`` on timeout.
         """
         if case.max_duration_ms is None:
-            return await self.agent.arun(case.prompt)
+            return await self._execute(case)
 
-        task = asyncio.ensure_future(self.agent.arun(case.prompt))
+        task = asyncio.ensure_future(self._execute(case))
         try:
             done, _ = await asyncio.wait({task}, timeout=max(0.0, case.max_duration_ms) / 1000)
         except asyncio.CancelledError:
@@ -813,6 +892,17 @@ class EvalRunner:
         """Run a single eval case."""
         start_time = time.perf_counter()
         checks: dict[str, bool] = {}
+
+        if case.simulated_user is not None:
+            # A conversation is model calls on both sides; the synchronous
+            # path cannot await the simulated user, and running the opening
+            # alone would grade a different case than the one written.
+            return EvalResult(
+                case_name=case.name,
+                passed=False,
+                score=0.0,
+                checks={"simulated_user:requires_arun": False},
+            )
 
         try:
             agent_result = self._call_sync_with_budget(
@@ -841,6 +931,7 @@ class EvalRunner:
                 duration_ms=duration_ms,
                 metrics=getattr(agent_result, "metrics", None),
             )
+            evaluations = self._evaluator_checks(case, ledger=ledger, checks=checks)
             receipts, claim_checks, open_claims = self._evidence_checks(
                 case, output=output, ledger=ledger, checks=checks
             )
@@ -867,6 +958,7 @@ class EvalRunner:
                 checks=checks,
                 receipts=receipts,
                 claim_checks=claim_checks,
+                evaluations=evaluations,
             )
 
         except Exception as e:  # noqa: BLE001
@@ -948,6 +1040,41 @@ class EvalRunner:
 
         return checks
 
+    def _tool_schema(self, tool_name: str) -> dict[str, Any] | None:
+        """The parameter schema of ``tool_name`` on the agent under test, when it has one."""
+        registry = getattr(self.agent, "tools", None)
+        getter = getattr(registry, "get", None)
+        if not callable(getter):
+            return None
+        try:
+            tool = getter(tool_name)
+        except Exception:  # noqa: BLE001 — a registry that cannot answer has no schema
+            return None
+        parameters = getattr(tool, "parameters", None)
+        return dict(parameters) if isinstance(parameters, dict) else None
+
+    def _evaluator_checks(
+        self, case: EvalCase, *, ledger: EvidenceLedger, checks: dict[str, bool]
+    ) -> list[EvaluatorVerdict]:
+        """Run the case's evaluators over the ledger; one check each, verdicts returned.
+
+        An :class:`~locus.evaluation.evaluators.ArgumentCorrectness` without a
+        schema is given the tool's own, read off the agent under test, so the
+        comparison knows an integer from a string without being told.
+        """
+        taken = set(checks)
+        verdicts: list[EvaluatorVerdict] = []
+        for evaluator in case.evaluators:
+            chosen = (
+                evaluator.with_schema(self._tool_schema(evaluator.tool))
+                if isinstance(evaluator, ArgumentCorrectness)
+                else evaluator
+            )
+            verdict = chosen.evaluate(ledger)
+            checks[evaluator_label(evaluator, taken)] = verdict.passed
+            verdicts.append(verdict)
+        return verdicts
+
     @staticmethod
     def _evidence_checks(
         case: EvalCase, *, output: str, ledger: EvidenceLedger, checks: dict[str, bool]
@@ -1028,31 +1155,77 @@ class EvalRunner:
                 verdict.passed = round(verdict.score * 100) >= rubric.pass_score
 
     async def _arun_case(self, case: EvalCase) -> EvalResult:
-        """Run one case asynchronously, grading with the judge when asked.
+        """Run one case asynchronously, then grade it.
 
-        Agent failures become a failed result. Judge failures are raised:
-        they are outside the ``try`` on purpose.
+        Agent failures become a failed result. Judge and simulator failures
+        are raised: they are outside the ``try`` on purpose.
+        """
+        started = time.perf_counter()
+        if case.simulated_user is not None and self.simulator is None:
+            # Not silently run as a single prompt: the case written is a
+            # conversation, and nobody supplied the model to play the user.
+            return EvalResult(
+                case_name=case.name,
+                passed=False,
+                score=0.0,
+                checks={"simulated_user:no_model_configured": False},
+            )
+        try:
+            run = await self._call_async_with_budget(case)
+        except JudgeUnavailableError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            return EvalResult(
+                case_name=case.name,
+                passed=False,
+                score=0.0,
+                duration_ms=(time.perf_counter() - started) * 1000,
+                error=str(e),
+            )
+        if run is _BUDGET_EXCEEDED:
+            return self._timed_out_result(case, (time.perf_counter() - started) * 1000)
+        return await self.agrade(case, run, duration_ms=(time.perf_counter() - started) * 1000)
+
+    async def agrade(
+        self, case: EvalCase, result: Any, *, duration_ms: float | None = None
+    ) -> EvalResult:
+        """Grade a run that already happened.
+
+        ``result`` is anything shaped like an ``AgentResult``: ``message``,
+        ``iterations``, ``tool_executions`` and, for the budget checks,
+        ``metrics``. A :class:`~locus.evaluation.simulator.Conversation`
+        qualifies, and so does a run reconstructed from the event bus, which
+        is how :class:`~locus.evaluation.online.OnlineEvaluator` scores
+        sampled traffic with the same checks and the same judge. The agent is
+        not called; ``duration_ms`` is the run's own when known.
+
+        Raises:
+            JudgeUnavailableError: The judge could not be reached.
         """
         started = time.perf_counter()
         checks: dict[str, bool] = {}
+        conversation = result if isinstance(result, Conversation) else None
         try:
-            agent_result = await self._call_async_with_budget(case)
-            if agent_result is _BUDGET_EXCEEDED:
-                return self._timed_out_result(case, (time.perf_counter() - started) * 1000)
-            output = agent_result.message or ""
-            iterations = agent_result.iterations
-            ledger = EvidenceLedger.from_result(agent_result, prompt=case.prompt)
+            output = str(getattr(result, "message", "") or "")
+            iterations = int(getattr(result, "iterations", 0) or 0)
+            ledger = EvidenceLedger.from_result(result, prompt=case.prompt)
             tools_called = [row.tool_name for row in ledger.tool_rows]
-            duration_ms = (time.perf_counter() - started) * 1000
-
+            if duration_ms is None:
+                duration_ms = float(getattr(result, "duration_ms", 0.0) or 0.0)
             checks = self._structural_checks(
                 case,
                 output=output,
                 ledger=ledger,
                 iterations=iterations,
                 duration_ms=duration_ms,
-                metrics=getattr(agent_result, "metrics", None),
+                metrics=getattr(result, "metrics", None),
             )
+            evaluations = self._evaluator_checks(case, ledger=ledger, checks=checks)
+            if conversation is not None and case.simulated_user is not None:
+                if case.simulated_user.require_goal_met:
+                    checks["simulated_user:goal_met"] = conversation.ended
+                if conversation.error:
+                    checks["simulated_user:agent_answered"] = False
             receipts, claim_checks, open_claims = self._evidence_checks(
                 case, output=output, ledger=ledger, checks=checks
             )
@@ -1078,6 +1251,17 @@ class EvalRunner:
             ):
                 if wanted:
                     checks[f"{label}:no_judge_configured"] = False
+
+        # What the judge reads. For a conversation that is the whole
+        # transcript with the persona and the goal, not the agent's replies
+        # alone: a reply is only right against what the user asked.
+        judged_prompt, judged_output = case.prompt, output
+        if conversation is not None and case.simulated_user is not None:
+            judged_prompt = (
+                f"{case.prompt}\n\n(The user: {case.simulated_user.persona.strip()} "
+                f"Their goal: {case.simulated_user.goal.strip()})"
+            )
+            judged_output = conversation.transcript
 
         # Judge calls below are deliberately not caught: an unreachable judge
         # raises (JudgeUnavailableError). Recording it as a failed case would
@@ -1115,7 +1299,9 @@ class EvalRunner:
         panel: PanelAgreement | None = None
         trust: TrustDecision | None = None
         if case.rubric and self.judge is not None:
-            verdict = await self.judge.score(prompt=case.prompt, output=output, rubric=case.rubric)
+            verdict = await self.judge.score(
+                prompt=judged_prompt, output=judged_output, rubric=case.rubric
+            )
             self._stamp_self_graded(verdict)
             if verdict.abstained or verdict.unparseable:
                 # The judge answered, but not with a verdict. That is a
@@ -1137,7 +1323,7 @@ class EvalRunner:
                 checks[f"rubric:{verdict.reason[:60] or 'graded'}"] = verdict.passed
                 judged_score = verdict.score
                 panel_verdicts, panel, trust = await self._judge_panel(
-                    case, output=output, primary=verdict
+                    case, output=judged_output, primary=verdict, prompt=judged_prompt
                 )
 
         # A graded case reports the judge's score rather than the fraction
@@ -1157,6 +1343,7 @@ class EvalRunner:
             iterations=iterations,
             duration_ms=duration_ms,
             checks=checks,
+            error=conversation.error if conversation is not None else None,
             grade=verdict.grade if verdict is not None and not not_graded_reason else None,
             verdict=verdict,
             not_graded_reason=not_graded_reason,
@@ -1166,4 +1353,7 @@ class EvalRunner:
             panel=panel,
             trust=trust,
             panel_verdicts=panel_verdicts,
+            evaluations=evaluations,
+            transcript=list(conversation.turns) if conversation is not None else [],
+            stopped_by=conversation.stopped_by if conversation is not None else None,
         )

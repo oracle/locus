@@ -246,3 +246,78 @@ def test_usage_errors_are_reported_without_a_traceback(
     assert "cannot read cases" in capsys.readouterr().err
     assert main(["eval", "summary", str(tmp_path / "nope.json")]) == 2
     assert "cannot read report" in capsys.readouterr().err
+
+
+def test_run_keeps_the_report_in_a_store_and_trend_reads_it_back(
+    app: Path, cases: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    store = tmp_path / "reports"
+    for maker in ("make", "make", "make_no"):
+        main(
+            [
+                "eval",
+                "run",
+                str(cases),
+                "--agent",
+                f"{app}:{maker}",
+                "--store",
+                str(store),
+                "--min-pass-rate",
+                "0",
+            ]
+        )
+    out = capsys.readouterr().out
+    assert "stored under suite 'cases'" in out
+    assert len(list((store / "cases").glob("*.json"))) == 3
+
+    code = main(["eval", "trend", "--store", str(store), "--suite", "cases", "--last", "5"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Trend for cases: 3 report(s)" in out
+    assert "1/2 passed" in out
+    assert "(+0 passed, +0.00 avg)" in out
+
+    assert main(["eval", "trend", "--store", str(store), "--suite", "cases", "--markdown"]) == 0
+    assert "| When | Passed |" in capsys.readouterr().out
+
+
+def test_trend_exits_one_when_the_newest_report_regressed(
+    app: Path, cases: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    store = tmp_path / "reports"
+    smoke = tmp_path / "smoke.json"
+    smoke.write_text(json.dumps([_CASES[0]]), encoding="utf-8")
+    main(
+        ["eval", "run", str(smoke), "--agent", f"{app}:make", "--store", str(store), "--suite", "s"]
+    )
+    main(
+        [
+            "eval",
+            "run",
+            str(smoke),
+            "--agent",
+            f"{app}:make_no",
+            "--store",
+            str(store),
+            "--suite",
+            "s",
+        ]
+    )
+    capsys.readouterr()
+    code = main(["eval", "trend", "--store", str(store), "--suite", "s"])
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "worse than the one before it" in out
+
+
+def test_trend_needs_a_store(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("LOCUS_EVAL_STORE", raising=False)
+    assert main(["eval", "trend", "--suite", "s"]) == 2
+    assert "no report store" in capsys.readouterr().err
+    monkeypatch.setenv("LOCUS_EVAL_STORE", str(tmp_path))
+    assert main(["eval", "trend", "--suite", "s"]) == 0
+    assert "no reports" in capsys.readouterr().out
+    assert main(["eval", "trend", "--store", "ftp://x", "--suite", "s"]) == 2
+    assert "unknown report store scheme" in capsys.readouterr().err
