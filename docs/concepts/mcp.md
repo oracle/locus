@@ -17,6 +17,14 @@ means an SDK-built agent can be either side: pull data from a
 billing server *and* serve its own refund tools back to the
 operator's desktop.
 
+Production use adds four things, each covered below: [signing in to a
+remote server with OAuth 2.1](#signing-in-to-a-remote-server-oauth-21),
+[shaping the imported toolset](#shaping-the-toolset-include-exclude-prefix)
+so two servers mount side by side, [a server that asks the person a
+question mid-call](#when-the-server-asks-a-question-elicitation), and
+[trace context across the hop](#tracing-across-the-hop). Exposing an
+agent is [one command](#locus-mcp-serve).
+
 ## When to use MCP
 
 | You want… | Use MCP |
@@ -162,6 +170,207 @@ Windows: `%APPDATA%\Claude\claude_desktop_config.json`):
 Restart Claude Desktop. Your `lookup_order` and `issue_refund` tools
 appear in the model's tool list.
 
+## Signing in to a remote server (OAuth 2.1)
+
+A Streamable HTTP server that answers `401` is asking the client to sign
+in. Give the client an `MCPOAuth` and it runs the OAuth 2.1
+authorization-code flow with PKCE on the first challenge:
+
+```python
+from locus.integrations import FileTokenStore, MCPClient, MCPOAuth
+
+billing = MCPClient(
+    base_url="https://billing.example.com/mcp",
+    oauth=MCPOAuth(
+        client_name="Support agent",
+        store=FileTokenStore(server_url="https://billing.example.com/mcp"),
+    ),
+)
+```
+
+What happens on that first `401`:
+
+1. The client reads the protected-resource metadata the challenge points
+   at (`WWW-Authenticate: Bearer resource_metadata="…"`, falling back to
+   the server's `/.well-known/oauth-protected-resource` paths), which
+   names the authorization server.
+2. It reads the authorization server's metadata (`/.well-known/
+   oauth-authorization-server`, with the OpenID Connect discovery
+   document as a fallback) for the authorize, token and registration
+   endpoints.
+3. It registers itself dynamically as a public client, unless
+   `client_metadata_url=` names a hosted client-metadata document to
+   identify with instead.
+4. It sends the person to the authorization URL — by default the
+   browser opens and a loopback listener on `127.0.0.1` receives the
+   redirect — and trades the returned code and the PKCE verifier for
+   tokens.
+5. It retries the request with the token. Later requests reuse it; an
+   expired token is refreshed without a person, and a refresh the
+   server rejects starts the flow again.
+
+The person is only ever involved at step 4. A headless process supplies
+its own `redirect_handler` (show or forward the URL) and
+`callback_handler` (return `(code, state)`) together with the
+`redirect_uri` the authorization server will call; `scopes=` asks for
+specific scopes instead of what the server advertises; `timeout=` bounds
+how long the sign-in may take (five minutes by default).
+
+**Where tokens live** is the `store`:
+
+| Store | Lifetime | Use it when |
+|---|---|---|
+| `InMemoryTokenStore()` (default) | the process | a service that signs in at start-up |
+| `FileTokenStore(path=…)` or `FileTokenStore(server_url=…)` | across runs; a JSON file created with mode `0600` under `$XDG_CONFIG_HOME/locus/mcp-tokens` (or `~/.config/locus/mcp-tokens`) | a CLI or a desktop tool on one person's machine |
+| `KeyringTokenStore(server_url)` | the OS keyring, through the optional `keyring` package | the same, where a keyring is available |
+
+Any object with `get_tokens` / `set_tokens` / `get_client_info` /
+`set_client_info` coroutines is a store, so a vault-backed one is a
+small class. No token value is written to a log by the SDK.
+
+Precedence with the other ways of authenticating: an `Authorization`
+header from `headers=`, `headers_provider` or the run's `mcp_headers`
+metadata is sent as given and wins over everything; a static
+`access_token=` wins over `oauth=`. OAuth is for the agent's own identity
+against the server; per-user headers remain the way to carry an end
+user's token through a shared agent.
+
+## Shaping the toolset — `include`, `exclude`, `prefix`
+
+A server publishes what it publishes; the agent should see what it
+needs, under names that do not collide with another server's.
+
+```python
+billing = MCPClient(
+    base_url="https://billing.example.com/mcp",
+    include=["lookup_*", "issue_refund"],   # names or globs, server-side names
+    exclude=["*_internal"],                 # wins over include
+    prefix="billing_",                      # the agent sees billing_lookup_order
+)
+travel = MCPClient(base_url="https://travel.example.com/mcp", prefix="travel_")
+agent = Agent(model="{{ locus_example_model }}", mcp_servers=[billing, travel])
+```
+
+Precedence, in order:
+
+1. `allowed_tools` (exact names) and `include` (names or globs) **narrow**:
+   when both are given a tool must satisfy both.
+2. `exclude` (names or globs) **removes**, and wins over `include`.
+3. `tool_filter` (a predicate over the tool's schema) decides last, and
+   only sees the tools that survived.
+4. `prefix` **renames** what is left, verbatim: `prefix="billing_"` turns
+   `lookup_order` into `billing_lookup_order`. It is applied after the
+   matching, which always sees the server's own names — `exclude=
+   ["billing_*"]` matches nothing.
+
+`list_tools()` returns the server's names after steps 1–3; calls through
+either the prefixed or the server name land on the server, and a call to
+a tool the shaping left out raises `MCPToolNotAllowedError`.
+
+## When the server asks a question (elicitation)
+
+An MCP server can ask the person something in the middle of a call —
+"Refund order 4821?", "Which region?" — as an *elicitation request*
+with a message and a small schema for the answer. The SDK routes it
+through the same interrupt mechanism `ask_user` uses, so the run pauses
+instead of failing:
+
+```python
+from locus.core.events import InterruptEvent
+
+async for event in agent.run("refund order 4821"):
+    if isinstance(event, InterruptEvent):
+        print(event.question)                 # "Refund order 4821?"
+        print(event.fields)                   # [{"name": "approve", "type": "boolean", ...}]
+        answer = input("> ")                  # "yes"
+        billing.answer_elicitation(event, answer)
+        async for later in agent.resume(answer, perform_dangling=True):
+            ...
+```
+
+What happens: the client tells the server the question is unanswered
+for now (`cancel`), the tool call returns the interrupt marker, and the
+run pauses on an `InterruptEvent` whose `fields` describe the answer the
+schema asks for (one field with an `enum` also fills `options`) and
+whose `metadata["mcp_elicitation"]` carries the server, tool and schema.
+`answer_elicitation(event, answer)` parks the answer on the client;
+`agent.resume(answer, perform_dangling=True)` re-issues the paused call,
+the server asks again, and this time it gets the answer. The answer is a
+mapping matching the schema, or — for a one-field schema — a string,
+bool or number coerced to the field's type (`"yes"` → `True`); `None`
+declines. Because the call is re-issued, a server should ask before it
+acts, which is what elicitation is for.
+
+Outside an agent run — or inside one, when you would rather not pause —
+an `elicitation_handler` answers:
+
+```python
+def approve_small_refunds(question):
+    amount = question.schema["properties"].get("amount", {}).get("default", 0)
+    return {"approve": amount < 50}
+
+billing = MCPClient(base_url=..., elicitation_handler=approve_small_refunds)
+```
+
+The handler (sync or async) gets an `MCPElicitation` (`message`,
+`schema`, `mode`, `url`, `server`, `tool_name`, `tool_call_id`) and
+returns the same shapes as above, or an `ElicitationAnswer` to say
+exactly what to send. Without a handler, a question that arrives
+outside a run is declined and logged.
+
+The other way round: an agent served by `LocusMCPServer` that pauses on
+`ask_user` has its question relayed to the MCP client as an elicitation
+(through `run_agent_stream`), and resumes with the reply. A client that
+cannot be asked ends the call with the question in its result.
+
+## Tracing across the hop
+
+With the [telemetry hook](hooks.md) installed, every `tools/call` the
+agent makes carries W3C trace context — `traceparent` and `tracestate`
+— in the request's `_meta`, parented to the agent's span for that tool
+call. A server that reads it files its own spans under that call, so one
+trace shows the model's decision, the tool call and the remote work. The
+server side is symmetric: a call served by `LocusMCPServer` runs under
+the context its `_meta` carries, so an agent exposed over MCP files its
+`agent.invocation` under the caller's span.
+
+```python
+from locus.hooks.builtin.telemetry import TelemetryHook
+
+agent = Agent(model="{{ locus_example_model }}", mcp_servers=[billing], hooks=[TelemetryHook()])
+```
+
+Nothing is configured on the client: it is on by default and does
+nothing without OpenTelemetry installed. `propagate_trace=False` keeps
+the agent's trace inside the process. `locus.integrations.mcp_tracing`
+has the pieces — `trace_meta()`, `trace_scope(meta)` — for a server
+built on something other than `LocusMCPServer`.
+
+## `locus mcp serve`
+
+One command exposes an agent, or a module of tools, as an MCP server:
+
+```bash
+locus mcp serve app.py:agent                       # stdio, for desktop clients
+locus mcp serve app.py:make_agent --name support   # a factory works too
+locus mcp serve billing_tools --transport http --port 8000 --path /mcp
+```
+
+The target is `MODULE:ATTR` or `FILE.py:ATTR` naming an `Agent`, a
+function returning one, a `Tool` or a list of tools — or a bare module or
+file, in which case every module-level `@tool` is served. An agent goes
+up through `LocusMCPServer` (its tools plus `run_agent` and
+`run_agent_stream`); tools go up as themselves through
+`create_tool_server(tools)`. Point a desktop client at the command:
+
+```json
+{
+  "mcpServers": {
+    "support": {"command": "locus", "args": ["mcp", "serve", "/srv/app.py:agent"]}
+  }
+}
+```
+
 ## What you get out of the box
 
 ### Schema preservation
@@ -235,7 +444,9 @@ audit trail.
 | Symptom | Likely cause |
 |---|---|
 | `MCPConnectionError: timed out after Ns connecting to MCP server …` / `… is unreachable` | The MCP server subprocess crashed or never completed the handshake. Run the command manually to see the error. |
-| `MCP tool 'X' is not allowed on …`, or the tool is missing from `await ti.list_tools()` | The server exposes a different name than you expected, or `allowed_tools` / `tool_filter` excludes it. Print `[t["name"] for t in await ti.list_tools()]` to see the actual list. |
+| `MCP tool 'X' is not allowed on …`, or the tool is missing from `await ti.list_tools()` | The server exposes a different name than you expected, or `allowed_tools` / `include` / `exclude` / `tool_filter` leaves it out. Print `[t["name"] for t in await ti.list_tools()]` to see the actual list; patterns match the server's names, not the prefixed ones. |
+| The run pauses on a question you did not expect | The server asked for input mid-call. Answer it with `client.answer_elicitation(event, …)` and `agent.resume(…, perform_dangling=True)`, or set `elicitation_handler` to answer without pausing. |
+| The browser opens for sign-in on every start | Tokens are in memory by default. Give `MCPOAuth` a `FileTokenStore` or `KeyringTokenStore`. |
 | The tool call returns an error about argument types | The MCP tool returned an arg type that doesn't match its declared schema. Common with hand-written MCP servers. |
 | Claude Desktop doesn't show your SDK tools | `claude_desktop_config.json` not picked up — check the file lives at the right path and Claude has been restarted. |
 | Hangs on `await ti.connect()` | The MCP subprocess is waiting for input on stdin (some servers expect a handshake) or never finished its init. Run the `server_command` manually to see what it prints, and wrap `connect()` in `asyncio.wait_for(..., timeout=...)`. |
