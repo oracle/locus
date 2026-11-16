@@ -151,12 +151,14 @@ the server holds the thread and no client-side compaction runs.
 
 ## What changes vs `OCIChatCompletionsModel`
 
-**One thing only:** `ConversationManager` strategies (window,
-summarize, truncate) don't apply. They operate on the full message
-list, and on the Responses path that list lives server-side — there's
-nothing for them to trim. The runtime loop reads the `server_stateful`
-class flag and skips the strategy step; you don't have to configure
-anything.
+**One thing only:** on the stateful path, `ConversationManager`
+strategies (window, summarize, truncate) don't apply. They operate on
+the full message list, and while OCI holds the thread that list lives
+server-side — there's nothing for them to trim. The runtime loop reads
+the model's `server_stateful` flag before every call and skips the
+strategy step while it is `True`; with `store=False`, or after the Zero
+Data Retention switch, the strategies apply as on any other transport.
+You don't have to configure anything.
 
 **Everything else works identically:**
 
