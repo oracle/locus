@@ -6,9 +6,11 @@ runs. Pass one to `Agent(checkpointer=...)` and the agent saves
 it pauses on an interrupt; and, on a checkpointer that can delete a
 single checkpoint, after each tool-calling iteration.
 `checkpoint_every_n_iterations` sets that last interval, and the turn's
-final save deletes the iteration saves it supersedes. Resume a thread by
-re-running with the same `thread_id`: same code, same case context,
-different process, different day.
+final save deletes the iteration saves it supersedes. The
+[durability mode](#durability-modes) decides whether those iteration
+saves are awaited, written in the background, or skipped. Resume a
+thread by re-running with the same `thread_id`: same code, same case
+context, different process, different day.
 
 This is the continuity story for production agents. A case outlives a
 process: a refund case opens Friday, the service redeploys over the
@@ -70,6 +72,81 @@ agent.run_sync("What did we do on this ticket, and on what evidence?", thread_id
     **durability and resumability**, not a tamper-evident audit log. For
     a tamper-evident record of decisions, route those through the
     [`AuditTrail`](control-layer.md) hash chain instead.
+
+## Durability modes
+
+Every mode writes the run's final state and the state it pauses on
+before control returns. `durability` decides how the **iteration**
+checkpoints — the saves after each tool-calling iteration — are made.
+Set it on the agent (`Agent(durability=...)`) or per run
+(`agent.run(..., durability=...)`, also on `arun` and `run_sync`); a
+`StateGraph` takes it on `GraphConfig.durability` for its per-step
+saves.
+
+| Mode | Iteration checkpoints | Crash mid-run loses | Use when |
+|---|---|---|---|
+| `"sync"` (default) | Written and awaited before the next model call. | At most the iteration in flight. | Tool calls cost money or cannot be undone, and the model call dominates latency anyway. |
+| `"async"` | Scheduled on the event loop while the next model call runs; every pending write is awaited before the final save. | The writes still in flight. | Many short iterations on a remote checkpointer; the thread's history still fills in. |
+| `"exit"` | None. One save at the end of the run (and before a pause). | Everything since the previous checkpoint. | Short runs, cheap tools, or a backend billed per write. |
+
+The two cheaper modes have a window the default does not: a process
+killed after a tool returned but before the run's next save leaves no
+checkpoint of that call, and a resumed run would issue it again. The
+[tool-effect ledger](idempotency.md#the-tool-effect-ledger) closes it:
+with `durability="async"` or `"exit"` the executor records every
+executed call in the thread's checkpointer the moment it returns (one
+small write per call, under the sidecar thread `<thread_id>~ledger`),
+and `agent.continue_turn(thread_id)` or
+`agent.resume(invocation_id=..., thread_id=...)` replays the recorded
+results instead of running the tools again. `Agent(tool_ledger=True)`
+turns the ledger on for `"sync"` too, closing its smaller window at the
+same per-call cost; `tool_ledger=False` turns it off everywhere.
+
+```python
+agent = Agent(model=..., tools=[...], checkpointer=cp, durability="async")
+
+# The caller keeps the id; a crashed run is picked up by it.
+agent.run_sync("Work ticket T-4821.", thread_id="case-4821", invocation_id="job-77")
+# ... the process dies mid-run; a new one continues the same turn:
+async for event in agent.resume(invocation_id="job-77", thread_id="case-4821"):
+    ...
+```
+
+### Overhead
+
+Measured with `scripts/bench_durability.py` on a scripted agent — ten
+iterations, one tool call each, a 2 KB tool result, model and tool cost
+near zero — so the figures are the checkpoint and ledger traffic alone,
+per iteration. Median of eleven runs on one machine, PostgreSQL 17 on
+localhost; your network to the database sets the real scale.
+
+| Checkpointer | Mode | `tool_ledger=False` | `tool_ledger=True` |
+|---|---|---|---|
+| `MemoryCheckpointer` | `sync` | 0.5 ms | 0.5 ms |
+| | `async` | 0.5 ms | 0.5 ms |
+| | `exit` | 0.4 ms | 0.4 ms |
+| `postgresql_checkpointer()` (adapter) | `sync` | 6.0 ms | 5.6 ms |
+| | `async` | 2.6 ms | 4.4 ms |
+| | `exit` | 0.6 ms | 2.7 ms |
+| `PgCheckpointer` | `sync` | 2.2 ms | 3.0 ms |
+| | `async` | 1.7 ms | 2.4 ms |
+| | `exit` | 0.5 ms | 1.5 ms |
+
+How to read it. The left column is the cost of the checkpoint schedule
+alone: `sync` pays the awaited write every iteration, `async` hides most
+of it behind the next model call, `exit` pays nothing until the end. The
+right column adds one ledger record per tool call — about 2 ms through
+the adapter, whose every save is four statements (the record, a `latest`
+row, an index read and write) whatever the payload, and about 1 ms on
+`PgCheckpointer`, whose save is one upsert. So on PostgreSQL
+`async` with the ledger costs what `sync` without it costs through the
+adapter, and `exit` with the ledger costs less than `async` without it;
+on `PgCheckpointer` every combination is cheaper than the adapter's
+default. In memory nothing registers. The ledger also writes a manifest
+once per turn and deletes the sidecar once at the end. With a real model
+call of a second or more per iteration, none of these numbers is visible;
+they matter for tight tool loops on a remote database and for backends
+billed per write.
 
 ## Picking a backend
 
@@ -389,5 +466,5 @@ row-level security), both in `locus.memory.store_backends`; subclass
 
 - [State](state.md) — what `AgentState` actually contains.
 - [Conversation management](conversation-management.md) — higher-level patterns built on checkpointers.
-- [Idempotency](idempotency.md) — replay-safe side effects when a checkpoint resume re-issues a tool call.
+- [Idempotency](idempotency.md) — in-run deduplication of identical tool calls, and the tool-effect ledger a resumed run replays from.
 - [How-to: custom checkpointer](../how-to/custom-checkpointer.md) — write your own backend.

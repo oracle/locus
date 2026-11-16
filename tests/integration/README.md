@@ -34,7 +34,9 @@ python scripts/run_notebooks.py --provider gemini --model gemini-2.5-flash
 ## PostgreSQL
 
 PostgreSQL-backed tests use the same environment variables as the backend
-fixtures:
+fixtures. `POSTGRES_USER` and `POSTGRES_DB` are the opt-in; `POSTGRES_HOST`
+defaults to `localhost`, `POSTGRES_PORT` to `5432`, and `POSTGRES_PASSWORD`
+to none (a Homebrew server with `trust` on localhost needs no password):
 
 ```bash
 export POSTGRES_HOST=localhost
@@ -44,12 +46,20 @@ export POSTGRES_USER=postgres
 export POSTGRES_PASSWORD=postgres
 ```
 
+When the tests skip, the skip reason says which variable is missing or why
+the port did not answer.
+
 The development compose file includes a PostgreSQL service:
 
 ```bash
 docker compose -f examples/docker-compose.yaml up -d postgres
 uv run hatch run test:test tests/integration/test_checkpoint_backends.py::TestPostgreSQLBackend
 ```
+
+The database-backed approval stores (`tests/integration/test_approval_stores.py`)
+run the shared conformance suite against PostgreSQL and Redis from the same
+variables, and against Oracle when `ORACLE_DSN`, `ORACLE_USER` and
+`ORACLE_PASSWORD` (plus `ORACLE_WALLET` for Autonomous Database) are set.
 
 ## MySQL
 

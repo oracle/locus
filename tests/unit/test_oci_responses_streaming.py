@@ -17,17 +17,22 @@ import pytest
 import respx
 
 from locus.core.events import ModelChunkEvent
-from locus.core.messages import Message
+from locus.core.messages import Message, Role, ToolCall
+from locus.core.warnings import LocusWarning
 from locus.models.providers.oci import (
+    OCI_RESPONSES_ITEMS_METADATA_KEY,
     OCIProjectRequiredError,
     OCIResponsesModel,
     OCIResponsesStateLostError,
+    OCIResponsesZeroDataRetentionError,
 )
 from locus.models.providers.oci._responses_parse import (
     _translate_tool_schema,
     build_request_body,
+    parse_compaction_response,
     parse_response,
     parse_stream_event,
+    reasoning_text,
 )
 
 
@@ -285,7 +290,49 @@ class TestParseStreamEventEdgeCases:
                 "delta": "args",
             }
         )
-        assert out == {"tool_calls": [{"id": "item_42", "arguments_delta": "args"}]}
+        assert out == {
+            "tool_calls": [{"id": "item_42", "item_id": "item_42", "arguments_delta": "args"}]
+        }
+
+    def test_output_item_added_carries_name_and_call_id(self) -> None:
+        out = parse_stream_event(
+            {
+                "type": "response.output_item.added",
+                "output_index": 0,
+                "item": {
+                    "type": "function_call",
+                    "id": "fc_1",
+                    "call_id": "call_1",
+                    "name": "add_numbers",
+                    "arguments": "",
+                },
+            }
+        )
+        assert out == {
+            "tool_calls": [
+                {"id": "call_1", "item_id": "fc_1", "name": "add_numbers", "arguments_delta": ""}
+            ]
+        }
+
+    def test_output_item_done_carries_the_full_arguments(self) -> None:
+        out = parse_stream_event(
+            {
+                "type": "response.output_item.done",
+                "item": {
+                    "type": "function_call",
+                    "id": "fc_1",
+                    "call_id": "call_1",
+                    "name": "add_numbers",
+                    "arguments": '{"a": 2, "b": 3}',
+                },
+            }
+        )
+        assert out["tool_calls"][0]["final"] is True
+        assert out["tool_calls"][0]["arguments"] == '{"a": 2, "b": 3}'
+
+    def test_non_function_output_items_stay_structural(self) -> None:
+        added = {"type": "response.output_item.added", "item": {"type": "message", "id": "msg_1"}}
+        assert parse_stream_event(added) == {}
 
     def test_nested_error_event(self) -> None:
         """Some servers emit ``foo.error`` instead of ``response.error``."""
@@ -629,4 +676,471 @@ async def test_stream_unknown_previous_response_id_maps_to_state_lost() -> None:
             [Message.user("hi")], provider_state={"previous_response_id": "resp_old"}
         ):
             pass
+    await model.aclose()
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_stream_zdr_400_flips_an_auto_model_and_raises_the_typed_error() -> None:
+    model = _make_model()
+    respx.post("https://fake-oci.test/openai/v1/responses").mock(
+        return_value=httpx.Response(
+            400,
+            json={
+                "error": {
+                    "code": "unsupported_parameter",
+                    "message": (
+                        "Previous response cannot be used for this organization "
+                        "due to Zero Data Retention."
+                    ),
+                    "param": "previous_response_id",
+                }
+            },
+        )
+    )
+
+    async def _drain() -> None:
+        async for _ in model.stream(
+            [Message.user("hi")], provider_state={"previous_response_id": "resp_old"}
+        ):
+            pass
+
+    with (
+        pytest.warns(LocusWarning, match="Zero Data Retention") as record,
+        pytest.raises(OCIResponsesZeroDataRetentionError),
+    ):
+        await _drain()
+    zdr = [
+        w
+        for w in record
+        if issubclass(w.category, LocusWarning) and "Zero Data Retention" in str(w.message)
+    ]
+    assert len(zdr) == 1
+    assert model.zdr_detected is True
+    assert model.server_stateful is False
+    await model.aclose()
+
+
+# =============================================================================
+# Reasoning controls and verbatim replay (parse layer)
+# =============================================================================
+
+_REASONING_ITEM: dict[str, Any] = {
+    "id": "rs_1",
+    "type": "reasoning",
+    "summary": [{"type": "summary_text", "text": "Add the two numbers."}],
+    "encrypted_content": "gAAAAABencrypted",
+}
+_FUNCTION_CALL_ITEM: dict[str, Any] = {
+    "id": "fc_1",
+    "type": "function_call",
+    "call_id": "call_1",
+    "name": "add",
+    "arguments": '{"a": 2, "b": 3}',
+}
+_COMPACTION_ITEM: dict[str, Any] = {
+    "id": "cmp_1",
+    "type": "compaction",
+    "encrypted_content": "gAAAAABcompacted",
+}
+
+
+class TestReasoningControls:
+    def test_nothing_is_sent_when_both_are_unset(self) -> None:
+        for store in (True, False):
+            body = build_request_body([Message.user("hi")], model="m", store=store)
+            assert "reasoning" not in body
+            assert "include" not in body
+
+    def test_the_dict_is_sent_as_given(self) -> None:
+        body = build_request_body(
+            [Message.user("hi")], model="m", reasoning={"effort": "high", "summary": "auto"}
+        )
+        assert body["reasoning"] == {"effort": "high", "summary": "auto"}
+
+    def test_the_effort_fills_a_dict_without_one(self) -> None:
+        body = build_request_body(
+            [Message.user("hi")], model="m", reasoning={"summary": "auto"}, reasoning_effort="low"
+        )
+        assert body["reasoning"] == {"summary": "auto", "effort": "low"}
+
+    def test_the_dict_wins_on_conflict(self) -> None:
+        body = build_request_body(
+            [Message.user("hi")], model="m", reasoning={"effort": "high"}, reasoning_effort="low"
+        )
+        assert body["reasoning"] == {"effort": "high"}
+
+    def test_the_callers_dict_is_not_mutated(self) -> None:
+        given = {"summary": "auto"}
+        build_request_body([Message.user("hi")], model="m", reasoning=given, reasoning_effort="low")
+        assert given == {"summary": "auto"}
+
+    def test_encrypted_reasoning_is_requested_only_when_stateless_and_set(self) -> None:
+        stateful = build_request_body([Message.user("hi")], model="m", reasoning_effort="low")
+        assert "include" not in stateful
+        stateless = build_request_body(
+            [Message.user("hi")], model="m", store=False, reasoning_effort="low"
+        )
+        assert stateless["include"] == ["reasoning.encrypted_content"]
+        with_dict = build_request_body(
+            [Message.user("hi")], model="m", store=False, reasoning={"summary": "auto"}
+        )
+        assert with_dict["include"] == ["reasoning.encrypted_content"]
+
+
+class TestVerbatimReplay:
+    def test_parse_response_keeps_the_raw_items_when_a_reasoning_item_is_present(self) -> None:
+        message, _, _, _ = parse_response(
+            {"id": "r", "output": [_REASONING_ITEM, _FUNCTION_CALL_ITEM]}
+        )
+        assert message.metadata[OCI_RESPONSES_ITEMS_METADATA_KEY] == [
+            _REASONING_ITEM,
+            _FUNCTION_CALL_ITEM,
+        ]
+        assert [tc.id for tc in message.tool_calls] == ["call_1"]
+        assert reasoning_text(message) == "Add the two numbers."
+
+    def test_parse_response_keeps_nothing_without_reasoning(self) -> None:
+        message, _, _, _ = parse_response({"id": "r", "output": [_FUNCTION_CALL_ITEM]})
+        assert message.metadata == {}
+        assert reasoning_text(message) is None
+
+    def test_a_turn_with_raw_items_is_replayed_verbatim(self) -> None:
+        turn, _, _, _ = parse_response(
+            {"id": "r", "output": [_REASONING_ITEM, _FUNCTION_CALL_ITEM]}
+        )
+        result = Message(role=Role.TOOL, content="5", tool_call_id="call_1", name="add")
+        body = build_request_body([Message.user("add"), turn, result], model="m", store=False)
+        assert body["input"][1:3] == [_REASONING_ITEM, _FUNCTION_CALL_ITEM]
+        assert body["input"][3] == {
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": "5",
+        }
+
+    def test_a_hand_built_turn_is_reconstructed_without_item_ids(self) -> None:
+        turn = Message.assistant(tool_calls=[ToolCall(id="call_1", name="add", arguments={"a": 2})])
+        body = build_request_body([Message.user("add"), turn], model="m", store=False)
+        assert body["input"][1] == {
+            "type": "function_call",
+            "call_id": "call_1",
+            "name": "add",
+            "arguments": '{"a": 2}',
+        }
+
+    def test_a_compaction_reply_becomes_messages_that_replay_the_item(self) -> None:
+        kept = {
+            "id": "msg_1",
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "My name is Ada."}],
+        }
+        messages, usage = parse_compaction_response(
+            {
+                "object": "response.compaction",
+                "output": [kept, _COMPACTION_ITEM],
+                "usage": {"input_tokens": 75, "output_tokens": 21, "total_tokens": 96},
+            }
+        )
+        assert [m.role for m in messages] == [Role.USER, Role.ASSISTANT]
+        assert messages[0].content == "My name is Ada."
+        assert messages[1].metadata[OCI_RESPONSES_ITEMS_METADATA_KEY] == [_COMPACTION_ITEM]
+        assert usage == {"prompt_tokens": 75, "completion_tokens": 21, "total_tokens": 96}
+
+        body = build_request_body(
+            [Message.system("sys"), *messages, Message.user("What is my name?")],
+            model="m",
+            store=False,
+        )
+        assert body["instructions"] == "sys"
+        assert body["input"][1] == _COMPACTION_ITEM
+        assert body["input"][2]["role"] == "user"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_stream_sends_the_reasoning_dict_and_asks_for_encrypted_items_when_stateless() -> (
+    None
+):
+    model = _make_model(store=False, reasoning={"effort": "low", "summary": "auto"})
+    captured: dict[str, Any] = {}
+    _capture_stream_body(captured)
+
+    async for _ in model.stream([Message.user("hi")]):
+        pass
+    assert captured["body"]["reasoning"] == {"effort": "low", "summary": "auto"}
+    assert captured["body"]["include"] == ["reasoning.encrypted_content"]
+    await model.aclose()
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_stream_reasoning_kwarg_replaces_the_config_dict() -> None:
+    model = _make_model(reasoning={"effort": "low"})
+    captured: dict[str, Any] = {}
+    _capture_stream_body(captured)
+
+    async for _ in model.stream([Message.user("hi")], reasoning={"summary": "concise"}):
+        pass
+    assert captured["body"]["reasoning"] == {"summary": "concise"}
+    assert "include" not in captured["body"]
+    await model.aclose()
+
+
+# =============================================================================
+# Edge paths of the parse layer and the stream loop
+# =============================================================================
+
+
+class TestParseLayerEdgePaths:
+    def test_replay_metadata_without_dict_items_falls_back_to_reconstruction(self) -> None:
+        turn = Message(
+            role=Role.ASSISTANT,
+            content="hi",
+            tool_calls=[ToolCall(id="c1", name="add", arguments={})],
+            metadata={OCI_RESPONSES_ITEMS_METADATA_KEY: ["not an item", 7]},
+        )
+        body = build_request_body([turn], model="m", store=False)
+        assert [item["type"] for item in body["input"]] == ["message", "function_call"]
+        assert body["input"][1]["arguments"] == "{}"
+
+    def test_an_empty_user_message_sends_no_input_item(self) -> None:
+        body = build_request_body([Message.user(""), Message.user("hi")], model="m")
+        assert len(body["input"]) == 1
+
+    def test_temperature_is_sent_when_given(self) -> None:
+        body = build_request_body([Message.user("hi")], model="m", temperature=0.2)
+        assert body["temperature"] == 0.2
+
+    def test_translate_tool_schema_keeps_only_the_fields_present(self) -> None:
+        assert _translate_tool_schema({"type": "function", "function": {"name": "ping"}}) == {
+            "type": "function",
+            "name": "ping",
+        }
+
+    def test_parse_response_skips_non_dict_output_items(self) -> None:
+        message, _, _, _ = parse_response(
+            {
+                "id": "r",
+                "output": [
+                    "garbage",
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [
+                            {"type": "refusal", "refusal": "no"},
+                            {"type": "output_text", "text": ""},
+                            {"type": "output_text", "text": "ok"},
+                        ],
+                    },
+                ],
+            }
+        )
+        assert message.content == "ok"
+        assert message.metadata == {}
+
+    def test_parse_response_unparseable_tool_arguments_become_empty(self) -> None:
+        message, _, _, _ = parse_response(
+            {
+                "id": "r",
+                "output": [
+                    {"type": "function_call", "call_id": "c1", "name": "add", "arguments": "{oops"}
+                ],
+            }
+        )
+        assert message.tool_calls[0].arguments == {}
+
+    def test_reasoning_text_skips_blocks_without_text(self) -> None:
+        message = Message(
+            role=Role.ASSISTANT,
+            content=None,
+            metadata={
+                OCI_RESPONSES_ITEMS_METADATA_KEY: [
+                    {
+                        "type": "reasoning",
+                        "summary": [{"type": "summary_text"}, "raw"],
+                        "content": [],
+                    },
+                    {"type": "function_call", "call_id": "c1", "name": "add", "arguments": "{}"},
+                    "not an item",
+                ]
+            },
+        )
+        assert reasoning_text(message) is None
+        assert reasoning_text(Message.assistant(content="plain")) is None
+
+    def test_compaction_response_edge_items(self) -> None:
+        messages, usage = parse_compaction_response(
+            {
+                "output": [
+                    "garbage",
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "Noted."}],
+                    },
+                    {"type": "function_call", "call_id": "c1", "name": "add", "arguments": "{}"},
+                    {"type": "compaction", "id": "cmp_1", "encrypted_content": "x"},
+                ],
+                "usage": {"input_tokens": 10, "output_tokens": 5},
+            }
+        )
+        assert [m.role for m in messages] == [Role.ASSISTANT, Role.ASSISTANT, Role.ASSISTANT]
+        assert messages[0].content == "Noted."
+        assert messages[1].content is None
+        assert messages[1].metadata[OCI_RESPONSES_ITEMS_METADATA_KEY][0]["type"] == "function_call"
+        assert messages[2].metadata[OCI_RESPONSES_ITEMS_METADATA_KEY][0]["type"] == "compaction"
+        assert usage == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+
+    def test_parse_stream_event_ignores_structural_events(self) -> None:
+        assert parse_stream_event({"type": "response.created"}) == {}
+        assert parse_stream_event({"type": "response.output_item.added", "item": {}}) == {}
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_stream_without_done_sentinel_skips_structural_events_and_bad_arguments() -> None:
+    """The SSE body ends without ``[DONE]``, carries lifecycle events the
+    translator drops, and a tool call whose accumulated arguments are not
+    JSON: the stream still yields the call (empty arguments) and ``done``."""
+    model = _make_model()
+    body = "".join(
+        f"data: {event}\n\n"
+        for event in [
+            '{"type": "response.created", "response": {"id": "resp_x"}}',
+            '{"type": "response.function_call_arguments.delta", "call_id": "call_1", "delta": "{oops"}',
+            '{"type": "response.completed", "response": {"id": "resp_x"}}',
+        ]
+    ).encode()
+    respx.post("https://fake-oci.test/openai/v1/responses").mock(
+        return_value=httpx.Response(200, content=body)
+    )
+
+    chunks = [event async for event in model.stream([Message.user("hi")])]
+
+    tool_chunks = [c for c in chunks if c.tool_calls]
+    assert len(tool_chunks) == 1
+    assert tool_chunks[0].tool_calls is not None
+    assert tool_chunks[0].tool_calls[0].id == "call_1"
+    assert tool_chunks[0].tool_calls[0].arguments == {}
+    assert chunks[-1].done is True
+    await model.aclose()
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_error_envelope_that_is_not_an_object_falls_back_to_the_body_text() -> None:
+    model = _make_model()
+    respx.post("https://fake-oci.test/openai/v1/responses").mock(
+        return_value=httpx.Response(503, json={"error": "upstream unavailable"})
+    )
+
+    with pytest.raises(RuntimeError, match="503") as exc_info:
+        await model.complete([Message.user("hi")])
+    assert "upstream unavailable" in str(exc_info.value)
+    assert not isinstance(exc_info.value, OCIResponsesStateLostError)
+    await model.aclose()
+
+
+# =============================================================================
+# Streamed tool calls carry the function name and the call id (#474)
+# =============================================================================
+
+
+def _fc_item(call_id: str, item_id: str, name: str, arguments: str) -> dict[str, Any]:
+    return {
+        "type": "function_call",
+        "id": item_id,
+        "call_id": call_id,
+        "name": name,
+        "arguments": arguments,
+    }
+
+
+def _events(*events: dict[str, Any]) -> bytes:
+    import json as _json
+
+    return _sse([_json.dumps(e) for e in events])
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_streamed_tool_call_has_the_name_and_call_id_complete_would_return() -> None:
+    """The deltas only carry the item id; the call id and the name come from the
+    ``output_item`` events, and the emitted ToolCall must match ``complete()``."""
+    model = _make_model()
+    respx.post("https://fake-oci.test/openai/v1/responses").mock(
+        return_value=httpx.Response(
+            200,
+            content=_events(
+                {"type": "response.created", "response": {"id": "resp_1"}},
+                {
+                    "type": "response.output_item.added",
+                    "output_index": 0,
+                    "item": _fc_item("call_1", "fc_1", "add_numbers", ""),
+                },
+                {
+                    "type": "response.function_call_arguments.delta",
+                    "item_id": "fc_1",
+                    "delta": '{"a": 2, ',
+                },
+                {
+                    "type": "response.function_call_arguments.delta",
+                    "item_id": "fc_1",
+                    "delta": '"b": 3}',
+                },
+                {
+                    "type": "response.function_call_arguments.done",
+                    "item_id": "fc_1",
+                    "arguments": '{"a": 2, "b": 3}',
+                },
+                {
+                    "type": "response.output_item.done",
+                    "output_index": 0,
+                    "item": _fc_item("call_1", "fc_1", "add_numbers", '{"a": 2, "b": 3}'),
+                },
+                {"type": "response.completed", "response": {"id": "resp_1"}},
+            ),
+        )
+    )
+
+    calls = []
+    async for chunk in model.stream([Message.user("add 2 and 3")]):
+        if chunk.tool_calls:
+            calls.extend(chunk.tool_calls)
+    assert [(c.id, c.name, c.arguments) for c in calls] == [
+        ("call_1", "add_numbers", {"a": 2, "b": 3})
+    ]
+    await model.aclose()
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_streamed_deltas_before_the_added_event_still_land_on_the_call_id() -> None:
+    """Out-of-order delivery: deltas keyed by the item id are moved under the
+    call id once ``output_item.added`` names it; no ``done`` item is needed."""
+    model = _make_model()
+    respx.post("https://fake-oci.test/openai/v1/responses").mock(
+        return_value=httpx.Response(
+            200,
+            content=_events(
+                {
+                    "type": "response.function_call_arguments.delta",
+                    "item_id": "fc_9",
+                    "delta": '{"x": 1}',
+                },
+                {
+                    "type": "response.output_item.added",
+                    "output_index": 0,
+                    "item": _fc_item("call_9", "fc_9", "noop", ""),
+                },
+                {"type": "response.completed", "response": {"id": "resp_9"}},
+            ),
+        )
+    )
+    calls = []
+    async for chunk in model.stream([Message.user("go")]):
+        if chunk.tool_calls:
+            calls.extend(chunk.tool_calls)
+    assert [(c.id, c.name, c.arguments) for c in calls] == [("call_9", "noop", {"x": 1})]
     await model.aclose()

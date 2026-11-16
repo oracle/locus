@@ -10,6 +10,35 @@ policy.
 
 ### Added
 
+- **Durability modes.** `Agent(durability=...)`, and `durability=` on
+  `run`, `arun` and `run_sync`, say when a run writes its iteration
+  checkpoints: `"sync"` (the default, and what every earlier release did)
+  awaits each one before the next model call; `"async"` schedules it and
+  awaits every pending write before the run's final save; `"exit"` writes
+  once at the end of the run. The final save and the save before an
+  interrupt are awaited in every mode. `GraphConfig.durability` does the
+  same for a `StateGraph`'s per-step saves. Every checkpointer gets the
+  modes through the protocol; none needed code of its own.
+  (`locus.agent.durability`)
+- **Tool-effect ledger.** With `durability="async"` or `"exit"` (or
+  `Agent(tool_ledger=True)` in any mode) the executor records every
+  executed tool call in the thread's checkpointer the moment it returns,
+  keyed by `(thread id, step, tool name, canonical arguments)`, as
+  checkpoints of the sidecar thread `<thread_id>~ledger`. A run that
+  continues the turn after a crash — `Agent.continue_turn(thread_id)`,
+  the new `Agent.resume(invocation_id=..., thread_id=...)`, or
+  `Agent.run(..., invocation_id=...)` under the id the crashed run was
+  started with — replays a recorded call instead of running the tool
+  again and runs only the calls with no record; `ToolResult.replayed`
+  marks a replayed result. `continue_turn` now also picks up a turn none
+  of whose checkpoints landed, from the ledger's manifest. Tools not
+  marked idempotent run at least once; `Agent(rerun_idempotent_on_replay=
+  True)` lets `idempotent=True` tools run again on replay instead. The
+  turn's final save clears the ledger. Temporal and DBOS segments record
+  into the same ledger, and `run_agent_segment(kind="continue")` finishes
+  an interrupted segment by replaying it. The checkpointers page has an
+  overhead table for each mode on the in-memory and PostgreSQL
+  checkpointers. (`locus.memory.ledger`; #453)
 - **A2A: every binding the specification defines.** Next to JSON-RPC,
   `A2AServer` serves the HTTP+JSON binding (`POST /message:send`,
   `GET /tasks/{id}`, `POST /tasks/{id}:cancel`, the push-config resources,
@@ -125,6 +154,191 @@ policy.
 - **Notebook 72** gains the judge as an optional step on the scripted test
   double: a staging rollout to an unpinned image, which the policy allows, is
   held by the judge, and the page shows the audit entry that records both.
+- **Tool-call integrity (`Agent(tool_call_integrity=True)`).** The runtime
+  signs every tool call as the model's response is parsed, the streaming
+  path included, over a canonical form of its id, name and arguments with
+  HMAC-SHA256 under a random per-run key, and the executor verifies the call
+  before it runs. A call changed in between is refused with a typed
+  `ToolCallIntegrityError`, an entry on the agent's `AuditTrail` (the signed
+  and received digests, and the hook the change is attributed to), a
+  `tool.integrity.refused` event, and a tool error the model reads so the
+  run continues; `"abort"` ends the run instead. Hooks that rewrite
+  arguments re-sign through `event.resign(by="...")` or
+  `ToolCallSigner.resign`, so the chain of custody names them; the built-in
+  `GuardrailsHook` redaction and `ExternalHooks` rewrites do. The signature
+  lives on the run, not on `ToolCall`, so messages and checkpoints are
+  unchanged. Off by default in 5.x, on by default in 6.0. (#450)
+- **Database-backed approval stores.** `PostgresApprovals`, `RedisApprovals`
+  and `OracleApprovals` implement `ApprovalStore` with the semantics of the
+  in-memory store (one-use consumption, approver rules, quorums, delegations)
+  over one row or key per held call, decided under the database's own lock, so
+  replicas that share the store never both redeem one approval. They follow the
+  connection conventions of the matching checkpointer backend and create their
+  table on first use only when it is missing. Each store owns one event loop on
+  a background thread; the `ApprovalStore` methods block on it and `asubmit` /
+  `aget` / `adecide` / `aconsume` / `apending` await it. Every store has a
+  password-free `spec` (`file://…`, `postgresql://…`, `redis://…`,
+  `oracle://…`) and `approval_store(spec)` opens one; a bare database scheme
+  reads `POSTGRES_*`, `REDIS_URL` or `ORACLE_*` from the environment.
+- **Pending holds in the checkpoint.** When a gated tool holds a call in
+  interrupt mode during a run with a checkpointer, the hold (approval id, tool,
+  action, asset, principal, reason, arguments, approvers so far, context, store
+  spec) is written into the thread's checkpoint under
+  `state.metadata["_locus_pending_holds"]`. `pending_holds(checkpointer,
+  thread_id)` reads it back in another process, `PendingHold.state(store)`
+  re-checks it, and the hold leaves the checkpoint when the call is answered.
+  Checkpoints written before this carry no holds and resume as before. The
+  gate's interrupt metadata gains a `store` key.
+- **`locus approvals` against any store.** `--store` takes a spec (or
+  `LOCUS_APPROVALS_STORE`), a bare path still means a `FileApprovals` file,
+  `--by` falls back to `LOCUS_APPROVER`, and `approve` / `reject` take
+  `--reason`, recorded on the decision. `ApprovalStore.decide()` accepts
+  `reason=""` for the same purpose.
+- Notebook 73 (support account gate) now ends with the hold parked in a
+  file-backed store, approved from another process through `locus approvals`,
+  and performed by a fresh agent resuming the thread.
+- **Full `reasoning` control on `OCIResponsesModel`.** `reasoning` takes the
+  Responses-native object (`effort`, `summary`, ...) on `OCIResponsesConfig`,
+  the constructor and as a call kwarg such as an agent's `model_kwargs`, and
+  is sent as given; with `reasoning_effort` set too the dict wins and the
+  effort only fills `effort` when the dict lacks it. Nothing is sent when
+  both are unset. Reasoning summaries the endpoint returns surface as
+  `ModelResponse.reasoning`. Before, a `reasoning` dict was dropped.
+- **Reasoning items replayed across tool calls on the stateless path.** With
+  `store=False` (or after the Zero Data Retention switch) and a reasoning
+  control set, the request asks for `include=["reasoning.encrypted_content"]`;
+  the reasoning items that come back stay on the assistant message under
+  `metadata["oci_responses_items"]` with the turn's `function_call` items,
+  and the next request replays them verbatim ahead of the tool result, so a
+  tool-calling turn keeps its reasoning. Turns without such items, and
+  streamed turns, are reconstructed as before.
+- **Native compaction on the OCI Responses transport.**
+  `OCIResponsesModel.compact_history()` posts a history to
+  `/responses/compact` and returns the compacted messages: the ones the
+  endpoint kept plus an encrypted `compaction` item the model replays on
+  later requests. `ContextCompactor(native_compaction=True)`, or
+  `CompactionConfig(native=True)` on the agent, hands the summary stage to a
+  model that offers `compact_history()` instead of writing a client-side
+  summary; the system prompt and the task message stay verbatim, the
+  `CompactionEvent` carries `stage="native"` (new value), the compaction
+  call's tokens count against the run's budgets, and a failed call falls
+  back to the client-side summary. Opt-in; off by default.
+- **Zero Data Retention detection on `OCIResponsesModel`.** A tenancy with
+  Zero Data Retention (ZDR) answers every request that carries
+  `previous_response_id` with a 400 saying so. That reply now raises
+  `OCIResponsesZeroDataRetentionError`, a subclass of
+  `OCIResponsesStateLostError` so existing handlers keep working. `store`
+  accepts `"auto"` besides `True` and `False`: under `"auto"` the model starts
+  stateful and, on that error, switches itself to the stateless path for the
+  rest of its lifetime (`store: false`, full history on every request), warns
+  once with a `LocusWarning`, and the agent runtime replays the interrupted
+  turn from the history it holds, so the run completes with the same result.
+  `model.zdr_detected` reports the switch and the run's event stream carries a
+  `CustomEvent` named `server_state_fallback`. `store=True` still raises;
+  `store=False` is unchanged.
+- **Release notes on the documentation site.** `docs/release-notes.md` is
+  generated from this file when the site is built (`hooks/release_notes.py`,
+  the `{{ locus_release_notes }}` token): `Unreleased` first, then every
+  release from 3.0.0 onward with its date, each version anchored by its tag
+  (`#v5.5.0`). Linked from the site footer, the compatibility and about
+  pages, and the README. (#465)
+
+- **Threads and runs on `AgentServer`, with a resumable event stream.**
+  `POST /threads` creates a thread, `POST /threads/{id}/runs` starts a turn
+  (or continues a paused one with a `resume` payload: the `/resume`
+  semantics, as a run of its own) and answers at once with a run id while
+  the agent runs in the background; `GET /runs/{id}` reports its status and
+  outcome; `GET /runs/{id}/events` streams it as SSE with an `id:` line per
+  event and honours `Last-Event-ID`, replaying exactly the events a dropped
+  client missed from the run's EventBus history; `POST /runs/{id}/cancel`
+  asks the agent to stop through `agent.cancel(thread_id=...)` and falls
+  back to cancelling the task. Thread state comes from the agent's
+  checkpointer when one is configured; the threads-and-runs registry itself
+  is in memory and bounded (`RunRegistry(history_per_run=500, max_runs=200,
+  ttl_seconds=3600)`, passed as `AgentServer(run_registry=...)`); a resume
+  past the retained window gets a `replay_gap` frame. (#456)
+- **`WS /runs/live`.** One WebSocket for user turns, approval answers
+  (`resume`, through the existing `decision_handler` and `agent.resume`),
+  `cancel`, `subscribe` (follow a run from a sequence number) and the events
+  of every run started or subscribed on it. Bearer header or `?token=`.
+  Voice frames are not carried: `locus.voice` sessions remain
+  application-driven.
+- **AG-UI and Vercel AI SDK UI message stream adapters.** `POST /ag-ui`
+  takes a `RunAgentInput` and streams `RUN_STARTED`, `TEXT_MESSAGE_*`,
+  `TOOL_CALL_*`, `STATE_SNAPSHOT` / `STATE_DELTA`, `CUSTOM` and
+  `RUN_FINISHED` / `RUN_ERROR`; `POST /vercel-ai` takes a UI message request
+  and answers an `x-vercel-ai-ui-message-stream: v1` stream (`start`,
+  `text-*`, `reasoning-*`, `tool-input-*`, `tool-output-available`,
+  `data-*`, `finish`). Both are also available for any run as
+  `GET /runs/{id}/events?protocol=ag-ui|vercel-ai`, resume included. The
+  conservative readings of the two protocols are recorded on the server
+  page. `examples/server_ui/` holds two plain HTML pages (resumable SSE, and
+  an AG-UI client); notebook 65 follows, drops and resumes a run.
+- `GET /threads/{id}` now adds the thread's `runs` and a `source` field,
+  answers from the registry when no checkpointer is configured, and no
+  longer fails with a 500 for a runnable without `config` (a
+  `GraphRunnable`); `DELETE /threads/{id}` forgets the thread's finished
+  runs as well.
+
+### Changed
+
+- **`OCIResponsesModel` defaults to `store="auto"`.** Before, the default was
+  `store=True` and the first tool-call continuation on a ZDR tenancy failed the
+  run with `OCIResponsesStateLostError`. The first request of a run is
+  unchanged; only the ZDR case now completes instead of failing. Pass
+  `store=True` to keep the old behaviour, or `store=False` on a tenancy known
+  to be ZDR to skip the one stateful attempt.
+- **OAuth 2.1 for remote MCP servers.** `MCPClient(oauth=MCPOAuth(...))`
+  signs in to a Streamable HTTP server that answers `401`: authorization
+  code with PKCE, discovery of the protected-resource and
+  authorization-server metadata, dynamic client registration (or a hosted
+  client-metadata document via `client_metadata_url`), token refresh, and a
+  browser hand-off with a loopback listener that a headless process replaces
+  with its own `redirect_handler` / `callback_handler`. Tokens live in a
+  pluggable store: `InMemoryTokenStore` (default), `FileTokenStore` (a
+  `0600` file under the user's config directory) or `KeyringTokenStore`
+  (the optional `keyring` package). No token value is logged. An
+  `Authorization` header or a static `access_token` still wins over OAuth.
+- **Toolset shaping on `MCPClient`.** `include=` and `exclude=` take server
+  tool names or globs, `prefix=` renames what is imported, so two servers
+  mount without name clashes. Order: `allowed_tools` and `include` narrow,
+  `exclude` removes (and wins over `include`), `tool_filter` decides last,
+  `prefix` is applied after matching. Calls through either name land; a
+  shaped-out tool raises `MCPToolNotAllowedError`.
+- **Elicitation.** A server that asks the person a question mid-call pauses
+  the agent run through the interrupt mechanism: an `InterruptEvent` whose
+  `fields` describe the requested schema and whose `metadata` carries
+  `mcp_elicitation`. `client.answer_elicitation(event, answer)` then
+  `agent.resume(answer, perform_dangling=True)` re-issues the call with the
+  answer. `elicitation_handler=` answers without pausing (and outside a run);
+  with neither, a question outside a run is declined. `MCPElicitation` and
+  `ElicitationAnswer` are the types. An agent served by `LocusMCPServer`
+  has its own `ask_user` questions relayed to the MCP client as
+  elicitations through `run_agent_stream`.
+- **W3C trace context in MCP `_meta`.** Every `tools/call` the agent makes
+  carries `traceparent` / `tracestate` parented to the telemetry hook's
+  span for that tool call (`TelemetryHook` now exposes it through
+  `current_tool_span()`), and every call `LocusMCPServer` serves runs under
+  the context its `_meta` carries, so an MCP hop stays inside one trace.
+  `propagate_trace=False` opts out; `locus.integrations.mcp_tracing` holds
+  `trace_meta()` and `trace_scope()` for other servers.
+- **`locus mcp serve <target>`** exposes an agent (`MODULE:ATTR` /
+  `FILE.py:ATTR`, an `Agent`, a factory, a `Tool` or a list of tools) or a
+  bare module of `@tool` functions as an MCP server over stdio (default) or
+  Streamable HTTP (`--transport http --host --port --path`).
+  `create_tool_server(tools)` and `LocusMCPServer.build()` are the same from
+  Python. The MCP concept page covers the auth flow, shaping precedence,
+  elicitation, tracing and the command. (#457)
+
+### Fixed
+
+- **Streamed tool calls on the OCI Responses transport keep their name and call
+  id.** `stream()` only read the argument deltas, which carry the stream item id
+  and no function name, so a streamed tool call came back as `name=""` keyed by
+  the item id while `complete()` returned the real name and `call_id`. The parser
+  now reads `response.output_item.added` and `.done` for `function_call` items
+  and the accumulator keys by the call id, so streamed and non-streamed turns
+  are identical and a streaming agent on the stateless path executes its tools.
 
 ### Removed
 
@@ -765,7 +979,7 @@ policy.
   RAG, grounding, guardrails and the admission gate, observability, serving,
   skills, providers), a "Verified on OCI" section with the 27 October 2026
   model matrix, a compact control-layer section, and a comparison with
-  LangGraph and Strands Agents (new `concepts/compare.md`). The Concepts
+  other agent SDKs (`concepts/compare.md`, since removed). The Concepts
   navigation follows the same order: start here, multi-agent shapes, the
   harness, control layer, providers. The OCI models page carries the verified
   matrix and corrects the Responses-API note (availability is per region).

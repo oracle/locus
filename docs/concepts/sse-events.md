@@ -65,7 +65,7 @@ for every iteration of the inner loop.
 | `agent.model.completed` | `content_preview`, `tool_call_count`, `stop_reason` | Not emitted by the `Agent.run` bridge (the loop never yields `ModelCompleteEvent`); `EventBusHook` publishes its own `agent.model.completed` with `stop_reason`, `content_length` |
 | `agent.tokens.used` | `prompt_tokens`, `completion_tokens`, `total_tokens` | Not currently emitted: bridged only from `ModelCompleteEvent`, which the loop never yields |
 | `agent.interrupt` | `interrupt_id`, `question_preview`, `options` | Human-in-the-loop (HITL) pause |
-| `agent.context.compacted` | `iteration`, `stage` (`"prune"` \| `"summarize"` \| `"truncate"`), `tokens_before`, `tokens_after`, `threshold`, `exhausted` | Context compaction; `exhausted` means the run ends with `context_exhausted` |
+| `agent.context.compacted` | `iteration`, `stage` (`"prune"` \| `"summarize"` \| `"truncate"` \| `"native"`), `tokens_before`, `tokens_after`, `threshold`, `exhausted` | Context compaction; `exhausted` means the run ends with `context_exhausted` |
 | `agent.terminate` | `reason`, `iterations_used`, `final_confidence`, `total_tool_calls`, `final_message_preview` | One per dispatch |
 | `agent.model.retry` | `attempt`, `max_retries`, `delay_seconds`, `reason` | `ModelRetryHook` only |
 | `agent.steering.applied` | `action`, `tool_name`, `reason` | `SteeringHook` only |
@@ -155,7 +155,7 @@ a hold for human approval, and `allow: true` alone is an allow.
 
 | Event | Payload |
 |---|---|
-| `memory.checkpoint.saved` | `thread_id`, `iteration`, `backend`, `trigger` (`"every_n_iterations"` \| `"final"` \| `"graph_interrupt"`) |
+| `memory.checkpoint.saved` | `thread_id`, `iteration`, `backend`, `trigger` (`"every_n_iterations"` \| `"final"` \| `"graph_interrupt"`), `durability` (`"sync"` \| `"async"` \| `"exit"`; agent runs only) |
 | `memory.checkpoint.loaded` | `thread_id`, `iteration`, `backend`, `resume_node` (graph only) |
 | `memory.conversation.pruned` | `strategy="sliding_window"`, `window_size`, `removed_count` |
 | `memory.compactor.triggered` | `strategy="summarizing"`, `messages_before`, `threshold` |
@@ -221,18 +221,22 @@ Emitted by `create_research_workflow` / individual node primitives from
 | `research.regenerate.completed` | `regeneration` (attempt index) |
 | `research.replan` | `replan` (iteration), `ungrounded_count`, `prompt_preview` |
 
-### `tool.*` — sandboxed tool execution
+### `tool.*` — sandboxed tool execution and tool-call integrity
 
 Emitted around each run of a tool declared with `@tool(sandbox=...)`.
 `tool.sandbox.denied` comes from `SandboxEnforcerHook` instead: it fires
 when a tool carries a label listed in `ControlPolicy.require_sandbox_for`
 but has no sandbox, and the hook then cancels that call.
+`tool.integrity.refused` comes from the executor with
+`tool_call_integrity` on: a call whose arguments changed after the model
+produced them, without a re-sign, was not run.
 
 | Event | Payload |
 |---|---|
 | `tool.sandbox.started` | `tool`, `provider`, `timeout` |
 | `tool.sandbox.completed` | `tool`, `ok`, `exit_code`, `timed_out`, `duration_ms` |
 | `tool.sandbox.denied` | `tool`, `labels` (the labels that required a sandbox) |
+| `tool.integrity.refused` | `tool`, `call_id`, `reason` (`mismatch` / `tainted`), `expected_digest`, `actual_digest`, `signed_by`, `mutated_by`, `disposition` (`refuse` / `abort`), `key_id` |
 
 ### `control.*` — admission control
 

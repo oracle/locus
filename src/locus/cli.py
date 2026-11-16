@@ -15,6 +15,7 @@ or a zero-argument function that returns one::
     locus policy lint policy.yaml --environments production staging
     locus policy explain policy.yaml --action '{"name": "refund", "kind": "payment"}'
     locus serve app.py:agent --port 8000
+    locus mcp serve app.py:agent     # the agent as an MCP server over stdio
     locus a2a card app.py:agent --url https://agent.example.com -o agent-card.json
     locus codex init                 # the Locus skill for Codex, in this project
     locus codex run "build an agent that triages tickets with a gated refund tool"
@@ -145,7 +146,8 @@ def _cmd_resume(args: argparse.Namespace) -> int:
 
 
 def _store(args: argparse.Namespace) -> Any:
-    from locus.control import ApprovalAuthority, FileApprovals  # noqa: PLC0415
+    from locus.control import ApprovalAuthority, approval_store  # noqa: PLC0415
+    from locus.control.approvals_spec import SPEC_ENV  # noqa: PLC0415
 
     authority = None
     if args.authority:
@@ -154,13 +156,28 @@ def _store(args: argparse.Namespace) -> Any:
             authority = authority()
         if not isinstance(authority, ApprovalAuthority):
             raise CLIError(f"{args.authority} is not an ApprovalAuthority")
-    return FileApprovals(args.store, authority)
+    spec = args.store or os.environ.get(SPEC_ENV)
+    if not spec:
+        raise CLIError(f"--store is required (or set {SPEC_ENV})")
+    try:
+        return approval_store(spec, authority)
+    except ValueError as exc:
+        raise CLIError(str(exc)) from exc
 
 
 def _cmd_approvals(args: argparse.Namespace) -> int:
+    store = _store(args)
+    try:
+        return _approvals(args, store)
+    finally:
+        close = getattr(store, "close", None)
+        if callable(close):
+            close()
+
+
+def _approvals(args: argparse.Namespace, store: Any) -> int:
     from locus.control import ApprovalAuthorityError  # noqa: PLC0415
 
-    store = _store(args)
     if args.action == "list":
         pending = store.pending()
         if args.json:
@@ -182,15 +199,18 @@ def _cmd_approvals(args: argparse.Namespace) -> int:
         print(json.dumps(asdict(record), indent=2, default=str))
         return 0
     verdict = "approved" if args.action == "approve" else "denied"
+    by = args.by or os.environ.get("LOCUS_APPROVER")
+    if not by:
+        raise CLIError("--by is required (or set LOCUS_APPROVER)")
     try:
-        record = store.decide(args.approval_id, verdict, by=args.by)
+        record = store.decide(args.approval_id, verdict, by=by, reason=args.reason or "")
     except ApprovalAuthorityError as exc:
         print(f"locus: refused: {exc}", file=sys.stderr)
         return 1
     except (KeyError, ValueError) as exc:
         print(f"locus: {exc}", file=sys.stderr)
         return 1
-    print(f"{record.approval_id}: {record.status}")
+    print(f"{record.approval_id}: {record.status} by {by}")
     return 0
 
 
@@ -273,6 +293,25 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     except RuntimeError as exc:
         print(f"locus: {exc}", file=sys.stderr)
         return 1
+    return 0
+
+
+def _cmd_mcp(args: argparse.Namespace) -> int:
+    from locus.integrations.mcp_serve import MCPServeError, serve  # noqa: PLC0415
+
+    try:
+        serve(
+            args.target,
+            transport=args.transport,
+            host=args.host,
+            port=args.port,
+            path=args.path,
+            name=args.name,
+        )
+    except MCPServeError as exc:
+        raise CLIError(str(exc)) from exc
+    except ImportError as exc:
+        raise CLIError(str(exc)) from exc
     return 0
 
 
@@ -429,7 +468,11 @@ def build_parser() -> argparse.ArgumentParser:
     resume.set_defaults(handler=_cmd_resume)
 
     approvals = commands.add_parser("approvals", help="list and decide held calls")
-    approvals.add_argument("--store", required=True, help="the FileApprovals JSON file")
+    approvals.add_argument(
+        "--store",
+        help="the approval store: a FileApprovals path, or memory://, file://, postgresql://, "
+        "redis://, oracle:// (default: $LOCUS_APPROVALS_STORE)",
+    )
     approvals.add_argument(
         "--authority", help="MODULE:ATTR naming an ApprovalAuthority checked on every decision"
     )
@@ -441,7 +484,8 @@ def build_parser() -> argparse.ArgumentParser:
     for verb in ("approve", "reject"):
         decide = actions.add_parser(verb, help=f"{verb} a held call")
         decide.add_argument("approval_id")
-        decide.add_argument("--by", required=True, help="who is deciding")
+        decide.add_argument("--by", help="who is deciding (default: $LOCUS_APPROVER)")
+        decide.add_argument("--reason", help="why, recorded with the decision")
     approvals.set_defaults(handler=_cmd_approvals)
 
     audit = commands.add_parser("audit", help="check an exported audit trail")
@@ -501,6 +545,28 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--port", type=int, default=8000)
     serve.add_argument("--api-key", help="bearer key; or set LOCUS_SERVER_API_KEY")
     serve.set_defaults(handler=_cmd_serve)
+
+    mcp = commands.add_parser("mcp", help="expose an agent or a tool module over MCP")
+    mcp_actions = mcp.add_subparsers(dest="action", required=True)
+    mcp_serve = mcp_actions.add_parser(
+        "serve",
+        help="serve an agent (its tools plus run_agent) or every @tool in a module",
+    )
+    mcp_serve.add_argument(
+        "target",
+        help=(
+            "MODULE:ATTR or FILE.py:ATTR naming an Agent, a factory, a Tool or a list "
+            "of tools; or a module / FILE.py whose module-level tools are served"
+        ),
+    )
+    mcp_serve.add_argument(
+        "--transport", choices=["stdio", "http"], default="stdio", help="default stdio"
+    )
+    mcp_serve.add_argument("--host", default="127.0.0.1", help="with --transport http")
+    mcp_serve.add_argument("--port", type=int, default=8000, help="with --transport http")
+    mcp_serve.add_argument("--path", default="/mcp", help="with --transport http")
+    mcp_serve.add_argument("--name", help="the server name clients see")
+    mcp.set_defaults(handler=_cmd_mcp)
 
     from locus.a2a.cli import register_a2a_commands  # noqa: PLC0415
 

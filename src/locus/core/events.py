@@ -240,8 +240,9 @@ class CompactionEvent(LocusEvent):
     """The run's context was compacted to keep it inside the model's window.
 
     ``stage`` says what it took: ``"prune"`` cleared old tool outputs,
-    ``"summarize"`` replaced older history with a model-written summary, and
-    ``"truncate"`` dropped it without one. Token counts are estimates of the
+    ``"summarize"`` replaced older history with a model-written summary,
+    ``"truncate"`` dropped it without one, and ``"native"`` handed it to the
+    provider's own compaction endpoint. Token counts are estimates of the
     whole request (messages plus tool definitions). ``exhausted`` means the
     context could not be brought under ``threshold`` (or compaction was
     thrashing) and the run ends with ``context_exhausted``; ``detail`` says why.
@@ -251,7 +252,7 @@ class CompactionEvent(LocusEvent):
 
     event_type: Literal["compaction"] = "compaction"
     iteration: int
-    stage: Literal["prune", "summarize", "truncate"]
+    stage: Literal["prune", "summarize", "truncate", "native"]
     tokens_before: int
     tokens_after: int
     threshold: int

@@ -140,6 +140,15 @@ kept, with no extra model calls. When the window is unknown, the agent
 falls back to `SlidingWindowManager(window_size=max(20, max_iterations * 2))`.
 Pass `NullManager()` to turn management off.
 
+A model whose provider compacts threads itself can take the summary
+stage over: `CompactionConfig(native=True)` (or
+`ContextCompactor(native_compaction=True)`) hands the older history to
+the model's `compact_history()` and keeps what comes back, which the
+model replays on later requests; the `CompactionEvent` then has
+`stage="native"`. `OCIResponsesModel` with `store=False` offers this; see
+[OCI Responses API](oci-responses.md#native-compaction). A model without
+it, or a failed call, summarises as usual.
+
 `LLMCompactor` is the token-aware built-in `ConversationManager`: it
 compacts old turns (and summarises them if you pass `summarize_fn`)
 while protecting:
