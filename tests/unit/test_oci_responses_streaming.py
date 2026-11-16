@@ -843,3 +843,158 @@ async def test_stream_reasoning_kwarg_replaces_the_config_dict() -> None:
     assert captured["body"]["reasoning"] == {"summary": "concise"}
     assert "include" not in captured["body"]
     await model.aclose()
+
+
+# =============================================================================
+# Edge paths of the parse layer and the stream loop
+# =============================================================================
+
+
+class TestParseLayerEdgePaths:
+    def test_replay_metadata_without_dict_items_falls_back_to_reconstruction(self) -> None:
+        turn = Message(
+            role=Role.ASSISTANT,
+            content="hi",
+            tool_calls=[ToolCall(id="c1", name="add", arguments={})],
+            metadata={OCI_RESPONSES_ITEMS_METADATA_KEY: ["not an item", 7]},
+        )
+        body = build_request_body([turn], model="m", store=False)
+        assert [item["type"] for item in body["input"]] == ["message", "function_call"]
+        assert body["input"][1]["arguments"] == "{}"
+
+    def test_an_empty_user_message_sends_no_input_item(self) -> None:
+        body = build_request_body([Message.user(""), Message.user("hi")], model="m")
+        assert len(body["input"]) == 1
+
+    def test_temperature_is_sent_when_given(self) -> None:
+        body = build_request_body([Message.user("hi")], model="m", temperature=0.2)
+        assert body["temperature"] == 0.2
+
+    def test_translate_tool_schema_keeps_only_the_fields_present(self) -> None:
+        assert _translate_tool_schema({"type": "function", "function": {"name": "ping"}}) == {
+            "type": "function",
+            "name": "ping",
+        }
+
+    def test_parse_response_skips_non_dict_output_items(self) -> None:
+        message, _, _, _ = parse_response(
+            {
+                "id": "r",
+                "output": [
+                    "garbage",
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [
+                            {"type": "refusal", "refusal": "no"},
+                            {"type": "output_text", "text": ""},
+                            {"type": "output_text", "text": "ok"},
+                        ],
+                    },
+                ],
+            }
+        )
+        assert message.content == "ok"
+        assert message.metadata == {}
+
+    def test_parse_response_unparseable_tool_arguments_become_empty(self) -> None:
+        message, _, _, _ = parse_response(
+            {
+                "id": "r",
+                "output": [
+                    {"type": "function_call", "call_id": "c1", "name": "add", "arguments": "{oops"}
+                ],
+            }
+        )
+        assert message.tool_calls[0].arguments == {}
+
+    def test_reasoning_text_skips_blocks_without_text(self) -> None:
+        message = Message(
+            role=Role.ASSISTANT,
+            content=None,
+            metadata={
+                OCI_RESPONSES_ITEMS_METADATA_KEY: [
+                    {
+                        "type": "reasoning",
+                        "summary": [{"type": "summary_text"}, "raw"],
+                        "content": [],
+                    },
+                    {"type": "function_call", "call_id": "c1", "name": "add", "arguments": "{}"},
+                    "not an item",
+                ]
+            },
+        )
+        assert reasoning_text(message) is None
+        assert reasoning_text(Message.assistant(content="plain")) is None
+
+    def test_compaction_response_edge_items(self) -> None:
+        messages, usage = parse_compaction_response(
+            {
+                "output": [
+                    "garbage",
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "Noted."}],
+                    },
+                    {"type": "function_call", "call_id": "c1", "name": "add", "arguments": "{}"},
+                    {"type": "compaction", "id": "cmp_1", "encrypted_content": "x"},
+                ],
+                "usage": {"input_tokens": 10, "output_tokens": 5},
+            }
+        )
+        assert [m.role for m in messages] == [Role.ASSISTANT, Role.ASSISTANT, Role.ASSISTANT]
+        assert messages[0].content == "Noted."
+        assert messages[1].content is None
+        assert messages[1].metadata[OCI_RESPONSES_ITEMS_METADATA_KEY][0]["type"] == "function_call"
+        assert messages[2].metadata[OCI_RESPONSES_ITEMS_METADATA_KEY][0]["type"] == "compaction"
+        assert usage == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+
+    def test_parse_stream_event_ignores_structural_events(self) -> None:
+        assert parse_stream_event({"type": "response.created"}) == {}
+        assert parse_stream_event({"type": "response.output_item.added", "item": {}}) == {}
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_stream_without_done_sentinel_skips_structural_events_and_bad_arguments() -> None:
+    """The SSE body ends without ``[DONE]``, carries lifecycle events the
+    translator drops, and a tool call whose accumulated arguments are not
+    JSON: the stream still yields the call (empty arguments) and ``done``."""
+    model = _make_model()
+    body = "".join(
+        f"data: {event}\n\n"
+        for event in [
+            '{"type": "response.created", "response": {"id": "resp_x"}}',
+            '{"type": "response.function_call_arguments.delta", "call_id": "call_1", "delta": "{oops"}',
+            '{"type": "response.completed", "response": {"id": "resp_x"}}',
+        ]
+    ).encode()
+    respx.post("https://fake-oci.test/openai/v1/responses").mock(
+        return_value=httpx.Response(200, content=body)
+    )
+
+    chunks = [event async for event in model.stream([Message.user("hi")])]
+
+    tool_chunks = [c for c in chunks if c.tool_calls]
+    assert len(tool_chunks) == 1
+    assert tool_chunks[0].tool_calls is not None
+    assert tool_chunks[0].tool_calls[0].id == "call_1"
+    assert tool_chunks[0].tool_calls[0].arguments == {}
+    assert chunks[-1].done is True
+    await model.aclose()
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_error_envelope_that_is_not_an_object_falls_back_to_the_body_text() -> None:
+    model = _make_model()
+    respx.post("https://fake-oci.test/openai/v1/responses").mock(
+        return_value=httpx.Response(503, json={"error": "upstream unavailable"})
+    )
+
+    with pytest.raises(RuntimeError, match="503") as exc_info:
+        await model.complete([Message.user("hi")])
+    assert "upstream unavailable" in str(exc_info.value)
+    assert not isinstance(exc_info.value, OCIResponsesStateLostError)
+    await model.aclose()

@@ -272,8 +272,9 @@ def parse_response(
     needs_replay = False
 
     for item in response.get("output", []):
-        if isinstance(item, dict):
-            raw_items.append(item)
+        if not isinstance(item, dict):
+            continue
+        raw_items.append(item)
         item_type = item.get("type")
         if item_type in ("reasoning", "compaction"):
             needs_replay = True

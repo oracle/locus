@@ -1008,3 +1008,63 @@ async def test_agent_native_compaction_hands_the_thread_to_the_endpoint() -> Non
     assert [item["type"] for item in replay["input"]] == ["message", "compaction"]
     assert replay["input"][1] == _COMPACTION_ITEM
     await model.aclose()
+
+
+_COMPACT_URL = "https://fake-oci.test/openai/v1/responses/compact"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_compact_history_without_system_messages_sends_no_instructions() -> None:
+    model = _make_model(store=False)
+    captured: dict[str, Any] = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"output": [_COMPACTION_ITEM], "usage": {}})
+
+    respx.post(_COMPACT_URL).mock(side_effect=_handler)
+
+    messages, usage = await model.compact_history([Message.user("hi"), Message.assistant("yo")])
+    assert "instructions" not in captured["body"]
+    assert [item["type"] for item in captured["body"]["input"]] == ["message", "message"]
+    assert len(messages) == 1
+    assert usage == {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    await model.aclose()
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_compact_history_transport_error_is_a_runtime_error() -> None:
+    model = _make_model(store=False)
+    respx.post(_COMPACT_URL).mock(side_effect=httpx.ConnectError("connection refused"))
+
+    with pytest.raises(RuntimeError, match="compaction request failed"):
+        await model.compact_history([Message.user("hi")])
+    await model.aclose()
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_compact_history_non_json_body_is_a_runtime_error() -> None:
+    model = _make_model(store=False)
+    respx.post(_COMPACT_URL).mock(return_value=httpx.Response(200, text="<html>gateway</html>"))
+
+    with pytest.raises(RuntimeError, match="non-JSON body"):
+        await model.compact_history([Message.user("hi")])
+    await model.aclose()
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_compact_history_server_error_goes_through_the_error_mapping() -> None:
+    model = _make_model(store=False)
+    respx.post(_COMPACT_URL).mock(
+        return_value=httpx.Response(
+            400, json={"error": {"message": "The 'store' parameter is not supported."}}
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="returned 400"):
+        await model.compact_history([Message.user("hi")])
+    await model.aclose()
