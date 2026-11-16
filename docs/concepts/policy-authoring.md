@@ -19,7 +19,6 @@ loads:
 
 ```yaml
 schema: "locus.control.policy/v1"
-version: "refund-gate-1"
 require_verification_score: 0.0
 max_blast_radius: 1
 require_human_for:
@@ -27,6 +26,7 @@ require_human_for:
 deny_for: []
 min_severity: "low"
 require_sandbox_for: []
+version: "refund-gate-1"
 require_human_over_usd: null
 spend_limit_usd: null
 ```
@@ -146,6 +146,7 @@ policy policy/refunds.yaml (sha256 b5afd3d6f5af)
   uncovered-environment: environment 'production' has no rule: an action there with one asset, no cost and no other label is allowed without a person
   uncovered-environment: environment 'staging' has no rule: an action there with one asset, no cost and no other label is allowed without a person
   kind-never-held: kind 'payment' is never held: a payment action with one asset, no cost and no other label is allowed in every declared environment ['production', 'staging']
+note: an action with no environment, kind or tags, one asset and no cost is allowed: every gated tool must derive labels for this policy to see it
 ```
 
 Those three are true of the refund policy above: it holds on `high_value`

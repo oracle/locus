@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import threading
 from collections.abc import AsyncGenerator, AsyncIterator
 from datetime import UTC, datetime
@@ -16,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, Field, PrivateAttr
 
 from locus.agent.config import AgentConfig, GroundingConfig, ReflexionConfig
+from locus.agent.durability import DurabilityMode
 from locus.agent.result import (
     STOP_REASONS,
     AgentResult,
@@ -58,9 +60,12 @@ if TYPE_CHECKING:
     from locus.agent.hook_orchestrator import HookOrchestrator
     from locus.agent.subagent import SubagentResult
     from locus.memory.conversation import ConversationManager
+    from locus.memory.ledger import LedgerManifest
     from locus.reasoning.grounding import GroundingEvaluator
     from locus.reasoning.reflexion import Reflector
 
+
+logger = logging.getLogger(__name__)
 
 #: Kept under their old names for code that imported them from here.
 _VALID_STOP_REASONS: frozenset[str] = frozenset(STOP_REASONS)
@@ -303,6 +308,8 @@ class Agent(AgentRuntimeMixin, BaseModel):
         thread_id: str | None = None,
         metadata: dict[str, Any] | None = None,
         model_kwargs: dict[str, Any] | None = None,
+        invocation_id: str | None = None,
+        durability: DurabilityMode | None = None,
     ) -> AgentResult:
         """
         Run the agent asynchronously and return a single ``AgentResult``.
@@ -329,6 +336,11 @@ class Agent(AgentRuntimeMixin, BaseModel):
             thread_id: Conversation to continue. Required (with a configured
                 checkpointer) for this run to see earlier turns.
             metadata: Additional metadata for tools
+            invocation_id: An id for this turn the caller keeps; a run issued
+                again under it after a crash replays the recorded tool calls
+                (see :meth:`run`).
+            durability: When this run writes its iteration checkpoints
+                (``"sync"``, ``"async"`` or ``"exit"``; see :meth:`run`).
 
         Returns:
             AgentResult with final message and state
@@ -346,6 +358,10 @@ class Agent(AgentRuntimeMixin, BaseModel):
         run_kwargs: dict[str, Any] = {"thread_id": thread_id, "metadata": metadata}
         if model_kwargs is not None:
             run_kwargs["model_kwargs"] = model_kwargs
+        if invocation_id is not None:
+            run_kwargs["invocation_id"] = invocation_id
+        if durability is not None:
+            run_kwargs["durability"] = durability
 
         grounding_score: float | None = None
         ungrounded_claims: list[str] = []
@@ -487,6 +503,8 @@ class Agent(AgentRuntimeMixin, BaseModel):
         thread_id: str | None = None,
         metadata: dict[str, Any] | None = None,
         model_kwargs: dict[str, Any] | None = None,
+        invocation_id: str | None = None,
+        durability: DurabilityMode | None = None,
     ) -> AgentResult:
         """
         Run the agent synchronously.
@@ -501,6 +519,9 @@ class Agent(AgentRuntimeMixin, BaseModel):
             prompt: User prompt to process
             thread_id: Optional thread ID for checkpointing
             metadata: Additional metadata for tools
+            invocation_id: An id for this turn the caller keeps (see :meth:`run`).
+            durability: When this run writes its iteration checkpoints
+                (``"sync"``, ``"async"`` or ``"exit"``; see :meth:`run`).
 
         Returns:
             AgentResult with final message and state
@@ -516,7 +537,12 @@ class Agent(AgentRuntimeMixin, BaseModel):
             # ``RuntimeError: Event loop is closed``.
             try:
                 return await self.arun(
-                    prompt, thread_id=thread_id, metadata=metadata, model_kwargs=model_kwargs
+                    prompt,
+                    thread_id=thread_id,
+                    metadata=metadata,
+                    model_kwargs=model_kwargs,
+                    invocation_id=invocation_id,
+                    durability=durability,
                 )
             finally:
                 # Background memory extraction is bound to this loop, which
@@ -788,17 +814,28 @@ class Agent(AgentRuntimeMixin, BaseModel):
 
     async def resume(
         self,
-        response: str,
+        response: str = "",
         *,
         thread_id: str | None = None,
         perform_dangling: bool = False,
         metadata: dict[str, Any] | None = None,
+        invocation_id: str | None = None,
+        durability: DurabilityMode | None = None,
     ) -> AsyncGenerator[LocusEvent, None]:
         """
-        Resume agent execution after an interrupt.
+        Resume agent execution after an interrupt, or a run that crashed.
 
         When a tool calls ask_user() and the agent yields an InterruptEvent,
         call this method with the user's response to continue execution.
+
+        With ``invocation_id`` the call instead continues a run the process
+        died in: ``resume(invocation_id=..., thread_id=...)`` is
+        :meth:`continue_turn` for that invocation. It takes no ``response``.
+        The run picks the turn up from the thread's last checkpoint — or,
+        when none of the turn's checkpoints landed (``durability="exit"``),
+        from the turn's start as the tool-effect ledger recorded it — and
+        every tool call the crashed attempt recorded is replayed from the
+        ledger rather than run again (:mod:`locus.memory.ledger`).
 
         **Resume is keyed strictly by thread.** Paused runs are held in memory
         per ``thread_id``; ``resume(thread_id="A")`` only ever continues
@@ -840,6 +877,11 @@ class Agent(AgentRuntimeMixin, BaseModel):
                 keys (``mcp_headers``) are never checkpointed: an in-process
                 resume reuses the paused run's, a cross-process resume that
                 needs them passes them here again.
+            invocation_id: The id of a run that crashed (its ``run_id``, or
+                the ``invocation_id`` it was started with) to continue on
+                ``thread_id``, replaying its recorded tool calls.
+            durability: When the resumed segment writes its iteration
+                checkpoints (see :meth:`run`).
 
         Raises:
             ApprovalPendingError: ``perform_dangling=True`` and the held call
@@ -859,6 +901,25 @@ class Agent(AgentRuntimeMixin, BaseModel):
             ...         async for event in agent.resume(answer):
             ...             handle(event)
         """
+        if invocation_id is not None:
+            if thread_id is None:
+                raise RuntimeError(
+                    "resume(invocation_id=...) needs thread_id: a run is found through its thread."
+                )
+            if response:
+                raise RuntimeError(
+                    "resume(invocation_id=...) continues a crashed run and takes no response; "
+                    "answer an interrupt with resume(response, thread_id=...)."
+                )
+            async with contextlib.aclosing(
+                self.continue_turn(
+                    thread_id, invocation_id=invocation_id, metadata=metadata, durability=durability
+                )
+            ) as continued:
+                async for event in continued:
+                    yield event
+            return
+
         pending = self._take_interrupt(thread_id)
         if pending is not None:
             state = pending.state
@@ -896,7 +957,9 @@ class Agent(AgentRuntimeMixin, BaseModel):
 
         # This resumed segment is a run of its own: cancellable by thread,
         # visible to hooks as ``event.run``, isolated from concurrent runs.
-        rc = self._begin_run(state, prompt, thread_id, run_metadata, ephemeral=ephemeral)
+        rc = self._begin_run(
+            state, prompt, thread_id, run_metadata, ephemeral=ephemeral, durability=durability
+        )
         try:
             folded_events: list[LocusEvent] = []
             state = await self._fold_resume_response(
@@ -921,6 +984,8 @@ class Agent(AgentRuntimeMixin, BaseModel):
         *,
         metadata: dict[str, Any] | None = None,
         model_kwargs: dict[str, Any] | None = None,
+        invocation_id: str | None = None,
+        durability: DurabilityMode | None = None,
     ) -> AsyncGenerator[LocusEvent, None]:
         """Continue a turn that stopped before it finished, from its checkpoint.
 
@@ -939,6 +1004,15 @@ class Agent(AgentRuntimeMixin, BaseModel):
         may already have performed is the model's decision to make, with
         that error in front of it.
 
+        With the tool-effect ledger on (``AgentConfig.tool_ledger``; the
+        default for ``durability="async"`` and ``"exit"``), the continued
+        segment replays: a tool call the crashed attempt recorded at the same
+        step with the same arguments returns the recorded result and the tool
+        does not run again; only calls with no record run. And when none of
+        the turn's checkpoints landed — ``durability="exit"`` writes once, at
+        the end — the turn is rebuilt from its start as the ledger's manifest
+        recorded it (the prompt, the run id), and run again with replay.
+
         A thread paused on an interrupt in this process is answered with
         :meth:`resume`, which folds the human's response; ``continue_turn``
         refuses it.
@@ -950,12 +1024,19 @@ class Agent(AgentRuntimeMixin, BaseModel):
                 (``mcp_headers``) are never checkpointed, so a segment that
                 needs them passes them here again.
             model_kwargs: Per-call model parameters, as for :meth:`run`.
+            invocation_id: When given, the turn in flight on the thread must
+                be this run (its ``run_id`` / the ``invocation_id`` it was
+                started with), or the call raises rather than continue
+                another turn.
+            durability: When the continued segment writes its iteration
+                checkpoints (see :meth:`run`).
 
         Raises:
-            RuntimeError: No checkpointer, no checkpoint for the thread, the
-                thread is paused on an in-memory interrupt, or its last turn
-                already finished with an answer (start a new one with
-                ``run()``).
+            RuntimeError: No checkpointer, no checkpoint or ledger for the
+                thread, the thread is paused on an in-memory interrupt, its
+                last turn already finished with an answer (start a new one
+                with ``run()``), or ``invocation_id`` is not the turn in
+                flight.
 
         Yields:
             LocusEvent instances for the rest of the turn.
@@ -968,29 +1049,81 @@ class Agent(AgentRuntimeMixin, BaseModel):
                 f"Thread {thread_id!r} is paused on an interrupt; answer it with resume()."
             )
         loaded = await checkpointer.load(thread_id)
-        if loaded is None:
+        manifest = await self._ledger_manifest(thread_id)
+        mid_turn = loaded is not None and not _turn_finished(loaded)
+        # The turn's checkpoints never landed, but its ledger did: the run
+        # started, recorded tool calls, and died before its first save.
+        unsaved_turn = (
+            manifest is not None
+            and not mid_turn
+            and (loaded is None or loaded.run_id != manifest.invocation_id)
+        )
+        if invocation_id is not None:
+            in_flight = (
+                loaded.run_id
+                if mid_turn and loaded is not None
+                else manifest.invocation_id
+                if unsaved_turn and manifest is not None
+                else None
+            )
+            if in_flight != invocation_id:
+                raise RuntimeError(
+                    f"Invocation {invocation_id!r} is not in flight on thread {thread_id!r}"
+                    + (f" ({in_flight!r} is)." if in_flight is not None else ".")
+                )
+        self._initialize()
+        if mid_turn and loaded is not None:
+            state = close_unfinished_calls(loaded)
+            prompt = ""
+            metadata_source = dict(loaded.metadata)
+        elif unsaved_turn and manifest is not None:
+            state = await self._create_initial_state(
+                manifest.prompt, thread_id, manifest.metadata or None
+            )
+            state = state.model_copy(update={"run_id": manifest.invocation_id})
+            prompt = manifest.prompt
+            metadata_source = dict(state.metadata)
+        elif loaded is None:
             raise RuntimeError(f"No checkpoint found for thread {thread_id!r} to continue.")
-        if _turn_finished(loaded):
+        else:
             raise RuntimeError(
                 f"The last turn on thread {thread_id!r} already finished; "
                 "call run() to start a new one."
             )
-        self._initialize()
-        state = close_unfinished_calls(loaded)
         run_metadata, ephemeral = self._split_run_metadata(
-            metadata if metadata is not None else dict(loaded.metadata)
+            metadata if metadata is not None else metadata_source
         )
         # Checkpoints never carry the (ephemeral) memory block; the rest of
         # the turn gets it re-injected, as a cross-process resume does.
         if self._memory_manager is not None:
             state = await self._memory_manager.on_session_start(state)
 
-        rc = self._begin_run(state, "", thread_id, run_metadata, ephemeral=ephemeral)
+        rc = self._begin_run(
+            state,
+            prompt,
+            thread_id,
+            run_metadata,
+            ephemeral=ephemeral,
+            durability=durability,
+            replay=True,
+        )
         async with contextlib.aclosing(
-            self._run_from_state(state, "", thread_id, run_metadata, model_kwargs, _run=rc)
+            self._run_from_state(state, prompt, thread_id, run_metadata, model_kwargs, _run=rc)
         ) as segment:
             async for event in segment:
                 yield event
+
+    async def _ledger_manifest(self, thread_id: str) -> LedgerManifest | None:
+        """The turn the thread's tool-effect ledger belongs to, or ``None``."""
+        from locus.memory.ledger import ToolEffectLedger  # noqa: PLC0415
+
+        try:
+            return await ToolEffectLedger(self.config.checkpointer).manifest(thread_id)
+        except Exception:  # noqa: BLE001 — a ledger that cannot be read is no ledger
+            logger.warning(
+                "could not read the tool-effect ledger of thread %s", thread_id, exc_info=True
+            )
+            return None
 
     def _take_interrupt(self, thread_id: str | None) -> PendingInterrupt | None:
         """Pop the in-memory interrupt ``resume`` should continue, if any.

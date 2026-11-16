@@ -41,20 +41,28 @@ policy decision, and its verdict lands on the same audit entry.
 `perform` here is a local stub: it appends to an in-memory list instead of
 calling kubectl, so the script runs offline with no cluster, no credentials,
 no network. Swap that one function for a real `kubectl rollout` call and the
-gate is unchanged. The judge runs on the SDK's scripted test double, so that
-part is offline too.
+gate is unchanged. The judge follows the series convention: with no provider
+configured it runs on the SDK's scripted test double, so that part is
+offline too; with ``LOCUS_MODEL_PROVIDER`` set it is the configured model
+reading the call.
 
 Run it:
     python examples/notebook_72_infra_deploy_gate.py
 
-    # Fully offline — the gate needs no model; the judge step uses the
-    # bundled scripted double. No provider, no network.
+    # Offline — the gate needs no model and the judge step uses the bundled
+    # scripted double. No provider, no network.
+
+    export LOCUS_MODEL_PROVIDER=oci LOCUS_MODEL_ID=openai.gpt-4.1
+    python examples/notebook_72_infra_deploy_gate.py
+    # The judge is the configured model; its id is on the audit entries.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+
+from config import get_model, resolved_provider
 
 from locus.control import (
     Action,
@@ -147,9 +155,11 @@ async def propose(
 # become a hold or a deny; a policy hold or deny stands whatever the judge
 # says. The verdict rides on the same audit entry.
 #
-# The judge model is the SDK's scripted test double, so this step is offline
-# too. Replace it with any model (a small one is the usual choice), or leave
-# `model=` unset on an agent and the judge borrows the agent's.
+# The judge model follows `examples/config.py`: the SDK's scripted test
+# double when no provider is configured, so this step is offline and its
+# two verdicts are written down; the configured model when
+# LOCUS_MODEL_PROVIDER is set, so the verdicts below are the model's own.
+# On an agent, leave `model=` unset and the judge borrows the agent's.
 
 
 @tool
@@ -160,7 +170,7 @@ def rollout(asset: str, image: str, environment: str = "staging") -> str:
     return record
 
 
-JUDGE_MODEL = ScriptedModel(
+SCRIPTED_JUDGE = ScriptedModel(
     [
         text(json.dumps({"verdict": "allow", "reason": "staging rollout to a pinned image"})),
         text(
@@ -173,6 +183,9 @@ JUDGE_MODEL = ScriptedModel(
         ),
     ]
 )
+
+OFFLINE = resolved_provider() == "mock"
+JUDGE_MODEL = SCRIPTED_JUDGE if OFFLINE else get_model()
 
 JUDGE = ToolCallJudge(
     JUDGE_MODEL,
@@ -285,16 +298,18 @@ async def main() -> None:
     # The hash chain still verifies.
     outcomes = [rec.payload["outcome"] for rec in records]
     assert len(records) == 4, f"expected 4 audit records, got {len(records)}"
-    assert outcomes == ["allow", "require_human", "allow", "require_human"], (
-        f"unexpected outcomes: {outcomes}"
-    )
-    assert records[3].payload["judge"]["verdict"] == "hold"
+    assert outcomes[:3] == ["allow", "require_human", "allow"], f"unexpected outcomes: {outcomes}"
+    # The unpinned image: the scripted double holds it; a live judge may hold
+    # or deny it, and either is a tightening the policy alone did not make.
+    assert outcomes[3] in ("require_human", "deny"), f"unexpected outcomes: {outcomes}"
+    assert records[3].payload["judge"]["verdict"] in ("hold", "deny")
     assert records[3].payload["judge"]["source"] == "model"
     assert APPLIED == [
         "deploy checkout-api -> checkout-api:1.8.2 (staging)",
         "deploy checkout-api -> checkout-api:1.8.2 (staging)",
     ], f"only the two allowed rollouts should have run, got: {APPLIED}"
-    assert JUDGE_MODEL.call_count == 2, "the judge was asked once per judged call"
+    if OFFLINE:
+        assert SCRIPTED_JUDGE.call_count == 2, "the judge was asked once per judged call"
     assert trail.verify(), "audit trail hash chain failed to verify"
     print(
         "\nOK — staging shipped, production held, the unpinned image held by the judge; all on the trail."

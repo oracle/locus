@@ -55,11 +55,12 @@ from collections import defaultdict
 from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, PrivateAttr
 
+from locus.agent.durability import CheckpointWriter
 from locus.core.command import Command, is_command, normalize_node_output
 from locus.core.interrupt import (
     InterruptException,
@@ -554,6 +555,11 @@ class GraphConfig(BaseModel):
     thread_id: str | None = None
     # Save a checkpoint after every completed step, so a thread has a history.
     checkpoint_every_step: bool = True
+    # When the step checkpoints are written: ``"sync"`` before the next step,
+    # ``"async"`` in the background (awaited before the run returns), or
+    # ``"exit"`` not at all, one save at the end of the run. The save before an
+    # interrupt is awaited in every mode. See :mod:`locus.agent.durability`.
+    durability: Literal["sync", "async", "exit"] = "sync"
 
     # Store for cross-thread memory
     store: Any | None = None  # BaseStore
@@ -1001,6 +1007,8 @@ class StateGraph(BaseModel):
         """
         start_time = datetime.now(UTC)
         cfg = config or self.config
+        # How this run writes its checkpoints (``cfg.durability``).
+        writer = CheckpointWriter(cfg.checkpointer, cfg.durability) if cfg.checkpointer else None
 
         # Handle resume from interrupt
         resume_value = None
@@ -1094,7 +1102,7 @@ class StateGraph(BaseModel):
                     # ``saved_state.metadata`` — MemoryCheckpointer and
                     # the other in-protocol backends round-trip the
                     # ``AgentState`` itself, not the ``metadata=`` kwarg.
-                    if cfg.checkpointer and cfg.thread_id:
+                    if writer is not None and cfg.thread_id:
                         from locus.core.state import AgentState  # noqa: PLC0415
 
                         stub_state = AgentState(
@@ -1104,10 +1112,10 @@ class StateGraph(BaseModel):
                                 "interrupt": interrupt_state.model_dump(),
                             }
                         )
-                        await cfg.checkpointer.save(
-                            state=stub_state,
-                            thread_id=cfg.thread_id,
-                        )
+                        # Awaited in every durability mode, pending step
+                        # writes first: the pause must be on disk before
+                        # the caller sees it.
+                        await writer.save_now(stub_state, cfg.thread_id)
                         from locus.observability.emit import (  # noqa: PLC0415
                             EV_CHECKPOINT_SAVED,
                             emit,
@@ -1255,7 +1263,7 @@ class StateGraph(BaseModel):
                     # Save to checkpointer if available. Same packing as
                     # the ``interrupt_before`` branch above — the resume
                     # path reads off ``saved_state.metadata``.
-                    if cfg.checkpointer and cfg.thread_id:
+                    if writer is not None and cfg.thread_id:
                         from locus.core.state import AgentState  # noqa: PLC0415
 
                         stub_state = AgentState(
@@ -1265,10 +1273,10 @@ class StateGraph(BaseModel):
                                 "interrupt": interrupt_state.model_dump(),
                             }
                         )
-                        await cfg.checkpointer.save(
-                            state=stub_state,
-                            thread_id=cfg.thread_id,
-                        )
+                        # Awaited in every durability mode, pending step
+                        # writes first: the pause must be on disk before
+                        # the caller sees it.
+                        await writer.save_now(stub_state, cfg.thread_id)
                         from locus.observability.emit import (  # noqa: PLC0415
                             EV_CHECKPOINT_SAVED,
                             emit,
@@ -1335,11 +1343,12 @@ class StateGraph(BaseModel):
                         iterations=iterations,
                     )
 
-            if cfg.checkpoint_every_step and cfg.checkpointer and cfg.thread_id:
+            if cfg.checkpoint_every_step and writer is not None and cfg.thread_id:
                 from locus.core.state import AgentState  # noqa: PLC0415
 
-                await cfg.checkpointer.save(
-                    state=AgentState(
+                # Written, scheduled or skipped as ``cfg.durability`` says.
+                await writer.save_iteration(
+                    AgentState(
                         metadata={
                             "graph_state": dict(state),
                             "step": iterations,
@@ -1347,8 +1356,9 @@ class StateGraph(BaseModel):
                             "next_nodes": list(dict.fromkeys(next_nodes)),
                         }
                     ),
-                    thread_id=cfg.thread_id,
-                    metadata={"source": "step", "step": iterations},
+                    cfg.thread_id,
+                    None,
+                    {"source": "step", "step": iterations},
                 )
 
             # Check if we've reached END
@@ -1372,6 +1382,28 @@ class StateGraph(BaseModel):
         success = all(
             r.status in (NodeStatus.COMPLETED, NodeStatus.SKIPPED) for r in node_results.values()
         )
+
+        if writer is not None and cfg.thread_id:
+            if cfg.checkpoint_every_step and not writer.writes_iterations:
+                # ``durability="exit"``: the run's one save, at its end.
+                from locus.core.state import AgentState  # noqa: PLC0415
+
+                await writer.save_now(
+                    AgentState(
+                        metadata={
+                            "graph_state": dict(state),
+                            "step": iterations,
+                            "completed_nodes": list(execution_order),
+                            "next_nodes": [],
+                        }
+                    ),
+                    cfg.thread_id,
+                    None,
+                    {"source": "exit", "step": iterations},
+                )
+            # ``durability="async"``: every scheduled step write lands before
+            # the result is handed back.
+            await writer.flush()
 
         return GraphResult(
             graph_id=self.id,

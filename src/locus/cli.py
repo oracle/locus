@@ -15,6 +15,7 @@ or a zero-argument function that returns one::
     locus policy lint policy.yaml --environments production staging
     locus policy explain policy.yaml --action '{"name": "refund", "kind": "payment"}'
     locus serve app.py:agent --port 8000
+    locus mcp serve app.py:agent     # the agent as an MCP server over stdio
     locus codex init                 # the Locus skill for Codex, in this project
     locus codex run "build an agent that triages tickets with a gated refund tool"
     locus eval run evals/cases.json --agent app.py:agent --store reports/
@@ -296,6 +297,25 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_mcp(args: argparse.Namespace) -> int:
+    from locus.integrations.mcp_serve import MCPServeError, serve  # noqa: PLC0415
+
+    try:
+        serve(
+            args.target,
+            transport=args.transport,
+            host=args.host,
+            port=args.port,
+            path=args.path,
+            name=args.name,
+        )
+    except MCPServeError as exc:
+        raise CLIError(str(exc)) from exc
+    except ImportError as exc:
+        raise CLIError(str(exc)) from exc
+    return 0
+
+
 def _cmd_codex(args: argparse.Namespace) -> int:
     from locus import codex  # noqa: PLC0415
 
@@ -552,6 +572,29 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--port", type=int, default=8000)
     serve.add_argument("--api-key", help="bearer key; or set LOCUS_SERVER_API_KEY")
     serve.set_defaults(handler=_cmd_serve)
+
+    mcp = commands.add_parser("mcp", help="expose an agent or a tool module over MCP")
+    mcp_actions = mcp.add_subparsers(dest="action", required=True)
+    mcp_serve = mcp_actions.add_parser(
+        "serve",
+        help="serve an agent (its tools plus run_agent) or every @tool in a module",
+    )
+    mcp_serve.add_argument(
+        "target",
+        help=(
+            "MODULE:ATTR or FILE.py:ATTR naming an Agent, a factory, a Tool or a list "
+            "of tools; or a module / FILE.py whose module-level tools are served"
+        ),
+    )
+    mcp_serve.add_argument(
+        "--transport", choices=["stdio", "http"], default="stdio", help="default stdio"
+    )
+    mcp_serve.add_argument("--host", default="127.0.0.1", help="with --transport http")
+    mcp_serve.add_argument("--port", type=int, default=8000, help="with --transport http")
+    mcp_serve.add_argument("--path", default="/mcp", help="with --transport http")
+    mcp_serve.add_argument("--name", help="the server name clients see")
+    mcp.set_defaults(handler=_cmd_mcp)
+
     codex = commands.add_parser(
         "codex", help="install the Locus skill for Codex and start Codex with it"
     )

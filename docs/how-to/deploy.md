@@ -16,7 +16,8 @@ secret.
 
 Those two credentials serve different trust boundaries. The provider
 credential lets the application call its model. The server key is the
-bearer token clients send to `/invoke`, `/stream`, and thread routes.
+bearer token clients send to `/invoke`, `/stream`, the thread and run
+routes, and the live socket.
 
 ## The shape you ship
 
@@ -86,8 +87,44 @@ You get out of the box:
   run metrics (`success`, `stop_reason`, `iterations`, `tool_calls`,
   `duration_ms`) as JSON.
 - `POST /stream` — Server-Sent Events of every typed event.
+- `POST /threads`, `POST /threads/{id}/runs`, `GET /runs/{id}`,
+  `GET /runs/{id}/events`, `POST /runs/{id}/cancel` — background runs
+  with a resumable event stream (`Last-Event-ID`).
+- `WS /runs/live` — turns, approval answers, cancellation and events on
+  one socket.
+- `POST /ag-ui` and `POST /vercel-ai` — the AG-UI and Vercel AI SDK UI
+  message stream protocols over the same runs.
 - `GET / DELETE /threads/{id}` — conversation persistence.
 - `GET /health` — liveness probe.
+
+## Wiring a web UI
+
+A browser front end talks to the server in one of three ways, all behind
+the same bearer key. A plain page starts a turn with
+`POST /threads/{id}/runs` and follows `GET /runs/{id}/events`, sending the
+last `id:` it saw as `Last-Event-ID` when the connection drops;
+[`examples/server_ui/index.html`](https://github.com/oracle/locus/tree/main/examples/server_ui)
+is that page, with no build step. A UI built on AG-UI components posts its
+`RunAgentInput` to `/ag-ui`
+([`examples/server_ui/ag-ui.html`](https://github.com/oracle/locus/tree/main/examples/server_ui)
+is a minimal client); one built on the Vercel AI SDK points its chat
+transport at `/vercel-ai`. Either can also read any run as
+`GET /runs/{id}/events?protocol=ag-ui|vercel-ai`, and cancel or resume
+through the run resources. The browser cannot set the `Authorization`
+header on an `EventSource` or a WebSocket: use `fetch()` for SSE, as the
+example page does, and `?token=` on the `/runs/live` URL, or terminate
+authentication at a proxy that adds the header.
+
+Three deployment details follow from this. Serve the page from the same
+origin as the API, or add `CORSMiddleware` to `server.app` for the page's
+origin. Let the WebSocket upgrade through the ingress (`/runs/live`), and
+turn response buffering off for the SSE routes as the Kubernetes section
+below says. And because the run registry is per process, route a client
+to the same worker for the life of a run (sticky sessions, or one worker
+per replica); thread *state* is shared through the checkpointer either
+way. The bounds of the registry — events kept per run, finished runs
+kept, their TTL — are described under
+[Threads and runs](../concepts/server.md#threads-and-runs).
 
 Provider credentials are read from the environment, or supplied by the
 platform as a principal. Inject secrets at runtime; never bake one into the

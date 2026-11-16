@@ -38,6 +38,7 @@ from pydantic import BaseModel
 
 from locus.agent.completion import AUTOMATED_NOTE_KEY, CONTINUATION_NOTE_KEY, Continuation
 from locus.agent.config import AgentConfig
+from locus.agent.durability import DurabilityMode, attach_durability, retry_ledger
 from locus.agent.model_retry import call_with_retry
 from locus.agent.result import normalize_stop_reason
 from locus.agent.run_context import (
@@ -588,11 +589,15 @@ class AgentRuntimeMixin:
         metadata: dict[str, Any] | None,
         *,
         ephemeral: dict[str, Any] | None = None,
+        durability: DurabilityMode | None = None,
+        replay: bool = False,
     ) -> RunContext:
         """Create and register the context that owns one run.
 
         ``metadata`` may still carry ephemeral keys (direct callers); they are
-        moved to ``rc.ephemeral`` and merged with ``ephemeral``.
+        moved to ``rc.ephemeral`` and merged with ``ephemeral``. ``durability``
+        overrides the agent's mode for this run; ``replay`` turns the
+        tool-effect ledger's replay on, for a run that continues a turn.
         """
         metadata, found = self._split_run_metadata(metadata)
         rc = RunContext.create(
@@ -609,6 +614,8 @@ class AgentRuntimeMixin:
             self.config.tool_call_integrity,
             [*self.config.hooks, *getattr(self, "_hooks", ())],
         )
+        # How this run writes its checkpoints, and its tool-effect ledger.
+        attach_durability(rc, self.config, durability=durability, replay=replay)
         with self._runs_lock:
             self._active_runs[id(rc)] = rc
         return rc
@@ -749,6 +756,8 @@ class AgentRuntimeMixin:
         metadata: dict[str, Any] | None = None,
         model_kwargs: dict[str, Any] | None = None,
         stream_tokens: bool = False,
+        invocation_id: str | None = None,
+        durability: DurabilityMode | None = None,
     ) -> AsyncGenerator[LocusEvent, None]:
         """
         Run the agent with streaming events.
@@ -757,6 +766,16 @@ class AgentRuntimeMixin:
             prompt: User prompt to process
             thread_id: Optional thread ID for checkpointing
             metadata: Additional metadata for tools
+            invocation_id: An id for this turn, kept by the caller (a job id).
+                It becomes the run's ``run_id``, and a run issued again with
+                the same id after a crash replays the tool calls the crashed
+                attempt recorded in the thread's tool-effect ledger instead
+                of running them again. Default: a fresh id, no replay.
+            durability: When this run writes its iteration checkpoints:
+                ``"sync"`` before the next model call, ``"async"`` in the
+                background (awaited before the final save), ``"exit"`` not at
+                all — one save at the end. Defaults to
+                ``AgentConfig.durability``. See :mod:`locus.agent.durability`.
             model_kwargs: Per-call parameters forwarded to the model for this
                 run — ``tool_choice``, ``logprobs``, ``extra_body`` and the
                 rest of the provider's request surface. Model configuration is
@@ -795,10 +814,22 @@ class AgentRuntimeMixin:
 
         # Create initial state
         state = await self._create_initial_state(prompt, thread_id, metadata)
+        if invocation_id is not None:
+            # The caller's id names the turn: a retry of a crashed run under
+            # the same id finds that run's tool-effect ledger.
+            state = state.model_copy(update={"run_id": invocation_id})
 
         # Everything that belongs to THIS run lives on ``rc``, never on the
         # agent: one Agent instance serves concurrent runs.
-        rc = self._begin_run(state, prompt, thread_id, metadata, ephemeral=ephemeral)
+        rc = self._begin_run(
+            state,
+            prompt,
+            thread_id,
+            metadata,
+            ephemeral=ephemeral,
+            durability=durability,
+            replay=invocation_id is not None,
+        )
         rc.result_slot = result_slot
 
         # Track metrics
@@ -1562,6 +1593,7 @@ class AgentRuntimeMixin:
                         invocation_metadata=metadata or {},
                         ephemeral_metadata=rc.ephemeral,
                         integrity=rc.integrity,
+                        ledger=rc.ledger,
                     )
                     batch_start = time.perf_counter()
                     interrupted_slot_idx: int | None = None
@@ -1729,7 +1761,7 @@ class AgentRuntimeMixin:
                                 # only run at GC — too late if the process
                                 # dies while paused.
                                 if self.config.checkpointer and thread_id:
-                                    await self.config.checkpointer.save(_durable(state), thread_id)
+                                    await self._checkpoint_interrupt(rc, state, thread_id)
                                 yield InterruptEvent(
                                     question=interrupt_data.get("question", ""),
                                     options=interrupt_data.get("options"),
@@ -1813,6 +1845,7 @@ class AgentRuntimeMixin:
                                 invocation_metadata=metadata or {},
                                 ephemeral_metadata=rc.ephemeral,
                                 integrity=rc.integrity,
+                                ledger=retry_ledger(rc),
                             )
                             [result] = await self._executor.execute(
                                 [
@@ -1927,7 +1960,7 @@ class AgentRuntimeMixin:
 
                 # The iteration's tool results are folded in, so this is a
                 # boundary ``continue_turn`` can pick the turn up from.
-                state = await self._checkpoint_iteration(state, thread_id)
+                state = await self._checkpoint_iteration(state, thread_id, rc)
 
             # The loop is done; close whichever iteration it left open.
             if _open_iteration is not None:
@@ -1987,7 +2020,7 @@ class AgentRuntimeMixin:
                 await self._memory_manager.on_session_end(_without_ephemeral_messages(state))
 
             # Final checkpoint
-            await self._checkpoint_final(state, thread_id, superseded)
+            await self._checkpoint_final(state, thread_id, superseded, rc)
 
     @_bus_bridge
     async def _run_from_state(
@@ -2309,6 +2342,7 @@ class AgentRuntimeMixin:
                             invocation_metadata=metadata or {},
                             ephemeral_metadata=rc.ephemeral,
                             integrity=rc.integrity,
+                            ledger=rc.ledger,
                         )
                         call = tc.model_copy(update={"arguments": invoke_args})
                         if self._emits_progress([call]):
@@ -2342,7 +2376,7 @@ class AgentRuntimeMixin:
                             # parks on the interrupt never drives this
                             # generator to its finally.
                             if self.config.checkpointer and thread_id:
-                                await self.config.checkpointer.save(_durable(state), thread_id)
+                                await self._checkpoint_interrupt(rc, state, thread_id)
                             payload = e.value.payload if hasattr(e, "value") else {}
                             question = (
                                 payload.get("question", str(payload))
@@ -2391,7 +2425,7 @@ class AgentRuntimeMixin:
                             state = _with_pending_hold(state, result, interrupt_data)
                             self._park_interrupt(rc, state)
                             if self.config.checkpointer and thread_id:
-                                await self.config.checkpointer.save(_durable(state), thread_id)
+                                await self._checkpoint_interrupt(rc, state, thread_id)
                             yield InterruptEvent(
                                 question=interrupt_data.get("question", ""),
                                 options=interrupt_data.get("options"),
@@ -2420,6 +2454,7 @@ class AgentRuntimeMixin:
                                 invocation_metadata=metadata or {},
                                 ephemeral_metadata=rc.ephemeral,
                                 integrity=rc.integrity,
+                                ledger=retry_ledger(rc),
                             )
                             [result] = await self._executor.execute(
                                 [tc.model_copy(update={"arguments": invoke_args})],
@@ -2455,7 +2490,7 @@ class AgentRuntimeMixin:
 
                 # Same boundary as run(): a resumed or continued turn is as
                 # durable per iteration as the first pass.
-                state = await self._checkpoint_iteration(state, thread_id)
+                state = await self._checkpoint_iteration(state, thread_id, rc)
 
             # The loop is done; close whichever iteration it left open.
             if _open_iteration is not None:
@@ -2492,10 +2527,31 @@ class AgentRuntimeMixin:
             # Final checkpoint — mirrors run(): a resumed run must stay as
             # durable as the original one (a second pause, or completion,
             # is persisted too — resume never downgrades durability).
-            await self._checkpoint_final(state, thread_id, superseded)
+            await self._checkpoint_final(state, thread_id, superseded, rc)
+
+    async def _checkpoint_interrupt(
+        self, rc: RunContext, state: AgentState, thread_id: str | None
+    ) -> None:
+        """Save the state the run pauses on, in every durability mode.
+
+        Awaited before the ``InterruptEvent`` is yielded: a consumer that
+        parks on the interrupt never drives the generator further. Any
+        iteration write still in flight (``durability="async"``) lands first.
+        """
+        checkpointer = self.config.checkpointer
+        if not checkpointer or not thread_id:
+            return
+        if rc.checkpoints is not None:
+            await rc.checkpoints.save_now(_durable(state), thread_id)
+        else:
+            await checkpointer.save(_durable(state), thread_id)
 
     async def _checkpoint_final(
-        self, state: AgentState, thread_id: str | None, superseded: list[str]
+        self,
+        state: AgentState,
+        thread_id: str | None,
+        superseded: list[str],
+        rc: RunContext | None = None,
     ) -> None:
         """Save the segment's final state, then delete the iteration saves it supersedes.
 
@@ -2504,11 +2560,18 @@ class AgentRuntimeMixin:
         They are deleted only after the final save succeeded — until then
         they are the thread's only record of the turn — and a failed delete
         is logged, never raised: losing the clean-up must not lose the turn.
+        Iteration writes still in flight (``durability="async"``) are awaited
+        before the final save, and the run's tool-effect ledger is cleared
+        after it: the saved state now holds every result the ledger recorded.
         """
         checkpointer = self.config.checkpointer
         if not checkpointer or not thread_id:
             return
-        await checkpointer.save(_durable(state), thread_id)
+        writer = rc.checkpoints if rc is not None else None
+        if writer is not None:
+            await writer.save_now(_durable(state), thread_id)
+        else:
+            await checkpointer.save(_durable(state), thread_id)
         from locus.observability.emit import (  # noqa: PLC0415
             EV_CHECKPOINT_SAVED,
             emit,
@@ -2520,19 +2583,21 @@ class AgentRuntimeMixin:
             iteration=state.iteration,
             backend=type(checkpointer).__name__,
             trigger="final",
+            durability=writer.mode if writer is not None else self.config.durability,
         )
-        if self.config.keep_iteration_checkpoints:
-            return
-        for checkpoint_id in superseded:
-            try:
-                await checkpointer.delete(thread_id, checkpoint_id)
-            except Exception:  # noqa: BLE001 — clean-up only; the turn is saved
-                logger.warning(
-                    "could not delete superseded iteration checkpoint %s of thread %s",
-                    checkpoint_id,
-                    thread_id,
-                    exc_info=True,
-                )
+        if not self.config.keep_iteration_checkpoints:
+            for checkpoint_id in superseded:
+                try:
+                    await checkpointer.delete(thread_id, checkpoint_id)
+                except Exception:  # noqa: BLE001 — clean-up only; the turn is saved
+                    logger.warning(
+                        "could not delete superseded iteration checkpoint %s of thread %s",
+                        checkpoint_id,
+                        thread_id,
+                        exc_info=True,
+                    )
+        if rc is not None and rc.ledger is not None:
+            await rc.ledger.clear()
 
     def _iteration_checkpoint_interval(self, thread_id: str | None) -> int:
         """How many iterations apart to checkpoint; 0 for none.
@@ -2550,7 +2615,9 @@ class AgentRuntimeMixin:
             return 1
         return 0
 
-    async def _checkpoint_iteration(self, state: AgentState, thread_id: str | None) -> AgentState:
+    async def _checkpoint_iteration(
+        self, state: AgentState, thread_id: str | None, rc: RunContext | None = None
+    ) -> AgentState:
         """Save ``state`` when this iteration is due a checkpoint; return the state to go on with.
 
         Called once the iteration's tool results are in the state, so the
@@ -2563,10 +2630,17 @@ class AgentRuntimeMixin:
         iteration checkpoints before saving, so the saved state names itself
         and every earlier one; the returned state carries the list to the
         turn's final save, which deletes them.
+
+        The run's durability mode decides how the save is made: awaited
+        (``sync``), scheduled (``async``), or not made at all (``exit``), in
+        which case the state is returned untouched.
         """
         checkpointer = self.config.checkpointer
         every = self._iteration_checkpoint_interval(thread_id)
         if not checkpointer or every <= 0 or state.iteration % every:
+            return state
+        writer = rc.checkpoints if rc is not None else None
+        if writer is not None and not writer.writes_iterations:
             return state
         cp_thread = thread_id or state.run_id
         checkpoint_id: str | None = None
@@ -2582,7 +2656,10 @@ class AgentRuntimeMixin:
             checkpoint_id = uuid4().hex
             pending = list(state.metadata.get(ITERATION_CHECKPOINTS_KEY) or [])
             state = state.with_metadata(ITERATION_CHECKPOINTS_KEY, [*pending, checkpoint_id])
-        await checkpointer.save(_durable(state), cp_thread, checkpoint_id)
+        if writer is not None:
+            await writer.save_iteration(_durable(state), cp_thread, checkpoint_id)
+        else:
+            await checkpointer.save(_durable(state), cp_thread, checkpoint_id)
         from locus.observability.emit import (  # noqa: PLC0415
             EV_CHECKPOINT_SAVED,
             emit,
@@ -2594,6 +2671,7 @@ class AgentRuntimeMixin:
             iteration=state.iteration,
             backend=type(checkpointer).__name__,
             trigger="every_n_iterations",
+            durability=writer.mode if writer is not None else self.config.durability,
         )
         return state
 
