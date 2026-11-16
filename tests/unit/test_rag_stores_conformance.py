@@ -22,7 +22,13 @@ from tests.unit.rag.store_conformance import DIMENSION, VectorStoreConformance
 
 
 def _installed(module: str) -> bool:
-    return importlib.util.find_spec(module) is not None
+    # Import rather than ``find_spec``: a package that is present but fails to
+    # import (or a CI stub that raises ImportError) counts as not installed.
+    try:
+        importlib.import_module(module)
+    except ImportError:
+        return False
+    return True
 
 
 class TestInMemoryConformance(VectorStoreConformance):

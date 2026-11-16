@@ -2,16 +2,25 @@
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
 
-"""Unit tests for the MongoDB Atlas vector store — pipeline shaping on a fake collection."""
+"""Unit tests for the MongoDB Atlas vector store — pipeline shaping on a fake collection.
+
+A fake ``pymongo`` module is injected into ``sys.modules`` where the adapter
+imports the client, ``ReplaceOne`` or ``SearchIndexModel`` lazily, so the
+tests need no library.
+"""
 
 from __future__ import annotations
 
+import asyncio
+import sys
+import types
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from locus.rag.stores import mongodb as mongodb_module
 from locus.rag.stores.base import Document
 from locus.rag.stores.mongodb import MongoDBAtlasVectorStore
 
@@ -79,6 +88,53 @@ class _FakeCollection:
         self.indexes.append({"name": model.document["name"], "queryable": True})
 
 
+class _FakeDatabase:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def __getitem__(self, collection: str) -> _FakeCollection:
+        fake = _FakeCollection()
+        fake.path = (self.name, collection)  # type: ignore[attr-defined]
+        return fake
+
+
+def _fake_pymongo(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+    """Install a fake ``pymongo`` (+ ``pymongo.operations``); returns the clients built."""
+    clients: list[Any] = []
+    module = types.ModuleType("pymongo")
+    operations = types.ModuleType("pymongo.operations")
+
+    class AsyncMongoClient:
+        def __init__(self, connection_string: str) -> None:
+            self.connection_string = connection_string
+            self.closed = False
+            clients.append(self)
+
+        def __getitem__(self, database: str) -> _FakeDatabase:
+            return _FakeDatabase(database)
+
+        async def close(self) -> None:
+            self.closed = True
+
+    class ReplaceOne:
+        def __init__(self, flt: dict[str, Any], replacement: dict[str, Any], upsert: bool = False):
+            self._filter = flt
+            self._doc = replacement
+            self._upsert = upsert
+
+    class SearchIndexModel:
+        def __init__(self, *, definition: dict[str, Any], name: str, type: str) -> None:  # noqa: A002
+            self.document = {"definition": definition, "name": name, "type": type}
+
+    module.AsyncMongoClient = AsyncMongoClient  # type: ignore[attr-defined]
+    module.ReplaceOne = ReplaceOne  # type: ignore[attr-defined]
+    module.operations = operations  # type: ignore[attr-defined]
+    operations.SearchIndexModel = SearchIndexModel  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "pymongo", module)
+    monkeypatch.setitem(sys.modules, "pymongo.operations", operations)
+    return clients
+
+
 def _store(**kwargs: Any) -> tuple[MongoDBAtlasVectorStore, _FakeCollection]:
     fake = _FakeCollection()
     store = MongoDBAtlasVectorStore(dimension=3, _collection=fake, **kwargs)
@@ -116,9 +172,10 @@ async def test_add_upserts_by_id_and_round_trips() -> None:
     assert got.created_at.tzinfo is not None
 
 
-async def test_add_batch_uses_bulk_replace_ops() -> None:
-    pytest.importorskip("pymongo")
+async def test_add_batch_uses_bulk_replace_ops(monkeypatch: pytest.MonkeyPatch) -> None:
+    _fake_pymongo(monkeypatch)
     store, fake = _store()
+    assert await store.add_batch([]) == []
     ids = await store.add_batch(
         [
             Document(id="a", content="x", embedding=[1.0, 0.0, 0.0]),
@@ -130,6 +187,8 @@ async def test_add_batch_uses_bulk_replace_ops() -> None:
     assert name == "bulk_write"
     assert len(ops) == 2
     assert type(ops[0]).__name__ == "ReplaceOne"
+    assert ops[0]._filter == {"_id": "a"}
+    assert ops[0]._upsert is True
     assert await store.count() == 2
 
 
@@ -174,8 +233,10 @@ async def test_search_threshold() -> None:
     assert [r.document.id for r in results] == ["a"]
 
 
-async def test_ensure_index_creates_definition_with_filter_paths() -> None:
-    pytest.importorskip("pymongo")
+async def test_ensure_index_creates_definition_with_filter_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fake_pymongo(monkeypatch)
     store, fake = _store(filter_fields=["topic", "year"], index_name="vec")
     await store.ensure_index(wait=True)
     name, model = next(c for c in fake.calls if c[0] == "create_search_index")
@@ -210,14 +271,90 @@ def test_constructor_validation_and_metric_mapping() -> None:
         MongoDBAtlasVectorStore(distance_metric="hamming", _collection=object())
     store = MongoDBAtlasVectorStore(dimension=3, distance_metric="euclidean", _collection=object())
     assert store.index_definition()["fields"][0]["similarity"] == "euclidean"
+    assert (store.config.dimension, store.config.distance_metric) == (3, "euclidean")
+    assert store.config.index_type == "hnsw"
     assert store._score(0.5) == (pytest.approx(0.5), pytest.approx(1.0))
     dot = MongoDBAtlasVectorStore(dimension=3, distance_metric="dot_product", _collection=object())
     assert dot._score(0.75) == (pytest.approx(0.5), None)
 
 
 def test_missing_connection_string_is_a_clear_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    pytest.importorskip("pymongo")
+    _fake_pymongo(monkeypatch)
     monkeypatch.delenv("MONGODB_URI", raising=False)
     store = MongoDBAtlasVectorStore(dimension=3)
     with pytest.raises(ValueError, match="MONGODB_URI"):
         store._get_collection()
+
+
+def test_missing_pymongo_names_the_extra(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "pymongo", None)
+    with pytest.raises(ImportError, match=r"locus-sdk\[mongodb\]"):
+        MongoDBAtlasVectorStore(dimension=3, connection_string="mongodb://x")._get_collection()
+
+
+async def test_collection_built_from_connection_string_and_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clients = _fake_pymongo(monkeypatch)
+    monkeypatch.setenv("MONGODB_URI", "mongodb://from-env")
+    store = MongoDBAtlasVectorStore(dimension=3, database="db", collection="c")
+    await store.close()  # nothing built yet: no-op
+    coll = store._get_collection()
+    assert coll.path == ("db", "c")
+    assert clients[0].connection_string == "mongodb://from-env"
+    assert store._get_collection() is coll  # cached
+    await store.close()
+    assert clients[0].closed is True
+    assert store._collection is None
+    explicit = MongoDBAtlasVectorStore(dimension=3, connection_string="mongodb://given")
+    explicit._get_collection()
+    assert clients[1].connection_string == "mongodb://given"
+    assert "documents" in repr(explicit)
+
+
+async def test_ensure_index_waits_until_queryable_and_times_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fake_pymongo(monkeypatch)
+    slept: list[float] = []
+
+    async def no_sleep(seconds: float) -> None:
+        slept.append(seconds)
+        for index in fake.indexes:
+            index["queryable"] = True
+
+    monkeypatch.setattr(
+        mongodb_module,
+        "asyncio",
+        SimpleNamespace(get_running_loop=asyncio.get_running_loop, sleep=no_sleep),
+    )
+    store, fake = _store(index_name="vec")
+    fake.indexes.append({"name": "vec", "queryable": False})
+    await store.ensure_index(wait=True)
+    assert slept == [5.0]
+    assert not [c for c in fake.calls if c[0] == "create_search_index"]
+
+    fake.indexes[0]["queryable"] = False
+    with pytest.raises(TimeoutError, match="'vec' was not queryable"):
+        await store.ensure_index(wait=True, wait_timeout=0.0)
+
+
+def test_to_document_created_at_variants_and_scores() -> None:
+    naive = MongoDBAtlasVectorStore._to_document({"_id": "a", "created_at": "2026-01-01T00:00:00"})
+    assert naive.created_at == datetime(2026, 1, 1, tzinfo=UTC)
+    assert naive.embedding is None
+    assert naive.content == ""
+    garbage = MongoDBAtlasVectorStore._to_document({"_id": "a", "created_at": "nope"})
+    assert garbage.created_at.tzinfo is not None
+    assert MongoDBAtlasVectorStore._to_document({}).id == ""
+    euclidean = MongoDBAtlasVectorStore(dimension=3, distance_metric="l2", _collection=object())
+    assert euclidean._score(0.0) == (0.0, float("inf"))
+
+
+async def test_pipeline_num_candidates_override_and_missing_document() -> None:
+    store, fake = _store(num_candidates=7)
+    stage = store.pipeline([1.0, 0.0, 0.0], 3, None)[0]["$vectorSearch"]
+    assert stage["numCandidates"] == 7
+    assert "filter" not in stage
+    assert store.build_filter(None) is None
+    assert await store.get("missing") is None
