@@ -479,10 +479,14 @@ class TieredCompaction(ContextCompactor):
             instead of summarising it; a model instance uses that model.
         pins: A predicate over messages; those it accepts survive every tier,
             as do messages pinned with :func:`~locus.memory.compaction.pin`.
-        reserved_tokens, tail_turns, tail_token_fraction,
-        tool_output_keep_tokens, summary_max_tokens,
-        min_iterations_between_summaries, token_counter: As for
+        reserved_tokens: As for :class:`~locus.memory.compaction.ContextCompactor`.
+        tail_turns: As for :class:`~locus.memory.compaction.ContextCompactor`.
+        tail_token_fraction: As for :class:`~locus.memory.compaction.ContextCompactor`.
+        tool_output_keep_tokens: As for :class:`~locus.memory.compaction.ContextCompactor`.
+        summary_max_tokens: As for :class:`~locus.memory.compaction.ContextCompactor`.
+        min_iterations_between_summaries: As for
             :class:`~locus.memory.compaction.ContextCompactor`.
+        token_counter: As for :class:`~locus.memory.compaction.ContextCompactor`.
     """
 
     def __init__(
