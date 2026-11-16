@@ -26,7 +26,7 @@ import pytest
 import respx
 from pydantic import ValidationError
 
-from locus.core.messages import Message
+from locus.core.messages import Message, Role
 from locus.core.warnings import LocusWarning
 from locus.models.providers.oci import (
     OCIProjectRequiredError,
@@ -752,4 +752,248 @@ async def test_agent_run_completes_statelessly_on_a_zdr_tenancy() -> None:
     assert len(bodies) == 2
     assert all(body["store"] is False for body in bodies)
     assert all("previous_response_id" not in body for body in bodies)
+    await model.aclose()
+
+
+# =============================================================================
+# reasoning dict, encrypted replay, native compaction
+# =============================================================================
+
+
+def test_reasoning_dict_is_kept_on_the_config() -> None:
+    assert _make_model().config.reasoning is None
+    assert _make_model(reasoning={"effort": "high"}).config.reasoning == {"effort": "high"}
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_complete_sends_the_configured_reasoning_dict() -> None:
+    model = _make_model(reasoning={"effort": "high", "summary": "auto"})
+    captured: dict[str, Any] = {}
+    _capture_body(captured)
+
+    await model.complete([Message.user("hi")])
+    assert captured["body"]["reasoning"] == {"effort": "high", "summary": "auto"}
+    assert "include" not in captured["body"]  # stateful: nothing to replay
+    await model.aclose()
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_complete_reasoning_kwarg_replaces_the_config_dict() -> None:
+    model = _make_model(reasoning={"effort": "high"})
+    captured: dict[str, Any] = {}
+    _capture_body(captured)
+
+    await model.complete([Message.user("hi")], reasoning={"summary": "concise"})
+    assert captured["body"]["reasoning"] == {"summary": "concise"}
+    await model.aclose()
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_complete_merges_the_effort_into_a_dict_that_lacks_it() -> None:
+    model = _make_model(reasoning={"summary": "auto"}, reasoning_effort="low")
+    captured: dict[str, Any] = {}
+    _capture_body(captured)
+
+    await model.complete([Message.user("hi")])
+    assert captured["body"]["reasoning"] == {"summary": "auto", "effort": "low"}
+
+    # A per-call effort still fills the gap; a dict with its own effort wins.
+    await model.complete([Message.user("hi")], reasoning_effort="high")
+    assert captured["body"]["reasoning"] == {"summary": "auto", "effort": "high"}
+    await model.complete(
+        [Message.user("hi")], reasoning={"effort": "medium"}, reasoning_effort="high"
+    )
+    assert captured["body"]["reasoning"] == {"effort": "medium"}
+    await model.aclose()
+
+
+_REASONING_ITEM: dict[str, Any] = {
+    "id": "rs_1",
+    "type": "reasoning",
+    "summary": [{"type": "summary_text", "text": "Use the tool."}],
+    "encrypted_content": "gAAAAABencrypted",
+}
+_FUNCTION_CALL_ITEM: dict[str, Any] = {
+    "id": "fc_1",
+    "type": "function_call",
+    "call_id": "call_add",
+    "name": "add",
+    "arguments": '{"a": 2, "b": 3}',
+}
+_COMPACTION_ITEM: dict[str, Any] = {
+    "id": "cmp_1",
+    "type": "compaction",
+    "encrypted_content": "gAAAAABcompacted",
+}
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_complete_stateless_replays_the_reasoning_items_on_the_next_turn() -> None:
+    """store=False with a reasoning control: the request asks for encrypted
+    reasoning, the reply's items are kept on the message and the continuation
+    carries them verbatim ahead of the tool result."""
+    model = _make_model(store=False, reasoning_effort="low")
+    bodies: list[dict[str, Any]] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content))
+        if len(bodies) == 1:
+            return httpx.Response(
+                200,
+                json={"id": "r1", "output": [_REASONING_ITEM, _FUNCTION_CALL_ITEM], "usage": {}},
+            )
+        return httpx.Response(200, json=_text_response("r2", "5"))
+
+    respx.post(_URL).mock(side_effect=_handler)
+
+    first = await model.complete([Message.user("Add 2 and 3.")])
+    assert bodies[0]["include"] == ["reasoning.encrypted_content"]
+    assert first.reasoning == "Use the tool."
+    assert [tc.id for tc in first.message.tool_calls] == ["call_add"]
+
+    result = Message(role=Role.TOOL, content="5", tool_call_id="call_add", name="add")
+    second = await model.complete([Message.user("Add 2 and 3."), first.message, result])
+    assert second.message.content == "5"
+    assert bodies[1]["input"][1:3] == [_REASONING_ITEM, _FUNCTION_CALL_ITEM]
+    assert bodies[1]["input"][3]["type"] == "function_call_output"
+    await model.aclose()
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_compact_history_posts_the_thread_and_returns_the_compacted_messages() -> None:
+    model = _make_model(store=False)
+    captured: dict[str, Any] = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "id": "resp_c",
+                "object": "response.compaction",
+                "output": [
+                    {
+                        "id": "msg_1",
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "My name is Ada."}],
+                    },
+                    _COMPACTION_ITEM,
+                ],
+                "usage": {"input_tokens": 75, "output_tokens": 21, "total_tokens": 96},
+            },
+        )
+
+    respx.post("https://fake-oci.test/openai/v1/responses/compact").mock(side_effect=_handler)
+
+    messages, usage = await model.compact_history(
+        [
+            Message.system("You are terse."),
+            Message.user("My name is Ada."),
+            Message.assistant(content="Hello Ada."),
+            Message.user("Remember it."),
+        ],
+        instructions="Keep names.",
+    )
+
+    body = captured["body"]
+    assert body["model"] == "openai.gpt-5.5-pro"
+    assert body["instructions"] == "You are terse.\n\nKeep names."
+    assert [item["type"] for item in body["input"]] == ["message", "message", "message"]
+    assert "store" not in body
+    assert "max_output_tokens" not in body
+    assert [m.role for m in messages] == [Role.USER, Role.ASSISTANT]
+    assert messages[1].metadata["oci_responses_items"] == [_COMPACTION_ITEM]
+    assert usage == {"prompt_tokens": 75, "completion_tokens": 21, "total_tokens": 96}
+    await model.aclose()
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_agent_native_compaction_hands_the_thread_to_the_endpoint() -> None:
+    """compaction.native=True on a stateless Responses model: when the context
+    reaches the threshold the runtime posts the history to /responses/compact,
+    carries the compaction item verbatim into the next request and yields a
+    CompactionEvent with stage "native"."""
+    from locus.agent import Agent, CompactionConfig
+    from locus.core.events import CompactionEvent
+    from locus.tools.decorator import tool
+
+    @tool
+    def work() -> str:
+        """Produce a large result."""
+        return "x" * 8_000
+
+    model = _make_model(store=False)
+    responses_bodies: list[dict[str, Any]] = []
+    compact_bodies: list[dict[str, Any]] = []
+
+    def _responses(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        responses_bodies.append(body)
+        if len(responses_bodies) == 1:
+            return httpx.Response(
+                200,
+                json={
+                    "id": "r1",
+                    "output": [
+                        {
+                            "type": "function_call",
+                            "call_id": "call_w",
+                            "name": "work",
+                            "arguments": "{}",
+                        }
+                    ],
+                    "usage": {},
+                },
+            )
+        return httpx.Response(200, json=_text_response("r2", "done"))
+
+    def _compact(request: httpx.Request) -> httpx.Response:
+        compact_bodies.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "id": "resp_c",
+                "object": "response.compaction",
+                "output": [_COMPACTION_ITEM],
+                "usage": {"input_tokens": 2100, "output_tokens": 30, "total_tokens": 2130},
+            },
+        )
+
+    respx.post(_URL).mock(side_effect=_responses)
+    respx.post("https://fake-oci.test/openai/v1/responses/compact").mock(side_effect=_compact)
+
+    agent = Agent(
+        model=model,
+        tools=[work],
+        system_prompt="You are terse.",
+        context_window=2_000,
+        compaction=CompactionConfig(native=True),
+        reflexion=False,
+        grounding=False,
+        max_iterations=4,
+    )
+    events = [event async for event in agent.run("Do the work, then say done.")]
+
+    compactions = [e for e in events if isinstance(e, CompactionEvent)]
+    assert [e.stage for e in compactions] == ["native"]
+    assert not compactions[0].exhausted
+
+    assert len(compact_bodies) == 1
+    compact = compact_bodies[0]
+    assert compact["instructions"] == "You are terse."
+    assert [item["type"] for item in compact["input"]] == ["function_call", "function_call_output"]
+    assert "store" not in compact
+
+    # The task message stays verbatim; the folded turn travels as the item.
+    replay = responses_bodies[1]
+    assert replay["store"] is False
+    assert [item["type"] for item in replay["input"]] == ["message", "compaction"]
+    assert replay["input"][1] == _COMPACTION_ITEM
     await model.aclose()

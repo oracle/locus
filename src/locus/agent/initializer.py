@@ -235,6 +235,7 @@ def initialize_agent(agent: Agent) -> None:
             tool_output_keep_tokens=compaction.tool_output_keep_tokens,
             summary_max_tokens=compaction.summary_max_tokens,
             min_iterations_between_summaries=compaction.min_iterations_between_summaries,
+            native_compaction=compaction.native,
         )
     elif context_window is not None:
         # Summarising is off, so no extra model calls: stale tool output is

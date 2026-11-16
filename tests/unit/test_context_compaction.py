@@ -535,6 +535,115 @@ def test_compaction_settings_reach_the_compactor() -> None:
     assert compactor.min_iterations_between_summaries == 5
 
 
+# --- native compaction --------------------------------------------------------
+
+
+class _NativeModel:
+    """A model whose provider compacts: records what it was handed."""
+
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.calls: list[tuple[list[Message], str | None]] = []
+
+    async def compact_history(
+        self, messages: list[Message], *, instructions: str | None = None
+    ) -> tuple[list[Message], dict[str, int]]:
+        self.calls.append((list(messages), instructions))
+        if self.fail:
+            raise RuntimeError("compaction endpoint unavailable")
+        folded = Message.assistant(content="[compacted by the provider]")
+        return [folded, *messages[-2:]], {"prompt_tokens": 500, "completion_tokens": 20}
+
+
+@pytest.mark.asyncio
+async def test_native_compaction_hands_the_history_to_the_model() -> None:
+    model = _NativeModel()
+    summariser = Summariser()
+    compactor = _compactor(summariser, native_compaction=True)
+    messages = _long_session()
+    tracker = CompactionTracker()
+
+    outcome = await compactor.compact(messages, iteration=16, tracker=tracker, model=model)
+
+    assert outcome is not None
+    assert outcome.stage == "native"
+    assert not outcome.exhausted
+    assert outcome.tokens_after < outcome.threshold
+    assert outcome.usage == {"prompt_tokens": 500, "completion_tokens": 20}
+    assert summariser.prompts == [], "no client-side summary was written"
+    out = outcome.messages
+    assert out[0].content == "SYSTEM PROMPT"
+    assert out[1].content == "TASK: port the parser"
+    assert out[2].content == "[compacted by the provider]"
+    assert out[3:] == messages[-2:]
+    handed, instructions = model.calls[0]
+    assert handed[0].content == "SYSTEM PROMPT", "system messages travel as instructions"
+    assert all(m.content != "TASK: port the parser" for m in handed), "the task stays verbatim"
+    assert instructions is None
+    assert tracker.last_summary_iteration == 16, "the thrash guard counts a native compaction"
+
+
+@pytest.mark.asyncio
+async def test_native_compaction_passes_the_hooks_guidance() -> None:
+    model = _NativeModel()
+    compactor = _compactor(native_compaction=True)
+
+    await compactor.compact(
+        _long_session(),
+        iteration=16,
+        tracker=CompactionTracker(),
+        instructions="Keep every file path.",
+        model=model,
+    )
+
+    assert model.calls[0][1] == "Keep every file path."
+
+
+@pytest.mark.asyncio
+async def test_a_failed_native_compaction_falls_back_to_the_summary() -> None:
+    model = _NativeModel(fail=True)
+    summariser = Summariser("## Goal\nport the parser")
+    compactor = _compactor(summariser, native_compaction=True)
+
+    outcome = await compactor.compact(
+        _long_session(), iteration=16, tracker=CompactionTracker(), model=model
+    )
+
+    assert outcome is not None
+    assert outcome.stage == "summarize"
+    assert len(model.calls) == 1
+    assert summariser.prompts, "the client-side summary took over"
+
+
+@pytest.mark.asyncio
+async def test_native_compaction_is_opt_in_and_needs_a_capable_model() -> None:
+    summariser = Summariser("## Goal\nport the parser")
+    model = _NativeModel()
+
+    # Flag off: the method is never called.
+    off = await _compactor(summariser, native_compaction=False).compact(
+        _long_session(), iteration=16, tracker=CompactionTracker(), model=model
+    )
+    assert off is not None
+    assert off.stage == "summarize"
+    assert model.calls == []
+
+    # Flag on, but the model has no compaction endpoint: summarise as usual.
+    on = await _compactor(summariser, native_compaction=True).compact(
+        _long_session(), iteration=16, tracker=CompactionTracker(), model=object()
+    )
+    assert on is not None
+    assert on.stage == "summarize"
+
+
+def test_native_compaction_setting_reaches_the_compactor() -> None:
+    agent = _agent(lambda m, t: text("ok"), compaction=CompactionConfig(native=True))
+    compactor = agent._conversation_manager
+    assert isinstance(compactor, ContextCompactor)
+    assert compactor.native_compaction is True
+    assert _compactor().native_compaction is False
+
+
 # --- a long session -----------------------------------------------------------
 
 _DECISION = re.compile(r"DECISION: [^\n]+")

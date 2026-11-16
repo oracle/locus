@@ -17,9 +17,10 @@ import pytest
 import respx
 
 from locus.core.events import ModelChunkEvent
-from locus.core.messages import Message
+from locus.core.messages import Message, Role, ToolCall
 from locus.core.warnings import LocusWarning
 from locus.models.providers.oci import (
+    OCI_RESPONSES_ITEMS_METADATA_KEY,
     OCIProjectRequiredError,
     OCIResponsesModel,
     OCIResponsesStateLostError,
@@ -28,8 +29,10 @@ from locus.models.providers.oci import (
 from locus.models.providers.oci._responses_parse import (
     _translate_tool_schema,
     build_request_body,
+    parse_compaction_response,
     parse_response,
     parse_stream_event,
+    reasoning_text,
 )
 
 
@@ -668,4 +671,170 @@ async def test_stream_zdr_400_flips_an_auto_model_and_raises_the_typed_error() -
     assert len(record) == 1
     assert model.zdr_detected is True
     assert model.server_stateful is False
+    await model.aclose()
+
+
+# =============================================================================
+# Reasoning controls and verbatim replay (parse layer)
+# =============================================================================
+
+_REASONING_ITEM: dict[str, Any] = {
+    "id": "rs_1",
+    "type": "reasoning",
+    "summary": [{"type": "summary_text", "text": "Add the two numbers."}],
+    "encrypted_content": "gAAAAABencrypted",
+}
+_FUNCTION_CALL_ITEM: dict[str, Any] = {
+    "id": "fc_1",
+    "type": "function_call",
+    "call_id": "call_1",
+    "name": "add",
+    "arguments": '{"a": 2, "b": 3}',
+}
+_COMPACTION_ITEM: dict[str, Any] = {
+    "id": "cmp_1",
+    "type": "compaction",
+    "encrypted_content": "gAAAAABcompacted",
+}
+
+
+class TestReasoningControls:
+    def test_nothing_is_sent_when_both_are_unset(self) -> None:
+        for store in (True, False):
+            body = build_request_body([Message.user("hi")], model="m", store=store)
+            assert "reasoning" not in body
+            assert "include" not in body
+
+    def test_the_dict_is_sent_as_given(self) -> None:
+        body = build_request_body(
+            [Message.user("hi")], model="m", reasoning={"effort": "high", "summary": "auto"}
+        )
+        assert body["reasoning"] == {"effort": "high", "summary": "auto"}
+
+    def test_the_effort_fills_a_dict_without_one(self) -> None:
+        body = build_request_body(
+            [Message.user("hi")], model="m", reasoning={"summary": "auto"}, reasoning_effort="low"
+        )
+        assert body["reasoning"] == {"summary": "auto", "effort": "low"}
+
+    def test_the_dict_wins_on_conflict(self) -> None:
+        body = build_request_body(
+            [Message.user("hi")], model="m", reasoning={"effort": "high"}, reasoning_effort="low"
+        )
+        assert body["reasoning"] == {"effort": "high"}
+
+    def test_the_callers_dict_is_not_mutated(self) -> None:
+        given = {"summary": "auto"}
+        build_request_body([Message.user("hi")], model="m", reasoning=given, reasoning_effort="low")
+        assert given == {"summary": "auto"}
+
+    def test_encrypted_reasoning_is_requested_only_when_stateless_and_set(self) -> None:
+        stateful = build_request_body([Message.user("hi")], model="m", reasoning_effort="low")
+        assert "include" not in stateful
+        stateless = build_request_body(
+            [Message.user("hi")], model="m", store=False, reasoning_effort="low"
+        )
+        assert stateless["include"] == ["reasoning.encrypted_content"]
+        with_dict = build_request_body(
+            [Message.user("hi")], model="m", store=False, reasoning={"summary": "auto"}
+        )
+        assert with_dict["include"] == ["reasoning.encrypted_content"]
+
+
+class TestVerbatimReplay:
+    def test_parse_response_keeps_the_raw_items_when_a_reasoning_item_is_present(self) -> None:
+        message, _, _, _ = parse_response(
+            {"id": "r", "output": [_REASONING_ITEM, _FUNCTION_CALL_ITEM]}
+        )
+        assert message.metadata[OCI_RESPONSES_ITEMS_METADATA_KEY] == [
+            _REASONING_ITEM,
+            _FUNCTION_CALL_ITEM,
+        ]
+        assert [tc.id for tc in message.tool_calls] == ["call_1"]
+        assert reasoning_text(message) == "Add the two numbers."
+
+    def test_parse_response_keeps_nothing_without_reasoning(self) -> None:
+        message, _, _, _ = parse_response({"id": "r", "output": [_FUNCTION_CALL_ITEM]})
+        assert message.metadata == {}
+        assert reasoning_text(message) is None
+
+    def test_a_turn_with_raw_items_is_replayed_verbatim(self) -> None:
+        turn, _, _, _ = parse_response(
+            {"id": "r", "output": [_REASONING_ITEM, _FUNCTION_CALL_ITEM]}
+        )
+        result = Message(role=Role.TOOL, content="5", tool_call_id="call_1", name="add")
+        body = build_request_body([Message.user("add"), turn, result], model="m", store=False)
+        assert body["input"][1:3] == [_REASONING_ITEM, _FUNCTION_CALL_ITEM]
+        assert body["input"][3] == {
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": "5",
+        }
+
+    def test_a_hand_built_turn_is_reconstructed_without_item_ids(self) -> None:
+        turn = Message.assistant(tool_calls=[ToolCall(id="call_1", name="add", arguments={"a": 2})])
+        body = build_request_body([Message.user("add"), turn], model="m", store=False)
+        assert body["input"][1] == {
+            "type": "function_call",
+            "call_id": "call_1",
+            "name": "add",
+            "arguments": '{"a": 2}',
+        }
+
+    def test_a_compaction_reply_becomes_messages_that_replay_the_item(self) -> None:
+        kept = {
+            "id": "msg_1",
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "My name is Ada."}],
+        }
+        messages, usage = parse_compaction_response(
+            {
+                "object": "response.compaction",
+                "output": [kept, _COMPACTION_ITEM],
+                "usage": {"input_tokens": 75, "output_tokens": 21, "total_tokens": 96},
+            }
+        )
+        assert [m.role for m in messages] == [Role.USER, Role.ASSISTANT]
+        assert messages[0].content == "My name is Ada."
+        assert messages[1].metadata[OCI_RESPONSES_ITEMS_METADATA_KEY] == [_COMPACTION_ITEM]
+        assert usage == {"prompt_tokens": 75, "completion_tokens": 21, "total_tokens": 96}
+
+        body = build_request_body(
+            [Message.system("sys"), *messages, Message.user("What is my name?")],
+            model="m",
+            store=False,
+        )
+        assert body["instructions"] == "sys"
+        assert body["input"][1] == _COMPACTION_ITEM
+        assert body["input"][2]["role"] == "user"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_stream_sends_the_reasoning_dict_and_asks_for_encrypted_items_when_stateless() -> (
+    None
+):
+    model = _make_model(store=False, reasoning={"effort": "low", "summary": "auto"})
+    captured: dict[str, Any] = {}
+    _capture_stream_body(captured)
+
+    async for _ in model.stream([Message.user("hi")]):
+        pass
+    assert captured["body"]["reasoning"] == {"effort": "low", "summary": "auto"}
+    assert captured["body"]["include"] == ["reasoning.encrypted_content"]
+    await model.aclose()
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_stream_reasoning_kwarg_replaces_the_config_dict() -> None:
+    model = _make_model(reasoning={"effort": "low"})
+    captured: dict[str, Any] = {}
+    _capture_stream_body(captured)
+
+    async for _ in model.stream([Message.user("hi")], reasoning={"summary": "concise"}):
+        pass
+    assert captured["body"]["reasoning"] == {"summary": "concise"}
+    assert "include" not in captured["body"]
     await model.aclose()

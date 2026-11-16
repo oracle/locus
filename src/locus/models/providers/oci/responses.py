@@ -36,9 +36,12 @@ from locus.core.messages import Message, ToolCall
 from locus.core.warnings import LocusWarning
 from locus.models.base import ModelResponse
 from locus.models.providers.oci._responses_parse import (
+    OCI_RESPONSES_ITEMS_METADATA_KEY,
     build_request_body,
+    parse_compaction_response,
     parse_response,
     parse_stream_event,
+    reasoning_text,
 )
 from locus.models.providers.oci._signing import OCIRequestSigner
 from locus.models.providers.oci.openai_compat import (
@@ -148,6 +151,16 @@ class OCIResponsesConfig(BaseModel):
             "kwarg overrides it for that call."
         ),
     )
+    reasoning: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "The Responses-native ``reasoning`` object (``effort``, "
+            "``summary``, ...), sent as given. When set together with "
+            "``reasoning_effort`` the dict wins and ``reasoning_effort`` only "
+            "fills ``effort`` if the dict lacks it. A ``reasoning`` call kwarg "
+            "replaces it for that call. None (default) sends nothing."
+        ),
+    )
     store: bool | Literal["auto"] = Field(
         default="auto",
         description=(
@@ -211,6 +224,7 @@ class OCIResponsesModel(BaseModel):
         request_timeout: float = 600.0,
         store: bool | Literal["auto"] = "auto",
         reasoning_effort: str | None = None,
+        reasoning: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize the OCI Responses model.
@@ -255,6 +269,15 @@ class OCIResponsesModel(BaseModel):
                 the model and are validated by the server. ``None`` (default)
                 sends no ``reasoning`` field. A ``reasoning_effort`` kwarg on
                 a call, such as an agent's ``model_kwargs``, overrides it.
+            reasoning: The Responses-native ``reasoning`` object, e.g.
+                ``{"effort": "high", "summary": "auto"}``, sent as given.
+                With ``reasoning_effort`` set too, the dict wins and the
+                effort only fills ``effort`` when the dict lacks it. A
+                ``reasoning`` call kwarg replaces it for that call. Under
+                ``store=False`` any reasoning control also requests
+                ``include=["reasoning.encrypted_content"]``, and the reasoning
+                items that come back are replayed on the next request so a
+                tool-calling turn keeps its reasoning.
 
         Raises:
             ValueError: If zero or both auth modes are set, if
@@ -298,6 +321,7 @@ class OCIResponsesModel(BaseModel):
             temperature=temperature,
             request_timeout=request_timeout,
             reasoning_effort=reasoning_effort,
+            reasoning=reasoning,
             **kwargs,
         )
         super().__init__(config=config)
@@ -440,6 +464,7 @@ class OCIResponsesModel(BaseModel):
             stream=False,
             response_format=kwargs.pop("response_format", None),
             store=self.server_stateful,
+            reasoning=kwargs.pop("reasoning", None) or self.config.reasoning,
             reasoning_effort=kwargs.pop("reasoning_effort", None) or self.config.reasoning_effort,
         )
 
@@ -472,7 +497,63 @@ class OCIResponsesModel(BaseModel):
             usage=usage,
             stop_reason=stop_reason,
             provider_state=parsed_provider_state or None,
+            reasoning=reasoning_text(message),
         )
+
+    async def compact_history(
+        self,
+        messages: list[Message],
+        *,
+        instructions: str | None = None,
+    ) -> tuple[list[Message], dict[str, int]]:
+        """Hand a conversation to the endpoint's own compaction.
+
+        Posts the thread to ``/responses/compact``; the endpoint keeps the
+        messages a continuation needs and folds the rest into an encrypted
+        ``compaction`` item. The result is a shorter Locus history that this
+        model replays verbatim on later requests (the compaction item rides
+        on an assistant message under
+        :data:`OCI_RESPONSES_ITEMS_METADATA_KEY`), so it is only meaningful
+        for a thread that keeps going through this transport.
+
+        :class:`~locus.memory.compaction.ContextCompactor` calls this when
+        built with ``native_compaction=True``; it is the opt-in that hands
+        the summary stage to the endpoint instead of writing one client-side.
+
+        Args:
+            messages: The history to compact. System messages become the
+                request's ``instructions``; the rest is the ``input``.
+            instructions: Extra guidance appended to the instructions (a
+                before-compaction hook's steering).
+
+        Returns:
+            ``(messages, usage)``: the compacted history, without the system
+            messages, and the compaction call's token usage.
+        """
+        body = build_request_body(messages, model=self.config.model, store=True)
+        request: dict[str, Any] = {"model": body["model"], "input": body["input"]}
+        guidance = [body.get("instructions"), instructions]
+        joined = "\n\n".join(part for part in guidance if part)
+        if joined:
+            request["instructions"] = joined
+
+        client = self._http_client()
+        try:
+            resp = await client.post(
+                "/responses/compact",
+                json=request,
+                headers=self._extra_headers(),
+            )
+        except httpx.HTTPError as exc:
+            msg = f"OCI Responses compaction request failed: {exc}"
+            raise RuntimeError(msg) from exc
+        self._raise_for_error(resp)
+        try:
+            payload = resp.json()
+        except ValueError as exc:
+            msg = f"OCI Responses compaction returned non-JSON body: {resp.text[:300]}"
+            raise RuntimeError(msg) from exc
+        return parse_compaction_response(payload)
 
     async def stream(
         self,
@@ -507,6 +588,7 @@ class OCIResponsesModel(BaseModel):
             stream=True,
             response_format=kwargs.pop("response_format", None),
             store=self.server_stateful,
+            reasoning=kwargs.pop("reasoning", None) or self.config.reasoning,
             reasoning_effort=kwargs.pop("reasoning_effort", None) or self.config.reasoning_effort,
         )
 
@@ -646,6 +728,7 @@ async def _iter_sse_events(response: httpx.Response) -> AsyncIterator[dict[str, 
 
 
 __all__ = [
+    "OCI_RESPONSES_ITEMS_METADATA_KEY",
     "OCIProjectRequiredError",
     "OCIResponsesConfig",
     "OCIResponsesModel",
