@@ -4,10 +4,10 @@
 replicaCount: 2
 
 image:
-  repository: ""            # <region>.ocir.io/<namespace>/<repository>
-  tag: ""
+  repository: ''            # <region>.ocir.io/<namespace>/<repository>
+  tag: ''
   pullPolicy: IfNotPresent
-  pullSecret: ""            # an existing docker-registry Secret for a private repository
+  pullSecret: ''            # an existing docker-registry Secret for a private repository
 
 containerPort: 8080
 
@@ -17,16 +17,16 @@ env: {}
 
 # A bearer key can also come from a Kubernetes Secret instead of Vault.
 serverApiKey:
-  existingSecret: ""        # Secret name
+  existingSecret: ''        # Secret name
   key: server-api-key
 
 oci:
   workloadIdentity: true    # OKE workload identity: resource principal per service account
-  region: ""
+  region: ''
 
 serviceAccount:
   create: true
-  name: ""
+  name: ''
   annotations: {}
 
 service:
@@ -39,7 +39,7 @@ resources:
     cpu: 500m
     memory: 1Gi
   limits:
-    cpu: "2"
+    cpu: '2'
     memory: 4Gi
 
 autoscaling:
