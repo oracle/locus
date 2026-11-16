@@ -76,7 +76,29 @@ The `oci:` factory picks the transport from the id, top-down:
 
 `OCIChatCompletionsModel(model, *, profile=None, auth_type=None, compartment_id=None, region="us-chicago-1", config_file="~/.oci/config", base_url=None, max_tokens=4096, temperature=0.7, **kwargs)` is a subclass of `OpenAIModel`, so every `OpenAIConfig` option applies. Pass exactly one of `profile` or `auth_type`; the factory fills `profile` from `OCI_PROFILE` when neither is given. `auth_type` is `"instance_principal"` or `"resource_principal"` and then `compartment_id` is mandatory. Under `profile=`, `compartment_id` falls back to `OCI_COMPARTMENT` / `OCI_COMPARTMENT_ID`, then to the profile's `tenancy`. Region is the `region=` argument (`DEFAULT_OCI_GENAI_REGION`, `us-chicago-1`); the `oci:` factory fills it from `LOCUS_OCI_REGION`, then `OCI_REGION`, when neither `region=` nor `base_url=` is given, so `Agent(model="oci:...")` follows the environment while the class itself reads only its arguments.
 
-`OCIModel(model_id, compartment_id=None, profile_name="DEFAULT", auth_type=None, config_file, service_endpoint=None, region=None, max_tokens, temperature, profile=None, **kwargs)` takes `profile_name=` (`profile=` is an alias) and an `OCIAuthType` value: `api_key`, `security_token`, `session_token`, `instance_principal`, `resource_principal`; when `auth_type` is `None` it reads `OCI_AUTH_TYPE` and defaults to `api_key`. `OCIResponsesModel(model, *, profile, auth_type, compartment_id, project_ocid=None, region, config_file, base_url, max_output_tokens=4096, temperature, request_timeout=600.0, store=True)` lives in `locus.models.providers.oci`; `store=False` for Zero Data Retention tenancies; it raises `OCIProjectRequiredError` or `OCIResponsesStateLostError`. All three classes are importable from `locus.models`.
+`OCIModel(model_id, compartment_id=None, profile_name="DEFAULT", auth_type=None, config_file, service_endpoint=None, region=None, max_tokens, temperature, profile=None, **kwargs)` takes `profile_name=` (`profile=` is an alias) and an `OCIAuthType` value: `api_key`, `security_token`, `session_token`, `instance_principal`, `resource_principal`; when `auth_type` is `None` it reads `OCI_AUTH_TYPE` and defaults to `api_key`. `OCIResponsesModel(model, *, profile, auth_type, compartment_id, project_ocid=None, region, config_file, base_url, max_output_tokens=4096, temperature, request_timeout=600.0, store="auto", reasoning_effort=None, reasoning=None)` lives in `locus.models.providers.oci`, as do its errors `OCIProjectRequiredError`, `OCIResponsesStateLostError` and `OCIResponsesZeroDataRetentionError`. All three model classes are importable from `locus.models`.
+
+**`store`.** `True` holds the thread server-side and continues it with `previous_response_id`; `False` is stateless (`store=false` on every request, the full history each turn, `server_stateful=False`, no `provider_state`); `"auto"`, the default, starts stateful and, when the tenancy enforces Zero Data Retention (every request that carries `previous_response_id` is a 400 saying so, raised as `OCIResponsesZeroDataRetentionError`, a subclass of `OCIResponsesStateLostError` so existing handlers keep working), switches itself to the stateless path for the rest of its lifetime, warns once with a `LocusWarning` (`OCI Responses: the endpoint reported Zero Data Retention ... now sends store=false`), and the agent runtime replays the interrupted turn from the history it holds, so the run completes with the same result; `model.zdr_detected` reports the switch and the run's events carry a `CustomEvent` named `server_state_fallback`. `store=True` still raises; on a tenancy known to be ZDR pass `store=False` and skip the one stateful attempt.
+
+**Reasoning.** `reasoning={"effort": "medium", "summary": "auto"}` is the Responses-native object, sent as given, on the constructor, on `OCIResponsesConfig`, or per call through `model_kwargs`; `reasoning_effort="low"` fills only `effort` and loses to the dict when both are set; nothing is sent when both are unset. Summaries the endpoint returns surface as `ModelResponse.reasoning`. On the stateless path a reasoning control also requests `include=["reasoning.encrypted_content"]`; the reasoning items stay on the assistant message under `metadata["oci_responses_items"]` with the turn's `function_call` items and are replayed verbatim ahead of the tool result, so a tool-calling turn keeps its reasoning.
+
+**Native compaction.** `await model.compact_history(messages, *, instructions=None) -> (messages, usage)` posts the history to `/responses/compact` and returns the messages the endpoint kept plus an encrypted `compaction` item the model replays on later requests, with the call's token usage; it is meaningful only for a thread that keeps going through this transport. `ContextCompactor(native_compaction=True)` or `Agent(compaction=CompactionConfig(native=True))` hands the summary stage to it (see conversation managers below).
+
+```python
+from locus.agent import Agent
+from locus.agent.config import CompactionConfig
+from locus.models.providers.oci import (
+    OCIResponsesModel, OCIResponsesStateLostError, OCIResponsesZeroDataRetentionError,
+)
+
+model = OCIResponsesModel("openai.gpt-5.5", profile="DEFAULT", region="us-chicago-1",
+                          store="auto", reasoning={"effort": "medium", "summary": "auto"})
+agent = Agent(model=model, context_window=400_000, compaction=CompactionConfig(native=True))
+print(model.config.store, model.server_stateful, model.zdr_detected)       # auto True False
+print(issubclass(OCIResponsesZeroDataRetentionError, OCIResponsesStateLostError), agent.config.compaction.native)
+```
+
+Prints `auto True False` and `True True`; nothing is sent until the first run, so this constructs without a reachable endpoint.
 
 Authentication is the profile's shape: an API-key profile (`key_file`, `user`, `fingerprint`) signs with the key; a profile written by `oci session authenticate` carries `security_token_file` and is detected automatically by every transport. On OCI Compute, OKE or Functions drop the profile and pass `auth_type=` plus `compartment_id=` (for `OCIModel`, `OCI_AUTH_TYPE=instance_principal` in the environment does the same).
 
@@ -88,6 +110,7 @@ Authentication is the profile's shape: an API-key profile (`key_file`, `user`, `
 | `400 Unsupported OpenAI operation` | A `cohere.*` id on the V1 transport; use `OCIModel` |
 | `compartment_id is required` | Dedicated AI Cluster endpoint or `auth_type=` without `compartment_id=` |
 | `No context window known for model ...` | A log notice, harmless; pass `Agent(context_window=...)`, set `LOCUS_CONTEXT_WINDOW`, or register the model with `locus.models.metadata.register_metadata` |
+| `LocusWarning: OCI Responses: the endpoint reported Zero Data Retention ...`, or `OCIResponsesZeroDataRetentionError` | The tenancy enforces Zero Data Retention. Under the default `store="auto"` the model switched to the stateless path and the run completed; under `store=True` the run failed. Pass `store=False` on that tenancy |
 
 ### OpenAI
 
@@ -214,9 +237,9 @@ A `ConversationManager` from `locus.memory.conversation` keeps the working set i
 | `SlidingWindowManager` | `window_size=20, preserve_system=True, preserve_first_user=True, slide_step=1` |
 | `SummarizingManager` | `threshold=30, keep_recent=10, summarize_fn=None, preserve_system=True` |
 | `LLMCompactor` (`locus.memory.compactor`) | `summarize_fn=None, context_length=128_000, trigger_fraction=0.8, head_turns=2, tail_token_fraction=0.5, tool_output_ttl_turns=10` |
-| `ContextCompactor` (`locus.memory.compaction`) | `context_length, summary_model=None, trigger_fraction=0.9, reserved_tokens=None, tail_turns=6, tail_token_fraction=0.25` |
+| `ContextCompactor` (`locus.memory.compaction`) | `context_length, summary_model=None, trigger_fraction=0.9, reserved_tokens=None, tail_turns=6, tail_token_fraction=0.25, native_compaction=False` |
 
-`OCIResponsesModel` holds the history server-side, so conversation managers are skipped on that transport; checkpointing, memory and grounding still apply.
+While `OCIResponsesModel` is server-stateful (`store=True`, or `"auto"` before Zero Data Retention was detected) it holds the history server-side and conversation managers and compaction are skipped; checkpointing, memory and grounding still apply. On its stateless path they apply, and `ContextCompactor(native_compaction=True)`, or `CompactionConfig(native=True)` on the agent, hands the summary stage to a model that offers `compact_history()` instead of writing a client-side summary: the system prompt and the task message stay verbatim, the `CompactionEvent` carries `stage="native"`, the compaction call's tokens count against the run's budgets, and a failed call falls back to the client-side summary. Opt-in; off by default.
 
 ### Stores and memory managers
 
