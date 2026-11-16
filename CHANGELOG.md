@@ -607,6 +607,59 @@ policy.
 
 ### Fixed
 
+- **`Agent.run_sync()` inside a running event loop no longer hangs on MCP
+  tools connected on that loop.** The run is driven on a worker thread's own
+  loop, which cannot reach an `MCPClient` session bound to the caller's; the
+  first tool call waited forever. `run_sync` now raises a `RuntimeError`
+  naming the client and the fix (`await agent.arun(...)`), and the MCP
+  getting-started page uses the async form.
+- **A stdio MCP server starts with this process's environment.**
+  `MCPClient(server_command=...)` passed no `env`, so the `mcp` SDK started
+  the server with a stripped environment (`PATH`, `HOME`, `USER` …) and a
+  server needing `PYTHONPATH`, an OCI profile or an API key died during the
+  handshake with a bare `Connection closed`. The server now inherits
+  `os.environ` (`inherit_env=False` for the SDK's minimal one), `env=` adds
+  variables, and a server that exits during setup is reported with the last
+  lines it wrote to stderr.
+- **Explicit-completion runs carry their answer.** A run that ended through
+  `task_complete` had `TerminateEvent.final_message=None` and
+  `AgentResult.message == ""`, so `LocusMCPServer`'s `run_agent` and
+  `run_agent_stream` returned "Agent completed without response" after a
+  relayed `ask_user`. The final message is now the terminal tool's `result` /
+  `summary` argument, else the assistant text of the turn around the call.
+  The loop also tells the model once, after a reply with no tool call in
+  `completion_mode="explicit"`, that such a reply ends nothing and
+  `task_complete(summary=...)` does — before, the same context went back
+  unchanged until the budget warning, which cost a dozen iterations for a
+  one-line answer.
+- **`auth_type="api_key"` is accepted by `OCIChatCompletionsModel` and
+  `OCIResponsesModel`.** The value every other OCI auth switch in the SDK —
+  and `LOCUS_OCI_AUTH_TYPE` — takes as its default was rejected by the V1
+  transports, so the image `locus deploy` builds could not run locally with a
+  profile. `api_key` (and `security_token`) now mean the profile path:
+  `profile=` when given, else `OCI_PROFILE`, else `DEFAULT`.
+- **`Agent.run_sync()` inside a running loop keeps the caller's context
+  variables.** The worker thread ran without `contextvars.copy_context()`, so
+  the OpenTelemetry context was lost: an agent served over MCP through
+  `run_agent` filed its `invoke_agent` span in a fresh trace with no parent,
+  although `LocusMCPServer` had set the caller's trace from `_meta`. The
+  thread now runs the coroutine inside a copy of the caller's context.
+- **`oci_apm().install()` on a `MeterProvider` already in place flushes the
+  reader it adds.** OpenTelemetry's `MeterProvider.force_flush()` and
+  `shutdown()` visit only constructor-time readers, so the documented
+  `meter_provider.shutdown()` exported nothing from the reader `install()`
+  had added and the last interval's metrics were lost. `install()` now returns
+  an `OCIAPMInstallation` — still the `(tracer_provider, meter_provider)`
+  pair — whose `force_flush()` and `shutdown()` reach what it added; when it
+  joined existing providers that `shutdown()` is also registered with
+  `atexit`.
+- **`validate_spans` ignores foreign-scope spans.** With FastAPI's native
+  `POST /` or the `mcp` package's `MCP send …` spans in the same exporter the
+  checker reported "root span 'POST /' is not an invoke_agent span" and
+  "spans belong to 3 traces". When spans come from more than one
+  instrumentation scope, only the telemetry hook's (`scope=
+  "locus.hooks.telemetry"`, the default) are checked; `scope=None` checks
+  everything. `SpanRecord` records the scope.
 - **`OCIContainerInstanceBackend` connects through an OCI Bastion with the
   default `known_hosts="strict"`.** The service reports no host key for a
   port-forwarding session (`bastion_public_host_key_info` is empty), so the

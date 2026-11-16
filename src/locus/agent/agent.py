@@ -518,9 +518,16 @@ class Agent(AgentRuntimeMixin, BaseModel):
 
         Blocking wrapper around :meth:`arun`: it drives ``self.arun(...)`` on
         a fresh event loop (or a worker thread when a loop is already
-        running) and closes the model / checkpointer clients bound to that
-        loop before returning. In thread-less environments (Pyodide / WASM)
-        this cannot work — call ``await self.arun(...)`` directly there.
+        running, with the caller's context variables — the OpenTelemetry
+        context among them — carried over) and closes the model /
+        checkpointer clients bound to that loop before returning. In
+        thread-less environments (Pyodide / WASM) this cannot work — call
+        ``await self.arun(...)`` directly there.
+
+        Inside a running loop, tools from an ``MCPClient`` connected on that
+        loop cannot be reached from the worker thread's loop: the first call
+        would wait forever. ``run_sync`` raises ``RuntimeError`` for that
+        case; use ``await agent.arun(...)`` there.
 
         Args:
             prompt: User prompt to process
@@ -534,6 +541,10 @@ class Agent(AgentRuntimeMixin, BaseModel):
 
         Returns:
             AgentResult with final message and state
+
+        Raises:
+            RuntimeError: Called inside a running event loop with MCP tools
+                whose session is bound to that loop.
         """
 
         async def _run_and_close_clients() -> AgentResult:
@@ -603,17 +614,52 @@ class Agent(AgentRuntimeMixin, BaseModel):
                     pass
 
         try:
-            asyncio.get_running_loop()
+            loop = asyncio.get_running_loop()
         except RuntimeError:
             # No running loop, create a new one
             return asyncio.run(_run_and_close_clients())
         else:
-            # There's a running loop, run in a thread to avoid nesting
+            bound = self._mcp_clients_bound_to(loop)
+            if bound:
+                raise RuntimeError(
+                    "Agent.run_sync() was called inside a running event loop with MCP "
+                    f"tools whose session lives on that loop ({', '.join(bound)}). "
+                    "run_sync drives the run on a worker thread's own loop, which "
+                    "cannot reach a session bound to the caller's, so the first MCP "
+                    "tool call would wait forever. Use `await agent.arun(...)` (or "
+                    "`async for event in agent.run(...)`) here, or call run_sync "
+                    "where no loop is running and let the agent connect the server "
+                    "itself (mcp_servers=[client])."
+                )
+            # There's a running loop: run in a thread to avoid nesting. The
+            # caller's context variables go with it — a run that only
+            # happens to be driven from a thread keeps its trace parent.
             import concurrent.futures
+            import contextvars
 
+            context = contextvars.copy_context()
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(asyncio.run, _run_and_close_clients())
+                future = executor.submit(context.run, asyncio.run, _run_and_close_clients())
                 return future.result()
+
+    def _mcp_clients_bound_to(self, loop: asyncio.AbstractEventLoop) -> list[str]:
+        """Labels of the configured MCP clients whose live session runs on ``loop``.
+
+        Looks at ``mcp_servers`` and at the tools an ``MCPClient.to_locus_tools``
+        call produced (they carry their client).
+        """
+        candidates: list[Any] = list(getattr(self.config, "mcp_servers", None) or ())
+        candidates.extend(getattr(t, "_source", None) for t in self.config.tools)
+        seen: set[int] = set()
+        labels: list[str] = []
+        for client in candidates:
+            if client is None or id(client) in seen:
+                continue
+            seen.add(id(client))
+            bound_loop = getattr(client, "bound_loop", None)
+            if callable(bound_loop) and bound_loop() is loop:
+                labels.append(str(getattr(client, "label", None) or type(client).__name__))
+        return labels
 
     def invoke(
         self,

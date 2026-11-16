@@ -359,6 +359,15 @@ _EMPTY_REPLY_NOTE = (
     "answer instead."
 )
 
+#: Sent once per explicit-completion run segment after a reply with no tool
+#: call: such a reply ends nothing in that mode, and the model is otherwise not
+#: told so until the budget warning two iterations before the limit.
+_EXPLICIT_COMPLETION_NOTE = (
+    "[Explicit completion] A reply without a tool call does not end this run. "
+    "When the task is done, call task_complete(summary=<your answer>) — the "
+    "summary is the answer the caller receives. Otherwise continue with the tools."
+)
+
 #: Sent, with the tools taken away, when a reply is empty again.
 _FINAL_ANSWER_REQUEST = (
     "[Final answer requested]\n"
@@ -863,6 +872,7 @@ class AgentRuntimeMixin:
         _verifier_attempts = 0
         # Whether an empty reply has already been sent back this turn.
         _empty_sent_back = False
+        _explicit_nudged = False
         # Unfinished text tool calls sent back since the last call that ran.
         _unfinished_sent_back = 0
         # Hold a call's content chunks until we know they are not a draft the
@@ -1040,7 +1050,11 @@ class AgentRuntimeMixin:
                         )
                         break
 
-                    # All other stop reasons: hard stop
+                    # All other stop reasons: hard stop. A run ended by a
+                    # terminal tool answers with what the call carried.
+                    final = _last_assistant_content
+                    if stop_reason == "terminal_tool":
+                        final = self._terminal_tool_message(state) or final
                     yield TerminateEvent(
                         reason=stop_reason,
                         iterations_used=state.iteration,
@@ -1049,7 +1063,7 @@ class AgentRuntimeMixin:
                         cost_usd=_cost_of(state),
                         reported_cost_usd=_reported_cost_of(state),
                         total_tool_calls=len(state.tool_executions),
-                        final_message=_last_assistant_content,
+                        final_message=final,
                     )
                     break
 
@@ -1429,6 +1443,18 @@ class AgentRuntimeMixin:
                         final_message=final_content,
                     )
                     break
+
+                # In explicit-completion mode a reply with no call ends
+                # nothing, and the same context would go back to the model
+                # unchanged — the same answer then comes back, iteration after
+                # iteration, until the budget warning. Say so, once.
+                if (
+                    not response.message.tool_calls
+                    and self.config.completion_mode == "explicit"
+                    and not _explicit_nudged
+                ):
+                    _explicit_nudged = True
+                    state = state.with_message(Message.system(_EXPLICIT_COMPLETION_NOTE))
 
                 # Execute tool calls.
                 #
@@ -2082,6 +2108,7 @@ class AgentRuntimeMixin:
         _last_no_tool_calls = False
         _verifier_attempts = 0
         _empty_sent_back = False
+        _explicit_nudged = False
         _unfinished_sent_back = 0
 
         # Extract last assistant content from state
@@ -2174,6 +2201,9 @@ class AgentRuntimeMixin:
 
                 should_stop, stop_reason = state.should_terminate
                 if should_stop and stop_reason:
+                    final = _last_assistant_content
+                    if stop_reason == "terminal_tool":
+                        final = self._terminal_tool_message(state) or final
                     yield TerminateEvent(
                         reason=stop_reason,
                         iterations_used=state.iteration,
@@ -2182,7 +2212,7 @@ class AgentRuntimeMixin:
                         cost_usd=_cost_of(state),
                         reported_cost_usd=_reported_cost_of(state),
                         total_tool_calls=len(state.tool_executions),
-                        final_message=_last_assistant_content,
+                        final_message=final,
                     )
                     break
 
@@ -2309,6 +2339,9 @@ class AgentRuntimeMixin:
                     break
 
                 if not response.message.tool_calls:
+                    if self.config.completion_mode == "explicit" and not _explicit_nudged:
+                        _explicit_nudged = True
+                        state = state.with_message(Message.system(_EXPLICIT_COMPLETION_NOTE))
                     continue
 
                 # Execute tools (simplified — reuse main logic)
@@ -4174,6 +4207,30 @@ class AgentRuntimeMixin:
                     result_text = result_text[:500] + "..."
                 evidence.append(f"[{execution.tool_name}]: {result_text}")
         return evidence
+
+    @staticmethod
+    def _terminal_tool_message(state: AgentState) -> str | None:
+        """The answer of a run that ended through a terminal tool.
+
+        The call's ``result`` or ``summary`` argument when it has one
+        (``task_complete(summary=...)``), else the assistant text of the turn
+        around the call; ``None`` when there is neither. Without this the run
+        ended with no final message at all and ``AgentResult.message`` was
+        empty, the answer surviving only inside the tool result.
+        """
+        for call in state.last_tool_calls:
+            if call.name not in state.terminal_tools:
+                continue
+            for key in ("result", "summary"):
+                value = call.arguments.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value
+        for msg in reversed(state.messages):
+            if msg.role == Role.USER:
+                break
+            if msg.role == Role.ASSISTANT and msg.content and msg.content.strip():
+                return msg.content
+        return None
 
     @staticmethod
     def _build_fallback_summary(state: AgentState) -> str:

@@ -12,7 +12,7 @@ import json
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar, get_type_hints, overload
 
-from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic import BaseModel, PrivateAttr, TypeAdapter, ValidationError
 
 from locus.observability.emit import (
     EV_TOOL_SANDBOX_COMPLETED,
@@ -109,6 +109,11 @@ class Tool(BaseModel):
     sent to the model and does not change how the result is handled."""
 
     model_config = {"arbitrary_types_allowed": True}
+
+    #: What produced this tool when it was not written by hand — the
+    #: ``MCPClient`` behind a tool from an MCP server. ``Agent.run_sync`` asks
+    #: it whether its session is bound to the caller's event loop.
+    _source: Any = PrivateAttr(default=None)
 
     @property
     def func(self) -> Callable[..., Any]:

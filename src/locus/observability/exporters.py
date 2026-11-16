@@ -18,10 +18,11 @@ inside the methods, so the module imports with the ``telemetry`` extra alone.
 
 from __future__ import annotations
 
+import atexit
 import logging
 import os
 import weakref
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit
@@ -89,6 +90,120 @@ def _base_endpoint(value: str) -> str:
             f"OCI APM data upload endpoint should be the host alone, got path {parts.path!r}"
         )
     return f"https://{parts.netloc}"
+
+
+# A tuple subclass cannot declare a non-empty ``__slots__``, and the instance
+# dict is where the bookkeeping below lives: the pair stays a pair.
+class OCIAPMInstallation(tuple[Any, Any]):  # noqa: SLOT001
+    """What one :meth:`OCIAPMExport.install` call set up.
+
+    A ``(tracer_provider, meter_provider)`` pair — it unpacks as before —
+    that also knows what the call created, so :meth:`force_flush` and
+    :meth:`shutdown` reach it. That matters for a ``MeterProvider`` that was
+    already in place: OpenTelemetry's ``MeterProvider.force_flush()`` and
+    ``shutdown()`` visit only the readers given at construction, so the
+    reader ``install()`` adds to an existing provider would otherwise never
+    export its last interval. When something was added to a provider already
+    in place, :meth:`shutdown` is also registered with :mod:`atexit`, so the
+    exit flush happens without any user code.
+    """
+
+    _span_processor: Any | None
+    _metric_reader: Any | None
+    _owns_tracer_provider: bool
+    _owns_meter_provider: bool
+    _atexit: Callable[[], None] | None
+    _shut: bool
+
+    def __new__(
+        cls,
+        tracer_provider: Any,
+        meter_provider: Any | None,
+        *,
+        span_processor: Any | None = None,
+        metric_reader: Any | None = None,
+        owns_tracer_provider: bool = False,
+        owns_meter_provider: bool = False,
+    ) -> OCIAPMInstallation:
+        self = super().__new__(cls, (tracer_provider, meter_provider))
+        self._span_processor = span_processor
+        self._metric_reader = metric_reader
+        self._owns_tracer_provider = owns_tracer_provider
+        self._owns_meter_provider = owns_meter_provider
+        self._atexit = None
+        self._shut = False
+        return self
+
+    @property
+    def tracer_provider(self) -> Any:
+        """The ``TracerProvider`` the export goes through."""
+        return self[0]
+
+    @property
+    def meter_provider(self) -> Any | None:
+        """The ``MeterProvider`` the export goes through; ``None`` with ``metrics=False``."""
+        return self[1]
+
+    @property
+    def added_to_existing_providers(self) -> bool:
+        """Whether the call joined providers already in place rather than creating them."""
+        return (self._span_processor is not None and not self._owns_tracer_provider) or (
+            self._metric_reader is not None and not self._owns_meter_provider
+        )
+
+    def force_flush(self, timeout_millis: float = 10_000) -> bool:
+        """Export what the processor and reader of this call hold now.
+
+        Works on them directly, so the reader added to an existing
+        ``MeterProvider`` — which that provider's own ``force_flush()``
+        skips — exports too. ``True`` when every flush reported success.
+        """
+        ok = True
+        if self._span_processor is not None:
+            ok = bool(self._span_processor.force_flush(int(timeout_millis))) and ok
+        if self._metric_reader is not None:
+            flush = getattr(self._metric_reader, "force_flush", None)
+            if callable(flush):
+                ok = bool(flush(timeout_millis=timeout_millis)) and ok
+            else:
+                self._metric_reader.collect(timeout_millis=timeout_millis)
+        return ok
+
+    def shutdown(self, timeout_millis: float = 30_000) -> None:
+        """Flush and stop what this call set up; safe to call more than once.
+
+        Providers created by the call are shut down (their ``shutdown()``
+        covers the processor and reader they were built with). On providers
+        that were already in place, the metric reader the call added is shut
+        down here — its final collection exports the last interval — and the
+        span processor it added is flushed and left to that provider's own
+        ``shutdown()``, which does visit added processors.
+        """
+        if self._shut:
+            return
+        self._shut = True
+        if self._atexit is not None:
+            atexit.unregister(self._atexit)
+            self._atexit = None
+        if self._owns_tracer_provider:
+            self[0].shutdown()
+        elif self._span_processor is not None:
+            self._span_processor.force_flush(int(timeout_millis))
+        if self._owns_meter_provider and self[1] is not None:
+            self[1].shutdown(timeout_millis=timeout_millis)
+        elif self._metric_reader is not None:
+            self._metric_reader.shutdown(timeout_millis=timeout_millis)
+
+    def register_atexit(self) -> None:
+        """Register :meth:`shutdown` with :mod:`atexit`; ``shutdown()`` unregisters it.
+
+        :meth:`OCIAPMExport.install` does this when it added to providers
+        already in place. Harmless to call again: one registration is kept.
+        """
+        if self._atexit is None and not self._shut:
+            handler = self.shutdown
+            self._atexit = handler
+            atexit.register(handler)
 
 
 @dataclass(frozen=True)
@@ -165,7 +280,7 @@ class OCIAPMExport:
         metrics: bool = True,
         batch: bool = True,
         force: bool = False,
-    ) -> tuple[Any, Any | None]:
+    ) -> OCIAPMInstallation:
         """Export to the domain through the global providers.
 
         With no global ``TracerProvider`` set yet, one is created with a
@@ -194,10 +309,15 @@ class OCIAPMExport:
                 tracer provider takes a span processor.
 
         Returns:
-            The ``(TracerProvider, MeterProvider | None)`` the export goes
-            through — the global providers in every case but ``force``.
-            Call ``shutdown()`` on the ones you own before the process exits
-            so the last batch is flushed.
+            An :class:`OCIAPMInstallation`: the ``(TracerProvider,
+            MeterProvider | None)`` the export goes through — the global
+            providers in every case but ``force`` — with ``force_flush()``
+            and ``shutdown()`` that reach what this call added. Call its
+            ``shutdown()`` before the process exits so the last batch and the
+            last metrics interval are exported; when the call added to
+            providers already in place, that ``shutdown()`` is also registered
+            with :mod:`atexit`, since a ``MeterProvider`` does not flush a
+            reader added after its construction on its own.
 
         Raises:
             RuntimeError: A global provider is set that cannot take this
@@ -214,35 +334,45 @@ class OCIAPMExport:
             attributes.update(resource_attributes)
         resource = Resource.create(attributes)
 
+        span_processor: Any | None = None
+        owns_tracer_provider = False
         tracer_provider = _global_tracer_provider(otel_trace)
         if tracer_provider is None:
+            span_processor = self.span_processor(batch=batch)
             tracer_provider = TracerProvider(resource=resource)
-            tracer_provider.add_span_processor(self.span_processor(batch=batch))
+            tracer_provider.add_span_processor(span_processor)
             _mark_installed(tracer_provider, self.traces_endpoint)
             otel_trace.set_tracer_provider(tracer_provider)
+            owns_tracer_provider = True
         elif not _is_installed(tracer_provider, self.traces_endpoint):
             if not hasattr(tracer_provider, "add_span_processor"):
                 raise RuntimeError(
                     f"the global TracerProvider ({type(tracer_provider).__name__}) takes no "
                     "span processor; add the exporter from span_exporter() to it yourself"
                 )
-            tracer_provider.add_span_processor(self.span_processor(batch=batch))
+            span_processor = self.span_processor(batch=batch)
+            tracer_provider.add_span_processor(span_processor)
             _mark_installed(tracer_provider, self.traces_endpoint)
 
         meter_provider: Any | None = None
+        metric_reader: Any | None = None
+        owns_meter_provider = False
         if metrics:
             from opentelemetry.sdk.metrics import MeterProvider  # noqa: PLC0415
 
             meter_provider = _global_meter_provider(otel_metrics)
             if meter_provider is None:
-                meter_provider = MeterProvider(
-                    resource=resource, metric_readers=[self.metric_reader()]
-                )
+                metric_reader = self.metric_reader()
+                meter_provider = MeterProvider(resource=resource, metric_readers=[metric_reader])
                 _mark_installed(meter_provider, self.metrics_endpoint)
                 otel_metrics.set_meter_provider(meter_provider)
+                owns_meter_provider = True
             elif not _is_installed(meter_provider, self.metrics_endpoint):
                 if hasattr(meter_provider, "add_metric_reader"):
-                    meter_provider.add_metric_reader(self.metric_reader())
+                    # The provider's own force_flush() / shutdown() skip a
+                    # reader added here; the installation's reach it.
+                    metric_reader = self.metric_reader()
+                    meter_provider.add_metric_reader(metric_reader)
                     _mark_installed(meter_provider, self.metrics_endpoint)
                 elif force:
                     _logger.warning(
@@ -250,17 +380,29 @@ class OCIAPMExport:
                         "MeterProvider returned exports to the domain but is not the global one",
                         type(meter_provider).__name__,
                     )
+                    metric_reader = self.metric_reader()
                     meter_provider = MeterProvider(
-                        resource=resource, metric_readers=[self.metric_reader()]
+                        resource=resource, metric_readers=[metric_reader]
                     )
                     _mark_installed(meter_provider, self.metrics_endpoint)
+                    owns_meter_provider = True
                 else:
                     raise RuntimeError(
                         f"the global MeterProvider ({type(meter_provider).__name__}) takes no "
                         "metric reader after construction; pass force=True for a provider of "
                         "this domain's own (not global), or metrics=False"
                     )
-        return tracer_provider, meter_provider
+        installation = OCIAPMInstallation(
+            tracer_provider,
+            meter_provider,
+            span_processor=span_processor,
+            metric_reader=metric_reader,
+            owns_tracer_provider=owns_tracer_provider,
+            owns_meter_provider=owns_meter_provider,
+        )
+        if installation.added_to_existing_providers:
+            installation.register_atexit()
+        return installation
 
 
 def oci_apm(
@@ -291,12 +433,10 @@ def oci_apm(
 
         from locus.observability.exporters import oci_apm
 
-        tracer_provider, meter_provider = oci_apm().install(
-            service_name="support-agent"
-        )
+        apm = oci_apm().install(service_name="support-agent")
         agent = Agent(model="oci:openai.gpt-4.1", hooks=[TelemetryHook()])
         ...
-        tracer_provider.shutdown()
+        apm.shutdown()  # flushes the last batch and the last metrics interval
     """
     endpoint = data_upload_endpoint or os.environ.get(ENV_OCI_APM_ENDPOINT)
     key = private_data_key or os.environ.get(ENV_OCI_APM_PRIVATE_DATA_KEY)
@@ -325,5 +465,6 @@ __all__ = [
     "ENV_OCI_APM_ENDPOINT",
     "ENV_OCI_APM_PRIVATE_DATA_KEY",
     "OCIAPMExport",
+    "OCIAPMInstallation",
     "oci_apm",
 ]

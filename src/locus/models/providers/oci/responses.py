@@ -16,9 +16,10 @@ reflexion, GSAR, grounding, tool hooks, idempotency, checkpointing,
 streaming, structured output, termination conditions — works
 identically to the chat/completions path.
 
-Auth mirrors :class:`OCIChatCompletionsModel`: API key via ``profile=``, or
-``auth_type="instance_principal"|"resource_principal"`` for workload
-identity. Reuses the existing httpx signer (``OCIRequestSigner``).
+Auth mirrors :class:`OCIChatCompletionsModel`: API key via ``profile=`` (or
+``auth_type="api_key"``, the same path named the way ``LOCUS_OCI_AUTH_TYPE``
+names it), or ``auth_type="instance_principal"|"resource_principal"`` for
+workload identity. Reuses the existing httpx signer (``OCIRequestSigner``).
 """
 
 from __future__ import annotations
@@ -53,6 +54,7 @@ from locus.models.providers.oci.openai_compat import (
     _load_profile_config,
     _refresh_callable_for,
     build_oci_openai_base_url,
+    resolve_profile_auth,
 )
 
 
@@ -234,12 +236,16 @@ class OCIResponsesModel(BaseModel):
             model: OCI model identifier (e.g. ``openai.gpt-5.5-pro``).
             profile: OCI config profile name in ``config_file``.
                 Mutually exclusive with ``auth_type``.
-            auth_type: ``"instance_principal"`` or ``"resource_principal"``.
-                Mutually exclusive with ``profile``. Requires
-                ``compartment_id``.
+            auth_type: ``"instance_principal"``, ``"resource_principal"`` or
+                ``"oke_workload_identity"``: a principal, mutually exclusive
+                with ``profile`` and requiring ``compartment_id``. Or
+                ``"api_key"`` (``"security_token"``), the profile path by
+                another name: ``profile=`` is used, else the ``OCI_PROFILE``
+                profile, else ``DEFAULT``.
             compartment_id: OCI compartment OCID, sent as
                 ``opc-compartment-id``. Auto-derived from the profile's
-                tenancy under ``profile=``. Required under ``auth_type=``.
+                tenancy under ``profile=``. Required under a principal
+                ``auth_type=``.
             project_ocid: Optional GenAI Project OCID. Locus does **not**
                 require this — leave unset for the standard path.
                 ``OCIProjectRequiredError`` is raised at request time if
@@ -285,6 +291,7 @@ class OCIResponsesModel(BaseModel):
                 ``auth_type`` is invalid, or if ``auth_type`` is set
                 without ``compartment_id``.
         """
+        profile, auth_type = resolve_profile_auth(profile, auth_type)
         modes_set = sum(x is not None for x in (profile, auth_type))
         if modes_set != 1:
             msg = "specify exactly one of profile=, auth_type="

@@ -58,7 +58,11 @@ print(agent.run_sync("hi").message)
 session-token (`security_token_file`) authentication — V1 picks the
 right signer based on the profile shape. The compartment
 header that OCI requires for IAM auth is auto-derived from the
-profile's `tenancy` field, so you don't pass it.
+profile's `tenancy` field, so you don't pass it. `auth_type="api_key"`
+(or `"security_token"`) names the same path the way `LOCUS_OCI_AUTH_TYPE`
+does: the model uses `profile=` when given, else the `OCI_PROFILE`
+profile, else `DEFAULT` — so a deployment image whose server reads
+`LOCUS_OCI_AUTH_TYPE` runs locally with a profile mounted.
 
 ### On OCI compute / OKE / Functions (workload identity)
 

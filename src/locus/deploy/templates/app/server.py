@@ -2,7 +2,8 @@
 
 Environment the deployment provides (see locus-deploy.yaml and the Terraform
 variables): OCI_COMPARTMENT_ID and OCI_REGION always; LOCUS_OCI_AUTH_TYPE names
-the principal the platform gives the container; LOCUS_SERVER_API_KEY arrives
+the principal the platform gives the container (``api_key`` with OCI_PROFILE and
+a mounted ``~/.oci`` runs the image locally); LOCUS_SERVER_API_KEY arrives
 through OCI Vault when server_api_key_secret_id is set. The server refuses to
 start without that key unless LOCUS_SERVER_ALLOW_UNAUTHENTICATED=1 says an
 unauthenticated agent is intended (allow_unauthenticated in the Terraform

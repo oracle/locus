@@ -703,7 +703,9 @@ class TestMCPClient:
         mcp_pkg = types.ModuleType("mcp")
 
         class _StdioParams:
-            def __init__(self, command: str, args: list[str]) -> None:
+            def __init__(
+                self, command: str, args: list[str], env: dict[str, str] | None = None
+            ) -> None:
                 pass
 
         mcp_pkg.StdioServerParameters = _StdioParams
