@@ -1189,6 +1189,10 @@ class Agent(AgentRuntimeMixin, BaseModel):
                     out_events.extend(rc.drain())
             if folded is None:
                 folded = ToolResult(tool_call_id=dangling.id, name=dangling.name, content=response)
+            # The call is answered: the thread no longer waits on its hold.
+            from locus.control.holds import without_hold  # noqa: PLC0415
+
+            state = without_hold(state, dangling.id)
             state = state.with_message(Message.tool(folded))
         else:
             state = state.with_message(Message.system(f"[User Response] {response}"))

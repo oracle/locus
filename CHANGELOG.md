@@ -8,6 +8,38 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **Database-backed approval stores.** `PostgresApprovals`, `RedisApprovals`
+  and `OracleApprovals` implement `ApprovalStore` with the semantics of the
+  in-memory store (one-use consumption, approver rules, quorums, delegations)
+  over one row or key per held call, decided under the database's own lock, so
+  replicas that share the store never both redeem one approval. They follow the
+  connection conventions of the matching checkpointer backend and create their
+  table on first use only when it is missing. Each store owns one event loop on
+  a background thread; the `ApprovalStore` methods block on it and `asubmit` /
+  `aget` / `adecide` / `aconsume` / `apending` await it. Every store has a
+  password-free `spec` (`file://…`, `postgresql://…`, `redis://…`,
+  `oracle://…`) and `approval_store(spec)` opens one; a bare database scheme
+  reads `POSTGRES_*`, `REDIS_URL` or `ORACLE_*` from the environment.
+- **Pending holds in the checkpoint.** When a gated tool holds a call in
+  interrupt mode during a run with a checkpointer, the hold (approval id, tool,
+  action, asset, principal, reason, arguments, approvers so far, context, store
+  spec) is written into the thread's checkpoint under
+  `state.metadata["_locus_pending_holds"]`. `pending_holds(checkpointer,
+  thread_id)` reads it back in another process, `PendingHold.state(store)`
+  re-checks it, and the hold leaves the checkpoint when the call is answered.
+  Checkpoints written before this carry no holds and resume as before. The
+  gate's interrupt metadata gains a `store` key.
+- **`locus approvals` against any store.** `--store` takes a spec (or
+  `LOCUS_APPROVALS_STORE`), a bare path still means a `FileApprovals` file,
+  `--by` falls back to `LOCUS_APPROVER`, and `approve` / `reject` take
+  `--reason`, recorded on the decision. `ApprovalStore.decide()` accepts
+  `reason=""` for the same purpose.
+- Notebook 73 (support account gate) now ends with the hold parked in a
+  file-backed store, approved from another process through `locus approvals`,
+  and performed by a fresh agent resuming the thread.
+
 ### Removed
 
 - **The `locus-sdk-security` package.** The security-domain tooling (red-team
