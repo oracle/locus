@@ -5,7 +5,7 @@ record the decision either way.
 
 `locus.control` is the domain-neutral surface, and the import path to use.
 Older releases shipped these under `locus.security`; that path still resolves,
-with a deprecation warning, until a future major release removes it.
+with a deprecation warning, until 6.0 removes it.
 
 For the concepts, start with [The control layer](../concepts/control-layer.md)
 and [Writing a policy that holds](../concepts/policy-authoring.md).
