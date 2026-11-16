@@ -31,6 +31,10 @@ allocations.
   yields that event, so the agent path does not record it.
 - Read the per-run history buffer after the fact (replay semantics for
   late subscribers — i.e. reconstruct the ticket timeline after the run).
+- The same ticket reply as OpenTelemetry spans: TelemetryHook names them per
+  the GenAI semantic conventions (invoke_agent, chat, execute_tool) with the
+  gen_ai.* attributes, caught here by the in-memory exporter — no backend,
+  no keys — and checked against the conventions.
 
 Run it:
     # Default: OCI GenAI if ~/.oci/config has a usable profile, else the bundled mock model
@@ -43,6 +47,7 @@ Run it:
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 from config import get_model
 
@@ -148,10 +153,85 @@ async def part3_history_replay() -> None:
         print(f"  ... +{len(replayed) - 10} more")
 
 
+# Part 4: the same reply as OpenTelemetry spans. TelemetryHook files the run
+# under the GenAI semantic conventions — one invoke_agent span, a chat span per
+# model call, an execute_tool span per tool call, gen_ai.* attributes — and an
+# in-memory exporter stands in for the backend. Swapping it for an OTLP
+# exporter (or ``oci_apm(...).span_processor()``) is the only change a
+# deployment makes.
+
+
+def _span_tree(spans: list[Any]) -> list[str]:
+    """Render finished spans as an indented tree, parents before children."""
+    ids = {s.context.span_id for s in spans}
+    children: dict[int | None, list[Any]] = {}
+    for s in spans:
+        parent = s.parent.span_id if s.parent is not None and s.parent.span_id in ids else None
+        children.setdefault(parent, []).append(s)
+    shown = (
+        "gen_ai.operation.name",
+        "gen_ai.tool.name",
+        "gen_ai.usage.input_tokens",
+        "gen_ai.usage.output_tokens",
+    )
+    lines: list[str] = []
+
+    def walk(parent: int | None, depth: int) -> None:
+        for s in sorted(children.get(parent, []), key=lambda x: x.start_time):
+            attrs = s.attributes or {}
+            detail = ", ".join(f"{k}={attrs[k]!r}" for k in shown if k in attrs)
+            lines.append(f"{'  ' * depth}{s.name}  [{s.kind.name}]  {detail}".rstrip())
+            walk(s.context.span_id, depth + 1)
+
+    walk(None, 0)
+    return lines
+
+
+async def part4_semconv_spans() -> None:
+    """TelemetryHook + in-memory exporter: the run as GenAI-convention spans."""
+    print("\n--- Part 4: OpenTelemetry spans under the GenAI semantic conventions ---")
+    try:
+        from opentelemetry import trace
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+    except ImportError:
+        print("OpenTelemetry SDK not installed: pip install 'locus-sdk[telemetry]' for this part")
+        return
+
+    from locus.hooks.builtin import TelemetryHook
+    from locus.observability.semconv import validate_spans
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    trace.set_tracer_provider(provider)
+
+    # The agent lends the hook its model and tools, so gen_ai.request.model,
+    # gen_ai.provider.name and gen_ai.tool.description need no configuration.
+    agent = Agent(
+        model=get_model(),
+        tools=[lookup_order],
+        hooks=[TelemetryHook()],
+        name="support-desk",
+        max_iterations=3,
+    )
+    result = await agent.arun("Look up order CS-1042 and reply with its status in one line.")
+    print("agent reply:", result.message[:120])
+
+    spans = list(exporter.get_finished_spans())
+    print(f"spans recorded ({len(spans)}):")
+    for line in _span_tree(spans):
+        print(f"  {line}")
+    problems = validate_spans(spans)
+    print("GenAI conventions check:", "ok" if not problems else "; ".join(problems))
+
+
 async def main() -> None:
     await part1_no_telemetry()
     await part2_subscribe()
     await part3_history_replay()
+    await part4_semconv_spans()
 
 
 if __name__ == "__main__":

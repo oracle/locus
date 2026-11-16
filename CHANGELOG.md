@@ -43,6 +43,49 @@ policy.
   Mermaid's specials). The checkpointers page has the per-backend table;
   notebook 50 forks a thread on the in-memory checkpointer.
   (`locus.memory.time_travel`; #454)
+- **`SandboxBackend`: the harness workspace as a documented protocol.** Every
+  harness backend now implements it over `WorkspaceBackend`: a lifecycle
+  (`state`, `start()`, `stop()`, `close()`, each idempotent), declared
+  `ResourceLimits` (a `max_exec_s` is enforced by clamping every `exec`
+  timeout), and `add_exec_hook()`, which hands an `ExecRecord` of every
+  command the backend runs to whoever holds it — after the command, so a
+  hook that raises is logged and the result still reaches the caller.
+  `SandboxMixin` gives a backend of your own all of it by overriding
+  `_start`, `_stop` and `_destroy`.
+  `locus.harness.testing.assert_backend_conformance(factory)`
+  is the conformance kit: the file, shell, deadline, background-command and
+  protocol checks the tools assume, run on a backend and reported together;
+  `run_conformance(backend)` does the same without closing it.
+- **`SSHSandboxBackend`.** Any host with `sshd` as a workspace (the `ssh`
+  extra, `paramiko`): commands run under a watchdog on the host so a deadline
+  kills the process group where it runs, both streams come back in order,
+  files move over SFTP with a `cat` fallback that checks the byte count,
+  host keys are checked against `known_hosts` or a pinned `host_key=` (a key
+  accepted under `known_hosts="accept-unknown"` stays in memory; the user's
+  file is never written), and `via=SSHJump(...)` connects through a bastion.
+- **`OCIContainerInstanceBackend`.** An OCI Container Instance as the
+  Oracle-native remote sandbox (the `oci-container` extra): `create()`
+  provisions the instance from an image with `sshd` or a package manager,
+  bootstraps `sshd` with a key pair generated for the backend, reads the
+  container's host keys from its log and connects with them pinned, directly
+  or through an OCI Bastion port-forwarding session for a private subnet
+  (`bastion_session_ttl=` sets its lifetime; a restart past it makes a new
+  one). A container or bastion that reports no host key is refused unless
+  `known_hosts="accept-unknown"` is passed. `stop()`/`start()` restart the
+  instance and `close()` deletes it and the session.
+- **`E2BBackend` and `DaytonaBackend`.** Thin adapters over the two hosted
+  sandbox services' Python clients (the `e2b` and `daytona` extras), checked
+  with stand-ins; the live tests run when the service's API key is set.
+- **`SandboxSpec` and `open_sandbox()`.** A sandbox named in configuration:
+  `backend="local" | "ssh" | "oci-container" | "oci-sandbox" | "openshell"
+  | "e2b" | "daytona" | "memory"` plus `root`, `env`, `limits`, a
+  `WarmPoolHint` and the backend's `options`; `from_mapping()` reads it from
+  a parsed YAML or JSON document and refuses unknown keys;
+  `register_backend()` adds a name. `SandboxPool` / `open_pool(spec)` keep
+  `warm_pool.ready` sandboxes created ahead of need, and the hint's `name`
+  reaches a service-side pool (OCI GenAI Sandbox warm pools). The new
+  [sandbox backends](docs/harness/backends.md) page documents the protocol,
+  the kit and each backend's prerequisites.
 - **Durability modes.** `Agent(durability=...)`, and `durability=` on
   `run`, `arun` and `run_sync`, say when a run writes its iteration
   checkpoints: `"sync"` (the default, and what every earlier release did)
@@ -217,6 +260,41 @@ policy.
   Gateway requests. New extras: `deploy` (PyYAML) and `functions` (the Fn
   FDK). The guide is [Deploy to OCI](docs/how-to/deploy-oci.md), with sizing
   and cost notes and a deploy-on-tag workflow.
+- **OpenTelemetry GenAI semantic conventions.** `TelemetryHook` now files a
+  run as one `invoke_agent` span, each model call as a `chat` span (CLIENT)
+  and each tool call as an `execute_tool` span, with the `gen_ai.*`
+  attributes (`gen_ai.operation.name`, `gen_ai.provider.name`,
+  `gen_ai.request.model`, `gen_ai.usage.input_tokens` / `output_tokens`,
+  `gen_ai.response.finish_reasons`, `gen_ai.response.id`,
+  `gen_ai.tool.name`, `gen_ai.tool.call.id`, `gen_ai.conversation.id`,
+  `error.type`) and the conventions' metrics
+  (`gen_ai.client.inference.usage.input_tokens` / `output_tokens`,
+  `gen_ai.client.inference.duration`, `gen_ai.invoke_agent.duration` /
+  `inference_calls` / `tool_calls`, `gen_ai.execute_tool.duration`, in
+  seconds with the recommended buckets). The agent lends the hook its model
+  and tools, so the model, provider and tool descriptions need no
+  configuration; `model=`, `provider_name=` and `agent_name=` override.
+  `TelemetryHook(semconv="locus-legacy")` keeps the previous
+  `agent.invocation` / `agent.iteration.<n>` / `tool.<name>` spans and
+  `locus.*` metrics. `locus.observability.semconv` holds the names and a
+  `validate_spans()` check for recorded traces.
+- **W3C trace context across A2A.** `A2AClient` sends `traceparent` (the
+  agent's tool span when called from a tool) on every request over every
+  binding — JSON-RPC, HTTP+JSON, gRPC metadata — and `A2AServer` runs a
+  served request under the caller's trace on each of them, so a
+  multi-agent call is one trace end to end. `locus.observability.propagation`
+  (`inject_trace_headers`, `trace_scope`, `current_traceparent`) does the
+  same for any other carrier; MCP `_meta` already carried it.
+- **OCI Application Performance Monitoring exporter.**
+  `locus.observability.exporters.oci_apm(endpoint, private_data_key)` builds
+  the OTLP/HTTP span and metric exporters for an APM domain (data upload
+  endpoint, `dataKey` authorization) and `install()` sets the global
+  providers, or adds the domain's span processor and metric reader to the
+  providers an application has already set (once per domain);
+  `examples/observability/` carries an importable APM dashboard for agent
+  runs, tool latency and token spend. The observability page gains an
+  "Export" section with recipes for OCI APM and three open-source backends,
+  and the SSE catalogue maps every bus event to the span it belongs to.
 - **`OracleAuditTrail`.** The audit trail on an Oracle AI Database immutable
   table (`CREATE IMMUTABLE TABLE … NO DROP UNTIL n DAYS IDLE NO DELETE UNTIL
   n DAYS AFTER INSERT`), or a blockchain table with `table_kind="blockchain"`.
@@ -452,6 +530,19 @@ policy.
   whatever its size and returns its key.
 
 ### Changed
+
+- **`TelemetryHook` default span and metric names.** The GenAI conventions
+  are the default; dashboards and alerts built on `agent.invocation`,
+  `tool.<name>` or the `locus.*` metrics keep working with
+  `TelemetryHook(semconv="locus-legacy")`. Tool spans are now keyed by
+  `tool_call_id`, so parallel calls to one tool each get their own span.
+  The hook keeps its state per run: concurrent `arun()` calls on one
+  `Agent` are one trace each, a sub-agent run from inside a tool files
+  under that call's `execute_tool` span, a hook-requested model retry gives
+  every attempt its own `chat` span, and a run that fails closes the model,
+  tool and iteration spans it left open with `error.type`.
+  `gen_ai.token.modality` on the token counters is `unknown` unless the
+  provider's usage breaks the count down by modality.
 
 - **`OCIResponsesModel` defaults to `store="auto"`.** Before, the default was
   `store=True` and the first tool-call continuation on a ZDR tenancy failed the

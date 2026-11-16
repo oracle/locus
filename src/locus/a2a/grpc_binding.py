@@ -45,6 +45,7 @@ from locus.a2a.protocol_v1 import (
 from locus.a2a.spec import INTERNAL_ERROR, METHOD_NOT_FOUND, VERSION_NOT_SUPPORTED
 from locus.a2a.spec_v1 import A2A_GRPC_SERVICE, A2A_V1_PROTOCOL_VERSION, BINDING_GRPC
 from locus.a2a.transports import A2AClientError, A2ATransportUnavailableError, ClientTransport
+from locus.observability.propagation import inject_trace_headers, trace_scope
 
 
 if TYPE_CHECKING:
@@ -195,9 +196,14 @@ class A2AGrpcService:
 
     # ----- plumbing --------------------------------------------------------
 
+    @staticmethod
+    def _metadata(context: Any) -> dict[str, Any]:
+        """The call's invocation metadata, keys lowered (gRPC sends them so)."""
+        return {key.lower(): value for key, value in (context.invocation_metadata() or ())}
+
     async def _guard(self, context: Any) -> None:
         grpc = _require_grpc()
-        metadata = {key.lower(): value for key, value in (context.invocation_metadata() or ())}
+        metadata = self._metadata(context)
         expected = self._server.api_key
         if expected is not None:
             presented = str(metadata.get("authorization", ""))
@@ -228,7 +234,9 @@ class A2AGrpcService:
             await self._guard(context)
             params = self._messages.to_dict(request)
             try:
-                result = await self._server.handle_v1(method, params)
+                # A ``traceparent`` metadata entry puts the run under the caller's trace.
+                with trace_scope(self._metadata(context)):
+                    result = await self._server.handle_v1(method, params)
             except A2AV1ProtocolError as e:
                 await self._abort(context, e.code, e.message)
                 raise  # pragma: no cover - abort raises
@@ -247,8 +255,9 @@ class A2AGrpcService:
             await self._guard(context)
             params = self._messages.to_dict(request)
             try:
-                async for frame in self._server.handle_v1_stream(method, params):
-                    yield self._messages.from_dict(frame, response_name)
+                with trace_scope(self._metadata(context)):
+                    async for frame in self._server.handle_v1_stream(method, params):
+                        yield self._messages.from_dict(frame, response_name)
             except A2AV1ProtocolError as e:
                 await self._abort(context, e.code, e.message)
             except Exception:
@@ -348,6 +357,8 @@ class GrpcClientTransport(ClientTransport):
         metadata = [(A2A_VERSION_HEADER.lower(), A2A_V1_PROTOCOL_VERSION)]
         if self._api_key:
             metadata.append(("authorization", f"Bearer {self._api_key}"))
+        # The trace context travels as metadata; gRPC keys are lower-case.
+        metadata.extend((key.lower(), value) for key, value in inject_trace_headers().items())
         return metadata
 
     def channel(self) -> Any:

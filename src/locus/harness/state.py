@@ -38,6 +38,7 @@ from locus.harness.backend import (
     take_window,
 )
 from locus.harness.local import glob_match
+from locus.harness.sandbox import SandboxMixin
 
 
 __all__ = ["MemoryBackend"]
@@ -59,7 +60,7 @@ def _noise(path: str, top: str) -> bool:
     return any(part in SKIP_DIRS for part in rel.split("/")[:-1])
 
 
-class MemoryBackend(StateBackend):
+class MemoryBackend(SandboxMixin, StateBackend):
     """Files in memory, rooted at ``/``; no shell.
 
     Args:
