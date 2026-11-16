@@ -91,12 +91,21 @@ way after the approval, resumes the thread and performs the call:
 python examples/notebook_73_support_account_gate.py
 ```
 
-There is no model to configure: Part 1 stands in for the agent by building the
-two proposed `Action` values itself, Part 2 drives the agent with a scripted
-test double, and the only side effect is a write to an in-memory dict, so it
-runs offline with no provider, credentials or network. The approval store and
+Part 1 stands in for the agent by building the two proposed `Action` values
+itself and needs no model. Part 2 drives an agent, and follows the series
+convention in `examples/config.py`: with no provider configured the model is a
+scripted test double, so the whole script runs offline with no credentials or
+network; set `LOCUS_MODEL_PROVIDER` (and `LOCUS_MODEL_ID`) and the agent that
+proposes the upgrade, and the fresh one that resumes the thread, run on the
+configured model, which the output names:
+
+```bash
+LOCUS_MODEL_PROVIDER=oci LOCUS_MODEL_ID=openai.gpt-4.1 python examples/notebook_73_support_account_gate.py
+```
+
+The only side effect is a write to an in-memory dict. The approval store and
 the checkpoints live in a temporary directory, and the "other process" is the
-`locus` command run as a subprocess. `LOCUS_MODEL_PROVIDER` has no effect here.
+`locus` command run as a subprocess.
 
 ## Output
 

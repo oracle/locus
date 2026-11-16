@@ -54,9 +54,14 @@ upgrade exactly once::
                                             ──> the upgrade runs once
 
 Run it:
-    # Fully offline — no network, no credentials, no model. The "perform"
-    # is a local stub that mutates an in-memory account dict; the agent's
-    # model is a scripted test double.
+    # Offline — no network, no credentials. The "perform" is a local stub
+    # that mutates an in-memory account dict, and with no provider
+    # configured the agent's model is a scripted test double.
+    python examples/notebook_73_support_account_gate.py
+
+    # The series convention (examples/config.py): with a provider set, the
+    # agent in Part 2 runs on the configured model and the run names it.
+    export LOCUS_MODEL_PROVIDER=oci LOCUS_MODEL_ID=openai.gpt-4.1
     python examples/notebook_73_support_account_gate.py
 """
 
@@ -66,6 +71,9 @@ import asyncio
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
+
+from config import get_model, resolved_provider
 
 from locus.agent import Agent
 from locus.control import (
@@ -80,6 +88,7 @@ from locus.control import (
 )
 from locus.core.events import InterruptEvent, TerminateEvent
 from locus.memory.backends.file import FileCheckpointer
+from locus.models.metadata import model_id_of
 from locus.testing import ScriptedModel, text, tool_call
 from locus.tools.decorator import tool
 
@@ -225,7 +234,15 @@ def _as_action(name: str, arguments: dict[str, object]) -> Action:
     )
 
 
-def _support_agent(model: ScriptedModel, root: Path, policy: ControlPolicy) -> Agent:
+OFFLINE = resolved_provider() == "mock"
+
+
+def _agent_model(scripted: ScriptedModel) -> Any:
+    """The series convention: the scripted double offline, else the configured model."""
+    return scripted if OFFLINE else get_model()
+
+
+def _support_agent(model: Any, root: Path, policy: ControlPolicy) -> Agent:
     """An agent process: rebuilt from the same policy, store file and checkpoint dir."""
     gated = gate_tool(
         upgrade_plan_and_credit,
@@ -238,6 +255,11 @@ def _support_agent(model: ScriptedModel, root: Path, policy: ControlPolicy) -> A
     return Agent(
         model=model,
         tools=[gated],
+        system_prompt=(
+            "You are a customer-support agent working tickets. Resolve a ticket by "
+            "calling upgrade_plan_and_credit with the account, plan and credit it asks "
+            "for; when the tool has run, confirm in one sentence."
+        ),
         checkpointer=FileCheckpointer(root / "checkpoints"),
         reflexion=False,
         grounding=False,
@@ -253,21 +275,29 @@ async def approve_from_another_process(policy: ControlPolicy) -> None:
 
         # --- Process 1: the agent proposes the upgrade and the gate holds it. ---
         first = _support_agent(
-            ScriptedModel(
-                [
-                    tool_call(
-                        "upgrade_plan_and_credit",
-                        account="cust:4821",
-                        plan="enterprise",
-                        credit_usd=500.0,
-                    )
-                ]
+            _agent_model(
+                ScriptedModel(
+                    [
+                        tool_call(
+                            "upgrade_plan_and_credit",
+                            account="cust:4821",
+                            plan="enterprise",
+                            credit_usd=500.0,
+                        )
+                    ]
+                )
             ),
             root,
             policy,
         )
+        if not OFFLINE:
+            print(f"  model: {resolved_provider()} {model_id_of(first.model)}")
         approval_id = ""
-        async for event in first.run("Ticket SUP-7782: upgrade and credit", thread_id="SUP-7782"):
+        ticket = (
+            "Ticket SUP-7782: move account cust:4821 to the enterprise plan "
+            "and add a 500 USD retention credit."
+        )
+        async for event in first.run(ticket, thread_id="SUP-7782"):
             if isinstance(event, InterruptEvent):
                 approval_id = event.metadata["approval_id"]
                 print(
@@ -308,7 +338,7 @@ async def approve_from_another_process(policy: ControlPolicy) -> None:
 
         # --- Process 2: a fresh agent resumes the thread; the upgrade runs once. ---
         second = _support_agent(
-            ScriptedModel([text("Upgrade applied and credit added.")]), root, policy
+            _agent_model(ScriptedModel([text("Upgrade applied and credit added.")])), root, policy
         )
         async for event in second.resume("approved", thread_id="SUP-7782", perform_dangling=True):
             if isinstance(event, TerminateEvent):
