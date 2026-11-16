@@ -35,10 +35,19 @@ Example — publish a Graph via :class:`GraphRunnable` (closes #213)::
 
 The same :class:`GraphRunnable` slots into ``locus.a2a.A2AServer`` —
 publish a graph as a spec-compliant A2A endpoint with no extra wiring.
+
+Beyond ``/invoke`` and ``/stream``, the server keeps threads and background
+runs (:class:`RunRegistry`): ``POST /threads/{id}/runs`` starts a turn,
+``GET /runs/{id}/events`` streams it as SSE resumable with ``Last-Event-ID``
+(also as AG-UI or Vercel AI SDK UI message stream frames, through
+:class:`AGUIAdapter` and :class:`VercelDataStreamAdapter`), and
+``WS /runs/live`` carries turns, approval answers and events on one socket.
 """
 
 from locus.server.adapters import GraphRunnable
 from locus.server.app import AgentServer
+from locus.server.protocols import AGUIAdapter, VercelDataStreamAdapter
+from locus.server.runs import RunRegistry
 
 
-__all__ = ["AgentServer", "GraphRunnable"]
+__all__ = ["AGUIAdapter", "AgentServer", "GraphRunnable", "RunRegistry", "VercelDataStreamAdapter"]
