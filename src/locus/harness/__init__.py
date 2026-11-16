@@ -10,8 +10,15 @@ list — written once against :class:`WorkspaceBackend` and run unchanged on
 the host (:class:`LocalBackend`), in memory (:class:`MemoryBackend`), in any
 sandbox that can run a command and move a file (:class:`SessionBackend`), or
 in an NVIDIA OpenShell sandbox (:class:`OpenShellBackend`, the
-``openshell`` extra), or in an OCI GenAI Sandbox (:class:`OCISandboxBackend`,
-the ``oci-sandbox`` extra).
+``openshell`` extra), in an OCI GenAI Sandbox (:class:`OCISandboxBackend`,
+the ``oci-sandbox`` extra), on any host over SSH (:class:`SSHSandboxBackend`,
+the ``ssh`` extra), in an OCI Container Instance
+(:class:`OCIContainerInstanceBackend`, the ``oci-container`` extra) or in a
+hosted sandbox (:class:`E2BBackend`, :class:`DaytonaBackend`). Every backend
+implements :class:`SandboxBackend` — the workspace plus a lifecycle, declared
+limits and evidence hooks — and :class:`SandboxSpec` names one for
+:func:`open_sandbox`. ``locus.harness.testing`` checks a backend of your own
+against the contract.
 
 The tool bodies never gate. :func:`build_harness` pairs each tool with the
 action spec that labels its calls (:mod:`locus.harness.labels`) and applies
@@ -40,6 +47,8 @@ from locus.harness.backend import (
     LineWindow,
     WorkspaceBackend,
 )
+from locus.harness.daytona import DaytonaBackend, DaytonaSession
+from locus.harness.e2b import E2BBackend, E2BSession
 from locus.harness.evidence import ExecRecord
 from locus.harness.labels import (
     KIND_EXEC,
@@ -52,9 +61,27 @@ from locus.harness.labels import (
 )
 from locus.harness.ledger import ReadLedger
 from locus.harness.local import LocalBackend
+from locus.harness.oci_container import OCIContainerInstanceBackend
 from locus.harness.oci_sandbox import OCISandboxBackend, OCISandboxSession
 from locus.harness.openshell import OpenShellBackend, OpenShellSession
+from locus.harness.sandbox import (
+    ExecHook,
+    LifecycleState,
+    ResourceLimits,
+    SandboxBackend,
+    SandboxMixin,
+    SandboxPool,
+    WarmPoolHint,
+)
 from locus.harness.session import SessionBackend, SessionLike
+from locus.harness.spec import (
+    SandboxSpec,
+    open_pool,
+    open_sandbox,
+    register_backend,
+    registered_backends,
+)
+from locus.harness.ssh import SSHJump, SSHSandboxBackend, SSHSession
 from locus.harness.state import MemoryBackend
 from locus.harness.tools.common import FileChange, HarnessConfig, HarnessContext
 from locus.harness.toolset import (
@@ -78,6 +105,11 @@ __all__ = [
     "BackendCapabilities",
     "BackendError",
     "CommandClass",
+    "DaytonaBackend",
+    "DaytonaSession",
+    "E2BBackend",
+    "E2BSession",
+    "ExecHook",
     "ExecRecord",
     "ExecResult",
     "ExecUnsupportedError",
@@ -89,18 +121,33 @@ __all__ = [
     "JobError",
     "JobOutput",
     "JobStatus",
+    "LifecycleState",
     "LineWindow",
     "LocalBackend",
     "MemoryBackend",
+    "OCIContainerInstanceBackend",
     "OCISandboxBackend",
     "OCISandboxSession",
     "OpenShellBackend",
     "OpenShellSession",
     "ReadLedger",
+    "ResourceLimits",
+    "SSHJump",
+    "SSHSandboxBackend",
+    "SSHSession",
+    "SandboxBackend",
+    "SandboxMixin",
+    "SandboxPool",
+    "SandboxSpec",
     "SessionBackend",
     "SessionLike",
+    "WarmPoolHint",
     "WorkspaceBackend",
     "action_spec",
     "build_harness",
     "classify_command",
+    "open_pool",
+    "open_sandbox",
+    "register_backend",
+    "registered_backends",
 ]

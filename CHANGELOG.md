@@ -10,6 +10,44 @@ policy.
 
 ### Added
 
+- **`SandboxBackend`: the harness workspace as a documented protocol.** Every
+  harness backend now implements it over `WorkspaceBackend`: a lifecycle
+  (`state`, `start()`, `stop()`, `close()`, each idempotent), declared
+  `ResourceLimits` (a `max_exec_s` is enforced by clamping every `exec`
+  timeout), and `add_exec_hook()`, which hands an `ExecRecord` of every
+  command the backend runs to whoever holds it. `SandboxMixin` gives a
+  backend of your own all of it by overriding `_start`, `_stop` and
+  `_destroy`. `locus.harness.testing.assert_backend_conformance(factory)`
+  is the conformance kit: the file, shell, deadline, background-command and
+  protocol checks the tools assume, run on a backend and reported together;
+  `run_conformance(backend)` does the same without closing it.
+- **`SSHSandboxBackend`.** Any host with `sshd` as a workspace (the `ssh`
+  extra, `paramiko`): commands run under a watchdog on the host so a deadline
+  kills the process group where it runs, both streams come back in order,
+  files move over SFTP with a `cat` fallback, host keys are checked against
+  `known_hosts` or a pinned `host_key=`, and `via=SSHJump(...)` connects
+  through a bastion.
+- **`OCIContainerInstanceBackend`.** An OCI Container Instance as the
+  Oracle-native remote sandbox (the `oci-container` extra): `create()`
+  provisions the instance from an image with `sshd` or a package manager,
+  bootstraps `sshd` with a key pair generated for the backend, reads the
+  container's host keys from its log and connects with them pinned, directly
+  or through an OCI Bastion port-forwarding session for a private subnet;
+  `stop()`/`start()` restart the instance and `close()` deletes it and the
+  session.
+- **`E2BBackend` and `DaytonaBackend`.** Thin adapters over the two hosted
+  sandbox services' Python clients (the `e2b` and `daytona` extras), checked
+  with stand-ins; the live tests run when the service's API key is set.
+- **`SandboxSpec` and `open_sandbox()`.** A sandbox named in configuration:
+  `backend="local" | "ssh" | "oci-container" | "oci-sandbox" | "openshell"
+  | "e2b" | "daytona" | "memory"` plus `root`, `env`, `limits`, a
+  `WarmPoolHint` and the backend's `options`; `from_mapping()` reads it from
+  a parsed YAML or JSON document and refuses unknown keys;
+  `register_backend()` adds a name. `SandboxPool` / `open_pool(spec)` keep
+  `warm_pool.ready` sandboxes created ahead of need, and the hint's `name`
+  reaches a service-side pool (OCI GenAI Sandbox warm pools). The new
+  [sandbox backends](docs/harness/backends.md) page documents the protocol,
+  the kit and each backend's prerequisites.
 - **`OracleAuditTrail`.** The audit trail on an Oracle AI Database immutable
   table (`CREATE IMMUTABLE TABLE … NO DROP UNTIL n DAYS IDLE NO DELETE UNTIL
   n DAYS AFTER INSERT`), or a blockchain table with `table_kind="blockchain"`.

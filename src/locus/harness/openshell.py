@@ -249,9 +249,8 @@ class OpenShellBackend(SessionBackend):
             return None, b"".join(parts)
         return code, b"".join(parts)
 
-    def close(self) -> None:
-        """Stop background commands; delete the sandbox if this backend made it."""
-        super().close()
+    def _destroy(self) -> None:
+        """Delete the sandbox if this backend made it (``close`` stops commands first)."""
         if self._owns_sandbox:
             delete = getattr(self.client, "delete", None)
             if delete is not None:

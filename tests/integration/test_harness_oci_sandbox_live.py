@@ -32,6 +32,7 @@ pytestmark = [
 pytest.importorskip("oci.generative_ai_sandbox")
 
 from locus.harness import OCISandboxBackend, build_harness  # noqa: E402
+from locus.harness.testing import run_conformance  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -47,6 +48,11 @@ def sandbox() -> Iterator[OCISandboxBackend]:
         yield backend
     finally:
         backend.close()
+
+
+def test_the_sandbox_conforms(sandbox: OCISandboxBackend) -> None:
+    report = run_conformance(sandbox)
+    assert report.ok, report.summary()
 
 
 def test_files_round_trip_in_the_sandbox(sandbox: OCISandboxBackend) -> None:

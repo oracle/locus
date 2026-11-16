@@ -212,6 +212,7 @@ nav:
     - Multi-modal providers: concepts/multi-modal-providers.md
   - The coding harness:
     - Overview: harness.md
+    - Sandbox backends: harness/backends.md
     - OCI GenAI Sandboxes: harness/oci-sandbox.md
     - NVIDIA OpenShell: harness/openshell.md
   - Memory and RAG:

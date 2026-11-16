@@ -153,6 +153,22 @@ openshell = ["openshell>=0.1.2,<0.2"]
 # SDK from 2.189.0, imported lazily (``import locus.harness`` does not need it).
 oci-sandbox = ["oci>=2.189.0"]
 
+# Any host with sshd as a coding-harness workspace (src/locus/harness/ssh.py).
+# Imported only by ``SSHSandboxBackend.connect``; a caller that passes its own
+# connected client needs nothing from it.
+ssh = ["paramiko>=3.4"]
+
+# OCI Container Instances as a coding-harness workspace
+# (src/locus/harness/oci_container.py): the OCI SDK provisions the instance,
+# paramiko works in it. Both imported lazily.
+oci-container = ["oci>=2.173.0", "paramiko>=3.4"]
+
+# Hosted sandbox services as a coding-harness workspace
+# (src/locus/harness/e2b.py, src/locus/harness/daytona.py). Each client is
+# imported only by the backend's ``connect`` and ``create``.
+e2b = ["e2b>=2.0"]
+daytona = ["daytona>=0.100"]
+
 # Mem0 agent-memory manager (src/locus/memory/managers/mem0.py) — the
 # portable, self-hostable long-term memory backend.
 mem0 = ["mem0ai>=0.1"]
@@ -762,6 +778,13 @@ module = [
     # The coding harness's OpenShell backend imports it lazily.
     "openshell",
     "openshell.*",
+    # The coding harness's SSH, E2B and Daytona backends import these lazily.
+    "paramiko",
+    "paramiko.*",
+    "e2b",
+    "e2b.*",
+    "daytona",
+    "daytona.*",
 ]
 ignore_missing_imports = true
 
