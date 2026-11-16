@@ -29,7 +29,7 @@ from locus.control import (
 )
 
 
-def _held(store: Any, **arguments: Any) -> str:
+def _held(store: ApprovalStore, **arguments: Any) -> str:
     args = arguments or {"order_id": "o1", "amount_usd": 10.0}
     return store.submit(
         "svc-billing", "issue_refund", args, reason="labels require a human", labels=["payment"]

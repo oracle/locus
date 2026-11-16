@@ -14,6 +14,7 @@ locks, the conditional DDL -- the way the checkpointer stub tests do.
 from __future__ import annotations
 
 import asyncio
+import builtins
 import json
 import re
 import sys
@@ -398,9 +399,10 @@ class _FakeRedis:
         target.difference_update(members)
         return before - len(target)
 
-    async def smembers(self, key: str) -> set[str]:
+    async def smembers(self, key: str) -> builtins.set[str]:
+        # ``builtins.set``: this class's ``set`` method shadows the type name.
         self._server.commands.append(f"SMEMBERS {key}")
-        return set(self._server.sets.get(key, set()))
+        return builtins.set(self._server.sets.get(key, builtins.set()))
 
     async def aclose(self) -> None:
         self.closed = True

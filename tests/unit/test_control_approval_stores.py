@@ -15,10 +15,12 @@ checked here too.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +28,7 @@ import pytest
 
 from locus.control import (
     ApprovalAuthority,
+    ApprovalAuthorityError,
     ApprovalRecord,
     ApproverRule,
     FileApprovals,
@@ -34,9 +37,16 @@ from locus.control import (
     PostgresApprovals,
     RedisApprovals,
     approval_store,
+    call_digest,
     store_spec,
 )
-from locus.control.approvals_db import record_from_json, record_to_json, without_password
+from locus.control.approvals_db import (
+    DatabaseApprovals,
+    _Loop,
+    record_from_json,
+    record_to_json,
+    without_password,
+)
 from tests.unit.approval_store_conformance import ApprovalStoreConformance
 from tests.unit.approval_store_fakes import (
     FakeRedisServer,
@@ -427,6 +437,137 @@ def test_passwords_are_removed_from_urls() -> None:
     assert without_password("postgresql://u:pw@h:5432/d?x=1") == "postgresql://u@h:5432/d?x=1"
     assert without_password("redis://:pw@h:6379/0") == "redis://h:6379/0"
     assert without_password("redis://h:6379") == "redis://h:6379"
+    assert without_password("postgresql://u:pw@h/d") == "postgresql://u@h/d"
+    assert without_password("redis://u:pw@[::1]:6379/0") == "redis://u@[::1]:6379/0"
+
+
+# ---------------------------------------------------------------------------
+# The shared base: the awaitable surface, the insert race, the loop thread
+# ---------------------------------------------------------------------------
+
+
+class _DictTransaction:
+    """A ``Transaction`` over one dict, with a hook to lose the insert race."""
+
+    def __init__(self, rows: dict[str, ApprovalRecord], lose_inserts: list[bool]) -> None:
+        self._rows = rows
+        self._lose_inserts = lose_inserts
+
+    async def get(self, approval_id: str, *, lock: bool = False) -> ApprovalRecord | None:
+        return self._rows.get(approval_id)
+
+    async def same_call(self, digest: str, *, lock: bool = False) -> list[ApprovalRecord]:
+        return [r for r in self._rows.values() if r.digest == digest]
+
+    async def insert(self, record: ApprovalRecord) -> bool:
+        if self._lose_inserts and self._lose_inserts.pop(0):
+            return False  # another submitter got there first
+        if record.approval_id in self._rows:
+            return False
+        self._rows[record.approval_id] = record
+        return True
+
+    async def update(self, record: ApprovalRecord) -> None:
+        self._rows[record.approval_id] = record
+
+    async def waiting(self) -> list[ApprovalRecord]:
+        return [r for r in self._rows.values() if r.status == "pending"]
+
+
+class _DictApprovals(DatabaseApprovals):
+    """The base over a dict: what every real backend layers on a driver."""
+
+    def __init__(self, lose_inserts: list[bool] | None = None, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.rows: dict[str, ApprovalRecord] = {}
+        self.lose_inserts = lose_inserts or []
+        self.disconnected = 0
+
+    @property
+    def spec(self) -> str:
+        return "dict://"
+
+    @asynccontextmanager
+    async def _transaction(self) -> AsyncIterator[_DictTransaction]:
+        yield _DictTransaction(self.rows, self.lose_inserts)
+
+    async def _disconnect(self) -> None:
+        self.disconnected += 1
+
+
+class TestDatabaseApprovalsBase:
+    def test_a_lost_insert_race_rereads_the_winner(self) -> None:
+        store = _DictApprovals(lose_inserts=[True])
+        winner = ApprovalRecord(
+            approval_id="appr-theirs",
+            digest=call_digest("svc", "t", {"a": 1}),
+            principal="svc",
+            tool="t",
+            arguments={"a": 1},
+        )
+        # The other submitter's record lands between our read and our insert.
+        store.rows[winner.approval_id] = winner
+
+        assert store.submit("svc", "t", {"a": 1}) == "appr-theirs"
+        assert store.pending() == [winner]
+        store.close()
+
+    def test_a_store_that_keeps_changing_is_reported(self) -> None:
+        store = _DictApprovals(lose_inserts=[True, True, True])
+
+        with pytest.raises(RuntimeError, match="kept changing"):
+            store.submit("svc", "t", {"a": 1})
+        store.close()
+
+    def test_an_authority_may_be_chosen_per_record(self) -> None:
+        finance = ApprovalAuthority(rules=(ApproverRule(approvers=frozenset({"alice"})),))
+        store = _DictApprovals(
+            authority=lambda record: finance if "payment" in record.labels else None
+        )
+        gated = store.submit("svc", "t", {"a": 1}, labels=["payment"])
+        free = store.submit("svc", "t", {"a": 2})
+
+        with pytest.raises(ApprovalAuthorityError):
+            store.decide(gated, "approved", by="mallory")
+        assert store.decide(free, "approved", by="mallory").status == "approved"
+        assert store.decide(gated, "approved", by="alice").status == "approved"
+        store.close()
+
+    @pytest.mark.asyncio
+    async def test_the_awaitable_surface_runs_on_the_stores_loop(self) -> None:
+        store = _DictApprovals()
+        store_loop = store._loop.loop  # noqa: SLF001 - the point of the test
+
+        approval_id = await store.asubmit("svc", "t", {"a": 1}, reason="why", labels=["x"])
+        assert store_loop is not asyncio.get_running_loop()
+        assert await store.astate(approval_id) == "pending"
+        assert [r.approval_id for r in await store.apending()] == [approval_id]
+        record = await store.aget(approval_id)
+        assert record is not None
+        assert (record.reason, record.labels) == ("why", ["x"])
+        decided = await store.adecide(approval_id, "approved", by="alice", reason="fine")
+        assert decided.approvals[-1]["reason"] == "fine"
+        assert (await store.aconsume(approval_id)).status == "consumed"
+        assert await store.aget("appr-nope") is None
+
+        await store.aclose()
+        assert store.disconnected == 1
+        assert repr(store) == "_DictApprovals('dict://')"
+
+    def test_the_loop_thread_starts_on_first_use_and_stops_cleanly(self) -> None:
+        loop = _Loop("test-io")
+        loop.stop()  # never started: nothing to stop
+        running = loop.loop
+        assert running.is_running()
+        assert loop.loop is running, "one loop per store"
+        loop.stop()
+        assert running.is_closed()
+        # A later use after close starts a fresh loop, as close() then reuse would.
+        store = _DictApprovals()
+        store.close()
+        assert store.submit("svc", "t", {"a": 1}).startswith("appr-")
+        store.close()
+        assert store.disconnected == 2
 
 
 class TestApprovalStoreSpecs:
@@ -443,14 +584,18 @@ class TestApprovalStoreSpecs:
 
     def test_an_authority_rides_along(self) -> None:
         authority = ApprovalAuthority(rules=(ApproverRule(approvers=frozenset({"a"})),))
-        assert approval_store("memory://", authority).authority is authority
+        store = approval_store("memory://", authority)
+        assert isinstance(store, InMemoryApprovals)
+        assert store.authority is authority
 
     def test_postgresql(self, monkeypatch: pytest.MonkeyPatch) -> None:
         store = approval_store("postgresql://u:pw@h:5433/d?sslmode=require&table=ops.approvals")
         assert isinstance(store, PostgresApprovals)
         assert store.dsn == "postgresql://u:pw@h:5433/d?sslmode=require"
         assert (store.schema_name, store.table_name) == ("ops", "approvals")
-        assert approval_store("postgres://u@h/d").table_name == "locus_approvals"
+        plain = approval_store("postgres://u@h/d")
+        assert isinstance(plain, PostgresApprovals)
+        assert plain.table_name == "locus_approvals"
 
         with pytest.raises(ValueError, match="POSTGRES_HOST"):
             approval_store("postgresql://")
