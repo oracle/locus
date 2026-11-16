@@ -306,6 +306,12 @@ policy.
   and the accumulator keys by the call id, so streamed and non-streamed turns
   are identical and a streaming agent on the stateless path executes its tools.
 
+### Deprecated
+
+- **The `locus.security` compatibility shim is removed in 6.0.** It keeps forwarding the
+  control-layer names to `locus.control` until then; its warning named a release
+  that has long passed and now says 6.0. Import from `locus.control`.
+
 ### Removed
 
 - **The `locus-sdk-security` package.** The security-domain tooling (red-team
