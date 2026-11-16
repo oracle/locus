@@ -592,6 +592,15 @@ def _text_response(response_id: str, text: str) -> dict[str, Any]:
     }
 
 
+def _zdr_warnings(record: Any) -> list[Any]:
+    """Only the Locus ZDR warning: the interpreter may record others alongside."""
+    return [
+        w
+        for w in record
+        if issubclass(w.category, LocusWarning) and "Zero Data Retention" in str(w.message)
+    ]
+
+
 def test_store_defaults_to_auto_and_validates_its_values() -> None:
     assert _make_model().config.store == "auto"
     assert _make_model(store=True).config.store is True
@@ -651,17 +660,18 @@ async def test_store_auto_switches_to_stateless_after_the_zdr_error() -> None:
         await model.complete(
             [Message.user("hi")], provider_state={"previous_response_id": "resp_1"}
         )
-    assert len(record) == 1
+    assert len(_zdr_warnings(record)) == 1
     assert model.zdr_detected is True
     assert model.server_stateful is False
 
     # The next call is stateless even with a continuation id threaded in,
     # and there is no second warning.
-    with warnings.catch_warnings():
-        warnings.simplefilter("error")
+    with warnings.catch_warnings(record=True) as again:
+        warnings.simplefilter("always")
         response = await model.complete(
             [Message.user("hi")], provider_state={"previous_response_id": "resp_1"}
         )
+    assert _zdr_warnings(again) == []
     assert response.message.content == "ok"
     assert bodies[-1]["store"] is False
     assert "previous_response_id" not in bodies[-1]
@@ -717,7 +727,7 @@ async def test_agent_run_completes_statelessly_on_a_zdr_tenancy() -> None:
 
     assert result.success
     assert result.message == "5"
-    assert len(record) == 1
+    assert len(_zdr_warnings(record)) == 1
     assert len(bodies) == 3
     first, rejected, replay = bodies
     assert "previous_response_id" not in first
@@ -744,9 +754,10 @@ async def test_agent_run_completes_statelessly_on_a_zdr_tenancy() -> None:
 
     # Same model, second run: stateless from the first request, no new warning.
     bodies.clear()
-    with warnings.catch_warnings():
-        warnings.simplefilter("error")
+    with warnings.catch_warnings(record=True) as again:
+        warnings.simplefilter("always")
         second = await agent.arun("Add 2 and 3 again.")
+    assert _zdr_warnings(again) == []
     assert second.success
     assert second.message == "5"
     assert len(bodies) == 2
