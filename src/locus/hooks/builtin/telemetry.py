@@ -13,21 +13,29 @@ histograms the conventions define. ``semconv="locus-legacy"`` keeps the
 ``agent.invocation`` / ``tool.<name>`` / ``locus.*`` shape the SDK emitted
 before, for dashboards built on it.
 
-The root span is parented to whatever OpenTelemetry context is current when
-the run starts, so a caller's ``traceparent`` — attached by
-:func:`locus.observability.propagation.trace_scope` on an A2A or MCP server —
-is inherited, and the tool span in flight is what
+The hook keeps its state per run, keyed by the run id the hook events carry,
+so one hook — one ``Agent`` — serves concurrent runs and nested ones (a
+sub-agent exposed as a tool) with a trace each.
+
+The root span is parented to the tool call in flight when the run starts
+inside one (a sub-agent's run sits under its caller's ``execute_tool``), else
+to whatever OpenTelemetry context is current, so a caller's ``traceparent`` —
+attached by :func:`locus.observability.propagation.trace_scope` on an A2A or
+MCP server — is inherited. The tool span in flight is what
 :func:`locus.observability.propagation.inject_trace_headers` and the MCP
 client carry onward.
 """
 
 from __future__ import annotations
 
+import contextvars
 import json
 import time
 from collections.abc import Generator, Iterable
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 from locus.hooks.provider import (
     AfterModelCallEvent,
@@ -63,11 +71,34 @@ except ImportError:
 
 #: Tool spans in flight, by ``tool_call_id``, across every ``TelemetryHook``.
 #: An integration running inside the tool (the MCP client, say) reads the span
-#: of ITS call through :func:`current_tool_span` to propagate it onward.
+#: of ITS call through :func:`current_tool_span` to propagate it onward. An
+#: entry leaves with its call, or with its run when the run ends first.
 _TOOL_CALL_SPANS: dict[str, Any] = {}
+
+#: The run current on this task (its id): set by ``on_before_invocation``,
+#: restored by ``on_after_invocation``. How a hook event that names no run —
+#: one built by hand — finds the run it belongs to.
+_CURRENT_RUN: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "locus_telemetry_run", default=None
+)
 
 #: Longest opt-in payload (tool arguments, tool result) recorded on a span.
 _PAYLOAD_LIMIT = 4000
+
+#: Per-modality token counts a provider may report inside its usage details,
+#: under the keys OpenAI-compatible usage blocks use for them.
+_TOKEN_MODALITY_KEYS: tuple[tuple[str, str], ...] = (
+    ("text_tokens", sc.TOKEN_MODALITY_TEXT),
+    ("audio_tokens", sc.TOKEN_MODALITY_AUDIO),
+    ("image_tokens", sc.TOKEN_MODALITY_IMAGE),
+    ("video_tokens", sc.TOKEN_MODALITY_VIDEO),
+)
+_INPUT_DETAIL_KEYS = ("prompt_tokens_details", "input_tokens_details", "input_token_details")
+_OUTPUT_DETAIL_KEYS = (
+    "completion_tokens_details",
+    "output_tokens_details",
+    "output_token_details",
+)
 
 
 def current_tool_span() -> Span | None:
@@ -110,6 +141,82 @@ def _attrs(**pairs: Any) -> dict[str, Any]:
     return {k: v for k, v in pairs.items() if v is not None}
 
 
+def _token_points(
+    total: int | None, usage: dict[str, Any], detail_keys: tuple[str, ...]
+) -> list[tuple[str, int]]:
+    """``(modality, count)`` pairs for one usage figure.
+
+    The conventions want ``gen_ai.token.modality`` set to ``unknown`` when the
+    modality cannot be determined; only a per-modality breakdown inside the
+    usage details (``audio_tokens``, ``text_tokens``, …) names one, and the
+    tokens it leaves unaccounted for stay ``unknown``.
+    """
+    if not total or total <= 0:
+        return []
+    details = next((usage[k] for k in detail_keys if isinstance(usage.get(k), dict)), None)
+    if details is None:
+        return [(sc.TOKEN_MODALITY_UNKNOWN, total)]
+    points: list[tuple[str, int]] = []
+    for key, modality in _TOKEN_MODALITY_KEYS:
+        count = _int_or_none(details.get(key))
+        if count is not None and count > 0:
+            points.append((modality, count))
+    if not points:
+        return [(sc.TOKEN_MODALITY_UNKNOWN, total)]
+    rest = total - sum(count for _, count in points)
+    if rest > 0:
+        points.append((sc.TOKEN_MODALITY_UNKNOWN, rest))
+    return points
+
+
+@dataclass
+class _ToolCall:
+    """One tool call's open span."""
+
+    span: Any
+    started: float
+    name: str
+    #: The context token when this call's span is current on the task.
+    token: Any = None
+
+
+@dataclass
+class _ModelCall:
+    """One model call's open ``chat`` span."""
+
+    span: Any
+    token: Any
+    started: float
+    #: 1 for the call the before-model hooks saw; one more per hook retry.
+    attempt: int = 1
+
+
+@dataclass
+class _Run:
+    """The hook's state for one agent run: its root span and what is open under it."""
+
+    run_id: str
+    span: Any
+    token: Any
+    started: float
+    #: The agent label the root span was started with; ``unnamed`` when none.
+    agent_name: str | None
+    unnamed: bool
+    #: The run current on this task before this one, and the token to restore it.
+    previous: str | None
+    context_token: Any = None
+    run_agent_name: str | None = None
+    conversation_id: str | None = None
+    inference_calls: int = 0
+    iterations: dict[int, Any] = field(default_factory=dict)
+    iteration_tokens: dict[int, Any] = field(default_factory=dict)
+    current_iteration: int | None = None
+    model: _ModelCall | None = None
+    tools: dict[str, _ToolCall] = field(default_factory=dict)
+    #: Key of the tool call whose span is current on the task, if one is.
+    current_tool: str | None = None
+
+
 class TelemetryHook(HookProvider):
     """Hook provider for OpenTelemetry tracing and metrics.
 
@@ -121,6 +228,8 @@ class TelemetryHook(HookProvider):
       index is the ``locus.iteration`` attribute).
     - ``chat <model>`` — one model call, CLIENT, with ``gen_ai.provider.name``,
       ``gen_ai.request.model``, usage, finish reasons and the response id.
+      A hook that asks for a retry ends the span and the retried call gets
+      one of its own, so every attempt is one span.
     - ``execute_tool <tool>`` — one tool call, INTERNAL, with
       ``gen_ai.tool.name`` / ``gen_ai.tool.call.id``; arguments and result
       only when asked for.
@@ -219,26 +328,13 @@ class TelemetryHook(HookProvider):
         self._agent_name = agent_name
         self._tool_descriptions: dict[str, str] = {}
 
-        # Active spans tracking + OTel context tokens for proper parent-
-        # child propagation. Without attaching each span to OTel's current
-        # context, exporters see every span as a new trace root — backends
-        # then render N separate traces instead of one tree per invocation.
-        # See issue #244.
-        self._invocation_span: Span | None = None
-        self._invocation_token: Any = None
-        self._invocation_started: float | None = None
-        self._iteration_spans: dict[int, Span] = {}
-        self._iteration_tokens: dict[int, Any] = {}
-        self._current_iteration: int | None = None
-        self._tool_spans: dict[str, tuple[Span, float, str]] = {}
-        self._model_span: Span | None = None
-        self._model_token: Any = None
-        self._model_started: float = 0.0
-        self._inference_calls = 0
-        self._run_agent_name: str | None = None
-        self._invocation_agent_name: str | None = None
-        self._invocation_unnamed = False
-        self._conversation_id: str | None = None
+        # One record per run in flight, keyed by run id. Each span is attached
+        # to OTel's current context while open, so the spans the agent creates
+        # inside a run are parented to it — without that, exporters see every
+        # span as a new trace root (issue #244). ``_loose`` collects spans of
+        # hook events that arrive outside any run (a hook driven by hand).
+        self._runs: dict[str, _Run] = {}
+        self._loose: _Run | None = None
 
         if self._genai:
             self._inference_duration = self._histogram(
@@ -365,6 +461,70 @@ class TelemetryHook(HookProvider):
                 self._tool_descriptions[name] = description
 
     # ------------------------------------------------------------------
+    # Run records
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _run_id_of(source: Any) -> str | None:
+        """The run id a hook event's ``run`` or an agent state names, if any."""
+        run_id = getattr(source, "run_id", None) if source is not None else None
+        return run_id if isinstance(run_id, str) and run_id else None
+
+    def _run_for(self, run_id: str | None) -> _Run | None:
+        """The record ``run_id`` names, else the run current on this task.
+
+        An event that names no run at all (one built by hand) falls back to
+        the newest run in flight.
+        """
+        if run_id is not None and run_id in self._runs:
+            return self._runs[run_id]
+        current = _CURRENT_RUN.get()
+        if current is not None and current in self._runs:
+            return self._runs[current]
+        if run_id is None and self._runs:
+            return next(reversed(self._runs.values()))
+        return None
+
+    def _run_or_loose(self, run_id: str | None) -> _Run:
+        """As :meth:`_run_for`, with the record for out-of-run events as the last resort."""
+        run = self._run_for(run_id)
+        if run is not None:
+            return run
+        if self._loose is None:
+            self._loose = _Run(
+                run_id="",
+                span=None,
+                token=None,
+                started=time.perf_counter(),
+                agent_name=None,
+                unnamed=False,
+                previous=None,
+            )
+        return self._loose
+
+    def _peek(self) -> _Run | None:
+        """The run a hand-built event would land in, without creating one."""
+        return self._run_for(None) or self._loose
+
+    # Views of the current run's open spans, for tests and debugging.
+    @property
+    def _invocation_span(self) -> Span | None:
+        run = self._run_for(None)
+        return run.span if run is not None else None
+
+    @property
+    def _iteration_spans(self) -> dict[int, Span]:
+        run = self._peek()
+        return run.iterations if run is not None else {}
+
+    @property
+    def _tool_spans(self) -> dict[str, tuple[Span, float, str]]:
+        run = self._peek()
+        if run is None:
+            return {}
+        return {key: (call.span, call.started, call.name) for key, call in run.tools.items()}
+
+    # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
@@ -398,63 +558,94 @@ class TelemetryHook(HookProvider):
         with self._tracer.start_as_current_span(name, attributes=attributes) as span:
             yield span
 
-    def _agent_label(self, state: AgentState | None = None) -> str | None:
+    def _agent_label(self, run: _Run | None, state: AgentState | None = None) -> str | None:
         if self._agent_name:
             return self._agent_name
-        if self._run_agent_name:
-            return self._run_agent_name
+        if run is not None and run.run_agent_name:
+            return run.run_agent_name
         agent_id = getattr(state, "agent_id", None) if state is not None else None
         if isinstance(agent_id, str) and agent_id:
             return agent_id
-        return self._invocation_agent_name
+        return run.agent_name if run is not None else None
 
-    def _absorb_run(self, run: Any) -> None:
+    def _absorb_run(self, run: _Run, info: Any) -> None:
         """Pick the conversation id and agent name off a hook event's ``run``."""
-        if run is None:
+        if info is None:
             return
-        thread_id = getattr(run, "thread_id", None)
-        if self._conversation_id is None and isinstance(thread_id, str) and thread_id:
-            self._conversation_id = thread_id
-            if self._genai and self._invocation_span is not None:
-                self._invocation_span.set_attribute(sc.GEN_AI_CONVERSATION_ID, thread_id)
-        agent_name = getattr(run, "agent_name", None)
+        thread_id = getattr(info, "thread_id", None)
+        if run.conversation_id is None and isinstance(thread_id, str) and thread_id:
+            run.conversation_id = thread_id
+            if self._genai and run.span is not None:
+                run.span.set_attribute(sc.GEN_AI_CONVERSATION_ID, thread_id)
+        agent_name = getattr(info, "agent_name", None)
         if (
             self._agent_name is None
-            and self._run_agent_name is None
+            and run.run_agent_name is None
             and isinstance(agent_name, str)
             and agent_name
         ):
-            self._run_agent_name = agent_name
-            span = self._invocation_span
-            if self._genai and span is not None and self._invocation_unnamed:
-                span.update_name(f"{sc.OP_INVOKE_AGENT} {agent_name}")
-                span.set_attribute(sc.GEN_AI_AGENT_NAME, agent_name)
-                self._invocation_unnamed = False
+            run.run_agent_name = agent_name
+            if self._genai and run.span is not None and run.unnamed:
+                run.span.update_name(f"{sc.OP_INVOKE_AGENT} {agent_name}")
+                run.span.set_attribute(sc.GEN_AI_AGENT_NAME, agent_name)
+                run.unnamed = False
 
-    def _close_model_span(self, error: str | None = None) -> None:
-        """End the open ``chat`` span, as a failure when ``error`` is given."""
-        span = self._model_span
-        if span is None:
+    def _close_model_span(
+        self, run: _Run, error: str | None = None, error_type: str | None = None
+    ) -> None:
+        """End the open ``chat`` span, as a failure when ``error`` is given.
+
+        A call that ended in an error is still an inference call: its duration
+        is recorded with ``error.type``, as the conventions ask, and it counts
+        towards the run's ``inference_calls``.
+        """
+        call = run.model
+        if call is None:
             return
-        self._model_span = None
+        run.model = None
+        span = call.span
         if error is not None:
+            kind = error_type or sc.ERROR_TYPE_OTHER
             span.set_status(Status(StatusCode.ERROR, error))
-            span.set_attribute(sc.ERROR_TYPE, sc.ERROR_TYPE_OTHER)
+            span.set_attribute(sc.ERROR_TYPE, kind)
+            run.inference_calls += 1
+            self._inference_duration.record(
+                time.perf_counter() - call.started,
+                self._inference_attrs() | {sc.ERROR_TYPE: kind},
+            )
         span.end()
-        if self._model_token is not None:
-            otel_context.detach(self._model_token)
-            self._model_token = None
+        if call.token is not None:
+            otel_context.detach(call.token)
 
-    def _close_open_iterations(self) -> None:
+    def _close_open_tools(self, run: _Run, error_type: str | None) -> None:
+        """End tool spans a run that ended left open, newest first."""
+        for key in list(reversed(run.tools)):
+            call = run.tools.pop(key)
+            call.span.set_status(Status(StatusCode.ERROR, "tool call did not complete"))
+            if self._genai:
+                call.span.set_attribute(sc.ERROR_TYPE, error_type or sc.ERROR_TYPE_OTHER)
+            else:
+                call.span.set_attribute("locus.error", "tool call did not complete")
+            call.span.end()
+            self._release_tool(run, call, key)
+
+    def _close_open_iterations(self, run: _Run, error_type: str | None) -> None:
         """End iteration spans a failed run left open, newest first."""
-        for iteration in sorted(self._iteration_spans, reverse=True):
-            span = self._iteration_spans.pop(iteration)
+        for iteration in sorted(run.iterations, reverse=True):
+            span = run.iterations.pop(iteration)
             span.set_status(Status(StatusCode.ERROR, "iteration did not complete"))
+            span.set_attribute(sc.ERROR_TYPE, error_type or sc.ERROR_TYPE_OTHER)
             span.end()
-            token = self._iteration_tokens.pop(iteration, None)
+            token = run.iteration_tokens.pop(iteration, None)
             if token is not None:
                 otel_context.detach(token)
-        self._current_iteration = None
+        run.current_iteration = None
+
+    @staticmethod
+    def _last_error_type(state: Any) -> str | None:
+        """``error.type`` for the last error an agent state recorded, if any."""
+        errors = getattr(state, "errors", ()) or ()
+        return sc.error_type(errors[-1]) if errors else None
 
     # ------------------------------------------------------------------
     # Invocation
@@ -467,8 +658,10 @@ class TelemetryHook(HookProvider):
     ) -> AgentState:
         """Start the run's root span and attach it as the current OTel context.
 
-        The span is parented to whatever context is current, so a caller's
-        ``traceparent`` (attached by ``trace_scope``) is inherited.
+        The span is parented to the tool call in flight when the run starts
+        inside one (a sub-agent run from a tool), else to whatever context is
+        current, so a caller's ``traceparent`` (attached by ``trace_scope``)
+        is inherited.
 
         Args:
             prompt: User prompt
@@ -477,17 +670,15 @@ class TelemetryHook(HookProvider):
         Returns:
             Unchanged state
         """
-        self._inference_calls = 0
-        self._conversation_id = None
-        self._run_agent_name = None
-        self._invocation_agent_name = None
-        self._invocation_started = time.perf_counter()
+        run_id = self._run_id_of(state) or uuid4().hex
+        started = time.perf_counter()
+        agent_name = self._agent_label(None, state)
+        parent = current_tool_span()
+        context = trace.set_span_in_context(parent) if parent is not None else None
         if self._genai:
-            agent_name = self._agent_label(state)
-            self._invocation_agent_name = agent_name
-            self._invocation_unnamed = agent_name is None
-            self._invocation_span = self._tracer.start_span(
+            span = self._tracer.start_span(
                 f"{sc.OP_INVOKE_AGENT} {agent_name}" if agent_name else sc.OP_INVOKE_AGENT,
+                context=context,
                 kind=SpanKind.INTERNAL,
                 attributes=_attrs(
                     **{
@@ -502,8 +693,9 @@ class TelemetryHook(HookProvider):
                 ),
             )
         else:
-            self._invocation_span = self._tracer.start_span(
+            span = self._tracer.start_span(
                 "agent.invocation",
+                context=context,
                 attributes={
                     "locus.run_id": state.run_id,
                     "locus.agent_id": state.agent_id or "",
@@ -517,8 +709,18 @@ class TelemetryHook(HookProvider):
         # agent creates inside this invocation is automatically parented
         # to it. Without this, child spans become disconnected trace
         # roots (issue #244).
-        ctx = trace.set_span_in_context(self._invocation_span)
-        self._invocation_token = otel_context.attach(ctx)
+        token = otel_context.attach(trace.set_span_in_context(span))
+        run = _Run(
+            run_id=run_id,
+            span=span,
+            token=token,
+            started=started,
+            agent_name=agent_name,
+            unnamed=agent_name is None,
+            previous=_CURRENT_RUN.get(),
+        )
+        run.context_token = _CURRENT_RUN.set(run_id)
+        self._runs[run_id] = run
         return state
 
     async def on_after_invocation(
@@ -532,19 +734,20 @@ class TelemetryHook(HookProvider):
             state: Final agent state
             success: Whether execution succeeded
         """
-        if self._invocation_span is None:
+        run = self._run_for(self._run_id_of(state))
+        if run is None or run.span is None:
             return
-        # A run that raised may leave a model call or an iteration open;
-        # close them (innermost first, so context tokens detach in order).
-        self._close_model_span("model call did not complete")
-        self._close_open_iterations()
-
-        span = self._invocation_span
-        started = self._invocation_started
-        elapsed_s = (time.perf_counter() - started) if started is not None else 0.0
-        duration_ms = (state.updated_at - state.started_at).total_seconds() * 1000
         errors = getattr(state, "errors", ()) or ()
         error_kind = sc.error_type(errors[-1] if errors else None) if not success else None
+        # A run that raised may leave a model call, tool calls or an iteration
+        # open; close them (innermost first, so context tokens detach in order).
+        self._close_model_span(run, "model call did not complete", error_kind)
+        self._close_open_tools(run, error_kind)
+        self._close_open_iterations(run, error_kind)
+
+        span = run.span
+        elapsed_s = time.perf_counter() - run.started
+        duration_ms = (state.updated_at - state.started_at).total_seconds() * 1000
 
         if self._genai:
             cache_read = (_int_or_none(getattr(state, "cache_read_tokens_used", None)) or 0) + (
@@ -567,7 +770,7 @@ class TelemetryHook(HookProvider):
                         sc.ERROR_TYPE: error_kind,
                         "locus.success": success,
                         "locus.iterations": _int_or_none(state.iteration),
-                        "locus.inference_calls": self._inference_calls,
+                        "locus.inference_calls": run.inference_calls,
                         "locus.tool_calls": len(state.tool_executions),
                         "locus.errors": len(errors),
                         "locus.confidence": state.confidence
@@ -593,17 +796,20 @@ class TelemetryHook(HookProvider):
         else:
             span.set_status(Status(StatusCode.ERROR, "Agent invocation failed"))
         span.end()
-        self._invocation_span = None
+        self._runs.pop(run.run_id, None)
 
         # Detach the invocation context — pair to the attach in
         # `on_before_invocation`. Detaching restores whatever
         # context was active before locus took over.
-        if self._invocation_token is not None:
-            otel_context.detach(self._invocation_token)
-            self._invocation_token = None
+        if run.token is not None:
+            otel_context.detach(run.token)
+        try:
+            _CURRENT_RUN.reset(run.context_token)
+        except (ValueError, RuntimeError):  # ended on another task than it started
+            _CURRENT_RUN.set(run.previous)
 
         if self._genai:
-            agent_name = self._agent_label(state)
+            agent_name = self._agent_label(run, state)
             invoke_attrs = _attrs(
                 **{
                     sc.GEN_AI_OPERATION_NAME: sc.OP_INVOKE_AGENT,
@@ -616,7 +822,7 @@ class TelemetryHook(HookProvider):
             count_attrs = _attrs(
                 **{sc.GEN_AI_OPERATION_NAME: sc.OP_INVOKE_AGENT, sc.GEN_AI_AGENT_NAME: agent_name}
             )
-            self._invoke_inference_calls.record(self._inference_calls, count_attrs)
+            self._invoke_inference_calls.record(run.inference_calls, count_attrs)
             self._invoke_tool_calls.record(len(state.tool_executions), count_attrs)
         else:
             self._invocation_duration.record(
@@ -643,24 +849,23 @@ class TelemetryHook(HookProvider):
             }
         )
 
-    async def on_before_model_call(self, event: BeforeModelCallEvent) -> None:
-        """Start a ``chat`` span for the model call (GenAI conventions only).
+    def _start_model_span(
+        self, run: _Run, *, messages: int | None, tools: int | None, attempt: int
+    ) -> None:
+        """Open a ``chat`` span and make it current.
 
-        The span is made current, so an instrumented HTTP client inside the
-        provider files its request under it.
+        An instrumented HTTP client inside the provider then files its request
+        under it.
         """
-        if not self._genai:
-            return
-        self._close_model_span("model call did not complete")
-        self._absorb_run(getattr(event, "run", None))
         model = self._request_model
         attrs = self._inference_attrs()
         attrs.update(
             _attrs(
                 **{
-                    sc.GEN_AI_CONVERSATION_ID: self._conversation_id,
-                    "locus.messages": len(event.messages),
-                    "locus.tools": len(event.tools or []),
+                    sc.GEN_AI_CONVERSATION_ID: run.conversation_id,
+                    "locus.messages": messages,
+                    "locus.tools": tools,
+                    "locus.retry_attempt": attempt if attempt > 1 else None,
                 }
             )
         )
@@ -669,16 +874,41 @@ class TelemetryHook(HookProvider):
             kind=SpanKind.CLIENT,
             attributes=attrs,
         )
-        self._model_span = span
-        self._model_token = otel_context.attach(trace.set_span_in_context(span))
-        self._model_started = time.perf_counter()
+        run.model = _ModelCall(
+            span=span,
+            token=otel_context.attach(trace.set_span_in_context(span)),
+            started=time.perf_counter(),
+            attempt=attempt,
+        )
+
+    async def on_before_model_call(self, event: BeforeModelCallEvent) -> None:
+        """Start a ``chat`` span for the model call (GenAI conventions only)."""
+        if not self._genai:
+            return
+        info = getattr(event, "run", None)
+        run = self._run_or_loose(self._run_id_of(info))
+        self._close_model_span(run, "model call did not complete")
+        self._absorb_run(run, info)
+        self._start_model_span(
+            run, messages=len(event.messages), tools=len(event.tools or []), attempt=1
+        )
 
     async def on_after_model_call(self, event: AfterModelCallEvent) -> None:
-        """End the ``chat`` span with usage, finish reason and response ids."""
-        if not self._genai or self._model_span is None:
+        """End the ``chat`` span with usage, finish reason and response ids.
+
+        When a hook asked for a retry (``event.retry``), the loop calls the
+        model again without the before-model hooks, so the retried attempt's
+        ``chat`` span is opened here: every attempt is one span and counts
+        once.
+        """
+        if not self._genai:
             return
-        span = self._model_span
-        elapsed_s = time.perf_counter() - self._model_started
+        run = self._run_for(self._run_id_of(getattr(event, "run", None)))
+        if run is None or run.model is None:
+            return
+        call = run.model
+        span = call.span
+        elapsed_s = time.perf_counter() - call.started
         response = event.response
         usage = getattr(response, "usage", None)
         usage = usage if isinstance(usage, dict) else {}
@@ -703,6 +933,7 @@ class TelemetryHook(HookProvider):
             or provider_state.get("previous_response_id")
         )
         response_model = metadata.get("model")
+        retry = bool(getattr(event, "retry", False))
         span.set_attributes(
             _attrs(
                 **{
@@ -717,23 +948,30 @@ class TelemetryHook(HookProvider):
                     sc.GEN_AI_RESPONSE_MODEL: response_model
                     if isinstance(response_model, str) and response_model
                     else None,
+                    "locus.retry_requested": True if retry else None,
                 }
             )
         )
         span.set_status(Status(StatusCode.OK))
-        self._close_model_span()
-        self._inference_calls += 1
+        self._close_model_span(run)
+        run.inference_calls += 1
 
         metric_attrs = self._inference_attrs(
             response_model if isinstance(response_model, str) else None
         )
         self._inference_duration.record(elapsed_s, metric_attrs)
-        token_attrs = metric_attrs | {sc.GEN_AI_TOKEN_MODALITY: sc.TOKEN_MODALITY_TEXT}
-        # The conventions count only known, strictly positive contributions.
-        if input_tokens:
-            self._input_tokens.add(input_tokens, token_attrs)
-        if output_tokens:
-            self._output_tokens.add(output_tokens, token_attrs)
+        # The conventions count only known, strictly positive contributions,
+        # each under its modality — ``unknown`` when the provider gives no
+        # per-modality breakdown.
+        for modality, count in _token_points(input_tokens, usage, _INPUT_DETAIL_KEYS):
+            self._input_tokens.add(count, metric_attrs | {sc.GEN_AI_TOKEN_MODALITY: modality})
+        for modality, count in _token_points(output_tokens, usage, _OUTPUT_DETAIL_KEYS):
+            self._output_tokens.add(count, metric_attrs | {sc.GEN_AI_TOKEN_MODALITY: modality})
+
+        if retry:
+            feedback = getattr(event, "retry_feedback", None)
+            messages = len(event.messages) + (1 if isinstance(feedback, str) and feedback else 0)
+            self._start_model_span(run, messages=messages, tools=None, attempt=call.attempt + 1)
 
     # ------------------------------------------------------------------
     # Tool calls
@@ -742,13 +980,22 @@ class TelemetryHook(HookProvider):
     async def on_before_tool_call(self, event: BeforeToolCallEvent) -> None:
         """Start tool call span.
 
+        The span is made current while the call runs, so a run started inside
+        the tool (a sub-agent) and an instrumented client the tool uses file
+        under it. When several calls of one batch are open at once — the loop
+        runs every call's before-tool hooks before any call starts — no single
+        span can be current; the tool context (:func:`current_tool_span`)
+        still names each call's span for what runs inside it.
+
         Args:
             event: Write-protected event carrying ``tool_name`` and
                 ``arguments``. The hook only inspects them.
         """
         tool_name = event.tool_name
         call_id = getattr(event, "tool_call_id", "") or ""
-        self._absorb_run(getattr(event, "run", None))
+        info = getattr(event, "run", None)
+        run = self._run_or_loose(self._run_id_of(info))
+        self._absorb_run(run, info)
 
         if self._genai:
             span_attrs = _attrs(
@@ -758,8 +1005,8 @@ class TelemetryHook(HookProvider):
                     sc.GEN_AI_TOOL_CALL_ID: call_id or None,
                     sc.GEN_AI_TOOL_TYPE: sc.TOOL_TYPE_FUNCTION,
                     sc.GEN_AI_TOOL_DESCRIPTION: self._tool_descriptions.get(tool_name),
-                    sc.GEN_AI_AGENT_NAME: self._agent_label(),
-                    sc.GEN_AI_CONVERSATION_ID: self._conversation_id,
+                    sc.GEN_AI_AGENT_NAME: self._agent_label(run),
+                    sc.GEN_AI_CONVERSATION_ID: run.conversation_id,
                 }
             )
             if self._record_arguments:
@@ -782,29 +1029,45 @@ class TelemetryHook(HookProvider):
             span = self._tracer.start_span(f"tool.{tool_name}", attributes=span_attrs)
             self._tool_call_counter.add(1, {"tool_name": tool_name})
 
-        self._tool_spans[call_id or tool_name] = (span, time.perf_counter(), tool_name)
+        key = call_id or tool_name
+        call = _ToolCall(span=span, started=time.perf_counter(), name=tool_name)
+        if not run.tools:
+            call.token = otel_context.attach(trace.set_span_in_context(span))
+            run.current_tool = key
+        elif run.current_tool is not None:
+            # A second call before the first ran: a batch. Neither span can
+            # be current for the tools' bodies, so neither is.
+            current = run.tools.get(run.current_tool)
+            if current is not None and current.token is not None:
+                otel_context.detach(current.token)
+                current.token = None
+            run.current_tool = None
+        run.tools[key] = call
         if call_id:
             _TOOL_CALL_SPANS[call_id] = span
 
-    def _pop_tool_span(self, call_id: str, tool_name: str) -> tuple[Span, float] | None:
-        """The open span for a finished call: by id, else the oldest for the tool."""
-        entry = self._tool_spans.pop(call_id, None) if call_id else None
-        if entry is None:
-            for key, (span, started, name) in self._tool_spans.items():
-                if name == tool_name:
-                    del self._tool_spans[key]
-                    entry = (span, started, name)
-                    break
-        if entry is None:
+    @staticmethod
+    def _release_tool(run: _Run, call: _ToolCall, key: str) -> None:
+        """Drop a finished call from the current context and the in-flight index."""
+        if call.token is not None:
+            otel_context.detach(call.token)
+            call.token = None
+        if run.current_tool == key:
+            run.current_tool = None
+        for call_id, active in list(_TOOL_CALL_SPANS.items()):
+            if active is call.span:
+                del _TOOL_CALL_SPANS[call_id]
+
+    def _pop_tool_span(self, run: _Run, call_id: str, tool_name: str) -> _ToolCall | None:
+        """The open call for a finished one: by id, else the oldest for the tool in this run."""
+        key = call_id if call_id and call_id in run.tools else None
+        if key is None:
+            key = next((k for k, call in run.tools.items() if call.name == tool_name), None)
+        if key is None:
             return None
-        span, started, _ = entry
-        if call_id:
-            _TOOL_CALL_SPANS.pop(call_id, None)
-        else:  # an event built without the id: drop the entry by identity
-            for key, active in list(_TOOL_CALL_SPANS.items()):
-                if active is span:
-                    del _TOOL_CALL_SPANS[key]
-        return span, started
+        call = run.tools.pop(key)
+        self._release_tool(run, call, key)
+        return call
 
     async def on_after_tool_call(self, event: AfterToolCallEvent) -> None:
         """End tool call span.
@@ -816,11 +1079,14 @@ class TelemetryHook(HookProvider):
         tool_name = event.tool_name
         error = event.error
         result = event.result
-        popped = self._pop_tool_span(getattr(event, "tool_call_id", "") or "", tool_name)
-        if popped is None:
+        run = self._run_for(self._run_id_of(getattr(event, "run", None))) or self._loose
+        if run is None:
             return
-        span, start_time = popped
-        elapsed_s = time.perf_counter() - start_time
+        call = self._pop_tool_span(run, getattr(event, "tool_call_id", "") or "", tool_name)
+        if call is None:
+            return
+        span = call.span
+        elapsed_s = time.perf_counter() - call.started
         duration_ms = elapsed_s * 1000
 
         if self._genai:
@@ -840,7 +1106,7 @@ class TelemetryHook(HookProvider):
                     **{
                         sc.GEN_AI_TOOL_NAME: tool_name,
                         sc.GEN_AI_TOOL_TYPE: sc.TOOL_TYPE_FUNCTION,
-                        sc.GEN_AI_AGENT_NAME: self._agent_label(),
+                        sc.GEN_AI_AGENT_NAME: self._agent_label(run),
                         sc.ERROR_TYPE: error_kind,
                     }
                 ),
@@ -881,6 +1147,7 @@ class TelemetryHook(HookProvider):
             iteration: Iteration number
             state: Current state
         """
+        run = self._run_or_loose(self._run_id_of(state))
         attributes = {
             "locus.iteration": iteration,
             "locus.confidence": state.confidence,
@@ -896,10 +1163,9 @@ class TelemetryHook(HookProvider):
         # Push this iteration's context onto OTel's stack so any tool
         # spans created during the iteration become children of it
         # (which is itself a child of the invocation).
-        ctx = trace.set_span_in_context(span)
-        self._iteration_spans[iteration] = span
-        self._iteration_tokens[iteration] = otel_context.attach(ctx)
-        self._current_iteration = iteration
+        run.iterations[iteration] = span
+        run.iteration_tokens[iteration] = otel_context.attach(trace.set_span_in_context(span))
+        run.current_iteration = iteration
 
     async def on_iteration_end(
         self,
@@ -912,12 +1178,13 @@ class TelemetryHook(HookProvider):
             iteration: Iteration number
             state: Current state
         """
-        if iteration not in self._iteration_spans:
+        run = self._run_for(self._run_id_of(state)) or self._loose
+        if run is None or iteration not in run.iterations:
             return
         # A model call that raised never reached ``on_after_model_call``;
         # close it first so context tokens detach in attach order.
-        self._close_model_span("model call did not complete")
-        span = self._iteration_spans.pop(iteration)
+        self._close_model_span(run, "model call did not complete", self._last_error_type(state))
+        span = run.iterations.pop(iteration)
         span.set_attributes(
             {
                 "locus.confidence_after": state.confidence,
@@ -929,11 +1196,11 @@ class TelemetryHook(HookProvider):
         # Detach the iteration context — pair to attach in
         # `on_iteration_start`. After detach, subsequent spans
         # parent to the invocation again.
-        token = self._iteration_tokens.pop(iteration, None)
+        token = run.iteration_tokens.pop(iteration, None)
         if token is not None:
             otel_context.detach(token)
-        if self._current_iteration == iteration:
-            self._current_iteration = None
+        if run.current_iteration == iteration:
+            run.current_iteration = None
 
 
 class NoOpTelemetryHook(HookProvider):

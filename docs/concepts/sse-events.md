@@ -299,7 +299,7 @@ and the span boundary come from the same moment of the loop.
 |---|---|
 | `agent.invocation.started` / `agent.invocation.completed` (`EventBusHook`) | start / end of `invoke_agent` |
 | `agent.iteration.started` / `agent.iteration.completed` (`EventBusHook`) | start / end of `locus.iteration` |
-| `agent.model.started` / `agent.model.completed` (`EventBusHook`) | start / end of `chat`; a retry (`agent.model.retry`) starts a second `chat` span in the same iteration |
+| `agent.model.started` / `agent.model.completed` (`EventBusHook`) | start / end of `chat`; a hook-requested retry (`agent.model.retry`) ends that span and the retried call gets a second `chat` span in the same iteration |
 | `agent.tool.started` / `agent.tool.completed` (both shapes) | start / end of `execute_tool`; the `EventBusHook` shape's `tool_call_id` is the span's `gen_ai.tool.call.id`. A call a hook cancels still has its span — the after-tool hooks run with the cancellation message as the result — and the span ends without `error.type`; the event's payload is what says it was cancelled |
 | `agent.think` | inside `locus.iteration`, after that iteration's `chat` span ended |
 | `agent.model.chunk` | inside `chat` (streaming) |
@@ -308,9 +308,9 @@ and the span boundary come from the same moment of the loop.
 | `agent.context.compacted` | inside `locus.iteration`, before the `chat` span (the summarising call of a `summarize` stage has no `chat` span of its own) |
 | `agent.interrupt` | inside `invoke_agent`; the run returns paused, so the span ends, and the resumed run is a new `invoke_agent` span with the same `gen_ai.conversation.id` |
 | `agent.terminate` | end of `invoke_agent` |
-| `agent.model.retry` | between two `chat` spans of one `locus.iteration` |
+| `agent.model.retry` | between two `chat` spans of one `locus.iteration`: `ModelRetryHook` asks the loop for another call, so the discarded call's span ends (`locus.retry_requested`) and the retried call gets its own (`locus.retry_attempt`). The provider-level retries of the agent's `model_retry` policy are not this event and happen inside one `chat` span |
 | `agent.steering.applied`, `agent.guardrail.triggered` | inside `locus.iteration`, next to the `chat` or `execute_tool` span of the call the hook acted on |
-| `multiagent.orchestrator.*`, `multiagent.handoff.*` | inside the orchestrator's `invoke_agent`; a specialist that carries the hook files its own `invoke_agent <specialist>` under the span current when it starts — the orchestrator's `execute_tool` span when the specialist is exposed as a tool |
+| `multiagent.orchestrator.*`, `multiagent.handoff.*` | inside the orchestrator's `invoke_agent`; a specialist that carries the hook files its own `invoke_agent <specialist>` under the tool call in flight — the orchestrator's `execute_tool` span — when the specialist is exposed as a tool, else under the span current when it starts |
 | `multiagent.specialist.started` / `multiagent.specialist.completed` | start / end of the specialist's run, so of its `invoke_agent` span when it has the hook |
 | `multiagent.graph.node.*` | no span; a node that runs an agent produces that agent's `invoke_agent` |
 | `composition.*` | no span; each stage's agent run is an `invoke_agent` |
@@ -324,7 +324,7 @@ and the span boundary come from the same moment of the loop.
 | `a2a.task.received` / `a2a.task.completed` | bracket the served request; the agent's `invoke_agent` is a child of the caller's span when the request carried `traceparent` |
 | `a2a.client.send` / `a2a.client.received` | bracket the HTTP call; made from a tool, it sits inside that tool's `execute_tool` span and carries the span as `traceparent` |
 | `skills.activated` | inside `locus.iteration`, before the `chat` span |
-| `deepagent.subagent.spawned` / `deepagent.subagent.completed` | the sub-agent's own `invoke_agent`, under the `execute_tool` span of the spawning tool |
+| `deepagent.subagent.spawned` / `deepagent.subagent.completed` | the sub-agent's own `invoke_agent`, under the `execute_tool` span of the spawning tool (the tool call in flight when its run starts) |
 | `deepagent.fs.*`, `deepagent.todo.*` | inside the `execute_tool` span of the file or todo tool |
 | `research.*` | no span; the agent runs the workflow drives are `invoke_agent` spans |
 | `tool.sandbox.started` / `tool.sandbox.completed` | inside the sandboxed tool's `execute_tool` span |

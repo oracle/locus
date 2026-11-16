@@ -34,7 +34,9 @@ and SigNoz are on the
    mobile agents and are not accepted by `oci_apm`.
 
 3. **Export.** Put the two values in the environment and let `oci_apm`
-   build the exporters and set the providers:
+   build the exporters and set the providers (an application that has
+   already set its global providers keeps them: `install()` adds the
+   domain's span processor and metric reader to them instead):
 
    ```bash
    export OCI_APM_DATA_UPLOAD_ENDPOINT=https://<domain>.apm-agt.<region>.oci.oraclecloud.com
@@ -88,8 +90,8 @@ compartment that holds the APM domain (and `${apmDomainId}` with the
 domain's OCID), then import:
 
 ```bash
-sed -e 's|${compartmentId}|ocid1.compartment.oc1..xxxx|g' \
-    -e 's|${apmDomainId}|ocid1.apmdomain.oc1.<region>.xxxx|g' \
+sed -e 's|${compartmentId}|<compartment OCID>|g' \
+    -e 's|${apmDomainId}|<APM domain OCID>|g' \
     oci_apm_dashboard.json > dashboard.json
 oci management-dashboard dashboard import --from-json file://dashboard.json
 ```

@@ -133,7 +133,13 @@ OP_EXECUTE_TOOL = "execute_tool"
 OPERATIONS: frozenset[str] = frozenset({OP_INVOKE_AGENT, OP_CHAT, OP_EXECUTE_TOOL})
 
 TOOL_TYPE_FUNCTION = "function"
+#: ``gen_ai.token.modality`` values. The conventions require ``unknown`` when
+#: the modality cannot be determined; a provider's usage names the others.
 TOKEN_MODALITY_TEXT = "text"  # noqa: S105 — attribute value, not a secret
+TOKEN_MODALITY_AUDIO = "audio"  # noqa: S105 — attribute value, not a secret
+TOKEN_MODALITY_IMAGE = "image"  # noqa: S105 — attribute value, not a secret
+TOKEN_MODALITY_VIDEO = "video"  # noqa: S105 — attribute value, not a secret
+TOKEN_MODALITY_UNKNOWN = "unknown"  # noqa: S105 — attribute value, not a secret
 #: ``error.type`` when nothing more specific is known.
 ERROR_TYPE_OTHER = "_OTHER"
 
@@ -568,7 +574,11 @@ __all__ = [
     "SERVER_ADDRESS",
     "SERVER_PORT",
     "SUPPORTED_SEMCONV",
+    "TOKEN_MODALITY_AUDIO",
+    "TOKEN_MODALITY_IMAGE",
     "TOKEN_MODALITY_TEXT",
+    "TOKEN_MODALITY_UNKNOWN",
+    "TOKEN_MODALITY_VIDEO",
     "TOOL_TYPE_FUNCTION",
     "SpanRecord",
     "assert_valid_spans",

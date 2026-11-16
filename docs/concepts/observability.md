@@ -192,10 +192,24 @@ without a mapping layer:
 | `execute_tool <tool>` | INTERNAL | tool call | `gen_ai.operation.name=execute_tool`, `gen_ai.tool.name`, `gen_ai.tool.call.id`, `gen_ai.tool.type=function`, `gen_ai.tool.description`, `gen_ai.agent.name`, `gen_ai.conversation.id`, `error.type` on failure; `gen_ai.tool.call.arguments` and `gen_ai.tool.call.result` only with `record_arguments` / `record_results` |
 
 Iterations nest under the run; model and tool spans nest under their
-iteration. The root span is a child of whatever OpenTelemetry context is
-current when the run starts, so a run served behind an HTTP handler, an
-A2A request or an MCP call files under the caller's trace (see
-[Trace context in and out](#trace-context-in-and-out)).
+iteration. The root span is a child of the tool call in flight when the
+run starts inside one — a sub-agent exposed as a tool files its
+`invoke_agent` under the orchestrator's `execute_tool` span — else of
+whatever OpenTelemetry context is current, so a run served behind an
+HTTP handler, an A2A request or an MCP call files under the caller's
+trace (see [Trace context in and out](#trace-context-in-and-out)). The
+hook keeps its state per run: one `Agent` serving concurrent `arun()`
+calls files one trace per run, each with its own iterations and totals.
+
+A hook that asks the loop to call the model again (`event.retry`, as
+`ModelRetryHook` does) ends the `chat` span of the discarded call with
+`locus.retry_requested` and the retried call gets a `chat` span of its own
+with `locus.retry_attempt`, so every attempt is one span and counts once;
+the provider-level retries of the agent's `model_retry` policy happen
+inside one `chat` span. A model call that raised is closed as an error
+with `error.type` and its duration recorded; a run that fails or is
+cancelled closes the tool and iteration spans it left open the same way,
+so a failed run's trace still passes `validate_spans`.
 
 The `Agent` lends the hook its model and tools when it is constructed, so
 `gen_ai.request.model` is the model id (`openai.gpt-4.1` for
@@ -221,7 +235,7 @@ the Python SDK honours:
 
 | Instrument | Type | Unit | Attributes |
 |---|---|---|---|
-| `gen_ai.client.inference.usage.input_tokens` | counter | `{token}` | `gen_ai.operation.name=chat`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.token.modality=text` |
+| `gen_ai.client.inference.usage.input_tokens` | counter | `{token}` | `gen_ai.operation.name=chat`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.token.modality` — `unknown` unless the provider's usage breaks the count down by modality (`text_tokens`, `audio_tokens`, `image_tokens`), then one point per modality named |
 | `gen_ai.client.inference.usage.output_tokens` | counter | `{token}` | same |
 | `gen_ai.client.inference.duration` | histogram | `s` | `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model` |
 | `gen_ai.invoke_agent.duration` | histogram | `s` | `gen_ai.operation.name=invoke_agent`, `gen_ai.agent.name`, `gen_ai.request.model`, `error.type` |
@@ -370,7 +384,11 @@ dependency beyond the `telemetry` extra.
 An APM domain receives OTLP over HTTP on its *data upload endpoint* with a
 *private data key* as the `dataKey` authorization; both are on the
 domain's page in the console (Administration → Data keys). `oci_apm`
-builds the two exporters from them and `install()` sets the providers:
+builds the two exporters from them and `install()` sets the global
+providers — or, when the application has already set them, adds the
+domain's span processor and metric reader to the ones in place, since
+OpenTelemetry does not let a global provider be replaced; a second
+`install()` for the same domain adds nothing:
 
 ```python
 from locus.observability.exporters import oci_apm
@@ -403,12 +421,15 @@ gen_ai.request.model` is the token bill by model.
 [`examples/observability/oci_apm_dashboard.json`](https://github.com/oracle/locus/blob/main/examples/observability/oci_apm_dashboard.json)
 is a Management Dashboard definition — agent runs and latency, tool
 latency and errors, token spend by model and over time — built on those
-queries. Set `compartmentId` in the file to the compartment that holds
-the APM domain and import it:
+queries. The file carries `${compartmentId}` and `${apmDomainId}`
+placeholders; put the OCIDs of the compartment that holds the APM domain
+and of the domain in their place, then import the result:
 
 ```bash
-oci management-dashboard dashboard import \
-    --from-json file://examples/observability/oci_apm_dashboard.json
+sed -e 's|${compartmentId}|<compartment OCID>|g' \
+    -e 's|${apmDomainId}|<APM domain OCID>|g' \
+    examples/observability/oci_apm_dashboard.json > dashboard.json
+oci management-dashboard dashboard import --from-json file://dashboard.json
 ```
 
 The same directory's README walks through the setup. A public data key

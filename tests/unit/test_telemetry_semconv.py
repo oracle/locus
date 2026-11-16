@@ -423,7 +423,7 @@ class TestGenAIMetrics:
 
         inputs = points[sc.METRIC_INPUT_TOKENS]
         assert sum(p.value for p in inputs) == 20  # 10 per call, two calls
-        assert all(p.attributes[sc.GEN_AI_TOKEN_MODALITY] == "text" for p in inputs)
+        assert all(p.attributes[sc.GEN_AI_TOKEN_MODALITY] == "unknown" for p in inputs)
         assert all(p.attributes[sc.GEN_AI_OPERATION_NAME] == "chat" for p in inputs)
         assert all(p.attributes[sc.GEN_AI_PROVIDER_NAME] == "oci.generative_ai" for p in inputs)
         assert all(p.attributes[sc.GEN_AI_REQUEST_MODEL] == "openai.gpt-4.1" for p in inputs)
@@ -625,3 +625,564 @@ class TestValidator:
         loaded = sc.load_spans(sc.dump_spans(spans))
         assert loaded == spans
         assert sc.validate_spans([]) == ["no spans recorded"]
+
+
+# ---------------------------------------------------------------------------
+# One hook, many runs: concurrent, nested, retried, failed
+# ---------------------------------------------------------------------------
+
+
+def _parent_name(exporter: Any, span: Any) -> str | None:
+    by_id = {s.context.span_id: s for s in exporter.get_finished_spans()}
+    parent = by_id.get(span.parent.span_id) if span.parent is not None else None
+    return parent.name if parent is not None else None
+
+
+class TestRuns:
+    async def test_concurrent_runs_on_one_agent_are_two_traces(self, exporter: Any) -> None:
+        """Two ``arun`` on one Agent: two roots, each with its own iterations and totals."""
+        import asyncio
+
+        from locus.agent import Agent
+        from locus.testing import ScriptedModel, text, tool_call
+        from locus.tools import tool
+
+        @tool
+        async def slow(x: str) -> str:
+            """Wait, then echo."""
+            await asyncio.sleep(0.02)
+            return x
+
+        scope = "locus.semconv.test-concurrent"
+        agent = Agent(
+            model=ScriptedModel(
+                [tool_call("slow", x="1"), text("a"), tool_call("slow", x="2"), text("b")]
+            ),
+            tools=[slow],
+            hooks=[TelemetryHook(tracer_name=scope)],
+            name="shared",
+            reflexion=False,
+            grounding=False,
+        )
+        await asyncio.gather(agent.arun("one"), agent.arun("two"))
+
+        spans = _spans(exporter, scope)
+        roots = [s for s in spans if s.name == "invoke_agent shared"]
+        assert len(roots) == 2
+        assert len({s.context.trace_id for s in spans}) == 2
+        # The script is shared, so the runs split its four replies between them.
+        assert sum(r.attributes["locus.inference_calls"] for r in roots) == 4
+        assert sum(r.attributes["locus.tool_calls"] for r in roots) == 2
+        for root in roots:
+            own = [s for s in spans if s.context.trace_id == root.context.trace_id]
+            assert sc.validate_spans(own) == []
+            calls = root.attributes["locus.inference_calls"]
+            assert sum(1 for s in own if s.name == sc.ITERATION_SPAN_NAME) == calls
+            assert sum(1 for s in own if s.name == "chat") == calls
+            assert (
+                sum(1 for s in own if s.name == "execute_tool slow")
+                == (root.attributes["locus.tool_calls"])
+            )
+        assert all(s.status.status_code.name == "OK" for s in spans)
+
+    async def test_sub_agent_run_sits_under_the_tool_span(self, exporter: Any) -> None:
+        """A sub-agent exposed as a tool parents its root on the orchestrator's execute_tool."""
+        from locus.agent import Agent
+        from locus.testing import ScriptedModel, text, tool_call
+        from locus.tools import tool
+
+        scope = "locus.semconv.test-subagent"
+        specialist = Agent(
+            model=ScriptedModel([text("spec done")]),
+            hooks=[TelemetryHook(tracer_name=scope)],
+            name="specialist",
+            reflexion=False,
+            grounding=False,
+        )
+
+        @tool
+        async def ask_specialist(question: str) -> str:
+            """Delegate a question."""
+            result = await specialist.arun(question)
+            return str(result.message)
+
+        orchestrator = Agent(
+            model=ScriptedModel([tool_call("ask_specialist", question="q"), text("done")]),
+            tools=[ask_specialist],
+            hooks=[TelemetryHook(tracer_name=scope)],
+            name="orchestrator",
+            reflexion=False,
+            grounding=False,
+        )
+        await orchestrator.arun("go")
+
+        spans = _spans(exporter, scope)
+        assert len({s.context.trace_id for s in spans}) == 1
+        by_name = {s.name: s for s in spans}
+        assert _parent_name(exporter, by_name["invoke_agent specialist"]) == (
+            "execute_tool ask_specialist"
+        )
+        assert _parent_name(exporter, by_name["execute_tool ask_specialist"]) == (
+            sc.ITERATION_SPAN_NAME
+        )
+        assert sc.validate_spans(spans) == []
+
+    async def test_nested_runs_on_one_hook_each_get_a_record(self, exporter: Any) -> None:
+        """One hook instance driven for an outer and an inner run keeps them apart."""
+        from opentelemetry import trace as otel_trace
+
+        from locus.testing import text
+
+        scope = "locus.semconv.test-nested"
+        hook = TelemetryHook(tracer_name=scope, model="openai:gpt-4.1")
+        outer = _state(run_id="outer", agent_id="outer")
+        inner = _state(run_id="inner", agent_id="inner")
+        outer_run = SimpleNamespace(info=RunInfo(run_id="outer", thread_id="t-outer"))
+        inner_run = SimpleNamespace(info=RunInfo(run_id="inner", thread_id="t-inner"))
+        await hook.on_before_invocation("outer", outer)
+        await hook.on_iteration_start(0, outer)
+        await hook.on_before_invocation("inner", inner)
+        assert hook._invocation_span.name == "invoke_agent inner"
+        await hook.on_before_model_call(
+            BeforeModelCallEvent(messages=[], tools=None, run=inner_run)
+        )
+        await hook.on_after_model_call(
+            AfterModelCallEvent(response=text("ok"), messages=[], run=inner_run)
+        )
+        await hook.on_after_invocation(inner, success=True)
+        assert hook._invocation_span.name == "invoke_agent outer"
+        assert otel_trace.get_current_span().name == sc.ITERATION_SPAN_NAME
+        await hook.on_before_model_call(
+            BeforeModelCallEvent(messages=[], tools=None, run=outer_run)
+        )
+        await hook.on_after_model_call(
+            AfterModelCallEvent(response=text("ok"), messages=[], run=outer_run)
+        )
+        await hook.on_iteration_end(0, outer)
+        await hook.on_after_invocation(outer, success=True)
+
+        by_name = _by_name(exporter, scope)
+        assert by_name["invoke_agent inner"].attributes["locus.inference_calls"] == 1
+        assert by_name["invoke_agent outer"].attributes["locus.inference_calls"] == 1
+        assert by_name["invoke_agent inner"].attributes[sc.GEN_AI_CONVERSATION_ID] == "t-inner"
+        assert by_name["invoke_agent outer"].attributes[sc.GEN_AI_CONVERSATION_ID] == "t-outer"
+        assert _parent_name(exporter, by_name["invoke_agent inner"]) == sc.ITERATION_SPAN_NAME
+        assert hook._invocation_span is None
+
+    async def test_hook_retry_gives_every_attempt_a_chat_span(
+        self, exporter: Any, metric_reader: Any
+    ) -> None:
+        """A hook's ``retry`` ends the chat span; the retried call gets its own and counts."""
+        from locus.agent import Agent
+        from locus.hooks.provider import HookPriority, HookProvider
+        from locus.testing import ScriptedModel, text
+
+        class RetryOnce(HookProvider):
+            def __init__(self) -> None:
+                self.calls = 0
+
+            @property
+            def priority(self) -> int:
+                return HookPriority.OBSERVABILITY_MIN + 50
+
+            @property
+            def name(self) -> str:
+                return "RetryOnce"
+
+            async def on_after_model_call(self, event: AfterModelCallEvent) -> None:
+                self.calls += 1
+                if self.calls == 1:
+                    event.retry = True
+                    event.retry_feedback = "try again"
+
+        scope = "locus.semconv.test-retry"
+        agent = Agent(
+            model=ScriptedModel([text("first"), text("second")]),
+            hooks=[TelemetryHook(tracer_name=scope), RetryOnce()],
+            name="retrying",
+            reflexion=False,
+            grounding=False,
+        )
+        result = await agent.arun("go")
+        assert result.message == "second"
+
+        spans = _spans(exporter, scope)
+        chats = [s for s in spans if s.name == "chat"]
+        assert len(chats) == 2
+        assert all(s.status.status_code.name == "OK" for s in chats)
+        assert all(s.attributes[sc.GEN_AI_USAGE_INPUT_TOKENS] == 10 for s in chats)
+        assert chats[0].attributes["locus.retry_requested"] is True
+        assert "locus.retry_attempt" not in chats[0].attributes
+        assert chats[1].attributes["locus.retry_attempt"] == 2
+        assert "locus.retry_requested" not in chats[1].attributes
+        assert _parent_name(exporter, chats[1]) == sc.ITERATION_SPAN_NAME
+        root = next(s for s in spans if s.name == "invoke_agent retrying")
+        assert root.attributes["locus.inference_calls"] == 2
+        assert sc.validate_spans(spans) == []
+        points = _points(metric_reader)
+        assert sum(p.count for p in points[sc.METRIC_INFERENCE_DURATION]) == 2
+        assert sum(p.value for p in points[sc.METRIC_INPUT_TOKENS]) == 20
+
+    async def test_failed_run_closes_everything_with_error_type(
+        self, exporter: Any, metric_reader: Any
+    ) -> None:
+        """A run that raised mid-call leaves a trace the validator accepts."""
+        scope = "locus.semconv.test-failed"
+        hook = TelemetryHook(tracer_name=scope, model="openai:gpt-4.1")
+        run = _run()
+        failed = _state(errors=("RuntimeError: boom",))
+        await hook.on_before_invocation("hi", failed)
+        await hook.on_iteration_start(0, failed)
+        await hook.on_before_model_call(BeforeModelCallEvent(messages=[], tools=None, run=run))
+        await hook.on_after_invocation(failed, success=False)
+
+        by_name = _by_name(exporter, scope)
+        for name in ("chat gpt-4.1", sc.ITERATION_SPAN_NAME, "invoke_agent support"):
+            assert by_name[name].status.status_code.name == "ERROR", name
+            assert by_name[name].attributes[sc.ERROR_TYPE] == "RuntimeError", name
+        assert by_name["invoke_agent support"].attributes["locus.inference_calls"] == 1
+        assert sc.validate_spans(_spans(exporter, scope), require_usage=False) == []
+        # The failed call's duration is recorded, with error.type, as the conventions ask.
+        durations = _points(metric_reader)[sc.METRIC_INFERENCE_DURATION]
+        assert sum(p.count for p in durations) == 1
+        assert durations[0].attributes[sc.ERROR_TYPE] == "RuntimeError"
+        assert sc.METRIC_INPUT_TOKENS not in _points(metric_reader)
+
+    async def test_model_call_that_raised_closes_at_iteration_end(self, exporter: Any) -> None:
+        scope = "locus.semconv.test-model-raised"
+        hook = TelemetryHook(tracer_name=scope, model="openai:gpt-4.1")
+        run = _run()
+        await hook.on_before_invocation("hi", _state())
+        await hook.on_iteration_start(0, _state())
+        await hook.on_before_model_call(BeforeModelCallEvent(messages=[], tools=None, run=run))
+        await hook.on_iteration_end(0, _state(errors=("TimeoutError: slow",)))
+        await hook.on_after_invocation(_state(), success=True)
+        chat = _by_name(exporter, scope)["chat gpt-4.1"]
+        assert chat.status.status_code.name == "ERROR"
+        assert chat.attributes[sc.ERROR_TYPE] == "TimeoutError"
+
+    async def test_tool_spans_open_at_run_end_are_closed_and_forgotten(self, exporter: Any) -> None:
+        """A cancelled run ends its tool spans as errors and leaves no in-flight entry."""
+        scope = "locus.semconv.test-open-tools"
+        hook = TelemetryHook(tracer_name=scope, model="openai:gpt-4.1")
+        run = _run()
+        await hook.on_before_invocation("hi", _state())
+        await hook.on_iteration_start(0, _state())
+        await hook.on_before_tool_call(
+            BeforeToolCallEvent(tool_name="slow", tool_call_id="c-1", arguments={}, run=run)
+        )
+        assert "c-1" in telemetry_mod._TOOL_CALL_SPANS
+        await hook.on_after_invocation(_state(errors=("CancelledError",)), success=False)
+        assert "c-1" not in telemetry_mod._TOOL_CALL_SPANS
+        assert hook._tool_spans == {}
+        tool = _by_name(exporter, scope)["execute_tool slow"]
+        assert tool.status.status_code.name == "ERROR"
+        assert tool.attributes[sc.ERROR_TYPE] == "CancelledError"
+        assert sc.validate_spans(_spans(exporter, scope), require_usage=False) == []
+
+    async def test_by_name_fallback_stays_inside_the_run(self, exporter: Any) -> None:
+        """An after-tool event without an id closes a span of its own run, never another's."""
+        scope = "locus.semconv.test-by-name"
+        hook = TelemetryHook(tracer_name=scope, model="openai:gpt-4.1")
+        first, second = _state(run_id="r-1"), _state(run_id="r-2")
+        run_1 = SimpleNamespace(info=RunInfo(run_id="r-1"))
+        run_2 = SimpleNamespace(info=RunInfo(run_id="r-2"))
+        await hook.on_before_invocation("one", first)
+        await hook.on_before_tool_call(
+            BeforeToolCallEvent(tool_name="lookup", tool_call_id="a", arguments={}, run=run_1)
+        )
+        await hook.on_before_invocation("two", second)
+        # Names the tool but not the call, from the second run: the first run's span stays open.
+        await hook.on_after_tool_call(
+            AfterToolCallEvent(tool_name="lookup", result=None, error=None, run=run_2)
+        )
+        assert "a" in telemetry_mod._TOOL_CALL_SPANS
+        await hook.on_after_tool_call(
+            AfterToolCallEvent(tool_name="lookup", result="ok", error=None, run=run_1)
+        )
+        assert "a" not in telemetry_mod._TOOL_CALL_SPANS
+        await hook.on_after_invocation(second, success=True)
+        await hook.on_after_invocation(first, success=True)
+        tool = _by_name(exporter, scope)["execute_tool lookup"]
+        assert tool.status.status_code.name == "OK"
+        roots = [s for s in _spans(exporter, scope) if s.name == "invoke_agent support"]
+        root_1 = next(s for s in roots if s.attributes["locus.run_id"] == "r-1")
+        assert tool.context.trace_id == root_1.context.trace_id
+
+    async def test_tool_span_is_current_while_the_call_runs(self, exporter: Any) -> None:
+        """One call open: its span is current; a batch of two: none is, the tool context tells."""
+        from opentelemetry import trace as otel_trace
+
+        scope = "locus.semconv.test-tool-current"
+        hook = TelemetryHook(tracer_name=scope, model="openai:gpt-4.1")
+        run = _run()
+        await hook.on_before_invocation("hi", _state())
+        await hook.on_iteration_start(0, _state())
+        await hook.on_before_tool_call(
+            BeforeToolCallEvent(tool_name="one", tool_call_id="c-1", arguments={}, run=run)
+        )
+        assert otel_trace.get_current_span().name == "execute_tool one"
+        await hook.on_before_tool_call(
+            BeforeToolCallEvent(tool_name="two", tool_call_id="c-2", arguments={}, run=run)
+        )
+        assert otel_trace.get_current_span().name == sc.ITERATION_SPAN_NAME
+        for call_id, name in (("c-1", "one"), ("c-2", "two")):
+            await hook.on_after_tool_call(
+                AfterToolCallEvent(
+                    tool_name=name, result="", error=None, tool_call_id=call_id, run=run
+                )
+            )
+        assert otel_trace.get_current_span().name == sc.ITERATION_SPAN_NAME
+        await hook.on_iteration_end(0, _state())
+        await hook.on_after_invocation(_state(), success=True)
+        assert otel_trace.get_current_span().get_span_context().span_id == 0
+
+
+class TestTokenModality:
+    async def test_unknown_without_a_breakdown(self, exporter: Any, metric_reader: Any) -> None:
+        hook = TelemetryHook(tracer_name="locus.semconv.test-modality", model="openai:gpt-4.1")
+        await _drive(hook)
+        for name in (sc.METRIC_INPUT_TOKENS, sc.METRIC_OUTPUT_TOKENS):
+            points = _points(metric_reader)[name]
+            assert [p.attributes[sc.GEN_AI_TOKEN_MODALITY] for p in points] == ["unknown"]
+
+    async def test_breakdown_in_the_usage_details_names_the_modality(
+        self, exporter: Any, metric_reader: Any
+    ) -> None:
+        from locus.testing import text
+
+        hook = TelemetryHook(tracer_name="locus.semconv.test-modality-2", model="openai:gpt-4.1")
+        response = text("ok")
+        response.usage = {
+            "prompt_tokens": 100,
+            "completion_tokens": 20,
+            "prompt_tokens_details": {"audio_tokens": 30, "cached_tokens": 10},
+            "completion_tokens_details": {"text_tokens": 20},
+        }
+        run = _run()
+        await hook.on_before_invocation("hi", _state())
+        await hook.on_before_model_call(BeforeModelCallEvent(messages=[], tools=None, run=run))
+        await hook.on_after_model_call(AfterModelCallEvent(response=response, messages=[], run=run))
+        await hook.on_after_invocation(_state(), success=True)
+        points = _points(metric_reader)
+        inputs = {
+            p.attributes[sc.GEN_AI_TOKEN_MODALITY]: p.value for p in points[sc.METRIC_INPUT_TOKENS]
+        }
+        assert inputs == {"audio": 30, "unknown": 70}  # cached_tokens is no modality
+        outputs = {
+            p.attributes[sc.GEN_AI_TOKEN_MODALITY]: p.value for p in points[sc.METRIC_OUTPUT_TOKENS]
+        }
+        assert outputs == {"text": 20}
+
+    def test_token_points(self) -> None:
+        points = telemetry_mod._token_points
+        keys = telemetry_mod._INPUT_DETAIL_KEYS
+        assert points(None, {}, keys) == []
+        assert points(0, {}, keys) == []
+        assert points(5, {"prompt_tokens_details": {"cached_tokens": 5}}, keys) == [("unknown", 5)]
+        assert points(5, {"input_tokens_details": {"image_tokens": 5}}, keys) == [("image", 5)]
+        assert points(5, {"input_tokens_details": {"text_tokens": 9}}, keys) == [("text", 9)]
+
+
+# ---------------------------------------------------------------------------
+# Edges: the legacy shape's tool paths, the API without bucket advisories,
+# a run ended on another task, events outside any run
+# ---------------------------------------------------------------------------
+
+
+class TestEdges:
+    async def test_legacy_tool_spans_record_arguments_results_and_errors(
+        self, exporter: Any, metric_reader: Any
+    ) -> None:
+        scope = "locus.semconv.test-legacy-tools"
+        hook = TelemetryHook(
+            tracer_name=scope,
+            semconv="locus-legacy",
+            record_arguments=True,
+            record_results=True,
+        )
+
+        class Unprintable:
+            def __str__(self) -> str:
+                raise ValueError("no")
+
+        await hook.on_before_invocation("hi", _state())
+        await hook.on_before_tool_call(
+            BeforeToolCallEvent(
+                tool_name="lookup",
+                tool_call_id="c-1",
+                arguments={"order": "CS-1", "blob": Unprintable()},
+            )
+        )
+        await hook.on_after_tool_call(
+            AfterToolCallEvent(tool_name="lookup", result="found", error=None, tool_call_id="c-1")
+        )
+        await hook.on_before_tool_call(
+            BeforeToolCallEvent(tool_name="lookup", tool_call_id="c-2", arguments={})
+        )
+        await hook.on_after_tool_call(
+            AfterToolCallEvent(tool_name="lookup", result=None, error="boom", tool_call_id="c-2")
+        )
+        # A third call is still open when the run ends.
+        await hook.on_before_tool_call(
+            BeforeToolCallEvent(tool_name="lookup", tool_call_id="c-3", arguments={})
+        )
+        await hook.on_after_invocation(_state(), success=False)
+
+        spans = [s for s in _spans(exporter, scope) if s.name == "tool.lookup"]
+        assert len(spans) == 3
+        first, second, third = spans
+        assert first.attributes["locus.tool.arg.order"] == "CS-1"
+        assert first.attributes["locus.tool.arg.blob"] == "<non-serializable>"
+        assert first.attributes["locus.result_preview"] == "found"
+        assert second.status.status_code.name == "ERROR"
+        assert second.attributes["locus.error"] == "boom"
+        assert third.status.status_code.name == "ERROR"
+        assert third.attributes["locus.error"] == "tool call did not complete"
+        points = _points(metric_reader)
+        assert sum(p.value for p in points["locus.tool_errors"]) == 1
+        assert sum(p.value for p in points["locus.tool_calls"]) == 3
+
+    def test_histograms_without_the_bucket_advisory(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """An OpenTelemetry API that predates ``explicit_bucket_boundaries_advisory``."""
+        from opentelemetry import metrics as otel_metrics
+
+        meter = otel_metrics.get_meter("locus.semconv.test-old-api")
+        real = meter.create_histogram
+        seen: list[dict[str, Any]] = []
+
+        def create_histogram(name: str, **kwargs: Any) -> Any:
+            seen.append(kwargs)
+            if "explicit_bucket_boundaries_advisory" in kwargs:
+                raise TypeError("unexpected keyword argument")
+            return real(name, **kwargs)
+
+        monkeypatch.setattr(meter, "create_histogram", create_histogram)
+        monkeypatch.setattr(otel_metrics, "get_meter", lambda name: meter)
+        TelemetryHook(tracer_name="locus.semconv.test-old-api")
+        assert any("explicit_bucket_boundaries_advisory" in k for k in seen)
+        assert any("explicit_bucket_boundaries_advisory" not in k for k in seen)
+
+    async def test_run_ended_on_another_task_still_closes(self, exporter: Any) -> None:
+        """The record goes even when the ending hook runs where the start did not."""
+        import asyncio
+
+        scope = "locus.semconv.test-other-task"
+        hook = TelemetryHook(tracer_name=scope, model="openai:gpt-4.1")
+        await hook.on_before_invocation("hi", _state())
+        await asyncio.create_task(hook.on_after_invocation(_state(), success=True))
+        assert hook._invocation_span is None
+        assert _by_name(exporter, scope)["invoke_agent support"].status.status_code.name == "OK"
+
+    async def test_events_outside_any_run(self, exporter: Any) -> None:
+        """Hook events with no run in flight: no error, no span for what never started."""
+        scope = "locus.semconv.test-no-run"
+        hook = TelemetryHook(tracer_name=scope, model="openai:gpt-4.1")
+        unknown = SimpleNamespace(info=RunInfo(run_id="never-started"))
+        await hook.on_after_model_call(AfterModelCallEvent(response=None, messages=[], run=unknown))
+        await hook.on_after_tool_call(
+            AfterToolCallEvent(tool_name="x", result=None, error=None, run=unknown)
+        )
+        await hook.on_iteration_end(0, _state(run_id="never-started"))
+        await hook.on_after_invocation(_state(run_id="never-started"), success=True)
+        assert hook._run_for("never-started") is None
+        assert hook._tool_spans == {}
+        assert hook._iteration_spans == {}
+        assert _spans(exporter, scope) == []
+
+    async def test_explicit_agent_name_wins_on_every_span(self, exporter: Any) -> None:
+        scope = "locus.semconv.test-agent-name"
+        hook = TelemetryHook(tracer_name=scope, model="openai:gpt-4.1", agent_name="desk")
+        await _drive(hook, run=_run(agent_name="other"))
+        by_name = _by_name(exporter, scope)
+        assert "invoke_agent desk" in by_name
+        assert by_name["execute_tool lookup_order"].attributes[sc.GEN_AI_AGENT_NAME] == "desk"
+
+
+# ---------------------------------------------------------------------------
+# The naming helpers and the validator on the less common shapes
+# ---------------------------------------------------------------------------
+
+
+class TestSemconvEdges:
+    def test_identity_helpers_on_odd_inputs(self) -> None:
+        class OCIModel:
+            pass
+
+        class AnthropicModel:
+            pass
+
+        class Bare:
+            model_id = "qwen-7b"
+
+        assert sc.request_model(object()) is None
+        assert sc.request_model(Bare()) == "qwen-7b"
+        assert sc.provider_name("gpt-4.1") is None  # no provider prefix
+        assert sc.provider_name(OCIModel()) == sc.PROVIDER_OCI_GENERATIVE_AI
+        assert sc.provider_name(AnthropicModel()) == "anthropic"
+        assert sc.provider_name(OpenAIModel("x", "not a url")) == "openai"
+        assert sc.server_address(OpenAIModel("x", "not a url")) == (None, None)
+        assert sc.server_address(object()) == (None, None)
+        assert sc.fallback_provider_name(None) is None
+
+    def test_records_from_dicts_and_span_records(self) -> None:
+        record = _rec("invoke_agent", "invoke_agent")
+        loaded = sc.records_from_spans([record, record.to_dict()])
+        assert loaded == [record, record]
+
+    def test_validator_names_every_other_problem(self) -> None:
+        chat = _rec(
+            "chat other",
+            "chat",
+            **{
+                sc.GEN_AI_PROVIDER_NAME: "p",
+                sc.GEN_AI_REQUEST_MODEL: "m",
+                sc.GEN_AI_RESPONSE_FINISH_REASONS: "stop",
+            },
+        )
+        chat.status = "ERROR"
+        odd_kind = _rec("execute_tool t", "execute_tool", **{sc.GEN_AI_TOOL_NAME: "t"})
+        odd_kind.kind = "SIDEWAYS"
+        odd_kind.span_id = "odd"
+        misnamed_tool = _rec(
+            "tool t", "execute_tool", **{sc.GEN_AI_TOOL_NAME: "t", sc.GEN_AI_TOOL_CALL_ID: 7}
+        )
+        misnamed_tool.span_id = "misnamed"
+        unknown_op = _rec("x", "dance")
+        iteration = _rec(sc.ITERATION_SPAN_NAME, None)
+        iteration.parent_span_id = None
+        other_trace = _rec("invoke_agent", "invoke_agent")
+        other_trace.trace_id = "t2"
+        other_trace.span_id = "root-2"
+        root = _rec(
+            "invoke_agent misnamed",
+            "invoke_agent",
+            **{sc.GEN_AI_USAGE_INPUT_TOKENS: -1, sc.GEN_AI_USAGE_OUTPUT_TOKENS: 2},
+        )
+        root.span_id = "invoke_agent"
+
+        problems = sc.validate_spans(
+            [root, chat, odd_kind, misnamed_tool, unknown_op, iteration, other_trace]
+        )
+        text = "\n".join(problems)
+        assert "belong to 2 traces" in text
+        assert "root spans, expected 1" in text
+        assert "expected name 'invoke_agent'" in text
+        assert "status ERROR without error.type" in text
+        assert "expected name 'chat m'" in text
+        assert "must be a string list" in text
+        assert "must be a non-negative integer" in text
+        assert "unknown span kind 'SIDEWAYS'" in text
+        assert "expected name 'execute_tool t'" in text
+        assert "gen_ai.tool.call.id must be a string" in text
+        assert "unknown operation 'dance'" in text
+        assert "iteration span has no parent" in text
+        # A root that is not an invoke_agent span is named as such.
+        lone = _rec(
+            "chat m", "chat", **{sc.GEN_AI_PROVIDER_NAME: "p", sc.GEN_AI_REQUEST_MODEL: "m"}
+        )
+        lone.parent_span_id = None
+        assert any(
+            "is not an invoke_agent span" in p
+            for p in sc.validate_spans([lone], require_usage=False)
+        )
