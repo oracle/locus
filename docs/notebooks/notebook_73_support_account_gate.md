@@ -100,7 +100,7 @@ the checkpoints live in a temporary directory, and the "other process" is the
 
 ## Output
 
-Running it offline — no model and no credentials — prints a small credit applied, a plan upgrade held, and the trail that records both; then the same upgrade held by a gated tool with the run parked, the hold read back from the thread's checkpoint, approved from another process with `locus approvals`, and performed once by a fresh agent resuming the thread:
+Running it offline — no credentials, bundled mock model — prints a small credit applied, a plan upgrade held, and the trail that records both; then the same upgrade held by a gated tool with the run parked, the hold read back from the thread's checkpoint, approved from another process with `locus approvals`, and performed once by a fresh agent resuming the thread:
 
 ```text
 Notebook 73: A support agent changes a customer account — admit() holds the big ones
