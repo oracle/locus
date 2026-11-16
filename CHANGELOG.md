@@ -133,6 +133,32 @@ policy.
 - Notebook 73 (support account gate) now ends with the hold parked in a
   file-backed store, approved from another process through `locus approvals`,
   and performed by a fresh agent resuming the thread.
+- **Full `reasoning` control on `OCIResponsesModel`.** `reasoning` takes the
+  Responses-native object (`effort`, `summary`, ...) on `OCIResponsesConfig`,
+  the constructor and as a call kwarg such as an agent's `model_kwargs`, and
+  is sent as given; with `reasoning_effort` set too the dict wins and the
+  effort only fills `effort` when the dict lacks it. Nothing is sent when
+  both are unset. Reasoning summaries the endpoint returns surface as
+  `ModelResponse.reasoning`. Before, a `reasoning` dict was dropped.
+- **Reasoning items replayed across tool calls on the stateless path.** With
+  `store=False` (or after the Zero Data Retention switch) and a reasoning
+  control set, the request asks for `include=["reasoning.encrypted_content"]`;
+  the reasoning items that come back stay on the assistant message under
+  `metadata["oci_responses_items"]` with the turn's `function_call` items,
+  and the next request replays them verbatim ahead of the tool result, so a
+  tool-calling turn keeps its reasoning. Turns without such items, and
+  streamed turns, are reconstructed as before.
+- **Native compaction on the OCI Responses transport.**
+  `OCIResponsesModel.compact_history()` posts a history to
+  `/responses/compact` and returns the compacted messages: the ones the
+  endpoint kept plus an encrypted `compaction` item the model replays on
+  later requests. `ContextCompactor(native_compaction=True)`, or
+  `CompactionConfig(native=True)` on the agent, hands the summary stage to a
+  model that offers `compact_history()` instead of writing a client-side
+  summary; the system prompt and the task message stay verbatim, the
+  `CompactionEvent` carries `stage="native"` (new value), the compaction
+  call's tokens count against the run's budgets, and a failed call falls
+  back to the client-side summary. Opt-in; off by default.
 - **Zero Data Retention detection on `OCIResponsesModel`.** A tenancy with
   Zero Data Retention (ZDR) answers every request that carries
   `previous_response_id` with a 400 saying so. That reply now raises

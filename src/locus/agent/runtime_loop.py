@@ -3421,6 +3421,7 @@ class AgentRuntimeMixin:
             tokens_before=tokens,
             instructions=hook.instructions,
             archive=pack.archive_for(session) if pack is not None else None,
+            model=self._model,
         )
         if outcome is None:
             return state, None

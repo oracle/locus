@@ -49,7 +49,7 @@ time if the endpoint signals that requirement. Non-OpenAI models served
 through the Responses endpoint are one such case. The OCID is sent as the
 `OpenAI-Project` header (and as `opc-project-id`).
 
-## Reasoning effort
+## Reasoning controls
 
 Reasoning models take an effort level. Set it once on the model with
 `reasoning_effort=`, or per run through the agent's `model_kwargs`; the
@@ -73,9 +73,81 @@ careful = agent.run_sync(
 )
 ```
 
+The full `reasoning` object of the Responses API (`effort`, `summary`,
+and whatever the model accepts) goes through `reasoning=`, on the model
+or in `model_kwargs`, and is sent as given. When both are set the dict
+wins and `reasoning_effort` only fills `effort` if the dict lacks it:
+
+```python
+model = OCIResponsesModel(
+    model="openai.gpt-5.5",
+    profile="MY_PROFILE",
+    region="us-chicago-1",
+    reasoning={"effort": "high", "summary": "auto"},
+)
+agent = Agent(model=model)
+result = agent.run_sync(
+    "Find the root cause of the incident.",
+    model_kwargs={"reasoning": {"summary": "detailed"}, "reasoning_effort": "medium"},
+)
+# sent: reasoning={"summary": "detailed", "effort": "medium"}
+```
+
 Left unset, no `reasoning` field is sent and the server's default applies.
 The accepted values depend on the model and the server validates them; a
-model that does not reason rejects the field.
+model that does not reason rejects the field. Reasoning summaries the
+endpoint returns surface as `ModelResponse.reasoning`.
+
+**Reasoning across tool calls without server state.** With `store=False`
+(or after the Zero Data Retention switch) nothing is kept server-side, so
+when a reasoning control is set the request also asks for
+`include=["reasoning.encrypted_content"]`. The reasoning items that come
+back stay on the assistant message (`metadata["oci_responses_items"]`,
+together with the turn's `function_call` items) and the next request
+replays them verbatim ahead of the tool result, so a tool-calling turn
+keeps the reasoning that led to the call. Whether the endpoint returns
+reasoning items depends on the model; when it returns none, the turn is
+reconstructed from the message as before. Streamed turns are
+reconstructed too.
+
+## Native compaction
+
+The endpoint can compact a thread itself: `POST /responses/compact`
+keeps the messages a continuation needs and folds the rest into an
+encrypted `compaction` item that later requests carry in their `input`.
+`OCIResponsesModel.compact_history()` exposes it, and the agent's
+`ContextCompactor` can hand its summary stage to it instead of writing a
+summary client-side. Opt in with `compaction=CompactionConfig(native=True)`
+(or `ContextCompactor(native_compaction=True)`); it applies on the
+stateless path, where the client holds the history:
+
+```python
+from locus.agent import Agent, CompactionConfig
+from locus.models.providers.oci import OCIResponsesModel
+
+model = OCIResponsesModel(
+    model="openai.gpt-5.5",
+    profile="MY_PROFILE",
+    region="us-chicago-1",
+    store=False,
+)
+agent = Agent(
+    model=model,
+    tools=[read_log],
+    context_window=400_000,
+    compaction=CompactionConfig(native=True),
+)
+```
+
+Old tool output is still cleared first. When that is not enough, the
+system prompt and the task message stay verbatim and the rest of the
+history goes to the endpoint; what comes back replaces it in
+`state.messages` and in the checkpoint, and the model replays the
+compaction item on every later request. The run yields a
+`CompactionEvent` with `stage="native"`; the compaction call's tokens
+count against the run's budgets. If the endpoint call fails the
+client-side summary takes over for that compaction. With `store=True`
+the server holds the thread and no client-side compaction runs.
 
 ## What changes vs `OCIChatCompletionsModel`
 

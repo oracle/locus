@@ -36,6 +36,7 @@ from locus.models.providers.oci.openai_compat import (
     build_oci_openai_base_url,
 )
 from locus.models.providers.oci.responses import (
+    OCI_RESPONSES_ITEMS_METADATA_KEY,
     OCIProjectRequiredError,
     OCIResponsesConfig,
     OCIResponsesModel,
@@ -431,6 +432,7 @@ __all__ = [
     "OCIModelProvider",
     "OCIChatCompletionsConfig",
     "OCIChatCompletionsModel",
+    "OCI_RESPONSES_ITEMS_METADATA_KEY",
     "OCIProjectRequiredError",
     "OCIResponsesConfig",
     "OCIResponsesModel",

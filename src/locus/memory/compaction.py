@@ -73,7 +73,9 @@ __all__ = [
 #: ``summarize``: older history was replaced by a model-written summary.
 #: ``truncate``: older history was dropped without a summary (no summary
 #: model, or the summary call failed twice).
-CompactionStage = Literal["prune", "summarize", "truncate"]
+#: ``native``: the model's own compaction endpoint folded the older history
+#: into an item the model replays itself (``native_compaction=True``).
+CompactionStage = Literal["prune", "summarize", "truncate", "native"]
 
 #: ``Message.metadata`` key on the summary message, so the next compaction
 #: builds on it rather than summarising a summary as if it were conversation.
@@ -271,6 +273,15 @@ class ContextCompactor(ConversationManager):
             many iterations of the last one means the context cannot hold the
             run any more: the run ends rather than looping. ``0`` disables it.
         token_counter: Maps a message to a token count; char/4 by default.
+        native_compaction: Hand the summary stage to the agent model's own
+            compaction endpoint when the model offers one (an async
+            ``compact_history(messages, *, instructions)`` returning the
+            compacted messages and the call's usage), such as
+            ``OCIResponsesModel`` with ``store=False``. The endpoint decides
+            what to keep and folds the rest into an item the model replays
+            itself; the system prompt and the task message stay verbatim
+            client-side. A model without the method, or a failed call,
+            summarises as usual.
     """
 
     def __init__(
@@ -286,6 +297,7 @@ class ContextCompactor(ConversationManager):
         summary_max_tokens: int | None = None,
         min_iterations_between_summaries: int = 3,
         token_counter: Callable[[Message], int] | None = None,
+        native_compaction: bool = False,
     ) -> None:
         if context_length < 1:
             raise ValueError("context_length must be positive")
@@ -321,6 +333,7 @@ class ContextCompactor(ConversationManager):
             else max(256, min(4_096, context_length // 10))
         )
         self.min_iterations_between_summaries = min_iterations_between_summaries
+        self.native_compaction = native_compaction
         self._count = token_counter or _char_count_tokens
 
     # ------------------------------------------------------------------
@@ -401,6 +414,7 @@ class ContextCompactor(ConversationManager):
         tokens_before: int | None = None,
         instructions: str | None = None,
         archive: OutputArchive | None = None,
+        model: Any = None,
     ) -> CompactionOutcome | None:
         """Compact ``messages`` when they reach the threshold; ``None`` when not.
 
@@ -414,6 +428,9 @@ class ContextCompactor(ConversationManager):
             archive: Archives cleared and folded outputs so ``obs_recall`` can
                 read them back (see :mod:`locus.memory.observation_pack`).
                 ``None`` clears to a lossy stub.
+            model: The agent's model. With ``native_compaction=True`` and a
+                model that offers ``compact_history``, the summary stage is
+                handed to it (see the class docstring).
         """
         original = list(messages)
         before = (
@@ -469,13 +486,74 @@ class ContextCompactor(ConversationManager):
                 ),
             )
 
-        outcome = await self._summarise_history(
-            original, cleared, tool_tokens, before, scale, instructions, archive
-        )
+        outcome: CompactionOutcome | None = None
+        if self.native_compaction and callable(getattr(model, "compact_history", None)):
+            outcome = await self._compact_natively(
+                model, cleared, tool_tokens, before, scale, instructions
+            )
+        if outcome is None:
+            outcome = await self._summarise_history(
+                original, cleared, tool_tokens, before, scale, instructions, archive
+            )
         tracker.forget_report()
-        if outcome.stage in ("summarize", "truncate") and not outcome.exhausted:
+        if outcome.stage in ("summarize", "truncate", "native") and not outcome.exhausted:
             tracker.last_summary_iteration = iteration
         return outcome
+
+    async def _compact_natively(
+        self,
+        model: Any,
+        cleared: list[Message],
+        tool_tokens: int,
+        before: int,
+        scale: float,
+        instructions: str | None,
+    ) -> CompactionOutcome | None:
+        """Stage 2 through the model's own compaction endpoint.
+
+        The protected head (leading system messages and the task message)
+        stays verbatim; the rest of the history goes to the endpoint with the
+        system messages as its instructions, and what comes back replaces it.
+        ``None`` when there is nothing beyond the head or the call failed, so
+        the caller falls back to the client-side summary.
+        """
+        threshold = self.threshold
+        head_end = _head_end(cleared)
+        head = cleared[:head_end]
+        body = cleared[head_end:]
+        if not body:
+            return None
+        system = [m for m in head if m.role == Role.SYSTEM]
+        try:
+            compacted_body, usage = await model.compact_history(
+                [*system, *body], instructions=instructions
+            )
+        except Exception as exc:  # noqa: BLE001 — a failed compaction falls back to a summary
+            logger.warning(
+                "Native context compaction failed, summarising instead: %s: %s",
+                type(exc).__name__,
+                exc,
+            )
+            return None
+        compacted = [*head, *compacted_body]
+        after = int((self.tokens(compacted) + tool_tokens) * scale)
+        exhausted = after >= threshold
+        return CompactionOutcome(
+            messages=compacted,
+            stage="native",
+            tokens_before=before,
+            tokens_after=after,
+            threshold=threshold,
+            exhausted=exhausted,
+            detail=(
+                f"compaction left {after} tokens against a {threshold}-token "
+                "threshold: the system prompt, task, tool definitions and what the "
+                "model's compaction kept no longer fit the window."
+                if exhausted
+                else None
+            ),
+            usage=dict(usage or {}),
+        )
 
     def _clear_tool_outputs(
         self, messages: list[Message], archive: OutputArchive | None = None

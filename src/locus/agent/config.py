@@ -215,6 +215,16 @@ class CompactionConfig(BaseModel):
     )
     summary_max_tokens: int | None = Field(default=None, ge=1)
     min_iterations_between_summaries: int = Field(default=3, ge=0)
+    native: bool = Field(
+        default=False,
+        description=(
+            "Hand the summary stage to the model's own compaction endpoint "
+            "when the model offers one (``compact_history``), such as "
+            "OCIResponsesModel with store=False. The endpoint folds the older "
+            "history into an item the model replays itself; no client-side "
+            "summary is written. Models without one summarise as usual."
+        ),
+    )
 
 
 class ObservationPackConfig(BaseModel):
