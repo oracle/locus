@@ -172,6 +172,12 @@ policy.
   `model.zdr_detected` reports the switch and the run's event stream carries a
   `CustomEvent` named `server_state_fallback`. `store=True` still raises;
   `store=False` is unchanged.
+- **Release notes on the documentation site.** `docs/release-notes.md` is
+  generated from this file when the site is built (`hooks/release_notes.py`,
+  the `{{ locus_release_notes }}` token): `Unreleased` first, then every
+  release from 3.0.0 onward with its date, each version anchored by its tag
+  (`#v5.5.0`). Linked from the site footer, the compatibility and about
+  pages, and the README. (#465)
 
 - **Threads and runs on `AgentServer`, with a resumable event stream.**
   `POST /threads` creates a thread, `POST /threads/{id}/runs` starts a turn
@@ -909,7 +915,7 @@ policy.
   RAG, grounding, guardrails and the admission gate, observability, serving,
   skills, providers), a "Verified on OCI" section with the 27 October 2026
   model matrix, a compact control-layer section, and a comparison with
-  LangGraph and Strands Agents (new `concepts/compare.md`). The Concepts
+  other agent SDKs (`concepts/compare.md`, since removed). The Concepts
   navigation follows the same order: start here, multi-agent shapes, the
   harness, control layer, providers. The OCI models page carries the verified
   matrix and corrects the Responses-API note (availability is per region).
