@@ -748,6 +748,8 @@ def test_entrypoint_hands_over_to_the_command(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     calls: list[tuple[str, list[str]]] = []
+    # The entrypoint writes into the process environment; keep that to this test.
+    monkeypatch.setattr(os, "environ", dict(os.environ))
     monkeypatch.setattr(os, "execvp", lambda file, args: calls.append((file, args)))
     monkeypatch.setenv("GREETING_SECRET_OCID", "ocid1.vaultsecret.oc1..hello")
     monkeypatch.delenv("GREETING", raising=False)
@@ -878,6 +880,8 @@ async def test_the_first_direct_invocation_after_a_cold_start_is_authenticated(
         return "k"
 
     monkeypatch.setattr(entrypoint, "vault_fetcher", lambda environ: fetch)
+    # prepare() resolves the key into the process environment; keep that to this test.
+    monkeypatch.setattr(os, "environ", dict(os.environ))
     agent = Agent(
         model=FunctionModel(lambda messages, tools: "pong"),
         tools=[],
