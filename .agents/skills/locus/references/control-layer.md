@@ -1,10 +1,15 @@
 # Control layer
 
 Everything under `locus.control`: the `Action` a policy reasons over, the
-`ControlPolicy` that decides allow / hold / deny, `admit()` and `gate_tool()`
-that enforce it, approval stores that park a held call until a named person
-decides, spend ledgers, grounded findings and verification, permission rules
-for coding agents, and the hash-chained `AuditTrail` every decision lands on.
+`ControlPolicy` that decides allow / hold / deny (in Python, or as a reviewed,
+linted, hot-reloaded file), `admit()` and `gate_tool()` that enforce it, the
+`ToolCallJudge` that reads the arguments a label cannot carry, signed tool calls
+between model and executor, approval stores (a file or a database) that park a
+held call until a named person decides and the pending holds a checkpoint
+records, spend ledgers, grounded findings and verification, permission rules
+for coding agents, and the hash-chained `AuditTrail` every decision lands on,
+kept in memory, in a file, in an Oracle immutable table, or anchored in object
+storage.
 The one rule: a side effect runs only through `admit()` / `admit_sync()` or a
 tool wrapped by `gate_tool()`. A check inside a tool body, a prompt instruction
 or a steering judge is advisory; the gate is code that runs before the action.
@@ -30,6 +35,9 @@ Strongest outcome wins: deny > hold > allow. `ApprovalDecision` has `outcome`, `
 | The `locus.harness` workspace tools | `build_harness(backend, wrap=lambda t, spec: gate_tool(t, policy=policy, action=spec))`; `wrap=None` leaves them ungated |
 | A decision without running anything | `approve(action, policy=..., finding=..., verdict=...)`: pure, no I/O |
 | Grounding, guardrails, audit of lifecycle events | `governed_agent(...)`; it does not gate tools, add `gate_tool` for that |
+| The policy is reviewed as a file, linted in CI, changed without a deploy | `ControlPolicy.load(path)`, `locus policy lint`, `PolicyWatcher(path)` wherever a `policy=` goes |
+| The labels are right but the arguments are not (a refund to an account not on the order) | `gate_tool(..., judge=ToolCallJudge(...))`: a model reads the call and can only tighten the decision |
+| Arguments could change between the model and the executor (a hook, a plugin) | `Agent(tool_call_integrity=True)`: every call is signed when parsed and verified before it runs |
 
 ## Action
 
@@ -73,6 +81,81 @@ the labels to hold or deny. `approve(action, *, policy, finding=None, verdict=No
 is the pure decision. `advisor` is any object with `advise(action) -> str | None`
 (`ControlAdvisor`): consulted only on allow, it can only tighten the outcome,
 and one that raises leaves the policy decision as is.
+
+### The policy as a file
+
+`ControlPolicy.load(path_or_text)` reads a YAML or JSON document: a path, or the document itself when the string holds a
+newline or starts with `{`. `ControlPolicy.loads(text, format=None)` reads text only; `policy.dump(path=None, format=None)`
+writes one (format from the suffix, else YAML) with every rule, defaults included, so `ControlPolicy.load(policy.dump())`
+is an equal policy. Every key is a field of the same name, type and default, so a file can never say what the API cannot;
+an optional `schema: locus.control.policy/v1` line is accepted. An unknown key, a wrong type or a bad value is a
+`PolicyFileError` (a `ValueError` with `key`, such as `require_human_for[2]`, and `source`). Reading YAML needs `pyyaml`;
+JSON and writing need nothing. `policy.content_hash()` (`policy_hash(policy)`) is the SHA-256 of the rules, equal for
+equal policies however they were built; `admit()` and `admit_sync()` record it as `policy_hash` on every
+`action-admission` entry, so a reader knows which rules a decision was made under.
+
+`PolicyDocument.load(path)` reads the whole file: `.policy`, plus a `governs:` block (`environments:` and `kinds:`
+lists) naming what the author expects the policy to cover, as `.environments` and `.kinds`; they are metadata, not
+rules. `lint_policy(policy, *, environments=(), kinds=()) -> LintReport` reports `unreachable-rule` (a hold label that
+`deny_for` pre-empts, a cost hold at or above the spend limit, a verification bar above 1.0, a denied `sandboxed` tag, a
+zero blast-radius cap), `uncovered-environment` and `kind-never-held` for what the document or the arguments declare:
+`report.ok`, `report.findings` (`LintFinding`: `code`, `message`, `rule`, `label`), `report.notes` (what was not
+checked, what auto-allows), `report.policy_hash`, `render()`, `to_dict()`. The last two codes come from weighing probe
+actions with `approve()`, so lint agrees with the gate by construction. `explain(policy, action, *, verdict=None,
+spent_usd=0.0, source="")` is the decision path: `decision`, every `RuleCheck` in `checks` (`rule`, `outcome` or
+`None`, `detail`, `.fired`), `requires_approval`, `render()`, `to_dict()`. `evaluate_rules(action, *, policy,
+finding=None, verdict=None, spent_usd=0.0) -> list[RuleCheck]` is the one evaluation `approve()` (which keeps the fired
+checks as `decision.checks`) and `explain()` share.
+
+`PolicyWatcher(path, *, interval=1.0, on_reload=None)` follows a file by modification time and size, checking at most
+once per `interval` seconds, and is accepted wherever `admit()`, `admit_sync()` and `gate_tool()` take a `policy`: any
+object with `current() -> ControlPolicy` is a `PolicySource`. Each decision asks it once, so the swap is atomic between
+admissions; a rewrite that no longer parses keeps the last good policy in force and reports why on `last_error`;
+`on_reload(old, new)` is called when the rules change; also `.policy`, `.document`, `.hash`, `.reloads`, `.reload()`.
+A broken file fails at construction, not at the first decision.
+
+```python
+import tempfile
+from pathlib import Path
+
+from locus.control import Action, ControlPolicy, PolicyFileError, PolicyWatcher, explain, lint_policy
+
+policy = ControlPolicy.load(
+    '{"version": "refund-gate-1", "require_verification_score": 0.0, '
+    '"require_human_for": ["high_value"], "deny_for": ["prohibited"]}'
+)
+print(policy.require_human_for, policy.content_hash()[:12])
+print(policy.dump())                                       # YAML, every rule written, no library needed
+try:
+    ControlPolicy.load('{"require_human": ["x"]}')
+except PolicyFileError as exc:
+    print(exc.key, "->", exc)
+
+report = lint_policy(policy, environments=["staging", "production"], kinds=["payment"])
+print(report.ok, [(f.code, f.label) for f in report.findings])
+shown = explain(policy, Action(name="refund", kind="payment", tags=frozenset({"high_value"})))
+print(shown.decision.outcome, [(c.rule, c.outcome) for c in shown.checks if c.fired])
+
+with tempfile.TemporaryDirectory() as tmp:
+    path = Path(tmp, "policy.json")
+    path.write_text(policy.dump(format="json"))
+    watcher = PolicyWatcher(path, interval=0.0)             # a PolicySource: pass it as policy=
+    print(watcher.current().require_human_for, watcher.reloads)
+    path.write_text(policy.dump(format="json").replace('"high_value"', '"high_value", "refund"'))
+    print(watcher.current().require_human_for, watcher.reloads, watcher.last_error)
+```
+
+Prints the loaded labels with a 12-character hash, the YAML `dump()` with every rule, then
+`require_human -> <string>: at require_human: unknown key 'require_human' (did you mean 'require_human_for'?)`,
+`False` with the findings `('uncovered-environment', 'production')`, `('uncovered-environment', 'staging')` and
+`('kind-never-held', 'payment')`, `require_human [('require_human_for', 'require_human')]`, and the watcher's
+`frozenset({'high_value'}) 0` before the rewrite and `frozenset({'high_value', 'refund'}) 1 None` after it.
+
+From a terminal, `locus policy lint policy.yaml [--environments staging production] [--kinds payment] [--format json]`
+exits 1 on a finding, and `locus policy explain policy.yaml --action '{"name": "refund", "kind": "payment",
+"tags": ["high_value"]}' [--expect allow|require_human|deny] [--spent-usd 160] [--verification 0.9] [--format json]`
+prints every rule, fired or not, the outcome and whether a person can approve it; `--expect` turns it into a check
+with the exit code.
 
 ## admit() and admit_sync()
 
@@ -129,11 +212,11 @@ Prints `ALLOW paid $12.50`, `REQUIRE_HUMAN not run`, `DENY not run`,
 
 ## gate_tool()
 
-`gate_tool(tool, *, policy, action=None, trail=None, finding=None, verdict=None, advisor=None, on_refusal="return", approval=None, principal="agent", refusal_reason=None, approval_context=None, ledger=None, spend_scope="default") -> Tool`
+`gate_tool(tool, *, policy, action=None, trail=None, finding=None, verdict=None, advisor=None, on_refusal="return", approval=None, principal="agent", refusal_reason=None, approval_context=None, ledger=None, spend_scope="default", judge=None) -> Tool`
 
 Returns a new `Tool` with the original's `name`, `description`, `parameters`,
 `idempotent` and `labels`. The original stays ungated: pass the gated copy to
-`Agent(tools=[...])`, never both. A sandboxed tool composes: the gate decides, then the original's `execute` runs the call in its sandbox.
+`Agent(tools=[...])`, never both. `policy` is a `ControlPolicy` or a `PolicySource` such as `PolicyWatcher`, asked once per call. A sandboxed tool composes: the gate decides, then the original's `execute` runs the call in its sandbox.
 
 | Parameter | Meaning |
 |---|---|
@@ -147,6 +230,7 @@ Returns a new `Tool` with the original's `name`, `description`, `parameters`,
 | `refusal_reason` | `str` or `(decision) -> str`: what the model is told. The policy's reason still goes to the trail |
 | `approval_context` | Mapping or `(tool_name, kwargs) -> mapping` bound into the approval id (thread, tenant, case); `policy.version` is added automatically |
 | `ledger`, `spend_scope` | `SpendLedger` and a scope string or `(tool_name, kwargs) -> str` |
+| `judge` | A `ToolCallJudge`. Its verdict reaches `admit(judgement=...)` and can turn an allow into a hold or a deny, never the reverse; a `@tool(read_only=True)` tool is not judged; the verdict is on the audit entry under `judge`; an edited approval is judged again |
 
 Refusal payload: `status` (`"held_for_approval"` or `"denied"`), `outcome`,
 `action`, `asset`, `reason`, and on a bridged hold `approval_id` and `next`.
@@ -154,6 +238,132 @@ No `approval_status` tool ships; to let the agent poll, expose one returning
 `bridge.state(approval_id)`. With `refusal_reason=lambda d: "Refused." if d.outcome == "deny" else "Waiting on a manager."`
 a held call returns `{"status": "held_for_approval", "outcome": "require_human", ..., "reason": "Waiting on a manager.", "approval_id": "appr-..."}`.
 The harness applies the same gate through `wrap=`; its `spec` labels `workspace.read`, `workspace.write`, `workspace.exec` and the exec tags.
+
+## The tool-call judge
+
+The policy is deterministic and sees labels; it cannot see that `environment="staging"` arrived with `--target prod-db`
+in the arguments. `ToolCallJudge(model=None, *, intent="", guidance=None, trail=None, tools=None, budget=None,
+cache_size=512, max_tokens=200, priority=HookPriority.SECURITY_DEFAULT)` shows a model the proposed call (name and
+arguments as the model sent them), the policy's `intent` in plain words and the per-tool `guidance` line, and returns a
+`JudgeVerdict` (`tool`, `verdict` `"allow"` / `"hold"` / `"deny"`, `reason`, `model`, `source` `"model"` / `"cache"` /
+`"read_only"` / `"budget"` / `"error"`, `error`; `.outcome` is the `ApprovalOutcome`), parsed through the
+structured-output path, so free text is never read for intent. Three rules are enforced in code: it tightens and never
+loosens (`gate_tool(judge=...)` hands the verdict to `admit(judgement=...)`, which keeps the stricter of the policy's
+outcome and the judge's); it fails closed (a model error, an off-schema reply or a spent `budget` is a hold); it is
+recorded (the admission entry carries `judge`: model, verdict, reason, cache hit, the error when it failed, and the event
+bus gets `control.judge.decided`). `model=None` borrows the agent's model once the judge is installed on one. Cost is
+bounded: `@tool(read_only=True)` tools are skipped (`source="read_only"`), verdicts are cached per (tool, canonical
+arguments) within a run, and `budget=` caps model calls per run (`judge.calls()`, `judge.reset()`). As
+`Agent(hooks=[judge])` instead, it judges every call and cancels a held or denied one with a refusal the model reads,
+recording `tool-call-judged` entries on its own `trail`. Write `intent` as one paragraph (what the agent is for, what it
+must never do) and `guidance` as the line a reviewer would be briefed with; keep anything expressible as a rule in the
+policy. Test the fold with a `ScriptedModel` standing in for the judge, then the guidance with the live judge model.
+
+```python
+import asyncio
+
+from locus.agent import Agent
+from locus.control import Action, AuditTrail, ControlPolicy, ToolCallJudge, gate_tool
+from locus.core.messages import Role
+from locus.testing import FunctionModel, ScriptedModel, text, tool_call
+from locus.tools import tool
+
+trail = AuditTrail()
+
+@tool
+def issue_refund(order_id: str, amount_usd: float, destination: str) -> str:
+    """Refund an order to a payment destination."""
+    return f"refunded {amount_usd} on {order_id} to {destination}"
+
+@tool(read_only=True)
+def lookup_order(order_id: str) -> str:
+    """Return an order's payment method."""
+    return "card ending 4242"
+
+judge = ToolCallJudge(
+    ScriptedModel([text('{"verdict": "hold", "reason": "destination is not the order\'s card"}')]),
+    intent="A support agent for one customer's own orders; money moves only to the order's payment method.",
+    guidance={"issue_refund": "Hold or deny a destination that is not the order's payment method."},
+    budget=10,
+)
+refund = gate_tool(
+    issue_refund,
+    policy=ControlPolicy(require_verification_score=0.0),      # the policy alone would allow this call
+    action=lambda name, args: Action(name=name, asset=args["order_id"], kind="payment"),
+    trail=trail,
+    judge=judge,
+)
+
+def scripted(messages, tools):
+    if any(m.role == Role.TOOL for m in messages):
+        return text("Held for review.")
+    return tool_call("issue_refund", order_id="ord-4821", amount_usd=40.0, destination="acct-9")
+
+agent = Agent(model=FunctionModel(scripted), tools=[lookup_order, refund], reflexion=False, grounding=False)
+result = agent.run_sync("Refund ord-4821 to acct-9.")
+print(result.tool_executions[0].result)                     # the refusal the model read
+entry = trail.records()[-1].payload
+print(entry["outcome"], entry["judge"])
+print(asyncio.run(judge.judge("lookup_order", {"order_id": "ord-4821"}, tool=lookup_order)))
+```
+
+Prints the refusal the model read (`"status": "held_for_approval"`, `"outcome": "require_human"`, a reason that
+begins `tool-call judge escalated allow -> require_human`), the audit entry's `require_human` with its `judge`
+mapping (`'verdict': 'hold'`, `'source': 'model'`, `'cache_hit': False`), and for the read-only lookup
+`JudgeVerdict(tool='lookup_order', verdict='allow', reason='read-only tool; not judged', model='', source='read_only',
+error=None)`: no model call was spent on it.
+
+## Tool-call integrity
+
+`Agent(tool_call_integrity=True)` (the same as `"refuse"`; `"abort"` ends the run instead) signs every tool call as the
+model's response is parsed, the streaming path included, over a canonical form of its id, name and arguments with
+HMAC-SHA256 under a random per-run key, and the executor verifies the call before it runs. A call changed in between is
+refused with a typed `ToolCallIntegrityError` (`tool_name`, `call_id`, `reason` `"mismatch"` or `"tainted"`,
+`expected_digest`, `actual_digest`, `signed_by`, `mutated_by`), an `agent.tool.integrity.refused` entry on the agent's
+`AuditTrail` (the one an `AuditHook` in `hooks=` carries), a `tool.integrity.refused` event, and a tool error the model
+reads so the run continues. A hook that legitimately rewrites `event.arguments` re-signs through
+`event.resign(by="MyHook")` (a no-op when integrity is off, so call it unconditionally); the `ToolCallSignature`
+(`call_id`, `tool_name`, `digest`, `mac`, `by`, `key_id`, `tainted_by`, `.signed_by`) then reads `by=("model",
+"MyHook")`, which is what the built-in `GuardrailsHook` redaction and `ExternalHooks` rewrites do. A hook that changes
+arguments without re-signing taints the record under its own name, and a later re-sign does not clear the taint.
+`ToolCallSigner(*, on_violation="refuse", trail=None, key=None)` is the per-run signer (`sign`, `sign_all`, `resign`,
+`taint`, `signature(call_id)`, `verify`, `refusals`) for a runtime of your own. The signature lives on the run, not on
+`ToolCall`, so messages and checkpoints are unchanged; a call rehydrated from a checkpoint in a new process is unsigned
+and runs as before. Off by default in 5.x, on by default from 6.0.
+
+```python
+from locus.agent import Agent
+from locus.hooks import HookPriority, HookProvider
+from locus.testing import ScriptedModel, text, tool_call
+from locus.tools import tool
+
+@tool
+def send_message(to: str, body: str) -> str:
+    """Send a message."""
+    return f"sent to {to}: {body}"
+
+class Redact(HookProvider):
+    priority = HookPriority.SECURITY_DEFAULT
+
+    def __init__(self, resign: bool) -> None:
+        self._resign = resign
+
+    async def on_before_tool_call(self, event) -> None:
+        event.arguments = {**event.arguments, "body": event.arguments["body"].replace("4111 1111", "****")}
+        if self._resign:
+            event.resign(by="Redact")                       # the chain of custody now names this hook
+
+for resign in (False, True):
+    model = ScriptedModel([tool_call("send_message", to="ops", body="card 4111 1111"), text("Done.")])
+    agent = Agent(model=model, tools=[send_message], hooks=[Redact(resign)], tool_call_integrity=True,
+                  reflexion=False, grounding=False)
+    execution = agent.run_sync("tell ops").tool_executions[0]
+    print(resign, "->", execution.result, "|", (execution.error or "")[:80])
+```
+
+Prints `False -> None | ToolCallIntegrityError: tool call call_send_message (send_message) was changed by Redact
+outside the re-sign API ...` (the body never ran; the message names the hook and both digests) and then
+`True -> sent to ops: card **** |`: the same rewrite, re-signed, ran.
 
 ## Approvals
 
@@ -164,7 +374,23 @@ The harness applies the same gate through `wrap=`; its `spec` labels `workspace.
 |---|---|---|
 | `InMemoryApprovals(authority=None)` | no | tests and demos |
 | `FileApprovals(path, authority=None)` | yes | one JSON file, re-read every call, atomic writes; writers serialised within one process only |
+| `PostgresApprovals(dsn=None, *, host="localhost", port=5432, database="locus", user="postgres", password="", table_name="locus_approvals", schema_name="public", authority=None)` | yes | one row per held call, decided under the row lock; `locus-sdk[postgresql]` |
+| `RedisApprovals(url="redis://localhost:6379", *, prefix="locus:approvals:", db=0, lock_timeout=10.0, authority=None)` | yes | one key per record, decided under the store's lock; `locus-sdk[redis]` |
+| `OracleApprovals(dsn=None, user="admin", password="", wallet_location=None, wallet_password=None, host=None, port=1521, service_name=None, *, table_name="locus_approvals", schema_name=None, authority=None)` | yes | an Oracle AI Database table; `locus-sdk[oracledb]` |
 | your own `ApprovalStore` | as built | a database with atomic updates for many writers |
+
+The database stores keep the in-memory semantics (one-use consumption, approver rules, quorums, delegations) over one
+row or key per held call, decided under the database's own lock, so replicas that share a store never both redeem one
+approval; they follow the connection conventions of the matching checkpointer backend and create their table on first
+use when it is missing. Each owns one event loop on a background thread: the `ApprovalStore` methods block on it, and
+`asubmit` / `aget` / `adecide` / `aconsume` / `apending` await it; `close()` releases the pool. Every store has a
+password-free `spec` (`memory://`, `file://approvals.json`, `postgresql://host:5432/db?table=public.locus_approvals`,
+`redis://host:6379?prefix=locus:approvals:`, `oracle://user@/?dsn=alias&wallet=/path&table=locus_approvals`);
+`approval_store(spec=None, authority=None)` opens one (`None` reads `LOCUS_APPROVALS_STORE`; a bare path is a
+`FileApprovals`; a bare scheme such as `postgresql://` reads `POSTGRES_*`, `REDIS_URL` or `ORACLE_*` from the
+environment), and `store_spec(store)` reads a store's spec back. Nothing connects until the first call, so
+`PostgresApprovals("postgresql://app:secret@db.internal:5432/locus").spec` prints
+`postgresql://app@db.internal:5432/locus?table=public.locus_approvals` offline.
 
 `ApprovalRecord`: `approval_id`, `digest`, `principal`, `tool`, `arguments`,
 `status` (`pending` → `approved` / `denied` → `consumed`), `reason`,
@@ -172,7 +398,7 @@ The harness applies the same gate through `wrap=`; its `spec` labels `workspace.
 `rejections`, `context`, `approved_arguments`, property `approvers`.
 `submit(principal, tool, args, *, reason="", labels=(), context=None)` returns
 the live record for the same call (`call_digest(principal, tool, arguments, context)`
-over canonical JSON) or opens a new one. `decide(approval_id, "approved" | "denied", *, by, arguments=None)`;
+over canonical JSON) or opens a new one. `decide(approval_id, "approved" | "denied", *, by, arguments=None, reason="")`;
 `arguments` edits the call (same keys) and the gate re-weighs the edited call.
 `consume(approval_id)` is called by the gate immediately before the side
 effect; the same call afterwards holds again. `pending()` lists waiting records.
@@ -198,19 +424,25 @@ the agent, and a `thread_id`. The agent yields an `InterruptEvent` (`question`,
 `metadata` with `approval_id`, `action`, `asset`, `principal`, `reason`, `arguments`,
 `approvers`, `context`) and parks. After `store.decide(...)`, `agent.resume(answer, thread_id=..., perform_dangling=True)`
 re-issues the held call; the gate finds the decision, consumes it, and runs the tool once.
+With a checkpointer the hold itself is written into the thread's checkpoint (`state.metadata["_locus_pending_holds"]`):
+`await pending_holds(checkpointer, thread_id)` reads it back, in this process or another, as `PendingHold` records
+(`tool_call_id`, `approval_id`, `tool`, `action`, `asset`, `principal`, `reason`, `arguments`, `approvers`, `context`,
+`store`, `held_at`; `hold.state(store)` re-checks it), `holds_of(state)` reads them from an `AgentState`, and the hold
+leaves the checkpoint when the call is answered. `hold.store` is the approval store's spec, so `approval_store(hold.store)`
+opens the right store in the process that decides; `InterruptEvent.metadata` carries the same `store` key.
 
 ```python
 import asyncio
 
 from locus.agent import Agent
-from locus.control import Action, AuditTrail, ControlPolicy, InMemoryApprovals, gate_tool
+from locus.control import Action, AuditTrail, ControlPolicy, InMemoryApprovals, gate_tool, pending_holds
 from locus.core.events import InterruptEvent
 from locus.core.messages import Role
 from locus.memory.backends.memory import MemoryCheckpointer
 from locus.testing import FunctionModel, text, tool_call
 from locus.tools import tool
 
-refunds, store, trail = [], InMemoryApprovals(), AuditTrail()
+refunds, store, trail, checkpointer = [], InMemoryApprovals(), AuditTrail(), MemoryCheckpointer()
 
 @tool(idempotent=True)
 def issue_refund(order_id: str, amount_usd: float) -> str:
@@ -229,26 +461,29 @@ refund = gate_tool(
     trail=trail, approval=store, on_refusal="interrupt", principal="svc-billing",
 )
 agent = Agent(model=FunctionModel(scripted), tools=[refund],
-              checkpointer=MemoryCheckpointer(), reflexion=False, grounding=False)
+              checkpointer=checkpointer, reflexion=False, grounding=False)
 
 async def main():
     approval_id = None
     async for event in agent.run("Refund order ord-4821.", thread_id="t1"):
         if isinstance(event, InterruptEvent):
             approval_id = event.metadata["approval_id"]   # the run is parked
-    print("while held:", refunds)                                  # []
+    holds = await pending_holds(checkpointer, "t1")       # what the checkpoint says the thread waits on
+    print(refunds, [(h.tool, h.asset, h.state(store), h.store) for h in holds])
     store.decide(approval_id, "approved", by="alice")
     async for _ in agent.resume("approved", thread_id="t1", perform_dangling=True):
         pass
-    print(refunds, store.state(approval_id), trail.verify())        # [('ord-4821', 250.0)] consumed True
+    print(refunds, store.state(approval_id), trail.verify(), await pending_holds(checkpointer, "t1"))
 
 asyncio.run(main())
 ```
 
-`event.question` reads `Approve issue_refund on ord-4821? labels ['payment'] require human approval`.
-In production use `FileApprovals("approvals.json")` and `FileCheckpointer("checkpoints")`
-(`locus.memory.backends.file`) and rebuild the same agent and store in the
-process that resumes. Pitfalls: `resume` without `perform_dangling=True` folds
+Prints `[] [('issue_refund', 'ord-4821', 'pending', 'memory://')]` while held and
+`[('ord-4821', 250.0)] consumed True []` after the resume; `event.question` reads
+`Approve issue_refund on ord-4821? labels ['payment'] require human approval`.
+In production use `approval_store("postgresql://...")` (or another database store) or `FileApprovals("approvals.json")`
+with `FileCheckpointer("checkpoints")` (`locus.memory.backends.file`), and rebuild the same agent and store in the
+process that resumes; `pending_holds` tells it which store. Pitfalls: `resume` without `perform_dangling=True` folds
 the word "approved" in as the tool result and nothing runs; a person's denial
 returns a `denied` refusal; a policy deny never pauses; the approved call is
 weighed again at redemption, so a spend limit still denies it.
@@ -347,6 +582,68 @@ truncated = "\n".join(exported.splitlines()[:2])      # a cut tail still verifie
 print(verify_jsonl(truncated, keys=keys), verify_jsonl(truncated, keys=keys, expected_head=anchor))  # True False
 ```
 
+### Durable backends
+
+`OracleAuditTrail(*, dsn=None, user="admin", password="", wallet_location=None, wallet_password=None, host=None,
+port=1521, service_name=None, table_name="locus_audit_trail", schema_name=None, trail_id="default",
+table_kind="immutable", retention_days=16, drop_idle_days=16, auto_create_table=True, clock=None, signer=None,
+min_pool_size=1, max_pool_size=2)` (`locus-sdk[oracledb]`) keeps the rows in an Oracle AI Database immutable table
+(`CREATE IMMUTABLE TABLE ... NO DROP UNTIL n DAYS IDLE NO DELETE UNTIL n DAYS AFTER INSERT`; `retention_days=None`
+writes `NO DELETE LOCKED` and `drop_idle_days=None` writes `NO DROP`), or a blockchain table with
+`table_kind="blockchain"`. Same API as `AuditTrail`, so
+`admit(trail=...)`, `gate_tool(trail=...)` and `governed_agent(audit_trail=...)` take it unchanged; `record()` commits
+the row before it returns, several processes share one trail (a stale writer reloads and continues the chain instead of
+forking it; several trails share a table by `trail_id`), and `verify()` re-reads the rows and recomputes every hash, on a
+blockchain table also checking that every row carries its `ORABCTAB_HASH$` and that `DBMS_BLOCKCHAIN_TABLE.VERIFY_ROWS`
+verifies them. `arecord()` / `acheck()` / `averify()` run the same work on a worker thread for async code. Nothing
+connects until the first record or read, so construction is cheap; give the trail its own schema with only `CREATE
+TABLE` and `INSERT` where you can.
+
+A hash chain cannot see its own tail, so keep the head where the agent cannot write. `anchor_trail(trail, store, *,
+every=None, require_retention_rule=False, prefix="locus/audit-anchors/") -> Anchor | None` writes the current head
+(`records`, `seq`, `head`, `ts`, `name`) as a small JSON object into an `OCIBucketAnchorStore(bucket_name, namespace, *,
+profile_name="DEFAULT", config_file="~/.oci/config", auth_type="api_key", region=None)` (OCI Object Storage,
+`locus-sdk[oci]`), an `S3AnchorStore(bucket, *, endpoint_url=None, region_name=None, aws_access_key_id=None,
+aws_secret_access_key=None)` (any S3-compatible bucket, `boto3`), or anything with the `AnchorStore` methods `put(name,
+body)`, `get(name)`, `list_names(prefix)`, `retention_rules()`. Anchors are never rewritten: the name carries the record
+count, so `latest_anchor(store)` is the greatest name under the prefix; `every=` anchors only once the chain has grown by
+that many records; `require_retention_rule=True` raises `AnchorError` for a bucket without a retention rule (OCI) or
+Object Lock (S3), so a bucket that can be emptied is never mistaken for an anchor. `verify_anchor(trail, store, *,
+keys=None) -> AnchorReport` (`ok`, `anchor`, `problem`) checks the chain is intact, holds at least as many records as
+the anchor names, and carries the anchored hash at the anchor's `seq`; records appended after it are fine. `await
+anchor_periodically(trail, store, *, interval_seconds, every=None, require_retention_rule=False, stop=None)` is the loop
+a server or runner runs (a final anchor on `stop`; a failed write ends the loop, which a supervisor should see).
+
+```python
+from locus.control import AnchorError, AuditTrail, anchor_trail, latest_anchor, verify_anchor
+
+class DictAnchorStore:                  # any object with these four methods is an AnchorStore
+    def __init__(self, retention=("keep 7 years",)):
+        self.objects, self._retention = {}, list(retention)
+    def put(self, name, body): self.objects.setdefault(name, body)
+    def get(self, name): return self.objects.get(name)
+    def list_names(self, prefix): return [n for n in self.objects if n.startswith(prefix)]
+    def retention_rules(self): return self._retention
+
+trail, store = AuditTrail(), DictAnchorStore()
+for name in ("refund-1", "refund-2", "refund-3"):
+    trail.record("action-admission", {"action": name, "outcome": "allow"})
+anchor = anchor_trail(trail, store, require_retention_rule=True)
+print(anchor.records, anchor.seq, anchor.head == trail.head, latest_anchor(store).name)
+trail.record("action-admission", {"action": "refund-4", "outcome": "deny"})
+print(verify_anchor(trail, store).ok)                        # records after the anchor are fine
+cut = AuditTrail.from_records(trail.records()[:2])
+print(cut.verify(), verify_anchor(cut, store).problem)       # a bare verify misses the cut; the anchor does not
+try:
+    anchor_trail(trail, DictAnchorStore(retention=()), require_retention_rule=True)
+except AnchorError as exc:
+    print(str(exc)[:47])
+```
+
+Prints `3 2 True locus/audit-anchors/00000000000000000003-<head prefix>.json`, `True`, then `True the chain holds 2
+record(s) but was anchored at 3: records were cut off` (the cut trail's own `verify()` passes, the anchor catches it),
+and `the bucket has no retention rule: an anchor the` from the refused anchor.
+
 ## PermissionRules and parse_command
 
 Use for a coding agent whose operator writes allow / ask / deny rules.
@@ -417,8 +714,10 @@ It does not gate tools: pass `gate_tool(...)` results in `tools`.
 | Command | Does |
 |---|---|
 | `locus run app.py:agent "prompt" --thread t1` | streams tool calls; exit 3 when paused, printing `approval: <id>` and the resume command |
-| `locus approvals --store approvals.json list [--json]` / `show <id>` | pending records / one record as JSON |
-| `locus approvals --store approvals.json approve <id> --by alice` | decide (`reject` for a denial); `--authority module:attr` checks an `ApprovalAuthority` |
+| `locus approvals --store SPEC list [--json]` / `show <id>` | pending records / one record as JSON; `SPEC` is a `FileApprovals` path, or `file://`, `postgresql://`, `redis://`, `oracle://`, `memory://` (default `LOCUS_APPROVALS_STORE`) |
+| `locus approvals --store SPEC approve <id> --by alice [--reason "..."]` | decide (`reject` for a denial); `--by` defaults to `LOCUS_APPROVER`; `--authority module:attr` checks an `ApprovalAuthority` |
+| `locus policy lint policy.yaml [--environments E ...] [--kinds K ...] [--format json]` | `lint_policy`; exit 1 on a finding |
+| `locus policy explain policy.yaml --action '{"name": "refund", "kind": "payment"}' [--expect OUTCOME] [--spent-usd N] [--verification C]` | `explain`: every rule, the outcome, whether a person can approve; `--expect` sets the exit code |
 | `locus resume app.py:agent --thread t1 --answer approved --perform` | `agent.resume(..., perform_dangling=True)` |
 | `locus audit verify trail.jsonl [--key KEY_ID=pub.pem]... [--head HASH]` | `verify_jsonl`; prints `verified: N record(s), ...` or `FAILED` (exit 1) |
 
@@ -428,18 +727,23 @@ It does not gate tools: pass `gate_tool(...)` results in `tools`.
 
 1. One typed `@tool` per side effect, `idempotent=True`, body passes a stable
    operation key downstream; an `action` callable that labels from the real
-   arguments (or `action_from_labels` with `derive` rules; gate on `UNDETERMINED_TAG`).
-2. `gate_tool(..., policy=reviewed_policy, trail=trail)`; keep the ungated tool
-   out of the agent's list; a test asserts every mutating tool is a gated copy.
-3. `FileApprovals` (or a database store) with an `ApprovalAuthority`,
-   `on_refusal="interrupt"`, a `FileCheckpointer`, a stable `thread_id`;
-   authenticate the person behind `by=` in your decision channel.
-4. `ControlPolicy(version=...)` and `approval_context` against replays across
+   arguments (or `action_from_labels` with `derive` rules; gate on `UNDETERMINED_TAG`);
+   `read_only=True` on the lookups.
+2. The policy as a reviewed file: `ControlPolicy.load("policy.yaml")` with a
+   `version`, `locus policy lint` in CI, a `PolicyWatcher` in the service.
+3. `gate_tool(..., policy=watcher, trail=trail, judge=ToolCallJudge(...))` for
+   what labels cannot carry; keep the ungated tool out of the agent's list; a
+   test asserts every mutating tool is a gated copy; `Agent(tool_call_integrity=True)`.
+4. `approval_store("postgresql://...")` (or another database store) with an
+   `ApprovalAuthority`, `on_refusal="interrupt"`, a durable checkpointer, a
+   stable `thread_id`; authenticate the person behind `by=` in your decision channel.
+5. `ControlPolicy(version=...)` and `approval_context` against replays across
    versions or tenants; `FileSpendLedger` per scope with `tool_execution="sequential"`.
-5. `AuditTrail(path=..., signer=Ed25519Signer.from_pem(...))`; ship the JSONL
-   and store `trail.head` where the agent cannot write.
-6. Tests for allow, hold, deny, restart, duplicate call, denial by a person,
-   edited approval, and a tampered export.
+6. `OracleAuditTrail(table_kind="blockchain")`, or `AuditTrail(path=..., signer=Ed25519Signer.from_pem(...))`
+   with `anchor_periodically` into a bucket that has a retention rule; ship the
+   JSONL and `verify_anchor` it.
+7. Tests for allow, hold, deny, restart, duplicate call, denial by a person,
+   edited approval, a changed tool call, and a tampered or cut export.
 
 ## What the gate does not protect
 
@@ -453,7 +757,8 @@ It does not gate tools: pass `gate_tool(...)` results in `tools`.
   between the external success and the local record can repeat the side
   effect; only a downstream idempotency key closes that window.
 - The chain's tail: a bare `verify()` passes a truncated trail. Anchor `head`
-  externally and sign; protect the private key and the file.
+  externally (`anchor_trail` into a bucket with a retention rule, or an
+  `OracleAuditTrail`) and sign; protect the private key and the file.
 - The approval channel (`by=` is trusted as given), concurrency (`FileApprovals`
   and the ledgers serialise writers within one process only), and anything an
   `advisor` or steering judge says: those only tighten or advise, the gate decides.

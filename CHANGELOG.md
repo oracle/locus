@@ -218,6 +218,19 @@ policy.
   unchanged; only the ZDR case now completes instead of failing. Pass
   `store=True` to keep the old behaviour, or `store=False` on a tenancy known
   to be ZDR to skip the one stateful attempt.
+- **The Codex skill covers the new surface.** `.agents/skills/locus/` (what
+  `locus codex init` places) teaches the policy file form with `locus policy
+  lint` / `explain` and `PolicyWatcher`, the tool-call judge and
+  `@tool(read_only=True)`, tool-call integrity, the database approval stores,
+  `approval_store()` and `pending_holds()`, `OracleAuditTrail` and the
+  object-storage anchors, the OCI Responses `store="auto"`, Zero Data
+  Retention, `reasoning` and native-compaction controls, the server's threads
+  and runs, `Last-Event-ID` resume, `WS /runs/live` and the AG-UI and Vercel
+  AI SDK adapters, and the evaluation primitives (rubrics, evidence receipts
+  and claims, reliability, report diffs and `EvalGate`), each with a snippet
+  that runs against the installed SDK. The skill test's wire-type exclusion
+  now also covers the A2A JSON-RPC envelope, parameter and push-notification
+  types. (#492)
 
 ### Fixed
 
