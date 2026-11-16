@@ -15,7 +15,7 @@ reconstruct it from a self-organizing pool.
 Routing does not itself restrict what a specialist can reach; the tools
 attached to each `Specialist` set what its model may ask for. Gating a
 side-effecting call is a separate step you add by wrapping the call in
-[`admit()`](../concepts/security-context.md#admission-control-the-enforcement-point);
+[`admit()`](../concepts/control-layer.md);
 neither the orchestrator nor the specialist calls it for you.
 
 What this notebook covers:

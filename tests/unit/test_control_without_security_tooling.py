@@ -5,10 +5,10 @@
 """The control core stands on its own.
 
 The admission gate, policy, audit trail and grounding layer live in
-``locus.control`` and must never pull in the security-domain tooling, which is
-a separate, opt-in distribution (``locus_security``). Each check runs in a
-fresh interpreter so ``sys.modules`` shows exactly what the import chain
-loaded, both with that distribution importable and with it blocked outright.
+``locus.control`` and must never pull in the former security-domain tooling
+(``locus_security``, no longer part of Locus). Each check runs in a fresh
+interpreter so ``sys.modules`` shows exactly what the import chain loaded,
+both with that package importable and with it blocked outright.
 """
 
 from __future__ import annotations

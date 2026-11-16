@@ -10,10 +10,6 @@ resolution-markers = [
 ]
 
 [manifest]
-members = [
-    "locus-sdk",
-    "locus-sdk-security",
-]
 overrides = [
     { name = "aiohttp", specifier = ">=3.14.1" },
     { name = "cryptography", specifier = ">=48.0.1" },
@@ -3212,17 +3208,6 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'server'", specifier = ">=0.27" },
 ]
 provides-extras = ["openai", "anthropic", "oci", "llm", "telemetry", "mcp", "server", "redis", "postgresql", "mysql", "opensearch", "s3", "browser", "audit", "temporal", "gemini", "dbos", "openshell", "oci-sandbox", "mem0", "oracledb", "agentmemory", "checkpoints", "pgvector", "qdrant", "chroma", "cohere", "rerank-local", "rerank", "rag", "sdk", "docs", "dev"]
-
-[[package]]
-name = "locus-sdk-security"
-version = "5.5.0"
-source = { editable = "packages/locus-sdk-security" }
-dependencies = [
-    { name = "locus-sdk" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "locus-sdk", editable = "." }]
 
 [[package]]
 name = "markdown"

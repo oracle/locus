@@ -44,7 +44,7 @@ python examples/<file>.py
     and [Oracle Cloud and Database 26ai](#oracle-cloud-and-database-26ai). The
     five gate examples are under [Control layer and security](#control-layer-and-security).
 
-The series runs 01 to 89, ordered by topic: start here, the multi-agent shapes, Oracle Cloud and Database 26ai, the harness, observability and serving, the control layer, real-world workflows, and security operations. Examples 81–89 ship in the `locus-sdk-security` package: install it from the clone with `python -m pip install -e packages/locus-sdk-security` and run its files from `packages/locus-sdk-security/examples/`. Each entry below links to the example's page, which carries the source and names any database or service the example needs beyond the model.
+The series runs 01 to 80, ordered by topic: start here, the multi-agent shapes, Oracle Cloud and Database 26ai, the harness, observability and serving, the control layer, and real-world workflows. Each entry below links to the example's page, which carries the source and names any database or service the example needs beyond the model.
 
 <div class="notebook-filter">
   <input
@@ -158,15 +158,3 @@ The series runs 01 to 89, ordered by topic: start here, the multi-agent shapes, 
 - **78 · [Concession approval](notebook_78_concession_approval.md)** — customer-support concession approval with risk-tiered gates
 - **79 · [Contract review](notebook_79_contract_review.md)** — vendor DPA review — data-subject rights, retention, transfer gaps
 - **80 · [Vendor integrations](notebook_80_vendor_integrations.md)** — live vendor integrations — PII discovery, data map, scan dispatch
-
-## Security operations (locus-sdk-security)
-
-- **81 · [Grounded cloud-posture agent](notebook_81_cloud_posture_agent.md)** — a read-only OCI posture audit that grounds every finding in observed API facts
-- **82 · [SOC playbooks](notebook_82_security_playbooks.md)** — bundled incident-response playbooks run over the security toolset, step-gated by `PlaybookEnforcer`
-- **83 · [Red-team an AI agent](notebook_83_agent_red_team.md)** — the OWASP-ASI / MITRE-ATLAS suite against a vulnerable and a hardened bot — grounded findings or abstentions
-- **84 · [Red-team a support bot](notebook_84_redteam_support_bot.md)** — red-team a customer-support chatbot for prompt injection and data leakage
-- **85 · [CI security gate](notebook_85_ci_security_gate.md)** — a regression gate that fails the build when an agent's guardrail coverage drops
-- **86 · [Verify findings](notebook_86_verify_findings.md)** — an independent skeptic challenges each finding before anyone acts on it
-- **87 · [SOC alert triage](notebook_87_soc_alert_triage.md)** — verdicts on SIEM alerts that ship only with corroborating evidence, otherwise an abstention
-- **88 · [Model and hardware fingerprinting](notebook_88_model_fingerprint.md)** — verify a vendor's claimed model and hardware through timing side-channels
-- **89 · [Investigate with SecurityContext](notebook_89_investigate_with_ctx.md)** — a vendor-neutral investigation that reasons in domains (logs, identity, threat intel, endpoint) rather than products

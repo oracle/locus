@@ -12,7 +12,7 @@ suite pins a known-disallowed export of personally identifiable information
 (PII), a known-allowed aggregate report, and a negative case that guards
 against the agent inventing a regulation citation or a breach finding no
 facts support
-([OWASP LLM09, Misinformation](../concepts/threat-scenarios.md#owasp-llm-top-10-2025)).
+([OWASP LLM09, Misinformation](../api/control.md)).
 
 What this notebook covers:
 

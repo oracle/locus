@@ -74,5 +74,4 @@ See [First controlled action](../how-to/first-controlled-action.md) for a small
 offline run, [policy authoring](policy-authoring.md) for classification
 coverage, [`gate_tool`](../api/control.md#locus.control.gate.gate_tool) for the
 interrupt-and-resume parameters, [interrupts](interrupts.md) for
-`agent.resume(...)`, and [SecurityContext](security-context.md) for a
-security-domain application.
+`agent.resume(...)`.

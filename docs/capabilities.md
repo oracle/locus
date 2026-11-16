@@ -19,8 +19,7 @@ does, and where to find it.
 <div markdown="block"><dt>Status labels</dt><dd markdown="span">Defined in the [compatibility policy](compatibility.md), with upgrade guidance</dd></div>
 </dl>
 
-One chain carries a result from a `red_team()` or `assure()` run to the
-action it justifies. `ground_finding()` grounds the result with GSAR and
+One chain carries a claim from a tool's output to the action it justifies. `ground_finding()` grounds the result with GSAR and
 withholds a below-threshold one as an `Abstention`; `verify()` challenges the
 `Evidence` that proceeds; `admit()` weighs the proposed action against the
 finding, the verdict and the `ControlPolicy` — allow, hold or deny — and
@@ -125,12 +124,9 @@ desk.register_specialists([fraud_check, risk_score, settlement])
 result = await desk.execute("Recommend how to resolve the duplicate charge on order 8842.")
 ```
 
-## Security — a worked example domain
+## Control — grounding, gating, audit
 
-The most fully built domain package, and the proof the chain holds under
-pressure: point an agent at an AI or at infrastructure, and every finding comes
-back grounded or abstained, ready to be verified, gated, and audited. The same
-chain — grounding, gating, audit — applies to any domain: a claim graded by
+One chain — grounding, gating, audit — applies to any domain: a claim graded by
 `ground_finding()` becomes evidence only when it clears the GSAR threshold, a
 side effect routed through `admit()` runs only on an allow decision or on a hold
 a named person approves, and `admit()` records every decision it makes (allowed,
@@ -143,18 +139,13 @@ so see [Guarantees and boundaries](why-locus.md).
 
 | Feature | What it does | Surface |
 |---|---|---|
-| **Grounded findings** | `ground_finding` returns a typed `Evidence` only when the claim clears the GSAR threshold — else an `Abstention`. Build findings through it, not by constructing `Evidence` directly. | `ground_finding` · [Grounded findings](concepts/security.md) |
-| **Target** | One handle over any AI under assessment — remote endpoint, in-process `Agent`, A2A peer, or callable | `Target.endpoint` / `.agent` / `.a2a` / `.from_callable` · [Agentic AI-security](concepts/agentic-ai-security.md) |
-| **Red-teaming** | OWASP-ASI probe suite → grounded `Evidence` (tagged OWASP LLM / ASI / MITRE ATLAS) or `Abstention` | `red_team(target)` · [Agentic AI-security](concepts/agentic-ai-security.md) |
-| **Assurance** | Grounded guardrail-coverage posture across the suite | `assure(target)` |
-| **Verification** | An independent skeptic challenges a finding's evidence and rescores confidence | `verify(finding) -> VerificationResult` · [Verify findings](notebooks/notebook_86_verify_findings.md) |
-| **Policy + approval** | Weigh an action against evidence, verification, and a `ControlPolicy` → allow / hold / deny (`allow` / `require_human` / `deny` in the API) | `approve(action, policy=…)` · [SecurityContext](concepts/security-context.md) |
-| **Admission gate** | Run a side-effecting action only if it clears the chain; `admit(trail=...)` records the decision to the audit trail you pass; else raises `AdmissionError` | `admit(...)` · `ctx.actions.execute(...)` · [SecurityContext](concepts/security-context.md) |
-| **SecurityContext** | Investigate by domain (logs / endpoint / identity / cloud / threat-intel / actions), not by vendor | `SecurityContext()` · [SecurityContext](concepts/security-context.md) |
+| **Grounded findings** | `ground_finding` returns a typed `Evidence` only when the claim clears the GSAR threshold — else an `Abstention`. Build findings through it, not by constructing `Evidence` directly. | `ground_finding` · [GSAR](concepts/gsar.md) |
+| **Verification** | An independent skeptic challenges a finding's evidence and rescores confidence | `verify(finding) -> VerificationResult` · [The control layer](concepts/control-layer.md) |
+| **Policy + approval** | Weigh an action against evidence, verification, and a `ControlPolicy` → allow / hold / deny (`allow` / `require_human` / `deny` in the API) | `approve(action, policy=…)` · [The control layer](concepts/control-layer.md) |
+| **Admission gate** | Run a side-effecting action only if it clears the chain; `admit(trail=...)` records the decision to the audit trail you pass; else raises `AdmissionError` | `admit(...)` · [The control layer](concepts/control-layer.md) |
 | **Audit trail** | Hash-chained, tamper-evident record of every entry written to it, including each decision `admit(trail=...)` makes; exports JSONL for a SIEM | `AuditTrail` · [Observability](concepts/observability.md) |
-| **Cloud posture (read-only)** | Spec-driven OCI auditing — `describe_oci` introspects the OCI SDK; `use_oci` runs read-only calls, writes refused by default; `create_soc_analyst` grounds the findings | `locus.tools.oci` (`describe_oci`, `use_oci`) · `locus_security` (`create_soc_analyst`) · [Cloud posture](concepts/cloud-posture.md) |
-| **Inference fingerprinting** | Timing side-channel model/hardware fingerprint → grounded `FingerprintFinding` or abstention | `fingerprint_to_finding` · [Grounded findings](concepts/security.md) |
-| **Governed agent** | An `Agent` with grounding + guardrails + audit trail on by default | `governed_agent(...)` · [Agentic AI-security](concepts/agentic-ai-security.md) |
+| **Cloud posture (read-only)** | Spec-driven OCI auditing — `describe_oci` introspects the OCI SDK; `use_oci` runs read-only calls, writes refused by default | `locus.tools.oci` (`describe_oci`, `use_oci`) · [OCI tools](api/tools.md#oci-tools) |
+| **Governed agent** | An `Agent` with grounding + guardrails + audit trail on by default | `governed_agent(...)` · [The control layer](concepts/control-layer.md) |
 
 ```python
 # A finding only exists above the GSAR bar — else it abstains. ground_finding never
@@ -175,22 +166,20 @@ else:
 ```
 
 ```python
-# The action chain: investigate → verify → policy → admission gate.
-# isolate_host fires only if the chain clears; production → hold (require_human).
-from locus.control import Action
-from locus_security import SecurityContext, verify
+# The action chain: policy → admission gate → audit trail.
+# The refund runs only if the policy allows; production → hold (require_human).
+from locus.control import Action, AdmissionError, AuditTrail, ControlPolicy, admit
 
-ctx = SecurityContext()
-verdict = await verify(finding)
-# Raises AdmissionError unless the policy allows; here production → hold.
-# ctx.actions.execute() passes neither a trail nor an approver: to record the
-# decision or approve the hold, call admit(..., trail=trail, approved_by=...)
-# directly.
-await ctx.actions.execute(
-    Action(name="isolate_host", asset="WS-0142", environment="production"),
-    lambda: ctx.endpoint.isolate("WS-0142"),   # side effect, gated
-    finding=finding, verdict=verdict,
+policy = ControlPolicy()        # conservative defaults: production → human
+trail = AuditTrail()
+refund = Action(
+    name="refund", asset="cust:4821",
+    blast_radius=1, kind="payment", environment="production",
 )
+try:
+    await admit(refund, lambda: issue_refund("cust:4821"), policy=policy, trail=trail)
+except AdmissionError as e:
+    print(e.decision.outcome)   # "require_human": the refund did not run
 ```
 
 ## Observability

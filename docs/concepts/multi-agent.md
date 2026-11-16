@@ -173,7 +173,7 @@ streaming — work in any of the eight shapes, so choosing a shape does not
 trade away production readiness. And a side-effecting tool in any
 shape can be put behind the admission gate — wrap it with
 [`gate_tool(...)`](control-layer.md) or call
-[`admit()`](security-context.md) in its body, passing your
+[`admit()`](control-layer.md) in its body, passing your
 `ControlPolicy` and an `AuditTrail`. Every decision on it, whether allow,
 hold or deny, is then appended to that hash-chained trail: each entry
 commits to the one before it, so an edit, reorder, or deletion in the

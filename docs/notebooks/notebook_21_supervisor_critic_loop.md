@@ -24,7 +24,7 @@ graph; a fourth, that the records were accessed by an unauthorized third
 party, has no evidence behind it. The candidate finding handed to the
 gate carries standard risk-taxonomy IDs (the `OwaspLLM` and
 `AtlasTechnique` enums from the
-[threat taxonomy](../concepts/security.md#threat-taxonomy)), so a shipped
+[threat taxonomy](../api/control.md)), so a shipped
 `Evidence` can be filed directly in a privacy register or data protection
 impact assessment (DPIA).
 

@@ -13,17 +13,17 @@
   :class:`~locus.core.warnings.LocusDeprecationWarning` naming the new path.
 - The security-domain tooling (``red_team``, ``Target``, ``SecurityContext``,
   the SOC analyst, the intel / SIEM / EDR / scanner / fingerprint
-  adapters, the IR playbooks, …) moved to the separate, opt-in
-  ``locus-sdk-security`` distribution, imported as :mod:`locus_security`.
-  Importing one of those names from here resolves it lazily from that package
-  when it is installed, and raises :class:`ImportError` saying what to install
-  when it is not.
+  adapters, the IR playbooks, …) is no longer part of Locus. It last shipped
+  as the ``locus-sdk-security`` distribution at the ``v5.5.0`` tag of
+  oracle/locus, imported as :mod:`locus_security`. Importing one of those
+  names from here resolves it lazily when that package is installed, and
+  raises :class:`ImportError` saying so when it is not.
 
 Submodule imports (``locus.security.policy``, ``locus.security.redteam.probes``,
 …) are aliased the same way, to the very same module objects, so patch targets
 and ``isinstance`` checks written against the old paths keep working.
 
-New code should import from :mod:`locus.control` or :mod:`locus_security`.
+New code should import from :mod:`locus.control`.
 """
 
 from __future__ import annotations
@@ -76,7 +76,7 @@ _CORE_NAMES = frozenset(
     }
 )
 
-#: Names that moved to the ``locus-sdk-security`` distribution.
+#: Names of the former ``locus-sdk-security`` distribution, no longer part of Locus.
 _DOMAIN_NAMES = frozenset(
     {
         "ActionsPort",
@@ -161,7 +161,7 @@ _CORE_MODULES = {
     "verify": "locus.control.verification",
 }
 
-#: Old submodules that now live under :mod:`locus_security` (same names).
+#: Old submodules of the former ``locus-sdk-security`` distribution (same names).
 _DOMAIN_MODULES = frozenset(
     {
         "_adapters",
@@ -184,9 +184,9 @@ _DOMAIN_MODULES = frozenset(
 
 _DOMAIN_PACKAGE = "locus_security"
 _INSTALL_HINT = (
-    "{what} moved to the separate locus-sdk-security package, which is not "
-    "published to PyPI. Install it from the repository with "
-    '`pip install "git+https://github.com/oracle/locus'
+    "{what} belonged to the locus-sdk-security package, which is no longer part "
+    "of Locus. It last shipped at the v5.5.0 tag of oracle/locus: "
+    '`pip install "git+https://github.com/oracle/locus@v5.5.0'
     '#subdirectory=packages/locus-sdk-security"` '
     "and import it from `locus_security`."
 )

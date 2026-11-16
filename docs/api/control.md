@@ -7,7 +7,7 @@ record the decision either way.
 Older releases shipped these under `locus.security`; that path still resolves,
 with a deprecation warning, until a future major release removes it.
 
-For the concepts, start with [The control layer](../concepts/security-context.md)
+For the concepts, start with [The control layer](../concepts/control-layer.md)
 and [Writing a policy that holds](../concepts/policy-authoring.md).
 
 ## Admitting an action

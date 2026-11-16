@@ -109,7 +109,7 @@ mixed up. See [hooks](hooks.md#on_after_tool_call-what-the-event-carries)
 for the full event surface. Note this list is a faithful trace for
 replay, not a tamper-evident record — for decisions an auditor must
 trust, route the action through the hash-chained
-[`AuditTrail`](agentic-ai-security.md) (each entry commits to the one
+[`AuditTrail`](control-layer.md) (each entry commits to the one
 before it, so editing any record breaks verification).
 
 ## Getting started — expose your tools as MCP

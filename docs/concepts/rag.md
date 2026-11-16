@@ -55,7 +55,7 @@ decision time the agent quotes the matching source — "refund policy
 | Answers must cite provenance — "which document says this?" | **yes — RAG hits carry source metadata** |
 | Security teams: verdicts depend on threat intel (CISA KEV entries, IOC — indicator of compromise — feeds, incident postmortems) | **yes — same machinery, security corpus** |
 | Static, small (< 50 KB) playbook / runbook content | no — just put it in the system prompt |
-| Live lookups (is this hash malicious *right now*?) | use a direct API tool such as [`enrich_indicator`](../api/integrations.md); RAG is for indexed corpora, not live lookups |
+| Live lookups (is this hash malicious *right now*?) | use a direct API tool (a threat-intel lookup, for example); RAG is for indexed corpora, not live lookups |
 
 ## Getting started
 
@@ -309,12 +309,12 @@ a *false fact*. An attacker who lands a chunk like —
 
 — can flip a verdict if the agent trusts retrieval blindly. The defense
 is **GSAR grounding**: never let a RAG hit alone produce an `Evidence`.
-Cross-check the claim against a direct API fact (`enrich_indicator`,
-`lookup_hash`), partition the evidence, and let an ungrounded or
+Cross-check the claim against a direct API fact (a threat-intel lookup,
+a hash check), partition the evidence, and let an ungrounded or
 *contradicted* claim abstain.
 
 ```python
-from locus_security import ground_finding, Severity, is_finding
+from locus.control import ground_finding, Severity, is_finding
 from locus.reasoning.gsar import Claim, EvidenceType, Partition
 
 ioc = "198.51.100.7"

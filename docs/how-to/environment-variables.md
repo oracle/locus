@@ -164,21 +164,3 @@ Notebooks 66 and 67. See [the gateway how-to](litellm-gateway.md).
 | `DATAMAP_URL` | Data-map adapter — notebook 80 |
 | `DATAMAP_API_KEY` | Data-map adapter — notebook 80 |
 | `DATAMAP_TOKEN` | Data-map adapter — notebook 80 |
-
-## Model fingerprinting
-
-[Notebook 88](../notebooks/notebook_88_model_fingerprint.md), which ships with
-examples 81–89 in the `locus-sdk-security` package
-(`packages/locus-sdk-security/examples/`).
-
-| Variable | Used by |
-|---|---|
-| `FINGERPRINT_MODEL` | Model id under test |
-| `FINGERPRINT_ASSET` | Asset label recorded on the finding |
-| `FINGERPRINT_SAMPLES` | Number of timing samples to collect |
-
-## Other
-
-| Variable | Used by |
-|---|---|
-| `OPENCLAW_DIR` | OpenClaw workspace root — the red-team example |
