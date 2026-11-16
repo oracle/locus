@@ -74,8 +74,8 @@ NOT_TAUGHT = {"security"}
 #: a builder calls: the A2A v1 schema mirror; the A2A JSON-RPC envelopes and the
 #: method parameter shapes ``A2AServer`` validates and ``A2AClient`` builds (a
 #: builder passes a ``Message`` and reads a ``Task``); the push-notification
-#: configuration, which the server answers with ``PUSH_NOTIFICATION_NOT_SUPPORTED``;
-#: and the box runner's environment.
+#: configuration shapes a task registers, which the skill teaches through
+#: ``PushNotificationSettings``; and the box runner's environment.
 WIRE_TYPES = re.compile(
     r"^(A2AV1|JsonRpc|MessageSend|Task(Id|Query)Params|(Task)?PushNotification|[A-Z][A-Z0-9_]+$)"
 )

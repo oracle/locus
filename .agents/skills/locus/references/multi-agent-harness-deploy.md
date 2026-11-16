@@ -248,8 +248,23 @@ Check: `sorted(route.path for route in server.app.routes)` includes `/`, `/.well
 `/a2a/invoke` (needs the `server` extra); `A2AServer` also accepts a `GraphRunnable`. A `FilePart` carries
 `FileWithBytes(bytes=<base64>)` or `FileWithUri(uri=...)`; `send_message_streaming(message)` yields the JSON-RPC stream
 events as dicts, which on the server side are the task's `TaskStatusUpdateEvent` transitions and the final
-`TaskArtifactUpdateEvent`. Push-notification methods answer `PUSH_NOTIFICATION_NOT_SUPPORTED`: there is no webhook
-delivery.
+`TaskArtifactUpdateEvent`. The same handlers serve every binding the specification defines: JSON-RPC, the HTTP+JSON
+binding (`POST /message:send`, `GET /tasks/{id}`, `POST /tasks/{id}:cancel`, the push-config resources, server-sent
+events for `message:stream` and `tasks/{id}:subscribe`) on the same app, and with `grpc_port=` the gRPC binding
+(`lf.a2a.v1.A2AService`, the `a2a-grpc` extra); the card's `supportedInterfaces` lists what is on (`transports=`), and
+`A2AClient.connect(url, prefer=[...])` or `A2AClient.from_card(card)` picks a binding from the card and moves to the
+next one when an interface is unreachable (`binding=` selects one outright; `A2ATransportUnavailableError` when none
+answers, `A2AClientError` for a reply the peer refused). `A2AServer(push_notifications=PushNotificationSettings(...))` delivers every status and artifact change to
+the webhooks a task registers (in `SendMessage`'s configuration or with the `*TaskPushNotificationConfig` methods),
+with retries and a URL policy that refuses private addresses unless told otherwise; `PushNotificationSigner` signs
+each body (Ed25519) and publishes the key at `/.well-known/jwks.json`, and `PushNotificationReceiver` is the
+client-side webhook that checks the token and the signature; `send_message(..., push_notification_config=...,
+blocking=False)` returns the task at once. A run that pauses for a person (`ask_user`, or a hold from
+`gate_tool(on_refusal="interrupt")`) surfaces as the task state `input-required` with the question as the status
+message; the peer's next message on the task resumes the run, and for a hold its first word decides (`approve` /
+`deny`) on the store passed as `A2AServer(approvals=...)`. `locus a2a card AGENT [--transport ...] [--grpc-port N]
+[--push] [--serve]` writes a v1.0 card from the agent's tools, skills and transports (`card_from_agent()` /
+`write_card()` in code).
 
 ## DeepAgent
 
