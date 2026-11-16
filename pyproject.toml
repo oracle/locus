@@ -594,6 +594,12 @@ ignore = [
     "S608",    # SQL built from validated identifiers (regex-checked at init)
     "PYI063",  # PEP 570 positional-only — `__context` is Pydantic's spelling
 ]
+"src/locus/control/approvals_postgres.py" = [
+    "S608",    # SQL built from validated identifiers (regex-checked at init)
+]
+"src/locus/control/approvals_oracle.py" = [
+    "S608",    # SQL built from validated identifiers (regex-checked at init)
+]
 "src/locus/rag/stores/**/*.py" = [
     "S608",    # SQL built from validated identifiers
     "PYI063",  # PEP 570 positional-only — `__context` is Pydantic's spelling

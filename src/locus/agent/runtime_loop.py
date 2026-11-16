@@ -461,6 +461,22 @@ def _durable(state: AgentState) -> AgentState:
     return state
 
 
+def _with_pending_hold(
+    state: AgentState, result: ToolResult, payload: dict[str, Any]
+) -> AgentState:
+    """``state`` carrying the approval hold ``payload`` describes, if it is one.
+
+    A gated tool's interrupt marker names its approval; ``ask_user``'s does not
+    and leaves the state as it was. The hold rides in the checkpoint, so the
+    process that resumes the thread can find what it waits on
+    (:mod:`locus.control.holds`).
+    """
+    from locus.control.holds import hold_from_interrupt, with_hold  # noqa: PLC0415
+
+    hold = hold_from_interrupt(result.tool_call_id, result.name, payload)
+    return with_hold(state, hold) if hold is not None else state
+
+
 #: State metadata naming the turn's per-iteration checkpoints. It rides in the
 #: saved state itself, so a process killed mid-turn hands the list to whatever
 #: finishes the turn — ``continue_turn`` or the next ``run`` — and that final
@@ -1704,6 +1720,7 @@ class AgentRuntimeMixin:
                         try:
                             interrupt_data = _json.loads(result.content)
                             if interrupt_data.get("__interrupt__"):
+                                state = _with_pending_hold(state, result, interrupt_data)
                                 self._park_interrupt(rc, state)
                                 # Checkpoint BEFORE yielding: a consumer that
                                 # stops iterating on the interrupt (an HTTP
@@ -2371,6 +2388,7 @@ class AgentRuntimeMixin:
                         except (ValueError, KeyError):
                             interrupt_data = None
                         if interrupt_data and interrupt_data.get("__interrupt__"):
+                            state = _with_pending_hold(state, result, interrupt_data)
                             self._park_interrupt(rc, state)
                             if self.config.checkpointer and thread_id:
                                 await self.config.checkpointer.save(_durable(state), thread_id)

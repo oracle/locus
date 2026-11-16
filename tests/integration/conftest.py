@@ -50,19 +50,34 @@ def redis_available() -> bool:
 
 
 @lru_cache(maxsize=1)
-def postgres_available() -> bool:
-    """Check if PostgreSQL is available and configured."""
-    # Require explicit configuration to avoid connecting to random local postgres
-    host = os.getenv("POSTGRES_HOST")
+def postgres_unavailable_reason() -> str | None:
+    """Why PostgreSQL tests skip, or ``None`` when the server answers.
+
+    ``POSTGRES_USER`` and ``POSTGRES_DB`` are the explicit opt-in (so a run
+    never connects to a PostgreSQL nobody pointed it at); ``POSTGRES_HOST``
+    defaults to ``localhost`` and ``POSTGRES_PORT`` to ``5432``, as the
+    integration README documents them.
+    """
     user = os.getenv("POSTGRES_USER")
     database = os.getenv("POSTGRES_DB")
-
-    # Must have explicit config
-    if not (host and user and database):
-        return False
-
+    if not (user and database):
+        missing = [name for name in ("POSTGRES_USER", "POSTGRES_DB") if not os.getenv(name)]
+        return (
+            f"PostgreSQL not configured: set {' and '.join(missing)} (POSTGRES_HOST/PORT optional)"
+        )
+    host = os.getenv("POSTGRES_HOST", "localhost")
     port = int(os.getenv("POSTGRES_PORT", "5432"))
-    return _check_port(host, port)
+    try:
+        with socket.create_connection((host, port), timeout=1.0):
+            return None
+    except (OSError, TimeoutError) as error:
+        return f"PostgreSQL not reachable at {host}:{port} ({type(error).__name__}: {error})"
+
+
+@lru_cache(maxsize=1)
+def postgres_available() -> bool:
+    """Check if PostgreSQL is available and configured."""
+    return postgres_unavailable_reason() is None
 
 
 @lru_cache(maxsize=1)
@@ -152,7 +167,7 @@ skip_without_redis = pytest.mark.skipif(
 
 skip_without_postgres = pytest.mark.skipif(
     not postgres_available(),
-    reason="PostgreSQL not available (check POSTGRES_HOST/PORT or start PostgreSQL)",
+    reason=postgres_unavailable_reason() or "PostgreSQL available",
 )
 
 skip_without_mysql = pytest.mark.skipif(
