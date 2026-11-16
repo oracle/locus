@@ -1,0 +1,69 @@
+# Default values for locus-agent. `locus deploy apply --target oke` renders
+# these from the Terraform variables; `helm install` takes them directly.
+
+replicaCount: 2
+
+image:
+  repository: ''            # <region>.ocir.io/<namespace>/<repository>
+  tag: ''
+  pullPolicy: IfNotPresent
+  pullSecret: ''            # an existing docker-registry Secret for a private repository
+
+containerPort: 8080
+
+# Environment for the agent server. Vault secret OCIDs go in <VAR>_SECRET_OCID;
+# python -m locus.deploy.entrypoint resolves them into <VAR> before uvicorn starts.
+env: {}
+
+# A bearer key can also come from a Kubernetes Secret instead of Vault.
+serverApiKey:
+  existingSecret: ''        # Secret name
+  key: server-api-key
+
+# LOCUS_OCI_AUTH_TYPE and OCI_AUTH_TYPE follow workloadIdentity: oke_workload_identity
+# (the pod exchanges its service-account token) or instance_principal (the node's).
+oci:
+  workloadIdentity: true    # OKE workload identity: a resource principal per service account
+  region: ''
+
+serviceAccount:
+  create: true
+  name: ''
+  annotations: {}
+
+service:
+  type: LoadBalancer
+  port: 80
+  annotations: {}
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: '2'
+    memory: 4Gi
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}
+
+# Readiness and liveness both use GET /health, which needs no bearer key.
+probes:
+  readiness:
+    initialDelaySeconds: 5
+    periodSeconds: 10
+  liveness:
+    initialDelaySeconds: 20
+    periodSeconds: 30

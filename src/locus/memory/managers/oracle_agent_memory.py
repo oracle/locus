@@ -113,8 +113,10 @@ def oci_litellm_auth(spec: str) -> dict[str, Any]:
         if auth_type == "instance_principal":
             signer = oci.auth.signers.InstancePrincipalsSecurityTokenSigner()
             region = region or getattr(signer, "region", None)
-        elif auth_type == "resource_principal":
-            signer = oci.auth.signers.get_resource_principals_signer()
+        elif auth_type in ("resource_principal", "oke_workload_identity"):
+            from locus._oci_auth import resource_principal_signer  # noqa: PLC0415
+
+            signer = resource_principal_signer(auth_type, oci_module=oci)
             region = region or getattr(signer, "region", None)
         else:
             profile = (

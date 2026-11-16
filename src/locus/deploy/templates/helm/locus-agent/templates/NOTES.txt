@@ -1,0 +1,16 @@
+{{ include "locus-agent.fullname" . }} is rolling out in namespace {{ .Release.Namespace }}.
+
+Service address:
+  kubectl -n {{ .Release.Namespace }} get svc {{ include "locus-agent.fullname" . }}
+
+Health, then one request:
+  curl -sf http://<address>/health
+  curl -sS -X POST http://<address>/invoke \
+    -H "Authorization: Bearer $LOCUS_SERVER_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{"prompt": "hello"}'
+{{- if .Values.oci.workloadIdentity }}
+
+Workload identity: grant the service account {{ include "locus-agent.serviceAccountName" . }} in
+namespace {{ .Release.Namespace }} the OCI permissions the agent needs (see the deploy guide).
+{{- end }}

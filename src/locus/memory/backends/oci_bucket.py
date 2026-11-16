@@ -70,7 +70,8 @@ class OCIBucketConfig(BaseModel):
     compartment_id: str | None = None
     profile_name: str = "DEFAULT"
     config_file: str = "~/.oci/config"
-    auth_type: str = "api_key"  # api_key | security_token | instance_principal | resource_principal
+    # api_key | security_token | instance_principal | resource_principal | oke_workload_identity
+    auth_type: str = "api_key"
     region: str | None = None
 
 
@@ -79,9 +80,11 @@ def build_object_storage_client(cfg: OCIBucketConfig) -> ObjectStorageClient:
 
     ``api_key`` (the default) reads the profile from ``cfg.config_file``; a
     session-token profile (``oci session authenticate``) is detected and
-    signed with its token. ``security_token``, ``instance_principal`` and
-    ``resource_principal`` select the matching signer. Shared by the
-    checkpointer and the audit-trail anchor store so the auth rules live once.
+    signed with its token. ``security_token``, ``instance_principal``,
+    ``resource_principal`` and ``oke_workload_identity`` select the matching
+    signer (``resource_principal`` picks the OKE workload-identity signer on
+    its own inside a pod). Shared by the checkpointer and the audit-trail
+    anchor store so the auth rules live once.
     """
     try:
         import oci
@@ -97,8 +100,10 @@ def build_object_storage_client(cfg: OCIBucketConfig) -> ObjectStorageClient:
     if cfg.auth_type == "instance_principal":
         signer = oci.auth.signers.InstancePrincipalsSecurityTokenSigner()
         return oci.object_storage.ObjectStorageClient(config={}, signer=signer)
-    if cfg.auth_type == "resource_principal":
-        signer = oci.auth.signers.get_resource_principals_signer()
+    if cfg.auth_type in ("resource_principal", "oke_workload_identity"):
+        from locus._oci_auth import resource_principal_signer
+
+        signer = resource_principal_signer(cfg.auth_type, oci_module=oci)
         return oci.object_storage.ObjectStorageClient(config={}, signer=signer)
     if cfg.auth_type == "security_token":
         oci_config = oci.config.from_file(str(config_file), cfg.profile_name)

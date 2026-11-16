@@ -159,8 +159,10 @@ def _build_config_and_signer(
         config: dict[str, Any] = {"region": region or signer.region}
         return config, signer
 
-    if auth_type == "resource_principal":
-        signer = oci_mod.auth.signers.get_resource_principals_signer()
+    if auth_type in ("resource_principal", "oke_workload_identity"):
+        from locus._oci_auth import resource_principal_signer
+
+        signer = resource_principal_signer(auth_type, oci_module=oci_mod)
         config = {"region": region or signer.region}
         return config, signer
 
@@ -193,7 +195,8 @@ def _build_config_and_signer(
     if auth_type != "api_key":
         raise _UseOCIError(
             f"Unsupported auth_type '{auth_type}'. Use one of: "
-            f"api_key, security_token, instance_principal, resource_principal."
+            f"api_key, security_token, instance_principal, resource_principal, "
+            f"oke_workload_identity."
         )
     return config, None
 
@@ -286,8 +289,9 @@ def use_oci(
             ``security_token`` (session token from
             ``oci session authenticate``), ``instance_principal``
             (running on an OCI compute instance with a dynamic group),
-            or ``resource_principal`` (running as an OCI Function or
-            other resource principal).
+            ``resource_principal`` (running as an OCI Function, a
+            Container Instance or an OKE workload-identity pod) or
+            ``oke_workload_identity`` (the OKE pod signer, named outright).
         label: Free-text hint describing the user-facing intent of the
             call. Surfaces in logs and traces — not sent to OCI.
         allow_mutations: Explicit opt-in to run a write operation
