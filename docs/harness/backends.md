@@ -265,9 +265,11 @@ connects with them pinned, so there is no trust-on-first-use: a log without
 a key is an error, not an unverified connection. With `bastion_id`, a
 port-forwarding session to the instance's private IP is created with the
 same key pair and the connection is a channel through the bastion, with the
-bastion's host key as the service reports it pinned the same way; that is
-the shape for an instance in a private subnet, which is where a sandbox
-belongs. Without it, `public_ip=True` assigns a public IP on a public
+bastion's host key pinned the same way: the key the service reports or — it
+reports none for a port-forwarding session — the one in your `known_hosts`,
+or else the key the endpoint presents at the first connection, read once and
+kept for the session (an `INFO` line says which); that is the shape for an
+instance in a private subnet, which is where a sandbox belongs. Without it, `public_ip=True` assigns a public IP on a public
 subnet, or the private IP is used as is for a process that can reach it.
 `known_hosts="accept-unknown"` is the explicit opt-in to connect anyway when
 the container or the bastion reports no key, with a warning; nothing is
@@ -281,7 +283,7 @@ written to the user's `known_hosts` either way.
 | `bastion_session_ttl` | 3 h | How long the bastion session lives; a restart after it expired makes a new one |
 | `public_ip` | `False` | Assign a public IP and connect to it |
 | `ssh_port` | 22 | The port `sshd` listens on in the container |
-| `known_hosts` | `"strict"` | Require the container's and the bastion's host keys; `"accept-unknown"` connects unverified when one is missing |
+| `known_hosts` | `"strict"` | Require the container's host keys and pin the bastion's; `"accept-unknown"` connects unverified when one is missing |
 | `container_env` | none | Environment variables set on the container |
 | `ready_timeout` | 600 s | For the instance to run and `sshd` to answer; installing it on the default image takes about a minute |
 
@@ -292,8 +294,13 @@ Prerequisites:
    For the bastion path, the subnet's security rules must admit TCP on the
    SSH port from the bastion's subnet (the VCN's CIDR does).
 2. **An OCI Bastion** in the VCN for a private subnet, with this machine's
-   address in its client CIDR list. Creating a bastion is a one-time step;
-   the backend only creates sessions on it.
+   address — as the bastion sees it, which is not always what a web lookup
+   shows — in its client CIDR list. The bastion checks the list after it
+   has accepted the session's key and closes the connection when the
+   address is not on it; the backend retries that for `AUTH_GRACE` (90 s)
+   and then raises, naming the bastion and quoting the container log, so a
+   failure there says so instead of running out the ready timeout. Creating
+   a bastion is a one-time step; the backend only creates sessions on it.
 3. **IAM** for the user or principal that runs the backend: `manage
    compute-container-family` and `use virtual-network-family` in the
    compartment, `read availability-domains` on the tenancy when no AD is

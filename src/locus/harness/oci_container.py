@@ -27,7 +27,10 @@ no command API — it starts a container and shows its log — so
    what the container itself reported, over the authenticated service API,
    so there is no trust-on-first-use. A log without a key is an error, not
    an unverified connection, unless ``known_hosts="accept-unknown"`` says
-   so; the same goes for a bastion that reports no host key.
+   so. The bastion's key is the one the service reports or, as the service
+   publishes none for a port-forwarding session, the one in ``known_hosts``
+   or else the key the endpoint presents at the first connection, read once
+   and pinned for the session.
 4. Connects directly to the instance's IP, or through an
    `OCI Bastion <https://docs.oracle.com/en-us/iaas/Content/Bastion/home.htm>`_
    when ``bastion_id`` is given: a port-forwarding session to the
@@ -64,7 +67,15 @@ from typing import Any
 
 from locus.harness.local import MAX_BACKGROUND
 from locus.harness.sandbox import ResourceLimits
-from locus.harness.ssh import KnownHosts, SSHJump, SSHSandboxBackend, SSHSession, _paramiko
+from locus.harness.ssh import (
+    KnownHosts,
+    SSHJump,
+    SSHJumpError,
+    SSHSandboxBackend,
+    SSHSession,
+    _paramiko,
+    learn_host_key,
+)
 
 
 __all__ = ["OCIContainerInstanceBackend"]
@@ -95,6 +106,15 @@ FAILED_MARK = "LOCUS_BOOTSTRAP_FAILED"
 #: given; the backend deletes it sooner on close, and makes a new one when
 #: a restart finds it expired.
 BASTION_SESSION_TTL = 3 * 60 * 60
+
+#: Seconds a refused key keeps being retried after it is first refused. A
+#: bastion session turns ``ACTIVE`` a little before the bastion honours it,
+#: and ``sshd`` answers a little after it logs; past this, a refusal is the
+#: answer, and the connection attempts stop well before the ready timeout.
+AUTH_GRACE = 90.0
+
+#: Lines of the container log a connection failure reports.
+LOG_TAIL_LINES = 30
 
 #: Seconds a stop or a start of the instance may take.
 LIFECYCLE_TIMEOUT = 600.0
@@ -157,6 +177,8 @@ class _Reach:
     username: str = "root"
     #: The id the bootstrap printed with its ready mark; ``""`` when not read.
     boot: str = ""
+    #: The container whose log to read when the connection fails; ``""`` when unknown.
+    container_id: str = ""
 
 
 def _transient(exc: BaseException) -> bool:
@@ -164,12 +186,26 @@ def _transient(exc: BaseException) -> bool:
 
     The socket's own errors and ``paramiko``'s ``SSHException`` family are,
     except a host key that does not match the pinned one: that is a
-    verdict, not a connection that is not up yet.
+    verdict, not a connection that is not up yet. A failure at the jump
+    host is judged by what the jump said.
     """
+    if isinstance(exc, SSHJumpError):
+        return _transient(exc.cause)
     names = {cls.__name__ for cls in type(exc).__mro__}
     if "BadHostKeyException" in names:
         return False
     return isinstance(exc, (OSError, EOFError)) or "SSHException" in names
+
+
+def _refused(exc: BaseException) -> bool:
+    """Whether ``exc`` is a key refused, or a connection closed once the key was accepted.
+
+    Either is an answer about this key and this client, not about a server
+    that is not up yet: it is retried for :data:`AUTH_GRACE` and no longer.
+    """
+    if isinstance(exc, SSHJumpError):
+        return exc.authenticated or _refused(exc.cause)
+    return any(cls.__name__ == "AuthenticationException" for cls in type(exc).__mro__)
 
 
 #: Opens a new SSH session after a restart, given the previous boot's host
@@ -558,9 +594,12 @@ class OCIContainerInstanceBackend(SSHSandboxBackend):
                 restart after it has expired makes a new one.
             ssh_port: The port ``sshd`` listens on in the container.
             known_hosts: ``"strict"`` requires the host keys the container
-                printed to its log, and the bastion's from the service, and
-                fails without them; ``"accept-unknown"`` connects unverified
-                when one of them is missing, with a warning.
+                printed to its log and fails without them, and pins the
+                bastion's key: the service's when it reports one, else the
+                one in ``known_hosts``, else the key the endpoint presents at
+                the first connection, read once for this session;
+                ``"accept-unknown"`` connects unverified when a key is
+                missing, with a warning.
             region: The region; the profile's when omitted.
             profile: The ``~/.oci/config`` profile.
             auth_type: ``api_key``, ``security_token``, ``instance_principal``
@@ -673,6 +712,7 @@ class OCIContainerInstanceBackend(SSHSandboxBackend):
                     interval=poll_interval,
                     connect_timeout=connect_timeout,
                     path=path,
+                    clients=clients,
                 )
                 reach = fresh
                 return session, fresh.host_keys, fresh.bastion_session_id
@@ -684,6 +724,7 @@ class OCIContainerInstanceBackend(SSHSandboxBackend):
                 interval=poll_interval,
                 connect_timeout=connect_timeout,
                 path=path,
+                clients=clients,
             )
             return cls(
                 session,
@@ -900,6 +941,7 @@ def _reach(
         session_id,
         known_hosts="strict" if keys else "accept-unknown",
         boot=boot,
+        container_id=str(container_id),
     )
 
 
@@ -919,9 +961,11 @@ def _bastion_session(
 
     The session is authorized for ``public``, and the jump logs in with its
     private half ``pkey``: the same key pair the container's ``sshd`` takes.
-    The bastion's host key, as the service reports it, is pinned on the
-    jump; a session that reports none is deleted and refused unless
-    ``known_hosts`` is ``"accept-unknown"``.
+    The bastion's host key is pinned on the jump: the service's when the
+    session reports one — it reports none for a port-forwarding session —
+    else the one in ``known_hosts``, else the key the endpoint presents now,
+    read once and kept for this session. With ``known_hosts`` at
+    ``"accept-unknown"`` a session without a key is accepted unverified.
     """
     models = _bastion_models()
     details = models.CreateSessionDetails(
@@ -953,13 +997,28 @@ def _bastion_session(
     region = clients.region or "unknown"
     host = match.group(1) if match else f"host.bastion.{region}.oci.oraclecloud.com"
     host_key = _public_key_line(getattr(session, "bastion_public_host_key_info", None))
-    if host_key is None:
-        if known_hosts != "accept-unknown":
+    if host_key is None and known_hosts != "accept-unknown":
+        try:
+            host_key, source = learn_host_key(
+                host, timeout=max(5.0, min(30.0, deadline - time.monotonic()))
+            )
+        except Exception as exc:
             clients.bastion.delete_session(session_id)
             raise RuntimeError(
-                f"bastion session {session_id} reports no host key for {host}; "
-                'pass known_hosts="accept-unknown" to connect through it unverified'
+                f"bastion session {session_id} reports no host key for {host}, "
+                f"and the endpoint did not present one: {exc}"
+            ) from exc
+        if source == "known_hosts":
+            logger.info(
+                "the service published no host key for %s; the one in known_hosts is pinned", host
             )
+        else:
+            logger.info(
+                "the service published no host key for %s; the key the endpoint presented "
+                "at this first connection is pinned for the session",
+                host,
+            )
+    elif host_key is None:
         logger.warning("the bastion reported no host key; %s is accepted unverified", host)
     via = SSHJump(
         host=host,
@@ -990,15 +1049,20 @@ def _connect_until(
     interval: float,
     connect_timeout: float,
     path: str | None,
+    clients: _Clients | None = None,
 ) -> SSHSession:
     """Connect to ``sshd``, retrying until ``deadline``: it answers a little after it logs.
 
-    The bastion reports a session ACTIVE a little before it accepts the
-    session's key, and ``sshd`` answers a little after it logs; an
-    authentication or transport failure now is "not yet", not "no". A host
-    key that does not match the pinned one is "no", at once.
+    A transport failure is "not yet" until the deadline. A refused key, or
+    a bastion that accepts the key and then closes the connection, is "not
+    yet" for :data:`AUTH_GRACE` seconds — a session turns ``ACTIVE`` a
+    little before the bastion honours it — and then the answer: the error
+    says whether the bastion or the container's ``sshd`` gave it, with the
+    tail of the container log when ``clients`` can read it. A host key that
+    does not match the pinned one is "no", at once.
     """
     last: BaseException | None = None
+    refused_since: float | None = None
     while True:
         try:
             return _open_ssh(reach, pkey, connect_timeout=connect_timeout, path=path)
@@ -1006,9 +1070,60 @@ def _connect_until(
             if not _transient(exc):
                 raise
             last = exc
-        if time.monotonic() >= deadline:
-            raise RuntimeError(f"could not reach sshd at {reach.host}:{reach.port}: {last}")
+        now = time.monotonic()
+        if _refused(last):
+            refused_since = now if refused_since is None else refused_since
+            final = now - refused_since >= AUTH_GRACE
+        else:
+            refused_since, final = None, False
+        if final or now >= deadline:
+            raise RuntimeError(_explain(reach, last, clients))
         time.sleep(interval)
+
+
+def _explain(reach: _Reach, exc: BaseException, clients: _Clients | None) -> str:
+    """What stopped the connection to ``reach``, where, and what the container logged."""
+    where = f"sshd at {reach.host}:{reach.port}"
+    if isinstance(exc, SSHJumpError):
+        if exc.authenticated:
+            why = (
+                f"the bastion {exc.host} accepted the session's key and then closed the "
+                "connection: it admits only the addresses in its client CIDR allow-list, "
+                "and this machine's address, as the bastion sees it, is not among them, or "
+                "the session was not yet honoured"
+            )
+        elif _refused(exc):
+            why = (
+                f"the bastion {exc.host} refused the session's key: the session is not "
+                "ACTIVE, or it was created for another key"
+            )
+        else:
+            why = f"the bastion {exc.host} did not carry the connection"
+        message = f"could not reach {where} through the bastion; {why} ({exc})"
+    elif _refused(exc):
+        message = (
+            f"the container's {where} refused the key the bootstrap authorized ({exc}); "
+            "its log below says what sshd made of it"
+        )
+    else:
+        message = f"could not reach {where}: {exc}"
+    if clients is not None and reach.container_id:
+        message += f"\ncontainer log, last {LOG_TAIL_LINES} lines (keys redacted):\n"
+        message += _log_tail(clients, reach.container_id)
+    return message
+
+
+_KEY_DATA = re.compile(r"(?<=\s)AAAA[A-Za-z0-9+/=]{4,}")
+
+
+def _log_tail(clients: _Clients, container_id: str, lines: int = LOG_TAIL_LINES) -> str:
+    """The last ``lines`` of the container's log, with key material replaced."""
+    try:
+        log = _text(clients.instances.retrieve_logs(container_id).data)
+    except Exception as exc:  # noqa: BLE001 - the log is a diagnostic, not the error
+        return f"(the container log could not be read: {exc})"
+    tail = log.splitlines()[-lines:]
+    return "\n".join(_KEY_DATA.sub("<redacted>", line) for line in tail) or "(empty)"
 
 
 def _delete_instance(clients: _Clients, instance_id: str, timeout: float = 600.0) -> None:

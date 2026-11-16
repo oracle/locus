@@ -21,7 +21,7 @@ from typing import Any
 
 import pytest
 
-from locus.harness import SSHJump, SSHSandboxBackend, SSHSession
+from locus.harness import SSHJump, SSHJumpError, SSHSandboxBackend, SSHSession
 from locus.harness import ssh as ssh_mod
 from locus.harness.ssh import _deadline_script
 
@@ -592,6 +592,172 @@ def test_a_failed_connection_closes_the_jump_host(fake_paramiko: types.ModuleTyp
     finally:
         FakeClient.connect = original  # type: ignore[method-assign]
     assert FakeClient.instances[0].closed
+
+
+def test_a_failure_at_the_jump_is_the_jumps_and_says_whether_the_key_was_accepted(
+    fake_paramiko: types.ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = FakeClient.connect
+
+    def failing(self: FakeClient, host: str, **kwargs: Any) -> None:
+        if host == "bastion":
+            raise OSError("refused")
+        original(self, host, **kwargs)
+
+    monkeypatch.setattr(FakeClient, "connect", failing)
+    with pytest.raises(
+        SSHJumpError, match="jump host bastion failed before accepting the key: OSError: refused"
+    ) as info:
+        SSHSession.open("10.0.0.5", via=SSHJump("bastion"))
+    assert isinstance(info.value.__cause__, OSError)
+    assert (info.value.host, info.value.authenticated) == ("bastion", False)
+    assert FakeClient.instances[0].closed, "the jump is closed on the way out"
+
+    monkeypatch.setattr(FakeClient, "connect", original)
+    FakeClient.instances = []
+
+    def dropped(self: FakeTransport, *args: Any, **kwargs: Any) -> Any:
+        raise EOFError
+
+    monkeypatch.setattr(FakeTransport, "open_channel", dropped)
+    with pytest.raises(SSHJumpError, match=r"after accepting the key: EOFError$") as info:
+        SSHSession.open("10.0.0.5", via=SSHJump("bastion"))
+    assert info.value.authenticated is True
+    assert FakeClient.instances[0].closed
+    assert len(FakeClient.instances) == 1, "the host was never connected"
+
+
+class FakeKnownKey:
+    def __init__(self, kind: str, data: str) -> None:
+        self.kind, self.data = kind, data
+
+    def get_name(self) -> str:
+        return self.kind
+
+    def get_base64(self) -> str:
+        return self.data
+
+
+class FakeHostKeysFile:
+    """``paramiko.HostKeys``: ``load`` a file, ``lookup`` a host."""
+
+    files: dict[str, Any] = {}
+
+    def __init__(self) -> None:
+        self.entries: dict[str, dict[str, FakeKnownKey]] = {}
+
+    def load(self, path: str) -> None:
+        content = FakeHostKeysFile.files.get(path)
+        if content is None:
+            raise FileNotFoundError(2, "No such file", path)
+        if isinstance(content, Exception):
+            raise content
+        self.entries = content
+
+    def lookup(self, name: str) -> dict[str, FakeKnownKey] | None:
+        return self.entries.get(name)
+
+
+class FakeKexTransport:
+    """``paramiko.Transport`` as far as one key exchange goes."""
+
+    instances: list[FakeKexTransport] = []
+    fail: Exception | None = None
+
+    def __init__(self, sock: Any) -> None:
+        self.sock = sock
+        self.started: float | None = None
+        self.banner_timeout: float | None = None
+        self.closed = False
+        FakeKexTransport.instances.append(self)
+
+    def start_client(self, timeout: float | None = None) -> None:
+        if FakeKexTransport.fail is not None:
+            raise FakeKexTransport.fail
+        self.started = timeout
+
+    def get_remote_server_key(self) -> FakeKnownKey:
+        return FakeKnownKey("ssh-ed25519", "QUJD")
+
+    def close(self) -> None:
+        self.closed = True
+
+
+@pytest.fixture
+def learning(
+    fake_paramiko: types.ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> list[tuple[Any, ...]]:
+    """``learn_host_key`` over the fakes: no file, no network. Returns the connections made."""
+    fake_paramiko.HostKeys = FakeHostKeysFile  # type: ignore[attr-defined]
+    fake_paramiko.Transport = FakeKexTransport  # type: ignore[attr-defined]
+    FakeHostKeysFile.files = {}
+    FakeKexTransport.instances = []
+    FakeKexTransport.fail = None
+    monkeypatch.setenv("HOME", str(tmp_path))
+    connections: list[tuple[Any, ...]] = []
+
+    def create_connection(address: tuple[str, int], timeout: float | None = None) -> str:
+        connections.append((address, timeout))
+        return "SOCK"
+
+    monkeypatch.setattr(ssh_mod.socket, "create_connection", create_connection)
+    return connections
+
+
+def test_a_host_key_in_known_hosts_is_learned_from_there_without_a_connection(
+    learning: list[tuple[Any, ...]], tmp_path: Path
+) -> None:
+    FakeHostKeysFile.files = {
+        str(tmp_path / ".ssh" / "known_hosts"): {
+            "bastion": {"ssh-rsa": FakeKnownKey("ssh-rsa", "S05PV04=")}
+        }
+    }
+    assert ssh_mod.learn_host_key("bastion") == ("ssh-rsa S05PV04=", "known_hosts")
+    assert learning == [], "nothing was connected"
+    assert FakeKexTransport.instances == []
+
+
+def test_a_host_key_not_in_known_hosts_is_read_from_the_endpoint_once(
+    learning: list[tuple[Any, ...]],
+) -> None:
+    assert ssh_mod.learn_host_key("bastion", timeout=7) == ("ssh-ed25519 QUJD", "endpoint")
+    assert learning == [(("bastion", 22), 7)]
+    [transport] = FakeKexTransport.instances
+    assert transport.sock == "SOCK"
+    assert (transport.started, transport.banner_timeout) == (7, 7)
+    assert transport.closed, "one exchange, then the transport is closed"
+
+
+def test_learning_a_host_key_names_the_port_and_skips_an_unreadable_file(
+    learning: list[tuple[Any, ...]], tmp_path: Path
+) -> None:
+    FakeHostKeysFile.files = {
+        "/etc/ssh/ssh_known_hosts": InvalidHostKey("@cert-authority ..."),
+        str(tmp_path / ".ssh" / "known_hosts"): {
+            "[bastion]:2222": {"ssh-ed25519": FakeKnownKey("ssh-ed25519", "UE9SVA==")}
+        },
+    }
+    assert ssh_mod.learn_host_key("bastion", 2222) == ("ssh-ed25519 UE9SVA==", "known_hosts")
+    assert ssh_mod.learn_host_key("bastion") == ("ssh-ed25519 QUJD", "endpoint"), (
+        "port 22 is the bare name; not in the file, so the endpoint is asked"
+    )
+    assert learning == [(("bastion", 22), 30.0)]
+
+
+def test_a_key_exchange_that_fails_closes_the_transport_and_raises(
+    learning: list[tuple[Any, ...]],
+) -> None:
+    FakeKexTransport.fail = OSError("reset by peer")
+    with pytest.raises(OSError, match="reset by peer"):
+        ssh_mod.learn_host_key("bastion")
+    [transport] = FakeKexTransport.instances
+    assert transport.closed
+
+
+def test_a_jump_error_without_words_from_its_cause_names_the_type() -> None:
+    assert str(SSHJumpError("b", EOFError(), authenticated=True)) == (
+        "jump host b failed after accepting the key: EOFError"
+    )
 
 
 # ----------------------------------------------------------------- backend --
