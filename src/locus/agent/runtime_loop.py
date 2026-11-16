@@ -1069,21 +1069,21 @@ class AgentRuntimeMixin:
                 # Keep the request inside the window before it is sent. The
                 # compacted history replaces the state's, so the run continues
                 # from the summary on its own, with no prompt to resume.
-                state, compaction = await self._compact_context(state, rc)
-                if compaction is not None:
+                state, compactions = await self._compact_context(state, rc)
+                for compaction in compactions:
                     yield compaction
-                    if compaction.exhausted:
-                        yield TerminateEvent(
-                            reason="context_exhausted",
-                            iterations_used=state.iteration,
-                            final_confidence=state.confidence,
-                            usage=_usage_of(state),
-                            cost_usd=_cost_of(state),
-                            reported_cost_usd=_reported_cost_of(state),
-                            total_tool_calls=len(state.tool_executions),
-                            final_message=f"[context exhausted] {compaction.detail}",
-                        )
-                        break
+                if compactions and compactions[-1].exhausted:
+                    yield TerminateEvent(
+                        reason="context_exhausted",
+                        iterations_used=state.iteration,
+                        final_confidence=state.confidence,
+                        usage=_usage_of(state),
+                        cost_usd=_cost_of(state),
+                        reported_cost_usd=_reported_cost_of(state),
+                        total_tool_calls=len(state.tool_executions),
+                        final_message=f"[context exhausted] {compactions[-1].detail}",
+                    )
+                    break
 
                 if stream_tokens:
                     chunk_queue: asyncio.Queue[Any] = asyncio.Queue()
@@ -1750,6 +1750,15 @@ class AgentRuntimeMixin:
                     # output up to the pack's inline limit goes whole (the pack
                     # sends it as a placeholder once it is old), and a larger
                     # one is archived whole and cut around a pointer to it.
+                    # Offload first: a result over the offload threshold goes
+                    # to storage whole and the message keeps a handle and a
+                    # preview (``fetch_tool_result`` reads it back), so the
+                    # cap below sees only the preview.
+                    offload = self.config.tool_result_offload
+                    if offload is not None and offload.should_offload(result.content):
+                        result = offload.offload(
+                            result, run_id=state.run_id, iteration=state.iteration
+                        )
                     if (
                         self.config.max_tool_result_length > 0
                         and result.content
@@ -2146,21 +2155,21 @@ class AgentRuntimeMixin:
                     )
                     break
 
-                state, compaction = await self._compact_context(state, rc)
-                if compaction is not None:
+                state, compactions = await self._compact_context(state, rc)
+                for compaction in compactions:
                     yield compaction
-                    if compaction.exhausted:
-                        yield TerminateEvent(
-                            reason="context_exhausted",
-                            iterations_used=state.iteration,
-                            final_confidence=state.confidence,
-                            usage=_usage_of(state),
-                            cost_usd=_cost_of(state),
-                            reported_cost_usd=_reported_cost_of(state),
-                            total_tool_calls=len(state.tool_executions),
-                            final_message=f"[context exhausted] {compaction.detail}",
-                        )
-                        break
+                if compactions and compactions[-1].exhausted:
+                    yield TerminateEvent(
+                        reason="context_exhausted",
+                        iterations_used=state.iteration,
+                        final_confidence=state.confidence,
+                        usage=_usage_of(state),
+                        cost_usd=_cost_of(state),
+                        reported_cost_usd=_reported_cost_of(state),
+                        total_tool_calls=len(state.tool_executions),
+                        final_message=f"[context exhausted] {compactions[-1].detail}",
+                    )
+                    break
 
                 try:
                     response, state = await self._get_model_response(state, model_kwargs, run=rc)
@@ -3366,11 +3375,13 @@ class AgentRuntimeMixin:
 
     async def _compact_context(
         self, state: AgentState, rc: RunContext
-    ) -> tuple[AgentState, CompactionEvent | None]:
+    ) -> tuple[AgentState, list[CompactionEvent]]:
         """Compact the run's context when the next request would reach the threshold.
 
-        Returns the state to continue with and the event to yield, or ``None``
-        when nothing was done. Only a :class:`ContextCompactor` compacts here;
+        Returns the state to continue with and the events to yield: none when
+        nothing was done, one for a :class:`ContextCompactor`, one per tier
+        that ran for a :class:`~locus.memory.tiers.TieredCompaction` (the last
+        carries ``exhausted``). Only a :class:`ContextCompactor` compacts here;
         other conversation managers shape each request in
         ``_get_model_response`` instead. Server-stateful transports hold the
         history on the server, so there is nothing local to compact.
@@ -3382,9 +3393,9 @@ class AgentRuntimeMixin:
 
         compactor = self._conversation_manager
         if not isinstance(compactor, ContextCompactor):
-            return state, None
+            return state, []
         if getattr(self._model, "server_stateful", False) is True:
-            return state, None
+            return state, []
         if rc.compaction is None:
             rc.compaction = CompactionTracker()
         tracker = rc.compaction
@@ -3399,7 +3410,7 @@ class AgentRuntimeMixin:
         measured = pack.view(messages, session=session) if pack is not None else messages
         tokens = compactor.measure(measured, tool_tokens=tool_tokens, tracker=tracker)
         if tokens < compactor.threshold:
-            return state, None
+            return state, []
 
         hook = await self._orch().run_before_compaction(
             list(messages),
@@ -3411,7 +3422,7 @@ class AgentRuntimeMixin:
         )
         if hook.cancel:
             logger.info("A before-compaction hook skipped compaction at %d tokens", tokens)
-            return state, None
+            return state, []
 
         outcome = await compactor.compact(
             messages,
@@ -3424,7 +3435,7 @@ class AgentRuntimeMixin:
             model=self._model,
         )
         if outcome is None:
-            return state, None
+            return state, []
         if outcome.usage:
             # Summary calls are spend like any other: they count against the
             # run's token and cost budgets.
@@ -3439,19 +3450,43 @@ class AgentRuntimeMixin:
                 tokens,
                 outcome.tokens_after,
             )
-        return state, CompactionEvent(
-            iteration=state.iteration,
-            stage=outcome.stage,
-            tokens_before=outcome.tokens_before,
-            tokens_after=outcome.tokens_after,
-            threshold=outcome.threshold,
-            context_window=compactor.context_length,
-            messages_before=len(messages),
-            messages_after=len(outcome.messages),
-            summary=outcome.summary,
-            exhausted=outcome.exhausted,
-            detail=outcome.detail,
-        )
+        if not outcome.tiers:
+            return state, [
+                CompactionEvent(
+                    iteration=state.iteration,
+                    stage=outcome.stage,
+                    tokens_before=outcome.tokens_before,
+                    tokens_after=outcome.tokens_after,
+                    threshold=outcome.threshold,
+                    context_window=compactor.context_length,
+                    messages_before=len(messages),
+                    messages_after=len(outcome.messages),
+                    summary=outcome.summary,
+                    exhausted=outcome.exhausted,
+                    detail=outcome.detail,
+                )
+            ]
+        # One event per tier that ran; the last one carries the verdict.
+        events: list[CompactionEvent] = []
+        for index, tier in enumerate(outcome.tiers):
+            last = index == len(outcome.tiers) - 1
+            events.append(
+                CompactionEvent(
+                    iteration=state.iteration,
+                    stage=tier.stage,
+                    tokens_before=tier.tokens_before,
+                    tokens_after=tier.tokens_after,
+                    threshold=outcome.threshold,
+                    context_window=compactor.context_length,
+                    messages_before=tier.messages_before,
+                    messages_after=tier.messages_after,
+                    summary=tier.summary,
+                    exhausted=outcome.exhausted if last else False,
+                    detail=(outcome.detail if last else None) or tier.detail,
+                    tier=tier.tier,
+                )
+            )
+        return state, events
 
     def _child_observation_pack(self, state: AgentState, run: RunContext) -> Any:
         """The ObservationPack config a subagent of this run gets, or ``None``.

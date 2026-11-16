@@ -27,7 +27,13 @@ question is what to drop when a long run no longer fits. A
 `ConversationManager` decides: `SlidingWindowManager` keeps the last *n*
 messages, `SummarizingManager` folds older turns into a summary, and
 `ContextCompactor` archives tool output and replaces it with a reference.
-See [the agent loop](agent-loop.md) for where it runs.
+`TieredCompaction` runs those as tiers, each at its own fraction of the
+window: clear tool results, slide the window, summarise, keep the turns
+relevant to the task; `pin()` keeps a message through all of them, and
+`ToolResultOffload` moves a large tool result out of the conversation by
+handle. [Conversation management](conversation-management.md#tiered-compaction)
+describes the pipeline and its defaults; see [the agent loop](agent-loop.md)
+for where it runs.
 
 {{ locus_model_tabs }}
 

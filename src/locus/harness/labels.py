@@ -79,6 +79,8 @@ TOOL_KINDS: dict[str, str] = {
     # The plan is the harness's own state; nothing in the workspace changes.
     "todo_write": KIND_READ,
     "todo_read": KIND_READ,
+    # Reads back an output the harness already produced and stored.
+    "fetch_tool_result": KIND_READ,
     "write": KIND_WRITE,
     "edit": KIND_WRITE,
     "multi_edit": KIND_WRITE,
@@ -544,7 +546,7 @@ def _discards(sub: str, args: tuple[str, ...]) -> bool:
 
 
 def _asset(name: str, kwargs: Mapping[str, Any]) -> str:
-    for key in ("path", "command", "handle"):
+    for key in ("path", "command", "handle", "key"):
         value = kwargs.get(key)
         if value:
             return str(value)

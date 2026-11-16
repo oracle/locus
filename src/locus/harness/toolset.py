@@ -59,14 +59,20 @@ logger = logging.getLogger(__name__)
 #: Every tool the harness can build.
 ALL_TOOLS: tuple[str, ...] = tuple(FACTORIES)
 
+#: Tools :func:`build_harness` adds to the default set only when the config
+#: calls for them: ``fetch_tool_result`` needs a ``result_store`` to read from.
+CONDITIONAL_TOOLS: frozenset[str] = frozenset({"fetch_tool_result"})
+
 #: The default set: everything but ``apply_patch``, which is the edit tool
 #: for models trained on the patch format and replaces the three below.
-DEFAULT_TOOLS: tuple[str, ...] = tuple(n for n in FACTORIES if n != "apply_patch")
+DEFAULT_TOOLS: tuple[str, ...] = tuple(
+    n for n in FACTORIES if n != "apply_patch" and n not in CONDITIONAL_TOOLS
+)
 
 #: The set for a model that edits with patches (the GPT family): the
 #: search-and-replace tools swapped for ``apply_patch``.
 PATCH_TOOLS: tuple[str, ...] = tuple(
-    n for n in FACTORIES if n not in {"edit", "multi_edit", "write"}
+    n for n in FACTORIES if n not in {"edit", "multi_edit", "write"} and n not in CONDITIONAL_TOOLS
 )
 
 Wrap = Callable[[Tool, ActionSpec], Tool]
@@ -141,6 +147,11 @@ def _prompt(backend: WorkspaceBackend, names: list[str], config: HarnessConfig) 
         )
     if "apply_patch" in names:
         lines.append("Change files with apply_patch.")
+    if "fetch_tool_result" in names:
+        lines.append(
+            "An output too long to show is stored whole under a key named in its note; "
+            "fetch_tool_result(key, offset) reads it back a page at a time."
+        )
     return "\n".join(lines)
 
 
@@ -157,7 +168,8 @@ def build_harness(
         backend: The workspace.
         tools: Which tools, by name (see :data:`ALL_TOOLS`). Default:
             :data:`DEFAULT_TOOLS`, without the shell tools when the backend
-            has no shell.
+            has no shell, plus ``fetch_tool_result`` when the config names a
+            ``result_store``.
         wrap: Applied to every tool with its action spec — the single place
             governance goes. ``None`` leaves the tools **ungated**.
         config: Behaviour; locus-code's defaults when omitted.
@@ -170,6 +182,8 @@ def build_harness(
     caps = backend.capabilities
     if tools is None:
         names = [n for n in DEFAULT_TOOLS if caps.can_exec or n not in SHELL_TOOLS]
+        if config.result_store is not None:
+            names.append("fetch_tool_result")
     else:
         names = list(dict.fromkeys(tools))
         unknown = [n for n in names if n not in FACTORIES]
