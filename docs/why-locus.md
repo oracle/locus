@@ -67,7 +67,7 @@ an agent, but application code and review must still prevent bypass paths.
 | GSAR grounding | Score and threshold logic over a typed partition | Evidence corpus, judge, thresholds, recovery/fail behavior | The judge's claim and evidence assessment |
 | Typed findings | Carries an explicit score, references, and provenance fields | Criteria for emitting or accepting the finding | Whether source evidence is complete and correctly interpreted |
 | Idempotent tools | Reuses a cached result for an identical call in the documented scope | Tool annotation, checkpoints, downstream operation key | Semantic equivalence of differently encoded calls |
-| Audit trail | Hash-chains appended records and detects later edits to that chain | Durable export, access controls, external anchoring | Whether all relevant events were sent to the trail |
+| Audit trail | Hash-chains appended records and detects later edits to that chain; `OracleAuditTrail` writes them to an immutable or blockchain table, `anchor_trail()` keeps the head in a retention-locked bucket | Which backend, the table's retention window, the bucket's retention rule, access controls | Whether all relevant events were sent to the trail |
 | Tool-call integrity | Signs each tool call as parsed and refuses one changed before execution, naming the hook when known | Turning it on (`tool_call_integrity`), re-signing in hooks that rewrite arguments, the audit trail that receives refusals | Whether a rewrite a hook signed for was the right one |
 
 ## Compared with prompt rules and filters
@@ -78,7 +78,7 @@ an agent, but application code and review must still prevent bypass paths.
 | Can block the side effect itself | No | Only if application wiring makes it authoritative | Yes, for calls routed through `admit()` |
 | Depends on model compliance | Yes | Often, when classification is model-based | Policy evaluation does not; action classification still can |
 | Human hold | Application-specific | Framework-specific | Built-in stores and resume flow |
-| Decision record | Usually logs | Usually logs | Optional hash-chained `AuditTrail` |
+| Decision record | Usually logs | Usually logs | Optional hash-chained `AuditTrail`, on an immutable table or anchored in object storage |
 
 Guardrails remain useful for prompt injection, content policy, and data-loss
 prevention. Admission solves a different problem: making an application-level
