@@ -56,13 +56,14 @@ from locus.control.action import ActionSpec, resolve_action
 from locus.control.admission import AdmissionError, admit
 from locus.control.approvals import ApprovalStore
 from locus.control.approvals_spec import store_spec
-from locus.control.policy import ApprovalDecision, ApprovalOutcome
+from locus.control.policy import ApprovalDecision, ApprovalOutcome, current_policy
 
 
 if TYPE_CHECKING:
     from locus.control.audit import AuditTrail
     from locus.control.findings import Evidence
-    from locus.control.policy import Action, ControlAdvisor, ControlPolicy
+    from locus.control.judge import JudgeVerdict, ToolCallJudge
+    from locus.control.policy import Action, ControlAdvisor, ControlPolicy, PolicySource
     from locus.control.spend import SpendLedger
     from locus.control.verification import VerificationResult
     from locus.tools.decorator import Tool
@@ -239,10 +240,23 @@ async def _evidence_for(
     return call_finding, call_verdict
 
 
+async def _judgement_for(
+    judge: ToolCallJudge | None, tool: Tool, kwargs: Mapping[str, Any]
+) -> JudgeVerdict | None:
+    """The judge's verdict on this call, or ``None`` when there is no judge.
+
+    The judge fails closed on its own (a model error or a spent budget is a
+    hold), so unlike ``_evidence_for`` nothing here needs catching.
+    """
+    if judge is None:
+        return None
+    return await judge.judge(tool.name, kwargs, tool=tool)
+
+
 def gate_tool(
     tool: Tool,
     *,
-    policy: ControlPolicy,
+    policy: ControlPolicy | PolicySource,
     action: ActionSpec | None = None,
     trail: AuditTrail | None = None,
     finding: PerCall[Evidence] = None,
@@ -257,6 +271,7 @@ def gate_tool(
     ) = None,
     ledger: SpendLedger | None = None,
     spend_scope: str | Callable[[str, dict[str, Any]], str] = "default",
+    judge: ToolCallJudge | None = None,
 ) -> Tool:
     """Return a copy of ``tool`` whose call goes through :func:`admit` first.
 
@@ -264,7 +279,10 @@ def gate_tool(
         tool: The tool to gate. Not modified — an ungated reference stays
             usable, which matters when the same function is called by trusted
             code elsewhere.
-        policy: The :class:`ControlPolicy` to weigh the call against.
+        policy: The :class:`ControlPolicy` to weigh the call against, or a
+            :class:`~locus.control.policy.PolicySource` such as a
+            :class:`~locus.control.policy_file.PolicyWatcher`, asked for the
+            current policy once per call.
         action: How to turn a call into an :class:`Action`. A constant
             ``Action`` when risk does not vary, or ``(name, kwargs) -> Action``
             when it does — the usual case, since a $12 refund and a $4,000,000
@@ -330,6 +348,14 @@ def gate_tool(
             maximum 1"). Pass a string, or ``(decision) -> str`` to vary by
             outcome, to say what the user should hear instead. The full policy
             reason is recorded on the audit trail regardless.
+        judge: A :class:`~locus.control.judge.ToolCallJudge`. Asked about
+            every call -- the tool's name and the arguments as the model sent
+            them -- and its verdict is handed to :func:`admit` as
+            ``judgement``, where it can turn the policy's allow into a hold
+            or a deny and never the reverse. A tool declared
+            ``@tool(read_only=True)`` is not judged. The verdict is on the
+            audit entry under ``judge``. After an approver edits a held
+            call's arguments, the edited call is judged again.
 
     Returns:
         A new :class:`~locus.tools.decorator.Tool`. Name, description and
@@ -368,10 +394,11 @@ def gate_tool(
         perform_with: Callable[[dict[str, Any]], Awaitable[Any]],
         call_finding: Evidence | None,
         call_verdict: VerificationResult | None,
+        call_judgement: JudgeVerdict | None,
     ) -> Any:
         """A ``require_human`` hold in interrupt mode: pause, or act on a decision."""
         store = cast("ApprovalStore", approval)
-        context = _approval_context(policy, approval_context, tool.name, kwargs)
+        context = _approval_context(current_policy(policy), approval_context, tool.name, kwargs)
         approval_id = store.submit(
             principal,
             tool.name,
@@ -429,6 +456,11 @@ def gate_tool(
                         if edited is not None
                         else (call_finding, call_verdict)
                     )
+                    run_judgement = (
+                        await _judgement_for(judge, tool, run_kwargs)
+                        if edited is not None
+                        else call_judgement
+                    )
                     return await admit(
                         run_action,
                         perform_once,
@@ -440,6 +472,7 @@ def gate_tool(
                         ledger=ledger,
                         spend_scope=_scope_for(spend_scope, tool.name, run_kwargs),
                         advisor=advisor,
+                        judgement=run_judgement,
                     )
                 except AdmissionError as denial:
                     store.consume(approval_id)
@@ -491,10 +524,12 @@ def gate_tool(
         resolved = resolve_action(action, tool.name, kwargs)
         call_finding: Evidence | None = None
         call_verdict: VerificationResult | None = None
+        call_judgement: JudgeVerdict | None = None
         try:
             call_finding, call_verdict = await _evidence_for(
                 resolved, finding, verdict, tool.name, kwargs, trail
             )
+            call_judgement = await _judgement_for(judge, tool, kwargs)
             return await admit(
                 resolved,
                 perform,
@@ -505,12 +540,21 @@ def gate_tool(
                 ledger=ledger,
                 spend_scope=_scope_for(spend_scope, tool.name, kwargs),
                 advisor=advisor,
+                judgement=call_judgement,
             )
         except AdmissionError as error:
             if on_refusal == "raise":
                 raise
             if on_refusal == "interrupt" and error.decision.outcome != ApprovalOutcome.DENY:
-                return await hold(error, resolved, kwargs, perform_with, call_finding, call_verdict)
+                return await hold(
+                    error,
+                    resolved,
+                    kwargs,
+                    perform_with,
+                    call_finding,
+                    call_verdict,
+                    call_judgement,
+                )
             return _refusal(
                 error,
                 approval=approval,
@@ -528,5 +572,6 @@ def gate_tool(
         parameters=tool.parameters,
         fn=gated,
         idempotent=tool.idempotent,
+        read_only=tool.read_only,
         labels=tool.labels,
     )

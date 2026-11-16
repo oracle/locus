@@ -31,6 +31,36 @@ strongest result, so deny beats hold beats allow (in the API,
 ::: locus.control.policy.ApprovalDecision
 ::: locus.control.policy.ApprovalOutcome
 
+### The policy as a file
+
+`ControlPolicy.load()` reads a policy from a YAML or JSON file and
+`policy.dump()` writes one; every key is a field of the same name, unknown
+keys are errors that name the key, and the two forms round-trip.
+`policy.content_hash()` names the rules a decision was made under; `admit()`
+records it as `policy_hash` on every audit entry. `PolicyWatcher` follows a
+file and hands `admit()` or `gate_tool()` the current policy, one per
+decision. The [policy authoring](../concepts/policy-authoring.md#the-policy-as-a-file)
+page shows the file form and the `locus policy lint` and `locus policy
+explain` commands that read it.
+
+::: locus.control.policy_file.PolicyWatcher
+::: locus.control.policy_file.PolicyDocument
+::: locus.control.policy_file.PolicyFileError
+::: locus.control.policy_file.policy_hash
+::: locus.control.policy.PolicySource
+
+### Linting and explaining a policy
+
+What `locus policy lint` and `locus policy explain` do, as calls.
+
+::: locus.control.policy_lint.lint_policy
+::: locus.control.policy_lint.LintReport
+::: locus.control.policy_lint.LintFinding
+::: locus.control.policy_lint.explain
+::: locus.control.policy_lint.Explanation
+::: locus.control.policy.evaluate_rules
+::: locus.control.policy.RuleCheck
+
 ## Describing an action
 
 A policy matches on what an action *is* — its environment, kind, blast
@@ -325,6 +355,38 @@ and demos. `admit()` takes `ledger=` and a string `spend_scope=` directly.
 ::: locus.control.spend.SpendLedger
 ::: locus.control.spend.InMemorySpendLedger
 ::: locus.control.spend.FileSpendLedger
+
+### Judging the call
+
+The policy sees labels. `ToolCallJudge` reads the call, the tool's name and
+the arguments the model sent, against an intent written in words and optional
+per-tool guidance, and returns a typed `allow` / `hold` / `deny` with a
+one-line reason. Pass it to `gate_tool(judge=...)` and the verdict reaches
+`admit()` as `judgement`, where `tighten()` keeps the stricter of the policy's
+outcome and the judge's: an allow can become a hold or a deny, never the
+reverse. The verdict is on the audit entry under `judge`; a model error, an
+off-schema reply or a spent `budget` is a hold.
+
+```python
+from locus.control import ControlPolicy, ToolCallJudge, gate_tool
+
+judge = ToolCallJudge(
+    small_model,
+    intent="Refund a customer's own order; never move money elsewhere.",
+    guidance={"issue_refund": "Hold anything over 500 USD."},
+    budget=20,
+)
+refund = gate_tool(issue_refund, policy=ControlPolicy(), trail=trail, judge=judge)
+```
+
+Installed as a hook (`hooks=[judge]`) it judges every call and cancels a held
+or denied one with a refusal the model can read; with no `model=` it borrows
+the agent's. Tools declared `@tool(read_only=True)` are not judged, and
+verdicts are cached per (tool, canonical arguments) within a run.
+
+::: locus.control.judge.ToolCallJudge
+::: locus.control.judge.JudgeVerdict
+::: locus.control.judge.tighten
 
 ## Deriving action labels
 

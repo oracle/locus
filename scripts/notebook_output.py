@@ -59,7 +59,7 @@ PAGES: dict[str, str] = {
     "notebook_62_eventbus_subscribers": "the event kinds the global telemetry forwarder and the per-deployment subscriber each received across two concurrent rollouts, then the `bus.stats()` snapshot (`active_runs`, `global_subscribers`, `history_runs`, `dropped_events_total`, `queue_depths`)",
     "notebook_63_event_catalogue": "the canonical `event_type` catalogue grouped by prefix (every `EV_*` constant read from the installed `locus.observability.emit` module when the script runs) and then the `composition.*` events the two-stage dispute-triage pipeline publishes, with no model text in the trail",
     "notebook_71_payment_refund_gate": "a small refund paid, a large one held",
-    "notebook_72_infra_deploy_gate": "a staging deploy allowed and a production rollback held",
+    "notebook_72_infra_deploy_gate": "a staging deploy allowed and a production rollback held, then the optional judge letting a pinned staging image through and holding an unpinned one the policy had allowed, with both verdicts on the audit entries",
     "notebook_73_support_account_gate": "a small credit applied, a plan upgrade held, and the trail that records both; then the same upgrade held by a gated tool with the run parked, the hold read back from the thread's checkpoint, approved from another process with `locus approvals`, and performed once by a fresh agent resuming the thread",
     "notebook_74_data_deletion_gate": "the export allowed on its own, the erasure held with nothing deleted until the Data Protection Officer signs off and it is re-admitted, and the three-record trail that verifies intact",
     "notebook_75_cloud_resource_gate": "a staging resize allowed, then a production terminate and an IAM grant held",
@@ -131,7 +131,10 @@ def uses_model(stem: str, sdk: Path) -> bool:
     cannot find in the source. Read it from the source rather than asserting it.
     """
     script = notebook_script(stem, sdk)
-    return script.is_file() and "get_model" in script.read_text()
+    if not script.is_file():
+        return False
+    source = script.read_text()
+    return "get_model" in source or "ScriptedModel" in source
 
 
 def render(stem: str, why: str, output: str, *, with_model: bool = True) -> str:

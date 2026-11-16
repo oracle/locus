@@ -20,11 +20,15 @@ engine builds on this open contract.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from locus.control.findings import Evidence
 from locus.control.taxonomy import Severity, severity_at_least
 from locus.control.verification import VerificationResult
+
+
+if TYPE_CHECKING:
+    import os
 
 
 class ApprovalOutcome:
@@ -66,6 +70,12 @@ class ControlPolicy:
     - ``spend_limit_usd``: an action that would take its scope's cumulative spend
       past this is denied — no approval overrides it. The caller supplies what the
       scope has spent (``spent_usd``), typically from a spend ledger.
+
+    A policy is also a document. :meth:`load` reads one from a YAML or JSON
+    file and :meth:`dump` writes one, so the rules can be reviewed and
+    versioned as text; :meth:`content_hash` names the exact rules an admission
+    was decided under and is recorded on every trail entry
+    (see :mod:`locus.control.policy_file`).
     """
 
     require_verification_score: float = 0.8
@@ -77,6 +87,69 @@ class ControlPolicy:
     version: str = ""
     require_human_over_usd: float | None = None
     spend_limit_usd: float | None = None
+
+    @classmethod
+    def load(cls, source: str | os.PathLike[str]) -> ControlPolicy:
+        """The policy in a YAML or JSON file, or in a document passed as text.
+
+        A path, or a string holding the document itself (one with a newline,
+        or starting with ``{``). The format follows the file suffix, else the
+        text. Unknown keys and badly typed values raise
+        :class:`~locus.control.policy_file.PolicyFileError` naming the key.
+        YAML needs the optional ``pyyaml`` package; JSON needs nothing.
+        """
+        from locus.control.policy_file import load_policy  # noqa: PLC0415 — avoids a cycle
+
+        return load_policy(source)
+
+    @classmethod
+    def loads(cls, text: str, *, format: Literal["yaml", "json"] | None = None) -> ControlPolicy:  # noqa: A002
+        """The policy in ``text``, a YAML or JSON document."""
+        from locus.control.policy_file import loads_policy  # noqa: PLC0415 — avoids a cycle
+
+        return loads_policy(text, format=format)
+
+    def dump(
+        self,
+        path: str | os.PathLike[str] | None = None,
+        *,
+        format: Literal["yaml", "json"] | None = None,  # noqa: A002
+    ) -> str:
+        """This policy as a document, written to ``path`` when one is given.
+
+        ``format`` defaults to the path's suffix, else YAML. Every rule is
+        written, defaults included, so a reviewer reads the whole policy and
+        ``ControlPolicy.load(policy.dump())`` gives back an equal policy.
+        """
+        from locus.control.policy_file import dump_policy  # noqa: PLC0415 — avoids a cycle
+
+        return dump_policy(self, path, format=format)
+
+    def content_hash(self) -> str:
+        """SHA-256 over the rules, the same for equal policies however they were built."""
+        from locus.control.policy_file import policy_hash  # noqa: PLC0415 — avoids a cycle
+
+        return policy_hash(self)
+
+
+class PolicySource(Protocol):
+    """Something that hands out the policy to decide under *right now*.
+
+    :func:`~locus.control.admission.admit` and
+    :func:`~locus.control.gate.gate_tool` take one wherever they take a
+    :class:`ControlPolicy`, and ask it once per admission, so a policy that
+    changes between decisions (:class:`~locus.control.policy_file.PolicyWatcher`
+    re-reading a file) is never half-swapped inside one.
+    """
+
+    def current(self) -> ControlPolicy:  # pragma: no cover - protocol
+        """The policy in force now."""
+        ...
+
+
+def current_policy(policy: ControlPolicy | PolicySource) -> ControlPolicy:
+    """``policy`` itself, or the one a :class:`PolicySource` holds now."""
+    return policy if isinstance(policy, ControlPolicy) else policy.current()
 
 
 @dataclass(frozen=True)
@@ -171,80 +244,13 @@ def approve(
     Returns:
         An :class:`ApprovalDecision`.
     """
-    triggered: list[tuple[str, str]] = []
-    labels = action.labels()
-
-    denied = labels & policy.deny_for
-    if denied:
-        triggered.append((ApprovalOutcome.DENY, f"labels {sorted(denied)} are denied by policy"))
-
-    unsandboxed = labels & policy.require_sandbox_for
-    if unsandboxed and SANDBOXED_TAG not in labels:
-        triggered.append(
-            (
-                ApprovalOutcome.DENY,
-                f"labels {sorted(unsandboxed)} require sandboxed execution "
-                f"(the action carries no {SANDBOXED_TAG!r} tag)",
-            )
+    triggered = [
+        (check.outcome, check.detail)
+        for check in evaluate_rules(
+            action, policy=policy, finding=finding, verdict=verdict, spent_usd=spent_usd
         )
-
-    if finding is not None and not severity_at_least(finding.severity, policy.min_severity):
-        triggered.append(
-            (
-                ApprovalOutcome.DENY,
-                f"finding severity {finding.severity.value} is below the policy "
-                f"minimum {policy.min_severity.value}",
-            )
-        )
-
-    if policy.require_verification_score > 0:
-        if verdict is None:
-            triggered.append((ApprovalOutcome.REQUIRE_HUMAN, "no verification provided"))
-        elif not verdict.survives:
-            triggered.append((ApprovalOutcome.DENY, "the finding did not survive verification"))
-        elif verdict.confidence < policy.require_verification_score:
-            triggered.append(
-                (
-                    ApprovalOutcome.REQUIRE_HUMAN,
-                    f"verification confidence {verdict.confidence:.2f} is below the bar "
-                    f"{policy.require_verification_score:.2f}",
-                )
-            )
-
-    if action.blast_radius > policy.max_blast_radius:
-        triggered.append(
-            (
-                ApprovalOutcome.REQUIRE_HUMAN,
-                f"blast radius {action.blast_radius} exceeds the maximum {policy.max_blast_radius}",
-            )
-        )
-
-    if (
-        policy.require_human_over_usd is not None
-        and action.cost_usd > policy.require_human_over_usd
-    ):
-        triggered.append(
-            (
-                ApprovalOutcome.REQUIRE_HUMAN,
-                f"cost ${action.cost_usd:,.2f} exceeds the per-action limit "
-                f"${policy.require_human_over_usd:,.2f}",
-            )
-        )
-
-    if policy.spend_limit_usd is not None and spent_usd + action.cost_usd > policy.spend_limit_usd:
-        triggered.append(
-            (
-                ApprovalOutcome.DENY,
-                f"spend ${spent_usd:,.2f} + ${action.cost_usd:,.2f} would exceed the spend "
-                f"limit ${policy.spend_limit_usd:,.2f}",
-            )
-        )
-
-    needs_human = labels & policy.require_human_for
-    if needs_human:
-        triggered.append(
-            (ApprovalOutcome.REQUIRE_HUMAN, f"labels {sorted(needs_human)} require human approval")
-        )
+        if check.outcome is not None
+    ]
 
     if not triggered:
         policy_outcome = ApprovalOutcome.ALLOW
@@ -267,6 +273,171 @@ def approve(
         checks=checks,
         policy_outcome=policy_outcome,
         model_outcome=model_outcome,
+    )
+
+
+@dataclass(frozen=True)
+class RuleCheck:
+    """One policy rule weighed against an action: whether it fired, and why.
+
+    ``rule`` is the :class:`ControlPolicy` field, ``outcome`` the result it
+    contributed (``None`` when it did not fire) and ``detail`` the sentence an
+    audit reader sees. :func:`approve` keeps the fired ones as its ``checks``;
+    :func:`~locus.control.policy_lint.explain` shows all of them.
+    """
+
+    rule: str
+    outcome: str | None
+    detail: str
+
+    @property
+    def fired(self) -> bool:
+        """Whether the rule contributed an outcome."""
+        return self.outcome is not None
+
+
+def evaluate_rules(
+    action: Action,
+    *,
+    policy: ControlPolicy,
+    finding: Evidence | None = None,
+    verdict: VerificationResult | None = None,
+    spent_usd: float = 0.0,
+) -> list[RuleCheck]:
+    """Every rule of ``policy`` weighed against ``action``, in the order they apply.
+
+    The one evaluation :func:`approve` and ``locus policy explain`` share: the
+    checks that fired, with the same wording, plus the rules that did not and
+    why, so a decision path can be shown without a second reading of the rules.
+    """
+    labels = action.labels()
+    checks: list[RuleCheck] = []
+
+    def add(rule: str, outcome: str | None, detail: str) -> None:
+        checks.append(RuleCheck(rule=rule, outcome=outcome, detail=detail))
+
+    denied = labels & policy.deny_for
+    if denied:
+        add("deny_for", ApprovalOutcome.DENY, f"labels {sorted(denied)} are denied by policy")
+    else:
+        add("deny_for", None, "no label of the action is denied")
+
+    unsandboxed = labels & policy.require_sandbox_for
+    if unsandboxed and SANDBOXED_TAG not in labels:
+        add(
+            "require_sandbox_for",
+            ApprovalOutcome.DENY,
+            f"labels {sorted(unsandboxed)} require sandboxed execution "
+            f"(the action carries no {SANDBOXED_TAG!r} tag)",
+        )
+    elif unsandboxed:
+        add(
+            "require_sandbox_for",
+            None,
+            f"labels {sorted(unsandboxed)} require sandboxed execution and the action is sandboxed",
+        )
+    else:
+        add("require_sandbox_for", None, "no label of the action requires a sandbox")
+
+    if finding is None:
+        add("min_severity", None, "no finding supplied")
+    elif not severity_at_least(finding.severity, policy.min_severity):
+        add(
+            "min_severity",
+            ApprovalOutcome.DENY,
+            f"finding severity {finding.severity.value} is below the policy "
+            f"minimum {policy.min_severity.value}",
+        )
+    else:
+        add(
+            "min_severity",
+            None,
+            f"finding severity {finding.severity.value} meets the minimum "
+            f"{policy.min_severity.value}",
+        )
+
+    checks.append(_verification_check(policy, verdict))
+
+    if action.blast_radius > policy.max_blast_radius:
+        add(
+            "max_blast_radius",
+            ApprovalOutcome.REQUIRE_HUMAN,
+            f"blast radius {action.blast_radius} exceeds the maximum {policy.max_blast_radius}",
+        )
+    else:
+        add(
+            "max_blast_radius",
+            None,
+            f"blast radius {action.blast_radius} is within the maximum {policy.max_blast_radius}",
+        )
+
+    if policy.require_human_over_usd is None:
+        add("require_human_over_usd", None, "not set")
+    elif action.cost_usd > policy.require_human_over_usd:
+        add(
+            "require_human_over_usd",
+            ApprovalOutcome.REQUIRE_HUMAN,
+            f"cost ${action.cost_usd:,.2f} exceeds the per-action limit "
+            f"${policy.require_human_over_usd:,.2f}",
+        )
+    else:
+        add(
+            "require_human_over_usd",
+            None,
+            f"cost ${action.cost_usd:,.2f} is within the per-action limit "
+            f"${policy.require_human_over_usd:,.2f}",
+        )
+
+    if policy.spend_limit_usd is None:
+        add("spend_limit_usd", None, "not set")
+    elif spent_usd + action.cost_usd > policy.spend_limit_usd:
+        add(
+            "spend_limit_usd",
+            ApprovalOutcome.DENY,
+            f"spend ${spent_usd:,.2f} + ${action.cost_usd:,.2f} would exceed the spend "
+            f"limit ${policy.spend_limit_usd:,.2f}",
+        )
+    else:
+        add(
+            "spend_limit_usd",
+            None,
+            f"spend ${spent_usd:,.2f} + ${action.cost_usd:,.2f} stays within the spend "
+            f"limit ${policy.spend_limit_usd:,.2f}",
+        )
+
+    needs_human = labels & policy.require_human_for
+    if needs_human:
+        add(
+            "require_human_for",
+            ApprovalOutcome.REQUIRE_HUMAN,
+            f"labels {sorted(needs_human)} require human approval",
+        )
+    else:
+        add("require_human_for", None, "no label of the action requires human approval")
+
+    return checks
+
+
+def _verification_check(policy: ControlPolicy, verdict: VerificationResult | None) -> RuleCheck:
+    rule = "require_verification_score"
+    if policy.require_verification_score <= 0:
+        return RuleCheck(rule, None, "the bar is 0: no verification required")
+    if verdict is None:
+        return RuleCheck(rule, ApprovalOutcome.REQUIRE_HUMAN, "no verification provided")
+    if not verdict.survives:
+        return RuleCheck(rule, ApprovalOutcome.DENY, "the finding did not survive verification")
+    if verdict.confidence < policy.require_verification_score:
+        return RuleCheck(
+            rule,
+            ApprovalOutcome.REQUIRE_HUMAN,
+            f"verification confidence {verdict.confidence:.2f} is below the bar "
+            f"{policy.require_verification_score:.2f}",
+        )
+    return RuleCheck(
+        rule,
+        None,
+        f"verification confidence {verdict.confidence:.2f} meets the bar "
+        f"{policy.require_verification_score:.2f}",
     )
 
 
@@ -334,5 +505,9 @@ __all__ = [
     "ApprovalOutcome",
     "ControlAdvisor",
     "ControlPolicy",
+    "PolicySource",
+    "RuleCheck",
     "approve",
+    "current_policy",
+    "evaluate_rules",
 ]
