@@ -52,12 +52,14 @@ from locus.core.messages import Message, Role
 from locus.memory.compactor import _char_count_tokens, _repair_boundaries
 from locus.memory.conversation import ConversationManager
 from locus.memory.observation_pack import OBSERVATION_ID_KEY
+from locus.memory.offload import offload_handle
 
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "CLEARED_OUTPUT_KEY",
+    "PINNED_KEY",
     "SUMMARY_MESSAGE_KEY",
     "CompactionOutcome",
     "CompactionStage",
@@ -65,7 +67,10 @@ __all__ = [
     "ContextCompactor",
     "RECALLABLE_OUTPUTS_KEY",
     "OutputArchive",
+    "TierOutcome",
+    "is_pinned",
     "is_summary_message",
+    "pin",
 ]
 
 #: Which compaction stage changed the context.
@@ -75,7 +80,11 @@ __all__ = [
 #: model, or the summary call failed twice).
 #: ``native``: the model's own compaction endpoint folded the older history
 #: into an item the model replays itself (``native_compaction=True``).
-CompactionStage = Literal["prune", "summarize", "truncate", "native"]
+#: ``window``: the oldest turns were dropped to a turn window
+#: (:class:`~locus.memory.tiers.SlidingWindow`).
+#: ``relevance``: turns unrelated to the current task were dropped
+#: (:class:`~locus.memory.tiers.Relevance`).
+CompactionStage = Literal["prune", "summarize", "truncate", "native", "window", "relevance"]
 
 #: ``Message.metadata`` key on the summary message, so the next compaction
 #: builds on it rather than summarising a summary as if it were conversation.
@@ -84,6 +93,10 @@ SUMMARY_MESSAGE_KEY = "locus_compaction_summary"
 #: ``Message.metadata`` key on a tool result whose output was cleared, so it is
 #: not cleared (and counted) twice.
 CLEARED_OUTPUT_KEY = "locus_compaction_cleared"
+
+#: ``Message.metadata`` key on a message compaction must keep verbatim through
+#: every stage and tier. Set it with :func:`pin`, or write ``{"pin": True}``.
+PINNED_KEY = "locus_pinned"
 
 # Keys that mark messages compaction must never fold into a summary: the
 # memory manager's injected block and turn-only verifier messages. Spelled out
@@ -173,10 +186,28 @@ def is_summary_message(message: Message) -> bool:
     return bool(message.metadata.get(SUMMARY_MESSAGE_KEY))
 
 
+def pin(message: Message) -> Message:
+    """A copy of ``message`` that every compaction stage and tier keeps verbatim.
+
+    For the facts a run must never lose: the acceptance criteria, a credential
+    handle, the decision the user took. Pinned messages are never cleared,
+    windowed out, summarised away or dropped for relevance.
+    """
+    return message.model_copy(update={"metadata": {**message.metadata, PINNED_KEY: True}})
+
+
+def is_pinned(message: Message) -> bool:
+    """Whether ``message`` carries a pin (:func:`pin` or ``metadata["pin"]``)."""
+    metadata = message.metadata
+    return bool(metadata.get(PINNED_KEY)) or metadata.get("pin") is True
+
+
 def _is_pinned(message: Message) -> bool:
     """Messages that are never folded into a summary."""
     metadata = message.metadata
-    return bool(metadata.get(_MEMORY_BLOCK_KEY) or metadata.get(_EPHEMERAL_KEY))
+    return bool(
+        metadata.get(_MEMORY_BLOCK_KEY) or metadata.get(_EPHEMERAL_KEY) or is_pinned(message)
+    )
 
 
 def _is_automated(message: Message) -> bool:
@@ -227,6 +258,23 @@ class CompactionTracker:
 
 
 @dataclass(frozen=True)
+class TierOutcome:
+    """What one tier of a :class:`~locus.memory.tiers.TieredCompaction` did."""
+
+    #: The tier's name (``clear_tool_results``, ``sliding_window``, ...).
+    tier: str
+    stage: CompactionStage
+    tokens_before: int
+    tokens_after: int
+    messages_before: int
+    messages_after: int
+    #: The summary text, when the tier wrote one.
+    summary: str | None = None
+    #: Why the tier left the context over the line, when it did.
+    detail: str | None = None
+
+
+@dataclass(frozen=True)
 class CompactionOutcome:
     """What one compaction did."""
 
@@ -245,6 +293,9 @@ class CompactionOutcome:
     detail: str | None = None
     #: Token usage of the summary calls, to count against the run's budgets.
     usage: dict[str, int] = field(default_factory=dict)
+    #: One entry per tier that changed the context, in the order they ran
+    #: (:class:`~locus.memory.tiers.TieredCompaction`); empty otherwise.
+    tiers: tuple[TierOutcome, ...] = ()
 
 
 class ContextCompactor(ConversationManager):
@@ -354,6 +405,14 @@ class ContextCompactor(ConversationManager):
         """Estimated tokens of ``messages``."""
         return sum(self._count(m) for m in messages)
 
+    def is_pinned(self, message: Message) -> bool:
+        """Whether compaction keeps ``message`` verbatim whatever the stage.
+
+        The memory manager's block, turn-only verifier messages and anything
+        pinned with :func:`pin`. Subclasses widen it (a ``pins=`` predicate).
+        """
+        return _is_pinned(message)
+
     @staticmethod
     def tool_tokens(schemas: Sequence[Mapping[str, Any]] | None) -> int:
         """Estimated tokens the tool definitions add to every request.
@@ -452,7 +511,7 @@ class ContextCompactor(ConversationManager):
         # though: clearing one output per turn would change an old message on
         # every request, which defeats the provider's prompt cache each time,
         # and only postpones the summary by a turn.
-        cleared = self._clear_tool_outputs(original, archive)
+        cleared = self.clear_tool_outputs(original, archive)
         after_clearing = int((self.tokens(cleared) + tool_tokens) * scale)
         if after_clearing < threshold - self.usable_tokens // 10:
             tracker.forget_report()
@@ -492,7 +551,7 @@ class ContextCompactor(ConversationManager):
                 model, cleared, tool_tokens, before, scale, instructions
             )
         if outcome is None:
-            outcome = await self._summarise_history(
+            outcome = await self.summarise_history(
                 original, cleared, tool_tokens, before, scale, instructions, archive
             )
         tracker.forget_report()
@@ -555,10 +614,20 @@ class ContextCompactor(ConversationManager):
             usage=dict(usage or {}),
         )
 
-    def _clear_tool_outputs(
-        self, messages: list[Message], archive: OutputArchive | None = None
+    def clear_tool_outputs(
+        self,
+        messages: list[Message],
+        archive: OutputArchive | None = None,
+        *,
+        keep_tokens: int | None = None,
     ) -> list[Message]:
-        """Replace tool outputs older than the newest ``tool_output_keep_tokens``."""
+        """Replace tool outputs older than the newest ``keep_tokens`` of output.
+
+        Stage 1 of :meth:`compact`, also run by the
+        :class:`~locus.memory.tiers.ClearToolResults` tier. ``keep_tokens``
+        defaults to ``tool_output_keep_tokens``.
+        """
+        budget = self.tool_output_keep_tokens if keep_tokens is None else keep_tokens
         calls = {tc.id: tc for m in messages if m.role == Role.ASSISTANT for tc in m.tool_calls}
         out = list(messages)
         kept = 0
@@ -568,12 +637,14 @@ class ContextCompactor(ConversationManager):
             message = out[index]
             if message.role != Role.TOOL or message.metadata.get(CLEARED_OUTPUT_KEY):
                 continue
+            if self.is_pinned(message):
+                continue
             size = self._count(message)
             if size <= _MIN_CLEARABLE_TOKENS:
                 continue
             # The newest output is always kept whole: the model is about to act
             # on it, and a stub there would make it call the tool again forever.
-            if newest or (not full and kept + size <= self.tool_output_keep_tokens):
+            if newest or (not full and kept + size <= budget):
                 kept += size
                 newest = False
                 continue
@@ -591,7 +662,7 @@ class ContextCompactor(ConversationManager):
             )
         return out
 
-    async def _summarise_history(
+    async def summarise_history(
         self,
         original: list[Message],
         cleared: list[Message],
@@ -600,8 +671,19 @@ class ContextCompactor(ConversationManager):
         scale: float,
         instructions: str | None,
         archive: OutputArchive | None = None,
+        *,
+        threshold: int | None = None,
     ) -> CompactionOutcome:
-        threshold = self.threshold
+        """Stage 2: summarise the history beyond the head and the verbatim tail.
+
+        Also run by the :class:`~locus.memory.tiers.Summarize` tier.
+        ``original`` is the conversation before clearing, index-aligned with
+        ``cleared``: the summariser reads the original text of a cleared
+        output. ``threshold`` is the line to get under; the compactor's own
+        by default (a tier passes its trigger).
+        """
+        if threshold is None:
+            threshold = self.threshold
         # Budgets below are in estimated tokens; the threshold, scaled down to
         # match them.
         limit = int(threshold / scale)
@@ -642,7 +724,7 @@ class ContextCompactor(ConversationManager):
             tail_size += size
         tail_indices = {i for turn in tail for i in turn}
         older = [i for i in body if i not in tail_indices]
-        pinned = [i for i in older if _is_pinned(cleared[i]) or i == latest_user]
+        pinned = [i for i in older if self.is_pinned(cleared[i]) or i == latest_user]
         folded = [i for i in older if i not in pinned]
 
         if not folded:
@@ -891,14 +973,25 @@ def _call_label(call: Any, name: str | None) -> str:
 
 def _stub(message: Message, call: Any) -> Message:
     size = len(message.content or "")
+    # An offloaded result is never lost to clearing: the stub keeps its handle,
+    # so fetch_tool_result still reaches the stored text.
+    handle = offload_handle(message)
+    if handle is not None:
+        content = (
+            f"[output cleared to free context: {_call_label(call, message.name)}; "
+            f"the full result is stored under handle={handle} — call "
+            f'fetch_tool_result(handle="{handle}") to read it again.]'
+        )
+    else:
+        content = (
+            f"[output cleared to free context: {_call_label(call, message.name)} "
+            f"returned {size} characters. Call the tool again if you need it.]"
+        )
     return Message(
         role=Role.TOOL,
         tool_call_id=message.tool_call_id,
         name=message.name,
-        content=(
-            f"[output cleared to free context: {_call_label(call, message.name)} "
-            f"returned {size} characters. Call the tool again if you need it.]"
-        ),
+        content=content,
         metadata={CLEARED_OUTPUT_KEY: True},
     )
 

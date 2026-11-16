@@ -17,6 +17,17 @@ resources), per-request identity (:class:`MCPRequestContext`,
 (``MCPClient.allowed_tools`` / ``tool_filter``), progress notifications
 (surfaced as :class:`~locus.core.events.ToolProgressEvent`) and
 :class:`MCPConnectionError` for a server that is down or drops mid-call.
+
+Remote servers that require sign-in take an :class:`~locus.integrations.mcp_auth.MCPOAuth`
+(OAuth 2.1 authorization code with PKCE, discovery, refresh, pluggable token
+storage). The imported toolset is shaped with ``include`` / ``exclude`` (names
+or globs) and ``prefix``, so two servers mount side by side without name
+clashes. A server that asks the person a question mid-call (MCP elicitation)
+pauses the agent run through its interrupt mechanism — see
+:class:`MCPElicitation` and :meth:`MCPClient.answer_elicitation` — or goes to
+``elicitation_handler`` outside a run. Every ``tools/call`` carries W3C trace
+context in ``_meta`` and every served call reads it, so an MCP hop stays inside
+the agent's trace (:mod:`locus.integrations.mcp_tracing`).
 """
 
 from __future__ import annotations
@@ -24,6 +35,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import fnmatch
+import functools
 import inspect
 import json
 import logging
@@ -40,6 +53,8 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, create_model
 
 from locus.core.media import encode_image
+from locus.integrations.mcp_auth import MCPOAuth
+from locus.integrations.mcp_tracing import incoming_trace_scope, outgoing_trace_scope, trace_meta
 from locus.tools.context import current_tool_context, progress_reporter
 from locus.tools.decorator import Tool, tool
 from locus.tools.output import ToolOutput
@@ -236,7 +251,7 @@ def locus_tool_to_mcp(locus_tool: Tool) -> dict[str, Any]:
 _SAFE_IDENTIFIER_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 
-def _create_tool_wrapper(tool_obj: Tool) -> Callable:
+def _create_tool_wrapper(tool_obj: Tool) -> Callable[..., Awaitable[str]]:
     """Create a wrapper function for a Locus tool that fastMCP can use.
 
     FastMCP introspects the wrapper's signature to build its JSON Schema,
@@ -277,7 +292,10 @@ def _create_tool_wrapper(tool_obj: Tool) -> Callable:
     async def _invoke(**kwargs: Any) -> str:
         # Drop None placeholders that we used to model optional params.
         real_kwargs = {k: v for k, v in kwargs.items() if v is not None}
-        result = await tool_obj.execute(**real_kwargs)
+        # The caller's trace context rides in the request's ``_meta``; run
+        # the tool under it so its spans file under the caller's.
+        with incoming_trace_scope():
+            result = await tool_obj.execute(**real_kwargs)
         if isinstance(result, str):
             return result
         return json.dumps(result)
@@ -361,6 +379,13 @@ class LocusMCPServer(BaseModel):
 
     model_config = {"arbitrary_types_allowed": True}
 
+    def build(self) -> FastMCP:
+        """The FastMCP server, built once: the agent's tools plus ``run_agent``
+        and ``run_agent_stream``. ``locus mcp serve`` runs what this returns."""
+        if self._mcp is None:
+            self._mcp = self._create_mcp()
+        return self._mcp
+
     def _create_mcp(self) -> FastMCP:
         """Create FastMCP server instance."""
         from fastmcp import FastMCP
@@ -370,9 +395,7 @@ class LocusMCPServer(BaseModel):
         # Register agent's tools as MCP tools
         if hasattr(self.agent, "_tool_registry"):
             self.agent._initialize()
-            for tool_obj in self.agent._tool_registry.tools.values():
-                wrapper = _create_tool_wrapper(tool_obj)
-                mcp.tool()(wrapper)
+            _register_locus_tools(mcp, self.agent._tool_registry.tools.values())
 
         # Register the main "run" tool that invokes the agent
         agent = self.agent
@@ -380,21 +403,16 @@ class LocusMCPServer(BaseModel):
         @mcp.tool()
         async def run_agent(prompt: str) -> str:
             """Run the Locus agent with a prompt and return the response."""
-            result = agent.run_sync(prompt)
+            with incoming_trace_scope():
+                result = agent.run_sync(prompt)
             return str(result.message)
 
         # Register a streaming version
         @mcp.tool()
         async def run_agent_stream(prompt: str) -> str:
             """Run the agent with streaming, returning final result."""
-            events = []
-            async for event in agent.run(prompt):
-                events.append(event)
-            # Return the final message from the last event
-            for event in reversed(events):
-                if hasattr(event, "final_message") and event.final_message:
-                    return str(event.final_message)
-            return "Agent completed without response"
+            with incoming_trace_scope():
+                return await _run_agent_answering_questions(agent, prompt)
 
         return mcp
 
@@ -447,6 +465,84 @@ class LocusMCPServer(BaseModel):
             return {"error": {"code": -32602, "message": f"Unknown tool: {tool_name}"}}
 
         return {"error": {"code": -32601, "message": f"Unknown method: {method}"}}
+
+
+def _register_locus_tools(mcp: Any, tools: Any) -> None:
+    """Register Locus tools on a FastMCP server, each behind a typed wrapper."""
+    for tool_obj in tools:
+        mcp.tool()(_create_tool_wrapper(tool_obj))
+
+
+def create_tool_server(
+    tools: list[Tool] | tuple[Tool, ...],
+    *,
+    name: str = "locus-tools",
+    version: str = "1.0.0",
+) -> FastMCP:
+    """A FastMCP server that publishes ``tools`` as they are — no agent.
+
+    What ``locus mcp serve <module>`` builds for a module of ``@tool``
+    functions. Call ``.run(transport=...)`` on the result.
+    """
+    from fastmcp import FastMCP
+
+    try:
+        mcp = FastMCP(name, version=version)
+    except TypeError:  # an older fastmcp without ``version``
+        mcp = FastMCP(name)
+    _register_locus_tools(mcp, tools)
+    return mcp
+
+
+async def _ask_through_mcp(question: str, options: list[str] | None) -> str | None:
+    """Put an agent's question to the MCP client as an elicitation.
+
+    ``None`` when the client declined, cancelled, cannot be asked (no request
+    context, a client without elicitation, a protocol era without a
+    back-channel) — the caller then stops with the question.
+    """
+    try:
+        from fastmcp.server.context import _current_context
+    except ImportError:
+        return None
+    ctx = _current_context.get()
+    if ctx is None:
+        return None
+    try:
+        outcome = await ctx.elicit(question, response_type=options or str)
+    except Exception:  # noqa: BLE001 — any failure to ask means the run stops on the question
+        logger.info("MCP client could not be asked %r; stopping on the question", question)
+        return None
+    if getattr(outcome, "action", None) != "accept":
+        return None
+    data = getattr(outcome, "data", None)
+    return data if isinstance(data, str) else json.dumps(data, default=str)
+
+
+async def _run_agent_answering_questions(agent: Any, prompt: str) -> str:
+    """Run ``agent`` to its answer, relaying each question it pauses on to the
+    MCP client as an elicitation and resuming with the reply."""
+    from locus.core.events import InterruptEvent
+
+    events: Any = agent.run(prompt)
+    for _ in range(64):  # a bound on questions, not a limit anyone should hit
+        seen: list[Any] = []
+        question: InterruptEvent | None = None
+        async for event in events:
+            seen.append(event)
+            if isinstance(event, InterruptEvent):
+                question = event
+                break
+        if question is None:
+            for event in reversed(seen):
+                if hasattr(event, "final_message") and event.final_message:
+                    return str(event.final_message)
+            return "Agent completed without response"
+        answer = await _ask_through_mcp(question.question, question.options)
+        if answer is None:
+            return f"The agent is waiting on a question nobody answered: {question.question}"
+        events = agent.resume(answer)
+    return "Agent asked too many questions"
 
 
 def create_mcp_server(
@@ -522,6 +618,165 @@ SessionKey = Callable[[MCPRequestContext, Mapping[str, str]], Hashable | None]
 
 
 @dataclass(frozen=True)
+class MCPElicitation:
+    """A question an MCP server asked mid-call (an elicitation request).
+
+    Attributes:
+        message: What the server wants to know, for a person to read.
+        schema: The JSON Schema the answer must match (``mode="form"``): an
+            object of primitive properties. ``None`` in URL mode.
+        mode: ``"form"`` — answer with data — or ``"url"`` — the person must
+            visit ``url`` and the server learns the outcome out of band.
+        url: Where to send the person in URL mode.
+        server: The :attr:`MCPClient.label` of the server asking.
+        tool_name: The tool whose call asked, when known.
+        tool_call_id: The model's tool-call id that the call serves, when the
+            question arrived inside an agent run. It is the
+            ``InterruptEvent.interrupt_id`` the run pauses with.
+    """
+
+    message: str
+    schema: dict[str, Any] | None = None
+    mode: str = "form"
+    url: str | None = None
+    server: str | None = None
+    tool_name: str | None = None
+    tool_call_id: str | None = None
+
+    @property
+    def fields(self) -> list[dict[str, Any]]:
+        """The answer's fields, in the shape ``InterruptEvent.fields`` uses."""
+        properties = (self.schema or {}).get("properties")
+        if not isinstance(properties, dict):
+            return []
+        required = set((self.schema or {}).get("required") or [])
+        fields: list[dict[str, Any]] = []
+        for name, raw in properties.items():
+            prop = raw if isinstance(raw, dict) else {}
+            field_spec: dict[str, Any] = {
+                "name": name,
+                "label": prop.get("title") or name,
+                "type": prop.get("type", "string"),
+                "required": name in required,
+            }
+            if prop.get("description"):
+                field_spec["description"] = prop["description"]
+            if "enum" in prop:
+                field_spec["options"] = list(prop["enum"])
+            fields.append(field_spec)
+        return fields
+
+    @property
+    def options(self) -> list[str] | None:
+        """The choices, when the answer is one enumerated field."""
+        fields = self.fields
+        if len(fields) == 1 and fields[0].get("options"):
+            return [str(o) for o in fields[0]["options"]]
+        return None
+
+
+@dataclass(frozen=True)
+class ElicitationAnswer:
+    """What to tell a server that asked a question.
+
+    ``action`` is ``"accept"`` with ``content`` matching the requested schema,
+    ``"decline"`` (the person said no) or ``"cancel"`` (nobody answered).
+    """
+
+    action: Literal["accept", "decline", "cancel"] = "accept"
+    content: dict[str, Any] | None = None
+
+    @classmethod
+    def accept(cls, content: Mapping[str, Any] | None = None) -> ElicitationAnswer:
+        return cls("accept", dict(content) if content is not None else None)
+
+    @classmethod
+    def decline(cls) -> ElicitationAnswer:
+        return cls("decline")
+
+    @classmethod
+    def cancel(cls) -> ElicitationAnswer:
+        return cls("cancel")
+
+    @classmethod
+    def from_value(cls, value: Any, schema: Mapping[str, Any] | None) -> ElicitationAnswer:
+        """An answer from what a handler or a person gave back.
+
+        An :class:`ElicitationAnswer` passes through; a mapping is accepted as
+        the content; ``None`` declines; a string is parsed as JSON when it is
+        an object, otherwise — like a bool or a number — it fills the schema's
+        single property, coerced to that property's type. Anything else is
+        declined.
+        """
+        if isinstance(value, ElicitationAnswer):
+            return value
+        if value is None:
+            return cls.decline()
+        if isinstance(value, Mapping):
+            return cls.accept(value)
+        properties = (schema or {}).get("properties")
+        properties = properties if isinstance(properties, dict) else {}
+        if isinstance(value, str):
+            text = value.strip()
+            if text.startswith("{"):
+                try:
+                    parsed = json.loads(text)
+                except ValueError:
+                    parsed = None
+                if isinstance(parsed, dict):
+                    return cls.accept(parsed)
+            if not properties:
+                return cls.accept({"value": value})
+        if len(properties) == 1:
+            [(name, prop)] = properties.items()
+            return cls.accept({name: _coerce_primitive(value, prop)})
+        return cls.decline()
+
+
+def _coerce_primitive(value: Any, prop: Any) -> Any:
+    """``value`` as the JSON type ``prop`` declares, when it reads as one."""
+    kind = prop.get("type") if isinstance(prop, dict) else None
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if kind == "boolean":
+        lowered = text.lower()
+        if lowered in {"true", "yes", "y", "approve", "approved", "ok", "1"}:
+            return True
+        if lowered in {"false", "no", "n", "deny", "denied", "reject", "0"}:
+            return False
+        return value
+    if kind == "integer":
+        try:
+            return int(text)
+        except ValueError:
+            return value
+    if kind == "number":
+        try:
+            return float(text)
+        except ValueError:
+            return value
+    return value
+
+
+#: ``(MCPElicitation) -> answer`` — sync or async. Return a mapping to accept
+#: with it, ``None`` to decline, a string / bool / number for a one-field
+#: schema, or an :class:`ElicitationAnswer` to say exactly what to send.
+ElicitationHandler = Callable[[MCPElicitation], Any]
+
+
+@dataclass
+class _ElicitationRoute:
+    """One ``tools/call`` in flight, so a question the server asks during it
+    can be attributed to the call — and to the agent run it serves."""
+
+    tool_name: str
+    tool_call_id: str | None
+    in_run: bool
+    pending: MCPElicitation | None = None
+
+
+@dataclass(frozen=True)
 class MCPToolResult:
     """Everything an MCP ``tools/call`` returned, not just its text.
 
@@ -536,6 +791,9 @@ class MCPToolResult:
         structured_content: The server's ``structuredContent``, if any.
         content: Every content block as a JSON-mode dict in MCP's shape.
         meta: The result's ``_meta``, if any.
+        elicitation: Set when the server asked a question inside an agent run
+            that nobody could answer yet: ``text`` is then the interrupt
+            marker that pauses the run, not a result from the server.
     """
 
     text: str
@@ -543,6 +801,7 @@ class MCPToolResult:
     structured_content: dict[str, Any] | None = None
     content: list[dict[str, Any]] = field(default_factory=list)
     meta: dict[str, Any] | None = None
+    elicitation: MCPElicitation | None = None
 
     def to_tool_output(self) -> ToolOutput:
         """This result as a :class:`~locus.tools.output.ToolOutput`.
@@ -922,6 +1181,51 @@ class _TypedConnectErrors:
             raise MCPConnectionError(msg) from exc
 
 
+def _matches_any(name: str, patterns: list[str]) -> bool:
+    """Whether ``name`` equals, or glob-matches, any of ``patterns``."""
+    return any(name == pattern or fnmatch.fnmatchcase(name, pattern) for pattern in patterns)
+
+
+def _http_module_for(auth: Any) -> Any:
+    """The httpx module to build the transport's client from.
+
+    mcp 2.x is written against the ``httpx2`` fork and its OAuth provider
+    yields ``httpx2`` requests; a provider that is not an ``httpx.Auth`` is one
+    of those, so the client must come from the same module. Everything else
+    uses ``httpx`` as before.
+    """
+    import httpx
+
+    if auth is None or isinstance(auth, httpx.Auth):
+        return httpx
+    try:
+        import httpx2
+    except ImportError:
+        return httpx
+    return httpx2 if isinstance(auth, httpx2.Auth) else httpx
+
+
+def _interrupt_marker(question: MCPElicitation) -> str:
+    """The ``__interrupt__`` marker the agent loop pauses on, for ``question``."""
+    return json.dumps(
+        {
+            "__interrupt__": True,
+            "question": question.message,
+            "options": question.options,
+            "fields": question.fields or None,
+            "metadata": {
+                "mcp_elicitation": {
+                    "server": question.server,
+                    "tool": question.tool_name,
+                    "mode": question.mode,
+                    "url": question.url,
+                    "schema": question.schema,
+                }
+            },
+        }
+    )
+
+
 class MCPClient(BaseModel):
     """
     Client for connecting to external MCP servers.
@@ -969,6 +1273,25 @@ class MCPClient(BaseModel):
     dies takes down only its session: the call in flight fails with
     :class:`MCPConnectionError` (a tool error to the agent, never a
     cancellation of the run) and the next call reconnects.
+
+    **Sign-in.** A remote server that answers ``401`` is signed in to with
+    :attr:`oauth` (:class:`~locus.integrations.mcp_auth.MCPOAuth`): OAuth 2.1
+    authorization code with PKCE, metadata discovery, refresh, and a pluggable
+    token store. A static :attr:`access_token` or an ``Authorization`` header
+    from :attr:`headers` / the run's metadata wins over it.
+
+    **Shaping.** :attr:`include` and :attr:`exclude` take server tool names or
+    globs; :attr:`prefix` renames what is left as the agent sees it. Order:
+    ``allowed_tools`` and ``include`` narrow, ``exclude`` removes (it wins over
+    ``include``), ``tool_filter`` runs last on what survived, and ``prefix`` is
+    applied after the matching, which always sees the server's names.
+
+    **Questions.** A server that asks the person something mid-call pauses the
+    agent run (an ``InterruptEvent`` whose ``fields`` describe the answer) and
+    the call is re-issued with the answer on
+    ``agent.resume(answer, perform_dangling=True)`` after
+    :meth:`answer_elicitation`; outside a run :attr:`elicitation_handler`
+    answers, and without one the question is declined.
     """
 
     # Stdio transport
@@ -1097,6 +1420,46 @@ class MCPClient(BaseModel):
             "so multimodal adapters show the model the image."
         ),
     )
+    oauth: MCPOAuth | None = Field(
+        default=None,
+        description=(
+            "Sign in to the server with OAuth 2.1 (authorization code + PKCE) "
+            "when it asks; tokens are kept in oauth.store. HTTP transport only."
+        ),
+    )
+    include: list[str] | None = Field(
+        default=None,
+        description=(
+            "Server tool names or globs ('search_*') to import; None imports all. "
+            "Matched against the server's names, before prefix."
+        ),
+    )
+    exclude: list[str] | None = Field(
+        default=None,
+        description="Server tool names or globs to leave out; wins over include.",
+    )
+    prefix: str | None = Field(
+        default=None,
+        description=(
+            "Prepended verbatim to each imported tool's name ('billing_' turns "
+            "lookup into billing_lookup), so two servers mount without clashes."
+        ),
+    )
+    elicitation_handler: ElicitationHandler | None = Field(
+        default=None,
+        description=(
+            "Answers a question the server asks mid-call (MCPElicitation -> "
+            "answer; sync or async). Without one, a question inside an agent run "
+            "pauses the run and one outside a run is declined."
+        ),
+    )
+    propagate_trace: bool = Field(
+        default=True,
+        description=(
+            "Carry W3C trace context (traceparent / tracestate) in each call's "
+            "_meta so the server's spans file under the agent's tool span."
+        ),
+    )
 
     _session: Any = None
     _client_context: Any = None
@@ -1112,6 +1475,9 @@ class MCPClient(BaseModel):
     _opened_sessions: int = PrivateAttr(default=0)
     _closed_sessions: int = PrivateAttr(default=0)
     _schemas: dict[str, dict[str, Any]] = PrivateAttr(default_factory=dict)
+    _oauth_provider: Any = PrivateAttr(default=None)
+    _inflight: list[_ElicitationRoute] = PrivateAttr(default_factory=list)
+    _elicitation_answers: dict[str, Any] = PrivateAttr(default_factory=dict)
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -1188,8 +1554,9 @@ class MCPClient(BaseModel):
 
         # Set up auth if token provided. A per-request Authorization header
         # (headers / headers_provider / run metadata) wins over the static
-        # token — BearerAuth would otherwise overwrite it on the wire.
-        auth = None
+        # token — BearerAuth would otherwise overwrite it on the wire — and
+        # a static token wins over OAuth.
+        auth: Any = None
         if self.access_token and not has_authorization:
             import httpx
 
@@ -1204,15 +1571,20 @@ class MCPClient(BaseModel):
                     yield request
 
             auth = BearerAuth(self.access_token)
+        elif self.oauth is not None and not has_authorization:
+            auth = self._oauth_auth()
 
         # Propagate verify_ssl to the underlying httpx client so the config
         # field is actually enforced. Without this, a caller who disables
         # or enables TLS verification sees no effect — the default was used.
-        import httpx
+        # The OAuth provider is typed against whichever httpx the installed
+        # mcp uses (the ``httpx2`` fork on mcp 2.x); build the client from
+        # the same module so the requests it yields are the kind it expects.
+        httpx = _http_module_for(auth)
 
         verify_ssl = self.verify_ssl
 
-        async def _current_headers(request: httpx.Request) -> None:
+        async def _current_headers(request: Any) -> None:
             # The session's CURRENT per-identity headers win over whatever
             # the transport stamped at open time: a rotated token is sent as
             # soon as it is known, never the one the session opened with.
@@ -1227,9 +1599,9 @@ class MCPClient(BaseModel):
 
         def _httpx_factory(
             headers: dict[str, str] | None = None,
-            timeout: httpx.Timeout | None = None,
-            auth: httpx.Auth | None = None,
-        ) -> httpx.AsyncClient:
+            timeout: Any | None = None,
+            auth: Any | None = None,
+        ) -> Any:
             return httpx.AsyncClient(
                 headers={**request_headers, **(headers or {})},
                 timeout=timeout if timeout is not None else httpx.Timeout(30.0),
@@ -1264,10 +1636,27 @@ class MCPClient(BaseModel):
                 http_client=_httpx_factory(auth=auth),
             )
 
-        await handle.start(client_context, ClientSession, self.connect_timeout)
+        await handle.start(
+            client_context, self._session_factory(ClientSession), self.connect_timeout
+        )
         if install:
             self._install(handle)
         return handle
+
+    def _oauth_auth(self) -> Any:
+        """The OAuth provider for this server, built once so its tokens and
+        discovered metadata outlive reconnects and per-identity sessions."""
+        if self._oauth_provider is None:
+            assert self.oauth is not None
+            assert self.base_url is not None
+            self._oauth_provider = self.oauth.provider(self.base_url)
+        return self._oauth_provider
+
+    def _session_factory(self, session_cls: Any) -> Callable[[Any, Any], Any]:
+        """``ClientSession`` bound to this client's elicitation callback."""
+        if _accepts_kwarg(session_cls.__init__, "elicitation_callback"):
+            return functools.partial(session_cls, elicitation_callback=self._on_elicitation)
+        return session_cls  # type: ignore[no-any-return]
 
     async def _connect_stdio(self) -> _SessionHandle:
         """Connect via stdio transport."""
@@ -1302,7 +1691,9 @@ class MCPClient(BaseModel):
         )
 
         handle = _SessionHandle(self.label)
-        await handle.start(stdio_client(server_params), ClientSession, self.connect_timeout)
+        await handle.start(
+            stdio_client(server_params), self._session_factory(ClientSession), self.connect_timeout
+        )
         self._install(handle)
         return handle
 
@@ -1585,13 +1976,38 @@ class MCPClient(BaseModel):
     # ------------------------------------------------------------------
 
     def _is_allowed(self, schema: Mapping[str, Any]) -> bool:
-        name = schema.get("name")
+        """Whether a server tool is imported — on the server's name.
+
+        ``allowed_tools`` and ``include`` narrow (both must match when given),
+        ``exclude`` removes, ``tool_filter`` decides last.
+        """
+        name = str(schema.get("name", ""))
         if self.allowed_tools is not None and name not in self.allowed_tools:
+            return False
+        if self.include is not None and not _matches_any(name, self.include):
+            return False
+        if self.exclude is not None and _matches_any(name, self.exclude):
             return False
         return self.tool_filter is None or bool(self.tool_filter(dict(schema)))
 
+    def _has_filters(self) -> bool:
+        return (
+            self.allowed_tools is not None
+            or self.include is not None
+            or self.exclude is not None
+            or self.tool_filter is not None
+        )
+
+    def _server_name(self, name: str) -> str:
+        """The server's name for a tool the agent knows under :attr:`prefix`."""
+        if self.prefix and name.startswith(self.prefix):
+            bare = name[len(self.prefix) :]
+            if bare in self._schemas or name not in self._schemas:
+                return bare
+        return name
+
     def _ensure_allowed(self, name: str) -> None:
-        if self.allowed_tools is None and self.tool_filter is None:
+        if not self._has_filters():
             return
         if not self._is_allowed(self._schemas.get(name, {"name": name})):
             msg = f"MCP tool {name!r} is not allowed on {self.label}"
@@ -1656,6 +2072,7 @@ class MCPClient(BaseModel):
             MCPConnectionError: The server could not be reached or dropped the
                 connection mid-call (the next call reconnects).
         """
+        name = self._server_name(name)
         self._ensure_allowed(name)
         session, handle = await self._session_for(self._request_context(name))
 
@@ -1663,6 +2080,10 @@ class MCPClient(BaseModel):
         kwargs: dict[str, Any] = {}
         if self.call_timeout is not None and _accepts_kwarg(call, "read_timeout_seconds"):
             kwargs["read_timeout_seconds"] = timedelta(seconds=self.call_timeout)
+        if self.propagate_trace and _accepts_kwarg(call, "meta"):
+            carrier = trace_meta()
+            if carrier:
+                kwargs["meta"] = carrier
 
         on_progress: Callable[[float, float | None, str | None], Any] | None = progress_callback
         if on_progress is None:
@@ -1682,9 +2103,25 @@ class MCPClient(BaseModel):
 
             kwargs["progress_callback"] = _progress
 
-        raw = await self._guarded(
-            handle, call(name=name, arguments=arguments, **kwargs), f"tools/call {name}"
+        ctx = current_tool_context()
+        route = _ElicitationRoute(
+            tool_name=name,
+            tool_call_id=ctx.tool_call_id if ctx is not None else None,
+            in_run=ctx is not None,
         )
+        self._inflight.append(route)
+        try:
+            with outgoing_trace_scope(self.propagate_trace):
+                raw = await self._guarded(
+                    handle, call(name=name, arguments=arguments, **kwargs), f"tools/call {name}"
+                )
+        finally:
+            self._inflight.remove(route)
+        if route.pending is not None:
+            # The server asked a question nobody could answer yet. Its reply
+            # to our "cancel" is not the result; the run pauses instead, and
+            # the call is re-issued with the answer on resume.
+            return MCPToolResult(text=_interrupt_marker(route.pending), elicitation=route.pending)
         return _convert_call_result(raw, embed_images=self.embed_images)
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
@@ -1694,6 +2131,79 @@ class MCPClient(BaseModel):
         ``structuredContent``, ``isError`` and non-text content.
         """
         return (await self.call_tool_result(name, arguments)).text
+
+    # ------------------------------------------------------------------
+    # Elicitation — the server asks a question
+    # ------------------------------------------------------------------
+
+    def answer_elicitation(self, interrupt: Any, answer: Any) -> None:
+        """Park the person's answer to a question that paused an agent run.
+
+        Call it before ``agent.resume(answer, perform_dangling=True)``: the
+        resume re-issues the paused tool call, the server asks again, and
+        this answer is what it gets.
+
+        Args:
+            interrupt: The ``InterruptEvent`` the run paused with, or its
+                ``interrupt_id`` (the tool-call id).
+            answer: A mapping matching the question's schema; a string, bool or
+                number for a one-field schema; ``None`` to decline; or an
+                :class:`ElicitationAnswer`.
+        """
+        key = getattr(interrupt, "interrupt_id", interrupt)
+        if not isinstance(key, str) or not key:
+            msg = "answer_elicitation needs an InterruptEvent or its interrupt_id"
+            raise ValueError(msg)
+        self._elicitation_answers[key] = answer
+
+    async def _on_elicitation(self, context: Any, params: Any) -> Any:
+        """The session's elicitation callback — runs on the connection's task."""
+        from mcp import types as mcp_types
+
+        route = self._inflight[-1] if self._inflight else None
+        mode = getattr(params, "mode", None) or "form"
+        schema = _mcp_field(params, "requestedSchema", "requested_schema")
+        question = MCPElicitation(
+            message=str(getattr(params, "message", "") or ""),
+            schema=dict(schema) if isinstance(schema, Mapping) else None,
+            mode=str(mode),
+            url=getattr(params, "url", None) if mode == "url" else None,
+            server=self.label,
+            tool_name=route.tool_name if route is not None else None,
+            tool_call_id=route.tool_call_id if route is not None else None,
+        )
+        answer = await self._answer_for(question, route)
+        if answer.action == "accept":
+            return mcp_types.ElicitResult(action="accept", content=answer.content)
+        return mcp_types.ElicitResult(action=answer.action)
+
+    async def _answer_for(
+        self, question: MCPElicitation, route: _ElicitationRoute | None
+    ) -> ElicitationAnswer:
+        call_id = question.tool_call_id
+        if call_id is not None and call_id in self._elicitation_answers:
+            parked = self._elicitation_answers.pop(call_id)
+            return ElicitationAnswer.from_value(parked, question.schema)
+        if self.elicitation_handler is not None:
+            try:
+                outcome = self.elicitation_handler(question)
+                if inspect.isawaitable(outcome):
+                    outcome = await outcome
+            except Exception:  # noqa: BLE001 — a failing handler declines rather than hang the call
+                logger.warning(
+                    "MCP elicitation handler failed on %s; declining", self.label, exc_info=True
+                )
+                return ElicitationAnswer.decline()
+            return ElicitationAnswer.from_value(outcome, question.schema)
+        if route is not None and route.in_run:
+            route.pending = question
+            return ElicitationAnswer.cancel()
+        logger.info(
+            "MCP server %s asked a question outside an agent run and no "
+            "elicitation_handler is set; declining",
+            self.label,
+        )
+        return ElicitationAnswer.decline()
 
     # ------------------------------------------------------------------
     # Agent integration
@@ -1763,13 +2273,15 @@ class MCPClient(BaseModel):
                     if getattr(type(self), "call_tool", None) is not _BASE_CALL_TOOL:
                         return await self.call_tool(name, kwargs)
                     result = await self.call_tool_result(name, kwargs)
+                    if result.elicitation is not None:
+                        return result.text  # the interrupt marker, as ask_user returns it
                     return result.to_tool_output()
 
                 func.__name__ = name
                 return func
 
             locus_tool = mcp_tool_to_locus(
-                name=mcp_tool["name"],
+                name=f"{self.prefix or ''}{mcp_tool['name']}",
                 description=mcp_tool.get("description", ""),
                 func=make_func(),
                 parameters=mcp_tool.get("inputSchema"),

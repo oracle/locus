@@ -65,7 +65,7 @@ for every iteration of the inner loop.
 | `agent.model.completed` | `content_preview`, `tool_call_count`, `stop_reason` | Not emitted by the `Agent.run` bridge (the loop never yields `ModelCompleteEvent`); `EventBusHook` publishes its own `agent.model.completed` with `stop_reason`, `content_length` |
 | `agent.tokens.used` | `prompt_tokens`, `completion_tokens`, `total_tokens` | Not currently emitted: bridged only from `ModelCompleteEvent`, which the loop never yields |
 | `agent.interrupt` | `interrupt_id`, `question_preview`, `options` | Human-in-the-loop (HITL) pause |
-| `agent.context.compacted` | `iteration`, `stage` (`"prune"` \| `"summarize"` \| `"truncate"` \| `"native"`), `tokens_before`, `tokens_after`, `threshold`, `exhausted` | Context compaction; `exhausted` means the run ends with `context_exhausted` |
+| `agent.context.compacted` | `iteration`, `stage` (`"prune"` \| `"summarize"` \| `"truncate"` \| `"native"` \| `"window"` \| `"relevance"`), `tokens_before`, `tokens_after`, `threshold`, `exhausted`, `tier` (tiered compaction only) | Context compaction; `exhausted` means the run ends with `context_exhausted`. A `TieredCompaction` publishes one event per tier that ran, in order, `tier` naming it (`clear_tool_results`, `sliding_window`, `native`, `summarize`, `relevance`) and each `tokens_before` continuing the previous `tokens_after`; the plain `ContextCompactor` sends no `tier` |
 | `agent.terminate` | `reason`, `iterations_used`, `final_confidence`, `total_tool_calls`, `final_message_preview` | One per dispatch |
 | `agent.model.retry` | `attempt`, `max_retries`, `delay_seconds`, `reason` | `ModelRetryHook` only |
 | `agent.steering.applied` | `action`, `tool_name`, `reason` | `SteeringHook` only |
@@ -155,7 +155,7 @@ a hold for human approval, and `allow: true` alone is an allow.
 
 | Event | Payload |
 |---|---|
-| `memory.checkpoint.saved` | `thread_id`, `iteration`, `backend`, `trigger` (`"every_n_iterations"` \| `"final"` \| `"graph_interrupt"`) |
+| `memory.checkpoint.saved` | `thread_id`, `iteration`, `backend`, `trigger` (`"every_n_iterations"` \| `"final"` \| `"graph_interrupt"`), `durability` (`"sync"` \| `"async"` \| `"exit"`; agent runs only) |
 | `memory.checkpoint.loaded` | `thread_id`, `iteration`, `backend`, `resume_node` (graph only) |
 | `memory.conversation.pruned` | `strategy="sliding_window"`, `window_size`, `removed_count` |
 | `memory.compactor.triggered` | `strategy="summarizing"`, `messages_before`, `threshold` |

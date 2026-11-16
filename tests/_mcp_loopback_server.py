@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import json
 import sys
 from typing import Any
 
@@ -48,6 +49,31 @@ class Hotel(BaseModel):
     id: str
     name: str
     price: float
+
+
+class Approval(BaseModel):
+    approve: bool
+
+
+class Reason(BaseModel):
+    reason: str
+    priority: int = 1
+
+
+def _request_meta(ctx: Any) -> dict[str, Any]:
+    """The raw ``_meta`` of the request being served, on either mcp major."""
+    rc = ctx.request_context
+    params = getattr(rc, "params", None)
+    if isinstance(params, dict) and isinstance(params.get("_meta"), dict):
+        return dict(params["_meta"])
+    meta = getattr(rc, "meta", None)
+    if meta is None:
+        return {}
+    dump = getattr(meta, "model_dump", None)
+    if callable(dump):
+        dumped = dump(by_alias=True, exclude_none=True)
+        return dict(dumped) if isinstance(dumped, dict) else {}
+    return dict(meta)
 
 
 def build_server(port: int) -> Any:
@@ -111,6 +137,27 @@ def build_server(port: int) -> Any:
             f"user={headers.get('x-user-id', '<none>')} "
             f"tenant={headers.get('x-tenant', '<none>')}"
         )
+
+    @mcp.tool()
+    def echo_meta(ctx: Context) -> str:  # type: ignore[type-arg]
+        """The request's ``_meta`` as JSON — shows what trace context arrived."""
+        return json.dumps(_request_meta(ctx), default=str)
+
+    @mcp.tool()
+    async def refund(order_id: str, ctx: Context) -> str:  # type: ignore[type-arg]
+        """Asks the person to approve before refunding (one boolean field)."""
+        outcome = await ctx.elicit(f"Refund order {order_id}?", Approval)
+        if outcome.action == "accept" and outcome.data is not None:
+            return f"refunded {order_id}" if outcome.data.approve else f"kept {order_id}"
+        return f"{outcome.action}: {order_id}"
+
+    @mcp.tool()
+    async def escalate(ticket: str, ctx: Context) -> str:  # type: ignore[type-arg]
+        """Asks for two fields (a reason and a priority)."""
+        outcome = await ctx.elicit(f"Why escalate {ticket}?", Reason)
+        if outcome.action == "accept" and outcome.data is not None:
+            return f"escalated {ticket}: {outcome.data.reason} (p{outcome.data.priority})"
+        return f"{outcome.action}: {ticket}"
 
     @mcp.tool()
     def auth_digest(ctx: Context) -> str:  # type: ignore[type-arg]

@@ -6,8 +6,7 @@ description: How the SDK's agent loop, grounding, admission policy, approvals, p
 # Control-layer architecture
 
 The SDK separates deciding what to do from deciding whether a consequential
-action may execute. This page is the domain-neutral map. `SecurityContext` is
-one worked application of the same control primitives.
+action may execute. This page is the domain-neutral map.
 
 {{ locus_diagram control-layer-flow }}
 
@@ -103,10 +102,12 @@ Hooks that legitimately rewrite arguments re-sign the call under their own
 name, so the chain of custody stays explicit:
 
 ```python
-from locus.hooks.provider import BeforeToolCallEvent, HookProvider
+from locus.hooks.provider import BeforeToolCallEvent, HookPriority, HookProvider
 
 
 class RedactingHook(HookProvider):
+    priority = HookPriority.SECURITY_DEFAULT
+
     async def on_before_tool_call(self, event: BeforeToolCallEvent) -> None:
         event.arguments = {k: str(v).replace("@", " at ") for k, v in event.arguments.items()}
         event.resign(by="RedactingHook")  # chain of custody: ("model", "RedactingHook")

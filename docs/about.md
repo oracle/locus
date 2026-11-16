@@ -30,7 +30,7 @@ retired. See [Legal notices](legal.md#provenance) for the licensing detail.
 
 | Signal | Where to check |
 |---|---|
-| Releases and changes | [Changelog](https://github.com/oracle/locus/blob/main/CHANGELOG.md) and [PyPI](https://pypi.org/project/locus-sdk/) |
+| Releases and changes | [Release notes](release-notes.md), generated from the [changelog](https://github.com/oracle/locus/blob/main/CHANGELOG.md), and [PyPI](https://pypi.org/project/locus-sdk/) |
 | Supported Python and dependency ranges | [Compatibility policy](compatibility.md) and package metadata |
 | Open work and decisions | [Issues](https://github.com/oracle/locus/issues) |
 | Contribution process | [Contributing guide](https://github.com/oracle/locus/blob/main/CONTRIBUTING.md) — contributions need the [Oracle Contributor Agreement](https://oca.opensource.oracle.com) |

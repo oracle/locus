@@ -12,10 +12,18 @@ Conversation Management:
 - NullManager: Keep all messages unchanged
 - SlidingWindowManager: Keep last N messages
 - SummarizingManager: Summarize older messages
+- ContextCompactor: Clear old tool output, then summarise, under a token threshold
+- TieredCompaction: Tiers in order, each at its own fraction of the window
+  (ClearToolResults, SlidingWindow, Summarize, Native, Relevance); pin() keeps
+  a message through every tier
+- ToolResultOffload: Large tool results to storage by handle; fetch_tool_result
+  reads them back
 
 Checkpointing:
 - BaseCheckpointer: Abstract base for checkpointer implementations
 - DeltaCheckpointer: Efficient delta-based checkpointing (~77% storage savings)
+- ToolEffectLedger: Every executed tool call, recorded in the thread's checkpointer
+  as it returns, so a run continued after a crash replays instead of re-running
 - get_checkpointer: Get a checkpointer by string identifier
 - register_checkpointer: Register a custom checkpointer provider
 - list_checkpointers: List available checkpointer providers
@@ -43,6 +51,7 @@ Backends (in locus.memory.backends):
 
 from locus.core.protocols import CheckpointerCapabilities
 from locus.memory.checkpointer import BaseCheckpointer
+from locus.memory.compaction import ContextCompactor, is_pinned, pin
 from locus.memory.conversation import (
     ConversationManager,
     NullManager,
@@ -56,6 +65,7 @@ from locus.memory.delta import (
     DeltaStorage,
     InMemoryDeltaStorage,
 )
+from locus.memory.ledger import LedgerEntry, LedgerManifest, ToolEffectLedger
 from locus.memory.manager import (
     BaseMemoryManager,
     LLMMemoryManager,
@@ -64,6 +74,7 @@ from locus.memory.manager import (
     MemoryType,
     NoopMemoryManager,
 )
+from locus.memory.offload import ToolResultOffload, offload_handle
 from locus.memory.registry import (
     get_checkpointer,
     list_checkpointers,
@@ -79,6 +90,15 @@ from locus.memory.store import (
     StoreContext,
     StoreItem,
 )
+from locus.memory.tiers import (
+    ClearToolResults,
+    CompactionTier,
+    Native,
+    Relevance,
+    SlidingWindow,
+    Summarize,
+    TieredCompaction,
+)
 
 
 __all__ = [
@@ -87,6 +107,20 @@ __all__ = [
     "NullManager",
     "SlidingWindowManager",
     "SummarizingManager",
+    "ContextCompactor",
+    # Tiered compaction
+    "TieredCompaction",
+    "CompactionTier",
+    "ClearToolResults",
+    "SlidingWindow",
+    "Summarize",
+    "Native",
+    "Relevance",
+    "pin",
+    "is_pinned",
+    # Tool-result offload
+    "ToolResultOffload",
+    "offload_handle",
     # Checkpointing
     "BaseCheckpointer",
     "CheckpointerCapabilities",
@@ -95,6 +129,10 @@ __all__ = [
     "InMemoryDeltaStorage",
     "DeltaCheckpoint",
     "CheckpointMetadata",
+    # Tool-effect ledger
+    "ToolEffectLedger",
+    "LedgerEntry",
+    "LedgerManifest",
     # Registry
     "get_checkpointer",
     "register_checkpointer",
