@@ -143,6 +143,9 @@ EV_TOOL_SANDBOX_STARTED = "tool.sandbox.started"
 EV_TOOL_SANDBOX_COMPLETED = "tool.sandbox.completed"
 EV_TOOL_SANDBOX_DENIED = "tool.sandbox.denied"
 
+# --- Tool-call integrity (locus.tools.integrity) ---
+EV_TOOL_INTEGRITY_REFUSED = "tool.integrity.refused"
+
 # --- Coding harness (locus.harness) ---
 EV_HARNESS_EXEC = "harness.exec"
 

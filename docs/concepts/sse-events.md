@@ -221,18 +221,22 @@ Emitted by `create_research_workflow` / individual node primitives from
 | `research.regenerate.completed` | `regeneration` (attempt index) |
 | `research.replan` | `replan` (iteration), `ungrounded_count`, `prompt_preview` |
 
-### `tool.*` — sandboxed tool execution
+### `tool.*` — sandboxed tool execution and tool-call integrity
 
 Emitted around each run of a tool declared with `@tool(sandbox=...)`.
 `tool.sandbox.denied` comes from `SandboxEnforcerHook` instead: it fires
 when a tool carries a label listed in `ControlPolicy.require_sandbox_for`
 but has no sandbox, and the hook then cancels that call.
+`tool.integrity.refused` comes from the executor with
+`tool_call_integrity` on: a call whose arguments changed after the model
+produced them, without a re-sign, was not run.
 
 | Event | Payload |
 |---|---|
 | `tool.sandbox.started` | `tool`, `provider`, `timeout` |
 | `tool.sandbox.completed` | `tool`, `ok`, `exit_code`, `timed_out`, `duration_ms` |
 | `tool.sandbox.denied` | `tool`, `labels` (the labels that required a sandbox) |
+| `tool.integrity.refused` | `tool`, `call_id`, `reason` (`mismatch` / `tainted`), `expected_digest`, `actual_digest`, `signed_by`, `mutated_by`, `disposition` (`refuse` / `abort`), `key_id` |
 
 ### `harness.*` — coding-harness commands
 

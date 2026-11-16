@@ -8,6 +8,23 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **Tool-call integrity (`Agent(tool_call_integrity=True)`).** The runtime
+  signs every tool call as the model's response is parsed, the streaming
+  path included, over a canonical form of its id, name and arguments with
+  HMAC-SHA256 under a random per-run key, and the executor verifies the call
+  before it runs. A call changed in between is refused with a typed
+  `ToolCallIntegrityError`, an entry on the agent's `AuditTrail` (the signed
+  and received digests, and the hook the change is attributed to), a
+  `tool.integrity.refused` event, and a tool error the model reads so the
+  run continues; `"abort"` ends the run instead. Hooks that rewrite
+  arguments re-sign through `event.resign(by="...")` or
+  `ToolCallSigner.resign`, so the chain of custody names them; the built-in
+  `GuardrailsHook` redaction and `ExternalHooks` rewrites do. The signature
+  lives on the run, not on `ToolCall`, so messages and checkpoints are
+  unchanged. Off by default in 5.x, on by default in 6.0. (#450)
+
 ### Removed
 
 - **The `locus-sdk-security` package.** The security-domain tooling (red-team
