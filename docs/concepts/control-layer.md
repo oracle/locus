@@ -80,6 +80,7 @@ Where it stops:
   every call, but a hook hold stops the call before the gate, so the trail
   then carries a `tool-call-judged` record for it rather than an
   `action-admission` one.
+
 ### What the runtime enforces: tool-call integrity
 
 The admission gate decides whether an action may run. A second check, inside
