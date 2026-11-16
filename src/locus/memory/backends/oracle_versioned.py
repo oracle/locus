@@ -58,6 +58,13 @@ oracle/langchain-oracle#224.
 ``(thread, ns, checkpoint, task)`` triple inside one cursor pass before
 inserting the new set. Retries are safe.
 
+This saver is the reference for the time-travel surface every Locus
+checkpointer has: one row per checkpoint, ``parent_checkpoint_id`` naming
+the row it descends from, ``created_at`` ordering the history. :meth:`fork`
+copies one row into a new thread with the parent link kept, and
+:meth:`list` projects the history to
+:class:`~locus.memory.time_travel.CheckpointInfo`.
+
 Uses ``python-oracledb`` in thin mode; the dependency is imported lazily
 inside :meth:`_get_pool` so installs without the driver can still import
 this module.
@@ -68,6 +75,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, cast
+from uuid import uuid4
 
 from pydantic import BaseModel, Field, SecretStr
 
@@ -77,6 +85,14 @@ from locus.memory.backends._oracle_config import (
 )
 from locus.memory.backends._oracle_config import (
     validate_sql_identifier as _validate_sql_identifier,
+)
+from locus.memory.time_travel import (
+    CheckpointInfo,
+    checkpoint_size,
+    fork_metadata,
+    info_from,
+    link_parents,
+    new_fork_id,
 )
 
 
@@ -606,6 +622,48 @@ class OracleCheckpointSaver(BaseModel):
             )
         return results
 
+    async def fork(
+        self,
+        thread_id: str,
+        checkpoint_id: str | None = None,
+        *,
+        new_thread_id: str | None = None,
+        checkpoint_ns: str = "default",
+    ) -> str:
+        """Start a new thread from one of this thread's checkpoints (the latest by default).
+
+        The new thread's first row is the checkpoint's data under a fresh
+        checkpoint id, with ``parent_checkpoint_id`` naming the source row
+        and ``forked_from`` / ``source`` in its metadata. Pending writes are
+        not copied: a fork starts with no step in flight.
+
+        Returns:
+            The new thread's id.
+
+        Raises:
+            LookupError: No such thread or checkpoint.
+            ValueError: ``new_thread_id`` is the source thread.
+        """
+        row = await self.get(
+            thread_id=thread_id, checkpoint_id=checkpoint_id, checkpoint_ns=checkpoint_ns
+        )
+        if row is None:
+            where = f"checkpoint {checkpoint_id!r} of " if checkpoint_id else ""
+            raise LookupError(f"no {where}thread {thread_id!r}")
+        forked = new_thread_id or new_fork_id(thread_id)
+        if forked == thread_id:
+            raise ValueError("a fork needs a thread id different from its parent")
+        source_id = str(row["checkpoint_id"])
+        await self.put(
+            thread_id=forked,
+            checkpoint_id=uuid4().hex,
+            checkpoint_data=row["checkpoint"] if isinstance(row["checkpoint"], dict) else {},
+            checkpoint_ns=checkpoint_ns,
+            parent_checkpoint_id=source_id,
+            metadata={**(row["metadata"] or {}), **fork_metadata(thread_id, source_id)},
+        )
+        return forked
+
     # ------------------------------------------------------------------
     # Pending writes
     # ------------------------------------------------------------------
@@ -790,3 +848,38 @@ class OracleCheckpointSaver(BaseModel):
                 f"table_name={self._table_prefix!r})"
             )
         return f"OracleCheckpointSaver(table_name={self._table_prefix!r})"
+
+    # Last on purpose: a method named ``list`` shadows the builtin for the
+    # annotations of anything defined after it.
+    async def list(
+        self, thread_id: str, limit: int = 10, *, checkpoint_ns: str = "default"
+    ) -> list[CheckpointInfo]:
+        """The thread's history as :class:`~locus.memory.time_travel.CheckpointInfo`, newest first.
+
+        The row's own ``parent_checkpoint_id`` is the parent; ``iteration``
+        is read from the checkpoint data when it has one (an agent state
+        does), and ``size`` is the data's size as compact JSON.
+        """
+        # One row past the window names the parent of the oldest in it when
+        # that row did not record one.
+        rows = await self.list_checkpoints(
+            thread_id=thread_id, checkpoint_ns=checkpoint_ns, limit=limit + 1
+        )
+        older = str(rows[limit]["checkpoint_id"]) if len(rows) > limit else None
+        infos: list[CheckpointInfo] = []
+        for row in rows[:limit]:
+            data = row["checkpoint"] if isinstance(row["checkpoint"], dict) else {}
+            metadata = dict(row["metadata"] or {})
+            if row["parent_checkpoint_id"] is not None:
+                metadata.setdefault("parent_checkpoint_id", row["parent_checkpoint_id"])
+            infos.append(
+                info_from(
+                    str(row["checkpoint_id"]),
+                    thread_id,
+                    created_at=row["created_at"],
+                    metadata=metadata,
+                    iteration=data.get("iteration"),
+                    size=checkpoint_size(data),
+                )
+            )
+        return link_parents(infos, older)

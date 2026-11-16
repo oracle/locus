@@ -14,6 +14,7 @@ from locus.core.protocols import CheckpointerCapabilities
 
 if TYPE_CHECKING:
     from locus.core.state import AgentState
+    from locus.memory.time_travel import CheckpointInfo
 
 
 class BaseCheckpointer(ABC):
@@ -35,11 +36,20 @@ class BaseCheckpointer(ABC):
     Use the `capabilities` property to check which features are available
     before calling extended methods.
 
+    Every checkpointer has the time-travel surface: :meth:`list` describes
+    a thread's checkpoints (iteration, time, size, parent), :meth:`fork`
+    starts a new thread from one of them, and ``Agent.run(...,
+    from_checkpoint=...)`` continues a thread from a past one. The defaults
+    here work on any subclass through ``save`` / ``load`` /
+    ``list_checkpoints``; a backend overrides :meth:`list` when it can read
+    the fields without loading each state.
+
     Example:
         >>> if checkpointer.capabilities.search:
         ...     results = await checkpointer.search("error handling")
-        >>> if checkpointer.capabilities.branching:
-        ...     await checkpointer.copy_thread("main", "experiment")
+        >>> for info in await checkpointer.list("main"):
+        ...     print(info.checkpoint_id, info.iteration, info.parent_checkpoint_id)
+        >>> experiment = await checkpointer.fork("main", info.checkpoint_id)
     """
 
     @property
@@ -326,6 +336,61 @@ class BaseCheckpointer(ABC):
         raise NotImplementedError("list_with_metadata not implemented")
 
     # =========================================================================
+    # Time travel
+    # =========================================================================
+
+    async def fork(
+        self,
+        thread_id: str,
+        checkpoint_id: str | None = None,
+        *,
+        new_thread_id: str | None = None,
+    ) -> str:
+        """Start a new thread from one of this thread's checkpoints (the latest by default).
+
+        The new thread's first checkpoint is the state at ``checkpoint_id``,
+        saved with ``forked_from`` and ``parent_checkpoint_id`` in its
+        metadata; running on it never changes the source thread. The source
+        thread's tool-effect ledger is copied up to that checkpoint's
+        iteration and no further, so a run on the fork replays nothing the
+        source did past the fork point.
+
+        Args:
+            thread_id: The thread to fork.
+            checkpoint_id: The checkpoint to fork at; the latest when ``None``.
+            new_thread_id: The fork's id; ``<thread_id>-fork-<8 hex>`` when ``None``.
+
+        Returns:
+            The new thread's id.
+
+        Raises:
+            LookupError: No such thread or checkpoint.
+            ValueError: ``new_thread_id`` is the source thread.
+        """
+        from locus.memory.time_travel import default_fork  # noqa: PLC0415
+
+        return await default_fork(self, thread_id, checkpoint_id, new_thread_id)
+
+    async def _trim_history(self, thread_id: str, keep: int | None) -> int:
+        """Delete all but the ``keep`` newest checkpoints of ``thread_id``; returns how many.
+
+        For backends with a ``max_checkpoints_per_thread`` bound. The
+        tool-effect ledger's sidecar thread (``<thread_id>~ledger``) is never
+        trimmed: its checkpoints are one record per executed tool call, and
+        dropping one would run that call again on a replay.
+        """
+        from locus.memory.ledger import LEDGER_SUFFIX  # noqa: PLC0415
+
+        if keep is None or thread_id.endswith(LEDGER_SUFFIX):
+            return 0
+        surplus = (await self.list_checkpoints(thread_id, limit=1_000_000))[keep:]
+        deleted = 0
+        for checkpoint_id in surplus:
+            if await self.delete(thread_id, checkpoint_id):
+                deleted += 1
+        return deleted
+
+    # =========================================================================
     # Helper Methods
     # =========================================================================
 
@@ -347,3 +412,26 @@ class BaseCheckpointer(ABC):
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}()"
+
+    # ``list`` is the last method of the class on purpose: a class-level name
+    # shadows the builtin for the annotations of everything defined after it.
+    async def list(self, thread_id: str, limit: int = 10) -> list[CheckpointInfo]:
+        """The thread's checkpoints, newest first, with what each one is.
+
+        Each :class:`~locus.memory.time_travel.CheckpointInfo` has the
+        checkpoint's id, when it was written, the iteration the state had
+        reached, the checkpoint's size in bytes as this backend stores it,
+        the checkpoint it descends from and, for a fork's first checkpoint,
+        the thread it was forked from. ``parent_checkpoint_id`` is ``None``
+        only for a thread's first checkpoint: with a ``limit``, the oldest
+        checkpoint described still names the one before it. The default
+        loads each state to read these; backends that store the fields
+        beside the state override it.
+
+        Args:
+            thread_id: Thread identifier.
+            limit: Maximum number of checkpoints to describe.
+        """
+        from locus.memory.time_travel import default_list  # noqa: PLC0415
+
+        return await default_list(self, thread_id, limit)

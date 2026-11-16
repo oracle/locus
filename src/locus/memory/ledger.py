@@ -45,7 +45,7 @@ import hashlib
 import json
 import logging
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -213,6 +213,34 @@ class ToolEffectLedger:
             if data is not None and "tool" in data:
                 found.append(LedgerEntry.from_dict(data))
         return sorted(found, key=lambda e: (e.recorded_at, e.step))
+
+    async def fork(
+        self, source_thread_id: str, dest_thread_id: str, *, up_to_step: int | None = None
+    ) -> int:
+        """Copy the source thread's ledger to a fork of it, up to ``up_to_step``.
+
+        A fork starts from a checkpoint, and that checkpoint already holds
+        the results of every call at or before its iteration — those records
+        are copied, re-keyed under the fork's thread id, with the manifest.
+        Records past ``up_to_step`` are the source thread's effects beyond
+        the fork point: a run on the fork must never replay them, so they
+        are not copied. ``None`` copies every record.
+
+        Returns the records copied; 0 when the source has no ledger.
+        """
+        manifest = await self.manifest(source_thread_id)
+        entries = await self.entries(source_thread_id)
+        if manifest is None and not entries:
+            return 0
+        if manifest is not None:
+            await self.write_manifest(replace(manifest, thread_id=dest_thread_id))
+        copied = 0
+        for entry in entries:
+            if up_to_step is not None and entry.step > up_to_step:
+                continue
+            await self.record(replace(entry, thread_id=dest_thread_id))
+            copied += 1
+        return copied
 
     async def clear(self, thread_id: str) -> bool:
         """Delete the thread's ledger. ``False`` when there was none or the backend cannot delete."""

@@ -771,3 +771,114 @@ class TestClose:
         # No pool was ever created; close() must not raise.
         await saver.close()
         assert saver._pool is None
+
+
+# ---------------------------------------------------------------------------
+# Time travel — list as CheckpointInfo, fork with the parent link kept
+# ---------------------------------------------------------------------------
+
+
+class TestTimeTravel:
+    @pytest.mark.asyncio
+    async def test_list_projects_rows_and_links_the_window_to_the_row_past_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ts = datetime(2026, 5, 18, tzinfo=UTC)
+        cursor = _StubCursor(
+            fetchone_queue=[(1,), (1,)],
+            fetchall_queue=[
+                [
+                    ("c3", "c2", '{"iteration": 3}', '{"note": 3}', ts),
+                    ("c2", None, '{"iteration": 2}', "{}", ts),  # no parent recorded
+                    ("c1", None, '"not a dict"', None, ts),  # the row past the window
+                ]
+            ],
+        )
+        _install_oracledb_stub(monkeypatch, cursor)
+        saver = _make_saver()
+
+        infos = await saver.list("t1", limit=2)
+
+        _, params = cursor.execute_calls[-1]
+        assert params["lim"] == 3, "one row past the window names its oldest parent"
+        assert [i.checkpoint_id for i in infos] == ["c3", "c2"]
+        assert [i.parent_checkpoint_id for i in infos] == ["c2", "c1"]
+        assert [i.iteration for i in infos] == [3, 2]
+        assert infos[0].metadata == {"note": 3, "parent_checkpoint_id": "c2"}
+        assert all(i.size and i.created_at == ts for i in infos)
+        assert all(i.thread_id == "t1" for i in infos)
+
+    @pytest.mark.asyncio
+    async def test_list_describes_a_row_whose_data_is_not_a_document(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cursor = _StubCursor(
+            fetchone_queue=[(1,), (1,)],
+            fetchall_queue=[[("c1", None, '"text"', None, "2026-05-18T00:00:00+00:00")]],
+        )
+        _install_oracledb_stub(monkeypatch, cursor)
+
+        [info] = await _make_saver().list("t1")
+
+        assert (info.iteration, info.size, info.parent_checkpoint_id) == (None, 2, None)
+        assert info.created_at == datetime(2026, 5, 18, tzinfo=UTC)
+
+    @pytest.mark.asyncio
+    async def test_fork_copies_the_row_under_a_new_thread_with_the_parent_kept(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ts = datetime(2026, 5, 18, tzinfo=UTC)
+        cursor = _StubCursor(
+            fetchone_queue=[(1,), (1,), ("c1", "c0", '{"iteration": 1}', '{"note": 1}', ts)]
+        )
+        _install_oracledb_stub(monkeypatch, cursor)
+        saver = _make_saver()
+
+        forked = await saver.fork("t1", "c1", new_thread_id="t1-alt", checkpoint_ns="ns")
+
+        assert forked == "t1-alt"
+        sql, params = cursor.execute_calls[-1]
+        assert sql.lstrip().startswith("INSERT INTO locus_checkpoints")
+        assert params["thread_id"] == "t1-alt"
+        assert params["checkpoint_ns"] == "ns"
+        assert params["parent_checkpoint_id"] == "c1"
+        assert params["checkpoint_id"] != "c1"
+        assert json.loads(params["checkpoint_data"]) == {"iteration": 1}
+        assert json.loads(params["metadata"]) == {
+            "note": 1,
+            "source": "fork",
+            "forked_from": "t1",
+            "parent_checkpoint_id": "c1",
+        }
+
+    @pytest.mark.asyncio
+    async def test_fork_defaults_to_the_latest_row_and_a_generated_thread_id(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cursor = _StubCursor(fetchone_queue=[(1,), (1,), ("c9", None, '"text"', None, None)])
+        _install_oracledb_stub(monkeypatch, cursor)
+
+        forked = await _make_saver().fork("t1")
+
+        assert forked.startswith("t1-fork-")
+        _, params = cursor.execute_calls[-1]
+        assert params["parent_checkpoint_id"] == "c9"
+        assert json.loads(params["checkpoint_data"]) == {}, "a row without a document forks empty"
+
+    @pytest.mark.asyncio
+    async def test_fork_refuses_a_missing_row_and_the_same_thread(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cursor = _StubCursor(
+            fetchone_queue=[(1,), (1,), None, ("c1", None, "{}", "{}", None)],
+        )
+        _install_oracledb_stub(monkeypatch, cursor)
+        saver = _make_saver()
+
+        with pytest.raises(LookupError, match="no checkpoint 'nope' of thread 't1'"):
+            await saver.fork("t1", "nope")
+        with pytest.raises(ValueError, match="different"):
+            await saver.fork("t1", new_thread_id="t1")
+        assert not any(sql.lstrip().startswith("INSERT") for sql, _ in cursor.execute_calls), (
+            "nothing was written"
+        )

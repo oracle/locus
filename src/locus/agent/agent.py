@@ -35,6 +35,7 @@ from locus.agent.runtime_loop import (
     UNFINISHED_CALL_ERROR,
     AgentRuntimeMixin,
     _invocation_arguments,
+    _take_iteration_checkpoints,
     close_unfinished_calls,
 )
 from locus.core.errors import ApprovalPendingError, GSARValidationError
@@ -310,6 +311,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
         model_kwargs: dict[str, Any] | None = None,
         invocation_id: str | None = None,
         durability: DurabilityMode | None = None,
+        from_checkpoint: str | None = None,
     ) -> AgentResult:
         """
         Run the agent asynchronously and return a single ``AgentResult``.
@@ -341,6 +343,8 @@ class Agent(AgentRuntimeMixin, BaseModel):
                 (see :meth:`run`).
             durability: When this run writes its iteration checkpoints
                 (``"sync"``, ``"async"`` or ``"exit"``; see :meth:`run`).
+            from_checkpoint: Start the turn from the thread's state at this
+                checkpoint instead of its latest (see :meth:`run`).
 
         Returns:
             AgentResult with final message and state
@@ -362,6 +366,8 @@ class Agent(AgentRuntimeMixin, BaseModel):
             run_kwargs["invocation_id"] = invocation_id
         if durability is not None:
             run_kwargs["durability"] = durability
+        if from_checkpoint is not None:
+            run_kwargs["from_checkpoint"] = from_checkpoint
 
         grounding_score: float | None = None
         ungrounded_claims: list[str] = []
@@ -505,6 +511,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
         model_kwargs: dict[str, Any] | None = None,
         invocation_id: str | None = None,
         durability: DurabilityMode | None = None,
+        from_checkpoint: str | None = None,
     ) -> AgentResult:
         """
         Run the agent synchronously.
@@ -522,6 +529,8 @@ class Agent(AgentRuntimeMixin, BaseModel):
             invocation_id: An id for this turn the caller keeps (see :meth:`run`).
             durability: When this run writes its iteration checkpoints
                 (``"sync"``, ``"async"`` or ``"exit"``; see :meth:`run`).
+            from_checkpoint: Start the turn from the thread's state at this
+                checkpoint instead of its latest (see :meth:`run`).
 
         Returns:
             AgentResult with final message and state
@@ -543,6 +552,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
                     model_kwargs=model_kwargs,
                     invocation_id=invocation_id,
                     durability=durability,
+                    from_checkpoint=from_checkpoint,
                 )
             finally:
                 # Background memory extraction is bound to this loop, which
@@ -821,6 +831,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
         metadata: dict[str, Any] | None = None,
         invocation_id: str | None = None,
         durability: DurabilityMode | None = None,
+        from_checkpoint: str | None = None,
     ) -> AsyncGenerator[LocusEvent, None]:
         """
         Resume agent execution after an interrupt, or a run that crashed.
@@ -882,6 +893,14 @@ class Agent(AgentRuntimeMixin, BaseModel):
                 ``thread_id``, replaying its recorded tool calls.
             durability: When the resumed segment writes its iteration
                 checkpoints (see :meth:`run`).
+            from_checkpoint: Continue from the thread's state at this
+                checkpoint instead of its latest (one of
+                ``checkpointer.list(thread_id)``), as if the run had paused
+                there: the thread's in-memory pause, if any, is discarded,
+                and the segment's first lasting save records the checkpoint
+                as its parent (later saves follow on from it). The
+                checkpoint itself is never deleted. Needs ``thread_id`` and
+                a checkpointer.
 
         Raises:
             ApprovalPendingError: ``perform_dangling=True`` and the held call
@@ -890,6 +909,8 @@ class Agent(AgentRuntimeMixin, BaseModel):
             RuntimeError: Nothing to resume (no paused run for the thread and
                 no checkpoint), or ``thread_id`` omitted while several runs
                 are paused.
+            LookupError: ``from_checkpoint`` names a checkpoint the thread
+                does not have.
 
         Yields:
             LocusEvent instances for the remaining execution
@@ -911,6 +932,12 @@ class Agent(AgentRuntimeMixin, BaseModel):
                     "resume(invocation_id=...) continues a crashed run and takes no response; "
                     "answer an interrupt with resume(response, thread_id=...)."
                 )
+            if from_checkpoint is not None:
+                raise RuntimeError(
+                    "resume(invocation_id=...) continues a crashed run from its ledger and "
+                    "cannot also start from_checkpoint; fork the thread at that checkpoint "
+                    "and run on the fork instead."
+                )
             async with contextlib.aclosing(
                 self.continue_turn(
                     thread_id, invocation_id=invocation_id, metadata=metadata, durability=durability
@@ -920,7 +947,14 @@ class Agent(AgentRuntimeMixin, BaseModel):
                     yield event
             return
 
-        pending = self._take_interrupt(thread_id)
+        if from_checkpoint is not None:
+            if thread_id is None or self.config.checkpointer is None:
+                raise RuntimeError("resume(from_checkpoint=...) needs thread_id and a checkpointer")
+            # The named checkpoint supersedes whatever pause is parked in memory.
+            self._take_interrupt(thread_id)
+            pending = None
+        else:
+            pending = self._take_interrupt(thread_id)
         if pending is not None:
             state = pending.state
             # The prompt of the paused run; the state already has the history.
@@ -938,10 +972,18 @@ class Agent(AgentRuntimeMixin, BaseModel):
                     "No interrupt to resume from. Call run() first, or pass "
                     "thread_id with a configured checkpointer to rehydrate."
                 )
-            loaded = await self.config.checkpointer.load(thread_id)
+            loaded = await self.config.checkpointer.load(thread_id, from_checkpoint)
             if loaded is None:
+                if from_checkpoint is not None:
+                    raise LookupError(
+                        f"no checkpoint {from_checkpoint!r} of thread {thread_id!r} to resume from"
+                    )
                 raise RuntimeError(f"No checkpoint found for thread {thread_id!r} to resume from.")
             state = loaded
+            if from_checkpoint is not None:
+                # The segment's final save must not delete the checkpoint it
+                # descends from (an iteration save names itself in the list).
+                _, state = _take_iteration_checkpoints(state)
             prompt = ""
             # A checkpoint never holds ephemeral metadata (``mcp_headers``):
             # a cross-process resume that needs it passes ``metadata=``.
@@ -960,6 +1002,8 @@ class Agent(AgentRuntimeMixin, BaseModel):
         rc = self._begin_run(
             state, prompt, thread_id, run_metadata, ephemeral=ephemeral, durability=durability
         )
+        if from_checkpoint is not None and rc.checkpoints is not None:
+            rc.checkpoints.parent_checkpoint_id = from_checkpoint
         try:
             folded_events: list[LocusEvent] = []
             state = await self._fold_resume_response(
@@ -1416,22 +1460,35 @@ class Agent(AgentRuntimeMixin, BaseModel):
         """Start a new thread from the given checkpoint (or the latest).
 
         The new thread carries the conversation up to that point and nothing
-        after it; running on it never changes the parent thread.
+        after it; running on it never changes the parent thread. This is
+        :meth:`BaseCheckpointer.fork <locus.memory.BaseCheckpointer.fork>`:
+        the thread's tool-effect ledger is forked with it, up to that
+        checkpoint's iteration, so the fork replays nothing the parent did
+        past the fork point. ``checkpointer.list(thread_id)`` names the
+        checkpoints to fork at.
 
         Returns:
             The new thread's id.
+
+        Raises:
+            LookupError: No such thread or checkpoint.
+            ValueError: ``new_thread_id`` is the parent thread.
         """
-        from uuid import uuid4  # noqa: PLC0415
+        checkpointer = self._require_checkpointer()
+        if hasattr(checkpointer, "fork"):
+            forked: str = await checkpointer.fork(
+                thread_id, checkpoint_id, new_thread_id=new_thread_id
+            )
+            return forked
+        # A duck-typed checkpointer without the time-travel surface: copy the
+        # state by hand, as before the surface existed.
+        from locus.memory.time_travel import fork_metadata, new_fork_id  # noqa: PLC0415
 
         state = await self.get_state(thread_id, checkpoint_id)
-        forked = new_thread_id or f"{thread_id}-fork-{uuid4().hex[:8]}"
+        forked = new_thread_id or new_fork_id(thread_id)
         if forked == thread_id:
             raise ValueError("a fork needs a thread id different from its parent")
-        await self._require_checkpointer().save(
-            state,
-            forked,
-            metadata={"forked_from": thread_id, "parent_checkpoint_id": checkpoint_id},
-        )
+        await checkpointer.save(state, forked, metadata=fork_metadata(thread_id, checkpoint_id))
         return forked
 
     @property
