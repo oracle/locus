@@ -1,0 +1,1006 @@
+[
+  {
+    "name": "allow",
+    "policy": "default",
+    "action": {
+      "name": "rotate_key",
+      "asset": "svc-1",
+      "environment": "staging",
+      "kind": "maintenance"
+    },
+    "verdict": {
+      "survives": true,
+      "confidence": 0.95,
+      "evidence_quality": 0.9
+    },
+    "finding": null,
+    "approved_by": null,
+    "ledger": null,
+    "context": null,
+    "advisor": null,
+    "judgement": null,
+    "clock": "2026-01-01T00:00:00+00:00",
+    "expected": {
+      "admitted": true,
+      "error": null,
+      "line": "{\"seq\": 0, \"ts\": \"2026-01-01T00:00:00+00:00\", \"event_type\": \"action-admission\", \"payload\": {\"action\": \"rotate_key\", \"asset\": \"svc-1\", \"outcome\": \"allow\", \"reason\": \"all policy checks passed\", \"policy_hash\": \"d4b1e82256361b394151acbb56eeef037b3b95d1b9484ee8a767863cebedc256\"}, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"hash\": \"427dcd3fc5324b2325e508a0aa7ebb8926a737f0b4000fe1ca90b8825d6b2f4f\"}",
+      "spent_after": null
+    }
+  },
+  {
+    "name": "require-human-production",
+    "policy": "default",
+    "action": {
+      "name": "rotate_key",
+      "asset": "svc-1",
+      "environment": "production",
+      "kind": "maintenance"
+    },
+    "verdict": {
+      "survives": true,
+      "confidence": 0.95,
+      "evidence_quality": 0.9
+    },
+    "finding": null,
+    "approved_by": null,
+    "ledger": null,
+    "context": null,
+    "advisor": null,
+    "judgement": null,
+    "clock": "2026-01-01T00:00:00+00:00",
+    "expected": {
+      "admitted": false,
+      "error": "action 'rotate_key' not admitted (require_human): labels ['production'] require human approval",
+      "line": "{\"seq\": 0, \"ts\": \"2026-01-01T00:00:00+00:00\", \"event_type\": \"action-admission\", \"payload\": {\"action\": \"rotate_key\", \"asset\": \"svc-1\", \"outcome\": \"require_human\", \"reason\": \"labels ['production'] require human approval\", \"policy_hash\": \"d4b1e82256361b394151acbb56eeef037b3b95d1b9484ee8a767863cebedc256\"}, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"hash\": \"bd2d0b976d010822ed3fbcb405ce1feb3c6a0c929b2e77047b7e0b5adede3de5\"}",
+      "spent_after": null
+    }
+  },
+  {
+    "name": "approved-by",
+    "policy": "default",
+    "action": {
+      "name": "rotate_key",
+      "asset": "svc-1",
+      "environment": "production",
+      "kind": "maintenance"
+    },
+    "verdict": {
+      "survives": true,
+      "confidence": 0.95,
+      "evidence_quality": 0.9
+    },
+    "finding": null,
+    "approved_by": "olga",
+    "ledger": null,
+    "context": null,
+    "advisor": null,
+    "judgement": null,
+    "clock": "2026-01-01T00:00:00+00:00",
+    "expected": {
+      "admitted": true,
+      "error": null,
+      "line": "{\"seq\": 0, \"ts\": \"2026-01-01T00:00:00+00:00\", \"event_type\": \"action-admission\", \"payload\": {\"action\": \"rotate_key\", \"asset\": \"svc-1\", \"outcome\": \"require_human\", \"reason\": \"labels ['production'] require human approval\", \"policy_hash\": \"d4b1e82256361b394151acbb56eeef037b3b95d1b9484ee8a767863cebedc256\", \"approved_by\": \"olga\"}, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"hash\": \"165c1a4aeed8b6242544fc2baa7ff260b5c2c5cab5d45c06e9cfac350b23d70a\"}",
+      "spent_after": null
+    }
+  },
+  {
+    "name": "approved-by-does-not-override-deny",
+    "policy": "default",
+    "action": {
+      "name": "rotate_key",
+      "asset": "svc-1",
+      "environment": "production",
+      "kind": "maintenance"
+    },
+    "verdict": {
+      "survives": false,
+      "confidence": 0.2,
+      "evidence_quality": 0.1
+    },
+    "finding": null,
+    "approved_by": "olga",
+    "ledger": null,
+    "context": null,
+    "advisor": null,
+    "judgement": null,
+    "clock": "2026-01-01T00:00:00+00:00",
+    "expected": {
+      "admitted": false,
+      "error": "action 'rotate_key' not admitted (deny): the finding did not survive verification; labels ['production'] require human approval",
+      "line": "{\"seq\": 0, \"ts\": \"2026-01-01T00:00:00+00:00\", \"event_type\": \"action-admission\", \"payload\": {\"action\": \"rotate_key\", \"asset\": \"svc-1\", \"outcome\": \"deny\", \"reason\": \"the finding did not survive verification; labels ['production'] require human approval\", \"policy_hash\": \"d4b1e82256361b394151acbb56eeef037b3b95d1b9484ee8a767863cebedc256\"}, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"hash\": \"4197066b31ccd6b345639f3440d937dd8d43f4b1dab67efae659f8f13891cd7d\"}",
+      "spent_after": null
+    }
+  },
+  {
+    "name": "no-verdict",
+    "policy": "default",
+    "action": {
+      "name": "rotate_key",
+      "asset": "svc-1",
+      "environment": "staging",
+      "kind": "maintenance"
+    },
+    "verdict": null,
+    "finding": null,
+    "approved_by": null,
+    "ledger": null,
+    "context": null,
+    "advisor": null,
+    "judgement": null,
+    "clock": "2026-01-01T00:00:00+00:00",
+    "expected": {
+      "admitted": false,
+      "error": "action 'rotate_key' not admitted (require_human): no verification provided",
+      "line": "{\"seq\": 0, \"ts\": \"2026-01-01T00:00:00+00:00\", \"event_type\": \"action-admission\", \"payload\": {\"action\": \"rotate_key\", \"asset\": \"svc-1\", \"outcome\": \"require_human\", \"reason\": \"no verification provided\", \"policy_hash\": \"d4b1e82256361b394151acbb56eeef037b3b95d1b9484ee8a767863cebedc256\"}, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"hash\": \"c6d85f91b2c976e61bea8690f3f10a91d2b8c45b48af224a9e23be2a3213a79c\"}",
+      "spent_after": null
+    }
+  },
+  {
+    "name": "deny-labels",
+    "policy": "locked-down",
+    "action": {
+      "name": "drop_table",
+      "asset": "db-1",
+      "environment": "production",
+      "kind": "delete"
+    },
+    "verdict": null,
+    "finding": null,
+    "approved_by": null,
+    "ledger": null,
+    "context": null,
+    "advisor": null,
+    "judgement": null,
+    "clock": "2026-01-01T00:00:00+00:00",
+    "expected": {
+      "admitted": false,
+      "error": "action 'drop_table' not admitted (deny): labels ['delete', 'production'] are denied by policy; no verification provided; blast radius 1 exceeds the maximum 0; labels ['production'] require human approval",
+      "line": "{\"seq\": 0, \"ts\": \"2026-01-01T00:00:00+00:00\", \"event_type\": \"action-admission\", \"payload\": {\"action\": \"drop_table\", \"asset\": \"db-1\", \"outcome\": \"deny\", \"reason\": \"labels ['delete', 'production'] are denied by policy; no verification provided; blast radius 1 exceeds the maximum 0; labels ['production'] require human approval\", \"policy_hash\": \"93ed6508803b6992b38c8c49edd1b8a2b4bba1fb3f8396f7a4a2090df8110d30\"}, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"hash\": \"572e24c33cbfed67649850238cc2c581897221c320b8765de0c254a039a7f6dd\"}",
+      "spent_after": null
+    }
+  },
+  {
+    "name": "finding-below-minimum",
+    "policy": "default",
+    "action": {
+      "name": "rotate_key",
+      "asset": "svc-1",
+      "environment": "staging",
+      "kind": "maintenance"
+    },
+    "verdict": {
+      "survives": true,
+      "confidence": 0.95,
+      "evidence_quality": 0.9
+    },
+    "finding": {
+      "severity": "info"
+    },
+    "approved_by": null,
+    "ledger": null,
+    "context": null,
+    "advisor": null,
+    "judgement": null,
+    "clock": "2026-01-01T00:00:00+00:00",
+    "expected": {
+      "admitted": false,
+      "error": "action 'rotate_key' not admitted (deny): finding severity info is below the policy minimum low",
+      "line": "{\"seq\": 0, \"ts\": \"2026-01-01T00:00:00+00:00\", \"event_type\": \"action-admission\", \"payload\": {\"action\": \"rotate_key\", \"asset\": \"svc-1\", \"outcome\": \"deny\", \"reason\": \"finding severity info is below the policy minimum low\", \"policy_hash\": \"d4b1e82256361b394151acbb56eeef037b3b95d1b9484ee8a767863cebedc256\"}, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"hash\": \"6c69a88b1b22fafb2dbb926555a91445fa521b3344be8bb816f6314b2b6fb23e\"}",
+      "spent_after": null
+    }
+  },
+  {
+    "name": "finding-meets-minimum",
+    "policy": "default",
+    "action": {
+      "name": "rotate_key",
+      "asset": "svc-1",
+      "environment": "staging",
+      "kind": "maintenance"
+    },
+    "verdict": {
+      "survives": true,
+      "confidence": 0.95,
+      "evidence_quality": 0.9
+    },
+    "finding": {
+      "severity": "high"
+    },
+    "approved_by": null,
+    "ledger": null,
+    "context": null,
+    "advisor": null,
+    "judgement": null,
+    "clock": "2026-01-01T00:00:00+00:00",
+    "expected": {
+      "admitted": true,
+      "error": null,
+      "line": "{\"seq\": 0, \"ts\": \"2026-01-01T00:00:00+00:00\", \"event_type\": \"action-admission\", \"payload\": {\"action\": \"rotate_key\", \"asset\": \"svc-1\", \"outcome\": \"allow\", \"reason\": \"all policy checks passed\", \"policy_hash\": \"d4b1e82256361b394151acbb56eeef037b3b95d1b9484ee8a767863cebedc256\"}, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"hash\": \"427dcd3fc5324b2325e508a0aa7ebb8926a737f0b4000fe1ca90b8825d6b2f4f\"}",
+      "spent_after": null
+    }
+  },
+  {
+    "name": "ledger-deny",
+    "policy": "refunds",
+    "action": {
+      "name": "issue_refund",
+      "asset": "order-4821",
+      "environment": "staging",
+      "kind": "payment",
+      "cost_usd": 150.0
+    },
+    "verdict": null,
+    "finding": null,
+    "approved_by": null,
+    "ledger": {
+      "scope": "acme",
+      "spent": 9900.0
+    },
+    "context": null,
+    "advisor": null,
+    "judgement": null,
+    "clock": "2026-01-01T00:00:00+00:00",
+    "expected": {
+      "admitted": false,
+      "error": "action 'issue_refund' not admitted (deny): spend $9,900.00 + $150.00 would exceed the spend limit $10,000.00",
+      "line": "{\"seq\": 0, \"ts\": \"2026-01-01T00:00:00+00:00\", \"event_type\": \"action-admission\", \"payload\": {\"action\": \"issue_refund\", \"asset\": \"order-4821\", \"outcome\": \"deny\", \"reason\": \"spend $9,900.00 + $150.00 would exceed the spend limit $10,000.00\", \"policy_hash\": \"ee2217a1b2c4e33e104169d7292602cbce9d508e55adebca2e16c4b04a83fc08\", \"cost_usd\": 150.0, \"spent_usd\": 9900.0, \"spend_scope\": \"acme\"}, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"hash\": \"4b2e72196c5aea20a86c47ec031bc540a751aabbfc32e4a0dab11335342b1c7a\"}",
+      "spent_after": 9900.0
+    }
+  },
+  {
+    "name": "ledger-allow",
+    "policy": "refunds",
+    "action": {
+      "name": "issue_refund",
+      "asset": "order-4821",
+      "environment": "staging",
+      "kind": "payment",
+      "cost_usd": 150.0
+    },
+    "verdict": null,
+    "finding": null,
+    "approved_by": null,
+    "ledger": {
+      "scope": "acme",
+      "spent": 100.0
+    },
+    "context": null,
+    "advisor": null,
+    "judgement": null,
+    "clock": "2026-01-01T00:00:00+00:00",
+    "expected": {
+      "admitted": true,
+      "error": null,
+      "line": "{\"seq\": 0, \"ts\": \"2026-01-01T00:00:00+00:00\", \"event_type\": \"action-admission\", \"payload\": {\"action\": \"issue_refund\", \"asset\": \"order-4821\", \"outcome\": \"allow\", \"reason\": \"all policy checks passed\", \"policy_hash\": \"ee2217a1b2c4e33e104169d7292602cbce9d508e55adebca2e16c4b04a83fc08\", \"cost_usd\": 150.0, \"spent_usd\": 100.0, \"spend_scope\": \"acme\"}, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"hash\": \"3ac4b0858a3de4329ab89f314d0bd3461156951dd68836597fa2e3a56551553c\"}",
+      "spent_after": 250.0
+    }
+  },
+  {
+    "name": "ledger-hold-spends-nothing",
+    "policy": "refunds",
+    "action": {
+      "name": "issue_refund",
+      "asset": "order-4821",
+      "environment": "staging",
+      "kind": "payment",
+      "cost_usd": 750.0
+    },
+    "verdict": null,
+    "finding": null,
+    "approved_by": null,
+    "ledger": {
+      "scope": "acme",
+      "spent": 100.0
+    },
+    "context": null,
+    "advisor": null,
+    "judgement": null,
+    "clock": "2026-01-01T00:00:00+00:00",
+    "expected": {
+      "admitted": false,
+      "error": "action 'issue_refund' not admitted (require_human): cost $750.00 exceeds the per-action limit $500.00",
+      "line": "{\"seq\": 0, \"ts\": \"2026-01-01T00:00:00+00:00\", \"event_type\": \"action-admission\", \"payload\": {\"action\": \"issue_refund\", \"asset\": \"order-4821\", \"outcome\": \"require_human\", \"reason\": \"cost $750.00 exceeds the per-action limit $500.00\", \"policy_hash\": \"ee2217a1b2c4e33e104169d7292602cbce9d508e55adebca2e16c4b04a83fc08\", \"cost_usd\": 750.0, \"spent_usd\": 100.0, \"spend_scope\": \"acme\"}, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"hash\": \"4b3100953635b84f590b312d90018e4de5678743f040b4415b1308d5e8b08fe3\"}",
+      "spent_after": 100.0
+    }
+  },
+  {
+    "name": "context",
+    "policy": "default",
+    "action": {
+      "name": "rotate_key",
+      "asset": "svc-1",
+      "environment": "staging",
+      "kind": "maintenance"
+    },
+    "verdict": {
+      "survives": true,
+      "confidence": 0.95,
+      "evidence_quality": 0.9
+    },
+    "finding": null,
+    "approved_by": null,
+    "ledger": null,
+    "context": {
+      "rule": "maintenance-window",
+      "principal": "agent-7",
+      "arguments": {
+        "key": "k-1",
+        "ttl": 3600
+      }
+    },
+    "advisor": null,
+    "judgement": null,
+    "clock": "2026-01-01T00:00:00+00:00",
+    "expected": {
+      "admitted": true,
+      "error": null,
+      "line": "{\"seq\": 0, \"ts\": \"2026-01-01T00:00:00+00:00\", \"event_type\": \"action-admission\", \"payload\": {\"action\": \"rotate_key\", \"asset\": \"svc-1\", \"outcome\": \"allow\", \"reason\": \"all policy checks passed\", \"policy_hash\": \"d4b1e82256361b394151acbb56eeef037b3b95d1b9484ee8a767863cebedc256\", \"context\": {\"rule\": \"maintenance-window\", \"principal\": \"agent-7\", \"arguments\": {\"key\": \"k-1\", \"ttl\": 3600}}}, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"hash\": \"383559a23399e456550dab9ae526e474b2778e25c8da26a8c91c382438187e16\"}",
+      "spent_after": null
+    }
+  },
+  {
+    "name": "advisor-escalates",
+    "policy": "default",
+    "action": {
+      "name": "rotate_key",
+      "asset": "svc-1",
+      "environment": "staging",
+      "kind": "maintenance"
+    },
+    "verdict": {
+      "survives": true,
+      "confidence": 0.95,
+      "evidence_quality": 0.9
+    },
+    "finding": null,
+    "approved_by": null,
+    "ledger": null,
+    "context": null,
+    "advisor": {
+      "advice": "deny"
+    },
+    "judgement": null,
+    "clock": "2026-01-01T00:00:00+00:00",
+    "expected": {
+      "admitted": false,
+      "error": "action 'rotate_key' not admitted (deny): control model escalated allow -> deny",
+      "line": "{\"seq\": 0, \"ts\": \"2026-01-01T00:00:00+00:00\", \"event_type\": \"action-admission\", \"payload\": {\"action\": \"rotate_key\", \"asset\": \"svc-1\", \"outcome\": \"deny\", \"reason\": \"control model escalated allow -> deny\", \"policy_hash\": \"d4b1e82256361b394151acbb56eeef037b3b95d1b9484ee8a767863cebedc256\", \"policy_outcome\": \"allow\", \"model_outcome\": \"deny\"}, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"hash\": \"122c9e4e4b7d8097cbd53ff715875ec872961df55c4c09ac3d99f9bc8b1caef5\"}",
+      "spent_after": null
+    }
+  },
+  {
+    "name": "advisor-holds",
+    "policy": "default",
+    "action": {
+      "name": "rotate_key",
+      "asset": "svc-1",
+      "environment": "staging",
+      "kind": "maintenance"
+    },
+    "verdict": {
+      "survives": true,
+      "confidence": 0.95,
+      "evidence_quality": 0.9
+    },
+    "finding": null,
+    "approved_by": null,
+    "ledger": null,
+    "context": null,
+    "advisor": {
+      "advice": "require_human"
+    },
+    "judgement": null,
+    "clock": "2026-01-01T00:00:00+00:00",
+    "expected": {
+      "admitted": false,
+      "error": "action 'rotate_key' not admitted (require_human): control model escalated allow -> require_human",
+      "line": "{\"seq\": 0, \"ts\": \"2026-01-01T00:00:00+00:00\", \"event_type\": \"action-admission\", \"payload\": {\"action\": \"rotate_key\", \"asset\": \"svc-1\", \"outcome\": \"require_human\", \"reason\": \"control model escalated allow -> require_human\", \"policy_hash\": \"d4b1e82256361b394151acbb56eeef037b3b95d1b9484ee8a767863cebedc256\", \"policy_outcome\": \"allow\", \"model_outcome\": \"require_human\"}, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"hash\": \"788855fbdde539ead24702fe1d8afe36d4fb81c5d002d6677384f6dc6409ed56\"}",
+      "spent_after": null
+    }
+  },
+  {
+    "name": "advisor-agrees",
+    "policy": "default",
+    "action": {
+      "name": "rotate_key",
+      "asset": "svc-1",
+      "environment": "staging",
+      "kind": "maintenance"
+    },
+    "verdict": {
+      "survives": true,
+      "confidence": 0.95,
+      "evidence_quality": 0.9
+    },
+    "finding": null,
+    "approved_by": null,
+    "ledger": null,
+    "context": null,
+    "advisor": {
+      "advice": "allow"
+    },
+    "judgement": null,
+    "clock": "2026-01-01T00:00:00+00:00",
+    "expected": {
+      "admitted": true,
+      "error": null,
+      "line": "{\"seq\": 0, \"ts\": \"2026-01-01T00:00:00+00:00\", \"event_type\": \"action-admission\", \"payload\": {\"action\": \"rotate_key\", \"asset\": \"svc-1\", \"outcome\": \"allow\", \"reason\": \"control model advised allow; no escalation\", \"policy_hash\": \"d4b1e82256361b394151acbb56eeef037b3b95d1b9484ee8a767863cebedc256\", \"policy_outcome\": \"allow\", \"model_outcome\": \"allow\"}, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"hash\": \"d25628c85bf1abf1498f9803aa2ab4ca3448c4387be73757cb6a2180352dc24c\"}",
+      "spent_after": null
+    }
+  },
+  {
+    "name": "advisor-unrecognised",
+    "policy": "default",
+    "action": {
+      "name": "rotate_key",
+      "asset": "svc-1",
+      "environment": "staging",
+      "kind": "maintenance"
+    },
+    "verdict": {
+      "survives": true,
+      "confidence": 0.95,
+      "evidence_quality": 0.9
+    },
+    "finding": null,
+    "approved_by": null,
+    "ledger": null,
+    "context": null,
+    "advisor": {
+      "advice": "probably fine"
+    },
+    "judgement": null,
+    "clock": "2026-01-01T00:00:00+00:00",
+    "expected": {
+      "admitted": true,
+      "error": null,
+      "line": "{\"seq\": 0, \"ts\": \"2026-01-01T00:00:00+00:00\", \"event_type\": \"action-admission\", \"payload\": {\"action\": \"rotate_key\", \"asset\": \"svc-1\", \"outcome\": \"allow\", \"reason\": \"all policy checks passed\", \"policy_hash\": \"d4b1e82256361b394151acbb56eeef037b3b95d1b9484ee8a767863cebedc256\", \"policy_outcome\": \"allow\", \"model_outcome\": null}, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"hash\": \"090c7fae3b55d8e749f3f1401e399f8d28de2a5e7b02e3610c093da71632844f\"}",
+      "spent_after": null
+    }
+  },
+  {
+    "name": "advisor-silent",
+    "policy": "default",
+    "action": {
+      "name": "rotate_key",
+      "asset": "svc-1",
+      "environment": "staging",
+      "kind": "maintenance"
+    },
+    "verdict": {
+      "survives": true,
+      "confidence": 0.95,
+      "evidence_quality": 0.9
+    },
+    "finding": null,
+    "approved_by": null,
+    "ledger": null,
+    "context": null,
+    "advisor": {
+      "advice": null
+    },
+    "judgement": null,
+    "clock": "2026-01-01T00:00:00+00:00",
+    "expected": {
+      "admitted": true,
+      "error": null,
+      "line": "{\"seq\": 0, \"ts\": \"2026-01-01T00:00:00+00:00\", \"event_type\": \"action-admission\", \"payload\": {\"action\": \"rotate_key\", \"asset\": \"svc-1\", \"outcome\": \"allow\", \"reason\": \"all policy checks passed\", \"policy_hash\": \"d4b1e82256361b394151acbb56eeef037b3b95d1b9484ee8a767863cebedc256\", \"policy_outcome\": \"allow\", \"model_outcome\": null}, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"hash\": \"090c7fae3b55d8e749f3f1401e399f8d28de2a5e7b02e3610c093da71632844f\"}",
+      "spent_after": null
+    }
+  },
+  {
+    "name": "advisor-fails",
+    "policy": "default",
+    "action": {
+      "name": "rotate_key",
+      "asset": "svc-1",
+      "environment": "staging",
+      "kind": "maintenance"
+    },
+    "verdict": {
+      "survives": true,
+      "confidence": 0.95,
+      "evidence_quality": 0.9
+    },
+    "finding": null,
+    "approved_by": null,
+    "ledger": null,
+    "context": null,
+    "advisor": {
+      "raises": "model endpoint unavailable"
+    },
+    "judgement": null,
+    "clock": "2026-01-01T00:00:00+00:00",
+    "expected": {
+      "admitted": true,
+      "error": null,
+      "line": "{\"seq\": 0, \"ts\": \"2026-01-01T00:00:00+00:00\", \"event_type\": \"action-admission\", \"payload\": {\"action\": \"rotate_key\", \"asset\": \"svc-1\", \"outcome\": \"allow\", \"reason\": \"control model unavailable; policy decision stands\", \"policy_hash\": \"d4b1e82256361b394151acbb56eeef037b3b95d1b9484ee8a767863cebedc256\", \"policy_outcome\": \"allow\", \"model_outcome\": null}, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"hash\": \"8f53ee0a5e3e72b129b8cd6bbc76b4e831ed48267ede4052fbaf2e656a6031ca\"}",
+      "spent_after": null
+    }
+  },
+  {
+    "name": "advisor-not-asked-on-hold",
+    "policy": "default",
+    "action": {
+      "name": "rotate_key",
+      "asset": "svc-1",
+      "environment": "production",
+      "kind": "maintenance"
+    },
+    "verdict": {
+      "survives": true,
+      "confidence": 0.95,
+      "evidence_quality": 0.9
+    },
+    "finding": null,
+    "approved_by": null,
+    "ledger": null,
+    "context": null,
+    "advisor": {
+      "advice": "deny"
+    },
+    "judgement": null,
+    "clock": "2026-01-01T00:00:00+00:00",
+    "expected": {
+      "admitted": false,
+      "error": "action 'rotate_key' not admitted (require_human): labels ['production'] require human approval",
+      "line": "{\"seq\": 0, \"ts\": \"2026-01-01T00:00:00+00:00\", \"event_type\": \"action-admission\", \"payload\": {\"action\": \"rotate_key\", \"asset\": \"svc-1\", \"outcome\": \"require_human\", \"reason\": \"labels ['production'] require human approval\", \"policy_hash\": \"d4b1e82256361b394151acbb56eeef037b3b95d1b9484ee8a767863cebedc256\", \"policy_outcome\": \"require_human\", \"model_outcome\": null}, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"hash\": \"7ed735bf05b1fa12f9cd3a3b887ec6f818aa6ab17a30d478bdb75cc8b346e196\"}",
+      "spent_after": null
+    }
+  },
+  {
+    "name": "judge-holds",
+    "policy": "default",
+    "action": {
+      "name": "rotate_key",
+      "asset": "svc-1",
+      "environment": "staging",
+      "kind": "maintenance"
+    },
+    "verdict": {
+      "survives": true,
+      "confidence": 0.95,
+      "evidence_quality": 0.9
+    },
+    "finding": null,
+    "approved_by": null,
+    "ledger": null,
+    "context": null,
+    "advisor": null,
+    "judgement": {
+      "tool": "rotate_key",
+      "verdict": "hold",
+      "reason": "rotates a production secret",
+      "model": "judge-model-v1",
+      "source": "model",
+      "error": null
+    },
+    "clock": "2026-01-01T00:00:00+00:00",
+    "expected": {
+      "admitted": false,
+      "error": "action 'rotate_key' not admitted (require_human): tool-call judge escalated allow -> require_human: rotates a production secret",
+      "line": "{\"seq\": 0, \"ts\": \"2026-01-01T00:00:00+00:00\", \"event_type\": \"action-admission\", \"payload\": {\"action\": \"rotate_key\", \"asset\": \"svc-1\", \"outcome\": \"require_human\", \"reason\": \"tool-call judge escalated allow -> require_human: rotates a production secret\", \"policy_hash\": \"d4b1e82256361b394151acbb56eeef037b3b95d1b9484ee8a767863cebedc256\", \"judge\": {\"model\": \"judge-model-v1\", \"verdict\": \"hold\", \"reason\": \"rotates a production secret\", \"cache_hit\": false, \"source\": \"model\"}}, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"hash\": \"ef039b0b0b4f5db9463ba06e526a16d709c7c94e4f7f333f00fc7a95a1e6ff44\"}",
+      "spent_after": null
+    }
+  },
+  {
+    "name": "judge-denies",
+    "policy": "default",
+    "action": {
+      "name": "rotate_key",
+      "asset": "svc-1",
+      "environment": "staging",
+      "kind": "maintenance"
+    },
+    "verdict": {
+      "survives": true,
+      "confidence": 0.95,
+      "evidence_quality": 0.9
+    },
+    "finding": null,
+    "approved_by": null,
+    "ledger": null,
+    "context": null,
+    "advisor": null,
+    "judgement": {
+      "tool": "rotate_key",
+      "verdict": "deny",
+      "reason": "the key is shared with billing",
+      "model": "judge-model-v1",
+      "source": "model",
+      "error": null
+    },
+    "clock": "2026-01-01T00:00:00+00:00",
+    "expected": {
+      "admitted": false,
+      "error": "action 'rotate_key' not admitted (deny): tool-call judge escalated allow -> deny: the key is shared with billing",
+      "line": "{\"seq\": 0, \"ts\": \"2026-01-01T00:00:00+00:00\", \"event_type\": \"action-admission\", \"payload\": {\"action\": \"rotate_key\", \"asset\": \"svc-1\", \"outcome\": \"deny\", \"reason\": \"tool-call judge escalated allow -> deny: the key is shared with billing\", \"policy_hash\": \"d4b1e82256361b394151acbb56eeef037b3b95d1b9484ee8a767863cebedc256\", \"judge\": {\"model\": \"judge-model-v1\", \"verdict\": \"deny\", \"reason\": \"the key is shared with billing\", \"cache_hit\": false, \"source\": \"model\"}}, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"hash\": \"acab1fe8f7925b5e786816c009724e50be5de20c5006350bf2164c4c5022a836\"}",
+      "spent_after": null
+    }
+  },
+  {
+    "name": "judge-allows",
+    "policy": "default",
+    "action": {
+      "name": "rotate_key",
+      "asset": "svc-1",
+      "environment": "staging",
+      "kind": "maintenance"
+    },
+    "verdict": {
+      "survives": true,
+      "confidence": 0.95,
+      "evidence_quality": 0.9
+    },
+    "finding": null,
+    "approved_by": null,
+    "ledger": null,
+    "context": null,
+    "advisor": null,
+    "judgement": {
+      "tool": "rotate_key",
+      "verdict": "allow",
+      "reason": "routine rotation",
+      "model": "judge-model-v1",
+      "source": "model",
+      "error": null
+    },
+    "clock": "2026-01-01T00:00:00+00:00",
+    "expected": {
+      "admitted": true,
+      "error": null,
+      "line": "{\"seq\": 0, \"ts\": \"2026-01-01T00:00:00+00:00\", \"event_type\": \"action-admission\", \"payload\": {\"action\": \"rotate_key\", \"asset\": \"svc-1\", \"outcome\": \"allow\", \"reason\": \"tool-call judge advised allow; no escalation\", \"policy_hash\": \"d4b1e82256361b394151acbb56eeef037b3b95d1b9484ee8a767863cebedc256\", \"judge\": {\"model\": \"judge-model-v1\", \"verdict\": \"allow\", \"reason\": \"routine rotation\", \"cache_hit\": false, \"source\": \"model\"}}, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"hash\": \"27d3f35e487aa4798c0f8f12e089e0d190fcf51ef294bc0b172863ce887a28c4\"}",
+      "spent_after": null
+    }
+  },
+  {
+    "name": "judge-allows-cached",
+    "policy": "default",
+    "action": {
+      "name": "rotate_key",
+      "asset": "svc-1",
+      "environment": "staging",
+      "kind": "maintenance"
+    },
+    "verdict": {
+      "survives": true,
+      "confidence": 0.95,
+      "evidence_quality": 0.9
+    },
+    "finding": null,
+    "approved_by": null,
+    "ledger": null,
+    "context": null,
+    "advisor": null,
+    "judgement": {
+      "tool": "rotate_key",
+      "verdict": "allow",
+      "reason": "routine rotation",
+      "model": "judge-model-v1",
+      "source": "cache",
+      "error": null
+    },
+    "clock": "2026-01-01T00:00:00+00:00",
+    "expected": {
+      "admitted": true,
+      "error": null,
+      "line": "{\"seq\": 0, \"ts\": \"2026-01-01T00:00:00+00:00\", \"event_type\": \"action-admission\", \"payload\": {\"action\": \"rotate_key\", \"asset\": \"svc-1\", \"outcome\": \"allow\", \"reason\": \"tool-call judge advised allow (cached); no escalation\", \"policy_hash\": \"d4b1e82256361b394151acbb56eeef037b3b95d1b9484ee8a767863cebedc256\", \"judge\": {\"model\": \"judge-model-v1\", \"verdict\": \"allow\", \"reason\": \"routine rotation\", \"cache_hit\": true, \"source\": \"cache\"}}, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"hash\": \"76f78361b0beb0336e6476880c2834f15c8a882ec4a7807ac924b229e49223b2\"}",
+      "spent_after": null
+    }
+  },
+  {
+    "name": "judge-read-only",
+    "policy": "default",
+    "action": {
+      "name": "rotate_key",
+      "asset": "svc-1",
+      "environment": "staging",
+      "kind": "maintenance"
+    },
+    "verdict": {
+      "survives": true,
+      "confidence": 0.95,
+      "evidence_quality": 0.9
+    },
+    "finding": null,
+    "approved_by": null,
+    "ledger": null,
+    "context": null,
+    "advisor": null,
+    "judgement": {
+      "tool": "rotate_key",
+      "verdict": "allow",
+      "reason": "read-only tool",
+      "model": "",
+      "source": "read_only",
+      "error": null
+    },
+    "clock": "2026-01-01T00:00:00+00:00",
+    "expected": {
+      "admitted": true,
+      "error": null,
+      "line": "{\"seq\": 0, \"ts\": \"2026-01-01T00:00:00+00:00\", \"event_type\": \"action-admission\", \"payload\": {\"action\": \"rotate_key\", \"asset\": \"svc-1\", \"outcome\": \"allow\", \"reason\": \"tool-call judge skipped: read-only tool\", \"policy_hash\": \"d4b1e82256361b394151acbb56eeef037b3b95d1b9484ee8a767863cebedc256\", \"judge\": {\"model\": \"\", \"verdict\": \"allow\", \"reason\": \"read-only tool\", \"cache_hit\": false, \"source\": \"read_only\"}}, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"hash\": \"700e85863a1474d811875e6167f04b72f2e6e97447b63c24e64b23f7049b0571\"}",
+      "spent_after": null
+    }
+  },
+  {
+    "name": "judge-error",
+    "policy": "default",
+    "action": {
+      "name": "rotate_key",
+      "asset": "svc-1",
+      "environment": "staging",
+      "kind": "maintenance"
+    },
+    "verdict": {
+      "survives": true,
+      "confidence": 0.95,
+      "evidence_quality": 0.9
+    },
+    "finding": null,
+    "approved_by": null,
+    "ledger": null,
+    "context": null,
+    "advisor": null,
+    "judgement": {
+      "tool": "rotate_key",
+      "verdict": "hold",
+      "reason": "the judge failed closed",
+      "model": "",
+      "source": "error",
+      "error": "timeout after 10s"
+    },
+    "clock": "2026-01-01T00:00:00+00:00",
+    "expected": {
+      "admitted": false,
+      "error": "action 'rotate_key' not admitted (require_human): tool-call judge escalated allow -> require_human: the judge failed closed",
+      "line": "{\"seq\": 0, \"ts\": \"2026-01-01T00:00:00+00:00\", \"event_type\": \"action-admission\", \"payload\": {\"action\": \"rotate_key\", \"asset\": \"svc-1\", \"outcome\": \"require_human\", \"reason\": \"tool-call judge escalated allow -> require_human: the judge failed closed\", \"policy_hash\": \"d4b1e82256361b394151acbb56eeef037b3b95d1b9484ee8a767863cebedc256\", \"judge\": {\"model\": \"\", \"verdict\": \"hold\", \"reason\": \"the judge failed closed\", \"cache_hit\": false, \"source\": \"error\", \"error\": \"timeout after 10s\"}}, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"hash\": \"1d61d64c0b7a3710cefb3cdd01afcf761dc2f4b2165066e8ac3777e8d994239b\"}",
+      "spent_after": null
+    }
+  },
+  {
+    "name": "judge-budget",
+    "policy": "default",
+    "action": {
+      "name": "rotate_key",
+      "asset": "svc-1",
+      "environment": "staging",
+      "kind": "maintenance"
+    },
+    "verdict": {
+      "survives": true,
+      "confidence": 0.95,
+      "evidence_quality": 0.9
+    },
+    "finding": null,
+    "approved_by": null,
+    "ledger": null,
+    "context": null,
+    "advisor": null,
+    "judgement": {
+      "tool": "rotate_key",
+      "verdict": "hold",
+      "reason": "judge call budget spent",
+      "model": "",
+      "source": "budget",
+      "error": null
+    },
+    "clock": "2026-01-01T00:00:00+00:00",
+    "expected": {
+      "admitted": false,
+      "error": "action 'rotate_key' not admitted (require_human): tool-call judge escalated allow -> require_human: judge call budget spent",
+      "line": "{\"seq\": 0, \"ts\": \"2026-01-01T00:00:00+00:00\", \"event_type\": \"action-admission\", \"payload\": {\"action\": \"rotate_key\", \"asset\": \"svc-1\", \"outcome\": \"require_human\", \"reason\": \"tool-call judge escalated allow -> require_human: judge call budget spent\", \"policy_hash\": \"d4b1e82256361b394151acbb56eeef037b3b95d1b9484ee8a767863cebedc256\", \"judge\": {\"model\": \"\", \"verdict\": \"hold\", \"reason\": \"judge call budget spent\", \"cache_hit\": false, \"source\": \"budget\"}}, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"hash\": \"b91eb7c8438dc9ddfe04ccda957d548e2b7548319ffad1c47ce3d7ce18a19a35\"}",
+      "spent_after": null
+    }
+  },
+  {
+    "name": "judge-unknown-word",
+    "policy": "default",
+    "action": {
+      "name": "rotate_key",
+      "asset": "svc-1",
+      "environment": "staging",
+      "kind": "maintenance"
+    },
+    "verdict": {
+      "survives": true,
+      "confidence": 0.95,
+      "evidence_quality": 0.9
+    },
+    "finding": null,
+    "approved_by": null,
+    "ledger": null,
+    "context": null,
+    "advisor": null,
+    "judgement": {
+      "tool": "rotate_key",
+      "verdict": "maybe",
+      "reason": "unclear",
+      "model": "judge-model-v1",
+      "source": "model",
+      "error": null
+    },
+    "clock": "2026-01-01T00:00:00+00:00",
+    "expected": {
+      "admitted": false,
+      "error": "action 'rotate_key' not admitted (require_human): tool-call judge escalated allow -> require_human: unclear",
+      "line": "{\"seq\": 0, \"ts\": \"2026-01-01T00:00:00+00:00\", \"event_type\": \"action-admission\", \"payload\": {\"action\": \"rotate_key\", \"asset\": \"svc-1\", \"outcome\": \"require_human\", \"reason\": \"tool-call judge escalated allow -> require_human: unclear\", \"policy_hash\": \"d4b1e82256361b394151acbb56eeef037b3b95d1b9484ee8a767863cebedc256\", \"judge\": {\"model\": \"judge-model-v1\", \"verdict\": \"maybe\", \"reason\": \"unclear\", \"cache_hit\": false, \"source\": \"model\"}}, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"hash\": \"f0f2d341e5925c081868220e13b6dd99261610c0594a7e109d6bef567635b24a\"}",
+      "spent_after": null
+    }
+  },
+  {
+    "name": "judge-cannot-widen",
+    "policy": "default",
+    "action": {
+      "name": "rotate_key",
+      "asset": "svc-1",
+      "environment": "production",
+      "kind": "maintenance"
+    },
+    "verdict": {
+      "survives": true,
+      "confidence": 0.95,
+      "evidence_quality": 0.9
+    },
+    "finding": null,
+    "approved_by": null,
+    "ledger": null,
+    "context": null,
+    "advisor": null,
+    "judgement": {
+      "tool": "rotate_key",
+      "verdict": "allow",
+      "reason": "looks fine",
+      "model": "judge-model-v1",
+      "source": "model",
+      "error": null
+    },
+    "clock": "2026-01-01T00:00:00+00:00",
+    "expected": {
+      "admitted": false,
+      "error": "action 'rotate_key' not admitted (require_human): labels ['production'] require human approval; tool-call judge advised allow; no escalation",
+      "line": "{\"seq\": 0, \"ts\": \"2026-01-01T00:00:00+00:00\", \"event_type\": \"action-admission\", \"payload\": {\"action\": \"rotate_key\", \"asset\": \"svc-1\", \"outcome\": \"require_human\", \"reason\": \"labels ['production'] require human approval; tool-call judge advised allow; no escalation\", \"policy_hash\": \"d4b1e82256361b394151acbb56eeef037b3b95d1b9484ee8a767863cebedc256\", \"judge\": {\"model\": \"judge-model-v1\", \"verdict\": \"allow\", \"reason\": \"looks fine\", \"cache_hit\": false, \"source\": \"model\"}}, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"hash\": \"3c875e08137b520762b7c8fb2d75b5861bda1222a9f2e7ff70ebc7700e6ccbe9\"}",
+      "spent_after": null
+    }
+  },
+  {
+    "name": "advisor-and-judge",
+    "policy": "default",
+    "action": {
+      "name": "rotate_key",
+      "asset": "svc-1",
+      "environment": "staging",
+      "kind": "maintenance"
+    },
+    "verdict": {
+      "survives": true,
+      "confidence": 0.95,
+      "evidence_quality": 0.9
+    },
+    "finding": null,
+    "approved_by": null,
+    "ledger": null,
+    "context": null,
+    "advisor": {
+      "advice": "allow"
+    },
+    "judgement": {
+      "tool": "rotate_key",
+      "verdict": "hold",
+      "reason": "unusual hour",
+      "model": "judge-model-v1",
+      "source": "model",
+      "error": null
+    },
+    "clock": "2026-01-01T00:00:00+00:00",
+    "expected": {
+      "admitted": false,
+      "error": "action 'rotate_key' not admitted (require_human): control model advised allow; no escalation; tool-call judge escalated allow -> require_human: unusual hour",
+      "line": "{\"seq\": 0, \"ts\": \"2026-01-01T00:00:00+00:00\", \"event_type\": \"action-admission\", \"payload\": {\"action\": \"rotate_key\", \"asset\": \"svc-1\", \"outcome\": \"require_human\", \"reason\": \"control model advised allow; no escalation; tool-call judge escalated allow -> require_human: unusual hour\", \"policy_hash\": \"d4b1e82256361b394151acbb56eeef037b3b95d1b9484ee8a767863cebedc256\", \"policy_outcome\": \"allow\", \"model_outcome\": \"allow\", \"judge\": {\"model\": \"judge-model-v1\", \"verdict\": \"hold\", \"reason\": \"unusual hour\", \"cache_hit\": false, \"source\": \"model\"}}, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"hash\": \"b7767f60123f7938f2e7ea92d35d72af584c5f17eb304e7a8cd51750e25274c5\"}",
+      "spent_after": null
+    }
+  },
+  {
+    "name": "sandbox-missing",
+    "policy": "sandbox",
+    "action": {
+      "name": "fetch",
+      "asset": "https://example.com",
+      "tags": [
+        "network"
+      ]
+    },
+    "verdict": null,
+    "finding": null,
+    "approved_by": null,
+    "ledger": null,
+    "context": null,
+    "advisor": null,
+    "judgement": null,
+    "clock": "2026-01-01T00:00:00+00:00",
+    "expected": {
+      "admitted": false,
+      "error": "action 'fetch' not admitted (deny): labels ['network'] require sandboxed execution (the action carries no 'sandboxed' tag)",
+      "line": "{\"seq\": 0, \"ts\": \"2026-01-01T00:00:00+00:00\", \"event_type\": \"action-admission\", \"payload\": {\"action\": \"fetch\", \"asset\": \"https://example.com\", \"outcome\": \"deny\", \"reason\": \"labels ['network'] require sandboxed execution (the action carries no 'sandboxed' tag)\", \"policy_hash\": \"924417a48c223f63697b31abd0325cabf364e15703674d882148d695120c6f44\"}, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"hash\": \"a91f266844cfdd279fd7e3b9d69d9d7de8266195dab09e69e390be90595a91ea\"}",
+      "spent_after": null
+    }
+  },
+  {
+    "name": "sandbox-present",
+    "policy": "sandbox",
+    "action": {
+      "name": "fetch",
+      "asset": "https://example.com",
+      "tags": [
+        "network",
+        "sandboxed"
+      ]
+    },
+    "verdict": null,
+    "finding": null,
+    "approved_by": null,
+    "ledger": null,
+    "context": null,
+    "advisor": null,
+    "judgement": null,
+    "clock": "2026-01-01T00:00:00+00:00",
+    "expected": {
+      "admitted": true,
+      "error": null,
+      "line": "{\"seq\": 0, \"ts\": \"2026-01-01T00:00:00+00:00\", \"event_type\": \"action-admission\", \"payload\": {\"action\": \"fetch\", \"asset\": \"https://example.com\", \"outcome\": \"allow\", \"reason\": \"all policy checks passed\", \"policy_hash\": \"924417a48c223f63697b31abd0325cabf364e15703674d882148d695120c6f44\"}, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"hash\": \"9cf95ac0e26d109971a13c69d2e80fd25f612d31b1edd84288ed03280f438cdc\"}",
+      "spent_after": null
+    }
+  },
+  {
+    "name": "floats-policy",
+    "policy": "floats",
+    "action": {
+      "name": "ping",
+      "asset": "svc-1",
+      "environment": "staging"
+    },
+    "verdict": {
+      "survives": true,
+      "confidence": 0.5,
+      "evidence_quality": 0.5
+    },
+    "finding": null,
+    "approved_by": null,
+    "ledger": null,
+    "context": null,
+    "advisor": null,
+    "judgement": null,
+    "clock": "2026-01-01T00:00:00+00:00",
+    "expected": {
+      "admitted": true,
+      "error": null,
+      "line": "{\"seq\": 0, \"ts\": \"2026-01-01T00:00:00+00:00\", \"event_type\": \"action-admission\", \"payload\": {\"action\": \"ping\", \"asset\": \"svc-1\", \"outcome\": \"allow\", \"reason\": \"all policy checks passed\", \"policy_hash\": \"293d0a33e2c975b5f575eef9cc46906d18e635ed6c4fede7647ea7c34dfcc85f\"}, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"hash\": \"7be23aab6fa83daf7d59ed7be414657c03af76eeedf232dbcb59ecd6672e3fa1\"}",
+      "spent_after": null
+    }
+  },
+  {
+    "name": "quoted-labels",
+    "policy": "quoted-labels",
+    "action": {
+      "name": "act",
+      "asset": "svc-1",
+      "tags": [
+        "caf\u00e9"
+      ]
+    },
+    "verdict": null,
+    "finding": null,
+    "approved_by": null,
+    "ledger": null,
+    "context": null,
+    "advisor": null,
+    "judgement": null,
+    "clock": "2026-01-01T00:00:00+00:00",
+    "expected": {
+      "admitted": false,
+      "error": "action 'act' not admitted (deny): labels ['caf\u00e9'] are denied by policy",
+      "line": "{\"seq\": 0, \"ts\": \"2026-01-01T00:00:00+00:00\", \"event_type\": \"action-admission\", \"payload\": {\"action\": \"act\", \"asset\": \"svc-1\", \"outcome\": \"deny\", \"reason\": \"labels ['caf\\u00e9'] are denied by policy\", \"policy_hash\": \"af43cd6bec630b2881e4ba4c02bfe6f10323e6885f1cf90e7239ec244d8e9ea7\"}, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"hash\": \"eeab76408a0e87a76d09777e694dc143f8e36934720ebcf21fb7e2508f0e3e98\"}",
+      "spent_after": null
+    }
+  }
+]

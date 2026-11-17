@@ -1,0 +1,9 @@
+{
+  "ok": true,
+  "source": "",
+  "policy_hash": "d4b1e82256361b394151acbb56eeef037b3b95d1b9484ee8a767863cebedc256",
+  "findings": [],
+  "notes": [
+    "no environments or kinds declared: add a `governs:` block to the file or pass --environments / --kinds, and each is checked for a rule"
+  ]
+}

@@ -1,0 +1,4 @@
+{
+  "key": "max_blast_radius",
+  "message": "at max_blast_radius: expected an integer, got a number"
+}

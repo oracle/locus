@@ -1,0 +1,365 @@
+[
+  {
+    "action": {
+      "name": "issue_refund",
+      "kind": "payment",
+      "environment": "staging",
+      "cost_usd": 120.0
+    },
+    "verdict": null,
+    "finding": null,
+    "spent_usd": 0.0,
+    "expected": {
+      "outcome": "allow",
+      "checks": [],
+      "reason": "all policy checks passed",
+      "rules": [
+        {
+          "rule": "deny_for",
+          "outcome": null,
+          "detail": "no label of the action is denied"
+        },
+        {
+          "rule": "require_sandbox_for",
+          "outcome": null,
+          "detail": "no label of the action requires a sandbox"
+        },
+        {
+          "rule": "min_severity",
+          "outcome": null,
+          "detail": "no finding supplied"
+        },
+        {
+          "rule": "require_verification_score",
+          "outcome": null,
+          "detail": "the bar is 0: no verification required"
+        },
+        {
+          "rule": "max_blast_radius",
+          "outcome": null,
+          "detail": "blast radius 1 is within the maximum 1"
+        },
+        {
+          "rule": "require_human_over_usd",
+          "outcome": null,
+          "detail": "cost $120.00 is within the per-action limit $500.00"
+        },
+        {
+          "rule": "spend_limit_usd",
+          "outcome": null,
+          "detail": "spend $0.00 + $120.00 stays within the spend limit $10,000.00"
+        },
+        {
+          "rule": "require_human_for",
+          "outcome": null,
+          "detail": "no label of the action requires human approval"
+        }
+      ]
+    }
+  },
+  {
+    "action": {
+      "name": "issue_refund",
+      "kind": "payment",
+      "environment": "staging",
+      "cost_usd": 750.0
+    },
+    "verdict": null,
+    "finding": null,
+    "spent_usd": 0.0,
+    "expected": {
+      "outcome": "require_human",
+      "checks": [
+        "cost $750.00 exceeds the per-action limit $500.00"
+      ],
+      "reason": "cost $750.00 exceeds the per-action limit $500.00",
+      "rules": [
+        {
+          "rule": "deny_for",
+          "outcome": null,
+          "detail": "no label of the action is denied"
+        },
+        {
+          "rule": "require_sandbox_for",
+          "outcome": null,
+          "detail": "no label of the action requires a sandbox"
+        },
+        {
+          "rule": "min_severity",
+          "outcome": null,
+          "detail": "no finding supplied"
+        },
+        {
+          "rule": "require_verification_score",
+          "outcome": null,
+          "detail": "the bar is 0: no verification required"
+        },
+        {
+          "rule": "max_blast_radius",
+          "outcome": null,
+          "detail": "blast radius 1 is within the maximum 1"
+        },
+        {
+          "rule": "require_human_over_usd",
+          "outcome": "require_human",
+          "detail": "cost $750.00 exceeds the per-action limit $500.00"
+        },
+        {
+          "rule": "spend_limit_usd",
+          "outcome": null,
+          "detail": "spend $0.00 + $750.00 stays within the spend limit $10,000.00"
+        },
+        {
+          "rule": "require_human_for",
+          "outcome": null,
+          "detail": "no label of the action requires human approval"
+        }
+      ]
+    }
+  },
+  {
+    "action": {
+      "name": "issue_refund",
+      "kind": "payment",
+      "environment": "staging",
+      "cost_usd": 150.0
+    },
+    "verdict": null,
+    "finding": null,
+    "spent_usd": 9900.0,
+    "expected": {
+      "outcome": "deny",
+      "checks": [
+        "spend $9,900.00 + $150.00 would exceed the spend limit $10,000.00"
+      ],
+      "reason": "spend $9,900.00 + $150.00 would exceed the spend limit $10,000.00",
+      "rules": [
+        {
+          "rule": "deny_for",
+          "outcome": null,
+          "detail": "no label of the action is denied"
+        },
+        {
+          "rule": "require_sandbox_for",
+          "outcome": null,
+          "detail": "no label of the action requires a sandbox"
+        },
+        {
+          "rule": "min_severity",
+          "outcome": null,
+          "detail": "no finding supplied"
+        },
+        {
+          "rule": "require_verification_score",
+          "outcome": null,
+          "detail": "the bar is 0: no verification required"
+        },
+        {
+          "rule": "max_blast_radius",
+          "outcome": null,
+          "detail": "blast radius 1 is within the maximum 1"
+        },
+        {
+          "rule": "require_human_over_usd",
+          "outcome": null,
+          "detail": "cost $150.00 is within the per-action limit $500.00"
+        },
+        {
+          "rule": "spend_limit_usd",
+          "outcome": "deny",
+          "detail": "spend $9,900.00 + $150.00 would exceed the spend limit $10,000.00"
+        },
+        {
+          "rule": "require_human_for",
+          "outcome": null,
+          "detail": "no label of the action requires human approval"
+        }
+      ]
+    }
+  },
+  {
+    "action": {
+      "name": "issue_refund",
+      "kind": "payment",
+      "environment": "staging",
+      "tags": [
+        "high_value"
+      ],
+      "cost_usd": 120.0
+    },
+    "verdict": null,
+    "finding": null,
+    "spent_usd": 0.0,
+    "expected": {
+      "outcome": "require_human",
+      "checks": [
+        "labels ['high_value'] require human approval"
+      ],
+      "reason": "labels ['high_value'] require human approval",
+      "rules": [
+        {
+          "rule": "deny_for",
+          "outcome": null,
+          "detail": "no label of the action is denied"
+        },
+        {
+          "rule": "require_sandbox_for",
+          "outcome": null,
+          "detail": "no label of the action requires a sandbox"
+        },
+        {
+          "rule": "min_severity",
+          "outcome": null,
+          "detail": "no finding supplied"
+        },
+        {
+          "rule": "require_verification_score",
+          "outcome": null,
+          "detail": "the bar is 0: no verification required"
+        },
+        {
+          "rule": "max_blast_radius",
+          "outcome": null,
+          "detail": "blast radius 1 is within the maximum 1"
+        },
+        {
+          "rule": "require_human_over_usd",
+          "outcome": null,
+          "detail": "cost $120.00 is within the per-action limit $500.00"
+        },
+        {
+          "rule": "spend_limit_usd",
+          "outcome": null,
+          "detail": "spend $0.00 + $120.00 stays within the spend limit $10,000.00"
+        },
+        {
+          "rule": "require_human_for",
+          "outcome": "require_human",
+          "detail": "labels ['high_value'] require human approval"
+        }
+      ]
+    }
+  },
+  {
+    "action": {
+      "name": "issue_refund",
+      "kind": "payment",
+      "environment": "production",
+      "cost_usd": 750.0
+    },
+    "verdict": null,
+    "finding": null,
+    "spent_usd": 0.0,
+    "expected": {
+      "outcome": "require_human",
+      "checks": [
+        "cost $750.00 exceeds the per-action limit $500.00",
+        "labels ['production'] require human approval"
+      ],
+      "reason": "cost $750.00 exceeds the per-action limit $500.00; labels ['production'] require human approval",
+      "rules": [
+        {
+          "rule": "deny_for",
+          "outcome": null,
+          "detail": "no label of the action is denied"
+        },
+        {
+          "rule": "require_sandbox_for",
+          "outcome": null,
+          "detail": "no label of the action requires a sandbox"
+        },
+        {
+          "rule": "min_severity",
+          "outcome": null,
+          "detail": "no finding supplied"
+        },
+        {
+          "rule": "require_verification_score",
+          "outcome": null,
+          "detail": "the bar is 0: no verification required"
+        },
+        {
+          "rule": "max_blast_radius",
+          "outcome": null,
+          "detail": "blast radius 1 is within the maximum 1"
+        },
+        {
+          "rule": "require_human_over_usd",
+          "outcome": "require_human",
+          "detail": "cost $750.00 exceeds the per-action limit $500.00"
+        },
+        {
+          "rule": "spend_limit_usd",
+          "outcome": null,
+          "detail": "spend $0.00 + $750.00 stays within the spend limit $10,000.00"
+        },
+        {
+          "rule": "require_human_for",
+          "outcome": "require_human",
+          "detail": "labels ['production'] require human approval"
+        }
+      ]
+    }
+  },
+  {
+    "action": {
+      "name": "issue_refund",
+      "kind": "payment",
+      "environment": "staging",
+      "cost_usd": 1234.5
+    },
+    "verdict": null,
+    "finding": null,
+    "spent_usd": 8900.25,
+    "expected": {
+      "outcome": "deny",
+      "checks": [
+        "cost $1,234.50 exceeds the per-action limit $500.00",
+        "spend $8,900.25 + $1,234.50 would exceed the spend limit $10,000.00"
+      ],
+      "reason": "cost $1,234.50 exceeds the per-action limit $500.00; spend $8,900.25 + $1,234.50 would exceed the spend limit $10,000.00",
+      "rules": [
+        {
+          "rule": "deny_for",
+          "outcome": null,
+          "detail": "no label of the action is denied"
+        },
+        {
+          "rule": "require_sandbox_for",
+          "outcome": null,
+          "detail": "no label of the action requires a sandbox"
+        },
+        {
+          "rule": "min_severity",
+          "outcome": null,
+          "detail": "no finding supplied"
+        },
+        {
+          "rule": "require_verification_score",
+          "outcome": null,
+          "detail": "the bar is 0: no verification required"
+        },
+        {
+          "rule": "max_blast_radius",
+          "outcome": null,
+          "detail": "blast radius 1 is within the maximum 1"
+        },
+        {
+          "rule": "require_human_over_usd",
+          "outcome": "require_human",
+          "detail": "cost $1,234.50 exceeds the per-action limit $500.00"
+        },
+        {
+          "rule": "spend_limit_usd",
+          "outcome": "deny",
+          "detail": "spend $8,900.25 + $1,234.50 would exceed the spend limit $10,000.00"
+        },
+        {
+          "rule": "require_human_for",
+          "outcome": null,
+          "detail": "no label of the action requires human approval"
+        }
+      ]
+    }
+  }
+]

@@ -1,0 +1,319 @@
+[
+  {
+    "action": {
+      "name": "run",
+      "kind": "shell",
+      "environment": "dev"
+    },
+    "verdict": null,
+    "finding": null,
+    "spent_usd": 0.0,
+    "expected": {
+      "outcome": "deny",
+      "checks": [
+        "labels ['shell'] require sandboxed execution (the action carries no 'sandboxed' tag)",
+        "no verification provided",
+        "blast radius 1 exceeds the maximum 0"
+      ],
+      "reason": "labels ['shell'] require sandboxed execution (the action carries no 'sandboxed' tag); no verification provided; blast radius 1 exceeds the maximum 0",
+      "rules": [
+        {
+          "rule": "deny_for",
+          "outcome": null,
+          "detail": "no label of the action is denied"
+        },
+        {
+          "rule": "require_sandbox_for",
+          "outcome": "deny",
+          "detail": "labels ['shell'] require sandboxed execution (the action carries no 'sandboxed' tag)"
+        },
+        {
+          "rule": "min_severity",
+          "outcome": null,
+          "detail": "no finding supplied"
+        },
+        {
+          "rule": "require_verification_score",
+          "outcome": "require_human",
+          "detail": "no verification provided"
+        },
+        {
+          "rule": "max_blast_radius",
+          "outcome": "require_human",
+          "detail": "blast radius 1 exceeds the maximum 0"
+        },
+        {
+          "rule": "require_human_over_usd",
+          "outcome": null,
+          "detail": "cost $0.00 is within the per-action limit $100.00"
+        },
+        {
+          "rule": "spend_limit_usd",
+          "outcome": null,
+          "detail": "spend $0.00 + $0.00 stays within the spend limit $50.00"
+        },
+        {
+          "rule": "require_human_for",
+          "outcome": null,
+          "detail": "no label of the action requires human approval"
+        }
+      ]
+    }
+  },
+  {
+    "action": {
+      "name": "run",
+      "kind": "shell",
+      "environment": "dev",
+      "tags": [
+        "sandboxed"
+      ],
+      "blast_radius": 0
+    },
+    "verdict": {
+      "survives": true,
+      "confidence": 1.0,
+      "evidence_quality": 1.0
+    },
+    "finding": null,
+    "spent_usd": 0.0,
+    "expected": {
+      "outcome": "require_human",
+      "checks": [
+        "verification confidence 1.00 is below the bar 1.50"
+      ],
+      "reason": "verification confidence 1.00 is below the bar 1.50",
+      "rules": [
+        {
+          "rule": "deny_for",
+          "outcome": null,
+          "detail": "no label of the action is denied"
+        },
+        {
+          "rule": "require_sandbox_for",
+          "outcome": null,
+          "detail": "labels ['shell'] require sandboxed execution and the action is sandboxed"
+        },
+        {
+          "rule": "min_severity",
+          "outcome": null,
+          "detail": "no finding supplied"
+        },
+        {
+          "rule": "require_verification_score",
+          "outcome": "require_human",
+          "detail": "verification confidence 1.00 is below the bar 1.50"
+        },
+        {
+          "rule": "max_blast_radius",
+          "outcome": null,
+          "detail": "blast radius 0 is within the maximum 0"
+        },
+        {
+          "rule": "require_human_over_usd",
+          "outcome": null,
+          "detail": "cost $0.00 is within the per-action limit $100.00"
+        },
+        {
+          "rule": "spend_limit_usd",
+          "outcome": null,
+          "detail": "spend $0.00 + $0.00 stays within the spend limit $50.00"
+        },
+        {
+          "rule": "require_human_for",
+          "outcome": null,
+          "detail": "no label of the action requires human approval"
+        }
+      ]
+    }
+  },
+  {
+    "action": {
+      "name": "drop_table",
+      "kind": "delete",
+      "environment": "production"
+    },
+    "verdict": null,
+    "finding": null,
+    "spent_usd": 0.0,
+    "expected": {
+      "outcome": "deny",
+      "checks": [
+        "labels ['delete', 'production'] are denied by policy",
+        "no verification provided",
+        "blast radius 1 exceeds the maximum 0",
+        "labels ['production'] require human approval"
+      ],
+      "reason": "labels ['delete', 'production'] are denied by policy; no verification provided; blast radius 1 exceeds the maximum 0; labels ['production'] require human approval",
+      "rules": [
+        {
+          "rule": "deny_for",
+          "outcome": "deny",
+          "detail": "labels ['delete', 'production'] are denied by policy"
+        },
+        {
+          "rule": "require_sandbox_for",
+          "outcome": null,
+          "detail": "no label of the action requires a sandbox"
+        },
+        {
+          "rule": "min_severity",
+          "outcome": null,
+          "detail": "no finding supplied"
+        },
+        {
+          "rule": "require_verification_score",
+          "outcome": "require_human",
+          "detail": "no verification provided"
+        },
+        {
+          "rule": "max_blast_radius",
+          "outcome": "require_human",
+          "detail": "blast radius 1 exceeds the maximum 0"
+        },
+        {
+          "rule": "require_human_over_usd",
+          "outcome": null,
+          "detail": "cost $0.00 is within the per-action limit $100.00"
+        },
+        {
+          "rule": "spend_limit_usd",
+          "outcome": null,
+          "detail": "spend $0.00 + $0.00 stays within the spend limit $50.00"
+        },
+        {
+          "rule": "require_human_for",
+          "outcome": "require_human",
+          "detail": "labels ['production'] require human approval"
+        }
+      ]
+    }
+  },
+  {
+    "action": {
+      "name": "buy",
+      "kind": "payment",
+      "environment": "dev",
+      "blast_radius": 0,
+      "cost_usd": 60.0
+    },
+    "verdict": null,
+    "finding": null,
+    "spent_usd": 0.0,
+    "expected": {
+      "outcome": "deny",
+      "checks": [
+        "no verification provided",
+        "spend $0.00 + $60.00 would exceed the spend limit $50.00"
+      ],
+      "reason": "no verification provided; spend $0.00 + $60.00 would exceed the spend limit $50.00",
+      "rules": [
+        {
+          "rule": "deny_for",
+          "outcome": null,
+          "detail": "no label of the action is denied"
+        },
+        {
+          "rule": "require_sandbox_for",
+          "outcome": null,
+          "detail": "no label of the action requires a sandbox"
+        },
+        {
+          "rule": "min_severity",
+          "outcome": null,
+          "detail": "no finding supplied"
+        },
+        {
+          "rule": "require_verification_score",
+          "outcome": "require_human",
+          "detail": "no verification provided"
+        },
+        {
+          "rule": "max_blast_radius",
+          "outcome": null,
+          "detail": "blast radius 0 is within the maximum 0"
+        },
+        {
+          "rule": "require_human_over_usd",
+          "outcome": null,
+          "detail": "cost $60.00 is within the per-action limit $100.00"
+        },
+        {
+          "rule": "spend_limit_usd",
+          "outcome": "deny",
+          "detail": "spend $0.00 + $60.00 would exceed the spend limit $50.00"
+        },
+        {
+          "rule": "require_human_for",
+          "outcome": null,
+          "detail": "no label of the action requires human approval"
+        }
+      ]
+    }
+  },
+  {
+    "action": {
+      "name": "scan",
+      "environment": "dev",
+      "blast_radius": 0
+    },
+    "verdict": {
+      "survives": true,
+      "confidence": 1.0,
+      "evidence_quality": 1.0
+    },
+    "finding": {
+      "severity": "critical"
+    },
+    "spent_usd": 0.0,
+    "expected": {
+      "outcome": "require_human",
+      "checks": [
+        "verification confidence 1.00 is below the bar 1.50"
+      ],
+      "reason": "verification confidence 1.00 is below the bar 1.50",
+      "rules": [
+        {
+          "rule": "deny_for",
+          "outcome": null,
+          "detail": "no label of the action is denied"
+        },
+        {
+          "rule": "require_sandbox_for",
+          "outcome": null,
+          "detail": "no label of the action requires a sandbox"
+        },
+        {
+          "rule": "min_severity",
+          "outcome": null,
+          "detail": "finding severity critical meets the minimum high"
+        },
+        {
+          "rule": "require_verification_score",
+          "outcome": "require_human",
+          "detail": "verification confidence 1.00 is below the bar 1.50"
+        },
+        {
+          "rule": "max_blast_radius",
+          "outcome": null,
+          "detail": "blast radius 0 is within the maximum 0"
+        },
+        {
+          "rule": "require_human_over_usd",
+          "outcome": null,
+          "detail": "cost $0.00 is within the per-action limit $100.00"
+        },
+        {
+          "rule": "spend_limit_usd",
+          "outcome": null,
+          "detail": "spend $0.00 + $0.00 stays within the spend limit $50.00"
+        },
+        {
+          "rule": "require_human_for",
+          "outcome": null,
+          "detail": "no label of the action requires human approval"
+        }
+      ]
+    }
+  }
+]

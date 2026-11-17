@@ -1,0 +1,43 @@
+{
+  "base": "signed",
+  "description": "record 1 edited and every later hash recomputed; chain consistent, signatures and head not",
+  "checks": [
+    {
+      "keys": [
+        "2ee9031729dbde22"
+      ],
+      "expected_head": "cb97fd9c19d4ab95ae1e3007f4c4d8c1a31aa4efdb91c608d6122011622a218c",
+      "report": {
+        "ok": false,
+        "records": 4,
+        "head": "5fdeb3e93fcef596c402125d2bb732212b5ea3ff5431f7a18f568e8e39c15111",
+        "broken_at": null,
+        "problem": "the chain does not end at the expected head: records were cut off"
+      }
+    },
+    {
+      "keys": [
+        "2ee9031729dbde22"
+      ],
+      "expected_head": null,
+      "report": {
+        "ok": false,
+        "records": 4,
+        "head": "5fdeb3e93fcef596c402125d2bb732212b5ea3ff5431f7a18f568e8e39c15111",
+        "broken_at": 1,
+        "problem": "record 1 is not signed by a trusted key"
+      }
+    },
+    {
+      "keys": null,
+      "expected_head": null,
+      "report": {
+        "ok": true,
+        "records": 4,
+        "head": "5fdeb3e93fcef596c402125d2bb732212b5ea3ff5431f7a18f568e8e39c15111",
+        "broken_at": null,
+        "problem": ""
+      }
+    }
+  ]
+}
