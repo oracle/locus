@@ -33,15 +33,6 @@ policy.
   keeps the two configs in step; `tests/integration/test_litellm_gateway_platform.py`
   drives the guardrail and the cache against a live gateway.
 
-### Fixed
-
-- `python -m locus.runner` reports every command the harness ran as a
-  `harness.exec` record. The runtime drained its exec records by replacing
-  the list the harness appends to, so only commands before the first tool
-  completion ever reached the gateway.
-
-### Changed
-
 - **Docs: notebook 78's captured output, concept pages that link their
   notebooks, the environment-variable reference completed from the source,
   and `Example:` sections on `BaseStore`, `InMemoryStore`, `register_provider`
@@ -50,6 +41,13 @@ policy.
   and control-layer pages link the notebooks that exercise them (#486); the
   variables the SDK reads but the page omitted are listed (#487); the four
   docstrings carry an example a test executes (#488, #489).
+
+### Fixed
+
+- `python -m locus.runner` reports every command the harness ran as a
+  `harness.exec` record. The runtime drained its exec records by replacing
+  the list the harness appends to, so only commands before the first tool
+  completion ever reached the gateway.
 
 ## [5.6.0] - 2026-11-17
 
