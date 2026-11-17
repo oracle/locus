@@ -221,6 +221,12 @@ async def _rows(dsn: str, table: str, columns: str) -> list[Any]:
         await conn.close()
 
 
+#: The ttl the Postgres at-rest cases save with: long enough that a first save
+#: which also creates the table does not expire before the asserts, short
+#: enough to wait out.
+SHORT_TTL = 1.5
+
+
 @pytest.mark.requires_postgres
 @pytest.mark.skipif(_postgres_dsn() is None, reason="POSTGRES_USER / POSTGRES_DB not set")
 @pytest.mark.usefixtures("_drop_postgres_tables")
@@ -230,10 +236,13 @@ class TestPostgresAtRest:
 
         dsn = _postgres_dsn()
         assert dsn is not None
+        # The first save on a fresh table runs the DDL under an advisory lock
+        # and stamps the expiry before it, so a sub-second ttl can run out
+        # under CI load before the asserts read the row back.
         cp = postgresql_checkpointer(
             dsn=dsn,
             table_name="locus_prod_adapter",
-            ttl=0.3,
+            ttl=SHORT_TTL,
             encryption=EncryptedSerializer(KEY),
             scope=SCOPE,
         )
@@ -260,7 +269,7 @@ class TestPostgresAtRest:
             assert await other.load("t") is None, "no scope: a miss, not a leak"
             await other.close()
 
-            await asyncio.sleep(0.4)
+            await asyncio.sleep(SHORT_TTL * 1.5)
             assert await cp.load("t") is None
             assert await cp.expire() == 1
             left = await _rows(dsn, "locus_prod_adapter", "thread_id")
@@ -372,7 +381,11 @@ class TestPostgresAtRest:
             await conn.close()
 
         cp = PgCheckpointer(
-            dsn, table="locus_prod_old", ttl=0.3, encryption=EncryptedSerializer(KEY), scope=SCOPE
+            dsn,
+            table="locus_prod_old",
+            ttl=SHORT_TTL,  # see test_adapter_rows_hold_ciphertext_expiry_and_the_scoped_key
+            encryption=EncryptedSerializer(KEY),
+            scope=SCOPE,
         )
         try:
             await cp.save(_secret_state().with_iteration(1), "t", "cp-0")
@@ -387,7 +400,7 @@ class TestPostgresAtRest:
             assert await plain.list_threads() == []
             assert await plain.list_threads(scope=SCOPE) == ["t"]
             await plain.close()
-            await asyncio.sleep(0.4)
+            await asyncio.sleep(SHORT_TTL * 1.5)
             assert await cp.load("t") is None
             assert await cp.expire() == 1
         finally:
