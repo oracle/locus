@@ -41,7 +41,6 @@ policy.
   the maintainers have not run. `tests/unit/test_litellm_gateway_example.py`
   keeps the two configs in step; `tests/integration/test_litellm_gateway_platform.py`
   drives the guardrail and the cache against a live gateway.
-
 - **Docs: notebook 78's captured output, concept pages that link their
   notebooks, the environment-variable reference completed from the source,
   and `Example:` sections on `BaseStore`, `InMemoryStore`, `register_provider`
@@ -53,6 +52,11 @@ policy.
 
 ### Fixed
 
+- **`LOCUS_FRONTIER_MODEL` turns the knob it names.** The rogue-agent challenge
+  showed the variable in its banner but ran a pinned model; `build_agent()`
+  now uses it, and the default is the model it pinned. The `locus.loop`
+  and `FallbackChain.last_tier` deprecation warnings name 6.0.0 as their
+  removal release instead of a past or missing one.
 - `python -m locus.runner` reports every command the harness ran as a
   `harness.exec` record. The runtime drained its exec records by replacing
   the list the harness appends to, so only commands before the first tool
