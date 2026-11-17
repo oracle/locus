@@ -13,6 +13,7 @@ Available stores:
 - RedisVectorStore: Redis Query Engine (Redis Stack / Redis 8) VECTOR fields
 - MongoDBAtlasVectorStore: MongoDB Atlas Vector Search
 - PineconeVectorStore: Pinecone serverless indexes
+- HeatWaveVectorStore: MySQL HeatWave (and MySQL 9+) VECTOR columns
 
 Stores that blend vector similarity with lexical relevance implement
 ``HybridSearchable``; ``supports_hybrid_search(store)`` tells a caller which.
@@ -54,6 +55,7 @@ __all__ = [
     "RedisVectorStore",
     "MongoDBAtlasVectorStore",
     "PineconeVectorStore",
+    "HeatWaveVectorStore",
 ]
 
 
@@ -64,6 +66,7 @@ _LAZY_STORES = {
     "RedisVectorStore": "locus.rag.stores.redis",
     "MongoDBAtlasVectorStore": "locus.rag.stores.mongodb",
     "PineconeVectorStore": "locus.rag.stores.pinecone",
+    "HeatWaveVectorStore": "locus.rag.stores.heatwave",
 }
 
 

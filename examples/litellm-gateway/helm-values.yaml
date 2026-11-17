@@ -1,7 +1,7 @@
 # LiteLLM AI Gateway — sample Kubernetes values for fronting providers.
 #
 # Pairs with the official LiteLLM Helm chart:
-#   ghcr.io/berriai/litellm-helm
+#   oci://ghcr.io/berriai/litellm-helm
 #   https://github.com/BerriAI/litellm/tree/main/deploy/charts/litellm-helm
 #
 # Deploy with:
@@ -18,13 +18,27 @@
 #   kubectl -n litellm create secret generic litellm-master \
 #     --from-literal=LITELLM_MASTER_KEY="$(openssl rand -hex 32)"
 #
-#   # 3. Install / upgrade the chart.
-#   helm repo add litellm oci://ghcr.io/berriai/litellm-helm
-#   helm -n litellm upgrade --install gateway litellm/litellm \
-#     --values examples/litellm-gateway/helm-values.yaml
+#   # 3. Credentials of the external Postgres named under ``db`` below.
+#   kubectl -n litellm create secret generic litellm-db \
+#     --from-literal=username=litellm --from-literal=password="..."
+#
+#   # 4. Install / upgrade the chart, mounting config.yaml from this
+#   #    directory as the gateway's config.
+#   helm -n litellm upgrade --install gateway oci://ghcr.io/berriai/litellm-helm \
+#     --values examples/litellm-gateway/helm-values.yaml \
+#     --set-file proxy_config=examples/litellm-gateway/config.yaml
 #
 # Locus services in the same cluster then point at:
 #   http://gateway-litellm.litellm.svc.cluster.local:4000
+#
+# For the response cache and the OpenTelemetry callback, mount
+# config.platform.yaml instead and add a Secret with REDIS_URL and
+# OTEL_EXPORTER_OTLP_ENDPOINT to ``environmentSecrets``.
+#
+# Both ``helm lint`` and ``helm template`` pass with these values
+# (chart 1.109.1); an install on a cluster is not something the Locus
+# maintainers have verified — docs/how-to/litellm-gateway.md has the
+# sequence to do so.
 
 # ---------------------------------------------------------------------------
 # Image / replicas
@@ -37,12 +51,10 @@ image:
 replicaCount: 2
 
 # ---------------------------------------------------------------------------
-# Inline config — alternatively mount the contents of config.yaml from
-# this directory via a ConfigMap. The Helm chart accepts either.
+# Inline config — pass the contents of config.yaml (or
+# config.platform.yaml) with --set-file, as above; the chart puts it in a
+# ConfigMap mounted at /etc/litellm/config.yaml.
 # ---------------------------------------------------------------------------
-# Set proxy_config to the contents of config.yaml. When using --set-file
-# you can reference the sibling file directly:
-#   --set-file proxy_config=examples/litellm-gateway/config.yaml
 # proxy_config: |
 #   model_list:
 #     - model_name: gpt-4o
@@ -52,12 +64,17 @@ replicaCount: 2
 
 # ---------------------------------------------------------------------------
 # Environment — provider credentials + master key sourced from secrets.
+# The chart exports every key of each listed Secret as an environment
+# variable, which config.yaml reads via os.environ/<NAME>.
 # ---------------------------------------------------------------------------
-envFrom:
-- secretRef:
-    name: provider-credentials
-- secretRef:
-    name: litellm-master
+environmentSecrets:
+- provider-credentials
+- litellm-master
+
+# The chart's own PROXY_MASTER_KEY, read from the same secret so the
+# migration job and the gateway agree on the admin key.
+masterkeySecretName: litellm-master
+masterkeySecretKey: LITELLM_MASTER_KEY
 
 # ---------------------------------------------------------------------------
 # Resources — sized for a small platform tier. Adjust to traffic.
@@ -82,14 +99,15 @@ service:
 
 # ---------------------------------------------------------------------------
 # Postgres — required for persistent virtual keys + spend logs in
-# production. The chart bundles an option to provision it; the form
-# below points at an external Postgres instance.
+# production. ``deployStandalone: false`` keeps the chart from bundling
+# its own Postgres; the gateway connects to the external instance named
+# here with the credentials in the ``litellm-db`` Secret.
 # ---------------------------------------------------------------------------
 db:
   useExisting: true
-  endpoint: postgres.your-platform.svc.cluster.local:5432
+  deployStandalone: false
+  endpoint: postgres.your-platform.svc.cluster.local
   database: litellm
-  url: postgresql://litellm:$(POSTGRES_PASSWORD)@$(DB_HOST)/$(DB_DATABASE)
   secret:
     name: litellm-db
     usernameKey: username

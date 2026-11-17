@@ -22,6 +22,42 @@ policy.
   gate's verdict as Markdown with one table row per failed check, for a
   pull-request comment, the way `eval diff` and `eval summary` already
   render with `--markdown`. The exit code is still the gate's verdict. (#484)
+- **`HeatWaveVectorStore` — MySQL HeatWave vector store** (#299). Documents
+  live in one InnoDB table with a `VECTOR(n)` column, a `JSON` metadata
+  column and a `FULLTEXT` index on the content; the store mirrors
+  `OracleVectorStore`'s surface (`add`, `add_batch`, `get`, `delete`,
+  `search`, `count`, `clear`, `close`) plus `hybrid_search`, which blends
+  `DISTANCE()` similarity with `MATCH ... AGAINST` relevance client-side the
+  way the Elasticsearch store does. It probes the server once: HeatWave
+  MySQL computes and orders by `DISTANCE()` on the server
+  (`server_side_distance=True`); community MySQL 9+ has the `VECTOR` type
+  but no `DISTANCE()`, so the store fetches up to `candidate_limit` rows and
+  ranks them here. Metadata filters are `JSON_EXTRACT` equality predicates
+  with the path and the value bound as parameters. Blocking driver calls run
+  on worker threads (`asyncio.to_thread`), so the pooled connections never
+  bind to an event loop. New `heatwave` extra (the same
+  `mysql-connector-python` the `mysql` checkpoint extra installs), lazy
+  export from `locus.rag.stores`, docs rows and a HeatWave vs community
+  MySQL section, and the shared conformance suite behind `HEATWAVE_DSN`.
+
+### Changed
+
+- **LiteLLM gateway example: the platform pieces the how-to promised are
+  wired (#269).** `examples/litellm-gateway/` gains `config.platform.yaml`
+  — the gateway of `config.yaml` plus the OpenTelemetry callback and the
+  Redis response cache; `docker-compose.yml` selects it when `REDIS_URL` is
+  set and starts a redis sidecar under the `cache` profile, with the
+  Langfuse variables passed through for the alternative callback. Both
+  configs carry an in-process PII guardrail (LiteLLM's content filter masks
+  US SSNs and card numbers before the upstream call; Presidio is documented
+  as the alternative). `helm-values.yaml` now uses the keys the chart reads
+  (`environmentSecrets` instead of the ignored `envFrom`, the master key
+  from the same Secret, an external Postgres without the bundled
+  StatefulSet). The how-to gains Observability, Caching and Guardrails
+  sections and the sequence to verify the Helm install on a cluster, which
+  the maintainers have not run. `tests/unit/test_litellm_gateway_example.py`
+  keeps the two configs in step; `tests/integration/test_litellm_gateway_platform.py`
+  drives the guardrail and the cache against a live gateway.
 - **`RequestClassifier` and `ProtocolPicker`, the router's two seams.**
   `Router(classifier=...)` takes any `async classify(text) -> GoalFrame` in
   place of the extractor agent, which is now wrapped in
@@ -29,9 +65,6 @@ policy.
   `CognitiveCompiler(protocol_picker=...)` takes any `ProtocolPicker`, of
   which `LLMProtocolPicker` is the one that ships. Behaviour is unchanged
   by default. (#342)
-
-### Changed
-
 - **Router: LOW-complexity requests go to `direct_response` before any
   goal gate.** A frame at `Complexity.LOW` whose risk is within
   `direct_response`'s `risk_max` compiles to `direct_response` whatever its
@@ -54,6 +87,11 @@ policy.
 
 ### Fixed
 
+- **`LOCUS_FRONTIER_MODEL` turns the knob it names.** The rogue-agent challenge
+  showed the variable in its banner but ran a pinned model; `build_agent()`
+  now uses it, and the default is the model it pinned. The `locus.loop`
+  and `FallbackChain.last_tier` deprecation warnings name 6.0.0 as their
+  removal release instead of a past or missing one.
 - `python -m locus.runner` reports every command the harness ran as a
   `harness.exec` record. The runtime drained its exec records by replacing
   the list the harness appends to, so only commands before the first tool

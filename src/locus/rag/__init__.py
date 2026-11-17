@@ -16,7 +16,8 @@ Vector Stores (persist and search vectors):
 - ChromaVectorStore: Chroma (embedded or server)
 - OracleVectorStore: Oracle Database 26ai with the native VECTOR type
 - MilvusVectorStore, WeaviateVectorStore, ElasticsearchVectorStore,
-  RedisVectorStore, MongoDBAtlasVectorStore, PineconeVectorStore
+  RedisVectorStore, MongoDBAtlasVectorStore, PineconeVectorStore,
+  HeatWaveVectorStore
 
 Rerankers (reorder candidates by relevance):
 - CrossEncoderReranker: local sentence-transformers cross-encoder (offline)
@@ -159,6 +160,7 @@ __all__ = [
     "RedisVectorStore",
     "MongoDBAtlasVectorStore",
     "PineconeVectorStore",
+    "HeatWaveVectorStore",
     # Oracle ingestion (lazy)
     "OracleADBLoader",
     "OracleInDBChunker",
@@ -248,6 +250,7 @@ def __getattr__(name: str) -> Any:
         "RedisVectorStore",
         "MongoDBAtlasVectorStore",
         "PineconeVectorStore",
+        "HeatWaveVectorStore",
     ):
         from locus.rag import stores
 
