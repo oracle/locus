@@ -3366,6 +3366,9 @@ e2b = [
 elasticsearch = [
     { name = "elasticsearch" },
 ]
+encryption = [
+    { name = "cryptography" },
+]
 functions = [
     { name = "fdk" },
 ]
@@ -3531,6 +3534,7 @@ requires-dist = [
     { name = "cohere", marker = "extra == 'rerank'", specifier = ">=5.0" },
     { name = "cohere", marker = "extra == 'sdk'", specifier = ">=5.0" },
     { name = "cryptography", marker = "extra == 'audit'", specifier = ">=42" },
+    { name = "cryptography", marker = "extra == 'encryption'", specifier = ">=42" },
     { name = "cryptography", marker = "extra == 'dev'", specifier = ">=42" },
     { name = "daytona", marker = "extra == 'daytona'", specifier = ">=0.100" },
     { name = "dbos", marker = "extra == 'dbos'", specifier = ">=2.0" },
@@ -3642,7 +3646,7 @@ requires-dist = [
     { name = "weaviate-client", marker = "extra == 'rag'", specifier = ">=4.16" },
     { name = "weaviate-client", marker = "extra == 'weaviate'", specifier = ">=4.16" },
 ]
-provides-extras = ["openai", "anthropic", "oci", "llm", "telemetry", "mcp", "server", "deploy", "functions", "redis", "postgresql", "mysql", "opensearch", "s3", "browser", "audit", "temporal", "gemini", "dbos", "openshell", "oci-sandbox", "ssh", "oci-container", "e2b", "daytona", "mem0", "a2a-grpc", "oracledb", "agentmemory", "checkpoints", "pgvector", "qdrant", "chroma", "milvus", "weaviate", "elasticsearch", "redis-vector", "pinecone", "mongodb", "cohere", "rerank-local", "rerank", "rag", "sdk", "docs", "dev"]
+provides-extras = ["openai", "anthropic", "oci", "llm", "telemetry", "mcp", "server", "deploy", "functions", "redis", "postgresql", "mysql", "opensearch", "s3", "browser", "audit", "encryption", "temporal", "gemini", "dbos", "openshell", "oci-sandbox", "ssh", "oci-container", "e2b", "daytona", "mem0", "a2a-grpc", "oracledb", "agentmemory", "checkpoints", "pgvector", "qdrant", "chroma", "milvus", "weaviate", "elasticsearch", "redis-vector", "pinecone", "mongodb", "cohere", "rerank-local", "rerank", "rag", "sdk", "docs", "dev"]
 
 [[package]]
 name = "markdown"

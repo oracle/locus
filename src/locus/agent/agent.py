@@ -49,6 +49,7 @@ from locus.core.events import (
 )
 from locus.core.messages import Message, Role, ToolResult
 from locus.core.state import AgentState
+from locus.memory.scope import CheckpointScope
 from locus.models import get_model  # noqa: F401 — re-exported for test monkey-patches
 from locus.tools.decorator import Tool
 from locus.tools.executor import ToolExecutor
@@ -312,6 +313,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
         invocation_id: str | None = None,
         durability: DurabilityMode | None = None,
         from_checkpoint: str | None = None,
+        scope: CheckpointScope | None = None,
     ) -> AgentResult:
         """
         Run the agent asynchronously and return a single ``AgentResult``.
@@ -345,10 +347,23 @@ class Agent(AgentRuntimeMixin, BaseModel):
                 (``"sync"``, ``"async"`` or ``"exit"``; see :meth:`run`).
             from_checkpoint: Start the turn from the thread's state at this
                 checkpoint instead of its latest (see :meth:`run`).
+            scope: The application and user the thread belongs to
+                (:class:`~locus.memory.CheckpointScope`; see :meth:`run`).
 
         Returns:
             AgentResult with final message and state
         """
+        if scope is not None:
+            with scope.active():
+                return await self.arun(
+                    prompt,
+                    thread_id=thread_id,
+                    metadata=metadata,
+                    model_kwargs=model_kwargs,
+                    invocation_id=invocation_id,
+                    durability=durability,
+                    from_checkpoint=from_checkpoint,
+                )
         started_at = datetime.now(UTC)
         stop_reason: StopReason = "complete"
         final_message: str = ""
@@ -512,6 +527,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
         invocation_id: str | None = None,
         durability: DurabilityMode | None = None,
         from_checkpoint: str | None = None,
+        scope: CheckpointScope | None = None,
     ) -> AgentResult:
         """
         Run the agent synchronously.
@@ -538,6 +554,8 @@ class Agent(AgentRuntimeMixin, BaseModel):
                 (``"sync"``, ``"async"`` or ``"exit"``; see :meth:`run`).
             from_checkpoint: Start the turn from the thread's state at this
                 checkpoint instead of its latest (see :meth:`run`).
+            scope: The application and user the thread belongs to
+                (:class:`~locus.memory.CheckpointScope`; see :meth:`run`).
 
         Returns:
             AgentResult with final message and state
@@ -564,6 +582,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
                     invocation_id=invocation_id,
                     durability=durability,
                     from_checkpoint=from_checkpoint,
+                    scope=scope,
                 )
             finally:
                 # Background memory extraction is bound to this loop, which
@@ -878,6 +897,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
         invocation_id: str | None = None,
         durability: DurabilityMode | None = None,
         from_checkpoint: str | None = None,
+        scope: CheckpointScope | None = None,
     ) -> AsyncGenerator[LocusEvent, None]:
         """
         Resume agent execution after an interrupt, or a run that crashed.
@@ -939,6 +959,8 @@ class Agent(AgentRuntimeMixin, BaseModel):
                 ``thread_id``, replaying its recorded tool calls.
             durability: When the resumed segment writes its iteration
                 checkpoints (see :meth:`run`).
+            scope: The application and user the thread belongs to
+                (:class:`~locus.memory.CheckpointScope`; see :meth:`run`).
             from_checkpoint: Continue from the thread's state at this
                 checkpoint instead of its latest (one of
                 ``checkpointer.list(thread_id)``), as if the run had paused
@@ -968,6 +990,22 @@ class Agent(AgentRuntimeMixin, BaseModel):
             ...         async for event in agent.resume(answer):
             ...             handle(event)
         """
+        if scope is not None:
+            with scope.active():
+                async with contextlib.aclosing(
+                    self.resume(
+                        response,
+                        thread_id=thread_id,
+                        perform_dangling=perform_dangling,
+                        metadata=metadata,
+                        invocation_id=invocation_id,
+                        durability=durability,
+                        from_checkpoint=from_checkpoint,
+                    )
+                ) as scoped:
+                    async for event in scoped:
+                        yield event
+            return
         if invocation_id is not None:
             if thread_id is None:
                 raise RuntimeError(
@@ -1076,6 +1114,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
         model_kwargs: dict[str, Any] | None = None,
         invocation_id: str | None = None,
         durability: DurabilityMode | None = None,
+        scope: CheckpointScope | None = None,
     ) -> AsyncGenerator[LocusEvent, None]:
         """Continue a turn that stopped before it finished, from its checkpoint.
 
@@ -1118,6 +1157,8 @@ class Agent(AgentRuntimeMixin, BaseModel):
                 be this run (its ``run_id`` / the ``invocation_id`` it was
                 started with), or the call raises rather than continue
                 another turn.
+            scope: The application and user the thread belongs to
+                (:class:`~locus.memory.CheckpointScope`; see :meth:`run`).
             durability: When the continued segment writes its iteration
                 checkpoints (see :meth:`run`).
 
@@ -1131,6 +1172,20 @@ class Agent(AgentRuntimeMixin, BaseModel):
         Yields:
             LocusEvent instances for the rest of the turn.
         """
+        if scope is not None:
+            with scope.active():
+                async with contextlib.aclosing(
+                    self.continue_turn(
+                        thread_id,
+                        metadata=metadata,
+                        model_kwargs=model_kwargs,
+                        invocation_id=invocation_id,
+                        durability=durability,
+                    )
+                ) as scoped:
+                    async for event in scoped:
+                        yield event
+            return
         checkpointer = self.config.checkpointer
         if checkpointer is None:
             raise RuntimeError("continue_turn needs a checkpointer on the agent")

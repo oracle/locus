@@ -73,6 +73,7 @@ from locus.core.loops import warning_text
 from locus.core.media import has_images, strip_images, text_length
 from locus.core.messages import Message, Role, ToolCall, ToolResult
 from locus.core.state import AgentState, ReasoningStep, ToolExecution
+from locus.memory.scope import CheckpointScope
 from locus.models.base import ModelResponse
 from locus.observability.mechanisms import LEAKED_TOOL_CALLS, record_mechanism
 from locus.tools.context import _progress_sink
@@ -768,6 +769,7 @@ class AgentRuntimeMixin:
         invocation_id: str | None = None,
         durability: DurabilityMode | None = None,
         from_checkpoint: str | None = None,
+        scope: CheckpointScope | None = None,
     ) -> AsyncGenerator[LocusEvent, None]:
         """
         Run the agent with streaming events.
@@ -776,6 +778,12 @@ class AgentRuntimeMixin:
             prompt: User prompt to process
             thread_id: Optional thread ID for checkpointing
             metadata: Additional metadata for tools
+            scope: The application and user the thread belongs to
+                (:class:`~locus.memory.CheckpointScope`). Active for every
+                checkpointer call this run makes — the thread's checkpoints
+                and its tool-effect ledger are stored under the scope, and
+                the same ``thread_id`` under another scope is another thread.
+                Default: the scope the checkpointer was built with, if any.
             from_checkpoint: Start this turn from the thread's state at that
                 checkpoint instead of its latest (one of
                 ``checkpointer.list(thread_id)``). The turn's first lasting
@@ -810,6 +818,26 @@ class AgentRuntimeMixin:
         Yields:
             LocusEvent instances for each step
         """
+        if scope is not None:
+            # The scope is a context variable the checkpointer reads: active
+            # for the whole run, this generator's consumer included.
+            with scope.active():
+                async with contextlib.aclosing(
+                    self.run(
+                        prompt,
+                        thread_id=thread_id,
+                        metadata=metadata,
+                        model_kwargs=model_kwargs,
+                        stream_tokens=stream_tokens,
+                        invocation_id=invocation_id,
+                        durability=durability,
+                        from_checkpoint=from_checkpoint,
+                    )
+                ) as scoped:
+                    async for event in scoped:
+                        yield event
+            return
+
         self._initialize()
         # Attaching may list tools with the per-run MCP headers, so it sees
         # the full metadata; nothing it is given is persisted.

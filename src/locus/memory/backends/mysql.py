@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -25,6 +26,8 @@ if TYPE_CHECKING:
 
     from mysql.connector.aio.abstracts import MySQLConnectionAbstract
 
+
+logger = logging.getLogger(__name__)
 
 _SAFE_SQL_IDENTIFIER = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]{0,63}$")
 
@@ -323,11 +326,21 @@ class MySQLBackend(BaseModel):
         or ``UPDATE`` that rewrites the JSON array from the row's current
         value under the row lock (``JSON_ARRAY_INSERT`` / ``JSON_REMOVE``),
         so two processes saving to one thread never lose an entry.
+
+    Expiry:
+        ``save(..., expires_at=...)`` keeps the time in an ``expires_at``
+        column, added to an existing table with ``ALTER TABLE ... ADD
+        COLUMN`` on first use when it is missing (a role that may not alter
+        the table goes without the column, and the adapter's own record of
+        the time still applies); ``load`` and ``exists`` skip expired rows
+        and :meth:`expire` deletes them.
     """
 
     config: MySQLConfig = Field(default_factory=MySQLConfig)
     _pool: _MySQLConnectionPool | None = None
     _initialized: bool = False
+    #: Whether the table has the ``expires_at`` column (probed or added on first use).
+    _expires_column: bool = True
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -393,15 +406,52 @@ class MySQLBackend(BaseModel):
                         updated_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
                             ON UPDATE CURRENT_TIMESTAMP(6),
                         metadata JSON NULL,
+                        expires_at TIMESTAMP(6) NULL,
                         KEY `{index_name}` (updated_at DESC)
                     ) ENGINE=InnoDB
                       DEFAULT CHARSET={self.config.charset}
                       COLLATE={self.config.collation}
                     """
                 )
+                await self._ensure_expires_column(cur)
             await conn.commit()
 
         self._initialized = True
+
+    async def _ensure_expires_column(self, cur: Any) -> None:
+        """Add ``expires_at`` to a table from before checkpoints could expire, when allowed."""
+        await cur.execute(
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = DATABASE() AND table_name = %s AND column_name = 'expires_at'",
+            (self.config.table_name,),
+        )
+        row = await cur.fetchone()
+        count = row[0] if row else None
+        if not (isinstance(count, int) and count == 0):
+            # Present, or a driver that gave no answer: assume the layout above.
+            self._expires_column = True
+            return
+        try:
+            await cur.execute(
+                f"ALTER TABLE {self._quoted_table_name} ADD COLUMN expires_at TIMESTAMP(6) NULL"
+            )
+        except Exception:  # noqa: BLE001 — a role that may not alter the table
+            logger.warning(
+                "could not add the expires_at column to %s; checkpoint expiry is kept in "
+                "the documents only",
+                self.config.table_name,
+                exc_info=True,
+            )
+            self._expires_column = False
+            return
+        self._expires_column = True
+
+    @property
+    def _live(self) -> str:
+        """The expiry filter for a read, or nothing when the table has no column."""
+        if not self._expires_column:
+            return ""
+        return "AND (expires_at IS NULL OR expires_at > UTC_TIMESTAMP(6))"
 
     async def save(
         self,
@@ -409,6 +459,7 @@ class MySQLBackend(BaseModel):
         data: dict[str, Any],
         checkpoint_id: str | None = None,
         metadata: dict[str, Any] | None = None,
+        expires_at: datetime | None = None,
     ) -> str:
         """
         Save checkpoint to MySQL.
@@ -418,6 +469,7 @@ class MySQLBackend(BaseModel):
             data: Checkpoint data
             checkpoint_id: Optional checkpoint ID
             metadata: Optional metadata for querying
+            expires_at: When the row stops being loadable (``None``: never)
 
         Returns:
             Checkpoint ID
@@ -429,41 +481,46 @@ class MySQLBackend(BaseModel):
 
         checkpoint_id = checkpoint_id or uuid4().hex
         now = datetime.now(UTC).replace(tzinfo=None)
+        # ``metadata`` stays the last column: the column list grows ahead of it.
+        columns = "thread_id, checkpoint_id, data, created_at, updated_at"
+        placeholders = "%s, %s, %s, %s, %s"
+        updates = (
+            "checkpoint_id = VALUES(checkpoint_id), data = VALUES(data), "
+            "updated_at = VALUES(updated_at)"
+        )
+        params: list[Any] = [thread_id, checkpoint_id, json.dumps(data), now, now]
+        if self._expires_column:
+            columns += ", expires_at"
+            placeholders += ", %s"
+            updates += ", expires_at = VALUES(expires_at)"
+            params.append(expires_at.astimezone(UTC).replace(tzinfo=None) if expires_at else None)
+        columns += ", metadata"
+        placeholders += ", %s"
+        updates += ", metadata = VALUES(metadata)"
+        params.append(json.dumps(metadata or {}))
 
         async with pool.acquire() as conn:
             async with await conn.cursor() as cur:
                 await cur.execute(
                     f"""
-                    INSERT INTO {self._quoted_table_name}
-                        (thread_id, checkpoint_id, data, created_at, updated_at, metadata)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                    ON DUPLICATE KEY UPDATE
-                        checkpoint_id = VALUES(checkpoint_id),
-                        data = VALUES(data),
-                        updated_at = VALUES(updated_at),
-                        metadata = VALUES(metadata)
+                    INSERT INTO {self._quoted_table_name} ({columns})
+                    VALUES ({placeholders})
+                    ON DUPLICATE KEY UPDATE {updates}
                     """,
-                    (
-                        thread_id,
-                        checkpoint_id,
-                        json.dumps(data),
-                        now,
-                        now,
-                        json.dumps(metadata or {}),
-                    ),
+                    tuple(params),
                 )
             await conn.commit()
 
         return checkpoint_id
 
     async def load(self, thread_id: str) -> dict[str, Any] | None:
-        """Load checkpoint from MySQL."""
+        """Load checkpoint from MySQL (``None`` for a row whose ``expires_at`` has passed)."""
         await self._ensure_table()
         pool = await self._get_pool()
 
         async with pool.acquire() as conn, await conn.cursor() as cur:
             await cur.execute(
-                f"SELECT data FROM {self._quoted_table_name} WHERE thread_id = %s",
+                f"SELECT data FROM {self._quoted_table_name} WHERE thread_id = %s {self._live}",
                 (thread_id,),
             )
             row = await cur.fetchone()
@@ -497,12 +554,30 @@ class MySQLBackend(BaseModel):
 
         async with pool.acquire() as conn, await conn.cursor() as cur:
             await cur.execute(
-                f"SELECT 1 FROM {self._quoted_table_name} WHERE thread_id = %s",
+                f"SELECT 1 FROM {self._quoted_table_name} WHERE thread_id = %s {self._live}",
                 (thread_id,),
             )
             row = await cur.fetchone()
 
         return row is not None
+
+    async def expire(self) -> int:
+        """Delete the rows whose ``expires_at`` has passed; returns how many."""
+        await self._ensure_table()
+        if not self._expires_column:
+            return 0
+        pool = await self._get_pool()
+
+        async with pool.acquire() as conn:
+            async with await conn.cursor() as cur:
+                await cur.execute(
+                    f"DELETE FROM {self._quoted_table_name} "
+                    "WHERE expires_at IS NOT NULL AND expires_at <= UTC_TIMESTAMP(6)"
+                )
+                deleted = int(cur.rowcount)
+            await conn.commit()
+
+        return max(deleted, 0)
 
     async def list_threads(
         self,

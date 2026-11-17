@@ -4,10 +4,13 @@
 
 """Time travel on the checkpointers that need a service: the shared suite, live.
 
-The cases are ``tests/unit/checkpointer_time_travel_conformance.py``'s, run
-over the generic PostgreSQL adapter and ``PgCheckpointer`` (``POSTGRES_USER``
+The cases are ``tests/unit/checkpointer_time_travel_conformance.py``'s —
+the time-travel surface, the history bound and, on PostgreSQL and Redis,
+the production settings (``ttl``, ``encryption``, ``scope``) — run over the
+generic PostgreSQL adapter and ``PgCheckpointer`` (``POSTGRES_USER``
 and ``POSTGRES_DB``; ``POSTGRES_HOST`` / ``POSTGRES_PORT`` optional), Redis
-(``REDIS_URL``), Oracle through ``oracle_checkpointer()`` and the versioned
+(``REDIS_URL``; the production settings run on the OCI bucket as well),
+Oracle through ``oracle_checkpointer()`` and the versioned
 ``OracleCheckpointSaver`` (``ORACLE_DSN`` / ``ORACLE_USER`` /
 ``ORACLE_PASSWORD`` and a wallet in ``ORACLE_WALLET``), and an OCI Object
 Storage bucket (``OCI_TT_BUCKET`` / ``OCI_TT_NAMESPACE``, with
@@ -18,6 +21,7 @@ the tables are named ``locus_tt_*`` and dropped when the module ends.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import uuid
 from collections.abc import AsyncIterator, Callable, Iterator
@@ -27,15 +31,18 @@ import pytest
 
 from locus.core.state import AgentState
 from tests.unit.checkpointer_time_travel_conformance import (
+    SCOPE_A,
+    SCOPE_B,
     BoundedHistoryConformance,
     CheckpointerTimeTravelConformance,
+    ProductionSettingsConformance,
 )
 
 
 pytestmark = pytest.mark.integration
 
 #: The threads the conformance cases write, and the ledger sidecars they leave.
-_THREADS = ("t", "t-alt", "t~ledger", "t-alt~ledger")
+_THREADS = ("t", "t-alt", "u", "t~ledger", "t-alt~ledger", "u~ledger")
 
 
 def _postgres_dsn() -> str | None:
@@ -66,25 +73,38 @@ def _oracle_kwargs() -> dict[str, Any]:
 
 
 async def _empty(cp: Any) -> None:
-    """Delete the threads a case wrote (named ones and unnamed forks), then close."""
-    for thread in _THREADS:
-        await cp.delete(thread)
-    if cp.capabilities.list_threads:
-        for thread in await cp.list_threads(limit=1000, pattern="t-fork-*"):
-            await cp.delete(thread)
+    """Delete the threads a case wrote (named ones, unnamed forks, under each scope), then close."""
+    for scope in (None, SCOPE_A, SCOPE_B):
+        with scope.active() if scope is not None else contextlib.nullcontext():
+            for thread in _THREADS:
+                await cp.delete(thread)
+            if cp.capabilities.list_threads:
+                for thread in await cp.list_threads(limit=1000, pattern="t-fork-*"):
+                    await cp.delete(thread)
     await cp.close()
 
 
 class _Tracked:
     """Builds checkpointers through ``_build`` and empties every one at the end of the test."""
 
-    def _build(self, keep: int | None) -> Any:  # pragma: no cover - each class provides one
+    def _build(self, keep: int | None, **settings: Any) -> Any:  # pragma: no cover
         raise NotImplementedError
 
     @pytest.fixture
     def make_checkpointer(self, _built: list[Any]) -> Callable[..., Any]:
         def make(keep: int | None = None) -> Any:
             cp = self._build(keep)
+            _built.append(cp)
+            return cp
+
+        return make
+
+    @pytest.fixture
+    def make_production(self, _built: list[Any]) -> Callable[..., Any]:
+        """``make(**settings)`` over the backing ``_build`` uses; the test's builds share it."""
+
+        def make(**settings: Any) -> Any:
+            cp = self._build(None, **settings)
             _built.append(cp)
             return cp
 
@@ -134,13 +154,19 @@ def _drop_postgres_tables() -> Iterator[None]:
 @pytest.mark.skipif(_postgres_dsn() is None, reason="POSTGRES_USER / POSTGRES_DB not set")
 @pytest.mark.usefixtures("_drop_postgres_tables")
 class TestPostgresAdapterTimeTravel(
-    _Tracked, CheckpointerTimeTravelConformance, BoundedHistoryConformance
+    _Tracked,
+    CheckpointerTimeTravelConformance,
+    BoundedHistoryConformance,
+    ProductionSettingsConformance,
 ):
-    def _build(self, keep: int | None) -> Any:
+    def _build(self, keep: int | None, **settings: Any) -> Any:
         from locus.memory.backends import postgresql_checkpointer
 
         return postgresql_checkpointer(
-            dsn=_postgres_dsn(), table_name="locus_tt_adapter", max_checkpoints_per_thread=keep
+            dsn=_postgres_dsn(),
+            table_name="locus_tt_adapter",
+            max_checkpoints_per_thread=keep,
+            **settings,
         )
 
 
@@ -148,14 +174,17 @@ class TestPostgresAdapterTimeTravel(
 @pytest.mark.skipif(_postgres_dsn() is None, reason="POSTGRES_USER / POSTGRES_DB not set")
 @pytest.mark.usefixtures("_drop_postgres_tables")
 class TestPgCheckpointerTimeTravel(
-    _Tracked, CheckpointerTimeTravelConformance, BoundedHistoryConformance
+    _Tracked,
+    CheckpointerTimeTravelConformance,
+    BoundedHistoryConformance,
+    ProductionSettingsConformance,
 ):
-    def _build(self, keep: int | None) -> Any:
+    def _build(self, keep: int | None, **settings: Any) -> Any:
         from locus.memory.backends import PgCheckpointer
 
         dsn = _postgres_dsn()
         assert dsn is not None
-        return PgCheckpointer(dsn, table="locus_tt_native", keep_checkpoints=keep)
+        return PgCheckpointer(dsn, table="locus_tt_native", keep_checkpoints=keep, **settings)
 
 
 # ---------------------------------------------------------------------------
@@ -165,14 +194,25 @@ class TestPgCheckpointerTimeTravel(
 
 @pytest.mark.requires_redis
 @pytest.mark.skipif(not os.getenv("REDIS_URL"), reason="REDIS_URL not set")
-class TestRedisTimeTravel(_Tracked, CheckpointerTimeTravelConformance, BoundedHistoryConformance):
-    def _build(self, keep: int | None) -> Any:
+class TestRedisTimeTravel(
+    _Tracked,
+    CheckpointerTimeTravelConformance,
+    BoundedHistoryConformance,
+    ProductionSettingsConformance,
+):
+    @pytest.fixture(autouse=True)
+    def _prefix(self) -> None:
+        # One key prefix per test: every checkpointer a test builds shares it.
+        self._test_prefix = f"locus:tt:{uuid.uuid4().hex[:8]}:"
+
+    def _build(self, keep: int | None, **settings: Any) -> Any:
         from locus.memory.backends import redis_checkpointer
 
         return redis_checkpointer(
             url=os.environ["REDIS_URL"],
-            prefix=f"locus:tt:{uuid.uuid4().hex[:8]}:",
+            prefix=self._test_prefix,
             max_checkpoints_per_thread=keep,
+            **settings,
         )
 
 
@@ -285,17 +325,30 @@ class TestOracleVersionedSaverTimeTravel:
     reason="OCI_TT_BUCKET / OCI_TT_NAMESPACE not set",
 )
 class TestOCIBucketTimeTravel(
-    _Tracked, CheckpointerTimeTravelConformance, BoundedHistoryConformance
+    _Tracked,
+    CheckpointerTimeTravelConformance,
+    BoundedHistoryConformance,
+    ProductionSettingsConformance,
 ):
-    def _build(self, keep: int | None) -> Any:
+    #: Each save is three object writes to the service; a ttl in the hundreds
+    #: of milliseconds would run out before the case reads the thread back.
+    short_ttl = 5.0
+
+    @pytest.fixture(autouse=True)
+    def _prefix(self) -> None:
+        # One object prefix per test: every checkpointer a test builds shares it.
+        self._test_prefix = f"locus-tt/{uuid.uuid4().hex[:8]}/"
+
+    def _build(self, keep: int | None, **settings: Any) -> Any:
         from locus.memory.backends import OCIBucketBackend
 
         return OCIBucketBackend(
             bucket_name=os.environ["OCI_TT_BUCKET"],
             namespace=os.environ["OCI_TT_NAMESPACE"],
-            prefix=f"locus-tt/{uuid.uuid4().hex[:8]}/",
+            prefix=self._test_prefix,
             profile_name=os.getenv("OCI_PROFILE", "DEFAULT"),
             auth_type=os.getenv("OCI_AUTH_TYPE", "api_key"),
             region=os.getenv("OCI_REGION"),
             max_checkpoints_per_thread=keep,
+            **settings,
         )

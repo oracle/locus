@@ -7,11 +7,14 @@
 A test class mixes :class:`CheckpointerTimeTravelConformance` in and provides a
 ``make_checkpointer`` fixture that builds a checkpointer on a fresh backing;
 one that bounds its history also mixes in :class:`BoundedHistoryConformance`
-and provides ``make_bounded(keep)``. The unit suite runs them over the
-in-memory, file, adapter-wrapped, S3 (mocked) and OCI bucket (faked)
-checkpointers and over a minimal subclass that has only the base defaults;
-the integration suite runs them over live PostgreSQL, Redis, Oracle and an
-OCI bucket behind the usual service markers.
+and provides ``make_bounded(keep)``; one that takes the production settings
+(``ttl``, ``encryption``, ``scope``) mixes in
+:class:`ProductionSettingsConformance` and provides ``make_production(**settings)``,
+whose every call in one test builds a checkpointer over the *same* backing.
+The unit suite runs them over the in-memory, file, adapter-wrapped, S3
+(mocked) and OCI bucket (faked) checkpointers and over a minimal subclass
+that has only the base defaults; the integration suite runs them over live
+PostgreSQL, Redis, Oracle and an OCI bucket behind the usual service markers.
 
 Between saves whose order the tests read back there is a pause of a few
 milliseconds and no more: every backend orders checkpoints by a time it
@@ -24,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import secrets
 from typing import Any
 
 import pytest
@@ -32,7 +36,9 @@ from locus.agent import Agent
 from locus.core.events import InterruptEvent
 from locus.core.messages import Message, Role, ToolCall, ToolResult
 from locus.core.state import AgentState
+from locus.memory.encryption import CheckpointEncryptionError, EncryptedSerializer
 from locus.memory.ledger import RunLedger, ToolEffectLedger
+from locus.memory.scope import CheckpointScope
 from locus.memory.time_travel import CheckpointInfo
 from locus.testing import FunctionModel, text, tool_call
 from locus.tools.decorator import tool
@@ -370,3 +376,226 @@ class BoundedHistoryConformance(_Settles):
         await _record_calls(ledger, "t", range(1, 5))
 
         assert [e.step for e in await ledger.entries("t")] == [1, 2, 3, 4]
+
+
+#: The two scopes the production cases write under (and a live suite cleans up).
+SCOPE_A = CheckpointScope(app_id="billing", user_id="u-1")
+SCOPE_B = CheckpointScope(app_id="billing", user_id="u-2")
+#: A ttl short enough to wait out in a test on a local store; Redis rounds it
+#: up to one second for its own ``EXPIRE``, the recorded expiry stays exact. A
+#: class over a remote store (an object-storage bucket) sets ``short_ttl``
+#: to a few seconds: its saves take longer than this.
+SHORT_TTL = 0.2
+
+
+async def _thread_ids(cp: Any, **kwargs: Any) -> set[str]:
+    """The thread ids ``list_threads`` names, as a set.
+
+    The adapter over a key-value store lists its keys (``t:latest``,
+    ``t:<checkpoint>``, ``t:_checkpoints``) rather than thread ids, as it
+    always has; the part before the first colon is the thread, and the ids
+    these cases use carry none.
+    """
+    return {t.split(":", 1)[0] for t in await cp.list_threads(limit=1000, **kwargs)}
+
+
+class ProductionSettingsConformance(_Settles):
+    """Mix in; provide a ``make_production`` fixture (``make(**settings)``, one backing per test)."""
+
+    #: The ttl the expiry cases save with; a class over a slow store raises it.
+    short_ttl: float = SHORT_TTL
+
+    @pytest.fixture
+    def production(self, make_production: Any) -> Any:
+        return make_production
+
+    async def outlive_the_ttl(self) -> None:
+        """Wait until anything saved with ``short_ttl`` has expired."""
+        await asyncio.sleep(self.short_ttl * 1.75)
+
+    # -- ttl -----------------------------------------------------------------
+
+    async def test_an_expired_checkpoint_is_not_loaded_listed_or_forked(
+        self, production: Any
+    ) -> None:
+        cp = production(ttl=self.short_ttl)
+        await cp.save(_state(0), "t", "cp-0", metadata={"note": 0})
+        await self.settle()
+        await cp.save(_state(1), "t", "cp-1", metadata={"note": 1})
+        live = await cp.load("t")
+        assert live is not None
+        assert live.iteration == 1
+        assert [i.checkpoint_id for i in await cp.list("t")] == ["cp-1", "cp-0"]
+        assert await cp.exists("t")
+        assert await cp.exists("t", "cp-0")
+
+        await self.outlive_the_ttl()
+
+        assert await cp.load("t") is None
+        assert await cp.load("t", "cp-0") is None
+        assert await cp.list("t") == []
+        assert await cp.list_checkpoints("t") == []
+        assert await cp.exists("t") is False
+        assert await cp.exists("t", "cp-0") is False
+        with pytest.raises(LookupError):
+            await cp.fork("t")
+        with pytest.raises(LookupError):
+            await cp.fork("t", "cp-0")
+
+    async def test_expire_removes_what_has_run_out_and_counts_it(self, production: Any) -> None:
+        cp = production(ttl=self.short_ttl)
+        await cp.save(_state(0), "t", "cp-0")
+        await cp.save(_state(1), "u", "cp-1")
+        assert await cp.expire() == 0, "nothing has run out yet"
+        assert await cp.load("u") is not None
+
+        await self.outlive_the_ttl()
+
+        assert await cp.expire() == 2
+        assert await cp.expire() == 0
+        assert await cp.load("t") is None
+        assert await cp.load("u") is None
+        await cp.save(_state(2), "t", "cp-2")
+        fresh = await cp.load("t")
+        assert fresh is not None
+        assert fresh.iteration == 2
+
+    async def test_without_a_ttl_nothing_expires(self, production: Any) -> None:
+        cp = production()
+        assert cp.ttl is None
+        await cp.save(_state(0), "t", "cp-0")
+        await self.outlive_the_ttl()
+        assert await cp.expire() == 0
+        assert await cp.load("t") is not None
+
+    async def test_a_ttl_bounds_what_the_agent_remembers(self, production: Any) -> None:
+        cp = production(ttl=self.short_ttl)
+        seen: list[list[Message]] = []
+        agent = _agent(cp, seen)
+        await agent.arun("first", thread_id="t")
+        await agent.arun("second", thread_id="t")
+        assert _user_texts(seen[-1]) == ["first", "second"]
+
+        await self.outlive_the_ttl()
+        await agent.arun("third", thread_id="t")
+
+        assert _user_texts(seen[-1]) == ["third"], "the expired turns are gone"
+
+    # -- encryption ----------------------------------------------------------
+
+    async def test_encrypted_state_round_trips_lists_and_forks(self, production: Any) -> None:
+        cp = production(encryption=EncryptedSerializer(secrets.token_bytes(32)))
+        await self._three(cp)
+
+        loaded = await cp.load("t")
+        assert loaded is not None
+        assert _user_texts(loaded.messages) == ["message 0", "message 1", "message 2"]
+        infos = await cp.list("t")
+        assert [i.iteration for i in infos] == [2, 1, 0], "the iteration stays readable"
+        assert [i.metadata["note"] for i in infos] == [2, 1, 0]
+        forked = await cp.fork("t", "cp-1", new_thread_id="t-alt")
+        fork_state = await cp.load(forked)
+        assert fork_state is not None
+        assert _user_texts(fork_state.messages) == ["message 0", "message 1"]
+
+    async def test_the_key_is_needed_to_load_but_not_to_list(self, production: Any) -> None:
+        key, other, new = (secrets.token_bytes(32) for _ in range(3))
+        writer = production(encryption=EncryptedSerializer(key))
+        await self._three(writer)
+
+        without_key = production()
+        infos = await without_key.list("t")
+        assert [i.checkpoint_id for i in infos] == ["cp-2", "cp-1", "cp-0"]
+        assert [i.iteration for i in infos] == [2, 1, 0]
+        assert [i.parent_checkpoint_id for i in infos] == ["cp-1", "cp-0", None]
+        assert await without_key.list_checkpoints("t") == ["cp-2", "cp-1", "cp-0"]
+        with pytest.raises(CheckpointEncryptionError, match="encrypted"):
+            await without_key.load("t")
+        with pytest.raises(CheckpointEncryptionError, match="no configured key"):
+            await production(encryption=EncryptedSerializer(other)).load("t")
+
+        rotated = production(encryption=EncryptedSerializer(new, previous_keys=[key]))
+        old = await rotated.load("t", "cp-2")
+        assert old is not None
+        assert old.iteration == 2, "the previous key still reads what it wrote"
+        await rotated.save(_state(3), "t", "cp-3")
+        with pytest.raises(CheckpointEncryptionError):
+            await writer.load("t", "cp-3")
+
+    async def test_plaintext_checkpoints_load_after_encryption_is_turned_on(
+        self, production: Any
+    ) -> None:
+        plain = production()
+        await plain.save(_state(0), "t", "cp-0")
+        await self.settle()
+
+        encrypted = production(encryption=EncryptedSerializer(secrets.token_bytes(32)))
+        before = await encrypted.load("t")
+        assert before is not None
+        assert before.iteration == 0
+        await encrypted.save(_state(1), "t", "cp-1")
+
+        assert [i.checkpoint_id for i in await encrypted.list("t")] == ["cp-1", "cp-0"]
+        still_plain = await plain.load("t", "cp-0")
+        assert still_plain is not None
+        with pytest.raises(CheckpointEncryptionError):
+            await plain.load("t")
+
+    # -- scope ---------------------------------------------------------------
+
+    async def test_a_scope_keeps_the_same_thread_id_apart(self, production: Any) -> None:
+        a, b, none = production(scope=SCOPE_A), production(scope=SCOPE_B), production()
+        await a.save(_state(1), "t", "cp-a")
+        await b.save(_state(2), "t", "cp-b")
+        await none.save(_state(3), "t", "cp-n")
+
+        for cp, iteration in ((a, 1), (b, 2), (none, 3)):
+            loaded = await cp.load("t")
+            assert loaded is not None
+            assert loaded.iteration == iteration
+        assert await a.load("t", "cp-b") is None, "another scope's checkpoint is a miss"
+        assert await none.load("t", "cp-a") is None
+        assert await a.exists("t", "cp-b") is False
+        assert [i.checkpoint_id for i in await a.list("t")] == ["cp-a"]
+        assert [i.checkpoint_id for i in await none.list("t")] == ["cp-n"]
+
+        assert await _thread_ids(a) == {"t"}
+        assert await _thread_ids(a, scope=SCOPE_B) == {"t"}
+        assert await _thread_ids(none) == {"t"}, "no scope lists the unscoped threads only"
+        assert await _thread_ids(none, scope=SCOPE_A) == {"t"}
+        assert await _thread_ids(production(scope=CheckpointScope(app_id="other"))) == set()
+
+    async def test_a_scoped_fork_stays_in_its_scope(self, production: Any) -> None:
+        a = production(scope=SCOPE_A)
+        await a.save(_state(0), "t", "cp-0")
+
+        forked = await a.fork("t", new_thread_id="t-alt")
+
+        assert await a.load(forked) is not None
+        assert await production().load(forked) is None
+        assert await production(scope=SCOPE_B).load(forked) is None
+
+    async def test_a_scoped_run_resumes_on_its_scope_and_misses_on_another(
+        self, production: Any
+    ) -> None:
+        cp = production()
+        seen: list[list[Message]] = []
+        agent = _agent(cp, seen)
+        await agent.arun("first", thread_id="t", scope=SCOPE_A)
+        await self.settle()
+        await agent.arun("second", thread_id="t", scope=SCOPE_A)
+        assert _user_texts(seen[-1]) == ["first", "second"]
+
+        await agent.arun("other", thread_id="t", scope=SCOPE_B)
+        assert _user_texts(seen[-1]) == ["other"], "another scope is another thread"
+        await agent.arun("plain", thread_id="t")
+        assert _user_texts(seen[-1]) == ["plain"], "no scope is a third thread"
+
+        assert len(await production(scope=SCOPE_A).list("t")) == 2
+        assert len(await production(scope=SCOPE_B).list("t")) == 1
+        assert len(await cp.list("t")) == 1
+        with SCOPE_A.active():
+            assert len(await cp.list("t")) == 2, "an active scope beats the instance's"
+        events = [e async for e in agent.run("streamed", thread_id="t", scope=SCOPE_A)]
+        assert events
+        assert _user_texts(seen[-1]) == ["first", "second", "streamed"]

@@ -7,9 +7,13 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from locus.core.protocols import CheckpointerCapabilities
+from locus.memory.encryption import CheckpointEncryptionError, EncryptedSerializer, is_envelope
+from locus.memory.expiry import expiry_time, parse_ttl
+from locus.memory.scope import CheckpointScope, current_scope
 
 
 if TYPE_CHECKING:
@@ -44,6 +48,18 @@ class BaseCheckpointer(ABC):
     ``list_checkpoints``; a backend overrides :meth:`list` when it can read
     the fields without loading each state.
 
+    Every checkpointer also takes the three production settings, applied
+    here so each backend only stores what they produce: ``ttl`` (a
+    checkpoint expires that long after it is written and is then neither
+    loaded, listed nor forked; :meth:`expire` removes what has expired),
+    ``encryption`` (an :class:`~locus.memory.encryption.EncryptedSerializer`
+    that seals the state before it is stored) and ``scope`` (a
+    :class:`~locus.memory.scope.CheckpointScope` that keeps one
+    application's and user's threads apart from another's). A subclass
+    passes them to :meth:`_configure` from its constructor and uses
+    :meth:`_scoped`, :meth:`_encode_state`, :meth:`_decode_state` and
+    :meth:`_expires_at` where it stores and reads.
+
     Example:
         >>> if checkpointer.capabilities.search:
         ...     results = await checkpointer.search("error handling")
@@ -51,6 +67,13 @@ class BaseCheckpointer(ABC):
         ...     print(info.checkpoint_id, info.iteration, info.parent_checkpoint_id)
         >>> experiment = await checkpointer.fork("main", info.checkpoint_id)
     """
+
+    #: How long after its save a checkpoint stays loadable; ``None`` keeps it until deleted.
+    ttl: timedelta | None = None
+    #: Seals the state before a backend stores it; ``None`` stores plaintext JSON.
+    encryption: EncryptedSerializer | None = None
+    #: The application and user this instance's threads belong to; ``None`` for none.
+    scope: CheckpointScope | None = None
 
     @property
     def capabilities(self) -> CheckpointerCapabilities:
@@ -301,21 +324,36 @@ class BaseCheckpointer(ABC):
         self,
         limit: int = 100,
         pattern: str = "*",
+        *,
+        scope: CheckpointScope | None = None,
     ) -> list[str]:
         """
-        List all thread IDs.
+        List the thread IDs of one scope.
 
         Requires: capabilities.list_threads = True
 
         Args:
             limit: Maximum threads to return
             pattern: Pattern to filter threads (backend-specific)
+            scope: The scope whose threads to list. Default: the scope active
+                for the call (a scoped run, or the one this instance was
+                built with); the unscoped threads when there is none.
 
         Returns:
-            List of thread IDs
+            List of thread IDs, as ``load`` takes them (without the scope prefix)
         """
         self._require_capability("list_threads")
         raise NotImplementedError("list_threads not implemented")
+
+    async def expire(self) -> int:
+        """Remove the checkpoints whose ``ttl`` has run out; returns how many.
+
+        A read never returns an expired checkpoint whether or not this has
+        run; this reclaims the storage. Call it from a scheduler as often as
+        the store's size warrants. It sweeps every scope. A backend whose
+        store expires keys itself (Redis) has nothing left to remove here.
+        """
+        raise NotImplementedError("expire not implemented for this backend")
 
     async def list_with_metadata(
         self,
@@ -409,6 +447,69 @@ class BaseCheckpointer(ABC):
                 f"{self.__class__.__name__} does not support '{capability}'. "
                 f"Check capabilities before calling: checkpointer.capabilities.{capability}"
             )
+
+    # =========================================================================
+    # Production settings: ttl, encryption, scope (for subclasses)
+    # =========================================================================
+
+    def _configure(
+        self,
+        *,
+        ttl: float | timedelta | None = None,
+        encryption: EncryptedSerializer | None = None,
+        scope: CheckpointScope | None = None,
+    ) -> None:
+        """Validate and keep the production settings a subclass's constructor took."""
+        self.ttl = parse_ttl(ttl)
+        if encryption is not None and not isinstance(encryption, EncryptedSerializer):
+            raise TypeError("encryption must be an EncryptedSerializer")
+        self.encryption = encryption
+        if scope is not None and not isinstance(scope, CheckpointScope):
+            raise TypeError("scope must be a CheckpointScope")
+        self.scope = scope if scope is not None and not scope.is_empty else None
+
+    def _effective_scope(self) -> CheckpointScope | None:
+        """The scope of this call: an active one (a scoped run) over the instance's."""
+        return current_scope() or self.scope
+
+    def _scoped(self, thread_id: str) -> str:
+        """The id ``thread_id`` is stored under: prefixed by the scope of this call."""
+        scope = self._effective_scope()
+        return scope.key(thread_id) if scope is not None else thread_id
+
+    def _listing_scope(self, scope: CheckpointScope | None) -> CheckpointScope:
+        """The scope ``list_threads`` lists: the given one, else the call's, else none."""
+        return scope or self._effective_scope() or CheckpointScope()
+
+    def _encode_state(self, state: AgentState) -> dict[str, Any]:
+        """``state`` as this checkpointer stores it: its checkpoint dict, sealed when encrypting."""
+        data = state.to_checkpoint()
+        return self.encryption.encrypt(data) if self.encryption is not None else data
+
+    def _decode_state(self, data: dict[str, Any]) -> AgentState:
+        """The state a stored checkpoint dict holds, unsealing an envelope.
+
+        A plaintext checkpoint loads whether or not ``encryption`` is set, so
+        turning encryption on leaves earlier checkpoints readable.
+
+        Raises:
+            CheckpointEncryptionError: The checkpoint is encrypted and this
+                instance has no ``encryption``, or none of its keys fits.
+        """
+        from locus.core.state import AgentState  # noqa: PLC0415
+
+        if is_envelope(data):
+            if self.encryption is None:
+                raise CheckpointEncryptionError(
+                    "the checkpoint is encrypted; give this checkpointer encryption= "
+                    "with the key it was written with"
+                )
+            data = self.encryption.decrypt(data)
+        return AgentState.from_checkpoint(data)
+
+    def _expires_at(self, now: datetime | None = None) -> datetime | None:
+        """When a save made ``now`` expires under this instance's ``ttl``; ``None`` without one."""
+        return expiry_time(self.ttl, now)
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}()"

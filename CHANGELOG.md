@@ -10,6 +10,32 @@ policy.
 
 ### Added
 
+- **Checkpoint TTL.** Every checkpointer takes `ttl=` (seconds or a
+  `timedelta`): a checkpoint expires that long after its save and is then
+  neither loaded, listed nor forked, and `await cp.expire()` removes what has
+  expired and returns the count. Redis gets its own `EXPIRE` on every key a
+  thread writes (the index hash and the tool-effect ledger's sidecar
+  included); PostgreSQL, MySQL and `PgCheckpointer` keep an `expires_at`
+  column added to an existing table on first use; the in-memory, file, S3,
+  OCI Object Storage and HTTP checkpointers record it beside the checkpoint.
+  (#298)
+- **Checkpoint encryption at rest.** `EncryptedSerializer` (AES-256-GCM via
+  `cryptography`, `pip install "locus-sdk[encryption]"`) seals the state
+  before any backend stores it: `encryption=` on every checkpointer, a key
+  or a `key_provider` callable for a vault fetch, `previous_keys` for
+  rotation, a versioned envelope that keeps the iteration readable, and
+  plaintext checkpoints written before it was turned on still load. The
+  listing fields — ids, times, iteration, size, parent and the metadata
+  passed to `save()` — stay in the clear so `list()` works without the key.
+  (#298)
+- **Per-application and per-user scoping.** `CheckpointScope(app_id=,
+  user_id=)` on every checkpointer (`scope=`) or per run (`agent.run(…,
+  scope=…)`, also `arun`, `run_sync`, `resume`, `continue_turn`) stores a
+  thread under `app=<app_id>/user=<user_id>/<thread_id>` — a key, directory
+  or object prefix, the `thread_id` column's prefix on SQL — so the same
+  `thread_id` under another scope is a miss, not another tenant's thread;
+  `list_threads(scope=)` lists one scope, and unscoped data stays reachable
+  with no scope. (#298)
 - `python -m locus.runner` takes its workspace from `LOCUS_WORKSPACE` when
   set, for a runner started outside an OpenShell sandbox (a gateway's local
   box driver, a CI job); unset, it works on `/sandbox` as before.

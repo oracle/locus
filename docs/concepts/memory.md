@@ -80,6 +80,15 @@ history and resume from any earlier checkpoint; your code drives it with
 `oracle_checkpointer()`, not the saver. Other backends are included;
 [Checkpointers](checkpointers.md) compares them.
 
+Every checkpointer takes the production settings of a shared store: `ttl=`
+expires a thread's checkpoints after a window (and `expire()` sweeps
+them), `encryption=` seals the state at rest with AES-256-GCM while the
+listing fields stay readable, and `scope=` (a `CheckpointScope` of
+`app_id` and `user_id`, also passed per run as `agent.run(…, scope=…)`)
+keeps one application's and one user's threads apart from another's
+without encoding tenancy in the `thread_id`. See
+[Production settings](checkpointers.md#production-settings).
+
 ## Long-term memory
 
 Long-term memory is what the agent keeps *across* threads: Alice's
