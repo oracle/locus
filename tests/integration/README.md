@@ -99,3 +99,9 @@ Stop the service when finished:
 ```bash
 docker compose -f tests/integration/docker-compose.mysql.yml down
 ```
+
+The `HeatWaveVectorStore` conformance suite
+(`tests/integration/rag/test_store_conformance_live.py`) is gated separately on
+`HEATWAVE_DSN` (or `LOCUS_MYSQL_DSN`), a `mysql://user:pw@host:port/db` URL to a
+MySQL HeatWave DB system or any MySQL 9+ server with the `VECTOR` type; it prints
+which search path (`server_side_distance`) the server took.

@@ -61,7 +61,7 @@ def test_using_a_deprecated_name_warns_and_says_what_to_use(name: str, instead: 
     assert len(caught) == 1
     assert issubclass(caught[0].category, LocusDeprecationWarning)
     message = str(caught[0].message)
-    assert "3.0.0" in message, "a deprecation without a removal version is a rumour"
+    assert "6.0.0" in message, "a deprecation without a removal version is a rumour"
     assert instead in message
 
 
@@ -129,7 +129,7 @@ def test_the_supported_runtime_does_not_import_the_deprecated_package() -> None:
     """A supported runtime reaching into a package scheduled for removal is a
     removal that cannot happen.
 
-    This is the check that keeps 3.0.0 achievable, and the one most likely to
+    This is the check that keeps 6.0.0 achievable, and the one most likely to
     be quietly undone by a later change that "just needs one thing from there".
     """
     offenders = []

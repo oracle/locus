@@ -22,6 +22,23 @@ policy.
   gate's verdict as Markdown with one table row per failed check, for a
   pull-request comment, the way `eval diff` and `eval summary` already
   render with `--markdown`. The exit code is still the gate's verdict. (#484)
+- **`HeatWaveVectorStore` — MySQL HeatWave vector store** (#299). Documents
+  live in one InnoDB table with a `VECTOR(n)` column, a `JSON` metadata
+  column and a `FULLTEXT` index on the content; the store mirrors
+  `OracleVectorStore`'s surface (`add`, `add_batch`, `get`, `delete`,
+  `search`, `count`, `clear`, `close`) plus `hybrid_search`, which blends
+  `DISTANCE()` similarity with `MATCH ... AGAINST` relevance client-side the
+  way the Elasticsearch store does. It probes the server once: HeatWave
+  MySQL computes and orders by `DISTANCE()` on the server
+  (`server_side_distance=True`); community MySQL 9+ has the `VECTOR` type
+  but no `DISTANCE()`, so the store fetches up to `candidate_limit` rows and
+  ranks them here. Metadata filters are `JSON_EXTRACT` equality predicates
+  with the path and the value bound as parameters. Blocking driver calls run
+  on worker threads (`asyncio.to_thread`), so the pooled connections never
+  bind to an event loop. New `heatwave` extra (the same
+  `mysql-connector-python` the `mysql` checkpoint extra installs), lazy
+  export from `locus.rag.stores`, docs rows and a HeatWave vs community
+  MySQL section, and the shared conformance suite behind `HEATWAVE_DSN`.
 - **TLS-only Autonomous Database connections, and a `config_dir` of their
   own.** Every Oracle backend — `OracleBackend` behind `oracle_checkpointer()`,
   `OracleCheckpointSaver`, `OracleStore`, `OracleVectorStore`,
@@ -69,6 +86,11 @@ policy.
 
 ### Fixed
 
+- **`LOCUS_FRONTIER_MODEL` turns the knob it names.** The rogue-agent challenge
+  showed the variable in its banner but ran a pinned model; `build_agent()`
+  now uses it, and the default is the model it pinned. The `locus.loop`
+  and `FallbackChain.last_tier` deprecation warnings name 6.0.0 as their
+  removal release instead of a past or missing one.
 - `python -m locus.runner` reports every command the harness ran as a
   `harness.exec` record. The runtime drained its exec records by replacing
   the list the harness appends to, so only commands before the first tool

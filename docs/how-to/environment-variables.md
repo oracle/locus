@@ -227,4 +227,5 @@ Notebooks 66 and 67. See [the gateway how-to](litellm-gateway.md).
 |---|---|
 | `LOCUS_MODEL_URL` | Base URL of a self-hosted OpenAI-compatible server (`/v1` is appended); `LOCUS_ADVISORY_URL` is the older name and is still read |
 | `LOCUS_MODEL_NAME` | Model id on that server; unset, the first id its `/v1/models` lists |
+| `LOCUS_FRONTIER_MODEL` | The hosted model the challenge runs against when `ANTHROPIC_API_KEY` is set and no local server is named; default `anthropic:claude-sonnet-5-5` |
 | `LOCUS_MODEL_API_KEY` | Key sent to that server (default `unused`; self-hosted servers ignore it) |
