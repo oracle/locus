@@ -1,0 +1,238 @@
+[
+  {
+    "action": {
+      "name": "act",
+      "tags": [
+        "yes"
+      ]
+    },
+    "verdict": null,
+    "finding": null,
+    "spent_usd": 0.0,
+    "expected": {
+      "outcome": "deny",
+      "checks": [
+        "labels ['yes'] are denied by policy"
+      ],
+      "reason": "labels ['yes'] are denied by policy",
+      "rules": [
+        {
+          "rule": "deny_for",
+          "outcome": "deny",
+          "detail": "labels ['yes'] are denied by policy"
+        },
+        {
+          "rule": "require_sandbox_for",
+          "outcome": null,
+          "detail": "no label of the action requires a sandbox"
+        },
+        {
+          "rule": "min_severity",
+          "outcome": null,
+          "detail": "no finding supplied"
+        },
+        {
+          "rule": "require_verification_score",
+          "outcome": null,
+          "detail": "the bar is 0: no verification required"
+        },
+        {
+          "rule": "max_blast_radius",
+          "outcome": null,
+          "detail": "blast radius 1 is within the maximum 1"
+        },
+        {
+          "rule": "require_human_over_usd",
+          "outcome": null,
+          "detail": "not set"
+        },
+        {
+          "rule": "spend_limit_usd",
+          "outcome": null,
+          "detail": "not set"
+        },
+        {
+          "rule": "require_human_for",
+          "outcome": null,
+          "detail": "no label of the action requires human approval"
+        }
+      ]
+    }
+  },
+  {
+    "action": {
+      "name": "act",
+      "tags": [
+        "caf\u00e9"
+      ]
+    },
+    "verdict": null,
+    "finding": null,
+    "spent_usd": 0.0,
+    "expected": {
+      "outcome": "deny",
+      "checks": [
+        "labels ['caf\u00e9'] are denied by policy"
+      ],
+      "reason": "labels ['caf\u00e9'] are denied by policy",
+      "rules": [
+        {
+          "rule": "deny_for",
+          "outcome": "deny",
+          "detail": "labels ['caf\u00e9'] are denied by policy"
+        },
+        {
+          "rule": "require_sandbox_for",
+          "outcome": null,
+          "detail": "no label of the action requires a sandbox"
+        },
+        {
+          "rule": "min_severity",
+          "outcome": null,
+          "detail": "no finding supplied"
+        },
+        {
+          "rule": "require_verification_score",
+          "outcome": null,
+          "detail": "the bar is 0: no verification required"
+        },
+        {
+          "rule": "max_blast_radius",
+          "outcome": null,
+          "detail": "blast radius 1 is within the maximum 1"
+        },
+        {
+          "rule": "require_human_over_usd",
+          "outcome": null,
+          "detail": "not set"
+        },
+        {
+          "rule": "spend_limit_usd",
+          "outcome": null,
+          "detail": "not set"
+        },
+        {
+          "rule": "require_human_for",
+          "outcome": null,
+          "detail": "no label of the action requires human approval"
+        }
+      ]
+    }
+  },
+  {
+    "action": {
+      "name": "act",
+      "kind": "on"
+    },
+    "verdict": null,
+    "finding": null,
+    "spent_usd": 0.0,
+    "expected": {
+      "outcome": "require_human",
+      "checks": [
+        "labels ['on'] require human approval"
+      ],
+      "reason": "labels ['on'] require human approval",
+      "rules": [
+        {
+          "rule": "deny_for",
+          "outcome": null,
+          "detail": "no label of the action is denied"
+        },
+        {
+          "rule": "require_sandbox_for",
+          "outcome": null,
+          "detail": "no label of the action requires a sandbox"
+        },
+        {
+          "rule": "min_severity",
+          "outcome": null,
+          "detail": "no finding supplied"
+        },
+        {
+          "rule": "require_verification_score",
+          "outcome": null,
+          "detail": "the bar is 0: no verification required"
+        },
+        {
+          "rule": "max_blast_radius",
+          "outcome": null,
+          "detail": "blast radius 1 is within the maximum 1"
+        },
+        {
+          "rule": "require_human_over_usd",
+          "outcome": null,
+          "detail": "not set"
+        },
+        {
+          "rule": "spend_limit_usd",
+          "outcome": null,
+          "detail": "not set"
+        },
+        {
+          "rule": "require_human_for",
+          "outcome": "require_human",
+          "detail": "labels ['on'] require human approval"
+        }
+      ]
+    }
+  },
+  {
+    "action": {
+      "name": "act",
+      "environment": "1.0"
+    },
+    "verdict": null,
+    "finding": null,
+    "spent_usd": 0.0,
+    "expected": {
+      "outcome": "require_human",
+      "checks": [
+        "labels ['1.0'] require human approval"
+      ],
+      "reason": "labels ['1.0'] require human approval",
+      "rules": [
+        {
+          "rule": "deny_for",
+          "outcome": null,
+          "detail": "no label of the action is denied"
+        },
+        {
+          "rule": "require_sandbox_for",
+          "outcome": null,
+          "detail": "no label of the action requires a sandbox"
+        },
+        {
+          "rule": "min_severity",
+          "outcome": null,
+          "detail": "no finding supplied"
+        },
+        {
+          "rule": "require_verification_score",
+          "outcome": null,
+          "detail": "the bar is 0: no verification required"
+        },
+        {
+          "rule": "max_blast_radius",
+          "outcome": null,
+          "detail": "blast radius 1 is within the maximum 1"
+        },
+        {
+          "rule": "require_human_over_usd",
+          "outcome": null,
+          "detail": "not set"
+        },
+        {
+          "rule": "spend_limit_usd",
+          "outcome": null,
+          "detail": "not set"
+        },
+        {
+          "rule": "require_human_for",
+          "outcome": "require_human",
+          "detail": "labels ['1.0'] require human approval"
+        }
+      ]
+    }
+  }
+]

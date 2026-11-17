@@ -1,0 +1,30 @@
+{
+  "schema": "locus.control.policy/v1",
+  "require_verification_score": 1.5,
+  "max_blast_radius": 0,
+  "require_human_for": [
+    "production"
+  ],
+  "deny_for": [
+    "delete",
+    "production"
+  ],
+  "min_severity": "high",
+  "require_sandbox_for": [
+    "shell"
+  ],
+  "version": "locked-down",
+  "require_human_over_usd": 100.0,
+  "spend_limit_usd": 50.0,
+  "governs": {
+    "environments": [
+      "dev",
+      "production"
+    ],
+    "kinds": [
+      "delete",
+      "payment",
+      "shell"
+    ]
+  }
+}

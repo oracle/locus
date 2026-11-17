@@ -1,0 +1,176 @@
+[
+  {
+    "action": {
+      "name": "fetch",
+      "tags": [
+        "network"
+      ]
+    },
+    "verdict": null,
+    "finding": null,
+    "spent_usd": 0.0,
+    "expected": {
+      "outcome": "deny",
+      "checks": [
+        "labels ['network'] require sandboxed execution (the action carries no 'sandboxed' tag)"
+      ],
+      "reason": "labels ['network'] require sandboxed execution (the action carries no 'sandboxed' tag)",
+      "rules": [
+        {
+          "rule": "deny_for",
+          "outcome": null,
+          "detail": "no label of the action is denied"
+        },
+        {
+          "rule": "require_sandbox_for",
+          "outcome": "deny",
+          "detail": "labels ['network'] require sandboxed execution (the action carries no 'sandboxed' tag)"
+        },
+        {
+          "rule": "min_severity",
+          "outcome": null,
+          "detail": "no finding supplied"
+        },
+        {
+          "rule": "require_verification_score",
+          "outcome": null,
+          "detail": "the bar is 0: no verification required"
+        },
+        {
+          "rule": "max_blast_radius",
+          "outcome": null,
+          "detail": "blast radius 1 is within the maximum 1"
+        },
+        {
+          "rule": "require_human_over_usd",
+          "outcome": null,
+          "detail": "not set"
+        },
+        {
+          "rule": "spend_limit_usd",
+          "outcome": null,
+          "detail": "not set"
+        },
+        {
+          "rule": "require_human_for",
+          "outcome": null,
+          "detail": "no label of the action requires human approval"
+        }
+      ]
+    }
+  },
+  {
+    "action": {
+      "name": "fetch",
+      "tags": [
+        "network",
+        "sandboxed"
+      ]
+    },
+    "verdict": null,
+    "finding": null,
+    "spent_usd": 0.0,
+    "expected": {
+      "outcome": "allow",
+      "checks": [],
+      "reason": "all policy checks passed",
+      "rules": [
+        {
+          "rule": "deny_for",
+          "outcome": null,
+          "detail": "no label of the action is denied"
+        },
+        {
+          "rule": "require_sandbox_for",
+          "outcome": null,
+          "detail": "labels ['network'] require sandboxed execution and the action is sandboxed"
+        },
+        {
+          "rule": "min_severity",
+          "outcome": null,
+          "detail": "no finding supplied"
+        },
+        {
+          "rule": "require_verification_score",
+          "outcome": null,
+          "detail": "the bar is 0: no verification required"
+        },
+        {
+          "rule": "max_blast_radius",
+          "outcome": null,
+          "detail": "blast radius 1 is within the maximum 1"
+        },
+        {
+          "rule": "require_human_over_usd",
+          "outcome": null,
+          "detail": "not set"
+        },
+        {
+          "rule": "spend_limit_usd",
+          "outcome": null,
+          "detail": "not set"
+        },
+        {
+          "rule": "require_human_for",
+          "outcome": null,
+          "detail": "no label of the action requires human approval"
+        }
+      ]
+    }
+  },
+  {
+    "action": {
+      "name": "fetch"
+    },
+    "verdict": null,
+    "finding": null,
+    "spent_usd": 0.0,
+    "expected": {
+      "outcome": "allow",
+      "checks": [],
+      "reason": "all policy checks passed",
+      "rules": [
+        {
+          "rule": "deny_for",
+          "outcome": null,
+          "detail": "no label of the action is denied"
+        },
+        {
+          "rule": "require_sandbox_for",
+          "outcome": null,
+          "detail": "no label of the action requires a sandbox"
+        },
+        {
+          "rule": "min_severity",
+          "outcome": null,
+          "detail": "no finding supplied"
+        },
+        {
+          "rule": "require_verification_score",
+          "outcome": null,
+          "detail": "the bar is 0: no verification required"
+        },
+        {
+          "rule": "max_blast_radius",
+          "outcome": null,
+          "detail": "blast radius 1 is within the maximum 1"
+        },
+        {
+          "rule": "require_human_over_usd",
+          "outcome": null,
+          "detail": "not set"
+        },
+        {
+          "rule": "spend_limit_usd",
+          "outcome": null,
+          "detail": "not set"
+        },
+        {
+          "rule": "require_human_for",
+          "outcome": null,
+          "detail": "no label of the action requires human approval"
+        }
+      ]
+    }
+  }
+]

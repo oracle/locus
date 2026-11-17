@@ -1,0 +1,2 @@
+schema: "locus.control.policy/v1"
+spend_limit_usd: .inf

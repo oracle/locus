@@ -1,0 +1,118 @@
+{
+  "authority": {
+    "rules": [
+      {
+        "labels": [
+          "production"
+        ],
+        "approvers": [
+          "olga"
+        ],
+        "roles": [],
+        "quorum": 1,
+        "allow_self_approval": false,
+        "name": ""
+      }
+    ],
+    "delegations": [
+      {
+        "grantor": "olga",
+        "grantee": "dan",
+        "expires_at": "2026-06-01T00:00:00+00:00",
+        "labels": []
+      },
+      {
+        "grantor": "olga",
+        "grantee": "eve",
+        "expires_at": "2025-06-01T00:00:00+00:00",
+        "labels": []
+      }
+    ]
+  },
+  "steps": [
+    {
+      "op": "submit",
+      "principal": "agent-7",
+      "tool": "issue_refund",
+      "arguments": {
+        "order_id": "4821",
+        "amount_usd": 120.0
+      },
+      "reason": "labels ['production'] require human approval",
+      "labels": [
+        "payment",
+        "production"
+      ],
+      "context": null
+    },
+    {
+      "op": "decide",
+      "ref": 0,
+      "verdict": "approved",
+      "by": "eve"
+    },
+    {
+      "op": "decide",
+      "ref": 0,
+      "verdict": "approved",
+      "by": "dan"
+    }
+  ],
+  "results": [
+    {
+      "approval_id": "appr-fb456872ebfb192e-1"
+    },
+    {
+      "error": {
+        "type": "ApprovalAuthorityError",
+        "message": "eve may not decide issue_refund (labels ['payment', 'production'])"
+      }
+    },
+    {
+      "status": "approved"
+    }
+  ],
+  "final": {
+    "appr-fb456872ebfb192e-1": {
+      "approval_id": "appr-fb456872ebfb192e-1",
+      "digest": "fb456872ebfb192e018307c198c0dc8cc53581d33706bdbc6fc82e8eee653fe6",
+      "principal": "agent-7",
+      "tool": "issue_refund",
+      "arguments": {
+        "order_id": "4821",
+        "amount_usd": 120.0
+      },
+      "status": "approved",
+      "reason": "labels ['production'] require human approval",
+      "created_at": "2026-01-01T00:00:00+00:00",
+      "verdict": "approved",
+      "decided_by": "dan",
+      "decided_at": "2026-01-01T00:00:03+00:00",
+      "labels": [
+        "payment",
+        "production"
+      ],
+      "approvals": [
+        {
+          "by": "dan",
+          "at": "2026-01-01T00:00:03+00:00",
+          "verdict": "approved",
+          "basis": "delegated by olga",
+          "rules": [
+            0
+          ]
+        }
+      ],
+      "rejections": [
+        {
+          "by": "eve",
+          "at": "2026-01-01T00:00:01+00:00",
+          "verdict": "approved",
+          "reason": "eve may not decide issue_refund (labels ['payment', 'production'])"
+        }
+      ],
+      "context": {},
+      "approved_arguments": null
+    }
+  }
+}

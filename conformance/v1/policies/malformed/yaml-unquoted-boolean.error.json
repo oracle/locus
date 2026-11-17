@@ -1,0 +1,4 @@
+{
+  "key": "require_human_for[0]",
+  "message": "at require_human_for[0]: expected a non-empty string, got a boolean"
+}
