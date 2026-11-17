@@ -16,6 +16,18 @@ For the concepts, start with [Checkpointers](../concepts/checkpointers.md).
 ::: locus.memory.checkpointer.BaseCheckpointer
 ::: locus.core.protocols.CheckpointerCapabilities
 
+## Production settings
+
+Every checkpointer takes `ttl=`, `encryption=` and `scope=`; the concepts
+page's [Production settings](../concepts/checkpointers.md#production-settings)
+describes what each does per backend and what stays plaintext.
+
+::: locus.memory.scope.CheckpointScope
+::: locus.memory.scope.current_scope
+::: locus.memory.scoped.ScopedCheckpointer
+::: locus.memory.encryption.EncryptedSerializer
+::: locus.memory.encryption.CheckpointEncryptionError
+
 ## Oracle Database 26ai
 
 Three flavours, depending on how you want state stored (all need the

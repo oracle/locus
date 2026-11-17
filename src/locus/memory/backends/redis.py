@@ -220,15 +220,31 @@ class RedisBackend(BaseModel):
                 return
 
     async def index_add(self, thread_id: str, entry: dict[str, Any]) -> None:
-        """Set the entry's field in the index hash (``HSET``: atomic, replaces a duplicate)."""
+        """Set the entry's field in the index hash (``HSET``: atomic, replaces a duplicate).
+
+        The hash is shared by every checkpoint of the thread, so its expiry
+        is the longest any writer asked for: a ``ttl`` only ever lengthens
+        it (a hash this call creates gets the ttl outright), and a writer
+        without a ttl makes it persist. Otherwise a short-lived save after
+        a long-lived one would take the index — and the listing of the
+        checkpoints still live — down with it.
+        """
         client = await self._get_client()
         await self._migrate_legacy_index(client, thread_id)
         key = self._index_hash_key(thread_id)
         pipe = client.pipeline(transaction=True)
         pipe.hset(key, str(entry["checkpoint_id"]), json.dumps(entry))
-        if self.config.ttl_seconds:
-            pipe.expire(key, self.config.ttl_seconds)
-        await pipe.execute()
+        pipe.hlen(key)
+        pipe.pttl(key)
+        added, length, remaining = await pipe.execute()
+        if not self.config.ttl_seconds:
+            if int(remaining) >= 0:
+                await client.persist(key)
+            return
+        wanted = int(self.config.ttl_seconds) * 1000
+        created = int(added) == 1 and int(length) == 1
+        if created or 0 <= int(remaining) < wanted:
+            await client.pexpire(key, wanted)
 
     async def index_remove(self, thread_id: str, checkpoint_id: str) -> bool:
         """Delete the entry's field from the index hash (``HDEL``)."""

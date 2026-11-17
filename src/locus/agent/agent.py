@@ -49,6 +49,8 @@ from locus.core.events import (
 )
 from locus.core.messages import Message, Role, ToolResult
 from locus.core.state import AgentState
+from locus.memory.scope import CheckpointScope, current_scope
+from locus.memory.scoped import pinned_checkpointer
 from locus.models import get_model  # noqa: F401 — re-exported for test monkey-patches
 from locus.tools.decorator import Tool
 from locus.tools.executor import ToolExecutor
@@ -312,6 +314,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
         invocation_id: str | None = None,
         durability: DurabilityMode | None = None,
         from_checkpoint: str | None = None,
+        scope: CheckpointScope | None = None,
     ) -> AgentResult:
         """
         Run the agent asynchronously and return a single ``AgentResult``.
@@ -345,6 +348,10 @@ class Agent(AgentRuntimeMixin, BaseModel):
                 (``"sync"``, ``"async"`` or ``"exit"``; see :meth:`run`).
             from_checkpoint: Start the turn from the thread's state at this
                 checkpoint instead of its latest (see :meth:`run`).
+            scope: The application and user the thread belongs to
+                (:class:`~locus.memory.CheckpointScope`; see :meth:`run`).
+                ``None`` inherits the checkpointer's scope; ``CheckpointScope()``
+                is explicitly unscoped.
 
         Returns:
             AgentResult with final message and state
@@ -368,6 +375,8 @@ class Agent(AgentRuntimeMixin, BaseModel):
             run_kwargs["durability"] = durability
         if from_checkpoint is not None:
             run_kwargs["from_checkpoint"] = from_checkpoint
+        if scope is not None:
+            run_kwargs["scope"] = scope
 
         grounding_score: float | None = None
         ungrounded_claims: list[str] = []
@@ -512,6 +521,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
         invocation_id: str | None = None,
         durability: DurabilityMode | None = None,
         from_checkpoint: str | None = None,
+        scope: CheckpointScope | None = None,
     ) -> AgentResult:
         """
         Run the agent synchronously.
@@ -538,6 +548,10 @@ class Agent(AgentRuntimeMixin, BaseModel):
                 (``"sync"``, ``"async"`` or ``"exit"``; see :meth:`run`).
             from_checkpoint: Start the turn from the thread's state at this
                 checkpoint instead of its latest (see :meth:`run`).
+            scope: The application and user the thread belongs to
+                (:class:`~locus.memory.CheckpointScope`; see :meth:`run`).
+                ``None`` inherits the checkpointer's scope; ``CheckpointScope()``
+                is explicitly unscoped.
 
         Returns:
             AgentResult with final message and state
@@ -564,6 +578,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
                     invocation_id=invocation_id,
                     durability=durability,
                     from_checkpoint=from_checkpoint,
+                    scope=scope,
                 )
             finally:
                 # Background memory extraction is bound to this loop, which
@@ -878,6 +893,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
         invocation_id: str | None = None,
         durability: DurabilityMode | None = None,
         from_checkpoint: str | None = None,
+        scope: CheckpointScope | None = None,
     ) -> AsyncGenerator[LocusEvent, None]:
         """
         Resume agent execution after an interrupt, or a run that crashed.
@@ -939,6 +955,10 @@ class Agent(AgentRuntimeMixin, BaseModel):
                 ``thread_id``, replaying its recorded tool calls.
             durability: When the resumed segment writes its iteration
                 checkpoints (see :meth:`run`).
+            scope: The application and user the thread belongs to
+                (:class:`~locus.memory.CheckpointScope`; see :meth:`run`).
+                ``None`` inherits the checkpointer's scope; ``CheckpointScope()``
+                is explicitly unscoped.
             from_checkpoint: Continue from the thread's state at this
                 checkpoint instead of its latest (one of
                 ``checkpointer.list(thread_id)``), as if the run had paused
@@ -986,7 +1006,11 @@ class Agent(AgentRuntimeMixin, BaseModel):
                 )
             async with contextlib.aclosing(
                 self.continue_turn(
-                    thread_id, invocation_id=invocation_id, metadata=metadata, durability=durability
+                    thread_id,
+                    invocation_id=invocation_id,
+                    metadata=metadata,
+                    durability=durability,
+                    scope=scope,
                 )
             ) as continued:
                 async for event in continued:
@@ -1001,6 +1025,14 @@ class Agent(AgentRuntimeMixin, BaseModel):
             pending = None
         else:
             pending = self._take_interrupt(thread_id)
+        # The segment's scope, resolved once: the argument, else the paused
+        # run's own (the thread lives there), else an open ``active()`` block's.
+        run_scope = scope
+        if run_scope is None and pending is not None:
+            run_scope = pending.scope
+        if run_scope is None:
+            run_scope = current_scope()
+        checkpointer = pinned_checkpointer(self.config.checkpointer, run_scope)
         if pending is not None:
             state = pending.state
             # The prompt of the paused run; the state already has the history.
@@ -1018,7 +1050,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
                     "No interrupt to resume from. Call run() first, or pass "
                     "thread_id with a configured checkpointer to rehydrate."
                 )
-            loaded = await self.config.checkpointer.load(thread_id, from_checkpoint)
+            loaded = await checkpointer.load(thread_id, from_checkpoint)
             if loaded is None:
                 if from_checkpoint is not None:
                     raise LookupError(
@@ -1046,7 +1078,13 @@ class Agent(AgentRuntimeMixin, BaseModel):
         # This resumed segment is a run of its own: cancellable by thread,
         # visible to hooks as ``event.run``, isolated from concurrent runs.
         rc = self._begin_run(
-            state, prompt, thread_id, run_metadata, ephemeral=ephemeral, durability=durability
+            state,
+            prompt,
+            thread_id,
+            run_metadata,
+            ephemeral=ephemeral,
+            durability=durability,
+            scope=run_scope,
         )
         if from_checkpoint is not None and rc.checkpoints is not None:
             rc.checkpoints.parent_checkpoint_id = from_checkpoint
@@ -1076,6 +1114,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
         model_kwargs: dict[str, Any] | None = None,
         invocation_id: str | None = None,
         durability: DurabilityMode | None = None,
+        scope: CheckpointScope | None = None,
     ) -> AsyncGenerator[LocusEvent, None]:
         """Continue a turn that stopped before it finished, from its checkpoint.
 
@@ -1118,6 +1157,10 @@ class Agent(AgentRuntimeMixin, BaseModel):
                 be this run (its ``run_id`` / the ``invocation_id`` it was
                 started with), or the call raises rather than continue
                 another turn.
+            scope: The application and user the thread belongs to
+                (:class:`~locus.memory.CheckpointScope`; see :meth:`run`).
+                ``None`` inherits the checkpointer's scope; ``CheckpointScope()``
+                is explicitly unscoped.
             durability: When the continued segment writes its iteration
                 checkpoints (see :meth:`run`).
 
@@ -1131,15 +1174,16 @@ class Agent(AgentRuntimeMixin, BaseModel):
         Yields:
             LocusEvent instances for the rest of the turn.
         """
-        checkpointer = self.config.checkpointer
-        if checkpointer is None:
+        if self.config.checkpointer is None:
             raise RuntimeError("continue_turn needs a checkpointer on the agent")
         if thread_id in self._interrupts:
             raise RuntimeError(
                 f"Thread {thread_id!r} is paused on an interrupt; answer it with resume()."
             )
+        run_scope = scope if scope is not None else current_scope()
+        checkpointer = pinned_checkpointer(self.config.checkpointer, run_scope)
         loaded = await checkpointer.load(thread_id)
-        manifest = await self._ledger_manifest(thread_id)
+        manifest = await self._ledger_manifest(thread_id, checkpointer)
         mid_turn = loaded is not None and not _turn_finished(loaded)
         # The turn's checkpoints never landed, but its ledger did: the run
         # started, recorded tool calls, and died before its first save.
@@ -1168,7 +1212,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
             metadata_source = dict(loaded.metadata)
         elif unsaved_turn and manifest is not None:
             state = await self._create_initial_state(
-                manifest.prompt, thread_id, manifest.metadata or None
+                manifest.prompt, thread_id, manifest.metadata or None, checkpointer=checkpointer
             )
             state = state.model_copy(update={"run_id": manifest.invocation_id})
             prompt = manifest.prompt
@@ -1196,6 +1240,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
             ephemeral=ephemeral,
             durability=durability,
             replay=True,
+            scope=run_scope,
         )
         async with contextlib.aclosing(
             self._run_from_state(state, prompt, thread_id, run_metadata, model_kwargs, _run=rc)
@@ -1203,12 +1248,20 @@ class Agent(AgentRuntimeMixin, BaseModel):
             async for event in segment:
                 yield event
 
-    async def _ledger_manifest(self, thread_id: str) -> LedgerManifest | None:
-        """The turn the thread's tool-effect ledger belongs to, or ``None``."""
+    async def _ledger_manifest(
+        self, thread_id: str, checkpointer: Any | None = None
+    ) -> LedgerManifest | None:
+        """The turn the thread's tool-effect ledger belongs to, or ``None``.
+
+        ``checkpointer`` is the one the run reads through (a scoped view);
+        the agent's by default.
+        """
         from locus.memory.ledger import ToolEffectLedger  # noqa: PLC0415
 
+        if checkpointer is None:
+            checkpointer = self.config.checkpointer
         try:
-            return await ToolEffectLedger(self.config.checkpointer).manifest(thread_id)
+            return await ToolEffectLedger(checkpointer).manifest(thread_id)
         except Exception:  # noqa: BLE001 — a ledger that cannot be read is no ledger
             logger.warning(
                 "could not read the tool-effect ledger of thread %s", thread_id, exc_info=True
@@ -1382,6 +1435,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
                                 thread_id=rc.thread_id,
                                 metadata=rc.metadata,
                                 ephemeral=rc.ephemeral,
+                                scope=rc.scope,
                             )
                             raise ApprovalPendingError(
                                 f"{dangling.name!r} on thread {rc.thread_id!r} is still "

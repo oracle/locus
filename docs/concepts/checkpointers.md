@@ -292,6 +292,162 @@ save — several saves within one second included — so `fork` and `list`
 reach back only as far as the bound; the oldest checkpoint kept reports
 no parent.
 
+## Production settings
+
+Every checkpointer takes three settings a deployment needs once real
+users' conversations are in the store: how long a checkpoint lives, how
+it is protected at rest, and whose it is. They are keyword arguments on
+every native checkpointer and on the `*_checkpointer()` factories, and
+they compose — one checkpointer can have all three.
+
+```python
+import os
+from datetime import timedelta
+
+from locus.agent import Agent
+from locus.memory import CheckpointScope, EncryptedSerializer
+from locus.memory.backends import postgresql_checkpointer
+
+cp = postgresql_checkpointer(
+    dsn=os.environ["LOCUS_PG_DSN"],
+    ttl=timedelta(days=30),
+    encryption=EncryptedSerializer(key_provider=lambda: fetch_key_from_vault()),
+    scope=CheckpointScope(app_id="billing"),
+)
+agent = Agent(model="{{ locus_model }}", checkpointer=cp)
+
+# The user is the run's: the same thread id under another user is another thread.
+agent.run_sync("Open ticket T-4821.", thread_id="case-4821", scope=CheckpointScope(app_id="billing", user_id="u-42"))
+```
+
+### TTL
+
+`ttl=` (seconds or a `timedelta`) gives every checkpoint an expiry,
+recorded at the save as `expires_at` beside the checkpoint — in the
+in-memory record, in a file's header, in the adapter's index entry and
+document, in a bucket's `.meta.json` and payload, in an `expires_at`
+column on PostgreSQL, MySQL and `PgCheckpointer`. A table made before
+the column existed is only probed on start; the first save that carries
+an expiry adds the column (`ALTER TABLE … ADD COLUMN IF NOT EXISTS` on
+PostgreSQL; MySQL has no `IF NOT EXISTS` for columns, so the probe
+decides), and a role that may not alter the table is told once, in one
+line, and expiry is kept in the documents. A checkpointer without a
+`ttl` never alters a table it did not create, and filters on the column
+only where it exists. Every read filters on the recorded expiry: an
+expired checkpoint is not loaded, listed or forked, whether or not the
+store has removed it yet, so a thread whose last turn is older than the
+TTL starts afresh. The tool-effect ledger's sidecar expires with its
+thread.
+
+Checkpointers with different `ttl`s may write to one thread. A
+checkpoint keeps the expiry it was saved with; what the thread shares —
+the Redis index hash, a bucket's `_latest` pointer, the adapter's
+`latest` copy — follows the longest-lived checkpoint: Redis only ever
+lengthens the index's `EXPIRE` (a writer without a `ttl` makes it
+persist), and a `load()` of the latest falls back to the newest live
+checkpoint when the pointer names an expired one.
+
+`await cp.expire()` removes what has expired and returns how many
+checkpoints went; call it from a scheduler as often as the store's size
+warrants. Where the store expires keys itself the sweep has little to
+do: `redis_checkpointer(ttl=…)` sets Redis's own `EXPIRE` (whole
+seconds) on every key a thread writes — each checkpoint, the `latest`
+copy, the index hash and the ledger sidecar — so the keys vanish on
+their own. On object storage the objects carry no expiry of their own;
+`expire()` lists the prefix and deletes the expired pairs, or a bucket
+lifecycle rule does it server-side. An instance without a `ttl` still
+never loads an expired checkpoint (and `exists()` is false for one), but
+lists one on S3 and OCI until `expire()` runs, since telling takes a
+read of each `.meta.json`.
+
+### Encryption at rest
+
+`encryption=EncryptedSerializer(key)` seals the state with AES-256-GCM
+before any backend stores it, so the bucket, table, Redis key or file
+holds ciphertext. The key is 32 bytes — generate one once with
+`base64.b64encode(os.urandom(32))`, keep it in your secret store and
+pass the decoded bytes (`base64.b64decode(os.environ["…"])`), or give
+`key_provider=`, a callable the serializer calls for every encryption
+and decryption, so a vault or key-management fetch plugs in (cache
+inside it if the fetch is slow). The `cryptography` package does the
+work: `pip install "locus-sdk[encryption]"`.
+
+What is stored is a versioned envelope, `{"v": 1, "alg": "A256GCM",
+"kid": …, "nonce": …, "ct": …, "iteration": …}`. `kid` is a fingerprint
+of the key (the first eight hex digits of its SHA-256), never the key.
+The envelope is bound to its place: the stored thread id (scope
+included), the checkpoint id and the plaintext `iteration` are the
+cipher's associated data, so a ciphertext copied from one thread or
+checkpoint to another, or an envelope whose `iteration` was edited,
+fails to decrypt with `CheckpointEncryptionError` (`fork` and
+`copy_thread` re-seal the state under the new thread). Rotate by moving
+the old key to `previous_keys=[…]`: a checkpoint is decrypted with the
+key its `kid` names, so history written under the old key keeps loading
+while new saves use the new one. A checkpointer without the key raises
+`CheckpointEncryptionError` on an encrypted checkpoint rather than a
+parse error.
+
+With encryption configured, a stored checkpoint that is **not** an
+envelope is refused — plaintext where ciphertext was expected is either
+an unmigrated store or a tampered one. To migrate a store written
+before encryption was turned on, pass
+`EncryptedSerializer(key, allow_plaintext=True)`: a plaintext checkpoint
+then loads with a one-line warning naming it, and the thread's next save
+is sealed; drop the flag once the store holds no plaintext.
+
+**What stays plaintext.** Only the state is encrypted. The fields a
+listing needs are stored beside it in the clear, so `cp.list()` works
+without the key: the thread id, the checkpoint id, the write time and
+the expiry time, the `iteration`, the stored `size`, the parent
+checkpoint id and fork origin, and the `metadata` you pass to `save()`.
+Keep secrets out of that metadata. Key material is never logged, never
+in an exception message and never in a `repr`.
+
+### Per-user and per-app scoping
+
+`CheckpointScope(app_id=…, user_id=…)` names the application and the
+user a thread belongs to, so a multi-tenant deployment keeps one
+application's and one user's threads apart without folding tenancy into
+every `thread_id`. The checkpointer stores a scoped thread under
+`app=<app_id>/user=<user_id>/<thread_id>` — a key prefix on Redis and the
+SQL adapters, a directory on files, an object-key prefix in a bucket, the
+prefix of the `thread_id` column on `PgCheckpointer` (whose `tenant`
+stays the Row-Level Security boundary). Either id may be omitted; the ids
+are letters, digits and `. _ : @ + -`.
+
+The stored id is a grammar no input can forge: each segment — the
+`app_id`, the `user_id` and the thread id — is percent-encoded before it
+is joined, so a `/` or `=` inside a thread id cannot form a scope
+marker. `load("user=victim/t")` under an app-only scope is the app's
+own thread `app=billing/user%3Dvictim%2Ft`, never the user's; an
+app-only scope lists and loads the app-level threads only (a user's
+threads need the user in the scope); and a checkpointer with no scope
+never resolves a scoped stored id as a thread. Unscoped threads keep
+their bare id, so existing data is unaffected (an unscoped id that
+could pass for a scope marker is the one exception: it is stored
+percent-encoded).
+
+Give the scope to the checkpointer (`scope=`) when an instance serves
+one tenant, or to the run — `agent.run(…, scope=…)`, also `arun`,
+`run_sync`, `resume` and `continue_turn` — when one agent serves many.
+The runtime resolves the run's scope once, when the run starts, and
+every checkpointer call the run makes — the ledger's included — goes
+through a view of the checkpointer pinned to it
+(`cp.with_scope(scope)`), so two runs whose events are consumed
+alternately, or a run consumed in another context, each keep their own.
+`scope=None` inherits the checkpointer's own scope; `CheckpointScope()`
+runs explicitly unscoped, whatever the checkpointer's scope. A paused
+run remembers its scope, so `resume()` without one continues the turn
+where it was saved. `with scope.active():` is a convenience for code of
+your own: inside the block it is the default scope of every direct
+checkpointer call, and of a run started inside it. From another scope,
+or from no scope, the same `thread_id` is a miss, not a leak; `fork`
+keeps the fork in the scope.
+
+`cp.list_threads()` lists one scope at a time: the checkpointer's own
+(or the run's) by default, `scope=` for another, and the unscoped
+threads for a checkpointer with none. `expire()` sweeps every scope.
+
 ## Picking a backend
 
 | Situation | Backend |

@@ -239,6 +239,24 @@ class _FakeRedis:
         self.ttls[key] = ttl
         return 1
 
+    async def pexpire(self, key: str, milliseconds: int) -> int:
+        self.ttls[key] = milliseconds // 1000
+        return 1
+
+    async def persist(self, key: str) -> int:
+        self.persists = getattr(self, "persists", 0) + 1
+        return int(self.ttls.pop(key, None) is not None)
+
+    async def hlen(self, key: str) -> int:
+        return len(self.hashes.get(key, {}))
+
+    async def pttl(self, key: str) -> int:
+        if key not in self.hashes and key not in self.strings:
+            return -2
+        if key not in self.ttls:
+            return -1
+        return self.ttls[key] * 1000
+
     def pipeline(self, transaction: bool = True) -> _FakePipeline:
         return _FakePipeline(self)
 
@@ -295,6 +313,37 @@ class TestRedisIndex:
         await backend.index_add("t", _entry("cp-0"))
 
         assert client.ttls[_HASH] == 60
+
+    async def test_a_shorter_ttl_never_shortens_the_hash_expiry(self) -> None:
+        long_lived, client = _redis(ttl_seconds=600)
+        short_lived = RedisBackend(url="redis://x", prefix="p:", ttl_seconds=1)
+        short_lived._client = client  # the same store
+        await long_lived.index_add("t", _entry("cp-0"))
+        assert client.ttls[_HASH] == 600
+        await short_lived.index_add("t", _entry("cp-1"))
+        assert client.ttls[_HASH] == 600, "only ever lengthened"
+        # The other way round the long writer lengthens it.
+        client.ttls[_HASH] = 1
+        await long_lived.index_add("t", _entry("cp-2"))
+        assert client.ttls[_HASH] == 600
+        # A fresh hash gets the writer's ttl outright.
+        await short_lived.index_add("u", _entry("cp-0"))
+        assert client.ttls["p:u:_checkpoints:hash"] == 1
+
+    async def test_a_writer_without_a_ttl_makes_the_hash_persist(self) -> None:
+        expiring, client = _redis(ttl_seconds=60)
+        forever = RedisBackend(url="redis://x", prefix="p:")
+        forever._client = client
+        await expiring.index_add("t", _entry("cp-0"))
+        assert client.ttls[_HASH] == 60
+        await forever.index_add("t", _entry("cp-1"))
+        assert _HASH not in client.ttls, "persisted"
+        assert client.persists == 1
+        await expiring.index_add("t", _entry("cp-2"))
+        assert _HASH not in client.ttls, "a later ttl writer leaves a persisted hash alone"
+        await forever.index_add("t", _entry("cp-3"))
+        await forever.index_add("u", _entry("cp-0"))
+        assert client.persists == 1, "no PERSIST for a hash that has no expiry"
 
     async def test_without_a_ttl_the_hash_never_expires(self) -> None:
         backend, client = _redis()

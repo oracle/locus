@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -19,6 +19,7 @@ from locus.memory.backends.checkpoint_index import (
     newest_first,
 )
 from locus.memory.checkpointer import BaseCheckpointer
+from locus.memory.expiry import EXPIRES_AT_KEY, is_expired, ttl_seconds
 from locus.memory.time_travel import (
     CheckpointInfo,
     checkpoint_iteration,
@@ -30,6 +31,13 @@ from locus.memory.time_travel import (
 
 if TYPE_CHECKING:
     from locus.core.state import AgentState
+    from locus.memory.encryption import EncryptedSerializer
+    from locus.memory.scope import CheckpointScope
+
+#: The document field the adapter records a checkpoint's expiry under.
+_EXPIRES_FIELD = "_expires_at"
+#: The key suffix of a thread's ``latest`` copy.
+_LATEST_SUFFIX = ":latest"
 
 
 def _callable_has_parameter(fn: Any, parameter_name: str) -> bool:
@@ -41,6 +49,28 @@ def _callable_has_parameter(fn: Any, parameter_name: str) -> bool:
     except (TypeError, ValueError):
         return False
     return parameter_name in sig.parameters
+
+
+def _parameter_default(fn: Any, parameter_name: str) -> Any:
+    """The default of a callable's parameter, or ``None`` when it has none (or is not introspectable)."""
+    import inspect
+
+    try:
+        parameter = inspect.signature(fn).parameters[parameter_name]
+    except (TypeError, ValueError, KeyError):
+        return None
+    return None if parameter.default is inspect.Parameter.empty else parameter.default
+
+
+def _glob_to_like(pattern: str) -> str:
+    """A shell-style pattern as a SQL ``LIKE`` pattern (``\\`` escapes)."""
+    return (
+        pattern.replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+        .replace("*", "%")
+        .replace("?", "_")
+    )
 
 
 class StorageBackendAdapter(BaseCheckpointer):
@@ -97,9 +127,28 @@ class StorageBackendAdapter(BaseCheckpointer):
         ``{thread}:_checkpoints`` key under a per-thread ``asyncio.Lock``:
         safe within one process, not between processes (the lock is per
         adapter instance).
+
+    Production settings:
+        ``ttl`` records each checkpoint's expiry in its document
+        (``_expires_at``) and its index entry, hands it to a backend whose
+        ``save`` takes ``expires_at`` (the SQL backends keep it in a column)
+        and, on Redis, sets the key's own ``EXPIRE``; reads skip what has
+        expired and :meth:`expire` removes it. ``encryption`` seals the
+        state inside each document; the ``_checkpoint_id``,
+        ``_checkpoint_timestamp``, ``_metadata`` and ``_expires_at`` fields
+        and the index stay plaintext. ``scope`` prefixes every key with the
+        scope's prefix.
     """
 
-    def __init__(self, backend: Any, *, max_checkpoints_per_thread: int | None = None) -> None:
+    def __init__(
+        self,
+        backend: Any,
+        *,
+        max_checkpoints_per_thread: int | None = None,
+        ttl: float | timedelta | None = None,
+        encryption: EncryptedSerializer | None = None,
+        scope: CheckpointScope | None = None,
+    ) -> None:
         """
         Initialize adapter with a storage backend.
 
@@ -107,11 +156,31 @@ class StorageBackendAdapter(BaseCheckpointer):
             backend: Storage backend with save/load/delete/exists methods
             max_checkpoints_per_thread: Keep only this many of a thread's
                 newest checkpoints (``None``, the default, keeps them all).
+            ttl: How long a checkpoint stays loadable after its save (seconds
+                or a ``timedelta``). Defaults to the backend's own
+                ``ttl_seconds`` when it has one (Redis), so the two agree;
+                given here, it is also set on such a backend.
+            encryption: Seals the state before it is stored
+                (:class:`~locus.memory.encryption.EncryptedSerializer`).
+            scope: The application and user the threads belong to
+                (:class:`~locus.memory.scope.CheckpointScope`).
         """
         if max_checkpoints_per_thread is not None and max_checkpoints_per_thread < 1:
             raise ValueError("max_checkpoints_per_thread must be at least 1")
         self._backend = backend
         self.max_checkpoints_per_thread = max_checkpoints_per_thread
+        config = getattr(backend, "config", None)
+        native_ttl = getattr(config, "ttl_seconds", None) if config is not None else None
+        if not isinstance(native_ttl, int | float) or isinstance(native_ttl, bool):
+            native_ttl = None
+        if ttl is None and native_ttl:
+            ttl = native_ttl
+        self._configure(ttl=ttl, encryption=encryption, scope=scope)
+        if self.ttl is not None and config is not None and hasattr(config, "ttl_seconds"):
+            if not native_ttl:
+                # The store expires the keys itself (Redis): the same ttl, in whole seconds.
+                config.ttl_seconds = ttl_seconds(self.ttl)
+        self._saves_expiry = _callable_has_parameter(getattr(backend, "save", None), "expires_at")
         self._capabilities_cache: CheckpointerCapabilities | None = None
         # Per-thread locks serializing the read-modify-write of the checkpoint
         # index (`{thread}:_checkpoints`). Without this, concurrent saves to the
@@ -166,34 +235,42 @@ class StorageBackendAdapter(BaseCheckpointer):
         """Save agent state with persistent checkpoint ID tracking."""
         checkpoint_id = checkpoint_id or uuid4().hex
         now = datetime.now(UTC)
+        key = self._scoped(thread_id)
+        expires_at = self._expires_at(now)
 
         # Create storage key
-        storage_key = f"{thread_id}:{checkpoint_id}"
+        storage_key = f"{key}:{checkpoint_id}"
 
         # Convert state to dict and save
-        data = state.to_checkpoint()
+        data = self._encode_state(state, key, checkpoint_id)
         data["_checkpoint_id"] = checkpoint_id
         data["_checkpoint_timestamp"] = now.isoformat()
         data["_metadata"] = metadata or {}
+        if expires_at is not None:
+            data[_EXPIRES_FIELD] = expires_at.isoformat()
 
         # Save the checkpoint (some backends support metadata parameter)
         save_method = self._backend.save
+        extra: dict[str, Any] = {}
+        if self._saves_expiry:
+            extra["expires_at"] = expires_at
         if _callable_has_parameter(save_method, "metadata"):
-            await save_method(storage_key, data, metadata=metadata)
+            await save_method(storage_key, data, metadata=metadata, **extra)
         else:
-            await save_method(storage_key, data)
+            await save_method(storage_key, data, **extra)
 
         # Also save as "latest" for easy retrieval
-        await self._backend.save(f"{thread_id}:latest", data)
+        await self._backend.save(f"{key}:latest", data, **extra)
 
         # Update checkpoint index (persistent checkpoint ID list)
         await self._update_checkpoint_index(
-            thread_id,
+            key,
             checkpoint_id,
             now,
             metadata,
             iteration=checkpoint_iteration(data),
             size=checkpoint_size(data),
+            expires_at=expires_at,
         )
         if self.max_checkpoints_per_thread is not None:
             await self._trim_history(thread_id, self.max_checkpoints_per_thread)
@@ -209,8 +286,9 @@ class StorageBackendAdapter(BaseCheckpointer):
         *,
         iteration: int | None = None,
         size: int | None = None,
+        expires_at: datetime | None = None,
     ) -> None:
-        """Update the persistent checkpoint index."""
+        """Update the persistent checkpoint index (``thread_id`` is the stored, scoped id)."""
         entry = {
             "checkpoint_id": checkpoint_id,
             "timestamp": timestamp.isoformat(),
@@ -218,6 +296,8 @@ class StorageBackendAdapter(BaseCheckpointer):
             "iteration": iteration,
             "size": size,
         }
+        if expires_at is not None:
+            entry[EXPIRES_AT_KEY] = expires_at.isoformat()
         if self._native_index is not None:
             # One atomic operation on the store: safe against another
             # process saving to the same thread at the same time.
@@ -245,38 +325,61 @@ class StorageBackendAdapter(BaseCheckpointer):
             # Save updated index
             await self._backend.save(index_key(thread_id), existing)
 
-    async def _index_entries(self, thread_id: str) -> list[dict[str, Any]]:
-        """The thread's index entries, newest first, from wherever the backend keeps them."""
+    async def _index_entries(self, key: str, *, live: bool = True) -> list[dict[str, Any]]:
+        """The thread's index entries, newest first, from wherever the backend keeps them.
+
+        ``key`` is the stored (scoped) thread id. With ``live`` (the default)
+        the entries whose expiry has passed are left out.
+        """
         if self._native_index is not None:
-            return newest_first(await self._native_index.index_list(thread_id))
-        existing = await self._backend.load(index_key(thread_id))
-        return newest_first((existing or {}).get("checkpoints", []))
+            entries = newest_first(await self._native_index.index_list(key))
+        else:
+            existing = await self._backend.load(index_key(key))
+            entries = newest_first((existing or {}).get("checkpoints", []))
+        if not live:
+            return entries
+        now = datetime.now(UTC)
+        return [e for e in entries if not is_expired(e.get(EXPIRES_AT_KEY), now)]
 
     async def load(
         self,
         thread_id: str,
         checkpoint_id: str | None = None,
     ) -> AgentState | None:
-        """Load agent state from the storage backend."""
-        from locus.core.state import AgentState
+        """Load agent state from the storage backend.
 
-        # Determine storage key
+        Without a ``checkpoint_id`` the thread's ``latest`` copy is read; when
+        that copy is gone or has expired — it was written with a shorter
+        ``ttl`` than an earlier checkpoint, or the store dropped it — the
+        newest live checkpoint in the index is loaded instead.
+        """
+        key = self._scoped(thread_id)
         if checkpoint_id:
-            storage_key = f"{thread_id}:{checkpoint_id}"
-        else:
-            storage_key = f"{thread_id}:latest"
+            return await self._load_document(key, f"{key}:{checkpoint_id}", checkpoint_id)
+        latest = await self._load_document(key, f"{key}:latest", None)
+        if latest is not None:
+            return latest
+        for entry in await self._index_entries(key):
+            cid = str(entry.get("checkpoint_id") or "")
+            if cid:
+                state = await self._load_document(key, f"{key}:{cid}", cid)
+                if state is not None:
+                    return state
+        return None
 
-        # Load data
+    async def _load_document(
+        self, key: str, storage_key: str, checkpoint_id: str | None
+    ) -> AgentState | None:
+        """The state a stored document holds, or ``None`` when it is missing or expired."""
         data = await self._backend.load(storage_key)
-        if data is None:
+        if data is None or is_expired(data.get(_EXPIRES_FIELD)):
             return None
-
-        # Remove adapter metadata before restoring
-        data.pop("_checkpoint_id", None)
+        # The ``latest`` copy names the checkpoint it is; the envelope is bound to it.
+        stored_id = data.pop("_checkpoint_id", None)
         data.pop("_checkpoint_timestamp", None)
         data.pop("_metadata", None)
-
-        return AgentState.from_checkpoint(data)
+        data.pop(_EXPIRES_FIELD, None)
+        return self._decode_state(data, key, str(checkpoint_id or stored_id or ""))
 
     async def list_checkpoints(
         self,
@@ -284,7 +387,7 @@ class StorageBackendAdapter(BaseCheckpointer):
         limit: int = 10,
     ) -> list[str]:
         """List available checkpoints from persistent index."""
-        checkpoints = await self._index_entries(thread_id)
+        checkpoints = await self._index_entries(self._scoped(thread_id))
         return [str(cp["checkpoint_id"]) for cp in checkpoints[:limit] if cp.get("checkpoint_id")]
 
     async def delete(
@@ -293,42 +396,87 @@ class StorageBackendAdapter(BaseCheckpointer):
         checkpoint_id: str | None = None,
     ) -> bool:
         """Delete checkpoint(s) with index update."""
+        key = self._scoped(thread_id)
         if checkpoint_id:
             # Delete specific checkpoint
-            storage_key = f"{thread_id}:{checkpoint_id}"
+            storage_key = f"{key}:{checkpoint_id}"
             deleted: bool = await self._backend.delete(storage_key)
 
             # Dropping the index entry is a deletion in its own right: an
             # entry whose checkpoint is already gone leaves list_checkpoints().
-            unlisted = await self._remove_from_index(thread_id, checkpoint_id)
+            unlisted = await self._remove_from_index(key, checkpoint_id)
 
             return deleted or unlisted
         else:
             # Delete all checkpoints for thread
             deleted = False
 
-            # Get all checkpoint IDs from index
-            checkpoints = await self.list_checkpoints(thread_id, limit=1000)
+            # Get all checkpoint IDs from index — expired ones included.
+            entries = await self._index_entries(key, live=False)
 
             # Delete each checkpoint
-            for cp_id in checkpoints:
-                if await self._backend.delete(f"{thread_id}:{cp_id}"):
+            for entry in entries[:1000]:
+                cp_id = entry.get("checkpoint_id")
+                if cp_id and await self._backend.delete(f"{key}:{cp_id}"):
                     deleted = True
 
             # Delete latest pointer
-            if await self._backend.exists(f"{thread_id}:latest"):
-                await self._backend.delete(f"{thread_id}:latest")
+            if await self._backend.exists(f"{key}:latest"):
+                await self._backend.delete(f"{key}:latest")
                 deleted = True
 
             # Delete index
             if self._native_index is not None:
-                if await self._native_index.index_clear(thread_id):
+                if await self._native_index.index_clear(key):
                     deleted = True
-            elif await self._backend.exists(index_key(thread_id)):
-                await self._backend.delete(index_key(thread_id))
+            elif await self._backend.exists(index_key(key)):
+                await self._backend.delete(index_key(key))
                 deleted = True
 
             return deleted
+
+    async def _indexed_threads(self) -> list[str]:
+        """The stored ids of every thread, from the backend's listing of ``<thread>:latest`` keys.
+
+        Every thread has its ``latest`` copy whatever store keeps the index,
+        so that key names the threads; a backend whose ``list_threads`` takes
+        no pattern cannot be swept this way and yields none.
+        """
+        list_threads = getattr(self._backend, "list_threads", None)
+        if list_threads is None or not _callable_has_parameter(list_threads, "pattern"):
+            return []
+        pattern = f"*{_LATEST_SUFFIX}"
+        if _parameter_default(list_threads, "pattern") == "%":
+            pattern = _glob_to_like(pattern)
+        keys: list[str] = await list_threads(pattern=pattern, limit=1_000_000)
+        return sorted(k[: -len(_LATEST_SUFFIX)] for k in keys if k.endswith(_LATEST_SUFFIX))
+
+    async def expire(self) -> int:
+        """Remove the checkpoints whose ``ttl`` has run out, from every thread and scope.
+
+        Each expired index entry's document is deleted and the entry dropped;
+        a ``latest`` copy that has expired goes with them. A backend with an
+        ``expire`` of its own (the SQL backends' ``expires_at`` column) sweeps
+        its rows as well. Returns the checkpoints removed.
+        """
+        now = datetime.now(UTC)
+        removed = 0
+        for key in await self._indexed_threads():
+            for entry in await self._index_entries(key, live=False):
+                if not is_expired(entry.get(EXPIRES_AT_KEY), now):
+                    continue
+                checkpoint_id = str(entry.get("checkpoint_id") or "")
+                if checkpoint_id:
+                    await self._backend.delete(f"{key}:{checkpoint_id}")
+                    await self._remove_from_index(key, checkpoint_id)
+                removed += 1
+            latest = await self._backend.load(f"{key}:latest")
+            if latest is not None and is_expired(latest.get(_EXPIRES_FIELD), now):
+                await self._backend.delete(f"{key}:latest")
+        native_expire = getattr(self._backend, "expire", None)
+        if native_expire is not None:
+            await native_expire()
+        return removed
 
     async def _remove_from_index(
         self,
@@ -358,14 +506,25 @@ class StorageBackendAdapter(BaseCheckpointer):
         thread_id: str,
         checkpoint_id: str | None = None,
     ) -> bool:
-        """Check if checkpoint exists."""
-        if checkpoint_id:
-            storage_key = f"{thread_id}:{checkpoint_id}"
-        else:
-            storage_key = f"{thread_id}:latest"
+        """Check if checkpoint exists and has not expired.
 
-        present: bool = await self._backend.exists(storage_key)
-        return present
+        A document that carries an expiry is filtered whether or not this
+        instance has a ``ttl``: the writer's expiry is the checkpoint's.
+        Without a ``checkpoint_id`` the thread exists when any live
+        checkpoint does, the ``latest`` copy's own expiry notwithstanding.
+        """
+        key = self._scoped(thread_id)
+        if checkpoint_id:
+            storage_key = f"{key}:{checkpoint_id}"
+            if not await self._backend.exists(storage_key):
+                return False
+            data = await self._backend.load(storage_key)
+            return data is not None and not is_expired(data.get(_EXPIRES_FIELD))
+        if await self._backend.exists(f"{key}:latest"):
+            data = await self._backend.load(f"{key}:latest")
+            if data is not None and not is_expired(data.get(_EXPIRES_FIELD)):
+                return True
+        return bool(await self._index_entries(key))
 
     # =========================================================================
     # Extended Methods - Delegate to Backend
@@ -407,14 +566,15 @@ class StorageBackendAdapter(BaseCheckpointer):
         checkpoint_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Get checkpoint metadata from index or backend."""
+        key = self._scoped(thread_id)
         # First try the backend's native method
         if hasattr(self._backend, "get_metadata"):
-            storage_key = f"{thread_id}:{checkpoint_id}" if checkpoint_id else f"{thread_id}:latest"
+            storage_key = f"{key}:{checkpoint_id}" if checkpoint_id else f"{key}:latest"
             meta: dict[str, Any] | None = await self._backend.get_metadata(storage_key)
             return meta
 
         # Fallback to checkpoint index
-        checkpoints = await self._index_entries(thread_id)
+        checkpoints = await self._index_entries(key)
         if not checkpoints:
             return None
 
@@ -464,21 +624,32 @@ class StorageBackendAdapter(BaseCheckpointer):
         self,
         limit: int = 100,
         pattern: str = "*",
+        *,
+        scope: CheckpointScope | None = None,
     ) -> list[str]:
-        """Delegate to backend list_threads."""
+        """The backend's keys of one scope, their scope prefix removed.
+
+        A shell-style ``pattern`` is matched by the backend when its
+        ``list_threads`` takes one (translated to ``LIKE`` for a backend whose
+        pattern defaults to ``%``), else here.
+        """
         self._require_capability("list_threads")
 
         # Backend might have different signature
         if hasattr(self._backend, "list_threads"):
-            if _callable_has_parameter(self._backend.list_threads, "pattern"):
-                with_pattern: list[str] = await self._backend.list_threads(
-                    pattern=pattern, limit=limit
-                )
-                return with_pattern
-            if _callable_has_parameter(self._backend.list_threads, "limit"):
-                threads: list[str] = await self._backend.list_threads(limit=limit)
+            listing = self._listing_scope(scope)
+            list_threads = self._backend.list_threads
+            if _callable_has_parameter(list_threads, "pattern"):
+                stored_pattern = f"{listing.prefix}{pattern}"
+                if _parameter_default(list_threads, "pattern") == "%":
+                    stored_pattern = _glob_to_like(stored_pattern)
+                with_pattern: list[str] = await list_threads(pattern=stored_pattern, limit=limit)
+                return listing.strip(with_pattern)
+            if _callable_has_parameter(list_threads, "limit"):
+                threads: list[str] = await list_threads(limit=limit)
             else:
-                threads = await self._backend.list_threads()
+                threads = await list_threads()
+            threads = listing.strip(threads)
 
             # Apply pattern filter if backend doesn't support it
             if pattern != "*":
@@ -515,7 +686,8 @@ class StorageBackendAdapter(BaseCheckpointer):
         An index entry written before the step fields existed has no
         ``iteration`` or ``size``; they are read from the checkpoint then.
         """
-        entries = await self._index_entries(thread_id)
+        key = self._scoped(thread_id)
+        entries = await self._index_entries(key)
         # The entry just past the window is the parent of the oldest in it.
         older = entries[limit].get("checkpoint_id") if len(entries) > limit else None
         infos: list[CheckpointInfo] = []
@@ -526,7 +698,7 @@ class StorageBackendAdapter(BaseCheckpointer):
             iteration, size = entry.get("iteration"), entry.get("size")
             if iteration is None or size is None:
                 # The same figures a save records: the document as stored.
-                data = await self._backend.load(f"{thread_id}:{checkpoint_id}")
+                data = await self._backend.load(f"{key}:{checkpoint_id}")
                 if data is not None:
                     iteration, size = data.get("iteration"), checkpoint_size(data)
             infos.append(
@@ -551,6 +723,10 @@ def redis_checkpointer(
     url: str = "redis://localhost:6379",
     prefix: str = "locus:state:",
     max_checkpoints_per_thread: int | None = None,
+    *,
+    ttl: float | timedelta | None = None,
+    encryption: EncryptedSerializer | None = None,
+    scope: CheckpointScope | None = None,
     **kwargs: Any,
 ) -> StorageBackendAdapter:
     """
@@ -561,6 +737,14 @@ def redis_checkpointer(
         prefix: Key prefix for all checkpoints
         max_checkpoints_per_thread: Keep only this many of a thread's newest
             checkpoints (``None`` keeps all); see ``StorageBackendAdapter``
+        ttl: How long a checkpoint stays loadable (seconds or a ``timedelta``);
+            every key the thread writes gets Redis's own ``EXPIRE`` for it
+            (whole seconds), the index hash and the tool-effect ledger's
+            sidecar included. ``ttl_seconds`` in ``kwargs`` is the same
+            setting by its older name.
+        encryption: Seals the state (:class:`~locus.memory.encryption.EncryptedSerializer`)
+        scope: The application and user the threads belong to
+            (:class:`~locus.memory.scope.CheckpointScope`)
         **kwargs: Additional RedisBackend options (ttl_seconds, db)
 
     Returns:
@@ -578,7 +762,13 @@ def redis_checkpointer(
     from locus.memory.backends.redis import RedisBackend
 
     backend = RedisBackend(url=url, prefix=prefix, **kwargs)
-    return StorageBackendAdapter(backend, max_checkpoints_per_thread=max_checkpoints_per_thread)
+    return StorageBackendAdapter(
+        backend,
+        max_checkpoints_per_thread=max_checkpoints_per_thread,
+        ttl=ttl,
+        encryption=encryption,
+        scope=scope,
+    )
 
 
 def postgresql_checkpointer(
@@ -589,6 +779,10 @@ def postgresql_checkpointer(
     password: str = "",
     dsn: str | None = None,
     max_checkpoints_per_thread: int | None = None,
+    *,
+    ttl: float | timedelta | None = None,
+    encryption: EncryptedSerializer | None = None,
+    scope: CheckpointScope | None = None,
     **kwargs: Any,
 ) -> StorageBackendAdapter:
     """
@@ -603,6 +797,11 @@ def postgresql_checkpointer(
         dsn: Connection string (overrides other params)
         max_checkpoints_per_thread: Keep only this many of a thread's newest
             checkpoints (``None`` keeps all); see ``StorageBackendAdapter``
+        ttl: How long a checkpoint stays loadable (seconds or a ``timedelta``);
+            kept in the table's ``expires_at`` column, swept by ``expire()``
+        encryption: Seals the state (:class:`~locus.memory.encryption.EncryptedSerializer`)
+        scope: The application and user the threads belong to
+            (:class:`~locus.memory.scope.CheckpointScope`)
         **kwargs: Additional PostgreSQLBackend options
 
     Returns:
@@ -630,7 +829,13 @@ def postgresql_checkpointer(
         dsn=dsn,
         **kwargs,
     )
-    return StorageBackendAdapter(backend, max_checkpoints_per_thread=max_checkpoints_per_thread)
+    return StorageBackendAdapter(
+        backend,
+        max_checkpoints_per_thread=max_checkpoints_per_thread,
+        ttl=ttl,
+        encryption=encryption,
+        scope=scope,
+    )
 
 
 def mysql_checkpointer(
@@ -641,6 +846,10 @@ def mysql_checkpointer(
     password: str = "",
     dsn: str | None = None,
     max_checkpoints_per_thread: int | None = None,
+    *,
+    ttl: float | timedelta | None = None,
+    encryption: EncryptedSerializer | None = None,
+    scope: CheckpointScope | None = None,
     **kwargs: Any,
 ) -> StorageBackendAdapter:
     """
@@ -655,6 +864,11 @@ def mysql_checkpointer(
         dsn: Connection string (overrides other params)
         max_checkpoints_per_thread: Keep only this many of a thread's newest
             checkpoints (``None`` keeps all); see ``StorageBackendAdapter``
+        ttl: How long a checkpoint stays loadable (seconds or a ``timedelta``);
+            kept in the table's ``expires_at`` column, swept by ``expire()``
+        encryption: Seals the state (:class:`~locus.memory.encryption.EncryptedSerializer`)
+        scope: The application and user the threads belong to
+            (:class:`~locus.memory.scope.CheckpointScope`)
         **kwargs: Additional MySQLBackend options
 
     Returns:
@@ -682,13 +896,23 @@ def mysql_checkpointer(
         dsn=dsn,
         **kwargs,
     )
-    return StorageBackendAdapter(backend, max_checkpoints_per_thread=max_checkpoints_per_thread)
+    return StorageBackendAdapter(
+        backend,
+        max_checkpoints_per_thread=max_checkpoints_per_thread,
+        ttl=ttl,
+        encryption=encryption,
+        scope=scope,
+    )
 
 
 def opensearch_checkpointer(
     hosts: list[str] | None = None,
     index_name: str = "locus-checkpoints",
     max_checkpoints_per_thread: int | None = None,
+    *,
+    ttl: float | timedelta | None = None,
+    encryption: EncryptedSerializer | None = None,
+    scope: CheckpointScope | None = None,
     **kwargs: Any,
 ) -> StorageBackendAdapter:
     """
@@ -699,6 +923,11 @@ def opensearch_checkpointer(
         index_name: Index name for checkpoints
         max_checkpoints_per_thread: Keep only this many of a thread's newest
             checkpoints (``None`` keeps all); see ``StorageBackendAdapter``
+        ttl: How long a checkpoint stays loadable (seconds or a ``timedelta``);
+            recorded in each document and swept by ``expire()``
+        encryption: Seals the state (:class:`~locus.memory.encryption.EncryptedSerializer`)
+        scope: The application and user the threads belong to
+            (:class:`~locus.memory.scope.CheckpointScope`)
         **kwargs: Additional OpenSearchBackend options (username, password, use_ssl)
 
     Returns:
@@ -717,7 +946,13 @@ def opensearch_checkpointer(
     from locus.memory.backends.opensearch import OpenSearchBackend
 
     backend = OpenSearchBackend(hosts=hosts, index_name=index_name, **kwargs)
-    return StorageBackendAdapter(backend, max_checkpoints_per_thread=max_checkpoints_per_thread)
+    return StorageBackendAdapter(
+        backend,
+        max_checkpoints_per_thread=max_checkpoints_per_thread,
+        ttl=ttl,
+        encryption=encryption,
+        scope=scope,
+    )
 
 
 def s3_checkpointer(
@@ -792,6 +1027,10 @@ def oracle_checkpointer(
     user: str = "admin",
     password: str = "",
     max_checkpoints_per_thread: int | None = None,
+    *,
+    ttl: float | timedelta | None = None,
+    encryption: EncryptedSerializer | None = None,
+    scope: CheckpointScope | None = None,
     **kwargs: Any,
 ) -> StorageBackendAdapter:
     """
@@ -803,6 +1042,11 @@ def oracle_checkpointer(
         password: Database password
         max_checkpoints_per_thread: Keep only this many of a thread's newest
             checkpoints (``None`` keeps all); see ``StorageBackendAdapter``
+        ttl: How long a checkpoint stays loadable (seconds or a ``timedelta``);
+            recorded in each row's document and swept by ``expire()``
+        encryption: Seals the state (:class:`~locus.memory.encryption.EncryptedSerializer`)
+        scope: The application and user the threads belong to
+            (:class:`~locus.memory.scope.CheckpointScope`)
         **kwargs: Additional OracleBackend options (table_name, wallet_location)
 
     Returns:
@@ -831,4 +1075,10 @@ def oracle_checkpointer(
         password=password,
         **kwargs,
     )
-    return StorageBackendAdapter(backend, max_checkpoints_per_thread=max_checkpoints_per_thread)
+    return StorageBackendAdapter(
+        backend,
+        max_checkpoints_per_thread=max_checkpoints_per_thread,
+        ttl=ttl,
+        encryption=encryption,
+        scope=scope,
+    )

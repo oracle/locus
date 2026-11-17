@@ -21,6 +21,8 @@ Conversation Management:
 
 Checkpointing:
 - BaseCheckpointer: Abstract base for checkpointer implementations
+- CheckpointScope: The application and user a thread belongs to (per-tenant scoping)
+- EncryptedSerializer: AES-256-GCM encryption of checkpoint state at rest
 - DeltaCheckpointer: Efficient delta-based checkpointing (~77% storage savings)
 - ToolEffectLedger: Every executed tool call, recorded in the thread's checkpointer
 - CheckpointInfo: One checkpoint of a thread, as ``checkpointer.list()`` describes it
@@ -66,6 +68,7 @@ from locus.memory.delta import (
     DeltaStorage,
     InMemoryDeltaStorage,
 )
+from locus.memory.encryption import CheckpointEncryptionError, EncryptedSerializer
 from locus.memory.ledger import LedgerEntry, LedgerManifest, ToolEffectLedger
 from locus.memory.manager import (
     BaseMemoryManager,
@@ -81,6 +84,7 @@ from locus.memory.registry import (
     list_checkpointers,
     register_checkpointer,
 )
+from locus.memory.scope import CheckpointScope
 from locus.memory.store import (
     BaseStore,
     InMemoryStore,
@@ -127,6 +131,9 @@ __all__ = [
     "BaseCheckpointer",
     "CheckpointerCapabilities",
     "CheckpointInfo",
+    "CheckpointScope",
+    "EncryptedSerializer",
+    "CheckpointEncryptionError",
     "DeltaCheckpointer",
     "DeltaStorage",
     "InMemoryDeltaStorage",
