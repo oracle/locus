@@ -24,6 +24,13 @@ policy.
   and control-layer pages link the notebooks that exercise them (#486); the
   variables the SDK reads but the page omitted are listed (#487); the four
   docstrings carry an example a test executes (#488, #489).
+
+### Fixed
+
+- `python -m locus.runner` reports every command the harness ran as a
+  `harness.exec` record. The runtime drained its exec records by replacing
+  the list the harness appends to, so only commands before the first tool
+  completion ever reached the gateway.
 - **Two processes saving to one thread no longer lose checkpoint-index
   entries** (`redis_checkpointer()`, `postgresql_checkpointer()`,
   `mysql_checkpointer()`, `opensearch_checkpointer()`). The adapter's
@@ -40,13 +47,6 @@ policy.
   the tool-effect ledger behave as before; a Redis index written by an
   earlier release is read as before and moved into the hash on the
   thread's next save. (#301)
-
-### Fixed
-
-- `python -m locus.runner` reports every command the harness ran as a
-  `harness.exec` record. The runtime drained its exec records by replacing
-  the list the harness appends to, so only commands before the first tool
-  completion ever reached the gateway.
 
 ## [5.6.0] - 2026-11-17
 
