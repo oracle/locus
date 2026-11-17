@@ -231,6 +231,18 @@ policy.
   the winner's row. `OracleSyncBackend` mirrors the four methods, and the
   backend reads its JSON columns through one helper that accepts every
   shape the driver returns (dict, string, sync or async LOB).
+- **Two writers saving the same key through `OracleBackend` at once no
+  longer fail.** `save()` is a `MERGE`, and for a key neither writer has
+  seen both take its `INSERT` branch; the loser met the primary key
+  (`ORA-00001`) on the shared `<thread_id>:latest` row and the save raised.
+  `save()` now repeats the `MERGE` once in that case, and the row the
+  winner committed takes the `UPDATE` branch. The first-time DDL raced
+  the same way, worse: every concurrent first save ran `CREATE TABLE` and
+  `CREATE INDEX`, and the losers failed with `ORA-00955`, `ORA-00054` or
+  `ORA-04020`. A backend now provisions once per process under a lock, a
+  `CREATE` another process won reads as created, and a lock collision with
+  that process's DDL or first writes is retried a few times, the way the
+  PostgreSQL backend serialises its own first-time DDL.
 - **A backend with only some of the `CheckpointIndexStore` methods is no
   longer taken for one without any.** `StorageBackendAdapter` fell back
   silently to its locked read-modify-write when a store defined one, two or
