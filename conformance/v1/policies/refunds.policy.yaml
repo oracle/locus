@@ -1,0 +1,18 @@
+schema: "locus.control.policy/v1"
+require_verification_score: 0.0
+max_blast_radius: 1
+require_human_for:
+  - "high_value"
+  - "production"
+deny_for: []
+min_severity: "low"
+require_sandbox_for: []
+version: "refunds-2026-11"
+require_human_over_usd: 500.0
+spend_limit_usd: 10000.0
+governs:
+  environments:
+    - "production"
+    - "staging"
+  kinds:
+    - "payment"

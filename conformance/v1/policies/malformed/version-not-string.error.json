@@ -1,0 +1,4 @@
+{
+  "key": "version",
+  "message": "at version: expected a string, got a number"
+}

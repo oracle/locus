@@ -1,0 +1,4 @@
+{
+  "key": "min_severity",
+  "message": "at min_severity: expected one of ['info', 'low', 'medium', 'high', 'critical'], got 'severe'"
+}

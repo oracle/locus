@@ -1,0 +1,57 @@
+{
+  "trail": "trail.jsonl",
+  "expected_head": "cb97fd9c19d4ab95ae1e3007f4c4d8c1a31aa4efdb91c608d6122011622a218c",
+  "checks": [
+    {
+      "keys": null,
+      "expected_head": "cb97fd9c19d4ab95ae1e3007f4c4d8c1a31aa4efdb91c608d6122011622a218c",
+      "report": {
+        "ok": true,
+        "records": 4,
+        "head": "cb97fd9c19d4ab95ae1e3007f4c4d8c1a31aa4efdb91c608d6122011622a218c",
+        "broken_at": null,
+        "problem": ""
+      }
+    },
+    {
+      "keys": [
+        "2ee9031729dbde22"
+      ],
+      "expected_head": "cb97fd9c19d4ab95ae1e3007f4c4d8c1a31aa4efdb91c608d6122011622a218c",
+      "report": {
+        "ok": true,
+        "records": 4,
+        "head": "cb97fd9c19d4ab95ae1e3007f4c4d8c1a31aa4efdb91c608d6122011622a218c",
+        "broken_at": null,
+        "problem": ""
+      }
+    },
+    {
+      "keys": [
+        "2ee9031729dbde22",
+        "conformance-v1-rotated"
+      ],
+      "expected_head": "cb97fd9c19d4ab95ae1e3007f4c4d8c1a31aa4efdb91c608d6122011622a218c",
+      "report": {
+        "ok": true,
+        "records": 4,
+        "head": "cb97fd9c19d4ab95ae1e3007f4c4d8c1a31aa4efdb91c608d6122011622a218c",
+        "broken_at": null,
+        "problem": ""
+      }
+    },
+    {
+      "keys": [
+        "conformance-v1-rotated"
+      ],
+      "expected_head": "cb97fd9c19d4ab95ae1e3007f4c4d8c1a31aa4efdb91c608d6122011622a218c",
+      "report": {
+        "ok": false,
+        "records": 4,
+        "head": "cb97fd9c19d4ab95ae1e3007f4c4d8c1a31aa4efdb91c608d6122011622a218c",
+        "broken_at": 0,
+        "problem": "record 0 is not signed by a trusted key"
+      }
+    }
+  ]
+}

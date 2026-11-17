@@ -80,6 +80,18 @@ policy.
   `mysql-connector-python` the `mysql` checkpoint extra installs), lazy
   export from `locus.rag.stores`, docs rows and a HeatWave vs community
   MySQL section, and the shared conformance suite behind `HEATWAVE_DSN`.
+- **Control-layer conformance fixtures.** `conformance/v1/` holds the test
+  vectors a port of the governance core proves parity against: canonical
+  JSON digests in both escaping modes, unsigned, signed and rotated-key audit
+  trails with a file per tamper class and the `AuditReport` each yields,
+  policy documents with their hash, lint findings and decisions, malformed
+  documents with the error key, approval digests, ids and decision
+  sequences, and the exact `action-admission` line an admission writes.
+  `scripts/conformance_export.py` regenerates them from a fixed clock and
+  fixture keys; a unit test fails on any difference, so a format change is a
+  deliberate `v2`. A dependency-free Node script under
+  `conformance/v1/tools/` recomputes the digests and verifies the signatures
+  from the other side. (#343)
 
 ### Changed
 

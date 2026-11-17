@@ -1,0 +1,183 @@
+[
+  {
+    "action": {
+      "name": "ping",
+      "environment": "staging"
+    },
+    "verdict": {
+      "survives": true,
+      "confidence": 0.5,
+      "evidence_quality": 0.5
+    },
+    "finding": null,
+    "spent_usd": 0.0,
+    "expected": {
+      "outcome": "allow",
+      "checks": [],
+      "reason": "all policy checks passed",
+      "rules": [
+        {
+          "rule": "deny_for",
+          "outcome": null,
+          "detail": "no label of the action is denied"
+        },
+        {
+          "rule": "require_sandbox_for",
+          "outcome": null,
+          "detail": "no label of the action requires a sandbox"
+        },
+        {
+          "rule": "min_severity",
+          "outcome": null,
+          "detail": "no finding supplied"
+        },
+        {
+          "rule": "require_verification_score",
+          "outcome": null,
+          "detail": "verification confidence 0.50 meets the bar 0.00"
+        },
+        {
+          "rule": "max_blast_radius",
+          "outcome": null,
+          "detail": "blast radius 1 is within the maximum 1"
+        },
+        {
+          "rule": "require_human_over_usd",
+          "outcome": null,
+          "detail": "cost $0.00 is within the per-action limit $0.00"
+        },
+        {
+          "rule": "spend_limit_usd",
+          "outcome": null,
+          "detail": "spend $0.00 + $0.00 stays within the spend limit $10,000,000,000,000,000.00"
+        },
+        {
+          "rule": "require_human_for",
+          "outcome": null,
+          "detail": "no label of the action requires human approval"
+        }
+      ]
+    }
+  },
+  {
+    "action": {
+      "name": "ping",
+      "environment": "staging"
+    },
+    "verdict": null,
+    "finding": null,
+    "spent_usd": 0.0,
+    "expected": {
+      "outcome": "require_human",
+      "checks": [
+        "no verification provided"
+      ],
+      "reason": "no verification provided",
+      "rules": [
+        {
+          "rule": "deny_for",
+          "outcome": null,
+          "detail": "no label of the action is denied"
+        },
+        {
+          "rule": "require_sandbox_for",
+          "outcome": null,
+          "detail": "no label of the action requires a sandbox"
+        },
+        {
+          "rule": "min_severity",
+          "outcome": null,
+          "detail": "no finding supplied"
+        },
+        {
+          "rule": "require_verification_score",
+          "outcome": "require_human",
+          "detail": "no verification provided"
+        },
+        {
+          "rule": "max_blast_radius",
+          "outcome": null,
+          "detail": "blast radius 1 is within the maximum 1"
+        },
+        {
+          "rule": "require_human_over_usd",
+          "outcome": null,
+          "detail": "cost $0.00 is within the per-action limit $0.00"
+        },
+        {
+          "rule": "spend_limit_usd",
+          "outcome": null,
+          "detail": "spend $0.00 + $0.00 stays within the spend limit $10,000,000,000,000,000.00"
+        },
+        {
+          "rule": "require_human_for",
+          "outcome": null,
+          "detail": "no label of the action requires human approval"
+        }
+      ]
+    }
+  },
+  {
+    "action": {
+      "name": "ping",
+      "environment": "staging",
+      "cost_usd": 0.5
+    },
+    "verdict": {
+      "survives": true,
+      "confidence": 0.5,
+      "evidence_quality": 0.5
+    },
+    "finding": null,
+    "spent_usd": 0.0,
+    "expected": {
+      "outcome": "require_human",
+      "checks": [
+        "cost $0.50 exceeds the per-action limit $0.00"
+      ],
+      "reason": "cost $0.50 exceeds the per-action limit $0.00",
+      "rules": [
+        {
+          "rule": "deny_for",
+          "outcome": null,
+          "detail": "no label of the action is denied"
+        },
+        {
+          "rule": "require_sandbox_for",
+          "outcome": null,
+          "detail": "no label of the action requires a sandbox"
+        },
+        {
+          "rule": "min_severity",
+          "outcome": null,
+          "detail": "no finding supplied"
+        },
+        {
+          "rule": "require_verification_score",
+          "outcome": null,
+          "detail": "verification confidence 0.50 meets the bar 0.00"
+        },
+        {
+          "rule": "max_blast_radius",
+          "outcome": null,
+          "detail": "blast radius 1 is within the maximum 1"
+        },
+        {
+          "rule": "require_human_over_usd",
+          "outcome": "require_human",
+          "detail": "cost $0.50 exceeds the per-action limit $0.00"
+        },
+        {
+          "rule": "spend_limit_usd",
+          "outcome": null,
+          "detail": "spend $0.00 + $0.50 stays within the spend limit $10,000,000,000,000,000.00"
+        },
+        {
+          "rule": "require_human_for",
+          "outcome": null,
+          "detail": "no label of the action requires human approval"
+        }
+      ]
+    }
+  }
+]
