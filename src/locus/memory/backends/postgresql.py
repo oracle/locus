@@ -114,8 +114,12 @@ class PostgreSQLBackend(BaseModel):
 
     config: PostgreSQLConfig = Field(default_factory=PostgreSQLConfig)
     _pool: Pool | None = None
-    #: Whether the table has the ``expires_at`` column (probed or added on first use).
+    #: Whether the table has the ``expires_at`` column (probed on first use; added
+    #: by the first save that carries an expiry, when the role may).
     _expires_column: bool = True
+    #: Whether adding the column has been tried (once per process; a role that
+    #: may not alter the table is told once, not on every save).
+    _expires_column_tried: bool = False
     #: The loop the cached pool was built on, or ``None`` when the pool did
     #: not come from here — a caller (or a test) that assigns ``_pool`` owns
     #: its lifecycle, and second-guessing that would discard it.
@@ -208,7 +212,7 @@ class PostgreSQLBackend(BaseModel):
             # failed against a table a migration had already made.
             existing = await conn.fetchval("SELECT to_regclass($1)", self._full_table_name)
             if existing is not None:
-                await self._ensure_expires_column(conn)
+                await self._probe_expires_column(conn)
                 self._initialized = True
                 return
 
@@ -257,29 +261,38 @@ class PostgreSQLBackend(BaseModel):
 
         self._initialized = True
 
-    async def _ensure_expires_column(self, conn: Any) -> None:
-        """Add ``expires_at`` to a table from before checkpoints could expire, when allowed."""
+    async def _probe_expires_column(self, conn: Any) -> None:
+        """Whether an existing table has ``expires_at``: no DDL, reads filter on it only if so."""
         present = await conn.fetchval(
             "SELECT 1 FROM information_schema.columns "
             "WHERE table_schema = $1 AND table_name = $2 AND column_name = 'expires_at'",
             self.config.schema_name,
             self.config.table_name,
         )
-        if present is not None:
-            self._expires_column = True
+        self._expires_column = present is not None
+
+    async def _ensure_expires_column(self, conn: Any) -> None:
+        """Add ``expires_at`` to a table from before checkpoints could expire, when allowed.
+
+        Called by the first save that carries an expiry — a checkpointer
+        without a ``ttl`` never alters a table it did not create. Tried
+        once: a role that may not alter the table is told once, and expiry
+        is then kept in the documents only.
+        """
+        if self._expires_column or self._expires_column_tried:
             return
+        self._expires_column_tried = True
         try:
             await conn.execute(
                 f"ALTER TABLE {self._full_table_name} ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ"
             )
-        except Exception:  # noqa: BLE001 — a role that may not alter the table
+        except Exception as exc:  # noqa: BLE001 — a role that may not alter the table
             logger.warning(
-                "could not add the expires_at column to %s; checkpoint expiry is kept in "
+                "could not add the expires_at column to %s (%s); checkpoint expiry is kept in "
                 "the documents only",
                 self._full_table_name,
-                exc_info=True,
+                str(exc).splitlines()[0] if str(exc) else type(exc).__name__,
             )
-            self._expires_column = False
             return
         self._expires_column = True
 
@@ -318,6 +331,8 @@ class PostgreSQLBackend(BaseModel):
         now = datetime.now(UTC)
 
         async with pool.acquire() as conn:
+            if expires_at is not None:
+                await self._ensure_expires_column(conn)
             if self._expires_column:
                 await conn.execute(
                     f"""

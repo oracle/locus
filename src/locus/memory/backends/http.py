@@ -176,7 +176,7 @@ class HTTPCheckpointer(BaseCheckpointer):
             "checkpoint_id": checkpoint_id,
             "thread_id": key,
             "created_at": now.isoformat(),
-            "state": self._encode_state(state),
+            "state": self._encode_state(state, key, checkpoint_id),
             "metadata": metadata or {},
         }
         if expires_at is not None:
@@ -233,7 +233,7 @@ class HTTPCheckpointer(BaseCheckpointer):
 
         # Handle both wrapped and unwrapped state formats
         state_data = data.get("state", data)
-        return self._decode_state(state_data)
+        return self._decode_state(state_data, key, checkpoint_id)
 
     async def list_checkpoints(
         self,

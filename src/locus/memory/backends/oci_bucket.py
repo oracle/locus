@@ -415,7 +415,7 @@ class OCIBucketBackend(BaseCheckpointer):
         key = self._scoped(thread_id)
         expires_at = self._expires_at(now)
 
-        state_data = self._encode_state(state)
+        state_data = self._encode_state(state, key, checkpoint_id)
         payload = {
             "checkpoint_id": checkpoint_id,
             "thread_id": key,
@@ -456,23 +456,34 @@ class OCIBucketBackend(BaseCheckpointer):
     ) -> AgentState | None:
         await self._ensure_bucket()
         key = self._scoped(thread_id)
-
         if checkpoint_id is None:
-            pointer = await self._get_bytes(self._latest_key(key))
-            if pointer is None:
-                # No pointer — fall back to listing (old bucket, restored
-                # from lifecycle, or pointer deleted mid-flight).
-                ids = await self.list_checkpoints(thread_id, limit=1)
-                if not ids:
-                    return None
-                checkpoint_id = ids[0]
-            else:
-                checkpoint_id = pointer.decode("utf-8").strip()
+            return await self._load_latest(key)
+        return await self._load_checkpoint(key, checkpoint_id)
 
+    async def _load_checkpoint(self, key: str, checkpoint_id: str) -> AgentState | None:
         data = await self._get_json(self._checkpoint_key(key, checkpoint_id))
         if data is None or is_expired(data.get(EXPIRES_AT_KEY)):
             return None
-        return self._decode_state(data["state"])
+        return self._decode_state(data["state"], key, checkpoint_id)
+
+    async def _load_latest(self, key: str) -> AgentState | None:
+        """The thread's newest live checkpoint.
+
+        ``_latest`` names the last save. Without it (an old bucket, a
+        pointer deleted mid-flight) or when the checkpoint it names has
+        expired — written with a shorter ``ttl`` than an earlier one — the
+        listing finds the newest checkpoint still live.
+        """
+        pointer = await self._get_bytes(self._latest_key(key))
+        if pointer is not None:
+            state = await self._load_checkpoint(key, pointer.decode("utf-8").strip())
+            if state is not None:
+                return state
+        for checkpoint_id, _, _ in await self._checkpoint_objects(key):
+            state = await self._load_checkpoint(key, checkpoint_id)
+            if state is not None:
+                return state
+        return None
 
     async def _checkpoint_objects(
         self, thread_key: str
@@ -721,6 +732,10 @@ class OCIBucketBackend(BaseCheckpointer):
             )
             if payload is None:
                 continue
+            if self.encryption is not None:
+                # An envelope is bound to its thread: unseal, seal under the new one.
+                state = self._decode_state(payload["state"], source_key, cp_id)
+                payload["state"] = self._encode_state(state, dest_key, cp_id)
             payload["thread_id"] = dest_key
             if meta is not None:
                 meta["thread_id"] = dest_key

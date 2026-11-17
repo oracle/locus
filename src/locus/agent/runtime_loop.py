@@ -73,7 +73,8 @@ from locus.core.loops import warning_text
 from locus.core.media import has_images, strip_images, text_length
 from locus.core.messages import Message, Role, ToolCall, ToolResult
 from locus.core.state import AgentState, ReasoningStep, ToolExecution
-from locus.memory.scope import CheckpointScope
+from locus.memory.scope import CheckpointScope, current_scope
+from locus.memory.scoped import scoped_checkpointer
 from locus.models.base import ModelResponse
 from locus.observability.mechanisms import LEAKED_TOOL_CALLS, record_mechanism
 from locus.tools.context import _progress_sink
@@ -601,6 +602,7 @@ class AgentRuntimeMixin:
         ephemeral: dict[str, Any] | None = None,
         durability: DurabilityMode | None = None,
         replay: bool = False,
+        scope: CheckpointScope | None = None,
     ) -> RunContext:
         """Create and register the context that owns one run.
 
@@ -608,6 +610,10 @@ class AgentRuntimeMixin:
         moved to ``rc.ephemeral`` and merged with ``ephemeral``. ``durability``
         overrides the agent's mode for this run; ``replay`` turns the
         tool-effect ledger's replay on, for a run that continues a turn.
+        ``scope`` is the run's checkpoint scope, resolved once by the caller:
+        every checkpointer call the run makes goes through a view pinned to
+        it (``rc.checkpointer``); ``None`` uses the agent's checkpointer as
+        it is.
         """
         metadata, found = self._split_run_metadata(metadata)
         rc = RunContext.create(
@@ -624,6 +630,11 @@ class AgentRuntimeMixin:
             self.config.tool_call_integrity,
             [*self.config.hooks, *getattr(self, "_hooks", ())],
         )
+        # The checkpointer this run writes through: the agent's, pinned to the
+        # run's scope. Explicit, never a context variable: two runs consumed
+        # alternately in one task each keep their own.
+        rc.scope = scope
+        rc.checkpointer = scoped_checkpointer(self.config.checkpointer, scope)
         # How this run writes its checkpoints, and its tool-effect ledger.
         attach_durability(rc, self.config, durability=durability, replay=replay)
         with self._runs_lock:
@@ -677,7 +688,14 @@ class AgentRuntimeMixin:
             thread_id=rc.thread_id,
             metadata=rc.metadata,
             ephemeral=rc.ephemeral,
+            scope=rc.scope,
         )
+
+    def _run_checkpointer(self, rc: RunContext | None) -> Any:
+        """The checkpointer a run's calls go through: ``rc``'s view, else the agent's."""
+        if rc is not None and rc.checkpointer is not None:
+            return rc.checkpointer
+        return self.config.checkpointer
 
     def _emits_progress(self, calls: list[ToolCall]) -> bool:
         """Whether any tool in the batch streams progress (``emits_progress``)."""
@@ -779,11 +797,14 @@ class AgentRuntimeMixin:
             thread_id: Optional thread ID for checkpointing
             metadata: Additional metadata for tools
             scope: The application and user the thread belongs to
-                (:class:`~locus.memory.CheckpointScope`). Active for every
-                checkpointer call this run makes — the thread's checkpoints
-                and its tool-effect ledger are stored under the scope, and
-                the same ``thread_id`` under another scope is another thread.
-                Default: the scope the checkpointer was built with, if any.
+                (:class:`~locus.memory.CheckpointScope`). Every checkpointer
+                call this run makes goes through a view pinned to it — the
+                thread's checkpoints and its tool-effect ledger are stored
+                under the scope, and the same ``thread_id`` under another
+                scope is another thread. ``None`` (the default) inherits the
+                checkpointer's own scope (or an open
+                ``CheckpointScope.active()`` block's); ``CheckpointScope()``
+                runs explicitly unscoped, whatever the checkpointer's scope.
             from_checkpoint: Start this turn from the thread's state at that
                 checkpoint instead of its latest (one of
                 ``checkpointer.list(thread_id)``). The turn's first lasting
@@ -818,25 +839,11 @@ class AgentRuntimeMixin:
         Yields:
             LocusEvent instances for each step
         """
-        if scope is not None:
-            # The scope is a context variable the checkpointer reads: active
-            # for the whole run, this generator's consumer included.
-            with scope.active():
-                async with contextlib.aclosing(
-                    self.run(
-                        prompt,
-                        thread_id=thread_id,
-                        metadata=metadata,
-                        model_kwargs=model_kwargs,
-                        stream_tokens=stream_tokens,
-                        invocation_id=invocation_id,
-                        durability=durability,
-                        from_checkpoint=from_checkpoint,
-                    )
-                ) as scoped:
-                    async for event in scoped:
-                        yield event
-            return
+        # The run's scope, resolved once, here: the argument, else an open
+        # ``active()`` block's. Everything below reads ``run_scope`` or the
+        # view ``_begin_run`` builds from it, never the context variable.
+        run_scope = scope if scope is not None else current_scope()
+        run_checkpointer = scoped_checkpointer(self.config.checkpointer, run_scope)
 
         self._initialize()
         # Attaching may list tools with the per-run MCP headers, so it sees
@@ -864,7 +871,11 @@ class AgentRuntimeMixin:
         if from_checkpoint is not None and (thread_id is None or not self.config.checkpointer):
             raise RuntimeError("run(from_checkpoint=...) needs thread_id and a checkpointer")
         state = await self._create_initial_state(
-            prompt, thread_id, metadata, from_checkpoint=from_checkpoint
+            prompt,
+            thread_id,
+            metadata,
+            from_checkpoint=from_checkpoint,
+            checkpointer=run_checkpointer,
         )
         if invocation_id is not None:
             # The caller's id names the turn: a retry of a crashed run under
@@ -881,6 +892,7 @@ class AgentRuntimeMixin:
             ephemeral=ephemeral,
             durability=durability,
             replay=invocation_id is not None,
+            scope=run_scope,
         )
         rc.result_slot = result_slot
         if from_checkpoint is not None and rc.checkpoints is not None:
@@ -2625,7 +2637,7 @@ class AgentRuntimeMixin:
         parks on the interrupt never drives the generator further. Any
         iteration write still in flight (``durability="async"``) lands first.
         """
-        checkpointer = self.config.checkpointer
+        checkpointer = self._run_checkpointer(rc)
         if not checkpointer or not thread_id:
             return
         if rc.checkpoints is not None:
@@ -2651,7 +2663,7 @@ class AgentRuntimeMixin:
         before the final save, and the run's tool-effect ledger is cleared
         after it: the saved state now holds every result the ledger recorded.
         """
-        checkpointer = self.config.checkpointer
+        checkpointer = self._run_checkpointer(rc)
         if not checkpointer or not thread_id:
             return
         writer = rc.checkpoints if rc is not None else None
@@ -2668,7 +2680,7 @@ class AgentRuntimeMixin:
             EV_CHECKPOINT_SAVED,
             thread_id=thread_id,
             iteration=state.iteration,
-            backend=type(checkpointer).__name__,
+            backend=type(self.config.checkpointer).__name__,
             trigger="final",
             durability=writer.mode if writer is not None else self.config.durability,
         )
@@ -2722,7 +2734,7 @@ class AgentRuntimeMixin:
         (``sync``), scheduled (``async``), or not made at all (``exit``), in
         which case the state is returned untouched.
         """
-        checkpointer = self.config.checkpointer
+        checkpointer = self._run_checkpointer(rc)
         every = self._iteration_checkpoint_interval(thread_id)
         if not checkpointer or every <= 0 or state.iteration % every:
             return state
@@ -2759,7 +2771,7 @@ class AgentRuntimeMixin:
             EV_CHECKPOINT_SAVED,
             thread_id=cp_thread,
             iteration=state.iteration,
-            backend=type(checkpointer).__name__,
+            backend=type(self.config.checkpointer).__name__,
             trigger="every_n_iterations",
             durability=writer.mode if writer is not None else self.config.durability,
         )
@@ -2867,8 +2879,12 @@ class AgentRuntimeMixin:
         metadata: dict[str, Any] | None,
         *,
         from_checkpoint: str | None = None,
+        checkpointer: Any | None = None,
     ) -> AgentState:
         """Create the state a new run (a new user turn) starts from.
+
+        ``checkpointer`` is the one the run reads through (a scoped view of
+        the agent's, for a run with a ``scope``); the agent's by default.
 
         With a checkpointed thread this is a NEW TURN on an existing
         conversation, which is not the same thing as resuming a paused one
@@ -2892,9 +2908,11 @@ class AgentRuntimeMixin:
         metadata, _ = self._split_run_metadata(metadata)
 
         # Try to load from checkpoint: the thread's latest, or the one named.
-        if self.config.checkpointer and thread_id:
+        if checkpointer is None:
+            checkpointer = self.config.checkpointer
+        if checkpointer and thread_id:
             if from_checkpoint is not None:
-                existing = await self.config.checkpointer.load(thread_id, from_checkpoint)
+                existing = await checkpointer.load(thread_id, from_checkpoint)
                 if existing is None:
                     raise LookupError(
                         f"no checkpoint {from_checkpoint!r} of thread {thread_id!r} to run from"
@@ -2905,7 +2923,7 @@ class AgentRuntimeMixin:
                 # must not delete the checkpoint it descends from.
                 _, existing = _take_iteration_checkpoints(existing)
             else:
-                existing = await self.config.checkpointer.load(thread_id)
+                existing = await checkpointer.load(thread_id)
             if existing:
                 from locus.observability.emit import (  # noqa: PLC0415
                     EV_CHECKPOINT_LOADED,

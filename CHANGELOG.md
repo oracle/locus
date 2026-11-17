@@ -15,17 +15,26 @@ policy.
   neither loaded, listed nor forked, and `await cp.expire()` removes what has
   expired and returns the count. Redis gets its own `EXPIRE` on every key a
   thread writes (the index hash and the tool-effect ledger's sidecar
-  included); PostgreSQL, MySQL and `PgCheckpointer` keep an `expires_at`
-  column added to an existing table on first use; the in-memory, file, S3,
-  OCI Object Storage and HTTP checkpointers record it beside the checkpoint.
-  (#298)
+  included; the index's expiry only ever lengthens, so a shorter-lived save
+  never hides the longer-lived checkpoints); PostgreSQL, MySQL and
+  `PgCheckpointer` keep an `expires_at` column, added to an existing table
+  by the first save made with a `ttl` — a checkpointer without one issues
+  no DDL and filters on the column only where it exists; the in-memory,
+  file, S3, OCI Object Storage and HTTP checkpointers record it beside the
+  checkpoint, and a load of a thread's latest falls back to its newest
+  live checkpoint when the pointer names an expired one. (#298)
 - **Checkpoint encryption at rest.** `EncryptedSerializer` (AES-256-GCM via
   `cryptography`, `pip install "locus-sdk[encryption]"`) seals the state
   before any backend stores it: `encryption=` on every checkpointer, a key
   or a `key_provider` callable for a vault fetch, `previous_keys` for
-  rotation, a versioned envelope that keeps the iteration readable, and
-  plaintext checkpoints written before it was turned on still load. The
-  listing fields — ids, times, iteration, size, parent and the metadata
+  rotation, and a versioned envelope that keeps the iteration readable and
+  is bound to its place — the stored thread id, the checkpoint id and the
+  iteration are the cipher's associated data, so a ciphertext moved to
+  another thread or checkpoint, or an envelope whose iteration was edited,
+  is refused. With encryption configured a plaintext checkpoint is refused
+  too; `EncryptedSerializer(..., allow_plaintext=True)` loads it with a
+  warning, for migrating a store written before encryption was turned on.
+  The listing fields — ids, times, iteration, size, parent and the metadata
   passed to `save()` — stay in the clear so `list()` works without the key.
   (#298)
 - **Per-application and per-user scoping.** `CheckpointScope(app_id=,
@@ -33,9 +42,15 @@ policy.
   scope=…)`, also `arun`, `run_sync`, `resume`, `continue_turn`) stores a
   thread under `app=<app_id>/user=<user_id>/<thread_id>` — a key, directory
   or object prefix, the `thread_id` column's prefix on SQL — so the same
-  `thread_id` under another scope is a miss, not another tenant's thread;
-  `list_threads(scope=)` lists one scope, and unscoped data stays reachable
-  with no scope. (#298)
+  `thread_id` under another scope is a miss, not another tenant's thread.
+  Each segment of the stored id is percent-encoded, so no thread id can
+  spell a scope marker, an app-only scope sees app-level threads only, and
+  an unscoped checkpointer never resolves a scoped id; a run's scope is
+  resolved once and carried by a view of the checkpointer
+  (`cp.with_scope(scope)`), never a context variable, with `scope=None`
+  inheriting the checkpointer's scope and `CheckpointScope()` explicitly
+  unscoped; `list_threads(scope=)` lists one scope, and unscoped data stays
+  reachable with no scope. (#298)
 - `python -m locus.runner` takes its workspace from `LOCUS_WORKSPACE` when
   set, for a runner started outside an OpenShell sandbox (a gateway's local
   box driver, a CI job); unset, it works on `/sandbox` as before.

@@ -152,7 +152,7 @@ class MemoryCheckpointer(BaseCheckpointer):
         if key not in self._storage:
             self._storage[key] = {}
 
-        data = self._encode_state(state)
+        data = self._encode_state(state, key, checkpoint_id)
         now = datetime.now(UTC)
         self._storage[key][checkpoint_id] = _Stored(
             data,
@@ -182,7 +182,8 @@ class MemoryCheckpointer(BaseCheckpointer):
         Returns:
             Restored AgentState or None if not found
         """
-        thread_data = self._live(self._scoped(thread_id))
+        key = self._scoped(thread_id)
+        thread_data = self._live(key)
 
         if not thread_data:
             return None
@@ -198,7 +199,7 @@ class MemoryCheckpointer(BaseCheckpointer):
         if checkpoint_id not in thread_data:
             return None
 
-        return self._decode_state(thread_data[checkpoint_id].data)
+        return self._decode_state(thread_data[checkpoint_id].data, key, checkpoint_id)
 
     async def list_checkpoints(
         self,

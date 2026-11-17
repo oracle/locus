@@ -326,12 +326,26 @@ agent.run_sync("Open ticket T-4821.", thread_id="case-4821", scope=CheckpointSco
 recorded at the save as `expires_at` beside the checkpoint — in the
 in-memory record, in a file's header, in the adapter's index entry and
 document, in a bucket's `.meta.json` and payload, in an `expires_at`
-column on PostgreSQL and MySQL (added to an existing table with
-`ALTER TABLE … ADD COLUMN IF NOT EXISTS` on first use) and on
-`PgCheckpointer`. Every read filters on it: an expired checkpoint is not
-loaded, listed or forked, whether or not the store has removed it yet, so
-a thread whose last turn is older than the TTL starts afresh. The
-tool-effect ledger's sidecar expires with its thread.
+column on PostgreSQL, MySQL and `PgCheckpointer`. A table made before
+the column existed is only probed on start; the first save that carries
+an expiry adds the column (`ALTER TABLE … ADD COLUMN IF NOT EXISTS` on
+PostgreSQL; MySQL has no `IF NOT EXISTS` for columns, so the probe
+decides), and a role that may not alter the table is told once, in one
+line, and expiry is kept in the documents. A checkpointer without a
+`ttl` never alters a table it did not create, and filters on the column
+only where it exists. Every read filters on the recorded expiry: an
+expired checkpoint is not loaded, listed or forked, whether or not the
+store has removed it yet, so a thread whose last turn is older than the
+TTL starts afresh. The tool-effect ledger's sidecar expires with its
+thread.
+
+Checkpointers with different `ttl`s may write to one thread. A
+checkpoint keeps the expiry it was saved with; what the thread shares —
+the Redis index hash, a bucket's `_latest` pointer, the adapter's
+`latest` copy — follows the longest-lived checkpoint: Redis only ever
+lengthens the index's `EXPIRE` (a writer without a `ttl` makes it
+persist), and a `load()` of the latest falls back to the newest live
+checkpoint when the pointer names an expired one.
 
 `await cp.expire()` removes what has expired and returns how many
 checkpoints went; call it from a scheduler as often as the store's size
@@ -342,29 +356,44 @@ copy, the index hash and the ledger sidecar — so the keys vanish on
 their own. On object storage the objects carry no expiry of their own;
 `expire()` lists the prefix and deletes the expired pairs, or a bucket
 lifecycle rule does it server-side. An instance without a `ttl` still
-never loads an expired checkpoint, but lists one on S3 and OCI until
-`expire()` runs, since telling takes a read of each `.meta.json`.
+never loads an expired checkpoint (and `exists()` is false for one), but
+lists one on S3 and OCI until `expire()` runs, since telling takes a
+read of each `.meta.json`.
 
 ### Encryption at rest
 
 `encryption=EncryptedSerializer(key)` seals the state with AES-256-GCM
 before any backend stores it, so the bucket, table, Redis key or file
-holds ciphertext. The key is 32 bytes, given directly or through
-`key_provider=` — a callable the serializer calls for every encryption
-and decryption, so a vault or key-management fetch plugs in (cache inside
-it if the fetch is slow). The `cryptography` package does the work:
-`pip install "locus-sdk[encryption]"`.
+holds ciphertext. The key is 32 bytes — generate one once with
+`base64.b64encode(os.urandom(32))`, keep it in your secret store and
+pass the decoded bytes (`base64.b64decode(os.environ["…"])`), or give
+`key_provider=`, a callable the serializer calls for every encryption
+and decryption, so a vault or key-management fetch plugs in (cache
+inside it if the fetch is slow). The `cryptography` package does the
+work: `pip install "locus-sdk[encryption]"`.
 
 What is stored is a versioned envelope, `{"v": 1, "alg": "A256GCM",
 "kid": …, "nonce": …, "ct": …, "iteration": …}`. `kid` is a fingerprint
 of the key (the first eight hex digits of its SHA-256), never the key.
-Rotate by moving the old key to `previous_keys=[…]`: a checkpoint is
-decrypted with the key its `kid` names, so history written under the old
-key keeps loading while new saves use the new one. A checkpoint written
-before encryption was turned on is not an envelope and loads as it
-always did, so turning encryption on needs no migration; a checkpointer
-without the key raises `CheckpointEncryptionError` on an encrypted
-checkpoint rather than a parse error.
+The envelope is bound to its place: the stored thread id (scope
+included), the checkpoint id and the plaintext `iteration` are the
+cipher's associated data, so a ciphertext copied from one thread or
+checkpoint to another, or an envelope whose `iteration` was edited,
+fails to decrypt with `CheckpointEncryptionError` (`fork` and
+`copy_thread` re-seal the state under the new thread). Rotate by moving
+the old key to `previous_keys=[…]`: a checkpoint is decrypted with the
+key its `kid` names, so history written under the old key keeps loading
+while new saves use the new one. A checkpointer without the key raises
+`CheckpointEncryptionError` on an encrypted checkpoint rather than a
+parse error.
+
+With encryption configured, a stored checkpoint that is **not** an
+envelope is refused — plaintext where ciphertext was expected is either
+an unmigrated store or a tampered one. To migrate a store written
+before encryption was turned on, pass
+`EncryptedSerializer(key, allow_plaintext=True)`: a plaintext checkpoint
+then loads with a one-line warning naming it, and the thread's next save
+is sealed; drop the flag once the store holds no plaintext.
 
 **What stays plaintext.** Only the state is encrypted. The fields a
 listing needs are stored beside it in the clear, so `cp.list()` works
@@ -386,16 +415,34 @@ prefix of the `thread_id` column on `PgCheckpointer` (whose `tenant`
 stays the Row-Level Security boundary). Either id may be omitted; the ids
 are letters, digits and `. _ : @ + -`.
 
+The stored id is a grammar no input can forge: each segment — the
+`app_id`, the `user_id` and the thread id — is percent-encoded before it
+is joined, so a `/` or `=` inside a thread id cannot form a scope
+marker. `load("user=victim/t")` under an app-only scope is the app's
+own thread `app=billing/user%3Dvictim%2Ft`, never the user's; an
+app-only scope lists and loads the app-level threads only (a user's
+threads need the user in the scope); and a checkpointer with no scope
+never resolves a scoped stored id as a thread. Unscoped threads keep
+their bare id, so existing data is unaffected (an unscoped id that
+could pass for a scope marker is the one exception: it is stored
+percent-encoded).
+
 Give the scope to the checkpointer (`scope=`) when an instance serves
 one tenant, or to the run — `agent.run(…, scope=…)`, also `arun`,
-`run_sync`, `resume` and `continue_turn` — when one agent serves many: a
-run's scope is active for every checkpointer call the run makes, the
-ledger's included, and takes precedence over the instance's.
-`with scope.active():` does the same around a block of your own. From
-another scope, or from no scope, the same `thread_id` is a miss, not a
-leak; `fork` keeps the fork in the scope. Threads written with no scope
-are stored under their bare id and stay reachable from a checkpointer
-with no scope, so existing data is unaffected.
+`run_sync`, `resume` and `continue_turn` — when one agent serves many.
+The runtime resolves the run's scope once, when the run starts, and
+every checkpointer call the run makes — the ledger's included — goes
+through a view of the checkpointer pinned to it
+(`cp.with_scope(scope)`), so two runs whose events are consumed
+alternately, or a run consumed in another context, each keep their own.
+`scope=None` inherits the checkpointer's own scope; `CheckpointScope()`
+runs explicitly unscoped, whatever the checkpointer's scope. A paused
+run remembers its scope, so `resume()` without one continues the turn
+where it was saved. `with scope.active():` is a convenience for code of
+your own: inside the block it is the default scope of every direct
+checkpointer call, and of a run started inside it. From another scope,
+or from no scope, the same `thread_id` is a miss, not a leak; `fork`
+keeps the fork in the scope.
 
 `cp.list_threads()` lists one scope at a time: the checkpointer's own
 (or the run's) by default, `scope=` for another, and the unscoped

@@ -255,8 +255,9 @@ class TestStorageBackendAdapter:
 
     @pytest.mark.asyncio
     async def test_exists(self, adapter, mock_backend):
-        """Test checking existence."""
+        """Test checking existence (the document is read to honour its expiry)."""
         mock_backend.exists.return_value = True
+        mock_backend.load.return_value = {"iteration": 0}
 
         result = await adapter.exists("thread1", "cp1")
 
@@ -267,6 +268,7 @@ class TestStorageBackendAdapter:
     async def test_exists_latest(self, adapter, mock_backend):
         """Test checking existence of latest."""
         mock_backend.exists.return_value = True
+        mock_backend.load.return_value = {"iteration": 0}
 
         result = await adapter.exists("thread1")
 

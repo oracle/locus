@@ -242,7 +242,7 @@ class StorageBackendAdapter(BaseCheckpointer):
         storage_key = f"{key}:{checkpoint_id}"
 
         # Convert state to dict and save
-        data = self._encode_state(state)
+        data = self._encode_state(state, key, checkpoint_id)
         data["_checkpoint_id"] = checkpoint_id
         data["_checkpoint_timestamp"] = now.isoformat()
         data["_metadata"] = metadata or {}
@@ -346,26 +346,40 @@ class StorageBackendAdapter(BaseCheckpointer):
         thread_id: str,
         checkpoint_id: str | None = None,
     ) -> AgentState | None:
-        """Load agent state from the storage backend."""
-        key = self._scoped(thread_id)
-        # Determine storage key
-        if checkpoint_id:
-            storage_key = f"{key}:{checkpoint_id}"
-        else:
-            storage_key = f"{key}:latest"
+        """Load agent state from the storage backend.
 
-        # Load data
+        Without a ``checkpoint_id`` the thread's ``latest`` copy is read; when
+        that copy is gone or has expired — it was written with a shorter
+        ``ttl`` than an earlier checkpoint, or the store dropped it — the
+        newest live checkpoint in the index is loaded instead.
+        """
+        key = self._scoped(thread_id)
+        if checkpoint_id:
+            return await self._load_document(key, f"{key}:{checkpoint_id}", checkpoint_id)
+        latest = await self._load_document(key, f"{key}:latest", None)
+        if latest is not None:
+            return latest
+        for entry in await self._index_entries(key):
+            cid = str(entry.get("checkpoint_id") or "")
+            if cid:
+                state = await self._load_document(key, f"{key}:{cid}", cid)
+                if state is not None:
+                    return state
+        return None
+
+    async def _load_document(
+        self, key: str, storage_key: str, checkpoint_id: str | None
+    ) -> AgentState | None:
+        """The state a stored document holds, or ``None`` when it is missing or expired."""
         data = await self._backend.load(storage_key)
         if data is None or is_expired(data.get(_EXPIRES_FIELD)):
             return None
-
-        # Remove adapter metadata before restoring
-        data.pop("_checkpoint_id", None)
+        # The ``latest`` copy names the checkpoint it is; the envelope is bound to it.
+        stored_id = data.pop("_checkpoint_id", None)
         data.pop("_checkpoint_timestamp", None)
         data.pop("_metadata", None)
         data.pop(_EXPIRES_FIELD, None)
-
-        return self._decode_state(data)
+        return self._decode_state(data, key, str(checkpoint_id or stored_id or ""))
 
     async def list_checkpoints(
         self,
@@ -491,18 +505,25 @@ class StorageBackendAdapter(BaseCheckpointer):
         thread_id: str,
         checkpoint_id: str | None = None,
     ) -> bool:
-        """Check if checkpoint exists (and, on a checkpointer with a ``ttl``, has not expired)."""
+        """Check if checkpoint exists and has not expired.
+
+        A document that carries an expiry is filtered whether or not this
+        instance has a ``ttl``: the writer's expiry is the checkpoint's.
+        Without a ``checkpoint_id`` the thread exists when any live
+        checkpoint does, the ``latest`` copy's own expiry notwithstanding.
+        """
         key = self._scoped(thread_id)
         if checkpoint_id:
             storage_key = f"{key}:{checkpoint_id}"
-        else:
-            storage_key = f"{key}:latest"
-
-        present: bool = await self._backend.exists(storage_key)
-        if present and self.ttl is not None:
+            if not await self._backend.exists(storage_key):
+                return False
             data = await self._backend.load(storage_key)
             return data is not None and not is_expired(data.get(_EXPIRES_FIELD))
-        return present
+        if await self._backend.exists(f"{key}:latest"):
+            data = await self._backend.load(f"{key}:latest")
+            if data is not None and not is_expired(data.get(_EXPIRES_FIELD)):
+                return True
+        return bool(await self._index_entries(key))
 
     # =========================================================================
     # Extended Methods - Delegate to Backend

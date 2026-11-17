@@ -308,7 +308,7 @@ class S3Backend(BaseCheckpointer):
         key = self._scoped(thread_id)
         expires_at = self._expires_at(now)
 
-        state_data = self._encode_state(state)
+        state_data = self._encode_state(state, key, checkpoint_id)
         payload = {
             "checkpoint_id": checkpoint_id,
             "thread_id": key,
@@ -338,17 +338,35 @@ class S3Backend(BaseCheckpointer):
         thread_id: str,
         checkpoint_id: str | None = None,
     ) -> AgentState | None:
+        await self._ensure_bucket()
         key = self._scoped(thread_id)
         if checkpoint_id is None:
-            pointer = await self._get_bytes(self._latest_key(key))
-            if pointer is None:
-                return None
-            checkpoint_id = pointer.decode("utf-8").strip()
+            return await self._load_latest(key)
+        return await self._load_checkpoint(key, checkpoint_id)
 
+    async def _load_checkpoint(self, key: str, checkpoint_id: str) -> AgentState | None:
         data = await self._get_json(self._checkpoint_key(key, checkpoint_id))
         if data is None or is_expired(data.get(EXPIRES_AT_KEY)):
             return None
-        return self._decode_state(data["state"])
+        return self._decode_state(data["state"], key, checkpoint_id)
+
+    async def _load_latest(self, key: str) -> AgentState | None:
+        """The thread's newest live checkpoint.
+
+        ``_latest`` names the last save. Written with a shorter ``ttl`` than
+        an earlier checkpoint, it expires first; the listing then finds the
+        newest checkpoint still live, as it does when the pointer is gone.
+        """
+        pointer = await self._get_bytes(self._latest_key(key))
+        if pointer is not None:
+            state = await self._load_checkpoint(key, pointer.decode("utf-8").strip())
+            if state is not None:
+                return state
+        for checkpoint_id, _, _ in await self._checkpoint_objects(key):
+            state = await self._load_checkpoint(key, checkpoint_id)
+            if state is not None:
+                return state
+        return None
 
     async def _checkpoint_objects(
         self, thread_key: str
@@ -502,10 +520,16 @@ class S3Backend(BaseCheckpointer):
         return results
 
     async def copy_thread(self, source_thread_id: str, dest_thread_id: str) -> bool:
+        """Copy every object of a thread under another thread's prefix.
+
+        An encrypted checkpoint is bound to its thread and cannot be copied
+        as bytes: each one is unsealed and sealed again under the new
+        thread, its ``.meta.json`` copied beside it.
+        """
         self._require_capability("branching")
         client = self._get_client()
-        src_prefix = self._thread_prefix(self._scoped(source_thread_id))
-        dst_prefix = self._thread_prefix(self._scoped(dest_thread_id))
+        src_key, dst_key = self._scoped(source_thread_id), self._scoped(dest_thread_id)
+        src_prefix, dst_prefix = self._thread_prefix(src_key), self._thread_prefix(dst_key)
         listing = await self._list_keys(src_prefix)
         if not listing["contents"]:
             return False
@@ -518,9 +542,19 @@ class S3Backend(BaseCheckpointer):
             )
 
         for obj in listing["contents"]:
-            src_key = obj["Key"]
-            dst_key = dst_prefix + src_key[len(src_prefix) :]
-            await asyncio.to_thread(_copy, src_key, dst_key)
+            object_key = obj["Key"]
+            name = object_key[len(src_prefix) :]
+            target = dst_prefix + name
+            is_payload = name.endswith(".json") and not name.endswith(".meta.json")
+            payload = await self._get_json(object_key) if is_payload and self.encryption else None
+            if payload is not None:
+                checkpoint_id = name[: -len(".json")]
+                state = self._decode_state(payload["state"], src_key, checkpoint_id)
+                payload["state"] = self._encode_state(state, dst_key, checkpoint_id)
+                payload["thread_id"] = dst_key
+                await self._put_json(target, payload)
+                continue
+            await asyncio.to_thread(_copy, object_key, target)
         return True
 
     async def vacuum(self, older_than_days: int = 30) -> int:

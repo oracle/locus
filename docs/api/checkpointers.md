@@ -24,6 +24,7 @@ describes what each does per backend and what stays plaintext.
 
 ::: locus.memory.scope.CheckpointScope
 ::: locus.memory.scope.current_scope
+::: locus.memory.scoped.ScopedCheckpointer
 ::: locus.memory.encryption.EncryptedSerializer
 ::: locus.memory.encryption.CheckpointEncryptionError
 

@@ -388,7 +388,7 @@ class PgCheckpointer(BaseCheckpointer):
             tenant,
             key,
             checkpoint_id,
-            json.dumps(self._encode_state(state)),
+            json.dumps(self._encode_state(state, key, checkpoint_id)),
             json.dumps(metadata or {}),
             oldest_message_time(state),
         ]
@@ -432,23 +432,26 @@ class PgCheckpointer(BaseCheckpointer):
         async with pool.acquire() as conn, conn.transaction():
             await self._pinned(conn, tenant)
             if checkpoint_id is None:
-                raw = await conn.fetchval(
-                    f"SELECT data FROM {self._table} WHERE tenant = $1 AND thread_id = $2 "
-                    f"{self._live} ORDER BY seq DESC LIMIT 1",
+                row = await conn.fetchrow(
+                    f"SELECT checkpoint_id, data FROM {self._table} "
+                    f"WHERE tenant = $1 AND thread_id = $2 {self._live} ORDER BY seq DESC LIMIT 1",
                     tenant,
                     key,
                 )
             else:
-                raw = await conn.fetchval(
-                    f"SELECT data FROM {self._table} "
+                row = await conn.fetchrow(
+                    f"SELECT checkpoint_id, data FROM {self._table} "
                     f"WHERE tenant = $1 AND thread_id = $2 AND checkpoint_id = $3 {self._live}",
                     tenant,
                     key,
                     checkpoint_id,
                 )
-        if raw is None:
+        if row is None:
             return None
-        return self._decode_state(json.loads(raw) if isinstance(raw, str) else raw)
+        raw = row["data"]
+        return self._decode_state(
+            json.loads(raw) if isinstance(raw, str) else raw, key, str(row["checkpoint_id"])
+        )
 
     async def list_checkpoints(self, thread_id: str, limit: int = 10) -> list[str]:
         tenant = self.tenant_for(thread_id)
@@ -611,25 +614,64 @@ class PgCheckpointer(BaseCheckpointer):
         return listing.strip(r["thread_id"] for r in rows)
 
     async def copy_thread(self, source_thread_id: str, dest_thread_id: str) -> bool:
-        """Copy every checkpoint of a thread to another thread of the same tenant."""
+        """Copy every checkpoint of a thread to another thread of the same tenant.
+
+        One statement when the rows can be copied as they are; an encrypted
+        checkpoint is bound to its thread, so with ``encryption`` each row
+        is unsealed and sealed again under the new thread.
+        """
         tenant = self.tenant_for(source_thread_id)
         if self.tenant_for(dest_thread_id) != tenant:
             raise ValueError("copy_thread cannot copy a thread to another tenant")
+        source_key, dest_key = self._scoped(source_thread_id), self._scoped(dest_thread_id)
         pool = await self._get_pool()
+        expires = ", expires_at" if self._has_expires else ""
         async with pool.acquire() as conn, conn.transaction():
             await self._pinned(conn, tenant)
-            expires = ", expires_at" if self._has_expires else ""
-            status = await conn.execute(
-                f"INSERT INTO {self._table} "
-                f"(tenant, thread_id, checkpoint_id, data, metadata, oldest_at{expires}) "
-                f"SELECT tenant, $3, checkpoint_id, data, metadata, oldest_at{expires} "
-                f"FROM {self._table} WHERE tenant = $1 AND thread_id = $2 {self._live} "
-                "ORDER BY seq ON CONFLICT (tenant, thread_id, checkpoint_id) DO NOTHING",
+            if self.encryption is None:
+                status = await conn.execute(
+                    f"INSERT INTO {self._table} "
+                    f"(tenant, thread_id, checkpoint_id, data, metadata, oldest_at{expires}) "
+                    f"SELECT tenant, $3, checkpoint_id, data, metadata, oldest_at{expires} "
+                    f"FROM {self._table} WHERE tenant = $1 AND thread_id = $2 {self._live} "
+                    "ORDER BY seq ON CONFLICT (tenant, thread_id, checkpoint_id) DO NOTHING",
+                    tenant,
+                    source_key,
+                    dest_key,
+                )
+                return _count(status) > 0
+            rows = await conn.fetch(
+                f"SELECT checkpoint_id, data, metadata, oldest_at{expires} FROM {self._table} "
+                f"WHERE tenant = $1 AND thread_id = $2 {self._live} ORDER BY seq",
                 tenant,
-                self._scoped(source_thread_id),
-                self._scoped(dest_thread_id),
+                source_key,
             )
-        return _count(status) > 0
+            copied = 0
+            for r in rows:
+                raw = r["data"]
+                state = self._decode_state(
+                    json.loads(raw) if isinstance(raw, str) else raw, source_key, r["checkpoint_id"]
+                )
+                args: list[Any] = [
+                    tenant,
+                    dest_key,
+                    r["checkpoint_id"],
+                    json.dumps(self._encode_state(state, dest_key, r["checkpoint_id"])),
+                    r["metadata"] if isinstance(r["metadata"], str) else json.dumps(r["metadata"]),
+                    r["oldest_at"],
+                ]
+                values = "$1, $2, $3, $4::jsonb, $5::jsonb, $6"
+                if self._has_expires:
+                    args.append(r["expires_at"])
+                    values += ", $7"
+                status = await conn.execute(
+                    f"INSERT INTO {self._table} "
+                    f"(tenant, thread_id, checkpoint_id, data, metadata, oldest_at{expires}) "
+                    f"VALUES ({values}) ON CONFLICT (tenant, thread_id, checkpoint_id) DO NOTHING",
+                    *args,
+                )
+                copied += _count(status)
+        return copied > 0
 
     async def vacuum(self, older_than_days: int = 30) -> int:
         """Delete the current tenant's threads nobody has saved to for ``older_than_days``.
@@ -689,7 +731,11 @@ class PgCheckpointer(BaseCheckpointer):
                 updates = []
                 for r in rows:
                     raw = r["data"]
-                    state = self._decode_state(json.loads(raw) if isinstance(raw, str) else raw)
+                    state = self._decode_state(
+                        json.loads(raw) if isinstance(raw, str) else raw,
+                        r["thread_id"],
+                        r["checkpoint_id"],
+                    )
                     trimmed, n = trim_messages(state, cutoff)
                     dropped += n
                     # Unstamped or recent exchanges ahead of the old ones stop
@@ -701,7 +747,9 @@ class PgCheckpointer(BaseCheckpointer):
                             tenant,
                             r["thread_id"],
                             r["checkpoint_id"],
-                            json.dumps(self._encode_state(trimmed)),
+                            json.dumps(
+                                self._encode_state(trimmed, r["thread_id"], r["checkpoint_id"])
+                            ),
                             oldest if oldest is not None and oldest >= cutoff else None,
                         )
                     )

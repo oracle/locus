@@ -38,7 +38,7 @@ from locus.core.messages import Message, Role, ToolCall, ToolResult
 from locus.core.state import AgentState
 from locus.memory.encryption import CheckpointEncryptionError, EncryptedSerializer
 from locus.memory.ledger import RunLedger, ToolEffectLedger
-from locus.memory.scope import CheckpointScope
+from locus.memory.scope import CheckpointScope, current_scope
 from locus.memory.time_travel import CheckpointInfo
 from locus.testing import FunctionModel, text, tool_call
 from locus.tools.decorator import tool
@@ -522,24 +522,42 @@ class ProductionSettingsConformance(_Settles):
         with pytest.raises(CheckpointEncryptionError):
             await writer.load("t", "cp-3")
 
-    async def test_plaintext_checkpoints_load_after_encryption_is_turned_on(
+    async def test_plaintext_checkpoints_are_refused_unless_migrating(
         self, production: Any
     ) -> None:
         plain = production()
         await plain.save(_state(0), "t", "cp-0")
         await self.settle()
 
-        encrypted = production(encryption=EncryptedSerializer(secrets.token_bytes(32)))
-        before = await encrypted.load("t")
+        key = secrets.token_bytes(32)
+        strict = production(encryption=EncryptedSerializer(key))
+        with pytest.raises(CheckpointEncryptionError, match="plaintext"):
+            await strict.load("t")
+        assert [i.checkpoint_id for i in await strict.list("t")] == ["cp-0"], "listing needs no key"
+
+        migrating = production(encryption=EncryptedSerializer(key, allow_plaintext=True))
+        before = await migrating.load("t")
         assert before is not None
         assert before.iteration == 0
-        await encrypted.save(_state(1), "t", "cp-1")
+        await migrating.save(_state(1), "t", "cp-1")
 
-        assert [i.checkpoint_id for i in await encrypted.list("t")] == ["cp-1", "cp-0"]
+        assert [i.checkpoint_id for i in await strict.list("t")] == ["cp-1", "cp-0"]
+        sealed = await strict.load("t")
+        assert sealed is not None
+        assert sealed.iteration == 1, "the new save is an envelope the strict reader loads"
         still_plain = await plain.load("t", "cp-0")
         assert still_plain is not None
         with pytest.raises(CheckpointEncryptionError):
             await plain.load("t")
+
+    async def test_an_envelope_moved_to_another_thread_is_refused(self, production: Any) -> None:
+        cp = production(encryption=EncryptedSerializer(secrets.token_bytes(32)))
+        await cp.save(_state(1), "t", "cp-0")
+        # A fork re-seals the state under the new thread; the copy loads there.
+        forked = await cp.fork("t", "cp-0", new_thread_id="t-alt")
+        moved = await cp.load(forked)
+        assert moved is not None
+        assert moved.iteration == 1
 
     # -- scope ---------------------------------------------------------------
 
@@ -599,3 +617,27 @@ class ProductionSettingsConformance(_Settles):
         events = [e async for e in agent.run("streamed", thread_id="t", scope=SCOPE_A)]
         assert events
         assert _user_texts(seen[-1]) == ["first", "second", "streamed"]
+
+    async def test_interleaved_scoped_runs_save_under_their_own_scope(
+        self, production: Any
+    ) -> None:
+        """Two streams advanced alternately in one task: the scope is the run's, not the context's."""
+        cp = production()
+        seen: list[list[Message]] = []
+        agent = _agent(cp, seen)
+        first = agent.run("hello from A", thread_id="t", scope=SCOPE_A)
+        second = agent.run("hello from B", thread_id="t", scope=SCOPE_B)
+        await anext(first)
+        await anext(second)
+        async for _ in first:
+            pass
+        async for _ in second:
+            pass
+        assert current_scope() is None, "nothing left in the context"
+        a = await production(scope=SCOPE_A).load("t")
+        b = await production(scope=SCOPE_B).load("t")
+        assert a is not None
+        assert b is not None
+        assert _user_texts(a.messages) == ["hello from A"]
+        assert _user_texts(b.messages) == ["hello from B"]
+        assert await cp.load("t") is None, "nothing landed unscoped"

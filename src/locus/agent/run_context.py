@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from locus.core.termination import TerminationCondition
     from locus.memory.compaction import CompactionTracker
     from locus.memory.ledger import RunLedger
+    from locus.memory.scope import CheckpointScope
     from locus.tools.integrity import ToolCallSigner
 
 
@@ -105,6 +106,9 @@ class PendingInterrupt:
     #: The paused run's ephemeral metadata (see :data:`EPHEMERAL_METADATA_KEYS`),
     #: kept in memory only so an in-process resume still has it.
     ephemeral: dict[str, Any] = field(default_factory=dict, repr=False)
+    #: The scope the paused run was given (``agent.run(..., scope=...)``), so a
+    #: ``resume()`` without one continues the turn where it was saved.
+    scope: CheckpointScope | None = None
 
 
 def _copy_termination(
@@ -153,6 +157,12 @@ class RunContext:
     #: The run's tool-call signer (``AgentConfig.tool_call_integrity``), or
     #: ``None`` when the feature is off. Set by the runtime's ``_begin_run``.
     integrity: ToolCallSigner | None = None
+    #: The scope the run was given (``agent.run(..., scope=...)``), resolved
+    #: once when the run started; ``None`` inherits the checkpointer's own.
+    scope: CheckpointScope | None = None
+    #: The checkpointer every call of this run goes through: the agent's, or
+    #: a view of it pinned to ``scope``. Set by the runtime's ``_begin_run``.
+    checkpointer: Any | None = None
     #: How this run writes its checkpoints (``durability=``); ``None`` without
     #: a checkpointer. Set by the runtime's ``_begin_run``.
     checkpoints: CheckpointWriter | None = None

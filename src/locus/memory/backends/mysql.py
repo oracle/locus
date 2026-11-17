@@ -384,8 +384,11 @@ class MySQLBackend(BaseModel):
     config: MySQLConfig = Field(default_factory=MySQLConfig)
     _pool: _MySQLConnectionPool | None = None
     _initialized: bool = False
-    #: Whether the table has the ``expires_at`` column (probed or added on first use).
+    #: Whether the table has the ``expires_at`` column (probed on first use; added
+    #: by the first save that carries an expiry, when the role may).
     _expires_column: bool = True
+    #: Whether adding the column has been tried (once per process).
+    _expires_column_tried: bool = False
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -458,13 +461,17 @@ class MySQLBackend(BaseModel):
                       COLLATE={self.config.collation}
                     """
                 )
-                await self._ensure_expires_column(cur)
+                await self._probe_expires_column(cur)
             await conn.commit()
 
         self._initialized = True
 
-    async def _ensure_expires_column(self, cur: Any) -> None:
-        """Add ``expires_at`` to a table from before checkpoints could expire, when allowed."""
+    async def _probe_expires_column(self, cur: Any) -> None:
+        """Whether the table has ``expires_at``: no DDL, reads filter on it only if so.
+
+        MySQL has no ``ADD COLUMN IF NOT EXISTS``, so the probe is what
+        decides whether a later save may add the column.
+        """
         await cur.execute(
             "SELECT COUNT(*) FROM information_schema.columns "
             "WHERE table_schema = DATABASE() AND table_name = %s AND column_name = 'expires_at'",
@@ -472,22 +479,31 @@ class MySQLBackend(BaseModel):
         )
         row = await cur.fetchone()
         count = row[0] if row else None
-        if not (isinstance(count, int) and count == 0):
-            # Present, or a driver that gave no answer: assume the layout above.
-            self._expires_column = True
+        # Present, or a driver that gave no answer: assume the layout above.
+        self._expires_column = not (isinstance(count, int) and count == 0)
+
+    async def _ensure_expires_column(self, cur: Any) -> None:
+        """Add ``expires_at`` to a table from before checkpoints could expire, when allowed.
+
+        Called by the first save that carries an expiry — a checkpointer
+        without a ``ttl`` never alters a table it did not create. Tried
+        once: a role that may not alter the table is told once, and expiry
+        is then kept in the documents only.
+        """
+        if self._expires_column or self._expires_column_tried:
             return
+        self._expires_column_tried = True
         try:
             await cur.execute(
                 f"ALTER TABLE {self._quoted_table_name} ADD COLUMN expires_at TIMESTAMP(6) NULL"
             )
-        except Exception:  # noqa: BLE001 — a role that may not alter the table
+        except Exception as exc:  # noqa: BLE001 — a role that may not alter the table
             logger.warning(
-                "could not add the expires_at column to %s; checkpoint expiry is kept in "
+                "could not add the expires_at column to %s (%s); checkpoint expiry is kept in "
                 "the documents only",
                 self.config.table_name,
-                exc_info=True,
+                str(exc).splitlines()[0] if str(exc) else type(exc).__name__,
             )
-            self._expires_column = False
             return
         self._expires_column = True
 
@@ -526,26 +542,30 @@ class MySQLBackend(BaseModel):
 
         checkpoint_id = checkpoint_id or uuid4().hex
         now = datetime.now(UTC).replace(tzinfo=None)
-        # ``metadata`` stays the last column: the column list grows ahead of it.
-        columns = "thread_id, checkpoint_id, data, created_at, updated_at"
-        placeholders = "%s, %s, %s, %s, %s"
-        updates = (
-            "checkpoint_id = VALUES(checkpoint_id), data = VALUES(data), "
-            "updated_at = VALUES(updated_at)"
-        )
-        params: list[Any] = [thread_id, checkpoint_id, json.dumps(data), now, now]
-        if self._expires_column:
-            columns += ", expires_at"
-            placeholders += ", %s"
-            updates += ", expires_at = VALUES(expires_at)"
-            params.append(expires_at.astimezone(UTC).replace(tzinfo=None) if expires_at else None)
-        columns += ", metadata"
-        placeholders += ", %s"
-        updates += ", metadata = VALUES(metadata)"
-        params.append(json.dumps(metadata or {}))
 
         async with pool.acquire() as conn:
             async with await conn.cursor() as cur:
+                if expires_at is not None:
+                    await self._ensure_expires_column(cur)
+                # ``metadata`` stays the last column: the column list grows ahead of it.
+                columns = "thread_id, checkpoint_id, data, created_at, updated_at"
+                placeholders = "%s, %s, %s, %s, %s"
+                updates = (
+                    "checkpoint_id = VALUES(checkpoint_id), data = VALUES(data), "
+                    "updated_at = VALUES(updated_at)"
+                )
+                params: list[Any] = [thread_id, checkpoint_id, json.dumps(data), now, now]
+                if self._expires_column:
+                    columns += ", expires_at"
+                    placeholders += ", %s"
+                    updates += ", expires_at = VALUES(expires_at)"
+                    params.append(
+                        expires_at.astimezone(UTC).replace(tzinfo=None) if expires_at else None
+                    )
+                columns += ", metadata"
+                placeholders += ", %s"
+                updates += ", metadata = VALUES(metadata)"
+                params.append(json.dumps(metadata or {}))
                 await cur.execute(
                     f"""
                     INSERT INTO {self._quoted_table_name} ({columns})

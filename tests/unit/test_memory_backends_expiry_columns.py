@@ -5,10 +5,12 @@
 """The ``expires_at`` column of the PostgreSQL and MySQL storage backends, on stubbed drivers.
 
 The adapter hands ``save(..., expires_at=)`` to a backend whose ``save``
-takes it; these backends keep it in a column added to an existing table
-on first use, filter their reads on it and sweep it with ``expire()``. A
-role that may not alter the table goes without the column, and the
-adapter's own record of the time still applies. The drivers are stubbed
+takes it; these backends keep it in a column, filter their reads on it and
+sweep it with ``expire()``. An existing table is only probed on start: the
+column is added by the first save that carries an expiry (a checkpointer
+without a ``ttl`` never alters a table it did not create), and a role that
+may not alter the table goes without the column, told once, with the
+adapter's own record of the time still applying. The drivers are stubbed
 as in ``test_memory_backends_postgresql.py`` and
 ``test_memory_backends_mysql.py``.
 """
@@ -73,18 +75,39 @@ class TestPostgresExpiresColumn:
         assert args[5] == EXPIRES
         assert backend._expires_column is True
 
-    async def test_an_old_table_gets_the_column_added_once(
+    async def test_without_a_ttl_an_old_table_is_left_alone(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         conn = _ProbingConn(table_exists=True, column_exists=False)
         pg_stubs._stub_asyncpg(monkeypatch, conn)
         backend = PostgreSQLBackend()
         await backend.save("t:cp", {"x": 1})
-        await backend.save("t:cp", {"x": 2})
+        await backend.load("t:cp")
+        await backend.exists("t:cp")
+        assert not any("ALTER TABLE" in sql for sql, _ in conn.execute_calls), "no DDL asked for"
+        assert backend._expires_column is False
+        assert backend._live == "", "reads do not name a column the table lacks"
+        sql, args = conn.execute_calls[0]
+        assert "expires_at" not in sql
+        assert len(args) == 6
+        assert await backend.expire() == 0
+
+    async def test_the_first_save_with_an_expiry_adds_the_column_once(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        conn = _ProbingConn(table_exists=True, column_exists=False)
+        pg_stubs._stub_asyncpg(monkeypatch, conn)
+        backend = PostgreSQLBackend()
+        await backend.save("t:cp", {"x": 0})
+        assert not any("ALTER TABLE" in sql for sql, _ in conn.execute_calls)
+        await backend.save("t:cp", {"x": 1}, expires_at=EXPIRES)
+        await backend.save("t:cp", {"x": 2}, expires_at=EXPIRES)
         alters = [sql for sql, _ in conn.execute_calls if "ALTER TABLE" in sql]
         assert len(alters) == 1
         assert "ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ" in alters[0]
-        assert conn.execute_calls[-1][1][5] is None, "no expiry binds NULL"
+        assert backend._expires_column is True
+        assert conn.execute_calls[-1][1][5] == EXPIRES
+        assert "expires_at IS NULL OR expires_at > now()" in backend._live
 
     async def test_an_existing_column_needs_no_ddl(self, monkeypatch: pytest.MonkeyPatch) -> None:
         conn = _ProbingConn(table_exists=True, column_exists=True)
@@ -102,8 +125,12 @@ class TestPostgresExpiresColumn:
         backend = PostgreSQLBackend()
         with caplog.at_level("WARNING"):
             await backend.save("t:cp", {"x": 1}, expires_at=EXPIRES)
+            await backend.save("t:cp", {"x": 2}, expires_at=EXPIRES)
         assert backend._expires_column is False
-        assert "could not add the expires_at column" in caplog.text
+        [record] = [r for r in caplog.records if "could not add the expires_at column" in r.message]
+        assert record.exc_info is None, "one line, once"
+        assert "permission denied" in record.getMessage()
+        assert backend._expires_column_tried is True, "tried once, not on every save"
         sql, args = conn.execute_calls[-1]
         assert "expires_at" not in sql
         assert len(args) == 6
@@ -180,15 +207,33 @@ class TestMySQLExpiresColumn:
         assert params[5] == EXPIRES.replace(tzinfo=None), "bound naive, in UTC"
         assert params[-1] == '{"a": 1}', "metadata stays the last parameter"
 
-    async def test_a_missing_column_is_added_once(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_without_a_ttl_a_missing_column_is_left_alone(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         cursor = _ProbingCursor(column_count=0)
         backend, _ = _mysql(monkeypatch, cursor)
         await backend.save("t:cp", {"x": 1})
-        await backend.save("t:cp", {"x": 2})
+        await backend.load("t:cp")
+        assert not any("ALTER TABLE" in sql for sql, _ in cursor.execute_calls)
+        assert backend._expires_column is False
+        assert backend._live == ""
+        inserts = [(sql, p) for sql, p in cursor.execute_calls if "INSERT INTO" in sql]
+        assert "expires_at" not in inserts[0][0]
+        assert len(inserts[0][1]) == 6
+
+    async def test_the_first_save_with_an_expiry_adds_the_column_once(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cursor = _ProbingCursor(column_count=0)
+        backend, _ = _mysql(monkeypatch, cursor)
+        await backend.save("t:cp", {"x": 0})
+        await backend.save("t:cp", {"x": 1}, expires_at=EXPIRES)
+        await backend.save("t:cp", {"x": 2}, expires_at=EXPIRES)
         alters = [sql for sql, _ in cursor.execute_calls if "ALTER TABLE" in sql]
         assert len(alters) == 1
         assert "ADD COLUMN expires_at TIMESTAMP(6) NULL" in alters[0]
-        assert cursor.execute_calls[-1][1][5] is None
+        assert backend._expires_column is True
+        assert cursor.execute_calls[-1][1][5] == EXPIRES.replace(tzinfo=None)
 
     async def test_a_driver_that_gives_no_answer_assumes_the_column(
         self, monkeypatch: pytest.MonkeyPatch
@@ -206,8 +251,11 @@ class TestMySQLExpiresColumn:
         backend, _ = _mysql(monkeypatch, cursor)
         with caplog.at_level("WARNING"):
             await backend.save("t:cp", {"x": 1}, expires_at=EXPIRES)
+            await backend.save("t:cp", {"x": 2}, expires_at=EXPIRES)
         assert backend._expires_column is False
-        assert "could not add the expires_at column" in caplog.text
+        [record] = [r for r in caplog.records if "could not add the expires_at column" in r.message]
+        assert record.exc_info is None
+        assert backend._expires_column_tried is True
         sql, params = cursor.execute_calls[-1]
         assert "expires_at" not in sql
         assert len(params) == 6

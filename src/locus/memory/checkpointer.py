@@ -6,19 +6,28 @@
 
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from locus.core.protocols import CheckpointerCapabilities
-from locus.memory.encryption import CheckpointEncryptionError, EncryptedSerializer, is_envelope
+from locus.memory.encryption import (
+    CheckpointEncryptionError,
+    EncryptedSerializer,
+    associated_data,
+    is_envelope,
+)
 from locus.memory.expiry import expiry_time, parse_ttl
-from locus.memory.scope import CheckpointScope, current_scope
+from locus.memory.scope import CheckpointScope, StoredThreadId, current_scope
 
 
 if TYPE_CHECKING:
     from locus.core.state import AgentState
     from locus.memory.time_travel import CheckpointInfo
+
+
+logger = logging.getLogger(__name__)
 
 
 class BaseCheckpointer(ABC):
@@ -58,7 +67,9 @@ class BaseCheckpointer(ABC):
     application's and user's threads apart from another's). A subclass
     passes them to :meth:`_configure` from its constructor and uses
     :meth:`_scoped`, :meth:`_encode_state`, :meth:`_decode_state` and
-    :meth:`_expires_at` where it stores and reads.
+    :meth:`_expires_at` where it stores and reads. :meth:`with_scope` is a
+    view of the instance under another scope, which is how a run's
+    ``scope=`` reaches every call the run makes.
 
     Example:
         >>> if checkpointer.capabilities.search:
@@ -468,43 +479,94 @@ class BaseCheckpointer(ABC):
             raise TypeError("scope must be a CheckpointScope")
         self.scope = scope if scope is not None and not scope.is_empty else None
 
+    def with_scope(self, scope: CheckpointScope | None) -> BaseCheckpointer:
+        """A view of this checkpointer whose every call is under ``scope``.
+
+        The view shares the store and the connections; ``scope`` replaces
+        the instance's for every call through it, whatever
+        :meth:`CheckpointScope.active` block is open — the empty scope is
+        the unscoped namespace. ``None`` is this checkpointer itself. The
+        runtime makes one per ``agent.run(..., scope=...)``; use it for
+        code of your own that serves one tenant per call::
+
+            await checkpointer.with_scope(CheckpointScope(user_id="u-42")).load("t")
+        """
+        if scope is None:
+            return self
+        from locus.memory.scoped import ScopedCheckpointer  # noqa: PLC0415
+
+        return ScopedCheckpointer(self, scope)
+
     def _effective_scope(self) -> CheckpointScope | None:
-        """The scope of this call: an active one (a scoped run) over the instance's."""
+        """The scope of this call: an active block's over the instance's."""
         return current_scope() or self.scope
 
     def _scoped(self, thread_id: str) -> str:
-        """The id ``thread_id`` is stored under: prefixed by the scope of this call."""
-        scope = self._effective_scope()
-        return scope.key(thread_id) if scope is not None else thread_id
+        """The id ``thread_id`` is stored under: keyed by the scope of this call.
+
+        An id already in its stored form (a
+        :class:`~locus.memory.scope.StoredThreadId`, from a scoped view)
+        is returned as it is.
+        """
+        if isinstance(thread_id, StoredThreadId):
+            return thread_id
+        scope = self._effective_scope() or CheckpointScope()
+        return scope.key(thread_id)
 
     def _listing_scope(self, scope: CheckpointScope | None) -> CheckpointScope:
         """The scope ``list_threads`` lists: the given one, else the call's, else none."""
         return scope or self._effective_scope() or CheckpointScope()
 
-    def _encode_state(self, state: AgentState) -> dict[str, Any]:
-        """``state`` as this checkpointer stores it: its checkpoint dict, sealed when encrypting."""
-        data = state.to_checkpoint()
-        return self.encryption.encrypt(data) if self.encryption is not None else data
+    def _encode_state(
+        self, state: AgentState, thread_key: str, checkpoint_id: str
+    ) -> dict[str, Any]:
+        """``state`` as this checkpointer stores it: its checkpoint dict, sealed when encrypting.
 
-    def _decode_state(self, data: dict[str, Any]) -> AgentState:
+        ``thread_key`` is the stored thread id (:meth:`_scoped`) and
+        ``checkpoint_id`` the checkpoint's: with encryption they bind the
+        envelope to its place, so a backend passes the same two to
+        :meth:`_decode_state`.
+        """
+        data = state.to_checkpoint()
+        if self.encryption is None:
+            return data
+        from locus.memory.time_travel import checkpoint_iteration  # noqa: PLC0415
+
+        aad = associated_data(thread_key, checkpoint_id, checkpoint_iteration(data))
+        return self.encryption.encrypt(data, aad=aad)
+
+    def _decode_state(
+        self, data: dict[str, Any], thread_key: str, checkpoint_id: str
+    ) -> AgentState:
         """The state a stored checkpoint dict holds, unsealing an envelope.
 
-        A plaintext checkpoint loads whether or not ``encryption`` is set, so
-        turning encryption on leaves earlier checkpoints readable.
+        With ``encryption`` set a plaintext checkpoint is refused unless the
+        serializer has ``allow_plaintext``; without it a plaintext
+        checkpoint loads and an envelope is refused.
 
         Raises:
             CheckpointEncryptionError: The checkpoint is encrypted and this
-                instance has no ``encryption``, or none of its keys fits.
+                instance has no ``encryption``; it is plaintext and the
+                serializer does not allow that; it was moved or edited; or
+                none of the keys fits.
         """
         from locus.core.state import AgentState  # noqa: PLC0415
 
-        if is_envelope(data):
-            if self.encryption is None:
-                raise CheckpointEncryptionError(
-                    "the checkpoint is encrypted; give this checkpointer encryption= "
-                    "with the key it was written with"
+        if self.encryption is not None:
+            if not is_envelope(data) and self.encryption.allow_plaintext:
+                logger.warning(
+                    "checkpoint %s of thread %s is plaintext; loaded under allow_plaintext",
+                    checkpoint_id,
+                    thread_key,
                 )
-            data = self.encryption.decrypt(data)
+                return AgentState.from_checkpoint(data)
+            aad = associated_data(thread_key, checkpoint_id, data.get("iteration"))
+            data = self.encryption.decrypt(data, aad=aad)
+        elif is_envelope(data):
+            raise CheckpointEncryptionError(
+                "the checkpoint is encrypted; give this checkpointer encryption= "
+                "with the key it was written with"
+            )
         return AgentState.from_checkpoint(data)
 
     def _expires_at(self, now: datetime | None = None) -> datetime | None:

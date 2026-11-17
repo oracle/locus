@@ -145,12 +145,45 @@ class TestRedisNativeExpiry:
         assert await cp.expire() == 0, "nothing left for the sweep"
         await cp.close()
 
+    async def test_mixed_ttl_writers_keep_the_longest_index_expiry(self, redis_prefix: str) -> None:
+        """A short-lived save after a long-lived one must not take the thread's index with it."""
+        from redis.asyncio import Redis
+
+        from locus.memory.backends import redis_checkpointer
+
+        long_lived = redis_checkpointer(url=os.environ["REDIS_URL"], prefix=redis_prefix, ttl=600)
+        short_lived = redis_checkpointer(url=os.environ["REDIS_URL"], prefix=redis_prefix, ttl=1)
+        forever = redis_checkpointer(url=os.environ["REDIS_URL"], prefix=redis_prefix)
+        client = Redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
+        try:
+            await long_lived.save(AgentState().with_iteration(1), "m", "cp-1")
+            await short_lived.save(AgentState().with_iteration(2), "m", "cp-2")
+            index = f"{redis_prefix}m:_checkpoints:hash"
+            assert await client.ttl(index) > 500, "only ever lengthened"
+            assert await client.ttl(f"{redis_prefix}m:cp-2") <= 1, "each checkpoint keeps its own"
+            await asyncio.sleep(1.6)
+            assert await long_lived.list_checkpoints("m") == ["cp-1"]
+            fallen_back = await long_lived.load("m")
+            assert fallen_back is not None
+            assert fallen_back.iteration == 1, "latest expired: the newest live checkpoint"
+            assert await forever.exists("m")
+            # A writer without a ttl makes the shared index persist.
+            await forever.save(AgentState().with_iteration(3), "m", "cp-3")
+            assert await client.ttl(index) == -1
+            await short_lived.save(AgentState().with_iteration(4), "m", "cp-4")
+            assert await client.ttl(index) == -1, "a later ttl writer leaves it persisted"
+        finally:
+            await client.aclose()
+            await long_lived.delete("m")
+            for cp in (long_lived, short_lived, forever):
+                await cp.close()
+
 
 # ---------------------------------------------------------------------------
 # PostgreSQL: ciphertext in the rows, the expires_at column, the scoped thread_id
 # ---------------------------------------------------------------------------
 
-_PG_TABLES = ("locus_prod_adapter", "locus_prod_native", "locus_prod_old")
+_PG_TABLES = ("locus_prod_adapter", "locus_prod_native", "locus_prod_old", "locus_prod_nottl")
 
 
 @pytest.fixture(scope="module")
@@ -229,6 +262,51 @@ class TestPostgresAtRest:
         finally:
             await cp.delete("t")
             await cp.close()
+
+    async def test_without_a_ttl_an_old_table_gets_no_ddl(self) -> None:
+        """The default path never alters a table it did not create; a ttl adds the column once."""
+        import asyncpg
+
+        from locus.memory.backends import postgresql_checkpointer
+
+        dsn = _postgres_dsn()
+        assert dsn is not None
+        conn = await asyncpg.connect(dsn)
+        try:
+            await conn.execute(
+                "CREATE TABLE locus_prod_nottl (thread_id TEXT PRIMARY KEY, checkpoint_id TEXT, "
+                "data JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), "
+                "updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), metadata JSONB DEFAULT '{}'::jsonb)"
+            )
+        finally:
+            await conn.close()
+
+        async def columns() -> set[str]:
+            conn = await asyncpg.connect(dsn)
+            try:
+                rows = await conn.fetch(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'locus_prod_nottl'"
+                )
+            finally:
+                await conn.close()
+            return {r["column_name"] for r in rows}
+
+        plain = postgresql_checkpointer(dsn=dsn, table_name="locus_prod_nottl")
+        try:
+            await plain.save(_secret_state(), "p", "cp-0")
+            assert await plain.load("p") is not None
+            assert await plain.exists("p")
+            assert "expires_at" not in await columns(), "no DDL without a ttl"
+            expiring = postgresql_checkpointer(dsn=dsn, table_name="locus_prod_nottl", ttl=60)
+            await expiring.save(_secret_state(), "q", "cp-0")
+            assert "expires_at" in await columns(), "the first save with a ttl adds it"
+            assert await expiring.load("q") is not None
+            await expiring.delete("q")
+            await expiring.close()
+        finally:
+            await plain.delete("p")
+            await plain.close()
 
     async def test_pg_checkpointer_rows_and_the_column_added_to_an_old_table(self) -> None:
         import asyncpg
