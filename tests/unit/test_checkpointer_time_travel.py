@@ -322,6 +322,8 @@ class TestBaseDefaultsTimeTravel(CheckpointerTimeTravelConformance):
 class TestOCIBucketTimeTravel(
     CheckpointerTimeTravelConformance, BoundedHistoryConformance, ProductionSettingsConformance
 ):
+    short_ttl = 1.0  # the fake client is in-process, but the same two-turn window applies
+
     @pytest.fixture
     def make_checkpointer(self) -> Any:
         from locus.memory.backends.oci_bucket import OCIBucketBackend
@@ -365,6 +367,11 @@ class TestS3TimeTravel(
     CheckpointerTimeTravelConformance, BoundedHistoryConformance, ProductionSettingsConformance
 ):
     """moto reports object modification times to the second, as S3 does."""
+
+    # A moto round trip is slow enough under load that two agent turns can
+    # straddle the default 0.2 s ttl, so the first turn has already expired
+    # when the second one loads. The remote-store classes widen the window.
+    short_ttl = 1.5
 
     @pytest.fixture(autouse=True)
     def _mock_aws(self) -> Iterator[None]:

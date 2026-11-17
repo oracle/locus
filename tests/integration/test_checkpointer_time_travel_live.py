@@ -160,6 +160,12 @@ class TestPostgresAdapterTimeTravel(
     BoundedHistoryConformance,
     ProductionSettingsConformance,
 ):
+    # The first save on a fresh table runs the DDL under an advisory lock, and
+    # the expiry stamp is taken before that; under CI load the default 0.2 s
+    # ttl can run out before the second save lands. The remote-store classes
+    # widen the window the same way.
+    short_ttl = 1.0
+
     def _build(self, keep: int | None, **settings: Any) -> Any:
         from locus.memory.backends import postgresql_checkpointer
 
@@ -180,6 +186,8 @@ class TestPgCheckpointerTimeTravel(
     BoundedHistoryConformance,
     ProductionSettingsConformance,
 ):
+    short_ttl = 1.0  # same two-turn window as the adapter class above
+
     def _build(self, keep: int | None, **settings: Any) -> Any:
         from locus.memory.backends import PgCheckpointer
 
