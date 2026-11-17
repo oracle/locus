@@ -98,6 +98,7 @@ embedder = OpenAIEmbeddings(model="text-embedding-3-small")
 | Redis | `RedisVectorStore` | Redis Query Engine (Redis Stack / Redis 8 bundle) HNSW `VECTOR` fields; `TAG` filters on declared metadata keys. |
 | MongoDB Atlas | `MongoDBAtlasVectorStore` | `$vectorSearch` on an Atlas Vector Search index; filter paths declared up front. |
 | Pinecone | `PineconeVectorStore` | Serverless indexes; content and metadata ride in the vector's metadata map. |
+| MySQL HeatWave | `HeatWaveVectorStore` | `VECTOR(n)` column; `DISTANCE()` on the server on HeatWave MySQL, distances computed client-side on community MySQL 9+; `JSON` metadata filters, `FULLTEXT` hybrid search. |
 
 ```python
 from locus.rag import QdrantVectorStore
@@ -115,7 +116,10 @@ the directory can be removed afterwards; left running, Milvus Lite
 flushes at interpreter exit and recreates it. Each served backend
 has its own extra: `[pgvector]`, `[opensearch]`, `[qdrant]`, `[chroma]`,
 `[oracledb]`, `[milvus]`, `[weaviate]`, `[elasticsearch]`,
-`[redis-vector]`, `[mongodb]`, `[pinecone]`; `[rag]` installs them all.
+`[redis-vector]`, `[mongodb]`, `[pinecone]`, `[heatwave]`; `[rag]` installs them
+all. `HeatWaveVectorStore` adapts to the server it reaches — see
+[MySQL HeatWave](../api/rag.md#mysql-heatwave) for what changes between
+HeatWave MySQL and community MySQL.
 
 ### 3. Wire the retriever
 
@@ -337,9 +341,10 @@ result = await retriever.retrieve("decline code 05", limit=5)
 blend are the ones implementing `HybridSearchable`: `OracleVectorStore`
 (Oracle Text or a `LIKE` leg; pass `hybrid_kwargs={"use_text_index": True}`
 after `ensure_text_index()`), `OpenSearchVectorStore`,
-`ElasticsearchVectorStore`, `WeaviateVectorStore` and
-`MilvusVectorStore(enable_hybrid=True)`. OpenSearch and Elasticsearch run
-the k-NN and `match` legs as two requests and blend the normalised scores
+`ElasticsearchVectorStore`, `WeaviateVectorStore`, `HeatWaveVectorStore` and
+`MilvusVectorStore(enable_hybrid=True)`. OpenSearch, Elasticsearch and
+HeatWave run the vector and lexical legs (k-NN and `match`, or `DISTANCE()`
+and `MATCH ... AGAINST`) as two queries and blend the normalised scores
 client-side, so no cluster-side pipeline is needed; Weaviate and Milvus
 use their native fused queries.
 

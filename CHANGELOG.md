@@ -8,6 +8,26 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **`HeatWaveVectorStore` — MySQL HeatWave vector store** (#299). Documents
+  live in one InnoDB table with a `VECTOR(n)` column, a `JSON` metadata
+  column and a `FULLTEXT` index on the content; the store mirrors
+  `OracleVectorStore`'s surface (`add`, `add_batch`, `get`, `delete`,
+  `search`, `count`, `clear`, `close`) plus `hybrid_search`, which blends
+  `DISTANCE()` similarity with `MATCH ... AGAINST` relevance client-side the
+  way the Elasticsearch store does. It probes the server once: HeatWave
+  MySQL computes and orders by `DISTANCE()` on the server
+  (`server_side_distance=True`); community MySQL 9+ has the `VECTOR` type
+  but no `DISTANCE()`, so the store fetches up to `candidate_limit` rows and
+  ranks them here. Metadata filters are `JSON_EXTRACT` equality predicates
+  with the path and the value bound as parameters. Blocking driver calls run
+  on worker threads (`asyncio.to_thread`), so the pooled connections never
+  bind to an event loop. New `heatwave` extra (the same
+  `mysql-connector-python` the `mysql` checkpoint extra installs), lazy
+  export from `locus.rag.stores`, docs rows and a HeatWave vs community
+  MySQL section, and the shared conformance suite behind `HEATWAVE_DSN`.
+
 ## [5.6.0] - 2026-11-17
 
 ### Added
