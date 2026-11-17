@@ -422,3 +422,21 @@ class TestStorageBackendAdapterRepr:
 
         repr_str = repr(adapter)
         assert "StorageBackendAdapter" in repr_str
+
+
+def test_a_mock_store_does_not_count_as_a_native_index() -> None:
+    """A ``MagicMock`` has every attribute name; only real coroutine methods count."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from locus.memory.backends.checkpoint_index import keeps_index_natively
+
+    assert keeps_index_natively(MagicMock()) is False
+    assert keeps_index_natively(object()) is False
+
+    class _Native:
+        index_add = AsyncMock()
+        index_remove = AsyncMock()
+        index_list = AsyncMock(return_value=[])
+        index_clear = AsyncMock()
+
+    assert keeps_index_natively(_Native()) is True
