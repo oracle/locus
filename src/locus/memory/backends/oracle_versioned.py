@@ -79,6 +79,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, SecretStr
 
+from locus._oracle_ddl import provisioning_lock, run_ddl
 from locus._oracle_pool_cache import safe_acquire
 from locus.memory.backends._oracle_config import (
     OracleConfig,
@@ -160,6 +161,9 @@ class OracleCheckpointSaver(BaseModel):
     _pool: oracledb.AsyncConnectionPool | None = None
     _pool_loop: Any = None
     _initialized: bool = False
+    # The lock the first-time DDL runs under, per event loop (``locus._oracle_ddl``).
+    _provision_lock: Any = None
+    _provision_lock_loop: Any = None
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -333,41 +337,46 @@ class OracleCheckpointSaver(BaseModel):
             self._initialized = True
             return
 
-        pool = await self._get_pool()
-        async with safe_acquire(self, pool) as conn, conn.cursor() as cursor:
-            # Check checkpoints table
-            await cursor.execute(
-                """
-                SELECT COUNT(*) FROM user_tables
-                WHERE table_name = UPPER(:table_name)
-                """,
-                {"table_name": self._checkpoints_table_unqualified},
-            )
-            row = await cursor.fetchone()
-            checkpoints_exists = bool(row and row[0] > 0)
+        # One provisioning pass per instance, and a CREATE another process
+        # won or is still running is handled (see ``locus._oracle_ddl``).
+        async with provisioning_lock(self):
+            if self._initialized:
+                return
+            pool = await self._get_pool()
+            async with safe_acquire(self, pool) as conn, conn.cursor() as cursor:
+                # Check checkpoints table
+                await cursor.execute(
+                    """
+                    SELECT COUNT(*) FROM user_tables
+                    WHERE table_name = UPPER(:table_name)
+                    """,
+                    {"table_name": self._checkpoints_table_unqualified},
+                )
+                row = await cursor.fetchone()
+                checkpoints_exists = bool(row and row[0] > 0)
 
-            if not checkpoints_exists:
-                await cursor.execute(self._checkpoints_ddl())
-                await cursor.execute(self._checkpoints_index_ddl())
+                if not checkpoints_exists:
+                    await run_ddl(cursor, self._checkpoints_ddl())
+                    await run_ddl(cursor, self._checkpoints_index_ddl())
 
-            # Check writes table
-            await cursor.execute(
-                """
-                SELECT COUNT(*) FROM user_tables
-                WHERE table_name = UPPER(:table_name)
-                """,
-                {"table_name": self._writes_table_unqualified},
-            )
-            row = await cursor.fetchone()
-            writes_exists = bool(row and row[0] > 0)
+                # Check writes table
+                await cursor.execute(
+                    """
+                    SELECT COUNT(*) FROM user_tables
+                    WHERE table_name = UPPER(:table_name)
+                    """,
+                    {"table_name": self._writes_table_unqualified},
+                )
+                row = await cursor.fetchone()
+                writes_exists = bool(row and row[0] > 0)
 
-            if not writes_exists:
-                await cursor.execute(self._writes_ddl())
+                if not writes_exists:
+                    await run_ddl(cursor, self._writes_ddl())
 
-            if not (checkpoints_exists and writes_exists):
-                await conn.commit()
+                if not (checkpoints_exists and writes_exists):
+                    await conn.commit()
 
-        self._initialized = True
+            self._initialized = True
 
     # ------------------------------------------------------------------
     # CLOB binding helpers

@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import os
 import re
+import threading
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -48,6 +49,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from locus._oracle_ddl import run_ddl_sync
 from locus.evaluation.framework import EvalReport
 
 
@@ -545,6 +547,8 @@ class OracleReportStore:
         self._connect = _connect
         self._pool: Any = None
         self._table_ready = False
+        # The first-time DDL runs once per instance (see ``locus._oracle_ddl``).
+        self._provision_lock = threading.Lock()
         if dsn:
             where = f"oracle://{user}@/?dsn={dsn}"
         else:
@@ -641,26 +645,32 @@ class OracleReportStore:
     def _ensure_table(self, conn: Any) -> None:
         if self._table_ready:
             return
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT COUNT(*) FROM all_tables WHERE table_name = UPPER(:name) "
-                "AND owner = UPPER(NVL(:owner, SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA')))",
-                {"name": self.config.table_name, "owner": self.config.schema_name},
-            )
-            row = cur.fetchone()
-            exists = bool(row and row[0])
-            if not exists:
-                if not self._auto_create:
-                    raise RuntimeError(
-                        f"table {self._full_table_name} does not exist and auto_create_table is off"
-                    )
-                cur.execute(self.ddl())
+        with self._provision_lock:
+            if self._table_ready:
+                return
+            with conn.cursor() as cur:
                 cur.execute(
-                    f"CREATE INDEX {self.config.table_name}_suite_idx "
-                    f"ON {self._full_table_name} (suite, created_at)"
+                    "SELECT COUNT(*) FROM all_tables WHERE table_name = UPPER(:name) "
+                    "AND owner = UPPER(NVL(:owner, SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA')))",
+                    {"name": self.config.table_name, "owner": self.config.schema_name},
                 )
-                conn.commit()
-        self._table_ready = True
+                row = cur.fetchone()
+                exists = bool(row and row[0])
+                if not exists:
+                    if not self._auto_create:
+                        raise RuntimeError(
+                            f"table {self._full_table_name} does not exist and "
+                            "auto_create_table is off"
+                        )
+                    # A CREATE another process won or is still running is handled.
+                    run_ddl_sync(cur, self.ddl())
+                    run_ddl_sync(
+                        cur,
+                        f"CREATE INDEX {self.config.table_name}_suite_idx "
+                        f"ON {self._full_table_name} (suite, created_at)",
+                    )
+                    conn.commit()
+            self._table_ready = True
 
     # -- the interface -------------------------------------------------------
 

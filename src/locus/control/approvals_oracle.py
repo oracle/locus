@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import SecretStr
 
+from locus._oracle_ddl import provisioning_lock, run_ddl
 from locus.control.approvals_db import DatabaseApprovals, record_from_json, record_to_json
 from locus.core.loop_bound import loop_bound
 from locus.memory.backends._oracle_config import OracleConfig
@@ -249,30 +250,34 @@ class OracleApprovals(DatabaseApprovals):
     async def _ensure_table(self, conn: Any, cursor: Any) -> None:
         if self._ready:
             return
-        await cursor.execute(
-            "SELECT COUNT(*) FROM user_tables WHERE table_name = UPPER(:table_name)",
-            {"table_name": self.config.table_name},
-        )
-        row = await cursor.fetchone()
-        if not (row and row[0] > 0):
-            await cursor.execute(f"""
-                CREATE TABLE {self._table} (
-                    approval_id VARCHAR2(255) PRIMARY KEY,
-                    digest VARCHAR2(64) NOT NULL,
-                    status VARCHAR2(16) NOT NULL,
-                    created_at VARCHAR2(40) NOT NULL,
-                    record CLOB CHECK (record IS JSON)
-                )
-            """)
+        # One provisioning pass per instance, and a CREATE another process
+        # won or is still running is handled (see ``locus._oracle_ddl``).
+        async with provisioning_lock(self):
+            if self._ready:
+                return
             await cursor.execute(
-                f"CREATE INDEX idx_{self.config.table_name}_digest ON {self._table} (digest)"
+                "SELECT COUNT(*) FROM user_tables WHERE table_name = UPPER(:table_name)",
+                {"table_name": self.config.table_name},
             )
-            await cursor.execute(
-                f"CREATE INDEX idx_{self.config.table_name}_status "
-                f"ON {self._table} (status, created_at)"
-            )
-            await conn.commit()
-        self._ready = True
+            row = await cursor.fetchone()
+            if not (row and row[0] > 0):
+                for statement in (
+                    f"""
+                    CREATE TABLE {self._table} (
+                        approval_id VARCHAR2(255) PRIMARY KEY,
+                        digest VARCHAR2(64) NOT NULL,
+                        status VARCHAR2(16) NOT NULL,
+                        created_at VARCHAR2(40) NOT NULL,
+                        record CLOB CHECK (record IS JSON)
+                    )
+                    """,
+                    f"CREATE INDEX idx_{self.config.table_name}_digest ON {self._table} (digest)",
+                    f"CREATE INDEX idx_{self.config.table_name}_status "
+                    f"ON {self._table} (status, created_at)",
+                ):
+                    await run_ddl(cursor, statement)
+                await conn.commit()
+            self._ready = True
 
     @asynccontextmanager
     async def _transaction(self) -> AsyncIterator[_OracleTransaction]:

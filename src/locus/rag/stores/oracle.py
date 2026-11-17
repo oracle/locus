@@ -18,6 +18,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, SecretStr
 
+from locus._oracle_ddl import provisioning_lock, run_ddl
 from locus._oracle_pool_cache import safe_acquire
 from locus.rag.stores._mmr import mmr_rerank as _mmr_rerank
 from locus.rag.stores._oracle_filter import compile_metadata_filter as _compile_metadata_filter
@@ -259,6 +260,9 @@ class OracleVectorStore(BaseModel, BaseVectorStore):
     _pool: oracledb.AsyncConnectionPool | None = None
     _pool_loop: Any = None  # asyncio loop the pool is bound to
     _initialized: bool = False
+    # The lock the first-time DDL runs under, per event loop (``locus._oracle_ddl``).
+    _provision_lock: Any = None
+    _provision_lock_loop: Any = None
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -347,10 +351,21 @@ class OracleVectorStore(BaseModel, BaseVectorStore):
         return self.oracle_config.table_name
 
     async def _ensure_table(self) -> None:
-        """Create table if not exists, unless ``auto_create_table=False``."""
+        """Create table if not exists, unless ``auto_create_table=False``.
+
+        One provisioning pass per instance; a ``CREATE`` another process won
+        or is still running is handled (see ``locus._oracle_ddl``).
+        """
         if self._initialized:
             return
 
+        async with provisioning_lock(self):
+            if self._initialized:
+                return
+            await self._provision()
+            self._initialized = True
+
+    async def _provision(self) -> None:
         pool = await self._get_pool()
         cfg = self.oracle_config
         dim = cfg.dimension
@@ -379,7 +394,9 @@ class OracleVectorStore(BaseModel, BaseVectorStore):
                     if created_col
                     else ""
                 )
-                await cursor.execute(f"""
+                await run_ddl(
+                    cursor,
+                    f"""
                         CREATE TABLE {self._full_table_name} (
                             {id_col} VARCHAR2(255) PRIMARY KEY,
                             {content_col} CLOB,
@@ -388,27 +405,29 @@ class OracleVectorStore(BaseModel, BaseVectorStore):
                                 CHECK ({metadata_col} IS JSON)
                             {created_at_ddl}
                         )
-                    """)
+                    """,
+                )
 
                 # Create the vector index using the configured organisation
                 # (HNSW / IVF / NONE). Centralised in _vector_index_ddl so
                 # build_index() can fire the same DDL out-of-band later.
                 ddl = self._vector_index_ddl()
                 if ddl is not None:
-                    await cursor.execute(ddl)
+                    await run_ddl(cursor, ddl)
 
                 if created_col:
-                    await cursor.execute(f"""
+                    await run_ddl(
+                        cursor,
+                        f"""
                             CREATE INDEX idx_{cfg.table_name}_created
                             ON {self._full_table_name} ({created_col} DESC)
-                        """)
+                        """,
+                    )
 
                 await conn.commit()
             # When auto_create_table=False and the table is missing, we leave
             # it for the first SQL operation to surface ORA-00942 with full
             # table context.
-
-        self._initialized = True
 
     @property
     def _vector_index_name(self) -> str:

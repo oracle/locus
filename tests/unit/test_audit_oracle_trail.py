@@ -14,7 +14,10 @@ database.
 from __future__ import annotations
 
 import sys
+import threading
+import time
 import types
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from typing import Any
 
@@ -513,3 +516,59 @@ def test_close_drops_the_pool(db: _FakeDB) -> None:
     trail.record("gate", {})
     assert db.pools_built == 2
     assert "OracleAuditTrail(dsn='audit_low'" in repr(trail)
+
+
+class _SlowCursor(_FakeCursor):
+    """Reading the chain takes a moment, as a round trip does: threads overlap."""
+
+    def fetchall(self) -> list[tuple[Any, ...]]:
+        time.sleep(0.05)
+        return super().fetchall()
+
+
+class _SlowConn(_FakeConn):
+    def cursor(self) -> _FakeCursor:
+        return _SlowCursor(self.db)
+
+
+class _BoundedPool(_FakePool):
+    """Two connections, as the real default pool has."""
+
+    def __init__(self, db: _FakeDB) -> None:
+        super().__init__(db)
+        self._slots = threading.BoundedSemaphore(2)
+
+    @contextmanager
+    def acquire(self) -> Any:
+        with self._slots:
+            yield _SlowConn(self.db)
+
+
+def test_readers_and_writers_on_a_two_connection_pool_do_not_deadlock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Lock before connection everywhere.
+
+    Before: a writer held the trail's lock inside ``record`` while waiting
+    for a connection, and the readers held both connections inside the
+    reload while waiting for the lock; nothing moved again.
+    """
+    database = _FakeDB()
+    fake = types.ModuleType("oracledb")
+    fake.create_pool = lambda **kwargs: _BoundedPool(database)  # type: ignore[attr-defined]
+    fake.makedsn = lambda host, port, service_name: f"{host}:{port}/{service_name}"  # type: ignore[attr-defined]
+    fake.DB_TYPE_CLOB = "CLOB"  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "oracledb", fake)
+    trail = _trail()
+    trail.record("warm-up", {})  # the chain is loaded; later writers go straight to the lock
+
+    pool = ThreadPoolExecutor(max_workers=8)
+    futures = [pool.submit(trail.reload) for _ in range(4)]
+    futures += [pool.submit(trail.record, "event", {"i": i}) for i in range(4)]
+    try:
+        for future in futures:
+            future.result(timeout=10)  # a deadlock surfaces here as a TimeoutError
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+
+    assert len(database.rows) == 5

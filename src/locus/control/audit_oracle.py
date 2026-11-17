@@ -52,9 +52,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, Literal
 
+from locus._oracle_ddl import run_ddl_sync
 from locus.control.audit import (
     _GENESIS,
     AuditRecord,
@@ -171,6 +173,8 @@ class OracleAuditTrail(AuditTrail):
         self._auto_create = auto_create_table
         self._pool: Any = None
         self._table_ready = False
+        # The first-time DDL runs once per instance (see ``locus._oracle_ddl``).
+        self._provision_lock = threading.Lock()
         self._loaded = False
 
     # ------------------------------------------------------------------
@@ -273,23 +277,27 @@ class OracleAuditTrail(AuditTrail):
     def _ensure_table(self, conn: Any) -> None:
         if self._table_ready:
             return
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT COUNT(*) FROM all_tables WHERE table_name = UPPER(:t) "
-                "AND owner = NVL(UPPER(:s), SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA'))",
-                {"t": self.config.table_name, "s": self.config.schema_name},
-            )
-            row = cur.fetchone()
-            exists = bool(row and row[0] > 0)
-            if not exists:
-                if not self._auto_create:
-                    raise RuntimeError(
-                        f"audit table {self._full_table_name} does not exist and "
-                        "auto_create_table is off; create it with OracleAuditTrail.ddl()"
-                    )
-                cur.execute(self.ddl())
-                conn.commit()
-        self._table_ready = True
+        with self._provision_lock:
+            if self._table_ready:
+                return
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT COUNT(*) FROM all_tables WHERE table_name = UPPER(:t) "
+                    "AND owner = NVL(UPPER(:s), SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA'))",
+                    {"t": self.config.table_name, "s": self.config.schema_name},
+                )
+                row = cur.fetchone()
+                exists = bool(row and row[0] > 0)
+                if not exists:
+                    if not self._auto_create:
+                        raise RuntimeError(
+                            f"audit table {self._full_table_name} does not exist and "
+                            "auto_create_table is off; create it with OracleAuditTrail.ddl()"
+                        )
+                    # A CREATE another process won or is still running is handled.
+                    run_ddl_sync(cur, self.ddl())
+                    conn.commit()
+            self._table_ready = True
 
     # ------------------------------------------------------------------
     # Reading the chain back
@@ -306,6 +314,7 @@ class OracleAuditTrail(AuditTrail):
         return rows
 
     def _load_from(self, conn: Any) -> None:
+        """Read the chain into memory; the caller holds ``self._lock``."""
         self._ensure_table(conn)
         records: list[AuditRecord] = []
         unreadable = 0
@@ -314,14 +323,22 @@ class OracleAuditTrail(AuditTrail):
                 records.append(_record_from_row(row))
             except (TypeError, ValueError):
                 unreadable += 1
-        with self._lock:
-            self._records = records
-            self._unreadable = unreadable
-            self._loaded = True
+        self._records = records
+        self._unreadable = unreadable
+        self._loaded = True
 
     def reload(self) -> None:
-        """Replace the in-memory copy of the chain with what the table holds now."""
-        self._run(self._load_from)
+        """Replace the in-memory copy of the chain with what the table holds now.
+
+        The lock is taken before the connection, the order ``record`` uses,
+        so no thread ever holds a pooled connection while waiting for the
+        lock. The other order deadlocked a burst of writers on the
+        two-connection pool: one thread held the lock inside ``record`` and
+        waited for a connection, while the threads holding both connections
+        inside this method waited for the lock.
+        """
+        with self._lock:
+            self._run(self._load_from)
 
     def _ensure_loaded(self) -> None:
         if not self._loaded:
