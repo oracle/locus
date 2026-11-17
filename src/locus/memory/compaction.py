@@ -323,7 +323,9 @@ class ContextCompactor(ConversationManager):
         min_iterations_between_summaries: A summary needed again within this
             many iterations of the last one means the context cannot hold the
             run any more: the run ends rather than looping. ``0`` disables it.
-        token_counter: Maps a message to a token count; char/4 by default.
+        token_counter: Maps a message to a token count; char/4 over the text,
+            tool calls and replayed metadata items by default (see
+            :data:`~locus.memory.compactor.REPLAYED_METADATA_KEYS`).
         native_compaction: Hand the summary stage to the agent model's own
             compaction endpoint when the model offers one (an async
             ``compact_history(messages, *, instructions)`` returning the

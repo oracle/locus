@@ -236,7 +236,7 @@ produced them, without a re-sign, was not run.
 | `tool.sandbox.started` | `tool`, `provider`, `timeout` |
 | `tool.sandbox.completed` | `tool`, `ok`, `exit_code`, `timed_out`, `duration_ms` |
 | `tool.sandbox.denied` | `tool`, `labels` (the labels that required a sandbox) |
-| `tool.integrity.refused` | `tool`, `call_id`, `reason` (`mismatch` / `tainted`), `expected_digest`, `actual_digest`, `signed_by`, `mutated_by`, `disposition` (`refuse` / `abort`), `key_id` |
+| `tool.integrity.refused` | `tool_name`, `call_id`, `reason` (`mismatch` / `tainted`), `expected_digest`, `actual_digest`, `signed_by`, `mutated_by`, `disposition` (`refuse` / `abort`), `key_id`; `tool` repeats `tool_name` until the next release (deprecated) |
 
 ### `control.*` — admission control
 

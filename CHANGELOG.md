@@ -10,6 +10,14 @@ policy.
 
 ### Added
 
+- **`on_request` / `on_response` on the HTTP-backed OCI models.**
+  `OCIResponsesModel` and `OCIChatCompletionsModel` (and their configs)
+  take a pair of sync callables that see each outgoing `httpx.Request`
+  after signing and each `httpx.Response` as its headers arrive — the seam
+  for request-shape tests and for seeing what goes on the wire when
+  debugging, where reaching into `model._http_client()` to attach httpx
+  event hooks was the only way. Both are `None` by default and install
+  nothing; `model_kwargs` carries them through the `oci:` factory.
 - **Time travel on every checkpointer.** `checkpointer.list(thread_id)`
   describes a thread's checkpoints newest first as `CheckpointInfo`
   records (id, write time, the state's iteration, the checkpoint's size
@@ -607,6 +615,19 @@ policy.
 
 ### Fixed
 
+- **Compaction token accounting counts what is replayed.** The default
+  token counter (`ContextCompactor`, `TieredCompaction`, `LLMCompactor`)
+  charges for the metadata items a transport replays on the wire — the
+  encrypted `compaction` item native compaction leaves on an assistant
+  message and the replayed reasoning items of the OCI and OpenAI Responses
+  paths (`locus.memory.compactor.REPLAYED_METADATA_KEYS`). `tokens_after`
+  of a native compaction could shrink while the replayed request grew, as
+  the item's few KB were counted as a one-line placeholder; the report and
+  the request now move together. Other metadata stays free.
+- **`tool.integrity.refused` carries `tool_name`.** The event named the
+  tool under `tool` while `control.judge.decided` and the agent's tool
+  events use `tool_name`; both control events now share the key, and the
+  audit-trail record of a refusal carries it too.
 - **`Agent.run_sync()` inside a running event loop no longer hangs on MCP
   tools connected on that loop.** The run is driven on a worker thread's own
   loop, which cannot reach an `MCPClient` session bound to the caller's; the
@@ -746,6 +767,8 @@ policy.
 
 ### Deprecated
 
+- **The `tool` key of `tool.integrity.refused`.** It repeats `tool_name` for
+  this release and goes away in the next; read `tool_name`.
 - **The `locus.security` compatibility shim is removed in 6.0.** It keeps forwarding the
   control-layer names to `locus.control` until then; its warning named a release
   that has long passed and now says 6.0. Import from `locus.control`.

@@ -295,7 +295,8 @@ class TestEnforce:
         await signer.enforce(call.model_copy(update={"arguments": {"x": "changed"}}))
 
         assert [t for t, _ in seen] == ["tool.integrity.refused"]
-        assert seen[0][1]["tool"] == "echo"
+        assert seen[0][1]["tool_name"] == "echo"
+        assert seen[0][1]["tool"] == "echo"  # deprecated alias, one release
         assert {"expected_digest", "actual_digest", "mutated_by"} <= set(seen[0][1])
 
     async def test_abort_mode_holds_the_error_for_the_runtime(self) -> None:
