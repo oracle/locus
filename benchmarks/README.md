@@ -79,3 +79,28 @@ needs equivalent configurations, equivalent middleware, and an author with no
 stake in the outcome. Any of those numbers published here would deserve to be
 distrusted, so they are not published here. The methodology above is
 deliberately simple enough to reproduce against anything else.
+
+## Router selection benchmark
+
+The one measurement here that calls a model. `router/cases.json` is the
+routing corpus as `EvalCase` objects: 42 labelled prompts tagged with the
+protocol each should reach (`shape:<id>`), two of them `trap` cases whose
+verb points at an expensive shape while the work is one step, and 18
+adversarial prompts (`injection`, `ambiguous`) scored on whether the answer
+stays inside the registered set. `locus.router.benchmark` adapts selection
+to `EvalRunner`'s contract, so the typed router, the typed router with a
+pluggable `RequestClassifier`, and a free-form baseline that asks the model
+for the id directly all run over the same file. Nothing is built or
+executed; the answer is the protocol id, `unbounded`, or `refused`.
+
+```bash
+python scripts/router_benchmark.py --model oci:<model-id> --repeats 3
+```
+
+Reports go to `router/reports/` (ignored by git), one `FileReportStore`
+suite per target, and the typed targets are gated against the free-form
+report. The same gate runs as
+`tests/integration/test_router_classifier_gate.py` behind
+`RUN_ROUTER_BENCHMARK=1`. The how-to
+[Benchmark the router](../docs/how-to/router-benchmark.md) explains the
+tags, the table and the gate.

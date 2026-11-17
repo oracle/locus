@@ -10,6 +10,19 @@ policy.
 
 ### Added
 
+- **Router benchmark harness.** The routing corpus is a file of `EvalCase`
+  objects (`benchmarks/router/cases.json`, tagged `labelled`, `shape:<id>`,
+  `trap`, `injection`, `ambiguous`) and `locus.router.benchmark` adapts
+  selection to `EvalRunner`'s contract: a typed target that takes any
+  `RequestClassifier` in the router's front seam, a free-form baseline that
+  may name an unregistered id, and `router_gate`, which holds the typed
+  router to the baseline on the whole corpus and on the traps, to 100%
+  bounded under injection and to no per-case regression. Every target
+  answers a protocol id, `unbounded` or `refused`; nothing is built or run.
+  `scripts/router_benchmark.py` runs it against a model and stores the
+  reports; `tests/integration/test_router_classifier_gate.py` is the same
+  gate behind `RUN_ROUTER_BENCHMARK=1`, and the routing benchmark beside it
+  reads the same file. (#342)
 - **Checkpoint TTL.** Every checkpointer takes `ttl=` (seconds or a
   `timedelta`): a checkpoint expires that long after its save and is then
   neither loaded, listed nor forked, and `await cp.expire()` removes what has

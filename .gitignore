@@ -291,3 +291,6 @@ family_eval_results.json
 baseline_*.json
 frontier_*.json
 sample600.json
+
+# Router benchmark reports (FileReportStore of scripts/router_benchmark.py)
+benchmarks/router/reports/
