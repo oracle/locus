@@ -221,6 +221,19 @@ class GateResult(BaseModel):
             return "Gate: passed"
         return "Gate: FAILED\n" + "\n".join(f"  - {reason}" for reason in self.reasons)
 
+    def to_markdown(self) -> str:
+        """The verdict as Markdown, one table row per failed check, for a pull-request comment."""
+        if self.passed:
+            return "**Gate: passed**"
+        rows = [
+            f"**Gate: FAILED**, {len(self.reasons)} reason(s)",
+            "",
+            "| Failed check |",
+            "|---|",
+        ]
+        rows.extend(f"| {reason} |" for reason in self.reasons)
+        return "\n".join(rows)
+
 
 class EvalGate(BaseModel):
     """The rule a build applies to a report.

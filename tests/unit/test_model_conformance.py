@@ -6,15 +6,18 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 import pytest
+from pydantic import SecretStr
 
 from locus.core.events import ModelChunkEvent
 from locus.core.messages import Message
+from locus.models.credentials import Credential, CredentialPool
 from locus.models.fallback import FallbackChain
-from locus.testing import FunctionModel, check_model_conformance, text, tool_call
+from locus.models.pooled import CredentialPoolModel
+from locus.testing import FunctionModel, ScriptedModel, check_model_conformance, text, tool_call
 
 
 def _well_behaved(messages: list[Message], tools: list[dict[str, Any]]) -> Any:
@@ -25,8 +28,41 @@ def _well_behaved(messages: list[Message], tools: list[dict[str, Any]]) -> Any:
     return text("pong")
 
 
-async def test_a_conformant_model_passes() -> None:
-    report = await check_model_conformance(FunctionModel(_well_behaved))
+def _scripted() -> ScriptedModel:
+    """The five turns the check makes: text, tool call, text, then the streamed pair."""
+    return ScriptedModel(
+        [
+            text("pong"),
+            tool_call("get_weather", call_id="call_1", city="Lisbon"),
+            text("It is 18C with light rain in Lisbon."),
+            text("pong"),
+            tool_call("get_weather", call_id="call_2", city="Lisbon"),
+        ]
+    )
+
+
+def _two_credentials() -> CredentialPool:
+    return CredentialPool(
+        [
+            Credential(label="primary", api_key=SecretStr("key-a")),
+            Credential(label="backup", api_key=SecretStr("key-b")),
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        lambda: FunctionModel(_well_behaved),
+        _scripted,
+        lambda: CredentialPoolModel(
+            pool=_two_credentials(), build_model=lambda c: FunctionModel(_well_behaved)
+        ),
+    ],
+    ids=["FunctionModel", "ScriptedModel", "CredentialPoolModel"],
+)
+async def test_a_conformant_model_passes(make: Callable[[], Any]) -> None:
+    report = await check_model_conformance(make())
     assert report.ok, report.failures
     assert [name for name, _, _ in report.checks] == [
         "complete_text",
@@ -35,6 +71,28 @@ async def test_a_conformant_model_passes() -> None:
         "stream_text",
         "stream_tool_call",
     ]
+
+
+async def test_a_scripted_model_is_consumed_turn_by_turn() -> None:
+    model = _scripted()
+    await check_model_conformance(model)
+    assert model.call_count == 5
+    assert model.offered_tools == [[], ["get_weather"], ["get_weather"], [], ["get_weather"]]
+
+
+async def test_a_credential_pool_builds_one_model_per_credential() -> None:
+    built: list[str] = []
+
+    def build(credential: Credential) -> FunctionModel:
+        built.append(credential.label)
+        return FunctionModel(_well_behaved)
+
+    model = CredentialPoolModel(pool=_two_credentials(), build_model=build)
+    report = await check_model_conformance(model)
+    assert report.ok, report.failures
+    assert built == ["primary", "backup"], "one model per credential, cached by label"
+    assert model.attempts == 5
+    assert model.last_credential is not None
 
 
 async def test_every_tier_of_a_chain_can_be_checked() -> None:

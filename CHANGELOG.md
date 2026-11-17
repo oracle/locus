@@ -13,6 +13,15 @@ policy.
 - `python -m locus.runner` takes its workspace from `LOCUS_WORKSPACE` when
   set, for a runner started outside an OpenShell sandbox (a gateway's local
   box driver, a CI job); unset, it works on `/sandbox` as before.
+- **`locus audit verify --format json`.** The verification of an exported
+  audit trail as data: `{"file", "verified", "records", "keys",
+  "head_checked"}` on stdout for both outcomes, where the command printed
+  prose only and a job archiving its results had to scrape it. Exit codes
+  are unchanged: 0 when the trail verifies, 1 when it does not. (#483)
+- **`locus eval gate --markdown` and `GateResult.to_markdown()`.** The
+  gate's verdict as Markdown with one table row per failed check, for a
+  pull-request comment, the way `eval diff` and `eval summary` already
+  render with `--markdown`. The exit code is still the gate's verdict. (#484)
 
 ### Fixed
 

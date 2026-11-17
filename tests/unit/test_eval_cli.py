@@ -192,6 +192,26 @@ def test_gate_applies_to_a_saved_report_against_a_baseline(
     )
 
 
+def test_gate_renders_markdown_for_a_pull_request_comment(
+    app: Path, cases: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    saved = tmp_path / "report.json"
+    main(["eval", "run", str(cases), "--agent", f"{app}:make", "--report", str(saved)])
+    capsys.readouterr()
+
+    code = main(["eval", "gate", str(saved), "--markdown"])
+    out = capsys.readouterr().out
+    assert code == 1
+    assert out.startswith("**Gate: FAILED**, 1 reason(s)\n\n| Failed check |\n|---|\n")
+    assert "| pass rate 0.50 below 1.00 (1/2 graded cases passed) |" in out
+    assert "Gate: FAILED\n  -" not in out
+
+    assert main(["eval", "gate", str(saved), "--min-pass-rate", "0.5", "--markdown"]) == 0
+    assert capsys.readouterr().out == "**Gate: passed**\n"
+    assert main(["eval", "gate", str(saved), "--min-pass-rate", "0.5"]) == 0
+    assert capsys.readouterr().out == "Gate: passed\n"
+
+
 def test_a_judge_spec_may_name_a_model_to_wrap(
     app: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
