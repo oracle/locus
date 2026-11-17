@@ -36,7 +36,42 @@ if TYPE_CHECKING:
     from locus.memory.time_travel import CheckpointInfo
 
 
-__all__ = ["ScopedCheckpointer", "scoped_checkpointer"]
+__all__ = ["ScopedCheckpointer", "pinned_checkpointer", "pinned_scope", "scoped_checkpointer"]
+
+
+def _given(*args: Any) -> tuple[Any, ...]:
+    """``args`` without the trailing ``None`` defaults: the call reaches ``inner`` as it was made."""
+    trimmed = list(args)
+    while trimmed and trimmed[-1] is None:
+        trimmed.pop()
+    return tuple(trimmed)
+
+
+def pinned_scope(checkpointer: Any, scope: CheckpointScope | None) -> CheckpointScope:
+    """The scope a run on ``checkpointer`` is pinned to: ``scope``, else the checkpointer's own.
+
+    A checkpointer without a scope pins to the unscoped namespace
+    (``CheckpointScope()``), so the result is never ``None``: the run
+    remembers it, and a ``resume()`` continues under it.
+    """
+    if scope is not None:
+        return scope
+    own = getattr(checkpointer, "scope", None)
+    return own if isinstance(own, CheckpointScope) else CheckpointScope()
+
+
+def pinned_checkpointer(checkpointer: Any, scope: CheckpointScope | None) -> Any:
+    """The checkpointer a run writes through: a view pinned to its scope, always.
+
+    ``scope`` is the run's, resolved once when the run starts; ``None``
+    pins the view to the checkpointer's own scope (:func:`pinned_scope`),
+    so no call the run makes — however late, and in whatever context its
+    events are consumed — ever consults a :meth:`CheckpointScope.active`
+    block. ``None`` for no checkpointer.
+    """
+    if checkpointer is None:
+        return None
+    return scoped_checkpointer(checkpointer, pinned_scope(checkpointer, scope))
 
 
 def scoped_checkpointer(checkpointer: Any, scope: CheckpointScope | None) -> Any:
@@ -50,9 +85,9 @@ def scoped_checkpointer(checkpointer: Any, scope: CheckpointScope | None) -> Any
     """
     if scope is None:
         return checkpointer
-    with_scope = getattr(checkpointer, "with_scope", None)
-    if callable(with_scope):
-        return with_scope(scope)
+    if isinstance(checkpointer, BaseCheckpointer):
+        return checkpointer.with_scope(scope)
+    # A duck-typed checkpointer (a test double among them) is wrapped as it is.
     return ScopedCheckpointer(checkpointer, scope)
 
 
@@ -101,7 +136,8 @@ class ScopedCheckpointer(BaseCheckpointer):
 
     @property
     def deletes_single_checkpoints(self) -> bool:
-        return bool(getattr(self.inner, "deletes_single_checkpoints", False))
+        # Strictly ``True``: a duck-typed inner without the property keeps every save.
+        return getattr(self.inner, "deletes_single_checkpoints", False) is True
 
     def _effective_scope(self) -> CheckpointScope | None:
         return self.scope
@@ -125,11 +161,15 @@ class ScopedCheckpointer(BaseCheckpointer):
         checkpoint_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> str:
-        saved: str = await self.inner.save(state, self._stored(thread_id), checkpoint_id, metadata)
+        saved: str = await self.inner.save(
+            state, *_given(self._stored(thread_id), checkpoint_id, metadata)
+        )
         return saved
 
     async def load(self, thread_id: str, checkpoint_id: str | None = None) -> AgentState | None:
-        loaded: AgentState | None = await self.inner.load(self._stored(thread_id), checkpoint_id)
+        loaded: AgentState | None = await self.inner.load(
+            *_given(self._stored(thread_id), checkpoint_id)
+        )
         return loaded
 
     async def list_checkpoints(self, thread_id: str, limit: int = 10) -> list[str]:
@@ -137,14 +177,14 @@ class ScopedCheckpointer(BaseCheckpointer):
         return ids
 
     async def delete(self, thread_id: str, checkpoint_id: str | None = None) -> bool:
-        deleted: bool = await self.inner.delete(self._stored(thread_id), checkpoint_id)
+        deleted: bool = await self.inner.delete(*_given(self._stored(thread_id), checkpoint_id))
         return deleted
 
     async def exists(self, thread_id: str, checkpoint_id: str | None = None) -> bool:
         exists = getattr(self.inner, "exists", None)
         if exists is None:
             return await super().exists(thread_id, checkpoint_id)
-        present: bool = await exists(self._stored(thread_id), checkpoint_id)
+        present: bool = await exists(*_given(self._stored(thread_id), checkpoint_id))
         return present
 
     async def close(self) -> None:
@@ -168,7 +208,7 @@ class ScopedCheckpointer(BaseCheckpointer):
         self, thread_id: str, checkpoint_id: str | None = None
     ) -> dict[str, Any] | None:
         meta: dict[str, Any] | None = await self.inner.get_metadata(
-            self._stored(thread_id), checkpoint_id
+            *_given(self._stored(thread_id), checkpoint_id)
         )
         return meta
 

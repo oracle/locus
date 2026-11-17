@@ -98,16 +98,22 @@ def _encode(segment: str) -> str:
     return quote(segment, safe="")
 
 
-class StoredThreadId(str):
+class StoredThreadId(str):  # noqa: SLOT000 — a str subtype cannot declare a slot for thread_id
     """A thread id already in its stored form (its scope applied).
 
     :meth:`BaseCheckpointer._scoped <locus.memory.checkpointer.BaseCheckpointer._scoped>`
     returns one and passes one through unchanged, which is how a scoped
     view of a checkpointer hands the backend the id to store under without
-    the backend applying its own scope on top.
+    the backend applying its own scope on top. ``thread_id`` is the id the
+    caller named, for a backend that keys something else on it (a tenant).
     """
 
-    __slots__ = ()
+    thread_id: str
+
+    def __new__(cls, stored: str, thread_id: str | None = None) -> StoredThreadId:
+        self = super().__new__(cls, stored)
+        self.thread_id = thread_id if thread_id is not None else stored
+        return self
 
 
 @dataclass(frozen=True)
@@ -166,7 +172,7 @@ class CheckpointScope:
             stored = _encode(thread_id) if _LOOKALIKE.match(thread_id) else thread_id
         else:
             stored = f"{self.prefix}{_encode(thread_id)}"
-        return StoredThreadId(stored)
+        return StoredThreadId(stored, thread_id)
 
     def unkey(self, stored_id: str) -> str | None:
         """The thread id a stored id names in this scope; ``None`` when it is not in it.

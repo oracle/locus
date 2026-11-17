@@ -277,10 +277,18 @@ class S3Backend(BaseCheckpointer):
             contents: list[dict[str, Any]] = []
             common_prefixes: list[str] = []
             token: str | None = None
+            from botocore.exceptions import ClientError  # noqa: PLC0415
+
             while True:
                 if token:
                     kwargs["ContinuationToken"] = token
-                resp = client.list_objects_v2(**kwargs)
+                try:
+                    resp = client.list_objects_v2(**kwargs)
+                except ClientError as e:
+                    # A bucket not made yet holds nothing; a read never creates it.
+                    if e.response.get("Error", {}).get("Code", "") == "NoSuchBucket":
+                        break
+                    raise
                 contents.extend(resp.get("Contents", []))
                 common_prefixes.extend(p["Prefix"] for p in resp.get("CommonPrefixes", []))
                 if resp.get("IsTruncated"):
@@ -338,7 +346,6 @@ class S3Backend(BaseCheckpointer):
         thread_id: str,
         checkpoint_id: str | None = None,
     ) -> AgentState | None:
-        await self._ensure_bucket()
         key = self._scoped(thread_id)
         if checkpoint_id is None:
             return await self._load_latest(key)

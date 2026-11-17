@@ -183,7 +183,13 @@ class TestRedisNativeExpiry:
 # PostgreSQL: ciphertext in the rows, the expires_at column, the scoped thread_id
 # ---------------------------------------------------------------------------
 
-_PG_TABLES = ("locus_prod_adapter", "locus_prod_native", "locus_prod_old", "locus_prod_nottl")
+_PG_TABLES = (
+    "locus_prod_adapter",
+    "locus_prod_native",
+    "locus_prod_old",
+    "locus_prod_nottl",
+    "locus_prod_tenant",
+)
 
 
 @pytest.fixture(scope="module")
@@ -307,6 +313,37 @@ class TestPostgresAtRest:
         finally:
             await plain.delete("p")
             await plain.close()
+
+    async def test_pg_checkpointer_tenant_of_places_a_view_write_and_a_direct_read_together(
+        self,
+    ) -> None:
+        from locus.memory.backends import PgCheckpointer
+
+        dsn = _postgres_dsn()
+        assert dsn is not None
+        seen: list[str] = []
+
+        def tenant_of(thread_id: str) -> str:
+            seen.append(thread_id)
+            return "tenant-" + thread_id.split("-", maxsplit=1)[0]
+
+        cp = PgCheckpointer(dsn, table="locus_prod_tenant", scope=SCOPE, tenant_of=tenant_of)
+        try:
+            await cp.save(_secret_state().with_iteration(1), "order-1", "cp-d")
+            view = cp.with_scope(SCOPE)
+            await view.save(_secret_state().with_iteration(2), "order-1", "cp-v")
+            assert set(seen) == {"order-1"}
+            assert await cp.load("order-1", "cp-v") is not None, (
+                "the direct read sees the view's save"
+            )
+            assert await view.load("order-1", "cp-d") is not None
+            rows = await _rows(dsn, "locus_prod_tenant", "tenant, thread_id, checkpoint_id")
+            assert {(r["tenant"], r["thread_id"]) for r in rows} == {
+                ("tenant-order", "app=billing/user=u-1/order-1")
+            }
+        finally:
+            await cp.delete("order-1")
+            await cp.close()
 
     async def test_pg_checkpointer_rows_and_the_column_added_to_an_old_table(self) -> None:
         import asyncpg

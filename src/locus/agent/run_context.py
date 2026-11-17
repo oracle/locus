@@ -106,8 +106,8 @@ class PendingInterrupt:
     #: The paused run's ephemeral metadata (see :data:`EPHEMERAL_METADATA_KEYS`),
     #: kept in memory only so an in-process resume still has it.
     ephemeral: dict[str, Any] = field(default_factory=dict, repr=False)
-    #: The scope the paused run was given (``agent.run(..., scope=...)``), so a
-    #: ``resume()`` without one continues the turn where it was saved.
+    #: The scope the paused run was pinned to, so a ``resume()`` without one
+    #: continues the turn where it was saved, whatever block is open then.
     scope: CheckpointScope | None = None
 
 
@@ -157,8 +157,10 @@ class RunContext:
     #: The run's tool-call signer (``AgentConfig.tool_call_integrity``), or
     #: ``None`` when the feature is off. Set by the runtime's ``_begin_run``.
     integrity: ToolCallSigner | None = None
-    #: The scope the run was given (``agent.run(..., scope=...)``), resolved
-    #: once when the run started; ``None`` inherits the checkpointer's own.
+    #: The scope the run is pinned to, resolved once when it started: the
+    #: one it was given (``agent.run(..., scope=...)``), else the
+    #: checkpointer's own (the empty scope when it has none). ``None`` only
+    #: without a checkpointer.
     scope: CheckpointScope | None = None
     #: The checkpointer every call of this run goes through: the agent's, or
     #: a view of it pinned to ``scope``. Set by the runtime's ``_begin_run``.

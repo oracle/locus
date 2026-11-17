@@ -83,6 +83,20 @@ policy.
 
 ### Changed
 
+- **Unscoped thread ids that spell a scope marker are stored encoded.** A
+  thread id of the form `app=…` or `user=…` (or beginning `app%` /
+  `user%`) on a checkpointer with no `scope=` is now stored
+  percent-encoded (`user=alice/chat` as `user%3Dalice%2Fchat`), so the
+  bare stored id can only ever be another tenant's scoped thread. A thread
+  of that exact shape written by an earlier release is no longer found
+  under its bare id: load it through `CheckpointScope(user_id="alice")`
+  (the bare id parses as that scope's thread `chat`) or rename it before
+  upgrading. Every other unscoped id keeps its bare stored form. The
+  adapter's `exists()` now reads the document to honour a recorded expiry
+  (one extra round trip), and a file checkpointer names its directories
+  by percent-encoding the characters outside `[A-Za-z0-9_-]`, reading a
+  directory an earlier release named lossily while its files record the
+  thread. (#298)
 - **LiteLLM gateway example: the platform pieces the how-to promised are
   wired (#269).** `examples/litellm-gateway/` gains `config.platform.yaml`
   — the gateway of `config.yaml` plus the OpenTelemetry callback and the

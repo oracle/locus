@@ -50,7 +50,7 @@ from locus.core.events import (
 from locus.core.messages import Message, Role, ToolResult
 from locus.core.state import AgentState
 from locus.memory.scope import CheckpointScope, current_scope
-from locus.memory.scoped import scoped_checkpointer
+from locus.memory.scoped import pinned_checkpointer
 from locus.models import get_model  # noqa: F401 — re-exported for test monkey-patches
 from locus.tools.decorator import Tool
 from locus.tools.executor import ToolExecutor
@@ -1032,7 +1032,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
             run_scope = pending.scope
         if run_scope is None:
             run_scope = current_scope()
-        checkpointer = scoped_checkpointer(self.config.checkpointer, run_scope)
+        checkpointer = pinned_checkpointer(self.config.checkpointer, run_scope)
         if pending is not None:
             state = pending.state
             # The prompt of the paused run; the state already has the history.
@@ -1181,7 +1181,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
                 f"Thread {thread_id!r} is paused on an interrupt; answer it with resume()."
             )
         run_scope = scope if scope is not None else current_scope()
-        checkpointer = scoped_checkpointer(self.config.checkpointer, run_scope)
+        checkpointer = pinned_checkpointer(self.config.checkpointer, run_scope)
         loaded = await checkpointer.load(thread_id)
         manifest = await self._ledger_manifest(thread_id, checkpointer)
         mid_turn = loaded is not None and not _turn_finished(loaded)

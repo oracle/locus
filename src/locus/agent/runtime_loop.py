@@ -74,7 +74,7 @@ from locus.core.media import has_images, strip_images, text_length
 from locus.core.messages import Message, Role, ToolCall, ToolResult
 from locus.core.state import AgentState, ReasoningStep, ToolExecution
 from locus.memory.scope import CheckpointScope, current_scope
-from locus.memory.scoped import scoped_checkpointer
+from locus.memory.scoped import pinned_checkpointer, pinned_scope
 from locus.models.base import ModelResponse
 from locus.observability.mechanisms import LEAKED_TOOL_CALLS, record_mechanism
 from locus.tools.context import _progress_sink
@@ -610,10 +610,10 @@ class AgentRuntimeMixin:
         moved to ``rc.ephemeral`` and merged with ``ephemeral``. ``durability``
         overrides the agent's mode for this run; ``replay`` turns the
         tool-effect ledger's replay on, for a run that continues a turn.
-        ``scope`` is the run's checkpoint scope, resolved once by the caller:
-        every checkpointer call the run makes goes through a view pinned to
-        it (``rc.checkpointer``); ``None`` uses the agent's checkpointer as
-        it is.
+        ``scope`` is the run's checkpoint scope, resolved once by the caller;
+        ``None`` means the checkpointer's own. Every checkpointer call the
+        run makes goes through a view pinned to it (``rc.checkpointer``),
+        and ``rc.scope`` records the pinned scope for a later ``resume()``.
         """
         metadata, found = self._split_run_metadata(metadata)
         rc = RunContext.create(
@@ -631,10 +631,12 @@ class AgentRuntimeMixin:
             [*self.config.hooks, *getattr(self, "_hooks", ())],
         )
         # The checkpointer this run writes through: the agent's, pinned to the
-        # run's scope. Explicit, never a context variable: two runs consumed
-        # alternately in one task each keep their own.
-        rc.scope = scope
-        rc.checkpointer = scoped_checkpointer(self.config.checkpointer, scope)
+        # run's scope (its own scope when the run has none). Explicit, never
+        # a context variable: two runs consumed alternately in one task each
+        # keep their own, and a block opened around a consumer changes nothing.
+        checkpointer = self.config.checkpointer
+        rc.scope = pinned_scope(checkpointer, scope) if checkpointer is not None else scope
+        rc.checkpointer = pinned_checkpointer(checkpointer, scope)
         # How this run writes its checkpoints, and its tool-effect ledger.
         attach_durability(rc, self.config, durability=durability, replay=replay)
         with self._runs_lock:
@@ -840,10 +842,11 @@ class AgentRuntimeMixin:
             LocusEvent instances for each step
         """
         # The run's scope, resolved once, here: the argument, else an open
-        # ``active()`` block's. Everything below reads ``run_scope`` or the
-        # view ``_begin_run`` builds from it, never the context variable.
+        # ``active()`` block's, else the checkpointer's own. Everything below
+        # reads ``run_scope`` or the pinned view ``_begin_run`` builds from
+        # it, never the context variable.
         run_scope = scope if scope is not None else current_scope()
-        run_checkpointer = scoped_checkpointer(self.config.checkpointer, run_scope)
+        run_checkpointer = pinned_checkpointer(self.config.checkpointer, run_scope)
 
         self._initialize()
         # Attaching may list tools with the per-run MCP headers, so it sees

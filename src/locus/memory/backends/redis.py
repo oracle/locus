@@ -216,13 +216,13 @@ class RedisBackend(BaseModel):
         key = self._index_hash_key(thread_id)
         pipe = client.pipeline(transaction=True)
         pipe.hset(key, str(entry["checkpoint_id"]), json.dumps(entry))
-        if not self.config.ttl_seconds:
-            pipe.persist(key)
-            await pipe.execute()
-            return
         pipe.hlen(key)
         pipe.pttl(key)
         added, length, remaining = await pipe.execute()
+        if not self.config.ttl_seconds:
+            if int(remaining) >= 0:
+                await client.persist(key)
+            return
         wanted = int(self.config.ttl_seconds) * 1000
         created = int(added) == 1 and int(length) == 1
         if created or 0 <= int(remaining) < wanted:

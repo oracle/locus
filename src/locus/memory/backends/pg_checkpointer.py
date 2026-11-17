@@ -55,6 +55,7 @@ from locus.core.protocols import CheckpointerCapabilities
 from locus.memory.checkpointer import BaseCheckpointer
 from locus.memory.ledger import LEDGER_SUFFIX
 from locus.memory.retention import oldest_message_time, stamp_messages, trim_messages
+from locus.memory.scope import StoredThreadId
 from locus.memory.time_travel import CheckpointInfo, info_from, link_parents
 
 
@@ -218,13 +219,19 @@ class PgCheckpointer(BaseCheckpointer):
             self._scope.reset(token)
 
     def tenant_for(self, thread_id: str | None = None) -> str:
-        """The tenant a call on ``thread_id`` belongs to (see the module docs)."""
+        """The tenant a call on ``thread_id`` belongs to (see the module docs).
+
+        ``tenant_of`` is given the id the caller named, never the stored
+        form a scope makes of it, so a save through a scoped run and a
+        direct read of the same thread place it in the same tenant.
+        """
         scoped = self._scope.get()
         if scoped:
             return scoped
         if self._tenant_of is not None and thread_id is not None:
+            named = thread_id.thread_id if isinstance(thread_id, StoredThreadId) else thread_id
             try:
-                found = self._tenant_of(thread_id)
+                found = self._tenant_of(named)
             except Exception as exc:
                 raise ValueError(f"tenant_of could not place thread {thread_id!r}") from exc
             if not found:

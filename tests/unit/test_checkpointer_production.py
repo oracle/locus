@@ -37,7 +37,7 @@ from locus.memory.encryption import associated_data, is_envelope
 from locus.memory.expiry import expiry_time, is_expired, parse_ttl, ttl_seconds
 from locus.memory.retention import RetainedCheckpointer
 from locus.memory.scope import StoredThreadId, current_scope
-from locus.memory.scoped import ScopedCheckpointer, scoped_checkpointer
+from locus.memory.scoped import ScopedCheckpointer, pinned_checkpointer, scoped_checkpointer
 from tests.unit.test_checkpointer_time_travel import (
     _DictStore,
     _FakeObjectStorage,
@@ -118,6 +118,22 @@ class TestCheckpointScope:
         assert empty.unkey("app%253Dx") == "app%3Dx"
         assert empty.key("apple") == "apple"
         assert empty.unkey("apple") == "apple"
+
+    async def test_a_legacy_bare_marker_shaped_id_reads_only_as_that_scope_s_thread(self) -> None:
+        """What an earlier release stored for the unscoped id ``user=alice/chat``."""
+        cp = MemoryCheckpointer()
+        await cp.save(_state(1), "placeholder", "cp-1")
+        cp._storage["user=alice/chat"] = cp._storage.pop("placeholder")
+        assert await cp.load("user=alice/chat") is None, (
+            "not reachable unscoped: it parses as a scope"
+        )
+        assert await cp.list_threads() == []
+        alice = MemoryCheckpointer(scope=CheckpointScope(user_id="alice"))
+        alice._storage = cp._storage
+        assert await alice.list_threads() == ["chat"], "the documented way back to it"
+        loaded = await alice.load("chat")
+        assert loaded is not None
+        assert loaded.iteration == 1
 
     def test_owns_unkey_and_strip(self) -> None:
         scope = CheckpointScope(app_id="billing", user_id="u-1")
@@ -411,6 +427,8 @@ class TestBaseHooks:
         cp._configure(scope=CheckpointScope(app_id="a"))
         stored = CheckpointScope(app_id="b").key("t")
         assert cp._scoped(stored) == "app=b/t", "a stored id is not keyed again"
+        assert stored.thread_id == "t", "and it remembers the id the caller named"
+        assert StoredThreadId("x").thread_id == "x"
         assert cp._scoped("t") == "app=a/t"
         assert cp.with_scope(None) is cp
         view = cp.with_scope(CheckpointScope(app_id="b"))
@@ -858,6 +876,24 @@ class TestFileHeaderReads:
         assert await cp.list_checkpoints("x") == []
 
 
+def test_pg_checkpointer_tenant_of_sees_the_named_thread_id_on_every_path() -> None:
+    pytest.importorskip("asyncpg")
+    from locus.memory.backends.pg_checkpointer import PgCheckpointer
+
+    seen: list[str] = []
+
+    def tenant_of(thread_id: str) -> str:
+        seen.append(thread_id)
+        return f"tenant-{thread_id.split('-', maxsplit=1)[0]}"
+
+    scope = CheckpointScope(app_id="a", user_id="u_1")
+    cp = PgCheckpointer("postgresql://unused/db", scope=scope, tenant_of=tenant_of)
+    direct = cp.tenant_for("order-1")
+    through_view = cp.tenant_for(scope.key("order-1"))
+    assert direct == through_view == "tenant-order"
+    assert seen == ["order-1", "order-1"], "never the stored form"
+
+
 def test_parameter_default_of_an_unsignaturable_callable_is_none() -> None:
     from locus.memory.backends.adapters import _parameter_default
 
@@ -1053,6 +1089,45 @@ class TestScopedRuns:
         assert str(unscoped.messages[-2].content) == "unscoped"
         assert await MemoryCheckpointer().list_threads() == []
 
+    @pytest.mark.parametrize("instance_scope", [None, CheckpointScope(app_id="inst")])
+    async def test_a_block_opened_around_the_consumer_changes_nothing(
+        self, instance_scope: CheckpointScope | None
+    ) -> None:
+        """A run with no scope is pinned to the checkpointer's own: never the consumer's block."""
+        from tests.unit.checkpointer_time_travel_conformance import _agent
+
+        cp = MemoryCheckpointer(scope=instance_scope)
+        agent = _agent(cp)
+        stream = agent.run("hello", thread_id="t")
+        await anext(stream)
+        with CheckpointScope(app_id="LEAK").active():
+            async for _ in stream:
+                pass
+        expected = "app=inst/t" if instance_scope is not None else "t"
+        assert cp.get_thread_ids() == [expected]
+        # The same for a run that pauses and is resumed inside a block.
+        asking = _agent(cp, asks=True)
+        paused = [e async for e in asking.run("book it", thread_id="p")]
+        assert paused
+        with CheckpointScope(app_id="LEAK").active():
+            resumed = [e async for e in asking.resume("option b", thread_id="p")]
+        assert resumed
+        assert sorted(cp.get_thread_ids()) == sorted(
+            [expected, "app=inst/p" if instance_scope is not None else "p"]
+        )
+
+    def test_pinned_checkpointer_always_pins(self) -> None:
+        assert pinned_checkpointer(None, None) is None
+        plain = MemoryCheckpointer()
+        view = pinned_checkpointer(plain, None)
+        assert isinstance(view, ScopedCheckpointer)
+        assert view.scope is None, "pinned to the unscoped namespace"
+        scoped = MemoryCheckpointer(scope=CheckpointScope(app_id="inst"))
+        assert pinned_checkpointer(scoped, None).scope == CheckpointScope(app_id="inst")
+        assert pinned_checkpointer(scoped, CheckpointScope(app_id="run")).scope == CheckpointScope(
+            app_id="run"
+        )
+
     async def test_an_active_block_is_resolved_once_when_the_run_starts(self) -> None:
         from tests.unit.checkpointer_time_travel_conformance import _agent
 
@@ -1141,6 +1216,20 @@ class TestScopedRuns:
         await view.save(AgentState(), "t")
         assert duck.saved == ["app=a/t"]
         assert await view.exists("t") is False
+        assert view.deletes_single_checkpoints is False, "no property on the duck: keep every save"
+        # A mock whose every attribute is callable is still wrapped, not asked for a view.
+        from unittest.mock import AsyncMock
+
+        mock = AsyncMock()
+        mock.load = AsyncMock(return_value=None)
+        pinned = pinned_checkpointer(mock, None)
+        assert isinstance(pinned, ScopedCheckpointer)
+        assert await pinned.load("t") is None
+        mock.load.assert_awaited_once_with("t")
+        await pinned.save(AgentState(), "t")
+        assert mock.save.await_args is not None
+        assert len(mock.save.await_args.args) == 2, "the call reaches the inner as it was made"
+        assert pinned.deletes_single_checkpoints is False
 
 
 moto = pytest.importorskip("moto", reason="S3 at-rest checks run on moto")
@@ -1214,6 +1303,29 @@ class TestAtRestS3:
         assert await scoped.load("t-copy") is not None
         assert await plain.load("t-copy") is None
         assert await scoped.get_metadata("t", "cp-0") == {}
+
+    async def test_a_listing_error_other_than_a_missing_bucket_propagates(self) -> None:
+        from botocore.exceptions import ClientError
+
+        cp = self._backend()
+        await cp.save(_state(0), "t", "cp-0")
+
+        def denied(**_: Any) -> Any:
+            raise ClientError({"Error": {"Code": "AccessDenied", "Message": "no"}}, "ListObjectsV2")
+
+        cp._get_client().list_objects_v2 = denied
+        with pytest.raises(ClientError, match="AccessDenied"):
+            await cp.list_checkpoints("t")
+
+    async def test_a_read_never_creates_the_bucket(self) -> None:
+        from locus.memory.backends.s3 import S3Backend
+
+        cp = S3Backend(bucket="never-made", region_name="us-east-1")
+        assert await cp.load("t") is None
+        assert await cp.load("t", "cp-0") is None
+        assert await cp.list_checkpoints("t") == []
+        names = {b["Name"] for b in cp._get_client().list_buckets().get("Buckets", [])}
+        assert "never-made" not in names
 
     async def test_load_falls_back_when_latest_names_an_expired_checkpoint(self) -> None:
         long_lived = self._backend(ttl=600)

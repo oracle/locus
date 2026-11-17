@@ -173,6 +173,7 @@ class _FakeRedis:
         return 1
 
     async def persist(self, key: str) -> int:
+        self.persists = getattr(self, "persists", 0) + 1
         return int(self.ttls.pop(key, None) is not None)
 
     async def hlen(self, key: str) -> int:
@@ -266,8 +267,12 @@ class TestRedisIndex:
         assert client.ttls[_HASH] == 60
         await forever.index_add("t", _entry("cp-1"))
         assert _HASH not in client.ttls, "persisted"
+        assert client.persists == 1
         await expiring.index_add("t", _entry("cp-2"))
         assert _HASH not in client.ttls, "a later ttl writer leaves a persisted hash alone"
+        await forever.index_add("t", _entry("cp-3"))
+        await forever.index_add("u", _entry("cp-0"))
+        assert client.persists == 1, "no PERSIST for a hash that has no expiry"
 
     async def test_without_a_ttl_the_hash_never_expires(self) -> None:
         backend, client = _redis()
