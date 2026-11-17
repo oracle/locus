@@ -51,6 +51,7 @@ class OracleSyncADBLoader:
         host: str | None = None,
         port: int = 1521,
         service_name: str | None = None,
+        config_dir: str | None = None,
         **kwargs: Any,
     ) -> None:
         self._async = OracleADBLoader(
@@ -68,6 +69,7 @@ class OracleSyncADBLoader:
             host=host,
             port=port,
             service_name=service_name,
+            config_dir=config_dir,
             **kwargs,
         )
 

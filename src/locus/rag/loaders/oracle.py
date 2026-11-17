@@ -46,6 +46,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Field, SecretStr
 
 from locus._oracle_pool_cache import get_pool, safe_acquire
+from locus.memory.backends._oracle_config import connect_params
 from locus.rag.stores.base import Document
 
 
@@ -84,6 +85,7 @@ class OracleADBLoaderConfig(BaseModel):
     dsn: str | None = None
     user: str = "admin"
     password: SecretStr = SecretStr("")
+    config_dir: str | None = None  # directory holding tnsnames.ora, no wallet needed
     wallet_location: str | None = None
     wallet_password: SecretStr | None = None
     host: str | None = None
@@ -162,6 +164,7 @@ class OracleADBLoader(BaseModel):
         host: str | None = None,
         port: int = 1521,
         service_name: str | None = None,
+        config_dir: str | None = None,
         **kwargs: Any,
     ) -> None:
         # Validate required string params before Pydantic touches them so
@@ -186,6 +189,7 @@ class OracleADBLoader(BaseModel):
             dsn=dsn,
             user=user,
             password=SecretStr(password) if isinstance(password, str) else password,
+            config_dir=config_dir,
             wallet_location=wallet_location,
             wallet_password=SecretStr(wallet_password)
             if isinstance(wallet_password, str)
@@ -230,15 +234,6 @@ class OracleADBLoader(BaseModel):
                     service_name=self.config.service_name,
                 )
 
-            params: dict[str, Any] = {}
-            if self.config.wallet_location:
-                params["config_dir"] = self.config.wallet_location
-                params["wallet_location"] = self.config.wallet_location
-                # ``is not None``: SecretStr("") is falsy in Pydantic v2, but
-                # "" is the auto-login (cwallet.sso) wallet idiom. See #289.
-                if self.config.wallet_password is not None:
-                    params["wallet_password"] = self.config.wallet_password.get_secret_value()
-
             # create_pool_async returns the pool directly (the "async"
             # refers to the pool type, not the constructor). Same quirk
             # OracleBackend documents.
@@ -248,7 +243,7 @@ class OracleADBLoader(BaseModel):
                 dsn=dsn,
                 min=self.config.min_pool_size,
                 max=self.config.max_pool_size,
-                **params,
+                **connect_params(self.config),
             )
 
         # Bound to the running event loop — see locus._oracle_pool_cache.

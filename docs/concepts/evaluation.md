@@ -672,8 +672,10 @@ assert not history.regressed, history.summary()
 
 `file:///var/lib/locus/evals` (or a bare path), `oracle://user:pw@/?dsn=mydb_low&wallet=/opt/wallet&table=LOCUS_EVAL_REPORTS`
 (a bare `oracle://` reads `ORACLE_DSN`, `ORACLE_USER`, `ORACLE_PASSWORD`,
-`ORACLE_WALLET` and `ORACLE_WALLET_PASSWORD` from the environment, as the
-approval stores do), `oci://<namespace>/<bucket>/<prefix>?profile=&region=&auth=`
+`ORACLE_CONFIG_DIR`, `ORACLE_WALLET` and `ORACLE_WALLET_PASSWORD` from the
+environment, as the approval stores do; `config_dir=` names the `tnsnames.ora`
+directory for a TLS-only database, `wallet=` the wallet for mutual TLS),
+`oci://<namespace>/<bucket>/<prefix>?profile=&region=&auth=`
 and `s3://<bucket>/<prefix>?endpoint_url=` are the forms. Each point of the
 trend carries the pass count, the average and their deltas against the
 previous point; a point whose fingerprint differs from the previous one is

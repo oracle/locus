@@ -91,7 +91,8 @@ class OracleAuditTrail(AuditTrail):
         user: Schema user. Give the trail its own schema with only
             ``CREATE TABLE`` and ``INSERT`` on it where you can.
         password: The schema user's password.
-        wallet_location: Wallet directory, for Autonomous Database with mTLS.
+        wallet_location: Wallet directory, for Autonomous Database with mTLS;
+            a TLS-only database needs none.
         wallet_password: Wallet password, when the wallet is encrypted.
         host: Database host, when not using ``dsn``.
         port: Listener port (default 1521).
@@ -112,6 +113,8 @@ class OracleAuditTrail(AuditTrail):
         signer: Signs every record, as on :class:`AuditTrail`.
         min_pool_size: Smallest size of the synchronous ``oracledb`` pool.
         max_pool_size: Largest size of the pool; two connections is plenty.
+        config_dir: Directory holding ``tnsnames.ora`` when ``dsn`` is an alias
+            and there is no wallet (or the aliases live outside it).
     """
 
     def __init__(
@@ -136,6 +139,7 @@ class OracleAuditTrail(AuditTrail):
         signer: AuditSigner | None = None,
         min_pool_size: int = 1,
         max_pool_size: int = 2,
+        config_dir: str | None = None,
     ) -> None:
         super().__init__(clock=clock, signer=signer)
         from pydantic import SecretStr  # noqa: PLC0415
@@ -156,6 +160,7 @@ class OracleAuditTrail(AuditTrail):
             dsn=dsn,
             user=user,
             password=SecretStr(password),
+            config_dir=config_dir,
             wallet_location=wallet_location,
             wallet_password=SecretStr(wallet_password) if wallet_password is not None else None,
             host=host,
@@ -194,23 +199,19 @@ class OracleAuditTrail(AuditTrail):
             raise ImportError(
                 'OracleAuditTrail needs the oracledb package:\n    pip install "locus-sdk[oracledb]"'
             ) from exc
+        from locus.memory.backends._oracle_config import connect_params  # noqa: PLC0415
+
         cfg = self.config
         dsn = cfg.dsn
         if dsn is None and cfg.host and cfg.service_name:
             dsn = oracledb.makedsn(cfg.host, cfg.port, service_name=cfg.service_name)
-        params: dict[str, Any] = {}
-        if cfg.wallet_location:
-            params["config_dir"] = cfg.wallet_location
-            params["wallet_location"] = cfg.wallet_location
-            if cfg.wallet_password is not None:
-                params["wallet_password"] = cfg.wallet_password.get_secret_value()
         return oracledb.create_pool(
             user=cfg.user,
             password=cfg.password.get_secret_value(),
             dsn=dsn,
             min=cfg.min_pool_size,
             max=cfg.max_pool_size,
-            **params,
+            **connect_params(cfg),
         )
 
     def _run(self, op: Callable[[Any], Any]) -> Any:

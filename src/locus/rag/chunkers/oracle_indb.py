@@ -39,6 +39,7 @@ from pydantic import BaseModel, SecretStr
 from locus._oracle_pool_cache import safe_acquire
 from locus.memory.backends._oracle_config import (
     OracleConfig,
+    connect_params,
     validate_sql_identifier,
 )
 
@@ -108,6 +109,7 @@ class OracleInDBChunker(BaseModel):
         by: str = "words",
         split: str = "recursively",
         normalize: str = "all",
+        config_dir: str | None = None,
         **kwargs: Any,
     ) -> None:
         if by not in _VALID_BY_VALUES:
@@ -125,6 +127,7 @@ class OracleInDBChunker(BaseModel):
             dsn=dsn,
             user=user,
             password=SecretStr(password) if isinstance(password, str) else password,
+            config_dir=config_dir,
             wallet_location=wallet_location,
             wallet_password=(
                 SecretStr(wallet_password) if isinstance(wallet_password, str) else wallet_password
@@ -154,15 +157,6 @@ class OracleInDBChunker(BaseModel):
             raise ImportError("OracleInDBChunker requires the 'oracledb' package.") from e
 
         cfg = self.oracle_config
-        params: dict[str, Any] = {}
-        if cfg.wallet_location:
-            params["config_dir"] = cfg.wallet_location
-            params["wallet_location"] = cfg.wallet_location
-            # ``is not None``: SecretStr("") is falsy in Pydantic v2, but
-            # "" is the auto-login (cwallet.sso) wallet idiom. See #289.
-            if cfg.wallet_password is not None:
-                params["wallet_password"] = cfg.wallet_password.get_secret_value()
-
         dsn = cfg.dsn
         if dsn is None and cfg.host and cfg.service_name:
             dsn = oracledb.makedsn(cfg.host, cfg.port, service_name=cfg.service_name)
@@ -173,7 +167,7 @@ class OracleInDBChunker(BaseModel):
             dsn=dsn,
             min=cfg.min_pool_size,
             max=cfg.max_pool_size,
-            **params,
+            **connect_params(cfg),
         )
         return self._pool
 

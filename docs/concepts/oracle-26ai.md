@@ -49,13 +49,53 @@ it already takes a synchronous `oracledb` pool or connection.
 ## Connecting
 
 Everything except `OracleAgentMemoryManager` takes the same connection
-arguments: `dsn`, `user`, `password`, and for Autonomous Database
-`wallet_location` and `wallet_password`; or `host`, `port` and
-`service_name` for a plain listener. `OracleAgentMemoryManager` instead
+arguments: `dsn`, `user` and `password`; `config_dir`, the directory
+holding `tnsnames.ora`, when `dsn` is an alias; for Autonomous Database
+with mutual TLS, `wallet_location` and `wallet_password`; or `host`, `port`
+and `service_name` for a plain listener. `OracleAgentMemoryManager` instead
 takes `connection=`, a ready `oracledb` pool (preferred) or connection built
 from the same values. The notebooks and the integration tests read these
-values from `ORACLE_DSN`, `ORACLE_USER`, `ORACLE_PASSWORD`, `ORACLE_WALLET`
-and `ORACLE_WALLET_PASSWORD`.
+values from `ORACLE_DSN`, `ORACLE_USER`, `ORACLE_PASSWORD`,
+`ORACLE_CONFIG_DIR` and, for mutual TLS, `ORACLE_WALLET` and
+`ORACLE_WALLET_PASSWORD`.
+
+### TLS-only or mutual TLS
+
+An Autonomous Database created without mutual TLS (`is_mtls_connection_required
+= false`, the default for a private endpoint) has no wallet. The client checks
+the server certificate against the public CAs, so `dsn`, `user` and `password`
+connect on their own when `dsn` is the connect descriptor from the console
+(`(description=...(protocol=tcps)...)`) or an Easy Connect string. To use a
+`tnsnames.ora` alias instead, pass the directory holding the file as
+`config_dir` — or set `TNS_ADMIN` and pass nothing. Do not pass that directory
+as `wallet_location`: python-oracledb then looks for a wallet file in it and
+fails with `DPY-6005`.
+
+With mutual TLS, `wallet_location` is the unzipped wallet directory. It holds
+its own `tnsnames.ora`, so it resolves aliases too; `config_dir` is only needed
+when the aliases live elsewhere.
+
+```python
+import os
+
+from locus.memory.store_backends import OracleStore
+
+credentials = dict(user=os.environ["ORACLE_USER"], password=os.environ["ORACLE_PASSWORD"])
+
+# TLS-only: the connect descriptor from the console, no wallet
+store = OracleStore(dsn=os.environ["ORACLE_DSN"], **credentials)
+
+# TLS-only: an alias in a tnsnames.ora of your own
+store = OracleStore(dsn="mydb_low", config_dir="/opt/oracle/tns", **credentials)
+
+# Mutual TLS: the wallet directory resolves the alias and holds the wallet
+store = OracleStore(dsn="mydb_low", wallet_location="/opt/oracle/wallet", **credentials)
+```
+
+An `oracle://` [approval-store](../api/control.md#pausing-until-someone-decides)
+or [report-store](evaluation.md#keeping-reports-and-reading-the-trend) spec takes `config_dir=` and
+`wallet=` the same way, and a bare one reads `ORACLE_CONFIG_DIR` (else
+`TNS_ADMIN`) and `ORACLE_WALLET` from the environment.
 
 ## Retrieval
 
@@ -72,7 +112,7 @@ db = dict(
     dsn=os.environ["ORACLE_DSN"],
     user=os.environ["ORACLE_USER"],
     password=os.environ["ORACLE_PASSWORD"],
-    wallet_location=os.environ["ORACLE_WALLET"],
+    wallet_location=os.environ["ORACLE_WALLET"],  # mutual TLS; omit for a TLS-only database
     wallet_password=os.environ.get("ORACLE_WALLET_PASSWORD", ""),
 )
 retriever = RAGRetriever(

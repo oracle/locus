@@ -48,6 +48,7 @@ from pydantic import BaseModel, SecretStr
 
 from locus._oracle_ddl import provisioning_lock, run_ddl
 from locus._oracle_pool_cache import get_pool, safe_acquire
+from locus.memory.backends._oracle_config import connect_params
 from locus.memory.store import (
     BaseStore,
     SemanticSearchResult,
@@ -134,6 +135,9 @@ class OracleStoreConfig(BaseModel):
     dsn: str | None = None
     user: str = "admin"
     password: SecretStr = SecretStr("")
+
+    # Directory holding tnsnames.ora, for a TNS alias without a wallet
+    config_dir: str | None = None
 
     # For Autonomous Database with wallet
     wallet_location: str | None = None
@@ -255,12 +259,14 @@ class OracleStore(BaseStore):
         dimension: int | None = None,
         distance_metric: str = "COSINE",
         auto_create_table: bool = True,
+        config_dir: str | None = None,
     ) -> None:
         super().__init__()
         self.config = OracleStoreConfig(
             dsn=dsn,
             user=user,
             password=SecretStr(password) if isinstance(password, str) else password,
+            config_dir=config_dir,
             wallet_location=wallet_location,
             wallet_password=SecretStr(wallet_password)
             if isinstance(wallet_password, str)
@@ -322,15 +328,6 @@ class OracleStore(BaseStore):
             if dsn is None and cfg.host and cfg.service_name:
                 dsn = oracledb.makedsn(cfg.host, cfg.port, service_name=cfg.service_name)
 
-            params: dict[str, Any] = {}
-            if cfg.wallet_location:
-                params["config_dir"] = cfg.wallet_location
-                params["wallet_location"] = cfg.wallet_location
-                # ``is not None``: SecretStr("") is falsy in Pydantic v2, but
-                # "" is the auto-login (cwallet.sso) wallet idiom. See #289.
-                if cfg.wallet_password is not None:
-                    params["wallet_password"] = cfg.wallet_password.get_secret_value()
-
             # create_pool_async returns the pool directly — the "async"
             # refers to the pool type, not the call signature.
             return oracledb.create_pool_async(
@@ -339,7 +336,7 @@ class OracleStore(BaseStore):
                 dsn=dsn,
                 min=cfg.min_pool_size,
                 max=cfg.max_pool_size,
-                **params,
+                **connect_params(cfg),
             )
 
         # Bound to the running event loop — see locus._oracle_pool_cache.

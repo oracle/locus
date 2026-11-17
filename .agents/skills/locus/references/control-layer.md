@@ -377,7 +377,7 @@ outside the re-sign API ...` (the body never ran; the message names the hook and
 | `FileApprovals(path, authority=None)` | yes | one JSON file, re-read every call, atomic writes; writers serialised within one process only |
 | `PostgresApprovals(dsn=None, *, host="localhost", port=5432, database="locus", user="postgres", password="", table_name="locus_approvals", schema_name="public", authority=None)` | yes | one row per held call, decided under the row lock; `locus-sdk[postgresql]` |
 | `RedisApprovals(url="redis://localhost:6379", *, prefix="locus:approvals:", db=0, lock_timeout=10.0, authority=None)` | yes | one key per record, decided under the store's lock; `locus-sdk[redis]` |
-| `OracleApprovals(dsn=None, user="admin", password="", wallet_location=None, wallet_password=None, host=None, port=1521, service_name=None, *, table_name="locus_approvals", schema_name=None, authority=None)` | yes | an Oracle AI Database table; `locus-sdk[oracledb]` |
+| `OracleApprovals(dsn=None, user="admin", password="", wallet_location=None, wallet_password=None, host=None, port=1521, service_name=None, *, table_name="locus_approvals", schema_name=None, authority=None, config_dir=None)` | yes | an Oracle AI Database table; `locus-sdk[oracledb]` |
 | your own `ApprovalStore` | as built | a database with atomic updates for many writers |
 
 The database stores keep the in-memory semantics (one-use consumption, approver rules, quorums, delegations) over one
@@ -386,7 +386,7 @@ approval; they follow the connection conventions of the matching checkpointer ba
 use when it is missing. Each owns one event loop on a background thread: the `ApprovalStore` methods block on it, and
 `asubmit` / `aget` / `adecide` / `aconsume` / `apending` await it; `close()` releases the pool. Every store has a
 password-free `spec` (`memory://`, `file://approvals.json`, `postgresql://host:5432/db?table=public.locus_approvals`,
-`redis://host:6379?prefix=locus:approvals:`, `oracle://user@/?dsn=alias&wallet=/path&table=locus_approvals`);
+`redis://host:6379?prefix=locus:approvals:`, `oracle://user@/?dsn=alias&wallet=/path&table=locus_approvals`, or `oracle://user@/?dsn=alias&config_dir=/path/to/tns&table=locus_approvals` for a TLS-only database with no wallet);
 `approval_store(spec=None, authority=None)` opens one (`None` reads `LOCUS_APPROVALS_STORE`; a bare path is a
 `FileApprovals`; a bare scheme such as `postgresql://` reads `POSTGRES_*`, `REDIS_URL` or `ORACLE_*` from the
 environment), and `store_spec(store)` reads a store's spec back. Nothing connects until the first call, so
@@ -585,7 +585,7 @@ print(verify_jsonl(truncated, keys=keys), verify_jsonl(truncated, keys=keys, exp
 
 ### Durable backends
 
-`OracleAuditTrail(*, dsn=None, user="admin", password="", wallet_location=None, wallet_password=None, host=None,
+`OracleAuditTrail(*, dsn=None, user="admin", password="", config_dir=None, wallet_location=None, wallet_password=None, host=None,
 port=1521, service_name=None, table_name="locus_audit_trail", schema_name=None, trail_id="default",
 table_kind="immutable", retention_days=16, drop_idle_days=16, auto_create_table=True, clock=None, signer=None,
 min_pool_size=1, max_pool_size=2)` (`locus-sdk[oracledb]`) keeps the rows in an Oracle AI Database immutable table

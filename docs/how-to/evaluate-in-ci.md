@@ -131,8 +131,8 @@ locus eval trend --store "oci://<namespace>/<bucket>/locus/eval/?profile=CI" --s
 
 A store is a directory or `file://` path, an Oracle AI Database table
 (`oracle://`, reading `ORACLE_DSN`, `ORACLE_USER`, `ORACLE_PASSWORD`,
-`ORACLE_WALLET` and `ORACLE_WALLET_PASSWORD` from the environment when the
-spec does not name them), an OCI Object Storage bucket (`oci://`) or any
+`ORACLE_CONFIG_DIR`, `ORACLE_WALLET` and `ORACLE_WALLET_PASSWORD` from the
+environment when the spec does not name them), an OCI Object Storage bucket (`oci://`) or any
 S3-compatible bucket (`s3://`); `LOCUS_EVAL_STORE` supplies the spec when
 `--store` is not given. `--suite` defaults to the cases file's stem. `trend`
 prints one line per report, oldest first, with the pass count, the average

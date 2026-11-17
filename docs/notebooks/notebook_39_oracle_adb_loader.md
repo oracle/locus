@@ -42,12 +42,13 @@ What this notebook covers:
 ## Prerequisites
 
 ```bash
-# Autonomous Database wallet (TLS) + credentials.
-export ORACLE_DSN=mydb_low                   # tnsnames alias in the wallet
+# Autonomous Database connection (mTLS wallet, or a TNS directory) + credentials.
+export ORACLE_DSN=mydb_low                   # tnsnames alias (wallet dir or ORACLE_CONFIG_DIR)
 export ORACLE_USER=locus_app                 # least-privileged app schema
 export ORACLE_PASSWORD='<app-password>'
-export ORACLE_WALLET=~/.oci/wallets/mydb     # directory holding tnsnames.ora
-export ORACLE_WALLET_PASSWORD='<wallet-pw>'  # if wallet is encrypted
+export ORACLE_WALLET=~/.oci/wallets/mydb     # mTLS only; a TLS-only database has none
+export ORACLE_WALLET_PASSWORD='<wallet-pw>'  # if the wallet is encrypted
+# TLS-only (no wallet): a connect string in ORACLE_DSN, or an alias + ORACLE_CONFIG_DIR
 ```
 
 In the drawing below the loader sits in the vectors group, reading rows
@@ -87,10 +88,11 @@ carried by the `terminate` event:
 python examples/notebook_39_oracle_adb_loader.py
 ```
 
-The script needs an Autonomous Database: `ORACLE_DSN`, `ORACLE_USER`,
-`ORACLE_PASSWORD` and `ORACLE_WALLET` must all be set, plus
-`ORACLE_WALLET_PASSWORD` when the wallet is encrypted. When any of the
-four is missing it prints the missing names and the minimal wiring
+The script needs an Autonomous Database: `ORACLE_DSN`, `ORACLE_USER` and
+`ORACLE_PASSWORD` must be set, plus `ORACLE_WALLET` for mutual TLS
+(`ORACLE_WALLET_PASSWORD` when the wallet is encrypted) or `ORACLE_CONFIG_DIR`
+when a TLS-only database is named by a tnsnames alias. When any of them is
+missing it prints the missing names and the minimal wiring
 snippet, then exits cleanly without opening a connection. The agent's
 model comes from `examples/config.py`: OCI Generative AI when
 `~/.oci/config` has a usable profile, otherwise the bundled mock model;

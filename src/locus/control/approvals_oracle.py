@@ -6,8 +6,9 @@
 
 Same connection conventions as
 :class:`~locus.memory.backends.oracle.OracleBackend`: a TNS alias or host /
-port / service name, a wallet for Autonomous Database, ``python-oracledb`` in
-thin mode, and a table created on first use when it does not exist::
+port / service name, a ``config_dir`` holding ``tnsnames.ora`` or a wallet for
+Autonomous Database with mTLS, ``python-oracledb`` in thin mode, and a table
+created on first use when it does not exist::
 
     from locus.control import OracleApprovals
 
@@ -31,13 +32,14 @@ import inspect
 from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
+from urllib.parse import quote
 
 from pydantic import SecretStr
 
 from locus._oracle_ddl import provisioning_lock, run_ddl
 from locus.control.approvals_db import DatabaseApprovals, record_from_json, record_to_json
 from locus.core.loop_bound import loop_bound
-from locus.memory.backends._oracle_config import OracleConfig
+from locus.memory.backends._oracle_config import OracleConfig, connect_params
 
 
 if TYPE_CHECKING:
@@ -139,10 +141,11 @@ class OracleApprovals(DatabaseApprovals):
     """An approval store in an Oracle AI Database table.
 
     Args:
-        dsn: A TNS alias from the wallet's ``tnsnames.ora``, or a connect string.
+        dsn: A TNS alias from a ``tnsnames.ora``, or a connect string.
         user: The schema to connect as.
         password: Its password.
-        wallet_location: The unzipped wallet directory, for Autonomous Database.
+        wallet_location: The unzipped wallet directory, for Autonomous Database
+            with mTLS; a TLS-only database needs none.
         wallet_password: The wallet password, when the wallet is encrypted.
         host: The server, when no ``dsn``.
         port: Its port.
@@ -153,6 +156,8 @@ class OracleApprovals(DatabaseApprovals):
         max_pool_size: Its upper bound.
         authority: Who may decide, as for
             :class:`~locus.control.approvals.InMemoryApprovals`.
+        config_dir: The directory holding ``tnsnames.ora`` when ``dsn`` is an
+            alias and there is no wallet (or the aliases live outside it).
     """
 
     def __init__(
@@ -173,12 +178,14 @@ class OracleApprovals(DatabaseApprovals):
         authority: ApprovalAuthority
         | Callable[[ApprovalRecord], ApprovalAuthority | None]
         | None = None,
+        config_dir: str | None = None,
     ) -> None:
         super().__init__(authority)
         self.config = OracleConfig(
             dsn=dsn,
             user=user,
             password=SecretStr(password) if isinstance(password, str) else password,
+            config_dir=config_dir,
             wallet_location=wallet_location,
             wallet_password=SecretStr(wallet_password)
             if isinstance(wallet_password, str)
@@ -202,8 +209,12 @@ class OracleApprovals(DatabaseApprovals):
             where = f"oracle://{config.user}@/?dsn={config.dsn}"
         else:
             where = f"oracle://{config.user}@{config.host}:{config.port}/{config.service_name}?"
+        # Percent-encoded: the parser reads the query with ``parse_qs``, which
+        # would turn a literal ``+`` into a space and split on ``&``.
+        if config.config_dir:
+            where += f"&config_dir={quote(config.config_dir, safe='/')}"
         if config.wallet_location:
-            where += f"&wallet={config.wallet_location}"
+            where += f"&wallet={quote(config.wallet_location, safe='/')}"
         return f"{where}&table={self._table}".replace("?&", "?")
 
     @property
@@ -224,13 +235,6 @@ class OracleApprovals(DatabaseApprovals):
         dsn = config.dsn
         if dsn is None and config.host and config.service_name:
             dsn = oracledb.makedsn(config.host, config.port, service_name=config.service_name)
-        params: dict[str, Any] = {}
-        if config.wallet_location:
-            params["config_dir"] = config.wallet_location
-            params["wallet_location"] = config.wallet_location
-            # ``is not None``: "" is the idiom for an auto-login wallet.
-            if config.wallet_password is not None:
-                params["wallet_password"] = config.wallet_password.get_secret_value()
         self._ready = False
         pool: oracledb.AsyncConnectionPool = oracledb.create_pool_async(
             user=config.user,
@@ -238,7 +242,7 @@ class OracleApprovals(DatabaseApprovals):
             dsn=dsn,
             min=config.min_pool_size,
             max=config.max_pool_size,
-            **params,
+            **connect_params(config),
         )
         return pool
 

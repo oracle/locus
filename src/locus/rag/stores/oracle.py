@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field, SecretStr
 
 from locus._oracle_ddl import provisioning_lock, run_ddl
 from locus._oracle_pool_cache import safe_acquire
+from locus.memory.backends._oracle_config import connect_params
 from locus.rag.stores._mmr import mmr_rerank as _mmr_rerank
 from locus.rag.stores._oracle_filter import compile_metadata_filter as _compile_metadata_filter
 from locus.rag.stores.base import (
@@ -80,6 +81,9 @@ class OracleVectorConfig(BaseModel):
     dsn: str | None = None
     user: str = "admin"
     password: SecretStr = SecretStr("")
+
+    # Directory holding tnsnames.ora, for a TNS alias without a wallet
+    config_dir: str | None = None
 
     # For Autonomous Database with wallet
     wallet_location: str | None = None
@@ -321,24 +325,13 @@ class OracleVectorStore(BaseModel, BaseVectorStore):
                     service_name=self.oracle_config.service_name,
                 )
 
-            params: dict[str, Any] = {}
-            if self.oracle_config.wallet_location:
-                params["config_dir"] = self.oracle_config.wallet_location
-                params["wallet_location"] = self.oracle_config.wallet_location
-                # ``is not None``: SecretStr("") is falsy in Pydantic v2, but
-                # "" is the auto-login (cwallet.sso) wallet idiom. See #289.
-                if self.oracle_config.wallet_password is not None:
-                    params["wallet_password"] = (
-                        self.oracle_config.wallet_password.get_secret_value()
-                    )
-
             return oracledb.create_pool_async(
                 user=self.oracle_config.user,
                 password=self.oracle_config.password.get_secret_value(),
                 dsn=dsn,
                 min=self.oracle_config.min_pool_size,
                 max=self.oracle_config.max_pool_size,
-                **params,
+                **connect_params(self.oracle_config),
             )
 
         return cast("oracledb.AsyncConnectionPool", await get_pool(self, _build))

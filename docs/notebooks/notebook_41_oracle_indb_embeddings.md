@@ -44,12 +44,13 @@ What this notebook covers:
 ## Prerequisites
 
 ```bash
-# Autonomous Database wallet (TLS) + credentials.
-export ORACLE_DSN=mydb_low                   # tnsnames alias in the wallet
+# Autonomous Database connection (mTLS wallet, or a TNS directory) + credentials.
+export ORACLE_DSN=mydb_low                   # tnsnames alias (wallet dir or ORACLE_CONFIG_DIR)
 export ORACLE_USER=locus_app                 # least-privileged app schema
 export ORACLE_PASSWORD='<app-password>'
-export ORACLE_WALLET=~/.oci/wallets/mydb     # directory holding tnsnames.ora
-export ORACLE_WALLET_PASSWORD='<wallet-pw>'  # if wallet is encrypted
+export ORACLE_WALLET=~/.oci/wallets/mydb     # mTLS only; a TLS-only database has none
+export ORACLE_WALLET_PASSWORD='<wallet-pw>'  # if the wallet is encrypted
+# TLS-only (no wallet): a connect string in ORACLE_DSN, or an alias + ORACLE_CONFIG_DIR
 export OCI_INDB_MODEL=ALL_MINILM_L12_V2      # optional, defaults to this
 export OCI_INDB_DIM=384                      # optional, must match the model
 ```
@@ -93,8 +94,9 @@ GRANT EXECUTE ON DBMS_VECTOR_CHAIN TO locus_app;
 GRANT SELECT ON MINING MODEL ALL_MINILM_L12_V2 TO locus_app;
 ```
 
-If any of `ORACLE_DSN`, `ORACLE_USER`, `ORACLE_PASSWORD` or
-`ORACLE_WALLET` is unset, the notebook prints the wiring snippet and
+If any of `ORACLE_DSN`, `ORACLE_USER` or `ORACLE_PASSWORD` is unset, or a
+tnsnames alias has no `ORACLE_WALLET` / `ORACLE_CONFIG_DIR` to resolve it, the
+notebook prints the wiring snippet and
 exits cleanly. If the model is not loaded, the notebook detects
 `ORA-40284` / `ORA-20100` (and the related `ORA-04063` / `ORA-20000`)
 from the initial embedding call and prints a skip notice instead of a
@@ -133,13 +135,14 @@ answer in `final_message`:
 python examples/notebook_41_oracle_indb_embeddings.py
 ```
 
-The script needs an Oracle Database 26ai reachable through the four
-variables in Prerequisites: `ORACLE_DSN`, `ORACLE_USER`,
-`ORACLE_PASSWORD` and `ORACLE_WALLET` (`ORACLE_WALLET_PASSWORD` only
-when the wallet is encrypted), with the ONNX model loaded and granted
+The script needs an Oracle Database 26ai reachable through the variables in
+Prerequisites: `ORACLE_DSN`, `ORACLE_USER` and `ORACLE_PASSWORD`, plus
+`ORACLE_WALLET` for mutual TLS (`ORACLE_WALLET_PASSWORD` only when the wallet
+is encrypted) or `ORACLE_CONFIG_DIR` when a TLS-only database is named by a
+tnsnames alias, with the ONNX model loaded and granted
 as shown above; `OCI_INDB_MODEL` and `OCI_INDB_DIM` override the model
-name and its output width, and must change together. When any of the
-four is unset it prints the missing names and the minimal wiring, then
+name and its output width, and must change together. When any of them is
+unset it prints the missing names and the minimal wiring, then
 exits cleanly without opening a connection. When the model is not
 loaded, the first embedding call raises an `ORA-` error that the
 script recognizes and reports as a skip notice. With the database in

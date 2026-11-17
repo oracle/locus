@@ -14,12 +14,13 @@ and a URL is how a store is named across processes::
     redis://host:6379/0?prefix=billing:approvals:
     oracle://user:pw@host:1522/service?wallet=/opt/wallet&table=approvals
     oracle://user:pw@/?dsn=locusdb_low&wallet=/opt/wallet
+    oracle://user:pw@/?dsn=locusdb_low&config_dir=/opt/tns     (TLS-only, no wallet)
 
 A database spec with nothing after the scheme falls back to the environment the
 integration tests already read: ``POSTGRES_HOST`` / ``POSTGRES_PORT`` /
 ``POSTGRES_DB`` / ``POSTGRES_USER`` / ``POSTGRES_PASSWORD``, ``REDIS_URL``, and
-``ORACLE_DSN`` / ``ORACLE_USER`` / ``ORACLE_PASSWORD`` / ``ORACLE_WALLET`` /
-``ORACLE_WALLET_PASSWORD``. The spec itself can come from
+``ORACLE_DSN`` / ``ORACLE_USER`` / ``ORACLE_PASSWORD`` / ``ORACLE_CONFIG_DIR`` (else
+``TNS_ADMIN``) / ``ORACLE_WALLET`` / ``ORACLE_WALLET_PASSWORD``. The spec itself can come from
 ``LOCUS_APPROVALS_STORE``, which is what ``locus approvals`` reads when
 ``--store`` is not given.
 
@@ -122,9 +123,18 @@ def _redis(spec: str, authority: Any) -> ApprovalStore:
 
 def _oracle(spec: str, authority: Any) -> ApprovalStore:
     from locus.control.approvals_oracle import OracleApprovals  # noqa: PLC0415
+    from locus.memory.backends._oracle_config import config_dir_from_env  # noqa: PLC0415
 
     url, options = _split_options(
-        spec, "table", "schema", "dsn", "wallet", "wallet_password", "user", "password"
+        spec,
+        "table",
+        "schema",
+        "dsn",
+        "config_dir",
+        "wallet",
+        "wallet_password",
+        "user",
+        "password",
     )
     parts = urlsplit(url)
     kwargs: dict[str, Any] = _table(options, None)
@@ -134,6 +144,7 @@ def _oracle(spec: str, authority: Any) -> ApprovalStore:
     wallet_password = options.get("wallet_password")
     if wallet_password is None and wallet and os.environ.get("ORACLE_WALLET_PASSWORD") is not None:
         wallet_password = os.environ.get("ORACLE_WALLET_PASSWORD")
+    config_dir = options.get("config_dir") or config_dir_from_env(wallet)
     if parts.hostname and parts.path.strip("/"):
         kwargs.update(
             host=parts.hostname, port=parts.port or 1521, service_name=parts.path.strip("/")
@@ -149,6 +160,7 @@ def _oracle(spec: str, authority: Any) -> ApprovalStore:
     return OracleApprovals(
         user=user,
         password=password,
+        config_dir=config_dir,
         wallet_location=wallet,
         wallet_password=wallet_password,
         authority=authority,

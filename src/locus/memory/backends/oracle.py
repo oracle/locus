@@ -21,6 +21,7 @@ from locus._oracle_pool_cache import safe_acquire
 from locus.core.state import AgentState
 from locus.memory.backends._oracle_config import (
     OracleConfig,
+    connect_params,
 )
 from locus.memory.backends.checkpoint_index import index_key, newest_first
 
@@ -84,9 +85,9 @@ class OracleBackend(BaseModel):
     - JSON column storage with search
     - Metadata indexing
     - Vacuum (cleanup old checkpoints)
-    - Works with Autonomous Database (wallet-based auth)
+    - Works with Autonomous Database over one-way TLS (no wallet) or mTLS
 
-    Example with DSN:
+    Example with a TNS alias and a wallet (mTLS):
         >>> backend = OracleBackend(
         ...     dsn="mydb_high",  # TNS name from tnsnames.ora
         ...     user="admin",
@@ -94,6 +95,14 @@ class OracleBackend(BaseModel):
         ...     wallet_location="/path/to/wallet",
         ... )
         >>> await backend.save("thread_1", state.model_dump())
+
+    Example with a TNS alias and no wallet (TLS-only database):
+        >>> backend = OracleBackend(
+        ...     dsn="mydb_low",
+        ...     user="admin",
+        ...     password="secret",
+        ...     config_dir="/path/to/tns",  # directory holding tnsnames.ora
+        ... )
 
     Example with connection string:
         >>> backend = OracleBackend(
@@ -131,12 +140,14 @@ class OracleBackend(BaseModel):
         host: str | None = None,
         port: int = 1521,
         service_name: str | None = None,
+        config_dir: str | None = None,
         **kwargs: Any,
     ) -> None:
         config = OracleConfig(
             dsn=dsn,
             user=user,
             password=SecretStr(password) if isinstance(password, str) else password,
+            config_dir=config_dir,
             wallet_location=wallet_location,
             wallet_password=SecretStr(wallet_password)
             if isinstance(wallet_password, str)
@@ -169,24 +180,13 @@ class OracleBackend(BaseModel):
                     service_name=self.config.service_name,
                 )
 
-            params: dict[str, Any] = {}
-            if self.config.wallet_location:
-                params["config_dir"] = self.config.wallet_location
-                params["wallet_location"] = self.config.wallet_location
-                # ``is not None`` (not truthiness): SecretStr("") is falsy in
-                # Pydantic v2, and "" is the python-oracledb idiom for an
-                # auto-login (cwallet.sso) wallet — a truthy guard would drop
-                # it and force the encrypted ewallet.pem path. See issue #289.
-                if self.config.wallet_password is not None:
-                    params["wallet_password"] = self.config.wallet_password.get_secret_value()
-
             return oracledb.create_pool_async(
                 user=self.config.user,
                 password=self.config.password.get_secret_value(),
                 dsn=dsn,
                 min=self.config.min_pool_size,
                 max=self.config.max_pool_size,
-                **params,
+                **connect_params(self.config),
             )
 
         return cast("oracledb.AsyncConnectionPool", await get_pool(self, _build))

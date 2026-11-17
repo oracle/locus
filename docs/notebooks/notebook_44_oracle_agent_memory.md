@@ -56,8 +56,9 @@ Same Oracle wallet block as the rest of the Oracle Cloud and Database
 export ORACLE_DSN=mydb_low                   # tnsnames alias
 export ORACLE_USER=locus_app                 # least-privileged app schema
 export ORACLE_PASSWORD='<app-password>'
-export ORACLE_WALLET=~/.oci/wallets/mydb
-export ORACLE_WALLET_PASSWORD='<wallet-pw>'  # if encrypted
+export ORACLE_WALLET=~/.oci/wallets/mydb     # mTLS only; a TLS-only database has none
+export ORACLE_WALLET_PASSWORD='<wallet-pw>'  # if the wallet is encrypted
+# TLS-only (no wallet): a connect string in ORACLE_DSN, or an alias + ORACLE_CONFIG_DIR
 ```
 
 `oracleagentmemory` drives its embedder and extraction model through
@@ -137,11 +138,12 @@ reaches the model:
 python examples/notebook_44_oracle_agent_memory.py
 ```
 
-The script needs an Autonomous Database reachable through the four
-variables in Prerequisites: `ORACLE_DSN`, `ORACLE_USER`,
-`ORACLE_PASSWORD` and `ORACLE_WALLET` (`ORACLE_WALLET_PASSWORD` only
-when the wallet is encrypted), plus the `oracleagentmemory` extra. When
-any of the four variables is unset it prints the missing names and the
+The script needs an Autonomous Database reachable through the variables in Prerequisites:
+`ORACLE_DSN`, `ORACLE_USER` and `ORACLE_PASSWORD`, plus `ORACLE_WALLET` for
+mutual TLS (`ORACLE_WALLET_PASSWORD` only when the wallet is encrypted) or
+`ORACLE_CONFIG_DIR` when a TLS-only database is named by a tnsnames alias,
+plus the `oracleagentmemory` extra. When any of them is unset it prints the
+missing names and the
 minimal wiring snippet, then exits cleanly without opening a
 connection; when the package is not installed, the manager raises an
 `ImportError` that names the extras command. With the database in

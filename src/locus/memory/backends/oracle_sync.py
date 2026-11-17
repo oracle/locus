@@ -52,6 +52,7 @@ class OracleSyncBackend:
         host: str | None = None,
         port: int = 1521,
         service_name: str | None = None,
+        config_dir: str | None = None,
         **kwargs: Any,
     ) -> None:
         self._async = OracleBackend(
@@ -63,6 +64,7 @@ class OracleSyncBackend:
             host=host,
             port=port,
             service_name=service_name,
+            config_dir=config_dir,
             **kwargs,
         )
 
@@ -167,6 +169,7 @@ class OracleSyncCheckpointSaver:
         min_pool_size: int = 1,
         max_pool_size: int = 5,
         auto_create_table: bool = True,
+        config_dir: str | None = None,
         **kwargs: Any,
     ) -> None:
         self._async = OracleCheckpointSaver(
@@ -183,6 +186,7 @@ class OracleSyncCheckpointSaver:
             min_pool_size=min_pool_size,
             max_pool_size=max_pool_size,
             auto_create_table=auto_create_table,
+            config_dir=config_dir,
             **kwargs,
         )
 

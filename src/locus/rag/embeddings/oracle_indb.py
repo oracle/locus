@@ -117,7 +117,7 @@ from typing import TYPE_CHECKING, Any, cast
 from pydantic import BaseModel, Field, SecretStr
 
 from locus._oracle_pool_cache import get_pool, safe_acquire
-from locus.memory.backends._oracle_config import validate_sql_identifier
+from locus.memory.backends._oracle_config import connect_params, validate_sql_identifier
 from locus.rag.embeddings.base import (
     BaseEmbedding,
     EmbeddingCapabilities,
@@ -152,6 +152,9 @@ class OracleInDBEmbeddingsConfig(BaseModel):
     dsn: str | None = None
     user: str = "admin"
     password: SecretStr = SecretStr("")
+
+    # Directory holding tnsnames.ora, for a TNS alias without a wallet
+    config_dir: str | None = None
 
     # Wallet (Autonomous DB / mTLS)
     wallet_location: str | None = None
@@ -230,6 +233,7 @@ class OracleInDBEmbeddings(BaseEmbedding):
         min_pool_size: int = 1,
         max_pool_size: int = 5,
         use_batch_function: bool = False,
+        config_dir: str | None = None,
     ) -> None:
         super().__init__()
         self._cfg = OracleInDBEmbeddingsConfig(
@@ -238,6 +242,7 @@ class OracleInDBEmbeddings(BaseEmbedding):
             dsn=dsn,
             user=user,
             password=SecretStr(password) if isinstance(password, str) else password,
+            config_dir=config_dir,
             wallet_location=wallet_location,
             wallet_password=SecretStr(wallet_password)
             if isinstance(wallet_password, str)
@@ -316,22 +321,13 @@ class OracleInDBEmbeddings(BaseEmbedding):
             if dsn is None and cfg.host and cfg.service_name:
                 dsn = oracledb.makedsn(cfg.host, cfg.port, service_name=cfg.service_name)
 
-            params: dict[str, Any] = {}
-            if cfg.wallet_location:
-                params["config_dir"] = cfg.wallet_location
-                params["wallet_location"] = cfg.wallet_location
-                # ``is not None``: SecretStr("") is falsy in Pydantic v2, but
-                # "" is the auto-login (cwallet.sso) wallet idiom. See #289.
-                if cfg.wallet_password is not None:
-                    params["wallet_password"] = cfg.wallet_password.get_secret_value()
-
             return oracledb.create_pool_async(
                 user=cfg.user,
                 password=cfg.password.get_secret_value(),
                 dsn=dsn,
                 min=cfg.min_pool_size,
                 max=cfg.max_pool_size,
-                **params,
+                **connect_params(cfg),
             )
 
         # Bound to the running event loop — see locus._oracle_pool_cache.

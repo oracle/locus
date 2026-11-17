@@ -44,8 +44,9 @@ Run it:
     export ORACLE_DSN=mydb_low                   # tnsnames alias
     export ORACLE_USER=locus_app                 # least-privileged app schema
     export ORACLE_PASSWORD='<app-password>'
-    export ORACLE_WALLET=~/.oci/wallets/mydb
-    export ORACLE_WALLET_PASSWORD='<wallet-pw>'  # if encrypted
+    export ORACLE_WALLET=~/.oci/wallets/mydb     # mTLS only; a TLS-only database has none
+    export ORACLE_WALLET_PASSWORD='<wallet-pw>'  # if the wallet is encrypted
+    # TLS-only (no wallet): a connect string in ORACLE_DSN, or an alias + ORACLE_CONFIG_DIR
 
     python examples/notebook_43_oracle_versioned_saver.py
 
@@ -72,7 +73,6 @@ _REQUIRED_ENV = (
     "ORACLE_DSN",
     "ORACLE_USER",
     "ORACLE_PASSWORD",
-    "ORACLE_WALLET",
 )
 
 
@@ -88,7 +88,38 @@ _TURNS = (
 
 
 def _missing_env() -> list[str]:
-    return [name for name in _REQUIRED_ENV if not os.environ.get(name)]
+    missing = [name for name in _REQUIRED_ENV if not os.environ.get(name)]
+    # A tnsnames alias in ORACLE_DSN needs a directory to resolve it: the
+    # mTLS wallet, or ORACLE_CONFIG_DIR / TNS_ADMIN for a TLS-only database.
+    # A connect descriptor or an Easy Connect address (host:port/service)
+    # needs neither, and an unset DSN is already reported above.
+    dsn = os.environ.get("ORACLE_DSN", "")
+    if (
+        dsn
+        and "(" not in dsn
+        and "/" not in dsn
+        and ":" not in dsn
+        and not any(
+            os.environ.get(name) for name in ("ORACLE_WALLET", "ORACLE_CONFIG_DIR", "TNS_ADMIN")
+        )
+    ):
+        missing.append("ORACLE_WALLET (mTLS) or ORACLE_CONFIG_DIR (TLS-only alias)")
+    return missing
+
+
+def _oracle_connection() -> dict[str, str]:
+    """dsn / user / password, plus the TNS directory or wallet the environment names."""
+    kwargs = {
+        "dsn": os.environ["ORACLE_DSN"],
+        "user": os.environ["ORACLE_USER"],
+        "password": os.environ["ORACLE_PASSWORD"],
+    }
+    if os.environ.get("ORACLE_CONFIG_DIR"):
+        kwargs["config_dir"] = os.path.expanduser(os.environ["ORACLE_CONFIG_DIR"])
+    if os.environ.get("ORACLE_WALLET"):  # mTLS only; a TLS-only database has no wallet
+        kwargs["wallet_location"] = os.path.expanduser(os.environ["ORACLE_WALLET"])
+        kwargs["wallet_password"] = os.environ.get("ORACLE_WALLET_PASSWORD", "")
+    return kwargs
 
 
 def _print_skip_banner(missing: list[str]) -> None:
@@ -101,8 +132,10 @@ def _print_skip_banner(missing: list[str]) -> None:
     for name in missing:
         print(f"  - {name}")
     print(
-        "\nProvision an Autonomous Database, drop its wallet under "
-        "$ORACLE_WALLET, then set the variables above and re-run."
+        "\nProvision an Autonomous Database. With mTLS, drop its wallet under "
+        "$ORACLE_WALLET; without it (TLS-only), put the connect string in "
+        "ORACLE_DSN or an alias in a tnsnames.ora under $ORACLE_CONFIG_DIR. "
+        "Then set the variables above and re-run."
     )
     print("\nMinimal wiring (what the live path below builds):")
     print(
@@ -130,11 +163,7 @@ def _print_skip_banner(missing: list[str]) -> None:
 
 def _build_saver() -> OracleCheckpointSaver:
     return OracleCheckpointSaver(
-        dsn=os.environ["ORACLE_DSN"],
-        user=os.environ["ORACLE_USER"],
-        password=os.environ["ORACLE_PASSWORD"],
-        wallet_location=os.path.expanduser(os.environ["ORACLE_WALLET"]),
-        wallet_password=os.environ.get("ORACLE_WALLET_PASSWORD", ""),
+        **_oracle_connection(),
         table_name=TABLE_PREFIX,
     )
 
@@ -272,11 +301,7 @@ async def main() -> None:
     # (notebook 42's primitive); the versioned saver adds an audit
     # trail on top. Both ride the same Autonomous Database wallet.
     live_cp = oracle_checkpointer(
-        dsn=os.environ["ORACLE_DSN"],
-        user=os.environ["ORACLE_USER"],
-        password=os.environ["ORACLE_PASSWORD"],
-        wallet_location=os.path.expanduser(os.environ["ORACLE_WALLET"]),
-        wallet_password=os.environ.get("ORACLE_WALLET_PASSWORD", ""),
+        **_oracle_connection(),
         table_name=f"{TABLE_PREFIX}_live",
     )
 

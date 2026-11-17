@@ -41,6 +41,7 @@ class OracleSyncInDBEmbeddings:
         min_pool_size: int = 1,
         max_pool_size: int = 5,
         use_batch_function: bool = True,
+        config_dir: str | None = None,
     ) -> None:
         self._async = OracleInDBEmbeddings(
             model_name=model_name,
@@ -56,6 +57,7 @@ class OracleSyncInDBEmbeddings:
             min_pool_size=min_pool_size,
             max_pool_size=max_pool_size,
             use_batch_function=use_batch_function,
+            config_dir=config_dir,
         )
 
     # -- Public introspection ----------------------------------------------

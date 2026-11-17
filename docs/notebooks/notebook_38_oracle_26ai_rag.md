@@ -30,12 +30,13 @@ What this notebook covers:
 ## Prerequisites
 
 ```bash
-# Database side — Autonomous Database wallet (TLS) + credentials.
-export ORACLE_DSN=mydb_low                   # tnsnames alias in the wallet
+# Database side — Autonomous Database connection (mTLS wallet, or a TNS directory) + credentials.
+export ORACLE_DSN=mydb_low                   # tnsnames alias (wallet dir or ORACLE_CONFIG_DIR)
 export ORACLE_USER=locus_app                 # least-privileged app schema
 export ORACLE_PASSWORD='<app-password>'
-export ORACLE_WALLET=~/.oci/wallets/mydb     # directory holding tnsnames.ora
-export ORACLE_WALLET_PASSWORD='<wallet-pw>'  # if wallet is encrypted
+export ORACLE_WALLET=~/.oci/wallets/mydb     # mTLS only; a TLS-only database has none
+export ORACLE_WALLET_PASSWORD='<wallet-pw>'  # if the wallet is encrypted
+# TLS-only (no wallet): a connect string in ORACLE_DSN, or an alias + ORACLE_CONFIG_DIR
 
 # Embedding side — OCI Generative AI in us-chicago-1.
 export OCI_PROFILE=<your-profile>
@@ -109,9 +110,10 @@ python examples/notebook_38_oracle_26ai_rag.py
 ```
 
 The script needs two live services. Oracle Database 26ai is reached
-through an Autonomous Database wallet: `ORACLE_DSN`, `ORACLE_USER`,
-`ORACLE_PASSWORD` and `ORACLE_WALLET` from Prerequisites, plus
-`ORACLE_WALLET_PASSWORD` when the wallet is encrypted. The embeddings come
+through `ORACLE_DSN`, `ORACLE_USER` and `ORACLE_PASSWORD` from Prerequisites,
+plus `ORACLE_WALLET` for mutual TLS (`ORACLE_WALLET_PASSWORD` when the wallet
+is encrypted) or `ORACLE_CONFIG_DIR` when a TLS-only database is named by a
+tnsnames alias. The embeddings come
 from Cohere `embed-v4.0` on OCI Generative AI, which needs
 `OCI_COMPARTMENT`; `OCI_PROFILE`, `OCI_REGION` and `OCI_AUTH_TYPE` default
 to `DEFAULT`, `us-chicago-1` and `api_key`, and the `LOCUS_OCI_*`
