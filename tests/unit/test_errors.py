@@ -11,7 +11,9 @@ attribute for structured logging.
 
 from __future__ import annotations
 
+import copy
 import inspect
+import pickle
 
 import pytest
 
@@ -105,6 +107,20 @@ class TestUnknownProviderError:
         assert str(err) == "no such provider"
         assert err.provider == "nope"
         assert err.available == ["a", "b"]
+
+    def test_defaults_and_round_trips(self) -> None:
+        """Like its siblings it rebuilds from ``args``, so it pickles and copies."""
+        bare = errors.UnknownProviderError("no such provider")
+        assert bare.provider is None
+        assert bare.available == []
+
+        err = errors.UnknownProviderError("no such provider", provider="nope", available=["a", "b"])
+        clones = (pickle.loads(pickle.dumps(err)), copy.copy(err), copy.deepcopy(err))  # noqa: S301 -- our own bytes
+        for clone in clones:
+            assert isinstance(clone, errors.UnknownProviderError)
+            assert str(clone) == "no such provider"
+            assert clone.provider == "nope"
+            assert clone.available == ["a", "b"]
 
     def test_is_exported(self) -> None:
         import locus.core

@@ -35,10 +35,12 @@ except LocusError as exc:
 exceptions pass through unwrapped, much of the SDK raises built-in
 exceptions such as `ValueError`, and several modules define their own
 exceptions outside this hierarchy — so a boundary handler that must see
-every failure catches `Exception` after `LocusError`. The SDK does not
-itself raise the tool, checkpoint and RAG families, `ConfigError` other
-than `UnknownProviderError`, or the other model errors; they are public, so your own model adapters and
-checkpointers can raise them under the same root.
+every failure catches `Exception` after `LocusError`. Of the
+configuration errors, the SDK raises only `UnknownProviderError`, from
+the model and checkpointer registries. The tool, checkpoint and RAG
+families, the base `ConfigError` and the other model errors are public
+so that your own model adapters and checkpointers can raise them under
+the same root; the SDK does not raise them itself.
 
 ## Hierarchy
 

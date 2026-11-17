@@ -53,8 +53,8 @@ def get_model(model_string: str, **kwargs: Any) -> ModelProtocol:
             form, or names a provider that is not registered. It subclasses
             ``ValueError``.
     """
+    available = list_providers()
     if ":" not in model_string:
-        available = list(_PROVIDERS.keys())
         raise UnknownProviderError(
             f"Model string must be 'provider:model', got: {model_string}. "
             f"Available providers: {available}",
@@ -65,7 +65,6 @@ def get_model(model_string: str, **kwargs: Any) -> ModelProtocol:
     provider, model_id = model_string.split(":", 1)
 
     if provider not in _PROVIDERS:
-        available = list(_PROVIDERS.keys())
         raise UnknownProviderError(
             f"Unknown provider: {provider}. Available: {available}",
             provider=provider,

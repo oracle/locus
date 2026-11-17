@@ -71,12 +71,12 @@ def get_checkpointer(checkpointer_string: str, **kwargs: Any) -> BaseCheckpointe
         config_hint = None
 
     if provider not in _CHECKPOINTERS:
-        available = list(_CHECKPOINTERS.keys())
+        available = list_checkpointers()
         raise UnknownProviderError(
             f"Unknown checkpointer provider: '{provider}'. "
             f"Available providers: {available}. "
             f"Install optional dependencies or register a custom provider.",
-            provider=provider,
+            provider=provider or None,
             available=available,
         )
 

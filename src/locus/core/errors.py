@@ -196,9 +196,13 @@ class UnknownProviderError(ConfigError, ValueError):
     ``"provider:model"`` form at all. It also subclasses :class:`ValueError`,
     so existing ``except ValueError`` handlers keep working.
 
+    Both attributes default to empty so that, like its siblings, an
+    instance can be rebuilt from ``args`` by :mod:`pickle` and :mod:`copy`.
+
     Attributes:
         provider: The provider prefix that was asked for, or ``None`` when
-            the identifier names none (a model string without a ``:``).
+            the identifier names none (a model string without a ``:``, or a
+            checkpointer string that starts with one).
         available: The providers registered when the lookup failed, in
             registration order.
     """
@@ -209,13 +213,13 @@ class UnknownProviderError(ConfigError, ValueError):
         self,
         message: str,
         *,
-        provider: str | None,
-        available: list[str],
+        provider: str | None = None,
+        available: list[str] | None = None,
         cause: BaseException | None = None,
     ) -> None:
         super().__init__(message, cause=cause)
         self.provider = provider
-        self.available = available
+        self.available = list(available) if available else []
 
 
 class GSARValidationError(LocusError):
