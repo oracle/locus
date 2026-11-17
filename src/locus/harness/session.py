@@ -68,6 +68,7 @@ from locus.harness.backend import (
     take_window,
 )
 from locus.harness.local import HEAD_KEEP, MAX_BACKGROUND, TAIL_KEEP, glob_match
+from locus.harness.sandbox import SandboxMixin
 
 
 __all__ = ["SessionBackend", "SessionLike"]
@@ -173,7 +174,7 @@ def _cap(data: bytes) -> tuple[bytes, bool]:
     return data[:HEAD_KEEP] + note + data[-TAIL_KEEP:], True
 
 
-class SessionBackend(WorkspaceTextMixin):
+class SessionBackend(SandboxMixin, WorkspaceTextMixin):
     """A :class:`SessionLike` sandbox as a workspace.
 
     Args:
@@ -461,6 +462,7 @@ class SessionBackend(WorkspaceTextMixin):
         cwd: str | None = None,
         on_output: Callable[[bytes], None] | None = None,
     ) -> ExecResult:
+        timeout = self._bounded(timeout)
         started = time.monotonic()
         code, output = self._exec_script(self._prelude(cwd, env) + command, timeout, on_output)
         duration = time.monotonic() - started
@@ -469,13 +471,15 @@ class SessionBackend(WorkspaceTextMixin):
         # chose to, and is not reported as timed out.
         timed_out = code is None or (code == 124 and duration >= timeout * 0.9)
         data, truncated = _cap(output)
-        return ExecResult(
+        result = ExecResult(
             exit_code=None if timed_out else code,
             output=data,
             truncated=truncated,
             timed_out=timed_out,
             duration_s=duration,
         )
+        self._record(command, result)
+        return result
 
     # -------------------------------------------------- background commands --
 
@@ -572,6 +576,7 @@ class SessionBackend(WorkspaceTextMixin):
         )
         with self._lock:
             self._jobs[handle] = record
+        self._record(command, ExecResult(exit_code=None, output=b""), background=True)
         return record.status(running=True, exit_code=None)
 
     def wait_background(self, handle: str, timeout: float) -> JobStatus:
@@ -675,7 +680,7 @@ class SessionBackend(WorkspaceTextMixin):
             out.append(job.status(running=running, exit_code=code))
         return out
 
-    def close(self) -> None:
+    def _stop(self) -> None:
         """Kill every background command and remove this backend's state."""
         with self._lock:
             jobs = list(self._jobs.values())

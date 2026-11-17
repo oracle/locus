@@ -45,6 +45,12 @@ The unified interface — combines an embedder and a store into the
 ::: locus.rag.stores.opensearch.OpenSearchVectorStore
 ::: locus.rag.stores.qdrant.QdrantVectorStore
 ::: locus.rag.stores.chroma.ChromaVectorStore
+::: locus.rag.stores.milvus.MilvusVectorStore
+::: locus.rag.stores.weaviate.WeaviateVectorStore
+::: locus.rag.stores.elasticsearch.ElasticsearchVectorStore
+::: locus.rag.stores.redis.RedisVectorStore
+::: locus.rag.stores.mongodb.MongoDBAtlasVectorStore
+::: locus.rag.stores.pinecone.PineconeVectorStore
 
 ### Oracle Database 26ai
 
@@ -70,19 +76,26 @@ synchronous code. All need the `oracledb` extra.
 ::: locus.rag.stores.base.VectorStoreConfig
 ::: locus.rag.stores.base.Document
 ::: locus.rag.stores.base.SearchResult
+::: locus.rag.stores.base.HybridSearchable
+::: locus.rag.stores.base.supports_hybrid_search
 
 ## Reranker
 
 Re-score candidates after the initial vector search. The `Reranker`
-Protocol lets you plug in any scorer; three implementations ship:
+Protocol lets you plug in any scorer; six implementations ship:
 `CrossEncoderReranker` (local, offline), `CohereReranker` (Cohere's
-direct rerank API) and `OCICohereReranker` (Cohere `rerank-v3.5` /
-`rerank-v4.0` served by OCI Generative AI).
+direct rerank API), `OCICohereReranker` (Cohere `rerank-v3.5` /
+`rerank-v4.0` served by OCI Generative AI), `LLMReranker` (any
+registered chat model grades the candidates), `JinaReranker` and
+`VoyageReranker` (hosted rerank APIs).
 
 ::: locus.rag.reranker.base.Reranker
 ::: locus.rag.reranker.cross_encoder.CrossEncoderReranker
 ::: locus.rag.reranker.cohere.CohereReranker
 ::: locus.rag.reranker.cohere_oci.OCICohereReranker
+::: locus.rag.reranker.llm.LLMReranker
+::: locus.rag.reranker.jina.JinaReranker
+::: locus.rag.reranker.voyage.VoyageReranker
 
 ## Multimodal processing
 

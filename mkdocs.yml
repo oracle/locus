@@ -67,6 +67,8 @@ theme:
 
 hooks:
 - hooks/cache_bust.py
+# Before build_metadata so the GitHub links it writes get pinned to the release.
+- hooks/release_notes.py
 - hooks/build_metadata.py
 - hooks/search_exclude.py
 - hooks/inline_code_breaks.py
@@ -86,13 +88,17 @@ extra_javascript:
 - javascripts/notebook-filter.js
 - javascripts/sidebar-filter.js
 
-copyright: <span class="footer-brand"><span class="footer-brand__o" aria-hidden="true"></span><span class="footer-brand__text">Oracle Generative AI</span></span><br><span class="footer-copy">Copyright &copy; 2025–2026 <span class="oracle-mark" aria-label="Oracle"></span> and/or its affiliates &middot; <a href="/legal/">Legal</a></span>
+copyright: <span class="footer-brand"><span class="footer-brand__o" aria-hidden="true"></span><span class="footer-brand__text">Oracle Generative AI</span></span><br><span class="footer-copy">Copyright &copy; 2025–2026 <span class="oracle-mark" aria-label="Oracle"></span> and/or its affiliates &middot; <a href="/legal/">Legal</a> &middot; <a href="/release-notes/">Release notes</a></span>
 
 extra:
   homepage: https://locusagents.ai/
   # The model every generic example uses; the build hook expands
   # {{ locus_example_model }} everywhere, so change it here, not on the pages.
   example_model: oci:openai.gpt-5.5
+  # The release-notes page ({{ locus_release_notes }}) renders CHANGELOG.md from
+  # this release onward: the locus-sdk line published from this repository.
+  # Earlier entries stay in the file on GitHub, which the page links.
+  release_notes_since: 3.0.0
   # Provider tab sets ({{ locus_model_tabs }}): one example model id per
   # provider, shown as linked tabs so a reader picks a provider once.
   model_tabs:
@@ -130,7 +136,7 @@ markdown_extensions:
 # convention (see README). check_paths makes a missing include fail the
 # build instead of rendering an empty section.
 - pymdownx.snippets:
-    base_path: [., packages/locus-sdk-security]
+    base_path: [.]
     check_paths: true
 # Mermaid diagrams render client-side via Material's built-in integration;
 # the custom_fence is what routes ```mermaid to it instead of highlighting
@@ -212,6 +218,7 @@ nav:
     - Multi-modal providers: concepts/multi-modal-providers.md
   - The coding harness:
     - Overview: harness.md
+    - Sandbox backends: harness/backends.md
     - OCI GenAI Sandboxes: harness/oci-sandbox.md
     - NVIDIA OpenShell: harness/openshell.md
   - Memory and RAG:
@@ -239,11 +246,6 @@ nav:
     - Control-layer architecture: concepts/control-layer.md
     - Writing a policy that holds: concepts/policy-authoring.md
     - Guardrails: concepts/safety.md
-    - SecurityContext application: concepts/security-context.md
-    - Security findings (locus-sdk-security): concepts/security.md
-    - Threat scenarios: concepts/threat-scenarios.md
-    - Agentic AI security: concepts/agentic-ai-security.md
-    - Cloud-posture agent: concepts/cloud-posture.md
   - Model providers:
     - Overview: concepts/models.md
     - OCI Generative AI: concepts/providers/oci.md
@@ -258,6 +260,7 @@ nav:
   - Project:
     - Guarantees & boundaries: why-locus.md
     - Compatibility & releases: compatibility.md
+    - Release notes: release-notes.md
     - About & maintainers: about.md
 - How-to:
   - Quickstart: how-to/quickstart.md
@@ -268,11 +271,12 @@ nav:
   - Persist conversations: how-to/persist-conversations.md
   - Build a custom tool: how-to/custom-tools.md
   - Add a checkpointer backend: how-to/custom-checkpointer.md
-  - Build a security integration: how-to/build-an-integration.md
   - OCI Generative AI models: how-to/oci-models.md
   - Dedicated AI Clusters: how-to/oci-dac.md
   - LiteLLM gateway: how-to/litellm-gateway.md
+  - Evaluate an agent in CI: how-to/evaluate-in-ci.md
   - Deploy: how-to/deploy.md
+  - Deploy to OCI: how-to/deploy-oci.md
   - The box runner: runner.md
 - Notebooks:
   - Examples: notebooks/index.md
@@ -364,23 +368,12 @@ nav:
       - 78 · Concession approval: notebooks/notebook_78_concession_approval.md
       - 79 · Contract review: notebooks/notebook_79_contract_review.md
       - 80 · Vendor integrations: notebooks/notebook_80_vendor_integrations.md
-    - Security operations (locus-sdk-security):
-      - 81 · Grounded cloud-posture agent: notebooks/notebook_81_cloud_posture_agent.md
-      - 82 · SOC playbooks: notebooks/notebook_82_security_playbooks.md
-      - 83 · Red-team an AI agent: notebooks/notebook_83_agent_red_team.md
-      - 84 · Red-team a support bot: notebooks/notebook_84_redteam_support_bot.md
-      - 85 · CI security gate: notebooks/notebook_85_ci_security_gate.md
-      - 86 · Verify findings: notebooks/notebook_86_verify_findings.md
-      - 87 · SOC alert triage: notebooks/notebook_87_soc_alert_triage.md
-      - 88 · Model and hardware fingerprinting: notebooks/notebook_88_model_fingerprint.md
-      - 89 · Investigate with SecurityContext: notebooks/notebook_89_investigate_with_ctx.md
 - API reference:
   - Overview: api/index.md
   - Agent: api/agent.md
   - Multi-agent: api/multiagent.md
   - DeepAgent: api/deepagent.md
   - Control: api/control.md
-  - Security: api/security.md
   - Tools: api/tools.md
   - A2A: api/a2a.md
   - Hooks: api/hooks.md

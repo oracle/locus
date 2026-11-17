@@ -3,7 +3,7 @@ name: docs
 # Builds the documentation site (mkdocs + Material + mkdocstrings) from this
 # repository and publishes it to GitHub Pages at https://locusagents.ai/.
 # The API reference imports the installed SDK, so the build installs this
-# checkout (core + security add-on + docs toolchain) first; the build hooks in
+# checkout (core + docs toolchain) first; the build hooks in
 # hooks/ read the SDK version and provider registry from that install.
 
 on:
@@ -15,7 +15,6 @@ on:
       - "hooks/**"
       - "mkdocs.yml"
       - "src/locus/**/*.py"
-      - "packages/locus-sdk-security/src/**/*.py"
       - ".github/workflows/docs.yml"
   pull_request:
     paths:
@@ -52,10 +51,10 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install locus, the security add-on and the docs toolchain
+      - name: Install locus and the docs toolchain
         run: |
           pip install -U pip
-          pip install -e ".[docs,oci,oracledb,openai]" -e "packages/locus-sdk-security"
+          pip install -e ".[docs,oci,oracledb,openai]"
 
       - name: Build mkdocs site (strict)
         run: mkdocs build --strict

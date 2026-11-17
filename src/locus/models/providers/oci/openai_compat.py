@@ -18,6 +18,9 @@ Two mutually-exclusive auth modes are supported. Pass **exactly one**:
 - ``auth_type="instance_principal"`` / ``"resource_principal"`` — for
   workloads running on OCI compute or in OCI Functions / OKE with
   workload identity.
+- ``auth_type="api_key"`` (``"security_token"`` too) — the profile path by
+  another name: sign with ``profile=``, else the ``OCI_PROFILE`` profile,
+  else ``DEFAULT``. It is what ``LOCUS_OCI_AUTH_TYPE`` defaults to.
 
 The endpoint is ``/openai/v1/chat/completions``. We do **not** use the
 Responses API and do **not** require a GenAI Project OCID — those imply
@@ -48,9 +51,10 @@ Example::
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import Field
 
@@ -69,8 +73,42 @@ if TYPE_CHECKING:
 
 DEFAULT_OCI_GENAI_REGION = "us-chicago-1"
 
-AuthType = Literal["instance_principal", "resource_principal"]
-_VALID_AUTH_TYPES: tuple[str, ...] = ("instance_principal", "resource_principal")
+AuthType = Literal[
+    "instance_principal",
+    "resource_principal",
+    "oke_workload_identity",
+    "api_key",
+    "security_token",
+    "session_token",
+]
+_VALID_AUTH_TYPES: tuple[str, ...] = (
+    "instance_principal",
+    "resource_principal",
+    "oke_workload_identity",
+)
+
+#: ``auth_type`` values that name the profile path rather than a principal:
+#: the API key of a ``~/.oci/config`` profile (the default of every other OCI
+#: auth switch in the SDK and of ``LOCUS_OCI_AUTH_TYPE``) or the session
+#: token the profile names. The profile's shape picks the signer either way.
+PROFILE_AUTH_TYPES: frozenset[str] = frozenset({"api_key", "security_token", "session_token"})
+
+
+def resolve_profile_auth(
+    profile: str | None, auth_type: str | None
+) -> tuple[str | None, str | None]:
+    """Fold a profile-path ``auth_type`` into ``profile``.
+
+    ``auth_type="api_key"`` (or ``"security_token"`` / ``"session_token"``)
+    says "sign with a profile": the result is ``(profile, None)`` with the
+    profile taken from ``profile=``, else ``LOCUS_OCI_PROFILE`` / ``OCI_PROFILE``,
+    else ``DEFAULT`` — the section ``oci.config`` reads on its own. Any other
+    pair is returned as given.
+    """
+    if auth_type in PROFILE_AUTH_TYPES:
+        env_profile = os.environ.get("LOCUS_OCI_PROFILE") or os.environ.get("OCI_PROFILE")
+        return profile or env_profile or "DEFAULT", None
+    return profile, auth_type
 
 
 def build_oci_openai_base_url(region: str) -> str:
@@ -96,7 +134,10 @@ class OCIChatCompletionsConfig(OpenAIConfig):
     )
     auth_type: str | None = Field(
         default=None,
-        description='"instance_principal" or "resource_principal"',
+        description=(
+            '"instance_principal", "resource_principal" or "oke_workload_identity"; '
+            '"api_key" / "security_token" fold into profile= at construction'
+        ),
     )
     config_file: str = Field(
         default="~/.oci/config",
@@ -312,9 +353,15 @@ def _build_instance_principal_signer() -> AbstractBaseSigner:
 
 
 def _build_resource_principal_signer() -> AbstractBaseSigner:
-    from oci.auth.signers import get_resource_principals_signer
+    from locus._oci_auth import resource_principal_signer
 
-    return get_resource_principals_signer()
+    return cast("AbstractBaseSigner", resource_principal_signer("resource_principal"))
+
+
+def _build_oke_workload_identity_signer() -> AbstractBaseSigner:
+    from locus._oci_auth import resource_principal_signer
+
+    return cast("AbstractBaseSigner", resource_principal_signer("oke_workload_identity"))
 
 
 def _refresh_callable_for(
@@ -370,6 +417,8 @@ def _refresh_callable_for(
         return _build_instance_principal_signer
     if auth_type == "resource_principal":
         return _build_resource_principal_signer
+    if auth_type == "oke_workload_identity":
+        return _build_oke_workload_identity_signer
 
     # Case 2: SecurityTokenSigner rebuilt from disk.
     if profile is not None and config_file is not None:
@@ -440,13 +489,16 @@ class OCIChatCompletionsModel(OpenAIModel):
                 ``meta.llama-3.3-70b-instruct``).
             profile: OCI config profile name from ``config_file``. Mutually
                 exclusive with ``auth_type``.
-            auth_type: ``"instance_principal"`` or ``"resource_principal"``.
-                Mutually exclusive with ``profile``. Requires
-                ``compartment_id``.
+            auth_type: ``"instance_principal"``, ``"resource_principal"`` or
+                ``"oke_workload_identity"``: a principal, mutually exclusive
+                with ``profile`` and requiring ``compartment_id``. Or
+                ``"api_key"`` (``"security_token"``), which is the profile
+                path by another name: ``profile=`` is used, else the
+                ``OCI_PROFILE`` profile, else ``DEFAULT``.
             compartment_id: OCI compartment OCID, sent as
                 ``opc-compartment-id``. Auto-derived from the profile's
                 tenancy under ``profile=``. Must be supplied explicitly
-                under ``auth_type=``.
+                under a principal ``auth_type=``.
             region: OCI region hosting the inference endpoint.
             config_file: Path to the OCI config file (used with ``profile``).
             base_url: Override the derived endpoint URL (e.g. for a custom
@@ -463,14 +515,16 @@ class OCIChatCompletionsModel(OpenAIModel):
                 is invalid, or if ``auth_type`` is set without
                 ``compartment_id``.
         """
+        profile, auth_type = resolve_profile_auth(profile, auth_type)
         modes_set = sum(x is not None for x in (profile, auth_type))
         if modes_set != 1:
             msg = (
                 "OCIChatCompletionsModel: specify exactly one auth mode. "
                 "Either profile='<section_from_~/.oci/config>' (api-key path; "
-                "use profile='DEFAULT' for the default section), "
+                "use profile='DEFAULT' for the default section, or "
+                "auth_type='api_key' for the OCI_PROFILE / DEFAULT section), "
                 "or auth_type='instance_principal'|'resource_principal'|"
-                "'security_token'|'delegation_token' together with compartment_id=. "
+                "'oke_workload_identity' together with compartment_id=. "
                 f"Got profile={profile!r}, auth_type={auth_type!r}."
             )
             raise ValueError(msg)
@@ -716,6 +770,8 @@ class OCIChatCompletionsModel(OpenAIModel):
             return _build_instance_principal_signer()
         if self.config.auth_type == "resource_principal":
             return _build_resource_principal_signer()
+        if self.config.auth_type == "oke_workload_identity":
+            return _build_oke_workload_identity_signer()
         # Validation in __init__ guarantees profile is set if we got here.
         assert self.config.profile is not None  # noqa: S101 — invariant
         return _build_signer_from_profile(self.config.profile, self.config.config_file)
@@ -723,7 +779,9 @@ class OCIChatCompletionsModel(OpenAIModel):
 
 __all__ = [
     "DEFAULT_OCI_GENAI_REGION",
+    "PROFILE_AUTH_TYPES",
     "OCIChatCompletionsConfig",
     "OCIChatCompletionsModel",
     "build_oci_openai_base_url",
+    "resolve_profile_auth",
 ]

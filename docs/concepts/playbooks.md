@@ -62,7 +62,7 @@ tool's result. Every call that runs lands in the step's `StepExecution`.
 | Regulated workflow (refund approval chains, change management, incident response) | **yes** |
 | Multi-step process where order matters | **yes** |
 | Repeatable runbook the team executes manually today | **yes — encode it** |
-| Audit-trail requirement: "every refund follows the same sequence" | **yes — the enforcer's in-memory execution log captures the sequence** (persist it, or pair it with [`AuditTrail`](agentic-ai-security.md), for a durable record) |
+| Audit-trail requirement: "every refund follows the same sequence" | **yes — the enforcer's in-memory execution log captures the sequence** (persist it, or pair it with [`AuditTrail`](control-layer.md), for a durable record) |
 | One-shot exploration, freeform Q&A | no — overhead's not worth it |
 | You want the model to choose tools freely | no — that's what `Agent(tools=[...])` already gives you |
 
@@ -248,7 +248,7 @@ for execution in plan.step_executions.values():
 
 `plan.step_executions` is a `dict[str, StepExecution]`; `StepStatus` is one of
 `pending`, `in_progress`, `completed`, `skipped`, `failed`. The plan is an
-ephemeral Pydantic object — serialize it (or wire an [`AuditTrail`](agentic-ai-security.md))
+ephemeral Pydantic object — serialize it (or wire an [`AuditTrail`](control-layer.md))
 if you need a record that outlives the process.
 
 ### Evidence, not just sequence

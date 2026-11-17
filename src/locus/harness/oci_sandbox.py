@@ -412,8 +412,6 @@ class OCISandboxBackend(SessionBackend):
             max_background=max_background,
         )
         self._owns_sandbox = owns_sandbox
-        self._jobs_stopped = False
-        self._sandbox_deleted = not owns_sandbox
 
     @property
     def client(self) -> OCISandboxClient:
@@ -446,26 +444,15 @@ class OCISandboxBackend(SessionBackend):
         sandbox = self.client.extend_sandbox(self.sandbox_id, details).data  # type: ignore[attr-defined]
         return getattr(sandbox, "time_expires", None)
 
-    def close(self) -> None:
-        """Stop background commands; stop and delete the sandbox if this backend made it.
+    def _destroy(self) -> None:
+        """Stop and delete the sandbox if this backend made it.
 
-        Safe to call again: a step that failed (a transient service error,
-        say) is retried by the next call, and one that succeeded is not
-        repeated. The sandbox is deleted even when its background commands
-        could not be stopped.
-
-        Raises:
-            Exception: The error of a step that failed, after every pending
-                step was attempted (the delete's, when both failed).
+        ``close`` ends the background commands first and calls this even
+        when that failed; a step that raised is retried by the next
+        ``close``, and one that succeeded is not repeated.
         """
-        try:
-            if not self._jobs_stopped:
-                super().close()
-                self._jobs_stopped = True
-        finally:
-            if not self._sandbox_deleted:
-                _stop_and_delete(self.client, self.sandbox_id)
-                self._sandbox_deleted = True
+        if self._owns_sandbox:
+            _stop_and_delete(self.client, self.sandbox_id)
 
     @classmethod
     def connect(

@@ -140,8 +140,6 @@ python examples/notebook_36_oci_tools.py --part agent           # the agent loop
 
 ## See also
 
-- [Notebook 81 — grounded cloud-posture agent](notebook_81_cloud_posture_agent.md) — a read-only auditing agent built on the same two tools
-- [Concepts: Cloud posture](../concepts/cloud-posture.md) — the read-only gate and the identity backstop behind it
 - [API: built-in OCI tools](../api/tools.md#oci-tools) — the `use_oci` and `describe_oci` signatures
 - [OCI Python SDK — Oracle docs](https://docs.oracle.com/en-us/iaas/tools/python/latest/) — the services, clients and operations the tools introspect
 

@@ -23,6 +23,12 @@ Design:
   ``metadata_for("gpt-4o")`` both resolve, as do
   ``"anthropic:claude-sonnet-4-6"`` and the bare ``"claude-sonnet-4-6"``.
   Canonical form is stored without a prefix; the lookup normalises inputs.
+* **OCI ids resolve the model they serve.** OCI Generative AI names a
+  model ``<vendor>.<model>``: ``metadata_for("oci:openai.gpt-4.1")`` and
+  the bare ``"openai.gpt-4.1"`` an ``OCIChatCompletionsModel`` carries both
+  resolve the ``gpt-4.1`` entry, and the models only OCI serves this way
+  (``meta.llama-3.3-70b-instruct``, ``cohere.command-a-03-2025``, ...) have
+  entries of their own.
 * **Unknown models** return ``None`` rather than a default — callers
   choose how to handle it (a conservative fallback, a log warning, or
   the existing ``ModelConfig`` values).
@@ -102,6 +108,10 @@ _PROVIDER_PREFIXES: Final[frozenset[str]] = frozenset(
     {
         "openai",
         "anthropic",
+        # OCI Generative AI; ``oci-responses`` for a Responses binding named
+        # through it. What remains is the ``<vendor>.<model>`` id.
+        "oci",
+        "oci-responses",
         # locus.models.providers.COMPATIBLE_PROVIDERS
         "ollama",
         "vllm",
@@ -134,6 +144,22 @@ def _strip_prefix(model_id: str) -> str:
     return model_id
 
 
+#: The vendors OCI Generative AI names in a model id, ``<vendor>.<model>``:
+#: ``openai.gpt-4.1`` is OpenAI's ``gpt-4.1`` served by OCI. Only these
+#: segments are dropped, so a dot inside a slug (``qwen3.6-35b``) is kept.
+_OCI_VENDORS: Final[frozenset[str]] = frozenset(
+    {"openai", "meta", "cohere", "google", "xai", "mistral", "anthropic"}
+)
+
+
+def _oci_bare(key: str) -> str | None:
+    """The model's own slug from an OCI ``<vendor>.<model>`` id, else ``None``."""
+    vendor, dot, rest = key.partition(".")
+    if dot and rest and vendor.lower() in _OCI_VENDORS:
+        return rest
+    return None
+
+
 #: A snapshot suffix on a model slug: ``-20250929``, ``-2025-09-29``,
 #: Vertex's ``@20251101``, or ``-latest``.
 _SNAPSHOT_SUFFIX: Final[re.Pattern[str]] = re.compile(
@@ -163,30 +189,42 @@ def metadata_for(model_id: str) -> ModelMetadata | None:
 
     Accepts both bare (``"gpt-4o"``) and prefixed (``"openai:gpt-4o"``)
     forms. Only prefixes Locus's providers use are stripped; anything
-    else is treated as part of the slug.
+    else is treated as part of the slug. An OCI Generative AI id,
+    ``<vendor>.<model>`` with or without ``oci:``, resolves the entry of
+    the model it serves: ``"oci:openai.gpt-4.1"`` is ``gpt-4.1``.
     """
     key = _strip_prefix(model_id.strip())
     with _lock:
-        found = _registry.get(key)
+        found = _lookup(key)
         if found is None:
-            # A dated snapshot or a ``-latest`` alias is the same model as its
-            # base slug, priced the same. Only those exact suffix shapes are
-            # stripped: a looser prefix match would let ``gpt-5`` answer for
-            # ``gpt-5.5``, which is a different model at a different price —
-            # and a wrong price under a hard ``max_cost_usd`` is worse than
-            # none.
-            base = _SNAPSHOT_SUFFIX.sub("", key)
-            if base != key:
-                found = _registry.get(base)
-        if found is None:
-            # OpenRouter's spelling of a Claude model, with or without its
-            # ``anthropic/`` vendor part, as the Anthropic binding sends it to
-            # OpenRouter's Messages API: the same model at the same list price
-            # (``anthropic/claude-sonnet-5.5`` is ``claude-sonnet-5-5``).
-            bare = key.removeprefix("anthropic/")
-            if _CLAUDE_DOTTED.match(bare) or bare != key:
-                found = _registry.get(_CLAUDE_DOTTED.sub(r"\1-\2", bare))
+            bare = _oci_bare(key)
+            if bare is not None:
+                found = _lookup(bare)
         return found
+
+
+def _lookup(key: str) -> ModelMetadata | None:
+    """``key``'s entry, its base entry for a snapshot, or a Claude respelling's."""
+    found = _registry.get(key)
+    if found is None:
+        # A dated snapshot or a ``-latest`` alias is the same model as its
+        # base slug, priced the same. Only those exact suffix shapes are
+        # stripped: a looser prefix match would let ``gpt-5`` answer for
+        # ``gpt-5.5``, which is a different model at a different price —
+        # and a wrong price under a hard ``max_cost_usd`` is worse than
+        # none.
+        base = _SNAPSHOT_SUFFIX.sub("", key)
+        if base != key:
+            found = _registry.get(base)
+    if found is None:
+        # OpenRouter's spelling of a Claude model, with or without its
+        # ``anthropic/`` vendor part, as the Anthropic binding sends it to
+        # OpenRouter's Messages API: the same model at the same list price
+        # (``anthropic/claude-sonnet-5.5`` is ``claude-sonnet-5-5``).
+        bare = key.removeprefix("anthropic/")
+        if _CLAUDE_DOTTED.match(bare) or bare != key:
+            found = _registry.get(_CLAUDE_DOTTED.sub(r"\1-\2", bare))
+    return found
 
 
 def model_id_of(model: object) -> str | None:
@@ -424,6 +462,16 @@ _seed(
     output_price_per_mtok="4.00",
 )
 
+# OpenAI GPT-5.1: the GPT-5 generation's window and output cap, as OpenAI
+# publishes them. OCI Generative AI serves it as ``openai.gpt-5.1``.
+_seed(
+    "gpt-5.1",
+    family="openai",
+    context_length=400_000,
+    max_output_tokens=128_000,
+    supports_prompt_caching=True,
+)
+
 # OpenAI GPT-5.5. Prices and window are the listed rates locus-code's price
 # table carried (2026-08); the output cap follows the GPT-5 generation.
 for _slug, _in, _out in (
@@ -551,3 +599,23 @@ _seed(
     input_price_per_mtok="1.32",
     output_price_per_mtok="3.96",
 )
+
+# Models OCI Generative AI serves under ``<vendor>.<model>`` ids and that no
+# other entry covers. Windows are the ones the OCI Generative AI documentation
+# states per model (read 2026-11-16); where another route lists a larger one
+# (xAI's own API for Grok 4) the OCI figure is the smaller and safe for both.
+# Output caps are the figures the same pages give: on-demand serving caps a
+# Meta or Cohere reply at 4,000 tokens (a dedicated cluster does not), Gemini
+# defaults to 65,536 and Grok 4's playground cap is 16,000. No prices: OCI
+# bills at its own rates, which a budget registers itself.
+for _slug, _family, _window, _output in (
+    ("llama-3.3-70b-instruct", "meta", 128_000, 4_000),
+    ("llama-4-maverick-17b-128e-instruct-fp8", "meta", 512_000, 4_000),
+    ("command-a-03-2025", "cohere", 256_000, 4_000),
+    ("command-r-plus-08-2024", "cohere", 128_000, 4_000),
+    ("gemini-2.5-pro", "google", 1_048_576, 65_536),
+    ("gemini-2.5-flash", "google", 1_048_576, 65_536),
+    ("grok-4", "xai", 128_000, 16_000),
+):
+    _seed(_slug, family=_family, context_length=_window, max_output_tokens=_output)
+del _slug, _family, _window, _output

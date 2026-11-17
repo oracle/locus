@@ -215,6 +215,37 @@ class CompactionConfig(BaseModel):
     )
     summary_max_tokens: int | None = Field(default=None, ge=1)
     min_iterations_between_summaries: int = Field(default=3, ge=0)
+    native: bool = Field(
+        default=False,
+        description=(
+            "Hand the summary stage to the model's own compaction endpoint "
+            "when the model offers one (``compact_history``), such as "
+            "OCIResponsesModel with store=False. The endpoint folds the older "
+            "history into an item the model replays itself; no client-side "
+            "summary is written. Models without one summarise as usual."
+        ),
+    )
+    tiers: list[Any] | None = Field(
+        default=None,
+        description=(
+            "Compaction tiers (``locus.memory.tiers``), each with its own trigger "
+            "as a fraction of the usable window. When set, the agent runs a "
+            "TieredCompaction over them instead of the two-stage ContextCompactor; "
+            "``True`` uses the default pipeline (clear tool results, sliding window, "
+            "summarise, relevance; with ``native=True`` the model's own compaction "
+            "before the summary). The settings above apply to the tiers that use them."
+        ),
+    )
+
+    @field_validator("tiers", mode="before")
+    @classmethod
+    def _tiers_flag(cls, v: Any) -> Any:
+        if v is True:
+            # The default pipeline; ``native`` is read when the compactor is built.
+            return []
+        if v is False:
+            return None
+        return v
 
 
 class ObservationPackConfig(BaseModel):
@@ -595,6 +626,20 @@ class AgentConfig(BaseModel):
         ),
     )
 
+    tool_call_integrity: bool | Literal["refuse", "abort"] = Field(
+        default=False,
+        description=(
+            "Sign every tool call as the model's response is parsed and verify "
+            "it at the executor, so arguments changed between the two — by a "
+            "hook that did not re-sign, a plugin, a consumer mutating the call "
+            "— are refused with a ToolCallIntegrityError, an audit entry and a "
+            "tool error the model reads. ``True`` or ``'refuse'`` refuses the "
+            "call and the run continues; ``'abort'`` ends the run with the "
+            "error once the batch has finished. Off (``False``) by default in "
+            "5.x; on by default from 6.0. See locus.tools.integrity."
+        ),
+    )
+
     max_tool_result_length: int = Field(
         default=32000,
         ge=0,
@@ -633,6 +678,31 @@ class AgentConfig(BaseModel):
             "tail of the result and cuts the middle."
         ),
     )
+
+    # Offloading by handle: any result over the offload's threshold goes to
+    # its store the moment it is produced, the message keeps a handle and a
+    # preview, and the ``fetch_tool_result`` tool (registered with it) reads
+    # the stored text back. See ``locus.memory.offload.ToolResultOffload``.
+    tool_result_offload: Any | None = Field(
+        default=None,
+        description=(
+            "Optional ToolResultOffload. Results over its threshold are stored "
+            "whole and replaced by a handle and a preview; fetch_tool_result "
+            "reads them back on demand. ``True`` uses an in-memory store with "
+            "the defaults."
+        ),
+    )
+
+    @field_validator("tool_result_offload", mode="before")
+    @classmethod
+    def _tool_result_offload_flag(cls, v: Any) -> Any:
+        if v is True:
+            from locus.memory.offload import ToolResultOffload  # noqa: PLC0415
+
+            return ToolResultOffload()
+        if v is False:
+            return None
+        return v
 
     # State management
     conversation_manager: Any | None = Field(
@@ -738,6 +808,45 @@ class AgentConfig(BaseModel):
             "get_state_history and fork can reach mid-turn states. Off by "
             "default: they exist to survive a crash, and keeping them grows "
             "storage with every iteration of every turn."
+        ),
+    )
+
+    durability: Literal["sync", "async", "exit"] = Field(
+        default="sync",
+        description=(
+            "When a run writes its iteration checkpoints. 'sync' (the default) "
+            "awaits each one before the next model call; 'async' schedules it "
+            "and awaits every pending write before the run's final save; "
+            "'exit' writes once at the end of the run. The final save and the "
+            "save before an interrupt are awaited in every mode. Agent.run, "
+            "arun and run_sync take a per-run override. See "
+            "locus.agent.durability."
+        ),
+    )
+
+    tool_ledger: bool | None = Field(
+        default=None,
+        description=(
+            "Record every executed tool call in the thread's checkpointer the "
+            "moment it returns, so a run that continues the turn after a crash "
+            "(Agent.continue_turn, resume(invocation_id=...)) replays the "
+            "recorded result instead of running the tool again. None (the "
+            "default) turns the ledger on for durability 'async' and 'exit', "
+            "whose iteration checkpoints are deferred or absent, and off for "
+            "'sync'; True turns it on in every mode, False off. Needs a "
+            "checkpointer and a thread_id. See locus.memory.ledger."
+        ),
+    )
+
+    rerun_idempotent_on_replay: bool = Field(
+        default=False,
+        description=(
+            "On replay, run @tool(idempotent=True) tools again instead of "
+            "serving their ledger record, and refresh the record with the new "
+            "result. Off by default: a recorded call is not run twice. Turn on "
+            "when an idempotent tool's output should be current rather than "
+            "the one the crashed run saw. Tools not marked idempotent are "
+            "always served from the ledger."
         ),
     )
 

@@ -58,7 +58,11 @@ print(agent.run_sync("hi").message)
 session-token (`security_token_file`) authentication — V1 picks the
 right signer based on the profile shape. The compartment
 header that OCI requires for IAM auth is auto-derived from the
-profile's `tenancy` field, so you don't pass it.
+profile's `tenancy` field, so you don't pass it. `auth_type="api_key"`
+(or `"security_token"`) names the same path the way `LOCUS_OCI_AUTH_TYPE`
+does: the model uses `profile=` when given, else the `OCI_PROFILE`
+profile, else `DEFAULT` — so a deployment image whose server reads
+`LOCUS_OCI_AUTH_TYPE` runs locally with a profile mounted.
 
 ### On OCI compute / OKE / Functions (workload identity)
 
@@ -112,11 +116,14 @@ model = OCIResponsesModel(
 ### Zero Data Retention (ZDR) tenancies
 
 Enterprise OCI tenancies with ZDR reject `previous_response_id`
-(server doesn't persist responses). For those, pass `store=False` —
-the model sends `store: false` on every request, drops the
+(server doesn't persist responses). The default `store="auto"` handles
+this on its own: the model starts stateful, and when the endpoint reports
+ZDR it switches to the stateless path for good, warns once, and the agent
+replays the turn. If you know the tenancy is ZDR, pass `store=False` —
+the model sends `store: false` on every request from the start, drops the
 continuation token, and reports `server_stateful=False` so the agent
 sends the full message history each turn. Responses-only models
-remain reachable.
+remain reachable either way.
 
 ```python
 model = OCIResponsesModel(

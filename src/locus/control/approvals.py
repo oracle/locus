@@ -11,7 +11,7 @@ A person decides with :meth:`ApprovalStore.decide`, and
 ``agent.resume(..., thread_id=..., perform_dangling=True)`` re-issues the held
 call, which finds the decision::
 
-    store = FileApprovals("approvals.json")
+    store = FileApprovals("approvals.json")  # or Postgres/Redis/OracleApprovals
     refund = gate_tool(
         issue_refund,
         policy=policy,
@@ -243,7 +243,13 @@ class Delegation:
 
 
 class ApprovalAuthorityError(PermissionError):
-    """A decision was refused because the decider lacks authority for it."""
+    """A decision was refused because the decider lacks authority for it.
+
+    When a store raises it, ``record`` is the held call with this refusal
+    appended to its ``rejections``, already written to the store.
+    """
+
+    record: ApprovalRecord | None = None
 
 
 class _Basis(NamedTuple):
@@ -408,8 +414,9 @@ class ApprovalStore(Protocol):
         *,
         by: str,
         arguments: Mapping[str, Any] | None = None,
+        reason: str = "",
     ) -> ApprovalRecord:
-        """Approve or deny a pending record, naming who decided."""
+        """Approve or deny a pending record, naming who decided and why."""
         ...
 
     def consume(self, approval_id: str) -> ApprovalRecord:
@@ -419,6 +426,134 @@ class ApprovalStore(Protocol):
     def pending(self) -> list[ApprovalRecord]:
         """Records still waiting for a decision, oldest first."""
         ...
+
+
+def _new_record(
+    digest: str,
+    same_call: int,
+    principal: str,
+    tool: str,
+    args: Mapping[str, Any],
+    *,
+    reason: str,
+    labels: Iterable[str],
+    context: Mapping[str, str] | None,
+) -> ApprovalRecord:
+    """A fresh pending record for a call that has ``same_call`` earlier records."""
+    return ApprovalRecord(
+        approval_id=f"appr-{digest[:16]}-{same_call + 1}",
+        digest=digest,
+        principal=principal,
+        tool=tool,
+        arguments=dict(args),
+        reason=reason,
+        labels=sorted(set(labels)),
+        context=dict(context or {}),
+    )
+
+
+def _check_decision(verdict: str, by: str) -> None:
+    if verdict not in ("approved", "denied"):
+        raise ValueError(f"verdict must be 'approved' or 'denied', not {verdict!r}")
+    if not by:
+        raise ValueError("a decision names who made it")
+
+
+def _edited_arguments(
+    record: ApprovalRecord, verdict: Verdict, arguments: Mapping[str, Any] | None
+) -> dict[str, Any] | None:
+    """The approver's edit of the call, checked against the record; ``None`` for none."""
+    if record.status != "pending":
+        raise ValueError(f"approval {record.approval_id} is already {record.status}")
+    if arguments is None:
+        return None
+    if verdict != "approved":
+        raise ValueError("only an approval can edit the call's arguments")
+    if set(arguments) != set(record.arguments):
+        raise ValueError(
+            f"an edit keeps the call's arguments {sorted(record.arguments)}; "
+            f"got {sorted(arguments)}"
+        )
+    return dict(arguments)
+
+
+def _transition(
+    record: ApprovalRecord,
+    verdict: Verdict,
+    by: str,
+    edited: dict[str, Any] | None,
+    authority: ApprovalAuthority | None,
+    reason: str = "",
+) -> ApprovalRecord:
+    """The record after ``by``'s decision; pure, so every store shares it.
+
+    Raises:
+        ApprovalAuthorityError: ``authority`` refuses ``by``. Its ``record`` is
+            the held call with the refusal appended, for the store to write.
+        ValueError: ``by`` already approved, or approved different arguments
+            than an earlier approver.
+    """
+    now = _now()
+    entry: dict[str, Any] = {"by": by, "at": now, "verdict": verdict}
+    if reason:
+        entry["reason"] = reason
+    if edited is not None:
+        entry["arguments"] = edited
+    if authority is None:
+        return replace(
+            record,
+            status=verdict,
+            verdict=verdict,
+            decided_by=by,
+            decided_at=now,
+            approvals=[*record.approvals, entry],
+            approved_arguments=edited,
+        )
+
+    try:
+        basis = authority.check(record, by, verdict)
+    except ApprovalAuthorityError as error:
+        error.record = replace(
+            record, rejections=[*record.rejections, {**entry, "reason": str(error)}]
+        )
+        raise
+
+    entry.update({"basis": basis.label, "rules": sorted(basis.rules)})
+    if verdict == "denied":
+        return replace(
+            record,
+            status="denied",
+            verdict="denied",
+            decided_by=by,
+            decided_at=now,
+            approvals=[*record.approvals, entry],
+        )
+    if by in record.approvers:
+        raise ValueError(f"{by} has already approved {record.approval_id}")
+    earlier = [a.get("arguments") for a in record.approvals if a.get("verdict") == "approved"]
+    if any(previous != edited for previous in earlier):
+        raise ValueError(
+            "approvers must approve the same arguments; this approval differs from an earlier one"
+        )
+    approvals = [*record.approvals, entry]
+    if not authority.satisfied(record, approvals):
+        return replace(record, approvals=approvals)
+    approved = replace(record, approvals=approvals)
+    return replace(
+        approved,
+        status="approved",
+        verdict="approved",
+        decided_by=", ".join(approved.approvers),
+        decided_at=now,
+        approved_arguments=edited,
+    )
+
+
+def _consumed(record: ApprovalRecord) -> ApprovalRecord:
+    """``record`` marked as acted on; refuses one that was never decided."""
+    if record.status not in ("approved", "denied"):
+        raise ValueError(f"approval {record.approval_id} is {record.status}, not decided")
+    return replace(record, status="consumed")
 
 
 class _Approvals:
@@ -468,19 +603,19 @@ class _Approvals:
             live = [r for r in same_call if r.status in _LIVE]
             if live:
                 return max(live, key=lambda r: r.created_at).approval_id
-            approval_id = f"appr-{digest[:16]}-{len(same_call) + 1}"
-            records[approval_id] = ApprovalRecord(
-                approval_id=approval_id,
-                digest=digest,
-                principal=principal,
-                tool=tool,
-                arguments=dict(args),
+            record = _new_record(
+                digest,
+                len(same_call),
+                principal,
+                tool,
+                args,
                 reason=reason,
-                labels=sorted(set(labels)),
-                context=dict(context or {}),
+                labels=labels,
+                context=context,
             )
+            records[record.approval_id] = record
             self._save(records)
-            return approval_id
+            return record.approval_id
 
     def state(self, approval_id: str) -> str | None:
         record = self.get(approval_id)
@@ -497,28 +632,16 @@ class _Approvals:
         *,
         by: str,
         arguments: Mapping[str, Any] | None = None,
+        reason: str = "",
     ) -> ApprovalRecord:
-        if verdict not in ("approved", "denied"):
-            raise ValueError(f"verdict must be 'approved' or 'denied', not {verdict!r}")
-        if not by:
-            raise ValueError("a decision names who made it")
+        _check_decision(verdict, by)
         with self._lock:
             records = self._load()
             record = records.get(approval_id)
             if record is None:
                 raise KeyError(approval_id)
-            if record.status != "pending":
-                raise ValueError(f"approval {approval_id} is already {record.status}")
-            if arguments is not None:
-                if verdict != "approved":
-                    raise ValueError("only an approval can edit the call's arguments")
-                if set(arguments) != set(record.arguments):
-                    raise ValueError(
-                        f"an edit keeps the call's arguments {sorted(record.arguments)}; "
-                        f"got {sorted(arguments)}"
-                    )
-            edited = dict(arguments) if arguments is not None else None
-            record = self._decided(records, record, verdict, by, edited)
+            edited = _edited_arguments(record, verdict, arguments)
+            record = self._decided(records, record, verdict, by, edited, reason)
             records[approval_id] = record
             self._save(records)
             return record
@@ -530,62 +653,15 @@ class _Approvals:
         verdict: Verdict,
         by: str,
         edited: dict[str, Any] | None = None,
+        reason: str = "",
     ) -> ApprovalRecord:
-        now = _now()
-        entry: dict[str, Any] = {"by": by, "at": now, "verdict": verdict}
-        if edited is not None:
-            entry["arguments"] = edited
-        authority = self.authority_for(record)
-        if authority is None:
-            return replace(
-                record,
-                status=verdict,
-                verdict=verdict,
-                decided_by=by,
-                decided_at=now,
-                approvals=[*record.approvals, entry],
-                approved_arguments=edited,
-            )
-
         try:
-            basis = authority.check(record, by, verdict)
+            return _transition(record, verdict, by, edited, self.authority_for(record), reason)
         except ApprovalAuthorityError as error:
-            records[record.approval_id] = replace(
-                record, rejections=[*record.rejections, {**entry, "reason": str(error)}]
-            )
-            self._save(records)
+            if error.record is not None:
+                records[record.approval_id] = error.record
+                self._save(records)
             raise
-
-        entry.update({"basis": basis.label, "rules": sorted(basis.rules)})
-        if verdict == "denied":
-            return replace(
-                record,
-                status="denied",
-                verdict="denied",
-                decided_by=by,
-                decided_at=now,
-                approvals=[*record.approvals, entry],
-            )
-        if by in record.approvers:
-            raise ValueError(f"{by} has already approved {record.approval_id}")
-        earlier = [a.get("arguments") for a in record.approvals if a.get("verdict") == "approved"]
-        if any(previous != edited for previous in earlier):
-            raise ValueError(
-                "approvers must approve the same arguments; this approval differs "
-                "from an earlier one"
-            )
-        approvals = [*record.approvals, entry]
-        if not authority.satisfied(record, approvals):
-            return replace(record, approvals=approvals)
-        approved = replace(record, approvals=approvals)
-        return replace(
-            approved,
-            status="approved",
-            verdict="approved",
-            decided_by=", ".join(approved.approvers),
-            decided_at=now,
-            approved_arguments=edited,
-        )
 
     def consume(self, approval_id: str) -> ApprovalRecord:
         with self._lock:
@@ -593,9 +669,7 @@ class _Approvals:
             record = records.get(approval_id)
             if record is None:
                 raise KeyError(approval_id)
-            if record.status not in ("approved", "denied"):
-                raise ValueError(f"approval {approval_id} is {record.status}, not decided")
-            record = replace(record, status="consumed")
+            record = _consumed(record)
             records[approval_id] = record
             self._save(records)
             return record
@@ -617,6 +691,11 @@ class InMemoryApprovals(_Approvals):
     ) -> None:
         super().__init__(authority)
         self._records: dict[str, ApprovalRecord] = {}
+
+    @property
+    def spec(self) -> str:
+        """``memory://``: the store spec, as :func:`locus.control.approval_store` reads it."""
+        return "memory://"
 
     def _load(self) -> dict[str, ApprovalRecord]:
         return dict(self._records)
@@ -644,6 +723,11 @@ class FileApprovals(_Approvals):
     ) -> None:
         super().__init__(authority)
         self.path = Path(path)
+
+    @property
+    def spec(self) -> str:
+        """``file://<path>``: the store spec, as :func:`locus.control.approval_store` reads it."""
+        return f"file://{self.path}"
 
     def _load(self) -> dict[str, ApprovalRecord]:
         if not self.path.exists():

@@ -158,7 +158,7 @@ Input validation, PII redaction, topic policies, and tool restrictions
 ride on the same hook system, so nothing is added as an afterthought.
 Stack them freely. One caveat: hooks attach per-agent, so in orchestrated shapes
 gate the side-effecting tool itself with
-[`admit()`](../security-context.md) — the gate travels with the tool,
+[`admit()`](../control-layer.md) — the gate travels with the tool,
 and no orchestration path bypasses it.
 
 → See [Safety & Guardrails](../safety.md).

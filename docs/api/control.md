@@ -5,9 +5,9 @@ record the decision either way.
 
 `locus.control` is the domain-neutral surface, and the import path to use.
 Older releases shipped these under `locus.security`; that path still resolves,
-with a deprecation warning, until a future major release removes it.
+with a deprecation warning, until 6.0 removes it.
 
-For the concepts, start with [The control layer](../concepts/security-context.md)
+For the concepts, start with [The control layer](../concepts/control-layer.md)
 and [Writing a policy that holds](../concepts/policy-authoring.md).
 
 ## Admitting an action
@@ -30,6 +30,36 @@ strongest result, so deny beats hold beats allow (in the API,
 ::: locus.control.policy.ControlPolicy
 ::: locus.control.policy.ApprovalDecision
 ::: locus.control.policy.ApprovalOutcome
+
+### The policy as a file
+
+`ControlPolicy.load()` reads a policy from a YAML or JSON file and
+`policy.dump()` writes one; every key is a field of the same name, unknown
+keys are errors that name the key, and the two forms round-trip.
+`policy.content_hash()` names the rules a decision was made under; `admit()`
+records it as `policy_hash` on every audit entry. `PolicyWatcher` follows a
+file and hands `admit()` or `gate_tool()` the current policy, one per
+decision. The [policy authoring](../concepts/policy-authoring.md#the-policy-as-a-file)
+page shows the file form and the `locus policy lint` and `locus policy
+explain` commands that read it.
+
+::: locus.control.policy_file.PolicyWatcher
+::: locus.control.policy_file.PolicyDocument
+::: locus.control.policy_file.PolicyFileError
+::: locus.control.policy_file.policy_hash
+::: locus.control.policy.PolicySource
+
+### Linting and explaining a policy
+
+What `locus policy lint` and `locus policy explain` do, as calls.
+
+::: locus.control.policy_lint.lint_policy
+::: locus.control.policy_lint.LintReport
+::: locus.control.policy_lint.LintFinding
+::: locus.control.policy_lint.explain
+::: locus.control.policy_lint.Explanation
+::: locus.control.policy.evaluate_rules
+::: locus.control.policy.RuleCheck
 
 ## Describing an action
 
@@ -85,9 +115,10 @@ A **denial** deliberately gets no id. It is final, and offering one would invite
 the agent to wait for a decision that is not coming.
 
 `ApprovalBridge` is a structural `Protocol` with no import-time dependency, so
-any approval queue with `submit` and `state` methods satisfies it. The two
-stores the SDK ships, `InMemoryApprovals` and `FileApprovals`, satisfy it too;
-see [Pausing until someone decides](#pausing-until-someone-decides).
+any approval queue with `submit` and `state` methods satisfies it. The stores
+the SDK ships, `InMemoryApprovals`, `FileApprovals`, `PostgresApprovals`,
+`RedisApprovals` and `OracleApprovals`, satisfy it too; see
+[Pausing until someone decides](#pausing-until-someone-decides).
 
 ::: locus.control.gate.ApprovalBridge
 
@@ -177,8 +208,71 @@ object in one process, and the agent's own submits and consumes are writes too.
 A decision saved from another process, or through another `FileApprovals`
 object, at the same moment can overwrite one of them. In the worst case a
 consumed approval goes back to `approved` and can be redeemed again. Where that
-matters, keep every writer in one process and give them the same `FileApprovals`
-object, or implement `ApprovalStore` over a database with atomic updates.
+matters, use one of the database-backed stores.
+
+**Database-backed stores.** `PostgresApprovals`, `RedisApprovals` and
+`OracleApprovals` keep one record per held call and make every submit,
+decision and consumption under the database's own lock (`SELECT ... FOR
+UPDATE` in PostgreSQL and Oracle, a lock key in Redis), so replicas that share
+the store never both redeem one approval. They follow the connection
+conventions of the matching checkpointer backend: a libpq DSN or host / port /
+database / user / password, a `redis://` URL and key prefix, a TNS alias or
+host / port / service name with an optional wallet. The table is created on
+first use only when it is missing, so a role without `CREATE` works against a
+table a migration made. Each store owns one event loop on a background thread,
+where its pool lives; the `ApprovalStore` methods block on it, and `asubmit`,
+`aget`, `adecide`, `aconsume`, `apending` await it from your own loop. Call
+`close()` (or `await aclose()`) when the application shuts down.
+
+```python
+from locus.control import OracleApprovals, PostgresApprovals, RedisApprovals
+
+store = PostgresApprovals(dsn="postgresql://locus@db.internal:5432/locus")
+store = RedisApprovals("redis://cache.internal:6379", prefix="billing:approvals:")
+store = OracleApprovals(dsn="locusdb_low", user="LOCUS", password=pw, wallet_location="/opt/wallet")
+```
+
+**Naming a store.** Every store has a `spec` with any password removed
+(`memory://`, `file://approvals.json`, `postgresql://locus@db.internal:5432/locus?table=public.locus_approvals`,
+`redis://cache.internal:6379?prefix=billing:approvals:`, `oracle://LOCUS@/?dsn=locusdb_low&wallet=/opt/wallet&table=locus_approvals`),
+and `approval_store(spec)` opens one from it. A database spec with nothing
+after the scheme reads the environment the integration tests use
+(`POSTGRES_HOST` and friends, `REDIS_URL`, `ORACLE_DSN` / `ORACLE_USER` /
+`ORACLE_PASSWORD` / `ORACLE_WALLET`). The `locus approvals` command takes the
+same spec:
+
+```bash
+locus approvals --store postgresql://locus@db.internal:5432/locus list
+locus approvals --store postgresql://locus@db.internal:5432/locus approve appr-… --by alice --reason "ticket 4821"
+locus approvals --store redis://cache.internal:6379 reject appr-… --by bob
+```
+
+`--store` defaults to `LOCUS_APPROVALS_STORE` and `--by` to `LOCUS_APPROVER`;
+`--authority MODULE:ATTR` checks every decision against an `ApprovalAuthority`.
+The decision records who decided and the `--reason` given.
+
+**The hold in the checkpoint.** When the gate holds a call during a run with a
+checkpointer, the runtime writes the hold into the thread's checkpoint
+(`state.metadata["_locus_pending_holds"]`): the approval id, tool, action,
+asset, principal, reason, arguments, approvers so far, context and the store's
+spec. A process that finds the thread later reads them with
+`pending_holds(checkpointer, thread_id)` and re-checks each against its store:
+
+```python
+from locus.control import approval_store, pending_holds
+
+
+async def show_holds(checkpointer):
+    for hold in await pending_holds(checkpointer, "t1"):
+        store = approval_store(hold.store)
+        print(hold.approval_id, hold.action, hold.asset, hold.state(store))
+```
+
+`agent.resume(..., thread_id=..., perform_dangling=True)` then performs the
+approved call once (or raises `ApprovalPendingError` while it is still
+pending), and the hold leaves the checkpoint when the call is answered. A
+checkpoint written before holds existed carries none; resume falls back to the
+dangling tool call, as before.
 
 **Who may decide.** Without an `ApprovalAuthority`, any named principal can
 decide. With one, every decision is checked when it is made:
@@ -212,6 +306,14 @@ rule covers cannot be approved by anyone: the authority fails closed.
 ::: locus.control.approvals.ApprovalStore
 ::: locus.control.approvals.InMemoryApprovals
 ::: locus.control.approvals.FileApprovals
+::: locus.control.approvals_postgres.PostgresApprovals
+::: locus.control.approvals_redis.RedisApprovals
+::: locus.control.approvals_oracle.OracleApprovals
+::: locus.control.approvals_spec.approval_store
+::: locus.control.approvals_spec.store_spec
+::: locus.control.holds.PendingHold
+::: locus.control.holds.pending_holds
+::: locus.control.holds.holds_of
 ::: locus.control.approvals.ApprovalRecord
 ::: locus.control.approvals.call_digest
 ::: locus.control.approvals.ApprovalAuthority
@@ -256,6 +358,52 @@ and demos. `admit()` takes `ledger=` and a string `spend_scope=` directly.
 ::: locus.control.spend.SpendLedger
 ::: locus.control.spend.InMemorySpendLedger
 ::: locus.control.spend.FileSpendLedger
+
+### Judging the call
+
+The policy sees labels. `ToolCallJudge` reads the call, the tool's name and
+the arguments the model sent, against an intent written in words and optional
+per-tool guidance, and returns a typed `allow` / `hold` / `deny` with a
+one-line reason. Pass it to `gate_tool(judge=...)` and the verdict reaches
+`admit()` as `judgement`, where `tighten()` keeps the stricter of the policy's
+outcome and the judge's: an allow can become a hold or a deny, never the
+reverse. The verdict is on the audit entry under `judge`; a model error, an
+off-schema reply or a spent `budget` is a hold.
+
+```python
+from locus.control import ControlPolicy, ToolCallJudge, gate_tool
+
+judge = ToolCallJudge(
+    small_model,
+    intent="Refund a customer's own order; never move money elsewhere.",
+    guidance={"issue_refund": "Hold anything over 500 USD."},
+    budget=20,
+)
+refund = gate_tool(issue_refund, policy=ControlPolicy(), trail=trail, judge=judge)
+```
+
+Installed as a hook (`hooks=[judge]`) it judges every call and cancels a held
+or denied one with a refusal the model can read; with no `model=` it borrows
+the agent's. Tools declared `@tool(read_only=True)` are not judged, and
+verdicts are cached per (tool, canonical arguments) within a run.
+
+::: locus.control.judge.ToolCallJudge
+::: locus.control.judge.JudgeVerdict
+::: locus.control.judge.tighten
+
+### Tool-call integrity
+
+With `Agent(tool_call_integrity=True)` the runtime signs every tool call as
+the model's response is parsed and the executor verifies it before it runs;
+a call changed in between is refused with `ToolCallIntegrityError`, recorded
+on the agent's `AuditTrail` and published as `tool.integrity.refused`. A hook
+that rewrites arguments re-signs through `event.resign(by=...)` on its
+`BeforeToolCallEvent`. The [control-layer page](../concepts/control-layer.md#what-the-runtime-enforces-tool-call-integrity)
+describes what the check guarantees and where it stops.
+
+::: locus.tools.integrity.ToolCallSigner
+::: locus.tools.integrity.ToolCallSignature
+::: locus.tools.integrity.ToolCallIntegrityError
 
 ## Deriving action labels
 
@@ -360,12 +508,40 @@ keep the key they were signed with, so give the verifier both public keys.
 Signing needs the `cryptography` package (`pip install "locus-sdk[audit]"`);
 an unsigned trail needs nothing and exports exactly as before.
 
+### Keeping the trail out of the agent's reach
+
+`OracleAuditTrail` writes each record as a row of an Oracle AI Database
+immutable table — or a blockchain table, whose row hashes the database
+re-verifies on `verify()` — and `anchor_trail()` keeps the chain head in an
+OCI Object Storage or S3-compatible bucket with a retention rule. Both are
+described on the [observability page](../concepts/observability.md#where-the-audit-trail-lives).
+
+```python
+from locus.control import OracleAuditTrail, S3AnchorStore, anchor_trail, verify_anchor
+
+trail = OracleAuditTrail(dsn="audit_low", user="AUDIT", password=pw, table_kind="blockchain")
+...
+store = S3AnchorStore("audit-anchors", endpoint_url="https://objectstorage.example")
+anchor_trail(trail, store, require_retention_rule=True)
+verify_anchor(trail, store).ok
+```
+
 ::: locus.control.audit.AuditTrail
 ::: locus.control.audit.AuditRecord
 ::: locus.control.audit.AuditSigner
 ::: locus.control.audit.Ed25519Signer
 ::: locus.control.audit.verify_jsonl
 ::: locus.control.governed.AuditHook
+::: locus.control.audit_oracle.OracleAuditTrail
+::: locus.control.audit_anchor.anchor_trail
+::: locus.control.audit_anchor.verify_anchor
+::: locus.control.audit_anchor.anchor_periodically
+::: locus.control.audit_anchor.latest_anchor
+::: locus.control.audit_anchor.Anchor
+::: locus.control.audit_anchor.AnchorReport
+::: locus.control.audit_anchor.AnchorStore
+::: locus.control.audit_anchor.OCIBucketAnchorStore
+::: locus.control.audit_anchor.S3AnchorStore
 
 ## Governed agents
 

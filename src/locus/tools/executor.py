@@ -16,7 +16,9 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, Field, PrivateAttr
 
 from locus.core.messages import ToolCall, ToolResult
+from locus.memory.ledger import RunLedger
 from locus.tools.context import ToolContext, bind_tool_context
+from locus.tools.integrity import ToolCallSigner
 from locus.tools.output import ToolOutput
 
 
@@ -249,6 +251,58 @@ def _bound_context(
     )
 
 
+async def _integrity_refusal(
+    tool_call: ToolCall, ctx_factory: ToolContextFactory | None
+) -> ToolResult | None:
+    """The refusal for a call that fails the run's integrity check, else ``None``.
+
+    Only when the factory carries the run's :class:`ToolCallSigner`
+    (``tool_call_integrity`` on the agent). A call the signer never signed is
+    not refused — see :mod:`locus.tools.integrity`.
+    """
+    signer = ctx_factory.integrity if ctx_factory is not None else None
+    if signer is None:
+        return None
+    return await signer.enforce(tool_call)
+
+
+async def _ledger_replay(
+    tool_call: ToolCall, ctx_factory: ToolContextFactory | None, registry: ToolRegistry
+) -> ToolResult | None:
+    """The result the run's tool-effect ledger recorded for this call, else ``None``.
+
+    Only when the factory carries the run's :class:`~locus.memory.ledger.RunLedger`
+    and the run is replaying (it continues a turn). The recorded result is
+    returned in the tool's place: the body does not run. The tool's
+    ``idempotent`` flag goes along so the ledger can apply
+    ``rerun_idempotent_on_replay``.
+    """
+    ledger = ctx_factory.ledger if ctx_factory is not None else None
+    if ledger is None:
+        return None
+    tool = registry.get(tool_call.name)
+    return await ledger.replay(
+        tool_call,
+        step=ctx_factory.iteration if ctx_factory is not None else 0,
+        idempotent=bool(getattr(tool, "idempotent", False)),
+    )
+
+
+async def _ledger_record(
+    tool_call: ToolCall, result: ToolResult, ctx_factory: ToolContextFactory | None
+) -> ToolResult:
+    """Record ``result`` in the run's tool-effect ledger, when it has one; return ``result``.
+
+    Written the moment the call returns, before the result is folded into
+    state or seen by a hook, so a process that dies right after the call
+    leaves its record behind.
+    """
+    ledger = ctx_factory.ledger if ctx_factory is not None else None
+    if ledger is not None:
+        await ledger.record(tool_call, result, step=ctx_factory.iteration if ctx_factory else 0)
+    return result
+
+
 if TYPE_CHECKING:
     from locus.tools.registry import ToolRegistry
 
@@ -271,6 +325,13 @@ class ToolContextFactory(BaseModel):
     state: Any = None
     invocation_metadata: dict[str, Any] = Field(default_factory=dict)
     ephemeral_metadata: dict[str, Any] = Field(default_factory=dict, exclude=True, repr=False)
+    #: The run's tool-call signer (``AgentConfig.tool_call_integrity``). When
+    #: set, every call is verified against it before it runs.
+    integrity: ToolCallSigner | None = Field(default=None, exclude=True, repr=False)
+    #: The run's tool-effect ledger (:mod:`locus.memory.ledger`). When set,
+    #: every executed call is recorded as it returns, and a replaying run is
+    #: served the record instead of running the call again.
+    ledger: RunLedger | None = Field(default=None, exclude=True, repr=False)
 
     def create(self, tool_call: ToolCall, tool_name: str) -> ToolContext:
         """Create a context for a tool call."""
@@ -394,6 +455,12 @@ class SequentialExecutor(ToolExecutor):
         start = time.perf_counter()
         if tool_call.malformed_arguments is not None:
             return _malformed_arguments_result(tool_call)
+        refusal = await _integrity_refusal(tool_call, ctx_factory)
+        if refusal is not None:
+            return refusal
+        replayed = await _ledger_replay(tool_call, ctx_factory, registry)
+        if replayed is not None:
+            return replayed
 
         try:
             tool = registry.get(tool_call.name)
@@ -415,18 +482,24 @@ class SequentialExecutor(ToolExecutor):
 
             duration = (time.perf_counter() - start) * 1000
 
-            return tool_result_from_output(tool_call, result, duration)
+            return await _ledger_record(
+                tool_call, tool_result_from_output(tool_call, result, duration), ctx_factory
+            )
 
         except Exception as e:  # noqa: BLE001
             duration = (time.perf_counter() - start) * 1000
             error_type = type(e).__name__
             error_msg = _sanitize_error(str(e))
-            return ToolResult(
-                tool_call_id=tool_call.id,
-                name=tool_call.name,
-                content="",
-                error=f"{error_type}: {error_msg}",
-                duration_ms=duration,
+            return await _ledger_record(
+                tool_call,
+                ToolResult(
+                    tool_call_id=tool_call.id,
+                    name=tool_call.name,
+                    content="",
+                    error=f"{error_type}: {error_msg}",
+                    duration_ms=duration,
+                ),
+                ctx_factory,
             )
 
 
@@ -530,6 +603,12 @@ class ConcurrentExecutor(ToolExecutor):
         start = time.perf_counter()
         if tool_call.malformed_arguments is not None:
             return _malformed_arguments_result(tool_call)
+        refusal = await _integrity_refusal(tool_call, ctx_factory)
+        if refusal is not None:
+            return refusal
+        replayed = await _ledger_replay(tool_call, ctx_factory, registry)
+        if replayed is not None:
+            return replayed
 
         try:
             tool = registry.get(tool_call.name)
@@ -548,18 +627,24 @@ class ConcurrentExecutor(ToolExecutor):
 
             duration = (time.perf_counter() - start) * 1000
 
-            return tool_result_from_output(tool_call, result, duration)
+            return await _ledger_record(
+                tool_call, tool_result_from_output(tool_call, result, duration), ctx_factory
+            )
 
         except Exception as e:  # noqa: BLE001
             duration = (time.perf_counter() - start) * 1000
             error_type = type(e).__name__
             error_msg = _sanitize_error(str(e))
-            return ToolResult(
-                tool_call_id=tool_call.id,
-                name=tool_call.name,
-                content="",
-                error=f"{error_type}: {error_msg}",
-                duration_ms=duration,
+            return await _ledger_record(
+                tool_call,
+                ToolResult(
+                    tool_call_id=tool_call.id,
+                    name=tool_call.name,
+                    content="",
+                    error=f"{error_type}: {error_msg}",
+                    duration_ms=duration,
+                ),
+                ctx_factory,
             )
 
 

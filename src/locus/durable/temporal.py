@@ -30,7 +30,12 @@ decisions live in the approval store, exactly as without Temporal.
 
 Each segment is attempted once. A segment that dies halfway may already have run
 tool calls, and running it again would repeat them, so a failed segment fails
-the workflow; the checkpoint shows where it stopped.
+the workflow; the checkpoint shows where it stopped. An agent that keeps a
+tool-effect ledger (``Agent(tool_ledger=True)``, or ``durability="async"`` /
+``"exit"``; :mod:`locus.memory.ledger`) records each call as it returns, so the
+turn can be finished afterwards with ``agent.continue_turn(thread_id)`` — or
+:func:`~locus.durable.segments.run_agent_segment` with ``kind="continue"`` —
+replaying the recorded calls rather than running them again.
 """
 
 from __future__ import annotations

@@ -263,7 +263,7 @@ def on_page_markdown(markdown: str, *, config: Any, **_: Any) -> str:
     rendered = markdown
     if "locus_source" in rendered:
         root = Path(config["config_file_path"]).parent
-        roots = [root, root / "packages" / "locus-sdk-security"]
+        roots = [root]
         rendered = _SOURCE_TOKEN.sub(
             lambda m: render_source(m.group("path"), m.group("symbol"), roots), rendered
         )

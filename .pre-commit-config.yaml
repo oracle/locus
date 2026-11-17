@@ -27,8 +27,9 @@ repos:
   - id: check-yaml
     args: [--unsafe]        # Allow custom tags
     # Helm chart templates use Go templating ({{ ... }}) — not valid
-    # YAML before render. Exclude every helm chart under deploy/.
-    exclude: ^deploy/.*helm/.*/templates/
+    # YAML before render. Exclude every helm chart under deploy/ and the
+    # chart ``locus deploy init`` ships.
+    exclude: ^(deploy/.*helm|src/locus/deploy/templates/helm)/.*/templates/
   - id: destroyed-symlinks
   - id: detect-private-key
   - id: end-of-file-fixer
@@ -86,7 +87,7 @@ repos:
     - fastmcp>=3.2.0
     - mcp>=1.0
     pass_filenames: false
-    entry: mypy src/locus packages/locus-sdk-security/src/locus_security
+    entry: mypy src/locus
 
   # ==========================================================================
   # Commit message linting
@@ -125,9 +126,10 @@ repos:
         #   reqeusts    — intentional typo-squat fixture for OSV malware test
         #   unparseable — accepted English variant of ``unparsable``
         #   re-use      — accepted hyphenation
+        #   apending    — ``DatabaseApprovals.apending``, the awaitable ``pending()``
         #   sie, als, fonction, hace — German, French and Spanish words in
         #                 the completion check's multilingual patterns and tests
-    - --ignore-words-list=te,whats,re-use,pres,reqeusts,unparseable,transferrin,transferring,ferritin,hepcidin,ferroportin,deferoxamine,deferasirox,deferiprone,erythroferrone,hemojuvelin,IRIDA,IDA,ACD,nin,sie,als,fonction,hace
+    - --ignore-words-list=te,whats,re-use,pres,reqeusts,unparseable,apending,transferrin,transferring,ferritin,hepcidin,ferroportin,deferoxamine,deferasirox,deferiprone,erythroferrone,hemojuvelin,IRIDA,IDA,ACD,nin,sie,als,fonction,hace
     - --skip=*.lock,*.json,*.yaml,*.yml,*.svg,*.gif,*.png,*.jpg,*.pdf
 
   # ==========================================================================
@@ -150,8 +152,9 @@ repos:
     args: [--autofix, --indent=2]
     # Helm templates use Go templating ({{ ... }}) — not valid YAML
     # before render. The GitHub Actions workflow YAMLs use anchors
-    # the formatter mangles. Exclude every helm chart under deploy/.
-    exclude: ^(\.github/|deploy/.*helm/.*/templates/)
+    # the formatter mangles. Exclude every helm chart under deploy/ and
+    # the chart ``locus deploy init`` ships.
+    exclude: ^(\.github/|(deploy/.*helm|src/locus/deploy/templates/helm)/.*/templates/)
 
   # ==========================================================================
   # Markdown

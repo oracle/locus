@@ -24,6 +24,9 @@ What this notebook covers:
   port: an `/invoke` with an explicit per-incident `thread_id`, the
   read-back on `GET /threads/{thread_id}`, a 404 for a thread never opened
   and an idempotent `DELETE`.
+- A turn started in the background with `POST /threads/{thread_id}/runs`,
+  followed on `GET /runs/{run_id}/events`, dropped after two frames and
+  resumed with `Last-Event-ID`, so the rest of the run arrives once.
 - Booting the same server under uvicorn with `LOCUS_NOTEBOOK_BOOT=1`.
 - When to use `AgentServer` and when `A2AServer`.
 
@@ -31,13 +34,21 @@ Endpoints:
 
 - `POST /invoke` — synchronous invocation.
 - `POST /stream` — SSE streaming.
-- `GET /threads/{thread_id}` — load a persisted incident thread.
+- `POST /threads/{thread_id}/runs` — start a turn in the background.
+- `GET /runs/{run_id}/events` — follow it as SSE, resumable with
+  `Last-Event-ID`.
+- `GET /runs/{run_id}` — the run's status and outcome.
+- `GET /threads/{thread_id}` — load a persisted incident thread and its
+  runs.
 - `DELETE /threads/{thread_id}` — drop a persisted incident thread.
 - `GET /health` — health check.
 
-The server also mounts `POST /resume`, which continues a paused thread;
-this notebook does not use it (see
-[Human-in-the-loop](../concepts/server.md#human-in-the-loop) on the
+The server also mounts `POST /resume`, which continues a paused thread,
+`POST /runs/{run_id}/cancel`, the `WS /runs/live` socket and the `/ag-ui`
+and `/vercel-ai` protocol endpoints; this notebook does not use them (see
+[Human-in-the-loop](../concepts/server.md#human-in-the-loop),
+[Live WebSocket](../concepts/server.md#live-websocket) and
+[UI wire protocols](../concepts/server.md#ui-wire-protocols) on the
 concept page).
 
 When to use `AgentServer` vs `A2AServer`:
@@ -91,12 +102,27 @@ the smoke test and the live boot share it:
 `example_server` drives the routes through FastAPI's `TestClient` without
 binding a port: `/health`, an `/invoke` with an explicit per-incident
 `thread_id`, a `/stream`, the read-back on `GET /threads/inc-4711`, a 404
-for a thread never opened and an idempotent `DELETE`. The hint it prints
+for a thread never opened and an idempotent `DELETE`. The client is opened
+with `with`, so the event loop it runs the app on outlives each request —
+which is what a run started in the background needs. The hint it prints
 last applies to keyed deployments that share one checkpointer: on one
 server, a token other than the configured key is answered with a 401, so
 a second engineer with a second key needs a second keyed instance:
 
 {{ locus_source examples/notebook_65_agent_server.py::example_server }}
+
+`_show_resumable_run` is the part `/stream` cannot do. It starts a turn
+with `POST /threads/inc-4712/runs`, which answers at once with a run id,
+follows the run on `GET /runs/{run_id}/events` — every frame carries an
+`id:` line with the event's sequence number — keeps the first two frames
+as a client whose connection dropped would, and reconnects with
+`Last-Event-ID` set to the last id it saw: the server replays exactly the
+events after it, once, and ends with `[DONE]`. `GET /runs/{run_id}` then
+shows the run's status and `GET /threads/inc-4712` lists the run under the
+incident. The history behind the replay is bounded; the
+[concept page](../concepts/server.md#threads-and-runs) gives the limits:
+
+{{ locus_source examples/notebook_65_agent_server.py::_show_resumable_run }}
 
 ## Run it
 
@@ -123,6 +149,9 @@ LOCUS_NOTEBOOK_BOOT=1 python examples/notebook_65_agent_server.py
 
 - [Agent Server](../concepts/server.md) — endpoints, authentication and
   thread scoping, human-in-the-loop over `/resume`, deployment.
+- [Deploy to OCI](../how-to/deploy-oci.md) — `locus deploy` puts this
+  server on OCI Container Instances, OKE or OCI Functions from one values
+  file, with the checkpointer, cache and tracing wired through variables.
 - [Checkpointers](../concepts/checkpointers.md) — the backends an
   incident thread can be persisted in, Redis among them.
 - [SSE streaming](notebook_64_sse_streaming.md) — the SSE wire format and

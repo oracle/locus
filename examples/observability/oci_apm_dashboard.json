@@ -1,0 +1,340 @@
+{
+  "dashboards": [
+    {
+      "dashboardId": "locus-agent-observability",
+      "displayName": "Locus agents",
+      "description": "Agent runs, tool latency and token spend from the OpenTelemetry GenAI semantic-convention spans the Locus TelemetryHook exports to this APM domain.",
+      "compartmentId": "${compartmentId}",
+      "providerId": "apm",
+      "providerName": "Application Performance Monitoring",
+      "providerVersion": "3.0.0",
+      "metadataVersion": "2.0",
+      "type": "normal",
+      "isOobDashboard": false,
+      "isShowInHome": false,
+      "isShowDescription": true,
+      "isFavorite": false,
+      "screenImage": "",
+      "nls": {},
+      "uiConfig": {
+        "isFilteringEnabled": true,
+        "isRefreshEnabled": true,
+        "isTimeRangeEnabled": true
+      },
+      "dataConfig": [],
+      "drilldownConfig": [],
+      "parametersConfig": [],
+      "featuresConfig": {},
+      "freeformTags": {},
+      "definedTags": {},
+      "tiles": [
+        {
+          "displayName": "Agent runs",
+          "description": "",
+          "savedSearchId": "locus-agent-runs",
+          "row": 0,
+          "column": 0,
+          "width": 6,
+          "height": 3,
+          "nls": {},
+          "uiConfig": {},
+          "dataConfig": [],
+          "state": "DEFAULT",
+          "drilldownConfig": {},
+          "parametersMap": {}
+        },
+        {
+          "displayName": "Token spend over time",
+          "description": "",
+          "savedSearchId": "locus-token-spend-over-time",
+          "row": 0,
+          "column": 6,
+          "width": 6,
+          "height": 3,
+          "nls": {},
+          "uiConfig": {},
+          "dataConfig": [],
+          "state": "DEFAULT",
+          "drilldownConfig": {},
+          "parametersMap": {}
+        },
+        {
+          "displayName": "Run latency by agent",
+          "description": "",
+          "savedSearchId": "locus-agent-run-latency",
+          "row": 3,
+          "column": 0,
+          "width": 6,
+          "height": 3,
+          "nls": {},
+          "uiConfig": {},
+          "dataConfig": [],
+          "state": "DEFAULT",
+          "drilldownConfig": {},
+          "parametersMap": {}
+        },
+        {
+          "displayName": "Tool latency and errors",
+          "description": "",
+          "savedSearchId": "locus-tool-latency",
+          "row": 3,
+          "column": 6,
+          "width": 6,
+          "height": 3,
+          "nls": {},
+          "uiConfig": {},
+          "dataConfig": [],
+          "state": "DEFAULT",
+          "drilldownConfig": {},
+          "parametersMap": {}
+        },
+        {
+          "displayName": "Token spend by model",
+          "description": "",
+          "savedSearchId": "locus-token-spend-by-model",
+          "row": 6,
+          "column": 0,
+          "width": 6,
+          "height": 3,
+          "nls": {},
+          "uiConfig": {},
+          "dataConfig": [],
+          "state": "DEFAULT",
+          "drilldownConfig": {},
+          "parametersMap": {}
+        },
+        {
+          "displayName": "Model call latency",
+          "description": "",
+          "savedSearchId": "locus-model-latency",
+          "row": 6,
+          "column": 6,
+          "width": 6,
+          "height": 3,
+          "nls": {},
+          "uiConfig": {},
+          "dataConfig": [],
+          "state": "DEFAULT",
+          "drilldownConfig": {},
+          "parametersMap": {}
+        }
+      ],
+      "savedSearches": [
+        {
+          "id": "locus-agent-runs",
+          "displayName": "Agent runs",
+          "description": "Agent invocations over time, from the invoke_agent spans.",
+          "providerId": "apm",
+          "providerName": "Application Performance Monitoring",
+          "providerVersion": "3.0.0",
+          "compartmentId": "${compartmentId}",
+          "isOobSavedSearch": false,
+          "metadataVersion": "2.0",
+          "type": "WIDGET_DONT_SHOW_IN_DASHBOARD",
+          "nls": {},
+          "screenImage": "",
+          "widgetTemplate": "",
+          "widgetVM": "",
+          "uiConfig": {
+            "visualization": {
+              "type": "line",
+              "x": "time",
+              "y": [
+                "Runs",
+                "Failed"
+              ]
+            }
+          },
+          "dataConfig": [
+            {
+              "dataSource": "apm-trace-explorer",
+              "queryText": "show (spans) count(*) as \"Runs\", sum(ErrorCount) as \"Failed\" where OperationName like 'invoke_agent%' timeseries 5 minutes",
+              "timeRange": "${timeRange}",
+              "apmDomainId": "${apmDomainId}"
+            }
+          ],
+          "drilldownConfig": [],
+          "parametersConfig": [],
+          "featuresConfig": {},
+          "freeformTags": {},
+          "definedTags": {}
+        },
+        {
+          "id": "locus-agent-run-latency",
+          "displayName": "Run latency by agent",
+          "description": "Count, average and p95 duration and failures per agent (gen_ai.agent.name is the span name's suffix).",
+          "providerId": "apm",
+          "providerName": "Application Performance Monitoring",
+          "providerVersion": "3.0.0",
+          "compartmentId": "${compartmentId}",
+          "isOobSavedSearch": false,
+          "metadataVersion": "2.0",
+          "type": "WIDGET_DONT_SHOW_IN_DASHBOARD",
+          "nls": {},
+          "screenImage": "",
+          "widgetTemplate": "",
+          "widgetVM": "",
+          "uiConfig": {
+            "visualization": {
+              "type": "table"
+            }
+          },
+          "dataConfig": [
+            {
+              "dataSource": "apm-trace-explorer",
+              "queryText": "show (spans) OperationName as \"Agent\", count(*) as \"Runs\", avg(SpanDuration) as \"Avg (ms)\", percentile(SpanDuration, 95) as \"p95 (ms)\", sum(ErrorCount) as \"Failed\" where OperationName like 'invoke_agent%' group by OperationName order by count(*) desc first 20 rows",
+              "timeRange": "${timeRange}",
+              "apmDomainId": "${apmDomainId}"
+            }
+          ],
+          "drilldownConfig": [],
+          "parametersConfig": [],
+          "featuresConfig": {},
+          "freeformTags": {},
+          "definedTags": {}
+        },
+        {
+          "id": "locus-tool-latency",
+          "displayName": "Tool latency and errors",
+          "description": "Calls, average and p95 duration and errors per tool, from the execute_tool spans.",
+          "providerId": "apm",
+          "providerName": "Application Performance Monitoring",
+          "providerVersion": "3.0.0",
+          "compartmentId": "${compartmentId}",
+          "isOobSavedSearch": false,
+          "metadataVersion": "2.0",
+          "type": "WIDGET_DONT_SHOW_IN_DASHBOARD",
+          "nls": {},
+          "screenImage": "",
+          "widgetTemplate": "",
+          "widgetVM": "",
+          "uiConfig": {
+            "visualization": {
+              "type": "table"
+            }
+          },
+          "dataConfig": [
+            {
+              "dataSource": "apm-trace-explorer",
+              "queryText": "show (spans) gen_ai.tool.name as \"Tool\", count(*) as \"Calls\", avg(SpanDuration) as \"Avg (ms)\", percentile(SpanDuration, 95) as \"p95 (ms)\", sum(ErrorCount) as \"Errors\" where OperationName like 'execute_tool%' group by gen_ai.tool.name order by avg(SpanDuration) desc first 20 rows",
+              "timeRange": "${timeRange}",
+              "apmDomainId": "${apmDomainId}"
+            }
+          ],
+          "drilldownConfig": [],
+          "parametersConfig": [],
+          "featuresConfig": {},
+          "freeformTags": {},
+          "definedTags": {}
+        },
+        {
+          "id": "locus-token-spend-by-model",
+          "displayName": "Token spend by model",
+          "description": "Input and output tokens per model, from the chat spans' gen_ai.usage.* attributes.",
+          "providerId": "apm",
+          "providerName": "Application Performance Monitoring",
+          "providerVersion": "3.0.0",
+          "compartmentId": "${compartmentId}",
+          "isOobSavedSearch": false,
+          "metadataVersion": "2.0",
+          "type": "WIDGET_DONT_SHOW_IN_DASHBOARD",
+          "nls": {},
+          "screenImage": "",
+          "widgetTemplate": "",
+          "widgetVM": "",
+          "uiConfig": {
+            "visualization": {
+              "type": "table"
+            }
+          },
+          "dataConfig": [
+            {
+              "dataSource": "apm-trace-explorer",
+              "queryText": "show (spans) gen_ai.request.model as \"Model\", gen_ai.provider.name as \"Provider\", count(*) as \"Model calls\", sum(gen_ai.usage.input_tokens) as \"Input tokens\", sum(gen_ai.usage.output_tokens) as \"Output tokens\" where OperationName like 'chat%' group by gen_ai.request.model, gen_ai.provider.name order by sum(gen_ai.usage.input_tokens) desc first 20 rows",
+              "timeRange": "${timeRange}",
+              "apmDomainId": "${apmDomainId}"
+            }
+          ],
+          "drilldownConfig": [],
+          "parametersConfig": [],
+          "featuresConfig": {},
+          "freeformTags": {},
+          "definedTags": {}
+        },
+        {
+          "id": "locus-token-spend-over-time",
+          "displayName": "Token spend over time",
+          "description": "Input and output tokens across all models, in 5-minute buckets.",
+          "providerId": "apm",
+          "providerName": "Application Performance Monitoring",
+          "providerVersion": "3.0.0",
+          "compartmentId": "${compartmentId}",
+          "isOobSavedSearch": false,
+          "metadataVersion": "2.0",
+          "type": "WIDGET_DONT_SHOW_IN_DASHBOARD",
+          "nls": {},
+          "screenImage": "",
+          "widgetTemplate": "",
+          "widgetVM": "",
+          "uiConfig": {
+            "visualization": {
+              "type": "area",
+              "x": "time",
+              "y": [
+                "Input tokens",
+                "Output tokens"
+              ]
+            }
+          },
+          "dataConfig": [
+            {
+              "dataSource": "apm-trace-explorer",
+              "queryText": "show (spans) sum(gen_ai.usage.input_tokens) as \"Input tokens\", sum(gen_ai.usage.output_tokens) as \"Output tokens\" where OperationName like 'chat%' timeseries 5 minutes",
+              "timeRange": "${timeRange}",
+              "apmDomainId": "${apmDomainId}"
+            }
+          ],
+          "drilldownConfig": [],
+          "parametersConfig": [],
+          "featuresConfig": {},
+          "freeformTags": {},
+          "definedTags": {}
+        },
+        {
+          "id": "locus-model-latency",
+          "displayName": "Model call latency",
+          "description": "Average and p95 duration of the chat spans per model.",
+          "providerId": "apm",
+          "providerName": "Application Performance Monitoring",
+          "providerVersion": "3.0.0",
+          "compartmentId": "${compartmentId}",
+          "isOobSavedSearch": false,
+          "metadataVersion": "2.0",
+          "type": "WIDGET_DONT_SHOW_IN_DASHBOARD",
+          "nls": {},
+          "screenImage": "",
+          "widgetTemplate": "",
+          "widgetVM": "",
+          "uiConfig": {
+            "visualization": {
+              "type": "table"
+            }
+          },
+          "dataConfig": [
+            {
+              "dataSource": "apm-trace-explorer",
+              "queryText": "show (spans) gen_ai.request.model as \"Model\", count(*) as \"Calls\", avg(SpanDuration) as \"Avg (ms)\", percentile(SpanDuration, 95) as \"p95 (ms)\", sum(ErrorCount) as \"Errors\" where OperationName like 'chat%' group by gen_ai.request.model order by avg(SpanDuration) desc first 20 rows",
+              "timeRange": "${timeRange}",
+              "apmDomainId": "${apmDomainId}"
+            }
+          ],
+          "drilldownConfig": [],
+          "parametersConfig": [],
+          "featuresConfig": {},
+          "freeformTags": {},
+          "definedTags": {}
+        }
+      ]
+    }
+  ]
+}

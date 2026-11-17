@@ -54,6 +54,10 @@ def initialize_agent(agent: Agent) -> None:
 
     get_model = _agent_module.get_model
 
+    # --- Checkpointer ------------------------------------------------------
+    # Refused here, not on the first run's ``load``.
+    _require_checkpointer(agent.config.checkpointer)
+
     # --- Model -------------------------------------------------------------
     if isinstance(agent.config.model, str):
         agent._model = get_model(agent.config.model, **agent.config.model_kwargs)
@@ -96,6 +100,14 @@ def initialize_agent(agent: Agent) -> None:
     from locus.agent.hook_orchestrator import HookOrchestrator
 
     agent._hook_orchestrator = HookOrchestrator(agent._hooks)
+
+    # A hook that declares ``bind_agent(model=, tools=)`` is lent the agent's
+    # resolved model and tools: ``ToolCallJudge`` judges with the agent's
+    # own model unless it was given one, and learns which tools are read-only.
+    for hook in agent._hooks:
+        bind_agent = getattr(hook, "bind_agent", None)
+        if callable(bind_agent):
+            bind_agent(model=agent._model, tools=list(agent._tool_registry))
 
     # --- Plugins (bundles of hooks + tools) -------------------------------
     for plugin in agent.config.plugins:
@@ -160,6 +172,14 @@ def initialize_agent(agent: Agent) -> None:
         if "obs_recall" not in agent._tool_registry:
             agent._tool_registry.register(_observation_recall_tool(agent))
 
+    # --- Tool-result offload → fetch_tool_result -----------------------------
+    # A result over the offload threshold leaves the conversation as a handle
+    # and a preview; fetch_tool_result is how the model reads the stored text
+    # back, so it comes with the offload.
+    offload = agent.config.tool_result_offload
+    if offload is not None and "fetch_tool_result" not in agent._tool_registry:
+        agent._tool_registry.register(offload.as_tool())
+
     # --- Deferred tools → tool_search --------------------------------------
     # Runs after every registration path above (config tools, plugins,
     # skills, providers) so the catalog sees them all. Deferral is
@@ -208,13 +228,22 @@ def initialize_agent(agent: Agent) -> None:
             "locus.models.metadata.register_metadata(ModelMetadata(..., "
             "input_price_per_mtok=..., output_price_per_mtok=...))."
         )
-    context_window = (
-        None
-        if agent.config.conversation_manager is not None
-        else _context_window(agent, meta.context_length if meta is not None else None)
-    )
+    context_window = _context_window(agent, meta.context_length if meta is not None else None)
     if agent.config.conversation_manager is not None:
         agent._conversation_manager = agent.config.conversation_manager
+        from locus.memory.tiers import TieredCompaction
+
+        manager = agent._conversation_manager
+        if isinstance(manager, TieredCompaction) and (
+            not manager.bound or manager.summary_model is None
+        ):
+            # A pipeline built without a model: bind it to this agent's model
+            # and to the window the agent resolved (its own setting, the
+            # environment, the model's metadata, the model itself).
+            manager.bind(
+                model=agent._model,
+                context_length=manager.context_length if manager.bound else context_window,
+            )
     elif context_window is not None and agent.config.compaction.enabled:
         # The window is known, so a long run can be kept inside it: clear old
         # tool output, then summarise older history and carry on (the loop
@@ -225,17 +254,35 @@ def initialize_agent(agent: Agent) -> None:
         summary_model = compaction.summary_model
         if isinstance(summary_model, str):
             summary_model = get_model(summary_model)
-        agent._conversation_manager = ContextCompactor(
-            context_length=context_window,
-            summary_model=summary_model if summary_model is not None else agent._model,
-            trigger_fraction=compaction.trigger_fraction,
-            reserved_tokens=compaction.reserved_tokens,
-            tail_turns=compaction.tail_turns,
-            tail_token_fraction=compaction.tail_token_fraction,
-            tool_output_keep_tokens=compaction.tool_output_keep_tokens,
-            summary_max_tokens=compaction.summary_max_tokens,
-            min_iterations_between_summaries=compaction.min_iterations_between_summaries,
-        )
+        if compaction.tiers is not None:
+            # The tiered pipeline: each tier at its own fraction of the window.
+            from locus.memory.tiers import TieredCompaction, default_tiers
+
+            agent._conversation_manager = TieredCompaction(
+                compaction.tiers or default_tiers(native=compaction.native),
+                context_length=context_window,
+                model=agent._model,
+                summary_model=summary_model if summary_model is not None else agent._model,
+                reserved_tokens=compaction.reserved_tokens,
+                tail_turns=compaction.tail_turns,
+                tail_token_fraction=compaction.tail_token_fraction,
+                tool_output_keep_tokens=compaction.tool_output_keep_tokens,
+                summary_max_tokens=compaction.summary_max_tokens,
+                min_iterations_between_summaries=compaction.min_iterations_between_summaries,
+            )
+        else:
+            agent._conversation_manager = ContextCompactor(
+                context_length=context_window,
+                summary_model=summary_model if summary_model is not None else agent._model,
+                trigger_fraction=compaction.trigger_fraction,
+                reserved_tokens=compaction.reserved_tokens,
+                tail_turns=compaction.tail_turns,
+                tail_token_fraction=compaction.tail_token_fraction,
+                tool_output_keep_tokens=compaction.tool_output_keep_tokens,
+                summary_max_tokens=compaction.summary_max_tokens,
+                min_iterations_between_summaries=compaction.min_iterations_between_summaries,
+                native_compaction=compaction.native,
+            )
     elif context_window is not None:
         # Summarising is off, so no extra model calls: stale tool output is
         # pruned and a token-budgeted tail kept on each request, which is what
@@ -344,6 +391,35 @@ def _context_window(agent: Agent, metadata_window: int | None) -> int | None:
             if isinstance(reported, int) and not isinstance(reported, bool) and reported > 0:
                 return reported
     return None
+
+
+def _require_checkpointer(checkpointer: Any) -> None:
+    """A checkpointer the agent can drive: ``load`` and ``save``.
+
+    Checked at construction so the mistake surfaces before the first run.
+    ``OracleCheckpointSaver`` is the usual case: a versioned history that
+    application code drives through ``put()`` / ``get()``, not a
+    ``BaseCheckpointer``; ``oracle_checkpointer()`` is the Oracle
+    checkpointer an agent takes.
+    """
+    if checkpointer is None:
+        return
+    if callable(getattr(checkpointer, "load", None)) and callable(
+        getattr(checkpointer, "save", None)
+    ):
+        return
+    name = type(checkpointer).__name__
+    hint = (
+        " OracleCheckpointSaver is a versioned history your code drives with put()/get(); "
+        "give the agent locus.memory.backends.adapters.oracle_checkpointer() instead and "
+        "keep the saver beside it."
+        if name == "OracleCheckpointSaver"
+        else ""
+    )
+    raise TypeError(
+        f"Agent(checkpointer=...) needs a checkpointer with async load(thread_id) and "
+        f"save(thread_id, state) methods (a locus.memory.BaseCheckpointer); got {name}.{hint}"
+    )
 
 
 def _warn_unknown_window(model_id: str | None) -> None:

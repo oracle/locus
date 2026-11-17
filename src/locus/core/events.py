@@ -240,18 +240,26 @@ class CompactionEvent(LocusEvent):
     """The run's context was compacted to keep it inside the model's window.
 
     ``stage`` says what it took: ``"prune"`` cleared old tool outputs,
-    ``"summarize"`` replaced older history with a model-written summary, and
-    ``"truncate"`` dropped it without one. Token counts are estimates of the
-    whole request (messages plus tool definitions). ``exhausted`` means the
-    context could not be brought under ``threshold`` (or compaction was
-    thrashing) and the run ends with ``context_exhausted``; ``detail`` says why.
-    It doubles as the compact boundary: everything before it in the stream is
-    no longer verbatim in the model's context.
+    ``"summarize"`` replaced older history with a model-written summary,
+    ``"truncate"`` dropped it without one, ``"native"`` handed it to the
+    provider's own compaction endpoint, ``"window"`` dropped the oldest turns
+    past a turn window and ``"relevance"`` dropped the turns unrelated to the
+    current task. Token counts are estimates of the whole request (messages
+    plus tool definitions). ``exhausted`` means the context could not be
+    brought under ``threshold`` (or compaction was thrashing) and the run ends
+    with ``context_exhausted``; ``detail`` says why. It doubles as the compact
+    boundary: everything before it in the stream is no longer verbatim in the
+    model's context.
+
+    A :class:`~locus.memory.tiers.TieredCompaction` yields one event per tier
+    that ran, in order, with ``tier`` naming it (``clear_tool_results``,
+    ``sliding_window``, ``summarize``, ``native``, ``relevance``); each
+    event's ``tokens_before`` is the previous one's ``tokens_after``.
     """
 
     event_type: Literal["compaction"] = "compaction"
     iteration: int
-    stage: Literal["prune", "summarize", "truncate"]
+    stage: Literal["prune", "summarize", "truncate", "native", "window", "relevance"]
     tokens_before: int
     tokens_after: int
     threshold: int
@@ -261,6 +269,8 @@ class CompactionEvent(LocusEvent):
     summary: str | None = None
     exhausted: bool = False
     detail: str | None = None
+    #: The tier that ran, for a tiered compaction; ``None`` for the plain compactor.
+    tier: str | None = None
 
 
 class TerminateEvent(LocusEvent):

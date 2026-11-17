@@ -64,7 +64,10 @@ def _shown(h: HarnessContext, text: str, ctx: ToolContext | None) -> str:
     key = extract_reference_key(stored.content)
     if key is None:
         return capped
-    return f"{capped}\n[the full output, {len(text):,} characters, is stored: key={key}]"
+    return (
+        f"{capped}\n[the full output, {len(text):,} characters, is stored: key={key} "
+        "— fetch_tool_result(key, offset) reads it back]"
+    )
 
 
 def make_bash(h: HarnessContext) -> Tool:

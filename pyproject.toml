@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "locus-sdk"
-version = "5.3.2"
+version = "5.5.0"
 description = "Oracle Generative AI Multi-Agent Reasoning Orchestrator SDK: the agent framework where the model never holds the trigger — every consequential action clears your policy first, waits for a human when it matters, and lands on a record you can verify. Build on it, or put it around the agent you already have."
 readme = "README.md"
 license = "UPL-1.0"
@@ -115,6 +115,12 @@ server = [
     "uvicorn[standard]>=0.27",
 ]
 
+# ``locus deploy``: the values file is YAML (src/locus/deploy/).
+deploy = ["pyyaml>=6.0"]
+
+# The AgentServer behind an OCI Function (src/locus/deploy/functions.py): the Fn FDK.
+functions = ["fdk>=0.1.80"]
+
 # Checkpoint backends — one extra per backend under
 # src/locus/memory/backends/ that needs a runtime dep. Keep in sync.
 redis = ["redis>=5.0"]
@@ -124,12 +130,6 @@ opensearch = ["opensearch-py>=2.4"]
 # S3-compatible object-storage checkpointer (src/locus/memory/backends/s3.py):
 # OCI Object Storage through its S3-compatible API, MinIO, R2, …
 s3 = ["boto3>=1.34"]
-
-# Security-domain tooling — red-team probes, SOC triage, intel / SIEM / EDR /
-# scanner / fingerprint adapters, OCI cloud posture — is a separate, opt-in
-# package in this repo (packages/locus-sdk-security/, imported as ``locus_security``).
-# It is not published to PyPI, so there is no extra for it: install it from
-# the repository.
 
 # Browser tools (src/locus/tools/browser.py). After installing, fetch a browser
 # with `playwright install chromium`.
@@ -159,9 +159,31 @@ openshell = ["openshell>=0.1.2,<0.2"]
 # SDK from 2.189.0, imported lazily (``import locus.harness`` does not need it).
 oci-sandbox = ["oci>=2.189.0"]
 
+# Any host with sshd as a coding-harness workspace (src/locus/harness/ssh.py).
+# Imported only by ``SSHSandboxBackend.connect``; a caller that passes its own
+# connected client needs nothing from it.
+ssh = ["paramiko>=3.4"]
+
+# OCI Container Instances as a coding-harness workspace
+# (src/locus/harness/oci_container.py): the OCI SDK provisions the instance,
+# paramiko works in it. Both imported lazily.
+oci-container = ["oci>=2.173.0", "paramiko>=3.4"]
+
+# Hosted sandbox services as a coding-harness workspace
+# (src/locus/harness/e2b.py, src/locus/harness/daytona.py). Each client is
+# imported only by the backend's ``connect`` and ``create``.
+e2b = ["e2b>=2.0"]
+daytona = ["daytona>=0.100"]
+
 # Mem0 agent-memory manager (src/locus/memory/managers/mem0.py) — the
 # portable, self-hostable long-term memory backend.
 mem0 = ["mem0ai>=0.1"]
+
+# The A2A gRPC binding (src/locus/a2a/grpc_binding.py). The JSON-RPC and
+# HTTP+JSON bindings ride the ``server`` extra; gRPC is opt-in. Imported
+# lazily: ``import locus.a2a`` needs none of it. ``grpcio-status`` carries
+# the ``google.rpc`` error-detail messages the binding puts on a failed call.
+a2a-grpc = ["grpcio>=1.60", "grpcio-status>=1.60", "protobuf>=5.26"]
 
 # All checkpoint backends. `pip install locus-sdk[checkpoints]` is the
 # one-shot install for durable thread state across every backend.
@@ -194,6 +216,18 @@ checkpoints = [
 pgvector = ["asyncpg>=0.29", "numpy>=1.26"]
 qdrant = ["qdrant-client>=1.9"]
 chroma = ["chromadb>=0.5"]
+# Milvus Lite (embedded, file-backed) rides the pymilvus extra; a Milvus
+# server or Zilliz Cloud needs only pymilvus itself.
+milvus = ["pymilvus[milvus-lite]>=2.5"]
+# 4.16 introduced ``Configure.Vectors.self_provided`` (the collection config
+# the store creates); embedded Weaviate downloads its binary on first use.
+weaviate = ["weaviate-client>=4.16"]
+elasticsearch = ["elasticsearch>=8.12"]
+# Redis Query Engine (Redis Stack / Redis 8) vector fields over redis-py.
+redis-vector = ["redis>=5.0"]
+pinecone = ["pinecone>=5"]
+# ``pymongo.AsyncMongoClient`` is GA from 4.13.
+mongodb = ["pymongo>=4.13"]
 
 # Cohere direct API (rerank + embeddings) and a local cross-encoder
 # reranker. Neither requires any cloud vendor SDK.
@@ -203,6 +237,7 @@ rerank = ["cohere>=5.0", "sentence-transformers>=3.0"]
 
 # Full RAG stack — every vector store + embedder + reranker Locus ships.
 # Use this if you want to pick a store at runtime rather than up front.
+# (The Jina, Voyage and LLM rerankers need nothing beyond the core install.)
 rag = [
     "asyncpg>=0.29",
     "opensearch-py>=2.4",
@@ -211,6 +246,12 @@ rag = [
     "requests>=2.31",
     "qdrant-client>=1.9",
     "chromadb>=0.5",
+    "pymilvus[milvus-lite]>=2.5",
+    "weaviate-client>=4.16",
+    "elasticsearch>=8.12",
+    "redis>=5.0",
+    "pinecone>=5",
+    "pymongo>=4.13",
     "openai>=1.50,<3",
     "cohere>=5.0",
     "sentence-transformers>=3.0",
@@ -288,6 +329,8 @@ dev = [
     "cryptography>=42",   # signed audit trail tests in tests/unit/test_signed_audit.py
     "temporalio>=1.7",    # durable run tests in tests/unit/test_temporal_durable.py
     "dbos>=2.0",          # durable run tests in tests/unit/test_dbos_durable.py
+    "grpcio>=1.60",       # A2A gRPC binding tests in tests/unit/test_a2a_grpc.py
+    "grpcio-status>=1.60",
 ]
 
 [project.scripts]
@@ -333,17 +376,11 @@ include = [
 # on every FastAPI ``@app.get/.post`` and on MCP imports.
 features = ["dev", "server", "mcp", "openai", "anthropic", "oci", "oci-sandbox", "oracledb", "rag", "s3", "mem0"]
 
-# The security-domain tooling is its own distribution in this repo. Install it
-# into the dev environment (editable) so one ``hatch run check`` lints, types
-# and tests both.
-[tool.hatch.envs.default.workspace]
-members = ["packages/locus-sdk-security"]
-
 [tool.hatch.envs.default.scripts]
 # Default test target = unit tests only (deterministic, no external deps).
 # Integration tests need credentials / live services and are run via
 # `test-integration` or `test-all` when those are available.
-test = "pytest {args:tests/unit packages/locus-sdk-security/tests/unit}"
+test = "pytest {args:tests/unit}"
 # Check every Python snippet in README.md / examples/README.md against the
 # installed SDK. Also runs as a unit test, so CI gates it either way; this
 # is the fast local loop when editing docs.
@@ -351,21 +388,21 @@ snippets = "python scripts/check_doc_snippets.py {args}"
 # The version is asserted in four documents no tool keeps in agreement.
 # Run this before tagging — CI runs it too, in the lint job.
 release-check = "python scripts/check_release_consistency.py {args}"
-test-integration = "pytest {args:tests/integration packages/locus-sdk-security/tests/integration}"
-test-all = "pytest {args:tests packages/locus-sdk-security/tests}"
-test-cov = "pytest --cov=src/locus --cov=packages/locus-sdk-security/src/locus_security --cov-report=term-missing --cov-report=html --cov-report=json {args:tests/unit packages/locus-sdk-security/tests/unit}"
+test-integration = "pytest {args:tests/integration}"
+test-all = "pytest {args:tests}"
+test-cov = "pytest --cov=src/locus --cov-report=term-missing --cov-report=html --cov-report=json {args:tests/unit}"
 # Refresh the per-file coverage baseline (commit the resulting
 # ``scripts/coverage_baseline.json``).
 cov-baseline-update = [
-    "pytest --cov=src/locus --cov=packages/locus-sdk-security/src/locus_security --cov-report=json {args:tests/unit packages/locus-sdk-security/tests/unit}",
+    "pytest --cov=src/locus --cov-report=json {args:tests/unit}",
     "python scripts/coverage_ratchet.py --update",
 ]
-test-fast = "pytest -n auto {args:tests/unit packages/locus-sdk-security/tests/unit}"
-lint = "ruff check src tests examples packages"
-lint-fix = "ruff check --fix src tests examples packages"
-format = "ruff format src tests examples packages"
-format-check = "ruff format --check src tests examples packages"
-typecheck = "mypy src/locus packages/locus-sdk-security/src/locus_security"
+test-fast = "pytest -n auto {args:tests/unit}"
+lint = "ruff check src tests examples"
+lint-fix = "ruff check --fix src tests examples"
+format = "ruff format src tests examples"
+format-check = "ruff format --check src tests examples"
+typecheck = "mypy src/locus"
 # CI gate: every check the project enforces, in one command. A clean run
 # of `hatch run check` is what `_lint.yml` runs. The trailing ``test-cov``
 # runs the deterministic unit suite under coverage and FAILS the whole
@@ -414,7 +451,7 @@ python = ["3.11", "3.12", "3.13", "3.14"]
 [tool.ruff]
 target-version = "py311"
 line-length = 100
-src = ["src", "tests", "packages/locus-sdk-security/src"]
+src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = [
@@ -602,9 +639,20 @@ ignore = [
 "src/locus/cli.py" = [
     "T201",    # print — the locus command's output is its interface
 ]
+# ``locus a2a card``: the same command, registered from the a2a package.
+"src/locus/a2a/cli.py" = ["T201"]
+"src/locus/deploy/*.py" = [
+    "T201",    # print — `locus deploy` and the container entrypoint report on stdout/stderr
+]
 "src/locus/memory/backends/**/*.py" = [
     "S608",    # SQL built from validated identifiers (regex-checked at init)
     "PYI063",  # PEP 570 positional-only — `__context` is Pydantic's spelling
+]
+"src/locus/control/approvals_postgres.py" = [
+    "S608",    # SQL built from validated identifiers (regex-checked at init)
+]
+"src/locus/control/approvals_oracle.py" = [
+    "S608",    # SQL built from validated identifiers (regex-checked at init)
 ]
 "src/locus/rag/stores/**/*.py" = [
     "S608",    # SQL built from validated identifiers
@@ -678,7 +726,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["locus", "locus_security"]
+known-first-party = ["locus"]
 force-single-line = false
 lines-after-imports = 2
 
@@ -739,6 +787,7 @@ module = [
     "mcp.*",
     "anthropic.*",
     "opensearchpy.*",
+    "opentelemetry.exporter.*",
     "redis.*",
     "asyncpg.*",
     "mysql.*",
@@ -750,6 +799,11 @@ module = [
     "botocore.*",
     "qdrant_client.*",
     "chromadb.*",
+    "pymilvus.*",
+    "weaviate.*",
+    "elasticsearch.*",
+    "pinecone.*",
+    "pymongo.*",
     "cohere.*",
     "sentence_transformers.*",
     "mem0.*",
@@ -768,6 +822,22 @@ module = [
     # The coding harness's OpenShell backend imports it lazily.
     "openshell",
     "openshell.*",
+    # The A2A gRPC binding (``locus.a2a.grpc_binding``) imports these lazily;
+    # grpcio ships no type stubs.
+    "grpc",
+    "grpc.*",
+    "grpc_status",
+    "grpc_status.*",
+    # The Fn FDK behind ``locus.deploy.functions``; untyped, imported on use.
+    "fdk",
+    "fdk.*",
+    # The coding harness's SSH, E2B and Daytona backends import these lazily.
+    "paramiko",
+    "paramiko.*",
+    "e2b",
+    "e2b.*",
+    "daytona",
+    "daytona.*",
 ]
 ignore_missing_imports = true
 
@@ -804,8 +874,8 @@ warn_required_dynamic_aliases = true
 
 [tool.pytest.ini_options]
 minversion = "8.0"
-testpaths = ["tests", "packages/locus-sdk-security/tests"]
-pythonpath = ["src", "packages/locus-sdk-security/src"]
+testpaths = ["tests"]
+pythonpath = ["src"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 addopts = [
@@ -830,7 +900,7 @@ filterwarnings = [
 # =============================================================================
 
 [tool.coverage.run]
-source = ["src/locus", "packages/locus-sdk-security/src/locus_security"]
+source = ["src/locus"]
 branch = true
 parallel = true
 omit = [
@@ -875,9 +945,6 @@ show_missing = true
 # Workspace
 # =============================================================================
 
-# The security-domain tooling ships as its own distribution from this repo
-# (``packages/locus-sdk-security/``). It depends on locus-sdk; resolve
-# both sides locally.
 [tool.uv]
 # Security overrides for transitive deps whose upstreams pin them below the
 # patched version: the `oci` SDK caps `cryptography` < 48 and
@@ -899,9 +966,3 @@ override-dependencies = [
     "pillow>=13.0.0",
     "urllib3>=2.8.0",
 ]
-
-[tool.uv.workspace]
-members = ["packages/locus-sdk-security"]
-
-[tool.uv.sources]
-locus-sdk-security = { workspace = true }

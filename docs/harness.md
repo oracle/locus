@@ -3,9 +3,11 @@
 `locus.harness` is the toolset a coding agent works with — read, write,
 edit, search, a shell — written once against a workspace protocol and run
 unchanged on the host, in memory, or inside a sandbox:
-[OCI GenAI Sandboxes](harness/oci-sandbox.md) in your tenancy, or
-[NVIDIA OpenShell](harness/openshell.md) behind a gateway. locus-code is an UI
-over it; the gateway runs the same tools inside OpenShell sandboxes.
+[OCI GenAI Sandboxes](harness/oci-sandbox.md) in your tenancy,
+[OCI Container Instances](harness/backends.md#oci-container-instances),
+[NVIDIA OpenShell](harness/openshell.md) behind a gateway, any host over
+[SSH](harness/backends.md#ssh), or a hosted sandbox service. locus-code is
+an UI over it; the gateway runs the same tools inside OpenShell sandboxes.
 
 ## Build a harness
 
@@ -50,7 +52,9 @@ the shell's default and maximum timeouts, what happens at a timeout
 (`"background"` keeps the command under a handle, `"kill"` stops it), how
 much output the model sees, whether the model can see images, a
 `ToolResultStore` for output too long to show, and the `on_exec` /
-`on_change` hooks.
+`on_change` hooks. With a store, the default tool set also includes
+`fetch_tool_result`, which pages a stored output back by the key its
+note names.
 
 ## The single-gate rule
 
@@ -84,11 +88,14 @@ for that.
 
 ## Backends
 
-All five implement `WorkspaceBackend`, which extends the deepagent
+Every backend implements `WorkspaceBackend`, which extends the deepagent
 `BackendProtocol` (so a workspace also serves the deepagent filesystem
-tools). Paths are relative to the backend's root or absolute inside it, and
-they name the same files the backend's shell sees. Recursive walks skip
-`.git`, `node_modules` and the other `SKIP_DIRS`.
+tools), and `SandboxBackend` over it: a lifecycle (`start`, `stop`,
+`close`), declared `limits` and evidence hooks, described on the
+[sandbox backends](harness/backends.md) page with the conformance kit that
+checks a backend of your own. Paths are relative to the backend's root or
+absolute inside it, and they name the same files the backend's shell sees.
+Recursive walks skip `.git`, `node_modules` and the other `SKIP_DIRS`.
 
 | Backend | Where | Isolated | Shell |
 | --- | --- | --- | --- |
@@ -97,6 +104,12 @@ they name the same files the backend's shell sees. Recursive walks skip
 | `SessionBackend(session, root=...)` | any sandbox, through `SessionLike` | yes, unless you say otherwise | yes, over `exec` |
 | `OpenShellBackend(client, sandbox, workspace=...)` | an NVIDIA OpenShell sandbox, root `/sandbox` | yes | yes, over `exec_stream` |
 | `OCISandboxBackend(client, sandbox_id, region=...)` | an OCI GenAI Sandbox, root `/workspace` | yes | yes, over `run_sandbox_command_and_stream` |
+| `SSHSandboxBackend.connect(host, ...)` | any host with `sshd` | yes, unless it is this machine | yes, over SSH with a watchdog on the host |
+| `OCIContainerInstanceBackend.create(compartment, subnet, ...)` | an OCI Container Instance, root `/workspace` | yes | yes, over SSH, through an OCI Bastion when asked |
+| `E2BBackend`, `DaytonaBackend` | a hosted sandbox service | yes | yes, over the service's client |
+
+A backend is also chosen by name: `open_sandbox(SandboxSpec(backend="ssh",
+options={"host": ...}))`, with limits and a warm-pool hint on the spec.
 
 ### Bring your own sandbox
 
@@ -119,16 +132,23 @@ with `setsid`, with their output in a file and their input on a FIFO, so
 nothing has to stay connected while they run. The sandbox needs `sh`,
 coreutils or busybox, `find`, `grep` and `awk`.
 
-### OCI GenAI Sandboxes and NVIDIA OpenShell
-
-Two sandboxes ship ready to use, each on its own page:
+### Sandboxes that ship ready to use
 
 - **[OCI GenAI Sandboxes](harness/oci-sandbox.md)**: `OCISandboxBackend`, an
   isolated, expiring Linux workspace in your OCI tenancy, created from a
   Generative AI project. `pip install "locus-sdk[oci-sandbox]"`.
+- **[OCI Container Instances](harness/backends.md#oci-container-instances)**:
+  `OCIContainerInstanceBackend`, a container on serverless compute in your
+  subnet, provisioned by the backend and worked in over SSH, through an OCI
+  Bastion for a private subnet. `pip install "locus-sdk[oci-container]"`.
 - **[NVIDIA OpenShell](harness/openshell.md)**: `OpenShellBackend`, a sandbox
   behind an OpenShell gateway, with provider credentials the sandbox never
   holds. `pip install "locus-sdk[openshell]"`.
+- **[SSH](harness/backends.md#ssh)**: `SSHSandboxBackend`, any host you can
+  log into, with a jump host when there is one. `pip install "locus-sdk[ssh]"`.
+- **[E2B and Daytona](harness/backends.md#e2b-and-daytona)**: thin adapters
+  over the two services' clients. `pip install "locus-sdk[e2b]"` or
+  `"locus-sdk[daytona]"`.
 
 ## Evidence
 

@@ -225,15 +225,6 @@ if you need the write to be *unreachable* during triage, don't register
 the skill, so the call is blocked (see above). Either way, a human (or
 a separate, audited [playbook](playbooks.md)) issues the refund.
 
-The security variant follows the same pattern. A phishing-triage
-skill steers the model to `fetch_alert` / `query_siem` /
-`enrich_indicator` and ends with *"Recommend containment in prose. Do
-NOT call `isolate_host` — that is the responder's call"*, over
-`tools=security_toolset(allow_containment=True)` — and gates the final
-verdict through `ground_finding` so an unsupported compromise claim
-abstains instead of shipping. See [Security](security.md) and
-[GSAR](gsar.md).
-
 ## Why progressive disclosure saves context
 
 A naive approach that places every capability in the system prompt

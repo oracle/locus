@@ -8,6 +8,886 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **Time travel on every checkpointer.** `checkpointer.list(thread_id)`
+  describes a thread's checkpoints newest first as `CheckpointInfo`
+  records (id, write time, the state's iteration, the checkpoint's size
+  as that backend stores it, the checkpoint it descends from — `None`
+  only for a thread's first — and, for a fork, the thread it came from);
+  `checkpointer.fork(thread_id, checkpoint_id)` starts a new thread from
+  any of them, with the thread's tool-effect ledger copied up to that
+  step and no further, so a run on the fork never replays what the
+  parent did past the fork point; `agent.run(..., from_checkpoint=...)`,
+  `arun`, `run_sync` and `agent.resume(..., from_checkpoint=...)`
+  continue a thread from a past checkpoint, the run's first lasting save
+  recording it as its parent and the rest following on, so the thread's
+  history shows the branch as a chain; the checkpoint run from is never
+  deleted. `Agent.fork` and `StateGraph.afork` go through the
+  checkpointer's `fork`. Every `BaseCheckpointer` has the surface through
+  the base defaults; the in-memory, file, adapter-wrapped (Redis,
+  PostgreSQL, MySQL, OpenSearch, Oracle), S3, OCI Object Storage and
+  `PgCheckpointer` backends read the step fields without loading the
+  state, and the versioned `OracleCheckpointSaver` (the reference, one
+  row per checkpoint with a parent link) gains `fork` and `list` too.
+  `max_checkpoints_per_thread` on `MemoryCheckpointer`, `S3Backend`,
+  `OCIBucketBackend`, `StorageBackendAdapter` and the `*_checkpointer()`
+  factories bounds a thread's history (`FileCheckpointer` and
+  `PgCheckpointer` already had one); no bound ever trims a ledger
+  sidecar, and the object-store backends order checkpoints saved within
+  one second by the write time in their own metadata, not the listing's
+  coarse modification time. `draw_mermaid_history(checkpointer,
+  *thread_ids)` and `StateGraph.adraw_mermaid_history` draw the
+  histories with a fork as a branch of its parent (node ids stay
+  distinct for thread ids that differ only in punctuation; labels escape
+  Mermaid's specials). The checkpointers page has the per-backend table;
+  notebook 50 forks a thread on the in-memory checkpointer.
+  (`locus.memory.time_travel`; #454)
+- **`SandboxBackend`: the harness workspace as a documented protocol.** Every
+  harness backend now implements it over `WorkspaceBackend`: a lifecycle
+  (`state`, `start()`, `stop()`, `close()`, each idempotent), declared
+  `ResourceLimits` (a `max_exec_s` is enforced by clamping every `exec`
+  timeout), and `add_exec_hook()`, which hands an `ExecRecord` of every
+  command the backend runs to whoever holds it — after the command, so a
+  hook that raises is logged and the result still reaches the caller.
+  `SandboxMixin` gives a backend of your own all of it by overriding
+  `_start`, `_stop` and `_destroy`.
+  `locus.harness.testing.assert_backend_conformance(factory)`
+  is the conformance kit: the file, shell, deadline, background-command and
+  protocol checks the tools assume, run on a backend and reported together;
+  `run_conformance(backend)` does the same without closing it.
+- **`SSHSandboxBackend`.** Any host with `sshd` as a workspace (the `ssh`
+  extra, `paramiko`): commands run under a watchdog on the host so a deadline
+  kills the process group where it runs, both streams come back in order,
+  files move over SFTP with a `cat` fallback that checks the byte count,
+  host keys are checked against `known_hosts` or a pinned `host_key=` (a key
+  accepted under `known_hosts="accept-unknown"` stays in memory; the user's
+  file is never written), and `via=SSHJump(...)` connects through a bastion.
+- **`OCIContainerInstanceBackend`.** An OCI Container Instance as the
+  Oracle-native remote sandbox (the `oci-container` extra): `create()`
+  provisions the instance from an image with `sshd` or a package manager,
+  bootstraps `sshd` with a key pair generated for the backend, reads the
+  container's host keys from its log and connects with them pinned, directly
+  or through an OCI Bastion port-forwarding session for a private subnet
+  (`bastion_session_ttl=` sets its lifetime; a restart past it makes a new
+  one). A container or bastion that reports no host key is refused unless
+  `known_hosts="accept-unknown"` is passed. `stop()`/`start()` restart the
+  instance and `close()` deletes it and the session.
+- **`E2BBackend` and `DaytonaBackend`.** Thin adapters over the two hosted
+  sandbox services' Python clients (the `e2b` and `daytona` extras), checked
+  with stand-ins; the live tests run when the service's API key is set.
+- **`SandboxSpec` and `open_sandbox()`.** A sandbox named in configuration:
+  `backend="local" | "ssh" | "oci-container" | "oci-sandbox" | "openshell"
+  | "e2b" | "daytona" | "memory"` plus `root`, `env`, `limits`, a
+  `WarmPoolHint` and the backend's `options`; `from_mapping()` reads it from
+  a parsed YAML or JSON document and refuses unknown keys;
+  `register_backend()` adds a name. `SandboxPool` / `open_pool(spec)` keep
+  `warm_pool.ready` sandboxes created ahead of need, and the hint's `name`
+  reaches a service-side pool (OCI GenAI Sandbox warm pools). The new
+  [sandbox backends](docs/harness/backends.md) page documents the protocol,
+  the kit and each backend's prerequisites.
+- **Durability modes.** `Agent(durability=...)`, and `durability=` on
+  `run`, `arun` and `run_sync`, say when a run writes its iteration
+  checkpoints: `"sync"` (the default, and what every earlier release did)
+  awaits each one before the next model call; `"async"` schedules it and
+  awaits every pending write before the run's final save; `"exit"` writes
+  once at the end of the run. The final save and the save before an
+  interrupt are awaited in every mode. `GraphConfig.durability` does the
+  same for a `StateGraph`'s per-step saves. Every checkpointer gets the
+  modes through the protocol; none needed code of its own.
+  (`locus.agent.durability`)
+- **Tool-effect ledger.** With `durability="async"` or `"exit"` (or
+  `Agent(tool_ledger=True)` in any mode) the executor records every
+  executed tool call in the thread's checkpointer the moment it returns,
+  keyed by `(thread id, step, tool name, canonical arguments)`, as
+  checkpoints of the sidecar thread `<thread_id>~ledger`. A run that
+  continues the turn after a crash — `Agent.continue_turn(thread_id)`,
+  the new `Agent.resume(invocation_id=..., thread_id=...)`, or
+  `Agent.run(..., invocation_id=...)` under the id the crashed run was
+  started with — replays a recorded call instead of running the tool
+  again and runs only the calls with no record; `ToolResult.replayed`
+  marks a replayed result. `continue_turn` now also picks up a turn none
+  of whose checkpoints landed, from the ledger's manifest. Tools not
+  marked idempotent run at least once; `Agent(rerun_idempotent_on_replay=
+  True)` lets `idempotent=True` tools run again on replay instead. The
+  turn's final save clears the ledger. Temporal and DBOS segments record
+  into the same ledger, and `run_agent_segment(kind="continue")` finishes
+  an interrupted segment by replaying it. The checkpointers page has an
+  overhead table for each mode on the in-memory and PostgreSQL
+  checkpointers. (`locus.memory.ledger`; #453)
+- **A2A: every binding the specification defines.** Next to JSON-RPC,
+  `A2AServer` serves the HTTP+JSON binding (`POST /message:send`,
+  `GET /tasks/{id}`, `POST /tasks/{id}:cancel`, the push-config resources,
+  server-sent events for `message:stream` and `tasks/{id}:subscribe`) on the
+  same app, and the gRPC binding (`lf.a2a.v1.A2AService`, all eleven RPCs)
+  on `grpc_port`, behind the new `a2a-grpc` extra. The card's
+  `supportedInterfaces` lists what is on (`transports=`); every binding lands
+  in one set of handlers and reports the same `ErrorInfo` reason on a
+  failure. `A2AClient.connect(url, prefer=[...])` / `from_card(card, ...)`
+  pick a binding from the card in preference order and move to the next one
+  when an interface is unreachable; `binding=` selects one outright.
+  `SubscribeToTask` now streams a task's live events after the snapshot.
+- **A2A push notifications.** `A2AServer(push_notifications=
+  PushNotificationSettings(...))` delivers every status and artifact change
+  to the webhooks a task registers (in `SendMessage`'s configuration or with
+  the `*TaskPushNotificationConfig` methods), with the token and
+  `Authorization` the config asks for, retries, and a URL policy that refuses
+  private addresses unless told otherwise. `PushNotificationSigner` signs
+  each body (Ed25519) and publishes the key at `/.well-known/jwks.json`;
+  `PushNotificationReceiver` is the client-side webhook that checks the token
+  and the signature. `send_message(..., push_notification_config=...,
+  blocking=False)` returns the task at once and runs it in the background.
+- **A2A interrupt mapping.** A run that pauses for a person — `ask_user`, or
+  an approval hold from `gate_tool(on_refusal="interrupt")` — surfaces as the
+  task state `input-required` with the question (or the hold summary) as the
+  status message. The peer's next message on the task resumes the run through
+  `Agent.resume()`; for a hold its first word decides (`approve` / `deny`),
+  recorded on the approval store passed as `A2AServer(approvals=...)`. An
+  approved hold performs the call once; a denied hold ends the task
+  `rejected`.
+- **`locus a2a card AGENT`** writes a v1.0 agent card from the agent's tools,
+  skills, streaming capability and the transports named (`--transport`,
+  `--grpc-port`, `--push`); `--serve` runs the server with that card.
+  `card_from_agent()` is the same in code.
+- **Six more vector stores.** `MilvusVectorStore` (Milvus server, Zilliz
+  Cloud, or embedded Milvus Lite from a local file), `WeaviateVectorStore`
+  (local, Weaviate Cloud or embedded), `ElasticsearchVectorStore`
+  (`dense_vector` k-NN with a `flattened` metadata field),
+  `RedisVectorStore` (Redis Query Engine `VECTOR` fields with `TAG`
+  filters on declared metadata keys), `MongoDBAtlasVectorStore`
+  (`$vectorSearch`, `ensure_index()` creates the Atlas index) and
+  `PineconeVectorStore` (serverless indexes). Each sits behind the existing
+  `VectorStore` protocol with `metadata_filter` and has its own extra:
+  `[milvus]`, `[weaviate]`, `[elasticsearch]`, `[redis-vector]`,
+  `[mongodb]`, `[pinecone]`; `[rag]` includes them all. The shared
+  conformance suite (`tests/unit/rag/store_conformance.py`) runs
+  unconditionally against the in-process stores — in-memory, Qdrant, Chroma
+  and Milvus Lite — and against the served ones (Weaviate, Elasticsearch,
+  Redis, MongoDB Atlas, Pinecone) only when the environment points at a
+  running service. Closes #460.
+- **Three more rerankers.** `LLMReranker` has any registered chat model
+  (`"oci:openai.gpt-4.1"`, or a model object) grade the candidates in
+  batches from a fenced prompt, so reranking needs no dedicated endpoint;
+  `JinaReranker` and `VoyageReranker` call the hosted rerank APIs over
+  `httpx` with `JINA_API_KEY` / `VOYAGE_API_KEY`.
+- **Hybrid search, one switch.** `RAGRetriever(hybrid=True, hybrid_alpha=…)`
+  calls `store.hybrid_search(query_text, query_embedding, alpha=…)` on
+  stores implementing the new `HybridSearchable` protocol — Oracle
+  Database 26ai, OpenSearch, Elasticsearch, Weaviate and Milvus
+  (`enable_hybrid=True`) — with the same `alpha` meaning everywhere
+  (`1.0` vector only, `0.0` lexical only). Stores without hybrid search
+  fall back to vector-only search with one logged warning;
+  `supports_hybrid_search(store)` and `retriever.hybrid_supported` report
+  the capability, `retrieve(..., hybrid=…)` overrides it per call and
+  `hybrid_kwargs` passes store-specific options such as Oracle's
+  `use_text_index`. `OpenSearchVectorStore` gains `hybrid_search`
+  (k-NN and BM25 legs blended client-side, no search pipeline needed).
+- **Notebook 52** adds the keyless Milvus Lite path with hybrid search and
+  the LLM reranker, and `examples/config.get_embedder()` builds
+  `OCIEmbeddings` when `LOCUS_EMBEDDING_PROVIDER=oci` (or when only an OCI
+  profile is configured), so the RAG notebooks run on OCI Generative AI
+  without an OpenAI key.
+
+- **Evaluators over the run's path.** `TrajectoryMatch` (`strict`,
+  `unordered` or `subset`), `ToolSelection` (recall and precision over the
+  tools chosen, with `forbidden` tools) and `ArgumentCorrectness` (one tool's
+  arguments against the expected ones, compared under the tool's parameter
+  schema with absolute, per-argument and relative tolerances) read the
+  evidence ledger with no model call. Each lives on an `EvalCase` under
+  `evaluators`, is one check named by its label, loads from a case file by
+  `kind`, enters the suite fingerprint, and leaves a typed
+  `EvaluatorVerdict` with its provenance in `EvalResult.evaluations`. The
+  runner fills an `ArgumentCorrectness` schema in from the tool on the agent
+  under test.
+- **A simulated user for multi-turn cases.** `EvalCase(simulated_user=
+  SimulatedUser(persona=..., goal=..., max_turns=..., stop_on=[...]))` has a
+  model play that user against the agent in `arun()`, opening with the case
+  prompt, until the goal is met, a stop phrase appears or the turn budget
+  runs out. `EvalRunner(simulator=UserSimulator(model))` names the model; the
+  judge's is used otherwise. The whole conversation is graded: every reply
+  and tool call for the checks and evaluators, the full transcript for the
+  judge; `EvalResult.transcript` and `stopped_by` keep what happened, and a
+  conversation that hit the budget fails `simulated_user:goal_met`. With a
+  checkpointer on the agent each turn continues one thread; without one the
+  transcript is carried in the prompt.
+- **Online evaluation.** `OnlineEvaluator(template, judge=, sampler=,
+  budget=)` subscribes to the event bus, rebuilds each run from its `agent.*`
+  events, keeps the runs `every_nth(n)` or `fraction(share)` pick within an
+  `OnlineBudget` (total, per minute, in flight), and grades them in the
+  background with the same checks and judge as a suite through the new
+  `EvalRunner.agrade(case, result)`. `attach(run_id, prompt=, output=,
+  arguments=)` supplies what the bus does not carry; `submit(prompt, result)`
+  grades a result the application holds. `report()` is an `EvalReport` whose
+  fingerprint is the template's, so online reports diff and trend as one
+  suite.
+- **Persisted reports and `locus eval trend`.** `report_store(spec)` opens a
+  `ReportStore`: a directory, an Oracle AI Database table
+  (`OracleReportStore`, headline figures in columns and the report as JSON),
+  an OCI Object Storage bucket (`OCIBucketReportStore`) or an S3-compatible
+  bucket (`S3ReportStore`), from `file://`, `oracle://`, `oci://` and `s3://`
+  specs or `LOCUS_EVAL_STORE`. `trend(store, suite=, last=)` reads the last
+  reports of a suite back with the pass and average deltas between them and
+  marks a fingerprint change rather than reading it as a regression.
+  `locus eval run --store <spec> --suite <name>` keeps the report after a run
+  and `locus eval trend --store <spec> --suite <name>` prints the trend,
+  exiting 1 when the newest report is worse than the one before it. Notebook
+  56 gains a trajectory case and a simulated-user case.
+- **`locus deploy`: the agent server on OCI.** `locus deploy init` writes a
+  deployment directory: Terraform roots for OCI Container Instances, OKE (a
+  bundled Helm chart installed through the Helm provider) and OCI Functions,
+  a registry root for the OCIR repository, a Dockerfile per image shape
+  (Oracle Linux 9, Python 3.12, non-root) and `locus-deploy.yaml`, the one
+  file a person edits. `plan`, `apply` and `destroy` run Terraform for the
+  chosen target; `apply` builds the image for the chosen architecture and
+  pushes it between the registry root and the target root; `plan`, `apply`
+  and `destroy` take `--dry-run` to print every command. `init` never
+  replaces an existing Dockerfile or `.dockerignore` without `--force`, only
+  appends to a `.gitignore`, writes a `.dockerignore` that keeps Terraform
+  state and tfvars out of the image, and takes `--sdk-wheel` to ship a
+  locus-sdk build that is not on PyPI. The roots share one set of variables
+  for the Oracle AI Database checkpointer, OCI Cache, OCI Object Storage and
+  OCI Application Performance Monitoring, authenticate the container with its
+  own principal (resource principal, instance principal or OKE workload
+  identity, the new `oke_workload_identity` auth type that every OCI auth
+  switch in the SDK accepts and that `resource_principal` detects on a pod)
+  and take secrets as OCI Vault secret OCIDs: the image starts with
+  `python -m locus.deploy.entrypoint`, which resolves every
+  `<VAR>_SECRET_OCID` into `<VAR>` before uvicorn. The generated server
+  refuses to start without its bearer key unless `allow_unauthenticated` is
+  set, and a public Container Instance needs `server_api_key_secret_id` or
+  that opt-out. `locus.deploy.functions` runs the `AgentServer` app behind
+  the Fn FDK, so the same server answers `oci fn function invoke` and API
+  Gateway requests. New extras: `deploy` (PyYAML) and `functions` (the Fn
+  FDK). The guide is [Deploy to OCI](docs/how-to/deploy-oci.md), with sizing
+  and cost notes and a deploy-on-tag workflow.
+- **OpenTelemetry GenAI semantic conventions.** `TelemetryHook` now files a
+  run as one `invoke_agent` span, each model call as a `chat` span (CLIENT)
+  and each tool call as an `execute_tool` span, with the `gen_ai.*`
+  attributes (`gen_ai.operation.name`, `gen_ai.provider.name`,
+  `gen_ai.request.model`, `gen_ai.usage.input_tokens` / `output_tokens`,
+  `gen_ai.response.finish_reasons`, `gen_ai.response.id`,
+  `gen_ai.tool.name`, `gen_ai.tool.call.id`, `gen_ai.conversation.id`,
+  `error.type`) and the conventions' metrics
+  (`gen_ai.client.inference.usage.input_tokens` / `output_tokens`,
+  `gen_ai.client.inference.duration`, `gen_ai.invoke_agent.duration` /
+  `inference_calls` / `tool_calls`, `gen_ai.execute_tool.duration`, in
+  seconds with the recommended buckets). The agent lends the hook its model
+  and tools, so the model, provider and tool descriptions need no
+  configuration; `model=`, `provider_name=` and `agent_name=` override.
+  `TelemetryHook(semconv="locus-legacy")` keeps the previous
+  `agent.invocation` / `agent.iteration.<n>` / `tool.<name>` spans and
+  `locus.*` metrics. `locus.observability.semconv` holds the names and a
+  `validate_spans()` check for recorded traces.
+- **W3C trace context across A2A.** `A2AClient` sends `traceparent` (the
+  agent's tool span when called from a tool) on every request over every
+  binding — JSON-RPC, HTTP+JSON, gRPC metadata — and `A2AServer` runs a
+  served request under the caller's trace on each of them, so a
+  multi-agent call is one trace end to end. `locus.observability.propagation`
+  (`inject_trace_headers`, `trace_scope`, `current_traceparent`) does the
+  same for any other carrier; MCP `_meta` already carried it.
+- **OCI Application Performance Monitoring exporter.**
+  `locus.observability.exporters.oci_apm(endpoint, private_data_key)` builds
+  the OTLP/HTTP span and metric exporters for an APM domain (data upload
+  endpoint, `dataKey` authorization) and `install()` sets the global
+  providers, or adds the domain's span processor and metric reader to the
+  providers an application has already set (once per domain);
+  `examples/observability/` carries an importable APM dashboard for agent
+  runs, tool latency and token spend. The observability page gains an
+  "Export" section with recipes for OCI APM and three open-source backends,
+  and the SSE catalogue maps every bus event to the span it belongs to.
+- **`OracleAuditTrail`.** The audit trail on an Oracle AI Database immutable
+  table (`CREATE IMMUTABLE TABLE … NO DROP UNTIL n DAYS IDLE NO DELETE UNTIL
+  n DAYS AFTER INSERT`), or a blockchain table with `table_kind="blockchain"`.
+  Same API as `AuditTrail`, so `admit(trail=…)`, `gate_tool(trail=…)` and
+  `governed_agent(audit_trail=…)` take it unchanged; `record()` commits the
+  row before it returns, several processes can share one trail (a stale
+  writer reloads and continues the chain instead of forking it), and
+  `verify()` re-reads the rows and recomputes every hash. On a blockchain
+  table it also checks that every row carries its database-side hash
+  (`ORABCTAB_HASH$`) and that `DBMS_BLOCKCHAIN_TABLE.VERIFY_ROWS` verifies
+  them all. `arecord()` / `acheck()` / `averify()` run the same work on a
+  worker thread for async code.
+- **Chain-head anchoring in object storage.** `anchor_trail(trail, store,
+  every=…)` writes the current head (record count, sequence number, hash,
+  timestamp) as a small JSON object into an OCI Object Storage bucket
+  (`OCIBucketAnchorStore`) or any S3-compatible bucket (`S3AnchorStore`);
+  `verify_anchor(trail, store)` checks the chain still reaches the latest
+  anchor, so a trail cut short of it fails. `require_retention_rule=True`
+  refuses to anchor into a bucket without a retention rule (OCI) or Object
+  Lock (S3). `anchor_periodically()` is the loop a server or runner calls.
+  The observability, control-layer and guarantees pages describe when to use
+  each backend.
+- **`ControlPolicy` as data.** `ControlPolicy.load(path_or_text)` reads a
+  policy from a YAML or JSON document and `policy.dump(path, format=...)`
+  writes one; every key is a field of the same name, type and default, so
+  the file form and the Python form round-trip and a file can never say
+  what the API cannot. An unknown key, a wrong type or a bad value is a
+  `PolicyFileError` that names the key and its path
+  (`require_human_for[2]`). Reading YAML needs the optional `pyyaml`
+  package; JSON and writing need nothing. `policy.content_hash()` is the
+  SHA-256 of the rules, equal for equal policies however they were built.
+- **The policy hash on the audit trail.** `admit()` and `admit_sync()`
+  record `policy_hash` on every `action-admission` entry, so a reader knows
+  which rules each decision was made under. The key lives in the entry's
+  payload: trails written before it exists verify unchanged, and readers
+  that do not know it are unaffected.
+- **Hot reload.** `PolicyWatcher(path, interval=...)` follows a policy file
+  by modification time and is accepted wherever `admit()`, `admit_sync()`
+  and `gate_tool()` take a `policy` (any `PolicySource` with a `current()`
+  method is). Each decision asks it once, so the swap is atomic between
+  admissions; a rewrite that no longer parses keeps the last good policy in
+  force and reports why on `last_error`; `on_reload` is called with the old
+  and new policy when the rules change.
+- **`locus policy lint <file>`** reports `unreachable-rule` (a hold label
+  that `deny_for` pre-empts, a cost hold at or above the spend limit, a
+  verification bar above 1.0, a denied `sandboxed` tag, a zero blast-radius
+  cap), `uncovered-environment` and `kind-never-held` for the environments
+  and kinds the file's `governs:` block or `--environments` / `--kinds`
+  declare. Exit 1 on a finding; `--format json` for CI. The last two are
+  found by weighing probe actions with `approve()`, so lint agrees with the
+  gate by construction.
+- **`locus policy explain <file> --action '{...}'`** prints every rule,
+  fired or not, the outcome and whether a person can approve it;
+  `--expect allow|require_human|deny` turns it into a check with the exit
+  code, `--spent-usd` and `--verification` supply what the gate would read
+  from a ledger and a verdict. `evaluate_rules()` is the one evaluation
+  `approve()` and `explain()` share; `lint_policy()`, `explain()` and
+  `PolicyDocument` are the same from Python.
+- Notebook 71 loads its policy from `examples/notebook_71_refund_policy.yaml`;
+  the policy authoring guide shows the file form first and a CI lint job.
+- **A model-based tool-call judge that feeds the gate.**
+  `locus.control.ToolCallJudge` shows a model the proposed tool call, name
+  and arguments, with the policy's intent and optional per-tool guidance,
+  and returns a typed `allow` / `hold` / `deny` verdict with a one-line
+  reason, parsed through the structured-output path. `gate_tool(judge=...)`
+  hands the verdict to `admit(judgement=...)`, where `tighten()` keeps the
+  stricter of the policy's outcome and the judge's: an allow can become a
+  hold or a deny, never the reverse. The verdict is on the audit entry under
+  `judge` (model, verdict, reason, cache hit, and the error when it failed
+  closed) and emitted as `control.judge.decided`. Installed as a hook it
+  judges every call and cancels a held or denied one; with no model of its
+  own it borrows the agent's. Read-only tools are skipped, verdicts are
+  cached per (tool, canonical arguments) within a run, and `budget=` caps
+  model calls per run; a model error, an off-schema reply or a spent budget
+  is a hold. (#448)
+- **`@tool(read_only=True)`.** Declares a tool that only observes, so the
+  judge does not spend a model call on it. Off by default.
+- **Notebook 72** gains the judge as an optional step on the scripted test
+  double: a staging rollout to an unpinned image, which the policy allows, is
+  held by the judge, and the page shows the audit entry that records both.
+- **Tool-call integrity (`Agent(tool_call_integrity=True)`).** The runtime
+  signs every tool call as the model's response is parsed, the streaming
+  path included, over a canonical form of its id, name and arguments with
+  HMAC-SHA256 under a random per-run key, and the executor verifies the call
+  before it runs. A call changed in between is refused with a typed
+  `ToolCallIntegrityError`, an entry on the agent's `AuditTrail` (the signed
+  and received digests, and the hook the change is attributed to), a
+  `tool.integrity.refused` event, and a tool error the model reads so the
+  run continues; `"abort"` ends the run instead. Hooks that rewrite
+  arguments re-sign through `event.resign(by="...")` or
+  `ToolCallSigner.resign`, so the chain of custody names them; the built-in
+  `GuardrailsHook` redaction and `ExternalHooks` rewrites do. The signature
+  lives on the run, not on `ToolCall`, so messages and checkpoints are
+  unchanged. Off by default in 5.x, on by default in 6.0. (#450)
+- **Database-backed approval stores.** `PostgresApprovals`, `RedisApprovals`
+  and `OracleApprovals` implement `ApprovalStore` with the semantics of the
+  in-memory store (one-use consumption, approver rules, quorums, delegations)
+  over one row or key per held call, decided under the database's own lock, so
+  replicas that share the store never both redeem one approval. They follow the
+  connection conventions of the matching checkpointer backend and create their
+  table on first use only when it is missing. Each store owns one event loop on
+  a background thread; the `ApprovalStore` methods block on it and `asubmit` /
+  `aget` / `adecide` / `aconsume` / `apending` await it. Every store has a
+  password-free `spec` (`file://…`, `postgresql://…`, `redis://…`,
+  `oracle://…`) and `approval_store(spec)` opens one; a bare database scheme
+  reads `POSTGRES_*`, `REDIS_URL` or `ORACLE_*` from the environment.
+- **Pending holds in the checkpoint.** When a gated tool holds a call in
+  interrupt mode during a run with a checkpointer, the hold (approval id, tool,
+  action, asset, principal, reason, arguments, approvers so far, context, store
+  spec) is written into the thread's checkpoint under
+  `state.metadata["_locus_pending_holds"]`. `pending_holds(checkpointer,
+  thread_id)` reads it back in another process, `PendingHold.state(store)`
+  re-checks it, and the hold leaves the checkpoint when the call is answered.
+  Checkpoints written before this carry no holds and resume as before. The
+  gate's interrupt metadata gains a `store` key.
+- **`locus approvals` against any store.** `--store` takes a spec (or
+  `LOCUS_APPROVALS_STORE`), a bare path still means a `FileApprovals` file,
+  `--by` falls back to `LOCUS_APPROVER`, and `approve` / `reject` take
+  `--reason`, recorded on the decision. `ApprovalStore.decide()` accepts
+  `reason=""` for the same purpose.
+- Notebook 73 (support account gate) now ends with the hold parked in a
+  file-backed store, approved from another process through `locus approvals`,
+  and performed by a fresh agent resuming the thread.
+- **Full `reasoning` control on `OCIResponsesModel`.** `reasoning` takes the
+  Responses-native object (`effort`, `summary`, ...) on `OCIResponsesConfig`,
+  the constructor and as a call kwarg such as an agent's `model_kwargs`, and
+  is sent as given; with `reasoning_effort` set too the dict wins and the
+  effort only fills `effort` when the dict lacks it. Nothing is sent when
+  both are unset. Reasoning summaries the endpoint returns surface as
+  `ModelResponse.reasoning`. Before, a `reasoning` dict was dropped.
+- **Reasoning items replayed across tool calls on the stateless path.** With
+  `store=False` (or after the Zero Data Retention switch) and a reasoning
+  control set, the request asks for `include=["reasoning.encrypted_content"]`;
+  the reasoning items that come back stay on the assistant message under
+  `metadata["oci_responses_items"]` with the turn's `function_call` items,
+  and the next request replays them verbatim ahead of the tool result, so a
+  tool-calling turn keeps its reasoning. Turns without such items, and
+  streamed turns, are reconstructed as before.
+- **Native compaction on the OCI Responses transport.**
+  `OCIResponsesModel.compact_history()` posts a history to
+  `/responses/compact` and returns the compacted messages: the ones the
+  endpoint kept plus an encrypted `compaction` item the model replays on
+  later requests. `ContextCompactor(native_compaction=True)`, or
+  `CompactionConfig(native=True)` on the agent, hands the summary stage to a
+  model that offers `compact_history()` instead of writing a client-side
+  summary; the system prompt and the task message stay verbatim, the
+  `CompactionEvent` carries `stage="native"` (new value), the compaction
+  call's tokens count against the run's budgets, and a failed call falls
+  back to the client-side summary. Opt-in; off by default.
+- **Zero Data Retention detection on `OCIResponsesModel`.** A tenancy with
+  Zero Data Retention (ZDR) answers every request that carries
+  `previous_response_id` with a 400 saying so. That reply now raises
+  `OCIResponsesZeroDataRetentionError`, a subclass of
+  `OCIResponsesStateLostError` so existing handlers keep working. `store`
+  accepts `"auto"` besides `True` and `False`: under `"auto"` the model starts
+  stateful and, on that error, switches itself to the stateless path for the
+  rest of its lifetime (`store: false`, full history on every request), warns
+  once with a `LocusWarning`, and the agent runtime replays the interrupted
+  turn from the history it holds, so the run completes with the same result.
+  `model.zdr_detected` reports the switch and the run's event stream carries a
+  `CustomEvent` named `server_state_fallback`. `store=True` still raises;
+  `store=False` is unchanged.
+- **Release notes on the documentation site.** `docs/release-notes.md` is
+  generated from this file when the site is built (`hooks/release_notes.py`,
+  the `{{ locus_release_notes }}` token): `Unreleased` first, then every
+  release from 3.0.0 onward with its date, each version anchored by its tag
+  (`#v5.5.0`). Linked from the site footer, the compatibility and about
+  pages, and the README. (#465)
+
+- **Threads and runs on `AgentServer`, with a resumable event stream.**
+  `POST /threads` creates a thread, `POST /threads/{id}/runs` starts a turn
+  (or continues a paused one with a `resume` payload: the `/resume`
+  semantics, as a run of its own) and answers at once with a run id while
+  the agent runs in the background; `GET /runs/{id}` reports its status and
+  outcome; `GET /runs/{id}/events` streams it as SSE with an `id:` line per
+  event and honours `Last-Event-ID`, replaying exactly the events a dropped
+  client missed from the run's EventBus history; `POST /runs/{id}/cancel`
+  asks the agent to stop through `agent.cancel(thread_id=...)` and falls
+  back to cancelling the task. Thread state comes from the agent's
+  checkpointer when one is configured; the threads-and-runs registry itself
+  is in memory and bounded (`RunRegistry(history_per_run=500, max_runs=200,
+  ttl_seconds=3600)`, passed as `AgentServer(run_registry=...)`); a resume
+  past the retained window gets a `replay_gap` frame. (#456)
+- **`WS /runs/live`.** One WebSocket for user turns, approval answers
+  (`resume`, through the existing `decision_handler` and `agent.resume`),
+  `cancel`, `subscribe` (follow a run from a sequence number) and the events
+  of every run started or subscribed on it. Bearer header or `?token=`.
+  Voice frames are not carried: `locus.voice` sessions remain
+  application-driven.
+- **AG-UI and Vercel AI SDK UI message stream adapters.** `POST /ag-ui`
+  takes a `RunAgentInput` and streams `RUN_STARTED`, `TEXT_MESSAGE_*`,
+  `TOOL_CALL_*`, `STATE_SNAPSHOT` / `STATE_DELTA`, `CUSTOM` and
+  `RUN_FINISHED` / `RUN_ERROR`; `POST /vercel-ai` takes a UI message request
+  and answers an `x-vercel-ai-ui-message-stream: v1` stream (`start`,
+  `text-*`, `reasoning-*`, `tool-input-*`, `tool-output-available`,
+  `data-*`, `finish`). Both are also available for any run as
+  `GET /runs/{id}/events?protocol=ag-ui|vercel-ai`, resume included. The
+  conservative readings of the two protocols are recorded on the server
+  page. `examples/server_ui/` holds two plain HTML pages (resumable SSE, and
+  an AG-UI client); notebook 65 follows, drops and resumes a run.
+- `GET /threads/{id}` now adds the thread's `runs` and a `source` field,
+  answers from the registry when no checkpointer is configured, and no
+  longer fails with a 500 for a runnable without `config` (a
+  `GraphRunnable`); `DELETE /threads/{id}` forgets the thread's finished
+  runs as well.
+- **Tiered compaction.** `TieredCompaction([ClearToolResults, SlidingWindow,
+  Summarize, Relevance])` (`locus.memory.tiers`) runs compaction tiers in
+  order, each at its own trigger as a fraction of the usable window (0.5,
+  0.7, 0.85 and 0.95 by default): stale tool outputs become stubs, the
+  oldest turns past a turn window are dropped, older history is summarised
+  by the existing summariser and, as a last resort, only the turns relevant
+  to the current task stay (by embeddings with an `embedder=`, by recency
+  without one). A `Native` tier hands the stage to a model's own compaction
+  endpoint (`default_tiers(native=True)`). The window comes from the model's
+  metadata, or `context_length=`. Pass `conversation_manager=TieredCompaction(...)`
+  or `CompactionConfig(tiers=True | [...])`; the agent binds the pipeline to
+  its model and window. One `CompactionEvent` per tier that ran, with `tier`
+  and the tokens before and after it; `stage` gains `"window"` and
+  `"relevance"`.
+- **Pinned messages.** `pin(message)` (or `metadata={"pin": True}`) and a
+  `pins=` predicate on `TieredCompaction` keep a message verbatim through
+  every compaction stage and tier, in `ContextCompactor` too; a pinned tool
+  result keeps the call that produced it.
+- **`ToolResultOffload`.** A tool result over `threshold_chars` (16,000) goes
+  to a `ToolResultStore` the moment it is produced; the message keeps a
+  handle and a preview, and the `fetch_tool_result` tool, registered with
+  the offload, reads the stored text back a page at a time. The handle
+  travels in the message text, so it survives checkpoints and compaction (a
+  cleared stub names it). `AgentConfig(tool_result_offload=...)`, or `True`
+  for an in-memory store. The coding harness includes the same
+  `fetch_tool_result` whenever its `HarnessConfig` names a `result_store`,
+  and the `bash` note says so. `ToolResultStore.put()` stores a result
+  whatever its size and returns its key.
+
+### Changed
+
+- **`TelemetryHook` default span and metric names.** The GenAI conventions
+  are the default; dashboards and alerts built on `agent.invocation`,
+  `tool.<name>` or the `locus.*` metrics keep working with
+  `TelemetryHook(semconv="locus-legacy")`. Tool spans are now keyed by
+  `tool_call_id`, so parallel calls to one tool each get their own span.
+  The hook keeps its state per run: concurrent `arun()` calls on one
+  `Agent` are one trace each, a sub-agent run from inside a tool files
+  under that call's `execute_tool` span, a hook-requested model retry gives
+  every attempt its own `chat` span, and a run that fails closes the model,
+  tool and iteration spans it left open with `error.type`.
+  `gen_ai.token.modality` on the token counters is `unknown` unless the
+  provider's usage breaks the count down by modality.
+
+- **`OCIResponsesModel` defaults to `store="auto"`.** Before, the default was
+  `store=True` and the first tool-call continuation on a ZDR tenancy failed the
+  run with `OCIResponsesStateLostError`. The first request of a run is
+  unchanged; only the ZDR case now completes instead of failing. Pass
+  `store=True` to keep the old behaviour, or `store=False` on a tenancy known
+  to be ZDR to skip the one stateful attempt.
+- **OAuth 2.1 for remote MCP servers.** `MCPClient(oauth=MCPOAuth(...))`
+  signs in to a Streamable HTTP server that answers `401`: authorization
+  code with PKCE, discovery of the protected-resource and
+  authorization-server metadata, dynamic client registration (or a hosted
+  client-metadata document via `client_metadata_url`), token refresh, and a
+  browser hand-off with a loopback listener that a headless process replaces
+  with its own `redirect_handler` / `callback_handler`. Tokens live in a
+  pluggable store: `InMemoryTokenStore` (default), `FileTokenStore` (a
+  `0600` file under the user's config directory) or `KeyringTokenStore`
+  (the optional `keyring` package). No token value is logged. An
+  `Authorization` header or a static `access_token` still wins over OAuth.
+- **Toolset shaping on `MCPClient`.** `include=` and `exclude=` take server
+  tool names or globs, `prefix=` renames what is imported, so two servers
+  mount without name clashes. Order: `allowed_tools` and `include` narrow,
+  `exclude` removes (and wins over `include`), `tool_filter` decides last,
+  `prefix` is applied after matching. Calls through either name land; a
+  shaped-out tool raises `MCPToolNotAllowedError`.
+- **Elicitation.** A server that asks the person a question mid-call pauses
+  the agent run through the interrupt mechanism: an `InterruptEvent` whose
+  `fields` describe the requested schema and whose `metadata` carries
+  `mcp_elicitation`. `client.answer_elicitation(event, answer)` then
+  `agent.resume(answer, perform_dangling=True)` re-issues the call with the
+  answer. `elicitation_handler=` answers without pausing (and outside a run);
+  with neither, a question outside a run is declined. `MCPElicitation` and
+  `ElicitationAnswer` are the types. An agent served by `LocusMCPServer`
+  has its own `ask_user` questions relayed to the MCP client as
+  elicitations through `run_agent_stream`.
+- **W3C trace context in MCP `_meta`.** Every `tools/call` the agent makes
+  carries `traceparent` / `tracestate` parented to the telemetry hook's
+  span for that tool call (`TelemetryHook` now exposes it through
+  `current_tool_span()`), and every call `LocusMCPServer` serves runs under
+  the context its `_meta` carries, so an MCP hop stays inside one trace.
+  `propagate_trace=False` opts out; `locus.integrations.mcp_tracing` holds
+  `trace_meta()` and `trace_scope()` for other servers.
+- **`locus mcp serve <target>`** exposes an agent (`MODULE:ATTR` /
+  `FILE.py:ATTR`, an `Agent`, a factory, a `Tool` or a list of tools) or a
+  bare module of `@tool` functions as an MCP server over stdio (default) or
+  Streamable HTTP (`--transport http --host --port --path`).
+  `create_tool_server(tools)` and `LocusMCPServer.build()` are the same from
+  Python. The MCP concept page covers the auth flow, shaping precedence,
+  elicitation, tracing and the command. (#457)
+- **The Codex skill covers the new surface.** `.agents/skills/locus/` (what
+  `locus codex init` places) teaches the policy file form with `locus policy
+  lint` / `explain` and `PolicyWatcher`, the tool-call judge and
+  `@tool(read_only=True)`, tool-call integrity, the database approval stores,
+  `approval_store()` and `pending_holds()`, `OracleAuditTrail` and the
+  object-storage anchors, the OCI Responses `store="auto"`, Zero Data
+  Retention, `reasoning` and native-compaction controls, the server's threads
+  and runs, `Last-Event-ID` resume, `WS /runs/live` and the AG-UI and Vercel
+  AI SDK adapters, and the evaluation primitives (rubrics, evidence receipts
+  and claims, reliability, report diffs and `EvalGate`), each with a snippet
+  that runs against the installed SDK. The skill test's wire-type exclusion
+  now also covers the A2A JSON-RPC envelope, parameter and push-notification
+  types. (#492)
+
+### Fixed
+
+- **`Agent.run_sync()` inside a running event loop no longer hangs on MCP
+  tools connected on that loop.** The run is driven on a worker thread's own
+  loop, which cannot reach an `MCPClient` session bound to the caller's; the
+  first tool call waited forever. `run_sync` now raises a `RuntimeError`
+  naming the client and the fix (`await agent.arun(...)`), and the MCP
+  getting-started page uses the async form.
+- **A stdio MCP server starts with this process's environment.**
+  `MCPClient(server_command=...)` passed no `env`, so the `mcp` SDK started
+  the server with a stripped environment (`PATH`, `HOME`, `USER` …) and a
+  server needing `PYTHONPATH`, an OCI profile or an API key died during the
+  handshake with a bare `Connection closed`. The server now inherits
+  `os.environ` (`inherit_env=False` for the SDK's minimal one), `env=` adds
+  variables, and a server that exits during setup is reported with the last
+  lines it wrote to stderr.
+- **Explicit-completion runs carry their answer.** A run that ended through
+  `task_complete` had `TerminateEvent.final_message=None` and
+  `AgentResult.message == ""`, so `LocusMCPServer`'s `run_agent` and
+  `run_agent_stream` returned "Agent completed without response" after a
+  relayed `ask_user`. The final message is now the terminal tool's `result` /
+  `summary` argument, else the assistant text of the turn around the call.
+  The loop also tells the model once, after a reply with no tool call in
+  `completion_mode="explicit"`, that such a reply ends nothing and
+  `task_complete(summary=...)` does — before, the same context went back
+  unchanged until the budget warning, which cost a dozen iterations for a
+  one-line answer.
+- **`auth_type="api_key"` is accepted by `OCIChatCompletionsModel` and
+  `OCIResponsesModel`.** The value every other OCI auth switch in the SDK —
+  and `LOCUS_OCI_AUTH_TYPE` — takes as its default was rejected by the V1
+  transports, so the image `locus deploy` builds could not run locally with a
+  profile. `api_key` (and `security_token`) now mean the profile path:
+  `profile=` when given, else `OCI_PROFILE`, else `DEFAULT`.
+- **`Agent.run_sync()` inside a running loop keeps the caller's context
+  variables.** The worker thread ran without `contextvars.copy_context()`, so
+  the OpenTelemetry context was lost: an agent served over MCP through
+  `run_agent` filed its `invoke_agent` span in a fresh trace with no parent,
+  although `LocusMCPServer` had set the caller's trace from `_meta`. The
+  thread now runs the coroutine inside a copy of the caller's context.
+- **`oci_apm().install()` on a `MeterProvider` already in place flushes the
+  reader it adds.** OpenTelemetry's `MeterProvider.force_flush()` and
+  `shutdown()` visit only constructor-time readers, so the documented
+  `meter_provider.shutdown()` exported nothing from the reader `install()`
+  had added and the last interval's metrics were lost. `install()` now returns
+  an `OCIAPMInstallation` — still the `(tracer_provider, meter_provider)`
+  pair — whose `force_flush()` and `shutdown()` reach what it added; when it
+  joined existing providers that `shutdown()` is also registered with
+  `atexit`.
+- **`validate_spans` ignores foreign-scope spans.** With FastAPI's native
+  `POST /` or the `mcp` package's `MCP send …` spans in the same exporter the
+  checker reported "root span 'POST /' is not an invoke_agent span" and
+  "spans belong to 3 traces". When spans come from more than one
+  instrumentation scope, only the telemetry hook's (`scope=
+  "locus.hooks.telemetry"`, the default) are checked; `scope=None` checks
+  everything. `SpanRecord` records the scope.
+- **`OCIContainerInstanceBackend` connects through an OCI Bastion with the
+  default `known_hosts="strict"`.** The service reports no host key for a
+  port-forwarding session (`bastion_public_host_key_info` is empty), so the
+  strict default refused every bastion path with "reports no host key". The
+  bastion's key is now the one in `known_hosts` or, failing that, the key the
+  endpoint presents at the first connection, read once with
+  `locus.harness.ssh.learn_host_key` and pinned for the session (an `INFO`
+  line says so); the container's keys are still pinned from its log, and
+  `known_hosts="accept-unknown"` stays the explicit unverified opt-in. The
+  unit stand-in for the bastion now reports no key, as the service does.
+- **A key the bastion or the container refuses is reported as such, in time,
+  with the container log.** `create()` retried an `AuthenticationException`
+  until the whole `ready_timeout` ran out, then deleted the instance and the
+  log that said why, and the error could not say whether the bastion or the
+  container's `sshd` had closed the connection. A failure at the jump is now
+  an `SSHJumpError` (new, exported from `locus.harness`) that records whether
+  the jump had accepted the key; a refused key, or a bastion that accepts the
+  key and then closes the connection — what an OCI Bastion does when the
+  client's address is not in its client CIDR allow-list, which it checks
+  after authentication — is retried for `AUTH_GRACE` (90 s) and then raised,
+  naming the bastion or the container's `sshd` and carrying the last 30
+  lines of the container log with key material redacted, before the
+  instance is deleted. Transport failures are retried to the deadline as
+  before; a host key that does not match is still raised at once.
+- **`SandboxSpec` refuses a field of the wrong type when it is built.**
+  `SandboxSpec(limits=5)` was accepted and the first `exec` failed with
+  `AttributeError: 'int' object has no attribute 'bound'`; `backend`,
+  `limits`, `warm_pool`, `env` and `options` are now checked in
+  `__post_init__` (`TypeError`), as `from_mapping` already did for mappings.
+- **Streamed tool calls on the OCI Responses transport keep their name and call
+  id.** `stream()` only read the argument deltas, which carry the stream item id
+  and no function name, so a streamed tool call came back as `name=""` keyed by
+  the item id while `complete()` returned the real name and `call_id`. The parser
+  now reads `response.output_item.added` and `.done` for `function_call` items
+  and the accumulator keys by the call id, so streamed and non-streamed turns
+  are identical and a streaming agent on the stateless path executes its tools.
+- **Report stores read back a report stored under a caller's id.** `put(report,
+  suite=..., report_id="build-42")` on the file, OCI Object Storage and S3
+  stores wrote the object and then `get()`, `list()` and `trend()` never found
+  it, because the object-name parser accepted only the generated 32-hex ids.
+  The id is now encoded in the object name and read back exactly, whatever the
+  string, and reports already stored under generated ids read as before.
+- **A held-back summary tier no longer ends the run before the cheaper tiers
+  run.** With a `TieredCompaction` whose `Summarize` tier sat before
+  `ClearToolResults` or `SlidingWindow`, a summary needed again within
+  `min_iterations_between_summaries` iterations ended the turn
+  `context_exhausted` with most of the window still free and the turn's task
+  lost. The guard now holds that tier back for the pass and the tiers after it
+  still run; the pass is exhausted only when the context is still over the
+  highest trigger after the last tier.
+- **OCI model ids have a context window.** `metadata_for("oci:openai.gpt-4.1")`
+  and the bare `openai.gpt-4.1` an `OCIChatCompletionsModel` carries returned
+  `None`, so every agent on an `oci:` model logged "No context window known"
+  and fell back to a message window instead of the default `ContextCompactor`.
+  An OCI `<vendor>.<model>` id now resolves the entry of the model it serves,
+  the `oci:` prefix is recognised, and the models only OCI serves this way
+  (`meta.llama-3.3-70b-instruct`,
+  `meta.llama-4-maverick-17b-128e-instruct-fp8`, `cohere.command-a-03-2025`,
+  `cohere.command-r-plus-08-2024`, `google.gemini-2.5-pro`,
+  `google.gemini-2.5-flash`, `xai.grok-4`) and `gpt-5.1` have entries with the
+  windows their documentation states.
+- **`OracleCheckpointSaver.list()` returns aware UTC times.** Its
+  `CheckpointInfo.created_at` came back timezone-naive (the driver drops the
+  zone of the `TIMESTAMP WITH TIME ZONE` column), while the adapter, PostgreSQL
+  and object-store backends return aware UTC datetimes, so comparing or sorting
+  infos across backends raised `TypeError`. The saver attaches UTC, and
+  `parse_time` reads a naive value as UTC wall-clock time, so every backend
+  agrees.
+- **`Agent(checkpointer=OracleCheckpointSaver(...))` is refused at
+  construction.** It was accepted and failed on the first run with
+  `AttributeError: ... has no attribute 'load'`. The agent now raises
+  `TypeError` when the checkpointer has no `load` / `save`, naming
+  `BaseCheckpointer` and, for the saver, `oracle_checkpointer()` as the Oracle
+  checkpointer an agent takes; the saver stays the versioned history your code
+  drives.
+- **`MilvusVectorStore.close()` stops the embedded Milvus Lite server.**
+  `MilvusClient.close()` only drops the connection; the in-process server kept
+  running until interpreter exit, flushed then, and recreated the database
+  directory a caller had removed after `close()` (notebook 52 Part 5 left a
+  `locus-nb52-*` directory behind). `close()` on a local `.db` uri now releases
+  the server for that file, so the directory stays removed, and the store loads
+  an existing collection when it opens one, so a file reopened after `close()`
+  or in a new process is searchable.
+
+### Deprecated
+
+- **The `locus.security` compatibility shim is removed in 6.0.** It keeps forwarding the
+  control-layer names to `locus.control` until then; its warning named a release
+  that has long passed and now says 6.0. Import from `locus.control`.
+
+### Removed
+
+- **The `locus-sdk-security` package.** The security-domain tooling (red-team
+  probes and jobs, `Target`, `SecurityContext`, the SOC analyst and
+  `PostureReport` grounding, the intel / SIEM / EDR / scanner / fingerprint
+  adapters, the IR playbooks, notebooks 81–89 and their documentation pages)
+  is no longer part of this repository. It last shipped at the `v5.5.0` tag.
+  The `locus.security` compatibility shim keeps forwarding the control-layer
+  names to `locus.control`; its security-domain names now raise an
+  `ImportError` that says so. The release workflow no longer builds the
+  package.
+
+## [5.5.0] - 2026-11-16
+
+### Added
+
+- **Reasoning effort on `OCIResponsesModel`.** `OCIResponsesConfig` takes
+  `reasoning_effort` (also a constructor argument), sent as
+  `reasoning={"effort": ...}` on both `complete()` and `stream()`. A
+  `reasoning_effort` call kwarg, such as an agent's `model_kwargs`,
+  overrides it for that call. Unset, no `reasoning` field is sent, so the
+  request body is unchanged. Before, `reasoning_effort` passed to the
+  constructor or in `model_kwargs` was dropped without a warning.
+
+### Fixed
+
+- **`OCIResponsesModel.stream()` error bodies.** A non-2xx on the streaming
+  path was raised as `httpx.ResponseNotRead`, because the error body had not
+  been read when it was classified. The body is read first now, so the typed
+  exceptions and the server's message surface exactly as on `complete()`.
+  Classification also reads the error's `param` field, so an envelope that
+  names `previous_response_id` there rather than in the message still maps
+  to `OCIResponsesStateLostError`.
+- **`OCIProjectRequiredError` on a 400.** The Responses endpoint signals the
+  project requirement for non-OpenAI models with a 400 naming the
+  `OpenAI-Project` / `opc-conversation-store-id` header. That is now mapped to
+  `OCIProjectRequiredError` instead of a plain `RuntimeError`.
+- **`project_ocid` reaches the Responses endpoint.** It was sent only as
+  `opc-project-id`, which the endpoint does not read for this requirement, so
+  following the exception's advice changed nothing. The OCID now also goes out
+  as `OpenAI-Project`; with it a non-OpenAI model answers on `/responses`.
+
+## [5.4.0] - 2026-11-10
+
+### Added
+
+- **The rubric as data.** `locus.evaluation.Rubric` names the dimensions a
+  judge scores 0-100, each with a weight and a line of guidance, plus
+  optional letter bands (`Rubric.default_grades()` offers A 90 / B 75 / C 60
+  / D 45 / F 0) and a `pass_score`. The weighted composite, the letter and
+  the pass are computed by code; missing dimensions count as zero rather
+  than vanishing from the average. `Rubric.revision()` hashes the rubric
+  and the judge prompt so two reports are comparable only when it matches.
+  Rubrics load from JSON or YAML (`Rubric.load`). An `EvalCase.rubric` may
+  be a string, as before, or a `Rubric`.
+- **Typed verdicts with provenance.** `Verdict` carries `grade`,
+  `dimensions`, `issues`, the judge's advisory `judge_reported_passed` /
+  `judge_reported_score`, and a `JudgeProvenance` (judge model id, rubric
+  revision, prompt hash, temperature, seed, channel, token usage,
+  `self_graded`). `EvalResult` exposes `grade` and the full `verdict`;
+  `EvalReport` adds `grade_distribution`.
+- **A structured judge channel with pinned sampling.** `LLMJudge` sends
+  `temperature=0.0` by default, takes an optional `seed` and `timeout_s`,
+  and receives the verdict through a `submit_verdict` tool call where the
+  model takes tools (`channel="auto"`), falling back to a plain-JSON reply;
+  `channel="text"` never offers the tool. The response under grading is
+  delimited and declared as data in the prompt.
+- **The run's own evidence as checks.** `EvidenceLedger` lays the run's tool
+  executions out as rows with stable ids (`E0`, `E1`, ..., `P` for the
+  prompt). `EvalCase.require_receipts` fails when a figure, identifier, date
+  or quoted string in the answer appears in no row; `EvalCase.claims` are
+  confirmed by code when the evidence carries their figures and settled by
+  the judge otherwise, through a `submit_claim_checks` tool call whose
+  citations are verified against the rows (a quote not in the cited row
+  downgrades the check to `unverifiable`); `EvalCase.grounding` runs the
+  GSAR audit over the answer and the ledger with the judge model. Results
+  carry `receipts`, `claim_checks` and `grounding_score`.
+- **Control-layer assertions.** `EvalCase.forbidden_tools` passes when the
+  tool never executed, where a call the gate refused did not execute;
+  `EvalCase.expected_refusals` passes when the gate answered `denied` or
+  `held_for_approval` at least once. `EvalCase.expected_tool_calls` matches
+  a call on its arguments (`ToolCallExpectation`).
+- **Budgets.** `EvalCase.max_total_tokens` and `max_cost_usd` read the run's
+  metrics; a target that reports none fails the check.
+- **Rubric caps.** `Rubric.caps` drop the grade to a ceiling when a
+  contradicted claim, a missing receipt or an ungrounded answer is found;
+  the runner applies them after the verdict and records `caps_applied`.
+- **Repeats.** `EvalRunner(repeats=)` or `arun(cases, repeats=)` reads every
+  case several times. A case passes only when every graded reading passed
+  (pass^k), the reading shown is the most pessimistic, `EvalResult.samples`
+  keeps them all, and `EvalResult.consistency` flags a case whose readings
+  disagreed by more than the gate; the report counts `unstable` cases and
+  the summary prints `pass k/n`.
+- **Judge panels and second opinions.** `EvalRunner(judges=[...])` grades
+  every judged answer with each judge; the first scores the case,
+  `EvalResult.panel` records the panel's agreement and `EvalResult.trust`
+  the decision between the first two judges (`trusted`,
+  `calibration_required`, `rejected`), which the summary prints.
+- **Pairwise comparison in both orders.** `LLMJudge.compare` asks which of
+  two answers better satisfies the rubric, once in each order; a preference
+  that flips with the position is a `tie` with `consistent=False`.
+- **`locus.evaluation.reliability`.** Pure functions over verdicts and grade
+  pairs: `consistency`, `panel_agreement`, `trust_decision`, `cohen_kappa`,
+  `calibration_drift`, `wilson_interval`, `bootstrap_ci` and
+  `publication_gates`.
+- **Comparable reports.** Every `EvalReport` carries a `fingerprint` of the
+  cases it measured (`suite_fingerprint`), `by_tag` counts, `check_failures`,
+  the judge models and rubric revisions seen, and `save` / `load` /
+  `to_markdown`. `diff_reports` compares two reports case by case (regressed,
+  improved, added, removed, score and dimension deltas, newly failing
+  checks) and refuses two different suites unless forced. `EvalGate` is the
+  rule a build applies (pass rate, average, not graded, unstable, and
+  against a baseline no regressions or a bounded average drop), reporting
+  every reason it failed.
+- **Cases as data.** `load_cases` reads a JSON, JSONL or YAML file of cases,
+  with a top-level rubric applied to cases that name none; `dump_cases`
+  writes one back.
+- **`locus eval`.** `run` loads cases and an agent (and optionally a judge
+  and a rubric), prints the report, saves it and exits with the gate's
+  verdict; `diff`, `gate` and `summary` work on saved reports, with
+  `--markdown` tables for pull-request comments. How-to: *Evaluate an agent
+  in CI*.
+- **Notebook 56** now covers the rubric with a judge, receipts, repeats and
+  a saved, diffed, gated pair of reports.
+
+### Changed
+
+- **A judge that returns no verdict leaves the case not graded.** An empty
+  reply, prose without JSON, a call to another tool or no scored dimension
+  is `Verdict(abstained=True)`. The result carries `not_graded_reason`, the
+  report counts it under `EvalReport.not_graded` and leaves it out of
+  `failed` and `avg_score`, and the summary prints `[NOT GRADED]` with the
+  reason. The `judge_unparseable:...` check is still recorded, so nothing
+  that used to be visible is hidden.
+- **Self-graded suites are named.** When the judge model id equals the
+  model under test, `provenance.self_graded` is stamped and the report
+  summary ends with a warning. The case is not failed for it.
+
 ### Fixed
 
 - `python -m locus.runner` reports every command the harness ran as a
@@ -516,7 +1396,7 @@ policy.
   RAG, grounding, guardrails and the admission gate, observability, serving,
   skills, providers), a "Verified on OCI" section with the 27 October 2026
   model matrix, a compact control-layer section, and a comparison with
-  LangGraph and Strands Agents (new `concepts/compare.md`). The Concepts
+  other agent SDKs (`concepts/compare.md`, since removed). The Concepts
   navigation follows the same order: start here, multi-agent shapes, the
   harness, control layer, providers. The OCI models page carries the verified
   matrix and corrects the Responses-API note (availability is per region).

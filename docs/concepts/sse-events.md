@@ -10,7 +10,7 @@ component-visible action (see [Observability](observability.md) for the
 hooks that ship it). Every event carries a stable `event_type` string
 keyed by the component that produced it (`agent.*`, `multiagent.*`,
 `composition.*`, `router.*`, `rag.*`, `memory.*`, `model.*`, `a2a.*`,
-`skills.*`, `deepagent.*`, `research.*`, `tool.*`, `harness.*`).
+`skills.*`, `deepagent.*`, `research.*`, `tool.*`, `control.*`, `harness.*`).
 
 Each action — every `lookup_order`, `issue_refund`, `isolate_host` —
 surfaces as a timestamped, span-tied event you can render live or replay
@@ -25,7 +25,7 @@ from the in-memory history buffer.
     pipeline — but it is **not** a complete or tamper-evident
     audit trail on its own. Forward events to durable storage if you need
     retention, and route security decisions through the
-    [`AuditTrail`](agentic-ai-security.md) for a tamper-evident record.
+    [`AuditTrail`](control-layer.md) for a tamper-evident record.
 
 This page is the **wire-format contract**. A browser renderer, the
 JSON log adapter, and any downstream OTEL bridge consume from it. If you
@@ -65,7 +65,7 @@ for every iteration of the inner loop.
 | `agent.model.completed` | `content_preview`, `tool_call_count`, `stop_reason` | Not emitted by the `Agent.run` bridge (the loop never yields `ModelCompleteEvent`); `EventBusHook` publishes its own `agent.model.completed` with `stop_reason`, `content_length` |
 | `agent.tokens.used` | `prompt_tokens`, `completion_tokens`, `total_tokens` | Not currently emitted: bridged only from `ModelCompleteEvent`, which the loop never yields |
 | `agent.interrupt` | `interrupt_id`, `question_preview`, `options` | Human-in-the-loop (HITL) pause |
-| `agent.context.compacted` | `iteration`, `stage` (`"prune"` \| `"summarize"` \| `"truncate"`), `tokens_before`, `tokens_after`, `threshold`, `exhausted` | Context compaction; `exhausted` means the run ends with `context_exhausted` |
+| `agent.context.compacted` | `iteration`, `stage` (`"prune"` \| `"summarize"` \| `"truncate"` \| `"native"` \| `"window"` \| `"relevance"`), `tokens_before`, `tokens_after`, `threshold`, `exhausted`, `tier` (tiered compaction only) | Context compaction; `exhausted` means the run ends with `context_exhausted`. A `TieredCompaction` publishes one event per tier that ran, in order, `tier` naming it (`clear_tool_results`, `sliding_window`, `native`, `summarize`, `relevance`) and each `tokens_before` continuing the previous `tokens_after`; the plain `ContextCompactor` sends no `tier` |
 | `agent.terminate` | `reason`, `iterations_used`, `final_confidence`, `total_tool_calls`, `final_message_preview` | One per dispatch |
 | `agent.model.retry` | `attempt`, `max_retries`, `delay_seconds`, `reason` | `ModelRetryHook` only |
 | `agent.steering.applied` | `action`, `tool_name`, `reason` | `SteeringHook` only |
@@ -155,7 +155,7 @@ a hold for human approval, and `allow: true` alone is an allow.
 
 | Event | Payload |
 |---|---|
-| `memory.checkpoint.saved` | `thread_id`, `iteration`, `backend`, `trigger` (`"every_n_iterations"` \| `"final"` \| `"graph_interrupt"`) |
+| `memory.checkpoint.saved` | `thread_id`, `iteration`, `backend`, `trigger` (`"every_n_iterations"` \| `"final"` \| `"graph_interrupt"`), `durability` (`"sync"` \| `"async"` \| `"exit"`; agent runs only) |
 | `memory.checkpoint.loaded` | `thread_id`, `iteration`, `backend`, `resume_node` (graph only) |
 | `memory.conversation.pruned` | `strategy="sliding_window"`, `window_size`, `removed_count` |
 | `memory.compactor.triggered` | `strategy="summarizing"`, `messages_before`, `threshold` |
@@ -221,18 +221,33 @@ Emitted by `create_research_workflow` / individual node primitives from
 | `research.regenerate.completed` | `regeneration` (attempt index) |
 | `research.replan` | `replan` (iteration), `ungrounded_count`, `prompt_preview` |
 
-### `tool.*` — sandboxed tool execution
+### `tool.*` — sandboxed tool execution and tool-call integrity
 
 Emitted around each run of a tool declared with `@tool(sandbox=...)`.
 `tool.sandbox.denied` comes from `SandboxEnforcerHook` instead: it fires
 when a tool carries a label listed in `ControlPolicy.require_sandbox_for`
 but has no sandbox, and the hook then cancels that call.
+`tool.integrity.refused` comes from the executor with
+`tool_call_integrity` on: a call whose arguments changed after the model
+produced them, without a re-sign, was not run.
 
 | Event | Payload |
 |---|---|
 | `tool.sandbox.started` | `tool`, `provider`, `timeout` |
 | `tool.sandbox.completed` | `tool`, `ok`, `exit_code`, `timed_out`, `duration_ms` |
 | `tool.sandbox.denied` | `tool`, `labels` (the labels that required a sandbox) |
+| `tool.integrity.refused` | `tool`, `call_id`, `reason` (`mismatch` / `tainted`), `expected_digest`, `actual_digest`, `signed_by`, `mutated_by`, `disposition` (`refuse` / `abort`), `key_id` |
+
+### `control.*` — admission control
+
+Emitted by `ToolCallJudge` for every verdict it reaches, whether it was
+installed as a hook or asked by `gate_tool(judge=...)` on the way into
+`admit()`. A read-only skip and a cache hit are verdicts too, so a consumer
+can see what the judge did and did not spend a model call on.
+
+| Event | Payload |
+|---|---|
+| `control.judge.decided` | `tool_name`, `verdict` (`allow` \| `hold` \| `deny`), `reason`, `judge_model`, `source` (`model` \| `cache` \| `read_only` \| `budget` \| `error`), `cache_hit` |
 
 ### `harness.*` — coding-harness commands
 
@@ -264,6 +279,64 @@ Started/completed events that share a `span_id` (`agent.tool.*`,
 `multiagent.graph.node.*`) let consumers compute durations without
 subtracting timestamps and survive interleaved events from concurrent
 runs.
+
+## Events and spans
+
+The bus and `TelemetryHook` watch the same run from two sides: the bus
+carries one event per visible action, the hook files the run as
+OpenTelemetry spans named per the GenAI semantic conventions — one
+`invoke_agent <name>` span per run, a `locus.iteration` span per ReAct
+iteration, a `chat <model>` span (CLIENT) per model call and an
+`execute_tool <tool>` span per tool call ([Observability — Traces and
+metrics over OTLP](observability.md#traces-and-metrics-over-otlp) lists
+their attributes). A bus event never creates a span; this table says
+which span each event falls in, so a consumer that has both — an SSE
+timeline next to a trace view — can line them up. "Inside *X*" means the
+event fires while span *X* is open; "start of" and "end of" mean the event
+and the span boundary come from the same moment of the loop.
+
+| Event | Span |
+|---|---|
+| `agent.invocation.started` / `agent.invocation.completed` (`EventBusHook`) | start / end of `invoke_agent` |
+| `agent.iteration.started` / `agent.iteration.completed` (`EventBusHook`) | start / end of `locus.iteration` |
+| `agent.model.started` / `agent.model.completed` (`EventBusHook`) | start / end of `chat`; a hook-requested retry (`agent.model.retry`) ends that span and the retried call gets a second `chat` span in the same iteration |
+| `agent.tool.started` / `agent.tool.completed` (both shapes) | start / end of `execute_tool`; the `EventBusHook` shape's `tool_call_id` is the span's `gen_ai.tool.call.id`. A call a hook cancels still has its span — the after-tool hooks run with the cancellation message as the result — and the span ends without `error.type`; the event's payload is what says it was cancelled |
+| `agent.think` | inside `locus.iteration`, after that iteration's `chat` span ended |
+| `agent.model.chunk` | inside `chat` (streaming) |
+| `agent.model.completed`, `agent.tokens.used` (bridge) | not emitted (see above); the token counts are on the `chat` span's `gen_ai.usage.*` attributes and the run totals on `invoke_agent` |
+| `agent.reflect`, `agent.grounding` | inside `locus.iteration`; the reflection and grounding model calls go through the model directly, not the hooked loop, so they have no `chat` span of their own |
+| `agent.context.compacted` | inside `locus.iteration`, before the `chat` span (the summarising call of a `summarize` stage has no `chat` span of its own) |
+| `agent.interrupt` | inside `invoke_agent`; the run returns paused, so the span ends, and the resumed run is a new `invoke_agent` span with the same `gen_ai.conversation.id` |
+| `agent.terminate` | end of `invoke_agent` |
+| `agent.model.retry` | between two `chat` spans of one `locus.iteration`: `ModelRetryHook` asks the loop for another call, so the discarded call's span ends (`locus.retry_requested`) and the retried call gets its own (`locus.retry_attempt`). The provider-level retries of the agent's `model_retry` policy are not this event and happen inside one `chat` span |
+| `agent.steering.applied`, `agent.guardrail.triggered` | inside `locus.iteration`, next to the `chat` or `execute_tool` span of the call the hook acted on |
+| `multiagent.orchestrator.*`, `multiagent.handoff.*` | inside the orchestrator's `invoke_agent`; a specialist that carries the hook files its own `invoke_agent <specialist>` under the tool call in flight — the orchestrator's `execute_tool` span — when the specialist is exposed as a tool, else under the span current when it starts |
+| `multiagent.specialist.started` / `multiagent.specialist.completed` | start / end of the specialist's run, so of its `invoke_agent` span when it has the hook |
+| `multiagent.graph.node.*` | no span; a node that runs an agent produces that agent's `invoke_agent` |
+| `composition.*` | no span; each stage's agent run is an `invoke_agent` |
+| `router.*` | no span; the compiled runnable's agents produce `invoke_agent` spans |
+| `rag.query.started` / `rag.query.completed` | inside `execute_tool` when retrieval is a tool, else inside `locus.iteration` |
+| `memory.checkpoint.saved` | inside `locus.iteration` (`every_n_iterations`), or at the end of `invoke_agent` (`final`) |
+| `memory.checkpoint.loaded` | before `invoke_agent` of the resumed run |
+| `memory.conversation.pruned`, `memory.compactor.*`, `memory.manager.injected` | inside `locus.iteration`, before the `chat` span |
+| `memory.manager.extracted`, `memory.manager.extract_failed` | at the end of `invoke_agent` (inline), or after it (background) |
+| `model.fallback`, `model.fallback.breaker` | inside the `chat` span of the call that failed over; `gen_ai.request.model` on that span is the hook's configured model, so with a `FallbackChain` pass `TelemetryHook(model=...)` |
+| `a2a.task.received` / `a2a.task.completed` | bracket the served request; the agent's `invoke_agent` is a child of the caller's span when the request carried `traceparent` |
+| `a2a.client.send` / `a2a.client.received` | bracket the HTTP call; made from a tool, it sits inside that tool's `execute_tool` span and carries the span as `traceparent` |
+| `skills.activated` | inside `locus.iteration`, before the `chat` span |
+| `deepagent.subagent.spawned` / `deepagent.subagent.completed` | the sub-agent's own `invoke_agent`, under the `execute_tool` span of the spawning tool (the tool call in flight when its run starts) |
+| `deepagent.fs.*`, `deepagent.todo.*` | inside the `execute_tool` span of the file or todo tool |
+| `research.*` | no span; the agent runs the workflow drives are `invoke_agent` spans |
+| `tool.sandbox.started` / `tool.sandbox.completed` | inside the sandboxed tool's `execute_tool` span |
+| `tool.sandbox.denied` | the denied call's `execute_tool` span: the before-tool hooks saw it start and the after-tool hooks end it with the enforcer's refusal as the result |
+| `tool.integrity.refused` | the refused call's `execute_tool` span, which ends in error (`error.type`) |
+| `control.judge.decided` | inside `locus.iteration`, before the judged call's `execute_tool` span; the judge's own model call goes to the model directly and has no `chat` span |
+| `harness.exec` | inside the shell tool's `execute_tool` span |
+
+Under `TelemetryHook(semconv="locus-legacy")` the spans are
+`agent.invocation`, `agent.iteration.<n>` and `tool.<name>`, with no
+model-call spans; the rows above map the same way with `chat` read as
+"inside the iteration".
 
 ## Cost when no one subscribes
 

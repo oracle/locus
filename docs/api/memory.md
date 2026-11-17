@@ -29,6 +29,26 @@ For the concepts, start with [Long-term memory](../concepts/memory-manager.md),
 ::: locus.memory.conversation.SlidingWindowManager
 ::: locus.memory.conversation.SummarizingManager
 
+### Compaction
+
+`ContextCompactor` is the default for an agent whose window is known;
+`TieredCompaction` runs tiers in order, each at its own fraction of the
+window; `pin()` keeps a message through every stage and tier;
+`ToolResultOffload` moves large tool results out of the conversation by
+handle. [Conversation management](../concepts/conversation-management.md#compaction-keep-long-threads-in-budget)
+has the behaviour and the defaults.
+
+::: locus.memory.compaction.ContextCompactor
+::: locus.memory.compaction.pin
+::: locus.memory.tiers.TieredCompaction
+::: locus.memory.tiers.CompactionTier
+::: locus.memory.tiers.ClearToolResults
+::: locus.memory.tiers.SlidingWindow
+::: locus.memory.tiers.Summarize
+::: locus.memory.tiers.Native
+::: locus.memory.tiers.Relevance
+::: locus.memory.offload.ToolResultOffload
+
 ## Cross-thread store
 
 The cross-thread KV the long-term memory manager writes to. Four

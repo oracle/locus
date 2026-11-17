@@ -50,12 +50,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev,sdk,mysql,pgvector,chroma,mem0]"
 
-      # The security-domain tooling is a separate distribution in this repo
-      # (packages/locus-sdk-security). Install it from the checkout so its
-      # suite runs here too — it is not on PyPI.
-      - name: Install locus-sdk-security
-        run: pip install -e "packages/locus-sdk-security"
-
       - name: Run unit tests with coverage
         # Hard org-wide gate: ``--cov-fail-under=95`` makes this step (and the
         # job) FAIL when deterministic unit line+branch coverage drops below
@@ -66,9 +60,8 @@ jobs:
         # ``coverage.xml`` is uploaded as an artifact so reviewers can
         # pull it into any local viewer.
         run: |
-          pytest tests/unit/ packages/locus-sdk-security/tests/unit/ \
+          pytest tests/unit/ \
             --cov=src/locus \
-            --cov=packages/locus-sdk-security/src/locus_security \
             --cov-report=term-missing \
             --cov-report=json \
             --cov-report=xml \

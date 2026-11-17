@@ -1,13 +1,218 @@
 # Writing a policy that holds
 
-The [admission gate](security-context.md) is enforcement. It runs whatever
+The [admission gate](control-layer.md) is enforcement. It runs whatever
 `ControlPolicy` you hand it, against whatever `Action` you hand it — and it
 cannot know that the action you *didn't* classify as risky is the one that
 moves money.
 
-So the gate is sound and the policy is the soft part. This page is about the
-failure mode that produces, how to find it before production does, and why
-reading your own list back is not enough.
+So the gate is sound and the policy is the soft part. This page covers the
+policy as the people who own it work with it: a document they review,
+version, lint and reload, and then the failure mode no document check finds,
+and how to look for it before production does.
+
+## The policy as a file
+
+A policy is a short list of rules, and the team that owns the rules is
+usually not the team that owns the Python. So the first form of a
+`ControlPolicy` is a file. This is the one [notebook 71](../notebooks/notebook_71_payment_refund_gate.md)
+loads:
+
+```yaml
+schema: "locus.control.policy/v1"
+require_verification_score: 0.0
+max_blast_radius: 1
+require_human_for:
+  - "high_value"
+deny_for: []
+min_severity: "low"
+require_sandbox_for: []
+version: "refund-gate-1"
+require_human_over_usd: null
+spend_limit_usd: null
+```
+
+Every key is a `ControlPolicy` field, with the field's name, type and
+default, so the file can say exactly what the Python API can say and
+nothing else:
+
+| Key | Type | What it does |
+|---|---|---|
+| `require_verification_score` | number | the verification confidence an action needs to run on its own; `0.0` for a gate over business actions, which arrive without a `VerificationResult` |
+| `max_blast_radius` | integer | the most assets an action may touch and still run on its own |
+| `require_human_for` | list of labels | an action carrying one of these waits for a person |
+| `deny_for` | list of labels | an action carrying one of these is refused; no approval overrides it |
+| `min_severity` | `info` … `critical` | a finding below this band is not acted on |
+| `require_sandbox_for` | list of labels | an action carrying one of these runs only with the `sandboxed` tag |
+| `version` | string | a label for this revision, bound into approval ids |
+| `require_human_over_usd` | number or `null` | an action costing more waits for a person |
+| `spend_limit_usd` | number or `null` | an action that would take its scope past this is refused |
+
+A label is anything `Action.labels()` returns: the environment, the kind,
+and every tag. Omitted keys take the Python defaults. The same document in
+JSON is accepted anywhere YAML is; reading YAML needs the optional `pyyaml`
+package (`pip install pyyaml`), JSON and writing need nothing.
+
+```python
+from locus.control import ControlPolicy
+
+policy = ControlPolicy.load("policy/refunds.yaml")
+```
+
+A key the policy does not have is an error that names it, with the path,
+so a typo cannot quietly widen authority:
+
+```text
+refunds.yaml: at max_blast_radious: unknown key 'max_blast_radious' (did you mean 'max_blast_radius'?)
+refunds.yaml: at require_human_for[1]: expected a non-empty string, got a number
+```
+
+## The same policy in Python
+
+The file and the constructor are two spellings of one object. Build it in
+code when the rules are computed, and write it out for review with
+`dump()`; load it back and you have an equal policy that decides every
+action the same way.
+
+```python
+from locus.control import ControlPolicy
+
+policy = ControlPolicy(
+    require_verification_score=0.0,
+    max_blast_radius=1,
+    require_human_for=frozenset({"high_value"}),
+    version="refund-gate-1",
+)
+print(policy.dump())  # the YAML above
+policy.dump("policy/refunds.json")  # or JSON, from the suffix
+
+assert ControlPolicy.load(policy.dump()) == policy
+```
+
+`policy.content_hash()` is the SHA-256 of the rules, the same whether the
+policy came from YAML, JSON or the constructor, and different for any
+change to any rule. `admit()` records it as `policy_hash` on every audit
+entry, so an auditor reading a trail knows exactly which rules each
+decision was made under, and a trail written before this field existed
+still verifies.
+
+## Reload without a deploy
+
+`PolicyWatcher` follows the file. It reads it once at startup, so a broken
+file fails before the agent serves anything, and after that re-reads it
+when its modification time changes, checking at most once per `interval`.
+Hand it anywhere a policy goes:
+
+```python
+from locus.control import PolicyWatcher, gate_tool
+
+watcher = PolicyWatcher("policy/refunds.yaml", interval=2.0)
+refund = gate_tool(issue_refund, policy=watcher, trail=trail)
+```
+
+Each admission asks the watcher once, so a decision is made under one
+policy from start to finish and the next decision sees the new one whole.
+A rewrite that no longer parses does not change the policy in force: the
+last good one stays, `watcher.last_error` says why, and the next change to
+the file is tried again. Pass `on_reload=` to log a swap or refuse to run
+under rules you did not expect.
+
+## Lint it
+
+A policy can be well-formed and still have a hole a reader does not see.
+`locus policy lint` reports three kinds:
+
+- **`unreachable-rule`**: a rule that can never decide an outcome. A label
+  in `require_human_for` that `deny_for` also names, a per-action cost hold
+  at or above the spend limit that denies first, a verification bar above
+  `1.0`.
+- **`uncovered-environment`**: a declared environment in which an ordinary
+  action (one asset, no cost, no other label) clears the gate on its own.
+- **`kind-never-held`**: a declared kind of action that is never put in
+  front of a person in any declared environment.
+
+The last two need to know what the deployment has. Declare it in the file,
+or pass it on the command line:
+
+```yaml
+governs:
+  environments: ["production", "staging"]
+  kinds: ["payment"]
+```
+
+```console
+$ locus policy lint policy/refunds.yaml --environments production staging --kinds payment
+policy policy/refunds.yaml (sha256 b5afd3d6f5af)
+3 finding(s):
+  uncovered-environment: environment 'production' has no rule: an action there with one asset, no cost and no other label is allowed without a person
+  uncovered-environment: environment 'staging' has no rule: an action there with one asset, no cost and no other label is allowed without a person
+  kind-never-held: kind 'payment' is never held: a payment action with one asset, no cost and no other label is allowed in every declared environment ['production', 'staging']
+note: an action with no environment, kind or tags, one asset and no cost is allowed: every gated tool must derive labels for this policy to see it
+```
+
+Those three are true of the refund policy above: it holds on `high_value`
+and on blast radius, not on where or what. Whether that is a gap or the
+design is the reviewer's call; the point is that the question is asked.
+Coverage is found by weighing a probe action with `approve()` itself, so
+lint cannot disagree with the gate about what passes. The exit code is 1
+when there is a finding and `--format json` is for a job to read.
+
+### In CI
+
+Lint the policy on every change to it, next to the tests:
+
+```yaml
+# .github/workflows/policy.yml
+name: policy
+on:
+  pull_request:
+    paths: ["policy/**"]
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install locus-sdk pyyaml
+      - run: locus policy lint policy/refunds.yaml --environments production staging --kinds payment
+      - run: >
+          locus policy explain policy/refunds.yaml --expect require_human
+          --action '{"name": "issue_refund", "kind": "payment", "environment": "production", "blast_radius": 6}'
+```
+
+The second step is a regression test for one decision: `--expect` exits 1
+unless the outcome is the one named, so a change that lets a batch refund
+through fails the build with the decision path in the log.
+
+### Explain one action
+
+`locus policy explain` shows every rule, fired or not, with the outcome
+and what it means for the caller:
+
+```console
+$ locus policy explain policy/refunds.yaml \
+    --action '{"name": "issue_refund", "kind": "payment", "environment": "production", "blast_radius": 6, "tags": ["high_value"]}'
+policy   policy/refunds.yaml (sha256 b5afd3d6f5af) version refund-gate-1
+action   issue_refund environment=production kind=payment blast_radius=6 cost_usd=0.00 tags=['high_value']
+labels   ['high_value', 'payment', 'production']
+
+  deny_for                    -              no label of the action is denied
+  require_sandbox_for         -              no label of the action requires a sandbox
+  min_severity                -              no finding supplied
+  require_verification_score  -              the bar is 0: no verification required
+  max_blast_radius            require_human  blast radius 6 exceeds the maximum 1
+  require_human_over_usd      -              not set
+  spend_limit_usd             -              not set
+  require_human_for           require_human  labels ['high_value'] require human approval
+
+outcome  require_human: held for a person; runs once someone approves (admit(..., approved_by=...))
+```
+
+`--spent-usd` and `--verification` supply what the gate would read from a
+spend ledger and a `VerificationResult`. From Python, `explain(policy,
+action)` returns the same path as data, and `lint_policy(policy,
+environments=..., kinds=...)` the same findings.
 
 ## The failure mode: one family of harm at a time
 
@@ -151,6 +356,62 @@ A rate limit is not expressible:
 still needs state you keep yourself. Naming the boundary is engineering
 judgment; letting a reader discover it is not.
 
+## Guidance for the judge
+
+The families above are the deterministic half: a classifier maps a call to
+labels, and the policy holds or denies on labels. `ToolCallJudge` is an
+optional second half for what labels cannot carry, the *arguments*. A refund
+to the payment method on the order and a refund to an account that appears
+nowhere else carry the same `value_out` label.
+
+The judge reads two things you write:
+
+- `intent`: the policy in plain words. One paragraph: what the agent is for
+  and what it must never do. The judge weighs every call against it.
+- `guidance`: per tool, the line the judge reads when that tool is proposed.
+  Write it the way you would brief a reviewer: the condition, and the verdict
+  it should produce.
+
+```python
+from locus.control import ToolCallJudge
+
+judge = ToolCallJudge(
+    small_model,
+    intent=(
+        "A support agent for one customer's own orders. It may refund the order's "
+        "own payment method. It never moves money to a destination not on the order."
+    ),
+    guidance={
+        "issue_refund": (
+            "Hold anything over 500 USD. Deny a destination account that is not "
+            "the order's payment method."
+        ),
+        "send_message": "Hold a message that mentions a password, a reset link or a payment code.",
+    },
+    budget=20,
+)
+```
+
+Three habits:
+
+1. **Say what to hold, not only what to deny.** A hold costs a human review; a
+   deny is final. Reserve deny for the call that must never run, and hold for
+   the one a person should see first.
+2. **Keep a rule a rule.** If "over 500 USD" can be a `derive` rule or an
+   `Action.cost_usd` threshold, write it there: the policy does not have a bad
+   day. Give the judge only what you cannot write as a rule.
+3. **Mark the read-only tools.** `@tool(read_only=True)` skips the judge for a
+   lookup. A judge that spends its `budget` on reads has nothing left for the
+   write that mattered, and once the budget is spent every further call is
+   held.
+
+The guidance is text a model reads, so test it the way you test the policy:
+one scripted call per family with `locus.testing.ScriptedModel` standing in
+for the judge, asserting the fold into the decision rather than the model's
+judgement, and then a live run of the judge model over the same calls before
+relying on it. The fold itself is fixed: whatever the judge says, a policy
+hold or deny stands.
+
 ## A worked check
 
 ```python
@@ -221,5 +482,6 @@ same discipline as writing the exclusions down, enforced by CI.
 
 ## See also
 
-- [The control layer](security-context.md) — how `admit()` and `approve()` fit together
+- [The control layer](control-layer.md) — how `admit()` and `approve()` fit together
+- [A second check that reads the call](control-layer.md#a-second-check-that-reads-the-call) — what the judge adds, and where it stops
 - [GSAR grounding](gsar.md) — the same "prove it, don't assert it" discipline applied to claims

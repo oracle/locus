@@ -38,6 +38,7 @@ pytestmark = [
 pytest.importorskip("openshell")
 
 from locus.harness import OpenShellBackend, build_harness  # noqa: E402
+from locus.harness.testing import run_conformance  # noqa: E402
 
 
 WORKSPACE = os.environ.get("LOCUS_OPENSHELL_WORKSPACE", "default")
@@ -66,6 +67,11 @@ def sandbox() -> Iterator[OpenShellBackend]:
         yield backend
     finally:
         backend.close()
+
+
+def test_the_sandbox_conforms(sandbox: OpenShellBackend) -> None:
+    report = run_conformance(sandbox)
+    assert report.ok, report.summary()
 
 
 def test_files_round_trip_in_the_sandbox(sandbox: OpenShellBackend) -> None:
