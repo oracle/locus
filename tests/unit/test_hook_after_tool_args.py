@@ -143,6 +143,7 @@ def test_after_tool_hook_sees_modified_arguments_from_before_hook() -> None:
             mutated = dict(event.arguments)
             mutated["block_type"] = "minecraft:bedrock"
             event.arguments = mutated
+            event.resign(by="_MutatingHook")  # integrity is on by default
 
     capture = _ActionQueueHook()
     tool_call = ToolCall(

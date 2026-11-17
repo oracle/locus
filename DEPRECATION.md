@@ -14,8 +14,21 @@ deprecations work.
 - **Patch** version bumps are bug fixes only.
 
 Consumers should pin a major (`locus-sdk>=5,<6`) and read the
-CHANGELOG before bumping across majors. For example, 6.0 removed the
-`locus.security` compatibility shim; `locus.control` is the import path.
+CHANGELOG before bumping across majors.
+
+### Removed in 6.0
+
+- The `locus.security` compatibility shim; `locus.control` is the
+  import path.
+- The `locus.loop` package (`ReActLoop`, `LoopRunner`, `BatchRunner`,
+  `StreamingCollector`, the nodes and the router); `Agent` is the
+  supported loop.
+- `FallbackChain.last_tier`; read `response.metadata["fallback"]` or
+  `locus.models.fallback.served_tier()`.
+- The `tool` key on the `tool.integrity.refused` payload; read
+  `tool_name`.
+- `Agent(tool_call_integrity=...)` defaults to `True`; pass `False` to
+  turn the check off.
 
 A deprecated API will:
 
@@ -64,5 +77,5 @@ implementation detail and can change in any release without
 deprecation.
 
 If you're importing from `locus.core.reducers`,
-`locus.loop.nodes._internal`, `locus.agent.agent._parse_*`, or
+`locus.tools.executor._internal`, `locus.agent.agent._parse_*`, or
 anything similar — that is your risk to carry.

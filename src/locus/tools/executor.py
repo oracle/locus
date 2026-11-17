@@ -30,11 +30,6 @@ def find_matching_execution(state: Any, tool_name: str, arguments: dict[str, Any
     structural dict comparison, so a model legitimately re-calling a tool with
     different arguments — a new date, a different order id — misses the cache
     and runs, which is the behaviour you want.
-
-    Lives here rather than in ``locus.loop.nodes``, where it was, because the
-    agent runtime needs it and ``locus.loop`` is deprecated. A supported
-    runtime reaching into a package scheduled for removal is a removal that
-    cannot happen.
     """
     for prior in reversed(state.tool_executions):
         if prior.tool_name != tool_name:

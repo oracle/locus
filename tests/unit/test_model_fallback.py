@@ -167,7 +167,7 @@ async def test_complete_falls_back_on_provider_errors(status: int) -> None:
     chain = FallbackChain([primary, backup], names=["primary", "backup"])
     response = await chain.complete(_msgs())
     assert response.content == "from-backup"
-    assert chain.last_tier == 1
+    assert response.metadata["fallback"]["tier"] == 1
 
 
 @pytest.mark.parametrize("exc", [TimeoutError(), ConnectionError("reset by peer")])

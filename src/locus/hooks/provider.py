@@ -242,8 +242,8 @@ class BeforeToolCallEvent(ProtectedEvent):
     def integrity(self) -> ToolCallSigner | None:
         """The run's :class:`~locus.tools.integrity.ToolCallSigner`, or ``None``.
 
-        ``None`` when the agent runs without ``tool_call_integrity``, or the
-        event was constructed by hand.
+        ``None`` when the agent runs with ``tool_call_integrity=False``, or
+        the event was constructed by hand.
         """
         ctx = self._run_ctx
         signer: ToolCallSigner | None = getattr(ctx, "integrity", None) if ctx is not None else None
@@ -254,8 +254,8 @@ class BeforeToolCallEvent(ProtectedEvent):
 
         A hook that rewrites ``event.arguments`` calls this afterwards, so the
         call's chain of custody names it; without it the executor refuses the
-        rewritten call when ``tool_call_integrity`` is on. A no-op when it is
-        off, so a hook can call it unconditionally::
+        rewritten call (``tool_call_integrity`` is on by default). A no-op when
+        the check is off, so a hook can call it unconditionally::
 
             event.arguments = redact(event.arguments)
             event.resign(by="PIIRedaction")
