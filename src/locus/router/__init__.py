@@ -64,14 +64,24 @@ Quick start::
 
     result = await router.dispatch("What does X mean?")
     print(result.text, result.protocol_id)
+
+The extractor is one :class:`RequestClassifier`; ``Router(classifier=...)``
+takes any other ``async classify(text) -> GoalFrame``, and
+``CognitiveCompiler(protocol_picker=...)`` takes any :class:`ProtocolPicker`.
 """
 
 from __future__ import annotations
 
 from locus.router.capability import HUMAN_SENTINEL, Capability, CapabilityIndex
+from locus.router.classifier import AgentFrameExtractor, RequestClassifier
 from locus.router.compiler import ApprovalCallback, CognitiveCompiler
 from locus.router.goal_frame import Complexity, GoalFrame, Risk, TaskType
-from locus.router.picker import LLMProtocolPicker, PickedProtocol, PickerError
+from locus.router.picker import (
+    LLMProtocolPicker,
+    PickedProtocol,
+    PickerError,
+    ProtocolPicker,
+)
 from locus.router.policy import PolicyDeniedError, PolicyGate, PolicyVerdict
 from locus.router.protocol import (
     BuilderContext,
@@ -95,6 +105,7 @@ from locus.router.skill_index import SkillIndex
 
 __all__ = [
     "A2ARunnable",
+    "AgentFrameExtractor",
     "AgentRunnable",
     "ApprovalCallback",
     "BuilderContext",
@@ -116,7 +127,9 @@ __all__ = [
     "PolicyGate",
     "PolicyVerdict",
     "Protocol",
+    "ProtocolPicker",
     "ProtocolRegistry",
+    "RequestClassifier",
     "Risk",
     "Router",
     "Runnable",

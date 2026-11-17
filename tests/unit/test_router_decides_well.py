@@ -18,13 +18,16 @@ are easy to conflate:
 
 from __future__ import annotations
 
+from typing import Any
+from unittest.mock import AsyncMock
+
 import pytest
 
 from locus.router.capability import CapabilityIndex
 from locus.router.compiler import CognitiveCompiler
 from locus.router.goal_frame import Complexity, GoalFrame, Risk, TaskType
-from locus.router.policy import PolicyGate
-from locus.router.protocol import ProtocolRegistry, builtin_protocols
+from locus.router.policy import PolicyDeniedError, PolicyGate
+from locus.router.protocol import ProtocolRegistry, _rank_key, builtin_protocols
 from locus.tools.decorator import tool
 from locus.tools.registry import create_registry
 
@@ -79,6 +82,12 @@ def _compiler(policy: PolicyGate | None = None, **kw: object) -> CognitiveCompil
     )
 
 
+def _registry() -> ProtocolRegistry:
+    registry = ProtocolRegistry()
+    registry.register_many(builtin_protocols())
+    return registry
+
+
 def _frame(**kw: object) -> GoalFrame:
     base: dict[str, object] = {
         "primary_goal": TaskType.ANSWER,
@@ -88,6 +97,15 @@ def _frame(**kw: object) -> GoalFrame:
     }
     base.update(kw)
     return GoalFrame(**base)  # type: ignore[arg-type]
+
+
+def _shape(runnable: Any) -> str | None:
+    """The protocol id a compiled runnable carries, through an approval wrapper."""
+    direct = getattr(runnable, "protocol_id", None)
+    if direct is not None:
+        return str(direct)
+    inner = getattr(runnable, "inner", None)
+    return None if inner is None else str(inner.protocol_id)
 
 
 #: (what a person asked, the frame an extractor would author for it).
@@ -197,26 +215,30 @@ async def test_the_choices_that_are_clearly_right_stay_right() -> None:
 
     Not every ask has an obviously correct shape, so this covers only the ones
     where a wrong answer would be plainly wrong — a question answered by a
-    committee, or a code request that never reaches the code loop.
+    committee, or a multi-step code request that never reaches the code loop.
     """
-    expected = {
-        TaskType.ANSWER: "direct_response",
-        TaskType.EXPLAIN: "direct_response",
-        TaskType.PLAN: "plan_execute_validate",
-        TaskType.GENERATE_CODE: "codegen_test_validate",
-        TaskType.DIAGNOSE: "specialist_fanout",
-    }
-    for task, shape in expected.items():
+    expected = [
+        (TaskType.ANSWER, Complexity.LOW, "direct_response"),
+        (TaskType.EXPLAIN, Complexity.LOW, "direct_response"),
+        (TaskType.PLAN, Complexity.HIGH, "plan_execute_validate"),
+        # Flipped deliberately (#342): a LOW-complexity frame compiles to
+        # `direct_response` before the goal gate, whatever its verb, so a
+        # one-step code request ("write the one-liner that…") is one reply.
+        # The row below keeps the code loop pinned for the request it exists
+        # for, the multi-step one.
+        (TaskType.GENERATE_CODE, Complexity.LOW, "direct_response"),
+        (TaskType.GENERATE_CODE, Complexity.MEDIUM, "codegen_test_validate"),
+        (TaskType.DIAGNOSE, Complexity.HIGH, "specialist_fanout"),
+    ]
+    for task, complexity, shape in expected:
         frame = _frame(
             primary_goal=task,
-            complexity=Complexity.HIGH
-            if task in (TaskType.PLAN, TaskType.DIAGNOSE)
-            else Complexity.LOW,
+            complexity=complexity,
             requires_code_generation=task is TaskType.GENERATE_CODE,
         )
         runnable = await _compiler().compile(frame)
-        assert getattr(runnable, "protocol_id", None) == shape, (
-            f"{task.value} routed to {getattr(runnable, 'protocol_id', None)}, expected {shape}"
+        assert _shape(runnable) == shape, (
+            f"{task.value}/{complexity.value} routed to {_shape(runnable)}, expected {shape}"
         )
 
 
@@ -240,9 +262,148 @@ async def test_asking_to_BUILD_something_does_not_reach_the_code_loop() -> None:
     or the code loop is being missed for exactly the request it exists to serve.
 
     Asserted as-is so the behaviour is visible and a deliberate change to it
-    breaks this test rather than passing silently.
+    breaks this test rather than passing silently. At MEDIUM complexity: a
+    LOW-complexity BUILD is one reply and takes the short-circuit to
+    `direct_response`, which says nothing about BUILD versus the code loop.
     """
     runnable = await _compiler().compile(
-        _frame(primary_goal=TaskType.BUILD, requires_code_generation=True)
+        _frame(
+            primary_goal=TaskType.BUILD,
+            complexity=Complexity.MEDIUM,
+            requires_code_generation=True,
+        )
     )
     assert getattr(runnable, "protocol_id", None) == "plan_execute_validate"
+
+
+# ---------------------------------------------------------------------------
+# `direct_response` handles DIAGNOSE (#342) — ranked by rule alone, with no
+# short-circuit in play, so the `handles` row is pinned on its own.
+# ---------------------------------------------------------------------------
+
+
+def test_a_one_step_diagnosis_ranks_the_direct_answer_first() -> None:
+    """ "Why did this alert fire?" at LOW complexity is one reply, not a committee."""
+    registry = _registry()
+    frame = _frame(primary_goal=TaskType.DIAGNOSE)
+    ranked = sorted(registry.filter_candidates(frame), key=lambda p: _rank_key(p, frame))
+    assert [p.id for p in ranked] == ["direct_response", "specialist_fanout"]
+    assert registry.select(frame).id == "direct_response"
+
+
+@pytest.mark.parametrize("complexity", [Complexity.MEDIUM, Complexity.HIGH])
+def test_a_harder_diagnosis_still_fans_out(complexity: Complexity) -> None:
+    """The canonical shape keeps every diagnosis that is more than one step."""
+    chosen = _registry().select(_frame(primary_goal=TaskType.DIAGNOSE, complexity=complexity))
+    assert chosen.id == "specialist_fanout"
+
+
+# ---------------------------------------------------------------------------
+# The LOW-complexity short-circuit (#342): one step of work is one reply,
+# whatever verb the extractor framed it with.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("task", list(TaskType), ids=[t.value for t in TaskType])
+async def test_a_one_step_ask_is_answered_directly_whatever_its_verb(task: TaskType) -> None:
+    compiler = _compiler()
+    frame = _frame(primary_goal=task)
+    runnable = await compiler.compile(frame)
+    assert _shape(runnable) == "direct_response", f"{task.value} routed to {_shape(runnable)}"
+
+    explanation = compiler.explain(frame)
+    assert explanation.selected_protocol == "direct_response"
+    assert explanation.method == "low_complexity_direct"
+    assert [c.protocol_id for c in explanation.candidates] == ["direct_response"]
+
+
+@pytest.mark.asyncio
+async def test_the_short_circuit_names_itself_on_the_selection_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    selected = AsyncMock()
+    monkeypatch.setattr("locus.router.compiler.emit_protocol_selected", selected)
+    await _compiler().compile(_frame(primary_goal=TaskType.GENERATE_CODE), run_id="r1")
+    assert selected.await_count == 1
+    assert selected.await_args.kwargs == {"method": "low_complexity_direct", "rationale": None}
+
+
+@pytest.mark.asyncio
+async def test_the_short_circuit_needs_low_complexity() -> None:
+    """MEDIUM is more than one step: the ordinary filter-and-rank path runs."""
+    compiler = _compiler()
+    frame = _frame(primary_goal=TaskType.GENERATE_CODE, complexity=Complexity.MEDIUM)
+    assert _shape(await compiler.compile(frame)) == "codegen_test_validate"
+    assert compiler.explain(frame).method == "rule_based"
+
+
+@pytest.mark.asyncio
+async def test_the_short_circuit_respects_the_direct_protocols_risk_cap() -> None:
+    """`direct_response` caps at LOW risk; a MEDIUM-risk one-step plan is not its to answer."""
+    compiler = _compiler()
+    frame = _frame(primary_goal=TaskType.PLAN, risk=Risk.MEDIUM)
+    assert _shape(await compiler.compile(frame)) == "plan_execute_validate"
+    assert compiler.explain(frame).method == "rule_based"
+
+
+@pytest.mark.asyncio
+async def test_a_denied_direct_protocol_does_not_short_circuit() -> None:
+    """A deployment that bans the shape gets the ordinary path, not a refusal."""
+    compiler = _compiler(policy=PolicyGate(denied_protocols={"direct_response"}))
+    frame = _frame(primary_goal=TaskType.GENERATE_CODE)
+    assert _shape(await compiler.compile(frame)) == "codegen_test_validate"
+    assert compiler.explain(frame).method == "rule_based"
+    # A goal only the denied shape handles is refused by the gate, as before.
+    with pytest.raises(PolicyDeniedError, match="denied by policy"):
+        await compiler.compile(_frame(primary_goal=TaskType.ANSWER))
+
+
+@pytest.mark.asyncio
+async def test_a_direct_protocol_missing_a_capability_does_not_short_circuit() -> None:
+    direct = next(p for p in builtin_protocols() if p.id == "direct_response")
+    registry = ProtocolRegistry()
+    registry.register(direct.model_copy(update={"requires_capabilities": ["crystal_ball"]}))
+    registry.register_many([p for p in builtin_protocols() if p.id != "direct_response"])
+    compiler = CognitiveCompiler(
+        protocols=registry, capabilities=_capabilities(), policy=PolicyGate(), model=_Model()
+    )
+    assert _shape(await compiler.compile(_frame(primary_goal=TaskType.GENERATE_CODE))) == (
+        "codegen_test_validate"
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_short_circuit_still_runs_the_policy_gate() -> None:
+    """Resolving the shape early does not skip the gate: a held ask stays held."""
+    runnable = await _compiler().compile(
+        _frame(primary_goal=TaskType.ANSWER, approval_required=True)
+    )
+    assert type(runnable).__name__ == "_ApprovalRunnable"
+    assert _shape(runnable) == "direct_response"
+
+
+@pytest.mark.asyncio
+async def test_the_short_circuit_can_be_switched_off() -> None:
+    compiler = _compiler(low_complexity_direct=None)
+    frame = _frame(primary_goal=TaskType.GENERATE_CODE)
+    assert _shape(await compiler.compile(frame)) == "codegen_test_validate"
+    assert compiler.explain(frame).method == "rule_based"
+
+
+def test_explain_accounts_for_every_protocol_under_the_short_circuit() -> None:
+    """No protocol vanishes: the ones the gates would have stopped say which gate,
+    the ones that would have survived say they were never considered."""
+    compiler = _compiler()
+    explanation = compiler.explain(_frame(primary_goal=TaskType.GENERATE_CODE))
+
+    accounted = {c.protocol_id for c in explanation.candidates} | {
+        r.protocol_id for r in explanation.rejected
+    }
+    assert accounted == {p.id for p in compiler.protocols.all()}
+    by_id = {r.protocol_id: r for r in explanation.rejected}
+    assert by_id["codegen_test_validate"].gate == "complexity"
+    assert "before the goal gate" in by_id["codegen_test_validate"].reason
+    assert by_id["debate"].gate == "goal"
+    assert explanation.allowed
+    assert not explanation.requires_approval

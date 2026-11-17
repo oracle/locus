@@ -22,9 +22,27 @@ policy.
   gate's verdict as Markdown with one table row per failed check, for a
   pull-request comment, the way `eval diff` and `eval summary` already
   render with `--markdown`. The exit code is still the gate's verdict. (#484)
+- **`RequestClassifier` and `ProtocolPicker`, the router's two seams.**
+  `Router(classifier=...)` takes any `async classify(text) -> GoalFrame` in
+  place of the extractor agent, which is now wrapped in
+  `AgentFrameExtractor`, the default implementation of the same protocol;
+  `CognitiveCompiler(protocol_picker=...)` takes any `ProtocolPicker`, of
+  which `LLMProtocolPicker` is the one that ships. Behaviour is unchanged
+  by default. (#342)
 
 ### Changed
 
+- **Router: LOW-complexity requests go to `direct_response` before any
+  goal gate.** A frame at `Complexity.LOW` whose risk is within
+  `direct_response`'s `risk_max` compiles to `direct_response` whatever its
+  `primary_goal`; `router.protocol.selected` reports
+  `method="low_complexity_direct"` and `explain()` mirrors it. The
+  `PolicyGate` still runs, a `direct_response` the gate denies sends the
+  frame down the ordinary filter-and-rank path, and
+  `CognitiveCompiler(low_complexity_direct=None)` turns the rule off.
+  `direct_response` also handles `DIAGNOSE` now, so a LOW-complexity
+  diagnosis ranks the direct answer first by rule while MEDIUM and HIGH
+  stay on `specialist_fanout`. (#342)
 - **Docs: notebook 78's captured output, concept pages that link their
   notebooks, the environment-variable reference completed from the source,
   and `Example:` sections on `BaseStore`, `InMemoryStore`, `register_provider`
