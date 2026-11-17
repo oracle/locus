@@ -579,3 +579,181 @@ class TestConcurrentIndexUpdates:
         )
         listed = set(await adapter.list_checkpoints("hot", limit=1000))
         assert listed == {f"cp-{i}" for i in range(1, n, 2)}
+
+
+# ---------------------------------------------------------------------------
+# Two adapter instances over one store — two processes, in effect (#301)
+# ---------------------------------------------------------------------------
+
+
+class _AtomicIndexBackend(_YieldingBackend):
+    """The yielding backend plus the index kept in atomic operations.
+
+    What Redis, PostgreSQL, MySQL and OpenSearch provide: each ``index_*``
+    call reaches the store (the ``await``) and then changes it in one step,
+    so nothing another writer did in between is lost.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.index: dict[str, dict[str, dict[str, Any]]] = {}
+        self.calls: list[str] = []
+
+    async def index_add(self, thread_id: str, entry: dict[str, Any]) -> None:
+        self.calls.append("index_add")
+        await asyncio.sleep(0)
+        self.index.setdefault(thread_id, {})[entry["checkpoint_id"]] = dict(entry)
+
+    async def index_remove(self, thread_id: str, checkpoint_id: str) -> bool:
+        self.calls.append("index_remove")
+        await asyncio.sleep(0)
+        return self.index.get(thread_id, {}).pop(checkpoint_id, None) is not None
+
+    async def index_list(self, thread_id: str) -> list[dict[str, Any]]:
+        self.calls.append("index_list")
+        await asyncio.sleep(0)
+        return list(self.index.get(thread_id, {}).values())
+
+    async def index_clear(self, thread_id: str) -> bool:
+        self.calls.append("index_clear")
+        await asyncio.sleep(0)
+        return self.index.pop(thread_id, None) is not None
+
+
+class _PlainDictBackend:
+    """A dict store with no await points: the adapter's locked read-modify-write cannot interleave."""
+
+    def __init__(self) -> None:
+        self._data: dict[str, Any] = {}
+
+    async def save(self, key: str, data: dict[str, Any]) -> None:
+        self._data[key] = data
+
+    async def load(self, key: str) -> dict[str, Any] | None:
+        return self._data.get(key)
+
+    async def delete(self, key: str) -> bool:
+        return self._data.pop(key, None) is not None
+
+    async def exists(self, key: str) -> bool:
+        return key in self._data
+
+
+async def _two_writers(backend: Any, n: int = 20) -> list[str]:
+    """Two adapters, two separate locks, one store, one thread; what the second lists."""
+    first, second = StorageBackendAdapter(backend), StorageBackendAdapter(backend)
+    await asyncio.gather(
+        *(first.save(_FakeState(), "hot", f"a-{i}") for i in range(n // 2)),
+        *(second.save(_FakeState(), "hot", f"b-{i}") for i in range(n // 2)),
+    )
+    return await second.list_checkpoints("hot", limit=1000)
+
+
+class TestTwoInstancesOverOneStore:
+    async def test_an_atomic_index_keeps_every_entry_across_instances(self) -> None:
+        """The issue's reproduction, on a store that keeps the index itself: 20/20 (#301)."""
+        backend = _AtomicIndexBackend()
+
+        listed = await _two_writers(backend)
+
+        assert len(set(listed)) == 20
+        assert "index_add" in backend.calls
+
+    async def test_the_in_memory_dict_store_keeps_every_entry_through_the_fallback(self) -> None:
+        """Without await points nothing interleaves: the locked read-modify-write is enough."""
+        backend = _PlainDictBackend()
+
+        listed = await _two_writers(backend)
+
+        assert len(set(listed)) == 20
+        assert "hot:_checkpoints" in backend._data, "the fallback keeps the index key"
+
+    async def test_a_store_without_an_atomic_index_shows_the_race_the_protocol_removes(
+        self,
+    ) -> None:
+        """Two locks over one store with await points interleave: the model of two processes."""
+        listed = await _two_writers(_YieldingBackend())
+
+        assert len(set(listed)) < 20, "the two-instance model must show what index_add fixes"
+
+    async def test_concurrent_removes_through_the_atomic_index(self) -> None:
+        backend = _AtomicIndexBackend()
+        adapter = StorageBackendAdapter(backend)
+        for i in range(20):
+            await adapter.save(_FakeState(), "hot", f"cp-{i}")
+
+        await asyncio.gather(*(adapter.delete("hot", f"cp-{i}") for i in range(0, 20, 2)))
+
+        assert set(await adapter.list_checkpoints("hot", limit=1000)) == {
+            f"cp-{i}" for i in range(1, 20, 2)
+        }
+        assert backend.calls.count("index_remove") == 10
+
+
+class TestNativeIndexRouting:
+    async def test_every_index_operation_goes_to_the_store_and_never_to_the_key(self) -> None:
+        backend = _AtomicIndexBackend()
+        adapter = StorageBackendAdapter(backend)
+
+        await adapter.save(_FakeState(), "t", "cp-0")
+        await adapter._update_checkpoint_index("t", "cp-1", datetime.now(UTC))
+        assert await adapter.list_checkpoints("t") == ["cp-1", "cp-0"]
+        assert await adapter.delete("t", "cp-0") is True
+        assert await adapter.delete("t") is True
+
+        assert backend.calls == [
+            "index_add",
+            "index_add",
+            "index_list",
+            "index_remove",
+            "index_list",
+            "index_clear",
+        ]
+        assert "t:_checkpoints" not in backend._data
+        assert backend.index == {}
+
+    async def test_delete_all_reports_a_cleared_index_alone(self) -> None:
+        backend = _AtomicIndexBackend()
+        adapter = StorageBackendAdapter(backend)
+        await backend.index_add("t", {"checkpoint_id": "ghost", "timestamp": "x"})
+
+        assert await adapter.delete("t") is True
+        assert await adapter.delete("t") is False
+
+    async def test_a_store_with_only_some_index_methods_takes_the_fallback(self) -> None:
+        class _Partial(_PlainDictBackend):
+            async def index_add(self, thread_id: str, entry: dict[str, Any]) -> None:
+                raise AssertionError("never called: the store lacks the other three")
+
+        backend = _Partial()
+        adapter = StorageBackendAdapter(backend)
+
+        assert adapter._native_index is None
+        await adapter.save(_FakeState(), "t", "cp-0")
+        assert "t:_checkpoints" in backend._data
+
+    async def test_entries_are_sorted_newest_first_whatever_order_the_store_returns(self) -> None:
+        backend = _AtomicIndexBackend()
+        adapter = StorageBackendAdapter(backend)
+        for checkpoint_id, stamp in (("mid", "02"), ("new", "03"), ("old", "01")):
+            await backend.index_add(
+                "t",
+                {
+                    "checkpoint_id": checkpoint_id,
+                    "timestamp": f"2026-01-{stamp}T00:00:00+00:00",
+                    "metadata": {"n": stamp},
+                    "iteration": 1,
+                    "size": 5,
+                },
+            )
+
+        assert await adapter.list_checkpoints("t") == ["new", "mid", "old"]
+        assert [i.checkpoint_id for i in await adapter.list("t", limit=2)] == ["new", "mid"]
+        latest = await adapter.get_metadata("t")
+        assert latest is not None
+        assert latest["checkpoint_id"] == "new"
+        by_id = await adapter.get_metadata("t", "old")
+        assert by_id is not None
+        assert by_id["metadata"] == {"n": "01"}
+        assert await adapter.get_metadata("t", "none") is None
+        assert await adapter.get_metadata("empty") is None

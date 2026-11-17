@@ -13,9 +13,38 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
+from locus.memory.backends.checkpoint_index import index_key
+
 
 if TYPE_CHECKING:
     from opensearchpy._async.client import AsyncOpenSearch
+
+
+#: How many times the service retries a scripted index update that lost a
+#: version race with another writer before it fails (``retry_on_conflict``).
+_INDEX_UPDATE_RETRIES = 25
+
+#: Painless: replace the entry with the same id, append the new one, newest first.
+_INDEX_ADD_SCRIPT = """
+if (ctx._source.data == null) { ctx._source.data = [:]; }
+if (!(ctx._source.data.checkpoints instanceof List)) { ctx._source.data.checkpoints = []; }
+List entries = ctx._source.data.checkpoints;
+entries.removeIf(e -> e.checkpoint_id == params.entry.checkpoint_id);
+entries.add(params.entry);
+entries.sort((a, b) -> String.valueOf(b.timestamp).compareTo(String.valueOf(a.timestamp)));
+ctx._source.updated_at = params.now;
+"""
+
+#: Painless: drop the entry with the id; a no-op (``noop`` result) when there is none.
+_INDEX_REMOVE_SCRIPT = """
+if (ctx._source.data == null || !(ctx._source.data.checkpoints instanceof List)) {
+  ctx.op = 'none';
+} else if (ctx._source.data.checkpoints.removeIf(e -> e.checkpoint_id == params.checkpoint_id)) {
+  ctx._source.updated_at = params.now;
+} else {
+  ctx.op = 'none';
+}
+"""
 
 
 class OpenSearchConfig(BaseModel):
@@ -50,6 +79,14 @@ class OpenSearchBackend(BaseModel):
         >>> await backend.save("thread_1", state.model_dump())
         >>> data = await backend.load("thread_1")
         >>> results = await backend.search("user query")
+
+    Checkpoint index:
+        Through ``opensearch_checkpointer()`` the thread's checkpoint index
+        is the ``<thread_id>:_checkpoints`` document's ``data``, as it
+        always was, but each change is one scripted ``_update``: the
+        service applies the script to the document's current version and
+        retries it on a version conflict, so two processes saving to one
+        thread never lose an entry.
     """
 
     config: OpenSearchConfig = Field(default_factory=OpenSearchConfig)
@@ -314,6 +351,75 @@ class OpenSearchBackend(BaseModel):
             }
             for hit in result["hits"]["hits"]
         ]
+
+    # -- checkpoint index (CheckpointIndexStore) -------------------------------
+
+    async def index_add(self, thread_id: str, entry: dict[str, Any]) -> None:
+        """Add the entry to the index document in one scripted update (upserting it)."""
+        await self._ensure_index()
+        client = await self._get_client()
+        now = datetime.now(UTC).isoformat()
+        key = index_key(thread_id)
+
+        # ``scripted_upsert``: the script also runs on the upsert body when
+        # the document does not exist yet, so the first entry goes through
+        # the same path as every later one.
+        await client.update(
+            index=self.config.index_name,
+            id=key,
+            body={
+                "scripted_upsert": True,
+                "script": {
+                    "lang": "painless",
+                    "source": _INDEX_ADD_SCRIPT,
+                    "params": {"entry": entry, "now": now},
+                },
+                "upsert": {
+                    "thread_id": key,
+                    "data": {"checkpoints": []},
+                    "created_at": now,
+                    "updated_at": now,
+                    "metadata": {},
+                },
+            },
+            refresh=True,
+            retry_on_conflict=_INDEX_UPDATE_RETRIES,
+        )
+
+    async def index_remove(self, thread_id: str, checkpoint_id: str) -> bool:
+        """Drop the entry from the index document in one scripted update."""
+        await self._ensure_index()
+        client = await self._get_client()
+
+        try:
+            result = await client.update(
+                index=self.config.index_name,
+                id=index_key(thread_id),
+                body={
+                    "script": {
+                        "lang": "painless",
+                        "source": _INDEX_REMOVE_SCRIPT,
+                        "params": {
+                            "checkpoint_id": checkpoint_id,
+                            "now": datetime.now(UTC).isoformat(),
+                        },
+                    },
+                },
+                refresh=True,
+                retry_on_conflict=_INDEX_UPDATE_RETRIES,
+            )
+        except Exception:  # noqa: BLE001 — no index document == nothing to remove
+            return False
+        return bool(result.get("result") == "updated")
+
+    async def index_list(self, thread_id: str) -> list[dict[str, Any]]:
+        """The index document's entries; ``[]`` without the document."""
+        existing = await self.load(index_key(thread_id))
+        return list((existing or {}).get("checkpoints", []))
+
+    async def index_clear(self, thread_id: str) -> bool:
+        """Delete the index document."""
+        return await self.delete(index_key(thread_id))
 
     async def close(self) -> None:
         """Close OpenSearch connection."""

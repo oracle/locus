@@ -46,6 +46,22 @@ policy.
   `harness.exec` record. The runtime drained its exec records by replacing
   the list the harness appends to, so only commands before the first tool
   completion ever reached the gateway.
+- **Two processes saving to one thread no longer lose checkpoint-index
+  entries** (`redis_checkpointer()`, `postgresql_checkpointer()`,
+  `mysql_checkpointer()`, `opensearch_checkpointer()`). The adapter's
+  `<thread_id>:_checkpoints` index was a read-modify-write that only a
+  per-process lock serialised, so two adapter instances over one store
+  dropped entries (19 of 20 in the model of #301, far fewer on a live
+  store). Each backend now keeps the index in an operation its store
+  makes atomic — a Redis hash (`HSET` / `HDEL`), a single `UPDATE` of the
+  index row's JSON array on PostgreSQL and MySQL, a scripted `_update` on
+  OpenSearch — behind the new `CheckpointIndexStore` protocol
+  (`locus.memory.backends`), which `StorageBackendAdapter` uses when the
+  store provides it and falls back to the locked read-modify-write
+  otherwise. Ordering, `max_checkpoints_per_thread`, `fork`, `list` and
+  the tool-effect ledger behave as before; a Redis index written by an
+  earlier release is read as before and moved into the hash on the
+  thread's next save. (#301)
 
 ## [5.6.0] - 2026-11-17
 

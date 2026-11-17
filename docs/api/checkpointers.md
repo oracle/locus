@@ -73,6 +73,13 @@ exceptions: convenience aliases that return the native `S3Backend` /
 `BaseCheckpointer`.
 
 ::: locus.memory.backends.adapters.StorageBackendAdapter
+
+A backend keeps the adapter's checkpoint index itself — in an operation
+its store makes atomic, so two processes writing one thread lose nothing
+— by implementing `CheckpointIndexStore`. The shipped Redis, PostgreSQL,
+MySQL and OpenSearch backends do.
+
+::: locus.memory.backends.checkpoint_index.CheckpointIndexStore
 ::: locus.memory.backends.adapters.oracle_checkpointer
 ::: locus.memory.backends.adapters.oci_bucket_checkpointer
 ::: locus.memory.backends.adapters.redis_checkpointer
