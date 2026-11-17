@@ -121,6 +121,18 @@ class OracleSyncBackend:
     def vacuum(self, older_than_days: int = 30) -> int:
         return run_sync(self._async.vacuum(older_than_days=older_than_days))
 
+    def index_add(self, thread_id: str, entry: dict[str, Any]) -> None:
+        return run_sync(self._async.index_add(thread_id, entry))
+
+    def index_remove(self, thread_id: str, checkpoint_id: str) -> bool:
+        return run_sync(self._async.index_remove(thread_id, checkpoint_id))
+
+    def index_list(self, thread_id: str) -> list[dict[str, Any]]:
+        return run_sync(self._async.index_list(thread_id))
+
+    def index_clear(self, thread_id: str) -> bool:
+        return run_sync(self._async.index_clear(thread_id))
+
     def count(self, pattern: str = "%") -> int:
         return run_sync(self._async.count(pattern=pattern))
 

@@ -8,16 +8,24 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field, SecretStr
 
+from locus.memory.backends.checkpoint_index import index_key
+
 
 if TYPE_CHECKING:
     from asyncpg import Pool
 
+
+logger = logging.getLogger(__name__)
+
+#: The filter a read applies once the table has the column: rows that have not expired.
+_LIVE = "AND (expires_at IS NULL OR expires_at > now())"
 
 _SAFE_SQL_IDENTIFIER = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]{0,62}$")
 
@@ -86,10 +94,32 @@ class PostgreSQLBackend(BaseModel):
 
     With DSN:
         >>> backend = PostgreSQLBackend(dsn="postgresql://user:pass@localhost:5432/mydb")
+
+    Checkpoint index:
+        Through ``postgresql_checkpointer()`` the thread's checkpoint index
+        is the ``<thread_id>:_checkpoints`` row's ``data`` column, as it
+        always was, but each change is one ``INSERT ... ON CONFLICT DO
+        UPDATE`` or ``UPDATE`` that rewrites the JSON array from the row's
+        current value under the row lock, so two processes saving to one
+        thread never lose an entry.
+
+    Expiry:
+        ``save(..., expires_at=...)`` keeps the time in an ``expires_at``
+        column, added to an existing table with ``ALTER TABLE ... ADD COLUMN
+        IF NOT EXISTS`` on first use (a role that may not alter the table
+        goes without the column, and the adapter's own record of the time
+        still applies); ``load`` and ``exists`` skip expired rows and
+        :meth:`expire` deletes them.
     """
 
     config: PostgreSQLConfig = Field(default_factory=PostgreSQLConfig)
     _pool: Pool | None = None
+    #: Whether the table has the ``expires_at`` column (probed on first use; added
+    #: by the first save that carries an expiry, when the role may).
+    _expires_column: bool = True
+    #: Whether adding the column has been tried (once per process; a role that
+    #: may not alter the table is told once, not on every save).
+    _expires_column_tried: bool = False
     #: The loop the cached pool was built on, or ``None`` when the pool did
     #: not come from here — a caller (or a test) that assigns ``_pool`` owns
     #: its lifecycle, and second-guessing that would discard it.
@@ -182,38 +212,94 @@ class PostgreSQLBackend(BaseModel):
             # failed against a table a migration had already made.
             existing = await conn.fetchval("SELECT to_regclass($1)", self._full_table_name)
             if existing is not None:
+                await self._probe_expires_column(conn)
                 self._initialized = True
                 return
 
-            # Create schema if needed
-            await conn.execute(f"""
-                CREATE SCHEMA IF NOT EXISTS {self.config.schema_name}
-            """)
-
-            # Create table with JSONB for efficient querying
-            await conn.execute(f"""
-                CREATE TABLE IF NOT EXISTS {self._full_table_name} (
-                    thread_id TEXT PRIMARY KEY,
-                    checkpoint_id TEXT,
-                    data JSONB NOT NULL,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    metadata JSONB DEFAULT '{{}}'::jsonb
+            # Two processes can both miss the probe and race CREATE TABLE IF
+            # NOT EXISTS; the loser fails on the pg_type unique index rather
+            # than finding the table. A transaction-scoped advisory lock on the
+            # table name serialises the creators, and the probe is repeated
+            # under the lock so the second one simply sees the table.
+            async with conn.transaction():
+                await conn.fetchval(
+                    "SELECT pg_advisory_xact_lock(hashtext($1))", self._full_table_name
                 )
-            """)
+                existing = await conn.fetchval("SELECT to_regclass($1)", self._full_table_name)
+                if existing is not None:
+                    self._initialized = True
+                    return
 
-            # Create indexes
-            await conn.execute(f"""
-                CREATE INDEX IF NOT EXISTS idx_{self.config.table_name}_updated
-                ON {self._full_table_name} (updated_at DESC)
-            """)
+                # Create schema if needed
+                await conn.execute(f"""
+                    CREATE SCHEMA IF NOT EXISTS {self.config.schema_name}
+                """)
 
-            await conn.execute(f"""
-                CREATE INDEX IF NOT EXISTS idx_{self.config.table_name}_metadata
-                ON {self._full_table_name} USING GIN (metadata)
-            """)
+                # Create table with JSONB for efficient querying
+                await conn.execute(f"""
+                    CREATE TABLE IF NOT EXISTS {self._full_table_name} (
+                        thread_id TEXT PRIMARY KEY,
+                        checkpoint_id TEXT,
+                        data JSONB NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        metadata JSONB DEFAULT '{{}}'::jsonb,
+                        expires_at TIMESTAMPTZ
+                    )
+                """)
+
+                # Create indexes
+                await conn.execute(f"""
+                    CREATE INDEX IF NOT EXISTS idx_{self.config.table_name}_updated
+                    ON {self._full_table_name} (updated_at DESC)
+                """)
+
+                await conn.execute(f"""
+                    CREATE INDEX IF NOT EXISTS idx_{self.config.table_name}_metadata
+                    ON {self._full_table_name} USING GIN (metadata)
+                """)
 
         self._initialized = True
+
+    async def _probe_expires_column(self, conn: Any) -> None:
+        """Whether an existing table has ``expires_at``: no DDL, reads filter on it only if so."""
+        present = await conn.fetchval(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_schema = $1 AND table_name = $2 AND column_name = 'expires_at'",
+            self.config.schema_name,
+            self.config.table_name,
+        )
+        self._expires_column = present is not None
+
+    async def _ensure_expires_column(self, conn: Any) -> None:
+        """Add ``expires_at`` to a table from before checkpoints could expire, when allowed.
+
+        Called by the first save that carries an expiry — a checkpointer
+        without a ``ttl`` never alters a table it did not create. Tried
+        once: a role that may not alter the table is told once, and expiry
+        is then kept in the documents only.
+        """
+        if self._expires_column or self._expires_column_tried:
+            return
+        self._expires_column_tried = True
+        try:
+            await conn.execute(
+                f"ALTER TABLE {self._full_table_name} ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ"
+            )
+        except Exception as exc:  # noqa: BLE001 — a role that may not alter the table
+            logger.warning(
+                "could not add the expires_at column to %s (%s); checkpoint expiry is kept in "
+                "the documents only",
+                self._full_table_name,
+                str(exc).splitlines()[0] if str(exc) else type(exc).__name__,
+            )
+            return
+        self._expires_column = True
+
+    @property
+    def _live(self) -> str:
+        """The expiry filter for a read, or nothing when the table has no column."""
+        return _LIVE if self._expires_column else ""
 
     async def save(
         self,
@@ -221,6 +307,7 @@ class PostgreSQLBackend(BaseModel):
         data: dict[str, Any],
         checkpoint_id: str | None = None,
         metadata: dict[str, Any] | None = None,
+        expires_at: datetime | None = None,
     ) -> str:
         """
         Save checkpoint to PostgreSQL.
@@ -230,6 +317,7 @@ class PostgreSQLBackend(BaseModel):
             data: Checkpoint data
             checkpoint_id: Optional checkpoint ID
             metadata: Optional metadata for querying
+            expires_at: When the row stops being loadable (``None``: never)
 
         Returns:
             Checkpoint ID
@@ -243,35 +331,60 @@ class PostgreSQLBackend(BaseModel):
         now = datetime.now(UTC)
 
         async with pool.acquire() as conn:
-            await conn.execute(
-                f"""
-                INSERT INTO {self._full_table_name}
-                    (thread_id, checkpoint_id, data, created_at, updated_at, metadata)
-                VALUES ($1, $2, $3::jsonb, $4, $5, $6::jsonb)
-                ON CONFLICT (thread_id) DO UPDATE SET
-                    checkpoint_id = EXCLUDED.checkpoint_id,
-                    data = EXCLUDED.data,
-                    updated_at = EXCLUDED.updated_at,
-                    metadata = EXCLUDED.metadata
-                """,
-                thread_id,
-                checkpoint_id,
-                json.dumps(data),
-                now,
-                now,
-                json.dumps(metadata or {}),
-            )
+            if expires_at is not None:
+                await self._ensure_expires_column(conn)
+            if self._expires_column:
+                await conn.execute(
+                    f"""
+                    INSERT INTO {self._full_table_name}
+                        (thread_id, checkpoint_id, data, created_at, updated_at, expires_at,
+                         metadata)
+                    VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb)
+                    ON CONFLICT (thread_id) DO UPDATE SET
+                        checkpoint_id = EXCLUDED.checkpoint_id,
+                        data = EXCLUDED.data,
+                        updated_at = EXCLUDED.updated_at,
+                        expires_at = EXCLUDED.expires_at,
+                        metadata = EXCLUDED.metadata
+                    """,
+                    thread_id,
+                    checkpoint_id,
+                    json.dumps(data),
+                    now,
+                    now,
+                    expires_at,
+                    json.dumps(metadata or {}),
+                )
+            else:
+                await conn.execute(
+                    f"""
+                    INSERT INTO {self._full_table_name}
+                        (thread_id, checkpoint_id, data, created_at, updated_at, metadata)
+                    VALUES ($1, $2, $3::jsonb, $4, $5, $6::jsonb)
+                    ON CONFLICT (thread_id) DO UPDATE SET
+                        checkpoint_id = EXCLUDED.checkpoint_id,
+                        data = EXCLUDED.data,
+                        updated_at = EXCLUDED.updated_at,
+                        metadata = EXCLUDED.metadata
+                    """,
+                    thread_id,
+                    checkpoint_id,
+                    json.dumps(data),
+                    now,
+                    now,
+                    json.dumps(metadata or {}),
+                )
 
         return checkpoint_id
 
     async def load(self, thread_id: str) -> dict[str, Any] | None:
-        """Load checkpoint from PostgreSQL."""
+        """Load checkpoint from PostgreSQL (``None`` for a row whose ``expires_at`` has passed)."""
         await self._ensure_table()
         pool = await self._get_pool()
 
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
-                f"SELECT data FROM {self._full_table_name} WHERE thread_id = $1",
+                f"SELECT data FROM {self._full_table_name} WHERE thread_id = $1 {self._live}",
                 thread_id,
             )
 
@@ -301,11 +414,28 @@ class PostgreSQLBackend(BaseModel):
 
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
-                f"SELECT 1 FROM {self._full_table_name} WHERE thread_id = $1",
+                f"SELECT 1 FROM {self._full_table_name} WHERE thread_id = $1 {self._live}",
                 thread_id,
             )
 
         return row is not None
+
+    async def expire(self) -> int:
+        """Delete the rows whose ``expires_at`` has passed; returns how many."""
+        await self._ensure_table()
+        if not self._expires_column:
+            return 0
+        pool = await self._get_pool()
+
+        async with pool.acquire() as conn:
+            result: str = await conn.execute(
+                f"DELETE FROM {self._full_table_name} "
+                "WHERE expires_at IS NOT NULL AND expires_at <= now()"
+            )
+        try:
+            return int(result.split()[1])
+        except (IndexError, ValueError):
+            return 0
 
     async def list_threads(
         self,
@@ -475,6 +605,94 @@ class PostgreSQLBackend(BaseModel):
             return int(result.split()[1])
         except (IndexError, ValueError):
             return 0
+
+    # -- checkpoint index (CheckpointIndexStore) -------------------------------
+
+    async def index_add(self, thread_id: str, entry: dict[str, Any]) -> None:
+        """Add the entry to the index row in one upsert, replacing one with its id."""
+        await self._ensure_table()
+        pool = await self._get_pool()
+        now = datetime.now(UTC)
+
+        # ``ON CONFLICT DO UPDATE`` evaluates the new array against the row as
+        # it is when the row lock is taken, so concurrent upserts queue up and
+        # each sees the entries the previous one wrote.
+        async with pool.acquire() as conn:
+            await conn.execute(
+                f"""
+                INSERT INTO {self._full_table_name} AS idx
+                    (thread_id, checkpoint_id, data, created_at, updated_at, metadata)
+                VALUES (
+                    $1, NULL, jsonb_build_object('checkpoints', jsonb_build_array($2::jsonb)),
+                    $3, $3, '{{}}'::jsonb
+                )
+                ON CONFLICT (thread_id) DO UPDATE SET
+                    data = jsonb_build_object(
+                        'checkpoints',
+                        (
+                            SELECT jsonb_agg(e ORDER BY e->>'timestamp' DESC)
+                            FROM (
+                                SELECT e
+                                FROM jsonb_array_elements(
+                                    COALESCE(idx.data->'checkpoints', '[]'::jsonb)
+                                ) AS elems(e)
+                                WHERE e->>'checkpoint_id' IS DISTINCT FROM $4::text
+                                UNION ALL
+                                SELECT $2::jsonb
+                            ) AS entries(e)
+                        )
+                    ),
+                    updated_at = EXCLUDED.updated_at
+                """,
+                index_key(thread_id),
+                json.dumps(entry),
+                now,
+                str(entry["checkpoint_id"]),
+            )
+
+    async def index_remove(self, thread_id: str, checkpoint_id: str) -> bool:
+        """Drop the entry from the index row in one ``UPDATE``; ``True`` when it was there."""
+        await self._ensure_table()
+        pool = await self._get_pool()
+
+        async with pool.acquire() as conn:
+            result: str = await conn.execute(
+                f"""
+                UPDATE {self._full_table_name} SET
+                    data = jsonb_build_object(
+                        'checkpoints',
+                        COALESCE(
+                            (
+                                SELECT jsonb_agg(e ORDER BY e->>'timestamp' DESC)
+                                FROM jsonb_array_elements(
+                                    COALESCE(data->'checkpoints', '[]'::jsonb)
+                                ) AS elems(e)
+                                WHERE e->>'checkpoint_id' IS DISTINCT FROM $2::text
+                            ),
+                            '[]'::jsonb
+                        )
+                    ),
+                    updated_at = $3
+                WHERE thread_id = $1
+                  AND data->'checkpoints' @> jsonb_build_array(
+                      jsonb_build_object('checkpoint_id', $2::text)
+                  )
+                """,
+                index_key(thread_id),
+                checkpoint_id,
+                datetime.now(UTC),
+            )
+
+        return result == "UPDATE 1"
+
+    async def index_list(self, thread_id: str) -> list[dict[str, Any]]:
+        """The index row's entries; ``[]`` without the row."""
+        existing = await self.load(index_key(thread_id))
+        return list((existing or {}).get("checkpoints", []))
+
+    async def index_clear(self, thread_id: str) -> bool:
+        """Delete the index row."""
+        return await self.delete(index_key(thread_id))
 
     async def close(self) -> None:
         """Close connection pool."""

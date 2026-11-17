@@ -8,24 +8,47 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from decimal import Decimal
+from typing import TYPE_CHECKING, Any, Protocol
 from urllib.parse import parse_qsl, unquote, urlparse
 
 from pydantic import BaseModel, Field, SecretStr
 
 from locus.core.loop_bound import loop_bound_async
+from locus.memory.backends.checkpoint_index import index_key
 
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from mysql.connector.aio.abstracts import MySQLConnectionAbstract
+    from mysql.connector.aio.abstracts import MySQLCursorAbstract
 
+
+logger = logging.getLogger(__name__)
 
 _SAFE_SQL_IDENTIFIER = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]{0,63}$")
+
+
+class _Connection(Protocol):
+    """The slice of the Connector/Python async connection API the pool uses.
+
+    ``mysql.connector.aio.connect()`` returns a ``MySQLConnectionAbstract``,
+    or a ``PooledMySQLConnection`` proxying one when the connection arguments
+    name a connector-level pool. Both satisfy this protocol, so the pool holds
+    whichever ``connect()`` handed back.
+    """
+
+    async def cursor(self) -> MySQLCursorAbstract: ...
+
+    async def commit(self) -> None: ...
+
+    async def rollback(self) -> None: ...
+
+    async def close(self) -> None: ...
 
 
 def _validate_sql_identifier(value: str, field_name: str) -> str:
@@ -54,6 +77,48 @@ def _decode_json(value: Any) -> Any:
     if isinstance(value, str):
         return json.loads(value)
     return value
+
+
+def _like_literal(value: str) -> str:
+    """``value`` with ``JSON_SEARCH``'s LIKE wildcards escaped, so it matches itself alone."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+#: The index row's entry array (``[]`` for a row without one).
+_INDEX_ARRAY = "COALESCE(JSON_EXTRACT(data, '$.checkpoints'), JSON_ARRAY())"
+#: The path of the entry whose ``checkpoint_id`` is the parameter (``NULL`` when none);
+#: two parameters: the escaped id and the escape character.
+_INDEX_ENTRY_PATH = (
+    "REPLACE(JSON_UNQUOTE(JSON_SEARCH(JSON_EXTRACT(data, '$.checkpoints'), 'one', %s, %s,"
+    " '$[*].checkpoint_id')), '.checkpoint_id', '')"
+)
+_LIKE_ESCAPE = "\\"
+
+
+def _as_str(value: object) -> str:
+    """Narrow a text column value to ``str``; the connector may return ``bytes``."""
+    if isinstance(value, bytes | bytearray):
+        return bytes(value).decode("utf-8")
+    if isinstance(value, str):
+        return value
+    msg = f"Expected a text column value, got {type(value).__name__}"
+    raise TypeError(msg)
+
+
+def _as_int(value: object) -> int:
+    """Narrow a numeric column value (``COUNT(*)``) to ``int``."""
+    if isinstance(value, int | float | Decimal | str | bytes):
+        return int(value)
+    msg = f"Expected a numeric column value, got {type(value).__name__}"
+    raise TypeError(msg)
+
+
+def _as_datetime(value: object) -> datetime:
+    """Narrow a ``TIMESTAMP`` column value, which the converter returns as ``datetime``."""
+    if isinstance(value, datetime):
+        return value
+    msg = f"Expected a datetime column value, got {type(value).__name__}"
+    raise TypeError(msg)
 
 
 def _parse_dsn(dsn: str) -> dict[str, Any]:
@@ -126,7 +191,7 @@ class _MySQLConnectionPool:
             raise ValueError(msg)
 
         self._config = config
-        self._available: asyncio.Queue[MySQLConnectionAbstract] = asyncio.Queue()
+        self._available: asyncio.Queue[_Connection] = asyncio.Queue()
         self._created = 0
         self._closed = False
         self._lock = asyncio.Lock()
@@ -136,7 +201,7 @@ class _MySQLConnectionPool:
         for _ in range(self._config.min_pool_size):
             await self._available.put(await self._connect())
 
-    async def _connect(self) -> MySQLConnectionAbstract:
+    async def _connect(self) -> _Connection:
         try:
             from mysql.connector.aio import connect
         except ImportError as e:
@@ -146,7 +211,7 @@ class _MySQLConnectionPool:
             ) from e
 
         kwargs = self._connect_kwargs()
-        conn: MySQLConnectionAbstract = await connect(**kwargs)
+        conn: _Connection = await connect(**kwargs)
         self._created += 1
         return conn
 
@@ -169,7 +234,7 @@ class _MySQLConnectionPool:
         return kwargs
 
     @asynccontextmanager
-    async def acquire(self) -> AsyncIterator[MySQLConnectionAbstract]:
+    async def acquire(self) -> AsyncIterator[_Connection]:
         """Acquire a connection and return it to the pool afterwards."""
         if self._closed:
             msg = "MySQL connection pool is closed"
@@ -191,7 +256,7 @@ class _MySQLConnectionPool:
             elif not getattr(conn, "closed", False):
                 await self._release(conn)
 
-    async def _release(self, conn: MySQLConnectionAbstract) -> None:
+    async def _release(self, conn: _Connection) -> None:
         """Return a connection to the pool with no open transaction.
 
         Under ``autocommit=False`` a bare ``SELECT`` (including read methods
@@ -219,7 +284,7 @@ class _MySQLConnectionPool:
             return error_types
         return (*error_types, MySQLError)
 
-    async def _acquire(self) -> MySQLConnectionAbstract:
+    async def _acquire(self) -> _Connection:
         while True:
             try:
                 conn = self._available.get_nowait()
@@ -243,7 +308,7 @@ class _MySQLConnectionPool:
                 if self._created < self._config.max_pool_size:
                     return await self._connect()
 
-    async def _is_healthy(self, conn: MySQLConnectionAbstract) -> bool:
+    async def _is_healthy(self, conn: _Connection) -> bool:
         """Validate an idle connection before handing it out again."""
         if getattr(conn, "closed", False):
             return False
@@ -256,7 +321,7 @@ class _MySQLConnectionPool:
             return False
         return True
 
-    async def _discard(self, conn: MySQLConnectionAbstract) -> None:
+    async def _discard(self, conn: _Connection) -> None:
         """Close a bad connection and make room for a replacement."""
         try:
             if not getattr(conn, "closed", False):
@@ -298,11 +363,32 @@ class MySQLBackend(BaseModel):
 
     With DSN:
         >>> backend = MySQLBackend(dsn="mysql://user:pass@localhost:3306/mydb")
+
+    Checkpoint index:
+        Through ``mysql_checkpointer()`` the thread's checkpoint index is
+        the ``<thread_id>:_checkpoints`` row's ``data`` column, as it always
+        was, but each change is one ``INSERT ... ON DUPLICATE KEY UPDATE``
+        or ``UPDATE`` that rewrites the JSON array from the row's current
+        value under the row lock (``JSON_ARRAY_INSERT`` / ``JSON_REMOVE``),
+        so two processes saving to one thread never lose an entry.
+
+    Expiry:
+        ``save(..., expires_at=...)`` keeps the time in an ``expires_at``
+        column, added to an existing table with ``ALTER TABLE ... ADD
+        COLUMN`` on first use when it is missing (a role that may not alter
+        the table goes without the column, and the adapter's own record of
+        the time still applies); ``load`` and ``exists`` skip expired rows
+        and :meth:`expire` deletes them.
     """
 
     config: MySQLConfig = Field(default_factory=MySQLConfig)
     _pool: _MySQLConnectionPool | None = None
     _initialized: bool = False
+    #: Whether the table has the ``expires_at`` column (probed on first use; added
+    #: by the first save that carries an expiry, when the role may).
+    _expires_column: bool = True
+    #: Whether adding the column has been tried (once per process).
+    _expires_column_tried: bool = False
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -368,15 +454,65 @@ class MySQLBackend(BaseModel):
                         updated_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
                             ON UPDATE CURRENT_TIMESTAMP(6),
                         metadata JSON NULL,
+                        expires_at TIMESTAMP(6) NULL,
                         KEY `{index_name}` (updated_at DESC)
                     ) ENGINE=InnoDB
                       DEFAULT CHARSET={self.config.charset}
                       COLLATE={self.config.collation}
                     """
                 )
+                await self._probe_expires_column(cur)
             await conn.commit()
 
         self._initialized = True
+
+    async def _probe_expires_column(self, cur: Any) -> None:
+        """Whether the table has ``expires_at``: no DDL, reads filter on it only if so.
+
+        MySQL has no ``ADD COLUMN IF NOT EXISTS``, so the probe is what
+        decides whether a later save may add the column.
+        """
+        await cur.execute(
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = DATABASE() AND table_name = %s AND column_name = 'expires_at'",
+            (self.config.table_name,),
+        )
+        row = await cur.fetchone()
+        count = row[0] if row else None
+        # Present, or a driver that gave no answer: assume the layout above.
+        self._expires_column = not (isinstance(count, int) and count == 0)
+
+    async def _ensure_expires_column(self, cur: Any) -> None:
+        """Add ``expires_at`` to a table from before checkpoints could expire, when allowed.
+
+        Called by the first save that carries an expiry — a checkpointer
+        without a ``ttl`` never alters a table it did not create. Tried
+        once: a role that may not alter the table is told once, and expiry
+        is then kept in the documents only.
+        """
+        if self._expires_column or self._expires_column_tried:
+            return
+        self._expires_column_tried = True
+        try:
+            await cur.execute(
+                f"ALTER TABLE {self._quoted_table_name} ADD COLUMN expires_at TIMESTAMP(6) NULL"
+            )
+        except Exception as exc:  # noqa: BLE001 — a role that may not alter the table
+            logger.warning(
+                "could not add the expires_at column to %s (%s); checkpoint expiry is kept in "
+                "the documents only",
+                self.config.table_name,
+                str(exc).splitlines()[0] if str(exc) else type(exc).__name__,
+            )
+            return
+        self._expires_column = True
+
+    @property
+    def _live(self) -> str:
+        """The expiry filter for a read, or nothing when the table has no column."""
+        if not self._expires_column:
+            return ""
+        return "AND (expires_at IS NULL OR expires_at > UTC_TIMESTAMP(6))"
 
     async def save(
         self,
@@ -384,6 +520,7 @@ class MySQLBackend(BaseModel):
         data: dict[str, Any],
         checkpoint_id: str | None = None,
         metadata: dict[str, Any] | None = None,
+        expires_at: datetime | None = None,
     ) -> str:
         """
         Save checkpoint to MySQL.
@@ -393,6 +530,7 @@ class MySQLBackend(BaseModel):
             data: Checkpoint data
             checkpoint_id: Optional checkpoint ID
             metadata: Optional metadata for querying
+            expires_at: When the row stops being loadable (``None``: never)
 
         Returns:
             Checkpoint ID
@@ -407,38 +545,47 @@ class MySQLBackend(BaseModel):
 
         async with pool.acquire() as conn:
             async with await conn.cursor() as cur:
+                if expires_at is not None:
+                    await self._ensure_expires_column(cur)
+                # ``metadata`` stays the last column: the column list grows ahead of it.
+                columns = "thread_id, checkpoint_id, data, created_at, updated_at"
+                placeholders = "%s, %s, %s, %s, %s"
+                updates = (
+                    "checkpoint_id = VALUES(checkpoint_id), data = VALUES(data), "
+                    "updated_at = VALUES(updated_at)"
+                )
+                params: list[Any] = [thread_id, checkpoint_id, json.dumps(data), now, now]
+                if self._expires_column:
+                    columns += ", expires_at"
+                    placeholders += ", %s"
+                    updates += ", expires_at = VALUES(expires_at)"
+                    params.append(
+                        expires_at.astimezone(UTC).replace(tzinfo=None) if expires_at else None
+                    )
+                columns += ", metadata"
+                placeholders += ", %s"
+                updates += ", metadata = VALUES(metadata)"
+                params.append(json.dumps(metadata or {}))
                 await cur.execute(
                     f"""
-                    INSERT INTO {self._quoted_table_name}
-                        (thread_id, checkpoint_id, data, created_at, updated_at, metadata)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                    ON DUPLICATE KEY UPDATE
-                        checkpoint_id = VALUES(checkpoint_id),
-                        data = VALUES(data),
-                        updated_at = VALUES(updated_at),
-                        metadata = VALUES(metadata)
+                    INSERT INTO {self._quoted_table_name} ({columns})
+                    VALUES ({placeholders})
+                    ON DUPLICATE KEY UPDATE {updates}
                     """,
-                    (
-                        thread_id,
-                        checkpoint_id,
-                        json.dumps(data),
-                        now,
-                        now,
-                        json.dumps(metadata or {}),
-                    ),
+                    tuple(params),
                 )
             await conn.commit()
 
         return checkpoint_id
 
     async def load(self, thread_id: str) -> dict[str, Any] | None:
-        """Load checkpoint from MySQL."""
+        """Load checkpoint from MySQL (``None`` for a row whose ``expires_at`` has passed)."""
         await self._ensure_table()
         pool = await self._get_pool()
 
         async with pool.acquire() as conn, await conn.cursor() as cur:
             await cur.execute(
-                f"SELECT data FROM {self._quoted_table_name} WHERE thread_id = %s",
+                f"SELECT data FROM {self._quoted_table_name} WHERE thread_id = %s {self._live}",
                 (thread_id,),
             )
             row = await cur.fetchone()
@@ -472,12 +619,30 @@ class MySQLBackend(BaseModel):
 
         async with pool.acquire() as conn, await conn.cursor() as cur:
             await cur.execute(
-                f"SELECT 1 FROM {self._quoted_table_name} WHERE thread_id = %s",
+                f"SELECT 1 FROM {self._quoted_table_name} WHERE thread_id = %s {self._live}",
                 (thread_id,),
             )
             row = await cur.fetchone()
 
         return row is not None
+
+    async def expire(self) -> int:
+        """Delete the rows whose ``expires_at`` has passed; returns how many."""
+        await self._ensure_table()
+        if not self._expires_column:
+            return 0
+        pool = await self._get_pool()
+
+        async with pool.acquire() as conn:
+            async with await conn.cursor() as cur:
+                await cur.execute(
+                    f"DELETE FROM {self._quoted_table_name} "
+                    "WHERE expires_at IS NOT NULL AND expires_at <= UTC_TIMESTAMP(6)"
+                )
+                deleted = int(cur.rowcount)
+            await conn.commit()
+
+        return max(deleted, 0)
 
     async def list_threads(
         self,
@@ -501,7 +666,7 @@ class MySQLBackend(BaseModel):
             )
             rows = await cur.fetchall()
 
-        return [row[0] for row in rows]
+        return [_as_str(row[0]) for row in rows]
 
     async def get_metadata(self, thread_id: str) -> dict[str, Any] | None:
         """Get checkpoint metadata."""
@@ -524,8 +689,8 @@ class MySQLBackend(BaseModel):
 
         return {
             "checkpoint_id": row[0],
-            "created_at": row[1].isoformat(),
-            "updated_at": row[2].isoformat(),
+            "created_at": _as_datetime(row[1]).isoformat(),
+            "updated_at": _as_datetime(row[2]).isoformat(),
             "metadata": _decode_json(row[3]) or {},
         }
 
@@ -558,9 +723,9 @@ class MySQLBackend(BaseModel):
 
         return [
             {
-                "thread_id": row[0],
+                "thread_id": _as_str(row[0]),
                 "data": _decode_json(row[1]),
-                "updated_at": row[2].isoformat(),
+                "updated_at": _as_datetime(row[2]).isoformat(),
             }
             for row in rows
         ]
@@ -597,9 +762,9 @@ class MySQLBackend(BaseModel):
 
         return [
             {
-                "thread_id": row[0],
+                "thread_id": _as_str(row[0]),
                 "data": _decode_json(row[1]),
-                "updated_at": row[2].isoformat(),
+                "updated_at": _as_datetime(row[2]).isoformat(),
             }
             for row in rows
         ]
@@ -616,7 +781,7 @@ class MySQLBackend(BaseModel):
             )
             row = await cur.fetchone()
 
-        return int(row[0]) if row else 0
+        return _as_int(row[0]) if row else 0
 
     async def vacuum(self, older_than_days: int = 30) -> int:
         """
@@ -644,6 +809,99 @@ class MySQLBackend(BaseModel):
             await conn.commit()
 
         return int(deleted)
+
+    # -- checkpoint index (CheckpointIndexStore) -------------------------------
+
+    async def index_add(self, thread_id: str, entry: dict[str, Any]) -> None:
+        """Add the entry to the index row in one upsert, replacing one with its id.
+
+        The new entry goes first: a save is the thread's newest checkpoint
+        in every normal case, and the adapter sorts what it reads anyway.
+        """
+        await self._ensure_table()
+        pool = await self._get_pool()
+        now = datetime.now(UTC).replace(tzinfo=None)
+        checkpoint_id = _like_literal(str(entry["checkpoint_id"]))
+        raw = json.dumps(entry)
+
+        async with pool.acquire() as conn:
+            async with await conn.cursor() as cur:
+                await cur.execute(
+                    f"""
+                    INSERT INTO {self._quoted_table_name}
+                        (thread_id, checkpoint_id, data, created_at, updated_at, metadata)
+                    VALUES (
+                        %s, NULL, JSON_OBJECT('checkpoints', JSON_ARRAY(CAST(%s AS JSON))),
+                        %s, %s, JSON_OBJECT()
+                    )
+                    ON DUPLICATE KEY UPDATE
+                        data = JSON_OBJECT(
+                            'checkpoints',
+                            JSON_ARRAY_INSERT(
+                                IF(
+                                    {_INDEX_ENTRY_PATH} IS NULL,
+                                    {_INDEX_ARRAY},
+                                    JSON_REMOVE({_INDEX_ARRAY}, {_INDEX_ENTRY_PATH})
+                                ),
+                                '$[0]',
+                                CAST(%s AS JSON)
+                            )
+                        ),
+                        updated_at = VALUES(updated_at)
+                    """,
+                    (
+                        index_key(thread_id),
+                        raw,
+                        now,
+                        now,
+                        checkpoint_id,
+                        _LIKE_ESCAPE,
+                        checkpoint_id,
+                        _LIKE_ESCAPE,
+                        raw,
+                    ),
+                )
+            await conn.commit()
+
+    async def index_remove(self, thread_id: str, checkpoint_id: str) -> bool:
+        """Drop the entry from the index row in one ``UPDATE``; ``True`` when it was there."""
+        await self._ensure_table()
+        pool = await self._get_pool()
+        escaped = _like_literal(checkpoint_id)
+
+        async with pool.acquire() as conn:
+            async with await conn.cursor() as cur:
+                await cur.execute(
+                    f"""
+                    UPDATE {self._quoted_table_name} SET
+                        data = JSON_OBJECT(
+                            'checkpoints', JSON_REMOVE({_INDEX_ARRAY}, {_INDEX_ENTRY_PATH})
+                        ),
+                        updated_at = %s
+                    WHERE thread_id = %s AND {_INDEX_ENTRY_PATH} IS NOT NULL
+                    """,
+                    (
+                        escaped,
+                        _LIKE_ESCAPE,
+                        datetime.now(UTC).replace(tzinfo=None),
+                        index_key(thread_id),
+                        escaped,
+                        _LIKE_ESCAPE,
+                    ),
+                )
+                removed = int(cur.rowcount)
+            await conn.commit()
+
+        return removed == 1
+
+    async def index_list(self, thread_id: str) -> list[dict[str, Any]]:
+        """The index row's entries; ``[]`` without the row."""
+        existing = await self.load(index_key(thread_id))
+        return list((existing or {}).get("checkpoints", []))
+
+    async def index_clear(self, thread_id: str) -> bool:
+        """Delete the index row."""
+        return await self.delete(index_key(thread_id))
 
     async def close(self) -> None:
         """Close connection pool."""

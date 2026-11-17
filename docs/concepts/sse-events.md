@@ -31,6 +31,10 @@ This page is the **wire-format contract**. A browser renderer, the
 JSON log adapter, and any downstream OTEL bridge consume from it. If you
 add a new emission site, list it here.
 
+[Notebook 63 — Event catalogue](../notebooks/notebook_63_event_catalogue.md)
+prints this catalogue from the installed module, then the `composition.*`
+events a two-stage pipeline publishes.
+
 ## How emission works
 
 Every `emit()` call site reads `current_run_id()` from a `ContextVar`
@@ -131,7 +135,7 @@ ends, so a subscriber's iterator finishes on its own.
 |---|---|
 | `router.frame.extracted` | `frame` (the parsed goal frame: `primary_goal`, `secondary_goals`, `domain`, `complexity`, `risk`, `approval_required`, `requires_*` switches, `required_capabilities`, `success_criteria`) |
 | `router.frame.failed` | `error` |
-| `router.protocol.selected` | `protocol_id`, `protocol_description`, `primary_goal`, `is_canonical`, `cost`, `latency`, `risk_max`, `method` (`"rule_based"` \| `"single_candidate"` \| `"llm_picked"` \| `"rule_based_fallback"` \| `"risk_fallback"`), `rationale` |
+| `router.protocol.selected` | `protocol_id`, `protocol_description`, `primary_goal`, `is_canonical`, `cost`, `latency`, `risk_max`, `method` (`"rule_based"` \| `"single_candidate"` \| `"llm_picked"` \| `"rule_based_fallback"` \| `"risk_fallback"` \| `"low_complexity_direct"`), `rationale` |
 | `router.protocol.no_match` | `primary_goal`, `risk`, `error` |
 | `router.protocol.picker_fallback` | `primary_goal`, `risk`, `error` |
 | `router.policy.verdict` | `protocol_id`, `allow`, `require_approval`, `reason`, `frame_risk` |

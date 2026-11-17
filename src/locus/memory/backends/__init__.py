@@ -52,6 +52,7 @@ from locus.memory.backends.adapters import (
     redis_checkpointer,
     s3_checkpointer,
 )
+from locus.memory.backends.checkpoint_index import CheckpointIndexStore
 from locus.memory.backends.file import FileCheckpointer
 from locus.memory.backends.http import HTTPCheckpointer
 from locus.memory.backends.memory import MemoryCheckpointer
@@ -79,6 +80,7 @@ __all__ = [
     "RedisBackend",
     "S3Backend",
     # Adapter and factory functions
+    "CheckpointIndexStore",
     "StorageBackendAdapter",
     "mysql_checkpointer",
     "oci_bucket_checkpointer",

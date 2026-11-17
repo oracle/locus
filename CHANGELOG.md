@@ -8,6 +8,148 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **Checkpoint TTL.** Every checkpointer takes `ttl=` (seconds or a
+  `timedelta`): a checkpoint expires that long after its save and is then
+  neither loaded, listed nor forked, and `await cp.expire()` removes what has
+  expired and returns the count. Redis gets its own `EXPIRE` on every key a
+  thread writes (the index hash and the tool-effect ledger's sidecar
+  included; the index's expiry only ever lengthens, so a shorter-lived save
+  never hides the longer-lived checkpoints); PostgreSQL, MySQL and
+  `PgCheckpointer` keep an `expires_at` column, added to an existing table
+  by the first save made with a `ttl` — a checkpointer without one issues
+  no DDL and filters on the column only where it exists; the in-memory,
+  file, S3, OCI Object Storage and HTTP checkpointers record it beside the
+  checkpoint, and a load of a thread's latest falls back to its newest
+  live checkpoint when the pointer names an expired one. (#298)
+- **Checkpoint encryption at rest.** `EncryptedSerializer` (AES-256-GCM via
+  `cryptography`, `pip install "locus-sdk[encryption]"`) seals the state
+  before any backend stores it: `encryption=` on every checkpointer, a key
+  or a `key_provider` callable for a vault fetch, `previous_keys` for
+  rotation, and a versioned envelope that keeps the iteration readable and
+  is bound to its place — the stored thread id, the checkpoint id and the
+  iteration are the cipher's associated data, so a ciphertext moved to
+  another thread or checkpoint, or an envelope whose iteration was edited,
+  is refused. With encryption configured a plaintext checkpoint is refused
+  too; `EncryptedSerializer(..., allow_plaintext=True)` loads it with a
+  warning, for migrating a store written before encryption was turned on.
+  The listing fields — ids, times, iteration, size, parent and the metadata
+  passed to `save()` — stay in the clear so `list()` works without the key.
+  (#298)
+- **Per-application and per-user scoping.** `CheckpointScope(app_id=,
+  user_id=)` on every checkpointer (`scope=`) or per run (`agent.run(…,
+  scope=…)`, also `arun`, `run_sync`, `resume`, `continue_turn`) stores a
+  thread under `app=<app_id>/user=<user_id>/<thread_id>` — a key, directory
+  or object prefix, the `thread_id` column's prefix on SQL — so the same
+  `thread_id` under another scope is a miss, not another tenant's thread.
+  Each segment of the stored id is percent-encoded, so no thread id can
+  spell a scope marker, an app-only scope sees app-level threads only, and
+  an unscoped checkpointer never resolves a scoped id; a run's scope is
+  resolved once and carried by a view of the checkpointer
+  (`cp.with_scope(scope)`), never a context variable, with `scope=None`
+  inheriting the checkpointer's scope and `CheckpointScope()` explicitly
+  unscoped; `list_threads(scope=)` lists one scope, and unscoped data stays
+  reachable with no scope. (#298)
+- `python -m locus.runner` takes its workspace from `LOCUS_WORKSPACE` when
+  set, for a runner started outside an OpenShell sandbox (a gateway's local
+  box driver, a CI job); unset, it works on `/sandbox` as before.
+- **`locus audit verify --format json`.** The verification of an exported
+  audit trail as data: `{"file", "verified", "records", "keys",
+  "head_checked"}` on stdout for both outcomes, where the command printed
+  prose only and a job archiving its results had to scrape it. Exit codes
+  are unchanged: 0 when the trail verifies, 1 when it does not. (#483)
+- **`locus eval gate --markdown` and `GateResult.to_markdown()`.** The
+  gate's verdict as Markdown with one table row per failed check, for a
+  pull-request comment, the way `eval diff` and `eval summary` already
+  render with `--markdown`. The exit code is still the gate's verdict. (#484)
+- **`HeatWaveVectorStore` — MySQL HeatWave vector store** (#299). Documents
+  live in one InnoDB table with a `VECTOR(n)` column, a `JSON` metadata
+  column and a `FULLTEXT` index on the content; the store mirrors
+  `OracleVectorStore`'s surface (`add`, `add_batch`, `get`, `delete`,
+  `search`, `count`, `clear`, `close`) plus `hybrid_search`, which blends
+  `DISTANCE()` similarity with `MATCH ... AGAINST` relevance client-side the
+  way the Elasticsearch store does. It probes the server once: HeatWave
+  MySQL computes and orders by `DISTANCE()` on the server
+  (`server_side_distance=True`); community MySQL 9+ has the `VECTOR` type
+  but no `DISTANCE()`, so the store fetches up to `candidate_limit` rows and
+  ranks them here. Metadata filters are `JSON_EXTRACT` equality predicates
+  with the path and the value bound as parameters. Blocking driver calls run
+  on worker threads (`asyncio.to_thread`), so the pooled connections never
+  bind to an event loop. New `heatwave` extra (the same
+  `mysql-connector-python` the `mysql` checkpoint extra installs), lazy
+  export from `locus.rag.stores`, docs rows and a HeatWave vs community
+  MySQL section, and the shared conformance suite behind `HEATWAVE_DSN`.
+
+### Changed
+
+- **Unscoped thread ids that spell a scope marker are stored encoded.** A
+  thread id of the form `app=…` or `user=…` (or beginning `app%` /
+  `user%`) on a checkpointer with no `scope=` is now stored
+  percent-encoded (`user=alice/chat` as `user%3Dalice%2Fchat`), so the
+  bare stored id can only ever be another tenant's scoped thread. A thread
+  of that exact shape written by an earlier release is no longer found
+  under its bare id: load it through `CheckpointScope(user_id="alice")`
+  (the bare id parses as that scope's thread `chat`) or rename it before
+  upgrading. Every other unscoped id keeps its bare stored form. The
+  adapter's `exists()` now reads the document to honour a recorded expiry
+  (one extra round trip), and a file checkpointer names its directories
+  by percent-encoding the characters outside `[A-Za-z0-9_-]`, reading a
+  directory an earlier release named lossily while its files record the
+  thread. (#298)
+- **LiteLLM gateway example: the platform pieces the how-to promised are
+  wired (#269).** `examples/litellm-gateway/` gains `config.platform.yaml`
+  — the gateway of `config.yaml` plus the OpenTelemetry callback and the
+  Redis response cache; `docker-compose.yml` selects it when `REDIS_URL` is
+  set and starts a redis sidecar under the `cache` profile, with the
+  Langfuse variables passed through for the alternative callback. Both
+  configs carry an in-process PII guardrail (LiteLLM's content filter masks
+  US SSNs and card numbers before the upstream call; Presidio is documented
+  as the alternative). `helm-values.yaml` now uses the keys the chart reads
+  (`environmentSecrets` instead of the ignored `envFrom`, the master key
+  from the same Secret, an external Postgres without the bundled
+  StatefulSet). The how-to gains Observability, Caching and Guardrails
+  sections and the sequence to verify the Helm install on a cluster, which
+  the maintainers have not run. `tests/unit/test_litellm_gateway_example.py`
+  keeps the two configs in step; `tests/integration/test_litellm_gateway_platform.py`
+  drives the guardrail and the cache against a live gateway.
+- **`RequestClassifier` and `ProtocolPicker`, the router's two seams.**
+  `Router(classifier=...)` takes any `async classify(text) -> GoalFrame` in
+  place of the extractor agent, which is now wrapped in
+  `AgentFrameExtractor`, the default implementation of the same protocol;
+  `CognitiveCompiler(protocol_picker=...)` takes any `ProtocolPicker`, of
+  which `LLMProtocolPicker` is the one that ships. Behaviour is unchanged
+  by default. (#342)
+- **Router: LOW-complexity requests go to `direct_response` before any
+  goal gate.** A frame at `Complexity.LOW` whose risk is within
+  `direct_response`'s `risk_max` compiles to `direct_response` whatever its
+  `primary_goal`; `router.protocol.selected` reports
+  `method="low_complexity_direct"` and `explain()` mirrors it. The
+  `PolicyGate` still runs, a `direct_response` the gate denies sends the
+  frame down the ordinary filter-and-rank path, and
+  `CognitiveCompiler(low_complexity_direct=None)` turns the rule off.
+  `direct_response` also handles `DIAGNOSE` now, so a LOW-complexity
+  diagnosis ranks the direct answer first by rule while MEDIUM and HIGH
+  stay on `specialist_fanout`. (#342)
+- **Docs: notebook 78's captured output, concept pages that link their
+  notebooks, the environment-variable reference completed from the source,
+  and `Example:` sections on `BaseStore`, `InMemoryStore`, `register_provider`
+  and `list_checkpointers`.** The concession-approval page shows the offline
+  run (#485); the OCI Responses, multi-modal providers, events, SSE catalogue
+  and control-layer pages link the notebooks that exercise them (#486); the
+  variables the SDK reads but the page omitted are listed (#487); the four
+  docstrings carry an example a test executes (#488, #489).
+
+### Deprecated
+
+- **Reading a Redis checkpoint index written by a release before this one.**
+  `redis_checkpointer()` still reads the `<thread_id>:_checkpoints` JSON
+  string an earlier release kept and moves it into the index hash on the
+  thread's next save or removal, with a `LocusDeprecationWarning` when it
+  does; that read ends in 7.0.0. Upgrade the processes that share one Redis
+  store together: one still on the earlier release lists only the
+  checkpoints it wrote itself after the move, and nothing else is lost.
+
 ### Removed
 
 - **Removed in 6.0: the `locus.security` compatibility shim.** The old import
@@ -15,6 +157,61 @@ policy.
   forwarded (`Evidence`, `Severity`, `ground_finding`, `verify`, the taxonomy
   enums, …). The security-domain names it used to forward left Locus with the
   `locus-sdk-security` package in 5.6.0. (#464)
+
+### Fixed
+
+- **Two processes creating the PostgreSQL checkpoint table at the same instant
+  no longer fail.** `postgresql_checkpointer()` and `PgCheckpointer` took
+  `CREATE TABLE IF NOT EXISTS` for atomic; the loser hit the `pg_type` unique
+  index. The first-time DDL now runs under a transaction-scoped advisory lock
+  on the table name and re-probes before creating.
+- **`LOCUS_FRONTIER_MODEL` turns the knob it names.** The rogue-agent challenge
+  showed the variable in its banner but ran a pinned model; `build_agent()`
+  now uses it, and the default is the model it pinned. The `locus.loop`
+  and `FallbackChain.last_tier` deprecation warnings name 6.0.0 as their
+  removal release instead of a past or missing one.
+- `python -m locus.runner` reports every command the harness ran as a
+  `harness.exec` record. The runtime drained its exec records by replacing
+  the list the harness appends to, so only commands before the first tool
+  completion ever reached the gateway.
+- **Two processes saving to one thread no longer lose checkpoint-index
+  entries** (`redis_checkpointer()`, `postgresql_checkpointer()`,
+  `mysql_checkpointer()`, `opensearch_checkpointer()`). The adapter's
+  `<thread_id>:_checkpoints` index was a read-modify-write that only a
+  per-process lock serialised, so two adapter instances over one store
+  dropped entries (19 of 20 in the model of #301, far fewer on a live
+  store). Each backend now keeps the index in an operation its store
+  makes atomic — a Redis hash (`HSET` / `HDEL`), a single `UPDATE` of the
+  index row's JSON array on PostgreSQL and MySQL, a scripted `_update` on
+  OpenSearch — behind the new `CheckpointIndexStore` protocol
+  (`locus.memory.backends`), which `StorageBackendAdapter` uses when the
+  store provides it and falls back to the locked read-modify-write
+  otherwise. Ordering, `max_checkpoints_per_thread`, `fork`, `list` and
+  the tool-effect ledger behave as before; a Redis index written by an
+  earlier release is read as before and moved into the hash on the
+  thread's next save. (#301)
+- **Index follow-ups to the fix above.** `opensearch_checkpointer()` answers
+  `False` from an index removal only when the index document does not
+  exist; a version conflict, an authorisation failure or a script error
+  propagates instead of leaving the deleted checkpoint listed.
+  `redis_checkpointer()` moves a legacy index string into the hash under a
+  `WATCH`, so the process that loses the migration race no longer puts back
+  an entry the winner had just removed, and the migrated hash carries the
+  configured `ttl_seconds` even when a removal is what migrates it.
+  `StorageBackendAdapter.delete(thread_id, checkpoint_id)` is `True` when it
+  removed an index entry whose checkpoint was already gone.
+- **`oracle_checkpointer()` keeps the checkpoint index atomically too.** The
+  Oracle backend was the one shipped store still on the adapter's locked
+  read-modify-write, so two processes saving to one thread through it could
+  lose index entries (#301). `OracleBackend` now implements
+  `CheckpointIndexStore`: each save or removal reads the
+  `<thread_id>:_checkpoints` row under `SELECT ... FOR UPDATE` and rewrites
+  it in the same transaction, so concurrent writers queue on the row lock
+  and each sees what the previous one committed; two first writers racing
+  on the row's insert meet the primary key, and the loser retries against
+  the winner's row. `OracleSyncBackend` mirrors the four methods, and the
+  backend reads its JSON columns through one helper that accepts every
+  shape the driver returns (dict, string, sync or async LOB).
 
 ## [5.6.0] - 2026-11-17
 
@@ -920,13 +1117,6 @@ policy.
 - **Self-graded suites are named.** When the judge model id equals the
   model under test, `provenance.self_graded` is stamped and the report
   summary ends with a warning. The case is not failed for it.
-
-### Fixed
-
-- `python -m locus.runner` reports every command the harness ran as a
-  `harness.exec` record. The runtime drained its exec records by replacing
-  the list the harness appends to, so only commands before the first tool
-  completion ever reached the gateway.
 
 ## [5.3.2] - 2026-11-02
 

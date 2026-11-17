@@ -185,7 +185,46 @@ class BaseStore(ABC):
     """
     Abstract base class for store implementations.
 
-    Provides common functionality and defines the interface.
+    Provides common functionality and defines the interface. A subclass
+    implements ``put``, ``get``, ``delete`` and ``list_keys``; ``exists`` and
+    ``get_item`` have defaults built on them, and the search methods raise
+    :class:`StoreCapabilityError` until a subclass overrides them and
+    advertises them in ``capabilities``.
+
+    Example:
+        ```python
+        from typing import Any
+
+        from locus.memory.store import BaseStore, StoreCapabilities
+
+
+        class DictStore(BaseStore):
+            def __init__(self) -> None:
+                self.items: dict[tuple[tuple[str, ...], str], Any] = {}
+
+            @property
+            def capabilities(self) -> StoreCapabilities:
+                return StoreCapabilities()  # nothing optional: no search, no TTL
+
+            async def put(self, namespace, key, value, metadata=None) -> None:
+                self.items[(namespace, key)] = value
+
+            async def get(self, namespace, key):
+                return self.items.get((namespace, key))
+
+            async def delete(self, namespace, key) -> bool:
+                return self.items.pop((namespace, key), None) is not None
+
+            async def list_keys(self, namespace, limit=100):
+                return [k for ns, k in self.items if ns == namespace][:limit]
+
+
+        store = DictStore()
+        await store.put(("users", "u-42"), "plan", "pro")
+        assert await store.get(("users", "u-42"), "plan") == "pro"
+        assert await store.exists(("users", "u-42"), "plan")
+        assert await store.list_keys(("users", "u-42")) == ["plan"]
+        ```
     """
 
     @property
@@ -531,7 +570,25 @@ class InMemoryStore(BaseStore):
     In-memory store implementation.
 
     Fast but not persistent - data is lost when process exits.
-    Useful for testing and development.
+    Useful for testing and development. ``search`` is a case-insensitive
+    substring match over each item's JSON value and metadata, and
+    ``capabilities`` advertises ``search``, ``list_namespaces`` and
+    ``batch_operations``.
+
+    Example:
+        ```python
+        from locus.memory.store import InMemoryStore
+
+        store = InMemoryStore()
+        ns = ("users", "u-42")
+        await store.put(ns, "plan", {"tier": "pro"}, metadata={"source": "billing"})
+        await store.put(ns, "theme", {"mode": "dark"})
+
+        assert await store.get(ns, "plan") == {"tier": "pro"}
+        assert await store.list_keys(ns) == ["plan", "theme"]
+        hits = await store.search(ns, query="dark")
+        assert [item.key for item in hits] == ["theme"]
+        ```
     """
 
     def __init__(self) -> None:

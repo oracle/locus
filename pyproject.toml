@@ -140,6 +140,10 @@ browser = ["playwright>=1.45"]
 # need nothing.
 audit = ["cryptography>=42"]
 
+# Checkpoint encryption at rest (src/locus/memory/encryption.py) — AES-256-GCM
+# over the state every backend stores. Plaintext checkpoints need nothing.
+encryption = ["cryptography>=42"]
+
 # Durable agent runs on Temporal (src/locus/durable/temporal.py).
 temporal = ["temporalio>=1.7"]
 
@@ -228,6 +232,9 @@ redis-vector = ["redis>=5.0"]
 pinecone = ["pinecone>=5"]
 # ``pymongo.AsyncMongoClient`` is GA from 4.13.
 mongodb = ["pymongo>=4.13"]
+# MySQL HeatWave (and plain MySQL 9+) VECTOR columns over Connector/Python —
+# the same driver as the ``mysql`` checkpoint extra, which covers it too.
+heatwave = ["mysql-connector-python>=9.0"]
 
 # Cohere direct API (rerank + embeddings) and a local cross-encoder
 # reranker. Neither requires any cloud vendor SDK.
@@ -252,6 +259,7 @@ rag = [
     "redis>=5.0",
     "pinecone>=5",
     "pymongo>=4.13",
+    "mysql-connector-python>=9.0",
     "openai>=1.50,<3",
     "cohere>=5.0",
     "sentence-transformers>=3.0",

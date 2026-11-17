@@ -240,7 +240,18 @@ def _cmd_audit_verify(args: argparse.Namespace) -> int:
     except OSError as exc:
         raise CLIError(f"cannot read {args.file}: {exc}") from exc
     records = sum(1 for line in text.splitlines() if line.strip())
-    if verify_jsonl(text, keys=keys, expected_head=args.head):
+    verified = verify_jsonl(text, keys=keys, expected_head=args.head)
+    if args.format == "json":
+        result = {
+            "file": args.file,
+            "verified": verified,
+            "records": records,
+            "keys": len(keys) if keys else 0,
+            "head_checked": args.head is not None,
+        }
+        print(json.dumps(result, indent=2))
+        return 0 if verified else 1
+    if verified:
         signed = f", signatures checked against {len(keys)} key(s)" if keys else ", chain only"
         anchored = ", head matches" if args.head else ""
         print(f"verified: {records} record(s){signed}{anchored}")
@@ -411,7 +422,7 @@ def _cmd_eval(args: argparse.Namespace) -> int:
         report = read(args.report)
         baseline = read(args.baseline) if args.baseline else None
         result = _gate_from_args(args).check(report, baseline=baseline, force=args.force)
-        print(result.summary())
+        print(result.to_markdown() if args.markdown else result.summary())
         return 0 if result.passed else 1
 
     agent = load_agent(args.agent)
@@ -530,6 +541,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="trusted public key; repeat for rotated keys",
     )
     verify.add_argument("--head", help="the chain head anchored out of band")
+    verify.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="json prints the result as data on stdout for both outcomes (default text)",
+    )
     verify.set_defaults(handler=_cmd_audit_verify)
 
     policy = commands.add_parser(
@@ -682,6 +699,7 @@ def build_parser() -> argparse.ArgumentParser:
     eval_gate.add_argument(
         "--force", action="store_true", help="gate even when the suites' fingerprints differ"
     )
+    eval_gate.add_argument("--markdown", action="store_true", help="print a Markdown table")
     _add_gate_arguments(eval_gate)
     eval_gate.set_defaults(handler=_cmd_eval)
 

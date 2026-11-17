@@ -44,13 +44,20 @@ if TYPE_CHECKING:  # pragma: no cover — typing only
     from locus.router.policy import PolicyVerdict
 
 
-#: Which of the three gates in ``filter_candidates`` ruled a protocol out.
-Gate = Literal["goal", "risk", "capabilities"]
+#: Which of the three gates in ``filter_candidates`` ruled a protocol out, or
+#: ``"complexity"`` when the compiler resolved a LOW-complexity frame to its
+#: direct protocol before the gates ran, so the protocol was never considered.
+Gate = Literal["goal", "risk", "capabilities", "complexity"]
 
 #: How the survivor was picked. Mirrors the ``method`` already reported on
 #: ``router.protocol.selected``.
 Method = Literal[
-    "rule_based", "single_candidate", "llm_picked", "rule_based_fallback", "risk_fallback"
+    "rule_based",
+    "single_candidate",
+    "llm_picked",
+    "rule_based_fallback",
+    "risk_fallback",
+    "low_complexity_direct",
 ]
 
 _COST_RANK = {"low": 0, "medium": 1, "high": 2}

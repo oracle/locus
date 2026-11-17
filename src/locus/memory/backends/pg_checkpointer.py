@@ -55,6 +55,7 @@ from locus.core.protocols import CheckpointerCapabilities
 from locus.memory.checkpointer import BaseCheckpointer
 from locus.memory.ledger import LEDGER_SUFFIX
 from locus.memory.retention import oldest_message_time, stamp_messages, trim_messages
+from locus.memory.scope import StoredThreadId
 from locus.memory.time_travel import CheckpointInfo, info_from, link_parents
 
 
@@ -62,6 +63,8 @@ if TYPE_CHECKING:
     from asyncpg import Pool
 
     from locus.core.state import AgentState
+    from locus.memory.encryption import EncryptedSerializer
+    from locus.memory.scope import CheckpointScope
 
 
 __all__ = ["PgCheckpointer", "TENANT_GUC"]
@@ -77,6 +80,10 @@ _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 _COLUMNS = frozenset(
     {"tenant", "thread_id", "checkpoint_id", "seq", "data", "metadata", "created_at", "updated_at"}
 )
+#: The column a ``ttl`` writes; added to an existing table on first use.
+_EXPIRES_COLUMN = "expires_at"
+#: The filter every read applies: rows whose expiry has not passed (or that have none).
+_LIVE = "AND (expires_at IS NULL OR expires_at > now())"
 
 
 def _ident(value: str, field: str) -> str:
@@ -115,6 +122,18 @@ class PgCheckpointer(BaseCheckpointer):
             are missing. ``False`` never runs DDL: the table must exist (made by
             a migration), and is checked for the expected columns.
         min_pool_size / max_pool_size: The asyncpg pool bounds.
+        ttl: How long a checkpoint stays loadable after its save (seconds or
+            a ``timedelta``), kept in the row's ``expires_at`` column (added
+            to an existing table with ``ALTER TABLE ... ADD COLUMN IF NOT
+            EXISTS`` on first use); every read filters on it and
+            :meth:`expire` deletes the rows whose time has passed.
+        encryption: Seals the state in the ``data`` column
+            (:class:`~locus.memory.encryption.EncryptedSerializer`); the
+            other columns stay plaintext.
+        scope: The application and user the threads belong to
+            (:class:`~locus.memory.scope.CheckpointScope`), stored as the
+            prefix of the ``thread_id`` column; the tenant stays the
+            Row-Level Security boundary.
 
     Example::
 
@@ -143,6 +162,9 @@ class PgCheckpointer(BaseCheckpointer):
         create_schema: bool = True,
         min_pool_size: int = 1,
         max_pool_size: int = 10,
+        ttl: float | timedelta | None = None,
+        encryption: EncryptedSerializer | None = None,
+        scope: CheckpointScope | None = None,
     ) -> None:
         if importlib.util.find_spec("asyncpg") is None:
             raise ImportError(
@@ -164,11 +186,15 @@ class PgCheckpointer(BaseCheckpointer):
         self._tenant_of = tenant_of
         self.keep_checkpoints = keep_checkpoints
         self.message_retention = message_retention
+        self._configure(ttl=ttl, encryption=encryption, scope=scope)
         self._create_schema = create_schema
         self._min_pool = min_pool_size
         self._max_pool = max_pool_size
         self._pool: Pool | None = None
         self._pool_lock = asyncio.Lock()
+        # Whether the table has the ``expires_at`` column: a table from before
+        # checkpoints could expire goes without it until a ``ttl`` needs it.
+        self._has_expires = True
         self._scope: contextvars.ContextVar[str | None] = contextvars.ContextVar(
             f"locus_pg_checkpointer_tenant_{id(self)}", default=None
         )
@@ -193,13 +219,19 @@ class PgCheckpointer(BaseCheckpointer):
             self._scope.reset(token)
 
     def tenant_for(self, thread_id: str | None = None) -> str:
-        """The tenant a call on ``thread_id`` belongs to (see the module docs)."""
+        """The tenant a call on ``thread_id`` belongs to (see the module docs).
+
+        ``tenant_of`` is given the id the caller named, never the stored
+        form a scope makes of it, so a save through a scoped run and a
+        direct read of the same thread place it in the same tenant.
+        """
         scoped = self._scope.get()
         if scoped:
             return scoped
         if self._tenant_of is not None and thread_id is not None:
+            named = thread_id.thread_id if isinstance(thread_id, StoredThreadId) else thread_id
             try:
-                found = self._tenant_of(thread_id)
+                found = self._tenant_of(named)
             except Exception as exc:
                 raise ValueError(f"tenant_of could not place thread {thread_id!r}") from exc
             if not found:
@@ -251,6 +283,18 @@ class PgCheckpointer(BaseCheckpointer):
                         f"postgresql_checkpointer() keeps one row per key with no tenant). "
                         f"Pass a new table= or migrate it."
                     )
+                self._has_expires = _EXPIRES_COLUMN in columns
+                if not self._has_expires and self.ttl is not None:
+                    # A table from before checkpoints could expire, and a ttl
+                    # that needs the column: add it, where DDL is allowed.
+                    if not self._create_schema:
+                        raise RuntimeError(
+                            f"PgCheckpointer: table {self._table} has no {_EXPIRES_COLUMN} "
+                            f"column and create_schema=False. Add it with a migration: "
+                            f"{self._expires_ddl()}"
+                        )
+                    await conn.execute(self._expires_ddl())
+                    self._has_expires = True
                 return
             if not self._create_schema:
                 raise RuntimeError(
@@ -258,8 +302,29 @@ class PgCheckpointer(BaseCheckpointer):
                     f"create_schema=False. Create it with a migration (see "
                     f"PgCheckpointer.ddl()) or allow create_schema."
                 )
-            for statement in self.ddl():
-                await conn.execute(statement)
+            # Serialise concurrent first-time creators (see PostgreSQLBackend).
+            async with conn.transaction():
+                await conn.fetchval("SELECT pg_advisory_xact_lock(hashtext($1))", self._table)
+                already = await conn.fetchval(
+                    "SELECT 1 FROM information_schema.columns "
+                    "WHERE table_schema = $1 AND table_name = $2 LIMIT 1",
+                    self._schema,
+                    self._table_name,
+                )
+                if already is None:
+                    for statement in self.ddl():
+                        await conn.execute(statement)
+            # Whoever created it ran this release's DDL, which carries the column.
+            self._has_expires = True
+
+    def _expires_ddl(self) -> str:
+        """The statement that adds the ``expires_at`` column to an existing table."""
+        return f"ALTER TABLE {self._table} ADD COLUMN IF NOT EXISTS {_EXPIRES_COLUMN} timestamptz"
+
+    @property
+    def _live(self) -> str:
+        """The expiry filter every read applies; nothing on a table without the column."""
+        return _LIVE if self._has_expires else ""
 
     def ddl(self) -> list[str]:
         """The statements that create this checkpointer's schema, for a migration."""
@@ -275,9 +340,11 @@ class PgCheckpointer(BaseCheckpointer):
             "metadata jsonb NOT NULL DEFAULT '{}'::jsonb, oldest_at timestamptz, "
             "created_at timestamptz NOT NULL DEFAULT now(), "
             "updated_at timestamptz NOT NULL DEFAULT now(), "
+            f"{_EXPIRES_COLUMN} timestamptz, "
             "PRIMARY KEY (tenant, thread_id, checkpoint_id))",
             f"CREATE INDEX IF NOT EXISTS idx_{name}_latest ON {t} (tenant, thread_id, seq DESC)",
             f"CREATE INDEX IF NOT EXISTS idx_{name}_oldest ON {t} (tenant, oldest_at)",
+            f"CREATE INDEX IF NOT EXISTS idx_{name}_expires ON {t} (tenant, {_EXPIRES_COLUMN})",
             f"ALTER TABLE {t} ENABLE ROW LEVEL SECURITY",
             f"ALTER TABLE {t} FORCE ROW LEVEL SECURITY",
             f"DROP POLICY IF EXISTS tenant_isolation ON {t}",
@@ -320,23 +387,30 @@ class PgCheckpointer(BaseCheckpointer):
     ) -> str:
         """Upsert the checkpoint and prune the thread, in one statement."""
         tenant = self.tenant_for(thread_id)
+        key = self._scoped(thread_id)
         checkpoint_id = checkpoint_id or uuid4().hex
         state = self.prepare(state)
+        pool = await self._get_pool()  # first: the schema probe decides the columns
         args: list[Any] = [
             tenant,
-            thread_id,
+            key,
             checkpoint_id,
-            json.dumps(state.to_checkpoint()),
+            json.dumps(self._encode_state(state, key, checkpoint_id)),
             json.dumps(metadata or {}),
             oldest_message_time(state),
         ]
+        columns, values, updates = "", "", ""
+        if self._has_expires:
+            args.append(self._expires_at())
+            columns, values = ", expires_at", ", $7"
+            updates = ", expires_at = EXCLUDED.expires_at"
         upsert = (
             f"INSERT INTO {self._table} "
-            "(tenant, thread_id, checkpoint_id, data, metadata, oldest_at) "
-            "VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6) "
+            f"(tenant, thread_id, checkpoint_id, data, metadata, oldest_at{columns}) "
+            f"VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6{values}) "
             "ON CONFLICT (tenant, thread_id, checkpoint_id) DO UPDATE SET "
             "data = EXCLUDED.data, metadata = EXCLUDED.metadata, "
-            "oldest_at = EXCLUDED.oldest_at, seq = DEFAULT, updated_at = now()"
+            f"oldest_at = EXCLUDED.oldest_at{updates}, seq = DEFAULT, updated_at = now()"
         )
         if self.keep_checkpoints is None or thread_id.endswith(LEDGER_SUFFIX):
             sql = upsert
@@ -344,46 +418,47 @@ class PgCheckpointer(BaseCheckpointer):
             # The DELETE reads the snapshot from before the INSERT, so it sees
             # the thread's other checkpoints only: keep the newest keep-1 of
             # them, plus the one being written.
+            args.append(self.keep_checkpoints - 1)
             sql = (
                 f"WITH saved AS ({upsert} RETURNING 1) "
                 f"DELETE FROM {self._table} WHERE tenant = $1 AND thread_id = $2 "
                 "AND checkpoint_id IN ("
                 f"SELECT checkpoint_id FROM {self._table} "
                 "WHERE tenant = $1 AND thread_id = $2 AND checkpoint_id <> $3 "
-                "ORDER BY seq DESC OFFSET $7)"
+                f"ORDER BY seq DESC OFFSET ${len(args)})"
             )
-            args.append(self.keep_checkpoints - 1)
-        pool = await self._get_pool()
         async with pool.acquire() as conn, conn.transaction():
             await self._pinned(conn, tenant)
             await conn.execute(sql, *args)
         return checkpoint_id
 
     async def load(self, thread_id: str, checkpoint_id: str | None = None) -> AgentState | None:
-        from locus.core.state import AgentState  # noqa: PLC0415
-
         tenant = self.tenant_for(thread_id)
+        key = self._scoped(thread_id)
         pool = await self._get_pool()
         async with pool.acquire() as conn, conn.transaction():
             await self._pinned(conn, tenant)
             if checkpoint_id is None:
-                raw = await conn.fetchval(
-                    f"SELECT data FROM {self._table} WHERE tenant = $1 AND thread_id = $2 "
-                    "ORDER BY seq DESC LIMIT 1",
+                row = await conn.fetchrow(
+                    f"SELECT checkpoint_id, data FROM {self._table} "
+                    f"WHERE tenant = $1 AND thread_id = $2 {self._live} ORDER BY seq DESC LIMIT 1",
                     tenant,
-                    thread_id,
+                    key,
                 )
             else:
-                raw = await conn.fetchval(
-                    f"SELECT data FROM {self._table} "
-                    "WHERE tenant = $1 AND thread_id = $2 AND checkpoint_id = $3",
+                row = await conn.fetchrow(
+                    f"SELECT checkpoint_id, data FROM {self._table} "
+                    f"WHERE tenant = $1 AND thread_id = $2 AND checkpoint_id = $3 {self._live}",
                     tenant,
-                    thread_id,
+                    key,
                     checkpoint_id,
                 )
-        if raw is None:
+        if row is None:
             return None
-        return AgentState.from_checkpoint(json.loads(raw) if isinstance(raw, str) else raw)
+        raw = row["data"]
+        return self._decode_state(
+            json.loads(raw) if isinstance(raw, str) else raw, key, str(row["checkpoint_id"])
+        )
 
     async def list_checkpoints(self, thread_id: str, limit: int = 10) -> list[str]:
         tenant = self.tenant_for(thread_id)
@@ -392,15 +467,16 @@ class PgCheckpointer(BaseCheckpointer):
             await self._pinned(conn, tenant)
             rows = await conn.fetch(
                 f"SELECT checkpoint_id FROM {self._table} WHERE tenant = $1 AND thread_id = $2 "
-                "ORDER BY seq DESC LIMIT $3",
+                f"{self._live} ORDER BY seq DESC LIMIT $3",
                 tenant,
-                thread_id,
+                self._scoped(thread_id),
                 limit,
             )
         return [r["checkpoint_id"] for r in rows]
 
     async def delete(self, thread_id: str, checkpoint_id: str | None = None) -> bool:
         tenant = self.tenant_for(thread_id)
+        key = self._scoped(thread_id)
         pool = await self._get_pool()
         async with pool.acquire() as conn, conn.transaction():
             await self._pinned(conn, tenant)
@@ -408,17 +484,35 @@ class PgCheckpointer(BaseCheckpointer):
                 status = await conn.execute(
                     f"DELETE FROM {self._table} WHERE tenant = $1 AND thread_id = $2",
                     tenant,
-                    thread_id,
+                    key,
                 )
             else:
                 status = await conn.execute(
                     f"DELETE FROM {self._table} "
                     "WHERE tenant = $1 AND thread_id = $2 AND checkpoint_id = $3",
                     tenant,
-                    thread_id,
+                    key,
                     checkpoint_id,
                 )
         return _count(status) > 0
+
+    async def expire(self) -> int:
+        """Delete the current tenant's checkpoints whose ``expires_at`` has passed; returns the count.
+
+        A read never returns an expired row whether or not this has run.
+        """
+        tenant = self.tenant_for()
+        pool = await self._get_pool()
+        if not self._has_expires:
+            return 0
+        async with pool.acquire() as conn, conn.transaction():
+            await self._pinned(conn, tenant)
+            status = await conn.execute(
+                f"DELETE FROM {self._table} WHERE tenant = $1 "
+                "AND expires_at IS NOT NULL AND expires_at <= now()",
+                tenant,
+            )
+        return _count(status)
 
     async def exists(self, thread_id: str, checkpoint_id: str | None = None) -> bool:
         if checkpoint_id is None:
@@ -429,9 +523,9 @@ class PgCheckpointer(BaseCheckpointer):
             await self._pinned(conn, tenant)
             found = await conn.fetchval(
                 f"SELECT 1 FROM {self._table} "
-                "WHERE tenant = $1 AND thread_id = $2 AND checkpoint_id = $3",
+                f"WHERE tenant = $1 AND thread_id = $2 AND checkpoint_id = $3 {self._live}",
                 tenant,
-                thread_id,
+                self._scoped(thread_id),
                 checkpoint_id,
             )
         return found is not None
@@ -444,6 +538,7 @@ class PgCheckpointer(BaseCheckpointer):
         self, thread_id: str, checkpoint_id: str | None = None
     ) -> dict[str, Any] | None:
         tenant = self.tenant_for(thread_id)
+        key = self._scoped(thread_id)
         cols = "checkpoint_id, metadata, created_at, updated_at"
         pool = await self._get_pool()
         async with pool.acquire() as conn, conn.transaction():
@@ -451,16 +546,16 @@ class PgCheckpointer(BaseCheckpointer):
             if checkpoint_id is None:
                 row = await conn.fetchrow(
                     f"SELECT {cols} FROM {self._table} WHERE tenant = $1 AND thread_id = $2 "
-                    "ORDER BY seq DESC LIMIT 1",
+                    f"{self._live} ORDER BY seq DESC LIMIT 1",
                     tenant,
-                    thread_id,
+                    key,
                 )
             else:
                 row = await conn.fetchrow(
                     f"SELECT {cols} FROM {self._table} "
-                    "WHERE tenant = $1 AND thread_id = $2 AND checkpoint_id = $3",
+                    f"WHERE tenant = $1 AND thread_id = $2 AND checkpoint_id = $3 {self._live}",
                     tenant,
-                    thread_id,
+                    key,
                     checkpoint_id,
                 )
         if row is None:
@@ -483,7 +578,7 @@ class PgCheckpointer(BaseCheckpointer):
             await self._pinned(conn, tenant)
             rows = await conn.fetch(
                 f"SELECT thread_id, checkpoint_id, updated_at FROM {self._table} "
-                "WHERE tenant = $1 AND metadata @> $2::jsonb ORDER BY seq DESC LIMIT $3",
+                f"WHERE tenant = $1 AND metadata @> $2::jsonb {self._live} ORDER BY seq DESC LIMIT $3",
                 tenant,
                 json.dumps({key: value}),
                 limit,
@@ -497,14 +592,17 @@ class PgCheckpointer(BaseCheckpointer):
             for r in rows
         ]
 
-    async def list_threads(self, limit: int = 100, pattern: str = "*") -> list[str]:
-        """The current tenant's threads, most recently saved first.
+    async def list_threads(
+        self, limit: int = 100, pattern: str = "*", *, scope: CheckpointScope | None = None
+    ) -> list[str]:
+        """The current tenant's threads of one scope, most recently saved first.
 
         ``pattern`` is a glob (``*`` and ``?``), matched in SQL.
         """
         tenant = self.tenant_for()
+        listing = self._listing_scope(scope)
         like = (
-            pattern.replace("\\", "\\\\")
+            f"{listing.prefix}{pattern}".replace("\\", "\\\\")
             .replace("%", "\\%")
             .replace("_", "\\_")
             .replace("*", "%")
@@ -515,32 +613,72 @@ class PgCheckpointer(BaseCheckpointer):
             await self._pinned(conn, tenant)
             rows = await conn.fetch(
                 f"SELECT thread_id FROM {self._table} WHERE tenant = $1 AND thread_id LIKE $2 "
-                "GROUP BY thread_id ORDER BY max(seq) DESC LIMIT $3",
+                f"{self._live} GROUP BY thread_id ORDER BY max(seq) DESC LIMIT $3",
                 tenant,
                 like,
                 limit,
             )
-        return [r["thread_id"] for r in rows]
+        return listing.strip(r["thread_id"] for r in rows)
 
     async def copy_thread(self, source_thread_id: str, dest_thread_id: str) -> bool:
-        """Copy every checkpoint of a thread to another thread of the same tenant."""
+        """Copy every checkpoint of a thread to another thread of the same tenant.
+
+        One statement when the rows can be copied as they are; an encrypted
+        checkpoint is bound to its thread, so with ``encryption`` each row
+        is unsealed and sealed again under the new thread.
+        """
         tenant = self.tenant_for(source_thread_id)
         if self.tenant_for(dest_thread_id) != tenant:
             raise ValueError("copy_thread cannot copy a thread to another tenant")
+        source_key, dest_key = self._scoped(source_thread_id), self._scoped(dest_thread_id)
         pool = await self._get_pool()
+        expires = ", expires_at" if self._has_expires else ""
         async with pool.acquire() as conn, conn.transaction():
             await self._pinned(conn, tenant)
-            status = await conn.execute(
-                f"INSERT INTO {self._table} "
-                "(tenant, thread_id, checkpoint_id, data, metadata, oldest_at) "
-                "SELECT tenant, $3, checkpoint_id, data, metadata, oldest_at "
-                f"FROM {self._table} WHERE tenant = $1 AND thread_id = $2 ORDER BY seq "
-                "ON CONFLICT (tenant, thread_id, checkpoint_id) DO NOTHING",
+            if self.encryption is None:
+                status = await conn.execute(
+                    f"INSERT INTO {self._table} "
+                    f"(tenant, thread_id, checkpoint_id, data, metadata, oldest_at{expires}) "
+                    f"SELECT tenant, $3, checkpoint_id, data, metadata, oldest_at{expires} "
+                    f"FROM {self._table} WHERE tenant = $1 AND thread_id = $2 {self._live} "
+                    "ORDER BY seq ON CONFLICT (tenant, thread_id, checkpoint_id) DO NOTHING",
+                    tenant,
+                    source_key,
+                    dest_key,
+                )
+                return _count(status) > 0
+            rows = await conn.fetch(
+                f"SELECT checkpoint_id, data, metadata, oldest_at{expires} FROM {self._table} "
+                f"WHERE tenant = $1 AND thread_id = $2 {self._live} ORDER BY seq",
                 tenant,
-                source_thread_id,
-                dest_thread_id,
+                source_key,
             )
-        return _count(status) > 0
+            copied = 0
+            for r in rows:
+                raw = r["data"]
+                state = self._decode_state(
+                    json.loads(raw) if isinstance(raw, str) else raw, source_key, r["checkpoint_id"]
+                )
+                args: list[Any] = [
+                    tenant,
+                    dest_key,
+                    r["checkpoint_id"],
+                    json.dumps(self._encode_state(state, dest_key, r["checkpoint_id"])),
+                    r["metadata"] if isinstance(r["metadata"], str) else json.dumps(r["metadata"]),
+                    r["oldest_at"],
+                ]
+                values = "$1, $2, $3, $4::jsonb, $5::jsonb, $6"
+                if self._has_expires:
+                    args.append(r["expires_at"])
+                    values += ", $7"
+                status = await conn.execute(
+                    f"INSERT INTO {self._table} "
+                    f"(tenant, thread_id, checkpoint_id, data, metadata, oldest_at{expires}) "
+                    f"VALUES ({values}) ON CONFLICT (tenant, thread_id, checkpoint_id) DO NOTHING",
+                    *args,
+                )
+                copied += _count(status)
+        return copied > 0
 
     async def vacuum(self, older_than_days: int = 30) -> int:
         """Delete the current tenant's threads nobody has saved to for ``older_than_days``.
@@ -578,11 +716,10 @@ class PgCheckpointer(BaseCheckpointer):
             thread_id: Only this thread (else every thread of the tenant).
             batch: Checkpoints rewritten per transaction.
         """
-        from locus.core.state import AgentState  # noqa: PLC0415
-
         if older_than <= timedelta(0):
             raise ValueError("older_than must be positive")
         tenant = self.tenant_for(thread_id)
+        key = self._scoped(thread_id) if thread_id else None
         cutoff = datetime.now(UTC) - older_than
         where = "tenant = $1 AND oldest_at < $2" + (" AND thread_id = $4" if thread_id else "")
         dropped = 0
@@ -596,13 +733,15 @@ class PgCheckpointer(BaseCheckpointer):
                     tenant,
                     cutoff,
                     batch,
-                    *([thread_id] if thread_id else []),
+                    *([key] if key else []),
                 )
                 updates = []
                 for r in rows:
                     raw = r["data"]
-                    state = AgentState.from_checkpoint(
-                        json.loads(raw) if isinstance(raw, str) else raw
+                    state = self._decode_state(
+                        json.loads(raw) if isinstance(raw, str) else raw,
+                        r["thread_id"],
+                        r["checkpoint_id"],
                     )
                     trimmed, n = trim_messages(state, cutoff)
                     dropped += n
@@ -615,7 +754,9 @@ class PgCheckpointer(BaseCheckpointer):
                             tenant,
                             r["thread_id"],
                             r["checkpoint_id"],
-                            json.dumps(trimmed.to_checkpoint()),
+                            json.dumps(
+                                self._encode_state(trimmed, r["thread_id"], r["checkpoint_id"])
+                            ),
                             oldest if oldest is not None and oldest >= cutoff else None,
                         )
                     )
@@ -664,10 +805,10 @@ class PgCheckpointer(BaseCheckpointer):
             rows = await conn.fetch(
                 "SELECT checkpoint_id, metadata, created_at, "
                 "(data->>'iteration')::int AS iteration, octet_length(data::text) AS size "
-                f"FROM {self._table} WHERE tenant = $1 AND thread_id = $2 "
+                f"FROM {self._table} WHERE tenant = $1 AND thread_id = $2 {self._live} "
                 "ORDER BY seq DESC LIMIT $3",
                 tenant,
-                thread_id,
+                self._scoped(thread_id),
                 limit + 1,
             )
         older = rows[limit]["checkpoint_id"] if len(rows) > limit else None

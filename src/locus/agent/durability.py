@@ -232,7 +232,7 @@ def attach_durability(
     ``resume(invocation_id=...)``, ``run(invocation_id=...)``) and off for a
     fresh turn, which has no records to find.
     """
-    checkpointer = config.checkpointer
+    checkpointer = rc.checkpointer if rc.checkpointer is not None else config.checkpointer
     if checkpointer is None:
         rc.checkpoints = None
         rc.ledger = None

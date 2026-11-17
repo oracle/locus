@@ -8,9 +8,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import warnings
 from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel, Field
+
+from locus.core.warnings import LocusDeprecationWarning
+from locus.memory.backends.checkpoint_index import index_key
 
 
 if TYPE_CHECKING:
@@ -42,6 +46,18 @@ class RedisBackend(BaseModel):
         >>> backend = RedisBackend(url="redis://localhost:6379")
         >>> await backend.save("thread_1", state.model_dump())
         >>> data = await backend.load("thread_1")
+
+    Checkpoint index:
+        Through ``redis_checkpointer()`` the thread's checkpoint index is a
+        hash at ``<prefix><thread_id>:_checkpoints:hash``, one field per
+        checkpoint (``HSET`` / ``HDEL`` are atomic), so two processes saving
+        to one thread never lose an entry. An index written by an earlier
+        release as one JSON string at ``<prefix><thread_id>:_checkpoints``
+        is still read, and moved into the hash (under the configured
+        ``ttl_seconds``) on the thread's next save or removal. Reading the
+        string ends in Locus 7.0.0, so upgrade the processes that share one
+        store together: one still on the earlier release lists only the
+        checkpoints it wrote itself after the move.
     """
 
     config: RedisConfig = Field(default_factory=RedisConfig)
@@ -152,6 +168,122 @@ class RedisBackend(BaseModel):
         threads = [k[prefix_len:] for k in keys]
         # Apply offset and limit
         return threads[offset : offset + limit]
+
+    # -- checkpoint index (CheckpointIndexStore) -------------------------------
+
+    def _index_hash_key(self, thread_id: str) -> str:
+        """The hash holding a thread's checkpoint index: one field per checkpoint."""
+        return f"{self._key(index_key(thread_id))}:hash"
+
+    def _legacy_index_key(self, thread_id: str) -> str:
+        """The key an earlier release kept the index at, as one JSON string."""
+        return self._key(index_key(thread_id))
+
+    @staticmethod
+    def _legacy_entries(raw: str | bytes | None) -> list[dict[str, Any]]:
+        """The entries of a legacy index string; ``[]`` when there is none."""
+        if raw is None:
+            return []
+        entries = json.loads(raw).get("checkpoints", [])
+        return [entry for entry in entries if entry.get("checkpoint_id")]
+
+    async def _migrate_legacy_index(self, client: Redis, thread_id: str) -> None:
+        """Move a legacy index string into the hash, once.
+
+        Without a string -- every thread this release wrote -- the check is
+        one ``EXISTS``. With one, the move runs under a ``WATCH`` on the
+        string: each entry is set only where the hash has none (``HSETNX``,
+        so an entry the hash already carries is never replaced by its older
+        copy), the string is deleted and the hash gets the configured TTL,
+        in one transaction that Redis discards when another process touched
+        the string in between. The process that loses that race writes
+        nothing: the winner's hash stands, and an entry the winner removed
+        after migrating is not put back by stale ``HSETNX`` calls.
+        """
+        legacy = self._legacy_index_key(thread_id)
+        if not await client.exists(legacy):
+            return
+        from redis.exceptions import WatchError
+
+        hash_key = self._index_hash_key(thread_id)
+        async with client.pipeline(transaction=True) as pipe:
+            await pipe.watch(legacy)
+            raw = await pipe.get(legacy)
+            if raw is None:
+                return  # migrated by another process since the check
+            warnings.warn(
+                f"Found a checkpoint index written by an earlier Locus release at {legacy!r} "
+                "and moved it into the index hash. Reading these legacy index strings ends "
+                "in Locus 7.0.0; upgrade every process that shares this Redis store before then.",
+                LocusDeprecationWarning,
+                stacklevel=2,
+            )
+            pipe.multi()
+            for entry in self._legacy_entries(raw):
+                pipe.hsetnx(hash_key, str(entry["checkpoint_id"]), json.dumps(entry))
+            pipe.delete(legacy)
+            if self.config.ttl_seconds:
+                pipe.expire(hash_key, self.config.ttl_seconds)
+            try:
+                await pipe.execute()
+            except WatchError:
+                # Another process migrated the string (or an older release
+                # rewrote it) after the read; its result stands.
+                return
+
+    async def index_add(self, thread_id: str, entry: dict[str, Any]) -> None:
+        """Set the entry's field in the index hash (``HSET``: atomic, replaces a duplicate).
+
+        The hash is shared by every checkpoint of the thread, so its expiry
+        is the longest any writer asked for: a ``ttl`` only ever lengthens
+        it (a hash this call creates gets the ttl outright), and a writer
+        without a ttl makes it persist. Otherwise a short-lived save after
+        a long-lived one would take the index — and the listing of the
+        checkpoints still live — down with it.
+        """
+        client = await self._get_client()
+        await self._migrate_legacy_index(client, thread_id)
+        key = self._index_hash_key(thread_id)
+        pipe = client.pipeline(transaction=True)
+        pipe.hset(key, str(entry["checkpoint_id"]), json.dumps(entry))
+        pipe.hlen(key)
+        pipe.pttl(key)
+        added, length, remaining = await pipe.execute()
+        if not self.config.ttl_seconds:
+            if int(remaining) >= 0:
+                await client.persist(key)
+            return
+        wanted = int(self.config.ttl_seconds) * 1000
+        created = int(added) == 1 and int(length) == 1
+        if created or 0 <= int(remaining) < wanted:
+            await client.pexpire(key, wanted)
+
+    async def index_remove(self, thread_id: str, checkpoint_id: str) -> bool:
+        """Delete the entry's field from the index hash (``HDEL``)."""
+        client = await self._get_client()
+        await self._migrate_legacy_index(client, thread_id)
+        removed: int = await client.hdel(self._index_hash_key(thread_id), checkpoint_id)
+        return removed > 0
+
+    async def index_list(self, thread_id: str) -> list[dict[str, Any]]:
+        """Every entry: the hash's fields, plus a legacy string's not yet migrated."""
+        client = await self._get_client()
+        pipe = client.pipeline(transaction=False)
+        pipe.hgetall(self._index_hash_key(thread_id))
+        pipe.get(self._legacy_index_key(thread_id))
+        fields, raw = await pipe.execute()
+        entries = {str(e["checkpoint_id"]): e for e in self._legacy_entries(raw)}
+        for checkpoint_id, value in cast("dict[str, str]", fields).items():
+            entries[checkpoint_id] = json.loads(value)
+        return list(entries.values())
+
+    async def index_clear(self, thread_id: str) -> bool:
+        """Delete the index hash and any legacy string."""
+        client = await self._get_client()
+        deleted: int = await client.delete(
+            self._index_hash_key(thread_id), self._legacy_index_key(thread_id)
+        )
+        return deleted > 0
 
     async def close(self) -> None:
         """Close Redis connection."""

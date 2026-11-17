@@ -54,6 +54,8 @@ if TYPE_CHECKING:
 
     from locus.core.protocols import CheckpointerCapabilities
     from locus.core.state import AgentState
+    from locus.memory.encryption import EncryptedSerializer
+    from locus.memory.scope import CheckpointScope
     from locus.memory.time_travel import CheckpointInfo
 
 
@@ -177,6 +179,21 @@ class RetainedCheckpointer(BaseCheckpointer):
     def deletes_single_checkpoints(self) -> bool:
         return self.inner.deletes_single_checkpoints
 
+    @property
+    def ttl(self) -> timedelta | None:  # type: ignore[override]
+        """``inner``'s ttl: the wrapper stores nothing itself."""
+        return self.inner.ttl
+
+    @property
+    def encryption(self) -> EncryptedSerializer | None:  # type: ignore[override]
+        """``inner``'s encryption: the wrapper stores nothing itself."""
+        return self.inner.encryption
+
+    @property
+    def scope(self) -> CheckpointScope | None:  # type: ignore[override]
+        """``inner``'s scope: the wrapper stores nothing itself."""
+        return self.inner.scope
+
     def retain(self, state: AgentState, now: datetime | None = None) -> AgentState:
         """``state`` as it would be saved now: stamped, and trimmed to ``max_age``."""
         now = now or self._clock()
@@ -209,8 +226,13 @@ class RetainedCheckpointer(BaseCheckpointer):
     async def vacuum(self, older_than_days: int = 30) -> int:
         return await self.inner.vacuum(older_than_days)
 
-    async def list_threads(self, limit: int = 100, pattern: str = "*") -> list[str]:
-        return await self.inner.list_threads(limit=limit, pattern=pattern)
+    async def expire(self) -> int:
+        return await self.inner.expire()
+
+    async def list_threads(
+        self, limit: int = 100, pattern: str = "*", *, scope: CheckpointScope | None = None
+    ) -> list[str]:
+        return await self.inner.list_threads(limit=limit, pattern=pattern, scope=scope)
 
     async def close(self) -> None:
         await self.inner.close()

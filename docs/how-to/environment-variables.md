@@ -70,6 +70,8 @@ that choice — without an OCI profile it still gives the mock.
 | `LOCUS_MODEL_ID_C` | Tertiary "model C" slot |
 | `LOCUS_RESEARCH_MODEL` | Overrides the model for the research/eval scripts |
 | `LOCUS_NOTEBOOK_BOOT` | Set to `1` to make notebook 65 start a live `AgentServer` on port 8000 instead of its TestClient smoke test |
+| `LOCUS_CONTEXT_WINDOW` | Input context window, in tokens, for every agent in the process whose `context_window` and model metadata do not name one — a self-hosted model the seed table cannot know |
+| `LOCUS_MODEL_PROFILES` | Path to a JSON file of `ModelProfile` overrides keyed by model id or `fnmatch` glob; `profile_for()` reads it before the built-in metadata and family heuristics |
 
 ### OCI Generative AI
 
@@ -86,6 +88,9 @@ that already exports `OCI_PROFILE` works unchanged. See
 | `LOCUS_OCI_ENDPOINT` / `OCI_ENDPOINT` | Service endpoint override — SDK transport (`OCIModel`) only |
 | `LOCUS_OCI_TRANSPORT` / `OCI_TRANSPORT` | Force `v1` or `sdk` instead of routing by model id |
 | `OCI_DAC_ENDPOINT_OCID`, `OCI_DAC_COMPARTMENT_ID`, `OCI_DAC_REGION` | Dedicated AI Cluster — notebook 35 |
+| `OCI_SESSION_PROFILE` / `OCI_CLI_PROFILE` | `OracleAgentMemoryManager` signing an `oci/...` extraction model: the profile is `OCI_SESSION_PROFILE`, then `OCI_PROFILE`, then `OCI_CLI_PROFILE`, then `DEFAULT` |
+| `OCI_USER` / `OCI_KEY_FILE` / `OCI_KEY_CONTENT` / `OCI_FINGERPRINT` | When any is set, `OracleAgentMemoryManager` leaves the `oci/...` model's auth to those variables instead of building a signer from the profile |
+| `OCI_RESOURCE_PRINCIPAL_VERSION` | Set by the OCI runtime, not by you; the `locus deploy` entrypoint reads it to pick `resource_principal` over `instance_principal` when `LOCUS_OCI_AUTH_TYPE` is unset |
 
 ## Provider keys
 
@@ -97,7 +102,13 @@ Per-provider setup, with the model string for each, is in
 | `OPENAI_API_KEY` | `OpenAIModel`, `OpenAIEmbeddings` |
 | `OPENAI_BASE_URL` | OpenAI-shaped endpoint override — points the notebooks at a proxy or the LiteLLM gateway |
 | `ANTHROPIC_API_KEY` | `AnthropicModel` |
+| `ANTHROPIC_BASE_URL` | `AnthropicModel` endpoint when `base_url=` is not given — any endpoint that speaks the Messages API; unset, `api.anthropic.com` |
+| `ANTHROPIC_AUTH_TOKEN` | `AnthropicModel` bearer token sent as `Authorization` instead of `x-api-key` when `auth_token=` is not given — what most gateways take; with a token, `ANTHROPIC_API_KEY` is not sent |
 | `COHERE_API_KEY` | `CohereEmbeddings`, `CohereReranker` |
+| `JINA_API_KEY` | `JinaReranker` |
+| `VOYAGE_API_KEY` | `VoyageReranker` |
+| `PINECONE_API_KEY` | `PineconeVectorStore` |
+| `MONGODB_URI` | `MongoDBAtlasVectorStore` connection string when `connection_string=` is not given |
 
 ### OpenAI-compatible providers
 
@@ -143,12 +154,31 @@ over the environment.
 | `LOCUS_APPROVALS_STORE` | The store `locus approvals` reads when `--store` is not given: a `FileApprovals` path, or `memory://`, `file://`, `postgresql://`, `redis://`, `oracle://`; `approval_store()` reads it when called without a spec |
 | `LOCUS_APPROVER` | The principal `locus approvals approve` / `reject` record when `--by` is not given |
 
+## Evaluation
+
+| Variable | Used by |
+|---|---|
+| `LOCUS_EVAL_STORE` | The report store `locus eval` and `report_store()` open when no spec is given — see [Evaluate in CI](evaluate-in-ci.md) |
+
 ## Serving
 
 | Variable | Used by |
 |---|---|
 | `LOCUS_SERVER_API_KEY` | `AgentServer` bearer token — notebook 65 |
 | `LOCUS_A2A_API_KEY` | `A2AServer.__init__` bearer token |
+
+## Deployed images
+
+The image `locus deploy` builds starts with `python -m locus.deploy.entrypoint`
+and serves the scaffolded `server.py`; see [Deploy to OCI](deploy-oci.md).
+
+| Variable | Used by |
+|---|---|
+| `LOCUS_MODEL` | Model string the scaffolded server builds its agent from (default `oci:openai.gpt-4.1`); `mock` for a first deployment that proves the path before a model is wired |
+| `LOCUS_SERVER_TITLE` | Title of the scaffolded `AgentServer` (default `Locus agent`) |
+| `LOCUS_SERVER_ALLOW_UNAUTHENTICATED` | `1` lets the scaffolded server start without `LOCUS_SERVER_API_KEY`; otherwise it refuses to start |
+| `<VAR>_SECRET_OCID` | The entrypoint reads the OCI Vault secret and sets `<VAR>` from it; a `<VAR>` already set wins |
+| `LOCUS_APM_DATA_KEY` / `OTEL_EXPORTER_OTLP_HEADERS` | With the key resolved and no OTLP headers set, the entrypoint sets the Application Performance Monitoring authorization header from it |
 
 ## LiteLLM gateway
 
@@ -161,6 +191,16 @@ Notebooks 66 and 67. See [the gateway how-to](litellm-gateway.md).
 | `LITELLM_GATEWAY_MODEL` | Model id as the gateway names it |
 | `LITELLM_MASTER_KEY` | Admin key — `/key/generate` and `/spend/*` (needs Postgres) |
 
+## Tools and MCP servers
+
+| Variable | Used by |
+|---|---|
+| `LOCUS_SANDBOX` | Sandbox provider for `@tool(sandbox=True)` or a `SandboxSpec` that names none: `subprocess` (alias `local`) unless set; `docker`, or a name from the `locus.sandbox_providers` entry-point group |
+| `LOCUS_ALLOW_PRIVATE_URLS` | `is_safe_url()` / `validate_url()` in `locus.tools.url_safety` when called without `allow_private=`: `true` / `1` / `yes` admits private-network targets (cloud metadata endpoints stay blocked). The MCP client passes its own `allow_private_url` field, so it does not read this |
+| `LOCUS_MCP_SKIP_OSV` | `1` disables the OSV malware check run before an MCP server is spawned with `npx`, `uvx`, `pipx`, `bunx` or `pnpm dlx` — for hosts with no network egress |
+| `OSV_ENDPOINT` | The OSV query endpoint that check calls (default `https://api.osv.dev/v1/query`) |
+| `XDG_CONFIG_HOME` | Where `FileTokenStore` keeps MCP OAuth tokens when given no path: `$XDG_CONFIG_HOME/locus/mcp-tokens`, else `~/.config/locus/mcp-tokens` |
+
 ## OCI tools and vendor adapters
 
 | Variable | Used by |
@@ -170,3 +210,21 @@ Notebooks 66 and 67. See [the gateway how-to](litellm-gateway.md).
 | `DATAMAP_URL` | Data-map adapter — notebook 80 |
 | `DATAMAP_API_KEY` | Data-map adapter — notebook 80 |
 | `DATAMAP_TOKEN` | Data-map adapter — notebook 80 |
+
+## Observability
+
+| Variable | Used by |
+|---|---|
+| `OCI_APM_DATA_UPLOAD_ENDPOINT` / `OCI_APM_PRIVATE_DATA_KEY` | `oci_apm()` when not given `data_upload_endpoint=` / `private_data_key=` — see [Observability](../concepts/observability.md) |
+
+## Rogue-agent challenge
+
+`python -m locus.rogue` picks its model from these; with none set and no
+`ANTHROPIC_API_KEY` it runs offline on a model that arrives compromised.
+
+| Variable | Used by |
+|---|---|
+| `LOCUS_MODEL_URL` | Base URL of a self-hosted OpenAI-compatible server (`/v1` is appended); `LOCUS_ADVISORY_URL` is the older name and is still read |
+| `LOCUS_MODEL_NAME` | Model id on that server; unset, the first id its `/v1/models` lists |
+| `LOCUS_FRONTIER_MODEL` | The hosted model the challenge runs against when `ANTHROPIC_API_KEY` is set and no local server is named; default `anthropic:claude-sonnet-5-5` |
+| `LOCUS_MODEL_API_KEY` | Key sent to that server (default `unused`; self-hosted servers ignore it) |

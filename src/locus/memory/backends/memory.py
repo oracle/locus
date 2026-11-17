@@ -15,12 +15,13 @@ Note: All data is lost when the process exits.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, NamedTuple
 from uuid import uuid4
 
 from locus.core.protocols import CheckpointerCapabilities
 from locus.memory.checkpointer import BaseCheckpointer
+from locus.memory.expiry import is_expired
 from locus.memory.time_travel import (
     CheckpointInfo,
     checkpoint_iteration,
@@ -32,6 +33,8 @@ from locus.memory.time_travel import (
 
 if TYPE_CHECKING:
     from locus.core.state import AgentState
+    from locus.memory.encryption import EncryptedSerializer
+    from locus.memory.scope import CheckpointScope
 
 
 class _Stored(NamedTuple):
@@ -42,6 +45,7 @@ class _Stored(NamedTuple):
     metadata: dict[str, Any]
     iteration: int | None
     size: int
+    expires_at: datetime | None = None
 
 
 class MemoryCheckpointer(BaseCheckpointer):
@@ -69,6 +73,13 @@ class MemoryCheckpointer(BaseCheckpointer):
             its length; a cap bounds it, at the cost of ``fork`` and ``list``
             reaching back only that far. The tool-effect ledger's sidecar
             thread is never trimmed.
+        ttl: How long a checkpoint stays loadable after its save (seconds or
+            a ``timedelta``); ``None`` keeps it until deleted. See
+            :mod:`locus.memory.expiry`.
+        encryption: Seals the state before it is stored
+            (:class:`~locus.memory.encryption.EncryptedSerializer`).
+        scope: The application and user the threads belong to
+            (:class:`~locus.memory.scope.CheckpointScope`).
 
     Example:
         ```python
@@ -82,13 +93,31 @@ class MemoryCheckpointer(BaseCheckpointer):
         ```
     """
 
-    def __init__(self, max_checkpoints_per_thread: int | None = None) -> None:
+    def __init__(
+        self,
+        max_checkpoints_per_thread: int | None = None,
+        *,
+        ttl: float | timedelta | None = None,
+        encryption: EncryptedSerializer | None = None,
+        scope: CheckpointScope | None = None,
+    ) -> None:
         if max_checkpoints_per_thread is not None and max_checkpoints_per_thread < 1:
             raise ValueError("max_checkpoints_per_thread must be at least 1")
         self.max_checkpoints_per_thread = max_checkpoints_per_thread
-        # Storage: {thread_id: {checkpoint_id: _Stored}}; the tuple's first
-        # three fields are (state_data, timestamp, metadata), as they always were.
+        self._configure(ttl=ttl, encryption=encryption, scope=scope)
+        # Storage: {stored thread id: {checkpoint_id: _Stored}}; the tuple's
+        # first three fields are (state_data, timestamp, metadata), as they
+        # always were. A scoped thread is stored under its scope's prefix.
         self._storage: dict[str, dict[str, _Stored]] = {}
+
+    def _live(self, thread_key: str) -> dict[str, _Stored]:
+        """A thread's checkpoints that have not expired."""
+        now = datetime.now(UTC)
+        return {
+            checkpoint_id: stored
+            for checkpoint_id, stored in self._storage.get(thread_key, {}).items()
+            if not is_expired(stored.expires_at, now)
+        }
 
     @property
     def capabilities(self) -> CheckpointerCapabilities:
@@ -118,17 +147,20 @@ class MemoryCheckpointer(BaseCheckpointer):
             Checkpoint ID for the saved state
         """
         checkpoint_id = checkpoint_id or uuid4().hex
+        key = self._scoped(thread_id)
 
-        if thread_id not in self._storage:
-            self._storage[thread_id] = {}
+        if key not in self._storage:
+            self._storage[key] = {}
 
-        data = state.to_checkpoint()
-        self._storage[thread_id][checkpoint_id] = _Stored(
+        data = self._encode_state(state, key, checkpoint_id)
+        now = datetime.now(UTC)
+        self._storage[key][checkpoint_id] = _Stored(
             data,
-            datetime.now(UTC),
+            now,
             metadata or {},
             checkpoint_iteration(data),
             checkpoint_size(data),
+            self._expires_at(now),
         )
         if self.max_checkpoints_per_thread is not None:
             await self._trim_history(thread_id, self.max_checkpoints_per_thread)
@@ -150,12 +182,8 @@ class MemoryCheckpointer(BaseCheckpointer):
         Returns:
             Restored AgentState or None if not found
         """
-        from locus.core.state import AgentState
-
-        if thread_id not in self._storage:
-            return None
-
-        thread_data = self._storage[thread_id]
+        key = self._scoped(thread_id)
+        thread_data = self._live(key)
 
         if not thread_data:
             return None
@@ -171,7 +199,7 @@ class MemoryCheckpointer(BaseCheckpointer):
         if checkpoint_id not in thread_data:
             return None
 
-        return AgentState.from_checkpoint(thread_data[checkpoint_id].data)
+        return self._decode_state(thread_data[checkpoint_id].data, key, checkpoint_id)
 
     async def list_checkpoints(
         self,
@@ -188,10 +216,7 @@ class MemoryCheckpointer(BaseCheckpointer):
         Returns:
             List of checkpoint IDs, newest first
         """
-        if thread_id not in self._storage:
-            return []
-
-        thread_data = self._storage[thread_id]
+        thread_data = self._live(self._scoped(thread_id))
 
         # Sort by timestamp descending
         sorted_ids = sorted(
@@ -217,44 +242,62 @@ class MemoryCheckpointer(BaseCheckpointer):
         Returns:
             True if deletion was successful
         """
-        if thread_id not in self._storage:
+        key = self._scoped(thread_id)
+        if key not in self._storage:
             return False
 
         if checkpoint_id is None:
             # Delete all checkpoints for thread
-            del self._storage[thread_id]
+            del self._storage[key]
             return True
-        if checkpoint_id in self._storage[thread_id]:
-            del self._storage[thread_id][checkpoint_id]
+        if checkpoint_id in self._storage[key]:
+            del self._storage[key][checkpoint_id]
             return True
         return False
+
+    async def expire(self) -> int:
+        """Drop every expired checkpoint, and the threads left empty; returns the count."""
+        now = datetime.now(UTC)
+        removed = 0
+        for key in list(self._storage):
+            thread_data = self._storage[key]
+            expired = [cid for cid, s in thread_data.items() if is_expired(s.expires_at, now)]
+            for checkpoint_id in expired:
+                del thread_data[checkpoint_id]
+            removed += len(expired)
+            if not thread_data:
+                del self._storage[key]
+        return removed
 
     def clear(self) -> None:
         """Clear all stored checkpoints."""
         self._storage.clear()
 
     def get_thread_ids(self) -> list[str]:
-        """Get list of all thread IDs with checkpoints."""
+        """Get list of all thread IDs with checkpoints, as stored (scoped ids carry their prefix)."""
         return list(self._storage.keys())
 
     async def list_threads(
         self,
         limit: int = 100,
         pattern: str = "*",
+        *,
+        scope: CheckpointScope | None = None,
     ) -> list[str]:
         """
-        List all thread IDs.
+        List the thread IDs of one scope.
 
         Args:
             limit: Maximum threads to return
             pattern: Pattern to filter (supports * as wildcard)
+            scope: The scope to list; default the call's, else the unscoped threads
 
         Returns:
             List of thread IDs
         """
         import fnmatch
 
-        threads = list(self._storage.keys())
+        threads = self._listing_scope(scope).strip(key for key in self._storage if self._live(key))
 
         if pattern != "*":
             threads = [t for t in threads if fnmatch.fnmatch(t, pattern)]
@@ -272,7 +315,7 @@ class MemoryCheckpointer(BaseCheckpointer):
             Number of checkpoints
         """
         if thread_id is not None:
-            return len(self._storage.get(thread_id, {}))
+            return len(self._storage.get(self._scoped(thread_id), {}))
         return sum(len(t) for t in self._storage.values())
 
     def __repr__(self) -> str:
@@ -284,7 +327,7 @@ class MemoryCheckpointer(BaseCheckpointer):
     # annotations of anything defined after it.
     async def list(self, thread_id: str, limit: int = 10) -> list[CheckpointInfo]:
         """The thread's checkpoints, newest first, read off the stored records."""
-        thread_data = self._storage.get(thread_id, {})
+        thread_data = self._live(self._scoped(thread_id))
         newest_first = sorted(
             thread_data.items(), key=lambda item: item[1].created_at, reverse=True
         )

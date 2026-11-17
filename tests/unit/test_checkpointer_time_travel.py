@@ -55,6 +55,7 @@ from locus.tools.decorator import tool
 from tests.unit.checkpointer_time_travel_conformance import (
     BoundedHistoryConformance,
     CheckpointerTimeTravelConformance,
+    ProductionSettingsConformance,
     _agent,
     _state,
 )
@@ -86,6 +87,27 @@ class _DictStore:
 
     async def list_threads(self, limit: int = 100, pattern: str = "*") -> list[str]:
         return [k for k in self.rows if fnmatch.fnmatch(k, pattern)][:limit]
+
+
+class _IndexedDictStore(_DictStore):
+    """``_DictStore`` keeping the checkpoint index itself, as the shipped backends do (#301)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.index: dict[str, dict[str, dict[str, Any]]] = {}
+
+    async def index_add(self, thread_id: str, entry: dict[str, Any]) -> None:
+        self.index.setdefault(thread_id, {})[entry["checkpoint_id"]] = copy.deepcopy(entry)
+
+    async def index_remove(self, thread_id: str, checkpoint_id: str) -> bool:
+        return self.index.get(thread_id, {}).pop(checkpoint_id, None) is not None
+
+    async def index_list(self, thread_id: str) -> list[dict[str, Any]]:
+        # Oldest first: the adapter, not the store, orders what it lists.
+        return [copy.deepcopy(e) for e in reversed(list(self.index.get(thread_id, {}).values()))]
+
+    async def index_clear(self, thread_id: str) -> bool:
+        return self.index.pop(thread_id, None) is not None
 
 
 class _FakeObjectStorage:
@@ -189,7 +211,21 @@ class _MinimalCheckpointer(BaseCheckpointer):
 # ---------------------------------------------------------------------------
 
 
-class TestMemoryTimeTravel(CheckpointerTimeTravelConformance, BoundedHistoryConformance):
+def _shared_memory() -> Any:
+    """``make(**settings)``: in-memory checkpointers over one dictionary."""
+    storage: dict[str, Any] = {}
+
+    def make(**settings: Any) -> MemoryCheckpointer:
+        cp = MemoryCheckpointer(**settings)
+        cp._storage = storage
+        return cp
+
+    return make
+
+
+class TestMemoryTimeTravel(
+    CheckpointerTimeTravelConformance, BoundedHistoryConformance, ProductionSettingsConformance
+):
     @pytest.fixture
     def make_checkpointer(self) -> Any:
         return MemoryCheckpointer
@@ -198,8 +234,14 @@ class TestMemoryTimeTravel(CheckpointerTimeTravelConformance, BoundedHistoryConf
     def make_bounded(self) -> Any:
         return lambda keep: MemoryCheckpointer(max_checkpoints_per_thread=keep)
 
+    @pytest.fixture
+    def make_production(self) -> Any:
+        return _shared_memory()
 
-class TestFileTimeTravel(CheckpointerTimeTravelConformance, BoundedHistoryConformance):
+
+class TestFileTimeTravel(
+    CheckpointerTimeTravelConformance, BoundedHistoryConformance, ProductionSettingsConformance
+):
     @pytest.fixture
     def make_checkpointer(self, tmp_path: Path) -> Any:
         return lambda: FileCheckpointer(tmp_path / "threads")
@@ -208,8 +250,14 @@ class TestFileTimeTravel(CheckpointerTimeTravelConformance, BoundedHistoryConfor
     def make_bounded(self, tmp_path: Path) -> Any:
         return lambda keep: FileCheckpointer(tmp_path / "bounded", max_checkpoints_per_thread=keep)
 
+    @pytest.fixture
+    def make_production(self, tmp_path: Path) -> Any:
+        return lambda **settings: FileCheckpointer(tmp_path / "production", **settings)
 
-class TestAdapterTimeTravel(CheckpointerTimeTravelConformance, BoundedHistoryConformance):
+
+class TestAdapterTimeTravel(
+    CheckpointerTimeTravelConformance, BoundedHistoryConformance, ProductionSettingsConformance
+):
     @pytest.fixture
     def make_checkpointer(self) -> Any:
         return lambda: StorageBackendAdapter(_DictStore())
@@ -218,11 +266,49 @@ class TestAdapterTimeTravel(CheckpointerTimeTravelConformance, BoundedHistoryCon
     def make_bounded(self) -> Any:
         return lambda keep: StorageBackendAdapter(_DictStore(), max_checkpoints_per_thread=keep)
 
+    @pytest.fixture
+    def make_production(self) -> Any:
+        store = _DictStore()
+        return lambda **settings: StorageBackendAdapter(store, **settings)
 
-class TestRetainedTimeTravel(CheckpointerTimeTravelConformance):
+
+class TestAdapterNativeIndexTimeTravel(
+    CheckpointerTimeTravelConformance, BoundedHistoryConformance, ProductionSettingsConformance
+):
+    """The adapter over a store that keeps the index atomically (Redis, SQL, OpenSearch)."""
+
+    @pytest.fixture
+    def make_checkpointer(self) -> Any:
+        return lambda: StorageBackendAdapter(_IndexedDictStore())
+
+    @pytest.fixture
+    def make_bounded(self) -> Any:
+        return lambda keep: StorageBackendAdapter(
+            _IndexedDictStore(), max_checkpoints_per_thread=keep
+        )
+
+    @pytest.fixture
+    def make_production(self) -> Any:
+        store = _IndexedDictStore()
+        return lambda **settings: StorageBackendAdapter(store, **settings)
+
+    async def test_the_index_key_is_never_written(self) -> None:
+        store = _IndexedDictStore()
+        cp = StorageBackendAdapter(store)
+        await cp.save(AgentState(agent_id="tt"), "t", "cp-0")
+        assert "t:_checkpoints" not in store.rows
+        assert set(store.rows) == {"t:cp-0", "t:latest"}
+
+
+class TestRetainedTimeTravel(CheckpointerTimeTravelConformance, ProductionSettingsConformance):
     @pytest.fixture
     def make_checkpointer(self) -> Any:
         return lambda: RetainedCheckpointer(MemoryCheckpointer())
+
+    @pytest.fixture
+    def make_production(self) -> Any:
+        inner = _shared_memory()
+        return lambda **settings: RetainedCheckpointer(inner(**settings))
 
 
 class TestBaseDefaultsTimeTravel(CheckpointerTimeTravelConformance):
@@ -233,7 +319,9 @@ class TestBaseDefaultsTimeTravel(CheckpointerTimeTravelConformance):
         return _MinimalCheckpointer
 
 
-class TestOCIBucketTimeTravel(CheckpointerTimeTravelConformance, BoundedHistoryConformance):
+class TestOCIBucketTimeTravel(
+    CheckpointerTimeTravelConformance, BoundedHistoryConformance, ProductionSettingsConformance
+):
     @pytest.fixture
     def make_checkpointer(self) -> Any:
         from locus.memory.backends.oci_bucket import OCIBucketBackend
@@ -254,11 +342,28 @@ class TestOCIBucketTimeTravel(CheckpointerTimeTravelConformance, BoundedHistoryC
     def make_bounded(self, make_checkpointer: Any) -> Any:
         return make_checkpointer
 
+    @pytest.fixture
+    def make_production(self) -> Any:
+        from locus.memory.backends.oci_bucket import OCIBucketBackend
+
+        client = _FakeObjectStorage()
+
+        def make(**settings: Any) -> OCIBucketBackend:
+            backend = OCIBucketBackend(
+                bucket_name="b", namespace="n", retry_strategy=object(), **settings
+            )
+            backend._client = client  # type: ignore[assignment]
+            return backend
+
+        return make
+
 
 moto = pytest.importorskip("moto", reason="S3 time travel runs on moto")
 
 
-class TestS3TimeTravel(CheckpointerTimeTravelConformance, BoundedHistoryConformance):
+class TestS3TimeTravel(
+    CheckpointerTimeTravelConformance, BoundedHistoryConformance, ProductionSettingsConformance
+):
     """moto reports object modification times to the second, as S3 does."""
 
     @pytest.fixture(autouse=True)
@@ -278,6 +383,13 @@ class TestS3TimeTravel(CheckpointerTimeTravelConformance, BoundedHistoryConforma
     @pytest.fixture
     def make_bounded(self, make_checkpointer: Any) -> Any:
         return make_checkpointer
+
+    @pytest.fixture
+    def make_production(self) -> Any:
+        from locus.memory.backends.s3 import S3Backend
+
+        # One mocked bucket per test: every checkpointer built here shares it.
+        return lambda **settings: S3Backend(bucket="locus-tt", region_name="us-east-1", **settings)
 
 
 # ---------------------------------------------------------------------------

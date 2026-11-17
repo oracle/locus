@@ -403,7 +403,7 @@ class FallbackChain:
         warnings.warn(
             "FallbackChain.last_tier is shared across concurrent calls and may "
             "describe another call; use response.metadata['fallback'] or "
-            "locus.models.fallback.served_tier() instead.",
+            "locus.models.fallback.served_tier() instead. It is removed in 6.0.0.",
             LocusDeprecationWarning,
             stacklevel=2,
         )

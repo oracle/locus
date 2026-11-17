@@ -56,6 +56,30 @@ eligible protocol's cap is not an error: it compiles onto
 
 {{ locus_source examples/notebook_29_cognitive_router.py::build_router }}
 
+The extractor is one `RequestClassifier`, the seam the frame comes
+through. `Router(extractor=...)` wraps the agent in `AgentFrameExtractor`,
+which runs its structured-output call off the event loop and raises
+`FrameExtractionError` when the result is not a `GoalFrame`;
+`Router(classifier=...)` takes anything with
+`async classify(text) -> GoalFrame` (a trained classifier, a lookup over a
+closed set of requests, a cache in front of the agent), and the compiler,
+the policy gate and the event stream see the same frame either way. The
+last-mile tie-break has the same shape: `CognitiveCompiler(protocol_picker=...)`
+takes any `ProtocolPicker`, of which `LLMProtocolPicker` is the one that
+ships.
+
+One rule runs before the three gates. A frame at `Complexity.LOW` whose
+risk is within `direct_response`'s `risk_max` compiles to `direct_response`
+whatever its `primary_goal`: one step of work is one reply, whichever verb
+the extractor framed it with, and `router.protocol.selected` reports
+`method="low_complexity_direct"`. The `PolicyGate` still runs, so a frame
+with `approval_required=True` is still held, and a deployment that lists
+`direct_response` in `denied_protocols` sends LOW frames down the ordinary
+filter-and-rank path instead; `CognitiveCompiler(low_complexity_direct=None)`
+switches the rule off. `explain()` mirrors it: the direct protocol is the
+only candidate, and a protocol that would have passed the three gates is
+reported as rejected at the `complexity` gate.
+
 The compiler's skill catalogue comes from the SKILL.md packages under
 `examples/skills/`. Each skill is registered under the `domain` its
 frontmatter `metadata` block declares (`incident-triage` is

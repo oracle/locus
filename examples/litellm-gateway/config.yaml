@@ -7,6 +7,13 @@
 #
 # The gateway picks up provider credentials from the env vars exported into
 # the container by docker-compose.yml. See docs/how-to/litellm-gateway.md.
+#
+# This file needs nothing beyond the gateway and its Postgres. The two
+# add-ons that need a backing service — the OpenTelemetry callback and the
+# Redis response cache — live in config.platform.yaml, which
+# docker-compose.yml selects when REDIS_URL is set. The two files share
+# everything but ``litellm_settings``; tests/unit/test_litellm_gateway_example.py
+# keeps them in step.
 
 model_list:
   # ---------------------------------------------------------------------------
@@ -60,17 +67,44 @@ router_settings:
 # Gateway-wide settings. ``drop_params`` strips OpenAI kwargs the
 # upstream provider doesn't accept so cross-vendor agent loops don't
 # 400. ``set_verbose`` is kept off here; flip it on for debugging.
+# Observability callbacks and the response cache are in
+# config.platform.yaml.
 litellm_settings:
   drop_params: true
   set_verbose: false
-  # Observability — uncomment one or more once you have the backend wired:
-  # success_callback: ["langfuse"]
-  # failure_callback: ["langfuse"]
-  # cache: true
-  # cache_params:
-  #   type: redis
-  #   host: redis
-  #   port: 6379
+
+
+# Guardrails. This one runs inside the gateway process (LiteLLM's own
+# regex content filter, no extra service) on every request: a US Social
+# Security number or a payment-card number in a prompt is replaced with
+# a mask before the request reaches the provider, so the upstream call,
+# the spend log and the trace all see the masked text. The response
+# header ``x-litellm-applied-guardrails`` names it on every request.
+#
+# Presidio is the alternative when you need entity recognition rather
+# than patterns. It runs as two services (analyzer + anonymizer); point
+# PRESIDIO_ANALYZER_API_BASE and PRESIDIO_ANONYMIZER_API_BASE at them
+# in the gateway's environment and swap the entry for:
+#
+#   - guardrail_name: pii-presidio
+#     litellm_params:
+#       guardrail: presidio
+#       mode: pre_call
+#       default_on: true
+#       output_parse_pii: true
+guardrails:
+- guardrail_name: pii-mask
+  litellm_params:
+    guardrail: litellm_content_filter
+    mode: pre_call
+    default_on: true
+    patterns:
+    - pattern_type: prebuilt
+      pattern_name: us_ssn
+      action: MASK
+    - pattern_type: prebuilt
+      pattern_name: credit_card
+      action: MASK
 
 
 # Master key for the admin API (used by /key/generate to issue

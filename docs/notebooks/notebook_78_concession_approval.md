@@ -97,6 +97,52 @@ export LOCUS_MODEL_ID=gpt-4o
 python examples/notebook_78_concession_approval.py
 ```
 
+## Output
+
+Running it offline — no credentials, bundled mock model — prints each ticket's risk tier and the gates it climbs: the 12/100 credit approved with no gate, the manager gate alone at 38, the manager then the billing lead at 62 (where the scripted reviewer says no, so the director gate is never reached) and all three gates at 88; the decision itself prints as `(missing)` because the mock model cannot fill the `ConcessionDecision` schema, as the Run it section explains:
+
+```text
+Notebook 78: Customer-support concession approval with risk-tiered gates
+============================================================
+
+--- CS-1001: risk 12/100 — Dana R. (Starter plan) — $15 account credit for a late shipping notification ---
+
+Concession decision:
+------------------------------------------------------------
+(missing)
+
+--- CS-1002: risk 38/100 — Marco T. (Pro plan) — one-month subscription refund after a billing double-charge ---
+  ⏸  [manager] Support Manager approval needed at risk score 38/100 (Marco T. (Pro plan) — one-month subscription refund after a billing double-charge). Approve?
+  ▶  Reviewer responds: 'yes'
+
+Concession decision:
+------------------------------------------------------------
+(missing)
+
+--- CS-1003: risk 62/100 — Acme Studio (Team plan, 40 seats) — full annual refund plus a goodwill credit after repeated outages ---
+  ⏸  [manager] Support Manager approval needed at risk score 62/100 (Acme Studio (Team plan, 40 seats) — full annual refund plus a goodwill credit after repeated outages). Approve?
+  ▶  Reviewer responds: 'yes'
+  ⏸  [billing] Billing Lead approval needed at risk score 62/100 (Acme Studio (Team plan, 40 seats) — full annual refund plus a goodwill credit after repeated outages). Approve?
+  ▶  Reviewer responds: 'no'
+
+Concession decision:
+------------------------------------------------------------
+(missing)
+
+--- CS-1004: risk 88/100 — Globex Corp (Enterprise, $480k ARR) — SLA-breach service credit and a contract make-good after a data-export failure ---
+  ⏸  [manager] Support Manager approval needed at risk score 88/100 (Globex Corp (Enterprise, $480k ARR) — SLA-breach service credit and a contract make-good after a data-export failure). Approve?
+  ▶  Reviewer responds: 'yes'
+  ⏸  [billing] Billing Lead approval needed at risk score 88/100 (Globex Corp (Enterprise, $480k ARR) — SLA-breach service credit and a contract make-good after a data-export failure). Approve?
+  ▶  Reviewer responds: 'yes'
+  ⏸  [director] Support Director approval needed at risk score 88/100 (Globex Corp (Enterprise, $480k ARR) — SLA-breach service credit and a contract make-good after a data-export failure). Approve?
+  ▶  Reviewer responds: 'yes'
+
+Concession decision:
+------------------------------------------------------------
+(missing)
+```
+<!-- notebook-output:end -->
+
 ## See also
 
 - [Notebook 15 — Human in the loop](notebook_15_human_in_the_loop.md) —

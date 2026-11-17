@@ -4,17 +4,16 @@
 
 """Top-level :class:`Router` — the only public surface of the module.
 
-The Router takes natural language, asks an extractor agent to fill a
-:class:`GoalFrame`, hands it to the :class:`CognitiveCompiler`, and
-executes the compiled :class:`Runnable`. Everything else in
-``locus.router`` is internal machinery.
+The Router takes natural language, asks a :class:`RequestClassifier` (by
+default an extractor agent) to fill a :class:`GoalFrame`, hands it to the
+:class:`CognitiveCompiler`, and executes the compiled :class:`Runnable`.
+Everything else in ``locus.router`` is internal machinery.
 """
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from locus.observability.context import reset_run_id, set_run_id
@@ -26,6 +25,11 @@ from locus.observability.router_events import (
     emit_runnable_executing,
     emit_runnable_failed,
 )
+from locus.router.classifier import (
+    AgentFrameExtractor,
+    FrameExtractionError,
+    RequestClassifier,
+)
 from locus.router.compiler import CognitiveCompiler
 from locus.router.explain import RoutingExplanation
 from locus.router.goal_frame import GoalFrame
@@ -36,10 +40,6 @@ if TYPE_CHECKING:
     from locus.agent.agent import Agent
 
 
-class FrameExtractionError(RuntimeError):
-    """Raised when the extractor agent failed to produce a valid GoalFrame."""
-
-
 class Router:
     """One-shot dispatcher: text in, :class:`RunnableResult` out.
 
@@ -48,6 +48,12 @@ class Router:
     extractor:
         :class:`~locus.Agent` configured with
         ``output_schema=GoalFrame``. Its parsed result drives selection.
+        Wrapped in an :class:`AgentFrameExtractor`; pass ``classifier``
+        instead to supply the frame some other way.
+    classifier:
+        Any :class:`RequestClassifier` — ``async classify(text) ->
+        GoalFrame``. Exactly one of ``extractor`` and ``classifier`` is
+        given; the compiler sees the same frame either way.
     compiler:
         :class:`CognitiveCompiler` set up with protocols, capabilities,
         policy, and model.
@@ -59,37 +65,44 @@ class Router:
     def __init__(
         self,
         *,
-        extractor: Agent,
         compiler: CognitiveCompiler,
+        extractor: Agent | None = None,
+        classifier: RequestClassifier | None = None,
         on_frame: Callable[[GoalFrame], None] | None = None,
     ) -> None:
+        if classifier is not None:
+            if extractor is not None:
+                err_msg = "Router takes either extractor= or classifier=, not both."
+                raise ValueError(err_msg)
+            self.classifier: RequestClassifier = classifier
+        elif extractor is not None:
+            self.classifier = AgentFrameExtractor(extractor)
+        else:
+            err_msg = "Router needs an extractor= agent or a classifier=."
+            raise ValueError(err_msg)
         self.extractor = extractor
         self.compiler = compiler
         self._on_frame = on_frame
 
     async def extract(self, user_input: str, run_id: str | None = None) -> GoalFrame:
-        """Run the extractor and return the parsed :class:`GoalFrame`.
+        """Run the classifier and return the :class:`GoalFrame`.
 
         Emits ``router.frame.extracted`` on success or
-        ``router.frame.failed`` on schema rejection, scoped to
-        ``run_id`` when supplied. Raises :class:`FrameExtractionError`
-        on failure — the compiler can't recover from that.
+        ``router.frame.failed`` when the classifier raises
+        :class:`FrameExtractionError`, scoped to ``run_id`` when supplied.
+        The error is re-raised — the compiler can't recover from that.
         """
-        result: Any = await asyncio.to_thread(self.extractor.invoke, user_input)
-        parsed = result.parsed
-        if not isinstance(parsed, GoalFrame):
-            err_msg = (
-                "Extractor did not produce a GoalFrame. "
-                f"parse_error={result.parse_error!r}, message={result.message!r}"
-            )
+        try:
+            frame = await self.classifier.classify(user_input)
+        except FrameExtractionError as exc:
             if run_id:
-                await emit_frame_failed(run_id, err_msg)
-            raise FrameExtractionError(err_msg)
+                await emit_frame_failed(run_id, str(exc))
+            raise
         if run_id:
-            await emit_frame_extracted(run_id, parsed)
+            await emit_frame_extracted(run_id, frame)
         if self._on_frame is not None:
-            self._on_frame(parsed)
-        return parsed
+            self._on_frame(frame)
+        return frame
 
     async def explain(
         self,

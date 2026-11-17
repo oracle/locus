@@ -41,14 +41,15 @@ from uuid import uuid4
 from pydantic import BaseModel
 
 from locus.core.protocols import CheckpointerCapabilities
+from locus.memory.backends.s3 import _live_in_order
 from locus.memory.checkpointer import BaseCheckpointer
+from locus.memory.expiry import EXPIRES_AT_KEY, is_expired
 from locus.memory.time_travel import (
     CheckpointInfo,
     checkpoint_iteration,
     checkpoint_size,
     info_from,
     link_parents,
-    order_by_write_time,
 )
 
 
@@ -56,6 +57,8 @@ if TYPE_CHECKING:
     from oci.object_storage import ObjectStorageClient
 
     from locus.core.state import AgentState
+    from locus.memory.encryption import EncryptedSerializer
+    from locus.memory.scope import CheckpointScope
 
 
 _LATEST_POINTER = "_latest"
@@ -160,6 +163,15 @@ class OCIBucketBackend(BaseCheckpointer):
         - ``branching`` — yes (via ``copy_thread``)
         - ``vacuum`` — yes (prefer bucket lifecycle policies for prod)
         - ``persistent_checkpoint_ids`` — yes
+
+    Production settings (see :class:`~locus.memory.checkpointer.BaseCheckpointer`):
+        ``ttl`` records ``expires_at`` in the payload and the ``.meta.json``
+        (a load never returns an expired checkpoint, an instance with a
+        ``ttl`` never lists one, :meth:`expire` deletes them; an Object
+        Storage lifecycle rule is the server-side alternative);
+        ``encryption`` seals the state inside the payload object, the
+        ``.meta.json`` staying plaintext; ``scope`` puts the scope's prefix
+        in the object key ahead of the thread id.
     """
 
     def __init__(
@@ -172,12 +184,16 @@ class OCIBucketBackend(BaseCheckpointer):
         region: str | None = None,
         retry_strategy: Any = None,
         max_checkpoints_per_thread: int | None = None,
+        ttl: float | timedelta | None = None,
+        encryption: EncryptedSerializer | None = None,
+        scope: CheckpointScope | None = None,
         **kwargs: Any,
     ) -> None:
         if max_checkpoints_per_thread is not None and max_checkpoints_per_thread < 1:
             raise ValueError("max_checkpoints_per_thread must be at least 1")
         # Keep only this many of a thread's newest checkpoints; None keeps all.
         self.max_checkpoints_per_thread = max_checkpoints_per_thread
+        self._configure(ttl=ttl, encryption=encryption, scope=scope)
         self.config = OCIBucketConfig(
             bucket_name=bucket_name,
             namespace=namespace,
@@ -268,17 +284,18 @@ class OCIBucketBackend(BaseCheckpointer):
     # Object path helpers
     # ------------------------------------------------------------------
 
-    def _thread_prefix(self, thread_id: str) -> str:
-        return f"{self.config.prefix}{thread_id}/"
+    def _thread_prefix(self, thread_key: str) -> str:
+        """The object prefix of a thread, from the id it is stored under (its scope included)."""
+        return f"{self.config.prefix}{thread_key}/"
 
-    def _checkpoint_key(self, thread_id: str, checkpoint_id: str) -> str:
-        return f"{self._thread_prefix(thread_id)}{checkpoint_id}.json"
+    def _checkpoint_key(self, thread_key: str, checkpoint_id: str) -> str:
+        return f"{self._thread_prefix(thread_key)}{checkpoint_id}.json"
 
-    def _meta_key(self, thread_id: str, checkpoint_id: str) -> str:
-        return f"{self._thread_prefix(thread_id)}{checkpoint_id}.meta.json"
+    def _meta_key(self, thread_key: str, checkpoint_id: str) -> str:
+        return f"{self._thread_prefix(thread_key)}{checkpoint_id}.meta.json"
 
-    def _latest_key(self, thread_id: str) -> str:
-        return f"{self._thread_prefix(thread_id)}{_LATEST_POINTER}"
+    def _latest_key(self, thread_key: str) -> str:
+        return f"{self._thread_prefix(thread_key)}{_LATEST_POINTER}"
 
     # ------------------------------------------------------------------
     # Raw object-level helpers (private)
@@ -395,31 +412,36 @@ class OCIBucketBackend(BaseCheckpointer):
 
         checkpoint_id = checkpoint_id or uuid4().hex
         now = datetime.now(UTC)
+        key = self._scoped(thread_id)
+        expires_at = self._expires_at(now)
 
-        state_data = state.to_checkpoint()
+        state_data = self._encode_state(state, key, checkpoint_id)
         payload = {
             "checkpoint_id": checkpoint_id,
-            "thread_id": thread_id,
+            "thread_id": key,
             "created_at": now.isoformat(),
             "state": state_data,
         }
         meta_payload = {
             "checkpoint_id": checkpoint_id,
-            "thread_id": thread_id,
+            "thread_id": key,
             "updated_at": now.isoformat(),
             "metadata": metadata or {},
             "iteration": checkpoint_iteration(state_data),
             "size": checkpoint_size(state_data),
         }
+        if expires_at is not None:
+            payload[EXPIRES_AT_KEY] = expires_at.isoformat()
+            meta_payload[EXPIRES_AT_KEY] = expires_at.isoformat()
 
         # Write checkpoint + metadata in parallel.
         await asyncio.gather(
-            self._put_json(self._checkpoint_key(thread_id, checkpoint_id), payload),
-            self._put_json(self._meta_key(thread_id, checkpoint_id), meta_payload),
+            self._put_json(self._checkpoint_key(key, checkpoint_id), payload),
+            self._put_json(self._meta_key(key, checkpoint_id), meta_payload),
         )
         # Update the "latest" pointer only after the payload is durable.
         await self._put_bytes(
-            self._latest_key(thread_id),
+            self._latest_key(key),
             checkpoint_id.encode("utf-8"),
             "text/plain",
         )
@@ -432,39 +454,51 @@ class OCIBucketBackend(BaseCheckpointer):
         thread_id: str,
         checkpoint_id: str | None = None,
     ) -> AgentState | None:
-        from locus.core.state import AgentState
-
         await self._ensure_bucket()
-
+        key = self._scoped(thread_id)
         if checkpoint_id is None:
-            pointer = await self._get_bytes(self._latest_key(thread_id))
-            if pointer is None:
-                # No pointer — fall back to listing (old bucket, restored
-                # from lifecycle, or pointer deleted mid-flight).
-                ids = await self.list_checkpoints(thread_id, limit=1)
-                if not ids:
-                    return None
-                checkpoint_id = ids[0]
-            else:
-                checkpoint_id = pointer.decode("utf-8").strip()
+            return await self._load_latest(key)
+        return await self._load_checkpoint(key, checkpoint_id)
 
-        data = await self._get_json(self._checkpoint_key(thread_id, checkpoint_id))
-        if data is None:
+    async def _load_checkpoint(self, key: str, checkpoint_id: str) -> AgentState | None:
+        data = await self._get_json(self._checkpoint_key(key, checkpoint_id))
+        if data is None or is_expired(data.get(EXPIRES_AT_KEY)):
             return None
-        return AgentState.from_checkpoint(data["state"])
+        return self._decode_state(data["state"], key, checkpoint_id)
+
+    async def _load_latest(self, key: str) -> AgentState | None:
+        """The thread's newest live checkpoint.
+
+        ``_latest`` names the last save. Without it (an old bucket, a
+        pointer deleted mid-flight) or when the checkpoint it names has
+        expired — written with a shorter ``ttl`` than an earlier one — the
+        listing finds the newest checkpoint still live.
+        """
+        pointer = await self._get_bytes(self._latest_key(key))
+        if pointer is not None:
+            state = await self._load_checkpoint(key, pointer.decode("utf-8").strip())
+            if state is not None:
+                return state
+        for checkpoint_id, _, _ in await self._checkpoint_objects(key):
+            state = await self._load_checkpoint(key, checkpoint_id)
+            if state is not None:
+                return state
+        return None
 
     async def _checkpoint_objects(
-        self, thread_id: str
+        self, thread_key: str
     ) -> list[tuple[str, Any, dict[str, Any] | None]]:
         """``(checkpoint_id, time_modified, meta)`` of the thread's checkpoints, newest first.
 
         Ordered by the service's modification time, and within one second of
         it by the write time in each ``.meta.json``; ``meta`` is that object
-        where it had to be read, ``None`` otherwise.
+        where it had to be read, ``None`` otherwise. On an instance with a
+        ``ttl`` every ``.meta.json`` is read and the expired checkpoints are
+        left out.
         """
-        objects, _ = await self._list_objects(self._thread_prefix(thread_id), limit=1000)
+        objects, _ = await self._list_objects(self._thread_prefix(thread_key), limit=1000)
 
-        thread_prefix_len = len(self._thread_prefix(thread_id))
+        thread_prefix_len = len(self._thread_prefix(thread_key))
         entries: list[tuple[str, Any]] = []
         for obj in objects:
             name = obj.name
@@ -475,8 +509,11 @@ class OCIBucketBackend(BaseCheckpointer):
             checkpoint_id = name[thread_prefix_len:-5]
             entries.append((checkpoint_id, getattr(obj, "time_modified", None)))
 
-        return await order_by_write_time(
-            entries, lambda cid: self._get_json(self._meta_key(thread_id, cid)), "updated_at"
+        return await _live_in_order(
+            entries,
+            lambda cid: self._get_json(self._meta_key(thread_key, cid)),
+            "updated_at",
+            read_all=self.ttl is not None,
         )
 
     async def list_checkpoints(
@@ -485,7 +522,8 @@ class OCIBucketBackend(BaseCheckpointer):
         limit: int = 10,
     ) -> list[str]:
         await self._ensure_bucket()
-        return [cp_id for cp_id, _, _ in (await self._checkpoint_objects(thread_id))[:limit]]
+        objects = await self._checkpoint_objects(self._scoped(thread_id))
+        return [cp_id for cp_id, _, _ in objects[:limit]]
 
     async def delete(
         self,
@@ -493,24 +531,60 @@ class OCIBucketBackend(BaseCheckpointer):
         checkpoint_id: str | None = None,
     ) -> bool:
         await self._ensure_bucket()
+        key = self._scoped(thread_id)
 
         if checkpoint_id is not None:
             results = await asyncio.gather(
-                self._delete_object(self._checkpoint_key(thread_id, checkpoint_id)),
-                self._delete_object(self._meta_key(thread_id, checkpoint_id)),
+                self._delete_object(self._checkpoint_key(key, checkpoint_id)),
+                self._delete_object(self._meta_key(key, checkpoint_id)),
             )
             # If we just deleted the latest, clear the pointer too.
-            pointer = await self._get_bytes(self._latest_key(thread_id))
+            pointer = await self._get_bytes(self._latest_key(key))
             if pointer is not None and pointer.decode("utf-8").strip() == checkpoint_id:
-                await self._delete_object(self._latest_key(thread_id))
+                await self._delete_object(self._latest_key(key))
             return any(results)
 
         # Delete every object under the thread prefix.
-        objects, _ = await self._list_objects(self._thread_prefix(thread_id), limit=1000)
+        objects, _ = await self._list_objects(self._thread_prefix(key), limit=1000)
         if not objects:
             return False
         await asyncio.gather(*(self._delete_object(o.name) for o in objects))
         return True
+
+    async def expire(self) -> int:
+        """Delete the checkpoints whose ``expires_at`` has passed, in every thread and scope.
+
+        One listing of the prefix, one GET per ``.meta.json``; each expired
+        checkpoint's payload and metadata objects are deleted, and a thread's
+        ``_latest`` pointer is cleared when it named one (a load then falls
+        back to the listing). Returns the checkpoints deleted. An Object
+        Storage lifecycle rule does the same server-side.
+        """
+        await self._ensure_bucket()
+        now = datetime.now(UTC)
+        objects, _ = await self._list_objects(self.config.prefix, limit=1000)
+        deleted = 0
+        gone: dict[str, set[str]] = {}
+        for obj in objects:
+            name = obj.name
+            if not name.endswith(".meta.json"):
+                continue
+            meta = await self._get_json(name)
+            if meta is None or not is_expired(meta.get(EXPIRES_AT_KEY), now):
+                continue
+            thread_prefix, file_name = name.rsplit("/", 1)
+            checkpoint_id = file_name[: -len(".meta.json")]
+            await asyncio.gather(
+                self._delete_object(f"{thread_prefix}/{checkpoint_id}.json"),
+                self._delete_object(name),
+            )
+            deleted += 1
+            gone.setdefault(thread_prefix[len(self.config.prefix) :], set()).add(checkpoint_id)
+        for thread_key, ids in gone.items():
+            pointer = await self._get_bytes(self._latest_key(thread_key))
+            if pointer is not None and pointer.decode("utf-8").strip() in ids:
+                await self._delete_object(self._latest_key(thread_key))
+        return deleted
 
     async def exists(
         self,
@@ -518,11 +592,15 @@ class OCIBucketBackend(BaseCheckpointer):
         checkpoint_id: str | None = None,
     ) -> bool:
         await self._ensure_bucket()
+        key = self._scoped(thread_id)
 
         if checkpoint_id is None:
-            pointer = await self._get_bytes(self._latest_key(thread_id))
-            return pointer is not None
-        return (await self._get_bytes(self._checkpoint_key(thread_id, checkpoint_id))) is not None
+            pointer = await self._get_bytes(self._latest_key(key))
+            if pointer is None:
+                return False
+            checkpoint_id = pointer.decode("utf-8").strip()
+        data = await self._get_json(self._checkpoint_key(key, checkpoint_id))
+        return data is not None and not is_expired(data.get(EXPIRES_AT_KEY))
 
     # ------------------------------------------------------------------
     # Extended API
@@ -534,27 +612,35 @@ class OCIBucketBackend(BaseCheckpointer):
         checkpoint_id: str | None = None,
     ) -> dict[str, Any] | None:
         await self._ensure_bucket()
+        key = self._scoped(thread_id)
 
         if checkpoint_id is None:
-            pointer = await self._get_bytes(self._latest_key(thread_id))
+            pointer = await self._get_bytes(self._latest_key(key))
             if pointer is None:
                 return None
             checkpoint_id = pointer.decode("utf-8").strip()
 
-        return await self._get_json(self._meta_key(thread_id, checkpoint_id))
+        meta = await self._get_json(self._meta_key(key, checkpoint_id))
+        if meta is None or is_expired(meta.get(EXPIRES_AT_KEY)):
+            return None
+        return meta
 
     async def list_threads(
         self,
         limit: int = 100,
         pattern: str = "*",
+        *,
+        scope: CheckpointScope | None = None,
     ) -> list[str]:
+        """The threads of one scope: the common prefixes one level under the scope's prefix."""
         await self._ensure_bucket()
+        scoped = self._listing_scope(scope)
 
         # delimiter="/" returns synthetic "sub-folders" under our prefix; each
-        # entry is exactly `{prefix}{thread_id}/`, which maps 1:1 to threads.
+        # entry is exactly `{prefix}{scope prefix}{thread_id}/`, one per thread.
         _, prefixes = await self._list_objects(
-            self.config.prefix,
-            limit=limit * 4 if pattern != "*" else limit,
+            f"{self.config.prefix}{scoped.prefix}",
+            limit=limit * 4 if pattern != "*" or scoped.is_empty else limit,
             delimiter="/",
         )
 
@@ -563,7 +649,9 @@ class OCIBucketBackend(BaseCheckpointer):
         for p in prefixes:
             if not p.endswith("/"):
                 continue
-            threads.append(p[prefix_len:-1])
+            thread_id = scoped.unkey(p[prefix_len:-1])
+            if thread_id:
+                threads.append(thread_id)
 
         if pattern != "*":
             import fnmatch
@@ -631,6 +719,7 @@ class OCIBucketBackend(BaseCheckpointer):
     ) -> bool:
         """Copy every checkpoint under source to dest (for branching)."""
         await self._ensure_bucket()
+        source_key, dest_key = self._scoped(source_thread_id), self._scoped(dest_thread_id)
 
         checkpoints = await self.list_checkpoints(source_thread_id, limit=1000)
         if not checkpoints:
@@ -638,24 +727,28 @@ class OCIBucketBackend(BaseCheckpointer):
 
         for cp_id in checkpoints:
             payload, meta = await asyncio.gather(
-                self._get_json(self._checkpoint_key(source_thread_id, cp_id)),
-                self._get_json(self._meta_key(source_thread_id, cp_id)),
+                self._get_json(self._checkpoint_key(source_key, cp_id)),
+                self._get_json(self._meta_key(source_key, cp_id)),
             )
             if payload is None:
                 continue
-            payload["thread_id"] = dest_thread_id
+            if self.encryption is not None:
+                # An envelope is bound to its thread: unseal, seal under the new one.
+                state = self._decode_state(payload["state"], source_key, cp_id)
+                payload["state"] = self._encode_state(state, dest_key, cp_id)
+            payload["thread_id"] = dest_key
             if meta is not None:
-                meta["thread_id"] = dest_thread_id
+                meta["thread_id"] = dest_key
                 await asyncio.gather(
-                    self._put_json(self._checkpoint_key(dest_thread_id, cp_id), payload),
-                    self._put_json(self._meta_key(dest_thread_id, cp_id), meta),
+                    self._put_json(self._checkpoint_key(dest_key, cp_id), payload),
+                    self._put_json(self._meta_key(dest_key, cp_id), meta),
                 )
             else:
-                await self._put_json(self._checkpoint_key(dest_thread_id, cp_id), payload)
+                await self._put_json(self._checkpoint_key(dest_key, cp_id), payload)
 
         # Point dest's latest at the most-recent source checkpoint.
         await self._put_bytes(
-            self._latest_key(dest_thread_id),
+            self._latest_key(dest_key),
             checkpoints[0].encode("utf-8"),
             "text/plain",
         )
@@ -672,22 +765,26 @@ class OCIBucketBackend(BaseCheckpointer):
     async def list(self, thread_id: str, limit: int = 10) -> list[CheckpointInfo]:
         """The thread's checkpoints, newest first: one listing, then each one's ``.meta.json``."""
         await self._ensure_bucket()
-        ordered = await self._checkpoint_objects(thread_id)
+        key = self._scoped(thread_id)
+        ordered = await self._checkpoint_objects(key)
         # The checkpoint just past the window is the parent of the oldest in it.
         older = ordered[limit][0] if len(ordered) > limit else None
         objects = ordered[:limit]
         metas = await asyncio.gather(
             *(
-                self._get_json(self._meta_key(thread_id, cid)) if meta is None else _ready(meta)
+                self._get_json(self._meta_key(key, cid)) if meta is None else _ready(meta)
                 for cid, _, meta in objects
             )
         )
         infos: list[CheckpointInfo] = []
+        now = datetime.now(UTC)
         for (checkpoint_id, modified, _), raw_meta in zip(objects, metas, strict=True):
             meta = raw_meta or {}
+            if is_expired(meta.get(EXPIRES_AT_KEY), now):
+                continue
             iteration, size = meta.get("iteration"), meta.get("size")
             if iteration is None or size is None:
-                data = await self._get_json(self._checkpoint_key(thread_id, checkpoint_id))
+                data = await self._get_json(self._checkpoint_key(key, checkpoint_id))
                 state_data = (data or {}).get("state")
                 if isinstance(state_data, dict):
                     iteration, size = state_data.get("iteration"), checkpoint_size(state_data)

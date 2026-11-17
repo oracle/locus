@@ -119,3 +119,23 @@ def test_no_dangerous_action_can_ever_auto_allow() -> None:
     for name, action in challenge.DANGER.items():
         decision = approve(action, policy=challenge.POLICY)
         assert decision.outcome != "allow", f"{name} must never auto-allow"
+
+
+def test_the_frontier_model_comes_from_the_environment(monkeypatch) -> None:
+    """``LOCUS_FRONTIER_MODEL`` picks the hosted model; unset, the documented default runs."""
+    from locus.rogue import challenge
+
+    seen: list[str] = []
+
+    def fake_get_model(model_id: str, **kwargs: object) -> object:
+        seen.append(model_id)
+        return challenge.CompromisedModel()
+
+    monkeypatch.setattr(challenge, "get_model", fake_get_model)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.delenv("LOCUS_FRONTIER_MODEL", raising=False)
+    challenge.build_agent(challenge.MODE_FRONTIER)
+    monkeypatch.setenv("LOCUS_FRONTIER_MODEL", "anthropic:claude-haiku-5-5")
+    challenge.build_agent(challenge.MODE_FRONTIER)
+    assert seen == [challenge.DEFAULT_FRONTIER_MODEL, "anthropic:claude-haiku-5-5"]
+    assert challenge.pick_mode() == (challenge.MODE_FRONTIER, "anthropic:claude-haiku-5-5")
