@@ -64,6 +64,7 @@ PAGES: dict[str, str] = {
     "notebook_73_support_account_gate": "a small credit applied, a plan upgrade held, and the trail that records both; then the same upgrade held by a gated tool with the run parked, the hold read back from the thread's checkpoint, approved from another process with `locus approvals`, and performed once by a fresh agent resuming the thread",
     "notebook_74_data_deletion_gate": "the export allowed on its own, the erasure held with nothing deleted until the Data Protection Officer signs off and it is re-admitted, and the three-record trail that verifies intact",
     "notebook_75_cloud_resource_gate": "a staging resize allowed, then a production terminate and an IAM grant held",
+    "notebook_78_concession_approval": "each ticket's risk tier and the gates it climbs: the 12/100 credit approved with no gate, the manager gate alone at 38, the manager then the billing lead at 62 (where the scripted reviewer says no, so the director gate is never reached) and all three gates at 88; the decision itself prints as `(missing)` because the mock model cannot fill the `ConcessionDecision` schema, as the Run it section explains",
     "notebook_80_vendor_integrations": "the offline sample each integration returns: the risk verdict for three identifiers, the two catalog records that hold the subject's data with their sensitivity, and the four PII categories a scan of `crm.customers` finds, then the STEWARD triage result",
 }
 

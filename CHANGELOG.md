@@ -10,6 +10,29 @@ policy.
 
 ### Added
 
+- `python -m locus.runner` takes its workspace from `LOCUS_WORKSPACE` when
+  set, for a runner started outside an OpenShell sandbox (a gateway's local
+  box driver, a CI job); unset, it works on `/sandbox` as before.
+- **`locus audit verify --format json`.** The verification of an exported
+  audit trail as data: `{"file", "verified", "records", "keys",
+  "head_checked"}` on stdout for both outcomes, where the command printed
+  prose only and a job archiving its results had to scrape it. Exit codes
+  are unchanged: 0 when the trail verifies, 1 when it does not. (#483)
+- **`locus eval gate --markdown` and `GateResult.to_markdown()`.** The
+  gate's verdict as Markdown with one table row per failed check, for a
+  pull-request comment, the way `eval diff` and `eval summary` already
+  render with `--markdown`. The exit code is still the gate's verdict. (#484)
+
+### Changed
+
+- **Docs: notebook 78's captured output, concept pages that link their
+  notebooks, the environment-variable reference completed from the source,
+  and `Example:` sections on `BaseStore`, `InMemoryStore`, `register_provider`
+  and `list_checkpointers`.** The concession-approval page shows the offline
+  run (#485); the OCI Responses, multi-modal providers, events, SSE catalogue
+  and control-layer pages link the notebooks that exercise them (#486); the
+  variables the SDK reads but the page omitted are listed (#487); the four
+  docstrings carry an example a test executes (#488, #489).
 - **`HeatWaveVectorStore` — MySQL HeatWave vector store** (#299). Documents
   live in one InnoDB table with a `VECTOR(n)` column, a `JSON` metadata
   column and a `FULLTEXT` index on the content; the store mirrors
@@ -27,6 +50,13 @@ policy.
   `mysql-connector-python` the `mysql` checkpoint extra installs), lazy
   export from `locus.rag.stores`, docs rows and a HeatWave vs community
   MySQL section, and the shared conformance suite behind `HEATWAVE_DSN`.
+
+### Fixed
+
+- `python -m locus.runner` reports every command the harness ran as a
+  `harness.exec` record. The runtime drained its exec records by replacing
+  the list the harness appends to, so only commands before the first tool
+  completion ever reached the gateway.
 
 ## [5.6.0] - 2026-11-17
 
@@ -932,13 +962,6 @@ policy.
 - **Self-graded suites are named.** When the judge model id equals the
   model under test, `provenance.self_graded` is stamped and the report
   summary ends with a warning. The case is not failed for it.
-
-### Fixed
-
-- `python -m locus.runner` reports every command the harness ran as a
-  `harness.exec` record. The runtime drained its exec records by replacing
-  the list the harness appends to, so only commands before the first tool
-  completion ever reached the gateway.
 
 ## [5.3.2] - 2026-11-02
 

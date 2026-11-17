@@ -229,6 +229,18 @@ def test_the_default_gate_is_the_strict_reading_of_a_suite() -> None:
     assert EvalGate().check(clean).summary() == "Gate: passed"
 
 
+def test_the_gate_result_renders_one_markdown_row_per_failed_check() -> None:
+    report = EvalRunner(agent=_agent("yes")).run(CASES)
+    report.not_graded = 1
+    result = EvalGate(min_pass_rate=0.6).check(report)
+    lines = result.to_markdown().splitlines()
+    assert lines[:4] == ["**Gate: FAILED**, 2 reason(s)", "", "| Failed check |", "|---|"]
+    assert lines[4:] == [f"| {reason} |" for reason in result.reasons]
+
+    clean = EvalRunner(agent=_agent("yes")).run(CASES[:1])
+    assert EvalGate().check(clean).to_markdown() == "**Gate: passed**"
+
+
 def test_every_failing_rule_is_reported() -> None:
     report = EvalRunner(agent=_agent("yes")).run(CASES)
     report.not_graded = 1

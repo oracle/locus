@@ -509,8 +509,8 @@ page and an AG-UI client.
 | `locus resume AGENT --thread ID [--answer TEXT] [--perform]` | continues a paused thread; `--perform` re-issues a held call once approved |
 | `locus approvals --store SPEC [--authority MODULE:ATTR] list [--json] / show ID / approve ID --by WHO [--reason R] / reject ID --by WHO` | reads and decides holds in the store `SPEC` names: a `FileApprovals` path, or `file://`, `postgresql://`, `redis://`, `oracle://`, `memory://` (default `LOCUS_APPROVALS_STORE`; `--by` defaults to `LOCUS_APPROVER`) |
 | `locus policy lint FILE [--environments ...] [--kinds ...] [--format json]` / `explain FILE --action JSON [--expect OUTCOME]` | lints a policy file for gaps (exit 1 on a finding) / shows the decision path for one action |
-| `locus eval run CASES --agent AGENT [--judge J] [--rubric FILE] [--repeats N] [--tags ...] [--report OUT] [--baseline IN] [--min-pass-rate R]` / `diff BASELINE CANDIDATE [--markdown]` / `gate REPORT [--baseline IN]` / `summary REPORT` | runs a suite file against an agent, diffs two saved reports, gates a build on one (exit 1 when it fails), prints one |
-| `locus audit verify FILE.jsonl [--key KEY_ID=PEM ...] [--head HASH]` | verifies an exported audit trail |
+| `locus eval run CASES --agent AGENT [--judge J] [--rubric FILE] [--repeats N] [--tags ...] [--report OUT] [--baseline IN] [--min-pass-rate R]` / `diff BASELINE CANDIDATE [--markdown]` / `gate REPORT [--baseline IN] [--markdown]` / `summary REPORT [--markdown]` | runs a suite file against an agent, diffs two saved reports, gates a build on one (exit 1 when it fails), prints one |
+| `locus audit verify FILE.jsonl [--key KEY_ID=PEM ...] [--head HASH] [--format json]` | verifies an exported audit trail; `--format json` prints the result as data for both outcomes |
 | `locus serve AGENT [--host H] [--port P] [--api-key K]` | `AgentServer` over the named agent |
 | `locus codex init [DIR] / run ["prompt"] / path` | installs or runs the bundled Codex skill |
 

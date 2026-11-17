@@ -128,3 +128,5 @@ agent = Agent(
   factories, `AgentConfig` wiring.
 - `tests/integration/test_providers_live.py` — live `httpx` fetch,
   live OpenAI search / image / speech (gated behind env vars).
+- [Notebook 57 — Multi-modal providers](../notebooks/notebook_57_multimodal_providers.md)
+  — the four protocols and the auto-registered tools in a runnable example.
