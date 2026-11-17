@@ -22,9 +22,33 @@ def register_provider(prefix: str, factory: Callable[..., ModelProtocol]) -> Non
     """
     Register a model provider.
 
+    The factory is called as ``factory(model_id, **kwargs)``: ``model_id`` is
+    the part of the model string after ``prefix:`` and ``kwargs`` are the
+    keyword arguments :func:`get_model` was given. Registering a prefix again
+    replaces its factory.
+
     Args:
         prefix: Provider prefix (e.g., "openai", "anthropic")
         factory: Factory function that takes model name and kwargs
+
+    Example:
+        ```python
+        from locus.models.registry import get_model, register_provider
+        from locus.testing import FunctionModel
+
+
+        def mine(model_id: str, **kwargs):
+            # kwargs are whatever get_model("mine:...", ...) was given
+            return FunctionModel(lambda messages, tools: f"{model_id} says hello")
+
+
+        register_provider("mine", mine)
+        model = get_model("mine:small")
+        assert isinstance(model, FunctionModel)
+        ```
+
+        After that, ``Agent(model="mine:small")`` resolves through the same
+        factory.
     """
     _PROVIDERS[prefix] = factory
 

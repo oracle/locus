@@ -14,13 +14,16 @@ policy.
   set, for a runner started outside an OpenShell sandbox (a gateway's local
   box driver, a CI job); unset, it works on `/sandbox` as before.
 
-### Fixed
+### Changed
 
-- `python -m locus.runner` reports every command the harness ran as a
-  `harness.exec` record. The runtime drained its exec records by replacing
-  the list the harness appends to, so only commands before the first tool
-  completion ever reached the gateway.
-
+- **Docs: notebook 78's captured output, concept pages that link their
+  notebooks, the environment-variable reference completed from the source,
+  and `Example:` sections on `BaseStore`, `InMemoryStore`, `register_provider`
+  and `list_checkpointers`.** The concession-approval page shows the offline
+  run (#485); the OCI Responses, multi-modal providers, events, SSE catalogue
+  and control-layer pages link the notebooks that exercise them (#486); the
+  variables the SDK reads but the page omitted are listed (#487); the four
+  docstrings carry an example a test executes (#488, #489).
 - **Two processes saving to one thread no longer lose checkpoint-index
   entries** (`redis_checkpointer()`, `postgresql_checkpointer()`,
   `mysql_checkpointer()`, `opensearch_checkpointer()`). The adapter's
@@ -37,6 +40,13 @@ policy.
   the tool-effect ledger behave as before; a Redis index written by an
   earlier release is read as before and moved into the hash on the
   thread's next save. (#301)
+
+### Fixed
+
+- `python -m locus.runner` reports every command the harness ran as a
+  `harness.exec` record. The runtime drained its exec records by replacing
+  the list the harness appends to, so only commands before the first tool
+  completion ever reached the gateway.
 
 ## [5.6.0] - 2026-11-17
 
