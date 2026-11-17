@@ -93,12 +93,42 @@ jobs:
       - name: docker build (linux/amd64, no push)
         run: docker build -t locus-sdk:ci .
 
+  # The documentation's own tests (tests/docs): the Codex skill names the
+  # SDK's public surface and its snippets import, the mkdocs hooks behave,
+  # notebook pages and release notes render. They need the docs toolchain,
+  # which the unit matrix does not install (mkdocs's watchdog has no 3.14
+  # wheel), so they get one Python 3.12 job. The docs workflow cannot carry
+  # them: its pull_request trigger ignores src/ and the skill directory,
+  # which is where the drift these tests catch begins.
+  docs-tests:
+    name: Docs Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # actions/checkout@v6.0.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      # actions/setup-python@v6.2.0
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install locus, the test deps and the docs toolchain
+        run: |
+          pip install -U pip
+          pip install -e ".[dev,docs,openai]"
+
+      - name: Run the documentation tests
+        run: pytest tests/docs
+
   # Aggregate gate. Branch-protection should require this single status
   # check rather than each individual one — that lets us add / remove
   # jobs without retouching protection rules.
   ci-success:
     name: CI Success
-    needs: [lint, test, integration, secret-scan, precommit, dco]
+    needs: [lint, test, integration, secret-scan, precommit, dco, docs-tests]
     if: always()
     runs-on: ubuntu-latest
     steps:
