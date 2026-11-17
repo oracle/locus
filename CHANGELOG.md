@@ -31,13 +31,6 @@ policy.
   [Oracle Database 26ai](docs/concepts/oracle-26ai.md) page describes the
   TLS-only path. (#347)
 
-### Fixed
-
-- `python -m locus.runner` reports every command the harness ran as a
-  `harness.exec` record. The runtime drained its exec records by replacing
-  the list the harness appends to, so only commands before the first tool
-  completion ever reached the gateway.
-
 ### Changed
 
 - **Docs: notebook 78's captured output, concept pages that link their
@@ -48,6 +41,13 @@ policy.
   and control-layer pages link the notebooks that exercise them (#486); the
   variables the SDK reads but the page omitted are listed (#487); the four
   docstrings carry an example a test executes (#488, #489).
+
+### Fixed
+
+- `python -m locus.runner` reports every command the harness ran as a
+  `harness.exec` record. The runtime drained its exec records by replacing
+  the list the harness appends to, so only commands before the first tool
+  completion ever reached the gateway.
 
 ## [5.6.0] - 2026-11-17
 
