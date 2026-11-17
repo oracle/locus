@@ -121,6 +121,12 @@ def opensearch_available() -> bool:
 
 
 @lru_cache(maxsize=1)
+def oracle_available() -> bool:
+    """Whether an Oracle database is configured (``ORACLE_DSN`` and ``ORACLE_PASSWORD``)."""
+    return bool(os.getenv("ORACLE_DSN") and os.getenv("ORACLE_PASSWORD"))
+
+
+@lru_cache(maxsize=1)
 def openai_available() -> bool:
     """Check if OpenAI API key is set."""
     return bool(os.getenv("OPENAI_API_KEY"))
@@ -181,6 +187,10 @@ skip_without_mysql = pytest.mark.skipif(
 skip_without_opensearch = pytest.mark.skipif(
     not opensearch_available(),
     reason="OpenSearch not available (set OPENSEARCH_HOSTS and credentials)",
+)
+
+skip_without_oracle = pytest.mark.skipif(
+    not oracle_available(), reason="Oracle not available (set ORACLE_DSN and ORACLE_PASSWORD)"
 )
 
 skip_without_oci = pytest.mark.skipif(
@@ -328,6 +338,7 @@ def service_status():
         "postgres": postgres_available(),
         "mysql": mysql_available(),
         "opensearch": opensearch_available(),
+        "oracle": oracle_available(),
         "openai": openai_available(),
     }
 
@@ -338,6 +349,7 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "requires_postgres: test requires PostgreSQL")
     config.addinivalue_line("markers", "requires_mysql: test requires MySQL")
     config.addinivalue_line("markers", "requires_opensearch: test requires OpenSearch")
+    config.addinivalue_line("markers", "requires_oracle: test requires an Oracle database")
     config.addinivalue_line("markers", "requires_oci: test requires OCI config")
     config.addinivalue_line("markers", "requires_openai: test requires OpenAI API key")
     config.addinivalue_line(
@@ -352,6 +364,7 @@ def pytest_collection_modifyitems(config, items):
         "requires_postgres": skip_without_postgres,
         "requires_mysql": skip_without_mysql,
         "requires_opensearch": skip_without_opensearch,
+        "requires_oracle": skip_without_oracle,
         "requires_oci": skip_without_oci,
         "requires_openai": skip_without_openai,
         "requires_model": skip_without_model,

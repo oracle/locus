@@ -9,7 +9,8 @@ over the generic PostgreSQL adapter and ``PgCheckpointer`` (``POSTGRES_USER``
 and ``POSTGRES_DB``; ``POSTGRES_HOST`` / ``POSTGRES_PORT`` optional), Redis
 (``REDIS_URL``), Oracle through ``oracle_checkpointer()`` and the versioned
 ``OracleCheckpointSaver`` (``ORACLE_DSN`` / ``ORACLE_USER`` /
-``ORACLE_PASSWORD`` and a wallet in ``ORACLE_WALLET``), and an OCI Object
+``ORACLE_PASSWORD``, plus a wallet in ``ORACLE_WALLET`` for Autonomous
+Database), and an OCI Object
 Storage bucket (``OCI_TT_BUCKET`` / ``OCI_TT_NAMESPACE``, with
 ``OCI_PROFILE`` and ``OCI_REGION`` for the client). Every checkpointer a
 test builds is emptied of the threads the cases write when the test ends;
@@ -50,19 +51,19 @@ def _postgres_dsn() -> str | None:
 
 
 def _oracle_available() -> bool:
-    return bool(
-        os.getenv("ORACLE_DSN") and os.getenv("ORACLE_PASSWORD") and os.getenv("ORACLE_WALLET")
-    )
+    return bool(os.getenv("ORACLE_DSN") and os.getenv("ORACLE_PASSWORD"))
 
 
 def _oracle_kwargs() -> dict[str, Any]:
-    return {
+    kwargs: dict[str, Any] = {
         "dsn": os.environ["ORACLE_DSN"],
         "user": os.environ.get("ORACLE_USER", "ADMIN"),
         "password": os.environ["ORACLE_PASSWORD"],
-        "wallet_location": os.environ["ORACLE_WALLET"],
-        "wallet_password": os.environ.get("ORACLE_WALLET_PASSWORD") or None,
     }
+    if wallet := os.environ.get("ORACLE_WALLET"):
+        kwargs["wallet_location"] = wallet
+        kwargs["wallet_password"] = os.environ.get("ORACLE_WALLET_PASSWORD") or None
+    return kwargs
 
 
 async def _empty(cp: Any) -> None:
@@ -191,14 +192,11 @@ def _drop_oracle_tables() -> Iterator[None]:
     import oracledb
 
     kwargs = _oracle_kwargs()
-    conn = oracledb.connect(
-        user=kwargs["user"],
-        password=kwargs["password"],
-        dsn=kwargs["dsn"],
-        config_dir=kwargs["wallet_location"],
-        wallet_location=kwargs["wallet_location"],
-        wallet_password=kwargs["wallet_password"],
-    )
+    connect: dict[str, Any] = {k: kwargs[k] for k in ("user", "password", "dsn")}
+    if "wallet_location" in kwargs:
+        connect["config_dir"] = connect["wallet_location"] = kwargs["wallet_location"]
+        connect["wallet_password"] = kwargs["wallet_password"]
+    conn = oracledb.connect(**connect)
     try:
         with conn.cursor() as cursor:
             for table in _ORACLE_TABLES:
