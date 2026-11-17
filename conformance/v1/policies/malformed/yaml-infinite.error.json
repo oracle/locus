@@ -1,0 +1,4 @@
+{
+  "key": "spend_limit_usd",
+  "message": "at spend_limit_usd: expected a finite number, got inf"
+}

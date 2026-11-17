@@ -1,0 +1,9 @@
+{
+  "ok": true,
+  "source": "",
+  "policy_hash": "924417a48c223f63697b31abd0325cabf364e15703674d882148d695120c6f44",
+  "findings": [],
+  "notes": [
+    "an action with no environment, kind or tags, one asset and no cost is allowed: every gated tool must derive labels for this policy to see it"
+  ]
+}

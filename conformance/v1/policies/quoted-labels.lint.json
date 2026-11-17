@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "source": "",
+  "policy_hash": "af43cd6bec630b2881e4ba4c02bfe6f10323e6885f1cf90e7239ec244d8e9ea7",
+  "findings": [],
+  "notes": [
+    "no environments or kinds declared: add a `governs:` block to the file or pass --environments / --kinds, and each is checked for a rule",
+    "an action with no environment, kind or tags, one asset and no cost is allowed: every gated tool must derive labels for this policy to see it"
+  ]
+}

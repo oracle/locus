@@ -1,0 +1,32 @@
+{
+  "ok": false,
+  "source": "",
+  "policy_hash": "93ed6508803b6992b38c8c49edd1b8a2b4bba1fb3f8396f7a4a2090df8110d30",
+  "findings": [
+    {
+      "code": "unreachable-rule",
+      "rule": "require_human_for",
+      "label": "production",
+      "message": "label 'production' in require_human_for is unreachable: deny_for denies it first"
+    },
+    {
+      "code": "unreachable-rule",
+      "rule": "require_verification_score",
+      "label": null,
+      "message": "require_verification_score 1.5 is above 1.0: no verification confidence can meet it, so every action is held"
+    },
+    {
+      "code": "unreachable-rule",
+      "rule": "require_human_over_usd",
+      "label": null,
+      "message": "require_human_over_usd 100.00 is unreachable: any action costing more already exceeds spend_limit_usd 50.00 and is denied"
+    },
+    {
+      "code": "unreachable-rule",
+      "rule": "max_blast_radius",
+      "label": null,
+      "message": "max_blast_radius 0 holds every action that touches an asset: the allow path is unreachable for them"
+    }
+  ],
+  "notes": []
+}

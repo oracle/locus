@@ -1,0 +1,4 @@
+{
+  "key": "require_verification_score",
+  "message": "at require_verification_score: expected a number, got the string 'high'"
+}

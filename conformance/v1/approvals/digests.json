@@ -1,0 +1,111 @@
+[
+  {
+    "principal": "agent-7",
+    "tool": "issue_refund",
+    "arguments": {
+      "order_id": "4821",
+      "amount_usd": 120.0
+    },
+    "context": null,
+    "note": "",
+    "digest": "fb456872ebfb192e018307c198c0dc8cc53581d33706bdbc6fc82e8eee653fe6",
+    "approval_id": "appr-fb456872ebfb192e-1"
+  },
+  {
+    "principal": "agent-7",
+    "tool": "issue_refund",
+    "arguments": {
+      "amount_usd": 120.0,
+      "order_id": "4821"
+    },
+    "context": null,
+    "note": "key order does not matter: the same digest as the first case",
+    "digest": "fb456872ebfb192e018307c198c0dc8cc53581d33706bdbc6fc82e8eee653fe6",
+    "approval_id": "appr-fb456872ebfb192e-1"
+  },
+  {
+    "principal": "agent-7",
+    "tool": "issue_refund",
+    "arguments": {
+      "order_id": "4821",
+      "amount_usd": 120.0
+    },
+    "context": {},
+    "note": "an empty context hashes like no context",
+    "digest": "fb456872ebfb192e018307c198c0dc8cc53581d33706bdbc6fc82e8eee653fe6",
+    "approval_id": "appr-fb456872ebfb192e-1"
+  },
+  {
+    "principal": "agent-7",
+    "tool": "issue_refund",
+    "arguments": {
+      "order_id": "4821",
+      "amount_usd": 120.0
+    },
+    "context": {
+      "policy_version": "refunds-2026-11",
+      "thread_id": "t1"
+    },
+    "note": "a context is part of the call",
+    "digest": "50a392e64ac9949a09982512e64783e2fe218e83810fcee672e0528e54cf1b07",
+    "approval_id": "appr-50a392e64ac9949a-1"
+  },
+  {
+    "principal": "agent-7",
+    "tool": "issue_refund",
+    "arguments": {
+      "order_id": "4821",
+      "amount_usd": 120
+    },
+    "context": null,
+    "note": "120 is not 120.0",
+    "digest": "239b9b098cba16fa27a2000439cf97fa2ccc986d6761e5e68aaebf190f9e47fd",
+    "approval_id": "appr-239b9b098cba16fa-1"
+  },
+  {
+    "principal": "agent-8",
+    "tool": "issue_refund",
+    "arguments": {
+      "order_id": "4821",
+      "amount_usd": 120.0
+    },
+    "context": null,
+    "note": "the principal is part of the call",
+    "digest": "d066c61f639076f0d1690a94fe902a2fbfecf22e4b095343b9dbc3e3453addd2",
+    "approval_id": "appr-d066c61f639076f0-1"
+  },
+  {
+    "principal": "agent-7",
+    "tool": "send_email",
+    "arguments": {
+      "to": "ops@example.com",
+      "subject": "R\u00e9sum\u00e9 \ud83d\ude00",
+      "body": "line1\nline2",
+      "cc": []
+    },
+    "context": null,
+    "note": "",
+    "digest": "da9c262ca5a7ff964dc9992695a713fdff3b70a9a04527233cfb317622740cbe",
+    "approval_id": "appr-da9c262ca5a7ff96-1"
+  },
+  {
+    "principal": "agent-7",
+    "tool": "update_record",
+    "arguments": {
+      "id": 7,
+      "patch": {
+        "b": [
+          1,
+          2.0
+        ],
+        "a": {
+          "nested": null
+        }
+      }
+    },
+    "context": null,
+    "note": "",
+    "digest": "7f9a19a3cb2d330f77522be47edb09bd64e6e9493d6ddbd74c7cf181df358d79",
+    "approval_id": "appr-7f9a19a3cb2d330f-1"
+  }
+]

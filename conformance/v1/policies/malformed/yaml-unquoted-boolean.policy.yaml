@@ -1,0 +1,3 @@
+schema: "locus.control.policy/v1"
+require_human_for:
+  - yes
