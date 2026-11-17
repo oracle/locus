@@ -12,9 +12,11 @@ index in an operation its store makes atomic, so here two instances, and
 then two processes, write one thread at once and the index is whole.
 
 Redis needs ``REDIS_URL``; PostgreSQL ``POSTGRES_USER`` and ``POSTGRES_DB``
-(``POSTGRES_HOST`` / ``POSTGRES_PORT`` optional). The threads written are
-deleted after each test; the PostgreSQL table, named for this run alone so
-that two runs sharing a database never meet, is dropped when the module ends.
+(``POSTGRES_HOST`` / ``POSTGRES_PORT`` optional); Oracle ``ORACLE_DSN`` and
+``ORACLE_PASSWORD`` (``ORACLE_USER`` and a wallet in ``ORACLE_WALLET``
+optional). The threads written are deleted after each test; the PostgreSQL
+and Oracle tables, each named for this run alone so that two runs sharing a
+database never meet, are dropped when the module ends.
 """
 
 from __future__ import annotations
@@ -48,15 +50,38 @@ def _postgres_dsn() -> str | None:
     return f"postgresql://{auth}@{host}:{port}/{db}"
 
 
+def _oracle_kwargs() -> dict[str, Any] | None:
+    """``oracle_checkpointer()`` arguments from ``ORACLE_*``; ``None`` without a database."""
+    dsn, password = os.getenv("ORACLE_DSN"), os.getenv("ORACLE_PASSWORD")
+    if not dsn or not password:
+        return None
+    kwargs: dict[str, Any] = {
+        "dsn": dsn,
+        "user": os.getenv("ORACLE_USER", "ADMIN"),
+        "password": password,
+    }
+    if wallet := os.getenv("ORACLE_WALLET"):
+        kwargs["wallet_location"] = wallet
+        kwargs["wallet_password"] = os.getenv("ORACLE_WALLET_PASSWORD") or None
+    return kwargs
+
+
 def _make(kind: str, target: str, scope: str) -> Any:
     """One adapter over the store at ``target``: what one process would hold.
 
-    ``scope`` keeps runs apart: the Redis key prefix, or the PostgreSQL table.
+    ``scope`` keeps runs apart: the Redis key prefix, or the SQL table name.
+    Oracle takes its connection from ``ORACLE_*`` and ignores ``target``.
     """
     if kind == "redis":
         from locus.memory.backends import redis_checkpointer
 
         return redis_checkpointer(url=target, prefix=scope)
+    if kind == "oracle":
+        from locus.memory.backends import oracle_checkpointer
+
+        kwargs = _oracle_kwargs()
+        assert kwargs is not None
+        return oracle_checkpointer(table_name=scope, **kwargs)
     from locus.memory.backends import postgresql_checkpointer
 
     return postgresql_checkpointer(dsn=target, table_name=scope)
@@ -185,5 +210,43 @@ class TestPostgresIndexConcurrency:
         assert dsn is not None
 
         listed = await _two_processes("postgresql", dsn, pg_table, "hot")
+
+        assert len(set(listed)) == N
+
+
+# ---------------------------------------------------------------------------
+# Oracle
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def oracle_table() -> Iterator[str]:
+    """A checkpoint table for this run alone, dropped when the module ends."""
+    table = f"locus_p301_index_{uuid.uuid4().hex[:8]}"
+    yield table
+    kwargs = _oracle_kwargs()
+    if kwargs is None:
+        return
+    import oracledb
+
+    connect: dict[str, Any] = {k: kwargs[k] for k in ("user", "password", "dsn")}
+    if "wallet_location" in kwargs:
+        connect["config_dir"] = connect["wallet_location"] = kwargs["wallet_location"]
+        connect["wallet_password"] = kwargs["wallet_password"]
+    with oracledb.connect(**connect) as conn, conn.cursor() as cursor:
+        cursor.execute(f"DROP TABLE {table} PURGE")
+        conn.commit()
+
+
+@pytest.mark.requires_oracle
+@pytest.mark.skipif(_oracle_kwargs() is None, reason="ORACLE_DSN / ORACLE_PASSWORD not set")
+class TestOracleIndexConcurrency:
+    async def test_two_instances_keep_every_entry(self, oracle_table: str) -> None:
+        listed = await _two_instances(lambda: _make("oracle", "", oracle_table), "hot")
+
+        assert len(set(listed)) == N
+
+    async def test_two_processes_keep_every_entry(self, oracle_table: str) -> None:
+        listed = await _two_processes("oracle", "", oracle_table, "hot")
 
         assert len(set(listed)) == N

@@ -182,6 +182,28 @@ policy.
   configured `ttl_seconds` even when a removal is what migrates it.
   `StorageBackendAdapter.delete(thread_id, checkpoint_id)` is `True` when it
   removed an index entry whose checkpoint was already gone.
+- **`oracle_checkpointer()` keeps the checkpoint index atomically too.** The
+  Oracle backend was the one shipped store still on the adapter's locked
+  read-modify-write, so two processes saving to one thread through it could
+  lose index entries (#301). `OracleBackend` now implements
+  `CheckpointIndexStore`: each save or removal reads the
+  `<thread_id>:_checkpoints` row under `SELECT ... FOR UPDATE` and rewrites
+  it in the same transaction, so concurrent writers queue on the row lock
+  and each sees what the previous one committed; two first writers racing
+  on the row's insert meet the primary key, and the loser retries against
+  the winner's row. `OracleSyncBackend` mirrors the four methods, and the
+  backend reads its JSON columns through one helper that accepts every
+  shape the driver returns (dict, string, sync or async LOB).
+
+### Deprecated
+
+- **Reading a Redis checkpoint index written by a release before this one.**
+  `redis_checkpointer()` still reads the `<thread_id>:_checkpoints` JSON
+  string an earlier release kept and moves it into the index hash on the
+  thread's next save or removal, with a `LocusDeprecationWarning` when it
+  does; that read ends in 7.0.0. Upgrade the processes that share one Redis
+  store together: one still on the earlier release lists only the
+  checkpoints it wrote itself after the move, and nothing else is lost.
 
 ## [5.6.0] - 2026-11-17
 

@@ -6,14 +6,18 @@
 
 Redis runs against a dict-backed fake of the client (strings, hashes and
 pipelines); PostgreSQL and MySQL against the statement-recording stubs
-their own test modules use; OpenSearch against a mocked client. The live
-behaviour — two processes writing one thread and losing nothing — is
+their own test modules use; OpenSearch against a mocked client; Oracle
+against a fake connection over one dict of rows. The live behaviour — two
+processes writing one thread and losing nothing — is
 ``tests/integration/test_checkpoint_index_concurrency.py``.
 """
 
 from __future__ import annotations
 
 import json
+import sys
+import types
+import warnings
 from collections.abc import Awaitable, Callable
 from typing import Any
 from unittest.mock import AsyncMock
@@ -25,6 +29,7 @@ from locus.memory.backends.adapters import StorageBackendAdapter
 from locus.memory.backends.checkpoint_index import index_key, keeps_index_natively, newest_first
 from locus.memory.backends.mysql import MySQLBackend, _like_literal
 from locus.memory.backends.opensearch import OpenSearchBackend
+from locus.memory.backends.oracle import OracleBackend, _read_json_column
 from locus.memory.backends.postgresql import PostgreSQLBackend
 from locus.memory.backends.redis import RedisBackend
 from tests.unit.test_memory_backends_mysql import (
@@ -82,8 +87,9 @@ class TestCheckpointIndexModule:
             PostgreSQLBackend(),
             MySQLBackend(),
             OpenSearchBackend(hosts=["http://x:9200"]),
+            OracleBackend(dsn="x"),
         ],
-        ids=["redis", "postgresql", "mysql", "opensearch"],
+        ids=["redis", "postgresql", "mysql", "opensearch", "oracle"],
     )
     def test_every_shipped_backend_keeps_the_index_itself(self, backend: Any) -> None:
         assert isinstance(backend, CheckpointIndexStore)
@@ -404,6 +410,19 @@ class TestRedisIndex:
         assert client.calls[:3] == ["exists", "watch", "get"]
         assert client.calls[3:] == ["hsetnx", "delete", "hset"]
 
+    async def test_migrating_a_legacy_string_warns_that_reading_them_ends(self) -> None:
+        from locus.core.warnings import LocusDeprecationWarning
+
+        backend, client = _redis()
+        client.strings[_LEGACY] = json.dumps({"checkpoints": [_entry("old-0")]})
+
+        with pytest.warns(LocusDeprecationWarning, match="7.0.0"):
+            await backend.index_add("t", _entry("new"))
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            await backend.index_add("t", _entry("newer"))  # no string left: silent
+
     async def test_a_migration_that_loses_the_race_writes_nothing(self) -> None:
         """Process one reads the string; process two migrates it and removes ``old-0``
         before process one's ``EXEC``, which Redis then discards: ``old-0`` stays gone."""
@@ -461,6 +480,308 @@ class TestRedisIndex:
         assert await adapter.delete("t") is True
         assert _HASH not in client.hashes
         assert await adapter.list_checkpoints("t") == []
+
+
+# ---------------------------------------------------------------------------
+# Oracle: the index row rewritten under its row lock
+# ---------------------------------------------------------------------------
+
+
+class _OracleLob:
+    """A temporary CLOB as the backend writes it; read back, an async locator."""
+
+    def __init__(self, text: str | None = None) -> None:
+        self.text = text
+
+    async def write(self, text: str) -> None:
+        self.text = text
+
+    def read(self) -> Any:
+        async def _read() -> str | None:
+            return self.text
+
+        return _read()
+
+
+class _SyncLob:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    def read(self) -> str:
+        return self.text
+
+
+class _OracleCursor:
+    def __init__(self, conn: _OracleConn) -> None:
+        self._conn = conn
+        self._row: Any = None
+        self.rowcount = 0
+
+    async def __aenter__(self) -> _OracleCursor:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    async def execute(self, sql: str, binds: dict[str, Any] | None = None) -> None:
+        self._row, self.rowcount = await self._conn.run(" ".join(sql.split()), binds or {})
+
+    async def fetchone(self) -> Any:
+        return self._row
+
+
+class _OracleConn:
+    """A fake connection over one dict of rows: ``rows[thread_id]`` is the data document.
+
+    Statements and binds are recorded. ``failing_inserts`` makes that many
+    ``INSERT`` statements raise ``insert_error`` after putting ``other_row``
+    in place, which is what losing the first-write race to another process
+    looks like: the winner's row is there when the loser retries.
+    """
+
+    def __init__(
+        self,
+        rows: dict[str, dict[str, Any]] | None = None,
+        *,
+        failing_inserts: int = 0,
+        insert_error: str = "ORA-00001: unique constraint (LOCUS.SYS_C007) violated",
+        other_row: dict[str, Any] | None = None,
+    ) -> None:
+        self.rows = rows if rows is not None else {}
+        self.statements: list[str] = []
+        self.binds: list[dict[str, Any]] = []
+        self.commits = 0
+        self.rollbacks = 0
+        self.failing_inserts = failing_inserts
+        self.insert_error = insert_error
+        self.other_row = other_row
+
+    def cursor(self) -> _OracleCursor:
+        return _OracleCursor(self)
+
+    async def createlob(self, _type: Any) -> _OracleLob:
+        return _OracleLob()
+
+    async def commit(self) -> None:
+        self.commits += 1
+
+    async def rollback(self) -> None:
+        self.rollbacks += 1
+
+    async def run(self, sql: str, binds: dict[str, Any]) -> tuple[Any, int]:
+        self.statements.append(sql)
+        self.binds.append(binds)
+        head = sql.upper()
+        key = binds.get("thread_id")
+        if "USER_TABLES" in head:
+            return (1,), 0
+        if head.startswith("SELECT DATA FROM"):
+            # The server's JSON type: oracledb returns the document as a dict.
+            return ((self.rows[key],), 0) if key in self.rows else (None, 0)
+        if head.startswith("SELECT 1 FROM"):
+            return ((1,), 0) if key in self.rows else (None, 0)
+        if head.startswith("INSERT"):
+            if self.failing_inserts:
+                self.failing_inserts -= 1
+                if self.other_row is not None:
+                    self.rows[key] = self.other_row
+                raise RuntimeError(self.insert_error)
+            self.rows[key] = json.loads(binds["data"].text)
+            return None, 1
+        if head.startswith(("UPDATE", "MERGE")):
+            self.rows[key] = json.loads(binds["data"].text)
+            return None, 1
+        if head.startswith("DELETE"):
+            return None, int(self.rows.pop(key, None) is not None)
+        raise AssertionError(f"unexpected SQL: {sql}")
+
+
+class _OraclePool:
+    def __init__(self, conn: _OracleConn) -> None:
+        self._conn = conn
+
+    def acquire(self) -> Any:
+        conn = self._conn
+
+        class _Acquired:
+            async def __aenter__(self) -> _OracleConn:
+                return conn
+
+            async def __aexit__(self, *exc: object) -> None:
+                return None
+
+        return _Acquired()
+
+    async def close(self, *, force: bool = False) -> None:
+        return None
+
+
+def _oracle(monkeypatch: pytest.MonkeyPatch, conn: _OracleConn) -> OracleBackend:
+    fake = types.ModuleType("oracledb")
+    fake.create_pool_async = lambda **kwargs: _OraclePool(conn)  # type: ignore[attr-defined]
+    fake.DB_TYPE_CLOB = object()  # type: ignore[attr-defined]
+    fake.AsyncConnectionPool = _OraclePool  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "oracledb", fake)
+    return OracleBackend(dsn="x", user="u", password="p")  # noqa: S106
+
+
+def _oracle_row(*entries: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {_ORACLE_KEY: {"checkpoints": list(entries)}}
+
+
+_ORACLE_KEY = "t:_checkpoints"
+
+
+class TestOracleJsonColumn:
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            {"checkpoints": []},
+            '{"checkpoints": []}',
+            b'{"checkpoints": []}',
+            _SyncLob('{"checkpoints": []}'),
+            _OracleLob('{"checkpoints": []}'),
+        ],
+        ids=["dict", "str", "bytes", "sync-lob", "async-lob"],
+    )
+    async def test_every_shape_the_driver_returns_reads_as_the_document(self, raw: Any) -> None:
+        assert await _read_json_column(raw) == {"checkpoints": []}
+
+    async def test_nothing_reads_as_none(self) -> None:
+        assert await _read_json_column(None) is None
+        assert await _read_json_column("") is None
+
+
+class TestOracleIndex:
+    async def test_add_inserts_the_row_under_a_row_lock(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        conn = _OracleConn()
+        backend = _oracle(monkeypatch, conn)
+
+        await backend.index_add("t", _entry("cp-0"))
+
+        assert conn.rows == _oracle_row(_entry("cp-0"))
+        select, insert = conn.statements[1:]  # [0] probes user_tables
+        assert select.upper().startswith("SELECT DATA FROM")
+        assert select.upper().endswith("FOR UPDATE")
+        assert insert.upper().startswith("INSERT INTO")
+        assert conn.binds[-1]["thread_id"] == _ORACLE_KEY
+        assert (conn.commits, conn.rollbacks) == (1, 0)
+
+    async def test_add_rewrites_the_row_newest_first_replacing_the_same_id(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        conn = _OracleConn(
+            _oracle_row(
+                _entry("cp-0", "2026-01-01T00:00:00"), _entry("cp-1", "2026-01-02T00:00:00")
+            )
+        )
+        backend = _oracle(monkeypatch, conn)
+
+        await backend.index_add("t", _entry("cp-0", "2026-01-03T00:00:00"))
+
+        entries = conn.rows[_ORACLE_KEY]["checkpoints"]
+        assert [e["checkpoint_id"] for e in entries] == ["cp-0", "cp-1"]
+        assert entries[0]["timestamp"] == "2026-01-03T00:00:00"
+        assert conn.statements[-1].upper().startswith("UPDATE")
+        assert conn.commits == 1
+
+    async def test_remove_reports_whether_the_entry_was_there_and_writes_only_then(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        conn = _OracleConn(_oracle_row(_entry("cp-0"), _entry("cp-1")))
+        backend = _oracle(monkeypatch, conn)
+
+        assert await backend.index_remove("t", "cp-0") is True
+        assert conn.rows == _oracle_row(_entry("cp-1"))
+        assert conn.commits == 1
+
+        assert await backend.index_remove("t", "cp-9") is False
+        assert conn.commits == 1, "nothing to write: the row lock goes with a rollback"
+        assert conn.rollbacks == 1
+
+    async def test_remove_without_a_row_never_creates_one(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        conn = _OracleConn()
+        backend = _oracle(monkeypatch, conn)
+
+        assert await backend.index_remove("t", "cp-0") is False
+
+        assert conn.rows == {}
+        assert not any(s.upper().startswith("INSERT") for s in conn.statements)
+        assert conn.rollbacks == 1
+
+    async def test_losing_the_first_insert_retries_against_the_winners_row(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        conn = _OracleConn(failing_inserts=1, other_row={"checkpoints": [_entry("theirs")]})
+        backend = _oracle(monkeypatch, conn)
+
+        await backend.index_add("t", _entry("mine"))
+
+        ids = sorted(e["checkpoint_id"] for e in conn.rows[_ORACLE_KEY]["checkpoints"])
+        assert ids == ["mine", "theirs"]
+        assert [s.split()[0].upper() for s in conn.statements[1:]] == [
+            "SELECT",
+            "INSERT",
+            "SELECT",
+            "UPDATE",
+        ]
+        assert (conn.commits, conn.rollbacks) == (1, 1)
+
+    async def test_an_insert_that_keeps_losing_gives_up_after_the_retries(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        conn = _OracleConn(failing_inserts=10)
+        backend = _oracle(monkeypatch, conn)
+
+        with pytest.raises(RuntimeError, match="ORA-00001"):
+            await backend.index_add("t", _entry("mine"))
+
+        assert sum(s.upper().startswith("INSERT") for s in conn.statements) == 3
+
+    async def test_any_other_insert_error_propagates_at_once(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        conn = _OracleConn(failing_inserts=10, insert_error="ORA-12899: value too large")
+        backend = _oracle(monkeypatch, conn)
+
+        with pytest.raises(RuntimeError, match="ORA-12899"):
+            await backend.index_add("t", _entry("mine"))
+
+        assert sum(s.upper().startswith("INSERT") for s in conn.statements) == 1
+        assert conn.rollbacks == 1
+
+    async def test_list_and_clear_go_through_the_index_row(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        conn = _OracleConn(_oracle_row(_entry("cp-0")))
+        backend = _oracle(monkeypatch, conn)
+
+        assert await backend.index_list("t") == [_entry("cp-0")]
+        assert await backend.index_clear("t") is True
+        assert await backend.index_clear("t") is False
+        assert await backend.index_list("t") == []
+
+    async def test_the_adapter_uses_the_native_index(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from locus.core.state import AgentState
+
+        conn = _OracleConn()
+        backend = _oracle(monkeypatch, conn)
+        adapter = StorageBackendAdapter(backend)
+        assert adapter._native_index is backend
+
+        state = AgentState(agent_id="a")
+        for step in range(3):
+            await adapter.save(state, "t", f"cp-{step}")
+
+        assert await adapter.list_checkpoints("t") == ["cp-2", "cp-1", "cp-0"]
+        assert await adapter.delete("t", "cp-1") is True
+        assert await adapter.list_checkpoints("t") == ["cp-2", "cp-0"]
+        assert await adapter.delete("t") is True
+        assert conn.rows == {}
 
 
 # ---------------------------------------------------------------------------
