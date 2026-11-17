@@ -89,6 +89,32 @@ def list_checkpointers() -> list[str]:
 
     Returns:
         List of registered provider names
+
+    Example:
+        The built-in names are registered on import; a name registered with
+        :func:`register_checkpointer` joins them.
+
+        ```python
+        from locus.memory.backends.memory import MemoryCheckpointer
+        from locus.memory.registry import list_checkpointers, register_checkpointer
+
+        builtin = {
+            "memory",
+            "file",
+            "http",
+            "redis",
+            "postgresql",
+            "mysql",
+            "opensearch",
+            "s3",
+            "oci",
+            "oracle",
+        }
+        assert builtin <= set(list_checkpointers())
+
+        register_checkpointer("audited", lambda **kwargs: MemoryCheckpointer())
+        assert "audited" in list_checkpointers()
+        ```
     """
     return list(_CHECKPOINTERS.keys())
 
