@@ -250,7 +250,7 @@ DEFAULT_LOCAL_MODEL = ""
 
 #: Overridable so the demo does not rot against a pinned model name, and
 #: so a reader can raise the difficulty (opus) or lower it (haiku).
-DEFAULT_FRONTIER_MODEL = "anthropic:claude-sonnet-5"
+DEFAULT_FRONTIER_MODEL = "anthropic:claude-sonnet-5-5"
 
 
 def build_agent(mode: str) -> Agent:
@@ -265,7 +265,11 @@ def build_agent(mode: str) -> Agent:
             temperature=0,
         )
     elif mode == MODE_FRONTIER:
-        model = get_model("anthropic:claude-sonnet-5-5", api_key=os.environ["ANTHROPIC_API_KEY"])
+        # The same name the banner shows: LOCUS_FRONTIER_MODEL, else the default.
+        model = get_model(
+            os.environ.get("LOCUS_FRONTIER_MODEL", DEFAULT_FRONTIER_MODEL),
+            api_key=os.environ["ANTHROPIC_API_KEY"],
+        )
     else:
         model = CompromisedModel()
     return Agent(

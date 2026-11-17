@@ -119,7 +119,7 @@ def __getattr__(name: str) -> Any:
 
     instead = _REPLACEMENTS.get(name)
     warnings.warn(
-        f"locus.loop.{name} is deprecated and will be removed in 3.0.0. "
+        f"locus.loop.{name} is deprecated and will be removed in 6.0.0. "
         f"locus.loop is a second ReAct implementation that Agent never used"
         + (f"; use {instead} instead." if instead else "."),
         LocusDeprecationWarning,
