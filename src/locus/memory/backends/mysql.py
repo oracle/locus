@@ -12,7 +12,8 @@ import logging
 import re
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from decimal import Decimal
+from typing import TYPE_CHECKING, Any, Protocol
 from urllib.parse import parse_qsl, unquote, urlparse
 
 from pydantic import BaseModel, Field, SecretStr
@@ -24,12 +25,30 @@ from locus.memory.backends.checkpoint_index import index_key
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from mysql.connector.aio.abstracts import MySQLConnectionAbstract
+    from mysql.connector.aio.abstracts import MySQLCursorAbstract
 
 
 logger = logging.getLogger(__name__)
 
 _SAFE_SQL_IDENTIFIER = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]{0,63}$")
+
+
+class _Connection(Protocol):
+    """The slice of the Connector/Python async connection API the pool uses.
+
+    ``mysql.connector.aio.connect()`` returns a ``MySQLConnectionAbstract``,
+    or a ``PooledMySQLConnection`` proxying one when the connection arguments
+    name a connector-level pool. Both satisfy this protocol, so the pool holds
+    whichever ``connect()`` handed back.
+    """
+
+    async def cursor(self) -> MySQLCursorAbstract: ...
+
+    async def commit(self) -> None: ...
+
+    async def rollback(self) -> None: ...
+
+    async def close(self) -> None: ...
 
 
 def _validate_sql_identifier(value: str, field_name: str) -> str:
@@ -74,6 +93,32 @@ _INDEX_ENTRY_PATH = (
     " '$[*].checkpoint_id')), '.checkpoint_id', '')"
 )
 _LIKE_ESCAPE = "\\"
+
+
+def _as_str(value: object) -> str:
+    """Narrow a text column value to ``str``; the connector may return ``bytes``."""
+    if isinstance(value, bytes | bytearray):
+        return bytes(value).decode("utf-8")
+    if isinstance(value, str):
+        return value
+    msg = f"Expected a text column value, got {type(value).__name__}"
+    raise TypeError(msg)
+
+
+def _as_int(value: object) -> int:
+    """Narrow a numeric column value (``COUNT(*)``) to ``int``."""
+    if isinstance(value, int | float | Decimal | str | bytes):
+        return int(value)
+    msg = f"Expected a numeric column value, got {type(value).__name__}"
+    raise TypeError(msg)
+
+
+def _as_datetime(value: object) -> datetime:
+    """Narrow a ``TIMESTAMP`` column value, which the converter returns as ``datetime``."""
+    if isinstance(value, datetime):
+        return value
+    msg = f"Expected a datetime column value, got {type(value).__name__}"
+    raise TypeError(msg)
 
 
 def _parse_dsn(dsn: str) -> dict[str, Any]:
@@ -146,7 +191,7 @@ class _MySQLConnectionPool:
             raise ValueError(msg)
 
         self._config = config
-        self._available: asyncio.Queue[MySQLConnectionAbstract] = asyncio.Queue()
+        self._available: asyncio.Queue[_Connection] = asyncio.Queue()
         self._created = 0
         self._closed = False
         self._lock = asyncio.Lock()
@@ -156,7 +201,7 @@ class _MySQLConnectionPool:
         for _ in range(self._config.min_pool_size):
             await self._available.put(await self._connect())
 
-    async def _connect(self) -> MySQLConnectionAbstract:
+    async def _connect(self) -> _Connection:
         try:
             from mysql.connector.aio import connect
         except ImportError as e:
@@ -166,7 +211,7 @@ class _MySQLConnectionPool:
             ) from e
 
         kwargs = self._connect_kwargs()
-        conn: MySQLConnectionAbstract = await connect(**kwargs)
+        conn: _Connection = await connect(**kwargs)
         self._created += 1
         return conn
 
@@ -189,7 +234,7 @@ class _MySQLConnectionPool:
         return kwargs
 
     @asynccontextmanager
-    async def acquire(self) -> AsyncIterator[MySQLConnectionAbstract]:
+    async def acquire(self) -> AsyncIterator[_Connection]:
         """Acquire a connection and return it to the pool afterwards."""
         if self._closed:
             msg = "MySQL connection pool is closed"
@@ -211,7 +256,7 @@ class _MySQLConnectionPool:
             elif not getattr(conn, "closed", False):
                 await self._release(conn)
 
-    async def _release(self, conn: MySQLConnectionAbstract) -> None:
+    async def _release(self, conn: _Connection) -> None:
         """Return a connection to the pool with no open transaction.
 
         Under ``autocommit=False`` a bare ``SELECT`` (including read methods
@@ -239,7 +284,7 @@ class _MySQLConnectionPool:
             return error_types
         return (*error_types, MySQLError)
 
-    async def _acquire(self) -> MySQLConnectionAbstract:
+    async def _acquire(self) -> _Connection:
         while True:
             try:
                 conn = self._available.get_nowait()
@@ -263,7 +308,7 @@ class _MySQLConnectionPool:
                 if self._created < self._config.max_pool_size:
                     return await self._connect()
 
-    async def _is_healthy(self, conn: MySQLConnectionAbstract) -> bool:
+    async def _is_healthy(self, conn: _Connection) -> bool:
         """Validate an idle connection before handing it out again."""
         if getattr(conn, "closed", False):
             return False
@@ -276,7 +321,7 @@ class _MySQLConnectionPool:
             return False
         return True
 
-    async def _discard(self, conn: MySQLConnectionAbstract) -> None:
+    async def _discard(self, conn: _Connection) -> None:
         """Close a bad connection and make room for a replacement."""
         try:
             if not getattr(conn, "closed", False):
@@ -601,7 +646,7 @@ class MySQLBackend(BaseModel):
             )
             rows = await cur.fetchall()
 
-        return [row[0] for row in rows]
+        return [_as_str(row[0]) for row in rows]
 
     async def get_metadata(self, thread_id: str) -> dict[str, Any] | None:
         """Get checkpoint metadata."""
@@ -624,8 +669,8 @@ class MySQLBackend(BaseModel):
 
         return {
             "checkpoint_id": row[0],
-            "created_at": row[1].isoformat(),
-            "updated_at": row[2].isoformat(),
+            "created_at": _as_datetime(row[1]).isoformat(),
+            "updated_at": _as_datetime(row[2]).isoformat(),
             "metadata": _decode_json(row[3]) or {},
         }
 
@@ -658,9 +703,9 @@ class MySQLBackend(BaseModel):
 
         return [
             {
-                "thread_id": row[0],
+                "thread_id": _as_str(row[0]),
                 "data": _decode_json(row[1]),
-                "updated_at": row[2].isoformat(),
+                "updated_at": _as_datetime(row[2]).isoformat(),
             }
             for row in rows
         ]
@@ -697,9 +742,9 @@ class MySQLBackend(BaseModel):
 
         return [
             {
-                "thread_id": row[0],
+                "thread_id": _as_str(row[0]),
                 "data": _decode_json(row[1]),
-                "updated_at": row[2].isoformat(),
+                "updated_at": _as_datetime(row[2]).isoformat(),
             }
             for row in rows
         ]
@@ -716,7 +761,7 @@ class MySQLBackend(BaseModel):
             )
             row = await cur.fetchone()
 
-        return int(row[0]) if row else 0
+        return _as_int(row[0]) if row else 0
 
     async def vacuum(self, older_than_days: int = 30) -> int:
         """

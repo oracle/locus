@@ -48,6 +48,23 @@ policy.
   gate's verdict as Markdown with one table row per failed check, for a
   pull-request comment, the way `eval diff` and `eval summary` already
   render with `--markdown`. The exit code is still the gate's verdict. (#484)
+- **`HeatWaveVectorStore` — MySQL HeatWave vector store** (#299). Documents
+  live in one InnoDB table with a `VECTOR(n)` column, a `JSON` metadata
+  column and a `FULLTEXT` index on the content; the store mirrors
+  `OracleVectorStore`'s surface (`add`, `add_batch`, `get`, `delete`,
+  `search`, `count`, `clear`, `close`) plus `hybrid_search`, which blends
+  `DISTANCE()` similarity with `MATCH ... AGAINST` relevance client-side the
+  way the Elasticsearch store does. It probes the server once: HeatWave
+  MySQL computes and orders by `DISTANCE()` on the server
+  (`server_side_distance=True`); community MySQL 9+ has the `VECTOR` type
+  but no `DISTANCE()`, so the store fetches up to `candidate_limit` rows and
+  ranks them here. Metadata filters are `JSON_EXTRACT` equality predicates
+  with the path and the value bound as parameters. Blocking driver calls run
+  on worker threads (`asyncio.to_thread`), so the pooled connections never
+  bind to an event loop. New `heatwave` extra (the same
+  `mysql-connector-python` the `mysql` checkpoint extra installs), lazy
+  export from `locus.rag.stores`, docs rows and a HeatWave vs community
+  MySQL section, and the shared conformance suite behind `HEATWAVE_DSN`.
 
 ### Changed
 
@@ -67,6 +84,24 @@ policy.
   the maintainers have not run. `tests/unit/test_litellm_gateway_example.py`
   keeps the two configs in step; `tests/integration/test_litellm_gateway_platform.py`
   drives the guardrail and the cache against a live gateway.
+- **`RequestClassifier` and `ProtocolPicker`, the router's two seams.**
+  `Router(classifier=...)` takes any `async classify(text) -> GoalFrame` in
+  place of the extractor agent, which is now wrapped in
+  `AgentFrameExtractor`, the default implementation of the same protocol;
+  `CognitiveCompiler(protocol_picker=...)` takes any `ProtocolPicker`, of
+  which `LLMProtocolPicker` is the one that ships. Behaviour is unchanged
+  by default. (#342)
+- **Router: LOW-complexity requests go to `direct_response` before any
+  goal gate.** A frame at `Complexity.LOW` whose risk is within
+  `direct_response`'s `risk_max` compiles to `direct_response` whatever its
+  `primary_goal`; `router.protocol.selected` reports
+  `method="low_complexity_direct"` and `explain()` mirrors it. The
+  `PolicyGate` still runs, a `direct_response` the gate denies sends the
+  frame down the ordinary filter-and-rank path, and
+  `CognitiveCompiler(low_complexity_direct=None)` turns the rule off.
+  `direct_response` also handles `DIAGNOSE` now, so a LOW-complexity
+  diagnosis ranks the direct answer first by rule while MEDIUM and HIGH
+  stay on `specialist_fanout`. (#342)
 - **Docs: notebook 78's captured output, concept pages that link their
   notebooks, the environment-variable reference completed from the source,
   and `Example:` sections on `BaseStore`, `InMemoryStore`, `register_provider`
@@ -78,6 +113,11 @@ policy.
 
 ### Fixed
 
+- **Two processes creating the PostgreSQL checkpoint table at the same instant
+  no longer fail.** `postgresql_checkpointer()` and `PgCheckpointer` took
+  `CREATE TABLE IF NOT EXISTS` for atomic; the loser hit the `pg_type` unique
+  index. The first-time DDL now runs under a transaction-scoped advisory lock
+  on the table name and re-probes before creating.
 - **`LOCUS_FRONTIER_MODEL` turns the knob it names.** The rogue-agent challenge
   showed the variable in its banner but ran a pinned model; `build_agent()`
   now uses it, and the default is the model it pinned. The `locus.loop`

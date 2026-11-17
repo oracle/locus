@@ -24,6 +24,7 @@ import json
 import sys
 import types
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -31,6 +32,9 @@ import pytest
 from locus.memory.backends.mysql import (
     MySQLBackend,
     MySQLConfig,
+    _as_datetime,
+    _as_int,
+    _as_str,
     _decode_json,
     _MySQLConnectionPool,
     _parse_dsn,
@@ -176,6 +180,27 @@ class TestHelpers:
     def test_parse_dsn_accepts_minimal_mysql_url_and_query_options(self) -> None:
         parsed = _parse_dsn("mysql+connector:///?ssl_disabled=true&charset=utf8mb4")
         assert parsed == {"ssl_disabled": "true", "charset": "utf8mb4"}
+
+    def test_as_str_accepts_text_and_decodes_bytes(self) -> None:
+        assert _as_str("t1") == "t1"
+        assert _as_str(b"t1") == "t1"
+        assert _as_str(bytearray(b"t1")) == "t1"
+        with pytest.raises(TypeError, match="text column"):
+            _as_str(None)
+
+    def test_as_int_converts_numeric_column_values(self) -> None:
+        assert _as_int(7) == 7
+        assert _as_int(Decimal(7)) == 7
+        assert _as_int("7") == 7
+        assert _as_int(b"7") == 7
+        with pytest.raises(TypeError, match="numeric column"):
+            _as_int(None)
+
+    def test_as_datetime_requires_a_datetime(self) -> None:
+        ts = datetime(2026, 1, 1, tzinfo=UTC)
+        assert _as_datetime(ts) is ts
+        with pytest.raises(TypeError, match="datetime column"):
+            _as_datetime("2026-01-01T00:00:00")
 
 
 class TestConnectionPool:

@@ -24,6 +24,9 @@ each class here only knows how to reach one backend. Gates:
 - ``OPENSEARCH_HOSTS`` — an OpenSearch cluster with the k-NN plugin (see
   ``conftest.get_opensearch_config`` for the auth / TLS variables).
 - ``MILVUS_URI`` — a Milvus server or Zilliz Cloud (``MILVUS_TOKEN`` optional).
+- ``HEATWAVE_DSN`` (or ``LOCUS_MYSQL_DSN``) — a MySQL HeatWave DB system or a
+  community MySQL 9+ server, e.g. ``mysql://user:pw@host:3306/db``; the suite
+  reports which search path the server took.
 """
 
 from __future__ import annotations
@@ -236,6 +239,27 @@ class TestMilvusServerConformance(VectorStoreConformance):
             token=_env("MILVUS_TOKEN"),
             enable_hybrid=True,
         )
+
+
+# ---------------------------------------------------------------- HeatWave
+
+
+@pytest.mark.skipif(not _env("HEATWAVE_DSN", "LOCUS_MYSQL_DSN"), reason="set HEATWAVE_DSN")
+class TestHeatWaveConformance(VectorStoreConformance):
+    supports_hybrid = True
+
+    async def make_store(self):  # type: ignore[no-untyped-def]
+        pytest.importorskip("mysql.connector")
+        from locus.rag.stores.heatwave import HeatWaveVectorStore
+
+        store = HeatWaveVectorStore(
+            dsn=_env("HEATWAVE_DSN", "LOCUS_MYSQL_DSN"),
+            dimension=DIMENSION,
+            table_name="locus_conformance",
+        )
+        await store.ensure_ready()
+        print(f"HeatWaveVectorStore server_side_distance={store.server_side_distance}")
+        return store
 
 
 # ------------------------------------------------------------------ helper
