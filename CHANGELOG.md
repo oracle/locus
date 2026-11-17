@@ -22,17 +22,6 @@ policy.
   gate's verdict as Markdown with one table row per failed check, for a
   pull-request comment, the way `eval diff` and `eval summary` already
   render with `--markdown`. The exit code is still the gate's verdict. (#484)
-
-### Changed
-
-- **Docs: notebook 78's captured output, concept pages that link their
-  notebooks, the environment-variable reference completed from the source,
-  and `Example:` sections on `BaseStore`, `InMemoryStore`, `register_provider`
-  and `list_checkpointers`.** The concession-approval page shows the offline
-  run (#485); the OCI Responses, multi-modal providers, events, SSE catalogue
-  and control-layer pages link the notebooks that exercise them (#486); the
-  variables the SDK reads but the page omitted are listed (#487); the four
-  docstrings carry an example a test executes (#488, #489).
 - **`HeatWaveVectorStore` — MySQL HeatWave vector store** (#299). Documents
   live in one InnoDB table with a `VECTOR(n)` column, a `JSON` metadata
   column and a `FULLTEXT` index on the content; the store mirrors
@@ -50,6 +39,17 @@ policy.
   `mysql-connector-python` the `mysql` checkpoint extra installs), lazy
   export from `locus.rag.stores`, docs rows and a HeatWave vs community
   MySQL section, and the shared conformance suite behind `HEATWAVE_DSN`.
+
+### Changed
+
+- **Docs: notebook 78's captured output, concept pages that link their
+  notebooks, the environment-variable reference completed from the source,
+  and `Example:` sections on `BaseStore`, `InMemoryStore`, `register_provider`
+  and `list_checkpointers`.** The concession-approval page shows the offline
+  run (#485); the OCI Responses, multi-modal providers, events, SSE catalogue
+  and control-layer pages link the notebooks that exercise them (#486); the
+  variables the SDK reads but the page omitted are listed (#487); the four
+  docstrings carry an example a test executes (#488, #489).
 
 ### Fixed
 
