@@ -32,6 +32,14 @@
 #   #       api_key="<virtual-key-from-step-5>",
 #   #       base_url="http://localhost:4000",
 #   #   )
+#
+# Optional — response cache + OpenTelemetry (config.platform.yaml). Setting
+# REDIS_URL switches the gateway to that file; the ``cache`` profile adds
+# the redis sidecar it names:
+#
+#   export REDIS_URL=redis://redis:6379
+#   export OTEL_EXPORTER_OTLP_ENDPOINT=http://host.docker.internal:4318  # your collector
+#   docker compose --profile cache up -d
 
 services:
   litellm:
@@ -48,6 +56,7 @@ services:
         condition: service_healthy
     volumes:
     - ./config.yaml:/app/config.yaml:ro
+    - ./config.platform.yaml:/app/config.platform.yaml:ro
     environment:
       # Provider credentials referenced by config.yaml via os.environ/<NAME>.
       OPENAI_API_KEY: ${OPENAI_API_KEY:?set OPENAI_API_KEY before running docker compose up}
@@ -57,7 +66,21 @@ services:
       # Postgres URL — virtual-key state, spend logs, audit log.
       DATABASE_URL: postgresql://litellm:${LITELLM_DB_PASSWORD:?set LITELLM_DB_PASSWORD}@db:5432/litellm
       STORE_MODEL_IN_DB: 'True'
-    command: [--config, /app/config.yaml, --port, '4000', --num_workers, '1']
+      # Response cache (config.platform.yaml). Unset: no cache, config.yaml.
+      REDIS_URL:
+      # OpenTelemetry (config.platform.yaml). Spans go over OTLP/HTTP to the
+      # endpoint when one is set; with no endpoint the protocol is empty and
+      # LiteLLM falls back to its console exporter, so the spans show up in
+      # the gateway log. OTEL_EXPORTER_OTLP_HEADERS carries the collector's auth.
+      OTEL_EXPORTER_OTLP_PROTOCOL: ${OTEL_EXPORTER_OTLP_ENDPOINT:+http/protobuf}
+      OTEL_EXPORTER_OTLP_ENDPOINT:
+      OTEL_EXPORTER_OTLP_HEADERS:
+      # Langfuse, when config.platform.yaml lists ``langfuse`` instead of ``otel``.
+      LANGFUSE_PUBLIC_KEY:
+      LANGFUSE_SECRET_KEY:
+      LANGFUSE_HOST:
+    # config.platform.yaml when REDIS_URL is set, config.yaml otherwise.
+    command: [--config, '/app/config${REDIS_URL:+.platform}.yaml', --port, '4000', --num_workers, '1']
     restart: unless-stopped
     healthcheck:
       test: [CMD, wget, --quiet, --tries=1, --spider, http://localhost:4000/health/liveness]
@@ -90,6 +113,22 @@ services:
     restart: unless-stopped
     healthcheck:
       test: [CMD-SHELL, pg_isready -U litellm -d litellm]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Redis sidecar for the response cache in config.platform.yaml. Only
+  # started with ``docker compose --profile cache up``; the basic sample
+  # runs without it. Ephemeral on purpose — a cache needs no volume.
+  # Override LITELLM_REDIS_IMAGE with a mirror if Docker Hub is blocked.
+  redis:
+    image: ${LITELLM_REDIS_IMAGE:-redis:7-alpine}
+    container_name: locus-litellm-redis
+    profiles: [cache]
+    command: [redis-server, --save, '']
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD, redis-cli, ping]
       interval: 5s
       timeout: 3s
       retries: 10

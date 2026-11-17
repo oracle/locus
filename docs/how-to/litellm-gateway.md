@@ -74,6 +74,13 @@ aliases declared in `config.yaml`. The sample ships six:
 `claude-haiku`, and `text-embedding-3-small`. Add more by extending
 `model_list`.
 
+`config.yaml` needs nothing beyond the gateway and its Postgres. A second
+file, `config.platform.yaml`, is the same gateway plus the two add-ons that
+need a backing service — the OpenTelemetry callback and the Redis response
+cache. Setting `REDIS_URL` switches the compose file to it and the `cache`
+profile adds the Redis sidecar; the "Observability" and "Caching" sections
+below walk through both.
+
 Verify with a `curl`:
 
 ```bash
@@ -187,6 +194,137 @@ is keyed by `api_key`, `user`, `team_id`, and any custom field in
 `metadata`, so the same SQL surface answers "what did team X spend
 this week?" and "what did model Y cost across all teams?".
 
+## Observability
+
+`config.platform.yaml` turns on LiteLLM's OpenTelemetry callback, so the
+gateway emits one trace per request:
+
+```yaml
+litellm_settings:
+  callbacks: [otel]
+```
+
+Spans leave over OTLP to the collector named by the standard variables
+`OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_PROTOCOL` and
+`OTEL_EXPORTER_OTLP_HEADERS` (the collector's auth). The compose file sets
+the protocol to `http/protobuf` whenever an endpoint is set and leaves it
+empty otherwise, which makes LiteLLM print the spans to the gateway log —
+a way to see them before a collector exists.
+
+```bash
+export REDIS_URL=redis://redis:6379                                   # selects config.platform.yaml
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://host.docker.internal:4318   # your collector's OTLP/HTTP port
+docker compose --profile cache up -d
+```
+
+A chat completion produces a `litellm_request` span with, among its
+attributes:
+
+```text
+gen_ai.request.model          gpt-4o
+gen_ai.response.id            chatcmpl-…
+gen_ai.usage.input_tokens     20
+gen_ai.usage.output_tokens    1
+litellm.model_group           gpt-4o
+litellm.provider.model        openai/gpt-4o
+litellm.cache_hit             False
+metadata.applied_guardrails   ['pii-mask']
+metadata.user_api_key_hash    <hash of the virtual key>
+metadata.user_api_key_team_id, metadata.user_api_key_alias, …
+```
+
+and child spans for the auth step, the router, the Redis lookup and each
+guardrail (`guardrail_name`, `guardrail_mode`, `guardrail_response`). A
+request served from the cache shows `litellm.cache_hit = True` and no
+upstream call.
+
+For Langfuse, replace `otel` with `langfuse` in `config.platform.yaml`
+and set `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` and `LANGFUSE_HOST`
+in the gateway's environment; the compose file passes the three through.
+LiteLLM's [logging page](https://docs.litellm.ai/docs/proxy/logging)
+lists the other backends it can push the same spans to.
+
+## Caching
+
+`config.platform.yaml` also turns on the response cache, backed by the
+Redis sidecar the `cache` profile starts:
+
+```yaml
+litellm_settings:
+  cache: true
+  cache_params:
+    type: redis
+    url: os.environ/REDIS_URL
+    ttl: 600
+```
+
+An identical request — same model alias, messages and parameters — within
+the TTL is answered from Redis without an upstream call. The second response
+is the stored first one, `id` included, and carries an `x-litellm-cache-key`
+header the first did not; its `x-litellm-response-cost` is `0.0`, the trace
+shows `litellm.cache_hit = True`, and with Postgres connected the
+`/spend/logs` row records the hit with no spend:
+
+```text
+call 1  1.730s  id=chatcmpl-…94c33  x-litellm-response-cost: 0.000017
+call 2  0.050s  id=chatcmpl-…94c33  x-litellm-response-cost: 0.0  x-litellm-cache-key: f24b15…
+```
+
+The saving on identical prompts is the whole upstream cost of the repeat.
+Agent loops repeat less than it seems — each turn carries new tool results
+— so the cache pays off on the stable parts of a workload: classification
+prompts, retrieval rewrites, evaluation rubrics, anything many users ask
+the same way. A cached answer is the earlier sample, so a request that
+wants a fresh one opts out with `"cache": {"no-cache": true}` in the
+body. The gateway does not start with `cache: true` and no reachable
+Redis, which is why the cache lives in its own config file rather than
+behind a switch in `config.yaml`.
+
+## Guardrails
+
+Both config files run one guardrail inside the gateway process — LiteLLM's
+own content filter, so no further service is needed:
+
+```yaml
+guardrails:
+- guardrail_name: pii-mask
+  litellm_params:
+    guardrail: litellm_content_filter
+    mode: pre_call
+    default_on: true
+    patterns:
+    - {pattern_type: prebuilt, pattern_name: us_ssn, action: MASK}
+    - {pattern_type: prebuilt, pattern_name: credit_card, action: MASK}
+```
+
+`mode: pre_call` rewrites the prompt before the upstream call, so the
+provider, the spend log and the trace only ever see the masked text.
+Asking the gateway to echo a line back shows it:
+
+```bash
+curl -s http://localhost:4000/v1/chat/completions \
+  -H "Authorization: Bearer $LITELLM_VIRTUAL_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "gpt-4o", "messages": [{"role": "user", "content":
+       "Return the text inside the square brackets exactly as written, nothing else: [reference 123-45-6789 / 4111 1111 1111 1111]"}]}' \
+  -D -
+```
+
+```text
+x-litellm-applied-guardrails: pii-mask
+…
+"content": "[reference [US_SSN_REDACTED] / [CREDIT_CARD_REDACTED]]"
+```
+
+The `guardrail` span in the trace lists each match with its
+`pattern_name` and `action`; `action: BLOCK` rejects the request instead
+of masking. Presidio is the alternative when you need entity recognition
+rather than patterns: it runs as two services, analyzer and anonymizer,
+named by `PRESIDIO_ANALYZER_API_BASE` and `PRESIDIO_ANONYMIZER_API_BASE`
+in the gateway's environment, with `guardrail: presidio` in place of the
+content filter. LiteLLM's [guardrails page](https://docs.litellm.ai/docs/proxy/guardrails)
+covers it, Lakera, and the per-key and per-request controls.
+
 ## Pointing the SDK at the gateway
 
 Use the existing `OpenAIModel` — that's the LiteLLM-compatible client:
@@ -250,6 +388,60 @@ The recommended deployment shape is:
 Don't expose the gateway publicly — issuing virtual keys is your
 auth boundary, but the provider credentials inside the gateway are not.
 
+The values file uses the keys the chart reads: `environmentSecrets` exports
+every key of the `provider-credentials` and `litellm-master` Secrets as
+environment variables for `os.environ/<NAME>` in `config.yaml`,
+`masterkeySecretName` / `masterkeySecretKey` point the chart's own master
+key at the same Secret, and `db.useExisting: true` with
+`db.deployStandalone: false` connects to your Postgres instead of bundling
+one. Render it locally with:
+
+```bash
+helm template gateway oci://ghcr.io/berriai/litellm-helm --version 1.109.1 \
+  --namespace litellm \
+  --values examples/litellm-gateway/helm-values.yaml \
+  --set-file proxy_config=examples/litellm-gateway/config.yaml
+```
+
+!!! warning "Not verified on a cluster by the maintainers"
+    `helm lint` and `helm template` pass with the sample values against
+    chart 1.109.1, and the rendered Deployment carries both Secrets, the
+    external Postgres and a ClusterIP Service. An install on a live
+    cluster — OKE or any other — is not something the Locus maintainers
+    have run. To verify it yourself:
+
+    ```bash
+    kubectl create namespace litellm
+    kubectl -n litellm create secret generic provider-credentials \
+      --from-literal=OPENAI_API_KEY="sk-..." \
+      --from-literal=ANTHROPIC_API_KEY="sk-ant-..."
+    kubectl -n litellm create secret generic litellm-master \
+      --from-literal=LITELLM_MASTER_KEY="$(openssl rand -hex 32)"
+    kubectl -n litellm create secret generic litellm-db \
+      --from-literal=username=litellm --from-literal=password="..."   # your Postgres
+
+    helm -n litellm upgrade --install gateway oci://ghcr.io/berriai/litellm-helm \
+      --version 1.109.1 \
+      --values examples/litellm-gateway/helm-values.yaml \
+      --set-file proxy_config=examples/litellm-gateway/config.yaml
+    kubectl -n litellm rollout status deployment/gateway-litellm
+    helm -n litellm test gateway                        # the chart's connection test
+
+    kubectl -n litellm port-forward svc/gateway-litellm 4000:4000 &
+    curl -s http://localhost:4000/health/liveness
+    export LITELLM_GATEWAY_URL=http://localhost:4000
+    export LITELLM_GATEWAY_KEY="$(kubectl -n litellm get secret litellm-master \
+      -o jsonpath='{.data.LITELLM_MASTER_KEY}' | base64 -d)"
+    pytest tests/integration/test_litellm_gateway_live.py \
+           tests/integration/test_litellm_gateway_platform.py -v
+    ```
+
+    The tests cover the model list, auth, completions, streaming, tool
+    calls and the PII guardrail through the forwarded port. For
+    `config.platform.yaml` on a cluster, mount it with `--set-file` instead
+    and add a Secret holding `REDIS_URL` and `OTEL_EXPORTER_OTLP_ENDPOINT`
+    to `environmentSecrets`.
+
 ## Authentication
 
 The gateway changes the credential boundary:
@@ -280,9 +472,12 @@ Highlights:
   per-team virtual keys via `/key/generate`.
 - **`router_settings.fallbacks`** — fallback chains across model
   aliases (e.g. `[{"gpt-5-mini": ["claude-sonnet-4-6", "gpt-4o"]}]`).
-- **`litellm_settings.callbacks`** — observability hooks (Langfuse,
-  OTel, Datadog, …).
-- **`litellm_settings.cache`** — Redis / S3 / Qdrant caching config.
+- **`guardrails`** — the in-process PII mask from "Guardrails" above;
+  each entry names a guardrail, its mode and whether it is on by default.
+- **`litellm_settings.callbacks`** — observability hooks (OpenTelemetry,
+  Langfuse, Datadog, …). In `config.platform.yaml`.
+- **`litellm_settings.cache`** — Redis / S3 / Qdrant caching config. In
+  `config.platform.yaml`, because the gateway needs the backend to start.
 
 ## How enterprises use this pattern
 
@@ -335,7 +530,8 @@ covers each surface (callbacks, cache, guardrails, audit) in depth.
   (`OpenAIModel`, `AnthropicModel`). The default for
   single-tenant deployments.
 - [`examples/litellm-gateway/`](https://github.com/oracle/locus/tree/main/examples/litellm-gateway)
-  — working `config.yaml`, `docker-compose.yml`, and `helm-values.yaml`.
+  — working `config.yaml`, `config.platform.yaml`, `docker-compose.yml`,
+  and `helm-values.yaml`.
 - [`examples/codex-on-oci/`](https://github.com/oracle/locus/tree/HEAD/examples/codex-on-oci)
   — the same gateway in front of OCI Generative AI, signed with an OCI
   profile, so that [Codex runs on OCI](codex.md#codex-on-oci-generative-ai).

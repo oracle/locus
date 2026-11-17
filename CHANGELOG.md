@@ -8,6 +8,25 @@ policy.
 
 ## [Unreleased]
 
+### Changed
+
+- **LiteLLM gateway example: the platform pieces the how-to promised are
+  wired (#269).** `examples/litellm-gateway/` gains `config.platform.yaml`
+  — the gateway of `config.yaml` plus the OpenTelemetry callback and the
+  Redis response cache; `docker-compose.yml` selects it when `REDIS_URL` is
+  set and starts a redis sidecar under the `cache` profile, with the
+  Langfuse variables passed through for the alternative callback. Both
+  configs carry an in-process PII guardrail (LiteLLM's content filter masks
+  US SSNs and card numbers before the upstream call; Presidio is documented
+  as the alternative). `helm-values.yaml` now uses the keys the chart reads
+  (`environmentSecrets` instead of the ignored `envFrom`, the master key
+  from the same Secret, an external Postgres without the bundled
+  StatefulSet). The how-to gains Observability, Caching and Guardrails
+  sections and the sequence to verify the Helm install on a cluster, which
+  the maintainers have not run. `tests/unit/test_litellm_gateway_example.py`
+  keeps the two configs in step; `tests/integration/test_litellm_gateway_platform.py`
+  drives the guardrail and the cache against a live gateway.
+
 ## [5.6.0] - 2026-11-17
 
 ### Added
