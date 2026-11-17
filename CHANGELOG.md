@@ -22,6 +22,23 @@ policy.
   gate's verdict as Markdown with one table row per failed check, for a
   pull-request comment, the way `eval diff` and `eval summary` already
   render with `--markdown`. The exit code is still the gate's verdict. (#484)
+- **TLS-only Autonomous Database connections, and a `config_dir` of their
+  own.** Every Oracle backend — `OracleBackend` behind `oracle_checkpointer()`,
+  `OracleCheckpointSaver`, `OracleStore`, `OracleVectorStore`,
+  `OracleADBLoader`, `OracleInDBChunker`, `OracleInDBEmbeddings`,
+  `OracleApprovals`, `OracleAuditTrail`, `OracleReportStore` and the sync
+  twins — takes an optional `config_dir`, the directory holding
+  `tnsnames.ora`, and passes `wallet_location` to python-oracledb only when a
+  wallet is given. A database created without mutual TLS has no wallet, and
+  naming its TNS directory as `wallet_location` (the only way to resolve an
+  alias before) made the driver look for a wallet file there and fail with
+  `DPY-6005`. `wallet_location` alone still doubles as the TNS directory, so
+  wallet users see no change. The `oracle://` approval-store and report-store
+  specs take `config_dir=` and a bare one reads `ORACLE_CONFIG_DIR` (else
+  `TNS_ADMIN`) from the environment; the Oracle notebooks require
+  `ORACLE_WALLET` only for an alias that nothing else resolves. The
+  [Oracle Database 26ai](docs/concepts/oracle-26ai.md) page describes the
+  TLS-only path. (#347)
 
 ### Changed
 
@@ -56,28 +73,6 @@ policy.
   the tool-effect ledger behave as before; a Redis index written by an
   earlier release is read as before and moved into the hash on the
   thread's next save. (#301)
-- **TLS-only Autonomous Database connections, and a `config_dir` of their
-  own.** Every Oracle backend — `OracleBackend` behind `oracle_checkpointer()`,
-  `OracleCheckpointSaver`, `OracleStore`, `OracleVectorStore`,
-  `OracleADBLoader`, `OracleInDBChunker`, `OracleInDBEmbeddings`,
-  `OracleApprovals`, `OracleAuditTrail`, `OracleReportStore` and the sync
-  twins — takes an optional `config_dir`, the directory holding
-  `tnsnames.ora`, and passes `wallet_location` to python-oracledb only when a
-  wallet is given. A database created without mutual TLS has no wallet, and
-  naming its TNS directory as `wallet_location` (the only way to resolve an
-  alias before) made the driver look for a wallet file there and fail with
-  `DPY-6005`. `wallet_location` alone still doubles as the TNS directory, so
-  wallet users see no change. The `oracle://` approval-store and report-store
-  specs take `config_dir=` and a bare one reads `ORACLE_CONFIG_DIR` (else
-  `TNS_ADMIN`) from the environment; the Oracle notebooks require
-  `ORACLE_WALLET` only for an alias that nothing else resolves. The
-  [Oracle Database 26ai](docs/concepts/oracle-26ai.md) page describes the
-  TLS-only path. (#347)
-
-- `python -m locus.runner` reports every command the harness ran as a
-  `harness.exec` record. The runtime drained its exec records by replacing
-  the list the harness appends to, so only commands before the first tool
-  completion ever reached the gateway.
 
 ## [5.6.0] - 2026-11-17
 
