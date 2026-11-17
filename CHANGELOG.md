@@ -21,8 +21,6 @@ policy.
   the list the harness appends to, so only commands before the first tool
   completion ever reached the gateway.
 
-### Fixed
-
 - **Two processes saving to one thread no longer lose checkpoint-index
   entries** (`redis_checkpointer()`, `postgresql_checkpointer()`,
   `mysql_checkpointer()`, `opensearch_checkpointer()`). The adapter's
