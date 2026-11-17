@@ -20,12 +20,14 @@ the index lives; the adapter only asks for its entries.
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Iterable
 from typing import Any, Protocol, runtime_checkable
 
 
 __all__ = [
     "INDEX_METHODS",
+    "index_methods_present",
     "keeps_index_natively",
     "INDEX_SUFFIX",
     "CheckpointIndexStore",
@@ -84,6 +86,19 @@ class CheckpointIndexStore(Protocol):
 INDEX_METHODS: tuple[str, ...] = ("index_add", "index_remove", "index_list", "index_clear")
 
 
+def index_methods_present(store: object) -> list[str]:
+    """The :data:`INDEX_METHODS` that ``store`` implements as coroutine functions, in order.
+
+    A ``MagicMock`` has every attribute name and a plain ``def`` is not
+    awaitable; neither counts. The adapter uses the list to tell a store that
+    keeps the index (all four) from one that implements only some of them,
+    which it warns about instead of silently taking the locked fallback.
+    """
+    return [
+        name for name in INDEX_METHODS if inspect.iscoroutinefunction(getattr(store, name, None))
+    ]
+
+
 def keeps_index_natively(store: object) -> bool:
     """Whether ``store`` implements every :class:`CheckpointIndexStore` method as a coroutine.
 
@@ -93,6 +108,4 @@ def keeps_index_natively(store: object) -> bool:
     adapter would then ``await`` something that is not awaitable. Requiring
     coroutine functions makes the detection the same on every interpreter.
     """
-    import inspect
-
-    return all(inspect.iscoroutinefunction(getattr(store, name, None)) for name in INDEX_METHODS)
+    return len(index_methods_present(store)) == len(INDEX_METHODS)
