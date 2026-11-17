@@ -198,3 +198,10 @@ offline run, [policy authoring](policy-authoring.md) for the file form, lint
 and classification coverage, [`gate_tool`](../api/control.md#locus.control.gate.gate_tool) for the
 interrupt-and-resume parameters, [interrupts](interrupts.md) for
 `agent.resume(...)`.
+
+Notebooks [71](../notebooks/notebook_71_payment_refund_gate.md) (payment
+refund), [72](../notebooks/notebook_72_infra_deploy_gate.md) (infrastructure
+deploy), [73](../notebooks/notebook_73_support_account_gate.md) (support
+account), [74](../notebooks/notebook_74_data_deletion_gate.md) (data deletion)
+and [75](../notebooks/notebook_75_cloud_resource_gate.md) (cloud resource) run
+this composition offline, one gate per domain.
