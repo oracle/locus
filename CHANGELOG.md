@@ -58,7 +58,6 @@ policy.
   the maintainers have not run. `tests/unit/test_litellm_gateway_example.py`
   keeps the two configs in step; `tests/integration/test_litellm_gateway_platform.py`
   drives the guardrail and the cache against a live gateway.
-
 - **Docs: notebook 78's captured output, concept pages that link their
   notebooks, the environment-variable reference completed from the source,
   and `Example:` sections on `BaseStore`, `InMemoryStore`, `register_provider`
