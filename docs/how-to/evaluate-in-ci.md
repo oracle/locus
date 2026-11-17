@@ -101,13 +101,16 @@ quick lane on every commit and the full suite nightly.
 locus eval diff reports/main.json reports/candidate.json
 locus eval diff reports/main.json reports/candidate.json --markdown
 locus eval summary reports/candidate.json --markdown
+locus eval gate reports/candidate.json --baseline reports/main.json --markdown
 ```
 
 `diff` exits 1 when any case regressed and names it, with the checks that
 newly fail and how each rubric dimension moved. `--markdown` renders a
 table for a pull-request comment. `locus eval gate` applies the gate to a
 saved report, for a pipeline that runs the suite in one job and decides in
-another.
+another; with `--markdown` it prints the verdict with one table row per
+failed check, so the reasons can be posted the same way. The exit code is
+the gate's verdict either way.
 
 ## 5. Keep the reports, read the trend
 

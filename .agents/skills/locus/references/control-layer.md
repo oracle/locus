@@ -719,7 +719,7 @@ It does not gate tools: pass `gate_tool(...)` results in `tools`.
 | `locus policy lint policy.yaml [--environments E ...] [--kinds K ...] [--format json]` | `lint_policy`; exit 1 on a finding |
 | `locus policy explain policy.yaml --action '{"name": "refund", "kind": "payment"}' [--expect OUTCOME] [--spent-usd N] [--verification C]` | `explain`: every rule, the outcome, whether a person can approve; `--expect` sets the exit code |
 | `locus resume app.py:agent --thread t1 --answer approved --perform` | `agent.resume(..., perform_dangling=True)` |
-| `locus audit verify trail.jsonl [--key KEY_ID=pub.pem]... [--head HASH]` | `verify_jsonl`; prints `verified: N record(s), ...` or `FAILED` (exit 1) |
+| `locus audit verify trail.jsonl [--key KEY_ID=pub.pem]... [--head HASH] [--format json]` | `verify_jsonl`; prints `verified: N record(s), ...` or `FAILED` (exit 1); `--format json` prints `{"file", "verified", "records", "keys", "head_checked"}` on stdout for both outcomes |
 
 `AGENT` is `module:attr` or `path.py:attr` (an `Agent` or a zero-argument factory). Exit codes: 0 ok, 1 failed check or decision, 2 usage, 3 paused.
 
