@@ -258,8 +258,19 @@ class PgCheckpointer(BaseCheckpointer):
                     f"create_schema=False. Create it with a migration (see "
                     f"PgCheckpointer.ddl()) or allow create_schema."
                 )
-            for statement in self.ddl():
-                await conn.execute(statement)
+            # Serialise concurrent first-time creators (see PostgreSQLBackend).
+            async with conn.transaction():
+                await conn.fetchval("SELECT pg_advisory_xact_lock(hashtext($1))", self._table)
+                already = await conn.fetchval(
+                    "SELECT 1 FROM information_schema.columns "
+                    "WHERE table_schema = $1 AND table_name = $2 LIMIT 1",
+                    self._schema,
+                    self._table_name,
+                )
+                if already is not None:
+                    return
+                for statement in self.ddl():
+                    await conn.execute(statement)
 
     def ddl(self) -> list[str]:
         """The statements that create this checkpointer's schema, for a migration."""

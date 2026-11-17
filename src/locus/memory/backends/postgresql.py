@@ -195,33 +195,47 @@ class PostgreSQLBackend(BaseModel):
                 self._initialized = True
                 return
 
-            # Create schema if needed
-            await conn.execute(f"""
-                CREATE SCHEMA IF NOT EXISTS {self.config.schema_name}
-            """)
-
-            # Create table with JSONB for efficient querying
-            await conn.execute(f"""
-                CREATE TABLE IF NOT EXISTS {self._full_table_name} (
-                    thread_id TEXT PRIMARY KEY,
-                    checkpoint_id TEXT,
-                    data JSONB NOT NULL,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    metadata JSONB DEFAULT '{{}}'::jsonb
+            # Two processes can both miss the probe and race CREATE TABLE IF
+            # NOT EXISTS; the loser fails on the pg_type unique index rather
+            # than finding the table. A transaction-scoped advisory lock on the
+            # table name serialises the creators, and the probe is repeated
+            # under the lock so the second one simply sees the table.
+            async with conn.transaction():
+                await conn.fetchval(
+                    "SELECT pg_advisory_xact_lock(hashtext($1))", self._full_table_name
                 )
-            """)
+                existing = await conn.fetchval("SELECT to_regclass($1)", self._full_table_name)
+                if existing is not None:
+                    self._initialized = True
+                    return
 
-            # Create indexes
-            await conn.execute(f"""
-                CREATE INDEX IF NOT EXISTS idx_{self.config.table_name}_updated
-                ON {self._full_table_name} (updated_at DESC)
-            """)
+                # Create schema if needed
+                await conn.execute(f"""
+                    CREATE SCHEMA IF NOT EXISTS {self.config.schema_name}
+                """)
 
-            await conn.execute(f"""
-                CREATE INDEX IF NOT EXISTS idx_{self.config.table_name}_metadata
-                ON {self._full_table_name} USING GIN (metadata)
-            """)
+                # Create table with JSONB for efficient querying
+                await conn.execute(f"""
+                    CREATE TABLE IF NOT EXISTS {self._full_table_name} (
+                        thread_id TEXT PRIMARY KEY,
+                        checkpoint_id TEXT,
+                        data JSONB NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        metadata JSONB DEFAULT '{{}}'::jsonb
+                    )
+                """)
+
+                # Create indexes
+                await conn.execute(f"""
+                    CREATE INDEX IF NOT EXISTS idx_{self.config.table_name}_updated
+                    ON {self._full_table_name} (updated_at DESC)
+                """)
+
+                await conn.execute(f"""
+                    CREATE INDEX IF NOT EXISTS idx_{self.config.table_name}_metadata
+                    ON {self._full_table_name} USING GIN (metadata)
+                """)
 
         self._initialized = True
 
