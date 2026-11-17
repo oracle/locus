@@ -436,7 +436,7 @@ def test_compaction_clears_into_recallable_stubs(tmp_path: Path) -> None:
     archive = pack.archive_for("s")
     compactor = ContextCompactor(context_length=40_000, tool_output_keep_tokens=2_000)
     history = _history([_big(f"o{n}") for n in range(8)])
-    cleared = compactor._clear_tool_outputs(history, archive)
+    cleared = compactor.clear_tool_outputs(history, archive)
 
     stubs = [m for m in cleared if m.metadata.get(CLEARED_OUTPUT_KEY)]
     assert stubs
@@ -457,7 +457,7 @@ def test_clearing_falls_back_to_the_lossy_stub_when_archiving_fails(tmp_path: Pa
     blocker.write_text("x")
     archive = ObservationPack(directory=blocker).archive_for("s")
     compactor = ContextCompactor(context_length=40_000, tool_output_keep_tokens=2_000)
-    cleared = compactor._clear_tool_outputs(_history([_big(f"o{n}") for n in range(8)]), archive)
+    cleared = compactor.clear_tool_outputs(_history([_big(f"o{n}") for n in range(8)]), archive)
     stubs = [m for m in cleared if m.metadata.get(CLEARED_OUTPUT_KEY)]
     assert stubs
     assert all(OBSERVATION_ID_KEY not in m.metadata for m in stubs)
@@ -771,7 +771,7 @@ def test_the_mechanism_ledger_records_swaps_placeholders_recalls_and_clears(
         obs_id = _swapped_id(pack, _big("a"))
         pack.recall("s", obs_id)
         compactor = ContextCompactor(context_length=40_000, tool_output_keep_tokens=2_000)
-        compactor._clear_tool_outputs(
+        compactor.clear_tool_outputs(
             _history([_big(f"o{n}") for n in range(8)]), pack.archive_for("s")
         )
         blocked = tmp_path / "blocked"

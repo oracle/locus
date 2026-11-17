@@ -30,7 +30,11 @@ live in the approval store, exactly as without DBOS.
 Each segment runs at most once. It records that it began before it starts; if
 the process dies inside it, DBOS recovers the run but the segment is not run
 again, because its tool calls may already have happened. The run fails with
-:class:`InterruptedSegmentError` and the checkpoint shows where it stopped. Needs
+:class:`InterruptedSegmentError` and the checkpoint shows where it stopped. An
+agent that keeps a tool-effect ledger (``Agent(tool_ledger=True)``, or
+``durability="async"`` / ``"exit"``; :mod:`locus.memory.ledger`) has recorded
+each call the segment made, so ``agent.continue_turn(thread_id)`` finishes the
+turn replaying them rather than running them again. Needs
 ``pip install "locus-sdk[dbos]"``.
 
 **Graphs.** A :class:`~locus.multiagent.graph.StateGraph` runs the same way. A

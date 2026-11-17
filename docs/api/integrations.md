@@ -1,8 +1,6 @@
 # Integrations
 
 Adapters that bridge the SDK to external frameworks, clouds, and vendor APIs.
-Cloud posture is one worked example domain — the same adapter pattern
-applies to any vendor API.
 
 ## FastMCP
 
@@ -12,7 +10,31 @@ server, and consume MCP tools from any compliant client as native
 
 ::: locus.integrations.fastmcp.LocusMCPServer
 ::: locus.integrations.fastmcp.create_mcp_server
+::: locus.integrations.fastmcp.create_tool_server
 ::: locus.integrations.fastmcp.mcp_tool_to_locus
+
+### Signing in to a remote server
+
+`MCPClient(oauth=MCPOAuth(...))` runs the OAuth 2.1 authorization-code
+flow (PKCE, discovery, refresh) against a Streamable HTTP server that asks
+for it; the token store is pluggable. See
+[MCP — signing in](../concepts/mcp.md#signing-in-to-a-remote-server-oauth-21).
+
+::: locus.integrations.mcp_auth.MCPOAuth
+::: locus.integrations.mcp_auth.MCPTokenStore
+::: locus.integrations.mcp_auth.InMemoryTokenStore
+::: locus.integrations.mcp_auth.FileTokenStore
+::: locus.integrations.mcp_auth.KeyringTokenStore
+
+### A server's questions
+
+::: locus.integrations.fastmcp.MCPElicitation
+::: locus.integrations.fastmcp.ElicitationAnswer
+
+### Trace context in `_meta`
+
+::: locus.integrations.mcp_tracing.trace_meta
+::: locus.integrations.mcp_tracing.trace_scope
 
 ## OCI cloud-posture (read-only)
 
@@ -21,40 +43,7 @@ discovers the shape of the control plane with `describe_oci` and runs
 read-only operations with `use_oci`, whose responses become grounded-finding
 evidence. Read-only by default: `use_oci` refuses a mutating operation before
 a call is made. Both are core tools, documented under
-[Tools](tools.md#oci-tools); the
-[`create_soc_analyst`](../concepts/cloud-posture.md) security-operations (SOC)
-analyst factory in `locus-sdk-security` composes them into a grounded posture
-agent. See the [cloud-posture agent](../concepts/cloud-posture.md) for the
-full workflow.
+[Tools](tools.md#oci-tools); [notebook 36](../notebooks/notebook_36_oci_tools.md)
+runs them inside an agent.
 
 Install the extra: `pip install 'locus-sdk[oci]'`.
-
-## Vendor integration examples
-
-The notebooks ship *worked* vendor integrations in
-[`examples/integrations/`][int]. Each is an ordinary `@tool` following
-one convention — **bring your own credentials**: read the vendor key from the
-environment and call the live API when it's set, otherwise return a
-deterministic offline sample so the example runs with no account. The return
-shape is identical either way, so the agent's reasoning doesn't change between
-the offline demo and a live deployment.
-
-| Tool | Vendor shape | Credential |
-|------|--------------|------------|
-| [`measure_endpoint_timing`][rt] | Streaming time-to-first-token / cadence probe | none (uses any reachable endpoint) |
-| [`dispatch_timing_probe`][gpu] | Offline reference GPU timing-probe dispatch (returns the sample feature vector; a live RunPod / Lambda probe is an integration you write) | none |
-| [`enrich_indicator`][ti] | VirusTotal / GreyNoise indicator-of-compromise (IOC) reputation | `VT_API_KEY` |
-| [`query_siem`][siem] | Splunk / Elastic log/alert search (a SIEM) | `SIEM_URL`, `SIEM_TOKEN` |
-
-Hand these to a triage agent end-to-end in
-[live vendor integrations](../notebooks/notebook_80_vendor_integrations.md);
-the GPU probe grounds into a fingerprint finding in
-[specialist agents](../notebooks/notebook_23_specialist_agents.md). The
-bring-your-own-credentials contract is documented in
-[`examples/integrations/README.md`][int].
-
-[int]: https://github.com/oracle/locus/tree/main/packages/locus-sdk-security/examples/integrations
-[ti]: https://github.com/oracle/locus/blob/main/packages/locus-sdk-security/examples/integrations/threat_intel.py
-[siem]: https://github.com/oracle/locus/blob/main/packages/locus-sdk-security/examples/integrations/siem_query.py
-[gpu]: https://github.com/oracle/locus/blob/main/packages/locus-sdk-security/examples/integrations/gpu_probe_dispatch.py
-[rt]: https://github.com/oracle/locus/blob/main/packages/locus-sdk-security/examples/integrations/remote_timing.py

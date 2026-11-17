@@ -459,7 +459,7 @@ async for event in agent.run(prompt, thread_id="th-q3-2026"):
 | `system_prompt=` | prepended to the message list before the first Think |
 | `reflexion=True` | enables Reflect on every iteration; `ReflexionConfig(evaluate_every_n_iterations=N)` for every Nth |
 | `grounding=True` | checks the final answer's claims against tool results before it returns |
-| `checkpointer=` | persists state at the end of a run, before an interrupt and — for a run with a `thread_id` on a checkpointer that can delete a single checkpoint — after each tool-calling iteration (the turn's final save deletes those iteration saves); `checkpoint_every_n_iterations=` changes that interval (0 keeps only the end-of-turn and interrupt saves) |
+| `checkpointer=` | persists state at the end of a run, before an interrupt and — for a run with a `thread_id` on a checkpointer that can delete a single checkpoint — after each tool-calling iteration (the turn's final save deletes those iteration saves); `checkpoint_every_n_iterations=` changes that interval (0 keeps only the end-of-turn and interrupt saves); `durability=` says whether the iteration saves are awaited (`"sync"`), written in the background (`"async"`) or skipped (`"exit"`), and `tool_ledger=` records each executed tool call so a run continued after a crash replays it — see [Checkpointers](checkpointers.md#durability-modes) |
 | `conversation_manager=` | summarises / prunes long histories before they exceed the context window |
 | `hooks=` | observe and steer every event |
 | `termination=` | the algebra the loop checks at the start of each iteration |

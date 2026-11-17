@@ -155,7 +155,7 @@ agent = Agent(model="oci:openai.gpt-5.5", tools=[retriever.as_tool()])
 | **[The coding harness](https://locusagents.ai/harness/)** | The toolset a coding agent works with (read, write, edit, grep, a shell), written once against a workspace protocol and run unchanged on the host, inside an [OCI GenAI Sandbox](https://locusagents.ai/harness/oci-sandbox/) in your tenancy or inside [NVIDIA OpenShell](https://locusagents.ai/harness/openshell/); one `wrap` gates every call. `pip install "locus-sdk[oci-sandbox]"` adds the sandbox client. |
 | **[Tools and MCP](https://locusagents.ai/concepts/tools/)** | `@tool` on any function; arguments coerced to the declared types whatever the model sends; `@tool(idempotent=True)` dedupes on `(name, args)`; `MCPClient` consumes Model Context Protocol (MCP) servers and `LocusMCPServer` exposes yours. |
 | **[Memory](https://locusagents.ai/concepts/memory/)** | Checkpoint backends for Oracle Database 26ai (with its versioned saver), OCI Object Storage, PostgreSQL, MySQL, Redis, OpenSearch, S3-compatible object stores, HTTP, a local file, in-memory; `OracleStore`, Oracle agent memory, the portable `LLMMemoryManager` for long-term memory. |
-| **[RAG](https://locusagents.ai/concepts/rag/)** | Six vector stores (Oracle 26ai, pgvector, Qdrant, Chroma, OpenSearch, in-memory); OCI, in-database, OpenAI and Cohere embeddings; OCI Cohere, local and Cohere rerankers; `retriever.as_tool()`. |
+| **[RAG](https://locusagents.ai/concepts/rag/)** | Twelve vector stores (Oracle 26ai, pgvector, Qdrant, Chroma, OpenSearch, Milvus, Weaviate, Elasticsearch, Redis, MongoDB Atlas, Pinecone, in-memory) with one `hybrid=True` switch where the store blends vector and lexical relevance; OCI, in-database, OpenAI and Cohere embeddings; OCI Cohere, Cohere, Jina, Voyage, local cross-encoder and LLM rerankers; `retriever.as_tool()`. |
 | **[Grounded reasoning](https://locusagents.ai/concepts/gsar/)** | Grounding-Stratified Adaptive Replanning (GSAR) partitions every claim as grounded, ungrounded, contradicted or complementary against typed evidence; below threshold the agent regenerates, replans or abstains. Reflexion, when enabled, scores every turn: the agent assesses its own progress from the tool results and adjusts. |
 | **[Guardrails](https://locusagents.ai/concepts/safety/) and [the admission gate](https://locusagents.ai/concepts/control-layer/)** | Input, output and tool-call guardrails, steering (LLM-as-judge), trace hygiene, and `admit()` / `approve()`: allow, hold for a human, or deny, on a hash-chained audit trail. |
 | **[Observability and streaming](https://locusagents.ai/concepts/observability/)** | Opt-in `EventBus`; one `run_context()` streams typed events from every layer; Server-Sent Events (SSE) and token streaming; OpenTelemetry hook. |
@@ -223,12 +223,9 @@ full runtime.
 
 The notebooks are numbered in reading order: start here (01–11), multi-agent shapes (12–32),
 Oracle Cloud and Database 26ai (33–45), the harness (46–59), observability, streaming and
-serving (60–67), control layer and security (68–76) and real-world workflows (77–80) live in
-[`examples/`](https://github.com/oracle/locus/tree/main/examples); the security-operations notebooks (81–89) ship with the
-opt-in [`locus-sdk-security`](https://github.com/oracle/locus/tree/main/packages/locus-sdk-security) package, installed from
-the repository at the matching tag. Notebooks 01–80 run against OCI Generative AI with an OCI
-profile, or the bundled mock model without one; 81–89 run on the mock model, or on OpenAI or
-Anthropic through `LOCUS_MODEL_PROVIDER`.
+serving (60–67), control layer and security (68–76) and real-world workflows (77–80), all in
+[`examples/`](https://github.com/oracle/locus/tree/main/examples). They run against OCI Generative AI with an OCI
+profile, or the bundled mock model without one.
 
 ```bash
 git clone https://github.com/oracle/locus.git
@@ -306,7 +303,7 @@ src/locus/
 ├── core/           AgentState, Message, events, termination algebra, Send
 ├── models/         Provider registry + OCI GenAI (V1 / SDK / Responses), OpenAI, Anthropic
 ├── memory/         BaseCheckpointer + backends (Oracle 26ai, OCI Object Storage, …), stores, memory managers
-├── rag/            Embeddings + 6 vector stores (Oracle 26ai, …) + rerankers + loaders + chunkers
+├── rag/            Embeddings + 12 vector stores (Oracle 26ai, …) + rerankers + loaders + chunkers
 ├── tools/          @tool decorator, registry, builtins, executors, OCI tools
 ├── harness/        Coding harness: workspace tools over LocalBackend, OCISandboxBackend, OpenShellBackend; build_harness(wrap=…)
 ├── reasoning/      Reflexion, Grounding, Causal, GSAR
@@ -330,10 +327,7 @@ src/locus/
 ```
 
 The docs site lives in [`docs/`](https://github.com/oracle/locus/tree/main/docs) (`mkdocs.yml`, theme in `overrides/`, build
-hooks in `hooks/`) and publishes to [locusagents.ai](https://locusagents.ai/). The opt-in security
-package lives in [`packages/locus-sdk-security/`](https://github.com/oracle/locus/tree/main/packages/locus-sdk-security); it is
-not on PyPI and installs from the repository at the matching tag (see its
-[README](https://github.com/oracle/locus/blob/main/packages/locus-sdk-security/README.md)).
+hooks in `hooks/`) and publishes to [locusagents.ai](https://locusagents.ai/).
 
 ---
 
@@ -350,8 +344,8 @@ pre-commit install
 See [CONTRIBUTING.md](https://github.com/oracle/locus/blob/main/CONTRIBUTING.md). Contributions need the
 [Oracle Contributor Agreement](https://oca.opensource.oracle.com); every PR runs format,
 lint, mypy, unit tests and the OCA check. Questions and bug reports go to
-[GitHub Issues](https://github.com/oracle/locus/issues); [CHANGELOG.md](https://github.com/oracle/locus/blob/main/CHANGELOG.md) lists what changed in
-each release. Please consult the [security guide](https://github.com/oracle/locus/blob/main/SECURITY.md) for vulnerability
+[GitHub Issues](https://github.com/oracle/locus/issues); the [release notes](https://locusagents.ai/release-notes/) list what changed in
+each release, and the [roadmap](https://github.com/oracle/locus/issues?q=is%3Aissue+is%3Aopen+label%3Aroadmap) is the `roadmap` label on the issue tracker. Please consult the [security guide](https://github.com/oracle/locus/blob/main/SECURITY.md) for vulnerability
 disclosure.
 
 ---

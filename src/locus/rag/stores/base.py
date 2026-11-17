@@ -264,3 +264,48 @@ class BaseVectorStore(ABC):
 
     async def close(self) -> None:
         """Close any resources."""
+
+
+@runtime_checkable
+class HybridSearchable(Protocol):
+    """Protocol for stores that blend vector similarity with lexical relevance.
+
+    A store that implements this protocol accepts the query *text* next to
+    the query *embedding* and returns one ranked list whose ``score`` is the
+    blended relevance. ``alpha`` weights the two legs the same way on every
+    store: ``1.0`` is pure vector search, ``0.0`` pure lexical, ``0.5`` an
+    even blend. Stores that can switch lexical scoring on and off at
+    construction time also expose ``hybrid_search_available`` so a caller
+    can fall back to :meth:`VectorStore.search` instead of failing.
+
+    ``RAGRetriever(hybrid=True)`` calls :meth:`hybrid_search` when
+    :func:`supports_hybrid_search` is true for its store and falls back to
+    vector-only search otherwise.
+    """
+
+    async def hybrid_search(
+        self,
+        query_text: str,
+        query_embedding: list[float],
+        *,
+        limit: int = 10,
+        alpha: float = 0.5,
+        threshold: float | None = None,
+        metadata_filter: dict[str, Any] | None = None,
+    ) -> list[SearchResult]:
+        """Return documents ranked by ``alpha * vector + (1 - alpha) * lexical``."""
+        ...
+
+
+def supports_hybrid_search(store: object) -> bool:
+    """True when ``store`` can answer :meth:`HybridSearchable.hybrid_search`.
+
+    Checks for a callable ``hybrid_search`` and honours an optional
+    ``hybrid_search_available`` flag for stores whose lexical leg is a
+    construction-time option (Milvus needs a BM25 function on the
+    collection, Oracle needs the text column). Used by ``RAGRetriever`` to
+    decide between the blended call and the vector-only fallback.
+    """
+    if not callable(getattr(store, "hybrid_search", None)):
+        return False
+    return bool(getattr(store, "hybrid_search_available", True))

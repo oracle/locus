@@ -12,37 +12,85 @@ suite pins a known-disallowed export of personally identifiable information
 (PII), a known-allowed aggregate report, and a negative case that guards
 against the agent inventing a regulation citation or a breach finding no
 facts support
-([OWASP LLM09, Misinformation](../concepts/threat-scenarios.md#owasp-llm-top-10-2025)).
+([OWASP LLM09, Misinformation](../api/control.md)).
 
 What this notebook covers:
 
-- `EvalCase`: a request prompt plus the substrings the reply must contain
-  (`expected_output_contains`) or must not (`expected_output_not_contains`),
-  with an optional `max_iterations` budget.
-- `EvalRunner.run`: calls the agent once per case and grades every check
-  the case declares.
-- `EvalReport`: pass and fail counts, an average score, and a `summary()`
-  that names each failed check.
+- Part 1, a structural suite: `EvalCase` declares the substrings a reply
+  must contain (`expected_output_contains`) or must not
+  (`expected_output_not_contains`), with an optional `max_iterations`
+  budget; `EvalRunner.run` grades every case; `EvalReport.summary()` names
+  each failed check, and `by_tag` counts the cases per tag.
+- Part 2, a `Rubric` with dimensions: the judge scores each dimension
+  0-100 and code computes the composite, the letter and the pass; the
+  verdict carries its provenance (judge model, rubric revision, channel).
+- Part 3, receipts: `require_receipts=True` fails an answer that states a
+  figure no tool returned, with no model call.
+- Part 4, repeats: `repeats=3` reads a case three times; it passes only if
+  every reading passed, and `consistency` flags readings that disagreed.
+- Part 5, two reports of one suite: saved, loaded, diffed with
+  `diff_reports`, and gated with `EvalGate` against the baseline.
+- Part 6, the path: `TrajectoryMatch`, `ToolSelection` and
+  `ArgumentCorrectness` on the case read which tools an access-review agent
+  called, in what order and with what arguments, with no model call; a
+  careless agent that grants raw access before reading the classification
+  fails all three.
+- Part 7, a simulated user: a `SimulatedUser` persona and goal on the case,
+  a model playing the requester against WARDEN turn by turn within a turn
+  budget, and the whole conversation graded, with the transcript and the
+  reason it stopped on the result.
 
 The three `EvalCase` objects go to the `EvalRunner`, which calls WARDEN
 once per case with the case's prompt, grades each reply against the checks
-the case declares (here `expected_output_contains`,
-`expected_output_not_contains` and the `max_iterations` budget) and
-aggregates the results into the `EvalReport` the script prints; the dashed
-rubric branch needs `arun()` and a judge, so this synchronous `run()` does
-not take it:
+the case declares and aggregates the results into the `EvalReport` the
+script prints; the rubric branch needs `arun()` and a judge, which Part 2
+supplies:
 
 {{ locus_diagram evaluation-flow }}
 
 ## Key lines
 
-One function carries the whole suite: WARDEN is built from the model
+Part 1 is the suite as a regression test: WARDEN is built from the model
 `examples/config.py` selects and a system prompt that classifies each
 request as `ALLOW` or `BLOCK`, the three cases pin the two expected
 decisions and the claims the agent must not invent, and `EvalRunner.run`
 grades every case and returns the report:
 
-{{ locus_source examples/notebook_56_evaluation.py::example_evaluation }}
+{{ locus_source examples/notebook_56_evaluation.py::example_structural_suite }}
+
+Part 2 hands the same request to a judge under a three-dimension rubric.
+The judge returns one score per dimension; the composite, the letter and
+the pass are computed from the rubric, and the verdict names the judge
+model and the rubric revision it was measured under:
+
+{{ locus_source examples/notebook_56_evaluation.py::example_rubric_and_judge }}
+
+Part 3 runs two scripted triage agents against one case with
+`require_receipts=True`. Both read the same metric; one states a memory
+figure the tool never returned, and the check names it:
+
+{{ locus_source examples/notebook_56_evaluation.py::example_receipts }}
+
+Part 5 saves a baseline and a candidate report of the same suite, loads
+them back, prints the per-case diff and applies the default gate, which
+fails on the regression:
+
+{{ locus_source examples/notebook_56_evaluation.py::example_diff_and_gate }}
+
+Part 6 runs one access request through a careful agent and a careless one.
+Three evaluators on the case read the path: the classification must be
+read before access is granted (`subset` order), raw export is forbidden,
+and the grant must name the aggregate scope, compared under the tool's own
+schema:
+
+{{ locus_source examples/notebook_56_evaluation.py::example_trajectory }}
+
+Part 7 writes the requester as a persona and a goal. The simulator plays
+them against WARDEN, which asks what the data is for before deciding; the
+conversation ends on the goal, a stop phrase or the turn budget, and the
+checks read every reply the agent gave:
+
+{{ locus_source examples/notebook_56_evaluation.py::example_simulated_user }}
 
 ## Run it
 
@@ -53,7 +101,9 @@ python examples/notebook_56_evaluation.py
 Model choice comes from `examples/config.py`: OCI Generative AI when
 `~/.oci/config` has a usable profile, otherwise the bundled mock model, so the
 example also runs offline with no credentials. Set `LOCUS_MODEL_PROVIDER`
-(`oci`, `openai`, `anthropic` or `mock`) to force one.
+(`oci`, `openai`, `anthropic` or `mock`) to force one. Part 7's requester is
+played by the secondary model slot (`LOCUS_MODEL_ID_B`) when a provider is
+configured, and by a scripted requester offline.
 
 To run offline regardless of the local OCI configuration:
 
@@ -61,19 +111,24 @@ To run offline regardless of the local OCI configuration:
 LOCUS_MODEL_PROVIDER=mock python examples/notebook_56_evaluation.py
 ```
 
-Under the mock model every reply is the same placeholder sentence, so the
-two decision cases fail their `output_contains` check and only
-`no_invented_regulation` passes; the report reads `1/3 passed`. That run
-shows the report format, including how a failed case lists the check it
-missed; the suite tests WARDEN itself only against a live model.
+Under the mock model every WARDEN reply in Part 1 is the same placeholder
+sentence, so the two decision cases fail their `output_contains` check and
+only `no_invented_regulation` passes; the report reads `1/3 passed`. Part 2
+has no second model to judge with offline, so a scripted judge submits one
+fixed verdict and the part shows how a verdict is composed and stamped.
+Parts 3 to 5 use the `locus.testing` doubles by design and read the same
+with or without credentials; the suite tests WARDEN itself only against a
+live model.
 
 ## See also
 
 - [Evaluation](../concepts/evaluation.md) — the built-in checks, tags,
-  wiring a suite into continuous integration (CI), and grading open-ended
-  answers with a `rubric` and an `LLMJudge`.
+  the rubric as data, receipts and claims, repeats and panels, and
+  comparable reports.
+- [Evaluate an agent in CI](../how-to/evaluate-in-ci.md) — the same flow
+  from the command line with `locus eval`.
 - [Evaluation API](../api/evaluation.md) — the `EvalCase`, `EvalRunner`,
-  `EvalReport` and `LLMJudge` reference.
+  `EvalReport`, `Rubric`, `LLMJudge`, `EvalGate` reference.
 
 ## Source
 

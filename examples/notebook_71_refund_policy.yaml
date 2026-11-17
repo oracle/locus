@@ -1,0 +1,28 @@
+# The refund gate's policy, as the file notebook 71 loads with ControlPolicy.load().
+#
+# Every key is a ControlPolicy field with the same name and default. Edit a
+# value, run the notebook again, and the gate decides differently: no Python
+# changes. `locus policy lint examples/notebook_71_refund_policy.yaml` checks
+# it for gaps; `locus policy explain` shows what it decides for one refund.
+schema: locus.control.policy/v1
+version: refund-gate-1
+
+# A refund is a business action, not a security finding: there is nothing to
+# verify, so the bar is 0. The default (0.8) would hold every refund that
+# arrives without a VerificationResult.
+require_verification_score: 0.0
+
+# A refund may touch one ledger entry to auto-pay. One that reverses a batch
+# of charges waits for a person.
+max_blast_radius: 1
+
+# Any refund tagged high_value (the script adds the tag at $200 and above)
+# waits for a person.
+require_human_for:
+- high_value
+
+deny_for: []
+min_severity: low
+require_sandbox_for: []
+require_human_over_usd:
+spend_limit_usd:

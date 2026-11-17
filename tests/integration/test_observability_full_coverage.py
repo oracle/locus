@@ -358,6 +358,7 @@ class TestEventConstantsAreReachable:
             "EV_HOOK_MODEL_RETRY",
             "EV_HOOK_STEERING_APPLIED",
             "EV_HOOK_GUARDRAIL_TRIGGERED",
+            "EV_CONTROL_JUDGE_DECIDED",
         ]
         for name in new_constants:
             value = getattr(emit_mod, name, None)

@@ -402,3 +402,57 @@ class TestDiscoverContextLength:
         with respx.mock:
             respx.get(f"{self._BASE}/models").mock(side_effect=httpx.ConnectError("refused"))
             assert await discover_context_length(self._BASE, "discover-test-none") is None
+
+
+# ---------------------------------------------------------------------------
+# OCI Generative AI ids: ``<vendor>.<model>``, with or without ``oci:``.
+# ---------------------------------------------------------------------------
+
+
+class TestOCIModelIds:
+    @pytest.mark.parametrize(
+        ("model_id", "slug", "window"),
+        [
+            ("oci:openai.gpt-4.1", "gpt-4.1", 1_000_000),
+            ("openai.gpt-4.1", "gpt-4.1", 1_000_000),  # as the built model carries it
+            ("oci:openai.gpt-5.5", "gpt-5.5", 400_000),
+            ("oci:openai.gpt-5.1", "gpt-5.1", 400_000),
+            ("oci:openai.gpt-4o", "gpt-4o", 128_000),
+            ("oci:openai.o3", "o3", 200_000),
+            ("oci:meta.llama-3.3-70b-instruct", "llama-3.3-70b-instruct", 128_000),
+            (
+                "oci:meta.llama-4-maverick-17b-128e-instruct-fp8",
+                "llama-4-maverick-17b-128e-instruct-fp8",
+                512_000,
+            ),
+            ("oci:cohere.command-a-03-2025", "command-a-03-2025", 256_000),
+            ("oci:cohere.command-r-plus-08-2024", "command-r-plus-08-2024", 128_000),
+            ("oci:google.gemini-2.5-pro", "gemini-2.5-pro", 1_048_576),
+            ("oci:google.gemini-2.5-flash", "gemini-2.5-flash", 1_048_576),
+            ("oci:xai.grok-4", "grok-4", 128_000),
+            ("oci-responses:openai.gpt-5.5", "gpt-5.5", 400_000),
+            ("oci:openai.gpt-4.1-2025-04-14", "gpt-4.1", 1_000_000),  # a dated OCI alias
+        ],
+    )
+    def test_an_oci_id_resolves_the_model_it_serves(
+        self, model_id: str, slug: str, window: int
+    ) -> None:
+        md = metadata_for(model_id)
+        assert md is not None
+        assert md.model_id == slug
+        assert md.context_length == window
+
+    def test_only_an_oci_vendor_segment_is_dropped(self) -> None:
+        qwen = metadata_for("oci:qwen3.6-35b")
+        assert qwen is not None
+        assert qwen.model_id == "qwen3.6-35b", "a dot inside a slug stays"
+        assert metadata_for("somevendor.gpt-4.1") is None
+        assert metadata_for("oci:openai.gpt-9") is None
+        assert metadata_for("openai.") is None
+
+    def test_the_oci_hosted_entries_carry_no_price(self) -> None:
+        md = metadata_for("oci:meta.llama-3.3-70b-instruct")
+        assert md is not None
+        assert md.family == "meta"
+        assert md.input_price_per_mtok is None
+        assert md.output_price_per_mtok is None

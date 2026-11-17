@@ -137,7 +137,7 @@ Prints `tool: lookup_order {'order_id': 'ord-4821'}`, the JSON result, `stop: co
 
 ## Tools
 
-`@tool` builds a `Tool` from a function: the name is the function name, the description is the docstring, and the JSON schema comes from the type hints with per-parameter descriptions parsed from an `Args:` block. Options: `@tool(name=..., description=..., idempotent=False, labels=None, sandbox=None, deferred=False, emits_progress=False)`. The body may be sync (run in a worker thread) or `async`. A parameter named `ctx` or `context` typed `ToolContext` is injected and left out of the schema. Model-supplied arguments are coerced to the annotations (`"17"` to `17`); a missing required argument becomes an error the model reads. Return values: `str` as is, `BaseModel` as JSON, `dict`/`list` as indented JSON, `None` as `"Success (no output)"`.
+`@tool` builds a `Tool` from a function: the name is the function name, the description is the docstring, and the JSON schema comes from the type hints with per-parameter descriptions parsed from an `Args:` block. Options: `@tool(name=..., description=..., idempotent=False, read_only=False, labels=None, sandbox=None, deferred=False, emits_progress=False)`. `read_only=True` declares a tool that only observes, so a `ToolCallJudge` (control reference) does not spend a model call on it; a declaration the author vouches for, not something the SDK checks. The body may be sync (run in a worker thread) or `async`. A parameter named `ctx` or `context` typed `ToolContext` is injected and left out of the schema. Model-supplied arguments are coerced to the annotations (`"17"` to `17`); a missing required argument becomes an error the model reads. Return values: `str` as is, `BaseModel` as JSON, `dict`/`list` as indented JSON, `None` as `"Success (no output)"`.
 
 An exception inside a tool never escapes the loop: the executor records `ToolResult.error` as `"ValueError: boom"`, the model sees `Error: ValueError: boom`, `ToolCompleteEvent.error` is set, `metrics.tool_errors` increments, and the run continues. Return `ToolOutput(text, structured_content=..., content_blocks=..., is_error=False)` to hand the application machine-readable data the model never sees (`ToolCompleteEvent.structured_content`); `is_error=True` reports a failure without raising.
 
@@ -221,7 +221,7 @@ Handlers in `locus.streaming` satisfy the `StreamHandler` protocol, `async on_ev
 
 ## Hooks
 
-Subclass `HookProvider` (`locus.hooks`), set `priority` (lower runs first; `HookPriority.SECURITY_DEFAULT` 50, `OBSERVABILITY_DEFAULT` 150, `BUSINESS_DEFAULT` 250, `DEFAULT` 300) and override any of: `on_before_invocation(prompt, state) -> state`, `on_after_invocation(state, success)`, `on_iteration_start(iteration, state)`, `on_iteration_end(iteration, state)`, `on_before_model_call(event)` (writable `messages`), `on_after_model_call(event)` (writable `retry`, `retry_feedback`, `response`), `on_before_tool_call(event)` (writable `arguments`, `secret_arguments`, `cancel`), `on_after_tool_call(event)` (writable `result`, `retry`), `on_before_compaction(event)` (writable `instructions`, `cancel`). Events are write-protected: setting a read-only field raises `AttributeError`. `event.run` gives `run_id`, `thread_id` and run metadata; `event.emit(CustomEvent(...))` sends UI-only data to the stream. Pass instances in `hooks=[...]`.
+Subclass `HookProvider` (`locus.hooks`), set `priority` (lower runs first; `HookPriority.SECURITY_DEFAULT` 50, `OBSERVABILITY_DEFAULT` 150, `BUSINESS_DEFAULT` 250, `DEFAULT` 300) and override any of: `on_before_invocation(prompt, state) -> state`, `on_after_invocation(state, success)`, `on_iteration_start(iteration, state)`, `on_iteration_end(iteration, state)`, `on_before_model_call(event)` (writable `messages`), `on_after_model_call(event)` (writable `retry`, `retry_feedback`, `response`), `on_before_tool_call(event)` (writable `arguments`, `secret_arguments`, `cancel`), `on_after_tool_call(event)` (writable `result`, `retry`), `on_before_compaction(event)` (writable `instructions`, `cancel`). Events are write-protected: setting a read-only field raises `AttributeError`. A hook that rewrites `event.arguments` calls `event.resign(by="MyHook")` afterwards: with `Agent(tool_call_integrity=True)` the executor refuses a rewritten call whose chain of custody does not name the hook (control reference), and the call is a no-op when integrity is off. `event.run` gives `run_id`, `thread_id` and run metadata; `event.emit(CustomEvent(...))` sends UI-only data to the stream. Pass instances in `hooks=[...]`.
 
 ```python
 from locus.agent import Agent
@@ -346,7 +346,9 @@ Prints `[('unexpected_tool', 'verify')] ['verify', 'pay']`: the early refund was
 
 ## Evaluation
 
-`locus.evaluation` runs structural checks over an agent: `EvalCase(name=..., prompt=..., expected_tools=[...], expected_output_contains=[...], expected_output_not_contains=[...], expected_tool_sequence=[...], exact_tool_sequence=False, max_iterations=None, max_duration_ms=None, rubric=None, tags=[...])`. `EvalRunner(agent=agent, judge=None, concurrency=4).run(cases)` (blocking) or `await runner.arun(cases)` returns an `EvalReport` with `results` (`EvalResult`: `passed`, `score`, `checks`, `tools_called`, `output`, `error`, `timed_out`), `passed`, `failed`, `avg_score`, `summary()`. `rubric` is graded only when `judge=LLMJudge(model=...)` is given; a judge that cannot be reached raises `JudgeUnavailableError` (a `RuntimeError`) out of `arun` instead of recording failed cases, since a judge outage says nothing about the agent. Use a double for structural regression tests and a live model for rubric grading.
+`locus.evaluation` runs structural checks over an agent, settles the answer against the run's own evidence, grades free-form quality against a rubric, measures how far to trust the grade, and gates a build on a saved report. `EvalCase(name=..., prompt=..., expected_tools=[...], expected_output_contains=[...], expected_output_not_contains=[...], expected_tool_sequence=[...], exact_tool_sequence=False, expected_tool_calls=[ToolCallExpectation(name=..., arguments={...})], forbidden_tools=[...], expected_refusals=[...], max_iterations=None, max_duration_ms=None, max_total_tokens=None, max_cost_usd=None, require_receipts=False, claims=[...], grounding=None, rubric=None, tags=[...])`; a case must assert something. `EvalRunner(agent=agent, *, judge=None, judges=None, concurrency=4, repeats=1).run(cases)` (blocking; cannot call a judge) or `await runner.arun(cases, repeats=None)` returns an `EvalReport` with `results` (`EvalResult`: `passed`, `score`, `grade`, `checks`, `tools_called`, `output`, `error`, `timed_out`, `receipts`, `claim_checks`, `verdict`, `not_graded_reason`, `samples`, `consistency`, `panel`, `trust`), `passed`, `failed`, `not_graded`, `unstable`, `avg_score`, `grade_distribution`, `by_tag` (`TagSummary`: `total`, `passed`, `failed`, `not_graded`, `avg_score`), `check_failures`, `judge_models`, `rubric_revisions`, `fingerprint`, `summary()`, `to_markdown()`, `save(path)` and `EvalReport.load(path)`. `rubric` is graded only when `judge=LLMJudge(model=...)` is given; a judge that cannot be reached raises `JudgeUnavailableError` (a `RuntimeError`) out of `arun` instead of recording failed cases, since a judge outage says nothing about the agent; a judge that answers without a verdict leaves the case `not_graded`, counted neither as passed nor failed. Use a double for structural regression tests and a live model for rubric grading.
+
+Beyond those checks the package grades the answer, the path and the history. A `rubric` is a string or a `Rubric(dimensions=[Dimension(key=..., weight=..., guidance=...)], grade_thresholds=Rubric.default_grades(), caps=[Cap(when=..., grade=...)])`; `LLMJudge.score(...)` returns a `Verdict` with `JudgeProvenance`, `LLMJudge.compare(...)` a `Comparison`, and the runner reads `EvalSample`s with `repeats=`. The run's tool results are an `EvidenceLedger` of `EvidenceRow`s: `require_receipts=True` settles figures by code (`ReceiptCheck`, `settle_receipts`), `claims=[...]` gives `ClaimCheck`s (`settle_claims`), `expected_tool_calls=[ToolCallExpectation(name=..., arguments={...})]`, `forbidden_tools` and `expected_refusals` read the gate's refusals. `evaluators=[TrajectoryMatch(expected=[...], mode="strict"|"unordered"|"subset"), ToolSelection(expected=[...], forbidden=[...]), ArgumentCorrectness(tool=..., expected={...}, tolerance=0.0)]` score the path with no model call, each one check and an `EvaluatorVerdict` (with `EvaluatorProvenance`, `ArgumentMismatch`) in `EvalResult.evaluations`. `simulated_user=SimulatedUser(persona=..., goal=..., max_turns=6, stop_on=[...])` has a model play the user against the agent in `arun()` (`UserSimulator(model)` on the runner, else the judge's model; `SimulatorUnavailableError` stops the suite), and the result carries the `ConversationTurn` transcript. `OnlineEvaluator(template, judge=None, sampler=every_nth(1), budget=OnlineBudget(max_cases=None, max_per_minute=None))` samples live runs off the event bus (`RecordedRun`) and grades them with `EvalRunner.agrade`. Reports: `suite_fingerprint(cases)`, `EvalReport.save/load`, `diff_reports(baseline, candidate)` giving a `ReportDiff` of `CaseDiff`s, `EvalGate(min_pass_rate=1.0, max_not_graded=0).check(report, baseline=...)` giving a `GateResult`, `by_tag` as `TagSummary`, `load_cases(path)` / `dump_cases(cases, path)`; `report_store(spec)` opens a `ReportStore` (`FileReportStore`, `OracleReportStore`, `OCIBucketReportStore`, `S3ReportStore`) whose `put` returns a `StoredReport`, and `trend(store, suite=..., last=10)` is a `Trend` of `TrendPoint`s. Reliability arithmetic over verdicts: `consistency` (`Consistency`), `panel_agreement` (`PanelAgreement`), `trust_decision` (`TrustDecision`, `TrustGates`), `cohen_kappa` (`Kappa`), `calibration_drift` (`CalibrationDrift`), `wilson_interval`, `bootstrap_ci`. The command line is `locus eval run|diff|gate|summary|trend`.
 
 ```python
 from locus.agent import Agent
@@ -380,6 +382,77 @@ print(report.passed, report.failed, report.results[0].checks)
 ```
 
 Prints `1 0 {'tool_called:lookup_order': True, 'output_contains:shipped': True, 'within_iteration_budget': True}`.
+
+**The run's own evidence.** `EvidenceLedger.from_result(result, prompt=...)` (or `from_executions`) lays the run out as `EvidenceRow` rows with stable ids: `P` for the prompt, `E0`, `E1`, ... per tool execution (`tool_name`, `arguments`, `text`, `error`, `refusal`, `.executed`); `ledger.find(value)`, `ledger.executions_of(tool)`, `ledger.refusals_of(tool)`. `require_receipts=True` runs `settle_receipts(output, ledger) -> ReceiptCheck` (`values`, `missing`, `passed`, `summary` such as `2/3`): every figure, identifier, date and quoted string in the answer must appear in some row, with `1,200` / `1200` and `71.9` against `71.8506` counting as the same value; no model is called. `claims=[...]` go through `settle_claims(claims, ledger) -> (settled, open)`: code confirms a claim whose figures are all in the ledger (`ClaimCheck`: `claim`, `verdict` `confirmed` / `contradicted` / `unverifiable`, `settled_by` `code` / `judge`, `evidence_ids`, `observed`, `reason`), the rest go to the judge in `arun()` with the ledger as the only evidence, and a citation that does not hold is downgraded to `unverifiable`. `forbidden_tools` passes when the tool never executed (a call the gate refused did not), `expected_refusals` when the gate refused at least one call of it: with `CompromisedModel` as the agent's model, "the gate holds" is a case in the same suite. `max_total_tokens` and `max_cost_usd` fail when the target reports no metrics.
+
+**Rubrics.** A string `rubric` asks `LLMJudge(model, *, rubric=None, temperature=0.0, seed=None, max_tokens=2048, timeout_s=None, channel="auto")` for one pass and one score. `Rubric(dimensions=[Dimension(key=..., label="", weight=1.0, guidance="")], grade_thresholds=Rubric.default_grades(), pass_score=60, caps=[Cap(when="contradicted_claim" | "receipts_failed" | "ungrounded", grade="C")], version="1")` has the judge score each dimension 0-100 while code does the arithmetic: `composite(scores)` (weights normalised; a missing dimension counts as zero), `grade_for(score)`, `revision()` (a short hash of dimensions, weights, thresholds and the judge prompt, stamped on every verdict, so reports with different revisions are different measurements), `Rubric.load(path)`, `Rubric.from_text(text)`. The runner applies the caps after the verdict (`verdict.caps_applied`). Every `Verdict` carries a `JudgeProvenance` (`judge_model`, `rubric_revision`, `prompt_sha`, `temperature`, `seed`, `channel`, usage, `self_graded`). `await judge.compare(prompt=, output_a=, output_b=, rubric=) -> Comparison` (`winner` `a` / `b` / `tie`, `consistent`, `abstained`, `picks`) asks in both orders, and only a preference that survives the swap wins.
+
+**Reliability.** `repeats=` runs every case several times: it passes only when every graded reading passed, the reading shown is the most pessimistic, `EvalResult.samples` keeps each `EvalSample` (`passed`, `score`, `grade`, `checks`, `verdict`), and `EvalResult.consistency` (`Consistency`: `pass_rate`, `score_stddev`, `grade_distribution`, `grade_agreement`, `flagged_unstable`) says whether the judge, not the agent, is what moved. `judges=[primary, second, ...]` grades every judged answer with each: `EvalResult.panel` (`PanelAgreement`: `consensus_grade`, `grade_consensus_rate`, `score_pearson`, `flagged_low_confidence`) and `EvalResult.trust` (`TrustDecision`: `trusted` when the letters match, `calibration_required` when they differ by one, when nothing checked the primary, or when it graded its own model, `rejected` at two or more; the distances are `TrustGates(calibration_letter_delta=1, rejection_letter_delta=2, score_delta_max=0.10)`). The same arithmetic stands alone, for verdicts collected elsewhere (any object or mapping with `passed`, `score`, `grade`, `dimensions`, `abstained`): `consistency(samples, *, min_samples=3, agreement_floor=0.7, score_spread_max=0.10)`, `panel_agreement(verdicts)`, `trust_decision(primary, independent, *, gates=None)`, `cohen_kappa(pairs, *, min_pairs=30) -> Kappa` (`kappa`, `pairs`, `undefined_reason` `insufficient_sample` / `no_variance`), `calibration_drift(pairs)` of `(judge_grade, human_grade)` `-> CalibrationDrift` (`agreement_rate`, `mean_letter_drift`, `direction`), `wilson_interval(successes, trials)` and `bootstrap_ci(values, *, seed)`.
+
+**Comparable reports and the gate.** Every report carries `suite_fingerprint(cases)` (name, prompt and expectations of every case; a `Rubric` enters as its revision), and `diff_reports(baseline, candidate, *, force=False) -> ReportDiff` refuses two different suites unless forced: `regressed`, `improved`, `added`, `removed`, `pass_delta`, `avg_score_delta`, `cases` (`CaseDiff`: `change`, the scores and grades, `dimension_deltas`, `newly_failing_checks`), `summary()`, `to_markdown()`. `EvalGate(min_pass_rate=1.0, min_avg_score=None, max_not_graded=0, max_unstable=None, no_regressions=True, max_avg_score_drop=None).check(report, *, baseline=None) -> GateResult` (`passed`, `reasons`, `summary()`) returns every reason it failed. `load_cases(path, *, rubric=None)` reads a `.json`, `.jsonl` or `.yaml` suite (a top-level `rubric` applies to cases that name none) and `dump_cases(cases, path)` writes one. From a terminal: `locus eval run cases.json --agent app.py:agent [--judge module:judge] [--rubric rubric.json] [--repeats 3] [--tags triage] [--report out.json] [--baseline main.json] [--min-pass-rate 0.95]` (exit 1 when the gate fails), `locus eval diff main.json out.json [--markdown]`, `locus eval gate out.json --baseline main.json`, `locus eval summary out.json`.
+
+```python
+import tempfile
+from pathlib import Path
+
+from locus.agent import Agent
+from locus.core.messages import Role
+from locus.evaluation import (
+    Cap, Dimension, EvalCase, EvalGate, EvalReport, EvalRunner, EvidenceLedger, Rubric,
+    diff_reports, dump_cases, load_cases, settle_claims, settle_receipts, suite_fingerprint, wilson_interval,
+)
+from locus.testing import FunctionModel, text, tool_call
+from locus.tools import tool
+
+@tool
+def query_metric(host: str, metric: str) -> str:
+    """Read a metric."""
+    return f"{metric} on {host}: 71.8506 at 09:55"
+
+def answering(figure):
+    def handler(messages, tools):
+        if any(m.role == Role.TOOL for m in messages):
+            return text(f"db-07 paged at 09:55 because cpu_pct reached {figure}.")
+        return tool_call("query_metric", host="db-07", metric="cpu_pct")
+    return handler
+
+def agent_for(figure):
+    return Agent(model=FunctionModel(answering(figure)), tools=[query_metric], reflexion=False, grounding=False)
+
+result = agent_for("98.2").run_sync("Why did db-07 page?")
+ledger = EvidenceLedger.from_result(result, prompt="Why did db-07 page?")
+print(ledger.ids, ledger.find("71.85"))                                     # ['P', 'E0'] ['E0']
+receipts = settle_receipts(result.message, ledger)
+print(receipts.summary, receipts.missing)                                   # 2/3 ['98.2']
+settled, open_claims = settle_claims(["cpu_pct was 71.9 on db-07", "the page was justified"], ledger)
+print([(c.verdict, c.evidence_ids) for c in settled], open_claims)
+
+rubric = Rubric(
+    dimensions=[Dimension(key="root_cause", weight=0.6, guidance="Names the component and the mechanism."),
+                Dimension(key="evidence", weight=0.4, guidance="Every figure appears in a tool result.")],
+    grade_thresholds=Rubric.default_grades(),
+    caps=[Cap(when="receipts_failed", grade="D")],
+)
+print(rubric.composite({"root_cause": 90, "evidence": 50}), rubric.grade_for(74), len(rubric.revision()))
+
+cases = [EvalCase(name="no_invented_figures", prompt="Why did db-07 page?", expected_tools=["query_metric"],
+                  require_receipts=True, forbidden_tools=["restart_service"], tags=["triage"])]
+baseline = EvalRunner(agent=agent_for("71.9")).run(cases)
+candidate = EvalRunner(agent=agent_for("98.2")).run(cases)
+print(baseline.passed, candidate.passed, candidate.results[0].checks, candidate.check_failures)
+print(baseline.fingerprint == suite_fingerprint(cases), baseline.by_tag["triage"].passed)
+with tempfile.TemporaryDirectory() as tmp:
+    dump_cases(cases, Path(tmp, "cases.json"))
+    print(load_cases(Path(tmp, "cases.json"))[0].name)
+    saved = baseline.save(Path(tmp, "main.json"))
+    diff = diff_reports(EvalReport.load(saved), candidate)
+    print(diff.regressed, diff.pass_delta, diff.cases[0].newly_failing_checks)
+gate = EvalGate(min_pass_rate=1.0, max_unstable=0).check(candidate, baseline=baseline)
+print(gate.passed, gate.reasons)
+print(wilson_interval(0, 20))                                               # (0.0, 0.161...)
+```
+
+Prints `['P', 'E0'] ['E0']`, `2/3 ['98.2']` (the answer's `98.2` appears in no tool result), `[('confirmed', ['P', 'E0'])] ['the page was justified']` (code settled the claim with figures; the other is left for a judge), `74 C 12`, then `1 0 {'tool_called:query_metric': True, 'forbidden_tool:restart_service': True, 'receipts:2/3': False} {'receipts:2/3': 1}`, `True 1`, `no_invented_figures`, `['no_invented_figures'] -1 ['receipts:2/3']`, `False ['pass rate 0.00 below 1.00 (0/1 graded cases passed)', 'regressed against the baseline: no_invented_figures']` and `(0.0, 0.161...)`: zero failures in twenty trials is "somewhere under 16%", not certainty.
 
 ## Prompts and conversation management
 

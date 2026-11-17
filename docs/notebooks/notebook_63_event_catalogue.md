@@ -7,9 +7,9 @@ rather than from a spreadsheet that drifts out of date. SDK components
 emit typed events under a stable prefix per subsystem, and most of the
 names are declared as `EV_*` constants in `locus.observability.emit`, so
 changing a constant propagates to every emission site that imports it.
-The constants span twelve prefixes: `agent.*`, `multiagent.*`,
+The constants span thirteen prefixes: `agent.*`, `multiagent.*`,
 `composition.*`, `rag.*`, `memory.*`, `a2a.*`, `skills.*`,
-`deepagent.*`, `research.*`, `model.*`, `tool.*` and `harness.*`.
+`deepagent.*`, `research.*`, `model.*`, `tool.*`, `control.*` and `harness.*`.
 
 Prefix map, with the component that emits each family:
 
@@ -26,6 +26,7 @@ Prefix map, with the component that emits each family:
 | `research.*` | Research workflow nodes in `locus.deepagent.workflow` |
 | `model.*` | `FallbackChain` tier fallback and circuit breaker |
 | `tool.*` | Sandboxed `@tool` runs and the `SandboxEnforcerHook` denial |
+| `control.*` | The `ToolCallJudge` verdict on a proposed tool call |
 | `harness.*` | Coding harness (`locus.harness`) command execution records |
 
 Two qualifications matter when the catalogue is handed to an assessor.
@@ -131,6 +132,8 @@ Running it offline — no credentials, bundled mock model — prints the canonic
     - composition.loop.terminated
     - composition.stage.completed
     - composition.stage.started
+  control.*  (1 events)
+    - control.judge.decided
   deepagent.*  (6 events)
     - deepagent.fs.read
     - deepagent.fs.write
@@ -182,7 +185,8 @@ Running it offline — no credentials, bundled mock model — prints the canonic
     - research.summarize.completed
   skills.*  (1 events)
     - skills.activated
-  tool.*  (3 events)
+  tool.*  (4 events)
+    - tool.integrity.refused
     - tool.sandbox.completed
     - tool.sandbox.denied
     - tool.sandbox.started

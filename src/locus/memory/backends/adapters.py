@@ -13,6 +13,13 @@ from uuid import uuid4
 
 from locus.core.protocols import CheckpointerCapabilities
 from locus.memory.checkpointer import BaseCheckpointer
+from locus.memory.time_travel import (
+    CheckpointInfo,
+    checkpoint_iteration,
+    checkpoint_size,
+    info_from,
+    link_parents,
+)
 
 
 if TYPE_CHECKING:
@@ -49,7 +56,15 @@ class StorageBackendAdapter(BaseCheckpointer):
     Storage schema:
     - `{thread_id}:{checkpoint_id}` -> checkpoint data
     - `{thread_id}:latest` -> latest checkpoint (for quick access)
-    - `{thread_id}:_checkpoints` -> list of checkpoint metadata
+    - `{thread_id}:_checkpoints` -> list of checkpoint metadata: for each
+      checkpoint its id, timestamp, metadata, iteration and size, so
+      ``list`` reads one key and never a checkpoint's state
+
+    Every checkpoint is its own key, so the thread's history is complete
+    and grows with the square of the conversation's length (each
+    checkpoint holds the whole conversation). ``max_checkpoints_per_thread``
+    bounds it: the save that makes a checkpoint surplus deletes it. The
+    tool-effect ledger's sidecar thread is never trimmed.
 
     Example:
         >>> from locus.memory.backends import RedisBackend
@@ -74,14 +89,19 @@ class StorageBackendAdapter(BaseCheckpointer):
         tracked in issue #301.
     """
 
-    def __init__(self, backend: Any) -> None:
+    def __init__(self, backend: Any, *, max_checkpoints_per_thread: int | None = None) -> None:
         """
         Initialize adapter with a storage backend.
 
         Args:
             backend: Storage backend with save/load/delete/exists methods
+            max_checkpoints_per_thread: Keep only this many of a thread's
+                newest checkpoints (``None``, the default, keeps them all).
         """
+        if max_checkpoints_per_thread is not None and max_checkpoints_per_thread < 1:
+            raise ValueError("max_checkpoints_per_thread must be at least 1")
         self._backend = backend
+        self.max_checkpoints_per_thread = max_checkpoints_per_thread
         self._capabilities_cache: CheckpointerCapabilities | None = None
         # Per-thread locks serializing the read-modify-write of the checkpoint
         # index (`{thread}:_checkpoints`). Without this, concurrent saves to the
@@ -152,7 +172,16 @@ class StorageBackendAdapter(BaseCheckpointer):
         await self._backend.save(f"{thread_id}:latest", data)
 
         # Update checkpoint index (persistent checkpoint ID list)
-        await self._update_checkpoint_index(thread_id, checkpoint_id, now, metadata)
+        await self._update_checkpoint_index(
+            thread_id,
+            checkpoint_id,
+            now,
+            metadata,
+            iteration=checkpoint_iteration(data),
+            size=checkpoint_size(data),
+        )
+        if self.max_checkpoints_per_thread is not None:
+            await self._trim_history(thread_id, self.max_checkpoints_per_thread)
 
         return checkpoint_id
 
@@ -162,6 +191,9 @@ class StorageBackendAdapter(BaseCheckpointer):
         checkpoint_id: str,
         timestamp: datetime,
         metadata: dict[str, Any] | None = None,
+        *,
+        iteration: int | None = None,
+        size: int | None = None,
     ) -> None:
         """Update the persistent checkpoint index."""
         index_key = f"{thread_id}:_checkpoints"
@@ -187,6 +219,8 @@ class StorageBackendAdapter(BaseCheckpointer):
                     "checkpoint_id": checkpoint_id,
                     "timestamp": timestamp.isoformat(),
                     "metadata": metadata or {},
+                    "iteration": iteration,
+                    "size": size,
                 }
             )
 
@@ -457,6 +491,41 @@ class StorageBackendAdapter(BaseCheckpointer):
     def __repr__(self) -> str:
         return f"StorageBackendAdapter({self._backend!r})"
 
+    # Last on purpose: a method named ``list`` shadows the builtin for the
+    # annotations of anything defined after it.
+    async def list(self, thread_id: str, limit: int = 10) -> list[CheckpointInfo]:
+        """The thread's checkpoints, newest first, from the index key alone.
+
+        An index entry written before the step fields existed has no
+        ``iteration`` or ``size``; they are read from the checkpoint then.
+        """
+        existing = await self._backend.load(f"{thread_id}:_checkpoints")
+        entries = list((existing or {}).get("checkpoints", []))
+        # The entry just past the window is the parent of the oldest in it.
+        older = entries[limit].get("checkpoint_id") if len(entries) > limit else None
+        infos: list[CheckpointInfo] = []
+        for entry in entries[:limit]:
+            checkpoint_id = entry.get("checkpoint_id")
+            if not checkpoint_id:
+                continue
+            iteration, size = entry.get("iteration"), entry.get("size")
+            if iteration is None or size is None:
+                # The same figures a save records: the document as stored.
+                data = await self._backend.load(f"{thread_id}:{checkpoint_id}")
+                if data is not None:
+                    iteration, size = data.get("iteration"), checkpoint_size(data)
+            infos.append(
+                info_from(
+                    str(checkpoint_id),
+                    thread_id,
+                    created_at=entry.get("timestamp"),
+                    metadata=entry.get("metadata") or {},
+                    iteration=iteration,
+                    size=size,
+                )
+            )
+        return link_parents(infos, older)
+
 
 # =============================================================================
 # Convenience Factory Functions
@@ -466,6 +535,7 @@ class StorageBackendAdapter(BaseCheckpointer):
 def redis_checkpointer(
     url: str = "redis://localhost:6379",
     prefix: str = "locus:state:",
+    max_checkpoints_per_thread: int | None = None,
     **kwargs: Any,
 ) -> StorageBackendAdapter:
     """
@@ -474,6 +544,8 @@ def redis_checkpointer(
     Args:
         url: Redis URL
         prefix: Key prefix for all checkpoints
+        max_checkpoints_per_thread: Keep only this many of a thread's newest
+            checkpoints (``None`` keeps all); see ``StorageBackendAdapter``
         **kwargs: Additional RedisBackend options (ttl_seconds, db)
 
     Returns:
@@ -491,7 +563,7 @@ def redis_checkpointer(
     from locus.memory.backends.redis import RedisBackend
 
     backend = RedisBackend(url=url, prefix=prefix, **kwargs)
-    return StorageBackendAdapter(backend)
+    return StorageBackendAdapter(backend, max_checkpoints_per_thread=max_checkpoints_per_thread)
 
 
 def postgresql_checkpointer(
@@ -501,6 +573,7 @@ def postgresql_checkpointer(
     user: str = "postgres",
     password: str = "",
     dsn: str | None = None,
+    max_checkpoints_per_thread: int | None = None,
     **kwargs: Any,
 ) -> StorageBackendAdapter:
     """
@@ -513,6 +586,8 @@ def postgresql_checkpointer(
         user: Database user
         password: Database password
         dsn: Connection string (overrides other params)
+        max_checkpoints_per_thread: Keep only this many of a thread's newest
+            checkpoints (``None`` keeps all); see ``StorageBackendAdapter``
         **kwargs: Additional PostgreSQLBackend options
 
     Returns:
@@ -540,7 +615,7 @@ def postgresql_checkpointer(
         dsn=dsn,
         **kwargs,
     )
-    return StorageBackendAdapter(backend)
+    return StorageBackendAdapter(backend, max_checkpoints_per_thread=max_checkpoints_per_thread)
 
 
 def mysql_checkpointer(
@@ -550,6 +625,7 @@ def mysql_checkpointer(
     user: str = "root",
     password: str = "",
     dsn: str | None = None,
+    max_checkpoints_per_thread: int | None = None,
     **kwargs: Any,
 ) -> StorageBackendAdapter:
     """
@@ -562,6 +638,8 @@ def mysql_checkpointer(
         user: Database user
         password: Database password
         dsn: Connection string (overrides other params)
+        max_checkpoints_per_thread: Keep only this many of a thread's newest
+            checkpoints (``None`` keeps all); see ``StorageBackendAdapter``
         **kwargs: Additional MySQLBackend options
 
     Returns:
@@ -589,12 +667,13 @@ def mysql_checkpointer(
         dsn=dsn,
         **kwargs,
     )
-    return StorageBackendAdapter(backend)
+    return StorageBackendAdapter(backend, max_checkpoints_per_thread=max_checkpoints_per_thread)
 
 
 def opensearch_checkpointer(
     hosts: list[str] | None = None,
     index_name: str = "locus-checkpoints",
+    max_checkpoints_per_thread: int | None = None,
     **kwargs: Any,
 ) -> StorageBackendAdapter:
     """
@@ -603,6 +682,8 @@ def opensearch_checkpointer(
     Args:
         hosts: OpenSearch hosts
         index_name: Index name for checkpoints
+        max_checkpoints_per_thread: Keep only this many of a thread's newest
+            checkpoints (``None`` keeps all); see ``StorageBackendAdapter``
         **kwargs: Additional OpenSearchBackend options (username, password, use_ssl)
 
     Returns:
@@ -621,7 +702,7 @@ def opensearch_checkpointer(
     from locus.memory.backends.opensearch import OpenSearchBackend
 
     backend = OpenSearchBackend(hosts=hosts, index_name=index_name, **kwargs)
-    return StorageBackendAdapter(backend)
+    return StorageBackendAdapter(backend, max_checkpoints_per_thread=max_checkpoints_per_thread)
 
 
 def s3_checkpointer(
@@ -695,6 +776,7 @@ def oracle_checkpointer(
     dsn: str | None = None,
     user: str = "admin",
     password: str = "",
+    max_checkpoints_per_thread: int | None = None,
     **kwargs: Any,
 ) -> StorageBackendAdapter:
     """
@@ -704,6 +786,8 @@ def oracle_checkpointer(
         dsn: Oracle connection string (e.g., "host:port/service_name")
         user: Database user
         password: Database password
+        max_checkpoints_per_thread: Keep only this many of a thread's newest
+            checkpoints (``None`` keeps all); see ``StorageBackendAdapter``
         **kwargs: Additional OracleBackend options (table_name, wallet_location)
 
     Returns:
@@ -732,4 +816,4 @@ def oracle_checkpointer(
         password=password,
         **kwargs,
     )
-    return StorageBackendAdapter(backend)
+    return StorageBackendAdapter(backend, max_checkpoints_per_thread=max_checkpoints_per_thread)

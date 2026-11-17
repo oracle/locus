@@ -64,6 +64,14 @@ agent = Agent(model="oci:meta.llama-3.3-70b-instruct")  # Meta Llama
 agent = Agent(model="oci:anthropic.claude-sonnet")  # Claude, no Anthropic key
 ```
 
+The agent knows these models' context windows: an OCI id resolves the
+metadata entry of the model it serves (`openai.gpt-4.1` is `gpt-4.1`,
+`google.gemini-2.5-pro` is `gemini-2.5-pro`), so a long run on `oci:`
+gets the default
+[compaction](../conversation-management.md#compaction-keep-long-threads-in-budget)
+and counts tokens against the real window. A model with no entry yet
+takes one through `locus.models.metadata.register_metadata`.
+
 ### Responses transport — `/openai/v1/responses` (opt-in)
 
 `OCIResponsesModel` calls the OpenAI-compatible Responses endpoint:
@@ -90,10 +98,11 @@ agent = Agent(model=OCIResponsesModel(
 ))
 ```
 
-`store=True` (the default) has OCI persist each response so the next
-turn continues it through `previous_response_id`; with `store=False`
-nothing is retained server-side and the runtime sends the full history
-on every request.
+`store=True` has OCI persist each response so the next turn continues it
+through `previous_response_id`; with `store=False` nothing is retained
+server-side and the runtime sends the full history on every request. The
+default, `store="auto"`, starts stateful and switches to the stateless
+path when the endpoint reports a Zero Data Retention tenancy.
 
 The only SDK primitive that bypasses on this path is
 `ConversationManager`. Memory, Reflexion, GSAR, grounding, tool
@@ -237,6 +246,43 @@ export OCI_AUTH_TYPE=api_key
 
 The model id and the agent code are unchanged; only the auth arguments
 differ.
+
+## Inspecting what goes on the wire
+
+Both HTTP-backed transports take a pair of sync callables that see each
+request after it is signed and each response as its headers arrive:
+`on_request` gets the `httpx.Request` (`request.content` is the JSON body,
+`request.headers` the signed headers), `on_response` the `httpx.Response`
+(`status_code`, `headers`; the body is not read yet). They run once per
+HTTP attempt, so a retry shows twice. This is the seam for a request-shape
+test and for seeing what a model actually receives when debugging; neither
+hook changes the request.
+
+```python
+import json
+
+from locus.models.providers.oci import OCIChatCompletionsModel, OCIResponsesModel
+
+seen = []
+model = OCIResponsesModel(
+    model="openai.gpt-5.5",
+    profile="MY_PROFILE",
+    region="us-chicago-1",
+    on_request=lambda request: seen.append(json.loads(request.content)),
+    on_response=lambda response: print(response.status_code),
+)
+# ... run the agent; seen[-1]["input"] is the last request's input items.
+
+# Same two options on the V1 transport, including through the factory:
+agent = Agent(
+    model="oci:openai.gpt-5.5",
+    model_kwargs={"on_request": lambda request: print(len(request.content), "bytes")},
+)
+```
+
+Both are `None` by default and install nothing. The options are fields on
+`OCIResponsesConfig` and `OCIChatCompletionsConfig` as well, so a model
+built from a config carries them.
 
 ## Common gotchas
 

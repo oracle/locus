@@ -1,0 +1,161 @@
+<!doctype html>
+<!--
+  Copyright (c) 2025, 2026 Oracle and/or its affiliates.
+  Licensed under the Universal Permissive License v1.0 as shown at
+  https://oss.oracle.com/licenses/upl/
+
+  Resumable run stream against a Locus AgentServer, in plain HTML and JS.
+
+  Start a server (see docs/concepts/server.md), for example:
+
+      LOCUS_SERVER_API_KEY=dev-key python examples/notebook_65_agent_server.py
+
+  then open this file in a browser (file:// works when the server allows the
+  page's origin; otherwise serve the folder with `python -m http.server` and
+  put CORSMiddleware in front of the app, or host the page from the same
+  origin). The page starts a run with POST /threads/{id}/runs, follows
+  GET /runs/{id}/events, and when the connection drops reconnects with
+  Last-Event-ID set to the last `id:` it saw, so every event is shown once.
+  The "Drop connection" button aborts the current fetch to show the resume.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Locus run stream (resumable)</title>
+  <style>
+    body { font: 14px/1.4 system-ui, sans-serif; margin: 2rem; max-width: 56rem; }
+    fieldset { border: 1px solid #ccc; margin-bottom: 1rem; }
+    label { display: block; margin: .4rem 0; }
+    input[type=text] { width: 100%; box-sizing: border-box; }
+    textarea { width: 100%; height: 4rem; }
+    #log { white-space: pre-wrap; background: #f6f6f6; padding: 1rem; min-height: 12rem; }
+    #status { font-weight: 600; }
+    .evt { color: #444; }
+    .text { color: #000; }
+  </style>
+</head>
+<body>
+  <h1>Locus run stream</h1>
+  <fieldset>
+    <legend>Server</legend>
+    <label>Base URL <input id="base" type="text" value="http://127.0.0.1:8000"></label>
+    <label>API key (bearer; leave empty for an unauthenticated dev server)
+      <input id="key" type="text" value=""></label>
+    <label>Thread id <input id="thread" type="text" value="ui-demo"></label>
+  </fieldset>
+  <fieldset>
+    <legend>Turn</legend>
+    <textarea id="prompt">Page on-call? CrashLoopBackOff on payments-worker, 12 restarts.</textarea>
+    <button id="run">Start run</button>
+    <button id="drop" disabled>Drop connection</button>
+    <button id="cancel" disabled>Cancel run</button>
+    <span id="status">idle</span>
+  </fieldset>
+  <div id="log"></div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const log = (text, cls) => {
+      const line = document.createElement("div");
+      line.className = cls || "evt";
+      line.textContent = text;
+      $("log").appendChild(line);
+    };
+    const headers = () => {
+      const h = { "Content-Type": "application/json" };
+      const key = $("key").value.trim();
+      if (key) h["Authorization"] = "Bearer " + key;
+      return h;
+    };
+
+    let runId = null;
+    let lastEventId = 0;   // the last `id:` received; the resume point
+    let controller = null; // aborts the current fetch (the "drop" button)
+    let finished = false;
+
+    async function startRun() {
+      $("log").textContent = "";
+      lastEventId = 0; finished = false;
+      const base = $("base").value.replace(/\/$/, "");
+      const thread = encodeURIComponent($("thread").value);
+      const res = await fetch(`${base}/threads/${thread}/runs`, {
+        method: "POST", headers: headers(),
+        body: JSON.stringify({ prompt: $("prompt").value }),
+      });
+      if (!res.ok) { log(`POST /threads/${thread}/runs -> ${res.status} ${await res.text()}`); return; }
+      runId = (await res.json()).run_id;
+      $("status").textContent = `run ${runId}`;
+      $("drop").disabled = false; $("cancel").disabled = false;
+      await follow();
+    }
+
+    // Follow GET /runs/{id}/events; on a dropped connection, reconnect from
+    // lastEventId. Frames are `id: N` + `data: {...}`; the stream ends with
+    // `data: [DONE]`.
+    async function follow() {
+      const base = $("base").value.replace(/\/$/, "");
+      while (!finished) {
+        controller = new AbortController();
+        const h = headers();
+        if (lastEventId > 0) h["Last-Event-ID"] = String(lastEventId);
+        let res;
+        try {
+          res = await fetch(`${base}/runs/${runId}/events`, { headers: h, signal: controller.signal });
+          if (!res.ok) { log(`GET /runs/${runId}/events -> ${res.status}`); return; }
+          log(lastEventId ? `-- reconnected after event ${lastEventId}` : "-- connected");
+          await readFrames(res.body);
+        } catch (err) {
+          log(`-- connection dropped (${err.name}); resuming after event ${lastEventId}`);
+          await new Promise((r) => setTimeout(r, 500));
+        }
+      }
+      $("status").textContent = `run ${runId} finished`;
+      $("drop").disabled = true; $("cancel").disabled = true;
+    }
+
+    async function readFrames(body) {
+      const reader = body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) return;
+        buf += decoder.decode(value, { stream: true });
+        const frames = buf.split("\n\n");
+        buf = frames.pop();
+        for (const frame of frames) handleFrame(frame);
+      }
+    }
+
+    function handleFrame(frame) {
+      let id = null, data = null;
+      for (const line of frame.split("\n")) {
+        if (line.startsWith("id: ")) id = Number(line.slice(4));
+        else if (line.startsWith("data: ")) data = line.slice(6);
+      }
+      if (data === "[DONE]") { finished = true; log("-- [DONE]"); return; }
+      if (data === null) return;
+      const evt = JSON.parse(data);
+      if (id !== null) lastEventId = id;
+      switch (evt.type) {
+        case "model_chunk": if (evt.content) log(evt.content, "text"); break;
+        case "think": log(`#${id} think: ${evt.content || ""}`); break;
+        case "tool_start": log(`#${id} tool_start ${evt.tool} ${JSON.stringify(evt.arguments)}`); break;
+        case "tool_complete": log(`#${id} tool_complete ${evt.tool}: ${evt.error || evt.result}`); break;
+        case "interrupt": log(`#${id} interrupt: ${evt.question} (answer with POST /threads/{id}/runs {"resume": ...})`); break;
+        case "done": log(`#${id} done (${evt.reason}): ${evt.message}`, "text"); break;
+        case "replay_gap": log(`#${id} replay gap: events ${evt.from}..${evt.to} are no longer retained`); break;
+        default: log(`#${id} ${evt.type} ${JSON.stringify(evt)}`);
+      }
+    }
+
+    $("run").onclick = () => startRun().catch((e) => log(String(e)));
+    $("drop").onclick = () => controller && controller.abort();
+    $("cancel").onclick = async () => {
+      const base = $("base").value.replace(/\/$/, "");
+      const res = await fetch(`${base}/runs/${runId}/cancel`, { method: "POST", headers: headers() });
+      log(`POST /runs/${runId}/cancel -> ${JSON.stringify(await res.json())}`);
+    };
+  </script>
+</body>
+</html>

@@ -549,13 +549,15 @@ def test_close_still_deletes_when_stopping_background_commands_fails(
     monkeypatch.setattr(oci_sandbox.time, "sleep", lambda _: None)
     b = OCISandboxBackend.create("ocid1.project", poll_interval=0)
 
-    def broken_close(self: Any) -> None:
+    def broken_stop(self: Any) -> None:
         raise ConnectionError("sandbox unreachable")
 
-    monkeypatch.setattr(oci_sandbox.SessionBackend, "close", broken_close)
+    # Stopping the background commands is the ``_stop`` step of the lifecycle.
+    monkeypatch.setattr(oci_sandbox.SessionBackend, "_stop", broken_stop)
     with pytest.raises(ConnectionError):
         b.close()
     assert client.deleted == ["sbx-1"], "the sandbox goes even if its jobs could not be stopped"
+    assert b.state == "closed"
 
 
 @pytest.mark.parametrize(

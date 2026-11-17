@@ -21,7 +21,7 @@ others.
 | Situation | Layer |
 |---|---|
 | Tool args from the model are sometimes malformed | Validation — already on; nothing to do |
-| Public-facing agent — block SQL/command/path-traversal patterns, cap input length | `GuardrailsHook` with the default `GuardrailConfig`; prompt-injection coverage is mapped on the [threat scenarios](threat-scenarios.md) page |
+| Public-facing agent — block SQL/command/path-traversal patterns, cap input length | `GuardrailsHook` with the default `GuardrailConfig` |
 | Customer-facing answer where leaking PII (emails, SSN, credit cards, IPs) is a compliance issue | `GuardrailsHook` with PII patterns enabled |
 | High-stakes tools (`issue_refund`, `delete_records`, `isolate_host`) — the action must not happen unless a policy allows it | [`gate_tool`](../api/control.md) — a check in real code that the model cannot bypass |
 | The same tools, where you want a second model's opinion *as well* | `SteeringHook` with a steering `model=` and a policy string — advisory, see below |
@@ -197,8 +197,7 @@ in the first place. Hooks and steering inspect a call and decide; a
 capability-restricted tool removes the capability, so there is nothing to
 decide. The two compose — but when you can constrain the tool, do that first.
 
-The [cloud-posture agent](cloud-posture.md) is the worked example. Its
-`use_oci` tool admits an operation only if its name starts with a read prefix
+The built-in `use_oci` tool is the worked example. It admits an operation only if its name starts with a read prefix
 (`list_` / `get_` / `summarize_` / …), and it checks **before** any API call:
 
 ```python
@@ -244,5 +243,3 @@ the model — and the backstop doesn't trust the gate either.
 - [Hooks](hooks.md) — how `GuardrailsHook` and `SteeringHook` plug into the lifecycle.
 - [Tools](tools.md) — the `@tool` decorator and its schema validation.
 - [Reasoning: grounding](reasoning.md#grounding) — the answer-side analogue, claim-by-claim.
-- [Cloud-posture agent](cloud-posture.md) — read-only-by-construction tools in practice.
-- [Threat scenarios](threat-scenarios.md) — security mapping: which guardrail covers which OWASP / ATLAS item.

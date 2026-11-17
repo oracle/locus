@@ -12,9 +12,17 @@ or a zero-argument function that returns one::
     locus approvals --store approvals.json approve appr-3f1c... --by alice@example.com
     locus resume app.py:agent --thread t1 --answer approved --perform
     locus audit verify trail.jsonl --key audit-1=audit-1.pub.pem --head 9c2e...
+    locus policy lint policy.yaml --environments production staging
+    locus policy explain policy.yaml --action '{"name": "refund", "kind": "payment"}'
     locus serve app.py:agent --port 8000
+    locus mcp serve app.py:agent     # the agent as an MCP server over stdio
+    locus a2a card app.py:agent --url https://agent.example.com -o agent-card.json
     locus codex init                 # the Locus skill for Codex, in this project
     locus codex run "build an agent that triages tickets with a gated refund tool"
+    locus eval run evals/cases.json --agent app.py:agent --store reports/
+    locus eval trend --store reports/ --suite cases --last 5
+    locus deploy init my-agent --target container-instances --compartment-id ocid1... --region eu-frankfurt-1
+    locus deploy apply my-agent  # builds the image, pushes it to OCIR, applies Terraform
 
 Exit codes: 0 success, 1 a check or decision failed, 2 usage error, 3 the run is
 paused waiting for a person.
@@ -142,7 +150,8 @@ def _cmd_resume(args: argparse.Namespace) -> int:
 
 
 def _store(args: argparse.Namespace) -> Any:
-    from locus.control import ApprovalAuthority, FileApprovals  # noqa: PLC0415
+    from locus.control import ApprovalAuthority, approval_store  # noqa: PLC0415
+    from locus.control.approvals_spec import SPEC_ENV  # noqa: PLC0415
 
     authority = None
     if args.authority:
@@ -151,13 +160,28 @@ def _store(args: argparse.Namespace) -> Any:
             authority = authority()
         if not isinstance(authority, ApprovalAuthority):
             raise CLIError(f"{args.authority} is not an ApprovalAuthority")
-    return FileApprovals(args.store, authority)
+    spec = args.store or os.environ.get(SPEC_ENV)
+    if not spec:
+        raise CLIError(f"--store is required (or set {SPEC_ENV})")
+    try:
+        return approval_store(spec, authority)
+    except ValueError as exc:
+        raise CLIError(str(exc)) from exc
 
 
 def _cmd_approvals(args: argparse.Namespace) -> int:
+    store = _store(args)
+    try:
+        return _approvals(args, store)
+    finally:
+        close = getattr(store, "close", None)
+        if callable(close):
+            close()
+
+
+def _approvals(args: argparse.Namespace, store: Any) -> int:
     from locus.control import ApprovalAuthorityError  # noqa: PLC0415
 
-    store = _store(args)
     if args.action == "list":
         pending = store.pending()
         if args.json:
@@ -179,15 +203,18 @@ def _cmd_approvals(args: argparse.Namespace) -> int:
         print(json.dumps(asdict(record), indent=2, default=str))
         return 0
     verdict = "approved" if args.action == "approve" else "denied"
+    by = args.by or os.environ.get("LOCUS_APPROVER")
+    if not by:
+        raise CLIError("--by is required (or set LOCUS_APPROVER)")
     try:
-        record = store.decide(args.approval_id, verdict, by=args.by)
+        record = store.decide(args.approval_id, verdict, by=by, reason=args.reason or "")
     except ApprovalAuthorityError as exc:
         print(f"locus: refused: {exc}", file=sys.stderr)
         return 1
     except (KeyError, ValueError) as exc:
         print(f"locus: {exc}", file=sys.stderr)
         return 1
-    print(f"{record.approval_id}: {record.status}")
+    print(f"{record.approval_id}: {record.status} by {by}")
     return 0
 
 
@@ -222,6 +249,45 @@ def _cmd_audit_verify(args: argparse.Namespace) -> int:
     return 1
 
 
+def _cmd_policy(args: argparse.Namespace) -> int:
+    from locus.control.policy_file import PolicyDocument, PolicyFileError  # noqa: PLC0415
+    from locus.control.policy_lint import (  # noqa: PLC0415
+        action_from_json,
+        explain,
+        lint_document,
+    )
+    from locus.control.verification import VerificationResult  # noqa: PLC0415
+
+    try:
+        document = PolicyDocument.load(args.file)
+    except (PolicyFileError, OSError, ImportError) as exc:
+        raise CLIError(str(exc)) from exc
+    if args.action == "lint":
+        report = lint_document(document, environments=args.environments, kinds=args.kinds)
+        print(json.dumps(report.to_dict(), indent=2) if args.format == "json" else report.render())
+        return 0 if report.ok else 1
+    try:
+        action = action_from_json(args.action_json)
+    except (TypeError, ValueError) as exc:
+        raise CLIError(str(exc)) from exc
+    verdict = (
+        VerificationResult(
+            survives=True, confidence=args.verification, evidence_quality=args.verification
+        )
+        if args.verification is not None
+        else None
+    )
+    explanation = explain(
+        document.policy, action, verdict=verdict, spent_usd=args.spent_usd, source=document.source
+    )
+    print(
+        json.dumps(explanation.to_dict(), indent=2)
+        if args.format == "json"
+        else explanation.render()
+    )
+    return 0 if args.expect is None or explanation.decision.outcome == args.expect else 1
+
+
 def _cmd_serve(args: argparse.Namespace) -> int:
     from locus.server import AgentServer  # noqa: PLC0415
 
@@ -231,6 +297,25 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     except RuntimeError as exc:
         print(f"locus: {exc}", file=sys.stderr)
         return 1
+    return 0
+
+
+def _cmd_mcp(args: argparse.Namespace) -> int:
+    from locus.integrations.mcp_serve import MCPServeError, serve  # noqa: PLC0415
+
+    try:
+        serve(
+            args.target,
+            transport=args.transport,
+            host=args.host,
+            port=args.port,
+            path=args.path,
+            name=args.name,
+        )
+    except MCPServeError as exc:
+        raise CLIError(str(exc)) from exc
+    except ImportError as exc:
+        raise CLIError(str(exc)) from exc
     return 0
 
 
@@ -268,6 +353,125 @@ def _cmd_codex(args: argparse.Namespace) -> int:
     return 0
 
 
+def _load_judge(spec: str) -> Any:
+    """An ``LLMJudge`` from ``spec``: a judge, a model to wrap, or a factory for either."""
+    from locus.evaluation import LLMJudge  # noqa: PLC0415
+
+    obj = load_object(spec)
+    if callable(obj) and not hasattr(obj, "score") and not hasattr(obj, "complete"):
+        obj = obj()
+    if hasattr(obj, "score"):
+        return obj
+    if hasattr(obj, "complete"):
+        return LLMJudge(obj)
+    raise CLIError(f"{spec} is not a judge, a model, or a function returning one")
+
+
+def _gate_from_args(args: argparse.Namespace) -> Any:
+    from locus.evaluation import EvalGate  # noqa: PLC0415
+
+    return EvalGate(
+        min_pass_rate=args.min_pass_rate,
+        min_avg_score=args.min_avg_score,
+        max_not_graded=args.max_not_graded,
+        max_unstable=args.max_unstable,
+        no_regressions=not args.allow_regressions,
+        max_avg_score_drop=args.max_avg_score_drop,
+    )
+
+
+def _cmd_eval(args: argparse.Namespace) -> int:
+    from locus.evaluation import (  # noqa: PLC0415
+        EvalReport,
+        EvalRunner,
+        JudgeUnavailableError,
+        Rubric,
+        diff_reports,
+        load_cases,
+    )
+
+    def read(path: str) -> Any:
+        try:
+            return EvalReport.load(path)
+        except (OSError, ValueError) as exc:
+            raise CLIError(f"cannot read report {path}: {exc}") from exc
+
+    if args.action == "summary":
+        report = read(args.report)
+        print(report.to_markdown() if args.markdown else report.summary())
+        return 0
+    if args.action == "diff":
+        try:
+            diff = diff_reports(read(args.baseline), read(args.candidate), force=args.force)
+        except ValueError as exc:
+            raise CLIError(str(exc)) from exc
+        print(diff.to_markdown() if args.markdown else diff.summary())
+        return 1 if diff.regressed else 0
+    if args.action == "gate":
+        report = read(args.report)
+        baseline = read(args.baseline) if args.baseline else None
+        result = _gate_from_args(args).check(report, baseline=baseline, force=args.force)
+        print(result.summary())
+        return 0 if result.passed else 1
+
+    agent = load_agent(args.agent)
+    judge = _load_judge(args.judge) if args.judge else None
+    rubric = None
+    if args.rubric:
+        try:
+            rubric = Rubric.load(args.rubric)
+        except (OSError, ValueError, TypeError) as exc:
+            raise CLIError(f"cannot read rubric {args.rubric}: {exc}") from exc
+    try:
+        cases = load_cases(args.cases, rubric=rubric)
+    except (OSError, ValueError, TypeError) as exc:
+        raise CLIError(f"cannot read cases {args.cases}: {exc}") from exc
+    if args.tags:
+        wanted = set(args.tags)
+        cases = [case for case in cases if wanted & set(case.tags)]
+    if not cases:
+        raise CLIError("no cases to run")
+
+    runner = EvalRunner(agent, judge=judge, concurrency=args.concurrency, repeats=args.repeats)
+    try:
+        report = asyncio.run(runner.arun(cases))
+    except JudgeUnavailableError as exc:
+        raise CLIError(f"the judge was unavailable, nothing was graded: {exc}") from exc
+    print(report.summary())
+    if args.report:
+        print(f"report written to {report.save(args.report)}")
+    if args.store:
+        store = _open_report_store(args.store)
+        suite = args.suite or Path(args.cases).stem
+        stored = store.put(report, suite=suite)
+        print(f"report {stored.report_id} stored under suite {suite!r} in {store.spec}")
+    baseline = read(args.baseline) if args.baseline else None
+    result = _gate_from_args(args).check(report, baseline=baseline)
+    print(result.summary())
+    return 0 if result.passed else 1
+
+
+def _open_report_store(spec: str | None) -> Any:
+    from locus.evaluation import report_store  # noqa: PLC0415
+
+    try:
+        return report_store(spec)
+    except (ValueError, ImportError) as exc:
+        raise CLIError(str(exc)) from exc
+
+
+def _cmd_eval_trend(args: argparse.Namespace) -> int:
+    from locus.evaluation import trend  # noqa: PLC0415
+
+    store = _open_report_store(args.store)
+    try:
+        result = trend(store, suite=args.suite, last=args.last, fingerprint=args.fingerprint)
+    except Exception as exc:  # noqa: BLE001 — a store that cannot answer is a usage problem here
+        raise CLIError(f"cannot read the store {store.spec}: {exc}") from exc
+    print(result.to_markdown() if args.markdown else result.summary())
+    return 1 if result.regressed else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """The argument parser for ``locus``."""
     from locus import __version__  # noqa: PLC0415
@@ -294,7 +498,11 @@ def build_parser() -> argparse.ArgumentParser:
     resume.set_defaults(handler=_cmd_resume)
 
     approvals = commands.add_parser("approvals", help="list and decide held calls")
-    approvals.add_argument("--store", required=True, help="the FileApprovals JSON file")
+    approvals.add_argument(
+        "--store",
+        help="the approval store: a FileApprovals path, or memory://, file://, postgresql://, "
+        "redis://, oracle:// (default: $LOCUS_APPROVALS_STORE)",
+    )
     approvals.add_argument(
         "--authority", help="MODULE:ATTR naming an ApprovalAuthority checked on every decision"
     )
@@ -306,7 +514,8 @@ def build_parser() -> argparse.ArgumentParser:
     for verb in ("approve", "reject"):
         decide = actions.add_parser(verb, help=f"{verb} a held call")
         decide.add_argument("approval_id")
-        decide.add_argument("--by", required=True, help="who is deciding")
+        decide.add_argument("--by", help="who is deciding (default: $LOCUS_APPROVER)")
+        decide.add_argument("--reason", help="why, recorded with the decision")
     approvals.set_defaults(handler=_cmd_approvals)
 
     audit = commands.add_parser("audit", help="check an exported audit trail")
@@ -323,12 +532,75 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--head", help="the chain head anchored out of band")
     verify.set_defaults(handler=_cmd_audit_verify)
 
+    policy = commands.add_parser(
+        "policy", help="lint a policy file for gaps, or explain its decision for one action"
+    )
+    policy_actions = policy.add_subparsers(dest="action", required=True)
+    lint = policy_actions.add_parser(
+        "lint", help="report unreachable rules, uncovered environments and kinds never held"
+    )
+    lint.add_argument("file", help="a .yaml, .yml or .json policy file")
+    lint.add_argument(
+        "--environments", nargs="*", default=[], help="environments to check for a rule"
+    )
+    lint.add_argument("--kinds", nargs="*", default=[], help="action kinds to check for a hold")
+    lint.add_argument("--format", choices=["text", "json"], default="text")
+    lint.set_defaults(handler=_cmd_policy)
+    explain = policy_actions.add_parser("explain", help="the decision path for one action")
+    explain.add_argument("file", help="a .yaml, .yml or .json policy file")
+    explain.add_argument(
+        "--action",
+        dest="action_json",
+        required=True,
+        metavar="JSON",
+        help='the action, e.g. \'{"name": "refund", "kind": "payment", "blast_radius": 3}\'',
+    )
+    explain.add_argument(
+        "--spent-usd", type=float, default=0.0, help="what the action's scope has already spent"
+    )
+    explain.add_argument(
+        "--verification", type=float, help="confidence of a verification the finding survived"
+    )
+    explain.add_argument(
+        "--expect",
+        choices=["allow", "require_human", "deny"],
+        help="exit 1 unless the outcome is this one",
+    )
+    explain.add_argument("--format", choices=["text", "json"], default="text")
+    explain.set_defaults(handler=_cmd_policy)
+
     serve = commands.add_parser("serve", help="serve an agent over HTTP")
     serve.add_argument("agent")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
     serve.add_argument("--api-key", help="bearer key; or set LOCUS_SERVER_API_KEY")
     serve.set_defaults(handler=_cmd_serve)
+
+    mcp = commands.add_parser("mcp", help="expose an agent or a tool module over MCP")
+    mcp_actions = mcp.add_subparsers(dest="action", required=True)
+    mcp_serve = mcp_actions.add_parser(
+        "serve",
+        help="serve an agent (its tools plus run_agent) or every @tool in a module",
+    )
+    mcp_serve.add_argument(
+        "target",
+        help=(
+            "MODULE:ATTR or FILE.py:ATTR naming an Agent, a factory, a Tool or a list "
+            "of tools; or a module / FILE.py whose module-level tools are served"
+        ),
+    )
+    mcp_serve.add_argument(
+        "--transport", choices=["stdio", "http"], default="stdio", help="default stdio"
+    )
+    mcp_serve.add_argument("--host", default="127.0.0.1", help="with --transport http")
+    mcp_serve.add_argument("--port", type=int, default=8000, help="with --transport http")
+    mcp_serve.add_argument("--path", default="/mcp", help="with --transport http")
+    mcp_serve.add_argument("--name", help="the server name clients see")
+    mcp.set_defaults(handler=_cmd_mcp)
+
+    from locus.a2a.cli import register_a2a_commands  # noqa: PLC0415
+
+    register_a2a_commands(commands, load_agent)
     codex = commands.add_parser(
         "codex", help="install the Locus skill for Codex and start Codex with it"
     )
@@ -361,7 +633,99 @@ def build_parser() -> argparse.ArgumentParser:
     run_codex.set_defaults(codex_args=[])
     codex_actions.add_parser("path", help="print where the bundled skill is")
     codex.set_defaults(handler=_cmd_codex)
+
+    evaluate = commands.add_parser(
+        "eval", help="run an evaluation suite, diff two reports, or gate a build on one"
+    )
+    eval_actions = evaluate.add_subparsers(dest="action", required=True)
+    eval_run = eval_actions.add_parser(
+        "run", help="run the cases in a file against an agent and print the report"
+    )
+    eval_run.add_argument("cases", help="a .json, .jsonl or .yaml file of EvalCase objects")
+    eval_run.add_argument(
+        "--agent", required=True, help="MODULE:ATTR or FILE.py:ATTR naming an Agent or a factory"
+    )
+    eval_run.add_argument(
+        "--judge",
+        help="MODULE:ATTR naming an LLMJudge, a model to wrap in one, or a factory for either",
+    )
+    eval_run.add_argument("--rubric", help="a rubric file applied to cases that name none")
+    eval_run.add_argument("--repeats", type=int, default=1, help="readings per case")
+    eval_run.add_argument("--concurrency", type=int, default=4, help="cases run at once")
+    eval_run.add_argument("--tags", nargs="*", default=[], help="only cases carrying one of these")
+    eval_run.add_argument("--report", help="write the report as JSON here")
+    eval_run.add_argument(
+        "--store",
+        help="also keep the report in a store: a directory, file://, oracle://, oci:// or "
+        "s3:// (see locus.evaluation.stores)",
+    )
+    eval_run.add_argument(
+        "--suite",
+        help="the suite name the stored report is filed under (default: the cases file stem)",
+    )
+    eval_run.add_argument("--baseline", help="a saved report to gate regressions against")
+    _add_gate_arguments(eval_run)
+    eval_run.set_defaults(handler=_cmd_eval)
+
+    eval_diff = eval_actions.add_parser("diff", help="compare two saved reports case by case")
+    eval_diff.add_argument("baseline")
+    eval_diff.add_argument("candidate")
+    eval_diff.add_argument(
+        "--force", action="store_true", help="diff even when the suites' fingerprints differ"
+    )
+    eval_diff.add_argument("--markdown", action="store_true", help="print a Markdown table")
+    eval_diff.set_defaults(handler=_cmd_eval)
+
+    eval_gate = eval_actions.add_parser("gate", help="apply the gate to a saved report")
+    eval_gate.add_argument("report")
+    eval_gate.add_argument("--baseline", help="a saved report to gate regressions against")
+    eval_gate.add_argument(
+        "--force", action="store_true", help="gate even when the suites' fingerprints differ"
+    )
+    _add_gate_arguments(eval_gate)
+    eval_gate.set_defaults(handler=_cmd_eval)
+
+    eval_summary = eval_actions.add_parser("summary", help="print a saved report")
+    eval_summary.add_argument("report")
+    eval_summary.add_argument("--markdown", action="store_true", help="print a Markdown table")
+    eval_summary.set_defaults(handler=_cmd_eval)
+
+    eval_trend = eval_actions.add_parser(
+        "trend", help="compare the last reports of one suite kept in a store"
+    )
+    eval_trend.add_argument(
+        "--store",
+        help="the report store: a directory, file://, oracle://, oci:// or s3:// "
+        "(default: $LOCUS_EVAL_STORE)",
+    )
+    eval_trend.add_argument(
+        "--suite", required=True, help="the suite name reports were filed under"
+    )
+    eval_trend.add_argument("--last", type=int, default=10, help="how many reports (default 10)")
+    eval_trend.add_argument("--fingerprint", help="only reports of this suite fingerprint")
+    eval_trend.add_argument("--markdown", action="store_true", help="print a Markdown table")
+    eval_trend.set_defaults(handler=_cmd_eval_trend)
+    from locus.deploy.cli import add_deploy_command  # noqa: PLC0415
+
+    add_deploy_command(commands)
     return parser
+
+
+def _add_gate_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--min-pass-rate", type=float, default=1.0, help="over graded cases (default 1.0)"
+    )
+    parser.add_argument("--min-avg-score", type=float, help="0-1")
+    parser.add_argument("--max-not-graded", type=int, default=0, help="default 0")
+    parser.add_argument("--max-unstable", type=int, help="with --repeats")
+    parser.add_argument(
+        "--allow-regressions",
+        action="store_true",
+        help="with --baseline: do not fail on a case that passed before and fails now",
+    )
+    parser.add_argument(
+        "--max-avg-score-drop", type=float, help="with --baseline: the average may not drop by more"
+    )
 
 
 def _split_codex_args(argv: list[str]) -> tuple[list[str], list[str]]:

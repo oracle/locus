@@ -8,7 +8,7 @@ stream is the surface you render in a UI, forward to telemetry, and
 replay in original order when reviewing a run. (It is a faithful trace,
 not a tamper-evident ledger — for a hash-chained record of decisions,
 where each entry commits to the one before it,
-route them through the [`AuditTrail`](agentic-ai-security.md).)
+route them through the [`AuditTrail`](control-layer.md).)
 
 The events are frozen Pydantic classes — not strings, not
 `dict[str, Any]` blobs — designed to drop into a `match` statement that
@@ -123,7 +123,7 @@ agent did is what the in-memory stream says it did. Note the scope: this
 is **write-protection in memory only**. Once an event is serialised to
 SSE, a log, or a logging backend there is no integrity guarantee on the
 bytes; for a tamper-evident record route decisions through the
-[`AuditTrail`](agentic-ai-security.md) hash chain — each entry commits
+[`AuditTrail`](control-layer.md) hash chain — each entry commits
 to the one before it, so editing any record breaks verification.
 
 ## Sync wrapper — when you don't need the stream

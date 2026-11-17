@@ -60,6 +60,7 @@ from locus.harness.backend import (
     WorkspaceTextMixin,
     take_window,
 )
+from locus.harness.sandbox import SandboxMixin
 from locus.tools.path_safety import safe_resolve
 
 
@@ -255,7 +256,7 @@ def _kill_all(shells: dict[str, Shell]) -> None:
             kill_group(shell.proc)
 
 
-class LocalBackend(WorkspaceTextMixin):
+class LocalBackend(SandboxMixin, WorkspaceTextMixin):
     """Files under ``root`` on this machine, and this machine's shell.
 
     Args:
@@ -272,10 +273,11 @@ class LocalBackend(WorkspaceTextMixin):
         label: How the workspace describes itself to the model, and whether it
             is ``isolated`` — a backend inside a sandbox box is.
 
-    Commands still running when the backend is closed, garbage collected or
-    the interpreter exits are killed with their process groups. Each command
-    runs in its own session, which keeps it out of a terminal's hangup and a
-    supervisor's ``kill -- -pgid``, so nothing else would stop them.
+    Commands still running when the backend is stopped, closed, garbage
+    collected or the interpreter exits are killed with their process groups.
+    Each command runs in its own session, which keeps it out of a terminal's
+    hangup and a supervisor's ``kill -- -pgid``, so nothing else would stop
+    them.
     """
 
     def __init__(
@@ -308,9 +310,9 @@ class LocalBackend(WorkspaceTextMixin):
     def capabilities(self) -> BackendCapabilities:
         return self._capabilities
 
-    def close(self) -> None:
+    def _stop(self) -> None:
         """Kill every command still running."""
-        self._finalizer()
+        _kill_all(self._shells)
 
     # ------------------------------------------------------------- paths --
 
@@ -565,17 +567,19 @@ class LocalBackend(WorkspaceTextMixin):
         )
         assert shell._reader is not None  # noqa: S101, SLF001 - set by _spawn
         shell._reader.start()  # noqa: SLF001
-        finished = shell.wait(max(0.0, timeout))
+        finished = shell.wait(max(0.0, self._bounded(timeout)))
         if not finished:
             shell.kill()
         data, _, lost = shell.output.since(0)
-        return ExecResult(
+        result = ExecResult(
             exit_code=shell.proc.returncode if finished else None,
             output=data,
             truncated=lost > 0,
             timed_out=not finished,
             duration_s=shell.elapsed,
         )
+        self._record(command, result)
+        return result
 
     def _get(self, handle: str) -> Shell:
         with self._lock:
@@ -612,6 +616,7 @@ class LocalBackend(WorkspaceTextMixin):
             self._forget_old_locked()
         assert shell._reader is not None  # noqa: S101, SLF001 - set by _spawn
         shell._reader.start()  # noqa: SLF001
+        self._record(command, ExecResult(exit_code=None, output=b""), background=True)
         return shell.status()
 
     def _snapshot(self) -> list[Shell]:

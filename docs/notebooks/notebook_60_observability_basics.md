@@ -31,6 +31,15 @@ What this notebook covers:
   meters.
 - Read the per-run history buffer after the fact (replay semantics for
   late subscribers — reconstruct the ticket timeline after the run).
+- Record the same reply as OpenTelemetry spans. `TelemetryHook` names them
+  per the GenAI semantic conventions — one `invoke_agent` span, a `chat`
+  span per model call, an `execute_tool` span per tool call, `gen_ai.*`
+  attributes — and the in-memory exporter catches them without a backend
+  or a key; `validate_spans` then checks the trace against the
+  conventions. The [Observability](../concepts/observability.md#traces-and-metrics-over-otlp)
+  page lists every span and attribute, and its
+  [Export](../concepts/observability.md#export) section is where the
+  exporter for OCI APM or an open-source backend replaces the in-memory one.
 
 Inside `run_context()`, the think, tool and terminate steps of
 `agent.arun(...)` reach the `EventBus` as canonical `agent.*` events, and
@@ -62,6 +71,15 @@ after-the-fact QA review of the ticket relies on:
 
 {{ locus_source examples/notebook_60_observability_basics.py::part3_history_replay }}
 
+The same reply with `TelemetryHook` on the agent and an in-memory exporter
+on the tracer provider: the agent lends the hook its model and tools, so
+the `chat` span carries the model id and provider and the `execute_tool`
+span the tool's description, and `validate_spans` returns no problems for
+the tree the exporter caught (the span tree printer is the notebook's own
+helper):
+
+{{ locus_source examples/notebook_60_observability_basics.py::part4_semconv_spans }}
+
 ## Run it
 
 ```bash
@@ -81,7 +99,7 @@ LOCUS_MODEL_PROVIDER=mock python examples/notebook_60_observability_basics.py
 
 ## Output
 
-Running it offline — no credentials, bundled mock model — prints the bus singleton still `None` after a reply made outside `run_context`, the canonical event trail a tool-calling ticket reply leaves on the bus (`agent.think`, `agent.tool.started`, `agent.tool.completed`, `agent.think`, `agent.terminate`), then the two events a late subscriber replays from history after the run has finished:
+Running it offline — no credentials, bundled mock model — prints the bus singleton still `None` after a reply made outside `run_context`, the canonical event trail a tool-calling ticket reply leaves on the bus (`agent.think`, `agent.tool.started`, `agent.tool.completed`, `agent.think`, `agent.terminate`), the two events a late subscriber replays from history after the run has finished, then the span tree `TelemetryHook` records for the same reply under the GenAI semantic conventions (`invoke_agent support-desk` over two `locus.iteration` spans holding the `chat` and `execute_tool lookup_order` spans, token counts on each) with the conventions check passing:
 
 ```text
 
@@ -102,6 +120,17 @@ timeline events recorded (5):
 replayed 2 events from history (after the run finished)
   - agent.think
   - agent.terminate
+
+--- Part 4: OpenTelemetry spans under the GenAI semantic conventions ---
+agent reply: This is a mock response for testing purposes.
+spans recorded (6):
+  invoke_agent support-desk  [INTERNAL]  gen_ai.operation.name='invoke_agent', gen_ai.usage.input_tokens=20, gen_ai.usage.output_tokens=40
+    locus.iteration  [INTERNAL]
+      chat  [CLIENT]  gen_ai.operation.name='chat', gen_ai.usage.input_tokens=10, gen_ai.usage.output_tokens=20
+      execute_tool lookup_order  [INTERNAL]  gen_ai.operation.name='execute_tool', gen_ai.tool.name='lookup_order'
+    locus.iteration  [INTERNAL]
+      chat  [CLIENT]  gen_ai.operation.name='chat', gen_ai.usage.input_tokens=10, gen_ai.usage.output_tokens=20
+GenAI conventions check: ok
 ```
 <!-- notebook-output:end -->
 

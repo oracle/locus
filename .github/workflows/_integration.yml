@@ -64,8 +64,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev,sdk,pgvector,qdrant,chroma,mem0]"
-          pip install -e "packages/locus-sdk-security"
 
       - name: Run integration tests
         # -rs shows skip reasons so CI logs make clear which services were absent.
-        run: pytest tests/integration packages/locus-sdk-security/tests/integration -q -rs
+        run: pytest tests/integration -q -rs

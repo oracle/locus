@@ -41,7 +41,7 @@ Each `Specialist` is configured on its own. Its fields:
 - ✅ **Auditability** matters — the result's `decisions` record which
   specialists the router picked and its reasoning. A specialist does
   not execute the tool calls it returns, so run consequential actions
-  in your own code through [`admit()`](../security-context.md) so every
+  in your own code through [`admit()`](../control-layer.md) so every
   decision lands on the hash-chained `AuditTrail`.
 
 ## When NOT to use it

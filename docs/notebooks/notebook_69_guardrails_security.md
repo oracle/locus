@@ -40,7 +40,7 @@ What this notebook covers:
   on text arriving in tickets and tool output.
 - Indirect prompt injection detected in tool output and surfaced as a grounded
   `Evidence` through `ground_finding`, tagged OWASP LLM01, OWASP LLM02 and
-  MITRE ATLAS AML.T0051 ([threat scenarios](../concepts/threat-scenarios.md)).
+  MITRE ATLAS AML.T0051.
 - Tool denylist versus allowlist in `on_before_tool_call`.
 - Secret-leakage filtering with `ContentFilterHook`, and stacked hooks through
   `HookRegistry`.
@@ -94,8 +94,6 @@ example also runs offline with no credentials. Set `LOCUS_MODEL_PROVIDER`
   to, and the built-in `GuardrailsHook` and `ContentFilterHook`.
 - [GSAR — typed grounding](../concepts/gsar.md) — the score and decision
   behind `ground_finding`.
-- [Threat scenarios](../concepts/threat-scenarios.md) — which guardrail covers
-  which OWASP and MITRE ATLAS item.
 - [Trace hygiene](notebook_70_guardrails_advanced.md) — `OutputFilterHook`,
   which redacts PII from the model's reply and applies `TopicPolicy` and
   `ContentPolicy` to it.

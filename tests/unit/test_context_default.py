@@ -324,3 +324,19 @@ def test_the_message_window_fallback_says_how_to_name_the_window_once(
 def test_an_explicit_window_must_be_positive() -> None:
     with pytest.raises(ValueError):
         _agent(_unknown_model(), context_window=0)
+
+
+def test_an_oci_model_id_gets_the_summarising_default(caplog: pytest.LogCaptureFixture) -> None:
+    # The id as an ``OCIChatCompletionsModel`` carries it, and as the agent is
+    # given it: both resolve the window of the model OCI serves.
+    from locus.agent import initializer
+
+    for name in ("openai.gpt-4.1", "oci:openai.gpt-4.1"):
+        initializer._warned_unknown.discard(name)
+        model = FunctionModel(lambda m, t: text("ok"), context_window=None)
+        model.config = SimpleNamespace(model=name)  # type: ignore[attr-defined]
+        with caplog.at_level("WARNING", logger="locus.agent.initializer"):
+            agent = _agent(model)
+        assert isinstance(agent._conversation_manager, ContextCompactor), name
+        assert agent._conversation_manager.context_length == 1_000_000
+    assert not [r for r in caplog.records if "No context window known" in r.getMessage()]

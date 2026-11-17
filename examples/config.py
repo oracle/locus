@@ -659,20 +659,52 @@ def _get_anthropic_model(**kwargs: Any) -> Any:
     )
 
 
+def get_embedding_provider() -> str:
+    """Which embedding provider the RAG notebooks use: ``openai`` or ``oci``.
+
+    Reads ``LOCUS_EMBEDDING_PROVIDER`` first. If it isn't set, auto-detects:
+    OpenAI when ``OPENAI_API_KEY`` is present, otherwise OCI Generative AI when
+    an OCI profile is configured, otherwise OpenAI (so the error names the key
+    that is missing).
+    """
+    explicit = os.environ.get("LOCUS_EMBEDDING_PROVIDER", "").lower()
+    if explicit:
+        return explicit
+    if os.environ.get("OPENAI_API_KEY"):
+        return "openai"
+    if _oci_env("PROFILE"):
+        return "oci"
+    return "openai"
+
+
 def get_embedder(**kwargs: Any) -> Any:
     """Return the embedding model for the RAG notebooks.
 
-    Mirrors :func:`get_model`: the id comes from ``LOCUS_EMBEDDING_MODEL`` so
-    the notebooks can be pointed at a self-hosted embedding endpoint (vLLM,
-    Ollama, LM Studio, TEI) instead of only api.openai.com. Provider
-    credentials and ``OPENAI_BASE_URL`` are read by the client as usual.
+    Mirrors :func:`get_model`: the provider comes from
+    :func:`get_embedding_provider` and the id from ``LOCUS_EMBEDDING_MODEL``
+    (or ``model=``). With ``openai`` the notebooks can be pointed at a
+    self-hosted embedding endpoint (vLLM, Ollama, LM Studio, TEI) through
+    ``OPENAI_BASE_URL``; with ``oci`` the Cohere embedding models served by
+    OCI Generative AI are used with the same ``OCI_*`` settings as the chat
+    models (``cohere.embed-v4.0`` by default).
     """
+    provider = get_embedding_provider()
+    model_id = kwargs.pop("model", None) or os.environ.get("LOCUS_EMBEDDING_MODEL")
+    if provider == "oci":
+        from locus.rag import OCIEmbeddings
+
+        return OCIEmbeddings(
+            model_id=model_id or "cohere.embed-v4.0",
+            profile_name=_oci_env("PROFILE", "DEFAULT") or "DEFAULT",
+            compartment_id=_oci_env("COMPARTMENT_ID") or _oci_env("COMPARTMENT") or "",
+            auth_type=_oci_env("AUTH_TYPE", "api_key") or "api_key",
+            service_endpoint=_oci_env("ENDPOINT"),
+            region=_oci_env("REGION"),
+            **kwargs,
+        )
     from locus.rag import OpenAIEmbeddings
 
-    model_id = kwargs.pop("model", None) or os.environ.get(
-        "LOCUS_EMBEDDING_MODEL", "text-embedding-3-small"
-    )
-    return OpenAIEmbeddings(model=model_id, **kwargs)
+    return OpenAIEmbeddings(model=model_id or "text-embedding-3-small", **kwargs)
 
 
 def get_embedding_dimension(default: int = 1536) -> int:

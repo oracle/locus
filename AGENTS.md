@@ -38,8 +38,7 @@ there.
 | Path | Purpose |
 |---|---|
 | `src/locus/` | the SDK; the module map is in `README.md` under "Repo layout" |
-| `packages/locus-sdk-security/` | `locus-sdk-security`, the security findings package, released in lockstep |
-| `examples/` | 89 numbered notebooks; each runs against OCI Generative AI with a profile, or against the bundled mock model (`examples/config.py`) without one |
+| `examples/` | 80 numbered notebooks; each runs against OCI Generative AI with a profile, or against the bundled mock model (`examples/config.py`) without one |
 | `docs/`, `mkdocs.yml`, `hooks/`, `overrides/` | the documentation site, published at [locusagents.ai](https://locusagents.ai/) |
 | `tests/unit/`, `tests/integration/`, `tests/docs/` | unit tests (no credentials), integration tests (gated on credentials and services), site build tests |
 | `codex/` | the specification and prompt for building a first agent with Codex |
@@ -54,8 +53,7 @@ there.
   the unit suite under its coverage gate), or the same by hand:
   `ruff format --check src tests examples packages`,
   `ruff check src tests examples packages`,
-  `mypy src/locus packages/locus-sdk-security/src/locus_security`,
-  `pytest tests/unit packages/locus-sdk-security/tests/unit`.
+  `mypy src/locus`, `pytest tests/unit`.
 - Documentation: `mkdocs build --strict` must pass; every code block on a
   page must run as written; the prose carries no dates, account or tenancy
   names, test counts or claims of having been verified; identifiers in prose

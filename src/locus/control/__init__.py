@@ -13,9 +13,7 @@ code that runs *before* the action, not a rule in the prompt — so a model that
 fooled still cannot act outside your policy.
 
 This is framework- and domain-agnostic: the control runtime applies to any
-agent that takes real actions. Domain tooling built on this core ships as
-separate, opt-in distributions (the security-domain tooling is
-``locus-sdk-security``, imported as :mod:`locus_security`).
+agent that takes real actions.
 
     from locus.control import Action, ControlPolicy, AuditTrail, admit, AdmissionError
 
@@ -59,6 +57,10 @@ from locus.control.approvals import (
     InMemoryApprovals,
     call_digest,
 )
+from locus.control.approvals_oracle import OracleApprovals
+from locus.control.approvals_postgres import PostgresApprovals
+from locus.control.approvals_redis import RedisApprovals
+from locus.control.approvals_spec import approval_store, store_spec
 from locus.control.audit import (
     AuditRecord,
     AuditReport,
@@ -68,6 +70,19 @@ from locus.control.audit import (
     check_jsonl,
     verify_jsonl,
 )
+from locus.control.audit_anchor import (
+    Anchor,
+    AnchorError,
+    AnchorReport,
+    AnchorStore,
+    OCIBucketAnchorStore,
+    S3AnchorStore,
+    anchor_periodically,
+    anchor_trail,
+    latest_anchor,
+    verify_anchor,
+)
+from locus.control.audit_oracle import OracleAuditTrail
 from locus.control.findings import (
     Confidence,
     Evidence,
@@ -90,6 +105,8 @@ from locus.control.grounded import (
     ground_fingerprint,
     is_finding,
 )
+from locus.control.holds import PendingHold, holds_of, pending_holds
+from locus.control.judge import JudgeVerdict, ToolCallJudge
 from locus.control.permissions import (
     VERDICT_POLICY,
     PermissionMatch,
@@ -104,8 +121,18 @@ from locus.control.policy import (
     ApprovalDecision,
     ApprovalOutcome,
     ControlPolicy,
+    PolicySource,
+    RuleCheck,
     approve,
+    evaluate_rules,
 )
+from locus.control.policy_file import (
+    PolicyDocument,
+    PolicyFileError,
+    PolicyWatcher,
+    policy_hash,
+)
+from locus.control.policy_lint import LintFinding, LintReport, explain, lint_policy
 from locus.control.shell import ShellCommand, SimpleCommand, parse_command
 from locus.control.spend import FileSpendLedger, InMemorySpendLedger, SpendLedger
 from locus.control.taxonomy import (
@@ -126,6 +153,7 @@ from locus.control.verification import (
     VerificationResult,
     verify,
 )
+from locus.tools.integrity import ToolCallIntegrityError, ToolCallSignature, ToolCallSigner
 
 
 __all__ = [
@@ -144,6 +172,15 @@ __all__ = [
     "ApprovalRecord",
     "ApprovalStore",
     "FileApprovals",
+    "OracleApprovals",
+    "PostgresApprovals",
+    "RedisApprovals",
+    "approval_store",
+    "store_spec",
+    # What a paused thread's checkpoint says it waits on
+    "PendingHold",
+    "holds_of",
+    "pending_holds",
     # Who may decide a held call
     "ApprovalAuthority",
     "ApprovalAuthorityError",
@@ -160,6 +197,9 @@ __all__ = [
     "admit",
     "admit_sync",
     "AdmissionError",
+    # A model that reads the proposed call and can tighten the decision
+    "ToolCallJudge",
+    "JudgeVerdict",
     # Operator-written allow / ask / deny rules, fed to admission as labels
     "PermissionRule",
     "PermissionRules",
@@ -178,6 +218,18 @@ __all__ = [
     "ApprovalDecision",
     "ApprovalOutcome",
     "SANDBOXED_TAG",
+    "RuleCheck",
+    "evaluate_rules",
+    # The policy as a document: file form, content hash, hot reload, lint
+    "PolicyDocument",
+    "PolicyFileError",
+    "PolicySource",
+    "PolicyWatcher",
+    "policy_hash",
+    "LintFinding",
+    "LintReport",
+    "explain",
+    "lint_policy",
     # Tamper-evident audit
     "AuditTrail",
     "AuditRecord",
@@ -187,6 +239,22 @@ __all__ = [
     "Ed25519Signer",
     "verify_jsonl",
     "AuditHook",
+    # Durable audit backends: Oracle immutable/blockchain table, object-storage anchors
+    "OracleAuditTrail",
+    "Anchor",
+    "AnchorError",
+    "AnchorReport",
+    "AnchorStore",
+    "OCIBucketAnchorStore",
+    "S3AnchorStore",
+    "anchor_periodically",
+    "anchor_trail",
+    "latest_anchor",
+    "verify_anchor",
+    # Tool-call integrity — what the runtime enforces between model and executor
+    "ToolCallSigner",
+    "ToolCallSignature",
+    "ToolCallIntegrityError",
     # Governed-by-default agent wrapper
     "GovernedAgent",
     "governed_agent",

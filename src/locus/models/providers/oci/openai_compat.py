@@ -18,6 +18,9 @@ Two mutually-exclusive auth modes are supported. Pass **exactly one**:
 - ``auth_type="instance_principal"`` / ``"resource_principal"`` — for
   workloads running on OCI compute or in OCI Functions / OKE with
   workload identity.
+- ``auth_type="api_key"`` (``"security_token"`` too) — the profile path by
+  another name: sign with ``profile=``, else the ``OCI_PROFILE`` profile,
+  else ``DEFAULT``. It is what ``LOCUS_OCI_AUTH_TYPE`` defaults to.
 
 The endpoint is ``/openai/v1/chat/completions``. We do **not** use the
 Responses API and do **not** require a GenAI Project OCID — those imply
@@ -48,10 +51,12 @@ Example::
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator, Callable
+import os
+from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
+import httpx
 from pydantic import Field
 
 from locus.core.loop_bound import loop_bound
@@ -69,8 +74,42 @@ if TYPE_CHECKING:
 
 DEFAULT_OCI_GENAI_REGION = "us-chicago-1"
 
-AuthType = Literal["instance_principal", "resource_principal"]
-_VALID_AUTH_TYPES: tuple[str, ...] = ("instance_principal", "resource_principal")
+AuthType = Literal[
+    "instance_principal",
+    "resource_principal",
+    "oke_workload_identity",
+    "api_key",
+    "security_token",
+    "session_token",
+]
+_VALID_AUTH_TYPES: tuple[str, ...] = (
+    "instance_principal",
+    "resource_principal",
+    "oke_workload_identity",
+)
+
+#: ``auth_type`` values that name the profile path rather than a principal:
+#: the API key of a ``~/.oci/config`` profile (the default of every other OCI
+#: auth switch in the SDK and of ``LOCUS_OCI_AUTH_TYPE``) or the session
+#: token the profile names. The profile's shape picks the signer either way.
+PROFILE_AUTH_TYPES: frozenset[str] = frozenset({"api_key", "security_token", "session_token"})
+
+
+def resolve_profile_auth(
+    profile: str | None, auth_type: str | None
+) -> tuple[str | None, str | None]:
+    """Fold a profile-path ``auth_type`` into ``profile``.
+
+    ``auth_type="api_key"`` (or ``"security_token"`` / ``"session_token"``)
+    says "sign with a profile": the result is ``(profile, None)`` with the
+    profile taken from ``profile=``, else ``LOCUS_OCI_PROFILE`` / ``OCI_PROFILE``,
+    else ``DEFAULT`` — the section ``oci.config`` reads on its own. Any other
+    pair is returned as given.
+    """
+    if auth_type in PROFILE_AUTH_TYPES:
+        env_profile = os.environ.get("LOCUS_OCI_PROFILE") or os.environ.get("OCI_PROFILE")
+        return profile or env_profile or "DEFAULT", None
+    return profile, auth_type
 
 
 def build_oci_openai_base_url(region: str) -> str:
@@ -78,12 +117,61 @@ def build_oci_openai_base_url(region: str) -> str:
     return f"https://inference.generativeai.{region}.oci.oraclecloud.com/openai/v1"
 
 
+#: A sync callable handed each outgoing :class:`httpx.Request` (``on_request=``).
+RequestHook = Callable[[httpx.Request], None]
+#: A sync callable handed each :class:`httpx.Response` as it arrives (``on_response=``).
+ResponseHook = Callable[[httpx.Response], None]
+
+_ON_REQUEST_DESCRIPTION = (
+    "Called with each outgoing httpx.Request after it is signed and before it "
+    "is sent: the seam for seeing what goes on the wire (``request.content`` is "
+    "the JSON body, ``request.headers`` the signed headers) in a test or when "
+    "debugging. Runs once per HTTP attempt, so a retry shows twice. None "
+    "(default) installs no hook."
+)
+_ON_RESPONSE_DESCRIPTION = (
+    "Called with each httpx.Response as its headers arrive and before the body "
+    "is read: ``status_code``, ``headers`` and ``request`` are available, the "
+    "body is not yet. Runs once per HTTP attempt. None (default) installs no "
+    "hook."
+)
+
+
+def request_event_hooks(
+    on_request: RequestHook | None,
+    on_response: ResponseHook | None,
+) -> dict[str, list[Callable[..., Awaitable[None]]]]:
+    """The httpx ``event_hooks`` mapping for a pair of sync inspection callables.
+
+    :class:`httpx.AsyncClient` awaits its hooks, so each sync callable is
+    wrapped in a coroutine function; an absent callable installs nothing. The
+    HTTP-backed OCI models (:class:`OCIChatCompletionsModel`,
+    :class:`~locus.models.providers.oci.OCIResponsesModel`) build their
+    client with this so ``on_request=`` / ``on_response=`` behave the same
+    on both transports.
+    """
+    hooks: dict[str, list[Callable[..., Awaitable[None]]]] = {}
+    if on_request is not None:
+
+        async def _request(request: httpx.Request) -> None:
+            on_request(request)
+
+        hooks["request"] = [_request]
+    if on_response is not None:
+
+        async def _response(response: httpx.Response) -> None:
+            on_response(response)
+
+        hooks["response"] = [_response]
+    return hooks
+
+
 class OCIChatCompletionsConfig(OpenAIConfig):
     """Configuration for :class:`OCIChatCompletionsModel`.
 
     Inherits all OpenAI knobs from :class:`OpenAIConfig`. Adds region,
     profile, ``auth_type``, ``compartment_id``, and ``config_file`` for OCI
-    auth selection.
+    auth selection, and the ``on_request`` / ``on_response`` inspection hooks.
     """
 
     region: str = Field(
@@ -96,7 +184,10 @@ class OCIChatCompletionsConfig(OpenAIConfig):
     )
     auth_type: str | None = Field(
         default=None,
-        description='"instance_principal" or "resource_principal"',
+        description=(
+            '"instance_principal", "resource_principal" or "oke_workload_identity"; '
+            '"api_key" / "security_token" fold into profile= at construction'
+        ),
     )
     config_file: str = Field(
         default="~/.oci/config",
@@ -110,6 +201,8 @@ class OCIChatCompletionsConfig(OpenAIConfig):
             "Required for instance_principal / resource_principal."
         ),
     )
+    on_request: RequestHook | None = Field(default=None, description=_ON_REQUEST_DESCRIPTION)
+    on_response: ResponseHook | None = Field(default=None, description=_ON_RESPONSE_DESCRIPTION)
 
 
 def _load_profile_config(profile: str, config_file: str) -> dict[str, Any]:
@@ -312,9 +405,15 @@ def _build_instance_principal_signer() -> AbstractBaseSigner:
 
 
 def _build_resource_principal_signer() -> AbstractBaseSigner:
-    from oci.auth.signers import get_resource_principals_signer
+    from locus._oci_auth import resource_principal_signer
 
-    return get_resource_principals_signer()
+    return cast("AbstractBaseSigner", resource_principal_signer("resource_principal"))
+
+
+def _build_oke_workload_identity_signer() -> AbstractBaseSigner:
+    from locus._oci_auth import resource_principal_signer
+
+    return cast("AbstractBaseSigner", resource_principal_signer("oke_workload_identity"))
 
 
 def _refresh_callable_for(
@@ -370,6 +469,8 @@ def _refresh_callable_for(
         return _build_instance_principal_signer
     if auth_type == "resource_principal":
         return _build_resource_principal_signer
+    if auth_type == "oke_workload_identity":
+        return _build_oke_workload_identity_signer
 
     # Case 2: SecurityTokenSigner rebuilt from disk.
     if profile is not None and config_file is not None:
@@ -431,6 +532,8 @@ class OCIChatCompletionsModel(OpenAIModel):
         base_url: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
+        on_request: RequestHook | None = None,
+        on_response: ResponseHook | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize the OCI OpenAI-compat model.
@@ -440,13 +543,16 @@ class OCIChatCompletionsModel(OpenAIModel):
                 ``meta.llama-3.3-70b-instruct``).
             profile: OCI config profile name from ``config_file``. Mutually
                 exclusive with ``auth_type``.
-            auth_type: ``"instance_principal"`` or ``"resource_principal"``.
-                Mutually exclusive with ``profile``. Requires
-                ``compartment_id``.
+            auth_type: ``"instance_principal"``, ``"resource_principal"`` or
+                ``"oke_workload_identity"``: a principal, mutually exclusive
+                with ``profile`` and requiring ``compartment_id``. Or
+                ``"api_key"`` (``"security_token"``), which is the profile
+                path by another name: ``profile=`` is used, else the
+                ``OCI_PROFILE`` profile, else ``DEFAULT``.
             compartment_id: OCI compartment OCID, sent as
                 ``opc-compartment-id``. Auto-derived from the profile's
                 tenancy under ``profile=``. Must be supplied explicitly
-                under ``auth_type=``.
+                under a principal ``auth_type=``.
             region: OCI region hosting the inference endpoint.
             config_file: Path to the OCI config file (used with ``profile``).
             base_url: Override the derived endpoint URL (e.g. for a custom
@@ -455,6 +561,13 @@ class OCIChatCompletionsModel(OpenAIModel):
                 this is automatically forwarded as
                 ``max_completion_tokens`` — see :class:`OpenAIModel`.
             temperature: Default sampling temperature.
+            on_request: Sync callable handed each outgoing :class:`httpx.Request`
+                after signing, before it is sent — ``request.content`` is the
+                JSON body. The seam for request-shape tests and for seeing what
+                goes on the wire; once per HTTP attempt. ``None`` installs none.
+            on_response: Sync callable handed each :class:`httpx.Response` as
+                its headers arrive (``status_code``, ``headers``; the body is
+                not read yet). ``None`` installs none.
             **kwargs: Forwarded to :class:`OCIChatCompletionsConfig` (top_p, seed,
                 frequency_penalty, presence_penalty, ...).
 
@@ -463,14 +576,16 @@ class OCIChatCompletionsModel(OpenAIModel):
                 is invalid, or if ``auth_type`` is set without
                 ``compartment_id``.
         """
+        profile, auth_type = resolve_profile_auth(profile, auth_type)
         modes_set = sum(x is not None for x in (profile, auth_type))
         if modes_set != 1:
             msg = (
                 "OCIChatCompletionsModel: specify exactly one auth mode. "
                 "Either profile='<section_from_~/.oci/config>' (api-key path; "
-                "use profile='DEFAULT' for the default section), "
+                "use profile='DEFAULT' for the default section, or "
+                "auth_type='api_key' for the OCI_PROFILE / DEFAULT section), "
                 "or auth_type='instance_principal'|'resource_principal'|"
-                "'security_token'|'delegation_token' together with compartment_id=. "
+                "'oke_workload_identity' together with compartment_id=. "
                 f"Got profile={profile!r}, auth_type={auth_type!r}."
             )
             raise ValueError(msg)
@@ -493,6 +608,8 @@ class OCIChatCompletionsModel(OpenAIModel):
             "base_url",
             "max_tokens",
             "temperature",
+            "on_request",
+            "on_response",
         ):
             kwargs.pop(explicit, None)
 
@@ -525,6 +642,8 @@ class OCIChatCompletionsModel(OpenAIModel):
             config_file=config_file,
             max_tokens=max_tokens,
             temperature=temperature,
+            on_request=on_request,
+            on_response=on_response,
             **kwargs,
         )
         # Skip OpenAIModel.__init__ — it would rebuild the config without
@@ -662,7 +781,6 @@ class OCIChatCompletionsModel(OpenAIModel):
         """Build the AsyncOpenAI client wired with the OCI request signer."""
 
         def build() -> openai.AsyncOpenAI:
-            import httpx
             import openai
 
             from locus.models.providers.oci._signing import OCIRequestSigner
@@ -699,6 +817,7 @@ class OCIChatCompletionsModel(OpenAIModel):
                     refresh_interval=600.0,
                 ),
                 timeout=httpx.Timeout(self.config.request_timeout),
+                event_hooks=request_event_hooks(self.config.on_request, self.config.on_response),
             )
             return openai.AsyncOpenAI(
                 api_key="not-used",
@@ -716,6 +835,8 @@ class OCIChatCompletionsModel(OpenAIModel):
             return _build_instance_principal_signer()
         if self.config.auth_type == "resource_principal":
             return _build_resource_principal_signer()
+        if self.config.auth_type == "oke_workload_identity":
+            return _build_oke_workload_identity_signer()
         # Validation in __init__ guarantees profile is set if we got here.
         assert self.config.profile is not None  # noqa: S101 — invariant
         return _build_signer_from_profile(self.config.profile, self.config.config_file)
@@ -723,7 +844,9 @@ class OCIChatCompletionsModel(OpenAIModel):
 
 __all__ = [
     "DEFAULT_OCI_GENAI_REGION",
+    "PROFILE_AUTH_TYPES",
     "OCIChatCompletionsConfig",
     "OCIChatCompletionsModel",
     "build_oci_openai_base_url",
+    "resolve_profile_auth",
 ]

@@ -18,19 +18,142 @@ in particular fails in both directions: it passes on an answer that happens to
 contain the word, and fails on a correct answer phrased differently. Where the
 right answer is not one exact string, something has to read it.
 
-`LLMJudge` grades against a written rubric and returns a typed `Verdict`. Two
+`LLMJudge` grades against a rubric and returns a typed `Verdict`. Three
 things it deliberately does not do:
 
 - **It does not retry until it passes.** A judge you re-roll is not a judge.
 - **It does not score zero when it cannot be reached.** An unusable judge
   raises, because a "failing" eval that actually means *the judge was down* is
   worse than no eval.
+- **It does not turn a reply it cannot read into a number.** That verdict is
+  `abstained`, and the runner reports the case as not graded.
 
 Use a different model from the one under test where you can — a model grading
-its own output is measuring self-consistency, not correctness.
+its own output is measuring self-consistency, not correctness. The runner
+stamps `provenance.self_graded` when it can tell.
 
 ::: locus.evaluation.judge.LLMJudge
 ::: locus.evaluation.judge.Verdict
+::: locus.evaluation.judge.JudgeProvenance
+::: locus.evaluation.judge.Comparison
+::: locus.evaluation.judge.model_id_of
+
+## The rubric as data
+
+A string rubric is one pass criterion the judge answers. A `Rubric` names
+dimensions the judge scores 0–100; the composite, the letter and the pass are
+then computed here, from the weights and thresholds, and the judge's own
+overall call survives only as `judge_reported_passed`. `revision()` identifies
+the rubric and prompt a verdict was measured under.
+
+::: locus.evaluation.rubric.Rubric
+::: locus.evaluation.rubric.Dimension
+::: locus.evaluation.rubric.Cap
+
+## The run's own evidence
+
+The run's tool executions, as rows with stable ids a claim can cite. Receipts
+and the claims whose figures the evidence carries are settled by code; the
+judge settles the rest and its citations are verified against the rows. The
+gate's refusal contract (`status: denied` or `held_for_approval` on a tool
+result) is what `forbidden_tools` and `expected_refusals` read.
+
+::: locus.evaluation.evidence.EvidenceLedger
+::: locus.evaluation.evidence.EvidenceRow
+::: locus.evaluation.evidence.ReceiptCheck
+::: locus.evaluation.evidence.ClaimCheck
+::: locus.evaluation.evidence.ToolCallExpectation
+::: locus.evaluation.evidence.settle_receipts
+::: locus.evaluation.evidence.settle_claims
+
+## Comparable reports, a diff and a gate
+
+::: locus.evaluation.framework.suite_fingerprint
+::: locus.evaluation.framework.TagSummary
+::: locus.evaluation.report.diff_reports
+::: locus.evaluation.report.ReportDiff
+::: locus.evaluation.report.CaseDiff
+::: locus.evaluation.report.EvalGate
+::: locus.evaluation.report.GateResult
+
+## Cases as data
+
+::: locus.evaluation.datasets.load_cases
+::: locus.evaluation.datasets.dump_cases
+
+## How far to trust a verdict
+
+Pure functions over verdicts and grade pairs. `EvalRunner` calls
+`consistency` with `repeats=` and `panel_agreement` / `trust_decision` with
+`judges=`; the rest read verdicts you collected elsewhere.
+
+::: locus.evaluation.reliability.consistency
+::: locus.evaluation.reliability.Consistency
+::: locus.evaluation.reliability.panel_agreement
+::: locus.evaluation.reliability.PanelAgreement
+::: locus.evaluation.reliability.trust_decision
+::: locus.evaluation.reliability.TrustDecision
+::: locus.evaluation.reliability.TrustGates
+::: locus.evaluation.reliability.cohen_kappa
+::: locus.evaluation.reliability.Kappa
+::: locus.evaluation.reliability.calibration_drift
+::: locus.evaluation.reliability.CalibrationDrift
+::: locus.evaluation.reliability.wilson_interval
+::: locus.evaluation.reliability.bootstrap_ci
+::: locus.evaluation.reliability.publication_gates
+::: locus.evaluation.reliability.ReliabilityGates
+::: locus.evaluation.reliability.HoldReason
+
+## Scoring the path
+
+Three evaluators read the run's path off the evidence ledger with no model
+call: the sequence of tool calls, the set of tools chosen, the arguments of one
+tool's call compared under its schema. Each is data on the case
+(`evaluators=[...]`), one named check, and a typed verdict with provenance.
+
+::: locus.evaluation.evaluators.TrajectoryMatch
+::: locus.evaluation.evaluators.ToolSelection
+::: locus.evaluation.evaluators.ArgumentCorrectness
+::: locus.evaluation.evaluators.EvaluatorVerdict
+::: locus.evaluation.evaluators.EvaluatorProvenance
+::: locus.evaluation.evaluators.ArgumentMismatch
+
+## A simulated user
+
+A persona and a goal on the case; a model plays that user against the agent
+within a turn budget, and the whole conversation is graded.
+
+::: locus.evaluation.simulator.SimulatedUser
+::: locus.evaluation.simulator.UserSimulator
+::: locus.evaluation.simulator.Conversation
+::: locus.evaluation.simulator.ConversationTurn
+::: locus.evaluation.simulator.SimulatorUnavailableError
+
+## Online evaluation
+
+Live runs sampled off the event bus, graded in the background with the
+suite's checks, folded into an ordinary report.
+
+::: locus.evaluation.online.OnlineEvaluator
+::: locus.evaluation.online.OnlineBudget
+::: locus.evaluation.online.RecordedRun
+::: locus.evaluation.online.RecordedToolCall
+::: locus.evaluation.online.every_nth
+::: locus.evaluation.online.fraction
+::: locus.evaluation.framework.EvalRunner.agrade
+
+## Report stores and the trend
+
+::: locus.evaluation.stores.report_store
+::: locus.evaluation.stores.ReportStore
+::: locus.evaluation.stores.StoredReport
+::: locus.evaluation.stores.FileReportStore
+::: locus.evaluation.stores.OracleReportStore
+::: locus.evaluation.stores.OCIBucketReportStore
+::: locus.evaluation.stores.S3ReportStore
+::: locus.evaluation.stores.trend
+::: locus.evaluation.stores.Trend
+::: locus.evaluation.stores.TrendPoint
 
 ## Asserting the order, not just the membership
 

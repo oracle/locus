@@ -1,0 +1,11 @@
+apiVersion: v2
+name: locus-agent
+description: A Locus AgentServer on Kubernetes (OKE); installed by `locus deploy` or with helm directly.
+type: application
+version: 0.1.0
+appVersion: 5.5.0
+keywords:
+- locus
+- agent
+- oracle
+home: https://github.com/oracle/locus

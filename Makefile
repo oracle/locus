@@ -17,10 +17,10 @@ test-fast:
 	hatch run test-fast
 
 integration_tests:
-	hatch run pytest tests/integration/ packages/locus-sdk-security/tests/integration/ -v
+	hatch run pytest tests/integration/ -v
 
 test-all:
-	hatch run pytest tests/ packages/locus-sdk-security/tests/ -v
+	hatch run pytest tests/ -v
 
 ######################
 # LINTING AND FORMATTING
@@ -60,11 +60,8 @@ clean:
 # BUILD & PUBLISH
 ######################
 
-# Both distributions land in dist/: locus-sdk (the core runtime) and
-# locus-sdk-security (the opt-in security-domain tooling).
 build:
 	hatch build
-	cd packages/locus-sdk-security && hatch build ../../dist
 
 publish:
 	hatch publish
@@ -95,5 +92,5 @@ help:
 	@echo '  make clean             - remove build artifacts and envs'
 	@echo ''
 	@echo 'Build & Publish:'
-	@echo '  make build             - build locus-sdk + locus-sdk-security'
+	@echo '  make build             - build locus-sdk'
 	@echo '  make publish           - publish to PyPI'

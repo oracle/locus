@@ -80,7 +80,7 @@ that already exports `OCI_PROFILE` works unchanged. See
 | Variable | Used by |
 |---|---|
 | `LOCUS_OCI_PROFILE` / `OCI_PROFILE` | `~/.oci/config` profile; when neither is set the notebooks pick `[DEFAULT]` or the only named profile |
-| `LOCUS_OCI_AUTH_TYPE` / `OCI_AUTH_TYPE` | `api_key` (default), `security_token`, `instance_principal`, `resource_principal` |
+| `LOCUS_OCI_AUTH_TYPE` / `OCI_AUTH_TYPE` | `api_key` (default), `security_token`, `instance_principal`, `resource_principal`, `oke_workload_identity` (`resource_principal` detects an OKE pod on its own) |
 | `LOCUS_OCI_REGION` / `OCI_REGION` | GenAI region, e.g. `us-chicago-1` |
 | `LOCUS_OCI_COMPARTMENT` / `OCI_COMPARTMENT` | Compartment OCID; the OCI model classes also read `OCI_COMPARTMENT_ID`, the name [Configure a model provider](configure-providers.md) uses. Derived from the profile's tenancy when none is set |
 | `LOCUS_OCI_ENDPOINT` / `OCI_ENDPOINT` | Service endpoint override — SDK transport (`OCIModel`) only |
@@ -128,12 +128,20 @@ over the environment.
 
 | Variable | Used by |
 |---|---|
-| `REDIS_URL` | Redis checkpointer — notebook 65 |
+| `REDIS_URL` | Redis checkpointer — notebook 65; a bare `redis://` approval-store spec |
 | `S3_BUCKET` | S3 checkpointer — notebook 50 |
-| `ORACLE_DSN` | Oracle Database 26ai — tnsnames alias or `host:port/service` — notebooks 37-45 |
+| `POSTGRES_HOST` / `POSTGRES_PORT` / `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | A bare `postgresql://` approval-store spec (`approval_store("postgresql://")`, `locus approvals --store postgresql://`) |
+| `ORACLE_DSN` | Oracle Database 26ai — tnsnames alias or `host:port/service` — notebooks 37-45; a bare `oracle://` approval-store spec |
 | `ORACLE_USER` / `ORACLE_PASSWORD` | Oracle Database 26ai credentials |
 | `ORACLE_WALLET` / `ORACLE_WALLET_PASSWORD` | Autonomous Database wallet directory and password (empty string for auto-login wallets) |
 | `S3_ENDPOINT_URL` | S3-compatible endpoint (MinIO, R2) — notebook 50 |
+
+## Approvals
+
+| Variable | Used by |
+|---|---|
+| `LOCUS_APPROVALS_STORE` | The store `locus approvals` reads when `--store` is not given: a `FileApprovals` path, or `memory://`, `file://`, `postgresql://`, `redis://`, `oracle://`; `approval_store()` reads it when called without a spec |
+| `LOCUS_APPROVER` | The principal `locus approvals approve` / `reject` record when `--by` is not given |
 
 ## Serving
 
@@ -153,32 +161,12 @@ Notebooks 66 and 67. See [the gateway how-to](litellm-gateway.md).
 | `LITELLM_GATEWAY_MODEL` | Model id as the gateway names it |
 | `LITELLM_MASTER_KEY` | Admin key — `/key/generate` and `/spend/*` (needs Postgres) |
 
-## Cloud and security domain
+## OCI tools and vendor adapters
 
 | Variable | Used by |
 |---|---|
-| `LOCUS_OCI_PROFILE` / `OCI_PROFILE` | OCI cloud-posture agent — the read-only profile notebook 81 audits as (see the OCI table above) |
-| `LOCUS_OCI_AUTH_TYPE` / `OCI_AUTH_TYPE` | OCI cloud-posture agent — `api_key` (default) or `security_token` |
-| `LOCUS_USE_OCI_ALLOW_MUTATIONS` | `use_oci` write opt-in — never set for the posture agent |
+| `LOCUS_USE_OCI_ALLOW_MUTATIONS` | `use_oci` write opt-in — notebook 36; unset, the tool refuses mutating calls |
 | `SCANNER_API_KEY` | Vulnerability-scanner adapter — notebook 80 |
 | `DATAMAP_URL` | Data-map adapter — notebook 80 |
 | `DATAMAP_API_KEY` | Data-map adapter — notebook 80 |
 | `DATAMAP_TOKEN` | Data-map adapter — notebook 80 |
-
-## Model fingerprinting
-
-[Notebook 88](../notebooks/notebook_88_model_fingerprint.md), which ships with
-examples 81–89 in the `locus-sdk-security` package
-(`packages/locus-sdk-security/examples/`).
-
-| Variable | Used by |
-|---|---|
-| `FINGERPRINT_MODEL` | Model id under test |
-| `FINGERPRINT_ASSET` | Asset label recorded on the finding |
-| `FINGERPRINT_SAMPLES` | Number of timing samples to collect |
-
-## Other
-
-| Variable | Used by |
-|---|---|
-| `OPENCLAW_DIR` | OpenClaw workspace root — the red-team example |

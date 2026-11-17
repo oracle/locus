@@ -8,6 +8,8 @@ Usage::
     python -m a2a_mesh.orchestrator "Is alert A-101 a true positive?"
     python -m a2a_mesh.orchestrator --stream "Enrich 198.51.100.7."
     python -m a2a_mesh.orchestrator --skill ioc_enrichment "Enrich this domain..."
+    python -m a2a_mesh.orchestrator --binding http+json "Enrich 198.51.100.7."
+    python -m a2a_mesh.orchestrator --push "Is alert A-101 a true positive?"
     python -m a2a_mesh.orchestrator --legacy --stream "Enrich 198.51.100.7."
 
 The orchestrator does **not** itself wrap an agent — it's a pure A2A
@@ -16,11 +18,16 @@ is deliberately rule-based so the demo stays inspectable; in real life
 you'd put a small Locus ``Orchestrator`` here whose specialists are
 ``A2AClient.as_tool()``-wrapped peers.
 
-It speaks A2A v1.0 JSON-RPC by default: ``SendMessage`` for a one-shot
-answer and ``SendStreamingMessage`` for ``--stream``, reading the reply
-from the task's artifacts. ``--legacy`` uses the pre-v1.0 flat endpoints
-(``/a2a/invoke``, ``/a2a/stream``) instead, which the peers still serve,
-so the demo also shows backwards compatibility.
+It speaks A2A v1.0 by default: ``SendMessage`` for a one-shot answer and
+``SendStreamingMessage`` for ``--stream``, reading the reply from the task's
+artifacts. The binding is chosen from the peer's card: ``--binding`` names
+the one to prefer (``jsonrpc`` or ``http+json``; the peers serve both).
+``--push`` registers a webhook instead of waiting: the orchestrator starts
+a local :class:`~locus.a2a.PushNotificationReceiver`, sends the message
+with ``blocking=False`` and prints each notification as the peer posts
+it. ``--legacy`` uses the pre-v1.0 flat endpoints (``/a2a/invoke``,
+``/a2a/stream``) instead, which the peers still serve, so the demo also
+shows backwards compatibility.
 """
 
 from __future__ import annotations
@@ -29,13 +36,15 @@ import argparse
 import asyncio
 import json
 import re
+import secrets
+import socket
 import sys
 import uuid
 from typing import Any
 
 import httpx
 
-from locus.a2a import A2AClient, AgentCard, Message, Task, TextPart
+from locus.a2a import A2AClient, AgentCard, Message, PushNotificationReceiver, Task, TextPart
 
 
 DEFAULT_PEERS = (
@@ -121,15 +130,63 @@ def reply_text(task: Task) -> str:
     return _parts_text(list(task.artifacts[-1].parts))
 
 
-async def run_send(url: str, prompt: str) -> str:
+async def connect(url: str, binding: str) -> A2AClient:
+    """A client on the binding the peer's card advertises, ``binding`` first."""
+    prefer = [binding, "jsonrpc", "http+json"]
+    client = await A2AClient.connect(url, prefer=prefer)
+    print(f"  → binding: {client.binding}")
+    return client
+
+
+async def run_send(url: str, prompt: str, binding: str = "jsonrpc") -> str:
     """A2A v1.0 ``SendMessage``: one round trip, the reply from the task's artifacts."""
-    task = await A2AClient(url).send_message(user_message(prompt))
+    task = await (await connect(url, binding)).send_message(user_message(prompt))
     return reply_text(task)
 
 
-async def run_stream(url: str, prompt: str) -> None:
+def _free_port() -> int:
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+async def run_push(url: str, prompt: str, binding: str = "jsonrpc") -> str:
+    """Register a webhook, send with ``blocking=False``, print each notification.
+
+    A local :class:`PushNotificationReceiver` listens on a free port; the
+    peer posts every status and artifact change to it, with the token we
+    registered echoed in ``X-A2A-Notification-Token``.
+    """
+    token = secrets.token_urlsafe(16)
+    receiver = PushNotificationReceiver(token=token)
+    port = _free_port()
+    serving = asyncio.create_task(receiver.serve("127.0.0.1", port))
+    await asyncio.sleep(0.2)  # let uvicorn bind before the peer posts
+    try:
+        client = await connect(url, binding)
+        task = await client.send_message(
+            user_message(prompt),
+            push_notification_config={"url": f"http://127.0.0.1:{port}/a2a/push", "token": token},
+            blocking=False,
+        )
+        print(f"  · task {task.id} accepted in state {task.status.state.value}; waiting for pushes")
+        async for note in receiver.events():
+            if note.kind == "artifactUpdate":
+                text = _parts_text(note.payload["artifactUpdate"]["artifact"].get("parts", []))
+                print(f"  ✅ push artifact: {text[:200]}")
+            else:
+                print(f"  · push {note.kind}: {note.state}")
+            if note.state in ("TASK_STATE_COMPLETED", "TASK_STATE_FAILED", "TASK_STATE_CANCELED"):
+                break
+        return reply_text(await client.get_task(task.id))
+    finally:
+        serving.cancel()
+
+
+async def run_stream(url: str, prompt: str, binding: str = "jsonrpc") -> None:
     """A2A v1.0 ``SendStreamingMessage``: render task lifecycle events as they arrive."""
-    async for event in A2AClient(url).send_message_streaming(user_message(prompt)):
+    client = await connect(url, binding)
+    async for event in client.send_message_streaming(user_message(prompt)):
         if "error" in event:
             error = event["error"]
             print(f"  ✗ {error.get('code')}: {error.get('message')}")
@@ -204,12 +261,15 @@ async def main_async(args: argparse.Namespace) -> int:
     elif args.legacy:
         print(f"\nInvoking {target} (legacy /a2a/invoke)…")
         print(f"\n  ← {await run_legacy_invoke(target, args.query)}")
+    elif args.push:
+        print(f"\nSending to {target} with a push webhook (SendMessage, blocking=false)…")
+        print(f"\n  ← {await run_push(target, args.query, args.binding)}")
     elif args.stream:
         print(f"\nStreaming from {target} (SendStreamingMessage)…")
-        await run_stream(target, args.query)
+        await run_stream(target, args.query, args.binding)
     else:
         print(f"\nSending to {target} (SendMessage)…")
-        print(f"\n  ← {await run_send(target, args.query)}")
+        print(f"\n  ← {await run_send(target, args.query, args.binding)}")
     return 0
 
 
@@ -225,6 +285,17 @@ def main() -> None:
     p.add_argument("--skill", help="force route to a specific skill tag")
     p.add_argument(
         "--stream", action="store_true", help="stream task events (SendStreamingMessage, SSE)"
+    )
+    p.add_argument(
+        "--binding",
+        choices=["jsonrpc", "http+json"],
+        default="jsonrpc",
+        help="the A2A protocol binding to prefer from the peer's card (default: jsonrpc)",
+    )
+    p.add_argument(
+        "--push",
+        action="store_true",
+        help="register a local webhook and follow the task through push notifications",
     )
     p.add_argument(
         "--legacy",

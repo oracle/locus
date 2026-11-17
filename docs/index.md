@@ -213,34 +213,6 @@ runs the full example.
 
     [Notebook 79 — Contract review →](notebooks/notebook_79_contract_review.md)
 
-=== "SOC alert triage"
-
-    A `locus-sdk-security` analyst works each alert with the security
-    information and event management (SIEM), endpoint detection and response
-    (EDR) and threat-intelligence tools and proposes a verdict; `ground_report`
-    returns it as a typed `Evidence`, carrying the references it cited, only
-    when that evidence clears the Grounding-Stratified Adaptive Replanning
-    (GSAR) threshold, and as an `Abstention` otherwise, so an alert with
-    nothing behind it is not filed as a finding.
-
-    ```python
-    from locus_security import (
-        PostureReport, SecurityControls, create_soc_analyst, ground_report,
-        is_finding,
-    )
-
-    controls = SecurityControls(siem=True, edr=True, threat_intel=True)
-    analyst = create_soc_analyst(model="oci:openai.gpt-5.5", controls=controls)
-    result = await analyst.arun("Triage the open alerts from the last hour.")
-    for verdict in ground_report(result.parsed_as(PostureReport), controls):
-        if is_finding(verdict):  # cited evidence cleared the GSAR threshold
-            print(verdict.severity, verdict.title, verdict.evidence_refs)
-        else:  # below the threshold: withheld, nothing is filed
-            print("withheld:", verdict.candidate_title, verdict.reason)
-    ```
-
-    [Notebook 87 — SOC alert triage →](notebooks/notebook_87_soc_alert_triage.md)
-
 ## One `Agent`, every shape
 
 Every shape runs the same `Agent`, emits the same events, and checkpoints to

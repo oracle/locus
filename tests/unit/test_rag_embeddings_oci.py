@@ -72,6 +72,11 @@ def _stub_oci_modules(
             return MagicMock(name="resource_principal_signer")
 
         @staticmethod
+        def get_oke_workload_identity_resource_principal_signer() -> Any:
+            probes["used_signer"] = "oke_workload_identity"
+            return MagicMock(name="oke_workload_identity_signer")
+
+        @staticmethod
         def SecurityTokenSigner(token: str, key: Any) -> Any:  # noqa: N802
             probes["used_signer"] = "security_token"
             probes["security_token"] = token
@@ -289,11 +294,24 @@ class TestGetClientAuthMatrix:
         assert probes["used_signer"] == "instance_principal"
 
     @pytest.mark.asyncio
-    async def test_resource_principal_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_resource_principal_path(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        from locus import _oci_auth
+
+        monkeypatch.setattr(_oci_auth, "SERVICE_ACCOUNT_TOKEN_PATH", tmp_path / "absent")
         probes = _stub_oci_modules(monkeypatch)
         m = OCIEmbeddings(auth_type="resource_principal")
         await m._get_client()
         assert probes["used_signer"] == "resource_principal"
+
+    @pytest.mark.asyncio
+    async def test_oke_workload_identity_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        probes = _stub_oci_modules(monkeypatch)
+        m = OCIEmbeddings(auth_type="oke_workload_identity")
+        await m._get_client()
+        assert probes["used_signer"] == "oke_workload_identity"
+        assert "signer" in probes["client_kwargs"][0]
 
     @pytest.mark.asyncio
     async def test_explicit_endpoint_overrides_region(

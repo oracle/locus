@@ -24,9 +24,9 @@ Key ideas:
 - The runtime reads ``model.server_stateful``: when it is ``True``,
   Locus sends only the latest turn and threads OCI's continuation id
   via ``AgentState.provider_state``. ``OCIResponsesModel`` reports
-  ``True`` unless built with ``store=False`` (Zero Data Retention
-  tenancies), in which case it sends the full history like the other
-  two. Resuming that OCI-side thread on a later run needs a
+  ``True`` unless built with ``store=False`` or until a Zero Data
+  Retention tenancy makes it switch (the default ``store="auto"``), in
+  which case it sends the full history like the other two. Resuming that OCI-side thread on a later run needs a
   checkpointer attached, so the continuation id is reloaded with the
   rest of the state.
 - On the server-stateful path the runtime skips ``ConversationManager``
@@ -94,7 +94,8 @@ def example_responses_transport() -> None:
     # checkpointer and a follow-up run on the same thread_id reloads that
     # state and resumes the OCI-side thread; without one, every run starts
     # a fresh thread. server_stateful is False when the model was built with
-    # store=False (ZDR tenancies) — then the full history travels each turn.
+    # store=False, or once a ZDR tenancy made the default store="auto"
+    # switch — then the full history travels each turn.
     print(f"  server_stateful: {model.server_stateful}")
     print()
 

@@ -22,7 +22,7 @@ from hooks import build_metadata
 
 ROOT = Path(__file__).resolve().parents[2]
 PAGES = sorted((ROOT / "docs" / "notebooks").glob("notebook_*.md"))
-ROOTS = [ROOT, ROOT / "packages" / "locus-sdk-security"]
+ROOTS = [ROOT]
 
 _SOURCE = re.compile(
     r"^\{\{\s*locus_source\s+(?P<path>[^\s:]+)::(?P<symbol>[A-Za-z_][\w.]*)\s*\}\}", re.MULTILINE

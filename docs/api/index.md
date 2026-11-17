@@ -77,12 +77,6 @@ from locus.core.termination import MaxIterations, ToolCalled
 |---|---|---|
 | [Control](control.md) | `admit()`, which checks an action against a `ControlPolicy` you write, before the action runs: allow, hold for a person, or deny (API values `allow`, `require_human`, `deny`). `gate_tool` puts the same check in front of a tool, approval stores keep held calls until someone decides, and `AuditTrail` records each decision when you pass one. Only the calls you route through the gate are checked | [Control-layer architecture](../concepts/control-layer.md), [Writing a policy that holds](../concepts/policy-authoring.md) |
 
-## Security domain
-
-| Reference | What it documents | Guide |
-|---|---|---|
-| [Security](security.md) | One domain built on the framework: red-team probes and jobs, grounded findings that come back as evidence or an `Abstention`, verification skeptics, and MITRE ATLAS and OWASP taxonomy tags. Import the admission gate from `locus.control`, not from here | [Agentic AI security](../concepts/agentic-ai-security.md), [Security layer](../concepts/security.md) |
-
 ## Deprecated
 
 [ReAct loop](loop.md) documents `locus.loop`, a second ReAct implementation

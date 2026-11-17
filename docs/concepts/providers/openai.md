@@ -191,7 +191,7 @@ entered the conversation. Two defaults keep it out of the wrong places:
 Every model call and tool invocation still lands on the typed SSE event
 stream — the faithful trace you forward to your logging backend — and
 admission decisions land on the hash-chained
-[`AuditTrail`](../agentic-ai-security.md) (hash-chained: each entry
+[`AuditTrail`](../control-layer.md) (hash-chained: each entry
 commits to the one before it, so editing any record breaks
 verification). Routing through a gateway (Portkey /
 LiteLLM) keeps your `OPENAI_API_KEY` off the egress path when policy
