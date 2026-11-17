@@ -153,6 +153,18 @@ model replays on later requests; the `CompactionEvent` then has
 [OCI Responses API](oci-responses.md#native-compaction). A model without
 it, or a failed call, summarises as usual.
 
+Native compaction pays off when the bulk of the history is assistant or
+tool output: that is what the endpoint folds into its encrypted
+`compaction` item, while the user messages a continuation needs are kept
+as they are. The item itself (a few KB) rides on an assistant message's
+metadata and goes out with every later request, and the default token
+counter charges for it, so `tokens_after` and the replayed request move
+together (the count is of what goes on the wire; the endpoint's own
+`prompt_tokens` for the item can be lower). On a transcript that is
+mostly user messages the stage can
+leave the history about as large as it found it; the client-side summary
+is the better fit there.
+
 ### Tiered compaction
 
 A long coding or research run does better with a pipeline than with two

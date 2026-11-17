@@ -44,6 +44,7 @@ still get a reasonable degradation.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
@@ -59,16 +60,38 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-__all__ = ["LLMCompactor"]
+__all__ = ["REPLAYED_METADATA_KEYS", "LLMCompactor"]
 
 
-#: Default char/4 heuristic — matches the fallback in
-#: ``locus.core.state.AgentState._estimate_total_tokens``.
+#: ``Message.metadata`` keys whose values a transport replays verbatim on the
+#: wire: the raw Responses output items (reasoning items with their
+#: ``encrypted_content``, the encrypted ``compaction`` item native compaction
+#: leaves behind, function calls) that the OCI and OpenAI Responses paths keep
+#: on an assistant turn. Their JSON travels in every later request, so the
+#: default token counter charges for it; any other metadata stays client-side
+#: and costs nothing. Literals rather than imports so this module stays free
+#: of provider imports; a unit test pins them to the providers' constants.
+REPLAYED_METADATA_KEYS: tuple[str, ...] = ("oci_responses_items", "openai_responses_items")
+
+
+def _replayed_metadata_chars(msg: Message) -> int:
+    """Characters of ``msg.metadata`` that go out on the wire with the message."""
+    chars = 0
+    for key in REPLAYED_METADATA_KEYS:
+        items = msg.metadata.get(key)
+        if items:
+            chars += len(json.dumps(items, separators=(",", ":"), default=str))
+    return chars
+
+
+#: Default char/4 heuristic over everything the message puts on the wire: its
+#: text, its tool calls and the replayed metadata items (see
+#: :data:`REPLAYED_METADATA_KEYS`).
 def _char_count_tokens(msg: Message) -> int:
     tool_calls_chars = 0
     for call in msg.tool_calls or ():
         tool_calls_chars += len(call.name or "") + len(str(call.arguments or ""))
-    return estimate_tokens(msg.content) + tool_calls_chars // 4
+    return estimate_tokens(msg.content) + (tool_calls_chars + _replayed_metadata_chars(msg)) // 4
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +153,9 @@ class LLMCompactor(ConversationManager):
             (their call metadata in the preceding assistant message
             is preserved). ``0`` disables pre-pruning.
         token_counter: Callable that maps a single :class:`Message`
-            to a token count. Default is a char/4 heuristic.
+            to a token count. Default is a char/4 heuristic over the
+            text, the tool calls and the metadata items a transport
+            replays on the wire (:data:`REPLAYED_METADATA_KEYS`).
         preserve_system: Keep the first system message verbatim at the
             head of the returned list. Default ``True``.
         slide_step: Granularity, in messages, of the two cuts this makes on

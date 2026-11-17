@@ -52,10 +52,11 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+import httpx
 from pydantic import Field
 
 from locus.core.loop_bound import loop_bound
@@ -116,12 +117,61 @@ def build_oci_openai_base_url(region: str) -> str:
     return f"https://inference.generativeai.{region}.oci.oraclecloud.com/openai/v1"
 
 
+#: A sync callable handed each outgoing :class:`httpx.Request` (``on_request=``).
+RequestHook = Callable[[httpx.Request], None]
+#: A sync callable handed each :class:`httpx.Response` as it arrives (``on_response=``).
+ResponseHook = Callable[[httpx.Response], None]
+
+_ON_REQUEST_DESCRIPTION = (
+    "Called with each outgoing httpx.Request after it is signed and before it "
+    "is sent: the seam for seeing what goes on the wire (``request.content`` is "
+    "the JSON body, ``request.headers`` the signed headers) in a test or when "
+    "debugging. Runs once per HTTP attempt, so a retry shows twice. None "
+    "(default) installs no hook."
+)
+_ON_RESPONSE_DESCRIPTION = (
+    "Called with each httpx.Response as its headers arrive and before the body "
+    "is read: ``status_code``, ``headers`` and ``request`` are available, the "
+    "body is not yet. Runs once per HTTP attempt. None (default) installs no "
+    "hook."
+)
+
+
+def request_event_hooks(
+    on_request: RequestHook | None,
+    on_response: ResponseHook | None,
+) -> dict[str, list[Callable[..., Awaitable[None]]]]:
+    """The httpx ``event_hooks`` mapping for a pair of sync inspection callables.
+
+    :class:`httpx.AsyncClient` awaits its hooks, so each sync callable is
+    wrapped in a coroutine function; an absent callable installs nothing. The
+    HTTP-backed OCI models (:class:`OCIChatCompletionsModel`,
+    :class:`~locus.models.providers.oci.OCIResponsesModel`) build their
+    client with this so ``on_request=`` / ``on_response=`` behave the same
+    on both transports.
+    """
+    hooks: dict[str, list[Callable[..., Awaitable[None]]]] = {}
+    if on_request is not None:
+
+        async def _request(request: httpx.Request) -> None:
+            on_request(request)
+
+        hooks["request"] = [_request]
+    if on_response is not None:
+
+        async def _response(response: httpx.Response) -> None:
+            on_response(response)
+
+        hooks["response"] = [_response]
+    return hooks
+
+
 class OCIChatCompletionsConfig(OpenAIConfig):
     """Configuration for :class:`OCIChatCompletionsModel`.
 
     Inherits all OpenAI knobs from :class:`OpenAIConfig`. Adds region,
     profile, ``auth_type``, ``compartment_id``, and ``config_file`` for OCI
-    auth selection.
+    auth selection, and the ``on_request`` / ``on_response`` inspection hooks.
     """
 
     region: str = Field(
@@ -151,6 +201,8 @@ class OCIChatCompletionsConfig(OpenAIConfig):
             "Required for instance_principal / resource_principal."
         ),
     )
+    on_request: RequestHook | None = Field(default=None, description=_ON_REQUEST_DESCRIPTION)
+    on_response: ResponseHook | None = Field(default=None, description=_ON_RESPONSE_DESCRIPTION)
 
 
 def _load_profile_config(profile: str, config_file: str) -> dict[str, Any]:
@@ -480,6 +532,8 @@ class OCIChatCompletionsModel(OpenAIModel):
         base_url: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
+        on_request: RequestHook | None = None,
+        on_response: ResponseHook | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize the OCI OpenAI-compat model.
@@ -507,6 +561,13 @@ class OCIChatCompletionsModel(OpenAIModel):
                 this is automatically forwarded as
                 ``max_completion_tokens`` — see :class:`OpenAIModel`.
             temperature: Default sampling temperature.
+            on_request: Sync callable handed each outgoing :class:`httpx.Request`
+                after signing, before it is sent — ``request.content`` is the
+                JSON body. The seam for request-shape tests and for seeing what
+                goes on the wire; once per HTTP attempt. ``None`` installs none.
+            on_response: Sync callable handed each :class:`httpx.Response` as
+                its headers arrive (``status_code``, ``headers``; the body is
+                not read yet). ``None`` installs none.
             **kwargs: Forwarded to :class:`OCIChatCompletionsConfig` (top_p, seed,
                 frequency_penalty, presence_penalty, ...).
 
@@ -547,6 +608,8 @@ class OCIChatCompletionsModel(OpenAIModel):
             "base_url",
             "max_tokens",
             "temperature",
+            "on_request",
+            "on_response",
         ):
             kwargs.pop(explicit, None)
 
@@ -579,6 +642,8 @@ class OCIChatCompletionsModel(OpenAIModel):
             config_file=config_file,
             max_tokens=max_tokens,
             temperature=temperature,
+            on_request=on_request,
+            on_response=on_response,
             **kwargs,
         )
         # Skip OpenAIModel.__init__ — it would rebuild the config without
@@ -716,7 +781,6 @@ class OCIChatCompletionsModel(OpenAIModel):
         """Build the AsyncOpenAI client wired with the OCI request signer."""
 
         def build() -> openai.AsyncOpenAI:
-            import httpx
             import openai
 
             from locus.models.providers.oci._signing import OCIRequestSigner
@@ -753,6 +817,7 @@ class OCIChatCompletionsModel(OpenAIModel):
                     refresh_interval=600.0,
                 ),
                 timeout=httpx.Timeout(self.config.request_timeout),
+                event_hooks=request_event_hooks(self.config.on_request, self.config.on_response),
             )
             return openai.AsyncOpenAI(
                 api_key="not-used",

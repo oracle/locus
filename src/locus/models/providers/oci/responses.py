@@ -46,7 +46,11 @@ from locus.models.providers.oci._responses_parse import (
 )
 from locus.models.providers.oci._signing import OCIRequestSigner
 from locus.models.providers.oci.openai_compat import (
+    _ON_REQUEST_DESCRIPTION,
+    _ON_RESPONSE_DESCRIPTION,
     DEFAULT_OCI_GENAI_REGION,
+    RequestHook,
+    ResponseHook,
     _build_instance_principal_signer,
     _build_oke_workload_identity_signer,
     _build_resource_principal_signer,
@@ -54,6 +58,7 @@ from locus.models.providers.oci.openai_compat import (
     _load_profile_config,
     _refresh_callable_for,
     build_oci_openai_base_url,
+    request_event_hooks,
     resolve_profile_auth,
 )
 
@@ -181,6 +186,8 @@ class OCIResponsesConfig(BaseModel):
             "access to Responses-only models like ``openai.gpt-5.5-pro``."
         ),
     )
+    on_request: RequestHook | None = Field(default=None, description=_ON_REQUEST_DESCRIPTION)
+    on_response: ResponseHook | None = Field(default=None, description=_ON_RESPONSE_DESCRIPTION)
 
 
 class OCIResponsesModel(BaseModel):
@@ -228,6 +235,8 @@ class OCIResponsesModel(BaseModel):
         store: bool | Literal["auto"] = "auto",
         reasoning_effort: str | None = None,
         reasoning: dict[str, Any] | None = None,
+        on_request: RequestHook | None = None,
+        on_response: ResponseHook | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize the OCI Responses model.
@@ -285,6 +294,14 @@ class OCIResponsesModel(BaseModel):
                 ``include=["reasoning.encrypted_content"]``, and the reasoning
                 items that come back are replayed on the next request so a
                 tool-calling turn keeps its reasoning.
+            on_request: Sync callable handed each outgoing :class:`httpx.Request`
+                after signing, before it is sent — ``request.content`` is the
+                JSON body of the ``/responses`` or ``/responses/compact`` call.
+                The seam for request-shape tests and for seeing what goes on
+                the wire; once per HTTP attempt. ``None`` installs none.
+            on_response: Sync callable handed each :class:`httpx.Response` as
+                its headers arrive (``status_code``, ``headers``; the body is
+                not read yet). ``None`` installs none.
 
         Raises:
             ValueError: If zero or both auth modes are set, if
@@ -330,6 +347,8 @@ class OCIResponsesModel(BaseModel):
             request_timeout=request_timeout,
             reasoning_effort=reasoning_effort,
             reasoning=reasoning,
+            on_request=on_request,
+            on_response=on_response,
             **kwargs,
         )
         super().__init__(config=config)
@@ -418,6 +437,7 @@ class OCIResponsesModel(BaseModel):
                 ),
                 timeout=httpx.Timeout(self.config.request_timeout),
                 base_url=self.config.base_url or "",
+                event_hooks=request_event_hooks(self.config.on_request, self.config.on_response),
             )
 
         # Bound to the loop that built it — see locus.core.loop_bound.

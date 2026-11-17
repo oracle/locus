@@ -247,6 +247,43 @@ export OCI_AUTH_TYPE=api_key
 The model id and the agent code are unchanged; only the auth arguments
 differ.
 
+## Inspecting what goes on the wire
+
+Both HTTP-backed transports take a pair of sync callables that see each
+request after it is signed and each response as its headers arrive:
+`on_request` gets the `httpx.Request` (`request.content` is the JSON body,
+`request.headers` the signed headers), `on_response` the `httpx.Response`
+(`status_code`, `headers`; the body is not read yet). They run once per
+HTTP attempt, so a retry shows twice. This is the seam for a request-shape
+test and for seeing what a model actually receives when debugging; neither
+hook changes the request.
+
+```python
+import json
+
+from locus.models.providers.oci import OCIChatCompletionsModel, OCIResponsesModel
+
+seen = []
+model = OCIResponsesModel(
+    model="openai.gpt-5.5",
+    profile="MY_PROFILE",
+    region="us-chicago-1",
+    on_request=lambda request: seen.append(json.loads(request.content)),
+    on_response=lambda response: print(response.status_code),
+)
+# ... run the agent; seen[-1]["input"] is the last request's input items.
+
+# Same two options on the V1 transport, including through the factory:
+agent = Agent(
+    model="oci:openai.gpt-5.5",
+    model_kwargs={"on_request": lambda request: print(len(request.content), "bytes")},
+)
+```
+
+Both are `None` by default and install nothing. The options are fields on
+`OCIResponsesConfig` and `OCIChatCompletionsConfig` as well, so a model
+built from a config carries them.
+
 ## Common gotchas
 
 | Symptom | Likely cause |

@@ -205,3 +205,87 @@ class TestRepr:
         r = repr(c)
         assert "999" in r
         assert "LLMCompactor" in r
+
+
+class TestReplayedMetadataCounting:
+    """The default counter charges for the metadata a transport replays on the wire.
+
+    Native compaction leaves an encrypted ``compaction`` item on an assistant
+    message's metadata; every later request carries it, so ``tokens_after``
+    has to see it or the report shrinks while the request grows.
+    """
+
+    @staticmethod
+    def _carrying(key: str, item: dict[str, Any]) -> Message:
+        return Message(
+            role=Role.ASSISTANT,
+            content="[Context compacted by the model.]",
+            metadata={key: [item]},
+        )
+
+    def test_a_compaction_item_counts(self) -> None:
+        import json
+
+        from locus.memory.compactor import _char_count_tokens
+
+        item = {"type": "compaction", "id": "cmp_1", "encrypted_content": "x" * 4000}
+        plain = _asst("[Context compacted by the model.]")
+        carrying = self._carrying("oci_responses_items", item)
+
+        extra = _char_count_tokens(carrying) - _char_count_tokens(plain)
+        assert extra == len(json.dumps([item], separators=(",", ":"))) // 4
+        assert extra >= 1000
+
+    def test_the_openai_replay_key_counts_too(self) -> None:
+        from locus.memory.compactor import _char_count_tokens
+
+        item = {"type": "reasoning", "id": "rs_1", "encrypted_content": "y" * 2000}
+        plain = _asst("[Context compacted by the model.]")
+        assert _char_count_tokens(self._carrying("openai_responses_items", item)) > (
+            _char_count_tokens(plain) + 400
+        )
+
+    def test_unrelated_metadata_is_free(self) -> None:
+        from locus.memory.compactor import _char_count_tokens
+
+        plain = _asst("hello")
+        other = Message(
+            role=Role.ASSISTANT,
+            content="hello",
+            metadata={"pin": True, "trace": {"big": "z" * 5000}, "oci_responses_items": []},
+        )
+        assert _char_count_tokens(other) == _char_count_tokens(plain)
+
+    def test_the_keys_are_the_providers_constants(self) -> None:
+        from locus.memory.compactor import REPLAYED_METADATA_KEYS
+        from locus.models.native.openai import RESPONSES_ITEMS_METADATA_KEY
+        from locus.models.providers.oci import OCI_RESPONSES_ITEMS_METADATA_KEY
+
+        assert set(REPLAYED_METADATA_KEYS) == {
+            OCI_RESPONSES_ITEMS_METADATA_KEY,
+            RESPONSES_ITEMS_METADATA_KEY,
+        }
+
+    async def test_native_compaction_reports_the_item_it_keeps(self) -> None:
+        """``tokens_after`` of the native stage includes the compaction item."""
+        from locus.memory.compaction import ContextCompactor
+        from locus.models.providers.oci._responses_parse import parse_compaction_response
+
+        item = {"type": "compaction", "id": "cmp_1", "encrypted_content": "e" * 3600}
+        kept, _usage = parse_compaction_response({"output": [item], "usage": {}})
+
+        class _Model:
+            async def compact_history(  # noqa: PLR6301
+                self, messages: list[Message], *, instructions: str | None = None
+            ) -> tuple[list[Message], dict[str, int]]:
+                return kept, {"total_tokens": 1}
+
+        compactor = ContextCompactor(context_length=100_000, native_compaction=True)
+        history = [_system(), _user("task"), *[_user(f"note {i}: " + "n" * 40) for i in range(20)]]
+        outcome = await compactor._compact_natively(_Model(), history, 0, 5_000, 1.0, None)
+
+        assert outcome is not None
+        assert outcome.stage == "native"
+        # The head stays (system + task); the body is the one compaction item,
+        # charged for its encrypted content rather than for its placeholder text.
+        assert outcome.tokens_after >= compactor.tokens(history[:2]) + 3600 // 4

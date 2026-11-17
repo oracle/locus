@@ -629,7 +629,7 @@ async def test_integrity_accepts_a_resigned_rewrite_and_refuses_a_silent_one(
     assert refused[0].payload["expected_digest"] != refused[0].payload["actual_digest"]
     bus = tap.of("tool.integrity.refused")
     assert len(bus) == 1
-    assert bus[0].data["tool"] == "post_notice"
+    assert bus[0].data["tool_name"] == "post_notice"
     assert _final(events_b), "the run did not continue to a final answer"
 
 

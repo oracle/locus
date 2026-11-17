@@ -147,7 +147,12 @@ compaction item on every later request. The run yields a
 `CompactionEvent` with `stage="native"`; the compaction call's tokens
 count against the run's budgets. If the endpoint call fails the
 client-side summary takes over for that compaction. With `store=True`
-the server holds the thread and no client-side compaction runs.
+the server holds the thread and no client-side compaction runs. The
+stage earns its keep on assistant- and tool-heavy histories: user
+messages come back as they went in, and the compaction item is replayed
+on every later request (its size is counted in `tokens_after`), so see
+[conversation management](conversation-management.md#compaction-keep-long-threads-in-budget)
+for when a client-side summary is the better fit.
 
 ## What changes vs `OCIChatCompletionsModel`
 
