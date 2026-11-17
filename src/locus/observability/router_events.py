@@ -102,6 +102,9 @@ async def emit_protocol_selected(
       unknown id, and ``_rank_key`` resolved it instead. The matching
       ``router.protocol.picker_fallback`` event carries the underlying
       error.
+    - ``"low_complexity_direct"`` — the frame is LOW complexity at a risk
+      the direct protocol accepts, so the compiler resolved it to
+      ``direct_response`` before the goal gate ran; no ranking happened.
     """
     await get_event_bus().publish(
         StreamEvent(

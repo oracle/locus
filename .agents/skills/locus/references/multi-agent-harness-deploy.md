@@ -206,7 +206,7 @@ Use when the model must not choose the topology. The model fills one typed `Goal
 | `PolicyGate(max_risk=Risk.HIGH, require_approval_above=Risk.MEDIUM, denied_protocols=None)` | `gate.check(frame, protocol) -> PolicyVerdict(allow, require_approval, reason)` |
 | `CapabilityIndex(tool_registry).annotate(cap_id, tool_name=, description=, domain=, risk=Risk.LOW)` | binds capability ids to tools |
 | `CognitiveCompiler(protocols=, capabilities=, policy=, model=, hooks=None, on_approval=None)` | `compiler.explain(frame, goal="")` is model-free; `await compiler.compile(frame)` builds a `Runnable`; `hooks=` governs every agent a builder emits; a held frame is denied without `on_approval` |
-| `Router(extractor=Agent(model=..., output_schema=GoalFrame), compiler=)` | `await router.dispatch(text) -> RunnableResult(text, parsed, raw, protocol_id, frame)`; `await router.explain(text)` runs nothing |
+| `Router(extractor=Agent(model=..., output_schema=GoalFrame), compiler=)` or `Router(classifier=, compiler=)` with any `RequestClassifier` | `await router.dispatch(text) -> RunnableResult(text, parsed, raw, protocol_id, frame)`; `await router.explain(text)` runs nothing; a `Complexity.LOW` frame compiles to `direct_response` before the goal gate |
 
 ```python
 from locus.router import (CapabilityIndex, CognitiveCompiler, Complexity, GoalFrame, PolicyGate,
