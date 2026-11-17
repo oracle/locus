@@ -6,9 +6,10 @@
 
 The admission gate, policy, audit trail and grounding layer live in
 ``locus.control`` and must never pull in the former security-domain tooling
-(``locus_security``, no longer part of Locus). Each check runs in a fresh
-interpreter so ``sys.modules`` shows exactly what the import chain loaded,
-both with that package importable and with it blocked outright.
+(``locus_security``, no longer part of Locus) nor the ``locus.security`` import
+path removed in 6.0. Each check runs in a fresh interpreter so ``sys.modules``
+shows exactly what the import chain loaded, both with that package importable
+and with it blocked outright.
 """
 
 from __future__ import annotations
@@ -43,7 +44,7 @@ _EXERCISE_THE_CORE = textwrap.dedent(
     from locus.reasoning.gsar import Claim, EvidenceType, Partition
     from locus.tools.decorator import tool
 
-    # Lazy top-level names resolve through locus.control, not locus.security.
+    # Lazy top-level names resolve through locus.control.
     assert locus.Evidence is locus.control.Evidence
     assert locus.ground_finding is ground_finding
 

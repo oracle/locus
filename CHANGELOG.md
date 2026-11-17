@@ -8,6 +8,14 @@ policy.
 
 ## [Unreleased]
 
+### Removed
+
+- **Removed in 6.0: the `locus.security` compatibility shim.** The old import
+  path no longer resolves; `locus.control` is the import path for the names it
+  forwarded (`Evidence`, `Severity`, `ground_finding`, `verify`, the taxonomy
+  enums, …). The security-domain names it used to forward left Locus with the
+  `locus-sdk-security` package in 5.6.0. (#464)
+
 ## [5.6.0] - 2026-11-17
 
 ### Added

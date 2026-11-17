@@ -14,7 +14,8 @@ deprecations work.
 - **Patch** version bumps are bug fixes only.
 
 Consumers should pin a major (`locus-sdk>=5,<6`) and read the
-CHANGELOG before bumping across majors.
+CHANGELOG before bumping across majors. For example, 6.0 removed the
+`locus.security` compatibility shim; `locus.control` is the import path.
 
 A deprecated API will:
 

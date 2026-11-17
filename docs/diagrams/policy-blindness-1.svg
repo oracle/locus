@@ -5,9 +5,9 @@
                              blast radius, cost (locus/control/action.py)
     Classify   -> admit()    approve() matches the ControlPolicy against Action.labels(),
                              blast radius and cost; it never sees the call's arguments
-                             (locus/security/policy.py)
+                             (locus/control/policy.py)
     admit()    -> trail      the decision is recorded before any branch, admitted or not
-                             (locus/security/admit.py)
+                             (locus/control/admission.py)
     allow      -> the call runs
     hold       -> (require_human) a named person decides on the ApprovalStore:
                   approved -> the call runs once, re-weighed with the approver recorded

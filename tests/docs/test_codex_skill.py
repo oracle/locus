@@ -68,8 +68,6 @@ def test_the_skill_carries_no_credential_shaped_text() -> None:
 
 
 PACKAGES = ROOT / "src" / "locus"
-#: The compatibility shim for the old ``locus.security`` path; nothing to teach.
-NOT_TAUGHT = {"security"}
 #: Public names that are protocol wire types or process constants, not something
 #: a builder calls: the A2A v1 schema mirror; the A2A JSON-RPC envelopes and the
 #: method parameter shapes ``A2AServer`` validates and ``A2AClient`` builds (a
@@ -108,7 +106,7 @@ def test_the_skill_names_the_public_surface() -> None:
     for package in sorted(
         p for p in PACKAGES.iterdir() if p.is_dir() and (p / "__init__.py").is_file()
     ):
-        if package.name.startswith("_") or package.name in NOT_TAUGHT:
+        if package.name.startswith("_"):
             continue
         if package.name not in tokens:
             unnamed_packages.append(package.name)

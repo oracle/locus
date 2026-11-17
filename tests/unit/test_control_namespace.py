@@ -6,11 +6,13 @@
 
 ``locus.control`` is the canonical home for the domain-neutral control core,
 including the grounding / verification layer. The security-domain tooling is no
-longer part of Locus; ``locus.security`` is now only a compatibility shim (see
-test_security_shim.py). The old security-coded names
+longer part of Locus, and the ``locus.security`` import path that forwarded to
+``locus.control`` was removed in 6.0. The old security-coded names
 (``SecurityPolicy``, ``Finding``, ``Verdict``, ``SecureAgent``, ``secure_agent``,
 ``SecurityProfile``) were removed outright (no shims).
 """
+
+import importlib
 
 import pytest
 
@@ -37,30 +39,8 @@ def test_control_exposes_the_core() -> None:
     )
 
 
-def test_security_no_longer_exports_control_core() -> None:
-    import locus.security as s
-
-    # Pure control symbols moved to locus.control (none of these are submodules).
-    for name in (
-        "Action",
-        "ControlPolicy",
-        "approve",
-        "ApprovalDecision",
-        "ApprovalOutcome",
-        "AuditTrail",
-        "AuditRecord",
-        "AuditHook",
-        "GovernedAgent",
-        "governed_agent",
-        "GovernanceProfile",
-        "AdmissionError",
-    ):
-        assert not hasattr(s, name), f"locus.security still exposes control symbol {name!r}"
-
-
-def test_old_names_are_gone_everywhere() -> None:
+def test_old_names_are_gone() -> None:
     import locus.control as c
-    import locus.security as s
 
     for old in (
         "SecurityPolicy",
@@ -70,23 +50,20 @@ def test_old_names_are_gone_everywhere() -> None:
         "secure_agent",
         "SecurityProfile",
     ):
-        assert not hasattr(s, old), f"old name {old!r} still on locus.security"
         assert not hasattr(c, old), f"old name {old!r} leaked onto locus.control"
 
 
-def test_old_import_paths_raise() -> None:
-    with pytest.raises(ImportError):
-        from locus.security import SecurityPolicy  # noqa: F401
-    with pytest.raises(ImportError):
-        # relocated to locus.control — must not resolve from locus.security
-        from locus.security import ControlPolicy  # noqa: F401
+def test_the_old_import_path_is_gone() -> None:
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("locus.security")
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("locus.security.policy")
 
 
-def test_evidence_and_verification_are_shared_objects() -> None:
-    # Re-exported in both namespaces — must be the SAME object, not a copy.
+def test_top_level_lazy_names_are_the_control_objects() -> None:
+    import locus
     import locus.control as c
-    import locus.security as s
 
-    assert c.Evidence is s.Evidence
-    assert c.VerificationResult is s.VerificationResult
-    assert c.verify is s.verify
+    assert locus.Evidence is c.Evidence
+    assert locus.Severity is c.Severity
+    assert locus.ground_finding is c.ground_finding

@@ -197,7 +197,6 @@
   "src/locus/router/runnable.py": 88.89,
   "src/locus/router/runtime.py": 86.67,
   "src/locus/router/skill_index.py": 84.85,
-  "src/locus/security/__init__.py": 100.0,
   "src/locus/server/__init__.py": 100.0,
   "src/locus/server/adapters.py": 94.34,
   "src/locus/server/app.py": 97.14,
