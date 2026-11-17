@@ -490,7 +490,8 @@ class OracleReportStore:
             ``service_name``.
         user: Schema user.
         password: The schema user's password.
-        wallet_location: Wallet directory, for Autonomous Database with mTLS.
+        wallet_location: Wallet directory, for Autonomous Database with mTLS;
+            a TLS-only database needs none.
         wallet_password: Wallet password, when the wallet is encrypted.
         host: Database host, when not using ``dsn``.
         port: Listener port (default 1521).
@@ -503,6 +504,8 @@ class OracleReportStore:
         max_pool_size: Largest size of the pool.
         _connect: A factory returning a connection, instead of the pool; the
             seam tests inject a double through.
+        config_dir: Directory holding ``tnsnames.ora`` when ``dsn`` is an alias
+            and there is no wallet (or the aliases live outside it).
     """
 
     def __init__(
@@ -522,6 +525,7 @@ class OracleReportStore:
         min_pool_size: int = 1,
         max_pool_size: int = 2,
         _connect: Callable[[], Any] | None = None,
+        config_dir: str | None = None,
     ) -> None:
         from pydantic import SecretStr  # noqa: PLC0415
 
@@ -531,6 +535,7 @@ class OracleReportStore:
             dsn=dsn,
             user=user,
             password=SecretStr(password),
+            config_dir=config_dir,
             wallet_location=wallet_location,
             wallet_password=SecretStr(wallet_password) if wallet_password is not None else None,
             host=host,
@@ -566,23 +571,19 @@ class OracleReportStore:
             raise ImportError(
                 'OracleReportStore needs the oracledb package:\n    pip install "locus-sdk[oracledb]"'
             ) from exc
+        from locus.memory.backends._oracle_config import connect_params  # noqa: PLC0415
+
         cfg = self.config
         dsn = cfg.dsn
         if dsn is None and cfg.host and cfg.service_name:
             dsn = oracledb.makedsn(cfg.host, cfg.port, service_name=cfg.service_name)
-        params: dict[str, Any] = {}
-        if cfg.wallet_location:
-            params["config_dir"] = cfg.wallet_location
-            params["wallet_location"] = cfg.wallet_location
-            if cfg.wallet_password is not None:
-                params["wallet_password"] = cfg.wallet_password.get_secret_value()
         return oracledb.create_pool(
             user=cfg.user,
             password=cfg.password.get_secret_value(),
             dsn=dsn,
             min=cfg.min_pool_size,
             max=cfg.max_pool_size,
-            **params,
+            **connect_params(cfg),
         )
 
     def _run(self, op: Callable[[Any], Any]) -> Any:
@@ -783,6 +784,8 @@ def _options(spec: str) -> dict[str, str]:
 
 
 def _oracle(spec: str) -> OracleReportStore:
+    from locus.memory.backends._oracle_config import config_dir_from_env  # noqa: PLC0415
+
     parts = urlsplit(spec)
     options = _options(spec)
     kwargs: dict[str, Any] = {}
@@ -800,6 +803,7 @@ def _oracle(spec: str) -> OracleReportStore:
     wallet_password = options.get("wallet_password")
     if wallet_password is None and wallet and os.environ.get("ORACLE_WALLET_PASSWORD") is not None:
         wallet_password = os.environ.get("ORACLE_WALLET_PASSWORD")
+    config_dir = options.get("config_dir") or config_dir_from_env(wallet)
     if parts.hostname and parts.path.strip("/"):
         kwargs.update(
             host=parts.hostname, port=parts.port or 1521, service_name=parts.path.strip("/")
@@ -815,6 +819,7 @@ def _oracle(spec: str) -> OracleReportStore:
     return OracleReportStore(
         user=user,
         password=password,
+        config_dir=config_dir,
         wallet_location=wallet,
         wallet_password=wallet_password,
         **kwargs,

@@ -327,7 +327,7 @@ cp = oracle_checkpointer(
     dsn=os.environ["ORACLE_DSN"],
     user=os.environ["ORACLE_USER"],
     password=os.environ["ORACLE_PASSWORD"],
-    wallet_location=os.environ["ORACLE_WALLET"],        # Autonomous Database wallet
+    wallet_location=os.environ["ORACLE_WALLET"],        # mutual TLS only; see below
     wallet_password=os.environ.get("ORACLE_WALLET_PASSWORD", ""),
     table_name="locus_checkpoints",
 )
@@ -335,6 +335,12 @@ agent = Agent(model="oci:openai.gpt-5.5", checkpointer=cp)
 agent.run_sync("My name is Alice.", thread_id="t1")
 agent.run_sync("What's my name?", thread_id="t1")   # resumes from the database
 ```
+
+A database without mutual TLS has no wallet: leave `wallet_location` out and
+pass the connect descriptor as `dsn`, or a `tnsnames.ora` alias with
+`config_dir=` naming the directory that holds the file. The wallet keyword
+alone makes python-oracledb look for a wallet there (`DPY-6005`); see
+[Oracle Database 26ai → TLS-only or mutual TLS](oracle-26ai.md#tls-only-or-mutual-tls).
 
 ### Local: `FileCheckpointer`
 

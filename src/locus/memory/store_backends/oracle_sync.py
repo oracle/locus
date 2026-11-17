@@ -50,6 +50,7 @@ class OracleSyncStore:
         dimension: int | None = None,
         distance_metric: str = "COSINE",
         auto_create_table: bool = True,
+        config_dir: str | None = None,
     ) -> None:
         self._async = OracleStore(
             dsn=dsn,
@@ -67,6 +68,7 @@ class OracleSyncStore:
             dimension=dimension,
             distance_metric=distance_metric,
             auto_create_table=auto_create_table,
+            config_dir=config_dir,
         )
 
     # -- Capabilities ------------------------------------------------------

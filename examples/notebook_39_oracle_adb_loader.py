@@ -38,13 +38,15 @@ Run it:
     export ORACLE_DSN=mydb_low                   # tnsnames alias in the wallet
     export ORACLE_USER=locus_app                 # least-privileged app schema
     export ORACLE_PASSWORD='<app-password>'
-    export ORACLE_WALLET=~/.oci/wallets/mydb     # directory holding tnsnames.ora
+    export ORACLE_WALLET=~/.oci/wallets/mydb     # mTLS only; a TLS-only database has none
     export ORACLE_WALLET_PASSWORD='<wallet-pw>'  # if the wallet is encrypted
+    # TLS-only (no wallet): a connect string in ORACLE_DSN, or an alias + ORACLE_CONFIG_DIR
 
     python examples/notebook_39_oracle_adb_loader.py
 
-If any of ``ORACLE_DSN``, ``ORACLE_USER``, ``ORACLE_PASSWORD`` or
-``ORACLE_WALLET`` is unset the notebook prints the missing names and
+If any of ``ORACLE_DSN``, ``ORACLE_USER`` or ``ORACLE_PASSWORD`` is unset,
+or a TNS alias has no ``ORACLE_WALLET`` / ``ORACLE_CONFIG_DIR`` to resolve
+it, the notebook prints the missing names and
 the wiring snippet, then exits cleanly — no traceback, no
 half-initialised state.
 
@@ -74,7 +76,6 @@ _REQUIRED_ENV = (
     "ORACLE_DSN",
     "ORACLE_USER",
     "ORACLE_PASSWORD",
-    "ORACLE_WALLET",
 )
 
 
@@ -120,7 +121,20 @@ _QUERIES = (
 
 
 def _missing_env() -> list[str]:
-    return [name for name in _REQUIRED_ENV if not os.environ.get(name)]
+    missing = [name for name in _REQUIRED_ENV if not os.environ.get(name)]
+    # A tnsnames alias in ORACLE_DSN needs a directory to resolve it: the
+    # mTLS wallet, or ORACLE_CONFIG_DIR / TNS_ADMIN for a TLS-only database.
+    # A full connect string needs neither.
+    dsn = os.environ.get("ORACLE_DSN", "")
+    if (
+        "(" not in dsn
+        and "/" not in dsn
+        and not any(
+            os.environ.get(name) for name in ("ORACLE_WALLET", "ORACLE_CONFIG_DIR", "TNS_ADMIN")
+        )
+    ):
+        missing.append("ORACLE_WALLET (mTLS) or ORACLE_CONFIG_DIR (TLS-only alias)")
+    return missing
 
 
 def _print_skip_banner(missing: list[str]) -> None:
@@ -133,8 +147,10 @@ def _print_skip_banner(missing: list[str]) -> None:
     for name in missing:
         print(f"  - {name}")
     print(
-        "\nProvision an Autonomous Database, drop its wallet under "
-        "$ORACLE_WALLET, then set the variables above and re-run."
+        "\nProvision an Autonomous Database. With mTLS, drop its wallet under "
+        "$ORACLE_WALLET; without it (TLS-only), put the connect string in "
+        "ORACLE_DSN or an alias in a tnsnames.ora under $ORACLE_CONFIG_DIR. "
+        "Then set the variables above and re-run."
     )
     print("\nMinimal wiring (what the live path below builds):")
     print(
@@ -162,29 +178,27 @@ def _print_skip_banner(missing: list[str]) -> None:
 
 def _conn_kwargs() -> dict[str, str]:
     """Connection envelope shared by the helper DDL/DML and the loader."""
-    return {
+    kwargs = {
         "dsn": os.environ["ORACLE_DSN"],
         "user": os.environ["ORACLE_USER"],
         "password": os.environ["ORACLE_PASSWORD"],
-        "wallet_location": os.path.expanduser(os.environ["ORACLE_WALLET"]),
-        "wallet_password": os.environ.get("ORACLE_WALLET_PASSWORD", ""),
     }
+    if os.environ.get("ORACLE_CONFIG_DIR"):
+        kwargs["config_dir"] = os.path.expanduser(os.environ["ORACLE_CONFIG_DIR"])
+    if os.environ.get("ORACLE_WALLET"):  # mTLS only; a TLS-only database has no wallet
+        kwargs["wallet_location"] = os.path.expanduser(os.environ["ORACLE_WALLET"])
+        kwargs["wallet_password"] = os.environ.get("ORACLE_WALLET_PASSWORD", "")
+    return kwargs
 
 
 async def _connect() -> oracledb.AsyncConnection:
-    """One async connection on the same wallet envelope the loader uses."""
+    """One async connection on the same connection envelope the loader uses."""
     import oracledb
 
     kw = _conn_kwargs()
-    params: dict[str, str] = {}
-    if kw["wallet_location"]:
-        params["config_dir"] = kw["wallet_location"]
-        params["wallet_location"] = kw["wallet_location"]
-        if kw["wallet_password"]:
-            params["wallet_password"] = kw["wallet_password"]
-    return await oracledb.connect_async(
-        user=kw["user"], password=kw["password"], dsn=kw["dsn"], **params
-    )
+    if "wallet_location" in kw:  # the wallet directory also holds tnsnames.ora
+        kw.setdefault("config_dir", kw["wallet_location"])
+    return await oracledb.connect_async(**kw)
 
 
 async def _setup_demo_table() -> None:

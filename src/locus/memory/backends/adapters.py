@@ -783,12 +783,16 @@ def oracle_checkpointer(
     Create an Oracle Database-backed checkpointer.
 
     Args:
-        dsn: Oracle connection string (e.g., "host:port/service_name")
+        dsn: Oracle connection string (e.g., "host:port/service_name") or a
+            tnsnames alias
         user: Database user
         password: Database password
         max_checkpoints_per_thread: Keep only this many of a thread's newest
             checkpoints (``None`` keeps all); see ``StorageBackendAdapter``
-        **kwargs: Additional OracleBackend options (table_name, wallet_location)
+        **kwargs: Additional OracleBackend options: ``table_name``;
+            ``config_dir`` (the directory holding ``tnsnames.ora``, for an
+            alias on a TLS-only database); ``wallet_location`` and
+            ``wallet_password`` for Autonomous Database with mTLS
 
     Returns:
         StorageBackendAdapter wrapping OracleBackend

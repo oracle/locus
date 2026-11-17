@@ -13,6 +13,23 @@ policy.
 - `python -m locus.runner` takes its workspace from `LOCUS_WORKSPACE` when
   set, for a runner started outside an OpenShell sandbox (a gateway's local
   box driver, a CI job); unset, it works on `/sandbox` as before.
+- **TLS-only Autonomous Database connections, and a `config_dir` of their
+  own.** Every Oracle backend — `OracleBackend` behind `oracle_checkpointer()`,
+  `OracleCheckpointSaver`, `OracleStore`, `OracleVectorStore`,
+  `OracleADBLoader`, `OracleInDBChunker`, `OracleInDBEmbeddings`,
+  `OracleApprovals`, `OracleAuditTrail`, `OracleReportStore` and the sync
+  twins — takes an optional `config_dir`, the directory holding
+  `tnsnames.ora`, and passes `wallet_location` to python-oracledb only when a
+  wallet is given. A database created without mutual TLS has no wallet, and
+  naming its TNS directory as `wallet_location` (the only way to resolve an
+  alias before) made the driver look for a wallet file there and fail with
+  `DPY-6005`. `wallet_location` alone still doubles as the TNS directory, so
+  wallet users see no change. The `oracle://` approval-store and report-store
+  specs take `config_dir=` and a bare one reads `ORACLE_CONFIG_DIR` (else
+  `TNS_ADMIN`) from the environment; the Oracle notebooks require
+  `ORACLE_WALLET` only for an alias that nothing else resolves. The
+  [Oracle Database 26ai](docs/concepts/oracle-26ai.md) page describes the
+  TLS-only path. (#347)
 
 ### Fixed
 

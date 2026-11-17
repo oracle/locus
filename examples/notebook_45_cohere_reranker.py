@@ -33,11 +33,13 @@ Run it:
     export OCI_AUTH_TYPE=api_key     # or security_token
     export OCI_REGION=us-chicago-1
     export OCI_COMPARTMENT=ocid1.compartment.oc1..xxx
-    # Plus the Oracle 26ai wallet (see notebook 38):
+    # Plus the Oracle 26ai connection (see notebook 38):
     export ORACLE_DSN=mydb_low
     export ORACLE_USER=locus_app
     export ORACLE_PASSWORD='<app-password>'
-    export ORACLE_WALLET=~/.oci/wallets/mydb
+    export ORACLE_WALLET=~/.oci/wallets/mydb     # mTLS only; a TLS-only database has none
+    export ORACLE_WALLET_PASSWORD='<wallet-pw>'  # if the wallet is encrypted
+    # TLS-only (no wallet): a connect string in ORACLE_DSN, or an alias + ORACLE_CONFIG_DIR
     python examples/notebook_45_cohere_reranker.py
 
 Difficulty: Intermediate. Self-contained — no prior notebook required.
@@ -60,13 +62,40 @@ _REQUIRED_ENV = (
     "ORACLE_DSN",
     "ORACLE_USER",
     "ORACLE_PASSWORD",
-    "ORACLE_WALLET",
     "OCI_COMPARTMENT",
 )
 
 
 def _missing_env() -> list[str]:
-    return [name for name in _REQUIRED_ENV if not os.environ.get(name)]
+    missing = [name for name in _REQUIRED_ENV if not os.environ.get(name)]
+    # A tnsnames alias in ORACLE_DSN needs a directory to resolve it: the
+    # mTLS wallet, or ORACLE_CONFIG_DIR / TNS_ADMIN for a TLS-only database.
+    # A full connect string needs neither.
+    dsn = os.environ.get("ORACLE_DSN", "")
+    if (
+        "(" not in dsn
+        and "/" not in dsn
+        and not any(
+            os.environ.get(name) for name in ("ORACLE_WALLET", "ORACLE_CONFIG_DIR", "TNS_ADMIN")
+        )
+    ):
+        missing.append("ORACLE_WALLET (mTLS) or ORACLE_CONFIG_DIR (TLS-only alias)")
+    return missing
+
+
+def _oracle_connection() -> dict[str, str]:
+    """dsn / user / password, plus the TNS directory or wallet the environment names."""
+    kwargs = {
+        "dsn": os.environ["ORACLE_DSN"],
+        "user": os.environ["ORACLE_USER"],
+        "password": os.environ["ORACLE_PASSWORD"],
+    }
+    if os.environ.get("ORACLE_CONFIG_DIR"):
+        kwargs["config_dir"] = os.path.expanduser(os.environ["ORACLE_CONFIG_DIR"])
+    if os.environ.get("ORACLE_WALLET"):  # mTLS only; a TLS-only database has no wallet
+        kwargs["wallet_location"] = os.path.expanduser(os.environ["ORACLE_WALLET"])
+        kwargs["wallet_password"] = os.environ.get("ORACLE_WALLET_PASSWORD", "")
+    return kwargs
 
 
 CORPUS = [
@@ -125,11 +154,7 @@ async def main() -> None:
     )
 
     store = OracleVectorStore(
-        dsn=os.environ["ORACLE_DSN"],
-        user=os.environ["ORACLE_USER"],
-        password=os.environ["ORACLE_PASSWORD"],
-        wallet_location=os.path.expanduser(os.environ["ORACLE_WALLET"]),
-        wallet_password=os.environ.get("ORACLE_WALLET_PASSWORD", ""),
+        **_oracle_connection(),
         table_name="locus_notebook_45",
         dimension=1536,  # embed-v4.0 width
         distance_metric="COSINE",

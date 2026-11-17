@@ -41,6 +41,7 @@ class OracleSyncInDBChunker:
         by: str = "words",
         split: str = "recursively",
         normalize: str = "all",
+        config_dir: str | None = None,
         **kwargs: Any,
     ) -> None:
         self._async = OracleInDBChunker(
@@ -57,6 +58,7 @@ class OracleSyncInDBChunker:
             by=by,
             split=split,
             normalize=normalize,
+            config_dir=config_dir,
             **kwargs,
         )
 

@@ -217,7 +217,8 @@ UPDATE` in PostgreSQL and Oracle, a lock key in Redis), so replicas that share
 the store never both redeem one approval. They follow the connection
 conventions of the matching checkpointer backend: a libpq DSN or host / port /
 database / user / password, a `redis://` URL and key prefix, a TNS alias or
-host / port / service name with an optional wallet. The table is created on
+host / port / service name with an optional `config_dir` (the `tnsnames.ora`
+directory, for a TLS-only database) or wallet (mutual TLS). The table is created on
 first use only when it is missing, so a role without `CREATE` works against a
 table a migration made. Each store owns one event loop on a background thread,
 where its pool lives; the `ApprovalStore` methods block on it, and `asubmit`,
@@ -238,7 +239,8 @@ store = OracleApprovals(dsn="locusdb_low", user="LOCUS", password=pw, wallet_loc
 and `approval_store(spec)` opens one from it. A database spec with nothing
 after the scheme reads the environment the integration tests use
 (`POSTGRES_HOST` and friends, `REDIS_URL`, `ORACLE_DSN` / `ORACLE_USER` /
-`ORACLE_PASSWORD` / `ORACLE_WALLET`). The `locus approvals` command takes the
+`ORACLE_PASSWORD` / `ORACLE_CONFIG_DIR` / `ORACLE_WALLET`). The `locus approvals`
+command takes the
 same spec:
 
 ```bash

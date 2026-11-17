@@ -133,7 +133,8 @@ over the environment.
 | `POSTGRES_HOST` / `POSTGRES_PORT` / `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | A bare `postgresql://` approval-store spec (`approval_store("postgresql://")`, `locus approvals --store postgresql://`) |
 | `ORACLE_DSN` | Oracle Database 26ai — tnsnames alias or `host:port/service` — notebooks 37-45; a bare `oracle://` approval-store spec |
 | `ORACLE_USER` / `ORACLE_PASSWORD` | Oracle Database 26ai credentials |
-| `ORACLE_WALLET` / `ORACLE_WALLET_PASSWORD` | Autonomous Database wallet directory and password (empty string for auto-login wallets) |
+| `ORACLE_CONFIG_DIR` | Directory holding `tnsnames.ora` when `ORACLE_DSN` is an alias on a TLS-only database (no wallet); a bare `oracle://` spec reads it, else `TNS_ADMIN` — notebooks 37-45 |
+| `ORACLE_WALLET` / `ORACLE_WALLET_PASSWORD` | Autonomous Database wallet directory and password for mutual TLS only (empty string for auto-login wallets); the wallet directory resolves aliases too |
 | `S3_ENDPOINT_URL` | S3-compatible endpoint (MinIO, R2) — notebook 50 |
 
 ## Approvals

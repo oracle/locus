@@ -82,6 +82,7 @@ from pydantic import BaseModel, Field, SecretStr
 from locus._oracle_pool_cache import safe_acquire
 from locus.memory.backends._oracle_config import (
     OracleConfig,
+    connect_params,
 )
 from locus.memory.backends._oracle_config import (
     validate_sql_identifier as _validate_sql_identifier,
@@ -178,6 +179,7 @@ class OracleCheckpointSaver(BaseModel):
         min_pool_size: int = 1,
         max_pool_size: int = 5,
         auto_create_table: bool = True,
+        config_dir: str | None = None,
         **kwargs: Any,
     ) -> None:
         # The two physical table names are derived from ``table_name``
@@ -194,6 +196,7 @@ class OracleCheckpointSaver(BaseModel):
             dsn=dsn,
             user=user,
             password=SecretStr(password) if isinstance(password, str) else password,
+            config_dir=config_dir,
             wallet_location=wallet_location,
             wallet_password=(
                 SecretStr(wallet_password) if isinstance(wallet_password, str) else wallet_password
@@ -263,22 +266,13 @@ class OracleCheckpointSaver(BaseModel):
             if dsn is None and cfg.host and cfg.service_name:
                 dsn = oracledb.makedsn(cfg.host, cfg.port, service_name=cfg.service_name)
 
-            params: dict[str, Any] = {}
-            if cfg.wallet_location:
-                params["config_dir"] = cfg.wallet_location
-                params["wallet_location"] = cfg.wallet_location
-                # ``is not None``: SecretStr("") is falsy in Pydantic v2, but
-                # "" is the auto-login (cwallet.sso) wallet idiom. See #289.
-                if cfg.wallet_password is not None:
-                    params["wallet_password"] = cfg.wallet_password.get_secret_value()
-
             return oracledb.create_pool_async(
                 user=cfg.user,
                 password=cfg.password.get_secret_value(),
                 dsn=dsn,
                 min=cfg.min_pool_size,
                 max=cfg.max_pool_size,
-                **params,
+                **connect_params(cfg),
             )
 
         return cast("oracledb.AsyncConnectionPool", await get_pool(self, _build))

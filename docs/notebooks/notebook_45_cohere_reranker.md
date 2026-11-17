@@ -55,8 +55,9 @@ export OCI_COMPARTMENT=ocid1.compartment.oc1..…
 export ORACLE_DSN=mydb_low
 export ORACLE_USER=locus_app
 export ORACLE_PASSWORD='<app-password>'
-export ORACLE_WALLET=~/.oci/wallets/mydb
+export ORACLE_WALLET=~/.oci/wallets/mydb     # mTLS only; a TLS-only database has none
 export ORACLE_WALLET_PASSWORD='<wallet-pw>'  # if the wallet is encrypted
+# TLS-only (no wallet): a connect string in ORACLE_DSN, or an alias + ORACLE_CONFIG_DIR
 ```
 
 Both lanes of the drawing run here against one `OCIEmbeddings` embedder
@@ -95,10 +96,11 @@ python examples/notebook_45_cohere_reranker.py
 
 The script needs two live services and no chat model, so
 `examples/config.py` and `LOCUS_MODEL_PROVIDER` play no part here.
-Oracle Database 26ai is reached through an Autonomous Database wallet:
-`ORACLE_DSN`, `ORACLE_USER`, `ORACLE_PASSWORD` and `ORACLE_WALLET` from
-Prerequisites, plus `ORACLE_WALLET_PASSWORD` when the wallet is
-encrypted; each run appends the eight passages to a `locus_notebook_45`
+Oracle Database 26ai is reached
+through `ORACLE_DSN`, `ORACLE_USER` and `ORACLE_PASSWORD` from Prerequisites,
+plus `ORACLE_WALLET` for mutual TLS (`ORACLE_WALLET_PASSWORD` when the wallet
+is encrypted) or `ORACLE_CONFIG_DIR` when a TLS-only database is named by a
+tnsnames alias; each run appends the eight passages to a `locus_notebook_45`
 table in that schema, created on first use. Both the Cohere `embed-v4.0`
 embeddings and the `rerank-v4.0-fast` reranker come from OCI Generative
 AI, which needs `OCI_COMPARTMENT`; `OCI_PROFILE`, `OCI_REGION` and

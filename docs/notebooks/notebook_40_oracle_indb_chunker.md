@@ -41,8 +41,9 @@ What this notebook covers:
 export ORACLE_DSN=mydb_low                   # tnsnames alias in the wallet
 export ORACLE_USER=locus_app                 # least-privileged app schema
 export ORACLE_PASSWORD='<app-password>'
-export ORACLE_WALLET=~/.oci/wallets/mydb     # directory holding tnsnames.ora
-export ORACLE_WALLET_PASSWORD='<wallet-pw>'  # if wallet is encrypted
+export ORACLE_WALLET=~/.oci/wallets/mydb     # mTLS only; a TLS-only database has none
+export ORACLE_WALLET_PASSWORD='<wallet-pw>'  # if the wallet is encrypted
+# TLS-only (no wallet): a connect string in ORACLE_DSN, or an alias + ORACLE_CONFIG_DIR
 ```
 
 One-time SQL prerequisite (out-of-band, as the schema owner):
@@ -95,9 +96,11 @@ python examples/notebook_40_oracle_indb_chunker.py
 
 The script needs an Oracle Database 26ai reachable through the four
 variables in Prerequisites — `ORACLE_DSN`, `ORACLE_USER`,
-`ORACLE_PASSWORD` and `ORACLE_WALLET`; `ORACLE_WALLET_PASSWORD` is
+`ORACLE_PASSWORD`, plus `ORACLE_WALLET` for mutual TLS or
+`ORACLE_CONFIG_DIR` when a TLS-only database is named by a tnsnames alias;
+`ORACLE_WALLET_PASSWORD` is
 optional and matters only for an encrypted wallet — and `EXECUTE` on
-`DBMS_VECTOR_CHAIN` for that user. When any of the four is unset it
+`DBMS_VECTOR_CHAIN` for that user. When any of them is unset it
 prints a skip notice naming the missing variables, together with the
 minimal wiring, and exits cleanly with status 0 before opening a
 connection. With them set it creates a one-row demo table,

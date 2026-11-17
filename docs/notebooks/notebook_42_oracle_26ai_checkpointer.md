@@ -36,8 +36,9 @@ single Autonomous Database:
 export ORACLE_DSN=mydb_low                   # tnsnames alias in the wallet
 export ORACLE_USER=locus_app                 # least-privileged app schema
 export ORACLE_PASSWORD='<app-password>'
-export ORACLE_WALLET=~/.oci/wallets/mydb     # directory holding tnsnames.ora
-export ORACLE_WALLET_PASSWORD='<wallet-pw>'  # if wallet is encrypted
+export ORACLE_WALLET=~/.oci/wallets/mydb     # mTLS only; a TLS-only database has none
+export ORACLE_WALLET_PASSWORD='<wallet-pw>'  # if the wallet is encrypted
+# TLS-only (no wallet): a connect string in ORACLE_DSN, or an alias + ORACLE_CONFIG_DIR
 ```
 
 The notebook writes to the table `locus_notebook_42` (set with
@@ -90,10 +91,11 @@ turn 1 although this process never saw it:
 python examples/notebook_42_oracle_26ai_checkpointer.py
 ```
 
-The script needs an Oracle Database reachable through the four
-variables in Prerequisites: `ORACLE_DSN`, `ORACLE_USER`,
-`ORACLE_PASSWORD` and `ORACLE_WALLET` (`ORACLE_WALLET_PASSWORD` only
-when the wallet is encrypted). When any of the four is unset it prints
+The script needs an Oracle Database reachable through the variables in Prerequisites:
+`ORACLE_DSN`, `ORACLE_USER` and `ORACLE_PASSWORD`, plus `ORACLE_WALLET` for
+mutual TLS (`ORACLE_WALLET_PASSWORD` only when the wallet is encrypted) or
+`ORACLE_CONFIG_DIR` when a TLS-only database is named by a tnsnames alias.
+When any of them is unset it prints
 the missing names and the minimal wiring, then exits cleanly without
 opening a connection. With the database in place, the agent's model
 comes from `examples/config.py`: OCI Generative AI when `~/.oci/config`

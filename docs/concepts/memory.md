@@ -63,7 +63,7 @@ cp = oracle_checkpointer(
     dsn=os.environ["ORACLE_DSN"],
     user=os.environ["ORACLE_USER"],
     password=os.environ["ORACLE_PASSWORD"],
-    wallet_location=os.environ["ORACLE_WALLET"],
+    wallet_location=os.environ["ORACLE_WALLET"],  # mutual TLS; omit for a TLS-only database
     wallet_password=os.environ.get("ORACLE_WALLET_PASSWORD", ""),
     table_name="support_threads",
 )
@@ -99,7 +99,7 @@ store = OracleStore(
     dsn=os.environ["ORACLE_DSN"],
     user=os.environ["ORACLE_USER"],
     password=os.environ["ORACLE_PASSWORD"],
-    wallet_location=os.environ["ORACLE_WALLET"],
+    wallet_location=os.environ["ORACLE_WALLET"],  # mutual TLS; omit for a TLS-only database
     wallet_password=os.environ.get("ORACLE_WALLET_PASSWORD", ""),
 )
 agent = Agent(
