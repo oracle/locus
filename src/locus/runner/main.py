@@ -7,7 +7,8 @@
 The process the gateway starts in a box. It:
 
 1. reads its gateway, run and workload token from the environment
-   (:meth:`~locus.runner.client.RunnerConfig.from_env`), and marks itself
+   (:meth:`~locus.runner.client.RunnerConfig.from_env`), and its workspace
+   when it is not ``/sandbox`` (``LOCUS_WORKSPACE``), and marks itself
    protects what it read once its runtime is built (:func:`~locus.runner.harden.protect`);
 2. asks the gateway what to do (``GET /internal/v1/runner/next``): start,
    resume, or stop;
@@ -32,6 +33,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import sys
 from collections.abc import Mapping
 from pathlib import Path
@@ -57,13 +59,26 @@ if TYPE_CHECKING:
     from locus.core.events import LocusEvent
 
 
-__all__ = ["EXIT_DONE", "EXIT_ERROR", "EXIT_REFUSED", "event_for", "main", "run_box"]
+__all__ = [
+    "EXIT_DONE",
+    "EXIT_ERROR",
+    "EXIT_REFUSED",
+    "WORKSPACE_VAR",
+    "event_for",
+    "main",
+    "run_box",
+]
 
 logger = logging.getLogger(__name__)
 
 EXIT_DONE = 0
 EXIT_ERROR = 1
 EXIT_REFUSED = 2
+
+#: Names the box's workspace when it is not ``/sandbox``. A runner started outside
+#: OpenShell (a gateway's local box driver, a CI job) sets it to the directory it may
+#: work in; inside a sandbox it is left unset.
+WORKSPACE_VAR = "LOCUS_WORKSPACE"
 
 #: Characters of a tool result reported on ``tool_complete`` (the gateway
 #: keeps what it needs; the run's stream is for watching, not evidence).
@@ -343,7 +358,8 @@ def main(argv: list[str] | None = None) -> int:
     """The console entry point."""
     del argv  # the runner takes everything from its environment
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-    return asyncio.run(run_box())
+    workspace = os.environ.get(WORKSPACE_VAR) or DEFAULT_WORKSPACE
+    return asyncio.run(run_box(workspace=workspace))
 
 
 if __name__ == "__main__":  # pragma: no cover

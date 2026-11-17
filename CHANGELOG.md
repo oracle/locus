@@ -8,6 +8,19 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- `python -m locus.runner` takes its workspace from `LOCUS_WORKSPACE` when
+  set, for a runner started outside an OpenShell sandbox (a gateway's local
+  box driver, a CI job); unset, it works on `/sandbox` as before.
+
+### Fixed
+
+- `python -m locus.runner` reports every command the harness ran as a
+  `harness.exec` record. The runtime drained its exec records by replacing
+  the list the harness appends to, so only commands before the first tool
+  completion ever reached the gateway.
+
 ## [5.6.0] - 2026-11-17
 
 ### Added
@@ -912,13 +925,6 @@ policy.
 - **Self-graded suites are named.** When the judge model id equals the
   model under test, `provenance.self_graded` is stamped and the report
   summary ends with a warning. The case is not failed for it.
-
-### Fixed
-
-- `python -m locus.runner` reports every command the harness ran as a
-  `harness.exec` record. The runtime drained its exec records by replacing
-  the list the harness appends to, so only commands before the first tool
-  completion ever reached the gateway.
 
 ## [5.3.2] - 2026-11-02
 
