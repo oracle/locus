@@ -87,6 +87,11 @@ policy.
 
 ### Fixed
 
+- **Two processes creating the PostgreSQL checkpoint table at the same instant
+  no longer fail.** `postgresql_checkpointer()` and `PgCheckpointer` took
+  `CREATE TABLE IF NOT EXISTS` for atomic; the loser hit the `pg_type` unique
+  index. The first-time DDL now runs under a transaction-scoped advisory lock
+  on the table name and re-probes before creating.
 - **`LOCUS_FRONTIER_MODEL` turns the knob it names.** The rogue-agent challenge
   showed the variable in its banner but ran a pinned model; `build_agent()`
   now uses it, and the default is the model it pinned. The `locus.loop`

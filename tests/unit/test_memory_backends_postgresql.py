@@ -66,6 +66,11 @@ class _StubConn:
     async def fetch(self, sql: str, *args: Any) -> list[Any]:
         return self.fetch_value
 
+    @asynccontextmanager
+    async def transaction(self) -> Any:
+        # The first-time DDL runs inside a transaction (advisory lock); a stub needs the shape.
+        yield
+
 
 class _StubPool:
     def __init__(self, conn: _StubConn) -> None:
