@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel, Field
 
+from locus.memory.backends.checkpoint_index import index_key
+
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis
@@ -42,6 +44,15 @@ class RedisBackend(BaseModel):
         >>> backend = RedisBackend(url="redis://localhost:6379")
         >>> await backend.save("thread_1", state.model_dump())
         >>> data = await backend.load("thread_1")
+
+    Checkpoint index:
+        Through ``redis_checkpointer()`` the thread's checkpoint index is a
+        hash at ``<prefix><thread_id>:_checkpoints:hash``, one field per
+        checkpoint (``HSET`` / ``HDEL`` are atomic), so two processes saving
+        to one thread never lose an entry. An index written by an earlier
+        release as one JSON string at ``<prefix><thread_id>:_checkpoints``
+        is still read, and moved into the hash on the thread's next save
+        or removal.
     """
 
     config: RedisConfig = Field(default_factory=RedisConfig)
@@ -152,6 +163,81 @@ class RedisBackend(BaseModel):
         threads = [k[prefix_len:] for k in keys]
         # Apply offset and limit
         return threads[offset : offset + limit]
+
+    # -- checkpoint index (CheckpointIndexStore) -------------------------------
+
+    def _index_hash_key(self, thread_id: str) -> str:
+        """The hash holding a thread's checkpoint index: one field per checkpoint."""
+        return f"{self._key(index_key(thread_id))}:hash"
+
+    def _legacy_index_key(self, thread_id: str) -> str:
+        """The key an earlier release kept the index at, as one JSON string."""
+        return self._key(index_key(thread_id))
+
+    @staticmethod
+    def _legacy_entries(raw: str | bytes | None) -> list[dict[str, Any]]:
+        """The entries of a legacy index string; ``[]`` when there is none."""
+        if raw is None:
+            return []
+        entries = json.loads(raw).get("checkpoints", [])
+        return [entry for entry in entries if entry.get("checkpoint_id")]
+
+    async def _migrate_legacy_index(self, client: Redis, thread_id: str) -> None:
+        """Move a legacy index string into the hash, once.
+
+        Each field is set only where the hash has none (``HSETNX``), so an
+        entry the hash already carries is never replaced by its older copy,
+        and the string is deleted in the same transaction. Two processes
+        migrating at once do the same idempotent work.
+        """
+        raw = await client.get(self._legacy_index_key(thread_id))
+        if raw is None:
+            return
+        pipe = client.pipeline(transaction=True)
+        for entry in self._legacy_entries(raw):
+            pipe.hsetnx(
+                self._index_hash_key(thread_id), str(entry["checkpoint_id"]), json.dumps(entry)
+            )
+        pipe.delete(self._legacy_index_key(thread_id))
+        await pipe.execute()
+
+    async def index_add(self, thread_id: str, entry: dict[str, Any]) -> None:
+        """Set the entry's field in the index hash (``HSET``: atomic, replaces a duplicate)."""
+        client = await self._get_client()
+        await self._migrate_legacy_index(client, thread_id)
+        key = self._index_hash_key(thread_id)
+        pipe = client.pipeline(transaction=True)
+        pipe.hset(key, str(entry["checkpoint_id"]), json.dumps(entry))
+        if self.config.ttl_seconds:
+            pipe.expire(key, self.config.ttl_seconds)
+        await pipe.execute()
+
+    async def index_remove(self, thread_id: str, checkpoint_id: str) -> bool:
+        """Delete the entry's field from the index hash (``HDEL``)."""
+        client = await self._get_client()
+        await self._migrate_legacy_index(client, thread_id)
+        removed: int = await client.hdel(self._index_hash_key(thread_id), checkpoint_id)
+        return removed > 0
+
+    async def index_list(self, thread_id: str) -> list[dict[str, Any]]:
+        """Every entry: the hash's fields, plus a legacy string's not yet migrated."""
+        client = await self._get_client()
+        pipe = client.pipeline(transaction=False)
+        pipe.hgetall(self._index_hash_key(thread_id))
+        pipe.get(self._legacy_index_key(thread_id))
+        fields, raw = await pipe.execute()
+        entries = {str(e["checkpoint_id"]): e for e in self._legacy_entries(raw)}
+        for checkpoint_id, value in cast("dict[str, str]", fields).items():
+            entries[checkpoint_id] = json.loads(value)
+        return list(entries.values())
+
+    async def index_clear(self, thread_id: str) -> bool:
+        """Delete the index hash and any legacy string."""
+        client = await self._get_client()
+        deleted: int = await client.delete(
+            self._index_hash_key(thread_id), self._legacy_index_key(thread_id)
+        )
+        return deleted > 0
 
     async def close(self) -> None:
         """Close Redis connection."""
