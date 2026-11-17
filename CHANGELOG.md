@@ -13,6 +13,33 @@ policy.
 - `python -m locus.runner` takes its workspace from `LOCUS_WORKSPACE` when
   set, for a runner started outside an OpenShell sandbox (a gateway's local
   box driver, a CI job); unset, it works on `/sandbox` as before.
+- **`locus audit verify --format json`.** The verification of an exported
+  audit trail as data: `{"file", "verified", "records", "keys",
+  "head_checked"}` on stdout for both outcomes, where the command printed
+  prose only and a job archiving its results had to scrape it. Exit codes
+  are unchanged: 0 when the trail verifies, 1 when it does not. (#483)
+- **`locus eval gate --markdown` and `GateResult.to_markdown()`.** The
+  gate's verdict as Markdown with one table row per failed check, for a
+  pull-request comment, the way `eval diff` and `eval summary` already
+  render with `--markdown`. The exit code is still the gate's verdict. (#484)
+
+### Changed
+
+- **Docs: notebook 78's captured output, concept pages that link their
+  notebooks, the environment-variable reference completed from the source,
+  and `Example:` sections on `BaseStore`, `InMemoryStore`, `register_provider`
+  and `list_checkpointers`.** The concession-approval page shows the offline
+  run (#485); the OCI Responses, multi-modal providers, events, SSE catalogue
+  and control-layer pages link the notebooks that exercise them (#486); the
+  variables the SDK reads but the page omitted are listed (#487); the four
+  docstrings carry an example a test executes (#488, #489).
+
+### Fixed
+
+- `python -m locus.runner` reports every command the harness ran as a
+  `harness.exec` record. The runtime drained its exec records by replacing
+  the list the harness appends to, so only commands before the first tool
+  completion ever reached the gateway.
 - **TLS-only Autonomous Database connections, and a `config_dir` of their
   own.** Every Oracle backend — `OracleBackend` behind `oracle_checkpointer()`,
   `OracleCheckpointSaver`, `OracleStore`, `OracleVectorStore`,
@@ -30,19 +57,6 @@ policy.
   `ORACLE_WALLET` only for an alias that nothing else resolves. The
   [Oracle Database 26ai](docs/concepts/oracle-26ai.md) page describes the
   TLS-only path. (#347)
-
-### Changed
-
-- **Docs: notebook 78's captured output, concept pages that link their
-  notebooks, the environment-variable reference completed from the source,
-  and `Example:` sections on `BaseStore`, `InMemoryStore`, `register_provider`
-  and `list_checkpointers`.** The concession-approval page shows the offline
-  run (#485); the OCI Responses, multi-modal providers, events, SSE catalogue
-  and control-layer pages link the notebooks that exercise them (#486); the
-  variables the SDK reads but the page omitted are listed (#487); the four
-  docstrings carry an example a test executes (#488, #489).
-
-### Fixed
 
 - `python -m locus.runner` reports every command the harness ran as a
   `harness.exec` record. The runtime drained its exec records by replacing

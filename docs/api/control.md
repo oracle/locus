@@ -501,6 +501,19 @@ verification, so a chain rebuilt around an edit fails unless it was signed with
 a key the verifier trusts. `trail.verify(keys=...)` runs the same check in
 process.
 
+From a terminal, `locus audit verify` runs it over the exported file and exits
+0 when the trail verifies, 1 when it does not:
+
+```bash
+locus audit verify trail.jsonl --key audit-2026-09=public.pem --head "$ANCHOR"
+locus audit verify trail.jsonl --key audit-2026-09=public.pem --format json
+```
+
+`--format json` prints the result as data on stdout for both outcomes, for a
+job that archives verification results rather than scraping the prose:
+`{"file": "trail.jsonl", "verified": true, "records": 12, "keys": 1,
+"head_checked": false}`.
+
 Signing does not catch truncation. Records dropped off the end take their
 signatures with them, and what is left is still validly signed, so keep passing
 an externally held `expected_head`.

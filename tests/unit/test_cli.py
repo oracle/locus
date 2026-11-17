@@ -222,6 +222,55 @@ def test_audit_verify_from_public_keys(tmp_path: Path, capsys: pytest.CaptureFix
     assert main(["audit", "verify", str(tmp_path / "missing.jsonl")]) == 2
 
 
+def test_audit_verify_as_json(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    pytest.importorskip("cryptography")
+    from locus.control import AuditTrail, Ed25519Signer
+
+    signer = Ed25519Signer.generate(key_id="audit-1")
+    trail = AuditTrail(signer=signer)
+    for i in range(3):
+        trail.record("action-admission", {"action": f"refund-{i}"})
+    export = tmp_path / "trail.jsonl"
+    export.write_text(trail.export_jsonl())
+    pem = tmp_path / "audit-1.pub.pem"
+    pem.write_bytes(signer.public_key_pem())
+    key = f"audit-1={pem}"
+
+    code = main(
+        ["audit", "verify", str(export), "--key", key, "--head", trail.head, "--format", "json"]
+    )
+    captured = capsys.readouterr()
+    assert code == 0
+    assert captured.err == ""
+    assert json.loads(captured.out) == {
+        "file": str(export),
+        "verified": True,
+        "records": 3,
+        "keys": 1,
+        "head_checked": True,
+    }
+
+    assert main(["audit", "verify", str(export), "--format", "json"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert (result["verified"], result["keys"], result["head_checked"]) == (True, 0, False)
+
+    lines = export.read_text().splitlines()
+    tampered = json.loads(lines[1])
+    tampered["payload"]["action"] = "refund-forged"
+    lines[1] = json.dumps(tampered)
+    export.write_text("\n".join(lines))
+    code = main(["audit", "verify", str(export), "--key", key, "--format", "json"])
+    captured = capsys.readouterr()
+    assert code == 1
+    assert captured.err == "", "the JSON form carries the verdict; nothing is printed to stderr"
+    result = json.loads(captured.out)
+    assert result["verified"] is False
+    assert (result["records"], result["keys"], result["head_checked"]) == (3, 1, False)
+
+    assert main(["audit", "verify", str(export), "--key", key]) == 1
+    assert "FAILED" in capsys.readouterr().err
+
+
 def test_serve_hands_the_agent_to_the_server(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
