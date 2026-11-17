@@ -4,8 +4,6 @@ The admission gate: decide whether a consequential action may run, and
 record the decision either way.
 
 `locus.control` is the domain-neutral surface, and the import path to use.
-Older releases shipped these under `locus.security`; that path still resolves,
-with a deprecation warning, until 6.0 removes it.
 
 For the concepts, start with [The control layer](../concepts/control-layer.md)
 and [Writing a policy that holds](../concepts/policy-authoring.md).
@@ -393,12 +391,13 @@ verdicts are cached per (tool, canonical arguments) within a run.
 
 ### Tool-call integrity
 
-With `Agent(tool_call_integrity=True)` the runtime signs every tool call as
+By default (`tool_call_integrity=True`) the runtime signs every tool call as
 the model's response is parsed and the executor verifies it before it runs;
 a call changed in between is refused with `ToolCallIntegrityError`, recorded
 on the agent's `AuditTrail` and published as `tool.integrity.refused`. A hook
 that rewrites arguments re-signs through `event.resign(by=...)` on its
-`BeforeToolCallEvent`. The [control-layer page](../concepts/control-layer.md#what-the-runtime-enforces-tool-call-integrity)
+`BeforeToolCallEvent`; `Agent(tool_call_integrity=False)` turns the check
+off. The [control-layer page](../concepts/control-layer.md#what-the-runtime-enforces-tool-call-integrity)
 describes what the check guarantees and where it stops.
 
 ::: locus.tools.integrity.ToolCallSigner

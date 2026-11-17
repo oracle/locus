@@ -203,16 +203,11 @@ class ToolCallIntegrityError(ToolError):
     def audit_payload(self, *, disposition: IntegrityViolation, key_id: str) -> dict[str, Any]:
         """The fields a refusal records on the audit trail and the event bus.
 
-        The tool goes out as ``tool_name``, the key the catalogue's other tool
-        events use. ``tool`` carries the same value for one more release.
-
-        .. deprecated:: 5.6.0
-            The ``tool`` key; read ``tool_name``.
+        The tool goes out as ``tool_name``, the key :class:`ToolCallIntegrityError`
+        and the audit entries use.
         """
         return {
             "tool_name": self.tool_name,
-            # Deprecated alias, removed in the release after 5.6.0.
-            "tool": self.tool_name,
             "call_id": self.call_id,
             "reason": self.reason,
             "expected_digest": self.expected_digest,

@@ -71,7 +71,6 @@ import asyncio
 import contextlib
 import logging
 import time
-import warnings
 from collections import deque
 from collections.abc import AsyncIterator, Callable, Iterator, Sequence
 from contextvars import ContextVar
@@ -79,7 +78,6 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal, cast
 
-from locus.core.warnings import LocusDeprecationWarning
 from locus.models.failover import FailoverDecision, FailoverReason, classify
 from locus.observability.emit import EV_MODEL_BREAKER, EV_MODEL_FALLBACK, emit
 
@@ -282,8 +280,8 @@ def served_tier() -> ServedTier | None:
     in the current context (task), or ``None``.
 
     Context-local, so concurrent calls on one shared chain each read their
-    own answer — unlike the deprecated :attr:`FallbackChain.last_tier`. Read
-    it in the task that awaited ``complete()`` or iterated ``stream()``.
+    own answer. Read it in the task that awaited ``complete()`` or iterated
+    ``stream()``.
     """
     return _SERVED_TIER.get()
 
@@ -378,7 +376,6 @@ class FallbackChain:
                 clock=clock,
             )
             self.tiers.append(_Tier(index=index, name=tier_name, model=model, breaker=breaker))
-        self._last_tier: int | None = None
         self._pending: list[FallbackEvent] = []
 
     # ------------------------------------------------------------------
@@ -390,24 +387,6 @@ class FallbackChain:
         """The primary tier's config, so code that reads ``model.config``
         (pricing, context window, provider hints) keeps working."""
         return getattr(self.tiers[0].model, "config", None)
-
-    @property
-    def last_tier(self) -> int | None:
-        """Deprecated: the tier that served the chain's most recent call.
-
-        Shared by every call on the chain, so with concurrent calls it is
-        whichever call finished last — not the one you just awaited. Use the
-        per-call :class:`ServedTier` instead (``response.metadata["fallback"]``
-        or :func:`served_tier`).
-        """
-        warnings.warn(
-            "FallbackChain.last_tier is shared across concurrent calls and may "
-            "describe another call; use response.metadata['fallback'] or "
-            "locus.models.fallback.served_tier() instead. It is removed in 6.0.0.",
-            LocusDeprecationWarning,
-            stacklevel=2,
-        )
-        return self._last_tier
 
     @property
     def metrics(self) -> dict[str, dict[str, Any]]:
@@ -579,7 +558,6 @@ class FallbackChain:
     async def _served(self, tier: _Tier, attempts: int) -> ServedTier:
         tier.breaker.record_success()
         tier.counters["served"] += 1
-        self._last_tier = tier.index
         served = ServedTier(index=tier.index, model=tier.name, attempts=attempts)
         _SERVED_TIER.set(served)
         if tier.index != 0:

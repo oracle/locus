@@ -183,12 +183,20 @@ class ValidationHook(HookProvider):
             # event.arguments is writable; mutating it changes what the
             # tool actually receives — instance counts stay within the
             # quota that keeps the cloud bill in check.
+            changed = False
             if base > self.max_value:
                 print(f"  [VALIDATION] Clamping base={base} to {self.max_value}")
                 event.arguments["base"] = self.max_value
+                changed = True
             if delta > self.max_value:
                 print(f"  [VALIDATION] Clamping delta={delta} to {self.max_value}")
                 event.arguments["delta"] = self.max_value
+                changed = True
+            if changed:
+                # Tool calls are signed over their arguments. A hook that
+                # changes them re-signs under its own name, so the executor
+                # records who changed what instead of refusing the call.
+                event.resign(by="ValidationHook")
 
 
 async def example_validation_hook():

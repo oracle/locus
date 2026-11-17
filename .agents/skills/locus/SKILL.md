@@ -177,8 +177,9 @@ Two more layers for what labels cannot carry: `gate_tool(...,
 judge=ToolCallJudge(intent=..., guidance={...}))` has a model read the
 arguments and can turn an allow into a hold or a deny, never the reverse
 (`@tool(read_only=True)` marks the lookups it should skip), and
-`Agent(tool_call_integrity=True)` signs every tool call as it is parsed and
-refuses one that a hook changed without `event.resign(by=...)`.
+`tool_call_integrity`, on by default, signs every tool call as it is parsed
+and refuses one that a hook changed without `event.resign(by=...)`;
+`Agent(tool_call_integrity=False)` turns the check off.
 
 ## Hold for a person, then resume
 
@@ -372,7 +373,7 @@ connection, `POST /threads/{id}/runs` starts a turn in the background and
 | `LLMMemoryManager` stored nothing | its default extractor is a keyword heuristic | phrase facts as "never ..." or "I'm a ..." or supply an extractor |
 | a gated tool ran with `require_human_for` set | the action's labels did not carry the tag | label from the real arguments; assert `trail.records()[-1].payload["outcome"]` in a test |
 | `LocusWarning: OCI Responses: the endpoint reported Zero Data Retention ...` or `OCIResponsesZeroDataRetentionError` | the tenancy enforces Zero Data Retention; under the default `store="auto"` the model switched to the stateless path and the run completed | nothing; `store=False` on that tenancy skips the first stateful attempt |
-| a tool result reads `ToolCallIntegrityError: ... changed by <Hook> outside the re-sign API` | `tool_call_integrity` is on and a hook rewrote the arguments without re-signing | call `event.resign(by="<Hook>")` after the rewrite |
+| a tool result reads `ToolCallIntegrityError: ... changed by <Hook> outside the re-sign API` | `tool_call_integrity` is on (the default) and a hook rewrote the arguments without re-signing | call `event.resign(by="<Hook>")` after the rewrite |
 
 ## Rules
 

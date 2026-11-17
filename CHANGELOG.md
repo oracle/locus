@@ -110,6 +110,13 @@ policy.
 
 ### Changed
 
+- **Changed in 6.0: `Agent(tool_call_integrity=...)` defaults to `True`.**
+  Every tool call is signed as the model's response is parsed and verified
+  before it runs, so a hook that rewrites `event.arguments` must call
+  `event.resign(by="MyHook")` or the call is refused with a
+  `ToolCallIntegrityError`; the built-in `GuardrailsHook` redaction and
+  `ExternalHooks` rewrites already do. Pass `Agent(tool_call_integrity=False)`
+  to keep the 5.x behaviour. (#450)
 - **Unscoped thread ids that spell a scope marker are stored encoded.** A
   thread id of the form `app=…` or `user=…` (or beginning `app%` /
   `user%`) on a checkpointer with no `scope=` is now stored
@@ -177,6 +184,27 @@ policy.
   store together: one still on the earlier release lists only the
   checkpoints it wrote itself after the move, and nothing else is lost.
 
+### Removed
+
+- **Removed in 6.0: the `locus.security` compatibility shim.** The old import
+  path no longer resolves; `locus.control` is the import path for the names it
+  forwarded (`Evidence`, `Severity`, `ground_finding`, `verify`, the taxonomy
+  enums, …). The security-domain names it used to forward left Locus with the
+  `locus-sdk-security` package in 5.6.0. (#464)
+- **Removed in 6.0: the `locus.loop` package.** `ReActLoop`,
+  `ReActLoopConfig`, `create_react_loop`, `LoopRunner`, `BatchRunner`,
+  `StreamingCollector`, `create_runner`, the nodes and the router no longer
+  import; `Agent` (`agent.run`, `agent.arun`), `EvalRunner` and `StateGraph`
+  conditional edges are the supported forms, as the 5.x deprecation warning
+  said.
+- **Removed in 6.0: `FallbackChain.last_tier`.** The attribute was shared by
+  every call on the chain; read the per-call `response.metadata["fallback"]`
+  or `locus.models.fallback.served_tier()` instead.
+- **Removed in 6.0: the `tool` key on the `tool.integrity.refused` payload**
+  (event bus and `agent.tool.integrity.refused` audit entries). Read
+  `tool_name`, the key `ToolCallIntegrityError.tool_name` and the audit
+  entries use.
+
 ### Fixed
 
 - **Two processes creating the PostgreSQL checkpoint table at the same instant
@@ -186,9 +214,7 @@ policy.
   on the table name and re-probes before creating.
 - **`LOCUS_FRONTIER_MODEL` turns the knob it names.** The rogue-agent challenge
   showed the variable in its banner but ran a pinned model; `build_agent()`
-  now uses it, and the default is the model it pinned. The `locus.loop`
-  and `FallbackChain.last_tier` deprecation warnings name 6.0.0 as their
-  removal release instead of a past or missing one.
+  now uses it, and the default is the model it pinned.
 - `python -m locus.runner` reports every command the harness ran as a
   `harness.exec` record. The runtime drained its exec records by replacing
   the list the harness appends to, so only commands before the first tool

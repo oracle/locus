@@ -76,12 +76,3 @@ from locus.core.termination import MaxIterations, ToolCalled
 | Reference | What it documents | Guide |
 |---|---|---|
 | [Control](control.md) | `admit()`, which checks an action against a `ControlPolicy` you write, before the action runs: allow, hold for a person, or deny (API values `allow`, `require_human`, `deny`). `gate_tool` puts the same check in front of a tool, approval stores keep held calls until someone decides, and `AuditTrail` records each decision when you pass one. Only the calls you route through the gate are checked | [Control-layer architecture](../concepts/control-layer.md), [Writing a policy that holds](../concepts/policy-authoring.md) |
-
-## Deprecated
-
-[ReAct loop](loop.md) documents `locus.loop`, a second ReAct implementation
-that `Agent` has never used. It is deprecated: it still imports, each name
-you import from it emits `LocusDeprecationWarning`, and it will be removed
-in a later major release, per the
-[deprecation policy](https://github.com/oracle/locus/blob/main/DEPRECATION.md).
-Use [`Agent`](agent.md) instead.
