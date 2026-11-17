@@ -47,6 +47,17 @@ if (ctx._source.data == null || !(ctx._source.data.checkpoints instanceof List))
 """
 
 
+def _is_not_found(exc: BaseException) -> bool:
+    """Whether ``exc`` is the client's 404 (``opensearchpy.exceptions.NotFoundError``).
+
+    Told by status code rather than by class so the backend does not import
+    the optional client package just to separate "no such document" from a
+    version conflict, an authorisation failure or a script error, which the
+    caller must see.
+    """
+    return getattr(exc, "status_code", None) == 404
+
+
 class OpenSearchConfig(BaseModel):
     """Configuration for OpenSearch backend."""
 
@@ -387,7 +398,11 @@ class OpenSearchBackend(BaseModel):
         )
 
     async def index_remove(self, thread_id: str, checkpoint_id: str) -> bool:
-        """Drop the entry from the index document in one scripted update."""
+        """Drop the entry from the index document in one scripted update.
+
+        ``False`` when the entry was not there or the thread has no index
+        document; any other failure of the update propagates.
+        """
         await self._ensure_index()
         client = await self._get_client()
 
@@ -408,8 +423,10 @@ class OpenSearchBackend(BaseModel):
                 refresh=True,
                 retry_on_conflict=_INDEX_UPDATE_RETRIES,
             )
-        except Exception:  # noqa: BLE001 — no index document == nothing to remove
-            return False
+        except Exception as exc:
+            if _is_not_found(exc):
+                return False  # no index document: nothing to remove
+            raise
         return bool(result.get("result") == "updated")
 
     async def index_list(self, thread_id: str) -> list[dict[str, Any]]:

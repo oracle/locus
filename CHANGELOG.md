@@ -172,6 +172,16 @@ policy.
   the tool-effect ledger behave as before; a Redis index written by an
   earlier release is read as before and moved into the hash on the
   thread's next save. (#301)
+- **Index follow-ups to the fix above.** `opensearch_checkpointer()` answers
+  `False` from an index removal only when the index document does not
+  exist; a version conflict, an authorisation failure or a script error
+  propagates instead of leaving the deleted checkpoint listed.
+  `redis_checkpointer()` moves a legacy index string into the hash under a
+  `WATCH`, so the process that loses the migration race no longer puts back
+  an entry the winner had just removed, and the migrated hash carries the
+  configured `ttl_seconds` even when a removal is what migrates it.
+  `StorageBackendAdapter.delete(thread_id, checkpoint_id)` is `True` when it
+  removed an index entry whose checkpoint was already gone.
 
 ## [5.6.0] - 2026-11-17
 
