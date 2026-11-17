@@ -44,16 +44,16 @@ reads it and checks the shape the tags and expectations must have.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from pydantic import BaseModel, Field
 
 from locus.evaluation.datasets import load_cases
 from locus.evaluation.framework import EvalCase, EvalReport
-from locus.evaluation.report import EvalGate, GateResult
+from locus.evaluation.report import EvalGate, GateResult, diff_reports
 from locus.router.capability import CapabilityIndex
 from locus.router.classifier import FrameExtractionError, RequestClassifier
 from locus.router.compiler import CognitiveCompiler
@@ -77,6 +77,7 @@ __all__ = [
     "TAG_INJECTION",
     "TAG_LABELLED",
     "TAG_TRAP",
+    "TRANSIENT_ERROR_NAMES",
     "UNBOUNDED",
     "FreeFormChoice",
     "FreeFormSelectionTarget",
@@ -89,9 +90,11 @@ __all__ = [
     "frame_extractor",
     "freeform_picker",
     "freeform_target",
+    "is_transient_error",
     "load_router_corpus",
     "mean_pass_rate",
     "pass_rate",
+    "regressions",
     "router_gate",
     "tag_table",
     "typed_target",
@@ -102,6 +105,48 @@ __all__ = [
 UNBOUNDED = "unbounded"
 #: The answer when nothing was selected: a rejected frame, a dead end, a provider error.
 REFUSED = "refused"
+
+#: Names of the exceptions a provider client raises when a call never reached a
+#: verdict: a dropped connection, a timeout, a rate limit, a failure on the
+#: server. A target retries these (see :func:`is_transient_error`); a wrong
+#: answer is never retried.
+TRANSIENT_ERROR_NAMES: frozenset[str] = frozenset(
+    {
+        "APIConnectionError",
+        "APITimeoutError",
+        "RateLimitError",
+        "InternalServerError",
+        "ServiceUnavailableError",
+        "ConnectError",
+        "ConnectTimeout",
+        "ReadTimeout",
+        "ReadError",
+        "RemoteProtocolError",
+    }
+)
+
+_T = TypeVar("_T")
+
+
+def is_transient_error(exc: BaseException) -> bool:
+    """Whether ``exc`` is a provider error worth one more attempt.
+
+    True for the built-in connection and timeout errors, for an exception
+    carrying an HTTP status of 408, 429 or 5xx (``status_code`` or
+    ``status``), and for any class in :data:`TRANSIENT_ERROR_NAMES` by name,
+    so the common HTTP and provider clients are covered without importing
+    them. Anything else, a rejected frame or a schema the reply did not fit
+    included, is an answer and is not retried.
+    """
+    if isinstance(exc, (ConnectionError, TimeoutError)):
+        return True
+    status = getattr(exc, "status_code", None)
+    if status is None:
+        status = getattr(exc, "status", None)
+    if isinstance(status, int) and (status in (408, 429) or status >= 500):
+        return True
+    return any(cls.__name__ in TRANSIENT_ERROR_NAMES for cls in type(exc).__mro__)
+
 
 #: A case with an expected protocol; its ``shape:<id>`` tag names it.
 TAG_LABELLED = "labelled"
@@ -217,6 +262,7 @@ class SelectionRecord:
     picked: str | None = None
     frame: GoalFrame | None = None
     detail: str = ""
+    attempts: int = 1
 
 
 class SelectionResult(BaseModel):
@@ -227,6 +273,7 @@ class SelectionResult(BaseModel):
     picked: str | None = None
     frame: GoalFrame | None = None
     detail: str = ""
+    attempts: int = 1
 
     model_config = {"frozen": True}
 
@@ -238,9 +285,34 @@ class SelectionTarget:
     :meth:`EvalRunner.run <locus.evaluation.EvalRunner.run>`.
     """
 
-    def __init__(self, registered: Iterable[str]) -> None:
+    def __init__(
+        self, registered: Iterable[str], *, attempts: int = 3, backoff_s: float = 1.0
+    ) -> None:
         self.registered: frozenset[str] = frozenset(registered)
         self.records: list[SelectionRecord] = []
+        #: Calls made for one prompt before a transient provider error counts
+        #: as :data:`REFUSED`; a wrong answer is never retried.
+        self.attempts = max(1, attempts)
+        #: The wait before the second attempt, doubled on each one after.
+        self.backoff_s = backoff_s
+
+    async def _attempt(self, call: Callable[[], Awaitable[_T]]) -> tuple[_T, int]:
+        """Await ``call()``, again after a transient provider error; the result and the attempts used."""
+        for attempt in range(1, self.attempts + 1):
+            try:
+                return await call(), attempt
+            except Exception as exc:
+                if attempt == self.attempts or not is_transient_error(exc):
+                    raise
+                await asyncio.sleep(self.backoff_s * 2 ** (attempt - 1))
+        raise AssertionError("unreachable: the last attempt returns or raises")
+
+    def _failed(self, prompt: str, exc: Exception) -> SelectionResult:
+        """The refusal for a call that raised: a transient error names the attempts it used."""
+        if is_transient_error(exc):
+            detail = f"{type(exc).__name__} after {self.attempts} attempt(s): {exc}"
+            return self._finish(prompt, None, detail=detail, attempts=self.attempts)
+        return self._finish(prompt, None, detail=f"{type(exc).__name__}: {exc}")
 
     def _finish(
         self,
@@ -249,6 +321,7 @@ class SelectionTarget:
         *,
         frame: GoalFrame | None = None,
         detail: str = "",
+        attempts: int = 1,
     ) -> SelectionResult:
         if picked is None:
             output = REFUSED
@@ -257,9 +330,18 @@ class SelectionTarget:
         else:
             output = UNBOUNDED
         self.records.append(
-            SelectionRecord(prompt=prompt, output=output, picked=picked, frame=frame, detail=detail)
+            SelectionRecord(
+                prompt=prompt,
+                output=output,
+                picked=picked,
+                frame=frame,
+                detail=detail,
+                attempts=attempts,
+            )
         )
-        return SelectionResult(message=output, picked=picked, frame=frame, detail=detail)
+        return SelectionResult(
+            message=output, picked=picked, frame=frame, detail=detail, attempts=attempts
+        )
 
     async def arun(self, prompt: str) -> SelectionResult:
         """Select for ``prompt``; the subclass decides how."""
@@ -279,26 +361,32 @@ class TypedSelectionTarget(SelectionTarget):
     ranker and the risk fallback. An opt-in
     :class:`~locus.router.ProtocolPicker` is not consulted, as ``explain``
     documents, so the measurement is of the deterministic path. A rejected
-    frame, a dead end and a provider error are all :data:`REFUSED`.
+    frame, a dead end and a provider error are all :data:`REFUSED`; a
+    transient provider error (:func:`is_transient_error`) is retried up to
+    ``attempts`` times first, so a dropped connection is not scored as a
+    routing decision.
     """
 
-    def __init__(self, router: Router) -> None:
-        super().__init__(p.id for p in router.compiler.protocols.all())
+    def __init__(self, router: Router, *, attempts: int = 3, backoff_s: float = 1.0) -> None:
+        super().__init__(
+            (p.id for p in router.compiler.protocols.all()), attempts=attempts, backoff_s=backoff_s
+        )
         self.router = router
 
     async def arun(self, prompt: str) -> SelectionResult:
         try:
-            frame = await self.router.extract(prompt)
+            frame, attempts = await self._attempt(lambda: self.router.extract(prompt))
         except FrameExtractionError as exc:
             return self._finish(prompt, None, detail=f"frame rejected: {exc}")
         except Exception as exc:  # noqa: BLE001 — a provider error on one prompt is a data point
-            return self._finish(prompt, None, detail=f"{type(exc).__name__}: {exc}")
+            return self._failed(prompt, exc)
         explanation = self.router.compiler.explain(frame, goal=prompt)
         return self._finish(
             prompt,
             explanation.selected_protocol,
             frame=frame,
             detail=explanation.method or "no protocol could take the frame",
+            attempts=attempts,
         )
 
 
@@ -322,23 +410,37 @@ class FreeFormSelectionTarget(SelectionTarget):
     (see :func:`freeform_picker`). Its answer is checked against the
     registered ids: a match is the id, anything else is :data:`UNBOUNDED`,
     and a reply the schema rejected or a provider error is :data:`REFUSED`.
+    A transient provider error is retried the way the typed target retries it.
     """
 
-    def __init__(self, picker: Agent, *, registered: Iterable[str] | None = None) -> None:
+    def __init__(
+        self,
+        picker: Agent,
+        *,
+        registered: Iterable[str] | None = None,
+        attempts: int = 3,
+        backoff_s: float = 1.0,
+    ) -> None:
         super().__init__(
-            registered if registered is not None else (p.id for p in builtin_protocols())
+            registered if registered is not None else (p.id for p in builtin_protocols()),
+            attempts=attempts,
+            backoff_s=backoff_s,
         )
         self.picker = picker
 
     async def arun(self, prompt: str) -> SelectionResult:
         try:
-            result: Any = await self.picker.arun(prompt)
+            result, attempts = await self._attempt(lambda: self.picker.arun(prompt))
         except Exception as exc:  # noqa: BLE001 — see TypedSelectionTarget.arun
-            return self._finish(prompt, None, detail=f"{type(exc).__name__}: {exc}")
+            return self._failed(prompt, exc)
         parsed = result.parsed
         if not isinstance(parsed, FreeFormChoice):
-            return self._finish(prompt, None, detail=f"no parse: {result.parse_error}")
-        return self._finish(prompt, parsed.protocol_id.strip(), detail=parsed.reasoning)
+            return self._finish(
+                prompt, None, detail=f"no parse: {result.parse_error}", attempts=attempts
+            )
+        return self._finish(
+            prompt, parsed.protocol_id.strip(), detail=parsed.reasoning, attempts=attempts
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -500,18 +602,39 @@ def mean_pass_rate(
     return sum(rates) / len(rates) if rates else None
 
 
-def router_gate(candidate: EvalReport, baseline: EvalReport) -> GateResult:
+def regressions(candidate: EvalReport, baseline: EvalReport) -> list[str]:
+    """The cases ``baseline`` passed that ``candidate`` fails, by name.
+
+    What ``per_case`` in :func:`router_gate` holds to zero; printed either
+    way, since it is the list a classifier has to clear. Empty when the two
+    reports are of different suites (the diff refuses them).
+    """
+    try:
+        return list(diff_reports(baseline, candidate).regressed)
+    except ValueError:
+        return []
+
+
+def router_gate(
+    candidate: EvalReport, baseline: EvalReport, *, per_case: bool = True
+) -> GateResult:
     """The router's gate: a typed report against the free-form baseline.
 
     Passes when the candidate's pass rate is at least the baseline's on the
     whole corpus and on the ``trap`` cases, when every ``injection`` case is
-    bounded, when nothing is left not graded, and when no case that passed on
-    the baseline fails on the candidate (:class:`~locus.evaluation.EvalGate`
-    with ``no_regressions``, which also refuses two reports of different
-    suites). Every reason it fails is reported.
+    bounded, when nothing is left not graded, and, with ``per_case``, when
+    no case that passed on the baseline fails on the candidate
+    (:class:`~locus.evaluation.EvalGate` with ``no_regressions``). The diff
+    behind that check refuses two reports of different suites whether or
+    not ``per_case`` is set. Every reason it fails is reported.
+
+    ``per_case`` is the parity a trained classifier is held to. The default
+    extractor is not one, and a one-step prompt it frames LOW goes to
+    ``direct_response`` whatever the label says, so a run of the default
+    router gates on the floors and reports its :func:`regressions`.
     """
     floor = pass_rate(baseline) or 0.0
-    gate = EvalGate(min_pass_rate=floor, max_not_graded=0, no_regressions=True)
+    gate = EvalGate(min_pass_rate=floor, max_not_graded=0, no_regressions=per_case)
     reasons = list(gate.check(candidate, baseline=baseline).reasons)
     base_trap, cand_trap = pass_rate(baseline, TAG_TRAP), pass_rate(candidate, TAG_TRAP)
     if base_trap is not None and cand_trap is not None and cand_trap < base_trap:

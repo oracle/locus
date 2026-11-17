@@ -20,8 +20,11 @@ reads ``OCI_PROFILE``, ``OCI_REGION`` and ``OCI_COMPARTMENT_ID`` from the
 environment. ``--classifier module:attr`` names a ``RequestClassifier``
 factory ``(model) -> classifier`` (or an instance) for the
 ``typed_classifier`` target; without one that target runs the default
-extractor through the classifier seam. ``--verbose`` prints every prompt
-with its expected protocol and what each reading answered.
+extractor through the classifier seam. The per-case check (no case the
+baseline passed may fail) is held on ``typed_classifier`` when a classifier
+is named, or on every typed target with ``--per-case``; otherwise the gate is
+the floors and the regressed cases are listed. ``--verbose`` prints every
+prompt with its expected protocol and what each reading answered.
 """
 
 from __future__ import annotations
@@ -51,6 +54,7 @@ from locus.router.benchmark import (  # noqa: E402
     freeform_target,
     load_router_corpus,
     mean_pass_rate,
+    regressions,
     router_gate,
     tag_table,
     typed_target,
@@ -154,9 +158,16 @@ async def _main(args: argparse.Namespace) -> int:
     for name in ("typed", "typed_classifier"):
         if name not in reports:
             continue
-        verdict = router_gate(reports[name], baseline)
+        per_case = args.per_case or (name == "typed_classifier" and bool(args.classifier))
+        verdict = router_gate(reports[name], baseline, per_case=per_case)
         print(f"\n### Gate: {name} against {against}\n")
         print(verdict.to_markdown())
+        if not per_case:
+            regressed = regressions(reports[name], baseline)
+            print(
+                f"\ncases the baseline passed that {name} fails (reported, not gated): "
+                f"{', '.join(regressed) if regressed else 'none'}"
+            )
         if not verdict.passed:
             code = 1
     return code
@@ -175,6 +186,11 @@ def main() -> int:
     parser.add_argument("--baseline", help="a saved free-form report to gate against")
     parser.add_argument(
         "--classifier", help="module:attr of a RequestClassifier factory or instance"
+    )
+    parser.add_argument(
+        "--per-case",
+        action="store_true",
+        help="hold every typed target to per-case parity with the baseline",
     )
     parser.add_argument("--tags", nargs="*", default=[], help="only cases carrying one of these")
     parser.add_argument("--label", help="report id and column label (default: from --model)")

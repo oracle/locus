@@ -19,11 +19,15 @@ The rates split per tag with ``EvalReport.by_tag``, the reports go to a
 ``FileReportStore`` (``ROUTER_BENCHMARK_REPORTS``, else the test's temporary
 directory) and the gate holds ``typed_classifier`` to the free-form report:
 at least its pass rate on the whole corpus and on the ``trap`` cases, every
-``injection`` case bounded, and no case that the baseline passed failing
-(:class:`~locus.evaluation.EvalGate` with ``no_regressions``). The baseline is
-the free-form report of this run, or the saved one
-``ROUTER_BENCHMARK_BASELINE`` names. The verdict is printed as Markdown, which
-is what a scheduled job posts.
+``injection`` case bounded, and, when a classifier is under test, no case
+that the baseline passed failing (:class:`~locus.evaluation.EvalGate` with
+``no_regressions``). Without ``ROUTER_BENCHMARK_CLASSIFIER`` the target is
+the default extractor, which is not held to per-case parity: a one-step
+prompt it frames LOW goes to ``direct_response`` whatever the label says, so
+the gate is the floors and the cases the baseline passed that it fails are
+printed as the list a classifier has to clear. The baseline is the free-form
+report of this run, or the saved one ``ROUTER_BENCHMARK_BASELINE`` names. The
+verdict is printed as Markdown, which is what a scheduled job posts.
 
 Opt-in like the benchmark beside it: ``RUN_ROUTER_BENCHMARK=1``, a model
 from the conftest (``LOCUS_TEST_MODEL=provider:model``), about 540 model
@@ -49,6 +53,7 @@ from locus.router.benchmark import (
     load_router_corpus,
     mean_pass_rate,
     pass_rate,
+    regressions,
     router_gate,
     tag_table,
     typed_target,
@@ -86,6 +91,7 @@ async def test_router_classifier_gate(model: object, tmp_path: Path) -> None:
     cases = load_router_corpus(CORPUS)
     repeats = int(os.environ.get("ROUTER_BENCHMARK_REPEATS", "3"))
     label = os.environ.get("BENCH_PROVIDER_LABEL") or type(model).__name__
+    per_case = bool(os.environ.get("ROUTER_BENCHMARK_CLASSIFIER"))
     targets = {
         "typed": typed_target(model),
         "typed_classifier": typed_target(model, classifier=_classifier(model)),
@@ -109,7 +115,10 @@ async def test_router_classifier_gate(model: object, tmp_path: Path) -> None:
     for name, report in reports.items():
         mean = mean_pass_rate(report, cases)
         print(f"{name}: mean per-reading accuracy {mean:.1%}" if mean is not None else name)
-    verdict = router_gate(reports["typed_classifier"], baseline)
+    regressed = regressions(reports["typed_classifier"], baseline)
+    held = "held to zero" if per_case else "reported, not gated: no classifier under test"
+    print(f"cases the baseline passed that typed_classifier fails ({held}): {regressed or 'none'}")
+    verdict = router_gate(reports["typed_classifier"], baseline, per_case=per_case)
     print()
     print(verdict.to_markdown())
 

@@ -130,10 +130,24 @@ target against the free-form report of the same run (or the saved one
 
 `router_gate` fails for any of: a pass rate below the baseline's on the
 whole corpus; a pass rate below the baseline's on the `trap` cases; an
-`injection` case that was `unbounded`; a case left not graded; a case the
-baseline passed that the candidate fails (`EvalGate` with
-`no_regressions`, which also refuses two reports of different suites).
-Every reason is listed, not the first. The exit code is the gate's.
+`injection` case that was `unbounded`; a case left not graded; and, with
+`per_case`, a case the baseline passed that the candidate fails (`EvalGate`
+with `no_regressions`; the diff behind it refuses two reports of different
+suites either way). Every reason is listed, not the first. The exit code is
+the gate's.
+
+Per-case parity is what a trained classifier is held to: the script applies
+it to `typed_classifier` when `--classifier` names one, or to every typed
+target with `--per-case`. The default extractor is not a classifier, and a
+one-step prompt it frames LOW goes to `direct_response` whatever the label
+says, so a run of the default router gates on the floors and prints the
+cases the baseline passed that it fails (`regressions`), the list a
+classifier has to clear.
+
+A reading that never reached a verdict is not a routing decision: a target
+retries a dropped connection, a timeout, a rate limit or a server-side
+failure (`is_transient_error`, three attempts with a doubling wait) before
+it counts as `refused`, and the audit line names the attempts.
 
 ## 5. The gate in a job
 
@@ -148,8 +162,9 @@ It runs the three targets with `EvalRunner(repeats=3)`, stores the reports
 in `ROUTER_BENCHMARK_REPORTS` (else the test's temporary directory), gates
 `typed_classifier` against the free-form report (`ROUTER_BENCHMARK_BASELINE`
 names a saved one instead) and prints the table and the Markdown verdict.
-`ROUTER_BENCHMARK_CLASSIFIER=module:attr` puts a classifier under test;
-`ROUTER_BENCHMARK_REPEATS` changes the readings.
+`ROUTER_BENCHMARK_CLASSIFIER=module:attr` puts a classifier under test, and
+only then is the per-case check asserted; `ROUTER_BENCHMARK_REPEATS` changes
+the readings.
 
 No baseline is committed. The free-form rate moves with every model
 release, so a baseline is a report in the store, named by the run that

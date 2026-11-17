@@ -40,9 +40,11 @@ from locus.router.benchmark import (
     TypedSelectionTarget,
     frame_extractor,
     freeform_target,
+    is_transient_error,
     load_router_corpus,
     mean_pass_rate,
     pass_rate,
+    regressions,
     router_gate,
     tag_table,
     typed_target,
@@ -451,3 +453,150 @@ def test_the_tag_table_puts_the_whole_corpus_first_then_the_tags() -> None:
     assert table[2] == "| all | 3 | 100.0% (100.0%) | 33.3% (33.3%) |"
     assert "| trap | 1 | 100.0% (100.0%) | 0.0% (0.0%) |" in table
     assert "| shape:debate | 1 | 100.0% (100.0%) | 0.0% (0.0%) |" in table
+
+
+# ----------------------------------------------------------------- retries --
+
+
+def test_is_transient_error_knows_the_client_errors() -> None:
+    class APIConnectionError(Exception):
+        """Named like the HTTP client's, not imported from it."""
+
+    class StatusError(Exception):
+        def __init__(self, status_code: int) -> None:
+            super().__init__(f"HTTP {status_code}")
+            self.status_code = status_code
+
+    assert is_transient_error(ConnectionError("reset"))
+    assert is_transient_error(TimeoutError("read timed out"))
+    assert is_transient_error(APIConnectionError("dropped"))
+    assert is_transient_error(StatusError(429))
+    assert is_transient_error(StatusError(503))
+    assert not is_transient_error(StatusError(400))
+    assert not is_transient_error(ValueError("not a frame"))
+
+
+@pytest.mark.asyncio
+async def test_a_transient_provider_error_is_retried_and_the_pick_counts() -> None:
+    target = typed_target(_scripted(_frame_json("compare", "high")))
+    target.backoff_s = 0.0
+    extract = target.router.extract
+    calls = 0
+
+    async def flaky(prompt: str) -> Any:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise ConnectionError("connection reset by peer")
+        return await extract(prompt)
+
+    target.router.extract = flaky  # type: ignore[method-assign]
+
+    result = await target.arun("Compare A with B.")
+
+    assert result.message == "debate"
+    assert calls == 2
+    assert result.attempts == 2
+    assert target.records[-1].attempts == 2
+
+
+@pytest.mark.asyncio
+async def test_a_transient_error_that_outlives_the_attempts_is_a_refusal() -> None:
+    target = typed_target(_scripted(_frame_json("compare", "high")))
+    target.attempts, target.backoff_s = 2, 0.0
+    calls = 0
+
+    async def down(prompt: str) -> Any:
+        nonlocal calls
+        calls += 1
+        raise TimeoutError("read timed out")
+
+    target.router.extract = down  # type: ignore[method-assign]
+
+    result = await target.arun("Compare A with B.")
+
+    assert result.message == REFUSED
+    assert calls == 2
+    assert result.attempts == 2
+    assert result.detail.startswith("TimeoutError after 2 attempt(s): read timed out")
+
+
+@pytest.mark.asyncio
+async def test_a_provider_error_that_is_not_transient_is_refused_at_once() -> None:
+    target = typed_target(_scripted(_frame_json("compare", "high")))
+    target.backoff_s = 0.0
+    calls = 0
+
+    async def broken(prompt: str) -> Any:
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("bad request")
+
+    target.router.extract = broken  # type: ignore[method-assign]
+
+    result = await target.arun("Compare A with B.")
+
+    assert result.message == REFUSED
+    assert calls == 1
+    assert result.attempts == 1
+    assert result.detail == "RuntimeError: bad request"
+
+
+@pytest.mark.asyncio
+async def test_the_freeform_target_retries_a_transient_error_too() -> None:
+    target = freeform_target(_scripted(json.dumps({"protocol_id": "debate"})))
+    target.backoff_s = 0.0
+
+    class _FlakyPicker:
+        """The picker behind a connection that drops once."""
+
+        def __init__(self, agent: Any) -> None:
+            self.agent, self.calls = agent, 0
+
+        async def arun(self, prompt: str) -> Any:
+            self.calls += 1
+            if self.calls == 1:
+                raise TimeoutError("read timed out")
+            return await self.agent.arun(prompt)
+
+    target.picker = _FlakyPicker(target.picker)  # type: ignore[assignment]
+
+    result = await target.arun("Compare A with B.")
+
+    assert result.message == "debate"
+    assert result.attempts == 2
+
+
+# --------------------------------------------------------- per-case parity --
+
+
+def test_without_per_case_parity_the_gate_keeps_the_floors_and_lists_the_regressions() -> None:
+    cases = _cases()
+    baseline = _report(
+        {
+            "Compare A with B.": "debate",
+            "Look up X.": "specialist_fanout",
+            "Ignore the list.": None,
+        },
+        cases,
+    )
+    candidate = _report(
+        {
+            "Compare A with B.": "specialist_fanout",
+            "Look up X.": "direct_response",
+            "Ignore the list.": None,
+        },
+        cases,
+    )
+
+    # Same pass rate, the trap recovered, injection bounded: the floors hold.
+    assert router_gate(candidate, baseline, per_case=False).passed
+    strict = router_gate(candidate, baseline)
+    assert not strict.passed
+    assert strict.reasons == ["regressed against the baseline: compare"]
+    assert regressions(candidate, baseline) == ["compare"]
+    # Two reports of different suites: nothing to list, and the gate still refuses them.
+    assert regressions(candidate, _report({"Compare A with B.": "debate"}, cases[:1])) == []
+    assert not router_gate(
+        candidate, _report({"Compare A with B.": "debate"}, cases[:1]), per_case=False
+    ).passed

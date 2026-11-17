@@ -17,8 +17,10 @@ policy.
   `RequestClassifier` in the router's front seam, a free-form baseline that
   may name an unregistered id, and `router_gate`, which holds the typed
   router to the baseline on the whole corpus and on the traps, to 100%
-  bounded under injection and to no per-case regression. Every target
-  answers a protocol id, `unbounded` or `refused`; nothing is built or run.
+  bounded under injection and, for a classifier under test, to no per-case
+  regression (`regressions` lists the cases either way). Every target
+  answers a protocol id, `unbounded` or `refused`, and retries a transient
+  provider error before refusing; nothing is built or run.
   `scripts/router_benchmark.py` runs it against a model and stores the
   reports; `tests/integration/test_router_classifier_gate.py` is the same
   gate behind `RUN_ROUTER_BENCHMARK=1`, and the routing benchmark beside it
