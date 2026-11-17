@@ -911,6 +911,13 @@ policy.
   model under test, `provenance.self_graded` is stamped and the report
   summary ends with a warning. The case is not failed for it.
 
+### Fixed
+
+- `python -m locus.runner` reports every command the harness ran as a
+  `harness.exec` record. The runtime drained its exec records by replacing
+  the list the harness appends to, so only commands before the first tool
+  completion ever reached the gateway.
+
 ## [5.3.2] - 2026-11-02
 
 ### Fixed

@@ -565,6 +565,29 @@ async def test_a_run_uses_every_kind_of_tool_then_parks_on_a_hold(
     assert (tmp_path / ".locus" / "runner.log").is_file()
 
 
+async def test_exec_records_keep_flowing_after_the_first_drain(
+    world: World, tmp_path: Path
+) -> None:
+    # The runner drains the exec records after every tool completion. The harness appends
+    # to the list the runtime was built with; draining by replacing that list silently
+    # orphaned the sink, so only commands before the first drain ever reached the gateway.
+    model = ScriptedModel(
+        [
+            tool_call("bash", call_id="c1", command="echo first"),
+            tool_call("bash", call_id="c2", command="echo second"),
+            tool_call("bash", call_id="c3", command="echo third"),
+            text("done"),
+        ]
+    )
+    assert (
+        await run_box(_env(), workspace=tmp_path, transport=world.transport, model=model)
+        == EXIT_DONE
+    )
+    execs = [e for e in world.events() if e["type"] == "harness.exec"]
+    assert [e["call_id"] for e in execs] == ["c1", "c2", "c3"]
+    assert all(e["exit_code"] == 0 and e["attested_by"] == "runner" for e in execs)
+
+
 async def test_a_parked_run_resumes_after_approval_and_finishes(
     world: World, tmp_path: Path
 ) -> None:

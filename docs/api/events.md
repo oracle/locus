@@ -4,6 +4,11 @@
 
 Typed, frozen Pydantic events yielded by `agent.run(...)`. Consume
 with `async for event in agent.run(...)` or pipe into a hook.
+`ModelCompleteEvent` is part of the `AllEvents` union and documented
+here for completeness, but the loop never yields it: a turn's text
+arrives on `ThinkEvent`, the answer on `TerminateEvent.final_message`
+and the usage on `TerminateEvent.usage` (see the
+[events concept page](../concepts/events.md#modelcompleteevent)).
 
 ::: locus.core.events.LocusEvent
 ::: locus.core.events.ThinkEvent
