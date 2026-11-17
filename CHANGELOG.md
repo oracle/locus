@@ -152,6 +152,16 @@ policy.
   variables the SDK reads but the page omitted are listed (#487); the four
   docstrings carry an example a test executes (#488, #489).
 
+### Deprecated
+
+- **Reading a Redis checkpoint index written by a release before this one.**
+  `redis_checkpointer()` still reads the `<thread_id>:_checkpoints` JSON
+  string an earlier release kept and moves it into the index hash on the
+  thread's next save or removal, with a `LocusDeprecationWarning` when it
+  does; that read ends in 7.0.0. Upgrade the processes that share one Redis
+  store together: one still on the earlier release lists only the
+  checkpoints it wrote itself after the move, and nothing else is lost.
+
 ### Fixed
 
 - **Two processes creating the PostgreSQL checkpoint table at the same instant
@@ -213,16 +223,6 @@ policy.
   the racy path with no signal. The adapter now warns (`LocusWarning`),
   naming the methods present and missing, and `index_methods_present()` in
   `locus.memory.backends.checkpoint_index` lists what a store implements.
-
-### Deprecated
-
-- **Reading a Redis checkpoint index written by a release before this one.**
-  `redis_checkpointer()` still reads the `<thread_id>:_checkpoints` JSON
-  string an earlier release kept and moves it into the index hash on the
-  thread's next save or removal, with a `LocusDeprecationWarning` when it
-  does; that read ends in 7.0.0. Upgrade the processes that share one Redis
-  store together: one still on the earlier release lists only the
-  checkpoints it wrote itself after the move, and nothing else is lost.
 
 ## [5.6.0] - 2026-11-17
 
