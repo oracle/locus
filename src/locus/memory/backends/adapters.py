@@ -12,6 +12,12 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from locus.core.protocols import CheckpointerCapabilities
+from locus.memory.backends.checkpoint_index import (
+    CheckpointIndexStore,
+    index_key,
+    keeps_index_natively,
+    newest_first,
+)
 from locus.memory.checkpointer import BaseCheckpointer
 from locus.memory.time_travel import (
     CheckpointInfo,
@@ -58,7 +64,9 @@ class StorageBackendAdapter(BaseCheckpointer):
     - `{thread_id}:latest` -> latest checkpoint (for quick access)
     - `{thread_id}:_checkpoints` -> list of checkpoint metadata: for each
       checkpoint its id, timestamp, metadata, iteration and size, so
-      ``list`` reads one key and never a checkpoint's state
+      ``list`` reads one key and never a checkpoint's state. A backend
+      that keeps the index itself (``CheckpointIndexStore``) may keep it
+      elsewhere — Redis in a hash beside that key.
 
     Every checkpoint is its own key, so the thread's history is complete
     and grows with the square of the conversation's length (each
@@ -80,13 +88,15 @@ class StorageBackendAdapter(BaseCheckpointer):
         >>> agent = Agent(model=model, checkpointer=checkpointer)
 
     Concurrency:
-        The ``{thread}:_checkpoints`` index is updated under a per-thread
-        ``asyncio.Lock``, so concurrent saves/removals to the same thread are
-        safe *within a single process*. The lock is per adapter instance and
-        does NOT serialize separate processes sharing one store, so
-        cross-process writes to the same thread can still drop index entries.
-        Making that case safe requires backend-native atomic index updates;
-        tracked in issue #301.
+        A backend that implements
+        :class:`~locus.memory.backends.checkpoint_index.CheckpointIndexStore`
+        (Redis, PostgreSQL, MySQL and OpenSearch do) keeps the index in an
+        operation its store makes atomic, so concurrent saves and removals
+        on one thread are safe across processes sharing the store. For any
+        other backend the index is a read-modify-write of the
+        ``{thread}:_checkpoints`` key under a per-thread ``asyncio.Lock``:
+        safe within one process, not between processes (the lock is per
+        adapter instance).
     """
 
     def __init__(self, backend: Any, *, max_checkpoints_per_thread: int | None = None) -> None:
@@ -107,6 +117,11 @@ class StorageBackendAdapter(BaseCheckpointer):
         # index (`{thread}:_checkpoints`). Without this, concurrent saves to the
         # same thread interleave load/save and silently drop index entries.
         self._index_locks: dict[str, asyncio.Lock] = {}
+        # The backend itself, when it keeps the index atomically (see
+        # ``CheckpointIndexStore``); ``None`` means the locked read-modify-write.
+        self._native_index: CheckpointIndexStore | None = (
+            backend if keeps_index_natively(backend) else None
+        )
 
     def _index_lock(self, thread_id: str) -> asyncio.Lock:
         """Get (or lazily create) the index lock for a thread."""
@@ -196,13 +211,24 @@ class StorageBackendAdapter(BaseCheckpointer):
         size: int | None = None,
     ) -> None:
         """Update the persistent checkpoint index."""
-        index_key = f"{thread_id}:_checkpoints"
+        entry = {
+            "checkpoint_id": checkpoint_id,
+            "timestamp": timestamp.isoformat(),
+            "metadata": metadata or {},
+            "iteration": iteration,
+            "size": size,
+        }
+        if self._native_index is not None:
+            # One atomic operation on the store: safe against another
+            # process saving to the same thread at the same time.
+            await self._native_index.index_add(thread_id, entry)
+            return
 
         # Serialize the read-modify-write so concurrent saves to the same
         # thread cannot clobber each other's index entries.
         async with self._index_lock(thread_id):
             # Load existing index
-            existing = await self._backend.load(index_key)
+            existing = await self._backend.load(index_key(thread_id))
             if existing is None:
                 existing = {"checkpoints": []}
 
@@ -213,25 +239,18 @@ class StorageBackendAdapter(BaseCheckpointer):
                 if cp.get("checkpoint_id") != checkpoint_id
             ]
 
-            # Add new/updated checkpoint
-            existing["checkpoints"].append(
-                {
-                    "checkpoint_id": checkpoint_id,
-                    "timestamp": timestamp.isoformat(),
-                    "metadata": metadata or {},
-                    "iteration": iteration,
-                    "size": size,
-                }
-            )
-
-            # Sort by timestamp (newest first)
-            existing["checkpoints"].sort(
-                key=lambda x: x.get("timestamp", ""),
-                reverse=True,
-            )
+            # Add new/updated checkpoint, newest first
+            existing["checkpoints"] = newest_first([*existing["checkpoints"], entry])
 
             # Save updated index
-            await self._backend.save(index_key, existing)
+            await self._backend.save(index_key(thread_id), existing)
+
+    async def _index_entries(self, thread_id: str) -> list[dict[str, Any]]:
+        """The thread's index entries, newest first, from wherever the backend keeps them."""
+        if self._native_index is not None:
+            return newest_first(await self._native_index.index_list(thread_id))
+        existing = await self._backend.load(index_key(thread_id))
+        return newest_first((existing or {}).get("checkpoints", []))
 
     async def load(
         self,
@@ -265,14 +284,8 @@ class StorageBackendAdapter(BaseCheckpointer):
         limit: int = 10,
     ) -> list[str]:
         """List available checkpoints from persistent index."""
-        index_key = f"{thread_id}:_checkpoints"
-
-        existing = await self._backend.load(index_key)
-        if existing is None:
-            return []
-
-        checkpoints = existing.get("checkpoints", [])
-        return [cp.get("checkpoint_id") for cp in checkpoints[:limit] if cp.get("checkpoint_id")]
+        checkpoints = await self._index_entries(thread_id)
+        return [str(cp["checkpoint_id"]) for cp in checkpoints[:limit] if cp.get("checkpoint_id")]
 
     async def delete(
         self,
@@ -307,8 +320,11 @@ class StorageBackendAdapter(BaseCheckpointer):
                 deleted = True
 
             # Delete index
-            if await self._backend.exists(f"{thread_id}:_checkpoints"):
-                await self._backend.delete(f"{thread_id}:_checkpoints")
+            if self._native_index is not None:
+                if await self._native_index.index_clear(thread_id):
+                    deleted = True
+            elif await self._backend.exists(index_key(thread_id)):
+                await self._backend.delete(index_key(thread_id))
                 deleted = True
 
             return deleted
@@ -319,10 +335,12 @@ class StorageBackendAdapter(BaseCheckpointer):
         checkpoint_id: str,
     ) -> None:
         """Remove checkpoint from index."""
-        index_key = f"{thread_id}:_checkpoints"
+        if self._native_index is not None:
+            await self._native_index.index_remove(thread_id, checkpoint_id)
+            return
 
         async with self._index_lock(thread_id):
-            existing = await self._backend.load(index_key)
+            existing = await self._backend.load(index_key(thread_id))
             if existing is None:
                 return
 
@@ -332,7 +350,7 @@ class StorageBackendAdapter(BaseCheckpointer):
                 if cp.get("checkpoint_id") != checkpoint_id
             ]
 
-            await self._backend.save(index_key, existing)
+            await self._backend.save(index_key(thread_id), existing)
 
     async def exists(
         self,
@@ -395,12 +413,9 @@ class StorageBackendAdapter(BaseCheckpointer):
             return meta
 
         # Fallback to checkpoint index
-        index_key = f"{thread_id}:_checkpoints"
-        existing = await self._backend.load(index_key)
-        if existing is None:
+        checkpoints = await self._index_entries(thread_id)
+        if not checkpoints:
             return None
-
-        checkpoints = existing.get("checkpoints", [])
 
         if checkpoint_id:
             for cp in checkpoints:
@@ -499,8 +514,7 @@ class StorageBackendAdapter(BaseCheckpointer):
         An index entry written before the step fields existed has no
         ``iteration`` or ``size``; they are read from the checkpoint then.
         """
-        existing = await self._backend.load(f"{thread_id}:_checkpoints")
-        entries = list((existing or {}).get("checkpoints", []))
+        entries = await self._index_entries(thread_id)
         # The entry just past the window is the parent of the oldest in it.
         older = entries[limit].get("checkpoint_id") if len(entries) > limit else None
         infos: list[CheckpointInfo] = []
