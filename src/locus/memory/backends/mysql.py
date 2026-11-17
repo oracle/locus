@@ -18,6 +18,7 @@ from urllib.parse import parse_qsl, unquote, urlparse
 from pydantic import BaseModel, Field, SecretStr
 
 from locus.core.loop_bound import loop_bound_async
+from locus.memory.backends.checkpoint_index import index_key
 
 
 if TYPE_CHECKING:
@@ -73,6 +74,22 @@ def _decode_json(value: Any) -> Any:
     if isinstance(value, str):
         return json.loads(value)
     return value
+
+
+def _like_literal(value: str) -> str:
+    """``value`` with ``JSON_SEARCH``'s LIKE wildcards escaped, so it matches itself alone."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+#: The index row's entry array (``[]`` for a row without one).
+_INDEX_ARRAY = "COALESCE(JSON_EXTRACT(data, '$.checkpoints'), JSON_ARRAY())"
+#: The path of the entry whose ``checkpoint_id`` is the parameter (``NULL`` when none);
+#: two parameters: the escaped id and the escape character.
+_INDEX_ENTRY_PATH = (
+    "REPLACE(JSON_UNQUOTE(JSON_SEARCH(JSON_EXTRACT(data, '$.checkpoints'), 'one', %s, %s,"
+    " '$[*].checkpoint_id')), '.checkpoint_id', '')"
+)
+_LIKE_ESCAPE = "\\"
 
 
 def _as_str(value: object) -> str:
@@ -343,6 +360,14 @@ class MySQLBackend(BaseModel):
 
     With DSN:
         >>> backend = MySQLBackend(dsn="mysql://user:pass@localhost:3306/mydb")
+
+    Checkpoint index:
+        Through ``mysql_checkpointer()`` the thread's checkpoint index is
+        the ``<thread_id>:_checkpoints`` row's ``data`` column, as it always
+        was, but each change is one ``INSERT ... ON DUPLICATE KEY UPDATE``
+        or ``UPDATE`` that rewrites the JSON array from the row's current
+        value under the row lock (``JSON_ARRAY_INSERT`` / ``JSON_REMOVE``),
+        so two processes saving to one thread never lose an entry.
     """
 
     config: MySQLConfig = Field(default_factory=MySQLConfig)
@@ -689,6 +714,99 @@ class MySQLBackend(BaseModel):
             await conn.commit()
 
         return int(deleted)
+
+    # -- checkpoint index (CheckpointIndexStore) -------------------------------
+
+    async def index_add(self, thread_id: str, entry: dict[str, Any]) -> None:
+        """Add the entry to the index row in one upsert, replacing one with its id.
+
+        The new entry goes first: a save is the thread's newest checkpoint
+        in every normal case, and the adapter sorts what it reads anyway.
+        """
+        await self._ensure_table()
+        pool = await self._get_pool()
+        now = datetime.now(UTC).replace(tzinfo=None)
+        checkpoint_id = _like_literal(str(entry["checkpoint_id"]))
+        raw = json.dumps(entry)
+
+        async with pool.acquire() as conn:
+            async with await conn.cursor() as cur:
+                await cur.execute(
+                    f"""
+                    INSERT INTO {self._quoted_table_name}
+                        (thread_id, checkpoint_id, data, created_at, updated_at, metadata)
+                    VALUES (
+                        %s, NULL, JSON_OBJECT('checkpoints', JSON_ARRAY(CAST(%s AS JSON))),
+                        %s, %s, JSON_OBJECT()
+                    )
+                    ON DUPLICATE KEY UPDATE
+                        data = JSON_OBJECT(
+                            'checkpoints',
+                            JSON_ARRAY_INSERT(
+                                IF(
+                                    {_INDEX_ENTRY_PATH} IS NULL,
+                                    {_INDEX_ARRAY},
+                                    JSON_REMOVE({_INDEX_ARRAY}, {_INDEX_ENTRY_PATH})
+                                ),
+                                '$[0]',
+                                CAST(%s AS JSON)
+                            )
+                        ),
+                        updated_at = VALUES(updated_at)
+                    """,
+                    (
+                        index_key(thread_id),
+                        raw,
+                        now,
+                        now,
+                        checkpoint_id,
+                        _LIKE_ESCAPE,
+                        checkpoint_id,
+                        _LIKE_ESCAPE,
+                        raw,
+                    ),
+                )
+            await conn.commit()
+
+    async def index_remove(self, thread_id: str, checkpoint_id: str) -> bool:
+        """Drop the entry from the index row in one ``UPDATE``; ``True`` when it was there."""
+        await self._ensure_table()
+        pool = await self._get_pool()
+        escaped = _like_literal(checkpoint_id)
+
+        async with pool.acquire() as conn:
+            async with await conn.cursor() as cur:
+                await cur.execute(
+                    f"""
+                    UPDATE {self._quoted_table_name} SET
+                        data = JSON_OBJECT(
+                            'checkpoints', JSON_REMOVE({_INDEX_ARRAY}, {_INDEX_ENTRY_PATH})
+                        ),
+                        updated_at = %s
+                    WHERE thread_id = %s AND {_INDEX_ENTRY_PATH} IS NOT NULL
+                    """,
+                    (
+                        escaped,
+                        _LIKE_ESCAPE,
+                        datetime.now(UTC).replace(tzinfo=None),
+                        index_key(thread_id),
+                        escaped,
+                        _LIKE_ESCAPE,
+                    ),
+                )
+                removed = int(cur.rowcount)
+            await conn.commit()
+
+        return removed == 1
+
+    async def index_list(self, thread_id: str) -> list[dict[str, Any]]:
+        """The index row's entries; ``[]`` without the row."""
+        existing = await self.load(index_key(thread_id))
+        return list((existing or {}).get("checkpoints", []))
+
+    async def index_clear(self, thread_id: str) -> bool:
+        """Delete the index row."""
+        return await self.delete(index_key(thread_id))
 
     async def close(self) -> None:
         """Close connection pool."""

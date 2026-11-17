@@ -88,6 +88,27 @@ class _DictStore:
         return [k for k in self.rows if fnmatch.fnmatch(k, pattern)][:limit]
 
 
+class _IndexedDictStore(_DictStore):
+    """``_DictStore`` keeping the checkpoint index itself, as the shipped backends do (#301)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.index: dict[str, dict[str, dict[str, Any]]] = {}
+
+    async def index_add(self, thread_id: str, entry: dict[str, Any]) -> None:
+        self.index.setdefault(thread_id, {})[entry["checkpoint_id"]] = copy.deepcopy(entry)
+
+    async def index_remove(self, thread_id: str, checkpoint_id: str) -> bool:
+        return self.index.get(thread_id, {}).pop(checkpoint_id, None) is not None
+
+    async def index_list(self, thread_id: str) -> list[dict[str, Any]]:
+        # Oldest first: the adapter, not the store, orders what it lists.
+        return [copy.deepcopy(e) for e in reversed(list(self.index.get(thread_id, {}).values()))]
+
+    async def index_clear(self, thread_id: str) -> bool:
+        return self.index.pop(thread_id, None) is not None
+
+
 class _FakeObjectStorage:
     """The slice of the OCI Object Storage client the bucket checkpointer uses."""
 
@@ -217,6 +238,29 @@ class TestAdapterTimeTravel(CheckpointerTimeTravelConformance, BoundedHistoryCon
     @pytest.fixture
     def make_bounded(self) -> Any:
         return lambda keep: StorageBackendAdapter(_DictStore(), max_checkpoints_per_thread=keep)
+
+
+class TestAdapterNativeIndexTimeTravel(
+    CheckpointerTimeTravelConformance, BoundedHistoryConformance
+):
+    """The adapter over a store that keeps the index atomically (Redis, SQL, OpenSearch)."""
+
+    @pytest.fixture
+    def make_checkpointer(self) -> Any:
+        return lambda: StorageBackendAdapter(_IndexedDictStore())
+
+    @pytest.fixture
+    def make_bounded(self) -> Any:
+        return lambda keep: StorageBackendAdapter(
+            _IndexedDictStore(), max_checkpoints_per_thread=keep
+        )
+
+    async def test_the_index_key_is_never_written(self) -> None:
+        store = _IndexedDictStore()
+        cp = StorageBackendAdapter(store)
+        await cp.save(AgentState(agent_id="tt"), "t", "cp-0")
+        assert "t:_checkpoints" not in store.rows
+        assert set(store.rows) == {"t:cp-0", "t:latest"}
 
 
 class TestRetainedTimeTravel(CheckpointerTimeTravelConformance):
