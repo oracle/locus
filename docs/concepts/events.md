@@ -307,3 +307,9 @@ event object: `on_before_invocation(prompt, state)` and
 - [Streaming](streaming.md) — how to consume the event stream.
 - [Hooks](hooks.md) — observe and steer the same lifecycle points from inside the loop.
 - [Agent server](server.md) — re-emit events over Server-Sent Events.
+- [Notebook 60 — Observability basics](../notebooks/notebook_60_observability_basics.md)
+  — the typed events of one run and the bus trail they become.
+- [Notebook 62 — EventBus subscribers](../notebooks/notebook_62_eventbus_subscribers.md)
+  — subscribing to the bus across concurrent runs.
+- [Notebook 64 — SSE streaming](../notebooks/notebook_64_sse_streaming.md)
+  — the same events over Server-Sent Events.
