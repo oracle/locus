@@ -16,6 +16,13 @@ deprecations work.
 Consumers should pin a major (`locus-sdk>=5,<6`) and read the
 CHANGELOG before bumping across majors.
 
+A deprecated API will:
+
+1. Still work for at least one full minor version.
+2. Emit `LocusDeprecationWarning` on use.
+3. Be listed in `CHANGELOG.md` with its planned removal version and a
+   migration snippet.
+
 ### Removed in 6.0
 
 - The `locus.security` compatibility shim; `locus.control` is the
@@ -27,15 +34,12 @@ CHANGELOG before bumping across majors.
   `locus.models.fallback.served_tier()`.
 - The `tool` key on the `tool.integrity.refused` payload; read
   `tool_name`.
+
+### Changed in 6.0
+
 - `Agent(tool_call_integrity=...)` defaults to `True`; pass `False` to
-  turn the check off.
-
-A deprecated API will:
-
-1. Still work for at least one full minor version.
-2. Emit `LocusDeprecationWarning` on use.
-3. Be listed in `CHANGELOG.md` with its planned removal version and a
-   migration snippet.
+  turn the check off. A hook that rewrites `event.arguments` now calls
+  `event.resign(by=...)` afterwards, or the executor refuses the call.
 
 ## Using `LocusDeprecationWarning`
 

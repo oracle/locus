@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import ast
 import importlib
+import importlib.util
 import pathlib
 import sys
 
@@ -36,8 +37,14 @@ SRC = pathlib.Path(__file__).resolve().parents[2] / "src" / "locus"
 
 def test_the_package_no_longer_imports() -> None:
     sys.modules.pop("locus.loop", None)
-    with pytest.raises(ImportError):
-        importlib.import_module("locus.loop")
+    # Looked up, not imported: importing would bind ``locus.loop`` on the
+    # package for the rest of the session. A checkout that imported the
+    # package before the removal keeps ``src/locus/loop/__pycache__`` (git
+    # never deletes it), and Python then resolves the directory as an empty
+    # namespace package, whose spec has no origin. That is not the package.
+    spec = importlib.util.find_spec("locus.loop")
+    assert spec is None or spec.origin is None, f"locus.loop still has source: {spec.origin}"
+    assert not list((SRC / "loop").rglob("*.py"))
 
 
 @pytest.mark.parametrize(
@@ -69,12 +76,18 @@ def test_the_submodules_are_gone_too(submodule: str) -> None:
 def test_the_top_level_package_has_no_loop_attribute() -> None:
     import locus
 
+    # With a stale ``src/locus/loop/__pycache__`` around, an earlier test's
+    # failed ``from locus.loop import …`` has bound the empty namespace
+    # package on ``locus``; start from the package's own lookup.
+    sys.modules.pop("locus.loop", None)
+    locus.__dict__.pop("loop", None)
     with pytest.raises(AttributeError):
         _ = locus.loop
 
 
 def test_no_source_file_remains_on_disk() -> None:
-    assert not (SRC / "loop").exists()
+    # Not ``.exists()``: a stale ``__pycache__`` directory may outlive the sources.
+    assert not list((SRC / "loop").rglob("*.py"))
 
 
 def test_the_supported_runtime_does_not_import_the_removed_package() -> None:

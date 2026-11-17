@@ -187,7 +187,11 @@ def __getattr__(name: str) -> object:
     import importlib
     import importlib.util
 
-    if importlib.util.find_spec(f"{__name__}.{name}") is not None:
+    # A directory left behind with only a stale ``__pycache__`` (git never
+    # deletes those) resolves as an empty namespace package, whose spec has
+    # no ``origin``; that is not a subpackage of ours.
+    spec = importlib.util.find_spec(f"{__name__}.{name}")
+    if spec is not None and spec.origin is not None:
         return importlib.import_module(f"{__name__}.{name}")
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

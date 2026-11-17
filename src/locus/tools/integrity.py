@@ -203,8 +203,8 @@ class ToolCallIntegrityError(ToolError):
     def audit_payload(self, *, disposition: IntegrityViolation, key_id: str) -> dict[str, Any]:
         """The fields a refusal records on the audit trail and the event bus.
 
-        The tool goes out as ``tool_name``, the key the catalogue's other tool
-        events use.
+        The tool goes out as ``tool_name``, the key :class:`ToolCallIntegrityError`
+        and the audit entries use.
         """
         return {
             "tool_name": self.tool_name,

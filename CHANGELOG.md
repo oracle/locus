@@ -187,7 +187,8 @@ policy.
   or `locus.models.fallback.served_tier()` instead.
 - **Removed in 6.0: the `tool` key on the `tool.integrity.refused` payload**
   (event bus and `agent.tool.integrity.refused` audit entries). Read
-  `tool_name`, the key the catalogue's other tool events use.
+  `tool_name`, the key `ToolCallIntegrityError.tool_name` and the audit
+  entries use.
 
 ### Fixed
 

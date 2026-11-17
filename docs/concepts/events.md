@@ -56,9 +56,11 @@ consumer can read every field; mutating one raises `ValidationError`.
 Steering is a separate surface: the **hook** events (`locus.hooks`,
 a `ProtectedEvent` family) let a hook steer by **assigning** to a
 writable field — `event.cancel = True` (or a reason string),
-`event.retry = True`, `event.arguments = {...}`. There are no
-`cancel()` / `retry()` / `replace_arguments()` methods; assigning to a
-read-only field raises `AttributeError`. See [Hooks](hooks.md).
+`event.retry = True`, `event.arguments = {...}` followed by
+`event.resign(by=...)` (tool calls are signed over their arguments; an
+unsigned rewrite is refused). There are no `cancel()` / `retry()` /
+`replace_arguments()` methods; assigning to a read-only field raises
+`AttributeError`. See [Hooks](hooks.md).
 
 ## Core events
 
@@ -295,7 +297,7 @@ event object: `on_before_invocation(prompt, state)` and
 | No `ModelChunkEvent`s arrive | `stream_tokens=True` was not passed to `agent.run()`. |
 | `ModelChunkEvent.content` is `None` | Tool-call-only chunk. Guard with `if event.content:`. |
 | `TerminateEvent` never arrives | Generator was cancelled mid-stream. Check the consumer for exceptions. |
-| Tried to mutate a streaming event field and got `ValidationError` | Streaming events are frozen by design. To steer, do it on the hook event by assigning a writable field — `event.cancel = True`, `event.retry = True`, or `event.arguments = {...}`. |
+| Tried to mutate a streaming event field and got `ValidationError` | Streaming events are frozen by design. To steer, do it on the hook event by assigning a writable field — `event.cancel = True`, `event.retry = True`, or `event.arguments = {...}` followed by `event.resign(by=...)`. |
 
 ## Source
 

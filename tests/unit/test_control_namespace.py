@@ -13,8 +13,9 @@ longer part of Locus, and the ``locus.security`` import path that forwarded to
 """
 
 import importlib
-
-import pytest
+import importlib.util
+import pathlib
+import sys
 
 
 def test_control_exposes_the_core() -> None:
@@ -54,10 +55,15 @@ def test_old_names_are_gone() -> None:
 
 
 def test_the_old_import_path_is_gone() -> None:
-    with pytest.raises(ModuleNotFoundError):
-        importlib.import_module("locus.security")
-    with pytest.raises(ModuleNotFoundError):
-        importlib.import_module("locus.security.policy")
+    # Looked up, not imported, so nothing binds ``locus.security`` on the
+    # package. A stale ``src/locus/security/__pycache__`` (git never deletes
+    # it) makes Python resolve the directory as an empty namespace package,
+    # whose spec has no origin; that is not the shim, which had source.
+    sys.modules.pop("locus.security", None)
+    spec = importlib.util.find_spec("locus.security")
+    assert spec is None or spec.origin is None, f"shim still has source: {spec.origin}"
+    src = pathlib.Path(importlib.import_module("locus").__file__).parent / "security"
+    assert not list(src.rglob("*.py"))
 
 
 def test_top_level_lazy_names_are_the_control_objects() -> None:
