@@ -109,6 +109,13 @@ raises `PolicyDeniedError`, which `main` prints as the `[verdict]` line:
 
 {{ locus_source examples/notebook_29_cognitive_router.py::_dispatch_with_fallback }}
 
+The selection step has its own benchmark. `benchmarks/router/cases.json`
+holds sixty prompts tagged by the protocol each should reach, and the
+[router benchmark](../how-to/router-benchmark.md) runs the typed router
+and a free-form baseline over them with the evaluation primitives,
+selection only: the frame is extracted and the protocol resolved, and
+nothing is built or run.
+
 ## Run it
 
 ```bash

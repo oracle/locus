@@ -37,7 +37,7 @@ Strongest outcome wins: deny > hold > allow. `ApprovalDecision` has `outcome`, `
 | Grounding, guardrails, audit of lifecycle events | `governed_agent(...)`; it does not gate tools, add `gate_tool` for that |
 | The policy is reviewed as a file, linted in CI, changed without a deploy | `ControlPolicy.load(path)`, `locus policy lint`, `PolicyWatcher(path)` wherever a `policy=` goes |
 | The labels are right but the arguments are not (a refund to an account not on the order) | `gate_tool(..., judge=ToolCallJudge(...))`: a model reads the call and can only tighten the decision |
-| Arguments could change between the model and the executor (a hook, a plugin) | `Agent(tool_call_integrity=True)`: every call is signed when parsed and verified before it runs |
+| Arguments could change between the model and the executor (a hook, a plugin) | `tool_call_integrity`, on by default: every call is signed when parsed and verified before it runs; `Agent(tool_call_integrity=False)` turns it off |
 
 ## Action
 
@@ -315,7 +315,8 @@ error=None)`: no model call was spent on it.
 
 ## Tool-call integrity
 
-`Agent(tool_call_integrity=True)` (the same as `"refuse"`; `"abort"` ends the run instead) signs every tool call as the
+`tool_call_integrity` is on by default (`True`, the same as `"refuse"`; `"abort"` ends the run instead; `False` turns
+the check off) and signs every tool call as the
 model's response is parsed, the streaming path included, over a canonical form of its id, name and arguments with
 HMAC-SHA256 under a random per-run key, and the executor verifies the call before it runs. A call changed in between is
 refused with a typed `ToolCallIntegrityError` (`tool_name`, `call_id`, `reason` `"mismatch"` or `"tainted"`,
@@ -329,7 +330,7 @@ arguments without re-signing taints the record under its own name, and a later r
 `ToolCallSigner(*, on_violation="refuse", trail=None, key=None)` is the per-run signer (`sign`, `sign_all`, `resign`,
 `taint`, `signature(call_id)`, `verify`, `refusals`) for a runtime of your own. The signature lives on the run, not on
 `ToolCall`, so messages and checkpoints are unchanged; a call rehydrated from a checkpoint in a new process is unsigned
-and runs as before. Off by default in 5.x, on by default from 6.0.
+and runs as before. The check is on by default; `Agent(tool_call_integrity=False)` turns it off.
 
 ```python
 from locus.agent import Agent
@@ -355,7 +356,7 @@ class Redact(HookProvider):
 
 for resign in (False, True):
     model = ScriptedModel([tool_call("send_message", to="ops", body="card 4111 1111"), text("Done.")])
-    agent = Agent(model=model, tools=[send_message], hooks=[Redact(resign)], tool_call_integrity=True,
+    agent = Agent(model=model, tools=[send_message], hooks=[Redact(resign)],  # integrity: on by default
                   reflexion=False, grounding=False)
     execution = agent.run_sync("tell ops").tool_executions[0]
     print(resign, "->", execution.result, "|", (execution.error or "")[:80])
@@ -733,7 +734,7 @@ It does not gate tools: pass `gate_tool(...)` results in `tools`.
    `version`, `locus policy lint` in CI, a `PolicyWatcher` in the service.
 3. `gate_tool(..., policy=watcher, trail=trail, judge=ToolCallJudge(...))` for
    what labels cannot carry; keep the ungated tool out of the agent's list; a
-   test asserts every mutating tool is a gated copy; `Agent(tool_call_integrity=True)`.
+   test asserts every mutating tool is a gated copy; `tool_call_integrity` stays on (the default).
 4. `approval_store("postgresql://...")` (or another database store) with an
    `ApprovalAuthority`, `on_refusal="interrupt"`, a durable checkpointer, a
    stable `thread_id`; authenticate the person behind `by=` in your decision channel.

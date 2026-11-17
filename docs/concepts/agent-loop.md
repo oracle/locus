@@ -12,10 +12,7 @@ emits, and how to extend it.
 
 The loop is implemented in
 [`src/locus/agent/runtime_loop.py`](https://github.com/oracle/locus/blob/main/src/locus/agent/runtime_loop.py):
-`AgentRuntimeMixin.run`, which `Agent` mixes in. The separate
-[`src/locus/loop/`](https://github.com/oracle/locus/tree/main/src/locus/loop)
-package is a deprecated second ReAct implementation that `Agent` has
-never used.
+`AgentRuntimeMixin.run`, which `Agent` mixes in.
 
 ## Origin: ReAct, then refinement
 
@@ -174,8 +171,7 @@ Source:
 There is no separate router object: transitions between nodes are
 the control flow of `AgentRuntimeMixin.run` in
 [`agent/runtime_loop.py`](https://github.com/oracle/locus/blob/main/src/locus/agent/runtime_loop.py).
-(The `Router` class in the deprecated `locus/loop/` package is not on
-this path.) The rules:
+The rules:
 
 | From | To | When |
 |---|---|---|

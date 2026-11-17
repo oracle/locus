@@ -8,7 +8,8 @@ Three layers. :class:`ToolCallSigner` alone (canonical form, chain of custody,
 taint). The executor refusing a changed call through the context factory. And
 the whole runtime, driven by a scripted model: a hook that changes arguments
 without re-signing is refused and named on the audit trail; one that re-signs
-is accepted; the streaming path signs too; the feature off changes nothing.
+is accepted; the streaming path signs too; the check is on by default and
+``tool_call_integrity=False`` turns it off.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from typing import Any
 
 import pytest
 
-from locus.agent import Agent
+from locus.agent import Agent, AgentConfig
 from locus.agent.hook_orchestrator import HookOrchestrator
 from locus.agent.run_context import RunContext
 from locus.control import AuditHook, AuditTrail, ToolCallIntegrityError, ToolCallSigner
@@ -252,7 +253,8 @@ class TestEnforce:
 
         [entry] = trail.records()
         assert entry.event_type == AUDIT_EVENT_TYPE
-        assert entry.payload["tool"] == "echo"
+        assert entry.payload["tool_name"] == "echo"
+        assert "tool" not in entry.payload  # the 5.x alias is gone
         assert entry.payload["call_id"] == "call_1"
         assert entry.payload["expected_digest"] == record.digest
         assert entry.payload["actual_digest"] == call_digest(changed)
@@ -296,7 +298,7 @@ class TestEnforce:
 
         assert [t for t, _ in seen] == ["tool.integrity.refused"]
         assert seen[0][1]["tool_name"] == "echo"
-        assert seen[0][1]["tool"] == "echo"  # deprecated alias, one release
+        assert "tool" not in seen[0][1]  # the 5.x alias is gone
         assert {"expected_digest", "actual_digest", "mutated_by"} <= set(seen[0][1])
 
     async def test_abort_mode_holds_the_error_for_the_runtime(self) -> None:
@@ -666,12 +668,36 @@ class TestAgent:
         assert _complete(events).error is None
         assert ran == [{"x": "[REDACTED]"}]
 
-    async def test_feature_off_keeps_the_old_behaviour(self) -> None:
+    async def test_on_by_default_a_silent_change_is_refused(self) -> None:
+        """No ``tool_call_integrity=`` argument: the check is on."""
+        assert AgentConfig.model_fields["tool_call_integrity"].default is True
         registry, ran = _registry()
         agent = Agent(
             model=_ScriptedModel(_script()),
             tools=list(registry),
             hooks=[_SilentHook()],
+            max_iterations=4,
+        )
+        events = await _drive(agent)
+        complete = _complete(events)
+        assert complete.error is not None
+        assert "ToolCallIntegrityError" in complete.error
+        assert ran == []
+
+    async def test_on_by_default_an_untouched_call_runs(self) -> None:
+        registry, ran = _registry()
+        agent = Agent(model=_ScriptedModel(_script()), tools=list(registry), max_iterations=4)
+        events = await _drive(agent)
+        assert _complete(events).error is None
+        assert ran == [{"x": "hello"}]
+
+    async def test_turned_off_a_silent_change_runs(self) -> None:
+        registry, ran = _registry()
+        agent = Agent(
+            model=_ScriptedModel(_script()),
+            tools=list(registry),
+            hooks=[_SilentHook()],
+            tool_call_integrity=False,
             max_iterations=4,
         )
         events = await _drive(agent)
@@ -692,7 +718,7 @@ class TestAgent:
         [entry] = [r for r in trail.records() if r.event_type == AUDIT_EVENT_TYPE]
         signed = ToolCall(id="call_echo", name="echo", arguments={"x": "hello"})
         received = ToolCall(id="call_echo", name="echo", arguments={"x": "changed"})
-        assert entry.payload["tool"] == "echo"
+        assert entry.payload["tool_name"] == "echo"
         assert entry.payload["call_id"] == "call_echo"
         assert entry.payload["expected_digest"] == call_digest(signed)
         assert entry.payload["actual_digest"] == call_digest(received)

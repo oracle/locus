@@ -232,15 +232,15 @@ Emitted around each run of a tool declared with `@tool(sandbox=...)`.
 when a tool carries a label listed in `ControlPolicy.require_sandbox_for`
 but has no sandbox, and the hook then cancels that call.
 `tool.integrity.refused` comes from the executor with
-`tool_call_integrity` on: a call whose arguments changed after the model
-produced them, without a re-sign, was not run.
+`tool_call_integrity` on (the default): a call whose arguments changed after
+the model produced them, without a re-sign, was not run.
 
 | Event | Payload |
 |---|---|
 | `tool.sandbox.started` | `tool`, `provider`, `timeout` |
 | `tool.sandbox.completed` | `tool`, `ok`, `exit_code`, `timed_out`, `duration_ms` |
 | `tool.sandbox.denied` | `tool`, `labels` (the labels that required a sandbox) |
-| `tool.integrity.refused` | `tool_name`, `call_id`, `reason` (`mismatch` / `tainted`), `expected_digest`, `actual_digest`, `signed_by`, `mutated_by`, `disposition` (`refuse` / `abort`), `key_id`; `tool` repeats `tool_name` until the next release (deprecated) |
+| `tool.integrity.refused` | `tool_name`, `call_id`, `reason` (`mismatch` / `tainted`), `expected_digest`, `actual_digest`, `signed_by`, `mutated_by`, `disposition` (`refuse` / `abort`), `key_id` |
 
 ### `control.*` — admission control
 

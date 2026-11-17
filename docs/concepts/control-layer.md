@@ -84,7 +84,7 @@ Where it stops:
 
 The admission gate decides whether an action may run. A second check, inside
 the runtime, decides whether the call that reaches the executor is the call
-the model produced. With `Agent(tool_call_integrity=True)` the runtime signs
+the model produced. By default (`tool_call_integrity=True`) the runtime signs
 every `ToolCall` as the model's response is parsed, streamed or not, over a
 canonical form of its id, name and arguments (sorted keys, no whitespace)
 with HMAC-SHA256 under a random per-run key that lives only in memory. The
@@ -129,8 +129,8 @@ perform_dangling=True)` re-issues is signed again under the new run's key
 before it enters the hook seam; a call that reaches the executor without any
 record in the current run, because code outside the runtime issued it, is
 unsigned and runs unverified. The guarantee is that once the runtime has
-signed a call, nothing may change it unnamed. Off by default in 5.x, on by
-default from 6.0.
+signed a call, nothing may change it unnamed. The check is on by default;
+`Agent(tool_call_integrity=False)` turns it off.
 
 ## Failure behavior
 

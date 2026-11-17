@@ -4,9 +4,10 @@
 
 """``FallbackChain`` reports which tier served EACH call.
 
-``last_tier`` is one attribute on a chain shared by concurrent calls, so it
-describes whichever call finished last. Each call now carries its own
-:class:`ServedTier` — on the response and in the calling context.
+One attribute on a chain shared by concurrent calls would describe whichever
+call finished last; ``last_tier`` was that attribute and left in 6.0.0. Each
+call carries its own :class:`ServedTier` — on the response and in the
+calling context.
 """
 
 from __future__ import annotations
@@ -15,11 +16,8 @@ import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
 
-import pytest
-
 from locus.core.events import ModelChunkEvent
 from locus.core.messages import Message
-from locus.core.warnings import LocusDeprecationWarning
 from locus.models.fallback import FallbackChain, ServedTier, served_tier
 from locus.testing import text
 
@@ -86,10 +84,9 @@ async def test_concurrent_completes_each_report_their_own_tier() -> None:
     assert primary.metadata["fallback"] == {"tier": 0, "model": "primary", "attempts": 1}
     assert primary_ctx == ServedTier(index=0, model="primary", attempts=1)
 
-    # The shared attribute describes whichever call finished last (the slow
-    # primary one) — the race the per-call report exists to avoid.
-    with pytest.warns(LocusDeprecationWarning):
-        assert chain.last_tier == 0
+    # The shared attribute that would have described whichever call finished
+    # last — the race the per-call report exists to avoid — is gone.
+    assert not hasattr(chain, "last_tier")
 
 
 async def test_concurrent_streams_each_report_their_own_tier() -> None:

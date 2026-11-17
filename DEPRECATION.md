@@ -23,6 +23,24 @@ A deprecated API will:
 3. Be listed in `CHANGELOG.md` with its planned removal version and a
    migration snippet.
 
+### Removed in 6.0
+
+- The `locus.security` compatibility shim; `locus.control` is the
+  import path.
+- The `locus.loop` package (`ReActLoop`, `LoopRunner`, `BatchRunner`,
+  `StreamingCollector`, the nodes and the router); `Agent` is the
+  supported loop.
+- `FallbackChain.last_tier`; read `response.metadata["fallback"]` or
+  `locus.models.fallback.served_tier()`.
+- The `tool` key on the `tool.integrity.refused` payload; read
+  `tool_name`.
+
+### Changed in 6.0
+
+- `Agent(tool_call_integrity=...)` defaults to `True`; pass `False` to
+  turn the check off. A hook that rewrites `event.arguments` now calls
+  `event.resign(by=...)` afterwards, or the executor refuses the call.
+
 ## Using `LocusDeprecationWarning`
 
 Internal callers emit deprecation warnings like this:
@@ -63,5 +81,5 @@ implementation detail and can change in any release without
 deprecation.
 
 If you're importing from `locus.core.reducers`,
-`locus.loop.nodes._internal`, `locus.agent.agent._parse_*`, or
+`locus.tools.executor._internal`, `locus.agent.agent._parse_*`, or
 anything similar — that is your risk to carry.

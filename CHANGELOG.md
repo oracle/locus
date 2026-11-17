@@ -8,8 +8,25 @@ policy.
 
 ## [Unreleased]
 
+## [6.0.0] - 2026-11-17
+
 ### Added
 
+- **Router benchmark harness.** The routing corpus is a file of `EvalCase`
+  objects (`benchmarks/router/cases.json`, tagged `labelled`, `shape:<id>`,
+  `trap`, `injection`, `ambiguous`) and `locus.router.benchmark` adapts
+  selection to `EvalRunner`'s contract: a typed target that takes any
+  `RequestClassifier` in the router's front seam, a free-form baseline that
+  may name an unregistered id, and `router_gate`, which holds the typed
+  router to the baseline on the whole corpus and on the traps, to 100%
+  bounded under injection and, for a classifier under test, to no per-case
+  regression (`regressions` lists the cases either way). Every target
+  answers a protocol id, `unbounded` or `refused`, and retries a transient
+  provider error before refusing; nothing is built or run.
+  `scripts/router_benchmark.py` runs it against a model and stores the
+  reports; `tests/integration/test_router_classifier_gate.py` is the same
+  gate behind `RUN_ROUTER_BENCHMARK=1`, and the routing benchmark beside it
+  reads the same file. (#342)
 - **Checkpoint TTL.** Every checkpointer takes `ttl=` (seconds or a
   `timedelta`): a checkpoint expires that long after its save and is then
   neither loaded, listed nor forked, and `await cp.expire()` removes what has
@@ -116,6 +133,13 @@ policy.
 
 ### Changed
 
+- **Changed in 6.0: `Agent(tool_call_integrity=...)` defaults to `True`.**
+  Every tool call is signed as the model's response is parsed and verified
+  before it runs, so a hook that rewrites `event.arguments` must call
+  `event.resign(by="MyHook")` or the call is refused with a
+  `ToolCallIntegrityError`; the built-in `GuardrailsHook` redaction and
+  `ExternalHooks` rewrites already do. Pass `Agent(tool_call_integrity=False)`
+  to keep the 5.x behaviour. (#450)
 - **Unscoped thread ids that spell a scope marker are stored encoded.** A
   thread id of the form `app=…` or `user=…` (or beginning `app%` /
   `user%`) on a checkpointer with no `scope=` is now stored
@@ -183,6 +207,27 @@ policy.
   store together: one still on the earlier release lists only the
   checkpoints it wrote itself after the move, and nothing else is lost.
 
+### Removed
+
+- **Removed in 6.0: the `locus.security` compatibility shim.** The old import
+  path no longer resolves; `locus.control` is the import path for the names it
+  forwarded (`Evidence`, `Severity`, `ground_finding`, `verify`, the taxonomy
+  enums, …). The security-domain names it used to forward left Locus with the
+  `locus-sdk-security` package in 5.6.0. (#464)
+- **Removed in 6.0: the `locus.loop` package.** `ReActLoop`,
+  `ReActLoopConfig`, `create_react_loop`, `LoopRunner`, `BatchRunner`,
+  `StreamingCollector`, `create_runner`, the nodes and the router no longer
+  import; `Agent` (`agent.run`, `agent.arun`), `EvalRunner` and `StateGraph`
+  conditional edges are the supported forms, as the 5.x deprecation warning
+  said.
+- **Removed in 6.0: `FallbackChain.last_tier`.** The attribute was shared by
+  every call on the chain; read the per-call `response.metadata["fallback"]`
+  or `locus.models.fallback.served_tier()` instead.
+- **Removed in 6.0: the `tool` key on the `tool.integrity.refused` payload**
+  (event bus and `agent.tool.integrity.refused` audit entries). Read
+  `tool_name`, the key `ToolCallIntegrityError.tool_name` and the audit
+  entries use.
+
 ### Fixed
 
 - **Two processes creating the PostgreSQL checkpoint table at the same instant
@@ -192,9 +237,7 @@ policy.
   on the table name and re-probes before creating.
 - **`LOCUS_FRONTIER_MODEL` turns the knob it names.** The rogue-agent challenge
   showed the variable in its banner but ran a pinned model; `build_agent()`
-  now uses it, and the default is the model it pinned. The `locus.loop`
-  and `FallbackChain.last_tier` deprecation warnings name 6.0.0 as their
-  removal release instead of a past or missing one.
+  now uses it, and the default is the model it pinned.
 - `python -m locus.runner` reports every command the harness ran as a
   `harness.exec` record. The runtime drained its exec records by replacing
   the list the harness appends to, so only commands before the first tool
@@ -237,6 +280,18 @@ policy.
   the winner's row. `OracleSyncBackend` mirrors the four methods, and the
   backend reads its JSON columns through one helper that accepts every
   shape the driver returns (dict, string, sync or async LOB).
+- **Two writers saving the same key through `OracleBackend` at once no
+  longer fail.** `save()` is a `MERGE`, and for a key neither writer has
+  seen both take its `INSERT` branch; the loser met the primary key
+  (`ORA-00001`) on the shared `<thread_id>:latest` row and the save raised.
+  `save()` now repeats the `MERGE` once in that case, and the row the
+  winner committed takes the `UPDATE` branch. The first-time DDL raced
+  the same way, worse: every concurrent first save ran `CREATE TABLE` and
+  `CREATE INDEX`, and the losers failed with `ORA-00955`, `ORA-00054` or
+  `ORA-04020`. A backend now provisions once per process under a lock, a
+  `CREATE` another process won reads as created, and a lock collision with
+  that process's DDL or first writes is retried a few times, the way the
+  PostgreSQL backend serialises its own first-time DDL.
 - **A backend with only some of the `CheckpointIndexStore` methods is no
   longer taken for one without any.** `StorageBackendAdapter` fell back
   silently to its locked read-modify-write when a store defined one, two or

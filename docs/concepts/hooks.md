@@ -228,10 +228,12 @@ Event objects are `ProtectedEvent` instances with a custom
 `__setattr__`: each event declares a small `_writable` set, and writing
 any other field raises `AttributeError`. The fields that *do* let hooks
 steer the agent are plain attribute assignments — on
-`BeforeToolCallEvent` you can set `event.arguments` (rewrite the inputs)
-and `event.cancel` (skip the call); on `AfterToolCallEvent` you can set
-`event.result` and `event.retry`. Setting `cancel` to a string records
-the reason:
+`BeforeToolCallEvent` you can set `event.arguments` (rewrite the inputs,
+then call `event.resign(by="<hook name>")`: tool calls are signed over
+their arguments, and a rewrite no hook has signed for is refused by the
+executor) and `event.cancel` (skip the call); on `AfterToolCallEvent` you
+can set `event.result` and `event.retry`. Setting `cancel` to a string
+records the reason:
 
 ```python
 async def on_before_tool_call(self, event):
@@ -248,7 +250,7 @@ any field; this restriction is deliberate.
 |---|---|
 | Hook never fires | The hook was not passed to `Agent(hooks=[...])`. The `HookRegistry` only sees what you register. |
 | Hook fires in the wrong order | Reorder the list you pass to `Agent(hooks=[...])`; when the hooks come through a `HookRegistry`, set `priority` on each provider (there is no default; the built-ins ship in the security, observability and default bands). |
-| `AttributeError: Cannot set 'foo' … read-only` | You tried to write a non-writable field. Only the steering fields are assignable: `messages` on before-model; `response`, `retry` and `retry_feedback` on after-model; `arguments`, `secret_arguments` and `cancel` on before-tool; `result` and `retry` on after-tool; `instructions` and `cancel` on before-compaction. Every other field is read-only. |
+| `AttributeError: Cannot set 'foo' … read-only` | You tried to write a non-writable field. Only the steering fields are assignable: `messages` on before-model; `response`, `retry` and `retry_feedback` on after-model; `arguments` and `secret_arguments` (followed by `event.resign(by=...)`) and `cancel` on before-tool; `result` and `retry` on after-tool; `instructions` and `cancel` on before-compaction. Every other field is read-only. |
 | `on_after_tool_call` does not see the result | The tool raised. Check `event.error` instead of `event.result`. |
 | Telemetry spans are not exported | `TelemetryHook` needs an OTel exporter configured upstream — see [Observability](observability.md). |
 

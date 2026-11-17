@@ -24,7 +24,8 @@ What this notebook covers:
   [Priorities](../concepts/hooks.md#priorities-the-ordering-rules)).
 - Mutating `event.arguments` from `on_before_tool_call` to rewrite the
   call before the tool runs — here, clamping `adjust_capacity` to a
-  maximum instance count.
+  maximum instance count — and re-signing it with `event.resign(by=...)`
+  so the signed call still runs.
 - Composing two hooks on one agent.
 
 Prerequisite: the agent-streaming notebook.
@@ -48,7 +49,9 @@ each of the four points the notebook uses:
 
 The `event.arguments` mapping is writable in `on_before_tool_call`, so a
 hook can clamp an out-of-range capacity change before `adjust_capacity`
-receives it:
+receives it. Tool calls are signed over their arguments, so the hook then
+calls `event.resign(by=...)`: the executor records which hook changed the
+call instead of refusing it as tampered with.
 
 {{ locus_source examples/notebook_09_agent_hooks.py::ValidationHook }}
 
