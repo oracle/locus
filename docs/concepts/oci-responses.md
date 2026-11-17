@@ -253,6 +253,7 @@ transport is explicit; an error on this path stays on this path.
 
 ## See also
 
+- [Notebook 34 — OCIResponsesModel](../notebooks/notebook_34_oci_responses.md) — the transport in a runnable example
 - [Hooks](hooks.md) — what `on_after_tool_call` sees on either transport
 - [OCI models — provider page](../how-to/oci-models.md) — when to pick which OCI transport
 - [Streaming](streaming.md) — how `ModelChunkEvent` works on streamed runs

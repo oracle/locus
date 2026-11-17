@@ -31,6 +31,10 @@ This page is the **wire-format contract**. A browser renderer, the
 JSON log adapter, and any downstream OTEL bridge consume from it. If you
 add a new emission site, list it here.
 
+[Notebook 63 — Event catalogue](../notebooks/notebook_63_event_catalogue.md)
+prints this catalogue from the installed module, then the `composition.*`
+events a two-stage pipeline publishes.
+
 ## How emission works
 
 Every `emit()` call site reads `current_run_id()` from a `ContextVar`
