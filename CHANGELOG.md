@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [6.0.0] - 2026-11-17
+
 ### Added
 
 - **Router benchmark harness.** The routing corpus is a file of `EvalCase`
