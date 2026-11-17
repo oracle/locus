@@ -10,15 +10,14 @@ Uses python-oracledb in thin mode (no Oracle Client required).
 
 from __future__ import annotations
 
-import asyncio
 import inspect
 import json
 from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel, Field, SecretStr
 
+from locus._oracle_ddl import provisioning_lock, run_ddl
 from locus._oracle_pool_cache import safe_acquire
-from locus.core.loop_bound import loop_bound
 from locus.core.state import AgentState
 from locus.memory.backends._oracle_config import (
     OracleConfig,
@@ -35,9 +34,6 @@ if TYPE_CHECKING:
 #: How many times a first write of a thread's index retries after losing the
 #: insert of the index row to another process (``ORA-00001`` on the key).
 _INDEX_INSERT_RETRIES = 3
-
-#: Attempts at a first-time DDL statement another session is contending for.
-_DDL_ATTEMPTS = 5
 
 
 async def _read_json_column(raw: Any) -> Any:
@@ -64,48 +60,6 @@ async def _read_json_column(raw: Any) -> Any:
 def _index_entries(value: Any) -> list[dict[str, Any]]:
     """The entries of an index document; ``[]`` for anything else."""
     return list(value.get("checkpoints", [])) if isinstance(value, dict) else []
-
-
-def _already_exists(exc: BaseException) -> bool:
-    """Whether ``exc`` is ``ORA-00955``: another connection created the object first.
-
-    Two pools provisioning one table at the same instant both see it
-    missing and both run the DDL; the loser's ``CREATE`` fails with this
-    error, and the table (or index) is there.
-    """
-    return "ORA-00955" in str(exc)
-
-
-def _ddl_contended(exc: BaseException) -> bool:
-    """Whether ``exc`` is a lock collision with another session on the object.
-
-    ``ORA-00054`` (resource busy) and ``ORA-04020`` (deadlock on the object's
-    library-cache lock) come from two processes provisioning one table at
-    the same instant while one of them already writes to it; a short wait
-    lets the other side commit.
-    """
-    message = str(exc)
-    return "ORA-00054" in message or "ORA-04020" in message
-
-
-async def _run_ddl(cursor: Any, statement: str) -> None:
-    """Run one first-time DDL statement against other sessions doing the same.
-
-    A ``CREATE`` another session won is done (``ORA-00955``); a lock
-    collision with that session waits a little and tries again, up to
-    :data:`_DDL_ATTEMPTS` times; anything else propagates.
-    """
-    for attempt in range(1, _DDL_ATTEMPTS + 1):
-        try:
-            await cursor.execute(statement)
-        except Exception as exc:
-            if _already_exists(exc):
-                return
-            if _ddl_contended(exc) and attempt < _DDL_ATTEMPTS:
-                await asyncio.sleep(0.2 * attempt)
-                continue
-            raise
-        return
 
 
 def _lost_first_write(exc: BaseException) -> bool:
@@ -251,14 +205,13 @@ class OracleBackend(BaseModel):
         coroutines of this process, so the first batch of concurrent saves
         runs the DDL once instead of twenty times. Between processes the
         DDL is its own arbiter: a ``CREATE`` another session won reads as
-        created (``ORA-00955``, see ``_already_exists``), and a lock
-        collision with that session's DDL or first writes is retried a few
-        times (see ``_ddl_contended``).
+        created, and a lock collision with that session's DDL or first
+        writes is retried a few times (:mod:`locus._oracle_ddl`).
         """
         if self._initialized:
             return
 
-        async with loop_bound(self, "_provision_lock", asyncio.Lock):
+        async with provisioning_lock(self):
             if self._initialized:
                 return
             pool = await self._get_pool()
@@ -291,7 +244,7 @@ class OracleBackend(BaseModel):
                         ON {self._full_table_name} (updated_at DESC)
                         """,
                     ):
-                        await _run_ddl(cursor, statement)
+                        await run_ddl(cursor, statement)
                     await conn.commit()
 
             self._initialized = True

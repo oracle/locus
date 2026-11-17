@@ -46,6 +46,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel, SecretStr
 
+from locus._oracle_ddl import provisioning_lock, run_ddl
 from locus._oracle_pool_cache import get_pool, safe_acquire
 from locus.memory.store import (
     BaseStore,
@@ -389,24 +390,29 @@ class OracleStore(BaseStore):
             self._initialized = True
             return
 
-        pool = await self._get_pool()
-        async with safe_acquire(self, pool) as conn, conn.cursor() as cursor:
-            await cursor.execute(
-                """
-                SELECT COUNT(*) FROM user_tables
-                WHERE table_name = UPPER(:table_name)
-                """,
-                {"table_name": self.config.table_name},
-            )
-            row = await cursor.fetchone()
-            table_exists = bool(row and row[0] > 0)
+        # One provisioning pass per instance, and a CREATE another process
+        # won or is still running is handled (see ``locus._oracle_ddl``).
+        async with provisioning_lock(self):
+            if self._initialized:
+                return
+            pool = await self._get_pool()
+            async with safe_acquire(self, pool) as conn, conn.cursor() as cursor:
+                await cursor.execute(
+                    """
+                    SELECT COUNT(*) FROM user_tables
+                    WHERE table_name = UPPER(:table_name)
+                    """,
+                    {"table_name": self.config.table_name},
+                )
+                row = await cursor.fetchone()
+                table_exists = bool(row and row[0] > 0)
 
-            if not table_exists:
-                await cursor.execute(self._create_table_ddl())
-                await cursor.execute(self._ns_index_ddl())
-                await conn.commit()
+                if not table_exists:
+                    await run_ddl(cursor, self._create_table_ddl())
+                    await run_ddl(cursor, self._ns_index_ddl())
+                    await conn.commit()
 
-        self._initialized = True
+            self._initialized = True
 
     # -- MERGE / SELECT / DELETE SQL ----------------------------------------
 

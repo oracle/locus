@@ -271,6 +271,21 @@ policy.
   `CREATE` another process won reads as created, and a lock collision with
   that process's DDL or first writes is retried a few times, the way the
   PostgreSQL backend serialises its own first-time DDL.
+- **Every other Oracle backend provisions its table the same way.**
+  `OracleCheckpointSaver`, `OracleStore`, `OracleVectorStore`,
+  `OracleApprovals`, `OracleAuditTrail` and the evaluation `OracleReportStore`
+  had the same first-time DDL: every concurrent first operation on a fresh
+  table ran the `CREATE` statements, and two processes starting together
+  failed with `ORA-00955`, `ORA-00054` or `ORA-04020`. They now share one
+  provisioning helper: one pass per instance under a lock, a `CREATE`
+  another process won reads as created, a lock collision with that
+  process is retried a few times.
+- **A burst of writers on one `OracleAuditTrail` no longer deadlocks.**
+  `record()` held the trail's lock while waiting for a pooled connection,
+  and reloading the chain held a connection while waiting for the lock; with
+  the default two-connection pool, eight threads recording at once stopped
+  for good. The reload now takes the lock before the connection, the order
+  `record()` uses.
 - **A backend with only some of the `CheckpointIndexStore` methods is no
   longer taken for one without any.** `StorageBackendAdapter` fell back
   silently to its locked read-modify-write when a store defined one, two or
