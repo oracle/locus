@@ -24,7 +24,14 @@ from collections.abc import Iterable
 from typing import Any, Protocol, runtime_checkable
 
 
-__all__ = ["INDEX_SUFFIX", "CheckpointIndexStore", "index_key", "newest_first"]
+__all__ = [
+    "INDEX_METHODS",
+    "keeps_index_natively",
+    "INDEX_SUFFIX",
+    "CheckpointIndexStore",
+    "index_key",
+    "newest_first",
+]
 
 #: The key suffix of a thread's checkpoint index, as the adapter has always stored it.
 INDEX_SUFFIX = ":_checkpoints"
@@ -71,3 +78,21 @@ class CheckpointIndexStore(Protocol):
     async def index_clear(self, thread_id: str) -> bool:
         """Drop the thread's whole index; ``True`` when there was one."""
         ...
+
+
+#: The methods a store implements to keep the index itself.
+INDEX_METHODS: tuple[str, ...] = ("index_add", "index_remove", "index_list", "index_clear")
+
+
+def keeps_index_natively(store: object) -> bool:
+    """Whether ``store`` implements every :class:`CheckpointIndexStore` method as a coroutine.
+
+    Stricter than ``isinstance`` against the runtime-checkable protocol on
+    purpose: a Python 3.11 ``isinstance`` check answers ``True`` for any object
+    that merely *has* the attribute names (a ``MagicMock`` does), and the
+    adapter would then ``await`` something that is not awaitable. Requiring
+    coroutine functions makes the detection the same on every interpreter.
+    """
+    import inspect
+
+    return all(inspect.iscoroutinefunction(getattr(store, name, None)) for name in INDEX_METHODS)

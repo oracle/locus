@@ -12,7 +12,12 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from locus.core.protocols import CheckpointerCapabilities
-from locus.memory.backends.checkpoint_index import CheckpointIndexStore, index_key, newest_first
+from locus.memory.backends.checkpoint_index import (
+    CheckpointIndexStore,
+    index_key,
+    keeps_index_natively,
+    newest_first,
+)
 from locus.memory.checkpointer import BaseCheckpointer
 from locus.memory.time_travel import (
     CheckpointInfo,
@@ -115,7 +120,7 @@ class StorageBackendAdapter(BaseCheckpointer):
         # The backend itself, when it keeps the index atomically (see
         # ``CheckpointIndexStore``); ``None`` means the locked read-modify-write.
         self._native_index: CheckpointIndexStore | None = (
-            backend if isinstance(backend, CheckpointIndexStore) else None
+            backend if keeps_index_natively(backend) else None
         )
 
     def _index_lock(self, thread_id: str) -> asyncio.Lock:
