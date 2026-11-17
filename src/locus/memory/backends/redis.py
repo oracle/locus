@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import warnings
 from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel, Field
 
+from locus.core.warnings import LocusDeprecationWarning
 from locus.memory.backends.checkpoint_index import index_key
 
 
@@ -52,7 +54,10 @@ class RedisBackend(BaseModel):
         to one thread never lose an entry. An index written by an earlier
         release as one JSON string at ``<prefix><thread_id>:_checkpoints``
         is still read, and moved into the hash (under the configured
-        ``ttl_seconds``) on the thread's next save or removal.
+        ``ttl_seconds``) on the thread's next save or removal. Reading the
+        string ends in Locus 7.0.0, so upgrade the processes that share one
+        store together: one still on the earlier release lists only the
+        checkpoints it wrote itself after the move.
     """
 
     config: RedisConfig = Field(default_factory=RedisConfig)
@@ -206,6 +211,13 @@ class RedisBackend(BaseModel):
             raw = await pipe.get(legacy)
             if raw is None:
                 return  # migrated by another process since the check
+            warnings.warn(
+                f"Found a checkpoint index written by an earlier Locus release at {legacy!r} "
+                "and moved it into the index hash. Reading these legacy index strings ends "
+                "in Locus 7.0.0; upgrade every process that shares this Redis store before then.",
+                LocusDeprecationWarning,
+                stacklevel=2,
+            )
             pipe.multi()
             for entry in self._legacy_entries(raw):
                 pipe.hsetnx(hash_key, str(entry["checkpoint_id"]), json.dumps(entry))

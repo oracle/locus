@@ -7,15 +7,18 @@
 from __future__ import annotations
 
 import asyncio
+import warnings
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from locus.core.protocols import CheckpointerCapabilities
+from locus.core.warnings import LocusWarning
 from locus.memory.backends.checkpoint_index import (
+    INDEX_METHODS,
     CheckpointIndexStore,
     index_key,
-    keeps_index_natively,
+    index_methods_present,
     newest_first,
 )
 from locus.memory.checkpointer import BaseCheckpointer
@@ -188,9 +191,19 @@ class StorageBackendAdapter(BaseCheckpointer):
         self._index_locks: dict[str, asyncio.Lock] = {}
         # The backend itself, when it keeps the index atomically (see
         # ``CheckpointIndexStore``); ``None`` means the locked read-modify-write.
+        present = index_methods_present(backend)
         self._native_index: CheckpointIndexStore | None = (
-            backend if keeps_index_natively(backend) else None
+            backend if len(present) == len(INDEX_METHODS) else None
         )
+        if self._native_index is None and present:
+            missing = [name for name in INDEX_METHODS if name not in present]
+            warnings.warn(
+                f"{type(backend).__name__} implements {', '.join(present)} but not "
+                f"{', '.join(missing)}; the adapter keeps the checkpoint index itself, under a "
+                "per-process lock, until all four CheckpointIndexStore methods are there.",
+                LocusWarning,
+                stacklevel=2,
+            )
 
     def _index_lock(self, thread_id: str) -> asyncio.Lock:
         """Get (or lazily create) the index lock for a thread."""

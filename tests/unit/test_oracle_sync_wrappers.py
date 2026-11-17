@@ -165,6 +165,24 @@ def _patch_async_with_mock(wrapper: Any, **method_returns: Any) -> AsyncMock:
 
 
 class TestOracleSyncBackend:
+    def test_index_methods_route_through(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _install_oracledb_stub(monkeypatch)
+        from locus.memory.backends.oracle_sync import OracleSyncBackend
+
+        wrapper = OracleSyncBackend(dsn="x", user="u", password="p")  # noqa: S106
+        entry = {"checkpoint_id": "c", "timestamp": "2026-01-01T00:00:00"}
+        mock = _patch_async_with_mock(
+            wrapper, index_add=None, index_remove=True, index_list=[entry], index_clear=True
+        )
+
+        assert wrapper.index_add("t", entry) is None
+        assert wrapper.index_remove("t", "c") is True
+        assert wrapper.index_list("t") == [entry]
+        assert wrapper.index_clear("t") is True
+        mock.index_add.assert_awaited_once_with("t", entry)
+        mock.index_remove.assert_awaited_once_with("t", "c")
+        mock.index_clear.assert_awaited_once_with("t")
+
     def test_constructs_with_async_args(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _install_oracledb_stub(monkeypatch)
         from locus.memory.backends.oracle_sync import OracleSyncBackend

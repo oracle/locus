@@ -1,0 +1,19 @@
+{
+  "base": "signed",
+  "description": "record 1 carries record 0's (valid base64) signature",
+  "checks": [
+    {
+      "keys": [
+        "2ee9031729dbde22"
+      ],
+      "expected_head": "cb97fd9c19d4ab95ae1e3007f4c4d8c1a31aa4efdb91c608d6122011622a218c",
+      "report": {
+        "ok": false,
+        "records": 4,
+        "head": "cb97fd9c19d4ab95ae1e3007f4c4d8c1a31aa4efdb91c608d6122011622a218c",
+        "broken_at": 1,
+        "problem": "record 1 is not signed by a trusted key"
+      }
+    }
+  ]
+}

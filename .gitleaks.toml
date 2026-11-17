@@ -18,6 +18,10 @@ description = "Illustrative/fake secrets in security demos and test fixtures"
 # fake keys in its sample data are intentional.
 paths = [
   '''examples/scenarios/sensitive_disclosure\.py''',
+  # The Ed25519 keys under conformance/v1 are published test vectors: they
+  # sign the fixture audit trails and nothing else, and a port verifies
+  # against them. They are never used outside the fixtures.
+  '''conformance/v1/audit/keys/.*\.pem''',
 ]
 
 # Exact fake values used elsewhere (not whole-file allowlists, so real keys in

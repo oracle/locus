@@ -453,3 +453,21 @@ def test_a_mock_store_does_not_count_as_a_native_index() -> None:
         index_clear = AsyncMock()
 
     assert keeps_index_natively(_Native()) is True
+
+
+def test_index_methods_present_names_the_coroutine_methods_a_store_has() -> None:
+    """The partial-implementation check counts coroutine functions only, in protocol order."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from locus.memory.backends.checkpoint_index import index_methods_present
+
+    class _Half:
+        index_list = AsyncMock(return_value=[])
+        index_add = AsyncMock()
+
+        def index_remove(self, thread_id: str, checkpoint_id: str) -> bool:  # sync: not awaitable
+            return False
+
+    assert index_methods_present(_Half()) == ["index_add", "index_list"]
+    assert index_methods_present(MagicMock()) == []
+    assert index_methods_present(object()) == []

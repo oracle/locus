@@ -1,0 +1,348 @@
+[
+  {
+    "name": "float-zero",
+    "mode": "ascii",
+    "input": 0.0,
+    "input_json": "0.0",
+    "canonical": "0.0",
+    "sha256": "8aed642bf5118b9d3c859bd4be35ecac75b6e873cce34e7b6f554b06f75550d7",
+    "note": "a float keeps its point: 0.0, never 0"
+  },
+  {
+    "name": "float-one",
+    "mode": "ascii",
+    "input": 1.0,
+    "input_json": "1.0",
+    "canonical": "1.0",
+    "sha256": "d0ff5974b6aa52cf562bea5921840c032a860a91a3512f7fe8f768f6bbe005f6",
+    "note": "1.0 and 1 are different bytes and different hashes"
+  },
+  {
+    "name": "int-one",
+    "mode": "ascii",
+    "input": 1,
+    "input_json": "1",
+    "canonical": "1",
+    "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+    "note": ""
+  },
+  {
+    "name": "negative-zero",
+    "mode": "ascii",
+    "input": -0.0,
+    "input_json": "-0.0",
+    "canonical": "-0.0",
+    "sha256": "c26617c7ccbcaa6631b45d851b8cf56e21d2ca624bdb1193afdbd4b560702cec",
+    "note": "the sign of zero is kept"
+  },
+  {
+    "name": "float-small-exponent",
+    "mode": "ascii",
+    "input": 1e-05,
+    "input_json": "1e-05",
+    "canonical": "1e-05",
+    "sha256": "5a9530d3c6d5faad6ba8afe16fb8e438df23865128370b2ec14ef622bb5f2ec9",
+    "note": "repr() switches to the exponent form below 1e-4"
+  },
+  {
+    "name": "float-large-exponent",
+    "mode": "ascii",
+    "input": 1e+16,
+    "input_json": "1e+16",
+    "canonical": "1e+16",
+    "sha256": "a144838520595009e7daf5aff8472573f9ce6a4bcd8c30673675618883464ab0",
+    "note": "and above 1e16: 1e+16 with an explicit plus"
+  },
+  {
+    "name": "float-shortest-repr",
+    "mode": "ascii",
+    "input": 0.30000000000000004,
+    "input_json": "0.30000000000000004",
+    "canonical": "0.30000000000000004",
+    "sha256": "06bad31060c1212ae832de4c031f7b31e3b48aed57858294478cb19450cf34ca",
+    "note": "the shortest round-tripping repr"
+  },
+  {
+    "name": "float-whole",
+    "mode": "ascii",
+    "input": 100.0,
+    "input_json": "100.0",
+    "canonical": "100.0",
+    "sha256": "43b87f618caab482ebe4976c92bcd6ad308b48055f1c27b4c574f3e31d7683e0",
+    "note": ""
+  },
+  {
+    "name": "int-large",
+    "mode": "ascii",
+    "input": 12345678901234567890123,
+    "input_json": "12345678901234567890123",
+    "canonical": "12345678901234567890123",
+    "sha256": "0c71ebdc4736bf09a888457750aa22f7c895026afb64b40f8fbd94092c61c19b",
+    "note": "integers are arbitrary precision and print in full"
+  },
+  {
+    "name": "int-vs-float-in-object",
+    "mode": "ascii",
+    "input": {
+      "int": 1,
+      "float": 1.0,
+      "zero": 0,
+      "float_zero": 0.0
+    },
+    "input_json": "{\"int\": 1, \"float\": 1.0, \"zero\": 0, \"float_zero\": 0.0}",
+    "canonical": "{\"float\":1.0,\"float_zero\":0.0,\"int\":1,\"zero\":0}",
+    "sha256": "6667b51df87595cea82c23669d74d3bf86668c38cfaa3e7d7dda2f93216d9d81",
+    "note": "a parser that reads 1.0 as 1 cannot re-hash this"
+  },
+  {
+    "name": "bool-null",
+    "mode": "ascii",
+    "input": {
+      "t": true,
+      "f": false,
+      "n": null
+    },
+    "input_json": "{\"t\": true, \"f\": false, \"n\": null}",
+    "canonical": "{\"f\":false,\"n\":null,\"t\":true}",
+    "sha256": "22e00dc2f7b01420f940fbdbfbdf34fa0667cc6500186495023ba37722cbd05e",
+    "note": ""
+  },
+  {
+    "name": "empty-containers",
+    "mode": "ascii",
+    "input": {
+      "object": {},
+      "array": [],
+      "string": ""
+    },
+    "input_json": "{\"object\": {}, \"array\": [], \"string\": \"\"}",
+    "canonical": "{\"array\":[],\"object\":{},\"string\":\"\"}",
+    "sha256": "160df1cb7c08864a4d113733fe02cfbc06a3e39c4ce0e0273ca7f2bb42e0facc",
+    "note": ""
+  },
+  {
+    "name": "key-order",
+    "mode": "ascii",
+    "input": {
+      "b": 1,
+      "a": 2,
+      "B": 3,
+      "_": 4,
+      "10": 5,
+      "9": 6,
+      "aa": 7,
+      "a0": 8
+    },
+    "input_json": "{\"b\": 1, \"a\": 2, \"B\": 3, \"_\": 4, \"10\": 5, \"9\": 6, \"aa\": 7, \"a0\": 8}",
+    "canonical": "{\"10\":5,\"9\":6,\"B\":3,\"_\":4,\"a\":2,\"a0\":8,\"aa\":7,\"b\":1}",
+    "sha256": "60b00c43c189cc67bf314687a4a160e894adaafd8f819ec7ef4bf12911e7c5a4",
+    "note": "keys sort by code point: digits, upper case, underscore, lower case; '10' before '9'"
+  },
+  {
+    "name": "nested",
+    "mode": "ascii",
+    "input": {
+      "z": {
+        "y": [
+          3,
+          {
+            "x": 1,
+            "w": 2
+          }
+        ],
+        "a": null
+      },
+      "m": [
+        [],
+        {}
+      ]
+    },
+    "input_json": "{\"z\": {\"y\": [3, {\"x\": 1, \"w\": 2}], \"a\": null}, \"m\": [[], {}]}",
+    "canonical": "{\"m\":[[],{}],\"z\":{\"a\":null,\"y\":[3,{\"w\":2,\"x\":1}]}}",
+    "sha256": "0f1fd5f7f4e6081f9c36c49f16246ec64bf1d95e2ff7eb00cd638563439d0c41",
+    "note": "objects sort at every depth; arrays keep their order"
+  },
+  {
+    "name": "escaping-ascii",
+    "mode": "ascii",
+    "input": {
+      "s": "quote \" backslash \\ slash / tab \t newline \n nul \u0000 del \u007f ls \u2028"
+    },
+    "input_json": "{\"s\": \"quote \\\" backslash \\\\ slash / tab \\t newline \\n nul \\u0000 del \u007f ls \u2028\"}",
+    "canonical": "{\"s\":\"quote \\\" backslash \\\\ slash / tab \\t newline \\n nul \\u0000 del \\u007f ls \\u2028\"}",
+    "sha256": "e90a210f9d28acf3f19a35eb301ecc7e4495c1620aff7c3e4ac90bfeab1758fc",
+    "note": "every byte outside 0x20-0x7e is escaped; '/' is not"
+  },
+  {
+    "name": "escaping-utf8",
+    "mode": "utf8",
+    "input": {
+      "s": "quote \" backslash \\ slash / tab \t newline \n nul \u0000 del \u007f ls \u2028"
+    },
+    "input_json": "{\"s\": \"quote \\\" backslash \\\\ slash / tab \\t newline \\n nul \\u0000 del \u007f ls \u2028\"}",
+    "canonical": "{\"s\":\"quote \\\" backslash \\\\ slash / tab \\t newline \\n nul \\u0000 del \u007f ls \u2028\"}",
+    "sha256": "d4c17ab51a7b278c616b4c9f45871574bde88287966c31d584b227205e7fd78f",
+    "note": "only control characters, the quote and the backslash are escaped"
+  },
+  {
+    "name": "non-ascii-key-ascii",
+    "mode": "ascii",
+    "input": {
+      "\u00e9": "\u00fc",
+      "e": 1,
+      "z": 2
+    },
+    "input_json": "{\"\u00e9\": \"\u00fc\", \"e\": 1, \"z\": 2}",
+    "canonical": "{\"e\":1,\"z\":2,\"\\u00e9\":\"\\u00fc\"}",
+    "sha256": "75e0c39c23c6aa5f3b65daead2461751eb693f16fcdee5318ed40641e592ec5b",
+    "note": "e (U+0065) sorts before \u00e9 (U+00E9) before z"
+  },
+  {
+    "name": "non-ascii-key-utf8",
+    "mode": "utf8",
+    "input": {
+      "\u00e9": "\u00fc",
+      "e": 1,
+      "z": 2
+    },
+    "input_json": "{\"\u00e9\": \"\u00fc\", \"e\": 1, \"z\": 2}",
+    "canonical": "{\"e\":1,\"z\":2,\"\u00e9\":\"\u00fc\"}",
+    "sha256": "b39a952ff0ee5d342e1c2d7b551ef041ca92a898d6ec5e529c71e26e8a0b1f3b",
+    "note": "the same order, written as UTF-8"
+  },
+  {
+    "name": "astral-key-order-ascii",
+    "mode": "ascii",
+    "input": {
+      "\ud83d\ude00": 1,
+      "\uff01": 2,
+      "a": 3
+    },
+    "input_json": "{\"\ud83d\ude00\": 1, \"\uff01\": 2, \"a\": 3}",
+    "canonical": "{\"a\":3,\"\\uff01\":2,\"\\ud83d\\ude00\":1}",
+    "sha256": "edda0cbb65543f6f4a7f502479a9543c0beb57a6d3d577efccf50ee750c6a729",
+    "note": "U+FF01 sorts before U+1F600 by code point; UTF-16 code-unit order would put the emoji first"
+  },
+  {
+    "name": "astral-key-order-utf8",
+    "mode": "utf8",
+    "input": {
+      "\ud83d\ude00": 1,
+      "\uff01": 2,
+      "a": 3
+    },
+    "input_json": "{\"\ud83d\ude00\": 1, \"\uff01\": 2, \"a\": 3}",
+    "canonical": "{\"a\":3,\"\uff01\":2,\"\ud83d\ude00\":1}",
+    "sha256": "f419fa2232bffebd6f3d21a8386febaf36794ac0432c31e847933f322ea66b00",
+    "note": ""
+  },
+  {
+    "name": "astral-value-ascii",
+    "mode": "ascii",
+    "input": {
+      "s": "\ud834\udd1e"
+    },
+    "input_json": "{\"s\": \"\ud834\udd1e\"}",
+    "canonical": "{\"s\":\"\\ud834\\udd1e\"}",
+    "sha256": "385a43bc980c662ddb671af5138ea1672b9e3cc48a8d82d5ee55d943f21fa46a",
+    "note": "a surrogate pair in ascii mode"
+  },
+  {
+    "name": "no-unicode-normalisation",
+    "mode": "ascii",
+    "input": {
+      "\u00e9": 1,
+      "e\u0301": 2
+    },
+    "input_json": "{\"\u00e9\": 1, \"e\u0301\": 2}",
+    "canonical": "{\"e\\u0301\":2,\"\\u00e9\":1}",
+    "sha256": "20eb18d1ed76e941a27280b7dfd4f2e5e05fa895c9bbd958fed117ec0e5fa7fe",
+    "note": "NFC and NFD are different keys; nothing is normalised"
+  },
+  {
+    "name": "numeric-string",
+    "mode": "ascii",
+    "input": {
+      "a": "1.0",
+      "b": 1.0
+    },
+    "input_json": "{\"a\": \"1.0\", \"b\": 1.0}",
+    "canonical": "{\"a\":\"1.0\",\"b\":1.0}",
+    "sha256": "7e0714a7d425f4f96e475124e500efa7e1e39a2a59eac5746f07653bbc6e02b5",
+    "note": "a string stays a string"
+  },
+  {
+    "name": "audit-entry-body",
+    "mode": "ascii",
+    "input": {
+      "seq": 0,
+      "ts": "2026-01-01T00:00:00+00:00",
+      "event_type": "session-start",
+      "payload": {
+        "agent": "conformance",
+        "schema": "locus.control.policy/v1",
+        "ratio": 1.0,
+        "zero": 0.0
+      },
+      "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "input_json": "{\"seq\": 0, \"ts\": \"2026-01-01T00:00:00+00:00\", \"event_type\": \"session-start\", \"payload\": {\"agent\": \"conformance\", \"schema\": \"locus.control.policy/v1\", \"ratio\": 1.0, \"zero\": 0.0}, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\"}",
+    "canonical": "{\"event_type\":\"session-start\",\"payload\":{\"agent\":\"conformance\",\"ratio\":1.0,\"schema\":\"locus.control.policy/v1\",\"zero\":0.0},\"prev_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"seq\":0,\"ts\":\"2026-01-01T00:00:00+00:00\"}",
+    "sha256": "4bb1d441bceb48be96206b0af003a94b06a6f1e3cfa9f334dbc7af7d7dc3a493",
+    "note": "the hash of record 0 in audit/unsigned/trail.jsonl"
+  },
+  {
+    "name": "policy-default",
+    "mode": "ascii",
+    "input": {
+      "require_verification_score": 0.8,
+      "max_blast_radius": 1,
+      "require_human_for": [
+        "production"
+      ],
+      "deny_for": [],
+      "min_severity": "low",
+      "require_sandbox_for": [],
+      "version": "",
+      "require_human_over_usd": null,
+      "spend_limit_usd": null
+    },
+    "input_json": "{\"require_verification_score\": 0.8, \"max_blast_radius\": 1, \"require_human_for\": [\"production\"], \"deny_for\": [], \"min_severity\": \"low\", \"require_sandbox_for\": [], \"version\": \"\", \"require_human_over_usd\": null, \"spend_limit_usd\": null}",
+    "canonical": "{\"deny_for\":[],\"max_blast_radius\":1,\"min_severity\":\"low\",\"require_human_for\":[\"production\"],\"require_human_over_usd\":null,\"require_sandbox_for\":[],\"require_verification_score\":0.8,\"spend_limit_usd\":null,\"version\":\"\"}",
+    "sha256": "d4b1e82256361b394151acbb56eeef037b3b95d1b9484ee8a767863cebedc256",
+    "note": "policies/default.hash"
+  },
+  {
+    "name": "approval-call",
+    "mode": "ascii",
+    "input": {
+      "principal": "agent-7",
+      "tool": "issue_refund",
+      "arguments": {
+        "order_id": "4821",
+        "amount_usd": 120.0
+      }
+    },
+    "input_json": "{\"principal\": \"agent-7\", \"tool\": \"issue_refund\", \"arguments\": {\"order_id\": \"4821\", \"amount_usd\": 120.0}}",
+    "canonical": "{\"arguments\":{\"amount_usd\":120.0,\"order_id\":\"4821\"},\"principal\":\"agent-7\",\"tool\":\"issue_refund\"}",
+    "sha256": "fb456872ebfb192e018307c198c0dc8cc53581d33706bdbc6fc82e8eee653fe6",
+    "note": "approvals/digests.json[0].digest"
+  },
+  {
+    "name": "integrity-call-utf8",
+    "mode": "utf8",
+    "input": {
+      "id": "call_1",
+      "name": "send_email",
+      "arguments": {
+        "to": "ops@example.com",
+        "subject": "R\u00e9sum\u00e9",
+        "n": 1.0
+      }
+    },
+    "input_json": "{\"id\": \"call_1\", \"name\": \"send_email\", \"arguments\": {\"to\": \"ops@example.com\", \"subject\": \"R\u00e9sum\u00e9\", \"n\": 1.0}}",
+    "canonical": "{\"arguments\":{\"n\":1.0,\"subject\":\"R\u00e9sum\u00e9\",\"to\":\"ops@example.com\"},\"id\":\"call_1\",\"name\":\"send_email\"}",
+    "sha256": "5b1dddae34c4430d48fec6e86a889918562be35deac9a5a6abf7a62e8ebbc01e",
+    "note": "the tool-call integrity canonical form uses ensure_ascii=False"
+  }
+]

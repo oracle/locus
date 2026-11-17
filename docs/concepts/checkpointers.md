@@ -279,13 +279,18 @@ on a replay.
 Through the adapter factories, each save or removal changes the index in
 one operation the store makes atomic — a Redis hash field (`HSET` /
 `HDEL`), one `UPDATE` of the index row's JSON array on PostgreSQL and
-MySQL, one scripted `_update` of the index document on OpenSearch — so
-two processes saving to the same thread at once both keep every entry
-(an index an earlier release wrote on Redis is read as before and moved
-into the hash on the thread's next save). `oracle_checkpointer()`, and
-any backend of your own without those operations, updates the index
-under a per-process lock: safe within one process, not between
-processes.
+MySQL, one scripted `_update` of the index document on OpenSearch, a
+rewrite of the index row under its row lock (`SELECT ... FOR UPDATE`) on
+Oracle — so two processes saving to the same thread at once both keep
+every entry. An index an earlier release wrote on Redis is read as before
+and moved into the hash on the thread's next save or removal; reading
+those strings ends in 7.0.0, and a process still on the earlier release
+lists only the checkpoints it wrote itself after the move, so upgrade the
+processes that share one Redis store together. A backend of your own
+without those operations updates the index under a per-process lock:
+safe within one process, not between processes. One that implements
+only some of the four methods gets a `LocusWarning` when the adapter is
+built, and the same lock.
 
 A bounded backend deletes the surplus from the oldest end after every
 save — several saves within one second included — so `fork` and `list`

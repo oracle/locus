@@ -1,0 +1,16 @@
+{
+  "ok": false,
+  "source": "",
+  "policy_hash": "ee2217a1b2c4e33e104169d7292602cbce9d508e55adebca2e16c4b04a83fc08",
+  "findings": [
+    {
+      "code": "uncovered-environment",
+      "rule": null,
+      "label": "staging",
+      "message": "environment 'staging' has no rule: an action there with one asset, no cost and no other label is allowed without a person"
+    }
+  ],
+  "notes": [
+    "an action with no environment, kind or tags, one asset and no cost is allowed: every gated tool must derive labels for this policy to see it"
+  ]
+}

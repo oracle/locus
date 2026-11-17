@@ -80,6 +80,18 @@ policy.
   `mysql-connector-python` the `mysql` checkpoint extra installs), lazy
   export from `locus.rag.stores`, docs rows and a HeatWave vs community
   MySQL section, and the shared conformance suite behind `HEATWAVE_DSN`.
+- **Control-layer conformance fixtures.** `conformance/v1/` holds the test
+  vectors a port of the governance core proves parity against: canonical
+  JSON digests in both escaping modes, unsigned, signed and rotated-key audit
+  trails with a file per tamper class and the `AuditReport` each yields,
+  policy documents with their hash, lint findings and decisions, malformed
+  documents with the error key, approval digests, ids and decision
+  sequences, and the exact `action-admission` line an admission writes.
+  `scripts/conformance_export.py` regenerates them from a fixed clock and
+  fixture keys; a unit test fails on any difference, so a format change is a
+  deliberate `v2`. A dependency-free Node script under
+  `conformance/v1/tools/` recomputes the digests and verifies the signatures
+  from the other side. (#343)
 - **TLS-only Autonomous Database connections, and a `config_dir` of their
   own.** Every Oracle backend — `OracleBackend` behind `oracle_checkpointer()`,
   `OracleCheckpointSaver`, `OracleStore`, `OracleVectorStore`,
@@ -157,6 +169,16 @@ policy.
   variables the SDK reads but the page omitted are listed (#487); the four
   docstrings carry an example a test executes (#488, #489).
 
+### Deprecated
+
+- **Reading a Redis checkpoint index written by a release before this one.**
+  `redis_checkpointer()` still reads the `<thread_id>:_checkpoints` JSON
+  string an earlier release kept and moves it into the index hash on the
+  thread's next save or removal, with a `LocusDeprecationWarning` when it
+  does; that read ends in 7.0.0. Upgrade the processes that share one Redis
+  store together: one still on the earlier release lists only the
+  checkpoints it wrote itself after the move, and nothing else is lost.
+
 ### Fixed
 
 - **Two processes creating the PostgreSQL checkpoint table at the same instant
@@ -199,6 +221,25 @@ policy.
   configured `ttl_seconds` even when a removal is what migrates it.
   `StorageBackendAdapter.delete(thread_id, checkpoint_id)` is `True` when it
   removed an index entry whose checkpoint was already gone.
+- **`oracle_checkpointer()` keeps the checkpoint index atomically too.** The
+  Oracle backend was the one shipped store still on the adapter's locked
+  read-modify-write, so two processes saving to one thread through it could
+  lose index entries (#301). `OracleBackend` now implements
+  `CheckpointIndexStore`: each save or removal reads the
+  `<thread_id>:_checkpoints` row under `SELECT ... FOR UPDATE` and rewrites
+  it in the same transaction, so concurrent writers queue on the row lock
+  and each sees what the previous one committed; two first writers racing
+  on the row's insert meet the primary key, and the loser retries against
+  the winner's row. `OracleSyncBackend` mirrors the four methods, and the
+  backend reads its JSON columns through one helper that accepts every
+  shape the driver returns (dict, string, sync or async LOB).
+- **A backend with only some of the `CheckpointIndexStore` methods is no
+  longer taken for one without any.** `StorageBackendAdapter` fell back
+  silently to its locked read-modify-write when a store defined one, two or
+  three of the four methods, so a typo in a backend's method name put it on
+  the racy path with no signal. The adapter now warns (`LocusWarning`),
+  naming the methods present and missing, and `index_methods_present()` in
+  `locus.memory.backends.checkpoint_index` lists what a store implements.
 
 ## [5.6.0] - 2026-11-17
 

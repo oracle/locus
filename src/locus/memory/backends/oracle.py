@@ -10,6 +10,7 @@ Uses python-oracledb in thin mode (no Oracle Client required).
 
 from __future__ import annotations
 
+import inspect
 import json
 from typing import TYPE_CHECKING, Any, cast
 
@@ -21,10 +22,44 @@ from locus.memory.backends._oracle_config import (
     OracleConfig,
     connect_params,
 )
+from locus.memory.backends.checkpoint_index import index_key, newest_first
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     import oracledb
+
+
+#: How many times a first write of a thread's index retries after losing the
+#: insert of the index row to another process (``ORA-00001`` on the key).
+_INDEX_INSERT_RETRIES = 3
+
+
+async def _read_json_column(raw: Any) -> Any:
+    """The Python value of a JSON-constrained ``CLOB`` column.
+
+    ``oracledb`` hands such a column back as a ``dict`` (the server's JSON
+    type, the usual case on 23ai and later), a ``str``, a sync LOB locator
+    (``read()`` returns the string) or, on an async connection, an async
+    locator (``read()`` is a coroutine).
+    """
+    if raw is None:
+        return None
+    if hasattr(raw, "read"):
+        raw = raw.read()
+        if inspect.isawaitable(raw):
+            raw = await raw
+    if isinstance(raw, (bytes, bytearray)):
+        raw = raw.decode("utf-8")
+    if isinstance(raw, str):
+        return json.loads(raw) if raw else None
+    return raw
+
+
+def _index_entries(value: Any) -> list[dict[str, Any]]:
+    """The entries of an index document; ``[]`` for anything else."""
+    return list(value.get("checkpoints", [])) if isinstance(value, dict) else []
 
 
 class OracleBackend(BaseModel):
@@ -65,6 +100,12 @@ class OracleBackend(BaseModel):
         ...     user="admin",
         ...     password="secret",
         ... )
+
+    Checkpoint index:
+        Through ``oracle_checkpointer()`` the thread's checkpoint index is
+        the row ``<thread_id>:_checkpoints``, read and rewritten under its
+        row lock (``SELECT ... FOR UPDATE``) on every save or removal, so
+        two processes saving to one thread never lose an entry.
     """
 
     config: OracleConfig = Field(default_factory=OracleConfig)
@@ -354,15 +395,7 @@ class OracleBackend(BaseModel):
         if row is None:
             return None
 
-        # Handle CLOB - read if needed
-        data = row[0]
-        if hasattr(data, "read"):
-            data = data.read()
-
-        # oracledb might already return JSON as dict
-        if isinstance(data, dict):
-            return data
-        loaded: dict = json.loads(data)
+        loaded: dict | None = await _read_json_column(row[0])
         return loaded
 
     async def delete(self, thread_id: str) -> bool:
@@ -588,6 +621,113 @@ class OracleBackend(BaseModel):
             row = await cursor.fetchone()
 
         return row[0] if row else 0
+
+    # -- checkpoint index (CheckpointIndexStore) -------------------------------
+
+    async def index_add(self, thread_id: str, entry: dict[str, Any]) -> None:
+        """Add the entry to the index row under its row lock, replacing one with its id."""
+        checkpoint_id = str(entry["checkpoint_id"])
+
+        def add(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            kept = [e for e in entries if str(e.get("checkpoint_id")) != checkpoint_id]
+            return newest_first([*kept, entry])
+
+        await self._change_index(thread_id, add, create=True)
+
+    async def index_remove(self, thread_id: str, checkpoint_id: str) -> bool:
+        """Drop the entry from the index row under its row lock; ``True`` when it was there."""
+
+        def remove(entries: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
+            kept = [e for e in entries if str(e.get("checkpoint_id")) != checkpoint_id]
+            return kept if len(kept) != len(entries) else None
+
+        return await self._change_index(thread_id, remove, create=False)
+
+    async def index_list(self, thread_id: str) -> list[dict[str, Any]]:
+        """The index row's entries; ``[]`` without the row."""
+        return _index_entries(await self.load(index_key(thread_id)))
+
+    async def index_clear(self, thread_id: str) -> bool:
+        """Delete the index row."""
+        return await self.delete(index_key(thread_id))
+
+    async def _change_index(
+        self,
+        thread_id: str,
+        change: Callable[[list[dict[str, Any]]], list[dict[str, Any]] | None],
+        *,
+        create: bool,
+    ) -> bool:
+        """Rewrite the thread's index row under its row lock; ``True`` when a row was written.
+
+        ``SELECT ... FOR UPDATE`` serialises the writers of one thread across
+        processes: each waits for the previous transaction to commit and
+        then reads the entries it wrote, which the adapter's
+        read-modify-write through ``save`` / ``load`` could not guarantee
+        (#301). ``change`` maps the entries read to the entries to write,
+        or ``None`` for nothing to write. Without a row, ``create`` decides
+        whether one is inserted; two first writers racing on that insert
+        meet the primary key, and the loser retries against the row the
+        winner committed.
+        """
+        key = index_key(thread_id)
+        await self._ensure_table()
+        pool = await self._get_pool()
+        attempt = 0
+        while True:
+            attempt += 1
+            async with safe_acquire(self, pool) as conn, conn.cursor() as cursor:
+                await cursor.execute(
+                    f"SELECT data FROM {self._full_table_name} "
+                    "WHERE thread_id = :thread_id FOR UPDATE",
+                    {"thread_id": key},
+                )
+                row = await cursor.fetchone()
+                if row is None and not create:
+                    await conn.rollback()
+                    return False
+                entries = _index_entries(await _read_json_column(row[0])) if row else []
+                changed = change(entries)
+                if changed is None:
+                    await conn.rollback()
+                    return False
+                try:
+                    await self._write_index_row(conn, cursor, key, changed, insert=row is None)
+                    await conn.commit()
+                except Exception as exc:
+                    await conn.rollback()
+                    lost_insert = row is None and "ORA-00001" in str(exc)
+                    if not lost_insert or attempt >= _INDEX_INSERT_RETRIES:
+                        raise
+                    continue
+                return True
+
+    async def _write_index_row(
+        self,
+        conn: Any,
+        cursor: Any,
+        key: str,
+        entries: list[dict[str, Any]],
+        *,
+        insert: bool,
+    ) -> None:
+        """Insert or update the index row with ``entries`` (as a temporary CLOB, like ``save``)."""
+        import oracledb as _oracledb
+
+        payload = await conn.createlob(_oracledb.DB_TYPE_CLOB)
+        await payload.write(json.dumps({"checkpoints": entries}, default=str))
+        binds = {"thread_id": key, "data": payload}
+        if insert:
+            await cursor.execute(
+                f"INSERT INTO {self._full_table_name} (thread_id, data) VALUES (:thread_id, :data)",
+                binds,
+            )
+        else:
+            await cursor.execute(
+                f"UPDATE {self._full_table_name} SET data = :data, updated_at = SYSTIMESTAMP "
+                "WHERE thread_id = :thread_id",
+                binds,
+            )
 
     async def close(self) -> None:
         """Close the connection pool and reset provisioning state.
