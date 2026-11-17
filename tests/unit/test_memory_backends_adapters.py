@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import sys
 import types
+import warnings
 from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -738,17 +739,31 @@ class TestNativeIndexRouting:
         assert await adapter.list_checkpoints("t") == []
         assert await adapter.delete("t", "ghost") is False
 
-    async def test_a_store_with_only_some_index_methods_takes_the_fallback(self) -> None:
+    async def test_a_store_with_only_some_index_methods_takes_the_fallback_and_says_so(
+        self,
+    ) -> None:
+        from locus.core.warnings import LocusWarning
+
         class _Partial(_PlainDictBackend):
             async def index_add(self, thread_id: str, entry: dict[str, Any]) -> None:
                 raise AssertionError("never called: the store lacks the other three")
 
         backend = _Partial()
-        adapter = StorageBackendAdapter(backend)
+        with pytest.warns(
+            LocusWarning, match="index_add but not index_remove, index_list, index_clear"
+        ):
+            adapter = StorageBackendAdapter(backend)
 
         assert adapter._native_index is None
         await adapter.save(_FakeState(), "t", "cp-0")
         assert "t:_checkpoints" in backend._data
+
+    def test_a_store_with_none_or_all_of_the_index_methods_is_not_warned_about(self) -> None:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            StorageBackendAdapter(_PlainDictBackend())
+            StorageBackendAdapter(_AtomicIndexBackend())
+            StorageBackendAdapter(MagicMock())
 
     async def test_entries_are_sorted_newest_first_whatever_order_the_store_returns(self) -> None:
         backend = _AtomicIndexBackend()

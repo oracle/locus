@@ -206,6 +206,13 @@ policy.
   the winner's row. `OracleSyncBackend` mirrors the four methods, and the
   backend reads its JSON columns through one helper that accepts every
   shape the driver returns (dict, string, sync or async LOB).
+- **A backend with only some of the `CheckpointIndexStore` methods is no
+  longer taken for one without any.** `StorageBackendAdapter` fell back
+  silently to its locked read-modify-write when a store defined one, two or
+  three of the four methods, so a typo in a backend's method name put it on
+  the racy path with no signal. The adapter now warns (`LocusWarning`),
+  naming the methods present and missing, and `index_methods_present()` in
+  `locus.memory.backends.checkpoint_index` lists what a store implements.
 
 ### Deprecated
 
