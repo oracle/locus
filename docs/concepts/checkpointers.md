@@ -288,7 +288,9 @@ those strings ends in 7.0.0, and a process still on the earlier release
 lists only the checkpoints it wrote itself after the move, so upgrade the
 processes that share one Redis store together. A backend of your own
 without those operations updates the index under a per-process lock:
-safe within one process, not between processes.
+safe within one process, not between processes. One that implements
+only some of the four methods gets a `LocusWarning` when the adapter is
+built, and the same lock.
 
 A bounded backend deletes the surplus from the oldest end after every
 save — several saves within one second included — so `fork` and `list`
