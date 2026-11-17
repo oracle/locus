@@ -275,6 +275,7 @@ nav:
   - Dedicated AI Clusters: how-to/oci-dac.md
   - LiteLLM gateway: how-to/litellm-gateway.md
   - Evaluate an agent in CI: how-to/evaluate-in-ci.md
+  - Benchmark the router: how-to/router-benchmark.md
   - Deploy: how-to/deploy.md
   - Deploy to OCI: how-to/deploy-oci.md
   - The box runner: runner.md
