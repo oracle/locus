@@ -1,0 +1,106 @@
+# LiteLLM AI Gateway — config.yaml plus the two add-ons that need a
+# backing service: the OpenTelemetry callback and the Redis response
+# cache.
+#
+# docker-compose.yml selects this file instead of config.yaml when
+# REDIS_URL is set, and starts the redis sidecar under the ``cache``
+# profile:
+#
+#   export REDIS_URL=redis://redis:6379
+#   export OTEL_EXPORTER_OTLP_ENDPOINT=http://host.docker.internal:4318  # your collector
+#   docker compose --profile cache up -d
+#
+# LiteLLM reads one config file and cannot switch the cache or a callback
+# on from an environment variable (an unset REDIS_URL under ``cache: true``
+# stops the gateway at startup), so the catalog below is a copy of the one
+# in config.yaml. The two files differ only in ``litellm_settings``;
+# tests/unit/test_litellm_gateway_example.py keeps them in step.
+
+model_list:
+- model_name: gpt-4o
+  litellm_params:
+    model: openai/gpt-4o
+    api_key: os.environ/OPENAI_API_KEY
+
+- model_name: gpt-4o-mini
+  litellm_params:
+    model: openai/gpt-4o-mini
+    api_key: os.environ/OPENAI_API_KEY
+
+- model_name: gpt-5-mini
+  litellm_params:
+    model: openai/gpt-5-mini
+    api_key: os.environ/OPENAI_API_KEY
+
+- model_name: claude-sonnet-4-6
+  litellm_params:
+    model: anthropic/claude-sonnet-4-6
+    api_key: os.environ/ANTHROPIC_API_KEY
+
+- model_name: claude-haiku
+  litellm_params:
+    model: anthropic/claude-3-5-haiku-20241022
+    api_key: os.environ/ANTHROPIC_API_KEY
+
+- model_name: text-embedding-3-small
+  litellm_params:
+    model: openai/text-embedding-3-small
+    api_key: os.environ/OPENAI_API_KEY
+
+
+router_settings:
+  fallbacks:
+  - gpt-5-mini:
+    - claude-sonnet-4-6
+    - gpt-4o
+  - claude-sonnet-4-6:
+    - gpt-4o
+
+
+litellm_settings:
+  drop_params: true
+  set_verbose: false
+
+  # Observability. One OpenTelemetry span per request — model, token
+  # counts, latency, cache hit, the virtual key and its metadata —
+  # exported over OTLP to OTEL_EXPORTER_OTLP_ENDPOINT, with
+  # OTEL_EXPORTER_OTLP_PROTOCOL (http/protobuf or grpc) and
+  # OTEL_EXPORTER_OTLP_HEADERS for the collector's auth. docker-compose.yml
+  # falls back to the console exporter when the endpoint is unset, so the
+  # spans show up in ``docker compose logs litellm`` instead.
+  #
+  # For Langfuse, replace ``otel`` with ``langfuse`` and set
+  # LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY and LANGFUSE_HOST in the
+  # gateway's environment; docker-compose.yml passes the three through.
+  callbacks: [otel]
+
+  # Response cache. An identical request — same model, messages and
+  # parameters — within the TTL is answered from Redis: no upstream
+  # call, zero cost, and the ``x-litellm-cache-key`` response header
+  # names the entry. A caller skips the cache for one request with
+  # ``"cache": {"no-cache": true}`` in the body.
+  cache: true
+  cache_params:
+    type: redis
+    url: os.environ/REDIS_URL
+    ttl: 600
+
+
+guardrails:
+- guardrail_name: pii-mask
+  litellm_params:
+    guardrail: litellm_content_filter
+    mode: pre_call
+    default_on: true
+    patterns:
+    - pattern_type: prebuilt
+      pattern_name: us_ssn
+      action: MASK
+    - pattern_type: prebuilt
+      pattern_name: credit_card
+      action: MASK
+
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  # database_url: os.environ/DATABASE_URL
