@@ -14,6 +14,7 @@ behaviour — two processes writing one thread and losing nothing — is
 from __future__ import annotations
 
 import json
+from collections.abc import Awaitable, Callable
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -21,7 +22,7 @@ import pytest
 
 from locus.memory.backends import CheckpointIndexStore
 from locus.memory.backends.adapters import StorageBackendAdapter
-from locus.memory.backends.checkpoint_index import index_key, newest_first
+from locus.memory.backends.checkpoint_index import index_key, keeps_index_natively, newest_first
 from locus.memory.backends.mysql import MySQLBackend, _like_literal
 from locus.memory.backends.opensearch import OpenSearchBackend
 from locus.memory.backends.postgresql import PostgreSQLBackend
@@ -86,6 +87,7 @@ class TestCheckpointIndexModule:
     )
     def test_every_shipped_backend_keeps_the_index_itself(self, backend: Any) -> None:
         assert isinstance(backend, CheckpointIndexStore)
+        assert keeps_index_natively(backend), "all four index methods, each a coroutine function"
 
 
 # ---------------------------------------------------------------------------
@@ -94,12 +96,39 @@ class TestCheckpointIndexModule:
 
 
 class _FakePipeline:
+    """``redis.asyncio``'s pipeline on the fake.
+
+    Commands run at once after ``WATCH`` and queue after ``MULTI``, as in
+    redis-py; ``EXEC`` is discarded with a ``WatchError`` when a watched key
+    was written since the ``WATCH``.
+    """
+
     def __init__(self, client: _FakeRedis) -> None:
         self._client = client
         self._ops: list[tuple[Any, tuple[Any, ...], dict[str, Any]]] = []
+        self._watched: dict[str, int] = {}
+        self._explicit = False
+
+    async def __aenter__(self) -> _FakePipeline:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        self._ops.clear()
+        self._watched.clear()
+
+    async def watch(self, *keys: str) -> bool:
+        self._client.calls.append("watch")
+        for key in keys:
+            self._watched[key] = self._client.versions.get(key, 0)
+        return True
+
+    def multi(self) -> None:
+        self._explicit = True
 
     def __getattr__(self, name: str) -> Any:
         method = getattr(self._client, name)
+        if self._watched and not self._explicit:
+            return method
 
         def queue(*args: Any, **kwargs: Any) -> _FakePipeline:
             self._ops.append((method, args, kwargs))
@@ -108,63 +137,105 @@ class _FakePipeline:
         return queue
 
     async def execute(self) -> list[Any]:
-        return [await method(*args, **kwargs) for method, args, kwargs in self._ops]
+        from redis.exceptions import WatchError
+
+        ops, self._ops = self._ops, []
+        changed = any(self._client.versions.get(k, 0) != v for k, v in self._watched.items())
+        self._watched.clear()
+        self._explicit = False
+        if changed:
+            raise WatchError("Watched variable changed.")
+        return [await method(*args, **kwargs) for method, args, kwargs in ops]
 
 
 class _FakeRedis:
-    """The slice of ``redis.asyncio.Redis`` the backend uses, on dicts."""
+    """The slice of ``redis.asyncio.Redis`` the backend uses, on dicts.
+
+    ``calls`` records every command; ``versions`` counts the writes to each
+    key, which is what a ``WATCH`` compares at ``EXEC``; ``after_get`` runs
+    once, right after the next ``GET`` read its value, to model another
+    process acting between a read and the ``EXEC`` that depends on it.
+    """
 
     def __init__(self) -> None:
         self.strings: dict[str, str] = {}
         self.hashes: dict[str, dict[str, str]] = {}
         self.ttls: dict[str, int] = {}
+        self.calls: list[str] = []
+        self.versions: dict[str, int] = {}
+        self.after_get: Callable[[], Awaitable[None]] | None = None
+
+    def _touch(self, key: str) -> None:
+        self.versions[key] = self.versions.get(key, 0) + 1
 
     async def get(self, key: str) -> str | None:
-        return self.strings.get(key)
+        self.calls.append("get")
+        value = self.strings.get(key)
+        if self.after_get is not None:
+            hook, self.after_get = self.after_get, None
+            await hook()
+        return value
 
     async def set(self, key: str, value: str) -> None:
+        self.calls.append("set")
         self.strings[key] = value
+        self._touch(key)
 
     async def setex(self, key: str, ttl: int, value: str) -> None:
+        self.calls.append("setex")
         self.strings[key] = value
         self.ttls[key] = ttl
+        self._touch(key)
 
     async def exists(self, key: str) -> int:
+        self.calls.append("exists")
         return int(key in self.strings or key in self.hashes)
 
     async def delete(self, *keys: str) -> int:
+        self.calls.append("delete")
         removed = 0
         for key in keys:
             if self.strings.pop(key, None) is not None:
                 removed += 1
+                self._touch(key)
             if self.hashes.pop(key, None) is not None:
                 removed += 1
+                self._touch(key)
         return removed
 
     async def hset(self, key: str, field: str, value: str) -> int:
+        self.calls.append("hset")
         fields = self.hashes.setdefault(key, {})
         created = field not in fields
         fields[field] = value
+        self._touch(key)
         return int(created)
 
     async def hsetnx(self, key: str, field: str, value: str) -> int:
+        self.calls.append("hsetnx")
         fields = self.hashes.setdefault(key, {})
         if field in fields:
             return 0
         fields[field] = value
+        self._touch(key)
         return 1
 
     async def hdel(self, key: str, *fields: str) -> int:
+        self.calls.append("hdel")
         stored = self.hashes.get(key, {})
         removed = sum(1 for field in fields if stored.pop(field, None) is not None)
         if not stored:
             self.hashes.pop(key, None)
+        if removed:
+            self._touch(key)
         return removed
 
     async def hgetall(self, key: str) -> dict[str, str]:
+        self.calls.append("hgetall")
         return dict(self.hashes.get(key, {}))
 
     async def expire(self, key: str, ttl: int) -> int:
+        self.calls.append("expire")
         self.ttls[key] = ttl
         return 1
 
@@ -259,6 +330,48 @@ class TestRedisIndex:
 
         assert _LEGACY not in client.strings
         assert [e["checkpoint_id"] for e in await backend.index_list("t")] == ["old-1"]
+
+    async def test_a_removal_that_migrates_puts_the_ttl_on_the_hash(self) -> None:
+        backend, client = _redis(ttl_seconds=60)
+        client.strings[_LEGACY] = json.dumps({"checkpoints": [_entry("old-0"), _entry("old-1")]})
+
+        assert await backend.index_remove("t", "old-0") is True
+
+        assert client.ttls[_HASH] == 60, "the index expires with its checkpoints"
+
+    async def test_without_a_legacy_string_a_write_costs_one_exists(self) -> None:
+        backend, client = _redis()
+
+        await backend.index_add("t", _entry("cp-0"))
+
+        assert client.calls == ["exists", "hset"]
+
+    async def test_the_migration_runs_under_a_watch_on_the_string(self) -> None:
+        backend, client = _redis()
+        client.strings[_LEGACY] = json.dumps({"checkpoints": [_entry("old-0")]})
+
+        await backend.index_add("t", _entry("new"))
+
+        assert client.calls[:3] == ["exists", "watch", "get"]
+        assert client.calls[3:] == ["hsetnx", "delete", "hset"]
+
+    async def test_a_migration_that_loses_the_race_writes_nothing(self) -> None:
+        """Process one reads the string; process two migrates it and removes ``old-0``
+        before process one's ``EXEC``, which Redis then discards: ``old-0`` stays gone."""
+        backend, client = _redis()
+        other = RedisBackend(url="redis://x", prefix="p:")
+        other._client = client  # type: ignore[assignment]
+        client.strings[_LEGACY] = json.dumps({"checkpoints": [_entry("old-0"), _entry("old-1")]})
+
+        async def process_two() -> None:
+            assert await other.index_remove("t", "old-0") is True
+
+        client.after_get = process_two
+
+        await backend.index_add("t", _entry("new"))
+
+        assert set(client.hashes[_HASH]) == {"old-1", "new"}, "old-0 is not put back"
+        assert _LEGACY not in client.strings
 
     async def test_migration_never_replaces_a_hash_entry_with_its_older_copy(self) -> None:
         backend, client = _redis()
@@ -480,8 +593,23 @@ class TestOpenSearchIndex:
         client.update.return_value = {"result": "noop"}
         assert await backend.index_remove("t", "cp-9") is False
 
-        client.update.side_effect = RuntimeError("404 document missing")
+        exceptions = pytest.importorskip("opensearchpy.exceptions")
+        client.update.side_effect = exceptions.NotFoundError(404, "document_missing_exception", {})
         assert await backend.index_remove("t", "cp-9") is False
+
+    async def test_remove_raises_anything_but_a_missing_document(self) -> None:
+        """A conflict, a refusal or a script error must not read as "nothing to remove"."""
+        exceptions = pytest.importorskip("opensearchpy.exceptions")
+        backend, client = _opensearch()
+
+        for error in (
+            exceptions.ConflictError(409, "version_conflict_engine_exception", {}),
+            exceptions.AuthorizationException(403, "security_exception", {}),
+            RuntimeError("connection reset"),
+        ):
+            client.update.side_effect = error
+            with pytest.raises(type(error)):
+                await backend.index_remove("t", "cp-1")
 
     async def test_list_and_clear_go_through_the_index_document(self) -> None:
         backend, client = _opensearch()

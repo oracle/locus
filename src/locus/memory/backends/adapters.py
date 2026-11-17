@@ -296,12 +296,13 @@ class StorageBackendAdapter(BaseCheckpointer):
         if checkpoint_id:
             # Delete specific checkpoint
             storage_key = f"{thread_id}:{checkpoint_id}"
-            result: bool = await self._backend.delete(storage_key)
+            deleted: bool = await self._backend.delete(storage_key)
 
-            # Update index
-            await self._remove_from_index(thread_id, checkpoint_id)
+            # Dropping the index entry is a deletion in its own right: an
+            # entry whose checkpoint is already gone leaves list_checkpoints().
+            unlisted = await self._remove_from_index(thread_id, checkpoint_id)
 
-            return result
+            return deleted or unlisted
         else:
             # Delete all checkpoints for thread
             deleted = False
@@ -333,24 +334,24 @@ class StorageBackendAdapter(BaseCheckpointer):
         self,
         thread_id: str,
         checkpoint_id: str,
-    ) -> None:
-        """Remove checkpoint from index."""
+    ) -> bool:
+        """Remove the checkpoint from the index; ``True`` when the index listed it."""
         if self._native_index is not None:
-            await self._native_index.index_remove(thread_id, checkpoint_id)
-            return
+            return await self._native_index.index_remove(thread_id, checkpoint_id)
 
         async with self._index_lock(thread_id):
             existing = await self._backend.load(index_key(thread_id))
             if existing is None:
-                return
+                return False
 
-            existing["checkpoints"] = [
-                cp
-                for cp in existing.get("checkpoints", [])
-                if cp.get("checkpoint_id") != checkpoint_id
-            ]
+            entries = existing.get("checkpoints", [])
+            kept = [cp for cp in entries if cp.get("checkpoint_id") != checkpoint_id]
+            if len(kept) == len(entries):
+                return False
 
+            existing["checkpoints"] = kept
             await self._backend.save(index_key(thread_id), existing)
+            return True
 
     async def exists(
         self,
