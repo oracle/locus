@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field, SecretStr
 
+from locus.memory.backends.checkpoint_index import index_key
+
 
 if TYPE_CHECKING:
     from asyncpg import Pool
@@ -86,6 +88,14 @@ class PostgreSQLBackend(BaseModel):
 
     With DSN:
         >>> backend = PostgreSQLBackend(dsn="postgresql://user:pass@localhost:5432/mydb")
+
+    Checkpoint index:
+        Through ``postgresql_checkpointer()`` the thread's checkpoint index
+        is the ``<thread_id>:_checkpoints`` row's ``data`` column, as it
+        always was, but each change is one ``INSERT ... ON CONFLICT DO
+        UPDATE`` or ``UPDATE`` that rewrites the JSON array from the row's
+        current value under the row lock, so two processes saving to one
+        thread never lose an entry.
     """
 
     config: PostgreSQLConfig = Field(default_factory=PostgreSQLConfig)
@@ -475,6 +485,94 @@ class PostgreSQLBackend(BaseModel):
             return int(result.split()[1])
         except (IndexError, ValueError):
             return 0
+
+    # -- checkpoint index (CheckpointIndexStore) -------------------------------
+
+    async def index_add(self, thread_id: str, entry: dict[str, Any]) -> None:
+        """Add the entry to the index row in one upsert, replacing one with its id."""
+        await self._ensure_table()
+        pool = await self._get_pool()
+        now = datetime.now(UTC)
+
+        # ``ON CONFLICT DO UPDATE`` evaluates the new array against the row as
+        # it is when the row lock is taken, so concurrent upserts queue up and
+        # each sees the entries the previous one wrote.
+        async with pool.acquire() as conn:
+            await conn.execute(
+                f"""
+                INSERT INTO {self._full_table_name} AS idx
+                    (thread_id, checkpoint_id, data, created_at, updated_at, metadata)
+                VALUES (
+                    $1, NULL, jsonb_build_object('checkpoints', jsonb_build_array($2::jsonb)),
+                    $3, $3, '{{}}'::jsonb
+                )
+                ON CONFLICT (thread_id) DO UPDATE SET
+                    data = jsonb_build_object(
+                        'checkpoints',
+                        (
+                            SELECT jsonb_agg(e ORDER BY e->>'timestamp' DESC)
+                            FROM (
+                                SELECT e
+                                FROM jsonb_array_elements(
+                                    COALESCE(idx.data->'checkpoints', '[]'::jsonb)
+                                ) AS elems(e)
+                                WHERE e->>'checkpoint_id' IS DISTINCT FROM $4::text
+                                UNION ALL
+                                SELECT $2::jsonb
+                            ) AS entries(e)
+                        )
+                    ),
+                    updated_at = EXCLUDED.updated_at
+                """,
+                index_key(thread_id),
+                json.dumps(entry),
+                now,
+                str(entry["checkpoint_id"]),
+            )
+
+    async def index_remove(self, thread_id: str, checkpoint_id: str) -> bool:
+        """Drop the entry from the index row in one ``UPDATE``; ``True`` when it was there."""
+        await self._ensure_table()
+        pool = await self._get_pool()
+
+        async with pool.acquire() as conn:
+            result: str = await conn.execute(
+                f"""
+                UPDATE {self._full_table_name} SET
+                    data = jsonb_build_object(
+                        'checkpoints',
+                        COALESCE(
+                            (
+                                SELECT jsonb_agg(e ORDER BY e->>'timestamp' DESC)
+                                FROM jsonb_array_elements(
+                                    COALESCE(data->'checkpoints', '[]'::jsonb)
+                                ) AS elems(e)
+                                WHERE e->>'checkpoint_id' IS DISTINCT FROM $2::text
+                            ),
+                            '[]'::jsonb
+                        )
+                    ),
+                    updated_at = $3
+                WHERE thread_id = $1
+                  AND data->'checkpoints' @> jsonb_build_array(
+                      jsonb_build_object('checkpoint_id', $2::text)
+                  )
+                """,
+                index_key(thread_id),
+                checkpoint_id,
+                datetime.now(UTC),
+            )
+
+        return result == "UPDATE 1"
+
+    async def index_list(self, thread_id: str) -> list[dict[str, Any]]:
+        """The index row's entries; ``[]`` without the row."""
+        existing = await self.load(index_key(thread_id))
+        return list((existing or {}).get("checkpoints", []))
+
+    async def index_clear(self, thread_id: str) -> bool:
+        """Delete the index row."""
+        return await self.delete(index_key(thread_id))
 
     async def close(self) -> None:
         """Close connection pool."""
