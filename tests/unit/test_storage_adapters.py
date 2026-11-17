@@ -319,32 +319,45 @@ class TestStorageBackendAdapterExists:
 
     @pytest.fixture
     def mock_backend(self):
-        """Create mock backend."""
+        """Create mock backend (``exists`` reads the document to honour its expiry)."""
         backend = MagicMock()
         backend.exists = AsyncMock()
+        backend.load = AsyncMock(return_value=None)
         return backend
 
     @pytest.mark.asyncio
     async def test_exists_latest(self, mock_backend):
         """Test checking if latest checkpoint exists."""
         mock_backend.exists.return_value = True
+        mock_backend.load.return_value = {"iteration": 0}
 
         adapter = StorageBackendAdapter(mock_backend)
         result = await adapter.exists("thread1")
 
         assert result is True
         mock_backend.exists.assert_called_once_with("thread1:latest")
+        mock_backend.load.assert_called_once_with("thread1:latest")
 
     @pytest.mark.asyncio
     async def test_exists_specific_checkpoint(self, mock_backend):
         """Test checking if specific checkpoint exists."""
         mock_backend.exists.return_value = True
+        mock_backend.load.return_value = {"iteration": 0}
 
         adapter = StorageBackendAdapter(mock_backend)
         result = await adapter.exists("thread1", checkpoint_id="cp1")
 
         assert result is True
         mock_backend.exists.assert_called_once_with("thread1:cp1")
+
+    @pytest.mark.asyncio
+    async def test_exists_is_false_for_an_expired_document(self, mock_backend):
+        """A document whose recorded expiry has passed does not exist, ttl or no ttl."""
+        mock_backend.exists.return_value = True
+        mock_backend.load.return_value = {"_expires_at": "2000-01-01T00:00:00+00:00"}
+
+        adapter = StorageBackendAdapter(mock_backend)
+        assert await adapter.exists("thread1", checkpoint_id="cp1") is False
 
     @pytest.mark.asyncio
     async def test_not_exists(self, mock_backend):

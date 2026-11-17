@@ -51,8 +51,8 @@ class RedisBackend(BaseModel):
         checkpoint (``HSET`` / ``HDEL`` are atomic), so two processes saving
         to one thread never lose an entry. An index written by an earlier
         release as one JSON string at ``<prefix><thread_id>:_checkpoints``
-        is still read, and moved into the hash on the thread's next save
-        or removal.
+        is still read, and moved into the hash (under the configured
+        ``ttl_seconds``) on the thread's next save or removal.
     """
 
     config: RedisConfig = Field(default_factory=RedisConfig)
@@ -185,32 +185,66 @@ class RedisBackend(BaseModel):
     async def _migrate_legacy_index(self, client: Redis, thread_id: str) -> None:
         """Move a legacy index string into the hash, once.
 
-        Each field is set only where the hash has none (``HSETNX``), so an
-        entry the hash already carries is never replaced by its older copy,
-        and the string is deleted in the same transaction. Two processes
-        migrating at once do the same idempotent work.
+        Without a string -- every thread this release wrote -- the check is
+        one ``EXISTS``. With one, the move runs under a ``WATCH`` on the
+        string: each entry is set only where the hash has none (``HSETNX``,
+        so an entry the hash already carries is never replaced by its older
+        copy), the string is deleted and the hash gets the configured TTL,
+        in one transaction that Redis discards when another process touched
+        the string in between. The process that loses that race writes
+        nothing: the winner's hash stands, and an entry the winner removed
+        after migrating is not put back by stale ``HSETNX`` calls.
         """
-        raw = await client.get(self._legacy_index_key(thread_id))
-        if raw is None:
+        legacy = self._legacy_index_key(thread_id)
+        if not await client.exists(legacy):
             return
-        pipe = client.pipeline(transaction=True)
-        for entry in self._legacy_entries(raw):
-            pipe.hsetnx(
-                self._index_hash_key(thread_id), str(entry["checkpoint_id"]), json.dumps(entry)
-            )
-        pipe.delete(self._legacy_index_key(thread_id))
-        await pipe.execute()
+        from redis.exceptions import WatchError
+
+        hash_key = self._index_hash_key(thread_id)
+        async with client.pipeline(transaction=True) as pipe:
+            await pipe.watch(legacy)
+            raw = await pipe.get(legacy)
+            if raw is None:
+                return  # migrated by another process since the check
+            pipe.multi()
+            for entry in self._legacy_entries(raw):
+                pipe.hsetnx(hash_key, str(entry["checkpoint_id"]), json.dumps(entry))
+            pipe.delete(legacy)
+            if self.config.ttl_seconds:
+                pipe.expire(hash_key, self.config.ttl_seconds)
+            try:
+                await pipe.execute()
+            except WatchError:
+                # Another process migrated the string (or an older release
+                # rewrote it) after the read; its result stands.
+                return
 
     async def index_add(self, thread_id: str, entry: dict[str, Any]) -> None:
-        """Set the entry's field in the index hash (``HSET``: atomic, replaces a duplicate)."""
+        """Set the entry's field in the index hash (``HSET``: atomic, replaces a duplicate).
+
+        The hash is shared by every checkpoint of the thread, so its expiry
+        is the longest any writer asked for: a ``ttl`` only ever lengthens
+        it (a hash this call creates gets the ttl outright), and a writer
+        without a ttl makes it persist. Otherwise a short-lived save after
+        a long-lived one would take the index — and the listing of the
+        checkpoints still live — down with it.
+        """
         client = await self._get_client()
         await self._migrate_legacy_index(client, thread_id)
         key = self._index_hash_key(thread_id)
         pipe = client.pipeline(transaction=True)
         pipe.hset(key, str(entry["checkpoint_id"]), json.dumps(entry))
-        if self.config.ttl_seconds:
-            pipe.expire(key, self.config.ttl_seconds)
-        await pipe.execute()
+        pipe.hlen(key)
+        pipe.pttl(key)
+        added, length, remaining = await pipe.execute()
+        if not self.config.ttl_seconds:
+            if int(remaining) >= 0:
+                await client.persist(key)
+            return
+        wanted = int(self.config.ttl_seconds) * 1000
+        created = int(added) == 1 and int(length) == 1
+        if created or 0 <= int(remaining) < wanted:
+            await client.pexpire(key, wanted)
 
     async def index_remove(self, thread_id: str, checkpoint_id: str) -> bool:
         """Delete the entry's field from the index hash (``HDEL``)."""

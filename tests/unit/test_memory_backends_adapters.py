@@ -720,6 +720,24 @@ class TestNativeIndexRouting:
         assert await adapter.delete("t") is True
         assert await adapter.delete("t") is False
 
+    async def test_delete_one_reports_a_removed_index_entry_alone(self) -> None:
+        backend = _AtomicIndexBackend()
+        adapter = StorageBackendAdapter(backend)
+        await backend.index_add("t", {"checkpoint_id": "ghost", "timestamp": "x"})
+
+        assert await adapter.delete("t", "ghost") is True
+        assert await adapter.list_checkpoints("t") == []
+        assert await adapter.delete("t", "ghost") is False
+
+    async def test_the_fallback_reports_a_removed_index_entry_alone_too(self) -> None:
+        backend = _PlainDictBackend()
+        adapter = StorageBackendAdapter(backend)
+        await adapter._update_checkpoint_index("t", "ghost", datetime.now(UTC))
+
+        assert await adapter.delete("t", "ghost") is True
+        assert await adapter.list_checkpoints("t") == []
+        assert await adapter.delete("t", "ghost") is False
+
     async def test_a_store_with_only_some_index_methods_takes_the_fallback(self) -> None:
         class _Partial(_PlainDictBackend):
             async def index_add(self, thread_id: str, entry: dict[str, Any]) -> None:

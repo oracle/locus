@@ -14,17 +14,27 @@ Requires httpx for async HTTP requests.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Self
 from urllib.parse import quote
 from uuid import uuid4
 
 from locus.core.loop_bound import loop_bound_async
 from locus.memory.checkpointer import BaseCheckpointer
+from locus.memory.expiry import EXPIRES_AT_KEY, is_expired
 
 
 if TYPE_CHECKING:
     from locus.core.state import AgentState
+    from locus.memory.encryption import EncryptedSerializer
+    from locus.memory.scope import CheckpointScope
+
+
+def _live_ids(entries: list[dict[str, Any]], limit: int) -> list[str]:
+    """The ids of the listed checkpoints whose ``expires_at`` (when the service reports one) has not passed."""
+    now = datetime.now(UTC)
+    live = [cp for cp in entries if not is_expired(cp.get(EXPIRES_AT_KEY), now)]
+    return [cp["checkpoint_id"] for cp in live[:limit]]
 
 
 def _encode_path_segment(value: str) -> str:
@@ -77,11 +87,32 @@ class HTTPCheckpointer(BaseCheckpointer):
         headers: dict[str, str] | None = None,
         auth: tuple[str, str] | None = None,
         timeout: float = 30.0,
+        *,
+        ttl: float | timedelta | None = None,
+        encryption: EncryptedSerializer | None = None,
+        scope: CheckpointScope | None = None,
     ):
+        """
+        Args:
+            base_url: The service's base URL.
+            headers: Headers sent with every request.
+            auth: Basic-auth credentials.
+            timeout: Request timeout in seconds.
+            ttl: How long a checkpoint stays loadable (seconds or a
+                ``timedelta``): sent as ``expires_at`` in the saved
+                document and honoured on load; the service decides whether
+                to delete (``expire()`` is not available over HTTP).
+            encryption: Seals the state before it is sent
+                (:class:`~locus.memory.encryption.EncryptedSerializer`).
+            scope: The application and user the threads belong to
+                (:class:`~locus.memory.scope.CheckpointScope`), a prefix of
+                the thread id in the request path.
+        """
         self.base_url = base_url.rstrip("/")
         self.headers = headers or {}
         self.auth = auth
         self.timeout = timeout
+        self._configure(ttl=ttl, encryption=encryption, scope=scope)
         self._client: Any = None
 
     async def _get_client(self) -> Any:
@@ -135,19 +166,24 @@ class HTTPCheckpointer(BaseCheckpointer):
             HTTPError: If the request fails
         """
         checkpoint_id = checkpoint_id or uuid4().hex
+        key = self._scoped(thread_id)
 
         client = await self._get_client()
 
+        now = datetime.now(UTC)
+        expires_at = self._expires_at(now)
         payload = {
             "checkpoint_id": checkpoint_id,
-            "thread_id": thread_id,
-            "created_at": datetime.now(UTC).isoformat(),
-            "state": state.to_checkpoint(),
+            "thread_id": key,
+            "created_at": now.isoformat(),
+            "state": self._encode_state(state, key, checkpoint_id),
             "metadata": metadata or {},
         }
+        if expires_at is not None:
+            payload[EXPIRES_AT_KEY] = expires_at.isoformat()
 
         response = await client.post(
-            f"/threads/{_encode_path_segment(thread_id)}/checkpoints",
+            f"/threads/{_encode_path_segment(key)}/checkpoints",
             json=payload,
         )
         response.raise_for_status()
@@ -172,9 +208,8 @@ class HTTPCheckpointer(BaseCheckpointer):
         Returns:
             Restored AgentState or None if not found
         """
-        from locus.core.state import AgentState
-
         client = await self._get_client()
+        key = self._scoped(thread_id)
 
         if checkpoint_id is None:
             # Get latest checkpoint
@@ -185,7 +220,7 @@ class HTTPCheckpointer(BaseCheckpointer):
 
         try:
             response = await client.get(
-                f"/threads/{_encode_path_segment(thread_id)}"
+                f"/threads/{_encode_path_segment(key)}"
                 f"/checkpoints/{_encode_path_segment(checkpoint_id)}",
             )
             response.raise_for_status()
@@ -193,10 +228,12 @@ class HTTPCheckpointer(BaseCheckpointer):
             return None
 
         data = response.json()
+        if is_expired(data.get(EXPIRES_AT_KEY)):
+            return None
 
         # Handle both wrapped and unwrapped state formats
         state_data = data.get("state", data)
-        return AgentState.from_checkpoint(state_data)
+        return self._decode_state(state_data, key, checkpoint_id)
 
     async def list_checkpoints(
         self,
@@ -217,7 +254,7 @@ class HTTPCheckpointer(BaseCheckpointer):
 
         try:
             response = await client.get(
-                f"/threads/{_encode_path_segment(thread_id)}/checkpoints",
+                f"/threads/{_encode_path_segment(self._scoped(thread_id))}/checkpoints",
                 params={"limit": limit},
             )
             response.raise_for_status()
@@ -232,7 +269,7 @@ class HTTPCheckpointer(BaseCheckpointer):
             if data and isinstance(data[0], str):
                 return data[:limit]
             if data and isinstance(data[0], dict):
-                return [cp["checkpoint_id"] for cp in data[:limit]]
+                return _live_ids(data, limit)
         elif isinstance(data, dict):
             # Wrapped response
             checkpoints = data.get("checkpoints", data.get("data", []))
@@ -240,7 +277,7 @@ class HTTPCheckpointer(BaseCheckpointer):
                 truncated: list[str] = checkpoints[:limit]
                 return truncated
             if checkpoints and isinstance(checkpoints[0], dict):
-                return [cp["checkpoint_id"] for cp in checkpoints[:limit]]
+                return _live_ids(checkpoints, limit)
 
         return []
 
@@ -260,16 +297,17 @@ class HTTPCheckpointer(BaseCheckpointer):
             True if deletion was successful
         """
         client = await self._get_client()
+        key = self._scoped(thread_id)
 
         try:
             if checkpoint_id is None:
                 # Delete all checkpoints for thread
                 response = await client.delete(
-                    f"/threads/{_encode_path_segment(thread_id)}/checkpoints",
+                    f"/threads/{_encode_path_segment(key)}/checkpoints",
                 )
             else:
                 response = await client.delete(
-                    f"/threads/{_encode_path_segment(thread_id)}"
+                    f"/threads/{_encode_path_segment(key)}"
                     f"/checkpoints/{_encode_path_segment(checkpoint_id)}",
                 )
             response.raise_for_status()

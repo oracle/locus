@@ -13,7 +13,8 @@ then two processes, write one thread at once and the index is whole.
 
 Redis needs ``REDIS_URL``; PostgreSQL ``POSTGRES_USER`` and ``POSTGRES_DB``
 (``POSTGRES_HOST`` / ``POSTGRES_PORT`` optional). The threads written are
-deleted after each test; the PostgreSQL table is dropped when the module ends.
+deleted after each test; the PostgreSQL table, named for this run alone so
+that two runs sharing a database never meet, is dropped when the module ends.
 """
 
 from __future__ import annotations
@@ -34,7 +35,6 @@ pytestmark = pytest.mark.integration
 
 #: Checkpoints per run, half from each writer.
 N = 20
-_PG_TABLE = "locus_p301_index"
 
 
 def _postgres_dsn() -> str | None:
@@ -48,15 +48,18 @@ def _postgres_dsn() -> str | None:
     return f"postgresql://{auth}@{host}:{port}/{db}"
 
 
-def _make(kind: str, target: str, prefix: str) -> Any:
-    """One adapter over the store at ``target``: what one process would hold."""
+def _make(kind: str, target: str, scope: str) -> Any:
+    """One adapter over the store at ``target``: what one process would hold.
+
+    ``scope`` keeps runs apart: the Redis key prefix, or the PostgreSQL table.
+    """
     if kind == "redis":
         from locus.memory.backends import redis_checkpointer
 
-        return redis_checkpointer(url=target, prefix=prefix)
+        return redis_checkpointer(url=target, prefix=scope)
     from locus.memory.backends import postgresql_checkpointer
 
-    return postgresql_checkpointer(dsn=target, table_name=_PG_TABLE)
+    return postgresql_checkpointer(dsn=target, table_name=scope)
 
 
 async def _two_instances(make: Callable[[], Any], thread: str) -> list[str]:
@@ -79,11 +82,11 @@ async def _two_instances(make: Callable[[], Any], thread: str) -> list[str]:
         await second.close()
 
 
-def _write_half(kind: str, target: str, prefix: str, thread: str, tag: str) -> None:
+def _write_half(kind: str, target: str, scope: str, thread: str, tag: str) -> None:
     """Child process: its own adapter writes ``N // 2`` checkpoints to ``thread`` at once."""
 
     async def run() -> None:
-        cp = _make(kind, target, prefix)
+        cp = _make(kind, target, scope)
         state = AgentState(agent_id="p301")
         try:
             await asyncio.gather(*(cp.save(state, thread, f"{tag}-{i}") for i in range(N // 2)))
@@ -93,16 +96,16 @@ def _write_half(kind: str, target: str, prefix: str, thread: str, tag: str) -> N
     asyncio.run(run())
 
 
-async def _two_processes(kind: str, target: str, prefix: str, thread: str) -> list[str]:
+async def _two_processes(kind: str, target: str, scope: str, thread: str) -> list[str]:
     """Two processes write ``thread`` at once; what this one lists afterwards."""
-    cp = _make(kind, target, prefix)
+    cp = _make(kind, target, scope)
     state = AgentState(agent_id="p301")
     try:
         await cp.save(state, thread, "warm-up")
         await cp.delete(thread)
         context = multiprocessing.get_context("spawn")
         workers = [
-            context.Process(target=_write_half, args=(kind, target, prefix, thread, tag))
+            context.Process(target=_write_half, args=(kind, target, scope, thread, tag))
             for tag in ("p1", "p2")
         ]
         for worker in workers:
@@ -147,8 +150,10 @@ class TestRedisIndexConcurrency:
 
 
 @pytest.fixture(scope="module")
-def _drop_postgres_table() -> Iterator[None]:
-    yield
+def pg_table() -> Iterator[str]:
+    """A checkpoint table for this run alone, dropped when the module ends."""
+    table = f"locus_p301_index_{uuid.uuid4().hex[:8]}"
+    yield table
     dsn = _postgres_dsn()
     if dsn is None:
         return
@@ -157,7 +162,7 @@ def _drop_postgres_table() -> Iterator[None]:
     async def drop() -> None:
         conn = await asyncpg.connect(dsn)
         try:
-            await conn.execute(f"DROP TABLE IF EXISTS {_PG_TABLE}")
+            await conn.execute(f"DROP TABLE IF EXISTS {table}")
         finally:
             await conn.close()
 
@@ -166,20 +171,19 @@ def _drop_postgres_table() -> Iterator[None]:
 
 @pytest.mark.requires_postgres
 @pytest.mark.skipif(_postgres_dsn() is None, reason="POSTGRES_USER / POSTGRES_DB not set")
-@pytest.mark.usefixtures("_drop_postgres_table")
 class TestPostgresIndexConcurrency:
-    async def test_two_instances_keep_every_entry(self) -> None:
+    async def test_two_instances_keep_every_entry(self, pg_table: str) -> None:
         dsn = _postgres_dsn()
         assert dsn is not None
 
-        listed = await _two_instances(lambda: _make("postgresql", dsn, ""), "hot")
+        listed = await _two_instances(lambda: _make("postgresql", dsn, pg_table), "hot")
 
         assert len(set(listed)) == N
 
-    async def test_two_processes_keep_every_entry(self) -> None:
+    async def test_two_processes_keep_every_entry(self, pg_table: str) -> None:
         dsn = _postgres_dsn()
         assert dsn is not None
 
-        listed = await _two_processes("postgresql", dsn, "", "hot")
+        listed = await _two_processes("postgresql", dsn, pg_table, "hot")
 
         assert len(set(listed)) == N

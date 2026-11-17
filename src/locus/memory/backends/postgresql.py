@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -20,6 +21,11 @@ from locus.memory.backends.checkpoint_index import index_key
 if TYPE_CHECKING:
     from asyncpg import Pool
 
+
+logger = logging.getLogger(__name__)
+
+#: The filter a read applies once the table has the column: rows that have not expired.
+_LIVE = "AND (expires_at IS NULL OR expires_at > now())"
 
 _SAFE_SQL_IDENTIFIER = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]{0,62}$")
 
@@ -96,10 +102,24 @@ class PostgreSQLBackend(BaseModel):
         UPDATE`` or ``UPDATE`` that rewrites the JSON array from the row's
         current value under the row lock, so two processes saving to one
         thread never lose an entry.
+
+    Expiry:
+        ``save(..., expires_at=...)`` keeps the time in an ``expires_at``
+        column, added to an existing table with ``ALTER TABLE ... ADD COLUMN
+        IF NOT EXISTS`` on first use (a role that may not alter the table
+        goes without the column, and the adapter's own record of the time
+        still applies); ``load`` and ``exists`` skip expired rows and
+        :meth:`expire` deletes them.
     """
 
     config: PostgreSQLConfig = Field(default_factory=PostgreSQLConfig)
     _pool: Pool | None = None
+    #: Whether the table has the ``expires_at`` column (probed on first use; added
+    #: by the first save that carries an expiry, when the role may).
+    _expires_column: bool = True
+    #: Whether adding the column has been tried (once per process; a role that
+    #: may not alter the table is told once, not on every save).
+    _expires_column_tried: bool = False
     #: The loop the cached pool was built on, or ``None`` when the pool did
     #: not come from here — a caller (or a test) that assigns ``_pool`` owns
     #: its lifecycle, and second-guessing that would discard it.
@@ -192,6 +212,7 @@ class PostgreSQLBackend(BaseModel):
             # failed against a table a migration had already made.
             existing = await conn.fetchval("SELECT to_regclass($1)", self._full_table_name)
             if existing is not None:
+                await self._probe_expires_column(conn)
                 self._initialized = True
                 return
 
@@ -222,7 +243,8 @@ class PostgreSQLBackend(BaseModel):
                         data JSONB NOT NULL,
                         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                        metadata JSONB DEFAULT '{{}}'::jsonb
+                        metadata JSONB DEFAULT '{{}}'::jsonb,
+                        expires_at TIMESTAMPTZ
                     )
                 """)
 
@@ -239,12 +261,53 @@ class PostgreSQLBackend(BaseModel):
 
         self._initialized = True
 
+    async def _probe_expires_column(self, conn: Any) -> None:
+        """Whether an existing table has ``expires_at``: no DDL, reads filter on it only if so."""
+        present = await conn.fetchval(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_schema = $1 AND table_name = $2 AND column_name = 'expires_at'",
+            self.config.schema_name,
+            self.config.table_name,
+        )
+        self._expires_column = present is not None
+
+    async def _ensure_expires_column(self, conn: Any) -> None:
+        """Add ``expires_at`` to a table from before checkpoints could expire, when allowed.
+
+        Called by the first save that carries an expiry — a checkpointer
+        without a ``ttl`` never alters a table it did not create. Tried
+        once: a role that may not alter the table is told once, and expiry
+        is then kept in the documents only.
+        """
+        if self._expires_column or self._expires_column_tried:
+            return
+        self._expires_column_tried = True
+        try:
+            await conn.execute(
+                f"ALTER TABLE {self._full_table_name} ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ"
+            )
+        except Exception as exc:  # noqa: BLE001 — a role that may not alter the table
+            logger.warning(
+                "could not add the expires_at column to %s (%s); checkpoint expiry is kept in "
+                "the documents only",
+                self._full_table_name,
+                str(exc).splitlines()[0] if str(exc) else type(exc).__name__,
+            )
+            return
+        self._expires_column = True
+
+    @property
+    def _live(self) -> str:
+        """The expiry filter for a read, or nothing when the table has no column."""
+        return _LIVE if self._expires_column else ""
+
     async def save(
         self,
         thread_id: str,
         data: dict[str, Any],
         checkpoint_id: str | None = None,
         metadata: dict[str, Any] | None = None,
+        expires_at: datetime | None = None,
     ) -> str:
         """
         Save checkpoint to PostgreSQL.
@@ -254,6 +317,7 @@ class PostgreSQLBackend(BaseModel):
             data: Checkpoint data
             checkpoint_id: Optional checkpoint ID
             metadata: Optional metadata for querying
+            expires_at: When the row stops being loadable (``None``: never)
 
         Returns:
             Checkpoint ID
@@ -267,35 +331,60 @@ class PostgreSQLBackend(BaseModel):
         now = datetime.now(UTC)
 
         async with pool.acquire() as conn:
-            await conn.execute(
-                f"""
-                INSERT INTO {self._full_table_name}
-                    (thread_id, checkpoint_id, data, created_at, updated_at, metadata)
-                VALUES ($1, $2, $3::jsonb, $4, $5, $6::jsonb)
-                ON CONFLICT (thread_id) DO UPDATE SET
-                    checkpoint_id = EXCLUDED.checkpoint_id,
-                    data = EXCLUDED.data,
-                    updated_at = EXCLUDED.updated_at,
-                    metadata = EXCLUDED.metadata
-                """,
-                thread_id,
-                checkpoint_id,
-                json.dumps(data),
-                now,
-                now,
-                json.dumps(metadata or {}),
-            )
+            if expires_at is not None:
+                await self._ensure_expires_column(conn)
+            if self._expires_column:
+                await conn.execute(
+                    f"""
+                    INSERT INTO {self._full_table_name}
+                        (thread_id, checkpoint_id, data, created_at, updated_at, expires_at,
+                         metadata)
+                    VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb)
+                    ON CONFLICT (thread_id) DO UPDATE SET
+                        checkpoint_id = EXCLUDED.checkpoint_id,
+                        data = EXCLUDED.data,
+                        updated_at = EXCLUDED.updated_at,
+                        expires_at = EXCLUDED.expires_at,
+                        metadata = EXCLUDED.metadata
+                    """,
+                    thread_id,
+                    checkpoint_id,
+                    json.dumps(data),
+                    now,
+                    now,
+                    expires_at,
+                    json.dumps(metadata or {}),
+                )
+            else:
+                await conn.execute(
+                    f"""
+                    INSERT INTO {self._full_table_name}
+                        (thread_id, checkpoint_id, data, created_at, updated_at, metadata)
+                    VALUES ($1, $2, $3::jsonb, $4, $5, $6::jsonb)
+                    ON CONFLICT (thread_id) DO UPDATE SET
+                        checkpoint_id = EXCLUDED.checkpoint_id,
+                        data = EXCLUDED.data,
+                        updated_at = EXCLUDED.updated_at,
+                        metadata = EXCLUDED.metadata
+                    """,
+                    thread_id,
+                    checkpoint_id,
+                    json.dumps(data),
+                    now,
+                    now,
+                    json.dumps(metadata or {}),
+                )
 
         return checkpoint_id
 
     async def load(self, thread_id: str) -> dict[str, Any] | None:
-        """Load checkpoint from PostgreSQL."""
+        """Load checkpoint from PostgreSQL (``None`` for a row whose ``expires_at`` has passed)."""
         await self._ensure_table()
         pool = await self._get_pool()
 
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
-                f"SELECT data FROM {self._full_table_name} WHERE thread_id = $1",
+                f"SELECT data FROM {self._full_table_name} WHERE thread_id = $1 {self._live}",
                 thread_id,
             )
 
@@ -325,11 +414,28 @@ class PostgreSQLBackend(BaseModel):
 
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
-                f"SELECT 1 FROM {self._full_table_name} WHERE thread_id = $1",
+                f"SELECT 1 FROM {self._full_table_name} WHERE thread_id = $1 {self._live}",
                 thread_id,
             )
 
         return row is not None
+
+    async def expire(self) -> int:
+        """Delete the rows whose ``expires_at`` has passed; returns how many."""
+        await self._ensure_table()
+        if not self._expires_column:
+            return 0
+        pool = await self._get_pool()
+
+        async with pool.acquire() as conn:
+            result: str = await conn.execute(
+                f"DELETE FROM {self._full_table_name} "
+                "WHERE expires_at IS NOT NULL AND expires_at <= now()"
+            )
+        try:
+            return int(result.split()[1])
+        except (IndexError, ValueError):
+            return 0
 
     async def list_threads(
         self,

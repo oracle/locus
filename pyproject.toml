@@ -140,6 +140,10 @@ browser = ["playwright>=1.45"]
 # need nothing.
 audit = ["cryptography>=42"]
 
+# Checkpoint encryption at rest (src/locus/memory/encryption.py) — AES-256-GCM
+# over the state every backend stores. Plaintext checkpoints need nothing.
+encryption = ["cryptography>=42"]
+
 # Durable agent runs on Temporal (src/locus/durable/temporal.py).
 temporal = ["temporalio>=1.7"]
 
