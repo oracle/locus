@@ -32,6 +32,7 @@ import inspect
 from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
+from urllib.parse import quote
 
 from pydantic import SecretStr
 
@@ -207,10 +208,12 @@ class OracleApprovals(DatabaseApprovals):
             where = f"oracle://{config.user}@/?dsn={config.dsn}"
         else:
             where = f"oracle://{config.user}@{config.host}:{config.port}/{config.service_name}?"
+        # Percent-encoded: the parser reads the query with ``parse_qs``, which
+        # would turn a literal ``+`` into a space and split on ``&``.
         if config.config_dir:
-            where += f"&config_dir={config.config_dir}"
+            where += f"&config_dir={quote(config.config_dir, safe='/')}"
         if config.wallet_location:
-            where += f"&wallet={config.wallet_location}"
+            where += f"&wallet={quote(config.wallet_location, safe='/')}"
         return f"{where}&table={self._table}".replace("?&", "?")
 
     @property

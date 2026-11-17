@@ -33,7 +33,7 @@ The checkpointer and the vector store from notebook 38 can share a
 single Autonomous Database:
 
 ```bash
-export ORACLE_DSN=mydb_low                   # tnsnames alias in the wallet
+export ORACLE_DSN=mydb_low                   # tnsnames alias (wallet dir or ORACLE_CONFIG_DIR)
 export ORACLE_USER=locus_app                 # least-privileged app schema
 export ORACLE_PASSWORD='<app-password>'
 export ORACLE_WALLET=~/.oci/wallets/mydb     # mTLS only; a TLS-only database has none

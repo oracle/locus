@@ -267,11 +267,38 @@ def test_approval_spec_reads_oracle_config_dir_from_the_environment(
     assert isinstance(explicit, OracleApprovals)
     assert explicit.config.config_dir == "/spec/tns"
 
-    # ORACLE_CONFIG_DIR and a wallet together: both are passed, as given.
+    # A wallet keeps resolving its own aliases: an ambient ORACLE_CONFIG_DIR,
+    # set for some other database, is not applied over it (like TNS_ADMIN).
     clean_oracle_env.setenv("ORACLE_WALLET", "/env/wallet")
     both = approval_store("oracle://")
     assert isinstance(both, OracleApprovals)
-    assert (both.config.config_dir, both.config.wallet_location) == ("/env/tns", "/env/wallet")
+    assert (both.config.config_dir, both.config.wallet_location) == (None, "/env/wallet")
+
+    # The spec's own option still wins over the wallet's directory.
+    explicit_both = approval_store("oracle://?config_dir=/spec/tns")
+    assert isinstance(explicit_both, OracleApprovals)
+    assert explicit_both.config.config_dir == "/spec/tns"
+    assert explicit_both.config.wallet_location == "/env/wallet"
+
+
+def test_approval_spec_round_trips_directories_with_url_characters(
+    clean_oracle_env: pytest.MonkeyPatch,
+) -> None:
+    from locus.control.approvals_oracle import OracleApprovals
+    from locus.control.approvals_spec import approval_store
+
+    store = OracleApprovals(
+        dsn="db_low",
+        user="U",
+        password="pw",  # noqa: S106
+        config_dir="/srv/tns+prod 1",
+        wallet_location="/srv/w&b",
+    )
+    reopened = approval_store(store.spec)
+    assert isinstance(reopened, OracleApprovals)
+    assert reopened.config.config_dir == "/srv/tns+prod 1"
+    assert reopened.config.wallet_location == "/srv/w&b"
+    assert reopened.config.dsn == "db_low"
 
 
 def test_approval_spec_falls_back_to_tns_admin_only_without_a_wallet(
@@ -313,3 +340,25 @@ def test_report_store_spec_reads_config_dir(clean_oracle_env: pytest.MonkeyPatch
     from_tns_admin = report_store("oracle://?table=LOCUS_EVAL_REPORTS")
     assert isinstance(from_tns_admin, OracleReportStore)
     assert from_tns_admin.config.config_dir == "/env/tns-admin"
+
+
+def test_report_store_spec_carries_config_dir_and_wallet_and_round_trips(
+    clean_oracle_env: pytest.MonkeyPatch,
+) -> None:
+    from locus.evaluation.stores import OracleReportStore, report_store
+
+    store = OracleReportStore(
+        dsn="db_low",
+        user="u",
+        password="pw",  # noqa: S106
+        config_dir="/tns dir",
+        wallet_location="/w+1",
+        schema_name="S",
+        table_name="R",
+    )
+    assert "config_dir=/tns%20dir" in store.spec
+    assert "wallet=/w%2B1" in store.spec
+    reopened = report_store(store.spec)
+    assert isinstance(reopened, OracleReportStore)
+    assert (reopened.config.config_dir, reopened.config.wallet_location) == ("/tns dir", "/w+1")
+    assert (reopened.config.schema_name, reopened.config.table_name) == ("S", "R")

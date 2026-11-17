@@ -554,7 +554,15 @@ class OracleReportStore:
             where = f"oracle://{user}@/?dsn={dsn}"
         else:
             where = f"oracle://{user}@{host}:{port}/{service_name}?"
-        self.spec = f"{where}&table={table_name}" if "?" in where else f"{where}?table={table_name}"
+        # The spec reopens the store elsewhere, so it carries the TNS directory
+        # and the wallet too (percent-encoded: the parser uses ``parse_qs``).
+        if config_dir:
+            where += f"&config_dir={quote(config_dir, safe='/')}"
+        if wallet_location:
+            where += f"&wallet={quote(wallet_location, safe='/')}"
+        if schema_name:
+            table_name = f"{schema_name}.{table_name}"
+        self.spec = f"{where}&table={table_name}".replace("?&", "?")
 
     # -- connection ----------------------------------------------------------
 

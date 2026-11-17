@@ -37,8 +37,8 @@ What this notebook covers:
 ## Prerequisites
 
 ```bash
-# Autonomous Database wallet (TLS) + credentials.
-export ORACLE_DSN=mydb_low                   # tnsnames alias in the wallet
+# Autonomous Database connection (mTLS wallet, or a TNS directory) + credentials.
+export ORACLE_DSN=mydb_low                   # tnsnames alias (wallet dir or ORACLE_CONFIG_DIR)
 export ORACLE_USER=locus_app                 # least-privileged app schema
 export ORACLE_PASSWORD='<app-password>'
 export ORACLE_WALLET=~/.oci/wallets/mydb     # mTLS only; a TLS-only database has none

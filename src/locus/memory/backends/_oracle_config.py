@@ -139,10 +139,12 @@ def connect_params(config: _ConnectionEnvelope) -> dict[str, Any]:
 def config_dir_from_env(wallet_location: str | None = None) -> str | None:
     """The TNS directory the environment names: ``ORACLE_CONFIG_DIR``, else ``TNS_ADMIN``.
 
-    ``TNS_ADMIN`` is only read when no wallet is given, so a wallet
-    directory keeps resolving its own aliases as before.
+    Neither is read when a wallet is given: the wallet directory carries
+    its own ``tnsnames.ora`` and keeps resolving its aliases as before,
+    whatever the shell has set for some other database. A spec's own
+    ``config_dir=`` still overrides the wallet, as the callers apply it
+    before asking here.
     """
-    config_dir = os.environ.get("ORACLE_CONFIG_DIR")
-    if config_dir or wallet_location:
-        return config_dir or None
-    return os.environ.get("TNS_ADMIN") or None
+    if wallet_location:
+        return None
+    return os.environ.get("ORACLE_CONFIG_DIR") or os.environ.get("TNS_ADMIN") or None

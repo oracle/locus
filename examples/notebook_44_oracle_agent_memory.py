@@ -109,11 +109,14 @@ def _missing_env() -> list[str]:
     missing = [name for name in _REQUIRED_ENV if not os.environ.get(name)]
     # A tnsnames alias in ORACLE_DSN needs a directory to resolve it: the
     # mTLS wallet, or ORACLE_CONFIG_DIR / TNS_ADMIN for a TLS-only database.
-    # A full connect string needs neither.
+    # A connect descriptor or an Easy Connect address (host:port/service)
+    # needs neither, and an unset DSN is already reported above.
     dsn = os.environ.get("ORACLE_DSN", "")
     if (
-        "(" not in dsn
+        dsn
+        and "(" not in dsn
         and "/" not in dsn
+        and ":" not in dsn
         and not any(
             os.environ.get(name) for name in ("ORACLE_WALLET", "ORACLE_CONFIG_DIR", "TNS_ADMIN")
         )
@@ -160,16 +163,16 @@ def _print_skip_banner(missing: list[str]) -> None:
 
     # A pool, not a single connection: oracleagentmemory extracts
     # memories on a background thread and needs its own session.
+    wallet = os.environ.get("ORACLE_WALLET")                  # mTLS only; TLS-only has none
+    tns_dir = os.environ.get("ORACLE_CONFIG_DIR") or wallet   # where tnsnames.ora lives
     conn = oracledb.create_pool(
         min=1, max=4,
         user=os.environ["ORACLE_USER"],
         password=os.environ["ORACLE_PASSWORD"],
-        dsn=os.environ["ORACLE_DSN"],
-        # mTLS: the wallet directory (it holds tnsnames.ora too). A TLS-only
-        # database needs no wallet: config_dir=<tnsnames.ora dir> or a connect string.
-        config_dir=os.environ["ORACLE_WALLET"],
-        wallet_location=os.environ["ORACLE_WALLET"],
-        wallet_password=os.environ.get("ORACLE_WALLET_PASSWORD", ""),
+        dsn=os.environ["ORACLE_DSN"],          # alias, or a connect string (needs no directory)
+        config_dir=tns_dir,
+        wallet_location=wallet,
+        wallet_password=os.environ.get("ORACLE_WALLET_PASSWORD", "") if wallet else None,
     )
     manager = OracleAgentMemoryManager(
         connection=conn,

@@ -91,11 +91,14 @@ def _missing_env() -> list[str]:
     missing = [name for name in _REQUIRED_ENV if not os.environ.get(name)]
     # A tnsnames alias in ORACLE_DSN needs a directory to resolve it: the
     # mTLS wallet, or ORACLE_CONFIG_DIR / TNS_ADMIN for a TLS-only database.
-    # A full connect string needs neither.
+    # A connect descriptor or an Easy Connect address (host:port/service)
+    # needs neither, and an unset DSN is already reported above.
     dsn = os.environ.get("ORACLE_DSN", "")
     if (
-        "(" not in dsn
+        dsn
+        and "(" not in dsn
         and "/" not in dsn
+        and ":" not in dsn
         and not any(
             os.environ.get(name) for name in ("ORACLE_WALLET", "ORACLE_CONFIG_DIR", "TNS_ADMIN")
         )
