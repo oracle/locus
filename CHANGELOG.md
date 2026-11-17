@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [5.6.0] - 2026-11-17
+
 ### Added
 
 - **`on_request` / `on_response` on the HTTP-backed OCI models.**
