@@ -27,12 +27,13 @@ from locus.observability.router_events import (
 from locus.router.capability import CapabilityIndex
 from locus.router.explain import (
     Method,
+    RejectedProtocol,
     RoutingExplanation,
     rank_candidates,
     rejection_for,
 )
-from locus.router.goal_frame import GoalFrame
-from locus.router.picker import LLMProtocolPicker
+from locus.router.goal_frame import Complexity, GoalFrame
+from locus.router.picker import ProtocolPicker
 from locus.router.policy import PolicyDeniedError, PolicyGate, PolicyVerdict
 from locus.router.protocol import (
     A2A_PEER_CAPABILITY,
@@ -122,14 +123,21 @@ class CognitiveCompiler:
         approval. Defaults to denying — wire your UI / CLI
         approval flow here.
     protocol_picker:
-        Optional :class:`LLMProtocolPicker`. When present, the compiler
-        delegates the *last-mile* protocol pick to the model whenever
-        the filter leaves more than one candidate. When absent (the
-        default), selection is the deterministic
-        :func:`_rank_key`-based ranker. The picker is the **only** part
-        of the routing pipeline that uses the model; everything else
-        — filtering, policy gating, capability binding, builder dispatch
-        — remains rule-based.
+        Optional :class:`~locus.router.picker.ProtocolPicker`
+        (:class:`~locus.router.picker.LLMProtocolPicker` is the one that
+        ships). When present, the compiler delegates the *last-mile*
+        protocol pick to it whenever the filter leaves more than one
+        candidate. When absent (the default), selection is the
+        deterministic :func:`_rank_key`-based ranker. The picker is the
+        **only** part of the routing pipeline that may use the model;
+        everything else — filtering, policy gating, capability binding,
+        builder dispatch — remains rule-based.
+    low_complexity_direct:
+        The protocol a LOW-complexity frame resolves to before any goal
+        gate runs (default ``"direct_response"``), provided the frame's
+        risk is within that protocol's ``risk_max`` and the policy gate
+        does not deny it. A one-step request is one reply whatever verb
+        it was framed with; ``None`` disables the short-circuit.
     """
 
     def __init__(
@@ -143,8 +151,9 @@ class CognitiveCompiler:
         a2a_endpoint: str | None = None,
         hooks: list[Any] | None = None,
         on_approval: ApprovalCallback | None = None,
-        protocol_picker: LLMProtocolPicker | None = None,
+        protocol_picker: ProtocolPicker | None = None,
         risk_fallback: str | None = "approval_gated_execution",
+        low_complexity_direct: str | None = "direct_response",
     ) -> None:
         self.protocols = protocols
         self.capabilities = capabilities
@@ -156,6 +165,31 @@ class CognitiveCompiler:
         self._on_approval: ApprovalCallback = on_approval or _default_deny
         self.protocol_picker = protocol_picker
         self.risk_fallback = risk_fallback
+        self.low_complexity_direct = low_complexity_direct
+
+    def _low_complexity_direct(self, frame: GoalFrame, available: set[str]) -> Protocol | None:
+        """The protocol a LOW-complexity frame resolves to before the gates run.
+
+        Complexity is the budget half of the frame: a LOW-complexity request
+        is one step of work whatever verb it was framed with, so it goes to
+        ``low_complexity_direct`` (default ``direct_response``) without the
+        goal gate ever consulting ``handles``. Returns ``None`` when the
+        short-circuit is disabled or the protocol is unregistered, when the
+        frame's risk is above the protocol's cap, when the protocol needs a
+        capability that is not available, or when the policy gate denies the
+        protocol for this frame — in every one of those cases the frame
+        takes the ordinary filter-and-rank path.
+        """
+        if frame.complexity != Complexity.LOW or not self.low_complexity_direct:
+            return None
+        direct = next((p for p in self.protocols.all() if p.id == self.low_complexity_direct), None)
+        if direct is None or frame.risk > direct.risk_max:
+            return None
+        if not set(direct.requires_capabilities).issubset(available):
+            return None
+        if not self.policy.check(frame, direct).allow:
+            return None
+        return direct
 
     def _risk_fallback(self, frame: GoalFrame, available: set[str]) -> Protocol | None:
         """The protocol a frame compiles onto when its risk is above every handler's cap.
@@ -258,14 +292,23 @@ class CognitiveCompiler:
         """Report the selection the rule-based ranker would make, and why.
 
         Deterministic and free: no model call, no execution. An opt-in
-        :class:`LLMProtocolPicker` is deliberately **not** consulted — it
-        would cost a call and could pick differently on a second run, so the
-        explanation would stop describing a repeatable decision. When a picker
-        is configured, ``method`` reports what the ladder in
-        :meth:`_pick_protocol` would do, and the ranking shown is the
-        fallback the picker is choosing among.
+        :class:`~locus.router.picker.ProtocolPicker` is deliberately **not**
+        consulted — it could cost a call and could pick differently on a
+        second run, so the explanation would stop describing a repeatable
+        decision. When a picker is configured, ``method`` reports what the
+        ladder in :meth:`_pick_protocol` would do, and the ranking shown is
+        the fallback the picker is choosing among.
+
+        A LOW-complexity frame the short-circuit takes is reported the way
+        :meth:`compile` treats it: the direct protocol is the only candidate,
+        ``method`` is ``"low_complexity_direct"``, and every other protocol
+        is rejected — by the gate that would have stopped it, or at the
+        ``"complexity"`` gate when it would have survived the three.
         """
         available = self.available_capabilities(frame)
+        direct = self._low_complexity_direct(frame, available)
+        if direct is not None:
+            return self._explain_direct(frame, direct, available, goal=goal)
         candidates = self.protocols.filter_candidates(frame, available_capabilities=available)
 
         rejected = tuple(
@@ -306,6 +349,63 @@ class CognitiveCompiler:
             policy=verdict,
         )
 
+    def _explain_direct(
+        self, frame: GoalFrame, direct: Protocol, available: set[str], *, goal: str
+    ) -> RoutingExplanation:
+        """The :meth:`explain` record for a frame the short-circuit resolved."""
+        not_considered = (
+            f"not considered: complexity {frame.complexity.value!r} resolved to "
+            f"{direct.id!r} before the goal gate"
+        )
+        rejected = tuple(
+            rejection_for(p, frame, available)
+            or RejectedProtocol(p.id, "complexity", not_considered)
+            for p in self.protocols.all()
+            if p.id != direct.id
+        )
+        return RoutingExplanation(
+            goal=goal,
+            goal_frame=frame,
+            selected_protocol=direct.id,
+            method="low_complexity_direct",
+            candidates=rank_candidates([direct], frame, direct.id),
+            rejected=rejected,
+            available_capabilities=tuple(sorted(available)),
+            policy=self.policy.check(frame, direct),
+        )
+
+    async def _select_protocol(
+        self, frame: GoalFrame, available: set[str], *, run_id: str | None
+    ) -> tuple[Protocol, str, str | None, bool]:
+        """Resolve ``frame`` to ``(protocol, method, rationale, held)``.
+
+        ``held`` is True on the risk-fallback path, where the verdict is
+        forced to require approval. The ladder: the LOW-complexity
+        short-circuit, then the three gates and :meth:`_pick_protocol`, then
+        the risk fallback; a frame nothing handles raises
+        :class:`NoMatchingProtocolError` after emitting
+        ``router.protocol.no_match``.
+        """
+        direct = self._low_complexity_direct(frame, available)
+        if direct is not None:
+            return direct, "low_complexity_direct", None, False
+        candidates = self.protocols.filter_candidates(frame, available_capabilities=available)
+        if candidates:
+            protocol, method, rationale = await self._pick_protocol(
+                frame, candidates, run_id=run_id
+            )
+            return protocol, method, rationale, False
+        fallback = self._risk_fallback(frame, available)
+        if fallback is not None:
+            return fallback, "risk_fallback", None, True
+        err = NoMatchingProtocolError(
+            f"No protocol handles primary_goal={frame.primary_goal!r} "
+            f"at risk={frame.risk!r} with capabilities={sorted(available)}.",
+        )
+        if run_id:
+            await emit_protocol_no_match(run_id, frame, str(err))
+        raise err
+
     async def compile(self, frame: GoalFrame, run_id: str | None = None) -> Runnable:
         """Pick a protocol, run the gate, build the runnable.
 
@@ -329,23 +429,9 @@ class CognitiveCompiler:
         # would trade "never selectable" for "selectable and then fails".
         if self.a2a_endpoint:
             available.add(A2A_PEER_CAPABILITY)
-        candidates = self.protocols.filter_candidates(frame, available_capabilities=available)
-        fallback = None if candidates else self._risk_fallback(frame, available)
-        if not candidates and fallback is None:
-            err = NoMatchingProtocolError(
-                f"No protocol handles primary_goal={frame.primary_goal!r} "
-                f"at risk={frame.risk!r} with capabilities={sorted(available)}.",
-            )
-            if run_id:
-                await emit_protocol_no_match(run_id, frame, str(err))
-            raise err
-
-        if fallback is not None:
-            protocol, method, rationale = fallback, "risk_fallback", None
-        else:
-            protocol, method, rationale = await self._pick_protocol(
-                frame, candidates, run_id=run_id
-            )
+        protocol, method, rationale, held = await self._select_protocol(
+            frame, available, run_id=run_id
+        )
 
         if run_id:
             await emit_protocol_selected(
@@ -353,7 +439,7 @@ class CognitiveCompiler:
             )
 
         verdict = self.policy.check(frame, protocol)
-        if fallback is not None:
+        if held:
             verdict = self._held_for_approval(frame, verdict)
         if run_id:
             await emit_policy_verdict(run_id, frame, protocol, verdict)

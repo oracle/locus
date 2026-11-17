@@ -58,6 +58,24 @@ policy.
   the maintainers have not run. `tests/unit/test_litellm_gateway_example.py`
   keeps the two configs in step; `tests/integration/test_litellm_gateway_platform.py`
   drives the guardrail and the cache against a live gateway.
+- **`RequestClassifier` and `ProtocolPicker`, the router's two seams.**
+  `Router(classifier=...)` takes any `async classify(text) -> GoalFrame` in
+  place of the extractor agent, which is now wrapped in
+  `AgentFrameExtractor`, the default implementation of the same protocol;
+  `CognitiveCompiler(protocol_picker=...)` takes any `ProtocolPicker`, of
+  which `LLMProtocolPicker` is the one that ships. Behaviour is unchanged
+  by default. (#342)
+- **Router: LOW-complexity requests go to `direct_response` before any
+  goal gate.** A frame at `Complexity.LOW` whose risk is within
+  `direct_response`'s `risk_max` compiles to `direct_response` whatever its
+  `primary_goal`; `router.protocol.selected` reports
+  `method="low_complexity_direct"` and `explain()` mirrors it. The
+  `PolicyGate` still runs, a `direct_response` the gate denies sends the
+  frame down the ordinary filter-and-rank path, and
+  `CognitiveCompiler(low_complexity_direct=None)` turns the rule off.
+  `direct_response` also handles `DIAGNOSE` now, so a LOW-complexity
+  diagnosis ranks the direct answer first by rule while MEDIUM and HIGH
+  stay on `specialist_fanout`. (#342)
 - **Docs: notebook 78's captured output, concept pages that link their
   notebooks, the environment-variable reference completed from the source,
   and `Example:` sections on `BaseStore`, `InMemoryStore`, `register_provider`

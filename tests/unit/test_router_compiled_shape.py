@@ -210,6 +210,10 @@ class TestPlanExecuteValidateShape:
     with the canonical role split: only the executor carries tools."""
 
     def _compile(self, compiler: CognitiveCompiler, **frame_kwargs) -> PipelineRunnable:
+        # MEDIUM complexity: a LOW-complexity PLAN is one reply and compiles to
+        # `direct_response` before the goal gate; this class is about the shape
+        # `plan_execute_validate` builds, so the frame has to reach it.
+        frame_kwargs.setdefault("complexity", Complexity.MEDIUM)
         frame = _frame(primary_goal=TaskType.PLAN, **frame_kwargs)
         runnable = asyncio.run(compiler.compile(frame))
         assert isinstance(runnable, PipelineRunnable), (

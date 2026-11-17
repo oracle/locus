@@ -2,25 +2,27 @@
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
 
-"""Opt-in LLM protocol picker — the second selection mode.
+"""Opt-in protocol picker — the second selection mode.
 
 The default routing path is :meth:`ProtocolRegistry.select`, a
 deterministic tuple-rank in :func:`_rank_key`. This module adds a
-second mode where the model picks the protocol from an
-already-filtered candidate set, returning a typed
-:class:`PickedProtocol` (id + rationale).
+second mode where something else picks the protocol from an
+already-filtered candidate set. :class:`ProtocolPicker` is the contract;
+:class:`LLMProtocolPicker` is the implementation that ships, asking the
+model for a typed :class:`PickedProtocol` (id + rationale).
 
 The picker is strictly opt-in. Pass an instance to
 ``CognitiveCompiler(protocol_picker=...)``; default callers see no
 change. PolicyGate still runs after selection, and the candidate set
 is filtered by the same three gates the rule-based path uses — the
-LLM only resolves the *last-mile* ambiguity when multiple protocols
+picker only resolves the *last-mile* ambiguity when multiple protocols
 qualify.
 """
 
 from __future__ import annotations
 
 import asyncio
+import typing
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -55,6 +57,26 @@ class PickedProtocol(BaseModel):
     )
 
     model_config = {"frozen": True}
+
+
+@typing.runtime_checkable
+class ProtocolPicker(typing.Protocol):
+    """Choose one protocol from candidates that already passed the gates.
+
+    ``candidates`` is non-empty and filtered by goal, risk and capabilities;
+    the picker does not re-check them. It returns the chosen candidate and
+    a short rationale (``""`` when it has none) that the compiler carries
+    on ``router.protocol.selected``. Any exception, :class:`PickerError`
+    included, makes the compiler fall back to the rule-based ranker.
+    """
+
+    async def pick(
+        self,
+        frame: GoalFrame,
+        candidates: list[Protocol],
+    ) -> tuple[Protocol, str]:
+        """Return ``(protocol, rationale)`` for ``frame``."""
+        ...
 
 
 _DEFAULT_SYSTEM_PROMPT = (
@@ -106,7 +128,8 @@ def _format_frame(frame: GoalFrame) -> str:
 class LLMProtocolPicker:
     """Picks a protocol from a pre-filtered candidate set using an LLM.
 
-    Construct with a locus model (any provider) and an optional
+    The default :class:`ProtocolPicker`. Construct with a locus model
+    (any provider) and an optional
     ``system_prompt`` override. The picker reuses the same Agent +
     ``output_schema`` machinery the router's extractor uses — one
     structured-output call per pick.
@@ -198,4 +221,4 @@ class LLMProtocolPicker:
         return picked, parsed.rationale
 
 
-__all__ = ["LLMProtocolPicker", "PickedProtocol", "PickerError"]
+__all__ = ["LLMProtocolPicker", "PickedProtocol", "PickerError", "ProtocolPicker"]

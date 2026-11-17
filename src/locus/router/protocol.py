@@ -596,7 +596,10 @@ def builtin_protocols() -> list[Protocol]:
         Protocol(
             id="direct_response",
             description="Single-agent answer for direct questions and explanations.",
-            handles=[TaskType.ANSWER, TaskType.EXPLAIN, TaskType.RESEARCH],
+            # DIAGNOSE is handled, not canonical: a LOW-complexity "why did this
+            # alert fire?" is one reply, and by ``_rank_key`` the cheap shape
+            # wins it while MEDIUM and HIGH stay on the canonical fan-out.
+            handles=[TaskType.ANSWER, TaskType.EXPLAIN, TaskType.RESEARCH, TaskType.DIAGNOSE],
             primary_for=[TaskType.ANSWER, TaskType.EXPLAIN],
             risk_max=Risk.LOW,
             cost="low",
