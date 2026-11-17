@@ -1,0 +1,19 @@
+{
+  "base": "signed",
+  "description": "record 3's signature is not base64",
+  "checks": [
+    {
+      "keys": [
+        "2ee9031729dbde22"
+      ],
+      "expected_head": "cb97fd9c19d4ab95ae1e3007f4c4d8c1a31aa4efdb91c608d6122011622a218c",
+      "report": {
+        "ok": false,
+        "records": 4,
+        "head": "cb97fd9c19d4ab95ae1e3007f4c4d8c1a31aa4efdb91c608d6122011622a218c",
+        "broken_at": 3,
+        "problem": "record 3 is not signed by a trusted key"
+      }
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+schema: "locus.control.policy/v1"
+require_verification_score: 0.0
+max_blast_radius: 1
+require_human_for:
+  - "1.0"
+  - "on"
+deny_for:
+  - "café"
+  - "yes"
+min_severity: "low"
+require_sandbox_for: []
+version: "1.0"
+require_human_over_usd: null
+spend_limit_usd: null

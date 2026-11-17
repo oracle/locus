@@ -1,0 +1,19 @@
+{
+  "base": "signed",
+  "description": "record 0 has a field a record does not have",
+  "checks": [
+    {
+      "keys": [
+        "2ee9031729dbde22"
+      ],
+      "expected_head": "cb97fd9c19d4ab95ae1e3007f4c4d8c1a31aa4efdb91c608d6122011622a218c",
+      "report": {
+        "ok": false,
+        "records": 3,
+        "head": "cb97fd9c19d4ab95ae1e3007f4c4d8c1a31aa4efdb91c608d6122011622a218c",
+        "broken_at": null,
+        "problem": "1 line(s) are not audit records"
+      }
+    }
+  ]
+}

@@ -1,0 +1,560 @@
+[
+  {
+    "action": {
+      "name": "rotate_key",
+      "asset": "svc-1",
+      "environment": "staging"
+    },
+    "verdict": {
+      "survives": true,
+      "confidence": 0.95,
+      "evidence_quality": 0.9
+    },
+    "finding": null,
+    "spent_usd": 0.0,
+    "expected": {
+      "outcome": "allow",
+      "checks": [],
+      "reason": "all policy checks passed",
+      "rules": [
+        {
+          "rule": "deny_for",
+          "outcome": null,
+          "detail": "no label of the action is denied"
+        },
+        {
+          "rule": "require_sandbox_for",
+          "outcome": null,
+          "detail": "no label of the action requires a sandbox"
+        },
+        {
+          "rule": "min_severity",
+          "outcome": null,
+          "detail": "no finding supplied"
+        },
+        {
+          "rule": "require_verification_score",
+          "outcome": null,
+          "detail": "verification confidence 0.95 meets the bar 0.80"
+        },
+        {
+          "rule": "max_blast_radius",
+          "outcome": null,
+          "detail": "blast radius 1 is within the maximum 1"
+        },
+        {
+          "rule": "require_human_over_usd",
+          "outcome": null,
+          "detail": "not set"
+        },
+        {
+          "rule": "spend_limit_usd",
+          "outcome": null,
+          "detail": "not set"
+        },
+        {
+          "rule": "require_human_for",
+          "outcome": null,
+          "detail": "no label of the action requires human approval"
+        }
+      ]
+    }
+  },
+  {
+    "action": {
+      "name": "rotate_key",
+      "asset": "svc-1",
+      "environment": "production"
+    },
+    "verdict": {
+      "survives": true,
+      "confidence": 0.95,
+      "evidence_quality": 0.9
+    },
+    "finding": null,
+    "spent_usd": 0.0,
+    "expected": {
+      "outcome": "require_human",
+      "checks": [
+        "labels ['production'] require human approval"
+      ],
+      "reason": "labels ['production'] require human approval",
+      "rules": [
+        {
+          "rule": "deny_for",
+          "outcome": null,
+          "detail": "no label of the action is denied"
+        },
+        {
+          "rule": "require_sandbox_for",
+          "outcome": null,
+          "detail": "no label of the action requires a sandbox"
+        },
+        {
+          "rule": "min_severity",
+          "outcome": null,
+          "detail": "no finding supplied"
+        },
+        {
+          "rule": "require_verification_score",
+          "outcome": null,
+          "detail": "verification confidence 0.95 meets the bar 0.80"
+        },
+        {
+          "rule": "max_blast_radius",
+          "outcome": null,
+          "detail": "blast radius 1 is within the maximum 1"
+        },
+        {
+          "rule": "require_human_over_usd",
+          "outcome": null,
+          "detail": "not set"
+        },
+        {
+          "rule": "spend_limit_usd",
+          "outcome": null,
+          "detail": "not set"
+        },
+        {
+          "rule": "require_human_for",
+          "outcome": "require_human",
+          "detail": "labels ['production'] require human approval"
+        }
+      ]
+    }
+  },
+  {
+    "action": {
+      "name": "rotate_key",
+      "environment": "staging"
+    },
+    "verdict": null,
+    "finding": null,
+    "spent_usd": 0.0,
+    "expected": {
+      "outcome": "require_human",
+      "checks": [
+        "no verification provided"
+      ],
+      "reason": "no verification provided",
+      "rules": [
+        {
+          "rule": "deny_for",
+          "outcome": null,
+          "detail": "no label of the action is denied"
+        },
+        {
+          "rule": "require_sandbox_for",
+          "outcome": null,
+          "detail": "no label of the action requires a sandbox"
+        },
+        {
+          "rule": "min_severity",
+          "outcome": null,
+          "detail": "no finding supplied"
+        },
+        {
+          "rule": "require_verification_score",
+          "outcome": "require_human",
+          "detail": "no verification provided"
+        },
+        {
+          "rule": "max_blast_radius",
+          "outcome": null,
+          "detail": "blast radius 1 is within the maximum 1"
+        },
+        {
+          "rule": "require_human_over_usd",
+          "outcome": null,
+          "detail": "not set"
+        },
+        {
+          "rule": "spend_limit_usd",
+          "outcome": null,
+          "detail": "not set"
+        },
+        {
+          "rule": "require_human_for",
+          "outcome": null,
+          "detail": "no label of the action requires human approval"
+        }
+      ]
+    }
+  },
+  {
+    "action": {
+      "name": "rotate_key",
+      "environment": "staging"
+    },
+    "verdict": {
+      "survives": true,
+      "confidence": 0.5,
+      "evidence_quality": 0.5
+    },
+    "finding": null,
+    "spent_usd": 0.0,
+    "expected": {
+      "outcome": "require_human",
+      "checks": [
+        "verification confidence 0.50 is below the bar 0.80"
+      ],
+      "reason": "verification confidence 0.50 is below the bar 0.80",
+      "rules": [
+        {
+          "rule": "deny_for",
+          "outcome": null,
+          "detail": "no label of the action is denied"
+        },
+        {
+          "rule": "require_sandbox_for",
+          "outcome": null,
+          "detail": "no label of the action requires a sandbox"
+        },
+        {
+          "rule": "min_severity",
+          "outcome": null,
+          "detail": "no finding supplied"
+        },
+        {
+          "rule": "require_verification_score",
+          "outcome": "require_human",
+          "detail": "verification confidence 0.50 is below the bar 0.80"
+        },
+        {
+          "rule": "max_blast_radius",
+          "outcome": null,
+          "detail": "blast radius 1 is within the maximum 1"
+        },
+        {
+          "rule": "require_human_over_usd",
+          "outcome": null,
+          "detail": "not set"
+        },
+        {
+          "rule": "spend_limit_usd",
+          "outcome": null,
+          "detail": "not set"
+        },
+        {
+          "rule": "require_human_for",
+          "outcome": null,
+          "detail": "no label of the action requires human approval"
+        }
+      ]
+    }
+  },
+  {
+    "action": {
+      "name": "rotate_key",
+      "environment": "staging"
+    },
+    "verdict": {
+      "survives": false,
+      "confidence": 0.2,
+      "evidence_quality": 0.1
+    },
+    "finding": null,
+    "spent_usd": 0.0,
+    "expected": {
+      "outcome": "deny",
+      "checks": [
+        "the finding did not survive verification"
+      ],
+      "reason": "the finding did not survive verification",
+      "rules": [
+        {
+          "rule": "deny_for",
+          "outcome": null,
+          "detail": "no label of the action is denied"
+        },
+        {
+          "rule": "require_sandbox_for",
+          "outcome": null,
+          "detail": "no label of the action requires a sandbox"
+        },
+        {
+          "rule": "min_severity",
+          "outcome": null,
+          "detail": "no finding supplied"
+        },
+        {
+          "rule": "require_verification_score",
+          "outcome": "deny",
+          "detail": "the finding did not survive verification"
+        },
+        {
+          "rule": "max_blast_radius",
+          "outcome": null,
+          "detail": "blast radius 1 is within the maximum 1"
+        },
+        {
+          "rule": "require_human_over_usd",
+          "outcome": null,
+          "detail": "not set"
+        },
+        {
+          "rule": "spend_limit_usd",
+          "outcome": null,
+          "detail": "not set"
+        },
+        {
+          "rule": "require_human_for",
+          "outcome": null,
+          "detail": "no label of the action requires human approval"
+        }
+      ]
+    }
+  },
+  {
+    "action": {
+      "name": "rotate_key",
+      "environment": "staging",
+      "blast_radius": 3
+    },
+    "verdict": {
+      "survives": true,
+      "confidence": 0.95,
+      "evidence_quality": 0.9
+    },
+    "finding": null,
+    "spent_usd": 0.0,
+    "expected": {
+      "outcome": "require_human",
+      "checks": [
+        "blast radius 3 exceeds the maximum 1"
+      ],
+      "reason": "blast radius 3 exceeds the maximum 1",
+      "rules": [
+        {
+          "rule": "deny_for",
+          "outcome": null,
+          "detail": "no label of the action is denied"
+        },
+        {
+          "rule": "require_sandbox_for",
+          "outcome": null,
+          "detail": "no label of the action requires a sandbox"
+        },
+        {
+          "rule": "min_severity",
+          "outcome": null,
+          "detail": "no finding supplied"
+        },
+        {
+          "rule": "require_verification_score",
+          "outcome": null,
+          "detail": "verification confidence 0.95 meets the bar 0.80"
+        },
+        {
+          "rule": "max_blast_radius",
+          "outcome": "require_human",
+          "detail": "blast radius 3 exceeds the maximum 1"
+        },
+        {
+          "rule": "require_human_over_usd",
+          "outcome": null,
+          "detail": "not set"
+        },
+        {
+          "rule": "spend_limit_usd",
+          "outcome": null,
+          "detail": "not set"
+        },
+        {
+          "rule": "require_human_for",
+          "outcome": null,
+          "detail": "no label of the action requires human approval"
+        }
+      ]
+    }
+  },
+  {
+    "action": {
+      "name": "rotate_key",
+      "environment": "staging"
+    },
+    "verdict": {
+      "survives": true,
+      "confidence": 0.95,
+      "evidence_quality": 0.9
+    },
+    "finding": {
+      "severity": "info"
+    },
+    "spent_usd": 0.0,
+    "expected": {
+      "outcome": "deny",
+      "checks": [
+        "finding severity info is below the policy minimum low"
+      ],
+      "reason": "finding severity info is below the policy minimum low",
+      "rules": [
+        {
+          "rule": "deny_for",
+          "outcome": null,
+          "detail": "no label of the action is denied"
+        },
+        {
+          "rule": "require_sandbox_for",
+          "outcome": null,
+          "detail": "no label of the action requires a sandbox"
+        },
+        {
+          "rule": "min_severity",
+          "outcome": "deny",
+          "detail": "finding severity info is below the policy minimum low"
+        },
+        {
+          "rule": "require_verification_score",
+          "outcome": null,
+          "detail": "verification confidence 0.95 meets the bar 0.80"
+        },
+        {
+          "rule": "max_blast_radius",
+          "outcome": null,
+          "detail": "blast radius 1 is within the maximum 1"
+        },
+        {
+          "rule": "require_human_over_usd",
+          "outcome": null,
+          "detail": "not set"
+        },
+        {
+          "rule": "spend_limit_usd",
+          "outcome": null,
+          "detail": "not set"
+        },
+        {
+          "rule": "require_human_for",
+          "outcome": null,
+          "detail": "no label of the action requires human approval"
+        }
+      ]
+    }
+  },
+  {
+    "action": {
+      "name": "rotate_key",
+      "environment": "staging"
+    },
+    "verdict": {
+      "survives": true,
+      "confidence": 0.95,
+      "evidence_quality": 0.9
+    },
+    "finding": {
+      "severity": "high"
+    },
+    "spent_usd": 0.0,
+    "expected": {
+      "outcome": "allow",
+      "checks": [],
+      "reason": "all policy checks passed",
+      "rules": [
+        {
+          "rule": "deny_for",
+          "outcome": null,
+          "detail": "no label of the action is denied"
+        },
+        {
+          "rule": "require_sandbox_for",
+          "outcome": null,
+          "detail": "no label of the action requires a sandbox"
+        },
+        {
+          "rule": "min_severity",
+          "outcome": null,
+          "detail": "finding severity high meets the minimum low"
+        },
+        {
+          "rule": "require_verification_score",
+          "outcome": null,
+          "detail": "verification confidence 0.95 meets the bar 0.80"
+        },
+        {
+          "rule": "max_blast_radius",
+          "outcome": null,
+          "detail": "blast radius 1 is within the maximum 1"
+        },
+        {
+          "rule": "require_human_over_usd",
+          "outcome": null,
+          "detail": "not set"
+        },
+        {
+          "rule": "spend_limit_usd",
+          "outcome": null,
+          "detail": "not set"
+        },
+        {
+          "rule": "require_human_for",
+          "outcome": null,
+          "detail": "no label of the action requires human approval"
+        }
+      ]
+    }
+  },
+  {
+    "action": {
+      "name": "rotate_key",
+      "environment": "production"
+    },
+    "verdict": {
+      "survives": false,
+      "confidence": 0.2,
+      "evidence_quality": 0.1
+    },
+    "finding": null,
+    "spent_usd": 0.0,
+    "expected": {
+      "outcome": "deny",
+      "checks": [
+        "the finding did not survive verification",
+        "labels ['production'] require human approval"
+      ],
+      "reason": "the finding did not survive verification; labels ['production'] require human approval",
+      "rules": [
+        {
+          "rule": "deny_for",
+          "outcome": null,
+          "detail": "no label of the action is denied"
+        },
+        {
+          "rule": "require_sandbox_for",
+          "outcome": null,
+          "detail": "no label of the action requires a sandbox"
+        },
+        {
+          "rule": "min_severity",
+          "outcome": null,
+          "detail": "no finding supplied"
+        },
+        {
+          "rule": "require_verification_score",
+          "outcome": "deny",
+          "detail": "the finding did not survive verification"
+        },
+        {
+          "rule": "max_blast_radius",
+          "outcome": null,
+          "detail": "blast radius 1 is within the maximum 1"
+        },
+        {
+          "rule": "require_human_over_usd",
+          "outcome": null,
+          "detail": "not set"
+        },
+        {
+          "rule": "spend_limit_usd",
+          "outcome": null,
+          "detail": "not set"
+        },
+        {
+          "rule": "require_human_for",
+          "outcome": "require_human",
+          "detail": "labels ['production'] require human approval"
+        }
+      ]
+    }
+  }
+]
