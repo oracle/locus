@@ -13,13 +13,6 @@ policy.
 - `python -m locus.runner` takes its workspace from `LOCUS_WORKSPACE` when
   set, for a runner started outside an OpenShell sandbox (a gateway's local
   box driver, a CI job); unset, it works on `/sandbox` as before.
-
-### Fixed
-
-- `python -m locus.runner` reports every command the harness ran as a
-  `harness.exec` record. The runtime drained its exec records by replacing
-  the list the harness appends to, so only commands before the first tool
-  completion ever reached the gateway.
 - **`locus audit verify --format json`.** The verification of an exported
   audit trail as data: `{"file", "verified", "records", "keys",
   "head_checked"}` on stdout for both outcomes, where the command printed
@@ -29,6 +22,13 @@ policy.
   gate's verdict as Markdown with one table row per failed check, for a
   pull-request comment, the way `eval diff` and `eval summary` already
   render with `--markdown`. The exit code is still the gate's verdict. (#484)
+
+### Fixed
+
+- `python -m locus.runner` reports every command the harness ran as a
+  `harness.exec` record. The runtime drained its exec records by replacing
+  the list the harness appends to, so only commands before the first tool
+  completion ever reached the gateway.
 
 ## [5.6.0] - 2026-11-17
 
