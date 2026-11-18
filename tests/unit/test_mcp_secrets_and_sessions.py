@@ -245,8 +245,14 @@ async def test_idle_sessions_are_closed_after_the_ttl(server: _LoopbackServer) -
         await client.call_tool("auth_digest", {})
         [handle] = client._identity_sessions.values()
         assert handle.alive
+        # The sweep forgets the session first, so no request reuses it, and
+        # closes it afterwards; a loaded machine can land between the two, so
+        # wait for both before asserting.
         deadline = asyncio.get_running_loop().time() + 5
-        while client._identity_sessions and asyncio.get_running_loop().time() < deadline:  # noqa: ASYNC110 — polling a background sweep
+        while (  # noqa: ASYNC110 — polling a background sweep
+            (client._identity_sessions or handle.alive)
+            and asyncio.get_running_loop().time() < deadline
+        ):
             await asyncio.sleep(0.05)
         assert not client._identity_sessions
         assert not handle.alive
