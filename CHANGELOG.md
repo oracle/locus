@@ -8,6 +8,48 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **TLS-only Autonomous Database connections, and a `config_dir` of their
+  own.** Every Oracle backend — `OracleBackend` behind
+  `oracle_checkpointer()`, `OracleCheckpointSaver`, `OracleStore`,
+  `OracleVectorStore`, `OracleADBLoader`, `OracleInDBChunker`,
+  `OracleInDBEmbeddings`, `OracleApprovals`, `OracleAuditTrail`,
+  `OracleReportStore` and the sync twins — takes an optional `config_dir`, the
+  directory holding `tnsnames.ora`, and passes `wallet_location` to python-
+  oracledb only when a wallet is given. A database created without mutual TLS
+  has no wallet, and naming its TNS directory as `wallet_location` (the only
+  way to resolve an alias before) made the driver look for a wallet file there
+  and fail with `DPY-6005`. `wallet_location` alone still doubles as the TNS
+  directory, so wallet users see no change. The `oracle://` approval-store and
+  report-store specs take `config_dir=` and a bare one reads
+  `ORACLE_CONFIG_DIR` (else `TNS_ADMIN`) from the environment; the Oracle
+  notebooks require `ORACLE_WALLET` only for an alias that nothing else
+  resolves. The [Oracle Database 26ai](docs/concepts/oracle-26ai.md) page
+  describes the TLS-only path. (#347) A wallet named by the spec or
+  `ORACLE_WALLET` keeps its own TNS directory: neither variable is applied
+  over it. The spec a store reports carries its `config_dir=` and `wallet=`
+  percent-encoded, and `OracleReportStore.spec` now carries them at all, so a
+  store built with a TNS directory reopens from its own spec.
+
+### Fixed
+
+- **Every other Oracle backend provisions its table the same way.**
+  `OracleCheckpointSaver`, `OracleStore`, `OracleVectorStore`,
+  `OracleApprovals`, `OracleAuditTrail` and the evaluation `OracleReportStore`
+  had the same first-time DDL: every concurrent first operation on a fresh
+  table ran the `CREATE` statements, and two processes starting together
+  failed with `ORA-00955`, `ORA-00054` or `ORA-04020`. They now share one
+  provisioning helper: one pass per instance under a lock, a `CREATE`
+  another process won reads as created, a lock collision with that
+  process is retried a few times.
+- **A burst of writers on one `OracleAuditTrail` no longer deadlocks.**
+  `record()` held the trail's lock while waiting for a pooled connection,
+  and reloading the chain held a connection while waiting for the lock; with
+  the default two-connection pool, eight threads recording at once stopped
+  for good. The reload now takes the lock before the connection, the order
+  `record()` uses.
+
 ## [6.0.0] - 2026-11-17
 
 ### Added
@@ -109,27 +151,6 @@ policy.
   deliberate `v2`. A dependency-free Node script under
   `conformance/v1/tools/` recomputes the digests and verifies the signatures
   from the other side. (#343)
-- **TLS-only Autonomous Database connections, and a `config_dir` of their
-  own.** Every Oracle backend — `OracleBackend` behind
-  `oracle_checkpointer()`, `OracleCheckpointSaver`, `OracleStore`,
-  `OracleVectorStore`, `OracleADBLoader`, `OracleInDBChunker`,
-  `OracleInDBEmbeddings`, `OracleApprovals`, `OracleAuditTrail`,
-  `OracleReportStore` and the sync twins — takes an optional `config_dir`, the
-  directory holding `tnsnames.ora`, and passes `wallet_location` to python-
-  oracledb only when a wallet is given. A database created without mutual TLS
-  has no wallet, and naming its TNS directory as `wallet_location` (the only
-  way to resolve an alias before) made the driver look for a wallet file there
-  and fail with `DPY-6005`. `wallet_location` alone still doubles as the TNS
-  directory, so wallet users see no change. The `oracle://` approval-store and
-  report-store specs take `config_dir=` and a bare one reads
-  `ORACLE_CONFIG_DIR` (else `TNS_ADMIN`) from the environment; the Oracle
-  notebooks require `ORACLE_WALLET` only for an alias that nothing else
-  resolves. The [Oracle Database 26ai](docs/concepts/oracle-26ai.md) page
-  describes the TLS-only path. (#347) A wallet named by the spec or
-  `ORACLE_WALLET` keeps its own TNS directory: neither variable is applied
-  over it. The spec a store reports carries its `config_dir=` and `wallet=`
-  percent-encoded, and `OracleReportStore.spec` now carries them at all, so a
-  store built with a TNS directory reopens from its own spec.
 
 ### Changed
 
@@ -292,21 +313,6 @@ policy.
   `CREATE` another process won reads as created, and a lock collision with
   that process's DDL or first writes is retried a few times, the way the
   PostgreSQL backend serialises its own first-time DDL.
-- **Every other Oracle backend provisions its table the same way.**
-  `OracleCheckpointSaver`, `OracleStore`, `OracleVectorStore`,
-  `OracleApprovals`, `OracleAuditTrail` and the evaluation `OracleReportStore`
-  had the same first-time DDL: every concurrent first operation on a fresh
-  table ran the `CREATE` statements, and two processes starting together
-  failed with `ORA-00955`, `ORA-00054` or `ORA-04020`. They now share one
-  provisioning helper: one pass per instance under a lock, a `CREATE`
-  another process won reads as created, a lock collision with that
-  process is retried a few times.
-- **A burst of writers on one `OracleAuditTrail` no longer deadlocks.**
-  `record()` held the trail's lock while waiting for a pooled connection,
-  and reloading the chain held a connection while waiting for the lock; with
-  the default two-connection pool, eight threads recording at once stopped
-  for good. The reload now takes the lock before the connection, the order
-  `record()` uses.
 - **A backend with only some of the `CheckpointIndexStore` methods is no
   longer taken for one without any.** `StorageBackendAdapter` fell back
   silently to its locked read-modify-write when a store defined one, two or
