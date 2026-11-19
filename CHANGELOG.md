@@ -50,6 +50,12 @@ policy.
   for good. The reload now takes the lock before the connection, the order
   `record()` uses.
 
+### Changed
+
+- **Community links.** The README, `CONTRIBUTING.md` and the documentation
+  footer link GitHub Discussions (questions, ideas, show and tell), the
+  `good first issue` briefs and the `roadmap` label (#465).
+
 ## [6.0.0] - 2026-11-17
 
 ### Added

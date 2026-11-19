@@ -479,7 +479,13 @@ and how `LocusDeprecationWarning` works.
 
 ## Questions?
 
-- Open a [GitHub Discussion](https://github.com/oracle/locus/discussions)
+- Open a [GitHub Discussion](https://github.com/oracle/locus/discussions): Q&A for questions,
+  Ideas for proposals, Show and tell for what you built
 - Check existing [Issues](https://github.com/oracle/locus/issues)
+- Looking for a first contribution? Issues labelled
+  [`good first issue`](https://github.com/oracle/locus/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
+  each carry a brief
+- The roadmap is the [`roadmap`](https://github.com/oracle/locus/issues?q=is%3Aissue+is%3Aopen+label%3Aroadmap)
+  label on the issue tracker, with the tracking issue pinned
 
 Thank you for contributing to the SDK!

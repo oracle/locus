@@ -88,7 +88,7 @@ extra_javascript:
 - javascripts/notebook-filter.js
 - javascripts/sidebar-filter.js
 
-copyright: <span class="footer-brand"><span class="footer-brand__o" aria-hidden="true"></span><span class="footer-brand__text">Oracle Generative AI</span></span><br><span class="footer-copy">Copyright &copy; 2025–2026 <span class="oracle-mark" aria-label="Oracle"></span> and/or its affiliates &middot; <a href="/legal/">Legal</a> &middot; <a href="/release-notes/">Release notes</a></span>
+copyright: <span class="footer-brand"><span class="footer-brand__o" aria-hidden="true"></span><span class="footer-brand__text">Oracle Generative AI</span></span><br><span class="footer-copy">Copyright &copy; 2025–2026 <span class="oracle-mark" aria-label="Oracle"></span> and/or its affiliates &middot; <a href="/legal/">Legal</a> &middot; <a href="https://github.com/oracle/locus/discussions">Discussions</a> &middot; <a href="/release-notes/">Release notes</a></span>
 
 extra:
   homepage: https://locusagents.ai/

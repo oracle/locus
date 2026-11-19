@@ -343,8 +343,11 @@ pre-commit install
 
 See [CONTRIBUTING.md](https://github.com/oracle/locus/blob/main/CONTRIBUTING.md). Contributions need the
 [Oracle Contributor Agreement](https://oca.opensource.oracle.com); every PR runs format,
-lint, mypy, unit tests and the OCA check. Questions and bug reports go to
-[GitHub Issues](https://github.com/oracle/locus/issues); the [release notes](https://locusagents.ai/release-notes/) list what changed in
+lint, mypy, unit tests and the OCA check. Questions, ideas and what you built go to
+[GitHub Discussions](https://github.com/oracle/locus/discussions); bug reports go to
+[GitHub Issues](https://github.com/oracle/locus/issues), and issues labelled
+[`good first issue`](https://github.com/oracle/locus/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) each carry a brief for a first contribution.
+The [release notes](https://locusagents.ai/release-notes/) list what changed in
 each release, and the [roadmap](https://github.com/oracle/locus/issues?q=is%3Aissue+is%3Aopen+label%3Aroadmap) is the `roadmap` label on the issue tracker. Please consult the [security guide](https://github.com/oracle/locus/blob/main/SECURITY.md) for vulnerability
 disclosure.
 
