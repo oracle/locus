@@ -112,11 +112,14 @@ def _distribution(question: Field, raw: Mapping[str, Any]) -> tuple[dict[str, fl
 
     key = "label" if isinstance(question, Score) else "value"
     mass = dict.fromkeys(question.labels, 0.0)
-    for item in raw.get("probabilities") or []:
+    probabilities = raw.get("probabilities")
+    if not isinstance(probabilities, list):
+        raise DecisionError(f"field {question.name!r}: probabilities must be an array")
+    for item in probabilities:
         if not isinstance(item, Mapping):
-            continue
+            raise DecisionError(f"field {question.name!r}: a probability entry must be an object")
         label, p = item.get(key), item.get("probability")
-        if label not in mass:
+        if not isinstance(label, str) or label not in mass:
             raise DecisionError(
                 f"field {question.name!r}: the answer names {label!r}, "
                 f"which is not one of {question.labels}"

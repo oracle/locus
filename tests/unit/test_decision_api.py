@@ -222,6 +222,46 @@ async def test_no_probability_mass_raises() -> None:
         await _openai(_Recorder(payload=payload)).decide(TEXT, FIELDS[1:2])
 
 
+@pytest.mark.parametrize("field_index", [1, 2])
+@pytest.mark.parametrize("sync", [False, True])
+@pytest.mark.parametrize(
+    ("probabilities", "match"),
+    [
+        (123, "probabilities must be an array"),
+        ({}, "probabilities must be an array"),
+        ("invalid", "probabilities must be an array"),
+        (None, "probabilities must be an array"),
+        ([None], "entry must be an object"),
+        ([{"value": [], "label": [], "probability": 0.5}], "not one of"),
+        ([{"value": {}, "label": {}, "probability": 0.5}], "not one of"),
+    ],
+)
+async def test_malformed_probabilities_raise_decision_error(
+    field_index: int, sync: bool, probabilities: Any, match: str
+) -> None:
+    question = FIELDS[field_index]
+    payload = {
+        "answers": [
+            {
+                "type": "choice" if field_index == 1 else "score",
+                "name": question.name,
+                "probabilities": probabilities,
+            }
+        ]
+    }
+    decider = _openai(_Recorder(payload=payload))
+    try:
+        if sync:
+            with pytest.raises(DecisionError, match=match):
+                decider.decide_sync(TEXT, [question])
+        else:
+            with pytest.raises(DecisionError, match=match):
+                await decider.decide(TEXT, [question])
+    finally:
+        decider.close()
+        await decider.aclose()
+
+
 async def test_http_errors_raise_with_the_server_message() -> None:
     rec = _Recorder(status=403, payload={"error": {"message": "tenancy not allowlisted"}})
     with pytest.raises(DecisionError, match="HTTP 403: tenancy not allowlisted"):
