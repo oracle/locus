@@ -23,6 +23,15 @@ A deprecated API will:
 3. Be listed in `CHANGELOG.md` with its planned removal version and a
    migration snippet.
 
+### Deprecated in 6.2
+
+- `locus.observability.emit.EV_MEMORY_CONVERSATION_ADDED`
+  (`memory.conversation.added`): declared since the event registry was
+  introduced and never emitted; nothing in the SDK adds to a conversation
+  outside the agent loop. Importing it warns and returns the string until
+  7.0.0, when the name is removed. No replacement: a subscriber never
+  received it.
+
 ### Removed in 6.0
 
 - The `locus.security` compatibility shim; `locus.control` is the

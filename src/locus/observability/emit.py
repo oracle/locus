@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from locus.observability.context import current_owner_loop, current_run_id
 
@@ -105,7 +105,6 @@ EV_RAG_STORE_SEARCH = "rag.store.search"
 # --- Memory operations ---
 EV_MEMORY_COMPACTOR_TRIGGERED = "memory.compactor.triggered"
 EV_MEMORY_COMPACTOR_COMPLETED = "memory.compactor.completed"
-EV_MEMORY_CONVERSATION_ADDED = "memory.conversation.added"
 EV_MEMORY_CONVERSATION_PRUNED = "memory.conversation.pruned"
 EV_MEMORY_MANAGER_INJECTED = "memory.manager.injected"
 EV_MEMORY_MANAGER_EXTRACTED = "memory.manager.extracted"
@@ -237,3 +236,35 @@ def emit_sync(event_type: str, /, **data: Any) -> None:
     _BACKGROUND_TASKS.add(task)
     task.add_done_callback(_BACKGROUND_TASKS.discard)
     bus.track_publish(task, rid)
+
+
+if TYPE_CHECKING:
+    # The retired name keeps its type for checkers until 7.0.0 (#572); at
+    # runtime the module ``__getattr__`` below serves it with a warning. A
+    # bare ``__getattr__`` returning ``str`` would type every misspelled
+    # ``EV_*`` import as ``str`` too.
+    EV_MEMORY_CONVERSATION_ADDED: str
+else:
+    # Names that were declared and never emitted. Served with a deprecation
+    # warning until 7.0.0, then gone (#572).
+    _RETIRED_EVENT_NAMES: dict[str, str] = {
+        # No code path adds to a conversation outside the agent loop, whose
+        # own events already show every turn.
+        "EV_MEMORY_CONVERSATION_ADDED": "memory.conversation.added",
+    }
+
+    def __getattr__(name: str) -> str:
+        """Serve a retired event name with a :class:`LocusDeprecationWarning`."""
+        if name in _RETIRED_EVENT_NAMES:
+            import warnings  # noqa: PLC0415
+
+            from locus.core.warnings import LocusDeprecationWarning  # noqa: PLC0415
+
+            warnings.warn(
+                f"{name} was declared but never emitted and is deprecated; no subscriber "
+                "ever received it and nothing replaces it. It will be removed in Locus 7.0.0.",
+                LocusDeprecationWarning,
+                stacklevel=2,
+            )
+            return _RETIRED_EVENT_NAMES[name]
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

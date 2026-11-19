@@ -8,6 +8,16 @@ policy.
 
 ## [Unreleased]
 
+### Deprecated
+
+- **`EV_MEMORY_CONVERSATION_ADDED` (`memory.conversation.added`).** The
+  constant in `locus.observability.emit` was declared and never emitted:
+  conversation managers apply a policy to the messages the agent already
+  holds, nothing adds to a conversation outside the agent loop, and the
+  agent's own events show every turn. Importing the name still returns the
+  string, with a `LocusDeprecationWarning`; it is removed in 7.0.0 and
+  nothing replaces it, since no subscriber ever received it (#572).
+
 ## [6.1.1] - 2026-11-19
 
 ### Fixed
