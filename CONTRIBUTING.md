@@ -283,6 +283,24 @@ git commit -s -m "docs(notebooks): add RAG with Qdrant example"
    - Address feedback promptly
    - Squash commits if requested
 
+## Documentation snippets
+
+Every Python block in `README.md`, `examples/README.md` and the pages under
+`docs/` is checked against the installed SDK by `hatch run snippets`
+(`scripts/check_doc_snippets.py`), in CI's lint job: each `from locus...
+import` must resolve, and each keyword passed to a Locus callable must exist
+on it. Two conventions:
+
+- The README and `examples/README.md` show code that is pasted into a file,
+  so a block there must compile as a file: no top-level `await`.
+- The pages under `docs/` follow the notebook convention: a block may use
+  top-level `await`, `async for` and `async with`, and may name tools or
+  agents it does not define, as a notebook cell does. It is accepted when it
+  compiles inside a coroutine. The complete programs are the notebooks.
+
+A block that names something on purpose that does not exist yet carries
+`<!-- docs: skip -->` on the line above its fence.
+
 ## Coding Standards
 
 ### Python Style
