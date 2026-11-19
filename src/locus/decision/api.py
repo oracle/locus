@@ -247,6 +247,11 @@ class OpenAIDecider:
         by_name: dict[str, Mapping[str, Any]] = {}
         for item in raw_answers if isinstance(raw_answers, list) else []:
             if isinstance(item, Mapping) and isinstance(item.get("name"), str):
+                # Two answers for one name are ambiguous whatever their order
+                # or type: keeping either would let one hide the other (a
+                # refusal followed by a valid answer, say).
+                if item["name"] in by_name:
+                    raise DecisionError(f"the response answers {item['name']!r} twice")
                 by_name[item["name"]] = item
 
         answers: dict[str, Answer] = {}

@@ -202,6 +202,30 @@ async def test_an_unreadable_predicate_raises(answers: list[dict[str, Any]], mat
         await _openai(rec).decide(TEXT, FIELDS[:1])
 
 
+_REFUSAL = {"type": "refusal", "name": "asks_refund"}
+_YES = {"type": "predicate", "name": "asks_refund", "probability": 0.9}
+_NO = {"type": "predicate", "name": "asks_refund", "probability": 0.1}
+
+
+@pytest.mark.parametrize(
+    "answers",
+    [[_REFUSAL, _YES], [_YES, _REFUSAL], [_YES, _NO]],
+    ids=["refusal-then-answer", "answer-then-refusal", "two-answers"],
+)
+async def test_a_duplicate_answer_raises(answers: list[dict[str, Any]]) -> None:
+    """Neither answer is kept: a refusal must never vanish behind a valid one."""
+    rec = _Recorder(payload={"answers": answers})
+    with pytest.raises(DecisionError, match="'asks_refund' twice"):
+        await _openai(rec).decide(TEXT, FIELDS[:1])
+
+
+async def test_a_duplicate_for_a_field_not_asked_raises() -> None:
+    extra = {"type": "predicate", "name": "other", "probability": 0.5}
+    rec = _Recorder(payload={"answers": [_YES, extra, extra]})
+    with pytest.raises(DecisionError, match="'other' twice"):
+        await _openai(rec).decide(TEXT, FIELDS[:1])
+
+
 async def test_a_label_off_the_list_raises() -> None:
     payload = {
         "answers": [
