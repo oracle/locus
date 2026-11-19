@@ -531,18 +531,27 @@ def route_after_grounding(
     2. Subsequent     → ``"replan"``      (expensive: full execute retry)
     3. Limits reached → ``END``
 
-    Compatible with ``StateGraph.add_conditional_edges``.
+    Compatible with ``StateGraph.add_conditional_edges``. Routing to ``END``
+    emits ``research.completed``; ``grounded`` tells a met threshold from
+    exhausted limits.
     """
     from locus.multiagent.graph import END  # noqa: PLC0415
+    from locus.observability.emit import EV_RESEARCH_COMPLETED, emit_sync  # noqa: PLC0415
 
     def _route(state: dict[str, Any]) -> str:
         score = state.get(KEY_GROUNDING_SCORE, 0.0)
         replans = state.get(KEY_REPLAN_COUNT, 0)
         regens = state.get(KEY_REGENERATION_COUNT, 0)
 
-        if score >= threshold:
-            return END
-        if replans >= max_replans and regens >= max_regenerations:
+        grounded = score >= threshold
+        if grounded or (replans >= max_replans and regens >= max_regenerations):
+            emit_sync(
+                EV_RESEARCH_COMPLETED,
+                grounded=grounded,
+                grounding_score=score,
+                replan=replans,
+                regeneration=regens,
+            )
             return END
         if regens < max_regenerations:
             return "regenerate"

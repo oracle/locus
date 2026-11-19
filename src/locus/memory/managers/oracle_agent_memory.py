@@ -485,10 +485,10 @@ class OracleAgentMemoryManager(BaseMemoryManager):
 
         injected = _inject_memories_into_state(state, memories)
         with contextlib.suppress(Exception):  # observability is best-effort
-            from locus.observability.emit import emit  # noqa: PLC0415
+            from locus.observability.emit import EV_MEMORY_MANAGER_INJECTED, emit  # noqa: PLC0415
 
             await emit(
-                "memory.manager.injected",
+                EV_MEMORY_MANAGER_INJECTED,
                 memory_count=len(memories),
                 types=[m.key for m in memories],
                 source="oracleagentmemory",
