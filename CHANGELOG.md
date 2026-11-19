@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [6.1.1] - 2026-11-19
+
 ### Fixed
 
 - **The Oracle `Sync*` wrappers no longer leave a database session behind
@@ -56,7 +58,6 @@ policy.
   The example `MockModel` in `examples/config.py` now reports a context
   window, so an `Agent` built on it keeps a token window instead of logging
   that it fell back to a message window (PR #555).
-
 - **The research workflow accepts a `provider:model` string at every node.**
   `create_research_workflow(model="oci:openai.gpt-4.1", ...)` ran the plan,
   execute and summarize nodes and then failed at the grounding node with
@@ -66,7 +67,6 @@ policy.
   node now resolves a string through `get_model()` once, when the workflow is
   built, so `model`, `summarization_model` and `grounding_model` all take a
   string or a model object (#563).
-
 - **An event emitted from sync code in the closing turn of a stream now
   reaches live subscribers.** `emit_sync` cannot await the bus, so it
   schedules the publish as a task (or hops it to the owner loop from a
