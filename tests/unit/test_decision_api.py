@@ -249,6 +249,35 @@ async def test_a_malformed_predicate_probability_raises(value: Any, match: str) 
         await _openai(_Recorder(payload=payload)).decide(TEXT, FIELDS[:1])
 
 
+@pytest.mark.parametrize("field_index", [0, 1, 2], ids=["predicate", "choice", "score"])
+@pytest.mark.parametrize("sync", [False, True], ids=["async", "sync"])
+@pytest.mark.parametrize("value", [10**400, -(10**400)], ids=["huge-positive", "huge-negative"])
+async def test_huge_integer_probability_raises_decision_error(
+    field_index: int, sync: bool, value: int
+) -> None:
+    question = FIELDS[field_index]
+    raw: dict[str, Any] = {
+        "type": ("predicate", "choice", "score")[field_index],
+        "name": question.name,
+    }
+    if field_index == 0:
+        raw["probability"] = value
+    else:
+        key = "label" if field_index == 2 else "value"
+        raw["probabilities"] = [{key: question.labels[0], "probability": value}]
+    decider = _openai(_Recorder(payload={"answers": [raw]}))
+    try:
+        if sync:
+            with pytest.raises(DecisionError, match=r"not in \[0, 1\]"):
+                decider.decide_sync(TEXT, [question])
+        else:
+            with pytest.raises(DecisionError, match=r"not in \[0, 1\]"):
+                await decider.decide(TEXT, [question])
+    finally:
+        decider.close()
+        await decider.aclose()
+
+
 @pytest.mark.parametrize(
     ("probabilities", "match"),
     [

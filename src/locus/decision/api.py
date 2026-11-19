@@ -43,7 +43,6 @@ or an answer off the listed labels raises :class:`~locus.decision.DecisionError`
 from __future__ import annotations
 
 import json
-import math
 import os
 import threading
 import time
@@ -120,10 +119,11 @@ def _probability(question: Field, value: Any, what: str) -> float:
     """
     if isinstance(value, bool) or not isinstance(value, int | float):
         raise DecisionError(f"field {question.name!r}: {what} is not a number ({value!r})")
-    p = float(value)
-    if not math.isfinite(p) or not 0.0 <= p <= 1.0:
+    # Check before converting: an arbitrarily large JSON integer can overflow
+    # float(), but comparing it to the bounds is safe.
+    if not 0.0 <= value <= 1.0:
         raise DecisionError(f"field {question.name!r}: {what} is not in [0, 1] ({value!r})")
-    return p
+    return float(value)
 
 
 def _distribution(question: Field, raw: Mapping[str, Any]) -> tuple[dict[str, float], float]:
