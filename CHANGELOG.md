@@ -8,6 +8,36 @@ policy.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`OracleVectorStore` hybrid search finds the rows written after the text
+  index and keeps the rows the text index misses.** `ensure_text_index()`
+  created the `CTXSYS.CONTEXT` index with manual synchronisation, so a
+  document added after the index existed was invisible to
+  `hybrid_search(use_text_index=True)` until someone ran
+  `CTX_DDL.SYNC_INDEX`; the index is now created with `SYNC (ON COMMIT)`
+  (rebuild an existing one with `ensure_text_index(drop_existing=True)`).
+  The text leg also filtered on `CONTAINS()`, so a semantic match with no
+  query term in it was dropped and `alpha=1.0` was not vector search; the
+  lexical score now comes from a left-joined `SCORE()` subquery and an
+  unmatched row scores 0 on that leg. The query text is sent as
+  `{term} ACCUM {term}` instead of raw Oracle Text syntax, so hyphens,
+  operators and reserved words in a natural-language query no longer make
+  it empty or invalid. The [Oracle Database 26ai](docs/concepts/oracle-26ai.md)
+  page shows the path, and the [RAG](docs/concepts/rag.md) page says that
+  the embedder is independent of a store's lexical leg.
+- **`OracleVectorStore` reads rows back on a database with the default
+  string limit.** `get()`, `search()` and `hybrid_search()` fetched the
+  vector as `VECTOR_SERIALIZE(...)`, a `VARCHAR2` that overflows 4000 bytes
+  at 1024 dimensions and above, so every read failed with `ORA-51810` on a
+  database with `MAX_STRING_SIZE = STANDARD` (Oracle Database Free and most
+  on-premises installations; Autonomous Database defaults to `EXTENDED`).
+  The vector column is now fetched natively, as python-oracledb returns it.
+- **Offline notebook runs no longer open with a context-window notice.**
+  The example `MockModel` in `examples/config.py` now reports a context
+  window, so an `Agent` built on it keeps a token window instead of logging
+  that it fell back to a message window (PR #555).
+
 ## [6.1.0] - 2026-11-19
 
 ### Added
@@ -53,29 +83,6 @@ policy.
 
 ### Fixed
 
-- **`OracleVectorStore` hybrid search finds the rows written after the text
-  index and keeps the rows the text index misses.** `ensure_text_index()`
-  created the `CTXSYS.CONTEXT` index with manual synchronisation, so a
-  document added after the index existed was invisible to
-  `hybrid_search(use_text_index=True)` until someone ran
-  `CTX_DDL.SYNC_INDEX`; the index is now created with `SYNC (ON COMMIT)`
-  (rebuild an existing one with `ensure_text_index(drop_existing=True)`).
-  The text leg also filtered on `CONTAINS()`, so a semantic match with no
-  query term in it was dropped and `alpha=1.0` was not vector search; the
-  lexical score now comes from a left-joined `SCORE()` subquery and an
-  unmatched row scores 0 on that leg. The query text is sent as
-  `{term} ACCUM {term}` instead of raw Oracle Text syntax, so hyphens,
-  operators and reserved words in a natural-language query no longer make
-  it empty or invalid. The [Oracle Database 26ai](docs/concepts/oracle-26ai.md)
-  page shows the path, and the [RAG](docs/concepts/rag.md) page says that
-  the embedder is independent of a store's lexical leg.
-- **`OracleVectorStore` reads rows back on a database with the default
-  string limit.** `get()`, `search()` and `hybrid_search()` fetched the
-  vector as `VECTOR_SERIALIZE(...)`, a `VARCHAR2` that overflows 4000 bytes
-  at 1024 dimensions and above, so every read failed with `ORA-51810` on a
-  database with `MAX_STRING_SIZE = STANDARD` (Oracle Database Free and most
-  on-premises installations; Autonomous Database defaults to `EXTENDED`).
-  The vector column is now fetched natively, as python-oracledb returns it.
 - **`Mem0MemoryManager` honours its page size on mem0ai 2.x.** mem0 2.0
   renamed the page-size argument of `search()` and `get_all()` from `limit`
   to `top_k` and ignores keywords it does not know, so every retrieval
