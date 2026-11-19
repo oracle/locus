@@ -10,6 +10,15 @@ policy.
 
 ### Fixed
 
+- **`OracleVectorStore` works on a database without a vector memory pool.**
+  The default `HNSW` index lives in the database's vector memory pool, and
+  Oracle Database Free sets `vector_memory_size` to 0 as installed, so the
+  first use of the store failed with a bare `ORA-51962` after the table was
+  already created, and every later instance searched that table without an
+  index and without a word. The store now says what happened and continues
+  with an exact scan, as `index_type="NONE"` does, with a `LocusWarning`
+  that names `index_type="IVF"` for an on-disk index; an explicit
+  `build_index()` raises `VectorStoreError` with the same guidance.
 - **`OracleVectorStore` hybrid search finds the rows written after the text
   index and keeps the rows the text index misses.** `ensure_text_index()`
   created the `CTXSYS.CONTEXT` index with manual synchronisation, so a
