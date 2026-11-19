@@ -10,6 +10,16 @@ policy.
 
 ### Fixed
 
+- **The Oracle `Sync*` wrappers no longer leave a database session behind
+  on every call.** `run_sync`, which every synchronous twin
+  (`OracleSyncBackend`, `OracleSyncStore`, `OracleSyncVectorStore`,
+  `OracleSyncInDBEmbeddings` and the rest) drives its async class through,
+  started a fresh event loop per call, so the per-loop connection pool was
+  rebuilt on each call, the previous pool's sessions stayed open on the
+  database, and `close()` failed on a pool whose loop was gone. Every call
+  now runs on one event loop that stays up for the process, in a copy of
+  the caller's `contextvars` context; the pool is built once, reused by
+  every call and closed by `close()`.
 - **`OracleVectorStore` works on a database without a vector memory pool.**
   The default `HNSW` index lives in the database's vector memory pool, and
   Oracle Database Free sets `vector_memory_size` to 0 as installed, so the
