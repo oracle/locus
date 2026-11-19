@@ -323,6 +323,11 @@ Prints `1 0 {'output_contains:Refund': True, 'tool_sequence': True}`, `(True, 't
 
 ## Decisions
 
+`OCIDecider` and `get_decider("oci:<model>")` use `OCI_PROFILE` when no
+`profile`, `auth_type` or `api_key` is supplied. Region precedence is an
+explicit `region`, then `LOCUS_OCI_REGION`, then `OCI_REGION`, then the SDK
+default. An explicit `base_url` bypasses the region environment defaults.
+
 The provider seam under `LogprobDecider` is `DecisionProvider` (`locus.decision`): `async decide(text, fields) -> Decision`, raising `DecisionError` rather than guessing; `decide_sync(provider, text, fields)` runs it from synchronous code. `TenantDecisionRouter(providers, *, audit_for=None, public=None, record_text=False)` serves each tenant only from its own head (`decide(text, fields, *, tenant=)`, `decide_sync(...)`, `for_tenant(tenant)` returns a bound provider for a `DecisionAdvisor`), refuses an unknown tenant with `UnknownTenantError` unless a `public` head is named, and records every decision on that tenant's `AuditTrail` from `audit_for(tenant)`, failing the decision when the record cannot be written; `per_tenant_trails(directory)` is the one-JSONL-file-per-tenant `audit_for`. The wire contract is `SYSTEM_PROMPT`, `LETTERS` (`A` to `Z`, one per option), `YES_NO` (`("yes", "no")`) and `answer_from_logprobs(question, top_logprobs) -> Answer`. For the gate, `ADMIT_FIELD` is `Choice("admit", ADMIT_QUESTION, (allow, require_human, deny))`, `describe_action(action)` renders an `Action` for a head, and `verification_from_decision(decision, thresholds)` turns yes/no safety heads into the `VerificationResult` a `ControlPolicy` weighs (a head at or over its threshold is a fatal refutation).
 
 ## Router

@@ -348,14 +348,17 @@ class OCIDecider(OpenAIDecider):
 
     Args:
         model: The OCI model id, e.g. ``openai.gpt-6-luna``.
-        profile: OCI config profile name.
+        profile: OCI config profile name. Falls back to ``OCI_PROFILE`` when
+            no authentication mode is given.
         auth_type: ``"instance_principal"`` or ``"resource_principal"``.
         api_key: An OCI Generative AI API key.
         compartment_id: Sent as ``opc-compartment-id``. Read from
             ``OCI_COMPARTMENT`` / ``OCI_COMPARTMENT_ID``, else the profile's
             tenancy, when omitted.
         project_ocid: Sent as ``opc-project-id`` when given.
-        region: OCI region (default the SDK's OCI default region).
+        region: OCI region. Defaults to ``LOCUS_OCI_REGION``, then
+            ``OCI_REGION``, then the SDK's OCI default region. An explicit
+            ``base_url`` bypasses the region environment defaults.
         config_file: The OCI config file, for ``profile=``.
         base_url: Override the derived endpoint (ending in ``/openai/v1``).
         timeout, extra_body, transport, sync_transport: As for
@@ -386,6 +389,8 @@ class OCIDecider(OpenAIDecider):
             build_oci_openai_base_url,
         )
 
+        if profile is None and auth_type is None and api_key is None:
+            profile = os.environ.get("OCI_PROFILE") or None
         if sum(x is not None for x in (profile, auth_type, api_key)) != 1:
             raise ValueError("specify exactly one of profile=, auth_type=, api_key=")
         if auth_type is not None and auth_type not in _OCI_AUTH_TYPES:
@@ -397,6 +402,8 @@ class OCIDecider(OpenAIDecider):
         self.profile = profile
         self.auth_type = auth_type
         self.config_file = config_file
+        if region is None and base_url is None:
+            region = os.environ.get("LOCUS_OCI_REGION") or os.environ.get("OCI_REGION")
         self.region = region or DEFAULT_OCI_GENAI_REGION
         self.project_ocid = project_ocid
         self.compartment_id = compartment_id or self._resolve_compartment(profile, config_file)

@@ -302,7 +302,10 @@ def test_oci_never_reads_the_openai_key(monkeypatch: pytest.MonkeyPatch) -> None
         ({"auth_type": "instance_principal"}, "compartment_id is required"),
     ],
 )
-def test_oci_auth_modes_are_checked(kwargs: dict[str, Any], match: str) -> None:
+def test_oci_auth_modes_are_checked(
+    kwargs: dict[str, Any], match: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OCI_PROFILE", raising=False)
     with pytest.raises(ValueError, match=match):
         OCIDecider("openai.gpt-6-luna", **kwargs)
 
@@ -342,6 +345,96 @@ def test_oci_compartment_falls_back_to_the_environment(monkeypatch: pytest.Monke
 
 
 # -- the registry -------------------------------------------------------------
+
+
+@pytest.mark.parametrize("via_registry", [False, True])
+def test_oci_profile_falls_back_to_the_environment(
+    monkeypatch: pytest.MonkeyPatch, via_registry: bool
+) -> None:
+    monkeypatch.setenv("OCI_PROFILE", "ENV_PROFILE")
+    kwargs = {"compartment_id": "ocid1.compartment.oc1..fake"}
+    decider = (
+        get_decider("oci:openai.gpt-6-luna", **kwargs)
+        if via_registry
+        else OCIDecider("openai.gpt-6-luna", **kwargs)
+    )
+    assert isinstance(decider, OCIDecider)
+    assert decider.profile == "ENV_PROFILE"
+
+
+@pytest.mark.parametrize("via_registry", [False, True])
+@pytest.mark.parametrize(
+    "auth", [{"profile": "EXPLICIT"}, {"auth_type": "instance_principal"}, {"api_key": "k"}]
+)
+def test_oci_explicit_auth_overrides_the_environment(
+    monkeypatch: pytest.MonkeyPatch, via_registry: bool, auth: dict[str, str]
+) -> None:
+    monkeypatch.setenv("OCI_PROFILE", "ENV_PROFILE")
+    kwargs = {"compartment_id": "ocid1.compartment.oc1..fake", **auth}
+    decider = (
+        get_decider("oci:openai.gpt-6-luna", **kwargs)
+        if via_registry
+        else OCIDecider("openai.gpt-6-luna", **kwargs)
+    )
+    assert isinstance(decider, OCIDecider)
+    assert decider.profile == auth.get("profile")
+    assert decider.auth_type == auth.get("auth_type")
+
+
+@pytest.mark.parametrize("via_registry", [False, True])
+@pytest.mark.parametrize(
+    ("locus_region", "oci_region", "explicit", "expected"),
+    [
+        (None, None, None, "us-chicago-1"),
+        (None, "eu-frankfurt-1", None, "eu-frankfurt-1"),
+        ("eu-paris-1", "eu-frankfurt-1", None, "eu-paris-1"),
+        ("", "eu-frankfurt-1", None, "eu-frankfurt-1"),
+        ("eu-paris-1", "eu-frankfurt-1", "uk-london-1", "uk-london-1"),
+    ],
+)
+def test_oci_region_precedence(
+    monkeypatch: pytest.MonkeyPatch,
+    via_registry: bool,
+    locus_region: str | None,
+    oci_region: str | None,
+    explicit: str | None,
+    expected: str,
+) -> None:
+    for name, value in (("LOCUS_OCI_REGION", locus_region), ("OCI_REGION", oci_region)):
+        if value is None:
+            monkeypatch.delenv(name, raising=False)
+        else:
+            monkeypatch.setenv(name, value)
+    kwargs: dict[str, Any] = {"api_key": "k"}
+    if explicit is not None:
+        kwargs["region"] = explicit
+    decider = (
+        get_decider("oci:openai.gpt-6-luna", **kwargs)
+        if via_registry
+        else OCIDecider("openai.gpt-6-luna", **kwargs)
+    )
+    assert isinstance(decider, OCIDecider)
+    assert decider.region == expected
+    assert decider.url == (
+        f"https://inference.generativeai.{expected}.oci.oraclecloud.com/openai/v1/decisions"
+    )
+
+
+@pytest.mark.parametrize("via_registry", [False, True])
+def test_oci_explicit_endpoint_overrides_the_environment(
+    monkeypatch: pytest.MonkeyPatch, via_registry: bool
+) -> None:
+    monkeypatch.setenv("LOCUS_OCI_REGION", "eu-paris-1")
+    monkeypatch.setenv("OCI_REGION", "eu-frankfurt-1")
+    kwargs = {"api_key": "k", "base_url": "https://example.test/openai/v1"}
+    decider = (
+        get_decider("oci:openai.gpt-6-luna", **kwargs)
+        if via_registry
+        else OCIDecider("openai.gpt-6-luna", **kwargs)
+    )
+    assert isinstance(decider, OCIDecider)
+    assert decider.region == "us-chicago-1"
+    assert decider.url == "https://example.test/openai/v1/decisions"
 
 
 def test_registry_resolves_both_prefixes(monkeypatch: pytest.MonkeyPatch) -> None:
