@@ -392,6 +392,7 @@ test = "pytest {args:tests/unit}"
 # Check every Python snippet in README.md / examples/README.md against the
 # installed SDK. Also runs as a unit test, so CI gates it either way; this
 # is the fast local loop when editing docs.
+# Documentation snippets against the installed SDK; CI runs it in the lint job.
 snippets = "python scripts/check_doc_snippets.py {args}"
 # The version is asserted in four documents no tool keeps in agreement.
 # Run this before tagging — CI runs it too, in the lint job.

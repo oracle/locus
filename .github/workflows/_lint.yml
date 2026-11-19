@@ -59,3 +59,8 @@ jobs:
       # the job to succeed.
       - name: Run format-check + ruff + mypy
         run: hatch run check
+      - name: Check the documentation snippets against the SDK
+        # Every ``from locus... import`` and keyword argument in the README,
+        # examples/README.md and the docs pages must exist on the installed
+        # SDK; docs pages may await at top level (the notebook convention).
+        run: hatch run snippets

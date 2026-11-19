@@ -58,6 +58,30 @@ def test_unparseable_code_is_reported() -> None:
     assert [k for k, _ in check_block("def (:\n")] == ["syntax"]
 
 
+def test_a_notebook_style_page_may_await_at_top_level() -> None:
+    """Pages under docs/ follow the notebook convention: the snippet compiles inside a coroutine."""
+    source = "from locus.agent import Agent\n\nagent = Agent(model='mock:m')\nprint(await agent.arun('hi'))\n"
+    assert check_block(source, notebook_style=True) == []
+    assert [k for k, _ in check_block(source)] == ["syntax"], "the README stays strict"
+
+
+def test_notebook_style_still_reports_code_broken_inside_a_coroutine() -> None:
+    assert [
+        k
+        for k, _ in check_block(
+            "from locus.agent import Agent\nf(a=1, positional)\n", notebook_style=True
+        )
+    ] == ["syntax"]
+
+
+def test_notebook_style_is_decided_by_the_docs_directory() -> None:
+    from check_doc_snippets import ROOT, is_notebook_style  # noqa: PLC0415
+
+    assert is_notebook_style(ROOT / "docs" / "concepts" / "events.md")
+    assert not is_notebook_style(ROOT / "README.md")
+    assert not is_notebook_style(ROOT / "examples" / "README.md")
+
+
 def test_a_complete_async_program_passes() -> None:
     source = (
         "import asyncio\n"
