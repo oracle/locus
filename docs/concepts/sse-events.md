@@ -188,7 +188,7 @@ returns. Like every `emit()` site, a no-op without a bound run id.
 | Event | Payload |
 |---|---|
 | `a2a.task.received` | `method`, `rpc_id` |
-| `a2a.task.completed` | `method`, `success`, `error_code` (on error), `duration_ms` |
+| `a2a.task.completed` | `method`, `success`, `error_code` (on a protocol or internal error; absent when a streaming client left mid-stream), `duration_ms` |
 | `a2a.client.send` | `target_url`, `method` |
 | `a2a.client.received` | `target_url`, `method`, `status_code`, `duration_ms`, `content_length` |
 
@@ -330,7 +330,7 @@ and the span boundary come from the same moment of the loop.
 | `memory.conversation.pruned`, `memory.compactor.*`, `memory.manager.injected` | inside `locus.iteration`, before the `chat` span |
 | `memory.manager.extracted`, `memory.manager.extract_failed` | at the end of `invoke_agent` (inline), or after it (background) |
 | `model.fallback`, `model.fallback.breaker` | inside the `chat` span of the call that failed over; `gen_ai.request.model` on that span is the hook's configured model, so with a `FallbackChain` pass `TelemetryHook(model=...)` |
-| `a2a.task.received` / `a2a.task.completed` | bracket the served request; the agent's `invoke_agent` is a child of the caller's span when the request carried `traceparent` |
+| `a2a.task.received` / `a2a.task.completed` | bracket the served request, for a streaming method too (`completed` follows the last SSE frame); the agent's `invoke_agent` is a child of the caller's span when the request carried `traceparent` |
 | `a2a.client.send` / `a2a.client.received` | bracket the HTTP call; made from a tool, it sits inside that tool's `execute_tool` span and carries the span as `traceparent` |
 | `skills.activated` | inside `locus.iteration`, before the `chat` span |
 | `deepagent.subagent.spawned` / `deepagent.subagent.completed` | the sub-agent's own `invoke_agent`, under the `execute_tool` span of the spawning tool (the tool call in flight when its run starts) |
