@@ -18,6 +18,21 @@ policy.
   string, with a `LocusDeprecationWarning`; it is removed in 7.0.0 and
   nothing replaces it, since no subscriber ever received it (#572).
 
+### Fixed
+
+- **Streaming A2A requests now close their event bracket.** `message/stream`
+  and the v1 `SendStreamingMessage` / `SubscribeToTask` methods emitted
+  `a2a.task.received` and never `a2a.task.completed`, because the JSON-RPC
+  dispatcher returned the SSE response before its completion emit; a
+  subscriber could not tell a streaming request that finished from one still
+  running. The stream now publishes `a2a.task.completed` when its generator
+  ends, with the same payload as the non-streaming path (`method`, `success`,
+  `error_code` on a protocol or internal error, `duration_ms` measured from
+  the request's arrival); a client that leaves mid-stream gets
+  `success: false` without an error code, and an agent failure inside the
+  stream, which the client receives as a final `failed` status update,
+  counts as a served request (#575).
+
 ## [6.1.1] - 2026-11-19
 
 ### Fixed
