@@ -456,7 +456,12 @@ Every release follows this checklist. Do not skip steps.
 1. **Update `CHANGELOG.md`.** Move the relevant entries from
    `[Unreleased]` into a new version heading. Write the date in
    `YYYY-MM-DD`. Add `### Removed` / `### Changed` notes for anything
-   breaking, with a migration snippet.
+   breaking, with a migration snippet. A PR that merges after this
+   rename with a hunk written under `[Unreleased]` lands its entries
+   inside the new version's section without a conflict; after the tag
+   exists, `scripts/check_release_consistency.py` fails CI on that,
+   because the wheel built from the tag does not contain the change.
+   Move the entries back under `[Unreleased]`.
 2. **Deprecation sweep.** For every item in `[Unreleased] > Removed`,
    confirm a `LocusDeprecationWarning` has been in place for at least
    one prior minor release, or document the single-release migration
@@ -466,8 +471,9 @@ Every release follows this checklist. Do not skip steps.
 4. **Run the full suite.** `hatch run check` locally (plus
    `hatch run test-integration` with live services available); CI runs
    the 3.11–3.14 matrix on the release PR.
-5. **Tag.** `git tag -a v<version> -m 'Release v<version>'` and push
-   the tag.
+5. **Tag.** `git tag -a v<version> -m 'Release v<version>'` on the
+   release PR's merge commit and push the tag. The CHANGELOG section at
+   the tag is the record of what the wheel contains.
 6. **Publish.** Build the wheel (`hatch build`), verify the wheel
    contents do not include compliance artifacts or test data, then
    upload.
