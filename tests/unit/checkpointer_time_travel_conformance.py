@@ -413,12 +413,25 @@ class ProductionSettingsConformance(_Settles):
         """Wait until anything saved with ``short_ttl`` has expired."""
         await asyncio.sleep(self.short_ttl * 1.75)
 
+    async def warm(self, cp: Any) -> None:
+        """Connect and provision ``cp`` before a timed window starts.
+
+        A fresh checkpointer opens its connection and runs its first-write
+        DDL inside the first ``save``, and the expiry stamp of that save is
+        taken before either; a ttl case that timed those too measured the
+        runner, not the ttl. One save and delete on a thread of its own
+        leaves the store as the case expects it.
+        """
+        await cp.save(_state(0), "warm-up", "warm-0")
+        await cp.delete("warm-up")
+
     # -- ttl -----------------------------------------------------------------
 
     async def test_an_expired_checkpoint_is_not_loaded_listed_or_forked(
         self, production: Any
     ) -> None:
         cp = production(ttl=self.short_ttl)
+        await self.warm(cp)
         await cp.save(_state(0), "t", "cp-0", metadata={"note": 0})
         await self.settle()
         await cp.save(_state(1), "t", "cp-1", metadata={"note": 1})
@@ -444,6 +457,7 @@ class ProductionSettingsConformance(_Settles):
 
     async def test_expire_removes_what_has_run_out_and_counts_it(self, production: Any) -> None:
         cp = production(ttl=self.short_ttl)
+        await self.warm(cp)
         await cp.save(_state(0), "t", "cp-0")
         await cp.save(_state(1), "u", "cp-1")
         assert await cp.expire() == 0, "nothing has run out yet"
@@ -470,6 +484,7 @@ class ProductionSettingsConformance(_Settles):
 
     async def test_a_ttl_bounds_what_the_agent_remembers(self, production: Any) -> None:
         cp = production(ttl=self.short_ttl)
+        await self.warm(cp)
         seen: list[list[Message]] = []
         agent = _agent(cp, seen)
         await agent.arun("first", thread_id="t")
