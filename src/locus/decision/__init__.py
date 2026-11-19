@@ -28,7 +28,8 @@ answer gets a probability, read from the logits of a single forward pass.
   argmax, margin and coverage) gathered in a :class:`Decision`.
 - **Providers** — the :class:`DecisionProvider` protocol; the zero-infra
   default :class:`LogprobDecider` over any OpenAI-compatible server; the
-  per-tenant :class:`TenantDecisionRouter`.
+  hosted :class:`DecisionsAPIDecider` over the OpenAI Decisions API, at OCI
+  Generative AI or at OpenAI; the per-tenant :class:`TenantDecisionRouter`.
 - **The gate** — :class:`DecisionAdvisor` plugs an admit head into
   ``approve(advisor=)``; :func:`verification_from_decision` feeds safety heads
   into ``ControlPolicy`` verification.
@@ -46,6 +47,7 @@ from locus.decision.control import (
     describe_action,
     verification_from_decision,
 )
+from locus.decision.decisions_api import DecisionsAPIDecider
 from locus.decision.fields import (
     LETTERS,
     SYSTEM_PROMPT,
@@ -76,6 +78,7 @@ __all__ = [
     "DecisionAdvisor",
     "DecisionError",
     "DecisionProvider",
+    "DecisionsAPIDecider",
     "Field",
     "LogprobDecider",
     "Score",

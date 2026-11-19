@@ -27,6 +27,7 @@ from locus.decision import (
     DecisionAdvisor,
     DecisionError,
     DecisionProvider,
+    DecisionsAPIDecider,
     Field,
     LogprobDecider,
     Score,
@@ -757,3 +758,328 @@ def test_answer_type_is_frozen() -> None:
     assert isinstance(answer, Answer)
     with pytest.raises(AttributeError):
         answer.field = "x"  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
+# The hosted provider: a fake Decisions API
+# ---------------------------------------------------------------------------
+
+
+class FakeDecisionsServer:
+    """Answers ``POST /decisions`` from a table of answers by question name; records requests."""
+
+    def __init__(
+        self,
+        answers: Mapping[str, dict[str, Any]],
+        *,
+        status: int = 200,
+        body: dict[str, Any] | None = None,
+        usage: dict[str, Any] | None = None,
+    ) -> None:
+        self.answers = answers
+        self.status = status
+        self.body = body
+        self.usage = usage or {"input_tokens": 42, "output_tokens": 0, "total_tokens": 42}
+        self.requests: list[dict[str, Any]] = []
+        self.urls: list[str] = []
+        self.headers: list[httpx.Headers] = []
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(json.loads(request.content))
+        self.urls.append(str(request.url))
+        self.headers.append(request.headers)
+        if self.body is not None:
+            return httpx.Response(self.status, json=self.body)
+        answers = [
+            {**self.answers[q["name"]], "name": q["name"]} for q in self.requests[-1]["questions"]
+        ]
+        return httpx.Response(
+            self.status, json={"model": "gpt-6-luna", "answers": answers, "usage": self.usage}
+        )
+
+    async def handle_async(self, request: httpx.Request) -> httpx.Response:
+        return self.handle(request)
+
+
+def _hosted(server: FakeDecisionsServer, **kw: Any) -> DecisionsAPIDecider:
+    return DecisionsAPIDecider(
+        "https://decisions.local/v1/",
+        "gpt-6-luna",
+        transport=httpx.MockTransport(server.handle_async),
+        sync_transport=httpx.MockTransport(server.handle),
+        **kw,
+    )
+
+
+DAMAGED = YesNo("damaged", "Does the customer report a damaged item?")
+WANTS = Choice("intent", "What does the customer want?", ("refund", "replacement", "other"))
+URGENCY = Score("urgency", "How urgent is this message?", ("low", "medium", "high"))
+
+HOSTED_ANSWERS: dict[str, dict[str, Any]] = {
+    "damaged": {"type": "predicate", "probability": 0.95},
+    "intent": {
+        "type": "choice",
+        "choice": "refund",
+        "confidence": 0.9,
+        "probabilities": [
+            {"value": "refund", "probability": 0.8},
+            {"value": "replacement", "probability": 0.15},
+            {"value": "other", "probability": 0.05},
+        ],
+    },
+    "urgency": {
+        "type": "score",
+        "score": 0.93,
+        "confidence": 0.81,
+        "probabilities": [
+            {"label": "low", "probability": 0.1, "value": 0},
+            {"label": "medium", "probability": 0.87, "value": 1},
+            {"label": "high", "probability": 0.03, "value": 2},
+        ],
+    },
+}
+
+
+async def test_hosted_request_is_the_contract() -> None:
+    server = FakeDecisionsServer(HOSTED_ANSWERS)
+    decider = _hosted(server, api_key="sk-test", headers={"X-Team": "support"})
+
+    await decider.decide("broken screen, refund please", [DAMAGED, WANTS, URGENCY])
+
+    assert server.urls == ["https://decisions.local/v1/decisions"]
+    assert server.requests == [
+        {
+            "model": "gpt-6-luna",
+            "input": "broken screen, refund please",
+            "questions": [
+                {
+                    "type": "predicate",
+                    "name": "damaged",
+                    "instructions": "Does the customer report a damaged item?",
+                },
+                {
+                    "type": "choice",
+                    "name": "intent",
+                    "instructions": "What does the customer want?",
+                    "choices": [{"value": "refund"}, {"value": "replacement"}, {"value": "other"}],
+                },
+                {
+                    "type": "score",
+                    "name": "urgency",
+                    "instructions": "How urgent is this message?",
+                    "levels": [{"label": "low"}, {"label": "medium"}, {"label": "high"}],
+                },
+            ],
+        }
+    ]
+    assert server.headers[0]["Authorization"] == "Bearer sk-test"
+    assert server.headers[0]["X-Team"] == "support"
+    assert server.requests[0] == decider.request_body(
+        "broken screen, refund please", [DAMAGED, WANTS, URGENCY]
+    )
+    assert "sk-test" not in repr(decider)
+
+
+async def test_hosted_answers_map_onto_the_fields() -> None:
+    server = FakeDecisionsServer(HOSTED_ANSWERS)
+    decision = await _hosted(server).decide("x", [DAMAGED, WANTS, URGENCY])
+
+    assert decision.provider == "decisions"
+    assert decision.model == "gpt-6-luna"
+    assert decision["damaged"].kind == "yesno"
+    assert decision["damaged"].p_yes == pytest.approx(0.95)
+    assert decision["damaged"].p("no") == pytest.approx(0.05)
+    assert decision["damaged"].coverage == 1.0
+    assert decision["intent"].label == "refund"
+    assert decision["intent"].probability == pytest.approx(0.8)
+    assert decision["intent"].coverage == pytest.approx(1.0)
+    assert decision["urgency"].kind == "score"
+    assert decision["urgency"].label == "medium"
+    assert decision["urgency"].expected == pytest.approx(0.1 * 0 + 0.87 * 0.5 + 0.03 * 1)
+    assert decision.meta["confidence"] == {"intent": 0.9, "urgency": 0.81}
+    assert decision.meta["usage"]["input_tokens"] == 42
+
+
+async def test_hosted_answers_are_matched_by_name_and_renormalised() -> None:
+    # Answers out of order, a value the field never listed, and a tail of mass elsewhere.
+    answers = {
+        "intent": {
+            "type": "choice",
+            "probabilities": [
+                {"value": "stale", "probability": 0.5},
+                {"value": "other", "probability": 0.1},
+                {"value": "refund", "probability": 0.3},
+            ],
+        },
+        "damaged": {"type": "predicate", "probability": 0.2},
+    }
+
+    class Reordered(FakeDecisionsServer):
+        def handle(self, request: httpx.Request) -> httpx.Response:
+            response = super().handle(request)
+            body = json.loads(response.content)
+            body["answers"].reverse()
+            return httpx.Response(200, json=body)
+
+    decision = await _hosted(Reordered(answers)).decide("x", [DAMAGED, WANTS])
+    assert decision["damaged"].p_yes == pytest.approx(0.2)
+    assert decision["intent"].label == "refund"
+    assert decision["intent"].probability == pytest.approx(0.75)
+    assert decision["intent"].coverage == pytest.approx(0.4)
+
+
+@pytest.mark.parametrize(
+    ("server", "message"),
+    [
+        (
+            FakeDecisionsServer({"damaged": {"type": "refusal"}}),
+            "declined to answer",
+        ),
+        (
+            FakeDecisionsServer({"damaged": {"type": "choice", "probabilities": []}}),
+            "expected a predicate answer",
+        ),
+        (
+            FakeDecisionsServer({"damaged": {"type": "predicate", "probability": 1.5}}),
+            "expected a predicate answer",
+        ),
+        (
+            FakeDecisionsServer({}, body={"model": "gpt-6-luna", "answers": []}),
+            "asked 1 question(s), the endpoint answered 0",
+        ),
+        (
+            FakeDecisionsServer({}, body={"choices": []}),
+            "returned no answers",
+        ),
+        (
+            FakeDecisionsServer(
+                {}, status=400, body={"code": "400", "message": "Compartment ID must be provided."}
+            ),
+            "HTTP 400: Compartment ID must be provided.",
+        ),
+        (
+            FakeDecisionsServer(
+                {}, status=401, body={"error": {"message": "Incorrect API key provided"}}
+            ),
+            "HTTP 401: Incorrect API key provided",
+        ),
+    ],
+)
+async def test_hosted_raises_rather_than_guesses(server: FakeDecisionsServer, message: str) -> None:
+    decider = _hosted(server)
+    with pytest.raises(DecisionError, match=message.replace("(", "\\(").replace(")", "\\)")):
+        await decider.decide("x", [DAMAGED])
+    with pytest.raises(DecisionError):
+        decider.decide_sync("x", [DAMAGED])
+
+
+async def test_hosted_score_levels_and_option_mass_are_checked() -> None:
+    too_many = Score("mood", "How upset?", 11)
+    with pytest.raises(ValueError, match="2 to 10"):
+        DecisionsAPIDecider.question(too_many)
+    server = FakeDecisionsServer(
+        {"intent": {"type": "choice", "probabilities": [{"value": "stale", "probability": 1.0}]}}
+    )
+    with pytest.raises(DecisionError, match="none of the field's options"):
+        await _hosted(server).decide("x", [WANTS])
+
+
+async def test_hosted_batches_long_field_lists_in_order() -> None:
+    fields = [YesNo(f"q{i}", f"Question {i}?") for i in range(5)]
+    server = FakeDecisionsServer(
+        {f.name: {"type": "predicate", "probability": i / 10} for i, f in enumerate(fields)},
+        usage={"input_tokens": 10, "total_tokens": 10},
+    )
+    decision = await _hosted(server, batch_size=2).decide("x", fields)
+
+    assert [len(r["questions"]) for r in server.requests] == [2, 2, 1]
+    assert [decision[f.name].p_yes for f in fields] == pytest.approx([0.0, 0.1, 0.2, 0.3, 0.4])
+    assert decision.meta["usage"] == {"input_tokens": 30, "total_tokens": 30}
+
+
+def test_hosted_sync_path_and_arguments() -> None:
+    server = FakeDecisionsServer(HOSTED_ANSWERS)
+    decider = _hosted(server)
+    decision = decider.decide_sync("x", [DAMAGED, WANTS])
+    assert decision["intent"].label == "refund"
+    assert len(server.requests) == 1
+    decider.close()
+
+    with pytest.raises(ValueError, match="not both"):
+        DecisionsAPIDecider(api_key="k", auth=httpx.BasicAuth("u", "p"))
+    with pytest.raises(ValueError, match="batch_size"):
+        DecisionsAPIDecider(batch_size=401)
+    with pytest.raises(ValueError, match="model"):
+        DecisionsAPIDecider(model="")
+    assert isinstance(DecisionsAPIDecider(), DecisionProvider)
+    assert DecisionsAPIDecider().base_url == "https://api.openai.com/v1"
+    assert DecisionsAPIDecider().model == "gpt-6-luna"
+
+
+async def test_hosted_transport_failure_is_a_decision_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused", request=request)
+
+    decider = DecisionsAPIDecider(
+        "https://decisions.local/v1",
+        transport=httpx.MockTransport(handler),
+        sync_transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(DecisionError, match="ConnectError"):
+        await decider.decide("x", [DAMAGED])
+    with pytest.raises(DecisionError, match="ConnectError"):
+        decider.decide_sync("x", [DAMAGED])
+
+
+async def test_hosted_on_oci_signs_and_sends_the_compartment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("oci")
+    from locus.models.providers.oci import openai_compat
+
+    class FakeSigner:
+        def do_request_sign(self, prepared: Any) -> None:
+            prepared.headers["authorization"] = "Signature keyId=fake"
+
+    seen: dict[str, Any] = {}
+
+    def fake_signer(*, profile: str | None, auth_type: str | None, config_file: str) -> FakeSigner:
+        seen.update(profile=profile, auth_type=auth_type, config_file=config_file)
+        return FakeSigner()
+
+    monkeypatch.setattr(openai_compat, "build_oci_signer", fake_signer)
+    for name in ("OCI_COMPARTMENT", "OCI_COMPARTMENT_ID", "LOCUS_OCI_COMPARTMENT"):
+        monkeypatch.delenv(name, raising=False)
+    server = FakeDecisionsServer(HOSTED_ANSWERS)
+
+    decider = DecisionsAPIDecider.on_oci(
+        profile="FRA",
+        compartment_id="ocid1.compartment.oc1..example",
+        region="eu-frankfurt-1",
+        config_file="/nonexistent/oci-config",
+        transport=httpx.MockTransport(server.handle_async),
+        sync_transport=httpx.MockTransport(server.handle),
+    )
+
+    assert decider.base_url == (
+        "https://inference.generativeai.eu-frankfurt-1.oci.oraclecloud.com/openai/v1"
+    )
+    assert decider.model == "openai.gpt-6-luna"
+    assert seen == {"profile": "FRA", "auth_type": None, "config_file": "/nonexistent/oci-config"}
+
+    decision = await decider.decide("x", [DAMAGED])
+    assert decision["damaged"].p_yes == pytest.approx(0.95)
+    assert server.headers[0]["opc-compartment-id"] == "ocid1.compartment.oc1..example"
+    assert server.headers[0]["authorization"] == "Signature keyId=fake"
+
+    decider.decide_sync("x", [DAMAGED])
+    assert server.headers[1]["opc-compartment-id"] == "ocid1.compartment.oc1..example"
+
+    with pytest.raises(ValueError, match="not both"):
+        DecisionsAPIDecider.on_oci(
+            profile="FRA", auth_type="instance_principal", compartment_id="ocid1.c"
+        )
+    with pytest.raises(ValueError, match="auth_type must be one of"):
+        DecisionsAPIDecider.on_oci(auth_type="password", compartment_id="ocid1.c")
+    with pytest.raises(ValueError, match="compartment_id is required"):
+        DecisionsAPIDecider.on_oci(profile="FRA", config_file="/nonexistent/oci-config")

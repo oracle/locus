@@ -70,6 +70,7 @@ if TYPE_CHECKING:
     from locus.core.events import ModelChunkEvent
     from locus.core.messages import Message
     from locus.models.base import ModelResponse
+    from locus.models.providers.oci._signing import OCIRequestSigner
 
 
 DEFAULT_OCI_GENAI_REGION = "us-chicago-1"
@@ -82,11 +83,13 @@ AuthType = Literal[
     "security_token",
     "session_token",
 ]
-_VALID_AUTH_TYPES: tuple[str, ...] = (
+#: ``auth_type`` values that name a principal rather than a config profile.
+PRINCIPAL_AUTH_TYPES: tuple[str, ...] = (
     "instance_principal",
     "resource_principal",
     "oke_workload_identity",
 )
+_VALID_AUTH_TYPES = PRINCIPAL_AUTH_TYPES
 
 #: ``auth_type`` values that name the profile path rather than a principal:
 #: the API key of a ``~/.oci/config`` profile (the default of every other OCI
@@ -416,6 +419,87 @@ def _build_oke_workload_identity_signer() -> AbstractBaseSigner:
     return cast("AbstractBaseSigner", resource_principal_signer("oke_workload_identity"))
 
 
+def resolve_oci_compartment(
+    compartment_id: str | None, *, profile: str | None, config_file: str
+) -> str | None:
+    """The compartment OCID to send as ``opc-compartment-id``, or ``None``.
+
+    Precedence: the explicit ``compartment_id``; then ``LOCUS_OCI_COMPARTMENT``,
+    ``OCI_COMPARTMENT`` or ``OCI_COMPARTMENT_ID`` (one export drives every
+    OCI switch in the SDK and its tests); then the ``profile``'s tenancy, a
+    last-resort default that may lack GenAI policy when the profile's home
+    tenancy is not the one hosting the compartment.
+    """
+    if compartment_id is None:
+        compartment_id = (
+            os.environ.get("LOCUS_OCI_COMPARTMENT")
+            or os.environ.get("OCI_COMPARTMENT")
+            or os.environ.get("OCI_COMPARTMENT_ID")
+        )
+    if compartment_id is None and profile is not None:
+        try:
+            compartment_id = _load_profile_config(profile, config_file).get("tenancy")
+        except Exception:  # noqa: BLE001 — the profile may be unreadable; the caller decides
+            compartment_id = None
+    return compartment_id
+
+
+def build_oci_signer(
+    *, profile: str | None, auth_type: str | None, config_file: str
+) -> AbstractBaseSigner:
+    """The OCI signer for one resolved auth mode: a principal, or a config profile.
+
+    ``auth_type`` is one of :data:`PRINCIPAL_AUTH_TYPES` or ``None``; with
+    ``None``, ``profile`` names the section of ``config_file`` to sign with
+    (API key, or the session token the section names).
+    """
+    if auth_type == "instance_principal":
+        return _build_instance_principal_signer()
+    if auth_type == "resource_principal":
+        return _build_resource_principal_signer()
+    if auth_type == "oke_workload_identity":
+        return _build_oke_workload_identity_signer()
+    if auth_type is not None:
+        raise ValueError(f"auth_type must be one of {PRINCIPAL_AUTH_TYPES}, got {auth_type!r}")
+    if profile is None:
+        raise ValueError("an OCI profile or a principal auth_type is required")
+    return _build_signer_from_profile(profile, config_file)
+
+
+def build_oci_request_auth(
+    *,
+    profile: str | None,
+    auth_type: str | None,
+    compartment_id: str | None,
+    config_file: str,
+    refresh_interval: float = 600.0,
+) -> OCIRequestSigner:
+    """The ``httpx.Auth`` that signs requests to the ``/openai/v1`` endpoint.
+
+    Builds the signer for the auth mode (:func:`build_oci_signer`), sends
+    ``compartment_id`` as ``opc-compartment-id``, and refreshes expiring
+    credentials: token-based signers (instance principal, resource principal,
+    session token) expire within minutes to hours, and without a refresh the
+    401 retry in :class:`OCIRequestSigner` is a no-op and every call fails
+    after about half an hour. The refresh rebuilds a fresh signer rather than
+    mutating one in place (see :func:`_refresh_callable_for`); a user-principal
+    API key never expires and gets no refresh. ``refresh_interval`` is 10
+    minutes, inside every principal credential's lifetime. Shared by
+    :class:`OCIChatCompletionsModel` and ``locus.decision.DecisionsAPIDecider``.
+    """
+    from locus.models.providers.oci._signing import OCIRequestSigner
+
+    signer = build_oci_signer(profile=profile, auth_type=auth_type, config_file=config_file)
+    return OCIRequestSigner(
+        signer,
+        compartment_id=compartment_id,
+        refresh_signer=_refresh_callable_for(
+            signer, auth_type=auth_type, profile=profile, config_file=config_file
+        ),
+        refresh_interval=refresh_interval,
+    )
+
+
 def _refresh_callable_for(
     signer: AbstractBaseSigner,
     *,
@@ -613,23 +697,9 @@ class OCIChatCompletionsModel(OpenAIModel):
         ):
             kwargs.pop(explicit, None)
 
-        # Resolve compartment_id with this precedence:
-        #   1. explicit ``compartment_id=`` arg
-        #   2. ``OCI_COMPARTMENT`` env var (matches OCIModel + the test
-        #      conftest convention so a single export drives every test)
-        #   3. profile's tenancy (last-resort default; may not have GenAI
-        #      policy if the profile lives in a different home tenancy than
-        #      the GenAI compartment, which is the MY_PROFILE / cross-tenancy case)
-        if compartment_id is None:
-            import os
-
-            compartment_id = os.getenv("OCI_COMPARTMENT") or os.getenv("OCI_COMPARTMENT_ID")
-        if compartment_id is None and profile is not None:
-            try:
-                profile_cfg = _load_profile_config(profile, config_file)
-                compartment_id = profile_cfg.get("tenancy")
-            except Exception:  # noqa: BLE001 — profile load may fail; keep None
-                compartment_id = None
+        compartment_id = resolve_oci_compartment(
+            compartment_id, profile=profile, config_file=config_file
+        )
 
         config = OCIChatCompletionsConfig(
             model=model,
@@ -783,38 +853,17 @@ class OCIChatCompletionsModel(OpenAIModel):
         def build() -> openai.AsyncOpenAI:
             import openai
 
-            from locus.models.providers.oci._signing import OCIRequestSigner
-
-            signer = self._build_signer()
-            # Token-based signers (instance principal, resource principal,
-            # session token) carry credentials that expire on the order of
-            # minutes-to-hours; without a refresh callback the 401 retry
-            # path in OCIRequestSigner is a no-op and the process dies a
-            # slow death of "all GenAI calls 401 after ~15-30min". The
-            # callback rebuilds a fresh signer on each refresh (rebuild, not
-            # in-place mutation — see _refresh_callable_for), so auth_flow
-            # can both (a) refresh-on-401 and (b) refresh proactively on a
-            # timer. Static signers (user-principal API key) return None and
-            # the refresh path stays dormant. refresh_interval is tightened
-            # to 10 minutes (upstream default is 1h) to re-mint principal
-            # credentials well inside their lifetime.
-            #
             # Pin the same timeout/retry knobs the parent OpenAIModel
             # uses so a stuck OCI request can't hang asyncio.gather()
             # forever (see ParallelPipeline) — without an explicit
             # timeout, the httpx default + openai-SDK default stack
             # together to ~10 minutes per call.
             http_client = httpx.AsyncClient(
-                auth=OCIRequestSigner(
-                    signer,
+                auth=build_oci_request_auth(
+                    profile=self.config.profile,
+                    auth_type=self.config.auth_type,
                     compartment_id=self.config.compartment_id,
-                    refresh_signer=_refresh_callable_for(
-                        signer,
-                        auth_type=self.config.auth_type,
-                        profile=self.config.profile,
-                        config_file=self.config.config_file,
-                    ),
-                    refresh_interval=600.0,
+                    config_file=self.config.config_file,
                 ),
                 timeout=httpx.Timeout(self.config.request_timeout),
                 event_hooks=request_event_hooks(self.config.on_request, self.config.on_response),
@@ -831,22 +880,22 @@ class OCIChatCompletionsModel(OpenAIModel):
         return loop_bound(self, "_client", build)
 
     def _build_signer(self) -> AbstractBaseSigner:
-        if self.config.auth_type == "instance_principal":
-            return _build_instance_principal_signer()
-        if self.config.auth_type == "resource_principal":
-            return _build_resource_principal_signer()
-        if self.config.auth_type == "oke_workload_identity":
-            return _build_oke_workload_identity_signer()
-        # Validation in __init__ guarantees profile is set if we got here.
-        assert self.config.profile is not None  # noqa: S101 — invariant
-        return _build_signer_from_profile(self.config.profile, self.config.config_file)
+        return build_oci_signer(
+            profile=self.config.profile,
+            auth_type=self.config.auth_type,
+            config_file=self.config.config_file,
+        )
 
 
 __all__ = [
     "DEFAULT_OCI_GENAI_REGION",
+    "PRINCIPAL_AUTH_TYPES",
     "PROFILE_AUTH_TYPES",
     "OCIChatCompletionsConfig",
     "OCIChatCompletionsModel",
     "build_oci_openai_base_url",
+    "build_oci_request_auth",
+    "build_oci_signer",
+    "resolve_oci_compartment",
     "resolve_profile_auth",
 ]

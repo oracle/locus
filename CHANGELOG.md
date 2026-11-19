@@ -10,6 +10,23 @@ policy.
 
 ### Added
 
+- **The OpenAI Decisions API as a decision provider, on OCI and OpenAI.**
+  `DecisionsAPIDecider` (`locus.decision`) answers every field of an input
+  in one `POST /decisions` request (up to 400 questions): a `YesNo` is a
+  `predicate`, a `Choice` a `choice`, a `Score` a `score` with 2 to 10
+  levels, and each answer's probabilities are read into the same `Answer`
+  `LogprobDecider` produces, so `DecisionAdvisor`, the thresholds and the
+  tenant router do not change. `DecisionsAPIDecider.on_oci()` signs with OCI
+  IAM (profile or principal, refreshed like the `oci:` chat transport) and
+  sends the compartment as `opc-compartment-id` for `openai.gpt-6-luna` on
+  `/openai/v1/decisions`; `DecisionsAPIDecider(api_key=...)` reaches
+  `gpt-6-luna` at OpenAI. The endpoint's per-answer `confidence` and token
+  `usage` land in `Decision.meta`; a refusal is a `DecisionError` (#546).
+  The OCI signing helpers the chat transport used privately are public now
+  (`build_oci_signer`, `build_oci_request_auth`, `resolve_oci_compartment`,
+  `PRINCIPAL_AUTH_TYPES` in `locus.models.providers.oci.openai_compat`), and
+  the compartment default reads `LOCUS_OCI_COMPARTMENT` before
+  `OCI_COMPARTMENT`, as the profile default reads `LOCUS_OCI_PROFILE`.
 - **TLS-only Autonomous Database connections, and a `config_dir` of their
   own.** Every Oracle backend — `OracleBackend` behind
   `oracle_checkpointer()`, `OracleCheckpointSaver`, `OracleStore`,
