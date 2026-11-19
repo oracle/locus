@@ -267,15 +267,20 @@ without storing either.
 
 ## Declared but not emitted
 
-Seven constants in `src/locus/observability/emit.py` have no emission site
+Six constants in `src/locus/observability/emit.py` have no emission site
 today, so a subscriber never sees them: `EV_A2A_TASK_PROCESSING`
 (`a2a.task.processing`), `EV_GRAPH_NODE_ROUTED`
-(`multiagent.graph.node.routed`), `EV_MEMORY_CONVERSATION_ADDED`
-(`memory.conversation.added`), `EV_RAG_EMBEDDING_GENERATED`
+(`multiagent.graph.node.routed`), `EV_RAG_EMBEDDING_GENERATED`
 (`rag.embedding.generated`), `EV_RAG_STORE_SEARCH` (`rag.store.search`),
 `EV_RAG_STORE_UPSERT` (`rag.store.upsert`) and `EV_RESEARCH_COMPLETED`
 (`research.completed`). The end of a research run is signalled by
 `close_stream(rid)`, not by an event.
+
+`EV_MEMORY_CONVERSATION_ADDED` (`memory.conversation.added`) was declared
+and never emitted either, and nothing in the SDK adds to a conversation
+outside the agent loop, whose own events show every turn. It is deprecated:
+importing it still returns the string with a `LocusDeprecationWarning`, and
+it is removed in 7.0.0.
 
 ## Span discipline
 
