@@ -354,12 +354,18 @@ def make_summarize_node(
 def make_grounding_eval_node(model: Any) -> Any:
     """Return an async node that scores summary claims against evidence (LLM-as-judge).
 
+    ``model`` is a model object or a ``provider:model`` string, as for every
+    other node; a string is resolved once, here, through :func:`get_model`.
+
     Reads:  ``KEY_SUMMARY``, ``KEY_EVIDENCE``
     Writes: ``KEY_GROUNDING_SCORE``, ``KEY_UNGROUNDED_CLAIMS``
     """
+    from locus.models.registry import get_model  # noqa: PLC0415
     from locus.observability.emit import EV_RESEARCH_GROUNDING_EVALUATED, emit  # noqa: PLC0415
     from locus.reasoning.grounding import GroundingEvaluator  # noqa: PLC0415
 
+    if isinstance(model, str):
+        model = get_model(model)
     evaluator = GroundingEvaluator()
 
     async def _grounding_eval(state: dict[str, Any]) -> dict[str, Any]:
@@ -585,7 +591,8 @@ def create_research_workflow(
                                             else              → replan → execute
 
     Args:
-        model: Primary model for execute + causal inference phases.
+        model: Primary model for execute + causal inference phases, a model
+            object or a ``provider:model`` string (every node accepts both).
         tools: Tools available to the execute agent.
         system_prompt: Domain identity for the execute agent.
         output_schema: Optional Pydantic model for structured output.

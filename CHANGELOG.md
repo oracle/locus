@@ -57,6 +57,16 @@ policy.
   window, so an `Agent` built on it keeps a token window instead of logging
   that it fell back to a message window (PR #555).
 
+- **The research workflow accepts a `provider:model` string at every node.**
+  `create_research_workflow(model="oci:openai.gpt-4.1", ...)` ran the plan,
+  execute and summarize nodes and then failed at the grounding node with
+  `'str' object has no attribute 'complete'`: every other node handed the
+  value to `Agent`, which resolves a string, while `make_grounding_eval_node`
+  passed it straight to `GroundingEvaluator.evaluate_with_llm`. The grounding
+  node now resolves a string through `get_model()` once, when the workflow is
+  built, so `model`, `summarization_model` and `grounding_model` all take a
+  string or a model object (#563).
+
 ## [6.1.0] - 2026-11-19
 
 ### Added
