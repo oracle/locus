@@ -43,6 +43,7 @@ or an answer off the listed labels raises :class:`~locus.decision.DecisionError`
 from __future__ import annotations
 
 import json
+import math
 import os
 import threading
 import time
@@ -65,12 +66,20 @@ if TYPE_CHECKING:
     import httpx
 
 
-__all__ = ["MAX_QUESTIONS", "MAX_SCORE_LEVELS", "OCIDecider", "OpenAIDecider"]
+__all__ = [
+    "MAX_QUESTIONS",
+    "MAX_SCORE_LEVELS",
+    "PROBABILITY_SUM_TOLERANCE",
+    "OCIDecider",
+    "OpenAIDecider",
+]
 
 #: Most questions one Decisions request takes.
 MAX_QUESTIONS = 400
 #: Most levels a ``score`` question takes (and at least two).
 MAX_SCORE_LEVELS = 10
+#: How far from 1 a choice or score distribution may sum (server rounding).
+PROBABILITY_SUM_TOLERANCE = 0.01
 
 _OPENAI_BASE_URL = "https://api.openai.com/v1"
 _OCI_AUTH_TYPES = frozenset({"instance_principal", "resource_principal"})
@@ -102,33 +111,57 @@ def question_body(question: Field) -> dict[str, Any]:
     }
 
 
+def _probability(question: Field, value: Any, what: str) -> float:
+    """``value`` as a probability: a finite number in [0, 1], never a bool.
+
+    A malformed value is refused, not clipped or skipped: a negative mass
+    dropped before renormalising would turn ``allow=0.2, deny=-0.8`` into a
+    certain allow.
+    """
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise DecisionError(f"field {question.name!r}: {what} is not a number ({value!r})")
+    p = float(value)
+    if not math.isfinite(p) or not 0.0 <= p <= 1.0:
+        raise DecisionError(f"field {question.name!r}: {what} is not in [0, 1] ({value!r})")
+    return p
+
+
 def _distribution(question: Field, raw: Mapping[str, Any]) -> tuple[dict[str, float], float]:
     """The listed labels' probabilities, renormalised, and the mass they had."""
     if isinstance(question, YesNo):
-        p = raw.get("probability")
-        if not isinstance(p, int | float) or not 0.0 <= float(p) <= 1.0:
+        if raw.get("probability") is None:
             raise DecisionError(f"field {question.name!r}: the answer carries no probability")
-        return {"yes": float(p), "no": 1.0 - float(p)}, 1.0
+        p = _probability(question, raw["probability"], "the probability")
+        return {"yes": p, "no": 1.0 - p}, 1.0
 
     key = "label" if isinstance(question, Score) else "value"
     mass = dict.fromkeys(question.labels, 0.0)
+    seen: set[str] = set()
     probabilities = raw.get("probabilities")
     if not isinstance(probabilities, list):
         raise DecisionError(f"field {question.name!r}: probabilities must be an array")
     for item in probabilities:
         if not isinstance(item, Mapping):
             raise DecisionError(f"field {question.name!r}: a probability entry must be an object")
-        label, p = item.get(key), item.get("probability")
+        label, value = item.get(key), item.get("probability")
         if not isinstance(label, str) or label not in mass:
             raise DecisionError(
                 f"field {question.name!r}: the answer names {label!r}, "
                 f"which is not one of {question.labels}"
             )
-        if isinstance(p, int | float) and float(p) > 0.0:
-            mass[label] += float(p)
+        if label in seen:
+            raise DecisionError(f"field {question.name!r}: the answer lists {label!r} twice")
+        seen.add(label)
+        mass[label] = _probability(question, value, f"the probability of {label!r}")
     coverage = sum(mass.values())
     if coverage <= 0.0:
         raise DecisionError(f"field {question.name!r}: the answer carries no probabilities")
+    # The probabilities must already add up to one; renormalising only takes
+    # away the server's rounding. A distribution off by more is malformed.
+    if abs(coverage - 1.0) > PROBABILITY_SUM_TOLERANCE:
+        raise DecisionError(
+            f"field {question.name!r}: the probabilities sum to {coverage:.4f}, not 1"
+        )
     return {lbl: m / coverage for lbl, m in mass.items()}, min(1.0, coverage)
 
 

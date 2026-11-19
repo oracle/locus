@@ -81,7 +81,8 @@ class _Recorder:
         self.requests.append(request)
         if isinstance(self.payload, bytes):
             return httpx.Response(self.status, content=self.payload)
-        return httpx.Response(self.status, json=self.payload)
+        # json.dumps writes NaN / Infinity, so malformed numbers can be served.
+        return httpx.Response(self.status, content=json.dumps(self.payload).encode())
 
     @property
     def body(self) -> dict[str, Any]:
@@ -193,7 +194,7 @@ async def test_answers_become_a_decision() -> None:
         ([{"type": "refusal", "name": "asks_refund"}], "refused"),
         ([{"type": "choice", "name": "asks_refund"}], "expected a predicate"),
         ([{"type": "predicate", "name": "asks_refund"}], "no probability"),
-        ([{"type": "predicate", "name": "asks_refund", "probability": 1.5}], "no probability"),
+        ([{"type": "predicate", "name": "asks_refund", "probability": 1.5}], r"not in \[0, 1\]"),
     ],
 )
 async def test_an_unreadable_predicate_raises(answers: list[dict[str, Any]], match: str) -> None:
@@ -224,6 +225,95 @@ async def test_a_duplicate_for_a_field_not_asked_raises() -> None:
     rec = _Recorder(payload={"answers": [_YES, extra, extra]})
     with pytest.raises(DecisionError, match="'other' twice"):
         await _openai(rec).decide(TEXT, FIELDS[:1])
+
+
+def _choice(probabilities: list[dict[str, Any]]) -> dict[str, Any]:
+    return {"answers": [{"type": "choice", "name": "department", "probabilities": probabilities}]}
+
+
+@pytest.mark.parametrize(
+    ("value", "match"),
+    [
+        (-0.1, r"not in \[0, 1\]"),
+        (1.5, r"not in \[0, 1\]"),
+        (float("inf"), r"not in \[0, 1\]"),
+        (float("nan"), r"not in \[0, 1\]"),
+        (True, "not a number"),
+        (False, "not a number"),
+        ("0.5", "not a number"),
+    ],
+)
+async def test_a_malformed_predicate_probability_raises(value: Any, match: str) -> None:
+    payload = {"answers": [{"type": "predicate", "name": "asks_refund", "probability": value}]}
+    with pytest.raises(DecisionError, match=match):
+        await _openai(_Recorder(payload=payload)).decide(TEXT, FIELDS[:1])
+
+
+@pytest.mark.parametrize(
+    ("probabilities", "match"),
+    [
+        # A negative mass is refused, not dropped: 0.2 / -0.8 must not read as a certain 0.2.
+        (
+            [{"value": "shipping", "probability": 0.2}, {"value": "billing", "probability": -0.8}],
+            r"not in \[0, 1\]",
+        ),
+        (
+            [{"value": "shipping", "probability": 5}, {"value": "billing", "probability": 5}],
+            r"not in \[0, 1\]",
+        ),
+        ([{"value": "shipping", "probability": float("inf")}], r"not in \[0, 1\]"),
+        ([{"value": "shipping", "probability": float("nan")}], r"not in \[0, 1\]"),
+        ([{"value": "shipping", "probability": True}], "not a number"),
+        ([{"value": "shipping"}], "not a number"),
+        (
+            [{"value": "shipping", "probability": 0.5}, {"value": "shipping", "probability": 0.5}],
+            "'shipping' twice",
+        ),
+        (
+            [{"value": "shipping", "probability": 0.9}, {"value": "billing", "probability": 0.8}],
+            "sum to 1.7000",
+        ),
+        ([{"value": "shipping", "probability": 0.5}], "sum to 0.5000"),
+    ],
+)
+async def test_a_malformed_distribution_raises(
+    probabilities: list[dict[str, Any]], match: str
+) -> None:
+    with pytest.raises(DecisionError, match=match):
+        await _openai(_Recorder(payload=_choice(probabilities))).decide(TEXT, FIELDS[1:2])
+
+
+async def test_infinity_in_the_json_body_raises() -> None:
+    """``json.loads`` reads a bare ``Infinity``; it must not reach the distribution."""
+    body = (
+        b'{"answers": [{"type": "choice", "name": "department", "probabilities": '
+        b'[{"value": "shipping", "probability": Infinity}]}]}'
+    )
+    with pytest.raises(DecisionError, match=r"not in \[0, 1\]"):
+        await _openai(_Recorder(payload=body)).decide(TEXT, FIELDS[1:2])
+
+
+async def test_rounding_within_the_tolerance_is_accepted() -> None:
+    probabilities = [
+        {"value": "shipping", "probability": 0.333},
+        {"value": "billing", "probability": 0.333},
+        {"value": "technical", "probability": 0.333},
+    ]
+    decision = await _openai(_Recorder(payload=_choice(probabilities))).decide(TEXT, FIELDS[1:2])
+    answer = decision["department"]
+    assert sum(answer.distribution.values()) == pytest.approx(1.0)
+    assert answer.p("shipping") == pytest.approx(1 / 3)
+    assert answer.coverage == pytest.approx(0.999)
+
+
+async def test_a_listed_label_left_out_reads_as_zero() -> None:
+    probabilities = [
+        {"value": "shipping", "probability": 0.75},
+        {"value": "billing", "probability": 0.25},
+    ]
+    decision = await _openai(_Recorder(payload=_choice(probabilities))).decide(TEXT, FIELDS[1:2])
+    assert decision["department"].p("technical") == 0.0
+    assert decision["department"].label == "shipping"
 
 
 async def test_a_label_off_the_list_raises() -> None:
