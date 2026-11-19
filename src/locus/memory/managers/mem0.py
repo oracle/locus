@@ -29,6 +29,7 @@ a self-hosted OpenAI-compatible stack, for instance).
 
 from __future__ import annotations
 
+import inspect
 from typing import TYPE_CHECKING, Any
 
 from locus.memory.manager import BaseMemoryManager, Memory, MemoryType
@@ -86,6 +87,24 @@ class Mem0MemoryManager(BaseMemoryManager):
         if self.run_id is not None:
             scope["run_id"] = self.run_id
         return scope
+
+    @staticmethod
+    def _page_size(method: Any, size: int) -> dict[str, int]:
+        """Name the page-size argument the way the installed mem0 declares it.
+
+        mem0 2.0 renamed ``limit`` to ``top_k`` on ``search()`` and
+        ``get_all()`` and ignores keywords it does not know, so the old name
+        silently fetched the default page of twenty rows. Releases before 2.0
+        only know ``limit``; a client that declares neither (``**kwargs``
+        only) gets ``limit``, the name this manager has always sent.
+        """
+        try:
+            params = inspect.signature(method).parameters
+        except (TypeError, ValueError):
+            return {"limit": size}
+        if "top_k" in params:
+            return {"top_k": size}
+        return {"limit": size}
 
     async def _scoped_read(self, method: Any, *args: Any, **kwargs: Any) -> Any:
         """Call a mem0 read with the scope this manager owns.
@@ -161,9 +180,13 @@ class Mem0MemoryManager(BaseMemoryManager):
         top = min(limit, self.retrieve_limit)
 
         if self.search_query:
-            response = await self._scoped_read(client.search, self.search_query, limit=top)
+            response = await self._scoped_read(
+                client.search, self.search_query, **self._page_size(client.search, top)
+            )
         else:
-            response = await self._scoped_read(client.get_all, limit=top)
+            response = await self._scoped_read(
+                client.get_all, **self._page_size(client.get_all, top)
+            )
 
         memories: list[Memory] = []
         for row in self._result_rows(response)[:top]:

@@ -34,6 +34,13 @@ policy.
 
 ### Fixed
 
+- **`Mem0MemoryManager` honours its page size on mem0ai 2.x.** mem0 2.0
+  renamed the page-size argument of `search()` and `get_all()` from `limit`
+  to `top_k` and ignores keywords it does not know, so every retrieval
+  fetched mem0's default of twenty rows: a `retrieve_limit` above twenty was
+  silently capped and a smaller one fetched more than it kept. The manager
+  now passes the name the installed release declares, `limit` on releases
+  before 2.0.
 - **Every other Oracle backend provisions its table the same way.**
   `OracleCheckpointSaver`, `OracleStore`, `OracleVectorStore`,
   `OracleApprovals`, `OracleAuditTrail` and the evaluation `OracleReportStore`
