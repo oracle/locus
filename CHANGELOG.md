@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [6.1.0] - 2026-11-19
+
 ### Added
 
 - **The OpenAI Decisions API as a decision provider, on OCI and OpenAI.**
