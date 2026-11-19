@@ -210,3 +210,86 @@ async def test_an_unrelated_error_is_not_swallowed_by_the_fallback():
 
     with pytest.raises(ValueError, match="vector store unreachable"):
         await mgr.retrieve(limit=5)
+
+
+class _TopKMem0Client:
+    """mem0 2.x: the page size is ``top_k`` and unknown keywords are ignored."""
+
+    def __init__(self, rows):
+        self._rows = rows
+        self.seen_top_k = None
+        self.seen_kwargs = None
+
+    async def get_all(self, *, filters=None, top_k=20, **kwargs):  # noqa: ARG002
+        self.seen_top_k = top_k
+        self.seen_kwargs = kwargs
+        return {"results": self._rows[:top_k]}
+
+    async def search(self, query, *, top_k=20, filters=None, **kwargs):  # noqa: ARG002
+        self.seen_top_k = top_k
+        self.seen_kwargs = kwargs
+        return {"results": self._rows[:top_k]}
+
+
+class _LimitMem0Client:
+    """mem0 0.1 / 1.x: the page size is ``limit`` and there is no ``**kwargs``."""
+
+    def __init__(self, rows):
+        self._rows = rows
+        self.seen_limit = None
+
+    async def get_all(self, user_id=None, agent_id=None, run_id=None, limit=100):  # noqa: ARG002
+        self.seen_limit = limit
+        return self._rows[:limit]
+
+    async def search(  # noqa: PLR0913
+        self,
+        query,  # noqa: ARG002
+        user_id=None,  # noqa: ARG002
+        agent_id=None,  # noqa: ARG002
+        run_id=None,  # noqa: ARG002
+        limit=100,
+        filters=None,  # noqa: ARG002
+    ):
+        self.seen_limit = limit
+        return self._rows[:limit]
+
+
+_ROWS = [{"id": f"m{i}", "memory": f"fact {i}"} for i in range(30)]
+
+
+@pytest.mark.asyncio
+async def test_page_size_is_top_k_on_current_mem0():
+    """mem0 2.x dropped ``limit`` for ``top_k`` and ignores unknown keywords, so
+    the old name silently fetched the default twenty rows."""
+    client = _TopKMem0Client(_ROWS)
+    mgr = Mem0MemoryManager(client=client, user_id="alice", retrieve_limit=25)
+
+    out = await mgr.retrieve(limit=25)
+
+    assert client.seen_top_k == 25
+    assert "limit" not in client.seen_kwargs
+    assert len(out) == 25
+
+
+@pytest.mark.asyncio
+async def test_search_page_size_is_top_k_on_current_mem0():
+    client = _TopKMem0Client(_ROWS)
+    mgr = Mem0MemoryManager(client=client, user_id="alice", search_query="prefs")
+
+    out = await mgr.retrieve(limit=5)
+
+    assert client.seen_top_k == 5
+    assert len(out) == 5
+
+
+@pytest.mark.asyncio
+async def test_page_size_is_limit_on_older_mem0():
+    """A release that names the page size ``limit`` and rejects unknown keywords."""
+    client = _LimitMem0Client(_ROWS)
+    mgr = Mem0MemoryManager(client=client, user_id="alice", search_query="prefs")
+
+    out = await mgr.retrieve(limit=5)
+
+    assert client.seen_limit == 5
+    assert len(out) == 5
