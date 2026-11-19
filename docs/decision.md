@@ -104,6 +104,62 @@ llama-server -m my-head-q4_k_m.gguf --port 8080          # a CPU is enough for 0
 A general instruction model works too, zero-shot, through the same rendered
 question. A head trained for the questions answers them more sharply.
 
+## A hosted endpoint: the Decisions API, on OCI or at OpenAI
+
+The OpenAI Decisions API (`POST /decisions`) answers the same kind of question
+as a hosted endpoint: typed questions about one shared input, each with a
+probability per answer, up to 400 questions in one request. `DecisionsAPIDecider`
+maps the fields onto its question types one to one and reads the answers into
+the same `Answer` objects, so `DecisionAdvisor`, the thresholds and the tenant
+router do not change when a team moves from a local head to the hosted model.
+
+| Field    | Question    | The `Answer` is read from                              |
+|----------|-------------|--------------------------------------------------------|
+| `YesNo`  | `predicate` | `probability` is P(yes); P(no) is the rest             |
+| `Choice` | `choice`    | `probabilities[].probability`, matched by `value`      |
+| `Score`  | `score`     | `probabilities[].probability`, matched by `label` (2 to 10 levels) |
+
+OCI Generative AI serves it on `/openai/v1/decisions` under IAM signing, with
+the compartment in `opc-compartment-id`, as the model `openai.gpt-6-luna`:
+
+```python
+from locus.decision import Choice, DecisionsAPIDecider, Score, YesNo
+
+decider = DecisionsAPIDecider.on_oci(profile="DEFAULT", region="eu-frankfurt-1")
+decision = decider.decide_sync(          # or: await decider.decide(...)
+    "The package arrived with a broken screen and I want my money back.",
+    [
+        YesNo("damaged", "Does the customer report a damaged item?"),
+        Choice("intent", "What does the customer want?", ("refund", "replacement", "other")),
+        Score("urgency", "How urgent is this message?", ("low", "medium", "high")),
+    ],
+)
+decision["damaged"].p_yes            # 1.0
+decision["intent"].label             # "refund"
+decision["urgency"].expected         # the probability-weighted level, in [0, 1]
+decision.meta["confidence"]          # {"intent": 1.0, "urgency": 0.81}
+```
+
+`on_oci()` takes the switches of the `oci:` chat transport: `profile=` (default
+`OCI_PROFILE`, then `DEFAULT`) or a principal `auth_type=`, `region=` (default
+`OCI_REGION`), `compartment_id=` (default `OCI_COMPARTMENT`, then the profile's
+tenancy). Session tokens and principals are refreshed the same way. At OpenAI
+the model is `gpt-6-luna` behind a bearer key:
+
+```python
+import os
+
+from locus.decision import DecisionsAPIDecider
+
+decider = DecisionsAPIDecider(api_key=os.environ["OPENAI_API_KEY"])
+```
+
+One decision is one request, however many fields it asks, so the input is
+read once. A refusal, an answer of the wrong type or an HTTP error raises
+`DecisionError`, as with every provider; the endpoint's per-answer `confidence`
+and its token `usage` are kept in `decision.meta`. `decider.request_body(text,
+fields)` is the exact request, for a check against the endpoint.
+
 ## In the admission gate
 
 A decision model never grants anything. Two seams, both escalate-only:
