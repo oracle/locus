@@ -28,7 +28,10 @@ answer gets a probability, read from the logits of a single forward pass.
   argmax, margin and coverage) gathered in a :class:`Decision`.
 - **Providers** — the :class:`DecisionProvider` protocol; the zero-infra
   default :class:`LogprobDecider` over any OpenAI-compatible server; the
-  per-tenant :class:`TenantDecisionRouter`.
+  Decisions API on OpenAI (:class:`OpenAIDecider`) or on OCI Generative AI
+  (:class:`OCIDecider`), also by name with :func:`get_decider`
+  (``"openai:<model>"``, ``"oci:<model>"``); the per-tenant
+  :class:`TenantDecisionRouter`.
 - **The gate** — :class:`DecisionAdvisor` plugs an admit head into
   ``approve(advisor=)``; :func:`verification_from_decision` feeds safety heads
   into ``ControlPolicy`` verification.
@@ -39,6 +42,7 @@ head on it and any server that returns logprobs serves it.
 
 from __future__ import annotations
 
+from locus.decision.api import MAX_QUESTIONS, MAX_SCORE_LEVELS, OCIDecider, OpenAIDecider
 from locus.decision.control import (
     ADMIT_FIELD,
     ADMIT_QUESTION,
@@ -61,6 +65,7 @@ from locus.decision.fields import (
     render,
 )
 from locus.decision.provider import DecisionProvider, LogprobDecider, decide_sync
+from locus.decision.registry import get_decider, list_deciders, register_decider
 from locus.decision.tenant import TenantDecisionRouter, UnknownTenantError, per_tenant_trails
 
 
@@ -68,6 +73,8 @@ __all__ = [
     "ADMIT_FIELD",
     "ADMIT_QUESTION",
     "LETTERS",
+    "MAX_QUESTIONS",
+    "MAX_SCORE_LEVELS",
     "SYSTEM_PROMPT",
     "YES_NO",
     "Answer",
@@ -78,6 +85,8 @@ __all__ = [
     "DecisionProvider",
     "Field",
     "LogprobDecider",
+    "OCIDecider",
+    "OpenAIDecider",
     "Score",
     "TenantDecisionRouter",
     "UnknownTenantError",
@@ -85,7 +94,10 @@ __all__ = [
     "answer_from_logprobs",
     "decide_sync",
     "describe_action",
+    "get_decider",
+    "list_deciders",
     "per_tenant_trails",
+    "register_decider",
     "render",
     "verification_from_decision",
 ]
