@@ -67,6 +67,16 @@ policy.
   built, so `model`, `summarization_model` and `grounding_model` all take a
   string or a model object (#563).
 
+- **An event emitted from sync code in the closing turn of a stream now
+  reaches live subscribers.** `emit_sync` cannot await the bus, so it
+  schedules the publish as a task (or hops it to the owner loop from a
+  worker thread); a consumer that called `close_stream` in the same loop
+  turn, as a graph router or a sync `@tool` site allows, found the event in
+  the history but never on its live subscription. The bus now remembers the
+  publishes `emit_sync` schedules per run (`EventBus.track_publish`), and
+  `close_stream` lets a run's land before it signals the end; `stats()`
+  reports them as `pending_publishes`.
+
 ## [6.1.0] - 2026-11-19
 
 ### Added
