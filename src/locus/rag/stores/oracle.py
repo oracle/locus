@@ -177,6 +177,29 @@ class OracleVectorConfig(BaseModel):
         _validate_int_in_range(self.index_parallel, "index_parallel", 1)
 
 
+_TEXT_QUERY_MAX_TERMS = 20
+
+
+def _oracle_text_query(text: str) -> str | None:
+    """Turn free text into an Oracle Text query that scores by terms matched.
+
+    Each whitespace-separated token is wrapped in ``{}`` so hyphens,
+    operators (``&``, ``|``, ``-``), reserved words (``AND``, ``NEAR``) and
+    stopwords are matched as plain words rather than parsed as query syntax,
+    and the tokens are joined with ``ACCUM``, which ranks a row by how many
+    of the terms it contains. A brace inside a token would end the escape,
+    so braces are dropped. Returns ``None`` when the text holds no term.
+    """
+    terms: list[str] = []
+    for token in text.split():
+        term = token.replace("{", "").replace("}", "")
+        if term:
+            terms.append("{" + term + "}")
+        if len(terms) >= _TEXT_QUERY_MAX_TERMS:
+            break
+    return " ACCUM ".join(terms) if terms else None
+
+
 class OracleVectorStore(BaseModel, BaseVectorStore):
     """
     Oracle 26ai Vector Store with native VECTOR support.
@@ -530,6 +553,25 @@ class OracleVectorStore(BaseModel, BaseVectorStore):
         """Convert embedding list to Oracle VECTOR string format."""
         return "[" + ",".join(str(f) for f in embedding) + "]"
 
+    @staticmethod
+    async def _read_embedding(value: Any) -> list[float] | None:
+        """Read a fetched vector column into a list of floats.
+
+        python-oracledb returns a ``VECTOR`` column as an ``array.array``;
+        the serialised ``[x,y,...]`` text, as ``str`` or as a LOB, is read
+        too for tables reached through another SQL path.
+        """
+        if value is None:
+            return None
+        if hasattr(value, "read"):
+            value = await value.read()
+        if isinstance(value, bytes):
+            value = value.decode()
+        if isinstance(value, str):
+            text = value.strip().strip("[]")
+            return [float(x) for x in text.split(",")] if text else None
+        return [float(x) for x in value]
+
     def _insert_sql(self) -> str:
         """Build an INSERT statement that respects column-name overrides."""
         cfg = self.oracle_config
@@ -632,7 +674,10 @@ class OracleVectorStore(BaseModel, BaseVectorStore):
         parts = [
             f"{cfg.id_column} AS id_",
             f"{cfg.content_column} AS content_",
-            f"VECTOR_SERIALIZE({cfg.embedding_column}) AS embedding_",
+            # Fetched natively (python-oracledb returns a VECTOR as an
+            # array.array). VECTOR_SERIALIZE to VARCHAR2 overflows 4000 bytes
+            # at 1024 dimensions and above when MAX_STRING_SIZE is STANDARD.
+            f"{cfg.embedding_column} AS embedding_",
             f"{cfg.metadata_column} AS metadata_",
         ]
         if cfg.created_at_column:
@@ -663,14 +708,7 @@ class OracleVectorStore(BaseModel, BaseVectorStore):
         if row is None:
             return None
 
-        # Parse embedding from serialized format
-        embedding_str = row[2]
-        if embedding_str:
-            # Remove brackets and parse floats
-            embedding_str = embedding_str.strip("[]")
-            embedding = [float(x) for x in embedding_str.split(",")]
-        else:
-            embedding = None
+        embedding = await self._read_embedding(row[2])
 
         # Parse metadata (handle async LOB)
         metadata = row[3]
@@ -812,13 +850,7 @@ class OracleVectorStore(BaseModel, BaseVectorStore):
             if threshold is not None and score < threshold:
                 continue
 
-            # Parse embedding
-            embedding_str = row[2]
-            if embedding_str:
-                embedding_str = embedding_str.strip("[]")
-                embedding = [float(x) for x in embedding_str.split(",")]
-            else:
-                embedding = None
+            embedding = await self._read_embedding(row[2])
 
             # Parse metadata (handle async LOB)
             metadata = row[3]
@@ -862,14 +894,19 @@ class OracleVectorStore(BaseModel, BaseVectorStore):
 
         Required only when calling :meth:`hybrid_search` with
         ``use_text_index=True``. The index is named ``idx_<table>_txt``
-        and provides BM25-style relevance scoring via ``SCORE(label)``
-        on top of ``CONTAINS()`` queries. Costs disk space and adds
-        index-maintenance overhead on writes — skip it if your corpus
-        is small enough that the LIKE fallback is fast enough.
+        and provides relevance scoring via ``SCORE(label)`` on top of
+        ``CONTAINS()`` queries. It is created with ``SYNC (ON COMMIT)``,
+        so rows written after the index exists are searchable as soon as
+        their transaction commits; a CONTEXT index without that parameter
+        covers only the rows present when it was built. Costs disk space
+        and adds index-maintenance overhead on writes — skip it if your
+        corpus is small enough that the LIKE fallback is fast enough.
 
         Args:
             drop_existing: When True, drop the existing index first so
-                the call is idempotent across reconfigurations.
+                the call is idempotent across reconfigurations. Use it
+                once to rebuild an index created by an earlier release,
+                which synchronised manually.
         """
         await self._ensure_table()
         pool = await self._get_pool()
@@ -886,7 +923,8 @@ class OracleVectorStore(BaseModel, BaseVectorStore):
             try:
                 await cursor.execute(
                     f"CREATE INDEX {idx_name} ON {self._full_table_name} "
-                    f"({cfg.content_column}) INDEXTYPE IS CTXSYS.CONTEXT"
+                    f"({cfg.content_column}) INDEXTYPE IS CTXSYS.CONTEXT "
+                    "PARAMETERS ('SYNC (ON COMMIT)')"
                 )
                 await conn.commit()
             except Exception as exc:
@@ -919,12 +957,15 @@ class OracleVectorStore(BaseModel, BaseVectorStore):
         * ``vector_score``: ``1 - distance/2`` for COSINE,
           ``(distance + 1) / 2`` for DOT, ``1 / (1 + distance)`` for
           EUCLIDEAN — same scoring as :meth:`search`.
-        * ``lexical_score``: when ``use_text_index=True``, the
-          normalised Oracle Text ``SCORE(...)`` divided by 100 (Oracle
-          returns 0..100). When False, the fraction of whitespace-split
-          tokens from ``query_text`` that appear as a case-insensitive
-          substring of the content (0..1).
+        * ``lexical_score``: when ``use_text_index=True``, the Oracle Text
+          ``SCORE(...)`` of an ``ACCUM`` query over the whitespace-split
+          tokens of ``query_text`` (each escaped in ``{}``), divided by 100
+          (Oracle returns 0..100). When False, the fraction of those tokens
+          that appear as a case-insensitive substring of the content (0..1).
 
+        Neither leg filters rows: a document that matches no query term
+        scores 0 on the lexical leg and still ranks by its vector
+        similarity, so ``alpha=1.0`` is the same ranking as :meth:`search`.
         The text index path requires :meth:`ensure_text_index` to have
         provisioned a ``CTXSYS.CONTEXT`` index on the content column.
 
@@ -955,18 +996,31 @@ class OracleVectorStore(BaseModel, BaseVectorStore):
         }
 
         # ---- lexical leg -------------------------------------------------
-        if use_text_index:
-            # SCORE(label) reads the CTXSYS.CONTEXT match relevance and
-            # returns 0..100; divide for the [0,1] blend.
-            params["text_query"] = query_text or "%"
-            lexical_expr = "NVL(SCORE(1), 0) / 100.0"
-            lexical_predicate = f"CONTAINS({cfg.content_column}, :text_query, 1) > 0"
+        # Neither leg filters: a row with no lexical match scores 0 on that
+        # leg and still ranks by vector similarity.
+        lexical_join = ""
+        text_query = _oracle_text_query(query_text or "") if use_text_index else None
+        if use_text_index and text_query is not None:
+            # SCORE(label) is the CTXSYS.CONTEXT relevance (0..100) of the
+            # ACCUM query. SCORE must sit in the query block that holds the
+            # CONTAINS, so the text leg is a LEFT JOIN on a subquery and
+            # unmatched rows come back with NULL, read as 0.
+            params["text_query"] = text_query
+            lexical_expr = "NVL(lex_.lex_score_, 0) / 100.0"
+            lexical_join = (
+                f"LEFT JOIN (SELECT {cfg.id_column} AS lex_id_, SCORE(1) AS lex_score_ "
+                f"FROM {self._full_table_name} "
+                f"WHERE CONTAINS({cfg.content_column}, :text_query, 1) > 0) lex_ "
+                f"ON lex_.lex_id_ = t.{cfg.id_column}"
+            )
+        elif use_text_index:
+            # No term to look up → pure vector.
+            lexical_expr = "0.0"
         else:
             tokens = [t for t in (query_text or "").split() if t]
             if not tokens:
                 # No tokens → fall back to pure vector.
                 lexical_expr = "0.0"
-                lexical_predicate = None
             else:
                 # Cap to avoid runaway bind counts on absurd queries.
                 tokens = tokens[:20]
@@ -978,7 +1032,6 @@ class OracleVectorStore(BaseModel, BaseVectorStore):
                         f"CASE WHEN LOWER({cfg.content_column}) LIKE :{pname} THEN 1 ELSE 0 END"
                     )
                 lexical_expr = f"({' + '.join(token_terms)}) / {len(tokens)}.0"
-                lexical_predicate = None  # don't filter — score reflects degree
 
         # ---- vector→similarity expression (Oracle SQL) -------------------
         if metric == "COSINE":
@@ -992,19 +1045,15 @@ class OracleVectorStore(BaseModel, BaseVectorStore):
         params["one_minus_alpha"] = 1.0 - float(alpha)
         blended_expr = f"({vector_score_expr}) * :alpha + ({lexical_expr}) * :one_minus_alpha"
 
-        where_clauses: list[str] = []
-        if lexical_predicate:
-            where_clauses.append(lexical_predicate)
         filter_sql = self._compile_metadata_filter(metadata_filter, params, prefix="hmf")
-        if filter_sql:
-            where_clauses.append(filter_sql)
-        where_sql = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
+        where_sql = f"WHERE {filter_sql}" if filter_sql else ""
 
         sql = f"""
             SELECT {self._select_columns_sql(with_distance=distance_func)},
                    {lexical_expr} AS lexical_score_,
                    ({blended_expr}) AS blended_score_
-            FROM {self._full_table_name}
+            FROM {self._full_table_name} t
+            {lexical_join}
             {where_sql}
             ORDER BY blended_score_ DESC
             FETCH FIRST :limit ROWS ONLY
@@ -1023,13 +1072,7 @@ class OracleVectorStore(BaseModel, BaseVectorStore):
             if threshold is not None and blended < threshold:
                 continue
 
-            # Parse embedding (best effort — same shape as search()).
-            embedding_str = row[2]
-            if embedding_str:
-                embedding_str = embedding_str.strip("[]")
-                embedding = [float(x) for x in embedding_str.split(",")]
-            else:
-                embedding = None
+            embedding = await self._read_embedding(row[2])
 
             metadata = row[3]
             if hasattr(metadata, "read"):
