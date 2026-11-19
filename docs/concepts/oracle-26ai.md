@@ -122,6 +122,12 @@ retriever = RAGRetriever(
 agent = Agent(model="oci:openai.gpt-5.5", tools=[retriever.as_tool()])
 ```
 
+The store creates the table and an `HNSW` vector index on first use. That
+index lives in the database's vector memory pool, so on a database without
+one, Oracle Database Free as installed, the store warns and searches the
+table with an exact scan; `OracleVectorStore(index_type="IVF", ...)` builds
+an on-disk index there instead.
+
 ### Hybrid search
 
 `OracleVectorStore` blends vector similarity with Oracle Text relevance on
