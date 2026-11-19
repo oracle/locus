@@ -473,10 +473,12 @@ def build_oci_request_auth(
     compartment_id: str | None,
     config_file: str,
     refresh_interval: float = 600.0,
+    signer: AbstractBaseSigner | None = None,
 ) -> OCIRequestSigner:
     """The ``httpx.Auth`` that signs requests to the ``/openai/v1`` endpoint.
 
-    Builds the signer for the auth mode (:func:`build_oci_signer`), sends
+    Builds the signer for the auth mode (:func:`build_oci_signer`) unless one
+    is passed in (a test's stand-in, or a signer built once and shared), sends
     ``compartment_id`` as ``opc-compartment-id``, and refreshes expiring
     credentials: token-based signers (instance principal, resource principal,
     session token) expire within minutes to hours, and without a refresh the
@@ -489,7 +491,8 @@ def build_oci_request_auth(
     """
     from locus.models.providers.oci._signing import OCIRequestSigner
 
-    signer = build_oci_signer(profile=profile, auth_type=auth_type, config_file=config_file)
+    if signer is None:
+        signer = build_oci_signer(profile=profile, auth_type=auth_type, config_file=config_file)
     return OCIRequestSigner(
         signer,
         compartment_id=compartment_id,
@@ -864,6 +867,7 @@ class OCIChatCompletionsModel(OpenAIModel):
                     auth_type=self.config.auth_type,
                     compartment_id=self.config.compartment_id,
                     config_file=self.config.config_file,
+                    signer=self._build_signer(),
                 ),
                 timeout=httpx.Timeout(self.config.request_timeout),
                 event_hooks=request_event_hooks(self.config.on_request, self.config.on_response),
