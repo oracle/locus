@@ -20,6 +20,12 @@ from urllib.parse import urlsplit
 import pytest
 
 
+# Per-test budget for the live suites, in seconds. A provider that never
+# answers or a database that never connects fails here instead of holding the
+# job until the runner's own limit; a live case normally takes seconds.
+INTEGRATION_TIMEOUT = 300
+
+
 # =============================================================================
 # Service Detection Helpers
 # =============================================================================
@@ -374,6 +380,16 @@ def pytest_collection_modifyitems(config, items):
         for marker_name, skip_marker in marker_map.items():
             if marker_name in [m.name for m in item.iter_markers()]:
                 item.add_marker(skip_marker)
+
+    # This hook sees every collected item, so only integration tests get the
+    # default budget. ``--timeout=N`` replaces it and ``--timeout=0`` disables it;
+    # a test's own ``@pytest.mark.timeout`` wins over both.
+    if not config.pluginmanager.hasplugin("timeout") or config.getoption("timeout") is not None:
+        return
+    here = Path(__file__).parent
+    for item in items:
+        if item.path.is_relative_to(here) and item.get_closest_marker("timeout") is None:
+            item.add_marker(pytest.mark.timeout(INTEGRATION_TIMEOUT))
 
 
 def pytest_report_header(config):

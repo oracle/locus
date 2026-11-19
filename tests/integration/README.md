@@ -4,6 +4,22 @@ Integration tests are opt-in and are skipped unless the required service
 configuration is present. Unit tests remain mocked or in-memory and run by
 default with `hatch run test`.
 
+## Timeouts
+
+Each integration test runs under a 300-second budget (`INTEGRATION_TIMEOUT` in
+`tests/integration/conftest.py`, enforced by `pytest-timeout` from the `dev`
+extras), so a provider that never answers or a database that never connects
+fails the test instead of holding the job. Pass `--timeout` to change it for a
+run, or `--timeout=0` to turn it off, for example while stepping through a test
+in a debugger:
+
+```bash
+uv run hatch run test-integration --timeout=60 tests/integration
+```
+
+A test that needs longer sets its own `@pytest.mark.timeout(...)`, which takes
+precedence over both. Unit tests have no budget.
+
 ## Models
 
 Most integration tests take the shared `model` fixture and never name a
