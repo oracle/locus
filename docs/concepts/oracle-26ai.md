@@ -28,7 +28,7 @@ pip install "locus-sdk[oci,oracledb]"
 
 | Need | Class | Notebook |
 |---|---|---|
-| Vector search for RAG on native `VECTOR` columns | `OracleVectorStore` | [38 — Oracle 26ai RAG](../notebooks/notebook_38_oracle_26ai_rag.md) |
+| Vector and hybrid search for RAG on native `VECTOR` columns | `OracleVectorStore` | [38 — Oracle 26ai RAG](../notebooks/notebook_38_oracle_26ai_rag.md) |
 | Ingest rows from your own tables as documents | `OracleADBLoader` | [39 — ADB loader](../notebooks/notebook_39_oracle_adb_loader.md) |
 | Chunk text inside the database | `OracleInDBChunker` | [40 — In-database chunker](../notebooks/notebook_40_oracle_indb_chunker.md) |
 | Embed inside the database with an ONNX model | `OracleInDBEmbeddings` | [41 — In-database embeddings](../notebooks/notebook_41_oracle_indb_embeddings.md) |
@@ -121,6 +121,38 @@ retriever = RAGRetriever(
 )
 agent = Agent(model="oci:openai.gpt-5.5", tools=[retriever.as_tool()])
 ```
+
+### Hybrid search
+
+`OracleVectorStore` blends vector similarity with Oracle Text relevance on
+the same row. `ensure_text_index()` creates a `CTXSYS.CONTEXT` index on the
+content column, synchronised on commit, and
+`RAGRetriever(hybrid=True, hybrid_kwargs={"use_text_index": True})` scores
+each candidate as `hybrid_alpha` times the vector similarity plus the rest
+times the `SCORE()` of the query terms, so an error code or a product name
+that the embedding blurs still ranks first. A document that contains none of
+the query terms keeps its vector score, and without the text index the
+lexical leg is a `LIKE` match on the query tokens.
+
+```python
+store = OracleVectorStore(table_name="runbooks", dimension=1536, **db)
+await store.ensure_text_index()  # once per table; rows added later are indexed on commit
+retriever = RAGRetriever(
+    embedder=OCIEmbeddings(model_id="cohere.embed-v4.0"),
+    store=store,
+    hybrid=True,
+    hybrid_kwargs={"use_text_index": True},
+)
+result = await retriever.retrieve("decline code 05", limit=5)
+```
+
+The embedder is any `locus.rag` embedder: the store receives the query
+vector, so the text index and the embedding model are independent and no
+model has to be loaded into the database for this path. The database's own
+hybrid vector index, which pairs a text index with an in-database embedding
+model, is a separate feature that the store does not use;
+`OracleInDBEmbeddings` is the way to embed inside the database with this
+store.
 
 When the text must not leave the database, chunk and embed inside it:
 `OracleInDBChunker` splits with `DBMS_VECTOR_CHAIN`, `OracleInDBEmbeddings`

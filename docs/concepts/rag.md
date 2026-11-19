@@ -337,10 +337,16 @@ retriever = RAGRetriever(
 result = await retriever.retrieve("decline code 05", limit=5)
 ```
 
+The embedder is independent of the lexical leg: the retriever embeds
+the query and hands the store the vector next to the text, so any
+`locus.rag` embedder pairs with any blending store, and the store's text
+index knows nothing about the embedding model.
+
 `hybrid_alpha` means the same thing on every store. The stores that
 blend are the ones implementing `HybridSearchable`: `OracleVectorStore`
 (Oracle Text or a `LIKE` leg; pass `hybrid_kwargs={"use_text_index": True}`
-after `ensure_text_index()`), `OpenSearchVectorStore`,
+after `ensure_text_index()`, see [Oracle Database 26ai](oracle-26ai.md#hybrid-search)),
+`OpenSearchVectorStore`,
 `ElasticsearchVectorStore`, `WeaviateVectorStore`, `HeatWaveVectorStore` and
 `MilvusVectorStore(enable_hybrid=True)`. OpenSearch, Elasticsearch and
 HeatWave run the vector and lexical legs (k-NN and `match`, or `DISTANCE()`
