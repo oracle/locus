@@ -128,6 +128,10 @@ class MockModel(BaseModel):
 
     max_tokens: int = 100
     temperature: float = 0.7
+    # The window the agent counts tokens against. Without one the agent
+    # falls back to a message window and says so on the first line of every
+    # notebook run offline; the mock never overflows, so any figure is fine.
+    context_window: int = 128_000
 
     # Simulated responses, keyed on words that show up in the notebooks'
     # prompts. First match wins, so the specific keys come before the generic
