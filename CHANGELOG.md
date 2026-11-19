@@ -42,6 +42,10 @@ policy.
   database with `MAX_STRING_SIZE = STANDARD` (Oracle Database Free and most
   on-premises installations; Autonomous Database defaults to `EXTENDED`).
   The vector column is now fetched natively, as python-oracledb returns it.
+- **Offline notebook runs no longer open with a context-window notice.**
+  The example `MockModel` in `examples/config.py` now reports a context
+  window, so an `Agent` built on it keeps a token window instead of logging
+  that it fell back to a message window (PR #555).
 
 ## [6.1.0] - 2026-11-19
 
