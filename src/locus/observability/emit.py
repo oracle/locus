@@ -202,6 +202,9 @@ def emit_sync(event_type: str, /, **data: Any) -> None:
 
     If neither path resolves a loop, the event is dropped — telemetry
     must never spin up a fresh loop and fight asyncio singletons.
+
+    Either way the scheduled publish is registered with the bus, and
+    ``EventBus.close_stream`` lets it land before it ends the stream.
     """
     rid = current_run_id()
     if rid is None:
@@ -223,7 +226,8 @@ def emit_sync(event_type: str, /, **data: Any) -> None:
         if owner_loop is None or not owner_loop.is_running():
             return
         try:
-            asyncio.run_coroutine_threadsafe(bus.publish(event), owner_loop)
+            hop = asyncio.run_coroutine_threadsafe(bus.publish(event), owner_loop)
+            bus.track_publish(hop, rid)
         except Exception:  # noqa: BLE001 — telemetry must never break the SDK
             logger.debug("emit_sync threadsafe schedule failed", exc_info=True)
         return
@@ -232,3 +236,4 @@ def emit_sync(event_type: str, /, **data: Any) -> None:
     task = loop.create_task(coro)
     _BACKGROUND_TASKS.add(task)
     task.add_done_callback(_BACKGROUND_TASKS.discard)
+    bus.track_publish(task, rid)
