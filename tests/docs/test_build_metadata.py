@@ -349,3 +349,30 @@ def test_a_card_glyph_token_expands_inside_a_list_item(tmp_path) -> None:
 def test_a_missing_card_glyph_fails_the_build(tmp_path) -> None:
     with pytest.raises(RuntimeError, match="does not exist"):
         build_metadata.render_glyph("nope", tmp_path)
+
+
+def test_cli_reference_lists_every_command_and_action_from_the_parser() -> None:
+    import argparse  # noqa: PLC0415
+
+    from locus.cli import build_parser  # noqa: PLC0415
+
+    rendered = build_metadata.on_page_markdown(
+        "{{ locus_cli_reference }}", config={"extra": {"sdk_version": "0.0.0"}}
+    )
+    parser = build_parser()
+    commands = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
+    assert len(commands.choices) >= 11
+    for name, sub in commands.choices.items():
+        assert f"| `locus {name}` |" in rendered
+        nested = next((a for a in sub._actions if isinstance(a, argparse._SubParsersAction)), None)
+        for action in nested.choices if nested is not None else ():
+            assert f"`{action}`:" in rendered, (name, action)
+
+
+def test_the_command_line_page_carries_the_token_and_is_in_the_nav() -> None:
+    from pathlib import Path  # noqa: PLC0415
+
+    root = Path(__file__).resolve().parents[2]
+    page = (root / "docs" / "how-to" / "command-line.md").read_text(encoding="utf-8")
+    assert "{{ locus_cli_reference }}" in page
+    assert "how-to/command-line.md" in (root / "mkdocs.yml").read_text(encoding="utf-8")
