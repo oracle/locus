@@ -554,7 +554,7 @@ def route_after_grounding(
             emit_sync(
                 EV_RESEARCH_COMPLETED,
                 grounded=grounded,
-                grounding_score=score,
+                score=score,
                 replan=replans,
                 regeneration=regens,
             )

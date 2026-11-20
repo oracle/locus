@@ -525,7 +525,7 @@ class TestWorkflowSSEEmission:
         assert collected == [
             (
                 "research.completed",
-                {"grounded": False, "grounding_score": 0.2, "replan": 1, "regeneration": 1},
+                {"grounded": False, "score": 0.2, "replan": 1, "regeneration": 1},
             )
         ]
         reset_event_bus()

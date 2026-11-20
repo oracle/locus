@@ -26,7 +26,6 @@ SRC = Path(emit_module.__file__).resolve().parents[1]
 NOT_EMITTED = {
     "EV_A2A_TASK_PROCESSING",
     "EV_GRAPH_NODE_ROUTED",
-    "EV_MEMORY_CONVERSATION_ADDED",
     "EV_RAG_EMBEDDING_GENERATED",
     "EV_RAG_STORE_SEARCH",
     "EV_RAG_STORE_UPSERT",
