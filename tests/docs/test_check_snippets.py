@@ -162,6 +162,42 @@ def test_a_bare_async_excerpt_is_not_reported():
     assert not check_block("async for event in agent.run('hi'):\n    print(event)\n")
 
 
+def test_a_notebook_style_page_may_await_at_top_level():
+    """Pages under docs/ follow the notebook convention: the block compiles inside a coroutine."""
+    source = "from locus.fake import plain\n\nresult = await plain(alpha=3)\nprint(result)\n"
+    assert check_block(source, notebook_style=True) == []
+    assert [k for k, _ in check_block(source)] == ["syntax"], "the README stays strict"
+
+
+def test_notebook_style_still_reports_code_broken_inside_a_coroutine():
+    problems = check_block(
+        "from locus.agent import Agent\nf(a=1, positional)\n", notebook_style=True
+    )
+    assert [k for k, _ in problems] == ["syntax"]
+
+
+def test_notebook_style_is_decided_by_the_docs_directory():
+    from scripts.check_snippets import ROOT, is_notebook_style  # noqa: PLC0415
+
+    assert is_notebook_style(ROOT / "docs" / "concepts" / "events.md")
+    assert not is_notebook_style(ROOT / "README.md")
+    assert not is_notebook_style(ROOT / "examples" / "README.md")
+
+
+def test_check_accepts_several_files_and_directories(tmp_path):
+    (tmp_path / "a.md").write_text(
+        "```python\nfrom locus.fake import plain\nprint(plain(alpha=1))\n```\n"
+    )
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    (sub / "b.md").write_text(
+        "```python\nfrom locus.fake import plain\nprint(plain(beta=1))\n```\n"
+    )
+    parsed, problems = check([tmp_path / "a.md", sub])
+    assert parsed == 2
+    assert problems == []
+
+
 def test_a_complete_async_program_is_not_reported():
     problems = check_block(
         "import asyncio\n"
