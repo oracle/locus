@@ -236,6 +236,44 @@ class TestCompactorBracket:
         assert completed["summarized_count"] == 4
         assert "error" not in completed
 
+    async def test_the_sync_apply_publishes_the_same_bracket(self) -> None:
+        # ``apply`` is synchronous; called inside a running loop it schedules
+        # its publishes through ``emit_sync`` and ``close_stream`` lets them land.
+        manager = SummarizingManager(threshold=3, keep_recent=1)
+        messages = [Message(role=Role.USER, content=f"m{i}") for i in range(5)]
+        async with _Events("memory.compactor.") as events:
+            result = manager.apply(messages)
+
+        assert len(result) == 2
+        assert events.names == ["memory.compactor.triggered", "memory.compactor.completed"]
+        triggered = events.only("memory.compactor.triggered")
+        assert triggered == {"strategy": "summarizing", "messages_before": 5, "threshold": 3}
+        completed = events.only("memory.compactor.completed")
+        assert completed["success"] is True
+        assert completed["messages_before"] == 5
+        assert completed["messages_after"] == 2
+        assert completed["summarized_count"] == 4
+        assert "error" not in completed
+
+    async def test_a_failing_sync_summary_closes_the_bracket(self) -> None:
+        manager = SummarizingManager(threshold=3, keep_recent=1)
+
+        def boom(messages: list[Message]) -> str:
+            raise RuntimeError("summary failed")
+
+        manager._generate_summary = boom  # type: ignore[method-assign]
+        messages = [Message(role=Role.USER, content=f"m{i}") for i in range(5)]
+        async with _Events("memory.compactor.") as events:
+            with pytest.raises(RuntimeError):
+                manager.apply(messages)
+
+        assert events.names == ["memory.compactor.triggered", "memory.compactor.completed"]
+        completed = events.only("memory.compactor.completed")
+        assert completed["success"] is False
+        assert completed["error"] == "RuntimeError"
+        assert completed["summarized_count"] == 0
+        assert completed["messages_after"] == 5
+
 
 class _Embedder:
     def __init__(self, *, fail: bool = False) -> None:
