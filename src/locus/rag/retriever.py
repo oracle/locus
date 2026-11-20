@@ -552,46 +552,63 @@ class RAGRetriever(BaseModel):
         )
         _started = _time.perf_counter()
 
-        # Embed the query
-        query_result = await self.embedder.embed_query(query)
+        try:
+            # Embed the query
+            query_result = await self.embedder.embed_query(query)
 
-        # If a reranker is wired in, over-fetch from the vector store
-        # (cheap embedding search), then have the reranker rescore the
-        # wider pool against the query (cross-encoder, more expensive
-        # but materially more accurate). Trim back to ``limit`` after.
-        store_limit = max(limit, self.rerank_candidate_pool) if self.reranker is not None else limit
-
-        # Search the store — blended when asked for and the store can do it,
-        # otherwise by vector alone (logged once so the fallback is visible).
-        use_hybrid = self.hybrid if hybrid is None else hybrid
-        if use_hybrid and self.hybrid_supported:
-            results = await self.store.hybrid_search(
-                query,
-                query_result.embedding,
-                limit=store_limit,
-                alpha=self.hybrid_alpha,
-                threshold=threshold,
-                metadata_filter=metadata_filter,
-                **self.hybrid_kwargs,
+            # If a reranker is wired in, over-fetch from the vector store
+            # (cheap embedding search), then have the reranker rescore the
+            # wider pool against the query (cross-encoder, more expensive
+            # but materially more accurate). Trim back to ``limit`` after.
+            store_limit = (
+                max(limit, self.rerank_candidate_pool) if self.reranker is not None else limit
             )
-        else:
-            if use_hybrid and not self._hybrid_fallback_logged:
-                logger.warning(
-                    "RAGRetriever(hybrid=True) but %s has no hybrid search; "
-                    "falling back to vector-only search",
-                    type(self.store).__name__,
+
+            # Search the store — blended when asked for and the store can do it,
+            # otherwise by vector alone (logged once so the fallback is visible).
+            use_hybrid = self.hybrid if hybrid is None else hybrid
+            if use_hybrid and self.hybrid_supported:
+                results = await self.store.hybrid_search(
+                    query,
+                    query_result.embedding,
+                    limit=store_limit,
+                    alpha=self.hybrid_alpha,
+                    threshold=threshold,
+                    metadata_filter=metadata_filter,
+                    **self.hybrid_kwargs,
                 )
-                self._hybrid_fallback_logged = True
-            results = await self.store.search(
-                query_embedding=query_result.embedding,
-                limit=store_limit,
-                threshold=threshold,
-                metadata_filter=metadata_filter,
-            )
+            else:
+                if use_hybrid and not self._hybrid_fallback_logged:
+                    logger.warning(
+                        "RAGRetriever(hybrid=True) but %s has no hybrid search; "
+                        "falling back to vector-only search",
+                        type(self.store).__name__,
+                    )
+                    self._hybrid_fallback_logged = True
+                results = await self.store.search(
+                    query_embedding=query_result.embedding,
+                    limit=store_limit,
+                    threshold=threshold,
+                    metadata_filter=metadata_filter,
+                )
 
-        if self.reranker is not None and results:
-            results = await self.reranker.rerank(query, results)
-            results = results[:limit]
+            if self.reranker is not None and results:
+                results = await self.reranker.rerank(query, results)
+                results = results[:limit]
+
+        except Exception as e:
+            # Close the bracket before the caller sees the failure.
+            await emit(
+                EV_RAG_QUERY_COMPLETED,
+                hit_count=0,
+                top_score=None,
+                duration_ms=(_time.perf_counter() - _started) * 1000,
+                store_type=type(self.store).__name__,
+                reranker_type=type(self.reranker).__name__ if self.reranker is not None else None,
+                success=False,
+                error=type(e).__name__,
+            )
+            raise
 
         await emit(
             EV_RAG_QUERY_COMPLETED,
@@ -600,6 +617,7 @@ class RAGRetriever(BaseModel):
             duration_ms=(_time.perf_counter() - _started) * 1000,
             store_type=type(self.store).__name__,
             reranker_type=type(self.reranker).__name__ if self.reranker is not None else None,
+            success=True,
         )
 
         return RetrievalResult(

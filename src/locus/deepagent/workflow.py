@@ -159,30 +159,41 @@ def make_execute_node(
         grounding_facts: list[dict[str, Any]] = []
         fact_idx = 0
 
-        async for event in agent.run(prompt):
-            if isinstance(event, ToolCompleteEvent) and event.result:
-                raw = str(event.result)[:2000]
-                evidence.append(raw)
-                grounding_facts.append(
-                    {
-                        "id": f"fact_{fact_idx:03d}",
-                        "text": raw,
-                        "source": event.tool_name,
-                    }
-                )
-                fact_idx += 1
-            elif isinstance(event, TerminateEvent) and event.final_message:
-                conclusion = f"[conclusion] {event.final_message[:2000]}"
-                evidence.append(conclusion)
-                grounding_facts.append(
-                    {
-                        "id": f"fact_{fact_idx:03d}",
-                        "text": conclusion,
-                        "source": "agent_conclusion",
-                    }
-                )
+        try:
+            async for event in agent.run(prompt):
+                if isinstance(event, ToolCompleteEvent) and event.result:
+                    raw = str(event.result)[:2000]
+                    evidence.append(raw)
+                    grounding_facts.append(
+                        {
+                            "id": f"fact_{fact_idx:03d}",
+                            "text": raw,
+                            "source": event.tool_name,
+                        }
+                    )
+                    fact_idx += 1
+                elif isinstance(event, TerminateEvent) and event.final_message:
+                    conclusion = f"[conclusion] {event.final_message[:2000]}"
+                    evidence.append(conclusion)
+                    grounding_facts.append(
+                        {
+                            "id": f"fact_{fact_idx:03d}",
+                            "text": conclusion,
+                            "source": "agent_conclusion",
+                        }
+                    )
+        except Exception as e:
+            # Close the bracket with the facts gathered so far; the graph
+            # records the node failure from the re-raise.
+            await emit(
+                EV_RESEARCH_EXECUTE_COMPLETED,
+                fact_count=len(grounding_facts),
+                success=False,
+                error=type(e).__name__,
+            )
+            raise
 
-        await emit(EV_RESEARCH_EXECUTE_COMPLETED, fact_count=len(grounding_facts))
+        await emit(EV_RESEARCH_EXECUTE_COMPLETED, fact_count=len(grounding_facts), success=True)
         return {KEY_EVIDENCE: evidence, KEY_GROUNDING_FACTS: grounding_facts}
 
     return _execute
@@ -455,7 +466,16 @@ def make_regenerate_summary_node(
             system_prompt="You are a precise editor. Remove ungrounded claims.",
             output_schema=output_schema,
         )
-        result = agent.run_sync(regen_prompt)
+        try:
+            result = agent.run_sync(regen_prompt)
+        except Exception as e:
+            await emit(
+                EV_RESEARCH_REGENERATE_COMPLETED,
+                regeneration=regen_count + 1,
+                success=False,
+                error=type(e).__name__,
+            )
+            raise
 
         update: dict[str, Any] = {
             KEY_SUMMARY: result.message or old_summary,
@@ -464,7 +484,7 @@ def make_regenerate_summary_node(
         if output_schema and result.parsed:
             update[KEY_STRUCTURED_OUTPUT] = result.parsed
 
-        await emit(EV_RESEARCH_REGENERATE_COMPLETED, regeneration=regen_count + 1)
+        await emit(EV_RESEARCH_REGENERATE_COMPLETED, regeneration=regen_count + 1, success=True)
         return update
 
     return _regenerate
