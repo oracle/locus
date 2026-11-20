@@ -109,6 +109,7 @@ deploy-A subscriber saw 2 events (only its own rollout):
   global_subscribers: 1
   history_runs: 2
   dropped_events_total: 0
+  pending_publishes: 0
   queue_depths: {}
 ```
 <!-- notebook-output:end -->

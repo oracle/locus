@@ -116,12 +116,22 @@ jobs:
           cache: pip
 
       - name: Install locus, the test deps and the docs toolchain
+        # ``telemetry`` because notebook 60's captured output records spans.
         run: |
           pip install -U pip
-          pip install -e ".[dev,docs,openai]"
+          pip install -e ".[dev,docs,openai,telemetry]"
 
       - name: Run the documentation tests
         run: pytest tests/docs
+
+      - name: Check the captured notebook output still matches a real run
+        # The output blocks on the notebook pages are captured from the
+        # notebooks; this fails when a notebook's output changed and the
+        # page did not (refresh with ``python scripts/notebook_output.py --update``).
+        env:
+          LOCUS_SDK_DIR: ${{ github.workspace }}
+          LOCUS_MODEL_PROVIDER: mock
+        run: python scripts/notebook_output.py --check
 
   # Aggregate gate. Branch-protection should require this single status
   # check rather than each individual one — that lets us add / remove
