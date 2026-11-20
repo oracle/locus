@@ -281,13 +281,17 @@ class JsonRpcClientTransport(_HttpTransport):
                     **self._timeout_kw(timeout),
                 )
         except httpx.TransportError as e:
-            raise A2ATransportUnavailableError(INTERNAL_ERROR, f"{self.url}: {e}") from e
-        if self._unavailable_status(resp.status_code):
-            raise A2ATransportUnavailableError(
-                METHOD_NOT_FOUND, f"{self.url} answered HTTP {resp.status_code}"
+            await emit(
+                EV_A2A_CLIENT_RECEIVED,
+                target_url=self.url,
+                method=method,
+                binding=self.binding,
+                status_code=None,
+                duration_ms=(time.perf_counter() - started) * 1000,
+                content_length=0,
+                error=type(e).__name__,
             )
-        resp.raise_for_status()
-        data = resp.json()
+            raise A2ATransportUnavailableError(INTERNAL_ERROR, f"{self.url}: {e}") from e
         await emit(
             EV_A2A_CLIENT_RECEIVED,
             target_url=self.url,
@@ -296,7 +300,14 @@ class JsonRpcClientTransport(_HttpTransport):
             status_code=resp.status_code,
             duration_ms=(time.perf_counter() - started) * 1000,
             content_length=len(resp.content),
+            **({"error": "HTTPStatusError"} if resp.is_error else {}),
         )
+        if self._unavailable_status(resp.status_code):
+            raise A2ATransportUnavailableError(
+                METHOD_NOT_FOUND, f"{self.url} answered HTTP {resp.status_code}"
+            )
+        resp.raise_for_status()
+        data = resp.json()
         if "error" in data:
             err = data["error"]
             raise A2AClientError(
@@ -446,6 +457,16 @@ class HttpJsonClientTransport(_HttpTransport):
                     **self._timeout_kw(timeout),
                 )
         except httpx.TransportError as e:
+            await emit(
+                EV_A2A_CLIENT_RECEIVED,
+                target_url=self.url,
+                method=method,
+                binding=self.binding,
+                status_code=None,
+                duration_ms=(time.perf_counter() - started) * 1000,
+                content_length=0,
+                error=type(e).__name__,
+            )
             raise A2ATransportUnavailableError(INTERNAL_ERROR, f"{self.url}: {e}") from e
         await emit(
             EV_A2A_CLIENT_RECEIVED,
@@ -455,6 +476,7 @@ class HttpJsonClientTransport(_HttpTransport):
             status_code=resp.status_code,
             duration_ms=(time.perf_counter() - started) * 1000,
             content_length=len(resp.content),
+            **({"error": "HTTPStatusError"} if resp.is_error else {}),
         )
         payload: Any
         try:

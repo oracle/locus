@@ -20,6 +20,18 @@ policy.
 
 ### Fixed
 
+- **A2A client calls close their event bracket when they fail, and the flat
+  `/a2a/invoke` and `/a2a/stream` routes have one.** The JSON-RPC, HTTP+JSON
+  and gRPC client transports, and the client's pre-1.0 path, emitted
+  `a2a.client.received` only for a response they could parse; a connection
+  error, a timeout, an HTTP error status or a gRPC status left
+  `a2a.client.send` without its partner. `received` now follows every call,
+  with `status_code` null when nothing arrived (the gRPC status on gRPC)
+  and `error` naming the failure, and the gRPC binding reports
+  `duration_ms` like the HTTP bindings. The two backwards-compatible routes
+  emitted no `a2a.task.*` events at all; they now emit `received` and
+  `completed` like the JSON-RPC methods, with `a2a/invoke` and `a2a/stream`
+  as the `method`.
 - **Every `started` event has its `completed` on failure too.** A
   sequential pipeline stage, a loop iteration, the research workflow's
   execute and regenerate nodes, the summarising compactor and

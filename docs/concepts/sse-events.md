@@ -187,10 +187,10 @@ returns. Like every `emit()` site, a no-op without a bound run id.
 
 | Event | Payload |
 |---|---|
-| `a2a.task.received` | `method`, `rpc_id` |
+| `a2a.task.received` | `method`, `rpc_id` (the flat `/a2a/invoke` and `/a2a/stream` routes report `a2a/invoke` / `a2a/stream` and a null `rpc_id`) |
 | `a2a.task.completed` | `method`, `success`, `error_code` (on a protocol or internal error; absent when a streaming client left mid-stream), `duration_ms` |
-| `a2a.client.send` | `target_url`, `method` |
-| `a2a.client.received` | `target_url`, `method`, `status_code`, `duration_ms`, `content_length` |
+| `a2a.client.send` | `target_url`, `method`, `binding` (from the v1 transports) |
+| `a2a.client.received` | `target_url`, `method`, `binding` (from the v1 transports), `status_code` (null when no response arrived; the gRPC status on the gRPC binding, 0 for OK), `duration_ms`, `content_length`, `error` (the exception type when the call failed in transit, `HTTPStatusError` for an error status, the gRPC status name on the gRPC binding) |
 
 ### `skills.*` — skill activation
 
@@ -338,7 +338,7 @@ and the span boundary come from the same moment of the loop.
 | `memory.manager.extracted`, `memory.manager.extract_failed` | at the end of `invoke_agent` (inline), or after it (background) |
 | `model.fallback`, `model.fallback.breaker` | inside the `chat` span of the call that failed over; `gen_ai.request.model` on that span is the hook's configured model, so with a `FallbackChain` pass `TelemetryHook(model=...)` |
 | `a2a.task.received` / `a2a.task.completed` | bracket the served request, for a streaming method too (`completed` follows the last SSE frame); the agent's `invoke_agent` is a child of the caller's span when the request carried `traceparent` |
-| `a2a.client.send` / `a2a.client.received` | bracket the HTTP call; made from a tool, it sits inside that tool's `execute_tool` span and carries the span as `traceparent` |
+| `a2a.client.send` / `a2a.client.received` | bracket the call, a failed one too (`received` then carries `error`); made from a tool, it sits inside that tool's `execute_tool` span and carries the span as `traceparent` |
 | `skills.activated` | inside `locus.iteration`, before the `chat` span |
 | `deepagent.subagent.spawned` / `deepagent.subagent.completed` | the sub-agent's own `invoke_agent`, under the `execute_tool` span of the spawning tool (the tool call in flight when its run starts) |
 | `deepagent.fs.*`, `deepagent.todo.*` | inside the `execute_tool` span of the file or todo tool |
