@@ -19,13 +19,15 @@ def test_every_diagram_passes() -> None:
 
 def test_the_vocabulary_is_read_from_the_stylesheet() -> None:
     assert {"node", "primary", "edge", "label-bg", "on-lane", "lane-title"} <= CLASSES
+    # Page chrome around the figure and CSS comments are not diagram vocabulary.
+    assert not {"md-typeset", "tl-glyph", "tl-dia__expand", "tl-dia-overlay__panel"} & CLASSES
 
 
 def test_inline_styling_unknown_classes_and_a_missing_title_fail(tmp_path: Path) -> None:
     svg = (DIAGRAMS / "agent-loop.svg").read_text(encoding="utf-8")
     bad = (
         svg.replace('<path class="edge"', '<path class="edge" style="stroke:red"', 1)
-        .replace('<text class="label"', '<text class="lable" font-size="9"', 1)
+        .replace('<text class="label"', '<text class="not-a-class" font-size="9"', 1)
         .replace('<title id="title">The agent loop</title>', "")
     )
     path = tmp_path / "bad.svg"
@@ -35,7 +37,7 @@ def test_inline_styling_unknown_classes_and_a_missing_title_fail(tmp_path: Path)
 
     assert "<path> has inline styling attribute style=" in problems
     assert "<text> has inline styling attribute font-size=" in problems
-    assert any('class "lable"' in p for p in problems)
+    assert any('class "not-a-class"' in p for p in problems)
     assert any("<title" in p for p in problems)
     assert main([str(path)]) == 1
 

@@ -30,13 +30,14 @@ STYLING = {"fill", "stroke", "style", "color"}  # plus every font-* attribute
 
 
 def known_classes(css: str) -> set[str]:
-    """Classes named in a selector scoped to ``.tl-dia`` (not ``.tl-dia__*``)."""
+    """Classes named after ``.tl-dia `` in a selector (not ``.tl-dia:hover``, ``.tl-dia__*``)."""
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.DOTALL)
     classes: set[str] = set()
     for selector in re.findall(r"([^{}]+)\{", css):
         for part in selector.split(","):
-            words = re.findall(r"\.([a-zA-Z][\w-]*)", part)
-            if "tl-dia" in words:
-                classes.update(w for w in words[words.index("tl-dia") + 1 :])
+            _, scoped, rest = part.partition(".tl-dia ")
+            if scoped:
+                classes.update(re.findall(r"\.([a-zA-Z][\w-]*)", rest))
     return classes
 
 
