@@ -1533,7 +1533,10 @@ class A2AServer(A2AV1ServerMixin):
             finally:
                 success, error_code = outcome if outcome is not None else (False, None)
                 completed(success, error_code)
-                yield "data: [DONE]\n\n"
+            # Outside the ``finally``: a generator the client closed must not
+            # yield again, and the terminator belongs to a stream that ran to
+            # its end, on the agent's answer or on the error frame.
+            yield "data: [DONE]\n\n"
 
         return StreamingResponse(event_generator(), media_type="text/event-stream")
 
