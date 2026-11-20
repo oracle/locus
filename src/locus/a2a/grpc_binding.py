@@ -451,9 +451,16 @@ class GrpcClientTransport(ClientTransport):
         timeout: Any = None,  # noqa: ASYNC109 — a gRPC deadline, not an asyncio timer
     ) -> AsyncIterator[dict[str, Any]]:
         grpc = _require_grpc()
+        from locus.observability.emit import EV_A2A_CLIENT_RECEIVED, EV_A2A_CLIENT_SEND, emit
+
         request_name, _, streaming = RPC_SIGNATURES.get(method, ("", "", False))
         if not request_name or not streaming:
             raise A2AClientError(METHOD_NOT_FOUND, f"unknown streaming method {method!r}")
+        await emit(EV_A2A_CLIENT_SEND, target_url=self.url, method=method, binding=self.binding)
+        started = time.perf_counter()
+        status = 0
+        frames = 0
+        error: str | None = None
         request = self._messages.from_dict(params, request_name)
         call = self._method(method)(
             request,
@@ -462,12 +469,28 @@ class GrpcClientTransport(ClientTransport):
         )
         try:
             async for response in call:
+                frames += 1
                 yield self._messages.to_dict(response)
         except grpc.aio.AioRpcError as e:
+            # ``status_code`` is the gRPC status here, as on the unary path.
+            status, error = e.code().value[0], e.code().name
             translated = self._translate(e)
             if isinstance(translated, A2ATransportUnavailableError):
                 raise translated from e
+            frames += 1
             yield {"error": {"code": translated.code, "message": translated.message}}
+        finally:
+            data: dict[str, Any] = {
+                "target_url": self.url,
+                "method": method,
+                "binding": self.binding,
+                "status_code": status,
+                "duration_ms": (time.perf_counter() - started) * 1000,
+                "frames": frames,
+            }
+            if error is not None:
+                data["error"] = error
+            await emit(EV_A2A_CLIENT_RECEIVED, **data)
 
     async def aclose(self) -> None:
         if self._channel is not None and self._owns_channel:

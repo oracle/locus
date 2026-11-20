@@ -288,8 +288,39 @@ class SummarizingManager(ConversationManager):
         to_summarize = non_system_messages[: -self.keep_recent]
         recent = non_system_messages[-self.keep_recent :]
 
+        import time as _time  # noqa: PLC0415
+
+        from locus.observability.emit import (  # noqa: PLC0415
+            EV_MEMORY_COMPACTOR_COMPLETED,
+            EV_MEMORY_COMPACTOR_TRIGGERED,
+            emit_sync,
+        )
+
+        # The same bracket ``async_apply`` publishes, scheduled on the running
+        # loop when there is one (a sync hook inside an agent run).
+        emit_sync(
+            EV_MEMORY_COMPACTOR_TRIGGERED,
+            strategy="summarizing",
+            messages_before=len(non_system_messages),
+            threshold=self.threshold,
+        )
+        _started = _time.perf_counter()
+
         # Generate summary
-        summary_text = self._generate_summary(to_summarize)
+        try:
+            summary_text = self._generate_summary(to_summarize)
+        except Exception as e:
+            emit_sync(
+                EV_MEMORY_COMPACTOR_COMPLETED,
+                strategy="summarizing",
+                messages_before=len(non_system_messages),
+                messages_after=len(non_system_messages),
+                summarized_count=0,
+                duration_ms=(_time.perf_counter() - _started) * 1000,
+                success=False,
+                error=type(e).__name__,
+            )
+            raise
 
         # Build result
         if system_message:
@@ -303,6 +334,15 @@ class SummarizingManager(ConversationManager):
         result.append(summary_message)
         result.extend(recent)
 
+        emit_sync(
+            EV_MEMORY_COMPACTOR_COMPLETED,
+            strategy="summarizing",
+            messages_before=len(non_system_messages),
+            messages_after=len(result),
+            summarized_count=len(to_summarize),
+            duration_ms=(_time.perf_counter() - _started) * 1000,
+            success=True,
+        )
         return result
 
     def _generate_summary(self, messages: list[Message]) -> str:

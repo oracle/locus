@@ -223,6 +223,30 @@ class _HttpTransport(ClientTransport):
             await self._client.aclose()
             self._client = None
 
+    async def _stream_received(
+        self,
+        method: str,
+        *,
+        started: float,
+        status: int | None,
+        frames: int,
+        error: str | None,
+    ) -> None:
+        """Close the ``a2a.client.send`` bracket of a streaming call."""
+        from locus.observability.emit import EV_A2A_CLIENT_RECEIVED, emit
+
+        data: dict[str, Any] = {
+            "target_url": self.url,
+            "method": method,
+            "binding": self.binding,
+            "status_code": status,
+            "duration_ms": (time.perf_counter() - started) * 1000,
+            "frames": frames,
+        }
+        if error is not None:
+            data["error"] = error
+        await emit(EV_A2A_CLIENT_RECEIVED, **data)
+
     @staticmethod
     def _unavailable_status(status_code: int) -> bool:
         return status_code in (404, 405, 501)
@@ -327,6 +351,13 @@ class JsonRpcClientTransport(_HttpTransport):
     ) -> AsyncIterator[dict[str, Any]]:
         import httpx
 
+        from locus.observability.emit import EV_A2A_CLIENT_SEND, emit
+
+        await emit(EV_A2A_CLIENT_SEND, target_url=self.url, method=method, binding=self.binding)
+        started = time.perf_counter()
+        status: int | None = None
+        frames = 0
+        error: str | None = None
         headers = self.headers(Accept="text/event-stream")
         try:
             async with (
@@ -339,6 +370,7 @@ class JsonRpcClientTransport(_HttpTransport):
                     **self._timeout_kw(timeout),
                 ) as resp,
             ):
+                status = resp.status_code
                 if self._unavailable_status(resp.status_code):
                     raise A2ATransportUnavailableError(
                         METHOD_NOT_FOUND, f"{self.url} answered HTTP {resp.status_code}"
@@ -354,6 +386,7 @@ class JsonRpcClientTransport(_HttpTransport):
                     except json.JSONDecodeError:
                         env = {}
                     if isinstance(env, dict) and "error" in env:
+                        frames += 1
                         yield {"error": env["error"]}
                     return
                 async for payload in self._sse_frames(resp):
@@ -364,11 +397,22 @@ class JsonRpcClientTransport(_HttpTransport):
                     except json.JSONDecodeError:
                         continue
                     if "error" in env:
+                        frames += 1
                         yield {"error": env["error"]}
                         break
+                    frames += 1
                     yield env.get("result", env)
         except httpx.TransportError as e:
+            error = type(e).__name__
             raise A2ATransportUnavailableError(INTERNAL_ERROR, f"{self.url}: {e}") from e
+        except Exception as e:
+            error = "HTTPStatusError" if status is not None and status >= 400 else type(e).__name__
+            raise
+        finally:
+            # Runs when the stream ends, fails, or the consumer stops reading.
+            await self._stream_received(
+                method, started=started, status=status, frames=frames, error=error
+            )
 
 
 class HttpJsonClientTransport(_HttpTransport):
@@ -502,6 +546,8 @@ class HttpJsonClientTransport(_HttpTransport):
     ) -> AsyncIterator[dict[str, Any]]:
         import httpx
 
+        from locus.observability.emit import EV_A2A_CLIENT_SEND, emit
+
         if method == "SendStreamingMessage":
             verb, path, body = "POST", "/message:stream", params
         elif method == "SubscribeToTask":
@@ -511,6 +557,11 @@ class HttpJsonClientTransport(_HttpTransport):
         headers = self.headers(Accept="text/event-stream")
         if body is not None:
             headers["Content-Type"] = A2A_JSON_MEDIA_TYPE
+        await emit(EV_A2A_CLIENT_SEND, target_url=self.url, method=method, binding=self.binding)
+        started = time.perf_counter()
+        status: int | None = None
+        frames = 0
+        error: str | None = None
         try:
             async with (
                 self._client_for(timeout) as client,
@@ -522,6 +573,7 @@ class HttpJsonClientTransport(_HttpTransport):
                     **self._timeout_kw(timeout),
                 ) as resp,
             ):
+                status = resp.status_code
                 if resp.is_error:
                     await resp.aread()
                     try:
@@ -541,13 +593,25 @@ class HttpJsonClientTransport(_HttpTransport):
                     except json.JSONDecodeError:
                         continue
                     if isinstance(frame, dict) and "error" in frame:
-                        error = frame["error"]
-                        code = code_from_error_details(error.get("details"), default=INTERNAL_ERROR)
-                        yield {"error": {"code": code, "message": error.get("message", "")}}
+                        error_body = frame["error"]
+                        code = code_from_error_details(
+                            error_body.get("details"), default=INTERNAL_ERROR
+                        )
+                        frames += 1
+                        yield {"error": {"code": code, "message": error_body.get("message", "")}}
                         break
+                    frames += 1
                     yield frame
         except httpx.TransportError as e:
-            raise A2ATransportUnavailableError(INTERNAL_ERROR, f"{self.url}: {e}") from e
+            error = type(e).__name__
+            raise A2ATransportUnavailableError(INTERNAL_ERROR, f"{self.url}{path}: {e}") from e
+        except Exception as e:
+            error = "HTTPStatusError" if status is not None and status >= 400 else type(e).__name__
+            raise
+        finally:
+            await self._stream_received(
+                method, started=started, status=status, frames=frames, error=error
+            )
 
 
 def make_transport(

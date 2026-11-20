@@ -20,6 +20,17 @@ policy.
 
 ### Fixed
 
+- **A2A client streams and the synchronous compactor publish their events.**
+  The `stream()` methods of the JSON-RPC, HTTP+JSON and gRPC client
+  transports and the client's pre-1.0 `message/stream` path emitted no
+  `a2a.client.*` events at all, so a streamed call was invisible to a
+  subscriber while its one-shot twin was bracketed. Each now emits
+  `a2a.client.send` before the request and `a2a.client.received` when the
+  stream ends, however it ends: with `status_code`, `duration_ms`, `frames`
+  (the frames yielded) and `error` on a failure in transit, an error status
+  or a gRPC status. `SummarizingManager.apply()` now publishes the same
+  `memory.compactor.triggered` / `completed` pair as `async_apply`, through
+  `emit_sync`, with `success` false and `error` when the summariser raises.
 - **A2A client calls close their event bracket when they fail, and the flat
   `/a2a/invoke` and `/a2a/stream` routes have one.** The JSON-RPC, HTTP+JSON
   and gRPC client transports, and the client's pre-1.0 path, emitted

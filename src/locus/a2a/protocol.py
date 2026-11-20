@@ -1978,6 +1978,14 @@ class A2AClient:
                 yield v1_stream_response_to_legacy_payload(frame)
             return
 
+        import time as _time  # noqa: PLC0415
+
+        from locus.observability.emit import (  # noqa: PLC0415
+            EV_A2A_CLIENT_RECEIVED,
+            EV_A2A_CLIENT_SEND,
+            emit,
+        )
+
         body = {
             "jsonrpc": "2.0",
             "id": uuid.uuid4().hex,
@@ -1986,11 +1994,17 @@ class A2AClient:
         }
         headers = inject_trace_headers(self._headers() | {"Accept": "text/event-stream"})
         effective_timeout = self._timeout if timeout is None else timeout
+        await emit(EV_A2A_CLIENT_SEND, target_url=self._url, method="message/stream")
+        _started = _time.perf_counter()
+        status: int | None = None
+        frames = 0
+        error: str | None = None
         client = await self._http()
         try:
             async with client.stream(
                 "POST", f"{self._url}/", json=body, headers=headers, timeout=effective_timeout
             ) as resp:
+                status = resp.status_code
                 resp.raise_for_status()
                 async for raw in resp.aiter_lines():
                     if not raw or not raw.startswith("data: "):
@@ -2003,12 +2017,27 @@ class A2AClient:
                     except json.JSONDecodeError:
                         continue
                     if "error" in env:
+                        frames += 1
                         yield env  # surface error envelope to caller
                         break
+                    frames += 1
                     yield env.get("result", env)
+        except Exception as e:
+            error = "HTTPStatusError" if status is not None and status >= 400 else type(e).__name__
+            raise
         finally:
             if client is not self._http_client:
                 await client.aclose()
+            data: dict[str, Any] = {
+                "target_url": self._url,
+                "method": "message/stream",
+                "status_code": status,
+                "duration_ms": (_time.perf_counter() - _started) * 1000,
+                "frames": frames,
+            }
+            if error is not None:
+                data["error"] = error
+            await emit(EV_A2A_CLIENT_RECEIVED, **data)
 
     async def subscribe(self, task_id: str) -> AsyncIterator[dict[str, Any]]:
         """Follow a running task (``SubscribeToTask``): the snapshot, then live events."""
