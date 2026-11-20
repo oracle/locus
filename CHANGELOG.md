@@ -8,7 +8,9 @@ policy.
 
 ## [Unreleased]
 
-### Added
+## [6.2.1] - 2026-11-20
+
+### Documentation
 
 - **An install-extras reference.** `docs/how-to/install-extras.md` lists
   every pip extra `pyproject.toml` defines, grouped by what it enables, with
