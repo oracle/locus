@@ -45,6 +45,8 @@ Any other provider works with the same steps and its own prefix and key; see
 
 On Oracle Cloud, install `locus-sdk[oci]` instead, point at an OCI config
 profile, and use `oci:` model ids. See [OCI GenAI models](oci-models.md).
+Every other extra, from checkpoint backends to vector stores and sandboxes,
+is listed on [Install extras](install-extras.md).
 
 ## 2. Save one complete file
 

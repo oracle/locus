@@ -48,6 +48,10 @@ Every class descends from `LocusError`; the string under each name is its `kind`
 Class names may evolve; `kind` strings are part of the stable contract.
 Key your dashboards on `kind`.
 
+One subclass lives outside `locus.core.errors`: `ToolCallIntegrityError` in
+`locus.tools.integrity` extends `ToolError` and keeps `tool_error` as its
+`kind`, so a handler keyed on the tool family sees an integrity refusal too.
+
 ## Idiomatic patterns
 
 ### One handler, structured logs

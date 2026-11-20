@@ -17,7 +17,8 @@ override, or an explicit `base_url=`. The order is always the same:
 
 Install the extra for the client you use: `pip install "locus-sdk[oci]"` for
 OCI Generative AI, `"locus-sdk[openai]"` for OpenAI and every
-OpenAI-compatible route, `"locus-sdk[anthropic]"` for Anthropic.
+OpenAI-compatible route, `"locus-sdk[anthropic]"` for Anthropic. The full
+list of extras is on [Install extras](install-extras.md).
 
 ## OCI Generative AI
 

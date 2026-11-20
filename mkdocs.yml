@@ -264,6 +264,7 @@ nav:
     - About & maintainers: about.md
 - How-to:
   - Quickstart: how-to/quickstart.md
+  - Install extras: how-to/install-extras.md
   - Build it with Codex: how-to/codex.md
   - Configure a model provider: how-to/configure-providers.md
   - Environment variables: how-to/environment-variables.md
