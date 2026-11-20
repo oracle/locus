@@ -8,6 +8,100 @@ policy.
 
 ## [Unreleased]
 
+### Deprecated
+
+- **`EV_MEMORY_CONVERSATION_ADDED` (`memory.conversation.added`).** The
+  constant in `locus.observability.emit` was declared and never emitted:
+  conversation managers apply a policy to the messages the agent already
+  holds, nothing adds to a conversation outside the agent loop, and the
+  agent's own events show every turn. Importing the name still returns the
+  string, with a `LocusDeprecationWarning`; it is removed in 7.0.0 and
+  nothing replaces it, since no subscriber ever received it (#572).
+
+### Fixed
+
+- **Streaming A2A requests now close their event bracket.** `message/stream`
+  and the v1 `SendStreamingMessage` / `SubscribeToTask` methods emitted
+  `a2a.task.received` and never `a2a.task.completed`, because the JSON-RPC
+  dispatcher returned the SSE response before its completion emit; a
+  subscriber could not tell a streaming request that finished from one still
+  running. The stream now publishes `a2a.task.completed` when its generator
+  ends, with the same payload as the non-streaming path (`method`, `success`,
+  `error_code` on a protocol or internal error, `duration_ms` measured from
+  the request's arrival); a client that leaves mid-stream gets
+  `success: false` without an error code, and an agent failure inside the
+  stream, which the client receives as a final `failed` status update,
+  counts as a served request (#575).
+
+## [6.1.1] - 2026-11-19
+
+### Fixed
+
+- **The Oracle `Sync*` wrappers no longer leave a database session behind
+  on every call.** `run_sync`, which every synchronous twin
+  (`OracleSyncBackend`, `OracleSyncStore`, `OracleSyncVectorStore`,
+  `OracleSyncInDBEmbeddings` and the rest) drives its async class through,
+  started a fresh event loop per call, so the per-loop connection pool was
+  rebuilt on each call, the previous pool's sessions stayed open on the
+  database, and `close()` failed on a pool whose loop was gone. Every call
+  now runs on one event loop that stays up for the process, in a copy of
+  the caller's `contextvars` context; the pool is built once, reused by
+  every call and closed by `close()`.
+- **`OracleVectorStore` works on a database without a vector memory pool.**
+  The default `HNSW` index lives in the database's vector memory pool, and
+  Oracle Database Free sets `vector_memory_size` to 0 as installed, so the
+  first use of the store failed with a bare `ORA-51962` after the table was
+  already created, and every later instance searched that table without an
+  index and without a word. The store now says what happened and continues
+  with an exact scan, as `index_type="NONE"` does, with a `LocusWarning`
+  that names `index_type="IVF"` for an on-disk index; an explicit
+  `build_index()` raises `VectorStoreError` with the same guidance.
+- **`OracleVectorStore` hybrid search finds the rows written after the text
+  index and keeps the rows the text index misses.** `ensure_text_index()`
+  created the `CTXSYS.CONTEXT` index with manual synchronisation, so a
+  document added after the index existed was invisible to
+  `hybrid_search(use_text_index=True)` until someone ran
+  `CTX_DDL.SYNC_INDEX`; the index is now created with `SYNC (ON COMMIT)`
+  (rebuild an existing one with `ensure_text_index(drop_existing=True)`).
+  The text leg also filtered on `CONTAINS()`, so a semantic match with no
+  query term in it was dropped and `alpha=1.0` was not vector search; the
+  lexical score now comes from a left-joined `SCORE()` subquery and an
+  unmatched row scores 0 on that leg. The query text is sent as
+  `{term} ACCUM {term}` instead of raw Oracle Text syntax, so hyphens,
+  operators and reserved words in a natural-language query no longer make
+  it empty or invalid. The [Oracle Database 26ai](docs/concepts/oracle-26ai.md)
+  page shows the path, and the [RAG](docs/concepts/rag.md) page says that
+  the embedder is independent of a store's lexical leg.
+- **`OracleVectorStore` reads rows back on a database with the default
+  string limit.** `get()`, `search()` and `hybrid_search()` fetched the
+  vector as `VECTOR_SERIALIZE(...)`, a `VARCHAR2` that overflows 4000 bytes
+  at 1024 dimensions and above, so every read failed with `ORA-51810` on a
+  database with `MAX_STRING_SIZE = STANDARD` (Oracle Database Free and most
+  on-premises installations; Autonomous Database defaults to `EXTENDED`).
+  The vector column is now fetched natively, as python-oracledb returns it.
+- **Offline notebook runs no longer open with a context-window notice.**
+  The example `MockModel` in `examples/config.py` now reports a context
+  window, so an `Agent` built on it keeps a token window instead of logging
+  that it fell back to a message window (PR #555).
+- **The research workflow accepts a `provider:model` string at every node.**
+  `create_research_workflow(model="oci:openai.gpt-4.1", ...)` ran the plan,
+  execute and summarize nodes and then failed at the grounding node with
+  `'str' object has no attribute 'complete'`: every other node handed the
+  value to `Agent`, which resolves a string, while `make_grounding_eval_node`
+  passed it straight to `GroundingEvaluator.evaluate_with_llm`. The grounding
+  node now resolves a string through `get_model()` once, when the workflow is
+  built, so `model`, `summarization_model` and `grounding_model` all take a
+  string or a model object (#563).
+- **An event emitted from sync code in the closing turn of a stream now
+  reaches live subscribers.** `emit_sync` cannot await the bus, so it
+  schedules the publish as a task (or hops it to the owner loop from a
+  worker thread); a consumer that called `close_stream` in the same loop
+  turn, as a graph router or a sync `@tool` site allows, found the event in
+  the history but never on its live subscription. The bus now remembers the
+  publishes `emit_sync` schedules per run (`EventBus.track_publish`), and
+  `close_stream` lets a run's land before it signals the end; `stats()`
+  reports them as `pending_publishes`.
+
 ## [6.1.0] - 2026-11-19
 
 ### Added
@@ -53,29 +147,6 @@ policy.
 
 ### Fixed
 
-- **`OracleVectorStore` hybrid search finds the rows written after the text
-  index and keeps the rows the text index misses.** `ensure_text_index()`
-  created the `CTXSYS.CONTEXT` index with manual synchronisation, so a
-  document added after the index existed was invisible to
-  `hybrid_search(use_text_index=True)` until someone ran
-  `CTX_DDL.SYNC_INDEX`; the index is now created with `SYNC (ON COMMIT)`
-  (rebuild an existing one with `ensure_text_index(drop_existing=True)`).
-  The text leg also filtered on `CONTAINS()`, so a semantic match with no
-  query term in it was dropped and `alpha=1.0` was not vector search; the
-  lexical score now comes from a left-joined `SCORE()` subquery and an
-  unmatched row scores 0 on that leg. The query text is sent as
-  `{term} ACCUM {term}` instead of raw Oracle Text syntax, so hyphens,
-  operators and reserved words in a natural-language query no longer make
-  it empty or invalid. The [Oracle Database 26ai](docs/concepts/oracle-26ai.md)
-  page shows the path, and the [RAG](docs/concepts/rag.md) page says that
-  the embedder is independent of a store's lexical leg.
-- **`OracleVectorStore` reads rows back on a database with the default
-  string limit.** `get()`, `search()` and `hybrid_search()` fetched the
-  vector as `VECTOR_SERIALIZE(...)`, a `VARCHAR2` that overflows 4000 bytes
-  at 1024 dimensions and above, so every read failed with `ORA-51810` on a
-  database with `MAX_STRING_SIZE = STANDARD` (Oracle Database Free and most
-  on-premises installations; Autonomous Database defaults to `EXTENDED`).
-  The vector column is now fetched natively, as python-oracledb returns it.
 - **`Mem0MemoryManager` honours its page size on mem0ai 2.x.** mem0 2.0
   renamed the page-size argument of `search()` and `get_all()` from `limit`
   to `top_k` and ignores keywords it does not know, so every retrieval

@@ -160,10 +160,11 @@ class TestPostgresAdapterTimeTravel(
     BoundedHistoryConformance,
     ProductionSettingsConformance,
 ):
-    # The first save on a fresh table runs the DDL under an advisory lock, and
-    # the expiry stamp is taken before that; under CI load the default 0.2 s
-    # ttl can run out before the second save lands. The remote-store classes
-    # widen the window the same way.
+    # The ttl cases warm a fresh checkpointer before their timed window (the
+    # connection and the first-write DDL under the advisory lock happen in the
+    # first save, with the expiry stamp taken before them); the wider window
+    # keeps a margin for two saves and a list on a loaded runner, where the
+    # default 0.2 s has run out before the second save landed (#565).
     short_ttl = 1.0
 
     def _build(self, keep: int | None, **settings: Any) -> Any:

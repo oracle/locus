@@ -22,9 +22,18 @@ The grammar quirks worth pinning here:
 
 from __future__ import annotations
 
+import warnings
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import Any
+from unittest.mock import AsyncMock
+
 import pytest
 
-from locus.rag.stores.oracle import OracleVectorStore
+import locus.rag.stores.oracle as oracle_mod
+from locus.core.errors import VectorStoreError
+from locus.core.warnings import LocusWarning
+from locus.rag.stores.oracle import OracleVectorStore, _needs_vector_memory
 
 
 def _store(**kwargs) -> OracleVectorStore:
@@ -132,3 +141,129 @@ class TestValidation:
     def test_parallel_min(self) -> None:
         with pytest.raises(ValueError, match="index_parallel"):
             _store(index_type="HNSW", index_parallel=0)
+
+
+# ---------------------------------------------------------------------------
+# ORA-51962: the HNSW index has no vector memory pool to live in
+# ---------------------------------------------------------------------------
+
+ORA_51962 = "ORA-51962: The vector memory area is out of space for the current container."
+
+
+class _Cursor:
+    """Records every statement; raises ``error`` on the vector index DDL."""
+
+    def __init__(self, error: Exception | None) -> None:
+        self.error = error
+        self.executed: list[str] = []
+
+    async def execute(self, sql: str, params: dict[str, Any] | None = None) -> None:
+        self.executed.append(" ".join(sql.split()))
+        if self.error is not None and "CREATE VECTOR INDEX" in sql:
+            raise self.error
+
+    async def fetchone(self) -> tuple[int]:
+        return (0,)  # the table does not exist yet
+
+    async def __aenter__(self) -> _Cursor:
+        return self
+
+    async def __aexit__(self, *exc: object) -> bool:
+        return False
+
+
+class _Conn:
+    def __init__(self, cursor: _Cursor) -> None:
+        self._cursor = cursor
+        self.commits = 0
+
+    def cursor(self) -> _Cursor:
+        return self._cursor
+
+    async def commit(self) -> None:
+        self.commits += 1
+
+
+def _provisioning_store(
+    monkeypatch: pytest.MonkeyPatch, error: Exception | None, **kwargs: Any
+) -> tuple[OracleVectorStore, _Cursor, _Conn]:
+    cursor = _Cursor(error)
+    conn = _Conn(cursor)
+
+    @asynccontextmanager
+    async def fake_acquire(_store: object, _pool: object) -> AsyncIterator[_Conn]:
+        yield conn
+
+    monkeypatch.setattr(oracle_mod, "safe_acquire", fake_acquire)
+    store = _store(**kwargs)
+    monkeypatch.setattr(store, "_get_pool", AsyncMock(return_value=object()))
+    return store, cursor, conn
+
+
+def test_needs_vector_memory_is_ora_51962_only() -> None:
+    assert _needs_vector_memory(RuntimeError(ORA_51962))
+    assert not _needs_vector_memory(RuntimeError("ORA-00955: name is already used"))
+    assert not _needs_vector_memory(RuntimeError("ORA-01031: insufficient privileges"))
+
+
+class TestVectorMemoryFallback:
+    async def test_hnsw_without_vector_memory_warns_and_keeps_the_table(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        store, cursor, conn = _provisioning_store(monkeypatch, RuntimeError(ORA_51962))
+
+        with pytest.warns(LocusWarning, match=r'index_type="IVF"') as record:
+            await store._ensure_table()
+
+        assert store._initialized is True
+        assert conn.commits == 1
+        assert any(sql.startswith("CREATE TABLE locus_vectors") for sql in cursor.executed)
+        assert any("ORGANIZATION INMEMORY NEIGHBOR GRAPH" in sql for sql in cursor.executed)
+        message = str(record[0].message)
+        assert "HNSW vector index on locus_vectors" in message
+        assert "ORA-51962" in message
+        assert message.endswith("Searching locus_vectors with an exact scan.")
+
+    async def test_the_table_is_searched_without_an_index_afterwards(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        store, cursor, _conn = _provisioning_store(monkeypatch, RuntimeError(ORA_51962))
+        with pytest.warns(LocusWarning):
+            await store._ensure_table()
+
+        # Already provisioned: a second pass runs no DDL and warns again never.
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            await store._ensure_table()
+        assert sum("CREATE" in sql for sql in cursor.executed) == 3  # table, index, created_at
+
+    async def test_other_index_errors_propagate(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        store, _cursor, conn = _provisioning_store(
+            monkeypatch, RuntimeError("ORA-01031: insufficient privileges")
+        )
+        with pytest.raises(RuntimeError, match="ORA-01031"):
+            await store._ensure_table()
+        assert store._initialized is False
+        assert conn.commits == 0
+
+    async def test_build_index_raises_vector_store_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        store, _cursor, conn = _provisioning_store(monkeypatch, RuntimeError(ORA_51962))
+
+        with pytest.raises(VectorStoreError, match="ORA-51962") as excinfo:
+            await store.build_index()
+
+        assert isinstance(excinfo.value.__cause__, RuntimeError)
+        assert 'index_type="IVF"' in str(excinfo.value)
+        assert "HNSW vector index on locus_vectors" in str(excinfo.value)
+        assert conn.commits == 0
+
+    async def test_build_index_other_errors_propagate(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        store, _cursor, _conn = _provisioning_store(
+            monkeypatch, RuntimeError("ORA-01031: insufficient privileges")
+        )
+        with pytest.raises(RuntimeError, match="ORA-01031"):
+            await store.build_index()

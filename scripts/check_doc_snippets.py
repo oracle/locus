@@ -28,6 +28,14 @@ Deliberately static. It imports the SDK but never executes a snippet, so it
 needs no API key, no network, and no services, which is what makes it cheap
 enough to gate every PR.
 
+The pages under ``docs/`` follow the notebook convention: a snippet may use
+top-level ``await``, ``async for`` and ``async with`` and name tools or agents
+it does not define, as a notebook cell does; the complete programs are the
+notebooks in ``examples/``. For those pages a snippet is accepted when it
+compiles inside a coroutine, and the symbol and keyword checks still apply.
+The README and ``examples/README.md`` stay strict: what they show is pasted
+into files.
+
 Two things it is careful about, both learned from false positives:
 
 - README prose legitimately shows fragments — ``async for event in
@@ -68,7 +76,9 @@ SKIP_INLINE = "# docs: skip"
 SKIP_COMMENT = "<!-- docs: skip -->"
 
 #: Checked by default: the two files a new reader actually copies from.
-DEFAULT_TARGETS = ("README.md", "examples/README.md")
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+DEFAULT_TARGETS = ("README.md", "examples/README.md", "docs/**/*.md")
+NOTEBOOK_STYLE_DIRS = ("docs",)
 
 
 @dataclass(frozen=True)
@@ -107,6 +117,10 @@ def _compiles(source: str) -> str | None:
     return None
 
 
+def _compiles_in_a_coroutine(source: str) -> bool:
+    return _compiles(f"async def _fragment():\n{textwrap.indent(source, '    ')}\n") is None
+
+
 def _is_excerpt(tree: ast.Module, source: str) -> bool:
     """Whether the snippet is an illustrative fragment rather than a file.
 
@@ -115,7 +129,16 @@ def _is_excerpt(tree: ast.Module, source: str) -> bool:
     """
     if any(isinstance(node, ast.Import | ast.ImportFrom) for node in tree.body):
         return False
-    return _compiles(f"async def _fragment():\n{textwrap.indent(source, '    ')}\n") is None
+    return _compiles_in_a_coroutine(source)
+
+
+def is_notebook_style(path: pathlib.Path) -> bool:
+    """Whether ``path`` is a docs page, where the notebook convention holds."""
+    try:
+        parts = path.resolve().relative_to(ROOT).parts
+    except ValueError:
+        parts = path.parts
+    return bool(parts) and parts[0] in NOTEBOOK_STYLE_DIRS
 
 
 def _resolve(dotted: str) -> Any:
@@ -173,14 +196,16 @@ def _check_call(node: ast.Call, target: str, obj: Any) -> list[tuple[str, str]]:
     return [("kwarg", f"{target}(...) has no parameter {kw!r}") for kw in sorted(passed - accepted)]
 
 
-def check_block(source: str) -> list[tuple[str, str]]:
+def check_block(source: str, *, notebook_style: bool = False) -> list[tuple[str, str]]:
     """Every problem in one snippet, as ``(kind, message)``."""
     try:
         tree = ast.parse(source)
     except SyntaxError as exc:
         return [("syntax", str(exc).split("(")[0].strip())]
 
-    if (error := _compiles(source)) is not None and not _is_excerpt(tree, source):
+    if (error := _compiles(source)) is not None and not (
+        _is_excerpt(tree, source) or (notebook_style and _compiles_in_a_coroutine(source))
+    ):
         return [("syntax", error)]
 
     found: list[tuple[str, str]] = []
@@ -221,17 +246,17 @@ def check(paths: list[pathlib.Path]) -> tuple[int, list[Problem]]:
         for index, source in iter_blocks(path):
             checked += 1
             problems.extend(
-                Problem(str(path), index, kind, message) for kind, message in check_block(source)
+                Problem(str(path), index, kind, message)
+                for kind, message in check_block(source, notebook_style=is_notebook_style(path))
             )
     return checked, problems
 
 
 def main(argv: list[str]) -> int:
-    root = pathlib.Path(__file__).resolve().parent.parent
     targets = (
         [pathlib.Path(a) for a in argv[1:]]
         if len(argv) > 1
-        else [root / t for t in DEFAULT_TARGETS]
+        else [path for pattern in DEFAULT_TARGETS for path in sorted(ROOT.glob(pattern))]
     )
 
     checked, problems = check(targets)

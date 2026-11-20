@@ -34,10 +34,10 @@ The `router.*` events are not in the registry: the helpers in
 `locus.observability.router_events` publish them as string literals
 under the run id that `Router.dispatch` binds, so they do not appear in
 the printed list. And the registry is neither a superset nor a subset of
-what the code publishes. Seven names (`multiagent.graph.node.routed`,
+what the code publishes. Six names (`multiagent.graph.node.routed`,
 `a2a.task.processing`, `rag.embedding.generated`, `rag.store.upsert`,
-`rag.store.search`, `memory.conversation.added` and
-`research.completed`) are declared but never emitted, and
+`rag.store.search` and `research.completed`) are declared but never
+emitted (`memory.conversation.added` was a seventh and is deprecated), and
 `agent.tokens.used` is emitted only for a `ModelCompleteEvent` that
 `Agent.run()` never yields. In the other direction, `EventBusHook` and
 the long-term memory managers publish their names as string literals,
@@ -143,12 +143,11 @@ Running it offline — no credentials, bundled mock model — prints the canonic
     - deepagent.todo.completed
   harness.*  (1 events)
     - harness.exec
-  memory.*  (8 events)
+  memory.*  (7 events)
     - memory.checkpoint.loaded
     - memory.checkpoint.saved
     - memory.compactor.completed
     - memory.compactor.triggered
-    - memory.conversation.added
     - memory.conversation.pruned
     - memory.manager.extracted
     - memory.manager.injected
