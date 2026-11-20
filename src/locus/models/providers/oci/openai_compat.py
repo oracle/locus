@@ -51,6 +51,7 @@ Example::
 from __future__ import annotations
 
 import json
+import logging
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
@@ -167,6 +168,9 @@ def request_event_hooks(
 
         hooks["response"] = [_response]
     return hooks
+
+
+logger = logging.getLogger(__name__)
 
 
 class OCIChatCompletionsConfig(OpenAIConfig):
@@ -843,11 +847,59 @@ class OCIChatCompletionsModel(OpenAIModel):
         tools: list[dict[str, Any]] | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[ModelChunkEvent]:
+        """Stream the turn; answer a structured request in one piece when the service streams nothing.
+
+        Some models behind this endpoint (the Llama family, observed on
+        ``meta.llama-3.3-70b-instruct``) answer a ``json_schema``
+        ``response_format`` without streaming it: the stream carries an empty
+        content delta and ends with ``finish_reason: "tool_calls"`` and no
+        tool-call delta, while the same request without ``stream`` returns the
+        JSON. A structured answer can never be legitimately empty, so when a
+        ``response_format`` was sent and nothing came through, the turn is
+        asked again without streaming and its content is yielded as one chunk,
+        followed by the terminal event of that completion.
+        """
         kwargs = self._munge_response_format_for_gemini(kwargs)
         tools = self._sanitize_tools_for_oci(tools)
         messages = self._prepare_messages_for_oci(messages, tools)
+
+        structured = kwargs.get("response_format") is not None
+        streamed_anything = False
+        terminal: ModelChunkEvent | None = None
         async for event in super().stream(messages, tools=tools, **kwargs):
+            if event.done:
+                terminal = event
+                continue
+            if event.content or event.tool_calls or event.reasoning:
+                streamed_anything = True
             yield event
+
+        if structured and not streamed_anything:
+            from locus.core.events import ModelChunkEvent as _ChunkEvent  # noqa: PLC0415
+
+            served = terminal.model if terminal is not None else None
+            logger.debug(
+                "OCI model %s streamed nothing for a response_format (stop_reason=%r); "
+                "answering the structured turn without streaming",
+                served or self.config.model,
+                terminal.stop_reason if terminal is not None else None,
+            )
+            response = await super().complete(messages, tools=tools, **kwargs)
+            if response.message.content:
+                yield _ChunkEvent(content=response.message.content, model=served)
+            if response.message.tool_calls:
+                yield _ChunkEvent(tool_calls=list(response.message.tool_calls), model=served)
+            yield _ChunkEvent(
+                done=True,
+                usage=response.usage or None,
+                stop_reason=response.stop_reason,
+                model=served,
+                cost_usd=terminal.cost_usd if terminal is not None else None,
+            )
+            return
+
+        if terminal is not None:
+            yield terminal
 
     @property
     def client(self) -> openai.AsyncOpenAI:

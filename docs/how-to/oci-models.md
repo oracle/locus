@@ -37,6 +37,14 @@ only path that reaches Responses-only OCI models (`openai.gpt-5.5-pro`
 today) and the only one that lets OCI hold conversation state between
 turns via `previous_response_id` — both modes covered below.
 
+One wrinkle on structured output: the Llama family answers a `json_schema`
+`response_format` without streaming it, so a streamed request carries an
+empty delta and ends with `finish_reason: "tool_calls"` and no tool call.
+`OCIChatCompletionsModel.stream()` notices that nothing came through for a
+structured turn, asks once more without streaming and yields the JSON as a
+single chunk, so `StructuredStream` and `Agent.run()` behave the same on
+every model; the OpenAI family streams the JSON token by token.
+
 ## V1 transport — `OCIChatCompletionsModel`
 
 ### From a laptop or CI

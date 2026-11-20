@@ -69,6 +69,16 @@ policy.
   stream, which the client receives as a final `failed` status update,
   counts as a served request (#575).
 
+- **A structured turn on OCI Llama models streams its answer instead of
+  nothing.** `meta.llama-3.3-70b-instruct` behind `/openai/v1` answers a
+  `json_schema` `response_format` without streaming it: the stream carries an
+  empty delta and ends with `finish_reason: "tool_calls"` and no tool call,
+  so `StructuredStream` produced no partial and no final while the same
+  request without `stream` returned the JSON. `OCIChatCompletionsModel.stream()`
+  now answers such a turn once without streaming and yields the content as
+  one chunk, followed by that completion's usage and stop reason; a turn that
+  streamed anything, or carried no `response_format`, is untouched (#585).
+
 ## [6.1.1] - 2026-11-19
 
 ### Fixed
