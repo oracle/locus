@@ -49,7 +49,7 @@ import json
 import logging
 import os
 import uuid
-from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -1296,7 +1296,7 @@ class A2AServer(A2AV1ServerMixin):
             if use_v1 and req.method in A2AV1_STREAMING_METHODS:
                 if req.method == "SubscribeToTask":
                     self._preflight_v1_task_subscription(params)
-                return await self._stream_response(req, v1=True, carrier=carrier)
+                return await self._stream_response(req, v1=True, carrier=carrier, started=_started)
             if use_v1 and req.method in A2AV1_JSONRPC_METHODS:
                 result = await self.handle_v1(req.method, params)
             elif req.method == "message/send":
@@ -1319,7 +1319,7 @@ class A2AServer(A2AV1ServerMixin):
                 )
             elif req.method == "message/stream":
                 # SSE — peer must POST with Accept: text/event-stream.
-                return await self._stream_response(req, carrier=carrier)
+                return await self._stream_response(req, carrier=carrier, started=_started)
             else:
                 raise _RpcError(METHOD_NOT_FOUND, f"unknown method {req.method!r}")
         except A2AV1ProtocolError as e:
@@ -1348,19 +1348,64 @@ class A2AServer(A2AV1ServerMixin):
         *,
         v1: bool = False,
         carrier: Mapping[str, Any] | None = None,
+        started: float | None = None,
     ) -> Any:
+        """The SSE response for a streaming method, which also closes the
+        ``a2a.task.received`` / ``a2a.task.completed`` bracket.
+
+        The dispatcher emitted ``received`` and returns this response before
+        its own ``completed`` emit, so the stream publishes ``completed`` when
+        its generator ends: on success, on a protocol or internal error (with
+        the error code the client was sent) and when the client leaves
+        mid-stream (``success`` false, no error code). An agent failure
+        inside the stream reaches the client as a final ``failed`` status
+        update, so that stream counts as served. ``started`` is the
+        dispatcher's clock, so ``duration_ms`` covers the whole request.
+        """
+        import contextvars  # noqa: PLC0415
+        import time as _time  # noqa: PLC0415
+
         from fastapi.responses import StreamingResponse
 
+        # Lazy import — observability is opt-in.
+        from locus.observability.emit import EV_A2A_TASK_COMPLETED, emit_sync  # noqa: PLC0415
+
         params = req.params if isinstance(req.params, dict) else {}
+        _started = _time.perf_counter() if started is None else started
+        # The generator may be finalised by the event loop in another
+        # context once the client is gone; the completion is published in a
+        # copy of the context this request was served in, so it carries the
+        # run id ``received`` was emitted under.
+        request_context = contextvars.copy_context()
+
+        def completed(success: bool, error_code: int | None) -> None:
+            data: dict[str, Any] = {
+                "method": req.method,
+                "success": success,
+                "duration_ms": (_time.perf_counter() - _started) * 1000,
+            }
+            if error_code is not None:
+                data["error_code"] = error_code
+            request_context.run(emit_sync, EV_A2A_TASK_COMPLETED, **data)
 
         async def gen() -> AsyncIterator[str]:
             # The generator runs after the handler returned, so the caller's
             # trace is re-attached here for the run it drives.
             with trace_scope(carrier):
-                async for chunk in produce():
-                    yield chunk
+                stream = produce()
+                try:
+                    async for chunk in stream:
+                        yield chunk
+                finally:
+                    # Close the inner generator here rather than leaving it
+                    # to the loop's finaliser, so the completion lands as
+                    # soon as this response ends, however it ends.
+                    await stream.aclose()
 
-        async def produce() -> AsyncIterator[str]:
+        async def produce() -> AsyncGenerator[str, None]:
+            # ``None`` until the stream ends on its own; a client that goes
+            # away mid-stream closes the generator before it is set.
+            outcome: tuple[bool, int | None] | None = None
             try:
                 stream = (
                     self.handle_v1_stream(req.method, params)
@@ -1372,10 +1417,13 @@ class A2AServer(A2AV1ServerMixin):
                         exclude_none=True
                     )
                     yield f"data: {json.dumps(payload)}\n\n"
+                outcome = (True, None)
             except A2AV1ProtocolError as e:
+                outcome = (False, e.code)
                 payload = _jsonrpc_error_response(req.id, e.code, e.message)
                 yield f"data: {json.dumps(payload)}\n\n"
             except Exception:  # noqa: BLE001 — sanitise stream errors
+                outcome = (False, INTERNAL_ERROR)
                 correlation_id = uuid.uuid4().hex
                 _logger.exception("A2A stream error (correlation_id=%s)", correlation_id)
                 payload = JsonRpcErrorResponse(
@@ -1387,6 +1435,9 @@ class A2AServer(A2AV1ServerMixin):
                     ),
                 ).model_dump(exclude_none=True)
                 yield f"data: {json.dumps(payload)}\n\n"
+            finally:
+                success, error_code = outcome if outcome is not None else (False, None)
+                completed(success, error_code)
 
         return StreamingResponse(gen(), media_type="text/event-stream")
 

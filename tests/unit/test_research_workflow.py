@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -263,6 +264,36 @@ class TestMakeGroundingEvalNode:
         node = make_grounding_eval_node(_model())
         result = await node({KEY_SUMMARY: "Some claim.", KEY_EVIDENCE: []})
         assert result[KEY_GROUNDING_SCORE] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_accepts_a_provider_string(self) -> None:
+        """A ``provider:model`` string reaches the evaluator as a model object (#563)."""
+        from locus.models.registry import register_provider
+
+        seen: list[str] = []
+
+        def factory(model_id: str, **_: Any) -> MockModel:
+            seen.append(model_id)
+            return MockModel()
+
+        register_provider("research-test", factory)
+        node = make_grounding_eval_node("research-test:judge")
+        result = await node(
+            {
+                KEY_SUMMARY: "Claim one is long enough. Claim two is too.",
+                KEY_EVIDENCE: ["evidence A"],
+            }
+        )
+        assert seen == ["judge"]
+        assert KEY_GROUNDING_SCORE in result
+        assert KEY_UNGROUNDED_CLAIMS in result
+
+    def test_workflow_builds_with_a_provider_string(self) -> None:
+        from locus.models.registry import register_provider
+
+        register_provider("research-test", lambda model_id, **_: MockModel())
+        wf = create_research_workflow(model="research-test:judge", tools=[], causal_inference=False)
+        assert wf is not None
 
     @pytest.mark.asyncio
     async def test_calls_evaluator(self) -> None:

@@ -16,6 +16,9 @@ breaks exactly one thing, so a failure names the drift rather than a fixture.
 from __future__ import annotations
 
 import importlib.util
+import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -78,6 +81,7 @@ def test_the_real_repo_is_consistent() -> None:
     version = module.check_versions_agree(verbose=False)
     module.check_changelog(version, verbose=False)
     module.check_security_major(version, verbose=False)
+    module.check_released_sections(verbose=False)
 
 
 # ----------------------------------------------------------------- catches --
@@ -155,3 +159,142 @@ def test_verbose_reports_each_passing_check(tmp_path: Path, monkeypatch, capsys)
     out = capsys.readouterr().out
     assert "CHANGELOG.md" in out
     assert "SECURITY.md" in out
+
+
+# ------------------------------------------------- released sections vs tags --
+
+
+def _git(root: Path, *args: str) -> str:
+    env = {
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@example.invalid",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@example.invalid",
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "PATH": os.environ["PATH"],
+    }
+    git = shutil.which("git")
+    assert git is not None, "these tests need git on PATH"
+    return subprocess.run(
+        [git, "-C", str(root), "-c", "commit.gpgsign=false", *args],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    ).stdout
+
+
+def _tagged_repo(tmp_path: Path) -> Path:
+    """The consistent repo at 3.11.0, committed and tagged ``v3.11.0`` as released."""
+    root = _repo(
+        tmp_path, pyproject="3.11.0", dunder="3.11.0", changelog="3.11.0", security_major="3"
+    )
+    _git(root, "init", "-q")
+    _git(root, "add", ".")
+    _git(root, "commit", "-q", "-m", "Release 3.11.0")
+    _git(root, "tag", "v3.11.0")
+    return root
+
+
+def _changelog(root: Path) -> Path:
+    return root / "CHANGELOG.md"
+
+
+def test_a_released_section_unchanged_since_its_tag_passes(tmp_path: Path, capsys) -> None:
+    module = _load(_tagged_repo(tmp_path))
+    module.check_released_sections(verbose=True)
+    assert "1 released sections unchanged since their tags" in capsys.readouterr().out
+
+
+def test_an_entry_added_after_the_tag_is_caught(tmp_path: Path) -> None:
+    """The 6.0.0 and 6.1.0 incident: a PR merged after the tag lands its
+    Unreleased hunk inside the released section."""
+    root = _tagged_repo(tmp_path)
+    text = _changelog(root).read_text()
+    _changelog(root).write_text(
+        text + "- **A fix merged after the tag.** It is not in the wheel.\n"
+    )
+    module = _load(root)
+    with pytest.raises(module.ConsistencyError) as exc:
+        module.check_released_sections(verbose=False)
+    message = str(exc.value)
+    assert "[3.11.0] section has 1 more entry" in message
+    assert "A fix merged after the tag" in message
+    assert "## [Unreleased]" in message
+
+
+def test_rewording_an_existing_entry_after_the_tag_is_allowed(tmp_path: Path) -> None:
+    """Link rewrites and renames touch released sections; only new entries are
+    claims about the wheel."""
+    root = _tagged_repo(tmp_path)
+    text = _changelog(root).read_text()
+    _changelog(root).write_text(
+        text.replace("- a change\n", "- a change, reworded\n  on two lines\n")
+    )
+    module = _load(root)
+    module.check_released_sections(verbose=False)
+
+
+def test_a_section_whose_tag_does_not_exist_yet_is_skipped(tmp_path: Path, capsys) -> None:
+    """The release PR renames Unreleased before the tag exists."""
+    root = _tagged_repo(tmp_path)
+    text = _changelog(root).read_text()
+    _changelog(root).write_text(
+        text.replace(
+            "## [Unreleased]\n", "## [Unreleased]\n\n## [3.12.0] - 2026-08-17\n\n- shipping next\n"
+        )
+    )
+    module = _load(root)
+    module.check_released_sections(verbose=True)
+    out = capsys.readouterr().out
+    assert "1 released sections unchanged" in out
+    assert "no tag yet for 3.12.0" in out
+
+
+def test_a_section_absent_at_its_own_tag_is_caught(tmp_path: Path) -> None:
+    root = _tagged_repo(tmp_path)
+    _git(root, "tag", "v3.12.0")  # tagged before the section was written
+    text = _changelog(root).read_text()
+    _changelog(root).write_text(
+        text.replace("## [Unreleased]\n", "## [Unreleased]\n\n## [3.12.0] - 2026-08-17\n\n- late\n")
+    )
+    module = _load(root)
+    with pytest.raises(
+        module.ConsistencyError, match=r"\[3\.12\.0\] section that does not exist at tag v3\.12\.0"
+    ):
+        module.check_released_sections(verbose=False)
+
+
+def test_sections_before_the_guarded_floor_are_not_compared(tmp_path: Path) -> None:
+    root = _tagged_repo(tmp_path)
+    _git(root, "tag", "v1.0.0")
+    text = _changelog(root).read_text()
+    _changelog(root).write_text(
+        text + "\n## [1.0.0] - 2025-01-01\n\n- written long after the tag\n"
+    )
+    module = _load(root)
+    module.check_released_sections(verbose=False)
+
+
+def test_outside_a_git_checkout_the_comparison_is_skipped(tmp_path: Path, capsys) -> None:
+    module = _load(_repo(tmp_path))
+    module.check_released_sections(verbose=False)
+    assert "not a git checkout" in capsys.readouterr().out
+
+
+def test_a_checkout_without_tags_says_so(tmp_path: Path, capsys) -> None:
+    root = _repo(tmp_path)
+    _git(root, "init", "-q")
+    module = _load(root)
+    module.check_released_sections(verbose=False)
+    assert "no release tags in this checkout" in capsys.readouterr().out
+
+
+def test_main_fails_on_an_entry_added_after_the_tag(tmp_path: Path, monkeypatch, capsys) -> None:
+    root = _tagged_repo(tmp_path)
+    _changelog(root).write_text(_changelog(root).read_text() + "- after the tag\n")
+    module = _load(root)
+    monkeypatch.setattr(sys, "argv", ["check_release_consistency.py"])
+    assert module.main() == 1
+    assert "more entry than it had at tag v3.11.0" in capsys.readouterr().err

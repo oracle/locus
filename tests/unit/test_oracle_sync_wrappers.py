@@ -6,9 +6,8 @@
 
 Covers:
 
-* :func:`locus._sync.run_sync` — both "no running loop" and
-  "inside-a-running-loop" branches (the second exercises the
-  background-thread fallback ``langgraph-oracledb`` uses).
+* :func:`locus._sync.run_sync` — called with and without a running
+  loop in the calling thread (both run on the bridge loop's thread).
 * :func:`locus._sync.drain` — async-iterator → list drain helper.
 * Every sync wrapper class:
     - Constructs with the same args as its async counterpart.
@@ -63,7 +62,7 @@ def _install_oracledb_stub(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
 
 class TestRunSync:
     def test_no_running_loop(self) -> None:
-        """The ``asyncio.run`` branch fires when called from plain sync code."""
+        """Called from plain sync code, the value comes back."""
         calls: list[int] = []
 
         async def coro() -> int:
@@ -76,13 +75,11 @@ class TestRunSync:
         assert calls == [1]
 
     def test_inside_running_loop_uses_background_thread(self) -> None:
-        """When a loop is already running, run_sync spins one on a thread.
+        """Called from inside a running loop, the coroutine runs on the bridge thread.
 
-        Drive run_sync *from inside* a running loop so the
-        ``get_running_loop`` succeeds and the threading branch
-        executes. We can't ``await`` from within a synchronous test —
-        instead we build our own loop and call run_until_complete on a
-        coroutine that calls run_sync.
+        Drive run_sync *from inside* a running loop. We can't ``await``
+        from within a synchronous test — instead we build our own loop
+        and call run_until_complete on a coroutine that calls run_sync.
         """
 
         async def inner() -> int:

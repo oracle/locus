@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "locus-sdk"
-version = "6.1.0"
+version = "6.1.1"
 description = "Oracle Generative AI Multi-Agent Reasoning Orchestrator SDK: the agent framework where the model never holds the trigger — every consequential action clears your policy first, waits for a human when it matters, and lands on a record you can verify. Build on it, or put it around the agent you already have."
 readme = "README.md"
 license = "UPL-1.0"
@@ -392,6 +392,7 @@ test = "pytest {args:tests/unit}"
 # Check every Python snippet in README.md / examples/README.md against the
 # installed SDK. Also runs as a unit test, so CI gates it either way; this
 # is the fast local loop when editing docs.
+# Documentation snippets against the installed SDK; CI runs it in the lint job.
 snippets = "python scripts/check_doc_snippets.py {args}"
 # The version is asserted in four documents no tool keeps in agreement.
 # Run this before tagging — CI runs it too, in the lint job.

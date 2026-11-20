@@ -8,32 +8,41 @@ in your own knowledge: index product docs, runbooks, and past
 resolutions, then let the agent cite them at decision time.
 
 ```python
+import asyncio
+
 from locus.agent import Agent
 from locus.rag import (
     RAGRetriever, OpenAIEmbeddings, InMemoryVectorStore, create_rag_tool,
 )
 
-retriever = RAGRetriever(
-    embedder=OpenAIEmbeddings(model="text-embedding-3-small"),
-    store=InMemoryVectorStore(),
-)
 
-# Your own knowledge: policy pages, runbooks, past resolutions.
-await retriever.add_documents([
-    "Refund policy §4.2: orders over $200 need manager approval; "
-    "digital goods are refundable within 14 days of purchase.",
-    "Runbook: checkout-latency regressions — roll back the most "
-    "recent deploy first, then check cache hit-rate dashboards.",
-    "Resolution ord-4821: duplicate charge traced to a double-submitted "
-    "payment form; refunded once and deduplicated at the gateway.",
-])
+async def main():
+    retriever = RAGRetriever(
+        embedder=OpenAIEmbeddings(model="text-embedding-3-small"),
+        store=InMemoryVectorStore(),
+    )
 
-agent = Agent(
-    model="openai:gpt-4o",
-    tools=[create_rag_tool(retriever)],
-    system_prompt="You are a support agent. Cite the indexed "
-                  "evidence behind every recommendation; never guess.",
-)
+    # Your own knowledge: policy pages, runbooks, past resolutions.
+    await retriever.add_documents([
+        "Refund policy §4.2: orders over $200 need manager approval; "
+        "digital goods are refundable within 14 days of purchase.",
+        "Runbook: checkout-latency regressions — roll back the most "
+        "recent deploy first, then check cache hit-rate dashboards.",
+        "Resolution ord-4821: duplicate charge traced to a double-submitted "
+        "payment form; refunded once and deduplicated at the gateway.",
+    ])
+
+    agent = Agent(
+        model="openai:gpt-4o",
+        tools=[create_rag_tool(retriever)],
+        system_prompt="You are a support agent. Cite the indexed "
+                      "evidence behind every recommendation; never guess.",
+    )
+    result = await agent.run("Does the refund on ord-4821 need manager approval?")
+    print(result.message)
+
+
+asyncio.run(main())
 ```
 
 The example names an OpenAI model explicitly because its embedder,

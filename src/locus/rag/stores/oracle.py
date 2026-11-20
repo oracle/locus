@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import re
+import warnings
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
@@ -20,6 +21,8 @@ from pydantic import BaseModel, Field, SecretStr
 
 from locus._oracle_ddl import provisioning_lock, run_ddl
 from locus._oracle_pool_cache import safe_acquire
+from locus.core.errors import VectorStoreError
+from locus.core.warnings import LocusWarning
 from locus.memory.backends._oracle_config import connect_params
 from locus.rag.stores._mmr import mmr_rerank as _mmr_rerank
 from locus.rag.stores._oracle_filter import compile_metadata_filter as _compile_metadata_filter
@@ -123,7 +126,10 @@ class OracleVectorConfig(BaseModel):
     #
     #   * ``HNSW`` — Hierarchical Navigable Small World. Memory-resident,
     #     best for sub-second query latency on large corpora; tune with
-    #     ``hnsw_neighbors`` (M) and ``hnsw_ef_construction``.
+    #     ``hnsw_neighbors`` (M) and ``hnsw_ef_construction``. Needs the
+    #     database's vector memory pool: without one (Oracle Database
+    #     Free as installed) provisioning warns and searches the table
+    #     with an exact scan — see ``_needs_vector_memory``.
     #   * ``IVF`` — Inverted File w/ neighbor partitions. Disk-friendly,
     #     ideal when the index can't fit in memory; tune with
     #     ``ivf_neighbor_partitions``.
@@ -175,6 +181,28 @@ class OracleVectorConfig(BaseModel):
         )
         _validate_int_in_range(self.index_accuracy, "index_accuracy", 1, 100)
         _validate_int_in_range(self.index_parallel, "index_parallel", 1)
+
+
+def _needs_vector_memory(exc: BaseException) -> bool:
+    """Whether ``exc`` is ``ORA-51962``: no room in the vector memory pool for the index.
+
+    An HNSW index lives in the database's vector memory pool. Oracle
+    Database Free sets ``vector_memory_size`` to 0 as installed, so its
+    first ``CREATE VECTOR INDEX ... INMEMORY NEIGHBOR GRAPH`` fails with
+    this error; a sized pool that is already full fails the same way.
+    """
+    return "ORA-51962" in str(exc)
+
+
+def _vector_memory_hint(index_type: str, table: str) -> str:
+    """What to do about ``ORA-51962`` on ``table``'s ``index_type`` index."""
+    return (
+        f"The {index_type} vector index on {table} needs room in the database's "
+        "vector memory pool and there is none (ORA-51962; vector_memory_size is 0 "
+        'on Oracle Database Free as installed). Pass index_type="IVF" for an '
+        'on-disk index, index_type="NONE" to search without one, or size '
+        "vector_memory_size."
+    )
 
 
 _TEXT_QUERY_MAX_TERMS = 20
@@ -244,6 +272,13 @@ class OracleVectorStore(BaseModel, BaseVectorStore):
     workloads use ``auto_create_table=False`` and pre-create the table
     out-of-band (DDL above) so the application user can be restricted
     to ``INSERT`` / ``SELECT`` / ``UPDATE`` on the table only.
+
+    The default ``HNSW`` index lives in the database's vector memory
+    pool. On a database without one (Oracle Database Free sets
+    ``vector_memory_size`` to 0 as installed) the index cannot be built:
+    the store warns with :class:`~locus.core.warnings.LocusWarning` and
+    searches the table with an exact scan, as ``index_type="NONE"``
+    does. Pass ``index_type="IVF"`` for an on-disk index there.
 
     Example with DSN (least-privileged app schema):
         >>> store = OracleVectorStore(
@@ -429,7 +464,20 @@ class OracleVectorStore(BaseModel, BaseVectorStore):
                 # build_index() can fire the same DDL out-of-band later.
                 ddl = self._vector_index_ddl()
                 if ddl is not None:
-                    await run_ddl(cursor, ddl)
+                    try:
+                        await run_ddl(cursor, ddl)
+                    except Exception as exc:
+                        if not _needs_vector_memory(exc):
+                            raise
+                        # Oracle commits each DDL on its own, so the table
+                        # is there; keep it and search it with an exact
+                        # scan, as ``index_type="NONE"`` would.
+                        hint = _vector_memory_hint(cfg.index_type.upper(), self._full_table_name)
+                        warnings.warn(
+                            f"{hint} Searching {self._full_table_name} with an exact scan.",
+                            LocusWarning,
+                            stacklevel=2,
+                        )
 
                 if created_col:
                     await run_ddl(
@@ -527,6 +575,11 @@ class OracleVectorStore(BaseModel, BaseVectorStore):
             rebuild: When True, drop the existing index (if any) before
                 creating it. Lets you switch from IVF to HNSW on a
                 populated table without DROP TABLE.
+
+        Raises:
+            VectorStoreError: The index needs room in the database's
+                vector memory pool and there is none (``ORA-51962``);
+                the message says which ``index_type`` to pass instead.
         """
         cfg = self.oracle_config
         if cfg.index_type.upper() == "NONE":
@@ -546,7 +599,14 @@ class OracleVectorStore(BaseModel, BaseVectorStore):
                 except Exception as exc:  # pragma: no cover — diagnostic only
                     if "ORA-01418" not in str(exc):
                         raise
-            await cursor.execute(ddl)
+            try:
+                await cursor.execute(ddl)
+            except Exception as exc:
+                if _needs_vector_memory(exc):
+                    raise VectorStoreError(
+                        _vector_memory_hint(cfg.index_type.upper(), self._full_table_name)
+                    ) from exc
+                raise
             await conn.commit()
 
     def _vector_to_string(self, embedding: list[float]) -> str:

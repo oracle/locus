@@ -17,6 +17,7 @@ router both publish through here. An SSE endpoint such as
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import logging
 from collections import defaultdict, deque
 from collections.abc import AsyncIterator
@@ -107,6 +108,10 @@ class EventBus:
         # Drop counter for tests + diagnostics.
         self._dropped_events = 0
 
+        # Publishes that ``emit_sync`` scheduled and nobody awaits, by run:
+        # ``close_stream`` lets a run's land before it signals the end.
+        self._pending: dict[asyncio.Future[Any] | concurrent.futures.Future[Any], str] = {}
+
         # Optional reference to the asyncio loop the bus runs on. Set
         # lazily by ``emit()`` / ``emit_sync()`` on first use so worker
         # threads (the ``@tool`` decorator's executor, ``asyncio.to_thread``
@@ -148,6 +153,36 @@ class EventBus:
             await self._deliver(queue, event)
         for queue in global_subscribers:
             await self._deliver(queue, event)
+
+    def track_publish(
+        self, future: asyncio.Future[Any] | concurrent.futures.Future[Any], run_id: str
+    ) -> None:
+        """Remember a publish that ``emit_sync`` scheduled for ``run_id``.
+
+        :meth:`close_stream` waits for the remembered publishes of its run
+        before it signals end-of-stream, so an event emitted from sync code
+        in the same loop turn as the close still reaches live subscribers
+        instead of landing in the history alone.
+        """
+        self._pending[future] = run_id
+        future.add_done_callback(lambda done: self._pending.pop(done, None))
+
+    async def _settle_publishes(self, run_id: str | None) -> None:
+        """Wait for the scheduled publishes of ``run_id`` (every run when ``None``)."""
+        loop = asyncio.get_running_loop()
+        for _ in range(3):  # a publish settling may schedule another
+            waits: list[asyncio.Future[Any]] = []
+            for future, owner in list(self._pending.items()):
+                if (run_id is not None and owner != run_id) or future.done():
+                    continue
+                if isinstance(future, asyncio.Future):
+                    if future.get_loop() is loop:
+                        waits.append(future)
+                else:
+                    waits.append(asyncio.wrap_future(future))
+            if not waits:
+                return
+            await asyncio.wait(waits, timeout=_PUBLISH_TIMEOUT_SECONDS)
 
     async def _deliver(self, queue: asyncio.Queue[StreamEvent | None], event: StreamEvent) -> None:
         try:
@@ -269,7 +304,12 @@ class EventBus:
         joining within the retention window still sees the run's
         events plus an immediate sentinel terminating the iterator.
         Use :meth:`drop_history` to forcibly forget a run.
+
+        Publishes that ``emit_sync`` scheduled for the run land first, so a
+        caller that closes the stream right after a sync emit site ran does
+        not cut that event off from live subscribers.
         """
+        await self._settle_publishes(run_id)
         async with self._lock:
             queues = list(self._queues.get(run_id, ()))
             self._queues.pop(run_id, None)
@@ -299,6 +339,7 @@ class EventBus:
 
     async def close_global(self) -> None:
         """Terminate every global subscriber. Used at shutdown."""
+        await self._settle_publishes(None)
         async with self._lock:
             queues = list(self._global_subscribers)
             self._global_subscribers.clear()
@@ -323,6 +364,7 @@ class EventBus:
             "global_subscribers": len(self._global_subscribers),
             "history_runs": len(self._history),
             "dropped_events_total": self._dropped_events,
+            "pending_publishes": sum(1 for f in self._pending if not f.done()),
             "queue_depths": {
                 run_id: [q.qsize() for q in queues] for run_id, queues in self._queues.items()
             },
