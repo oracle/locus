@@ -18,6 +18,7 @@ import httpx
 import pytest
 
 from locus.a2a import A2AClient, A2AServer
+from locus.a2a.protocol import A2AMessage, A2ARequest
 from locus.a2a.spec import INTERNAL_ERROR
 from locus.a2a.transports import (
     A2AClientError,
@@ -221,6 +222,14 @@ class _BoomAgent:
         yield  # pragma: no cover
 
 
+class _SlowAgent:
+    """Yields one event, then waits forever; the stream is still open when the client leaves."""
+
+    async def run(self, prompt: str) -> Any:
+        yield ThinkEvent(iteration=0, reasoning="first", tool_calls=[])
+        await asyncio.Event().wait()
+
+
 def _terminate() -> TerminateEvent:
     return TerminateEvent(
         reason="complete",
@@ -294,3 +303,23 @@ class TestLegacyRoutes:
         completed = events.only("a2a.task.completed")
         assert completed["success"] is False
         assert completed["error_code"] == INTERNAL_ERROR
+
+    async def test_closing_the_stream_after_one_frame_raises_nothing_and_completes(self) -> None:
+        # Starlette does not close the body iterator itself; whoever does
+        # (the loop's finaliser in production) must not hit a yield in a
+        # ``finally``, and the bracket still closes with ``success`` false.
+        server = A2AServer(agent=_SlowAgent(), allow_unauthenticated=True)
+        _ = server.app
+        async with _Events("a2a.task.") as events:
+            request = A2ARequest(messages=[A2AMessage(role="user", content="hi")])
+            response = await server._legacy_stream(request)
+            iterator = response.body_iterator
+            first = await iterator.__anext__()
+            await iterator.aclose()
+
+        assert first.startswith("data: ")
+        assert events.names == ["a2a.task.received", "a2a.task.completed"]
+        completed = events.only("a2a.task.completed")
+        assert completed["method"] == "a2a/stream"
+        assert completed["success"] is False
+        assert "error_code" not in completed

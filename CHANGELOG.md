@@ -20,6 +20,13 @@ policy.
 
 ### Fixed
 
+- **Closing the flat `/a2a/stream` response early no longer raises.** The
+  legacy stream yielded its `data: [DONE]` terminator from a `finally`
+  block, so a generator closed before its end (a client that disconnected,
+  and the explicit close added in #581) hit a `yield` while handling
+  `GeneratorExit` and raised `RuntimeError: async generator ignored
+  GeneratorExit`. The terminator now follows the stream's own end only; an
+  early close still publishes `a2a.task.completed` with `success: false`.
 - **A2A client streams and the synchronous compactor publish their events.**
   The `stream()` methods of the JSON-RPC, HTTP+JSON and gRPC client
   transports and the client's pre-1.0 `message/stream` path emitted no
