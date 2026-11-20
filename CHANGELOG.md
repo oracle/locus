@@ -55,6 +55,14 @@ policy.
 
 ### Fixed
 
+- **The SSE catalogue's payload keys match the code, and a docs test keeps
+  it so.** `composition.loop.terminated` sends `iterations` and
+  `duration_ms` (the row said `iterations_run`), and
+  `memory.checkpoint.saved` carries `interrupted_node` and a
+  `graph_interrupt_before` trigger when a graph pauses before a node.
+  `tests/docs/test_sse_catalogue_keys.py` now reads every payload row in
+  `docs/concepts/sse-events.md` and the `emit()` calls under `src/locus`, and
+  fails when a documented key is never sent or a sent key is not documented.
 - **Closing the flat `/a2a/stream` response early no longer raises.** The
   legacy stream yielded its `data: [DONE]` terminator from a `finally`
   block, so a generator closed before its end (a client that disconnected,
