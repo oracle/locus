@@ -283,6 +283,24 @@ git commit -s -m "docs(notebooks): add RAG with Qdrant example"
    - Address feedback promptly
    - Squash commits if requested
 
+## Documentation snippets
+
+Every Python block in `README.md`, `examples/README.md` and the pages under
+`docs/` is checked against the installed SDK by `hatch run snippets`
+(`scripts/check_doc_snippets.py`), in CI's lint job: each `from locus...
+import` must resolve, and each keyword passed to a Locus callable must exist
+on it. Two conventions:
+
+- The README and `examples/README.md` show code that is pasted into a file,
+  so a block there must compile as a file: no top-level `await`.
+- The pages under `docs/` follow the notebook convention: a block may use
+  top-level `await`, `async for` and `async with`, and may name tools or
+  agents it does not define, as a notebook cell does. It is accepted when it
+  compiles inside a coroutine. The complete programs are the notebooks.
+
+A block that names something on purpose that does not exist yet carries
+`<!-- docs: skip -->` on the line above its fence.
+
 ## Coding Standards
 
 ### Python Style
@@ -456,7 +474,12 @@ Every release follows this checklist. Do not skip steps.
 1. **Update `CHANGELOG.md`.** Move the relevant entries from
    `[Unreleased]` into a new version heading. Write the date in
    `YYYY-MM-DD`. Add `### Removed` / `### Changed` notes for anything
-   breaking, with a migration snippet.
+   breaking, with a migration snippet. A PR that merges after this
+   rename with a hunk written under `[Unreleased]` lands its entries
+   inside the new version's section without a conflict; after the tag
+   exists, `scripts/check_release_consistency.py` fails CI on that,
+   because the wheel built from the tag does not contain the change.
+   Move the entries back under `[Unreleased]`.
 2. **Deprecation sweep.** For every item in `[Unreleased] > Removed`,
    confirm a `LocusDeprecationWarning` has been in place for at least
    one prior minor release, or document the single-release migration
@@ -466,8 +489,9 @@ Every release follows this checklist. Do not skip steps.
 4. **Run the full suite.** `hatch run check` locally (plus
    `hatch run test-integration` with live services available); CI runs
    the 3.11–3.14 matrix on the release PR.
-5. **Tag.** `git tag -a v<version> -m 'Release v<version>'` and push
-   the tag.
+5. **Tag.** `git tag -a v<version> -m 'Release v<version>'` on the
+   release PR's merge commit and push the tag. The CHANGELOG section at
+   the tag is the record of what the wheel contains.
 6. **Publish.** Build the wheel (`hatch build`), verify the wheel
    contents do not include compliance artifacts or test data, then
    upload.

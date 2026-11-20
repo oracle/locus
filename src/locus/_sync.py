@@ -2,66 +2,104 @@
 # Licensed under the Universal Permissive License v1.0 as shown at
 # https://oss.oracle.com/licenses/upl/
 
-"""Run an async coroutine from sync code, regardless of loop state.
+"""Run an async coroutine from sync code, on one event loop that stays up.
 
 Single shared helper used by every ``Sync*`` wrapper class shipped
 alongside the async primitives (checkpointer / store / vector store /
 embedder). It bridges synchronous callers into the async drivers
 without taking any langchain or langgraph dependency.
+
+Every call runs on the same event loop, hosted on one daemon thread for
+the life of the process. That is what makes a sync wrapper usable more
+than once: ``oracledb`` async pools (and every other async client) bind
+to the loop that created them, so a fresh ``asyncio.run()`` per call made
+each call build a new pool and leave the previous pool's sessions open
+on the database, and ``close()`` then tried to close a pool whose loop
+was already gone. On one loop the pool is built once, reused by every
+call, and closed by ``close()``.
 """
 
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
+import contextvars
+import threading
 from collections.abc import AsyncIterator, Coroutine
 from typing import Any, TypeVar
 
 
 T = TypeVar("T")
 
+_lock = threading.Lock()
+_loop: asyncio.AbstractEventLoop | None = None
+_thread: threading.Thread | None = None
+
+
+def _bridge_loop() -> asyncio.AbstractEventLoop:
+    """The loop every :func:`run_sync` call runs on, started on first use.
+
+    Rebuilt when its thread is gone — after ``os.fork()`` the child has
+    the loop object but not the thread that was running it.
+    """
+    global _loop, _thread
+    with _lock:
+        if _loop is None or _thread is None or not _thread.is_alive():
+            loop = asyncio.new_event_loop()
+            thread = threading.Thread(
+                target=loop.run_forever, name="locus-sync-bridge", daemon=True
+            )
+            thread.start()
+            _loop, _thread = loop, thread
+        return _loop
+
+
+def _settle(task: asyncio.Future[Any], done: concurrent.futures.Future[Any]) -> None:
+    """Carry ``task``'s outcome over to the future the calling thread waits on."""
+    if task.cancelled():
+        done.cancel()
+        return
+    exc = task.exception()
+    if exc is not None:
+        done.set_exception(exc)
+    else:
+        done.set_result(task.result())
+
 
 def run_sync(coro: Coroutine[Any, Any, T]) -> T:
     """Drive a coroutine to completion from synchronous context.
 
-    Handles two cases:
+    Works whether or not the calling thread has a running loop: the
+    coroutine runs on the bridge loop's thread, in a copy of the caller's
+    :mod:`contextvars` context, and the caller blocks until it finishes.
+    Its return value comes back, its exception is re-raised.
 
-      1. **No running loop** (script / Jupyter cell with ``await``
-         disabled): use :func:`asyncio.run`.
-      2. **Inside a running loop** (Jupyter ``await``, FastAPI
-         handler, etc.): we can't reuse the active loop — instead we
-         run the coroutine to completion on a *fresh* event loop
-         hosted on a background thread, and block the calling thread
-         until that completes.
-
-    Case 2 is what lets the synchronous wrapper classes call into the
-    async drivers from inside an already-running event loop.
+    Raises:
+        RuntimeError: Called from the bridge loop's own thread, where
+            blocking on it would wait forever; code already running there
+            awaits the coroutine instead.
     """
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        # No running loop in this thread — safe to spin one up.
-        return asyncio.run(coro)
+    loop = _bridge_loop()
+    if threading.current_thread() is _thread:
+        coro.close()
+        raise RuntimeError(
+            "run_sync() was called from the thread that runs it; "
+            "code on the bridge loop awaits the coroutine instead."
+        )
 
-    import threading
+    done: concurrent.futures.Future[T] = concurrent.futures.Future()
+    context = contextvars.copy_context()
 
-    result: list[Any] = []
-    error: list[BaseException] = []
-
-    def runner() -> None:
-        new_loop = asyncio.new_event_loop()
+    def start() -> None:
         try:
-            result.append(new_loop.run_until_complete(coro))
-        except BaseException as exc:  # noqa: BLE001 — re-raised in caller thread
-            error.append(exc)
-        finally:
-            new_loop.close()
+            task = loop.create_task(coro, context=context)
+        except BaseException as exc:  # noqa: BLE001 — re-raised in the calling thread
+            done.set_exception(exc)
+            return
+        task.add_done_callback(lambda finished: _settle(finished, done))
 
-    t = threading.Thread(target=runner, daemon=True)
-    t.start()
-    t.join()
-    if error:
-        raise error[0]
-    return result[0]  # type: ignore[no-any-return]
+    loop.call_soon_threadsafe(start)
+    return done.result()
 
 
 async def drain(agen: AsyncIterator[T]) -> list[T]:

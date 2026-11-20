@@ -137,19 +137,24 @@ import asyncio
 
 from locus.a2a import A2AClient, Message, PushNotificationReceiver, TextPart
 
-receiver = PushNotificationReceiver(token="one-per-task-token")
-asyncio.create_task(receiver.serve("0.0.0.0", 9000))
 
-client = A2AClient("https://research.example.com", api_key="...")
-task = await client.send_message(
-    Message(role="user", parts=[TextPart(text="Research ...")], messageId="m-1"),
-    push_notification_config={"url": "https://me.example.com:9000/a2a/push", "token": "one-per-task-token"},
-    blocking=False,
-)
-async for note in receiver.events():
-    print(note.kind, note.state)
-    if note.state == "TASK_STATE_COMPLETED":
-        break
+async def main():
+    receiver = PushNotificationReceiver(token="one-per-task-token")
+    asyncio.create_task(receiver.serve("0.0.0.0", 9000))
+
+    client = A2AClient("https://research.example.com", api_key="...")
+    task = await client.send_message(
+        Message(role="user", parts=[TextPart(text="Research ...")], messageId="m-1"),
+        push_notification_config={"url": "https://me.example.com:9000/a2a/push", "token": "one-per-task-token"},
+        blocking=False,
+    )
+    async for note in receiver.events():
+        print(note.kind, note.state)
+        if note.state == "TASK_STATE_COMPLETED":
+            break
+
+
+asyncio.run(main())
 ```
 
 `blocking=False` asks the server to return the task as soon as it is

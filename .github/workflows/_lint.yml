@@ -29,6 +29,10 @@ jobs:
     steps:
       # actions/checkout@v6.0.2
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          # The release check below compares every released CHANGELOG
+          # section with the same section at its tag.
+          fetch-tags: true
 
       # actions/setup-python@v6.2.0
       - name: Set up Python ${{ matrix.python-version }}
@@ -40,7 +44,10 @@ jobs:
       # Stdlib only (tomllib), so it runs before Hatch is installed and fails
       # in seconds rather than after a full lint+typecheck. SECURITY.md once
       # claimed 2.1.x support while the package shipped 2.10.0; nothing in CI
-      # noticed, and an outside reviewer found it.
+      # noticed, and an outside reviewer found it. It also fails when a
+      # released CHANGELOG section gained entries after its tag: a PR merged
+      # right after a release lands its Unreleased hunk inside the released
+      # section without a conflict (6.0.0 and 6.1.0 both had it).
       - name: Check release metadata is self-consistent
         run: python scripts/check_release_consistency.py --verbose
 
@@ -52,3 +59,8 @@ jobs:
       # the job to succeed.
       - name: Run format-check + ruff + mypy
         run: hatch run check
+      - name: Check the documentation snippets against the SDK
+        # Every ``from locus... import`` and keyword argument in the README,
+        # examples/README.md and the docs pages must exist on the installed
+        # SDK; docs pages may await at top level (the notebook convention).
+        run: hatch run snippets
