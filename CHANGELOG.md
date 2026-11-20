@@ -24,6 +24,14 @@ policy.
   elsewhere, `ToolCallIntegrityError` in `locus.tools.integrity`, is now
   named with its inherited `tool_error` kind.
 
+- **`research.completed` is published when a research run fails inside a
+  node.** The execute, causal-inference, summarize, grounding and regenerate
+  nodes publish it with `grounded: false`, `error` (the exception's class
+  name), `score` as the state holds it and the replan and regeneration
+  counters before re-raising, so a subscriber no longer infers a failed run's
+  end from the stream closing. The healthy path from the grounding router is
+  unchanged (#591).
+
 ## [6.2.0] - 2026-11-20
 
 ### Added

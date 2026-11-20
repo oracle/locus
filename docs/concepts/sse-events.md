@@ -224,7 +224,7 @@ Emitted by `create_research_workflow` / individual node primitives from
 | `research.regenerate.started` | `ungrounded_count` |
 | `research.regenerate.completed` | `regeneration` (attempt index), `success`, `error` (when the editor agent raised) |
 | `research.replan` | `replan` (iteration), `ungrounded_count`, `prompt_preview` |
-| `research.completed` | `score`, `threshold`, `grounded` (`False` when the replan and regeneration budgets ran out), `replan`, `regeneration`; the last `research.*` event of a run, sent when the grounding router routes to `END` |
+| `research.completed` | `score` (`None` when the run failed before grounding), `threshold` (healthy exits only), `grounded` (`False` when the budgets ran out or a node failed), `replan`, `regeneration`, and on a failed run `error` (the exception's class name); the last `research.*` event of a run, sent by the grounding router when it routes to `END`, or by the failing node before it re-raises |
 
 ### `tool.*` — sandboxed tool execution and tool-call integrity
 

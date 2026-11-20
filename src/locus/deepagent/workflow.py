@@ -107,6 +107,28 @@ KEY_STOP_REASON = "stop_reason"
 """str — terminal reason: 'grounded' | 'max_replans' | 'max_regenerations'."""
 
 
+async def _emit_research_failed(state: dict[str, Any], exc: BaseException) -> None:
+    """Publish ``research.completed`` for a run that ends in a node failure.
+
+    The state graph stops at the first node that raises, so a node's
+    ``except`` branch is the end of the run and the grounding router, which
+    publishes the event on the healthy path, is never reached. The payload
+    keeps the healthy keys a subscriber already reads (``score`` is whatever
+    the state holds, ``None`` before grounding) and adds ``error``, the
+    exception's class name.
+    """
+    from locus.observability.emit import EV_RESEARCH_COMPLETED, emit  # noqa: PLC0415
+
+    await emit(
+        EV_RESEARCH_COMPLETED,
+        score=state.get(KEY_GROUNDING_SCORE),
+        grounded=False,
+        error=type(exc).__name__,
+        replan=state.get(KEY_REPLAN_COUNT, 0),
+        regeneration=state.get(KEY_REGENERATION_COUNT, 0),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Node: execute
 # ---------------------------------------------------------------------------
@@ -191,6 +213,7 @@ def make_execute_node(
                 success=False,
                 error=type(e).__name__,
             )
+            await _emit_research_failed(state, e)
             raise
 
         await emit(EV_RESEARCH_EXECUTE_COMPLETED, fact_count=len(grounding_facts), success=True)
@@ -246,7 +269,11 @@ def make_causal_inference_node(
             model=model,
             system_prompt="You extract causal chains from evidence. Return only valid JSON.",
         )
-        result = extractor.run_sync(causal_prompt)
+        try:
+            result = extractor.run_sync(causal_prompt)
+        except Exception as e:
+            await _emit_research_failed(state, e)
+            raise
 
         events: list[dict[str, Any]] = []
         try:
@@ -341,7 +368,11 @@ def make_summarize_node(
             system_prompt="You are a precise summarizer. Cite only what the evidence supports.",
             output_schema=output_schema,
         )
-        result = summarizer.run_sync(summarize_prompt)
+        try:
+            result = summarizer.run_sync(summarize_prompt)
+        except Exception as e:
+            await _emit_research_failed(state, e)
+            raise
 
         update: dict[str, Any] = {KEY_SUMMARY: result.message or ""}
         if output_schema and result.parsed:
@@ -388,11 +419,15 @@ def make_grounding_eval_node(model: Any) -> Any:
 
         claims = [s.strip() for s in summary.replace("\n", " ").split(".") if len(s.strip()) > 10]
 
-        grounding_result = await evaluator.evaluate_with_llm(
-            claims=claims,
-            evidence=evidence,
-            model=model,
-        )
+        try:
+            grounding_result = await evaluator.evaluate_with_llm(
+                claims=claims,
+                evidence=evidence,
+                model=model,
+            )
+        except Exception as e:
+            await _emit_research_failed(state, e)
+            raise
 
         await emit(
             EV_RESEARCH_GROUNDING_EVALUATED,
@@ -475,6 +510,7 @@ def make_regenerate_summary_node(
                 success=False,
                 error=type(e).__name__,
             )
+            await _emit_research_failed(state, e)
             raise
 
         update: dict[str, Any] = {
@@ -560,7 +596,9 @@ def route_after_grounding(
     Compatible with ``StateGraph.add_conditional_edges``. Both exits to
     ``END`` publish ``research.completed`` (``score``, ``threshold``,
     ``grounded``, ``replan``, ``regeneration``), the last ``research.*``
-    event of a run; ``grounded`` is ``False`` when the budgets ran out.
+    event of a run; ``grounded`` is ``False`` when the budgets ran out. A node
+    that raises publishes the same event with ``error`` set before the
+    exception propagates, so a failed run ends with it too.
     """
     from locus.multiagent.graph import END  # noqa: PLC0415
     from locus.observability.emit import EV_RESEARCH_COMPLETED, emit_sync  # noqa: PLC0415

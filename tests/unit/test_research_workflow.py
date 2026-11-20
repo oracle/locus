@@ -683,6 +683,143 @@ class TestWorkflowSSEEmission:
         reset_event_bus()
 
 
+class _ProviderDown(MockModel):
+    """A model whose every completion fails, so the execute node raises."""
+
+    async def complete(self, *args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("provider down")
+
+
+class TestResearchCompletedOnFailure:
+    """A run that fails inside a node still ends with one ``research.completed``."""
+
+    def _workflow(self, model: Any) -> Any:
+        return create_research_workflow(
+            model=model,
+            tools=[],
+            max_replans=0,
+            max_regenerations=0,
+            causal_inference=False,
+            reflexion=False,
+            max_iterations=2,
+        )
+
+    async def _run(self, wf: Any) -> tuple[Any, list[tuple[str, dict[str, Any]]]]:
+        import asyncio
+
+        from locus.observability import get_event_bus, run_context
+        from locus.observability.event_bus import reset_event_bus
+
+        reset_event_bus()
+        research: list[tuple[str, dict[str, Any]]] = []
+
+        async def drain(rid: str) -> None:
+            async for ev in get_event_bus().subscribe(rid):
+                if ev.event_type.startswith("research."):
+                    research.append((ev.event_type, dict(ev.data)))
+
+        try:
+            async with run_context() as rid:
+                t = asyncio.create_task(drain(rid))
+                await asyncio.sleep(0)
+                result = await wf.execute({KEY_PROMPT: "Why did the export stall?"})
+                await get_event_bus().close_stream(rid)
+                await asyncio.wait_for(t, timeout=10.0)
+        finally:
+            reset_event_bus()
+        return result, research
+
+    @staticmethod
+    def _assert_failed_payload(payload: dict[str, Any], error: str) -> None:
+        assert payload["grounded"] is False
+        assert payload["error"] == error
+        assert payload["replan"] == 0
+        assert payload["regeneration"] == 0
+
+    @pytest.mark.asyncio
+    async def test_execute_failure(self) -> None:
+        result, research = await self._run(self._workflow(_ProviderDown()))
+
+        names = [name for name, _ in research]
+        assert names == [
+            "research.execute.started",
+            "research.execute.completed",
+            "research.completed",
+        ]
+        assert research[1][1]["success"] is False
+        self._assert_failed_payload(research[2][1], "RuntimeError")
+        assert research[2][1]["score"] is None
+        assert result.success is False
+
+    @pytest.mark.asyncio
+    async def test_summarize_failure(self) -> None:
+        with patch("locus.agent.agent.Agent.run_sync", side_effect=RuntimeError("summarizer down")):
+            result, research = await self._run(self._workflow(_model()))
+
+        names = [name for name, _ in research]
+        assert names == [
+            "research.execute.started",
+            "research.execute.completed",
+            "research.completed",
+        ]
+        assert research[1][1]["success"] is True
+        self._assert_failed_payload(research[2][1], "RuntimeError")
+        assert result.success is False
+
+    @pytest.mark.asyncio
+    async def test_causal_inference_failure(self) -> None:
+        wf = create_research_workflow(
+            model=_model(),
+            tools=[],
+            max_replans=0,
+            max_regenerations=0,
+            causal_inference=True,
+            reflexion=False,
+            max_iterations=2,
+        )
+        # The causal node is the first to call run_sync; execute streams via run().
+        with patch("locus.agent.agent.Agent.run_sync", side_effect=RuntimeError("extractor down")):
+            result, research = await self._run(wf)
+
+        names = [name for name, _ in research]
+        assert names == [
+            "research.execute.started",
+            "research.execute.completed",
+            "research.completed",
+        ]
+        self._assert_failed_payload(research[2][1], "RuntimeError")
+        assert result.success is False
+
+    @pytest.mark.asyncio
+    async def test_grounding_failure(self) -> None:
+        with patch(
+            "locus.reasoning.grounding.GroundingEvaluator.evaluate_with_llm",
+            new=AsyncMock(side_effect=ValueError("judge down")),
+        ):
+            result, research = await self._run(self._workflow(_model()))
+
+        names = [name for name, _ in research]
+        assert names == [
+            "research.execute.started",
+            "research.execute.completed",
+            "research.summarize.completed",
+            "research.completed",
+        ]
+        self._assert_failed_payload(research[3][1], "ValueError")
+        assert result.success is False
+
+    @pytest.mark.asyncio
+    async def test_healthy_run_is_unchanged(self) -> None:
+        _, research = await self._run(self._workflow(_model()))
+
+        names = [name for name, _ in research]
+        assert names.count("research.completed") == 1
+        assert names[-1] == "research.completed"
+        payload = research[-1][1]
+        assert "error" not in payload
+        assert payload["threshold"] == 0.65
+
+
 class TestWorkflowEdgeCases:
     @pytest.mark.asyncio
     async def test_execute_node_tool_complete_event(self) -> None:
