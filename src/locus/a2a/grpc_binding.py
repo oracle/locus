@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import hmac
 import logging
+import time
 from collections.abc import AsyncIterator, Callable, Mapping
 from functools import cache
 from importlib import resources
@@ -412,6 +413,7 @@ class GrpcClientTransport(ClientTransport):
         if not request_name:
             raise A2AClientError(METHOD_NOT_FOUND, f"unknown method {method!r}")
         await emit(EV_A2A_CLIENT_SEND, target_url=self.url, method=method, binding=self.binding)
+        started = time.perf_counter()
         request = self._messages.from_dict(params, request_name)
         try:
             response = await self._method(method)(
@@ -420,6 +422,16 @@ class GrpcClientTransport(ClientTransport):
                 timeout=self._timeout if timeout is None else float(timeout),
             )
         except grpc.aio.AioRpcError as e:
+            # ``status_code`` is the gRPC status here, as on the success path.
+            await emit(
+                EV_A2A_CLIENT_RECEIVED,
+                target_url=self.url,
+                method=method,
+                binding=self.binding,
+                status_code=e.code().value[0],
+                duration_ms=(time.perf_counter() - started) * 1000,
+                error=e.code().name,
+            )
             raise self._translate(e) from e
         await emit(
             EV_A2A_CLIENT_RECEIVED,
@@ -427,6 +439,7 @@ class GrpcClientTransport(ClientTransport):
             method=method,
             binding=self.binding,
             status_code=0,
+            duration_ms=(time.perf_counter() - started) * 1000,
         )
         return self._messages.to_dict(response)
 

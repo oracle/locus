@@ -1114,18 +1114,44 @@ class A2AServer(A2AV1ServerMixin):
     # ----- backward-compat: the legacy A2ARequest invoke shape --------
 
     async def _legacy_invoke(self, request: A2ARequest) -> A2AResponse:
-        from locus.core.events import TerminateEvent
+        import time as _time  # noqa: PLC0415
 
+        from locus.core.events import TerminateEvent
+        from locus.observability.emit import (  # noqa: PLC0415
+            EV_A2A_TASK_COMPLETED,
+            EV_A2A_TASK_RECEIVED,
+            emit,
+        )
+
+        # The flat routes carry no JSON-RPC method; the route name stands in.
+        await emit(EV_A2A_TASK_RECEIVED, method="a2a/invoke", rpc_id=None)
+        _started = _time.perf_counter()
         user_msgs = [m for m in request.messages if m.role == "user"]
         prompt = user_msgs[-1].content if user_msgs else ""
         final = ""
         stop_reason = "complete"
         iterations = 0
-        async for event in self._agent.run(prompt):
-            if isinstance(event, TerminateEvent):
-                final = event.final_message or final
-                stop_reason = event.reason or stop_reason
-            iterations += 1
+        try:
+            async for event in self._agent.run(prompt):
+                if isinstance(event, TerminateEvent):
+                    final = event.final_message or final
+                    stop_reason = event.reason or stop_reason
+                iterations += 1
+        except Exception:
+            await emit(
+                EV_A2A_TASK_COMPLETED,
+                method="a2a/invoke",
+                success=False,
+                error_code=INTERNAL_ERROR,
+                duration_ms=(_time.perf_counter() - _started) * 1000,
+            )
+            raise
+        await emit(
+            EV_A2A_TASK_COMPLETED,
+            method="a2a/invoke",
+            success=True,
+            duration_ms=(_time.perf_counter() - _started) * 1000,
+        )
         return A2AResponse(
             messages=[A2AMessage(role="agent", content=final)],
             status="completed",
@@ -1342,6 +1368,35 @@ class A2AServer(A2AV1ServerMixin):
             JsonRpcSuccessResponse(id=req.id, result=result).model_dump(exclude_none=True)
         )
 
+    def _stream_completion(self, method: str, started: float) -> Callable[[bool, int | None], None]:
+        """A callable that publishes ``a2a.task.completed`` for a streaming response.
+
+        The generator may be finalised by the event loop in another context
+        once the client is gone; the completion is published in a copy of the
+        context the request was served in, so it carries the run id
+        ``received`` was emitted under. ``started`` is the clock the request
+        arrived on, so ``duration_ms`` covers the whole request.
+        """
+        import contextvars  # noqa: PLC0415
+        import time as _time  # noqa: PLC0415
+
+        # Lazy import — observability is opt-in.
+        from locus.observability.emit import EV_A2A_TASK_COMPLETED, emit_sync  # noqa: PLC0415
+
+        request_context = contextvars.copy_context()
+
+        def completed(success: bool, error_code: int | None) -> None:
+            data: dict[str, Any] = {
+                "method": method,
+                "success": success,
+                "duration_ms": (_time.perf_counter() - started) * 1000,
+            }
+            if error_code is not None:
+                data["error_code"] = error_code
+            request_context.run(emit_sync, EV_A2A_TASK_COMPLETED, **data)
+
+        return completed
+
     async def _stream_response(
         self,
         req: JsonRpcRequest,
@@ -1362,31 +1417,13 @@ class A2AServer(A2AV1ServerMixin):
         update, so that stream counts as served. ``started`` is the
         dispatcher's clock, so ``duration_ms`` covers the whole request.
         """
-        import contextvars  # noqa: PLC0415
         import time as _time  # noqa: PLC0415
 
         from fastapi.responses import StreamingResponse
 
-        # Lazy import — observability is opt-in.
-        from locus.observability.emit import EV_A2A_TASK_COMPLETED, emit_sync  # noqa: PLC0415
-
         params = req.params if isinstance(req.params, dict) else {}
         _started = _time.perf_counter() if started is None else started
-        # The generator may be finalised by the event loop in another
-        # context once the client is gone; the completion is published in a
-        # copy of the context this request was served in, so it carries the
-        # run id ``received`` was emitted under.
-        request_context = contextvars.copy_context()
-
-        def completed(success: bool, error_code: int | None) -> None:
-            data: dict[str, Any] = {
-                "method": req.method,
-                "success": success,
-                "duration_ms": (_time.perf_counter() - _started) * 1000,
-            }
-            if error_code is not None:
-                data["error_code"] = error_code
-            request_context.run(emit_sync, EV_A2A_TASK_COMPLETED, **data)
+        completed = self._stream_completion(req.method, _started)
 
         async def gen() -> AsyncIterator[str]:
             # The generator runs after the handler returned, so the caller's
@@ -1444,19 +1481,30 @@ class A2AServer(A2AV1ServerMixin):
     async def _legacy_stream(
         self, request: A2ARequest, *, carrier: Mapping[str, Any] | None = None
     ) -> Any:
+        import time as _time  # noqa: PLC0415
+
         from fastapi.responses import StreamingResponse
 
         from locus.core.events import TerminateEvent, ThinkEvent
+        from locus.observability.emit import EV_A2A_TASK_RECEIVED, emit  # noqa: PLC0415
+
+        await emit(EV_A2A_TASK_RECEIVED, method="a2a/stream", rpc_id=None)
+        completed = self._stream_completion("a2a/stream", _time.perf_counter())
 
         user_msgs = [m for m in request.messages if m.role == "user"]
         prompt = user_msgs[-1].content if user_msgs else ""
 
         async def event_generator() -> AsyncIterator[str]:
             with trace_scope(carrier):
-                async for chunk in produce():
-                    yield chunk
+                stream = produce()
+                try:
+                    async for chunk in stream:
+                        yield chunk
+                finally:
+                    await stream.aclose()
 
-        async def produce() -> AsyncIterator[str]:
+        async def produce() -> AsyncGenerator[str, None]:
+            outcome: tuple[bool, int | None] | None = None
             try:
                 async for event in self._agent.run(prompt):
                     if isinstance(event, ThinkEvent):
@@ -1466,7 +1514,9 @@ class A2AServer(A2AV1ServerMixin):
                     else:
                         data = {"type": event.event_type}
                     yield f"data: {json.dumps(data)}\n\n"
+                outcome = (True, None)
             except Exception:  # noqa: BLE001
+                outcome = (False, INTERNAL_ERROR)
                 correlation_id = uuid.uuid4().hex
                 _logger.exception("A2A legacy stream error (correlation_id=%s)", correlation_id)
                 yield (
@@ -1481,6 +1531,8 @@ class A2AServer(A2AV1ServerMixin):
                     + "\n\n"
                 )
             finally:
+                success, error_code = outcome if outcome is not None else (False, None)
+                completed(success, error_code)
                 yield "data: [DONE]\n\n"
 
         return StreamingResponse(event_generator(), media_type="text/event-stream")
@@ -1822,6 +1874,19 @@ class A2AClient:
             )
             resp.raise_for_status()
             data = resp.json()
+        except Exception as e:
+            # Close the bracket with what arrived, if anything did.
+            response = getattr(e, "response", None)
+            await emit(
+                EV_A2A_CLIENT_RECEIVED,
+                target_url=self._url,
+                method=method,
+                status_code=getattr(response, "status_code", None),
+                duration_ms=(_time.perf_counter() - _started) * 1000,
+                content_length=len(response.content) if response is not None else 0,
+                error=type(e).__name__,
+            )
+            raise
         finally:
             if client is not self._http_client:
                 await client.aclose()
