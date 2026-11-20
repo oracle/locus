@@ -92,13 +92,12 @@ def _oci_model_available() -> bool:
 
 
 def _oracle_available() -> bool:
+    """A DSN and a password; a wallet only when the database needs one (TLS-only ADB and
+    Oracle Database Free connect without a wallet since 6.1.0)."""
     wallet = os.environ.get("ORACLE_WALLET")
-    return bool(
-        os.environ.get("ORACLE_PASSWORD")
-        and os.environ.get("ORACLE_DSN")
-        and wallet
-        and (Path(wallet) / "tnsnames.ora").exists()
-    )
+    if wallet and not (Path(wallet) / "tnsnames.ora").exists():
+        return False
+    return bool(os.environ.get("ORACLE_PASSWORD") and os.environ.get("ORACLE_DSN"))
 
 
 def _postgres_available() -> bool:
@@ -120,13 +119,15 @@ needs_oracle = pytest.mark.skipif(not _oracle_available(), reason="Oracle creden
 
 
 def _oracle_kwargs() -> dict[str, Any]:
-    return {
+    kwargs: dict[str, Any] = {
         "dsn": os.environ["ORACLE_DSN"],
-        "user": os.environ["ORACLE_USER"],
+        "user": os.environ.get("ORACLE_USER", "ADMIN"),
         "password": os.environ["ORACLE_PASSWORD"],
-        "wallet_location": os.environ["ORACLE_WALLET"],
-        "wallet_password": os.environ.get("ORACLE_WALLET_PASSWORD") or None,
     }
+    if wallet := os.environ.get("ORACLE_WALLET"):
+        kwargs["wallet_location"] = wallet
+        kwargs["wallet_password"] = os.environ.get("ORACLE_WALLET_PASSWORD") or None
+    return kwargs
 
 
 def _responses_model(**kwargs: Any) -> Any:
