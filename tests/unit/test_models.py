@@ -185,6 +185,31 @@ class TestModelRegistry:
         with pytest.raises(ValueError, match="Unknown provider"):
             get_model("unknown:model")
 
+    def test_get_model_unknown_provider_is_typed(self):
+        """An unknown provider raises UnknownProviderError naming it and the registered ones."""
+        from locus.core.errors import ConfigError, UnknownProviderError
+        from locus.models.registry import get_model, list_providers
+
+        with pytest.raises(UnknownProviderError, match="Unknown provider") as exc_info:
+            get_model("unknown:model")
+
+        err = exc_info.value
+        assert isinstance(err, ConfigError)
+        assert err.kind == "unknown_provider"
+        assert err.provider == "unknown"
+        assert err.available == list_providers()
+
+    def test_get_model_invalid_format_is_typed(self):
+        """A model string without a provider prefix raises UnknownProviderError with no provider."""
+        from locus.core.errors import UnknownProviderError
+        from locus.models.registry import get_model, list_providers
+
+        with pytest.raises(UnknownProviderError, match="must be 'provider:model'") as exc_info:
+            get_model("invalid_no_colon")
+
+        assert exc_info.value.provider is None
+        assert exc_info.value.available == list_providers()
+
     def test_list_providers(self):
         """List available providers."""
         from locus.models.registry import list_providers

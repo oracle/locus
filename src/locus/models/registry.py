@@ -10,6 +10,8 @@ import os
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
 
+from locus.core.errors import UnknownProviderError
+
 
 if TYPE_CHECKING:
     from locus.core.protocols import ModelProtocol
@@ -71,18 +73,27 @@ def get_model(model_string: str, **kwargs: Any) -> ModelProtocol:
         Model instance
 
     Raises:
-        ValueError: If provider is unknown or model string is invalid
+        UnknownProviderError: If the model string is not in "provider:model"
+            form, or names a provider that is not registered. It subclasses
+            ``ValueError``.
     """
+    available = list_providers()
     if ":" not in model_string:
-        raise ValueError(
+        raise UnknownProviderError(
             f"Model string must be 'provider:model', got: {model_string}. "
-            f"Available providers: {list(_PROVIDERS.keys())}"
+            f"Available providers: {available}",
+            provider=None,
+            available=available,
         )
 
     provider, model_id = model_string.split(":", 1)
 
     if provider not in _PROVIDERS:
-        raise ValueError(f"Unknown provider: {provider}. Available: {list(_PROVIDERS.keys())}")
+        raise UnknownProviderError(
+            f"Unknown provider: {provider}. Available: {available}",
+            provider=provider,
+            available=available,
+        )
 
     return _PROVIDERS[provider](model_id, **kwargs)
 

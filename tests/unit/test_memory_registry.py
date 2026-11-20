@@ -81,6 +81,31 @@ class TestGetCheckpointer:
         with pytest.raises(ValueError, match="Unknown checkpointer provider"):
             get_checkpointer("nonexistent_provider")
 
+    def test_get_unknown_provider_is_typed(self):
+        """An unknown provider raises UnknownProviderError naming it and the registered ones."""
+        from locus.core.errors import ConfigError, UnknownProviderError
+
+        with pytest.raises(UnknownProviderError) as exc_info:
+            get_checkpointer("nonexistent_provider:some-hint")
+
+        err = exc_info.value
+        assert isinstance(err, ConfigError)
+        assert err.kind == "unknown_provider"
+        assert err.provider == "nonexistent_provider"
+        assert err.available == list(_CHECKPOINTERS.keys())
+        assert "memory" in err.available
+
+    def test_get_empty_provider_prefix_is_typed_as_none(self):
+        """A leading ':' names no provider, so ``provider`` is None as it is for get_model."""
+        from locus.core.errors import UnknownProviderError
+        from locus.memory.registry import list_checkpointers
+
+        with pytest.raises(UnknownProviderError, match="Unknown checkpointer provider") as exc_info:
+            get_checkpointer(":some-hint")
+
+        assert exc_info.value.provider is None
+        assert exc_info.value.available == list_checkpointers()
+
     def test_get_with_config_hint_passed_as_kwarg(self):
         """Test that config_hint is passed to factory."""
         mock_checkpointer = MagicMock()
