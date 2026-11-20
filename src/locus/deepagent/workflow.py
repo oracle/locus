@@ -557,18 +557,32 @@ def route_after_grounding(
     2. Subsequent     → ``"replan"``      (expensive: full execute retry)
     3. Limits reached → ``END``
 
-    Compatible with ``StateGraph.add_conditional_edges``.
+    Compatible with ``StateGraph.add_conditional_edges``. Both exits to
+    ``END`` publish ``research.completed`` (``score``, ``threshold``,
+    ``grounded``, ``replan``, ``regeneration``), the last ``research.*``
+    event of a run; ``grounded`` is ``False`` when the budgets ran out.
     """
     from locus.multiagent.graph import END  # noqa: PLC0415
+    from locus.observability.emit import EV_RESEARCH_COMPLETED, emit_sync  # noqa: PLC0415
 
     def _route(state: dict[str, Any]) -> str:
         score = state.get(KEY_GROUNDING_SCORE, 0.0)
         replans = state.get(KEY_REPLAN_COUNT, 0)
         regens = state.get(KEY_REGENERATION_COUNT, 0)
 
-        if score >= threshold:
-            return END
-        if replans >= max_replans and regens >= max_regenerations:
+        grounded = score >= threshold
+        budgets_spent = replans >= max_replans and regens >= max_regenerations
+        if grounded or budgets_spent:
+            # The router is synchronous, so the publish is scheduled on the
+            # loop; ``close_stream`` waits for it before ending the stream.
+            emit_sync(
+                EV_RESEARCH_COMPLETED,
+                score=score,
+                threshold=threshold,
+                grounded=grounded,
+                replan=replans,
+                regeneration=regens,
+            )
             return END
         if regens < max_regenerations:
             return "regenerate"

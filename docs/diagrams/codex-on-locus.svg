@@ -13,7 +13,7 @@
     Codex -> your project   the agent, its tests and a run script, written from the skill
     project -> provider     the agent calls its own model with an oci:, openai: or anthropic: id; the
                             credential comes from the environment or ~/.oci/config (locus/models/registry.py)
-    scenarios -> Codex      codex/scenarios/run.py starts `locus codex run --exec` once per task in an
+    scenarios -> Codex      codex/scenarios/run.py starts `locus codex run` in exec mode once per task in an
                             empty directory and runs the task's check.sh in what Codex built
   Styled by the .tl-dia classes in docs/stylesheets/locus.css; see docs/diagrams/README.md.
 -->

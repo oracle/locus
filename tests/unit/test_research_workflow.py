@@ -593,6 +593,95 @@ class TestWorkflowSSEEmission:
         assert "research.grounding.evaluated" in collected
         reset_event_bus()
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("state", "grounded"),
+        [
+            ({KEY_GROUNDING_SCORE: 0.9}, True),
+            ({KEY_GROUNDING_SCORE: 0.1, KEY_REPLAN_COUNT: 1, KEY_REGENERATION_COUNT: 1}, False),
+        ],
+        ids=["threshold-met", "budgets-spent"],
+    )
+    async def test_router_emits_research_completed_on_both_exits(
+        self, state: dict[str, Any], grounded: bool
+    ) -> None:
+        import asyncio
+
+        from locus.multiagent.graph import END
+        from locus.observability import get_event_bus, run_context
+        from locus.observability.event_bus import reset_event_bus
+
+        reset_event_bus()
+        route = route_after_grounding(threshold=0.65, max_replans=1, max_regenerations=1)
+        collected: list[tuple[str, dict[str, Any]]] = []
+
+        async def drain(rid: str) -> None:
+            async for ev in get_event_bus().subscribe(rid):
+                collected.append((ev.event_type, dict(ev.data)))
+
+        async with run_context() as rid:
+            t = asyncio.create_task(drain(rid))
+            await asyncio.sleep(0)
+            # A retry route is silent; only the exit to END reports.
+            assert route({KEY_GROUNDING_SCORE: 0.1}) == "regenerate"
+            assert route({KEY_GROUNDING_SCORE: 0.1, KEY_REGENERATION_COUNT: 1}) == "replan"
+            assert route(state) == END
+            await get_event_bus().close_stream(rid)
+            await asyncio.wait_for(t, timeout=5.0)
+
+        assert [name for name, _ in collected] == ["research.completed"]
+        payload = collected[0][1]
+        assert payload == {
+            "score": state[KEY_GROUNDING_SCORE],
+            "threshold": 0.65,
+            "grounded": grounded,
+            "replan": state.get(KEY_REPLAN_COUNT, 0),
+            "regeneration": state.get(KEY_REGENERATION_COUNT, 0),
+        }
+        reset_event_bus()
+
+    @pytest.mark.asyncio
+    async def test_full_run_ends_with_research_completed(self) -> None:
+        import asyncio
+
+        from locus.observability import get_event_bus, run_context
+        from locus.observability.event_bus import reset_event_bus
+
+        reset_event_bus()
+        wf = create_research_workflow(
+            model=_model(),
+            tools=[],
+            causal_inference=False,
+            max_replans=1,
+            max_regenerations=1,
+            max_iterations=2,
+        )
+        research: list[tuple[str, dict[str, Any]]] = []
+
+        async def drain(rid: str) -> None:
+            async for ev in get_event_bus().subscribe(rid):
+                if ev.event_type.startswith("research."):
+                    research.append((ev.event_type, dict(ev.data)))
+
+        async with run_context() as rid:
+            t = asyncio.create_task(drain(rid))
+            await asyncio.sleep(0)
+            result = await wf.execute({KEY_PROMPT: "What changed?"})
+            await get_event_bus().close_stream(rid)
+            await asyncio.wait_for(t, timeout=10.0)
+
+        names = [name for name, _ in research]
+        assert names.count("research.completed") == 1
+        assert names[-1] == "research.completed"
+        payload = research[-1][1]
+        final = result.final_state
+        # The mock model grounds nothing, so the run spends both budgets.
+        assert payload["grounded"] is False
+        assert payload["score"] == final.get(KEY_GROUNDING_SCORE, 0.0)
+        assert payload["replan"] == final.get(KEY_REPLAN_COUNT, 0) == 1
+        assert payload["regeneration"] == final.get(KEY_REGENERATION_COUNT, 0) == 1
+        reset_event_bus()
+
 
 class TestWorkflowEdgeCases:
     @pytest.mark.asyncio

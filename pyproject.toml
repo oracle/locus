@@ -314,6 +314,7 @@ dev = [
     "pytest-asyncio>=0.24",
     "pytest-cov>=6.0",
     "pytest-xdist>=3.5",
+    "pytest-timeout>=2.3",
     "respx>=0.21",  # Mock httpx
     "dirty-equals>=0.8",  # Pydantic test helpers
     # Dev-time deps that some unit tests import directly. Living here
