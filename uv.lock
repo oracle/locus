@@ -3279,7 +3279,7 @@ wheels = [
 
 [[package]]
 name = "locus-sdk"
-version = "6.1.1"
+version = "6.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
