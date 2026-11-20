@@ -393,7 +393,7 @@ test = "pytest {args:tests/unit}"
 # installed SDK. Also runs as a unit test, so CI gates it either way; this
 # is the fast local loop when editing docs.
 # Documentation snippets against the installed SDK; CI runs it in the lint job.
-snippets = "python scripts/check_doc_snippets.py {args}"
+snippets = "python scripts/check_snippets.py {args}"
 # The version is asserted in four documents no tool keeps in agreement.
 # Run this before tagging — CI runs it too, in the lint job.
 release-check = "python scripts/check_release_consistency.py {args}"
@@ -437,7 +437,7 @@ features = ["docs", "openai"]
 serve = "mkdocs serve {args}"
 build = "mkdocs build --strict {args}"
 # Validates every ```python block on the site against the installed SDK.
-snippets = "python scripts/check_snippets.py {args:docs}"
+snippets = "python scripts/check_snippets.py {args}"
 # The captured output on the notebook pages, re-run against this checkout.
 outputs = "python scripts/notebook_output.py {args:--check}"
 

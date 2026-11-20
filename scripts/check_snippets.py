@@ -18,6 +18,14 @@ Three checks, in increasing order of what they catch:
 3. **Call signatures** — keyword arguments passed to an imported Locus
    callable must exist, and required Pydantic fields must be supplied.
 
+Two conventions decide what "a snippet must compile" means. ``README.md`` and
+``examples/README.md`` show code that is pasted into a file, so a block there
+must compile as a file. The pages under ``docs/`` follow the notebook
+convention: a block may use top-level ``await``, ``async for`` and ``async
+with`` and name tools or agents it does not define, as a notebook cell does; it
+is accepted when it compiles inside a coroutine, and the symbol and keyword
+checks still apply. With no arguments the checker covers all three.
+
 Deliberately static: it imports the SDK but never executes a snippet, so
 it needs no API keys, no network, and no running services. That keeps it
 cheap enough to gate every PR.
@@ -54,6 +62,9 @@ from typing import Any
 
 FENCE = re.compile(r"^([ \t]*)```(?:python|py)\s*$(.*?)^\1```[ \t]*$", re.MULTILINE | re.DOTALL)
 SKIP_INLINE = "# docs: skip"
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+DEFAULT_TARGETS = ("README.md", "examples/README.md", "docs/**/*.md")
+NOTEBOOK_STYLE_DIRS = ("docs",)
 SKIP_COMMENT = "<!-- docs: skip -->"
 
 
@@ -221,6 +232,19 @@ def _bound_names(tree: ast.Module) -> set[str]:
     return bound
 
 
+def _compiles_in_a_coroutine(source: str) -> bool:
+    return _compiles(f"async def _fragment():\n{textwrap.indent(source, '    ')}\n") is None
+
+
+def is_notebook_style(path: pathlib.Path) -> bool:
+    """Whether ``path`` is a docs page, where the notebook convention holds."""
+    try:
+        parts = path.resolve().relative_to(ROOT).parts
+    except ValueError:
+        parts = path.parts
+    return bool(parts) and parts[0] in NOTEBOOK_STYLE_DIRS
+
+
 def _is_excerpt(tree: ast.Module, source: str) -> bool:
     """Whether this is an illustrative fragment rather than a runnable file.
 
@@ -250,7 +274,7 @@ def _is_excerpt(tree: ast.Module, source: str) -> bool:
     return bool(used - _bound_names(tree))
 
 
-def check_block(source: str) -> list[tuple[str, str]]:
+def check_block(source: str, *, notebook_style: bool = False) -> list[tuple[str, str]]:
     """Every problem in one snippet, as ``(kind, message)``."""
     try:
         tree = ast.parse(source)
@@ -258,7 +282,9 @@ def check_block(source: str) -> list[tuple[str, str]]:
         return [("syntax", str(exc).split("(")[0].strip())]
 
     # Parse is not enough — see ``_compiles``.
-    if (error := _compiles(source)) is not None and not _is_excerpt(tree, source):
+    if (error := _compiles(source)) is not None and not (
+        _is_excerpt(tree, source) or (notebook_style and _compiles_in_a_coroutine(source))
+    ):
         return [("syntax", error)]
 
     found: list[tuple[str, str]] = []
@@ -315,12 +341,22 @@ def check_block(source: str) -> list[tuple[str, str]]:
     return found
 
 
-def check(root: pathlib.Path) -> tuple[int, list[Problem]]:
+def _markdown_files(targets: list[pathlib.Path]) -> list[pathlib.Path]:
+    files: list[pathlib.Path] = []
+    for target in targets:
+        files.extend(sorted(target.rglob("*.md")) if target.is_dir() else [target])
+    return files
+
+
+def check(targets: pathlib.Path | list[pathlib.Path]) -> tuple[int, list[Problem]]:
+    """Check every block in every Markdown file under ``targets`` (files or directories)."""
+    paths = [targets] if isinstance(targets, pathlib.Path) else targets
     problems: list[Problem] = []
     parsed = 0
-    for path in sorted(root.rglob("*.md")):
+    for path in _markdown_files(paths):
+        notebook_style = is_notebook_style(path)
         for index, source in iter_blocks(path):
-            issues = check_block(source)
+            issues = check_block(source, notebook_style=notebook_style)
             if not any(kind == "syntax" for kind, _ in issues):
                 parsed += 1
             problems += [Problem(str(path), index, kind, message) for kind, message in issues]
@@ -328,12 +364,16 @@ def check(root: pathlib.Path) -> tuple[int, list[Problem]]:
 
 
 def main(argv: list[str]) -> int:
-    root = pathlib.Path(argv[1] if len(argv) > 1 else "docs")
-    if not root.exists():
-        print(f"no such path: {root}", file=sys.stderr)
-        return 2
-    parsed, problems = check(root)
-    print(f"checked {parsed} Python snippets under {root}")
+    if len(argv) > 1:
+        targets = [pathlib.Path(a) for a in argv[1:]]
+        for target in targets:
+            if not target.exists():
+                print(f"no such path: {target}", file=sys.stderr)
+                return 2
+    else:
+        targets = [path for pattern in DEFAULT_TARGETS for path in sorted(ROOT.glob(pattern))]
+    parsed, problems = check(targets)
+    print(f"checked {parsed} Python snippets in {len(_markdown_files(targets))} file(s)")
     if not problems:
         print("no problems found")
         return 0

@@ -287,7 +287,7 @@ git commit -s -m "docs(notebooks): add RAG with Qdrant example"
 
 Every Python block in `README.md`, `examples/README.md` and the pages under
 `docs/` is checked against the installed SDK by `hatch run snippets`
-(`scripts/check_doc_snippets.py`), in CI's lint job: each `from locus...
+(`scripts/check_snippets.py`), in CI's lint job: each `from locus...
 import` must resolve, and each keyword passed to a Locus callable must exist
 on it. Two conventions:
 
