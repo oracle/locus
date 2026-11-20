@@ -20,6 +20,19 @@ policy.
 
 ### Fixed
 
+- **Every `started` event has its `completed` on failure too.** A
+  sequential pipeline stage, a loop iteration, the research workflow's
+  execute and regenerate nodes, the summarising compactor and
+  `RAGRetriever.retrieve()` emitted their `completed` event only when the
+  work in between returned, so an agent, summariser, embedder or store that
+  raised left the bracket open and a subscriber could not tell a failed
+  step from one still running. Each now publishes `completed` with
+  `success: false` and `error` (the exception's type name) before the
+  exception reaches the caller, and carries `success: true` on the normal
+  path. The catalogue rows for `composition.fanout.completed`
+  (`agents_succeeded`, `agents_failed`), `composition.loop.iteration.*`
+  (`max_loops`, `condition_met`) and `rag.query.completed`
+  (`reranker_type`) now name the keys the code sends.
 - **Streaming A2A requests now close their event bracket.** `message/stream`
   and the v1 `SendStreamingMessage` / `SubscribeToTask` methods emitted
   `a2a.task.received` and never `a2a.task.completed`, because the JSON-RPC

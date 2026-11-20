@@ -389,10 +389,24 @@ class SummarizingManager(ConversationManager):
 
         _started = _time.perf_counter()
 
-        if self.summarize_fn is not None and asyncio.iscoroutinefunction(self.summarize_fn):
-            summary_text = await self.summarize_fn(to_summarize)
-        else:
-            summary_text = self._generate_summary(to_summarize)
+        try:
+            if self.summarize_fn is not None and asyncio.iscoroutinefunction(self.summarize_fn):
+                summary_text = await self.summarize_fn(to_summarize)
+            else:
+                summary_text = self._generate_summary(to_summarize)
+        except Exception as e:
+            # The thread is left as it was; the bracket still closes.
+            await emit(
+                EV_MEMORY_COMPACTOR_COMPLETED,
+                strategy="summarizing",
+                messages_before=len(non_system_messages),
+                messages_after=len(non_system_messages),
+                summarized_count=0,
+                duration_ms=(_time.perf_counter() - _started) * 1000,
+                success=False,
+                error=type(e).__name__,
+            )
+            raise
 
         if system_message:
             result.append(system_message)
@@ -410,6 +424,7 @@ class SummarizingManager(ConversationManager):
             messages_after=len(result),
             summarized_count=len(to_summarize),
             duration_ms=(_time.perf_counter() - _started) * 1000,
+            success=True,
         )
         return result
 

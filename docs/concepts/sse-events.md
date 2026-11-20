@@ -116,11 +116,11 @@ run id is bound, either by an active `run_context()` or by
 | Event | Payload |
 |---|---|
 | `composition.stage.started` | `pipeline_kind="sequential"`, `stage`, `stage_count` |
-| `composition.stage.completed` | `pipeline_kind`, `stage`, `output_length`, `duration_ms`, `success` |
+| `composition.stage.completed` | `pipeline_kind`, `stage`, `output_length`, `duration_ms`, `success`, `error` (the exception type, when `success` is false) |
 | `composition.fanout.started` | `agent_count`, `merge_strategy` |
-| `composition.fanout.completed` | `success_count`, `error_count`, `duration_ms` |
-| `composition.loop.iteration.started` | `iteration` |
-| `composition.loop.iteration.completed` | `iteration`, `output_length`, `duration_ms` |
+| `composition.fanout.completed` | `agents_succeeded`, `agents_failed`, `duration_ms` |
+| `composition.loop.iteration.started` | `iteration`, `max_loops` |
+| `composition.loop.iteration.completed` | `iteration`, `output_length`, `condition_met`, `duration_ms`, `success`, `error` (when `success` is false) |
 | `composition.loop.terminated` | `iterations_run`, `terminated_by` (`"condition"` \| `"max_loops"`) |
 
 ### `router.*` — goal routing
@@ -153,7 +153,7 @@ a hold for human approval, and `allow: true` alone is an allow.
 | Event | Payload |
 |---|---|
 | `rag.query.started` | `query_preview`, `limit`, `store_type`, `threshold` |
-| `rag.query.completed` | `hit_count`, `top_score`, `duration_ms`, `store_type` |
+| `rag.query.completed` | `hit_count`, `top_score`, `duration_ms`, `store_type`, `reranker_type`, `success`, `error` (when `success` is false; `hit_count` is 0) |
 
 ### `memory.*` — checkpointing, conversation management, long-term memory
 
@@ -163,7 +163,7 @@ a hold for human approval, and `allow: true` alone is an allow.
 | `memory.checkpoint.loaded` | `thread_id`, `iteration`, `backend`, `resume_node` (graph only) |
 | `memory.conversation.pruned` | `strategy="sliding_window"`, `window_size`, `removed_count` |
 | `memory.compactor.triggered` | `strategy="summarizing"`, `messages_before`, `threshold` |
-| `memory.compactor.completed` | `strategy`, `messages_before`, `messages_after`, `summarized_count`, `duration_ms` |
+| `memory.compactor.completed` | `strategy`, `messages_before`, `messages_after`, `summarized_count`, `duration_ms`, `success`, `error` (when the summariser raised; the thread is left as it was) |
 | `memory.manager.injected` | `memory_count`, `types`; `OracleAgentMemoryManager` adds `source="oracleagentmemory"` |
 | `memory.manager.extracted` | `memory_count`, `types`, `keys`; `Mem0MemoryManager` sends `backend="mem0"`, `message_count` instead |
 | `memory.manager.extract_failed` | `error_type`, `error`, `mode` (`"inline"` \| `"background"`) |
@@ -217,12 +217,12 @@ Emitted by `create_research_workflow` / individual node primitives from
 | Event | Payload |
 |---|---|
 | `research.execute.started` | `prompt_preview`, `replan` (iteration index) |
-| `research.execute.completed` | `fact_count` |
+| `research.execute.completed` | `fact_count`, `success`, `error` (when the research agent raised; `fact_count` counts what it gathered first) |
 | `research.causal.built` | `node_count`, `hypothesis_preview`, `confidence` |
 | `research.summarize.completed` | `summary_length`, `has_structured_output` |
 | `research.grounding.evaluated` | `score`, `claims_evaluated`, `ungrounded_count`, `requires_replan` |
 | `research.regenerate.started` | `ungrounded_count` |
-| `research.regenerate.completed` | `regeneration` (attempt index) |
+| `research.regenerate.completed` | `regeneration` (attempt index), `success`, `error` (when the editor agent raised) |
 | `research.replan` | `replan` (iteration), `ungrounded_count`, `prompt_preview` |
 
 ### `tool.*` — sandboxed tool execution and tool-call integrity
@@ -288,6 +288,13 @@ Started/completed events that share a `span_id` (`agent.tool.*`,
 `multiagent.graph.node.*`) let consumers compute durations without
 subtracting timestamps and survive interleaved events from concurrent
 runs.
+
+Every `started` has its `completed`, on failure too: when the work in
+between raises, the `completed` event is published with `success` false
+and `error` set to the exception's type name before the exception
+reaches the caller, so a subscriber never sees a bracket left open.
+`a2a.task.completed` reports a failure with `success` and `error_code`
+instead, and `multiagent.graph.node.completed` with `status`.
 
 ## Events and spans
 

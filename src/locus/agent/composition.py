@@ -101,7 +101,21 @@ class SequentialPipeline(BaseModel):
                     stage=i,
                     stage_count=len(self.agents),
                 )
-                result = await _arun_agent(agent, current_input)
+                try:
+                    result = await _arun_agent(agent, current_input)
+                except Exception as e:
+                    # The stage's bracket closes before the pipeline reports
+                    # the failure, so a subscriber sees which stage ended it.
+                    await emit(
+                        EV_PIPELINE_STAGE_COMPLETED,
+                        pipeline_kind="sequential",
+                        stage=i,
+                        output_length=0,
+                        duration_ms=(time.perf_counter() - stage_started) * 1000,
+                        success=False,
+                        error=type(e).__name__,
+                    )
+                    raise
                 output = result.message or ""
                 outputs.append(output)
                 await emit(
@@ -267,12 +281,25 @@ class LoopAgent(BaseModel):
         terminated_by = "max_loops"
         try:
             for i in range(self.max_loops):
+                iteration_started = time.perf_counter()
                 await emit(
                     EV_LOOP_ITERATION_STARTED,
                     iteration=i,
                     max_loops=self.max_loops,
                 )
-                result = await _arun_agent(self.agent, current_input)
+                try:
+                    result = await _arun_agent(self.agent, current_input)
+                except Exception as e:
+                    await emit(
+                        EV_LOOP_ITERATION_COMPLETED,
+                        iteration=i,
+                        output_length=0,
+                        condition_met=False,
+                        duration_ms=(time.perf_counter() - iteration_started) * 1000,
+                        success=False,
+                        error=type(e).__name__,
+                    )
+                    raise
                 output = result.message or ""
                 outputs.append(output)
                 stopped = self.condition(output)
@@ -281,6 +308,8 @@ class LoopAgent(BaseModel):
                     iteration=i,
                     output_length=len(output),
                     condition_met=stopped,
+                    duration_ms=(time.perf_counter() - iteration_started) * 1000,
+                    success=True,
                 )
 
                 # Check termination condition
