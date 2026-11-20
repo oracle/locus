@@ -9,16 +9,18 @@ default with `hatch run test`.
 Each integration test runs under a 300-second budget (`INTEGRATION_TIMEOUT` in
 `tests/integration/conftest.py`, enforced by `pytest-timeout` from the `dev`
 extras), so a provider that never answers or a database that never connects
-fails the test instead of holding the job. Pass `--timeout` to change it for a
-run, or `--timeout=0` to turn it off, for example while stepping through a test
-in a debugger:
+fails the test instead of holding the job. A budget set for the run replaces
+it: `--timeout=N` on the command line, `PYTEST_TIMEOUT=N` in the environment or
+`timeout = N` in the ini, where `0` turns it off (for example while stepping
+through a test in a debugger):
 
 ```bash
-uv run hatch run test-integration --timeout=60 tests/integration
+hatch run test-integration --timeout=60 tests/integration
+PYTEST_TIMEOUT=0 hatch run test-integration
 ```
 
 A test that needs longer sets its own `@pytest.mark.timeout(...)`, which takes
-precedence over both. Unit tests have no budget.
+precedence over all of these. Unit tests have no budget.
 
 ## Models
 

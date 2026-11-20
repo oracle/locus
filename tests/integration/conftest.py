@@ -382,9 +382,16 @@ def pytest_collection_modifyitems(config, items):
                 item.add_marker(skip_marker)
 
     # This hook sees every collected item, so only integration tests get the
-    # default budget. ``--timeout=N`` replaces it and ``--timeout=0`` disables it;
-    # a test's own ``@pytest.mark.timeout`` wins over both.
-    if not config.pluginmanager.hasplugin("timeout") or config.getoption("timeout") is not None:
+    # default budget. A budget set for the run (``--timeout``, ``PYTEST_TIMEOUT``
+    # or ``timeout`` in the ini; ``0`` disables) replaces it; a test's own
+    # ``@pytest.mark.timeout`` wins over all of them.
+    if not config.pluginmanager.hasplugin("timeout"):
+        return
+    if (
+        config.getoption("timeout") is not None
+        or config.getini("timeout")
+        or os.environ.get("PYTEST_TIMEOUT")
+    ):
         return
     here = Path(__file__).parent
     for item in items:
