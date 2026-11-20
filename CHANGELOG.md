@@ -8,6 +8,41 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **`research.completed` closes every research run.** The grounding router
+  of `create_research_workflow` publishes it on both of its exits to `END`,
+  with `score`, `threshold`, `grounded` (`False` when the replan and
+  regeneration budgets ran out), `replan` and `regeneration`, so a subscriber
+  no longer infers the end of a run from the stream closing. A unit test now
+  parses every module under `locus` and fails when an `EV_*` constant in
+  `locus.observability.emit` has no emit site; the five constants that still
+  have none are listed in the test and on the SSE events page (#536, after
+  the proposal in #556 by ishtiaq-ahmed-dev).
+- **`scripts/check_diagrams.py`.** The diagrams README pointed at a
+  `render_check.py` that was never in the repository. The checker covers
+  what needs no browser: well-formed XML, no presentation attributes, only
+  classes that a `.tl-dia` rule in `locus.css` styles, and the `role`,
+  `aria-labelledby`, title and description markup; `tests/docs` runs it over
+  every diagram, so a diagram that breaks a rule fails CI (#537, after the
+  proposal in #558 by ishtiaq-ahmed-dev).
+
+### Changed
+
+- **Integration tests run under a 300-second budget.** `pytest-timeout`
+  joins the `dev` extras and `tests/integration/conftest.py` marks every
+  integration test with the budget unless the run passes `--timeout`, sets
+  `PYTEST_TIMEOUT` or an ini `timeout`, or the test carries its own
+  `@pytest.mark.timeout`; a provider that never answers or a database that
+  never connects fails its test with the plugin's message instead of holding
+  the job. Unit tests carry no budget (#541, after the proposal in #557 by
+  ishtiaq-ahmed-dev).
+- **Memory managers emit through the event constants.**
+  `memory.manager.injected` and `memory.manager.extracted` were published as
+  string literals; they now go through `EV_MEMORY_MANAGER_INJECTED` and
+  `EV_MEMORY_MANAGER_EXTRACTED`, so the name and the constant cannot drift
+  apart (#536).
+
 ### Deprecated
 
 - **`EV_MEMORY_CONVERSATION_ADDED` (`memory.conversation.added`).** The
@@ -75,6 +110,9 @@ policy.
   `success: false` without an error code, and an agent failure inside the
   stream, which the client receives as a final `failed` status update,
   counts as a served request (#575).
+- **`codex-on-locus.svg` is well-formed XML.** A `--` inside its comment
+  made XML parsers reject the file while browsers rendered it inline
+  regardless; found by the new diagram checker (#537).
 
 - **A structured turn on OCI Llama models streams its answer instead of
   nothing.** `meta.llama-3.3-70b-instruct` behind `/openai/v1` answers a

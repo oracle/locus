@@ -224,6 +224,7 @@ Emitted by `create_research_workflow` / individual node primitives from
 | `research.regenerate.started` | `ungrounded_count` |
 | `research.regenerate.completed` | `regeneration` (attempt index), `success`, `error` (when the editor agent raised) |
 | `research.replan` | `replan` (iteration), `ungrounded_count`, `prompt_preview` |
+| `research.completed` | `score`, `threshold`, `grounded` (`False` when the replan and regeneration budgets ran out), `replan`, `regeneration`; the last `research.*` event of a run, sent when the grounding router routes to `END` |
 
 ### `tool.*` — sandboxed tool execution and tool-call integrity
 
@@ -267,14 +268,15 @@ without storing either.
 
 ## Declared but not emitted
 
-Six constants in `src/locus/observability/emit.py` have no emission site
+Five constants in `src/locus/observability/emit.py` have no emission site
 today, so a subscriber never sees them: `EV_A2A_TASK_PROCESSING`
 (`a2a.task.processing`), `EV_GRAPH_NODE_ROUTED`
 (`multiagent.graph.node.routed`), `EV_RAG_EMBEDDING_GENERATED`
-(`rag.embedding.generated`), `EV_RAG_STORE_SEARCH` (`rag.store.search`),
-`EV_RAG_STORE_UPSERT` (`rag.store.upsert`) and `EV_RESEARCH_COMPLETED`
-(`research.completed`). The end of a research run is signalled by
-`close_stream(rid)`, not by an event.
+(`rag.embedding.generated`), `EV_RAG_STORE_SEARCH` (`rag.store.search`)
+and `EV_RAG_STORE_UPSERT` (`rag.store.upsert`). The unit test
+`tests/unit/test_emit_constants_have_sites.py` carries the same list and
+fails when a constant gains or loses an emission site without this page
+following.
 
 `EV_MEMORY_CONVERSATION_ADDED` (`memory.conversation.added`) was declared
 and never emitted either, and nothing in the SDK adds to a conversation

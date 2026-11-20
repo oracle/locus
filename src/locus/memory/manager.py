@@ -325,12 +325,12 @@ class BaseMemoryManager(ABC):
             # must not keep reaching the model from the checkpoint.
             return _strip_memory_blocks(state)
 
-        from locus.observability.emit import emit  # noqa: PLC0415
+        from locus.observability.emit import EV_MEMORY_MANAGER_INJECTED, emit  # noqa: PLC0415
 
         injected_state = _inject_memories_into_state(state, memories)
 
         await emit(
-            "memory.manager.injected",
+            EV_MEMORY_MANAGER_INJECTED,
             memory_count=len(memories),
             types=[m.type.value for m in memories],
         )
@@ -382,7 +382,7 @@ class BaseMemoryManager(ABC):
 
     async def _extract_and_save(self, messages: list[Message]) -> None:
         """Run :meth:`extract` + :meth:`save`, reporting instead of raising."""
-        from locus.observability.emit import emit  # noqa: PLC0415
+        from locus.observability.emit import EV_MEMORY_MANAGER_EXTRACTED, emit  # noqa: PLC0415
 
         try:
             memories = await self.extract(messages)
@@ -400,7 +400,7 @@ class BaseMemoryManager(ABC):
             return
 
         await emit(
-            "memory.manager.extracted",
+            EV_MEMORY_MANAGER_EXTRACTED,
             memory_count=len(memories),
             types=[m.type.value for m in memories],
             keys=[m.key for m in memories],

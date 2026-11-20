@@ -222,6 +222,6 @@ class Mem0MemoryManager(BaseMemoryManager):
         client = self._get_client()
         await client.add(mem0_messages, **self._scope())
 
-        from locus.observability.emit import emit  # noqa: PLC0415
+        from locus.observability.emit import EV_MEMORY_MANAGER_EXTRACTED, emit  # noqa: PLC0415
 
-        await emit("memory.manager.extracted", backend="mem0", message_count=len(mem0_messages))
+        await emit(EV_MEMORY_MANAGER_EXTRACTED, backend="mem0", message_count=len(mem0_messages))

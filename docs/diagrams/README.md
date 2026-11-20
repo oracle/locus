@@ -62,9 +62,15 @@ Size nodes so the longest line has at least 12 px of padding each side.
 ## Check before committing
 
 ```bash
-python render_check.py docs/diagrams/NAME.svg /tmp/NAME
+python scripts/check_diagrams.py docs/diagrams/NAME.svg
 ```
 
-renders it in light, dark and at phone width, and fails on inline styling,
-unknown classes, a missing title/description, or any clipped, overlapping or
-overflowing text.
+reads the class vocabulary from `docs/stylesheets/locus.css` and fails on XML
+that is not well-formed (a `--` inside a comment is enough), on any
+presentation attribute from rule 1, on a class that no `.tl-dia` rule styles,
+and on missing `role`, `aria-labelledby`, title or description (rule 2). With
+no arguments it checks every diagram; `tests/docs/test_check_diagrams.py` runs
+it that way in CI, so a diagram that breaks a rule fails the build.
+
+Rule 6 has no script. Open the page under `mkdocs serve`, in light and dark
+and at phone width, and look for clipped, overlapping or overflowing text.

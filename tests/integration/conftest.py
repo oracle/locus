@@ -20,6 +20,15 @@ from urllib.parse import urlsplit
 import pytest
 
 
+# Per-test budget for the live suites, in seconds. A provider that never
+# answers or a database that never connects fails its test here instead of
+# holding the job until the runner's own limit; a live case normally takes
+# seconds. A budget set for the whole run replaces it (``--timeout``,
+# ``PYTEST_TIMEOUT``, ``timeout`` in the ini; ``0`` disables), and a test's
+# own ``@pytest.mark.timeout`` always wins.
+INTEGRATION_TIMEOUT_SECONDS = 300
+
+
 # =============================================================================
 # Service Detection Helpers
 # =============================================================================
@@ -357,8 +366,27 @@ def pytest_configure(config):
     )
 
 
+def _run_sets_a_timeout(config) -> bool:
+    """True when the invocation already carries a budget of its own."""
+    return (
+        config.getoption("timeout") is not None
+        or bool(config.getini("timeout"))
+        or bool(os.environ.get("PYTEST_TIMEOUT"))
+    )
+
+
+def _apply_integration_timeout(config, items) -> None:
+    """Give every item under this directory the default budget."""
+    if not config.pluginmanager.hasplugin("timeout") or _run_sets_a_timeout(config):
+        return
+    suite = Path(__file__).parent
+    for item in items:
+        if item.path.is_relative_to(suite) and item.get_closest_marker("timeout") is None:
+            item.add_marker(pytest.mark.timeout(INTEGRATION_TIMEOUT_SECONDS))
+
+
 def pytest_collection_modifyitems(config, items):
-    """Auto-skip tests based on marker requirements."""
+    """Auto-skip tests based on marker requirements; apply the time budget."""
     marker_map = {
         "requires_redis": skip_without_redis,
         "requires_postgres": skip_without_postgres,
@@ -374,6 +402,8 @@ def pytest_collection_modifyitems(config, items):
         for marker_name, skip_marker in marker_map.items():
             if marker_name in [m.name for m in item.iter_markers()]:
                 item.add_marker(skip_marker)
+
+    _apply_integration_timeout(config, items)
 
 
 def pytest_report_header(config):
