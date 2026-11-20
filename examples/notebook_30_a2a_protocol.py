@@ -56,7 +56,9 @@ Prerequisites:
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import socket
+import sys
 import threading
 import time
 
@@ -109,6 +111,14 @@ async def main() -> None:
     print("=" * 60)
     print("Notebook 30: A2A — cross-org payment-risk sharing mesh")
     print("=" * 60)
+
+    if importlib.util.find_spec("fastapi") is None:
+        print(
+            "\nskipped: fastapi is not installed; the A2A server side needs it: "
+            "pip install 'locus-sdk[server]' (see the prerequisites in the notebook docstring)\n"
+        )
+        # 77 = skipped: scripts/run_notebooks.py reports SKIP, not FAIL.
+        sys.exit(77)
 
     # ---------------------------------------------------------------
     # Part 1: publish the Network's risk agent behind A2A

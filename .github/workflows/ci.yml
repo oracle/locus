@@ -133,12 +133,42 @@ jobs:
           LOCUS_MODEL_PROVIDER: mock
         run: python scripts/notebook_output.py --check
 
+  # Every notebook, offline, with the bundled mock model and every extra
+  # installed. A notebook that needs something the runner lacks prints a
+  # skip banner and exits 77 (``scripts/run_notebooks.py`` reports SKIP);
+  # anything that tracebacks fails the job. About a minute end to end.
+  notebooks:
+    name: Notebooks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # actions/checkout@v6.0.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      # actions/setup-python@v6.2.0
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install locus with every extra the notebooks use
+        run: |
+          pip install -U pip
+          pip install -e ".[dev,sdk,server,mcp,oci,oracledb,openai,anthropic,rag,s3,mem0,telemetry]"
+
+      - name: Run every notebook with the mock model
+        env:
+          LOCUS_MODEL_PROVIDER: mock
+          LOCUS_CONTEXT_WINDOW: "128000"
+        run: python scripts/run_notebooks.py < /dev/null
+
   # Aggregate gate. Branch-protection should require this single status
   # check rather than each individual one — that lets us add / remove
   # jobs without retouching protection rules.
   ci-success:
     name: CI Success
-    needs: [lint, test, integration, secret-scan, precommit, dco, docs-tests]
+    needs: [lint, test, integration, secret-scan, precommit, dco, docs-tests, notebooks]
     if: always()
     runs-on: ubuntu-latest
     steps:
