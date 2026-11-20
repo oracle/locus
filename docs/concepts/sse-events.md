@@ -121,7 +121,7 @@ run id is bound, either by an active `run_context()` or by
 | `composition.fanout.completed` | `agents_succeeded`, `agents_failed`, `duration_ms` |
 | `composition.loop.iteration.started` | `iteration`, `max_loops` |
 | `composition.loop.iteration.completed` | `iteration`, `output_length`, `condition_met`, `duration_ms`, `success`, `error` (when `success` is false) |
-| `composition.loop.terminated` | `iterations_run`, `terminated_by` (`"condition"` \| `"max_loops"`) |
+| `composition.loop.terminated` | `iterations` (the iterations that ran), `terminated_by` (`"condition"` \| `"max_loops"`), `duration_ms` |
 
 ### `router.*` — goal routing
 
@@ -159,10 +159,10 @@ a hold for human approval, and `allow: true` alone is an allow.
 
 | Event | Payload |
 |---|---|
-| `memory.checkpoint.saved` | `thread_id`, `iteration`, `backend`, `trigger` (`"every_n_iterations"` \| `"final"` \| `"graph_interrupt"`), `durability` (`"sync"` \| `"async"` \| `"exit"`; agent runs only) |
+| `memory.checkpoint.saved` | `thread_id`, `iteration`, `backend`, `trigger` (`"every_n_iterations"` \| `"final"` \| `"graph_interrupt"` \| `"graph_interrupt_before"`), `durability` (`"sync"` \| `"async"` \| `"exit"`; agent runs only), `interrupted_node` (graph interrupts only: the node the run paused at) |
 | `memory.checkpoint.loaded` | `thread_id`, `iteration`, `backend`, `resume_node` (graph only) |
 | `memory.conversation.pruned` | `strategy="sliding_window"`, `window_size`, `removed_count` |
-| `memory.compactor.triggered` | `strategy="summarizing"`, `messages_before`, `threshold`; from `SummarizingManager.apply` (through `emit_sync`) and `async_apply` alike |
+| `memory.compactor.triggered` | `strategy="summarizing"`, `messages_before`, `threshold` (from both the synchronous and the asynchronous apply path of `SummarizingManager`) |
 | `memory.compactor.completed` | `strategy`, `messages_before`, `messages_after`, `summarized_count`, `duration_ms`, `success`, `error` (when the summariser raised; the thread is left as it was) |
 | `memory.manager.injected` | `memory_count`, `types`; `OracleAgentMemoryManager` adds `source="oracleagentmemory"` |
 | `memory.manager.extracted` | `memory_count`, `types`, `keys`; `Mem0MemoryManager` sends `backend="mem0"`, `message_count` instead |
