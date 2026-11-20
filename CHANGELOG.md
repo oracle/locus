@@ -8,6 +8,15 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **A command-line reference.** `docs/how-to/command-line.md` documents the
+  `locus` command; its table of subcommands and actions is rendered at docs
+  build time from `locus.cli.build_parser()` through `{{ locus_cli_reference }}`,
+  so it follows the command. `tests/docs/test_error_hierarchy_diagram.py` keeps
+  the errors page's hierarchy diagram equal to the classes and `kind` values in
+  `locus.core.errors`, with subclasses defined elsewhere named in the prose.
+
 ## [6.2.1] - 2026-11-20
 
 ### Documentation

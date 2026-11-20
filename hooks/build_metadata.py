@@ -27,6 +27,7 @@ EVENT_COUNT_TOKEN = "{{ locus_event_count }}"  # noqa: S105 — template placeho
 EVENT_PREFIXES_TOKEN = "{{ locus_event_prefixes }}"  # noqa: S105 — template placeholder, not a secret
 MODEL_TABS_TOKEN = "{{ locus_model_tabs }}"  # noqa: S105 — template placeholder, not a secret
 MODEL_TOKEN = "{{ locus_model }}"  # noqa: S105 — template placeholder, not a secret
+CLI_REFERENCE_TOKEN = "{{ locus_cli_reference }}"  # noqa: S105 — template placeholder, not a secret
 
 _SDK_REPO = "https://github.com/oracle/locus/"
 #: A link into the SDK repo on its moving ``main`` branch.
@@ -256,6 +257,42 @@ def on_config(config: Any) -> Any:
     return config
 
 
+def _cli_reference() -> str:
+    """The ``locus`` command's subcommands and actions, as a table, from the parser itself.
+
+    Read from :func:`locus.cli.build_parser` at build time, so the page
+    follows the command: a subcommand or action added to the parser appears
+    here on the next build, with the help line the parser prints.
+    """
+    import argparse  # noqa: PLC0415
+
+    cli = import_module("locus.cli")
+    parser = cli.build_parser()
+
+    # argparse exposes subparsers and their help only through private attributes.
+    def subparsers(p: argparse.ArgumentParser) -> argparse._SubParsersAction | None:  # noqa: SLF001
+        actions = p._actions  # noqa: SLF001
+        return next((a for a in actions if isinstance(a, argparse._SubParsersAction)), None)  # noqa: SLF001
+
+    def help_of(action: argparse._SubParsersAction, name: str) -> str:  # noqa: SLF001
+        text = next((c.help for c in action._choices_actions if c.dest == name), "") or ""  # noqa: SLF001
+        return " ".join(text.split())
+
+    commands = subparsers(parser)
+    if commands is None:
+        raise RuntimeError("locus.cli.build_parser() has no subcommands")
+    rows = ["| Command | What it does | Actions |", "|---|---|---|"]
+    for name, sub in commands.choices.items():
+        nested = subparsers(sub)
+        actions = (
+            "; ".join(f"`{a}`: {help_of(nested, a)}" for a in nested.choices)
+            if nested is not None
+            else "—"
+        )
+        rows.append(f"| `locus {name}` | {help_of(commands, name)} | {actions} |")
+    return "\n".join(rows)
+
+
 def on_page_markdown(markdown: str, *, config: Any, **_: Any) -> str:
     """Expand build facts only where their explicit tokens appear."""
     extra = config["extra"]
@@ -277,6 +314,8 @@ def on_page_markdown(markdown: str, *, config: Any, **_: Any) -> str:
     rendered = rendered.replace(SDK_VERSION_TOKEN, sdk_version)
     if PROVIDER_TABLE_TOKEN in rendered:
         rendered = rendered.replace(PROVIDER_TABLE_TOKEN, _provider_table())
+    if CLI_REFERENCE_TOKEN in rendered:
+        rendered = rendered.replace(CLI_REFERENCE_TOKEN, _cli_reference())
     if EXAMPLE_MODEL_TOKEN in rendered:
         if not extra.get("example_model"):
             raise RuntimeError(
