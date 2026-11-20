@@ -8,6 +8,22 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **An install-extras reference.** `docs/how-to/install-extras.md` lists
+  every pip extra `pyproject.toml` defines, grouped by what it enables, with
+  the packages each one adds; the quickstart and the provider guide link to
+  it. A docs test keeps the page in step with `pyproject.toml`: every extra
+  has a row, every row names an extra that exists, and the packages a row
+  lists are that extra's own dependencies.
+
+### Fixed
+
+- **The errors page names `ToolCallIntegrityError`.** The hierarchy diagram
+  covers every class in `locus.core.errors`; the one subclass defined
+  elsewhere, `ToolCallIntegrityError` in `locus.tools.integrity`, is now
+  named with its inherited `tool_error` kind.
+
 ## [6.2.0] - 2026-11-20
 
 ### Added
