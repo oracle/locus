@@ -168,8 +168,10 @@ then take the next free number at the end of that range:
 4. **Graceful skip**: if the notebook needs credentials the harness
    may not have (OPENAI_API_KEY, COHERE_API_KEY, etc.), check the env
    vars at the top of `main()` and print a skip banner with a one-line
-   wiring snippet instead of crashing. The CI runs every notebook —
-   nothing is allowed to traceback on a missing optional env.
+   wiring snippet instead of crashing, and exit with code 77 so
+   `scripts/run_notebooks.py` reports a skip. CI runs every notebook
+   offline with the mock model (the `Notebooks` job, every extra
+   installed); nothing is allowed to traceback on a missing optional env.
 5. **`locus.core.interrupt()`**: notebooks that call `interrupt()`
    for human approval (Notebooks 24, 38, 62, 63, 64 today) need a
    terminal; say so in the header docstring so nobody runs them
