@@ -652,8 +652,9 @@ through it.
 A report on disk is one build's artefact. A regression is a question about
 several, so a `ReportStore` keeps reports by suite and by fingerprint, and
 `trend` reads the last N of one suite back and says where each moved against
-the one before it. Four stores share the interface: a directory
-(`FileReportStore`), a table on an Oracle AI Database (`OracleReportStore`,
+the one before it. Five stores share the interface: a directory
+(`FileReportStore`), a SQLite database file (`SqliteReportStore`), a table
+on an Oracle AI Database (`OracleReportStore`,
 the report as JSON with its headline figures in columns), an OCI Object
 Storage bucket (`OCIBucketReportStore`) and any S3-compatible bucket
 (`S3ReportStore`). `report_store(spec)` opens one from a string, which is how
@@ -670,7 +671,7 @@ print(history.summary())
 assert not history.regressed, history.summary()
 ```
 
-`file:///var/lib/locus/evals` (or a bare path), `oracle://user:pw@/?dsn=mydb_low&wallet=/opt/wallet&table=LOCUS_EVAL_REPORTS`
+`file:///var/lib/locus/evals` (or a bare path), `sqlite:///var/lib/locus/evals.db`, `oracle://user:pw@/?dsn=mydb_low&wallet=/opt/wallet&table=LOCUS_EVAL_REPORTS`
 (a bare `oracle://` reads `ORACLE_DSN`, `ORACLE_USER`, `ORACLE_PASSWORD`,
 `ORACLE_CONFIG_DIR`, `ORACLE_WALLET` and `ORACLE_WALLET_PASSWORD` from the
 environment, as the approval stores do; `config_dir=` names the `tnsnames.ora`
@@ -737,7 +738,7 @@ leaves the case not graded rather than failed.
 - [`locus.evaluation.evaluators`](https://github.com/oracle/locus/blob/main/src/locus/evaluation/evaluators.py) — `TrajectoryMatch`, `ToolSelection`, `ArgumentCorrectness`, `EvaluatorVerdict`.
 - [`locus.evaluation.simulator`](https://github.com/oracle/locus/blob/main/src/locus/evaluation/simulator.py) — `SimulatedUser`, `UserSimulator`, `Conversation`.
 - [`locus.evaluation.online`](https://github.com/oracle/locus/blob/main/src/locus/evaluation/online.py) — `OnlineEvaluator`, `OnlineBudget`, `every_nth`, `fraction`.
-- [`locus.evaluation.stores`](https://github.com/oracle/locus/blob/main/src/locus/evaluation/stores.py) — `report_store`, the four stores, `trend`.
+- [`locus.evaluation.stores`](https://github.com/oracle/locus/blob/main/src/locus/evaluation/stores.py) — `report_store`, the five stores, `trend`.
 
 ## See also
 

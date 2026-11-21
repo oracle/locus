@@ -24,8 +24,8 @@ Provides systematic testing of agent quality:
 - Play a multi-turn case with a :class:`SimulatedUser`: a persona and a goal
   a model acts out against the agent, within a turn budget
 - Grade a sample of live runs off the event bus with :class:`OnlineEvaluator`
-- Keep reports in a store (:func:`report_store`: a directory, an Oracle AI
-  Database table, an OCI or S3 bucket) and read the :func:`trend` across them
+- Keep reports in a store (:func:`report_store`: a directory, a SQLite file,
+  an Oracle AI Database table, an OCI or S3 bucket) and read the :func:`trend` across them
 """
 
 from locus.evaluation.datasets import dump_cases, load_cases
@@ -102,6 +102,7 @@ from locus.evaluation.stores import (
     OracleReportStore,
     ReportStore,
     S3ReportStore,
+    SqliteReportStore,
     StoredReport,
     Trend,
     TrendPoint,
@@ -152,6 +153,7 @@ __all__ = [
     "S3ReportStore",
     "SimulatedUser",
     "SimulatorUnavailableError",
+    "SqliteReportStore",
     "StoredReport",
     "TagSummary",
     "ToolCallExpectation",

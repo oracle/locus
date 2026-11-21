@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from locus.cli import main
+from locus.evaluation import report_store
 
 
 if TYPE_CHECKING:
@@ -268,10 +269,11 @@ def test_usage_errors_are_reported_without_a_traceback(
     assert "cannot read report" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("scheme", ["", "sqlite://"])
 def test_run_keeps_the_report_in_a_store_and_trend_reads_it_back(
-    app: Path, cases: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    app: Path, cases: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str], scheme: str
 ) -> None:
-    store = tmp_path / "reports"
+    store = f"{scheme}{tmp_path / 'reports'}"
     for maker in ("make", "make", "make_no"):
         main(
             [
@@ -288,7 +290,7 @@ def test_run_keeps_the_report_in_a_store_and_trend_reads_it_back(
         )
     out = capsys.readouterr().out
     assert "stored under suite 'cases'" in out
-    assert len(list((store / "cases").glob("*.json"))) == 3
+    assert len(report_store(store).list(suite="cases")) == 3
 
     code = main(["eval", "trend", "--store", str(store), "--suite", "cases", "--last", "5"])
     out = capsys.readouterr().out
@@ -301,10 +303,11 @@ def test_run_keeps_the_report_in_a_store_and_trend_reads_it_back(
     assert "| When | Passed |" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("scheme", ["", "sqlite://"])
 def test_trend_exits_one_when_the_newest_report_regressed(
-    app: Path, cases: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    app: Path, cases: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str], scheme: str
 ) -> None:
-    store = tmp_path / "reports"
+    store = f"{scheme}{tmp_path / 'reports'}"
     smoke = tmp_path / "smoke.json"
     smoke.write_text(json.dumps([_CASES[0]]), encoding="utf-8")
     main(

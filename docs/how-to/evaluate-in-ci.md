@@ -129,7 +129,8 @@ locus eval trend --store "oracle://?dsn=mydb_low&table=LOCUS_EVAL_REPORTS" --sui
 locus eval trend --store "oci://<namespace>/<bucket>/locus/eval/?profile=CI" --suite warden --markdown
 ```
 
-A store is a directory or `file://` path, an Oracle AI Database table
+A store is a directory or `file://` path, a SQLite database file
+(`sqlite://`), an Oracle AI Database table
 (`oracle://`, reading `ORACLE_DSN`, `ORACLE_USER`, `ORACLE_PASSWORD`,
 `ORACLE_CONFIG_DIR`, `ORACLE_WALLET` and `ORACLE_WALLET_PASSWORD` from the
 environment when the spec does not name them), an OCI Object Storage bucket (`oci://`) or any
