@@ -6,13 +6,16 @@
 
 from __future__ import annotations
 
+import inspect
+import warnings
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
+
+from locus.core.warnings import LocusWarning
 
 
 if TYPE_CHECKING:
     from locus.core.messages import Message
-
 
 class ConversationManager(ABC):
     """
@@ -253,6 +256,7 @@ class SummarizingManager(ConversationManager):
         self.summarize_fn = summarize_fn
         self.preserve_system = preserve_system
         self._summary_cache: dict[int, str] = {}
+        self._warned_async_summarize: bool = False
 
     def apply(self, messages: list[Message]) -> list[Message]:
         """
@@ -361,9 +365,19 @@ class SummarizingManager(ConversationManager):
             return self._summary_cache[cache_key]
 
         if self.summarize_fn is not None:
-            # If async function provided, we can't call it synchronously
-            # This is a limitation - for async summarization, use async API
-            summary = f"Conversation with {len(messages)} messages summarized."
+            if inspect.iscoroutinefunction(self.summarize_fn):
+
+                if not self._warned_async_summarize:
+                    warnings.warn(
+                        "Async summarize_fn cannot be called synchronously in apply(); "
+                        "using placeholder summary. Use async_apply() instead." ,
+                        LocusWarning,
+                        stacklevel=2,
+                    )
+                    self._warned_async_summarize = True
+                summary = f"Conversation with {len(messages)} messages summarized."
+            else:
+                    summary = self.summarize_fn(messages)
         else:
             # Simple extractive summary
             summary_parts = []

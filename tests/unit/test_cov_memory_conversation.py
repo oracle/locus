@@ -36,24 +36,27 @@ def test_apply_under_threshold_keeps_system_message() -> None:
     assert out[0].role == Role.SYSTEM
     assert len(out) == 3
 
-
 def test_generate_summary_uses_fn_then_serves_from_cache() -> None:
+    calls = 0
+
     def _fn(_msgs: list[Message]) -> str:
-        return "ignored-by-sync-path"
+        nonlocal calls
+        calls += 1
+        return "custom-sync-summary"
 
     mgr = SummarizingManager(threshold=3, keep_recent=1, summarize_fn=_fn)
     msgs = [_user(f"m{i}") for i in range(10)]
 
     out1 = mgr.apply(msgs)
     summary1 = next(m for m in out1 if m.role == Role.SYSTEM)
-    assert "summarized" in (summary1.content or "")
+    assert "custom-sync-summary" in (summary1.content or "")
+    assert calls == 1
 
     # Second call hits the summary cache for the identical prefix.
     out2 = mgr.apply(msgs)
     summary2 = next(m for m in out2 if m.role == Role.SYSTEM)
     assert summary2.content == summary1.content
-
-
+    assert calls == 1
 # ---------------------------------------------------------------------------
 # Async apply
 # ---------------------------------------------------------------------------

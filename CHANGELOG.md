@@ -8,7 +8,13 @@ policy.
 
 ## [Unreleased]
 
-## [6.3.0] - 2026-11-23
+### Fixed
+
+- **`SummarizingManager.apply()` sync `summarize_fn`.** Synchronous `summarize_fn` is now called in `SummarizingManager.apply()` instead of returning a placeholder; passing a coroutine function emits a one-time `LocusWarning` and falls back to the placeholder (#583).
+
+##[6.3.0] - 2026-11-23
+
+
 
 ### Added
 

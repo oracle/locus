@@ -4,12 +4,17 @@
 
 """Unit tests for conversation management module."""
 
+import asyncio
+import warnings
+
 import pytest
 
 from locus.core.messages import Message, ToolCall, ToolResult
+from locus.core.warnings import LocusWarning
 from locus.memory.conversation import (
     NullManager,
     SlidingWindowManager,
+    SummarizingManager,
 )
 
 
@@ -223,3 +228,61 @@ class TestSlidingWindowAnchorsTheTask:
         result = manager.apply(messages)
 
         assert [m.content for m in result] == ["Message 7", "Message 8", "Message 9"]
+
+class TestSummarizingManager:
+    """Tests for SummarizingManager."""
+
+    def test_apply_calls_sync_summarize_fn(self):
+        """Test that apply() calls a synchronous summarize_fn."""
+        called = []
+
+        def sync_summarize(msgs):
+            called.append(msgs)
+            return "Custom sync summary"
+
+        manager = SummarizingManager(
+            threshold=4,
+            keep_recent=2,
+            summarize_fn=sync_summarize,
+        )
+        messages = [
+            Message(role="user", content=f"Message {i}") for i in range(6)
+        ]
+
+        result = manager.apply(messages)
+
+        assert len(called) == 1
+        assert any("Custom sync summary" in (m.content or "") for m in result)
+
+    def test_apply_warns_once_for_async_summarize_fn(self):
+        """Test that apply() warns once and uses placeholder for async summarize_fn."""
+
+        async def async_summarize(msgs):
+            return "Async summary"
+
+        manager = SummarizingManager(
+            threshold=4,
+            keep_recent=2,
+            summarize_fn=async_summarize,
+        )
+        messages1 = [
+            Message(role="user", content=f"First {i}") for i in range(6)
+        ]
+        messages2 = [
+            Message(role="user", content=f"Second {i}") for i in range(6)
+        ]
+
+        with pytest.warns(LocusWarning, match="Async summarize_fn"):
+            result = manager.apply(messages1)
+
+        assert any("summarized." in (m.content or "") for m in result)
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            manager.apply(messages2)
+
+        assert len(caught) == 0
+
+        messages3 =[Message(role="user", content=f"Third {i}")for i in range(6)]
+        async_result =asyncio.run(manager.async_apply(messages3))
+        assert any("Async summary" in(m.content or "") for m in async_result)
