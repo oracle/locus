@@ -30,7 +30,6 @@ PACKAGE_ROOT = EMIT_FILE.parents[1]
 
 NO_SITE_YET = frozenset(
     {
-        "EV_A2A_TASK_PROCESSING",
         "EV_GRAPH_NODE_ROUTED",
         "EV_RAG_EMBEDDING_GENERATED",
         "EV_RAG_STORE_SEARCH",

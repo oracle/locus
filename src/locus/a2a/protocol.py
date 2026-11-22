@@ -701,12 +701,24 @@ class A2AServer(A2AV1ServerMixin):
         task: Task,
         on_event: Callable[[Any], None] | None,
         completion: tuple[TaskState, str | None] = (TaskState.completed, None),
+        resumed: bool = False,
     ) -> str:
-        """Drive ``events`` into ``task`` until the run ends, pauses or is cancelled."""
+        """Drive ``events`` into ``task`` until the run ends, pauses or is cancelled.
+
+        ``resumed`` is True when entered from :meth:`_resume_run` for a task
+        that paused on an interrupt; it is reported on ``a2a.task.processing``.
+        """
         from locus.core.events import InterruptEvent, TerminateEvent, ThinkEvent
+        from locus.observability.emit import EV_A2A_TASK_PROCESSING, emit  # noqa: PLC0415
 
         final = ""
         task.status = TaskStatus(state=TaskState.working, timestamp=_now_iso())
+        await emit(
+            EV_A2A_TASK_PROCESSING,
+            task_id=task.id,
+            context_id=task.contextId,
+            resumed=resumed,
+        )
         self._emit(
             task,
             TaskStatusUpdateEvent(taskId=task.id, contextId=task.contextId, status=task.status),
@@ -876,7 +888,9 @@ class A2AServer(A2AV1ServerMixin):
             answer, thread_id=pending.thread_id, perform_dangling=perform
         )
         try:
-            return await self._consume(events, task=task, on_event=on_event, completion=completion)
+            return await self._consume(
+                events, task=task, on_event=on_event, completion=completion, resumed=True
+            )
         except ApprovalPendingError as e:
             # The run paused again on the same undecided hold: put the task
             # back where it was so the next reply can decide it.

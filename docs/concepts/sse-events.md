@@ -189,6 +189,7 @@ returns. Like every `emit()` site, a no-op without a bound run id.
 |---|---|
 | `a2a.task.received` | `method`, `rpc_id` (the flat `/a2a/invoke` and `/a2a/stream` routes report `a2a/invoke` / `a2a/stream` and a null `rpc_id`) |
 | `a2a.task.completed` | `method`, `success`, `error_code` (on a protocol or internal error; absent when a streaming client left mid-stream), `duration_ms` |
+| `a2a.task.processing` | `task_id`, `context_id`, `resumed` (`True` when a task paused on an interrupt is running again); one per transition to `working` |
 | `a2a.client.send` | `target_url`, `method`, `binding` (from the v1 transports) |
 | `a2a.client.received` | `target_url`, `method`, `binding` (from the v1 transports), `status_code` (null when no response arrived; the gRPC status on the gRPC binding, 0 for OK), `duration_ms`, `content_length` (one-shot calls) or `frames` (streaming methods: the frames the stream yielded, also when the consumer stopped reading early), `error` (the exception type when the call failed in transit, `HTTPStatusError` for an error status, the gRPC status name on the gRPC binding) |
 
@@ -268,9 +269,8 @@ without storing either.
 
 ## Declared but not emitted
 
-Five constants in `src/locus/observability/emit.py` have no emission site
-today, so a subscriber never sees them: `EV_A2A_TASK_PROCESSING`
-(`a2a.task.processing`), `EV_GRAPH_NODE_ROUTED`
+Four constants in `src/locus/observability/emit.py` have no emission site
+today, so a subscriber never sees them: `EV_GRAPH_NODE_ROUTED`
 (`multiagent.graph.node.routed`), `EV_RAG_EMBEDDING_GENERATED`
 (`rag.embedding.generated`), `EV_RAG_STORE_SEARCH` (`rag.store.search`)
 and `EV_RAG_STORE_UPSERT` (`rag.store.upsert`). The unit test
